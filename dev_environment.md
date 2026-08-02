@@ -25,6 +25,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 ## Workflow
 
 ```sh
+bibites-mod/sync-game-refs.sh  # re-sync libs/ + decompiled/ after a game update (no-op if current)
 bibites-mod/deploy.sh          # dotnet build + copy DLL to BepInEx/plugins
 bibites-mod/game.sh start      # launch the game, detached from the shell
 bibites-mod/game.sh log 60     # read the last 60 BepInEx log lines
@@ -47,12 +48,14 @@ through the BepInEx chainloader.
   PowerShell `Start-Process`, which detaches properly.
 - `Program Files (x86)` is writable from WSL without elevation (Steam's ACLs).
 - Windows interop tools need a Windows-side cwd: `cd /mnt/c` first (the scripts do).
-- `libs/` DLLs are copies pinned to the current game build. After a game update,
-  re-copy them and re-run the decompile (`ilspycmd -p -o decompiled/BibitesAssembly
-  --referencepath bibites-mod/libs bibites-mod/libs/BibitesAssembly.dll`).
-- Steam auto-updates are a risk to signature stability: set the game to "update only
-  on launch" in Steam properties, and prefer launching the exe directly (which skips
-  the update check) — `game.sh start` does this.
+- `libs/` DLLs and `decompiled/` are copies of one game build. `sync-game-refs.sh`
+  re-copies the DLL set and regenerates the decompile in one step; run it instead of
+  copying by hand.
+- **Steam auto-updates stay on** — the toolchain detects drift rather than pinning a
+  version. `sync-game-refs.sh` compares the game's `BibitesAssembly.dll` hash against
+  `libs/` (and reports the Steam buildid); `deploy.sh` runs the same cheap check and
+  warns before building against stale references. After any re-sync, re-verify mod
+  code against the changed APIs.
 
 ## Useful decompiled entry points found so far
 

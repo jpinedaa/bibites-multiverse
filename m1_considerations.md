@@ -59,7 +59,8 @@ access violations (research §6.5).
 
 ## Prerequisites
 
-- The game at a pinned version, v0.6.3 (Corpses and Seasons), with automatic updates off
+- The installed game. Steam can update the game at any time. `sync-game-refs.sh` updates
+  the reference DLLs and the decompiled source to the installed version
 - BepInEx, installed in the game directory
 - dnSpy (or an equal decompiler) and read access to `BibitesAssembly.dll`
 - A C# plugin project with `<HintPath>` references to the Managed DLLs
@@ -98,7 +99,7 @@ If a clean hook on the spawn function is not possible, two fallbacks exist:
 
 ## Next Steps
 
-1. Disable automatic updates for the game in Steam.
+1. Run `sync-game-refs.sh` to update the reference DLLs and the decompiled source.
 2. Install BepInEx in the game directory.
 3. Decompile `BibitesAssembly.dll` with dnSpy.
 4. Find the spawn functions and the serialization entry points. Record each signature
