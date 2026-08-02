@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <AssemblyName>BibitesMultiverse</AssemblyName>
+    <RootNamespace>BibitesMultiverse</RootNamespace>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="libs/BepInEx.dll" Private="false" />
+    <Reference Include="libs/0Harmony.dll" Private="false" />
+    <Reference Include="libs/BibitesAssembly.dll" Private="false" />
+    <Reference Include="libs/Newtonsoft.Json.dll" Private="false" />
+    <Reference Include="libs/Newtonsoft.Json.UnityConverters.dll" Private="false" />
+    <Reference Include="libs/UnityEngine.dll" Private="false" />
+    <Reference Include="libs/UnityEngine.CoreModule.dll" Private="false" />
+    <Reference Include="libs/UnityEngine.PhysicsModule.dll" Private="false" />
+    <Reference Include="libs/UnityEngine.Physics2DModule.dll" Private="false" />
+    <Reference Include="libs/UnityEngine.InputLegacyModule.dll" Private="false" />
+    <Reference Include="libs/UnityEngine.UI.dll" Private="false" />
+  </ItemGroup>
+
+</Project>

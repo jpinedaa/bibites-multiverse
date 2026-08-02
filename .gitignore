@@ -1,0 +1,9 @@
+# Decompiled proprietary game code; regenerable via ilspycmd
+decompiled/
+
+# DLLs copied from the game install; proprietary and regenerable
+bibites-mod/libs/
+
+# Build output
+bibites-mod/bin/
+bibites-mod/obj/
