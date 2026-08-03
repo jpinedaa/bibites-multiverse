@@ -8,7 +8,7 @@
   │                                                                 │
   │  ┌─────────────┐    Contract A     ┌──────────────────────┐     │
   │  │  BepInEx Mod │◄── localhost ───►│   Sidecar Daemon      │     │
-  │  │    (C#)      │    WebSocket     │   (Go / Rust / Node)  │     │
+  │  │    (C#)      │    WebSocket     │        (Go)           │     │
   │  └──────┬───────┘                  └──────────┬───────────┘     │
   │         │                                     │                 │
   │         │ Harmony patches                     │ Contract B      │
@@ -45,6 +45,10 @@ Recorded so divergences are deliberate, not accidental. Section references (§) 
 | **D4** | **The bb8 body is opaque to the mod.** The mod ships the game's own Newtonsoft output as a version-tagged blob; parsing, validation, and indexing live only in the sidecar's `bb8-schema`. | The authoritative serializer is the game itself. One schema implementation instead of two, no cross-language fidelity risk, and the mod survives game updates that add fields. | `bb8-schema` needs no C# implementation. All payload validation happens sidecar-side, before anything reaches a mod. |
 | **D5** | **No global clock.** Every sector runs at its own sim speed; envelope timestamps are informational; a migrating organism may experience time discontinuities. | Peers' sim speeds differ by hardware and settings; synchronizing would couple every peer to the slowest. | Age/season continuity across sectors is explicitly not guaranteed. |
 | **D6** | **Species catalog is a module inside the sidecar, post-MVP (M5).** | It shares the sidecar's storage and (later) DHT; a standalone service created a circular dependency in the earlier draft. | Off the MVP critical path. |
+| **D7** | **Sidecar and relay are written in Go.** | go-libp2p is the reference libp2p implementation, which settles the M4 transport. A single static binary is also the easiest thing to ask a player to run alongside the mod. | `multiverse-sidecar`, `multiverse-relay`, and `bb8-schema` are Go. `bb8-schema` needs no second implementation — D4 already removed the C# side. |
+
+The project owner ratified D1 (relay-first), D2 (at-most-once custody), and D3
+(edges-over-towers) on 2026-08-02; they are settled, not provisional.
 
 ---
 
@@ -52,7 +56,7 @@ Recorded so divergences are deliberate, not accidental. Section references (§) 
 
 ### 1. `bb8-schema` — The Data Language
 **What it is:** A library that parses, validates, and serializes migration payloads.
-**Language:** Sidecar language only — the mod treats payloads as opaque blobs (D4).
+**Language:** Go, sidecar-side only — the mod treats payloads as opaque blobs (D4, D7).
 **Depends on:** Nothing. Pure data.
 **Tested by:** Unit tests against real `.bb8` files from the community.
 
@@ -103,7 +107,7 @@ currently open (`EDGE_STATUS`). Routing is the sidecar's job.
 
 ### 3. `multiverse-sidecar` — The Network Brain
 **What it is:** A standalone daemon that handles all networking and custody.
-**Language:** TBD (Go / Rust / Node — whichever has best libp2p support for M4).
+**Language:** Go — go-libp2p for M4, and one static binary for players to run (D7).
 **Depends on:** `bb8-schema`. Contains the `species-catalog` module (D6).
 **Tested by:** Integration tests with multiple sidecar instances, no game needed.
 
@@ -130,7 +134,7 @@ currently open (`EDGE_STATUS`). Routing is the sidecar's job.
 ### 4. `multiverse-relay` — The Spatial Router (MVP transport)
 **What it is:** A small, deliberately dumb server that forwards Contract B frames
 between sidecars and arbitrates the sector map. It never parses bb8 bodies.
-**Language:** Same as the sidecar (shared framing code).
+**Language:** Go, same as the sidecar (shared framing code) (D7).
 **Depends on:** Contract B envelope framing only.
 **Tested by:** Integration tests with N sidecar instances.
 
@@ -383,7 +387,7 @@ species-catalog module.
 |---|---|---|
 | `bb8-schema` | JSON structure, node layout, synapse rules, gene array, weight polymorphism, validation constraints. From `m1_findings.md`: the game's `.bb8` top-level keys (`transform`, `rb2d`, `genes`, `body`, `clock`, `brain`, `version`, `desc`) and the fact that a `.bb8` carries full live state while a `.bb8template` does not; genes are keyed by enum **name**, so gene reordering is safe and only additions/removals need conversion; **the `Utility.Version` alpha quirk** — a 4-argument `new Version(0,6,3,3)` binds to the alpha overload and means `0.6.3a3`, *not* `0.6.3.3`, and `V3` sorts before `Alpha`, so `bb8-schema` must reproduce that ordering | Version differences between game updates; cross-version conversion (EinsteinEditor prior art); the exact byte shape of community-tool `.bb8` dialects; whether Newtonsoft honours `[NonSerialized]` on `NEATBrain.Node.NIn/NOut` in the shipped DLL; corpse/pellet/egg payload shapes (M5) |
 | `bibites-mod` | BepInEx/Harmony setup, export/import patterns, threading constraints, the Constance-Mod overwrite technique (now only needed for the egg-hatch fallback). From `m1_findings.md`: exact signatures in `BibitesAssembly.dll`; spawn/restore API (`SaveSystem.LoadBibiteOrEggFromData`, public, no mutation, ID-preserving); serialize API (`SaveSystem.SerializeBibite`/`SaveBibite`); live-attribute access is public except `InternalClock` (covered by public `SerializationHelper.DeserializeObject`, so no mod-side reflection); no ID registry exists — IDs are random int32; clean removal is raw `Object.Destroy` after de-listing from `BibiteTracker`; patch targets (`BibiteBody.FixedUpdate()`, `EggHatching.Hatch()`). **Confirmed in-game 2026-08-02** (`m1_findings.md`, *Runtime results*): the round trip is byte-exact, the ID survives, and the world save that follows succeeds; `GameManager.StartGame(path)` loads a named world headlessly, and `SaveSystem.CreateSave` must be driven by hand because the public `SaveGame` wrapper swallows save exceptions inside a coroutine. **Two game instances do run at once on one machine** — verified 2026-08-02: both processes persisted, and BepInEx gave the second instance `BepInEx/LogOutput.log.1` because the first holds a lock on `LogOutput.log`, so neither log is truncated | Re-linking parent/child references after respawn: implemented, but M1 exercised it against an organism with **no** parents and **no** children, so the stale-reference trap that breaks the *next* world save is still unproven — re-test in an evolved world (M2); **how to suppress void-avoidance per edge (D3)**; per-instance mod config for the M2 rig, since both instances share one plugin DLL and one BepInEx config directory; `.csproj` HintPaths |
-| `multiverse-sidecar` | Custody chain and journal semantics (D2); admission-control levers | Language choice; journal format and crash recovery; Contract A reconnection semantics (replay of un-acked `MIGRATE_IN`s); libp2p maturity per language (M4); lease design and churn healing for sector claims (M4) |
+| `multiverse-sidecar` | Custody chain and journal semantics (D2); admission-control levers | Journal format and crash recovery; Contract A reconnection semantics (replay of un-acked `MIGRATE_IN`s); go-libp2p maturity (M4); lease design and churn healing for sector claims (M4) |
 | `multiverse-relay` | Star routing and single-arbiter sector assignment are well-trodden | **Who operates it** (and later the bootstrap nodes); sector assignment policy (user-chosen vs auto); capacity and abuse limits |
 | `species-catalog` | Community already shares `.bb8` on GitHub/Steam Workshop; content-addressing makes sense | Storage limits, search/index strategy, replication policy (all M5) |
 | **Contract A** | Message types and the custody chain | Exact JSON message schemas; NACK error taxonomy |

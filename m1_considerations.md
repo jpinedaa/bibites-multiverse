@@ -117,7 +117,7 @@ organism must not be latched to the mouth of another organism.
 2. Serialize the organism. Write the payload to a log file.
 3. Run the round-trip command on the organism.
 4. Serialize the organism again. Compare the two payloads.
-5. Watch the organism for one minute of simulation time.
+5. Watch the organism for 30 simulated seconds.
 6. Save the world from the game menu.
 
 The test passes when:
@@ -147,9 +147,6 @@ and the environment variable `MULTIVERSE_AUTOTEST=1` both start it.
   condition.
 - The organism stayed alive and healthy for 30 simulated seconds.
 - The world save completed with no exception. The run showed no Unity error.
-
-One deviation from the procedure: step 5 asks for one minute of simulation time. The
-harness watches 30 simulated seconds. Extend the window to 60 seconds, or correct step 5.
 
 `m1_findings.md` gives the full runtime results, the cause of each float artifact, and the
 API hazards that the harness work exposed.
