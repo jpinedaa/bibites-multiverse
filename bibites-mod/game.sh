@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Control The Bibites on the Windows side from WSL, one or two instances at a time.
+# Control The Bibites on the Windows side from WSL, one to five instances at a time.
 #
 #   game.sh start   [instance]        launch and record the Windows PID
 #   game.sh stop    [instance|all]    stop one instance by PID; no argument stops every instance
@@ -14,14 +14,15 @@
 #
 # Two facts from dev_environment.md shape this script:
 #
-#   * Two instances share one plugins/ DLL and one config/ directory, so a per-instance
+#   * Every instance shares one plugins/ DLL and one config/ directory, so a per-instance
 #     setting can only arrive through the environment — and WSLENV must name every
 #     variable, or WSL forwards none of them.
-#   * BepInEx gives the FIRST process to start `LogOutput.log` and the second
-#     `LogOutput.log.1`, because the first holds a lock on the first file. Which
-#     instance owns which file is therefore a race, not a rule. This script never
-#     assumes; it greps each candidate for the instance's own marker, which the mod
-#     prints once at startup on its `[M2] config:` line.
+#   * BepInEx gives the FIRST process to start `LogOutput.log` and each later one the
+#     next free `LogOutput.log.N` (N = 1..4, then it gives up), because the earlier
+#     process holds a lock. Which instance owns which file is therefore a race, not a
+#     rule. This script never assumes; it globs every candidate and greps each for the
+#     instance's own marker, which the mod prints once at startup on its
+#     `[M2] config:` line. The M3 ring runs three instances, so `.log.2` is routine.
 set -euo pipefail
 
 GAME_WIN='C:\Program Files (x86)\Steam\steamapps\common\The Bibites\The Bibites.exe'
@@ -82,12 +83,20 @@ logfile_for() {
   local marker=""
   [ -f "$RUN_DIR/$instance.marker" ] && marker="$(cat "$RUN_DIR/$instance.marker")"
 
-  local candidates=("$LOG_DIR/LogOutput.log" "$LOG_DIR/LogOutput.log.1")
-  local f
+  # BepInEx falls back through LogOutput.log.1 .. .4, so glob rather than list: with three
+  # game instances the third owns LogOutput.log.2 and a two-entry list never finds it.
+  local candidates=() f
+  for f in "$LOG_DIR/LogOutput.log" "$LOG_DIR"/LogOutput.log.[0-9]; do
+    if [ -f "$f" ]; then candidates+=("$f"); fi
+  done
+
+  if [ "${#candidates[@]}" -eq 0 ]; then
+    echo "no BepInEx log found under $LOG_DIR" >&2
+    return 1
+  fi
 
   if [ -n "$marker" ]; then
     for f in "${candidates[@]}"; do
-      [ -f "$f" ] || continue
       if grep -qE "$marker" "$f" 2>/dev/null; then
         printf '%s\n' "$f"
         return 0
@@ -97,15 +106,8 @@ logfile_for() {
     return 1
   fi
 
-  for f in "${candidates[@]}"; do
-    if [ -f "$f" ]; then
-      printf '%s\n' "$f"
-      return 0
-    fi
-  done
-
-  echo "no BepInEx log found under $LOG_DIR" >&2
-  return 1
+  printf '%s\n' "${candidates[0]}"
+  return 0
 }
 
 # ---------------------------------------------------------------- commands

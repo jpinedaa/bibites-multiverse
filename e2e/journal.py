@@ -53,8 +53,13 @@ def replay(path):
                 "entityId": entry.get("entityId"),
                 "payloadHash": entry.get("payloadHash"),
                 "edge": entry.get("edge"),
-                "sourceSector": entry.get("sourceSector"),
-                "destSector": entry.get("destSector"),
+                # Ring slots since M3 (contract-b-m3.md §7.1). The M2 journals in this
+                # tree still say sourceSector/destSector, so read both and let the newer
+                # name win — a journal is a durable record and is never rewritten.
+                "sourceSlot": entry.get("sourceSlot", entry.get("sourceSector")),
+                "destSlot": entry.get("destSlot", entry.get("destSector")),
+                "genomeHash": entry.get("genomeHash") or "",
+                "parents": len(entry.get("parents") or []),
                 "direction": record.get("direction"),
                 "status": "open",
                 "acked": False,
@@ -89,7 +94,8 @@ def cmd_summary(paths):
             print(
                 "{path} migrationId={migrationId} entityId={entityId} dir={direction} "
                 "status={status} acked={acked} bounce={bounceBack} edge={edge} "
-                "route={sourceSector}->{destSector} payloadHash={payloadHash}".format(
+                "route={sourceSlot}->{destSlot} payloadHash={payloadHash} "
+                "genomeHash={genomeHash} parents={parents}".format(
                     path=path, **state
                 )
             )

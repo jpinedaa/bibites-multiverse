@@ -99,12 +99,26 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "archive: %v\n", err)
 		return 1
 	}
-	shown, gaps := 0, 0
+	shown, gaps, unhashable := 0, 0, 0
 	for _, m := range migrations {
-		missing := !m.GenomeHeld
-		for _, held := range m.ParentsHeld {
-			if !held {
+		// contract-b-m3.md §10: the gap report names "a hash that no peer can
+		// serve" — an UNRESOLVED hash. A lineage entry with no hash at all is a
+		// different thing: `gapReason: "parent_gone"` means the genome never
+		// existed to be recorded, and no retry can produce one. Counting those
+		// here put every ordinary migration in the gap report — every hop after
+		// the first carries a parent_gone entry (contract-a.md §5.3) — and
+		// buried the entries an operator can actually act on.
+		missing := false
+		if m.Lineage != nil {
+			if m.Lineage.GenomeHash == "" {
+				unhashable++
+			} else if !m.GenomeHeld {
 				missing = true
+			}
+			for i, p := range m.Lineage.Parents {
+				if p.GenomeHash != "" && (i >= len(m.ParentsHeld) || !m.ParentsHeld[i]) {
+					missing = true
+				}
 			}
 		}
 		if missing {
@@ -130,8 +144,9 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "    parent %d  %s %s\n", p.EntityID, p.GenomeHash, held(ok))
 		}
 	}
-	fmt.Fprintf(stdout, "\n%d migration(s) shown, %d with a genome the archive does not hold\n",
-		shown, gaps)
+	fmt.Fprintf(stdout,
+		"\n%d migration(s) shown, %d with an unresolved genome hash, %d whose migrant genome would not hash\n",
+		shown, gaps, unhashable)
 	return 0
 }
 
