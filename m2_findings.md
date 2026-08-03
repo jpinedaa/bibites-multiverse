@@ -451,7 +451,7 @@ What *does* happen further out, in order of radius, all inside
    trigger enter/exit (`:247-273`). This is a shrinking circle event, not the map edge,
    and it is off unless the scenario enables it.
 
-**Three implications for M2's border detection:**
+**Implications for M2's border detection — and one of them M3 has since superseded:**
 
 - Because nothing happens at the square edge, the mod is free to define the edge
   wherever it likes and owns the entire behaviour there. There is no vanilla code to
@@ -461,19 +461,29 @@ What *does* happen further out, in order of radius, all inside
   at `:613-616`. A dead body drifting outward will sail past `1.5·S + 1000` and keep
   going forever. Relevant to M5's corpse migration, and a reason not to reuse the
   live-organism border logic for corpses.
-- **World wrapping is a latent M2 hazard.** If the mod's border strip ever fails to
-  capture an organism (paused sim, peer down, `EDGE_STATUS` closed), the organism keeps
-  going and eventually teleports to the antipode. That reads to a player as a
-  duplication/teleport bug caused by the mod. Recommend the M2 rig call
-  `ScenarioSettings.Instance.worldWrapping.SetValue(false)` while an edge is open, and
-  restore it afterwards — one public call, same pattern as §1.5 option 2.
-- **Disabling it trades the teleport for a leak — observed 2026-08-02/03.** With wrapping
+- **World wrapping was treated as a latent M2 hazard.** If the mod's border strip ever
+  fails to capture an organism (paused sim, peer down, `EDGE_STATUS` closed), the organism
+  keeps going and eventually teleports to the antipode. That reads to a player as a
+  duplication/teleport bug caused by the mod. M2 therefore called
+  `ScenarioSettings.Instance.worldWrapping.SetValue(false)` while an edge was open, and
+  restored it afterwards — one public call, same pattern as §1.5 option 2.
+- **Disabling it traded the teleport for a leak — observed 2026-08-02/03.** With wrapping
   off and only *one* edge guarded by the mod, the other three edges guard nothing at all:
   nothing at the square edge stops an organism (see the top of this section), and past
   `1.5·S + 1000` there is now no wrap either. The M2 rig saw organisms at `y = 7186` with
   `S = 2000` — outward-bound, alive, and never coming back. **An M2 world therefore leaks
-  population through its unguarded edges.** M2 accepted this; M3 must guard all four edges
-  — wrap selectively (closed edges only), clamp at the closed edges, or open all four.
+  population through its unguarded edges.** M2 accepted this.
+- ~~**M3 must guard all four edges** — wrap selectively (closed edges only), clamp at the
+  closed edges, or open all four.~~ **Superseded 2026-08-03 by decision D10.** M3 does not
+  guard four edges: it stops disabling the wrap. `worldWrapping` stays **ON**, and the
+  vanilla wrap becomes the containment mechanism for every edge no strip guards. The two
+  radii do not compete — the strips capture from `S − W` outward and the wrap fires at
+  `1.5·S + 1000` — and the export capture band now extends **outside** the square, with an
+  outward-velocity test that a wrapped organism (travelling inward) cannot pass. The M2
+  leak was self-inflicted by the `SetValue(false)` call above, not by the game. See
+  `system_decomposition.md` D10, `m3_considerations.md` Risks 1 and 2 for the two in-game
+  tests that gate it, and `contracts/contract-a.md` §4.3.1 and §14 A13 for the wire and
+  behaviour rules.
 
 ---
 

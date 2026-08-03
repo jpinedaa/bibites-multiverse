@@ -133,6 +133,9 @@ Disable world wrapping while an edge is open. Use
 `ScenarioSettings.Instance.worldWrapping.SetValue(false)`. Snapshot the previous value
 first. Restore that value when the world unloads.
 
+**M3 reverses this instruction.** Decision D10 keeps `worldWrapping` ON. The mod only
+reads the value and reports it. See *Carried to M3*.
+
 Note the sibling setting. `shadeAvoidance` and `worldWrapping` sit on one `if/else if`
 chain. With shade avoidance on, the wrap branch never runs.
 
@@ -408,10 +411,14 @@ live game exposes it.
 
 ## Carried to M3
 
-- **Guard all four edges.** M2 disables `worldWrapping` while an edge is open (Risk 4).
-  Organisms then escape through the three unguarded edges and never come back. The rig saw
-  one at `y=7186` with `S=2000`. An M2 world therefore leaks population. Choose one answer
-  in M3: wrap the closed edges only, clamp at the closed edges, or open all four edges.
+- ~~**Guard all four edges.**~~ **Superseded by decision D10 on 2026-08-03.** M2 disables
+  `worldWrapping` while an edge is open (Risk 4). Organisms then escape through the three
+  unguarded edges. The rig saw one at `y=7186` with `S=2000`. An M2 world therefore leaks
+  population. M3 guards no extra edge. M3 keeps `worldWrapping` ON, and the vanilla wrap
+  contains each edge that no strip guards. The mod only reads the setting and reports it.
+  The export capture band also extends outside the square. Each export needs an outward
+  velocity, because a wrapped organism travels inward. See `system_decomposition.md` D10,
+  `m3_considerations.md` Risks 1 and 2, and `contracts/contract-a.md` §4.3.1 and §14 A13.
 - **Migration order is child first, then parent.** `BibiteGenes.SaveState` drops the
   parentage of a child once the parent GameObject is gone. A child that migrates after its
   parent therefore arrives with no link back. The behaviour matches vanilla, so this is a

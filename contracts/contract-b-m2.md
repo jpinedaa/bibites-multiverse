@@ -1,5 +1,30 @@
 # Contract B — M2 Subset (Sidecar ↔ Relay ↔ Sidecar)
 
+> ## ⚠ SUPERSEDED — 2026-08-03. Historical record only.
+>
+> **Contract B is now `contracts/contract-b-m3.md` (`contract-b/2.0`).** Decisions D8–D11
+> replaced the two-sector map with the ring, so this document describes a wire that no
+> M3 component speaks. It is kept because `m2_findings.md` and `m2_considerations.md` cite
+> it as the specification the passing M2 exit test ran against.
+>
+> **Do not implement from this file.** Read it only to understand what M2 did.
+>
+> What changed, in one table:
+>
+> | This document says | M3 says | Where |
+> |---|---|---|
+> | Two sectors, `"A"` and `"B"`, with a fixed east/west pairing (§1, §5.3) | One ring of integer slots; each peer has one east neighbour; a slot is bound to a peer identity and its reservation never expires (D8) | `contract-b-m3.md` §2, §7 |
+> | `SECTOR_GRANT` returns a sector letter (§5.4) | The grant returns the slot **and** the east neighbour (D8) | `contract-b-m3.md` §6.4 |
+> | `PEER_STATUS` lists live peers; an absent sector is vacant (§5.5) | It reports the **ring order**; a vacant slot stays in the ring with `live: false` (D8) | `contract-b-m3.md` §6.5 |
+> | `MIGRATION_PAYLOAD` carries `sourceSector` / `destSector` strings (§5.6) | Integer `sourceSlot` / `destSlot`, `exitEdge` always `"E"`, plus the D11 lineage annex | `contract-b-m3.md` §6.6 |
+> | No authentication; loopback only (§2, §10 item 1) | A shared bearer token on the WebSocket upgrade, because the wire leaves the loopback (D9) | `contract-b-m3.md` §3.1 |
+> | Nine message types (§5) | Twelve — `GENOME_REQUEST` and `GENOME_RESPONSE` are new (D11) | `contract-b-m3.md` §6.9, §6.10 |
+> | **§10 item 3: "M3 generalises to an `{x, y}` grid"** | **Wrong, and superseded.** D8 **retires** the `{x, y}` grid and keeps it on record only as a far-future extension. M3 is the ring. The same item's milestone labels also predate D9's renumbering: direct P2P is now **M5** and ecosystem completeness **M6**, with a new **M4 — Public release** in between | `system_decomposition.md` D8, D9; `m3_considerations.md` |
+>
+> Three resolutions written here — the `entityId`/`heading` authority order, the two accepted
+> shapes of `$.body.id`, and the persisted slot file — carry into M3 unchanged and are
+> restated in `contract-b-m3.md` §7.4 and §11 item 3.
+
 **Version:** `contract-b/1`
 **Amended:** 2026-08-02. Three resolutions from the Go implementation are folded into §8 —
 **B1** the authority order for `entityId` and `heading` (item 2), **B2** the two accepted
