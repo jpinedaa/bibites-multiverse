@@ -87,7 +87,7 @@ inside `bb8-genome/1`.
 
 | Projected key | JSON type | Source | Rule |
 |---|---|---|---|
-| `genes` | object | the dialect's gene object | Every key present in the source, unchanged. Values by the number rule of §5.4. |
+| `genes` | object | the dialect's gene object | Every key present in the source, unchanged. Every value **MUST** be a JSON number and is projected by the float rule of §5.4; any other JSON type is **unhashable** (§8). |
 | `nodes` | array of object | the dialect's node array | One entry per node, five keys each (below), sorted by §5.3. |
 | `projection` | string | this document | Always the literal `"bb8-genome/1"`. |
 | `synapses` | array of object | the dialect's synapse array | One entry per synapse, five keys each (below), sorted by §5.3. |
@@ -241,6 +241,16 @@ The conversion is:
    `Float.floatToRawIntBits`, `f32::to_bits`) and print them big-endian as exactly eight
    lowercase hex digits, zero-padded.
 
+**A number field must be a JSON number. There is no third form.** A value that is neither
+an integer by the rule above nor a float by the rule above — a JSON string, a boolean,
+`null`, an object, an array — is **unhashable**, and `bb8-schema` returns
+`ErrUnhashableGenome` (§8). It is never coerced, never parsed out of a string, and never
+defaulted. `"0.42"` is not `0.42` here: accepting it would mean two implementations must
+also agree on which strings are numbers, which is the portability problem §5.4 exists to
+delete. The one deliberate exception is a synapse `weight`, which §4.2 makes explicitly
+polymorphic — a JSON string there becomes the tagged `ref:` form, and the tag is what keeps
+it from ever colliding with an `f32:` value.
+
 #### Why this float rule, and why it is safe across languages
 
 The values are C# `float` — 32-bit — in the game
@@ -262,7 +272,8 @@ Two further properties earned it the place:
   because the parse lands on the same binary32 either way.
 - **It is mutation-sensitive at one ULP.** `0.3` and the smallest float above it differ in
   the last hex digit (`3e99999a` vs `3e99999b`), so the child of a mutation can never
-  collide with its parent — which is the second half of Risk 9. §7.2 shows this.
+  collide with its parent — which is the second half of Risk 9. §7.2 demonstrates it with a
+  typeable decimal literal three ULPs away; one ULP behaves the same way.
 
 The cost is that the canonical string is not pleasant to read. That is acceptable: it is a
 hash input, never an interchange format. An implementation **SHOULD** offer a debug dump
@@ -382,17 +393,26 @@ Check the pieces by hand if you like: the gene object is sorted `ColorB`, `Color
 node's `TypeName` and its three activations are gone; `gen`, `tag`, `speciesID` and
 `parent1` are gone; `-0.25` is `be800000` and `-1.5` is `bfc00000`.
 
-### 7.2 A one-ULP mutation
+### 7.2 A near-ULP mutation
 
-Change one gene from `0.3` to the next representable float above it — `0.3000001`, which
-is `f32:3e99999d` — and change nothing else. The canonical string differs in one
-character, at one position, and the digest is unrelated:
+Change one gene from `0.3` to `0.3000001` and change nothing else. The canonical string
+differs in one character, at one position, and the digest is unrelated:
 
 ```
 bb8-genome/1:sha256:43ea8315112301799622f3ab8906c2882e528502bc35424a209cd67bfdaec207
 ```
 
 This is the Risk 9 requirement, met: a mutated child never inherits its parent's hash.
+
+**A note on the arithmetic, because an earlier draft was loose here.** `0.3000001` is
+**not** the next representable float above `0.3`. It is three ULPs above it: `0.3` parses
+to `f32:3e99999a`, and the three floats above it are `3e99999b` (`0.30000004`), `3e99999c`
+(`0.30000007`) and then `3e99999d`, which is what `0.3000001` parses to. The digest above
+is correct and this case stays exactly as written — a three-ULP change is a perfectly good
+conformance case, and `0.3000001` has the virtue of being a decimal literal an
+implementer can type without consulting a bit pattern. The genuine one-ULP claim lives in
+§5.4 (`3e99999a` vs `3e99999b`) and is unaffected: `f32:` is bit-exact, so the smallest
+possible mutation still changes the canonical string.
 
 ### 7.3 The same organism as a template
 
@@ -411,7 +431,7 @@ An implementation is conformant when it reproduces all of:
 | 1 | §7.1 input | the §7.1 canonical string and digest |
 | 2 | §7.1 input with the two nodes and the gene keys reordered | unchanged digest |
 | 3 | §7.3 template form of §7.1 | unchanged digest |
-| 4 | §7.2 one-ULP mutation | the §7.2 digest |
+| 4 | §7.2 near-ULP mutation (`0.3` → `0.3000001`) | the §7.2 digest |
 | 5 | `"desc": "a<b"` on a node | raw `<` in the canonical string, **not** `\u003c` |
 | 6 | a gene value of `-0.0` | `"f32:00000000"` |
 | 7 | a gene value of `1e39` | unhashable, `ErrUnhashableGenome` |
@@ -436,6 +456,7 @@ partial hash, a placeholder, or the hash of a repaired projection.
 | A node's `type` is a name that is not in the `NodeType` table | §4.1 |
 | A float is `NaN`, `±Inf`, or overflows binary32 | §5.4 |
 | An integer is outside `int64` | §5.4 |
+| A number field carries something that is not a JSON number — a string, a boolean, `null`, an object or an array. The polymorphic synapse `weight` of §4.2 is the one exception | §5.4 |
 | Two nodes share an `index`, or two synapses share `(nodeIn, nodeOut, inov)` | §5.3 |
 | A string is not valid UTF-8 | §5.5 |
 

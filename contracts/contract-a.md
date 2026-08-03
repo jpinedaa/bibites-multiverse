@@ -262,6 +262,18 @@ Three consequences, all load-bearing:
 The entry edge `W` has **no capture band at all**. It is passive: an organism that walks
 west out of the square is not a migrant, and the wrap returns it (D10, §14 A11).
 
+> **OPEN — the direction test has no magnitude floor** (§12 item 7). `velocity.x > 0` is a
+> strict comparison against zero and nothing more, so an organism that is loitering in the
+> band and merely jittering eastward on one `FixedUpdate` exports. That is **not** a defect
+> and this specification does **not** add a floor in M3: any floor is a second tunable, it
+> has to be expressed in `S` to survive a different `SimulationSize`, and a floor set wrong
+> turns a legitimate slow crossing into an organism pinned against the edge forever. The
+> one-way ring also makes the failure mode cheap — a jitter export moves the organism
+> forward, never back, so it cannot ping-pong (Risk 3). Revisit only if it turns out to be
+> operationally noisy: the evidence would be a band population that churns across the ring
+> without any of them travelling anywhere, and the fix would be a floor on the **outward
+> component over several ticks**, not on one sample.
+
 ### 4.4 Velocity and heading
 
 | Field | Frame of reference |
@@ -274,6 +286,21 @@ enters the next slot still travelling eastward. That continuity is the whole poi
 D3's map-edge model. The sidecar **MUST NOT** negate, rotate, or reflect either value in
 M2, and **MUST NOT** in M3 either, because every ring slot is a pure translation of every
 other (amended — §14, A11).
+
+**`heading` is NOT range-normalized, and no implementation may assume `[0, 360)`.** The
+value is whatever `Rigidbody2D.rotation` holds, and Unity lets that accumulate without
+bound: real M3 emissions included `heading = 2768.18`. Two rules follow, and both sides
+already obey them:
+
+- A **sender** copies the raw value. It **MUST NOT** wrap, fold or normalize it. Wrapping
+  would be a silent behaviour change on a field whose only consumer treats it as an angle.
+- A **receiver** feeds it straight to rotation — `Quaternion.Euler(0, 0, heading)` and
+  `Rigidbody2D.rotation`, both of which take any real number and reduce it themselves. It
+  **MUST NOT** validate a range, and a value outside `[0, 360)` is **never** a NACK reason.
+
+The only test either side may apply is finiteness (§4.1): `NaN` and `±Inf` are forbidden on
+the wire, and every other float is a legal heading. `exitPosition` is the field with a
+range; `heading` is not, and the two must not be validated alike.
 
 ### 4.5 The `kind` enum
 
@@ -434,8 +461,8 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
 | `kind` | string enum | yes | `"bibite"` in M2 and M3. |
 | `gameVersion` | string | yes | The version that produced `payload`. Authoritative over the blob's own `version` key. |
 | `payload` | string | yes | The opaque bb8 blob (§4.6). |
-| `parents` | array of object | no | **The lineage inputs** (added — §14, A12). `0`–`maxParentBlobs` (2) entries, in `genes.parent1` then `genes.parent2` order. Absent and `[]` mean the same thing: no parent is known. |
-| `parents[].entityId` | `entityId` | yes | The parent's `BibiteBody.id.id`, read from `$.genes.parent1` / `$.genes.parent2` of the migrant. `0` is the game's "unassigned" sentinel and such an entry **MUST** be omitted entirely. |
+| `parents` | array of object | no | **The lineage inputs** (added — §14, A12). `0`–`maxParentBlobs` (2) entries, in `BibiteGenes.parent1` then `BibiteGenes.parent2` order. Absent and `[]` mean the same thing: no parent is known. |
+| `parents[].entityId` | `entityId` | yes | The parent's `BibiteBody.id.id`, read from the **live `BibiteGenes` component** of the migrant — never from the migrant's serialized payload (amended — §14, A12). `0` is the game's "unassigned" sentinel and such an entry **MUST** be omitted entirely. |
 | `parents[].payload` | string | no | The parent's own opaque bb8 blob, from `SaveSystem.SerializeBibite`, subject to the same rules as `payload` (§4.6). **Absent means the parent is gone** — `BibiteGenes` drops the parentage once the parent GameObject is destroyed, so this is normal and is recorded as a gap, never as an error. |
 | `parents[].gameVersion` | string | no | The version that produced `parents[].payload`. Absent means "the same as the migrant's `gameVersion`", which is always true in practice because both were serialized in the same tick. |
 | `exitEdge` | edge enum | yes | Which of the mod's own edges the organism crossed. Always the mod's `exportEdge` — `"E"` under the ring. |
@@ -469,8 +496,13 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
 
 **Sender obligations for `parents`** (added — §14, A12). The mod **MUST**:
 
-- read the parent entity IDs from the migrant's own `$.genes.parent1` and
-  `$.genes.parent2` — the only place they exist — and emit them in that order;
+- read the parent entity IDs from the migrant's **live `BibiteGenes` component**, in
+  `parent1` then `parent2` order: the `GameObject` reference resolved to
+  `BibiteBody.id.id` while it is alive, and the component's own `parent1ID` / `parent2ID`
+  when it is not. **Not** from the migrant's serialized payload — the game omits
+  `$.genes.parent1` / `$.genes.parent2` entirely when the parent `GameObject` is gone
+  (`BibiteGenes.SaveState`, `BibiteGenes.cs:552-559`), so a payload-sourced reader loses
+  exactly the entries that matter (amended — §14, A12);
 - serialize a parent with `SaveSystem.SerializeBibite` **only while its GameObject is
   alive**, in the same `FixedUpdate` as the migrant's own serialization;
 - **never parse, inspect or hash** a parent blob. D4 is unchanged: the blob is opaque to
@@ -496,7 +528,7 @@ the main thread (`m3_considerations.md`, Risk 8).
     "entityId": -843827577,
     "kind": "bibite",
     "gameVersion": "0.6.3.1",
-    "payload": "{\"transform\":{\"position\":[2412.6,6003.1],\"rotation\":274.11,\"scale\":0.9312},\"rb2d\":{\"px\":2412.6,\"py\":6003.1,\"vx\":61.2,\"vy\":4.4,\"r\":274.11},\"genes\":{\"parent1\":-1180911975,\"parent2\":204418833, ... },\"body\":{\"id\":-843827577, ... },\"clock\":{ ... },\"brain\":{ ... },\"version\":\"0.6.3.1\"}",
+    "payload": "{\"transform\":{\"position\":[2412.6,6003.1],\"rotation\":274.11,\"scale\":0.9312},\"rb2d\":{\"px\":2412.6,\"py\":6003.1,\"vx\":61.2,\"vy\":4.4,\"r\":274.11},\"genes\":{\"parent1\":-1180911975, ... },\"body\":{\"id\":-843827577, ... },\"clock\":{ ... },\"brain\":{ ... },\"version\":\"0.6.3.1\"}",
     "parents": [
       {
         "entityId": -1180911975,
@@ -518,8 +550,20 @@ the main thread (`m3_considerations.md`, Risk 8).
 The example is a capture from **outside** the square (§4.3.1): the organism sits at
 `x = 2412.6, y = 6003.1` with `S = 2000`, having cleared the strip in one tick at
 `vx = 61.2`. The raw normalized position would be `(6003.1 + 2000) / 4000 = 2.0008`, and
-the mod clamps it to `1.0` before sending. The second parent is a **gap** — its entity ID
-survives in the migrant's genes, but its GameObject is gone, so no blob accompanies it.
+the mod clamps it to `1.0` before sending. The second parent is a **gap**: its `GameObject`
+is gone, so no blob accompanies it — and note that the migrant's own `payload` no longer
+carries a `parent2` key either, because `BibiteGenes.SaveState` writes one only for a live
+parent. The entity ID `204418833` comes from the component's `parent2ID`, which is why the
+mod reads the component and not the blob.
+
+**A gap entry is rarer than that example makes it look.** `parent1ID` / `parent2ID` are
+`[NonSerialized]` and are only ever filled by `BibiteGenes.LoadState`, from a payload that
+still carried the key. So an organism **born in this world** whose parent later died
+contributes **no entry at all** — the `GameObject` is fake-null and the recorded integer is
+`0`, which §5.3 omits. A gap entry needs an organism that was **restored** — from a save,
+or from an earlier hop of this ring — while its parent was still alive at that serialization.
+Every hop after the first therefore produces gaps for parents that hop 1 shipped as blobs,
+which is exactly what the archive's genome store is for.
 
 ---
 
@@ -1197,9 +1241,12 @@ These notes are non-normative. They exist so the two sides do not have to negoti
   (`m2_findings.md` §1.2). `worldWrapping` is no longer such a setting: under D10 the mod
   **reads and reports** it and never writes it (amended — §14, A13).
 - **Serialize a parent only while it is alive.** `SaveSystem.SerializeBibite` on a
-  destroyed GameObject is a Unity fake-null trap. Collect `$.genes.parent1` /
-  `parent2` first, resolve each through `BibiteTracker`, and skip whatever is gone — that
-  skip *is* the gap the annex records (§14, A12).
+  destroyed GameObject is a Unity fake-null trap. Read `BibiteGenes.parent1` / `parent2`
+  and let Unity's fake-null answer the liveness question: a live reference gives both the
+  entity ID (`BibiteBody.id.id`) and the blob, and a fake-null one falls back to
+  `parent1ID` / `parent2ID` for the ID and ships no blob — that fallback *is* the gap the
+  annex records (§14, A12). Do not source the IDs from the migrant's payload, and no
+  `BibiteTracker` lookup is needed: the component holds the reference already.
 - **Configure from environment variables.** Both game instances share one `plugins/` DLL
   and one `config/` directory, so a BepInEx config file cannot differ per instance. The
   WSL → Windows hop needs `WSLENV` to name each variable (`dev_environment.md`).
@@ -1243,6 +1290,16 @@ These notes are non-normative. They exist so the two sides do not have to negoti
    (§14, A15): the ring makes one export edge a permanent property, so the debt is moot
    rather than urgent, and closing the item would erase the note the retired `{x, y}` grid
    would need if it ever returned.
+7. **The capture band's direction test has no magnitude floor** (§4.3.1). `velocity.x > 0`
+   admits an export on a single tick of eastward jitter, so an organism loitering in the
+   band can cross without ever meaning to. M3 accepts it: a floor is a second tunable, it
+   must scale with `S`, and the one-way ring bounds the consequence to "the organism moved
+   on". Open because it is a **rate** question that only a populated ring can answer, and
+   the answer changes a rule the mod enforces on every organism on every tick.
+8. **A parent blob dropped for frame size is unreachable at the sidecar** (§14, A12). The
+   sidecar records it as `"parent_gone"` because the two look identical on the wire, so
+   `contract-b-m3.md` §6.6's `"blob_dropped_for_size"` is defined and never emitted. The
+   fix is one additive optional field on `parents[]`; M3 does not add it.
 
 ---
 
@@ -1520,8 +1577,10 @@ something it is not allowed to compute.
 **Resolution — split the work at the process boundary.** The mod **ships**, the sidecar
 **hashes**:
 
-1. The mod reads the parent entity IDs from the migrant's own `$.genes.parent1` and
-   `$.genes.parent2` — integers, no genome parsing involved.
+1. The mod reads the parent entity IDs from the migrant's live `BibiteGenes` component —
+   the `parent1` / `parent2` `GameObject` resolved to `BibiteBody.id.id` while it is alive,
+   and the component's `parent1ID` / `parent2ID` when it is not. Integers either way, no
+   genome parsing involved.
 2. For each parent still alive locally, the mod calls `SaveSystem.SerializeBibite` and puts
    the result in `parents[].payload` as an **opaque string**, exactly as it does for the
    migrant. It never looks inside it.
@@ -1535,6 +1594,24 @@ something it is not allowed to compute.
 
 D4 is intact: the mod still never parses a genome. Risk 7 is answered as a side effect —
 the source sidecar holds the parent genome, so it can serve the archive's fetch.
+
+**Why step 1 reads the component and not the blob.** `BibiteGenes.SaveState` writes
+`$.genes.parent1` only `if (parent1 != null)` (`BibiteGenes.cs:552-559`), so the payload
+carries a parent key **only while that parent is alive** — precisely the case where the mod
+does not need the payload, because it can serialize the parent. A payload-sourced reader
+would therefore never produce a gap at all, and the lineage of a departed parent would be
+lost silently. The component keeps both handles: the `GameObject`, and the `[NonSerialized]`
+`parent1ID` / `parent2ID` that `LoadState` fills from a payload that did carry the key.
+
+**Contract debt — a dropped blob is indistinguishable from a dead parent.** §6.6 of
+`contract-b-m3.md` defines three `gapReason` values, and the sidecar can only ever emit two
+of them. A parent the mod dropped for frame size arrives on Contract A as an entry with an
+`entityId` and no `payload` — byte for byte what a dead parent looks like — so the sidecar
+records `"parent_gone"` and `"blob_dropped_for_size"` is unreachable. The mod logs the drop
+loudly on its own side, so the information is not lost, only unjoined. **M3 adds no flag for
+this.** The fix is one optional boolean on `parents[]`, it is additive, and it is worth doing
+the first time an operator actually has to correlate two logs to answer "did we ship that
+genome?". Recorded here so the next reader does not mistake the missing value for a defect.
 
 The cost lands on the export path, on the Unity main thread: one export may now serialize
 three organisms in one `FixedUpdate`. §5.3 requires a within-tick cache by entity ID, and

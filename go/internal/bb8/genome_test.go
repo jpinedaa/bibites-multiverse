@@ -73,9 +73,11 @@ func TestWorkedExampleReproducesTheSpec(t *testing.T) {
 	}
 }
 
-// TestOneULPMutantDiffers is conformance case 4 and the second half of
-// m3_considerations.md Risk 9: a mutated child never inherits its parent's hash.
-func TestOneULPMutantDiffers(t *testing.T) {
+// TestNearULPMutantDiffers is conformance case 4 and the second half of
+// m3_considerations.md Risk 9: a mutated child never inherits its parent's
+// hash. genome-hash.md §7.2: 0.3000001 is three ULPs above 0.3, not one — the
+// digest is unchanged, the arithmetic in the name is not.
+func TestNearULPMutantDiffers(t *testing.T) {
 	mutant := strings.Replace(workedExample, "0.30000001192092896", "0.3000001", 1)
 	if mutant == workedExample {
 		t.Fatal("the mutation was not applied")
@@ -85,7 +87,7 @@ func TestOneULPMutantDiffers(t *testing.T) {
 		t.Fatalf("GenomeHash: %v", err)
 	}
 	if got == workedHash {
-		t.Fatal("a one-ULP gene change produced the parent's digest")
+		t.Fatal("a near-ULP gene change produced the parent's digest")
 	}
 	if got != mutantHash {
 		t.Fatalf("mutant genomeHash = %s, want %s", got, mutantHash)
@@ -173,7 +175,7 @@ func TestConformanceChecklist(t *testing.T) {
 					t.Errorf("the template canonical string is not byte-identical to the saved one:\n%s", c)
 				}
 			}},
-		{name: "4 the one-ULP mutation", payload: mutant, want: mutantHash},
+		{name: "4 the near-ULP mutation", payload: mutant, want: mutantHash},
 		{name: "5 a raw < in a node desc", payload: angle, want: "-",
 			canon: func(t *testing.T, c string) {
 				if !strings.Contains(c, `"desc":"a<b"`) {

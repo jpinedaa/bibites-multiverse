@@ -480,11 +480,11 @@ The Contract C `MigrationEnvelope`, carried in `data`, now with the lineage anne
 | `body.version` | string | yes | The game version that serialized the blob. Authoritative over the blob's own `version` key (Contract A §4.6). |
 | `body.bb8` | string | yes | The opaque blob, as a JSON **string**, never nested, never base64. Max `maxPayloadBytes` (4 MiB). |
 | `lineage` | object | yes | The annex. Always present; `parents` may be empty. |
-| `lineage.genomeHash` | string | yes | The migrant's own genome hash, computed by the **source sidecar** from `body.bb8` with `genome-hash.md`. The archive's join key. |
+| `lineage.genomeHash` | string | yes | The migrant's own genome hash, computed by the **source sidecar** from `body.bb8` with `genome-hash.md`. The archive's join key. **The empty string when the migrant's own genome will not hash** — see below. Always present as a key. |
 | `lineage.parents` | array of object | yes | `0`–`2` entries, in `genes.parent1` then `genes.parent2` order. `[]` is normal. |
 | `lineage.parents[].entityId` | `entityId` | yes | The parent's id, from the migrant's genes. Signed int32, often negative. |
 | `lineage.parents[].genomeHash` | string | no | The parent's genome hash. **Absent means a gap** — the parent genome was not available to hash. |
-| `lineage.parents[].gapReason` | string enum | no | Present exactly when `genomeHash` is absent: `"parent_gone"` (no blob was shipped — the usual case), `"blob_invalid"` (`bb8-schema` could not hash it), `"blob_dropped_for_size"` (the mod trimmed it to fit the frame). |
+| `lineage.parents[].gapReason` | string enum | no | Present exactly when `genomeHash` is absent: `"parent_gone"` (no blob was shipped — the usual case), `"blob_invalid"` (`bb8-schema` could not hash it), `"blob_dropped_for_size"` (the mod trimmed it to fit the frame). **`"blob_dropped_for_size"` is currently unreachable** — see below. |
 | `sourcePeer` | string | yes | Origin peer id. The relay verifies it. |
 | `sourceSlot` | number (int) | yes | The origin's ring slot. |
 | `destSlot` | number (int) | yes | The origin's **east neighbour** slot at the moment the migration was journaled. The relay routes on this. |
@@ -505,6 +505,15 @@ a migration to carry data almost every receiver already has.
 traffic — the passive entry edge — and its own peer's `exportEdge` for a bounce-back
 (§9, `contract-a.md` §14 A11).
 
+**Contract debt — the sidecar can only emit two of the three `gapReason` values.** A parent
+the mod dropped for frame size arrives on Contract A as an `entityId` with no `payload`,
+which is byte for byte what a dead parent looks like, so the sidecar records `"parent_gone"`
+and `"blob_dropped_for_size"` never appears on this wire. The value stays in the enum: the
+mod logs each drop on its own side, a receiver must already tolerate every value here, and
+removing it would be a wire change for a field a reader must handle defensively anyway.
+Closing the debt needs one additive optional flag on Contract A's `parents[]`, and M3 does
+not add it (`contract-a.md` §14 A12, §12 item 8).
+
 The receiving sidecar **MUST**, in this order:
 
 1. Deduplicate on `migrationId` against its journal **and its tombstones**. A hit is
@@ -524,6 +533,26 @@ The receiving sidecar **MUST**, in this order:
 **The receiver never recomputes `lineage.genomeHash` as a gate.** It MAY recompute it for a
 consistency log line, but a mismatch is a `bb8-schema` defect to shout about, not a reason
 to refuse an organism — custody rules outrank bookkeeping.
+
+**An unhashable migrant sends `genomeHash: ""`, loudly, and still crosses.** `genome-hash.md`
+§8 forbids a placeholder hash, so when the source sidecar's own `GenomeHash` call fails there
+is nothing to put in the field and it carries the empty string. Three rules follow, and none
+of them is optional:
+
+- The source sidecar **MUST** log the failure at error level. A blob that passed
+  `bb8-schema` validation (step 4 of Contract A §5.3) and then would not hash is a
+  `bb8-schema` defect, not a bad organism, and it is the only signal that defect will emit.
+- The source sidecar **MUST** still forward the envelope. It **MUST NOT** substitute a
+  placeholder, a truncation, the payload hash, or the hash of a repaired projection.
+- The receiver **MUST NOT** treat an empty `genomeHash` as invalid. It is not a
+  `MIGRATION_NACK` reason, it does not fail validation, and it does not stop the delivery.
+  The custody chain does not depend on the annex; §6.8 says the annex is never a reason to
+  refuse an organism, and this is the case that proves it.
+
+The archive records the envelope with no join key on the migrant. That is a **gap on the
+migrant**, the same shape of hole as a gap on a parent, and it is recoverable: the blob is
+in the journal, so a fixed `bb8-schema` can hash it later. An organism refused at the wire
+is not recoverable at all. That asymmetry is the whole argument.
 
 ```json
 {
@@ -1056,10 +1085,27 @@ Census uploads would close the gap and are not M3.
 | `maxFrameBytes` | `8388608` | both | Shared with Contract A §10. |
 | `maxPayloadBytes` | `4194304` | both | Shared with Contract A §10. Applies to `body.bb8` and to a `GENOME_RESPONSE` body. |
 | `archiveQueueMax` | `1024` | relay | Copied frames buffered per subscriber before the oldest is dropped (§5.1). |
-| `genomeRequestTimeoutMs` | `15000` | requester | How long a requester waits for a `GENOME_RESPONSE` before it counts the attempt as failed. |
+| `genomeRequestTimeoutMs` | `15000` | requester | How long a requester waits for a `GENOME_RESPONSE` before it counts the attempt as failed. **Requester-side only, and deliberately the only entry** — see the note below. |
 | `genomeRequestsPerMinute` | `30` | both | Per requester, per answering peer. Enforced on both sides (§10). |
 | `genomeCacheRetentionDays` | `30` | sidecar | Genome cache lifetime, least-recently-served. |
 | `genomeCacheMaxBytes` | `2147483648` | sidecar | 2 GiB cap on `<data-dir>/genomes/`. |
+
+**There is no answering-side timeout for `GENOME_REQUEST`, and its absence is deliberate.**
+§6.9 says the answering sidecar must reply "within `genomeRequestTimeoutMs`", which reads
+like a deadline it has to arm. It is not. The answer is served **synchronously** out of the
+genome cache, the journal or the tombstones — a local read on data the sidecar already has —
+so the handler either produces a `GENOME_RESPONSE` or produces
+`found: false, reason: "unknown_hash"`, and it does both immediately. There is no wait to
+time out, so an answering-side timer would have nothing to cancel and no state to abandon.
+`genomeRequestTimeoutMs` is therefore a **requester-side** budget only: it bounds how long
+the requester keeps a `requestId` outstanding before it counts the fetch as failed and
+retries later (§10). A late answer that arrives after that budget is still attributable
+through the echoed `genomeHash` (§6.10) and may simply be used.
+
+This matters for any implementer reading §6.9's MUST as a scheduling requirement. If a
+future answering side ever has to go to disk, to another peer, or to a queue to serve a
+genome, that is the point at which an answer-side deadline becomes real — and it would need
+its own tunable, not this one.
 
 ---
 
