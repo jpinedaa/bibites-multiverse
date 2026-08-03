@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"multiverse/internal/fsutil"
 )
 
 // Reservation binds one ring slot to one peer identity.
@@ -96,12 +98,7 @@ func (r *Ring) Save() error {
 	if err := os.Rename(tmp, r.path); err != nil {
 		return err
 	}
-	d, err := os.Open(filepath.Dir(r.path))
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	return fsutil.SyncDir(filepath.Dir(r.path))
 }
 
 // Size is the number of slots in the ring.

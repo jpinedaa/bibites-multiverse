@@ -2,8 +2,9 @@
 
 This report expands milestone M3 of `system_decomposition.md`.
 
-**Status: PLANNED.** The owner redefined this milestone on 2026-08-03. Decisions D8 to D11
-hold the new shape.
+**Status: IN PROGRESS.** The owner redefined this milestone on 2026-08-03. Decisions D8 to
+D11 hold the new shape. The three-slot rehearsal on one machine passed. The LAN packaging
+is built. The LAN exit test is the remaining step.
 
 ## Purpose
 
@@ -179,20 +180,38 @@ both end with a closed export edge.
 
 ### Risk 6 — The second computer has no development environment
 
+**Status: RESOLVED on 2026-08-03.**
+
 The main machine runs WSL, the .NET SDK, the Go toolchain and `game.sh`. The second
-computer has none of them, and `WSLENV` does not exist there.
+computer has none of them. `WSLENV` does not exist there.
 
-Deliver artifacts to that machine, not a build: BepInEx, the plugin DLL, the sidecar
-binary, and one script that sets the environment variables and starts the sidecar. Keep
-the artifact list in `dev_environment.md`.
+The first half of the answer is a bundle of artifacts, not a build.
+`farend/make-farend-bundle.sh` makes `farend/dist/farend-bundle.zip` on the main machine.
+The zip holds the BepInEx release, a fresh plugin DLL, the Windows sidecar and two
+scripts. `setup-farend.ps1` finds the Steam install and installs the three parts. It also
+compares `BibitesAssembly.dll` against a hash in the script. A different hash stops the
+installation and prints the two ways forward. `start-slot2.ps1` starts the sidecar, waits
+for the ring slot, and then starts the game. `farend/README.md` holds the human steps.
 
-The rig is the second half of the problem. `game.sh` starts a game through a local
-PowerShell call, and it cannot reach the second machine. Decide the answer early, because
-the exit test depends on it. A scripted far end needs a small agent or a remote PowerShell
-session. An operator-driven far end costs the unattended property that M2 won.
+The second half of the answer removes the drive path. **The rig never drives the far
+end.** `e2e/run-m3-lan.sh` reads every fact about slot 2 on the main machine:
 
-Windows Firewall blocks the relay port by default. Add the rule on the main machine, and
-record the host name and the port in `dev_environment.md`.
+- The relay's `ring.json` gives the slot of the far end.
+- The `EDGE_STATUS` ripple into slot 1 gives its liveness. An export edge opens only for a
+  live neighbour that has a game.
+- The archive records each hop into slot 2 and each hop out of it. The relay copies each
+  envelope and each answer to the archive.
+- Slot 3 records the arrival of each organism that leaves slot 2.
+
+The rig cannot force an export on the far end, and it does not need to. Organisms cross
+east by themselves. Phase 3 waits for that natural crossing, with a wide timeout. The
+operator of the second computer runs two scripts and nothing more. The unattended property
+of M2 stays intact for every part of the test that this machine owns.
+
+Two network steps stay with the owner. Windows Firewall blocks the relay port. WSL2 also
+runs behind NAT on the main machine, so Windows must forward the port into the WSL virtual
+machine. `e2e/run-m3-lan.sh lanhost` prints both commands with the current addresses.
+`dev_environment.md` records the two commands and the port.
 
 ### Risk 7 — The archive fetches genomes across the LAN
 
@@ -310,6 +329,8 @@ WP2 blocks WP3 and WP5. Both of them hash genomes.
 **Needs the game:** no.
 
 - Ring insertion at the relay, keyed on `peerId`, with a held slot and a manual release
+- ✓ A manual reservation as well, `--reserve-slot <peerId>`. It writes the ring order
+  before any peer connects, so the LAN ring forms in any start order (WP6, 2026-08-03)
 - The east-neighbour map, published in `SECTOR_GRANT` and `PEER_STATUS`
 - The one-way `EDGE_STATUS` ripple. A dead peer closes the export edge of its west
   neighbour only
@@ -351,12 +372,22 @@ deliberately dumb relay (D1). A slot-less peer adds a member that owns no world.
 
 **Depends on:** WP3, WP4.
 **Needs the game:** yes.
+**Status: built on 2026-08-03. The LAN exit test is the remaining step.**
 
-- The artifact set for the second computer, and the script that starts it (Risk 6)
-- The firewall rule and the host name for the relay port
-- The third slot: a second sidecar and a second game instance on the main machine
-- The far-end drive path, scripted or operator-driven (Risk 6)
-- An update to `dev_environment.md`
+- ✓ The artifact set for the second computer, and the script that starts it (Risk 6).
+  `farend/`: `make-farend-bundle.sh`, `setup-farend.ps1`, the generated `start-slot2.ps1`
+  and `stop-slot2.ps1`, and `README.md`
+- ✓ The Windows sidecar binary, `bin/multiverse-sidecar.exe`, proven on this machine in a
+  two-slot ring across the WSL boundary: ring form-up, a migration, and a slot reclaim
+  after a restart
+- ✓ The firewall rule and the port forward for the relay port, printed by
+  `e2e/run-m3-lan.sh lanhost`. **The relay host address stays `TODO-owner`**
+- ✓ The third slot: a second sidecar and a second game instance on the main machine
+- ✓ The far-end drive path. Risk 6 holds the answer: there is no drive path, and
+  `e2e/run-m3-lan.sh` verifies slot 2 from the archive
+- ✓ Ring pre-seeding, so the LAN ring forms in any start order. `bin/relay
+  --reserve-slot <peerId>` writes the reservations before any peer connects
+- ✓ An update to `dev_environment.md`
 
 ### WP7 — The exit test
 
@@ -372,6 +403,32 @@ velocity, so every guard on the ordinary path runs.
 The test uses three seeded worlds, `M3-Slot1`, `M3-Slot2` and `M3-Slot3`. All three worlds
 use the same `SimulationSize`. Slot 1 and slot 3 run on the main machine. Slot 2 runs on
 the second computer.
+
+### The second-computer procedure
+
+Do these ten steps one time, before Part 1. `e2e/run-m3-lan.sh` runs the test itself.
+
+On the main machine:
+
+1. Stop all games. Then run `farend/make-farend-bundle.sh`.
+2. Run `e2e/run-m3-lan.sh reserve`. This holds slot 2 for the second computer.
+3. Run `e2e/run-m3-lan.sh lanhost`. Write down the LAN address of this machine.
+4. In an elevated PowerShell, add the firewall rule and the port forward from step 3.
+5. Copy `farend/dist/farend-bundle.zip` and `~/.multiverse-token` to the second computer.
+6. Run `e2e/run-m3-lan.sh up`.
+
+On the second computer:
+
+7. Unpack the zip into one folder. Put the token beside it as `token.txt`.
+8. Run `.\setup-farend.ps1 -RelayHost <the address from step 3> -TokenFile .\token.txt`.
+9. Run `.\start-slot2.ps1`. Wait for the line `RING SLOT GRANTED`.
+
+Back on the main machine:
+
+10. Run `e2e/run-m3-lan.sh phase1`. The ring is complete when phase 1 passes.
+
+After the test, run `e2e/run-m3-lan.sh down` here. The other operator runs
+`.\stop-slot2.ps1` there. Neither command touches the other machine.
 
 ### Part 1 — The circuit
 
@@ -434,8 +491,10 @@ is also a pass, because decision D2 accepts loss. Two copies is a failure.
 Record the count for each kill. A pass with zero copies must name the process that lost the
 organism.
 
-The third kill needs a drive path on the second computer. Risk 6 owns that problem. If the
-far end stays operator-driven, run the third kill by hand and record it as a manual step.
+Kill 2 and kill 3 happen on the second computer, and Risk 6 keeps that machine
+operator-driven. Its operator stops the process by hand and starts it again with
+`.\start-slot2.ps1`. Record both kills as manual steps. The count after each recovery
+comes from the main machine, in the same way as phase 6 of `e2e/run-m3-lan.sh`.
 
 ## Deliverables
 
@@ -445,8 +504,9 @@ far end stays operator-driven, run the third kill by hand and record it as a man
 - A `multiverse-sidecar` with annex assembly, the genome cache and the fetch answer
 - A `multiverse-archive` binary, with its store and its query surface
 - A mod build with wrap containment, the outside band and parent collection
-- The artifact set and the start script for the second computer
-- An update to `dev_environment.md` with the LAN rig and the firewall rule
+- ✓ The artifact set and the start script for the second computer (`farend/`)
+- ✓ An update to `dev_environment.md` with the LAN rig, the bundle workflow, the firewall
+  rule and the port forward
 - The recorded results of the two D10 tests
 - The automated M3 exit test, with its recorded result
 - An `m3_findings.md` with the research results of the milestone
@@ -464,9 +524,10 @@ Four calls need an answer before WP1 closes.
 3. **The self hash in the annex.** The envelope carries the genome of the migrant already,
    so the archive can hash it. An explicit `genomeHash` costs one field and makes the join
    key deterministic at both ends.
-4. **The far end of the rig** (Risk 6). A scripted second computer keeps the unattended
-   property of M2 and costs a remote agent. An operator-driven second computer costs a
-   manual step in the exit test.
+4. **The far end of the rig** (Risk 6). **Answered on 2026-08-03.** Neither option was
+   necessary. The far end is set up one time and then observed only. The archive, the
+   relay's ring state and the `EDGE_STATUS` ripple carry every fact to the main machine.
+   The one manual step left is Part 3, kill 3.
 
 ## Next Steps
 
@@ -476,5 +537,6 @@ Four calls need an answer before WP1 closes.
 4. Start WP2. The genome projection blocks the annex and the archive.
 5. Start WP3 and WP4 in parallel, from the amended contracts.
 6. Build WP5 after the archive route of call 2 is settled.
-7. Build WP6. Install the second computer, and open the firewall port.
+7. ✓ Build WP6. The bundle, the LAN rig and the two network commands are ready. The owner
+   installs the second computer and opens the port, with the ten-step procedure above.
 8. Run WP7. Record the results in `m3_findings.md` and in this document.

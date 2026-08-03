@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"multiverse/internal/fsutil"
 	"multiverse/internal/wire"
 )
 
@@ -368,14 +369,10 @@ func writeRecord(w *bufio.Writer, rec record) error {
 	return w.WriteByte('\n')
 }
 
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
-}
+// syncDir flushes the directory entry after a rename-into-place. It is
+// platform-dependent — Windows has no directory fsync at all — so the primitive
+// lives in internal/fsutil.
+func syncDir(dir string) error { return fsutil.SyncDir(dir) }
 
 // append writes one record and flushes it to durable storage before returning.
 func (j *Journal) append(rec record) error {

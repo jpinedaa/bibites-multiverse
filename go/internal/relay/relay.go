@@ -142,6 +142,37 @@ func (s *Server) ReleaseSlot(slot int) error {
 	return nil
 }
 
+// ReserveSlot pre-seeds one ring reservation for a peer that has not connected
+// yet. Like ReleaseSlot it is a startup command, not a wire message.
+//
+// Why the ring needs it. §7.2 rule 4 appends a new peer at the tail, so slot
+// order is start order, and the rig on one machine simply starts its sidecars in
+// the order it wants. Across a LAN that is not available: the second computer is
+// started by a person, and demanding that they start it after slot 1 and before
+// slot 3 makes the ring order depend on human timing. Pre-seeding the
+// reservations in ring order removes the ordering constraint completely — rule 1
+// then hands each peer the slot that is already keyed to its peerId, whenever it
+// arrives.
+//
+// It is idempotent: a peerId that already holds a slot keeps it, and created is
+// false. Re-running a pre-seed must never insert a second reservation.
+func (s *Server) ReserveSlot(peerID string) (Reservation, bool, error) {
+	if peerID == "" {
+		return Reservation{}, false, errors.New("relay: --reserve-slot needs a peer id")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if held := s.ring.SlotOfPeer(peerID); held > 0 {
+		return Reservation{Slot: held, PeerID: peerID}, false, nil
+	}
+	res := s.ring.Append(peerID)
+	if err := s.ring.Save(); err != nil {
+		s.ring.Release(res.Slot)
+		return Reservation{}, false, err
+	}
+	return res, true, nil
+}
+
 // RingSnapshot returns the current reservation order.
 func (s *Server) RingSnapshot() []Reservation {
 	s.mu.Lock()

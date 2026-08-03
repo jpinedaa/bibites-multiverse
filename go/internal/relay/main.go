@@ -35,6 +35,9 @@ func Main(args []string, stderr io.Writer) int {
 		"accept unauthenticated connections; for a single-machine test rig only, never on the LAN")
 	releaseSlot := fs.Int("release-slot", 0,
 		"release ring slot n at startup and exit; the operator escape hatch of contract-b-m3.md §7.5")
+	var reserveSlots peerList
+	fs.Var(&reserveSlots, "reserve-slot",
+		"reserve the next ring slot for this peer id at startup and exit; repeat once per peer, in ring order")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -72,6 +75,25 @@ func Main(args []string, stderr io.Writer) int {
 		return 0
 	}
 
+	if len(reserveSlots) > 0 {
+		for _, id := range reserveSlots {
+			res, created, err := srv.ReserveSlot(id)
+			if err != nil {
+				log.Error("relay: reservation failed", "peer", id, "err", err)
+				return 1
+			}
+			if created {
+				log.Info("relay: reserved a ring slot before the peer connected",
+					"slot", res.Slot, "peer", res.PeerID)
+			} else {
+				log.Info("relay: this peer already holds a ring slot; left alone",
+					"slot", res.Slot, "peer", res.PeerID)
+			}
+		}
+		log.Info("relay: ring pre-seeded; start it again to serve", "ring", srv.RingSnapshot())
+		return 0
+	}
+
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
 		log.Error("relay: listen failed", "addr", *listen, "err", err)
@@ -102,6 +124,13 @@ func Main(args []string, stderr io.Writer) int {
 	}
 	return 0
 }
+
+// peerList collects a repeated --reserve-slot flag, in the order it was given,
+// which is the ring order the reservations are appended in.
+type peerList []string
+
+func (p *peerList) String() string     { return strings.Join(*p, ",") }
+func (p *peerList) Set(v string) error { *p = append(*p, v); return nil }
 
 func env(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {

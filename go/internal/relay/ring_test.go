@@ -2,6 +2,8 @@ package relay
 
 import (
 	"testing"
+
+	"multiverse/internal/contractb"
 )
 
 // TestAppendMovesExactlyOneLane covers contract-b-m3.md §7.2: appending at the
@@ -136,5 +138,70 @@ func TestReleaseRefusesALivePeersSlot(t *testing.T) {
 	}
 	if s.ring.Size() != 0 {
 		t.Fatalf("ring size = %d after the release", s.ring.Size())
+	}
+}
+
+// TestReserveSlotPreSeedsTheRingInAnyStartOrder covers the LAN case of §7.2:
+// the reservations are created before any peer connects, so rule 1 hands each
+// peer its slot whenever it arrives and start order stops mattering.
+func TestReserveSlotPreSeedsTheRingInAnyStartOrder(t *testing.T) {
+	dir := t.TempDir()
+	s, err := New(Options{InsecureNoToken: true, DataDir: dir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for i, id := range []string{"slot-1", "slot-2", "slot-3"} {
+		res, created, err := s.ReserveSlot(id)
+		if err != nil {
+			t.Fatalf("ReserveSlot(%s): %v", id, err)
+		}
+		if !created || res.Slot != i+1 || res.PeerID != id {
+			t.Fatalf("ReserveSlot(%s) = %+v created=%v, want slot %d", id, res, created, i+1)
+		}
+	}
+
+	// Idempotent: a re-run of the pre-seed must not insert a second entry.
+	res, created, err := s.ReserveSlot("slot-2")
+	if err != nil || created || res.Slot != 2 {
+		t.Fatalf("re-reserving slot-2 gave %+v created=%v err=%v", res, created, err)
+	}
+	if s.ring.Size() != 3 {
+		t.Fatalf("ring size = %d after a repeated pre-seed, want 3", s.ring.Size())
+	}
+	if _, _, err := s.ReserveSlot(""); err == nil {
+		t.Fatal("an empty peer id was reserved a slot")
+	}
+
+	// Durable, and in ring order: a restarted relay must hand slot 2 to the
+	// far-end peer even though it connects last.
+	again, err := LoadRing(dir)
+	if err != nil {
+		t.Fatalf("LoadRing: %v", err)
+	}
+	if again.Size() != 3 || again.Order[1].PeerID != "slot-2" || again.MaxSlotEverIssued != 3 {
+		t.Fatalf("reloaded ring is %v (max %d)", again.Order, again.MaxSlotEverIssued)
+	}
+	if east, ok := again.East("slot-1"); !ok || east.PeerID != "slot-2" {
+		t.Fatalf("east(slot-1) = %+v, want slot-2", east)
+	}
+}
+
+// TestReserveThenClaimGivesTheReservedSlot covers rule 1 over a pre-seeded
+// ring: the peer that connects FIRST must still get the slot its peerId names,
+// not slot 1.
+func TestReserveThenClaimGivesTheReservedSlot(t *testing.T) {
+	s, err := New(Options{InsecureNoToken: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	for _, id := range []string{"slot-1", "slot-2", "slot-3"} {
+		if _, _, err := s.ReserveSlot(id); err != nil {
+			t.Fatalf("ReserveSlot(%s): %v", id, err)
+		}
+	}
+	p := &peer{id: "slot-3"}
+	slot, reason, inserted := s.assignLocked(p, 0)
+	if slot != 3 || inserted || reason != contractb.GrantReclaimed {
+		t.Fatalf("assign(slot-3) = slot %d reason %s inserted %v, want slot 3 reclaimed", slot, reason, inserted)
 	}
 }

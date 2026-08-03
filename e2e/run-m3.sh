@@ -59,6 +59,10 @@ PORT_1="${PORT_1:-8787}"
 PORT_2="${PORT_2:-8788}"
 PORT_3="${PORT_3:-18789}"
 RELAY_URL="ws://127.0.0.1:$RELAY_PORT/contract-b/v2"
+# Loopback for the local rehearsal. run-m3-lan.sh overrides this to 0.0.0.0 so
+# the second computer can reach the relay; the local sidecars keep dialling
+# 127.0.0.1 either way.
+RELAY_LISTEN="${RELAY_LISTEN:-127.0.0.1:$RELAY_PORT}"
 
 # Every slot exports east. The entry edge is derived and passive.
 EXPORT_EDGE=E
@@ -143,11 +147,11 @@ proc_alive() { local p="$1"; [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
 start_relay() {
   local pid
   mkdir -p "$RELAY_DATA"
-  nohup "$BIN/relay" --listen "127.0.0.1:$RELAY_PORT" --data-dir "$RELAY_DATA" \
+  nohup "$BIN/relay" --listen "$RELAY_LISTEN" --data-dir "$RELAY_DATA" \
     --token-file "$TOKEN_FILE" >>"$LOGS/relay.log" 2>&1 &
   pid=$!
   record_pid relay "$pid"
-  note "relay pid=$pid port=$RELAY_PORT dataDir=$RELAY_DATA"
+  note "relay pid=$pid listen=$RELAY_LISTEN dataDir=$RELAY_DATA"
 }
 
 start_archive() {
@@ -1082,6 +1086,14 @@ all() {
   errors
   phase6
 }
+
+# run-m3-lan.sh sources this file for its helpers — the ports, the game control,
+# the log waits, the field parser, the seeding and the teardown are the same on
+# both rigs. M3_LIB=1 stops the dispatch below so that a source is a library
+# load and not a command.
+if [ "${M3_LIB:-0}" = 1 ]; then
+  return 0
+fi
 
 case "${1:-status}" in
   build)   build ;;

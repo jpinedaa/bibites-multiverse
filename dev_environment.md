@@ -12,7 +12,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/`) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`) |
 | Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, `contract-a/1.1`), `contract-b-m3.md` (sidecar ↔ relay ↔ sidecar ↔ archive, `contract-b/2.0`), `genome-hash.md` (the canonical genome projection). `contract-b-m2.md` is the superseded M2 wire, kept as the record of what `contract-b/1` said |
-| Rigs and exit tests | `e2e/` — `run-m3.sh` = the current three-slot ring rig, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `journal.py` = journal reader |
+| Rigs and exit tests | `e2e/` — `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `journal.py` = journal reader |
+| Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The bundle itself lands in `farend/dist/`, which is **gitignored**: it holds binaries and a downloaded BepInEx release |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
 | Shared LAN token — **never in the repo** | `~/.multiverse-token`, mode `600`. See *The LAN token* below |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
@@ -85,6 +86,9 @@ gofmt -l . && go vet ./...           # both must print nothing
 
 # Static binaries for the rig: relay, sidecar and archive.
 CGO_ENABLED=0 go build -o ../bin/ ./cmd/...
+
+# The sidecar for the second computer. No cgo, so it cross-compiles from here.
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ../bin/multiverse-sidecar.exe ./cmd/sidecar
 ```
 
 `e2e/run-m3.sh` runs the whole M3 ring rig and its rehearsal with no operator, and every
@@ -107,6 +111,49 @@ e2e/run-m3.sh errors     # every unexplained error line in all three BepInEx log
 e2e/run-m3.sh down       # stop everything and leave no process behind
 e2e/run-m3.sh all        # build, seed, up, phase1..5, errors, down
 ```
+
+`e2e/run-m3-lan.sh` is the same milestone with **slot 2 on the second computer**. It sources
+`run-m3.sh` with `M3_LIB=1` and reuses every helper — ports, token, game control, log waits,
+`field`, seeding, teardown — and replaces only what the LAN changes: two local slots instead
+of three, and every assertion about the third one read from somewhere the far end sends by
+itself. That resolves `m3_considerations.md` Risk 6: **the far end is never driven.** Ring
+state comes from the relay's `ring.json`, slot 2's liveness from the `EDGE_STATUS` ripple
+into slot 1 (an export edge opens only when its east neighbour is live *and* mod-connected),
+and every hop through slot 2 from the **archive**, which the relay feeds a copy of every
+`MIGRATION_PAYLOAD` and every `MIGRATION_ACK`. No agent, no remote PowerShell, no file read
+across the network.
+
+```sh
+e2e/run-m3-lan.sh lanhost   # the relay's LAN address + the two elevated owner commands
+e2e/run-m3-lan.sh reserve   # pre-seed the ring: slot-1, slot-2, slot-3, in ring order
+e2e/run-m3-lan.sh seed      # M3-Slot1 and M3-Slot3 only; the far end seeds M3-Slot2 itself
+e2e/run-m3-lan.sh up        # relay (0.0.0.0) → archive → sidecars 1,3 → games 1,3
+e2e/run-m3-lan.sh phase1    # ring form-up, including the remote slot 2
+e2e/run-m3-lan.sh phase2    # forced export 1→2; the arrival is read from the ARCHIVE
+e2e/run-m3-lan.sh phase3    # a NATURAL eastward crossing out of slot 2, into slot 3
+e2e/run-m3-lan.sh phase4    # the return hop 3→1: the circuit closes
+e2e/run-m3-lan.sh phase5    # archive truth: all three lanes, lineage, genomes held
+e2e/run-m3-lan.sh phase6    # exactly-once; slot 2 is inferred, and the inference is printed
+e2e/run-m3-lan.sh down      # stops THIS machine only; the far end is never touched
+```
+
+Three things about it are load-bearing:
+
+- **Pre-seed the ring before the first `up`.** Slot order is start order on a fresh ring
+  (`contract-b-m3.md` §7.2 rule 4), and the second computer is started by a person, so start
+  order is not something to depend on. `reserve` runs `bin/relay --reserve-slot slot-1
+  --reserve-slot slot-2 --reserve-slot slot-3`, which writes the three reservations and
+  exits; rule 1 then hands each peer the slot its `peerId` already owns, in any join order.
+  `up` does it for you when `ring.json` is not already in that shape.
+- **Phase 3 waits for the ring's own traffic.** Nothing can force an export on an undriven
+  far end. The measured crossing rate is ~20 eastward crossings per *simulated* hour, which
+  is one every ~180 s of wall clock at 1x and every ~9 s at 20x, so the default
+  `NATURAL_TIMEOUT` is 1800 s with progress every 30 s. The far end's operator can press
+  `F10` in the game to force one by hand.
+- **Slot 2 is inferred in the exactly-once count, and phase 6 says so.** Slots 1 and 3 are
+  counted in their own worlds through `count <id>`; slot 2 cannot be, so its holding is
+  derived from the last archive record that names the organism and printed with the
+  reasoning beside it.
 
 `e2e/run-m2.sh` is **historical**. It is the recorded shape of the M2 exit test — two
 sectors, `contract-b/1`, `MULTIVERSE_SECTOR`, `--sector A`, `/contract-b/v1` — and none of
@@ -237,6 +284,81 @@ bin/relay --data-dir ./e2e/relay-data --release-slot 2   # releases, logs, exits
 The released number is **retired, not reused**: the next peer appends at the tail. Stop the
 relay before running it, and restart it afterwards.
 
+**Reserving a ring slot before its peer connects.** The mirror image of the release flag, and
+the reason the LAN ring can form in any start order:
+
+```sh
+bin/relay --data-dir ./e2e/relay-data \
+          --reserve-slot slot-1 --reserve-slot slot-2 --reserve-slot slot-3   # writes, logs, exits 0
+```
+
+Each `--reserve-slot` appends one reservation at the tail, in the order given, so the flags
+*are* the ring order. It is idempotent — a `peerId` that already holds a slot keeps it — and,
+like `--release-slot`, it is a startup command: the relay writes `ring.json` and exits without
+serving. `e2e/run-m3-lan.sh reserve` is the wrapper the LAN rig uses.
+
+## The far end — the second computer
+
+The second computer has no development environment (`m3_considerations.md` Risk 6). It gets
+**artifacts, not a build**, in one zip, and two PowerShell scripts. Everything it needs is
+made here:
+
+```sh
+bibites-mod/game.sh stop all      # deploy.sh cannot overwrite a DLL a running game holds
+farend/make-farend-bundle.sh      # -> farend/dist/farend-bundle.zip
+```
+
+The bundle holds `setup-farend.ps1`, `README.md`, a **fresh** `BibitesMultiverse.dll` (it runs
+`deploy.sh`), `multiverse-sidecar.exe` (cross-compiled), and the pinned BepInEx 5.4.23.3 zip
+(downloaded once into the gitignored `farend/dist/cache/`, SHA-256 verified). The script
+refuses to build when `setup-farend.ps1`'s pinned `$AssemblySha256` no longer equals
+`bibites-mod/libs/BibitesAssembly.dll` — that pin **is** the version gate on the far end, and a
+stale one would let two different game builds into one ring.
+
+Copy three things to the second computer: the zip, `~/.multiverse-token` (as `token.txt`), and
+the relay's LAN address. Its operator then runs two commands, and `farend/README.md` is the
+whole of their instructions:
+
+```powershell
+.\setup-farend.ps1 -RelayHost <relay LAN address> -TokenFile .\token.txt
+.\start-slot2.ps1
+```
+
+`setup-farend.ps1` finds Steam's copy of the game (registry, the usual folders, and every
+extra library in `libraryfolders.vdf`), verifies `BibitesAssembly.dll` against the pin,
+installs BepInEx if it is absent, copies the plugin, writes the token to
+`%LOCALAPPDATA%\BibitesMultiverse\token.txt` with a user-only ACL, and generates
+`start-slot2.ps1` and `stop-slot2.ps1`. `start-slot2.ps1` sets `MULTIVERSE_EXPORT_EDGE=E`,
+`MULTIVERSE_RING_SLOT=2`, `MULTIVERSE_SIDECAR_PORT=8787`, `MULTIVERSE_WORLD=M3-Slot2` and
+`MULTIVERSE_CMD_FILE` natively — there is no `WSLENV` on that machine — starts the sidecar,
+**waits for `ring slot granted` in its log**, and only then starts the game. A failure to join
+prints the four usual causes and does not start the game.
+
+### Owner steps: making the relay reachable (elevated, on this machine)
+
+WSL2 here runs in **NAT mode**, and `.wslconfig` sets that deliberately: `networkingMode=mirrored`
+breaks Docker Desktop port publishing on this host. A relay on `0.0.0.0:8790` inside WSL is
+therefore reachable from Windows but **not from the LAN** until Windows forwards the port into
+the VM. Both commands below need an elevated PowerShell and both are **owner steps**;
+`e2e/run-m3-lan.sh lanhost` prints them with the current addresses filled in.
+
+```powershell
+# once
+New-NetFirewallRule -DisplayName "Bibites Multiverse relay" -Direction Inbound `
+  -Action Allow -Protocol TCP -LocalPort 8790 -Profile Private
+
+# after every WSL restart: the WSL address changes
+netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0
+netsh interface portproxy add v4tov4 listenport=8790 listenaddress=0.0.0.0 `
+  connectport=8790 connectaddress=<the WSL address from `lanhost`>
+```
+
+**Relay LAN host: `TODO-owner`.** The address the second computer dials is one of this
+machine's Windows IPv4 addresses, and only the owner can say which network is the home LAN.
+`lanhost` lists the candidates; the home-LAN one is normally `192.168.x.x` or `10.x.x.x`, never
+a `172.x` hypervisor address. Record it here once it is chosen, and give the same value to
+`setup-farend.ps1 -RelayHost`.
+
 ## Gotchas
 
 - **Target `netstandard2.1`**, not 2.0 — Unity 6 assemblies reference netstandard 2.1
@@ -281,6 +403,23 @@ relay before running it, and restart it afterwards.
   greps both candidates for that instance's own startup marker instead. Both instances also
   load the same `plugins/` DLL and the same `config/`, so per-instance settings can only
   arrive through the environment.
+- **A Go program that runs on Windows must not fsync a directory.** POSIX needs the
+  containing directory flushed after a rename-into-place, and the journal and the relay's
+  `ring.json` both did it unconditionally. On Windows `os.Open` of a directory followed by
+  `Sync` fails with `Access is denied`, so `multiverse-sidecar.exe` exited at startup with
+  `open journal: sync …\journal: Access is denied` — before it ever claimed a slot, which
+  reads exactly like a dead peer. The primitive now lives in `go/internal/fsutil` with a
+  build-tagged Windows no-op (NTFS journals that metadata itself). Found by running the
+  cross-compiled sidecar on this machine, not on the second computer.
+- **From a Windows process, WSL services answer on `localhost`, not on `127.0.0.1`.** WSL2's
+  localhost forwarding resolved `ws://localhost:8790` into the VM, while `ws://127.0.0.1:8790`
+  got `connectex: No connection could be made`. It matters only for a cross-boundary test on
+  this machine; the second computer dials a LAN address either way.
+- **`Start-Process` from a WSL `powershell.exe` call keeps the interop pipe open.** The
+  launched child inherits it, so `ps_run … | tail` never returns even though PowerShell
+  itself exited. Redirect the PowerShell output to a file and read the file, with a
+  `timeout` around the call. `game.sh` is unaffected because the game detaches with its own
+  window.
 - **`~/.bashrc` sets `GOROOT=$HOME/go` before any Go exists.** Installing the tarball
   anywhere else leaves every `go` command failing with `cannot find GOROOT directory`. The
   install therefore keeps the real toolchain at `~/go-dist/go` and symlinks `~/go` to it,
@@ -304,7 +443,15 @@ relay before running it, and restart it afterwards.
   working in this repo, silently attaches to or fights over the first one's processes.
   Check with `ss -ltn | grep -E '878[78]|8790|18789'` before starting, and give a throwaway
   smoke test high ports (`--listen 127.0.0.1:0` writes the resolved address to
-  `<data-dir>/listen.addr`). The M2 rig used `8787`/`8788`/`8790` and collides head-on.
+  `<data-dir>/listen.addr`). The M2 rig used `8787`/`8788`/`8790` and collides head-on. On
+  the LAN rig only `8787`, `18789` and `8790` are local; the far end's `8787` is on its own
+  machine.
+- **The archive ledger is cumulative, so an archive assertion needs a lower time bound.**
+  `migrations.jsonl` keeps every hop of every earlier run, so "wait until a `slot 2 -> slot 3`
+  record exists" succeeded instantly against an hour-old record and reported a crossing that
+  had not happened yet. Every wait in `run-m3-lan.sh` is filtered by an RFC 3339 mark taken
+  when the wait starts; the header line begins with that timestamp, so a string compare is
+  the whole filter.
 - **Reconnect bugs only appear in a real restart under a live game.** The M2 exit test
   found a leaked send loop in the mod's WebSocket transport that no per-side test suite
   could reach: `Task.WhenAny` left the losing loop alive, it parked on a semaphore shared
