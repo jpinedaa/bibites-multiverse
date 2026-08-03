@@ -32,6 +32,9 @@ namespace BibitesMultiverse
         internal string text;
         internal TransportLogLevel level;
         internal int closeCode;
+
+        /// <summary>Which connection this event belongs to. See <see cref="WebSocketTransport.Generation"/>.</summary>
+        internal int generation;
     }
 
     /// <summary>
@@ -57,6 +60,7 @@ namespace BibitesMultiverse
         private Task worker;
         private volatile bool halted;
         private volatile bool connected;
+        private int generation;
 
         /// <summary>Bound on the send queue, so an unread socket cannot grow memory without limit.</summary>
         private const int MaxQueuedFrames = 256;
@@ -77,6 +81,15 @@ namespace BibitesMultiverse
         }
 
         internal bool IsConnected => connected;
+
+        /// <summary>
+        /// Counts successful connects. It is what lets the client tell "the socket is up" from "the
+        /// socket I handshook on is up": the <c>Connected</c> event is drained on the game thread one
+        /// or more frames after the socket actually opened, and in that window a heartbeat aimed at
+        /// the previous session would otherwise become the first frame of the new one — which the
+        /// sidecar answers with close 4003, because CONFIG_UPDATE must come first (§5.1).
+        /// </summary>
+        internal int Generation => Volatile.Read(ref generation);
 
         /// <summary>True once a close code told us not to reconnect until the mod is restarted (§6.2).</summary>
         internal bool IsHalted => halted;
@@ -227,13 +240,19 @@ namespace BibitesMultiverse
                 try
                 {
                     socket = new ClientWebSocket();
-                    DrainOutbound();
                     await socket.ConnectAsync(uri, token).ConfigureAwait(false);
+
+                    // Drain **after** the connect, not before it. Anything still queued belongs to the
+                    // session that just died — including a heartbeat the game thread produced while it
+                    // had not yet drained the Disconnected event — and §5.1 says the first frame on a
+                    // new connection is CONFIG_UPDATE.
+                    DrainOutbound();
 
                     Report(TransportLogLevel.Info, $"connected to {url} on backoff rung {attempt}.");
                     session.Start();
                     connected = true;
-                    inbound.Enqueue(new TransportEvent { kind = TransportEventKind.Connected });
+                    int thisGeneration = Interlocked.Increment(ref generation);
+                    inbound.Enqueue(new TransportEvent { kind = TransportEventKind.Connected, generation = thisGeneration });
 
                     await PumpAsync(socket, token).ConfigureAwait(false);
 
@@ -292,13 +311,42 @@ namespace BibitesMultiverse
             }
         }
 
+        /// <summary>
+        /// Run the two socket loops for one connection and **end both of them together**.
+        ///
+        /// The send loop parks on <see cref="outboundSignal"/>, which is shared by every connection.
+        /// Waiting only on the first loop to finish therefore leaves the other one alive and still
+        /// queued on that semaphore: the next connection's <c>CONFIG_UPDATE</c> wakes the orphan
+        /// first, the orphan dequeues the frame, its send fails on the dead socket, and the frame is
+        /// gone. The sidecar then sees a HEARTBEAT as the first frame and closes 4003, forever, one
+        /// stolen frame per leaked loop. That is a permanent inability to reconnect, and it is what
+        /// the M2 kill test hit the first time a sidecar was restarted under a live mod.
+        ///
+        /// So: cancel the session, wait for both loops, then re-await the one that failed so the
+        /// caller still sees the real cause rather than the cancellation.
+        /// </summary>
         private async Task PumpAsync(ClientWebSocket socket, CancellationToken token)
         {
-            Task receive = ReceiveLoopAsync(socket, token);
-            Task send = SendLoopAsync(socket, token);
-            Task finished = await Task.WhenAny(receive, send).ConfigureAwait(false);
-            // Surface the failure of whichever loop stopped first.
-            await finished.ConfigureAwait(false);
+            using (CancellationTokenSource session = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                Task receive = ReceiveLoopAsync(socket, session.Token);
+                Task send = SendLoopAsync(socket, session.Token);
+                Task finished = await Task.WhenAny(receive, send).ConfigureAwait(false);
+
+                session.Cancel();
+                try
+                {
+                    await Task.WhenAll(receive, send).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // The loser always ends in a cancellation, and the winner's own failure is
+                    // re-thrown below. Neither is worth reporting twice.
+                }
+
+                // Surface the failure of whichever loop stopped first.
+                await finished.ConfigureAwait(false);
+            }
         }
 
         private async Task ReceiveLoopAsync(ClientWebSocket socket, CancellationToken token)

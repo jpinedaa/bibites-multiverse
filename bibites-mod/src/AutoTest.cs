@@ -34,7 +34,6 @@ namespace BibitesMultiverse
     {
         internal const string Prefix = "[M1-AUTOTEST]";
         internal const string SaveName = "M1-AutoTest";
-        internal const string SeedScenario = "Default.zip";
 
         private const float MenuTimeout = 240f;
         private const float SimTimeout = 300f;
@@ -55,12 +54,7 @@ namespace BibitesMultiverse
         private string failure;
         private bool finished;
 
-        private static string SaveFilePath => Path.Combine(SaveController.SavePath, SaveName + ".zip");
-
-        private static string ScenarioPath(string fileName)
-        {
-            return Path.Combine(Path.Combine(Application.persistentDataPath, "Scenarios"), fileName);
-        }
+        private static string SaveFilePath => WorldSeeder.SavePathFor(SaveName);
 
         private static void Log(string message)
         {
@@ -318,187 +312,52 @@ namespace BibitesMultiverse
 
         private IEnumerator SeedWorld()
         {
-            string scenario = ScenarioPath(SeedScenario);
-            if (File.Exists(scenario))
-            {
-                Log($"phase 2: applying the stock scenario '{SeedScenario}' (read-only).");
-                try
-                {
-                    ApplyScenario(scenario);
-                }
-                catch (Exception e)
-                {
-                    Warn($"phase 2: could not apply the scenario ({e.Message}) — continuing with the current settings.");
-                }
-            }
-            else
-            {
-                Warn($"phase 2: {scenario} not found — continuing with the current scenario settings.");
-            }
+            WorldOpResult seed = new WorldOpResult();
+            yield return WorldSeeder.Seed(
+                SaveName,
+                SeedTimeScale,
+                () => FindTarget(preferred: true) != null,
+                SeedPreferredTimeout,
+                () => LivingCount() > 0,
+                SeedAnyTimeout,
+                Prefix,
+                seed);
 
-            SimulationManager.gameName = SaveName;
-
-            bool started = false;
-            try
+            if (!seed.ok)
             {
-                GameManager.StartGame();
-                started = true;
-            }
-            catch (Exception e)
-            {
-                failure = "GameManager.StartGame threw while seeding: " + e.Message;
-                MultiversePlugin.Log.LogError($"{Prefix} {e}");
-            }
-
-            if (!started)
-            {
-                yield break;
-            }
-
-            yield return WaitFor(SimulationReady, SimTimeout, "the simulation scene (seed)");
-            if (timedOut)
-            {
-                failure = "the seeding simulation never became ready";
-                yield break;
-            }
-
-            PrepareSimulation(SeedTimeScale);
-            Log($"phase 2: seeding simulation running at {SeedTimeScale:F0}x — waiting for bibites to spawn and eat.");
-
-            yield return WaitFor(() => FindTarget(preferred: true) != null, SeedPreferredTimeout, "a preferred organism (seed)");
-            if (timedOut)
-            {
-                Warn("phase 2: no adult with stomach content within the timeout — accepting any living bibite.");
-                yield return WaitFor(() => LivingCount() > 0, SeedAnyTimeout, "any living bibite (seed)");
-                if (timedOut)
-                {
-                    failure = "the seeding simulation never produced a living bibite";
-                    yield break;
-                }
-            }
-
-            Log($"phase 2: seeding done — bibites={LivingCount()} eggs={EggCount()} " +
-                $"simulatedTime={TimeKeeper.simulatedTime:F1}s. Saving as '{SaveName}'.");
-
-            yield return SaveWorld(SaveFilePath);
-            if (!string.IsNullOrEmpty(failure))
-            {
+                failure = seed.failure;
                 yield break;
             }
 
             Log($"phase 2: '{SaveName}' written ({new FileInfo(SaveFilePath).Length} bytes).");
         }
 
-        /// <summary>Mirror of UIScripts/ScenarioSelectorPanel.cs:342-383 — read only, nothing is written back.</summary>
-        private static void ApplyScenario(string zipPath)
-        {
-            using (ZipArchive zip = ZipFile.Open(zipPath, ZipArchiveMode.Read))
-            {
-                JObject info = SaveSystem.ReadJObjectFromArchive(zip.GetEntry("scenario.info"));
-                Utility.Version version = Utility.Version.Parse(info["version"].ToString());
-                SerializationHelper.DeserializeScenario(SaveSystem.GetSettingsOfSave(zip), version, checkForModifiers: true);
-                SaveSystem.CheckTemplatesOfArchive(zip);
-            }
-        }
-
         // ---- world save --------------------------------------------------------------------
 
         /// <summary>
-        /// Drive SaveSystem.CreateSave ourselves instead of going through SaveGame's StartCoroutine,
-        /// so an exception inside the save (the stale-reference symptom of Risk 5) lands in our own
-        /// catch instead of being swallowed by Unity's coroutine runner.
+        /// <see cref="WorldSeeder.SaveWorld"/> drives SaveSystem.CreateSave by hand, so an exception
+        /// inside the save (the stale-reference symptom of Risk 5) reaches a catch instead of being
+        /// swallowed by Unity's coroutine runner. This wrapper adds the auto-test's own error window
+        /// on top, because a Unity error logged during the save is a failure even when CreateSave
+        /// itself returns.
         /// </summary>
         private IEnumerator SaveWorld(string path)
         {
             BeginErrorWindow();
 
-            IEnumerator save = null;
-            try
-            {
-                save = GameBridge.CreateSaveEnumerator(path);
-            }
-            catch (Exception e)
-            {
-                Warn($"could not reach SaveSystem.CreateSave by reflection ({e.Message}) — using SaveController.SaveWorld.");
-                save = null;
-            }
-
-            if (save != null)
-            {
-                while (true)
-                {
-                    bool moved;
-                    try
-                    {
-                        moved = save.MoveNext();
-                    }
-                    catch (Exception e)
-                    {
-                        failure = "the world save threw: " + e.GetType().Name + ": " + e.Message;
-                        MultiversePlugin.Log.LogError($"{Prefix} world save exception: {e}");
-                        EndErrorWindow();
-                        yield break;
-                    }
-
-                    if (!moved)
-                    {
-                        break;
-                    }
-
-                    yield return save.Current;
-                }
-            }
-            else
-            {
-                SaveSystem system = SaveSystem.instance;
-                SaveController controller = SaveController.Instance;
-                if (system == null || controller == null)
-                {
-                    failure = "no SaveSystem/SaveController to save the world with";
-                    EndErrorWindow();
-                    yield break;
-                }
-
-                bool done = false;
-                UnityEngine.Events.UnityAction handler = () => { done = true; };
-                system.onSavingDone.AddListener(handler);
-                controller.SaveWorld(path);
-                yield return WaitFor(() => done, SaveTimeout, "the world save");
-                system.onSavingDone.RemoveListener(handler);
-                if (timedOut)
-                {
-                    failure = "the world save did not finish within " + SaveTimeout.ToString("F0") + " s";
-                    EndErrorWindow();
-                    yield break;
-                }
-            }
+            WorldOpResult result = new WorldOpResult();
+            yield return WorldSeeder.SaveWorld(path, Prefix, result);
 
             int errors = EndErrorWindow();
+            if (!result.ok)
+            {
+                failure = result.failure;
+                yield break;
+            }
+
             if (errors > 0)
             {
                 failure = errors + " unity error(s)/exception(s) during the world save";
-                yield break;
-            }
-
-            if (!File.Exists(path))
-            {
-                failure = "the world save produced no file at " + path;
-                yield break;
-            }
-
-            try
-            {
-                using (ZipArchive zip = ZipFile.Open(path, ZipArchiveMode.Read))
-                {
-                    if (zip.GetEntry("scene.bb8scene") == null)
-                    {
-                        failure = "the world save has no scene.bb8scene entry";
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                failure = "the world save is not a readable archive: " + e.Message;
             }
         }
 

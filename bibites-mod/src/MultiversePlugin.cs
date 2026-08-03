@@ -28,12 +28,37 @@ namespace BibitesMultiverse
             gameObject.AddComponent<RoundTripCommand>();
             Log.LogInfo($"Round-trip dev command armed — press {RoundTripCommand.Hotkey} inside a running simulation.");
 
-            StartMultiverseClient();
+            MultiverseConfig config = StartMultiverseClient();
+            StartDevCommands(config);
             StartAutoTest();
         }
 
+        /// <summary>
+        /// The M2 rig's dev channel. Armed by MULTIVERSE_CMD_FILE (the orchestration script's command
+        /// file) or MULTIVERSE_FAMILY_REPORT; the forced-export hotkey works either way, so a manual
+        /// run needs neither variable.
+        /// </summary>
+        private void StartDevCommands(MultiverseConfig config)
+        {
+            string commandFile = (MultiverseConfig.Env(DevCommands.EnvCommandFile) ?? string.Empty).Trim();
+            string familyReport = (MultiverseConfig.Env(DevCommands.EnvFamilyReport) ?? string.Empty).Trim();
+
+            float seconds = 0f;
+            if (!string.IsNullOrEmpty(familyReport)
+                && !float.TryParse(familyReport, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out seconds))
+            {
+                Log.LogWarning($"[M2] {DevCommands.EnvFamilyReport}='{familyReport}' is not a number of seconds — the periodic family report stays off.");
+                seconds = 0f;
+            }
+
+            DevCommands commands = gameObject.AddComponent<DevCommands>();
+            commands.CommandFile = commandFile;
+            commands.FamilyReportSeconds = seconds;
+            commands.FallbackWorldName = (config != null) ? config.WorldToLoad : string.Empty;
+        }
+
         /// <summary>The M2 client: configuration, the Harmony border hook and the Contract A transport.</summary>
-        private void StartMultiverseClient()
+        private MultiverseConfig StartMultiverseClient()
         {
             MultiverseConfig config;
             try
@@ -43,7 +68,7 @@ namespace BibitesMultiverse
             catch (Exception e)
             {
                 Log.LogError($"[M2] configuration failed — the multiverse client stays off: {e}");
-                return;
+                return null;
             }
 
             config.LogSummary();
@@ -59,17 +84,18 @@ namespace BibitesMultiverse
                 Log.LogInfo(
                     $"[M2] no border edge is configured ({MultiverseConfig.EnvOpenEdge} or [M2] OpenEdge) — " +
                     "the Contract A client, the border strip and the crossing counters all stay off.");
-                return;
+                return config;
             }
 
             if (!BorderPatches.Apply(Guid))
             {
                 Log.LogError("[M2] the border hook could not be installed — the multiverse client stays off.");
-                return;
+                return config;
             }
 
             MultiverseClient client = gameObject.AddComponent<MultiverseClient>();
             client.Initialize(config);
+            return config;
         }
 
         private void StartAutoTest()

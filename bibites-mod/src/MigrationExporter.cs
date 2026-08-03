@@ -205,7 +205,7 @@ namespace BibitesMultiverse
                 $"[M2] migrationId={migrationId} entityId={entityId} phase=MIGRATE_OUT_SENT edge={ContractA.EdgeName(edge)} " +
                 $"exitPosition={exitPosition.ToString("F6", CultureInfo.InvariantCulture)} " +
                 $"pos=({position.x:F2},{position.y:F2}) vel=({velocity.x:F2},{velocity.y:F2}) heading={heading:F2} " +
-                $"payloadBytes={payloadBytes} S={geometry.S:F1}");
+                $"payloadBytes={payloadBytes} payloadSha256={ContractA.Sha256Hex(payload)} S={geometry.S:F1}");
             return true;
         }
 

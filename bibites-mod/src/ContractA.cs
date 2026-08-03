@@ -324,5 +324,39 @@ namespace BibitesMultiverse
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
         }
+
+        /// <summary>
+        /// Lower-case hex SHA-256 of the UTF-8 bytes of a payload string — bit for bit the same
+        /// function the sidecar stores as <c>payloadHash</c> (<c>go/internal/bb8.Hash</c>). Logging it
+        /// on both sides of every hop is what turns "the blob survived" into a checkable claim across
+        /// two game processes, without ever putting a 100 kB payload in the log.
+        /// </summary>
+        internal static string Sha256Hex(string payload)
+        {
+            if (payload == null)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+                {
+                    byte[] digest = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload));
+                    System.Text.StringBuilder hex = new System.Text.StringBuilder(digest.Length * 2);
+                    foreach (byte b in digest)
+                    {
+                        hex.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+                    }
+
+                    return hex.ToString();
+                }
+            }
+            catch (Exception e)
+            {
+                MultiversePlugin.Log.LogWarning($"[M2] could not hash a payload: {e.Message}");
+                return string.Empty;
+            }
+        }
     }
 }

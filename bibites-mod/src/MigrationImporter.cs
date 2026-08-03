@@ -125,7 +125,7 @@ namespace BibitesMultiverse
             MultiversePlugin.Log.LogInfo(
                 $"[M2] migrationId={migrationId} entityId={entityId} phase=MIGRATE_IN_RECEIVED edge={ContractA.EdgeName(entryEdge)} " +
                 $"entryPosition={entryPosition.ToString("F6", CultureInfo.InvariantCulture)} attempt={attempt} bounceBack={bounceBack} " +
-                $"payloadBytes={System.Text.Encoding.UTF8.GetByteCount(payload)}");
+                $"payloadBytes={System.Text.Encoding.UTF8.GetByteCount(payload)} payloadSha256={ContractA.Sha256Hex(payload)}");
 
             if (entryEdge != client.Config.BorderEdge)
             {

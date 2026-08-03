@@ -7,3 +7,10 @@ bibites-mod/libs/
 # Build output
 bibites-mod/bin/
 bibites-mod/obj/
+bin/
+
+# E2E rig runtime state. e2e/data/ holds the sidecar journals — the durable custody
+# record of decision D2 — which belong to one run of one machine, never to the repo.
+e2e/data/
+e2e/logs/
+e2e/run/

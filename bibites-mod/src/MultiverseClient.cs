@@ -54,6 +54,13 @@ namespace BibitesMultiverse
         private long lastEdgeStatusEpoch;
         private bool edgeOpen;
         private bool handshakeSent;
+
+        /// <summary>
+        /// The transport generation this client handshook on (§5.1). A socket that has re-opened but
+        /// whose <c>Connected</c> event has not been drained yet is a different connection, and
+        /// sending a heartbeat into it puts a non-CONFIG_UPDATE frame first, which is close 4003.
+        /// </summary>
+        private int handshakeGeneration = -1;
         private float nextHeartbeatRealtime;
         private bool haltedReported;
 
@@ -159,6 +166,7 @@ namespace BibitesMultiverse
             lastEdgeStatusEpoch = 0;
             edgeOpen = false;
             handshakeSent = false;
+            handshakeGeneration = -1;
             haltedReported = false;
             pendingMutations.Clear();
             exporter.Clear();
@@ -202,6 +210,7 @@ namespace BibitesMultiverse
 
             edgeOpen = false;
             handshakeSent = false;
+            handshakeGeneration = -1;
             armed = false;
             Active = null;
 
@@ -240,7 +249,7 @@ namespace BibitesMultiverse
                         break;
 
                     case TransportEventKind.Connected:
-                        OnConnected();
+                        OnConnected(transportEvent.generation);
                         break;
 
                     case TransportEventKind.Disconnected:
@@ -270,7 +279,7 @@ namespace BibitesMultiverse
             }
         }
 
-        private void OnConnected()
+        private void OnConnected(int connectionGeneration)
         {
             if (!armed)
             {
@@ -285,6 +294,7 @@ namespace BibitesMultiverse
             edgeOpen = false;
             importer.ClearConnectionState();
 
+            handshakeGeneration = connectionGeneration;
             SendConfigUpdate("connect");
             handshakeSent = true;
             nextHeartbeatRealtime = Time.realtimeSinceStartup + ContractA.HeartbeatIntervalMs / 1000f;
@@ -296,6 +306,7 @@ namespace BibitesMultiverse
         private void OnDisconnected(int closeCode, string reason)
         {
             handshakeSent = false;
+            handshakeGeneration = -1;
             bool wasOpen = edgeOpen;
             edgeOpen = false;
 
@@ -604,7 +615,7 @@ namespace BibitesMultiverse
         /// <summary>§8 — wall-clock cadence. A paused sim, 0x and 20x all heartbeat the same.</summary>
         private void PumpHeartbeat()
         {
-            if (!handshakeSent || transport == null || !transport.IsConnected)
+            if (!handshakeSent || transport == null || !transport.IsConnected || transport.Generation != handshakeGeneration)
             {
                 if (transport != null && transport.IsHalted && !haltedReported)
                 {
@@ -715,6 +726,18 @@ namespace BibitesMultiverse
         internal void NoteArrival(int entityId)
         {
             crossing.Forget(entityId);
+            exporter.Forget(entityId);
+        }
+
+        /// <summary>
+        /// Drop the export cooldown and the entry-immunity window for one organism. The rig's forced
+        /// export (<see cref="DevCommands"/>) uses it so a second hop is not silently swallowed by the
+        /// guards that exist to stop *natural* ping-pong. It relaxes no rule of the pipeline itself:
+        /// the strip test, the outward-velocity test and the whole custody flow still run.
+        /// </summary>
+        internal void ClearMigrationBlocks(int entityId)
+        {
+            importer.Forget(entityId);
             exporter.Forget(entityId);
         }
     }
