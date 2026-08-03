@@ -1,5 +1,6 @@
 using BepInEx;
 using BepInEx.Logging;
+using UnityEngine;
 
 namespace BibitesMultiverse
 {
@@ -15,7 +16,12 @@ namespace BibitesMultiverse
         private void Awake()
         {
             Log = Logger;
-            Log.LogInfo($"{Name} {Version} loaded — M1 environment smoke test.");
+            Log.LogInfo($"{Name} {Version} loaded — M1 round-trip dev command.");
+            Log.LogInfo($"Application.version = {Application.version}");
+            Log.LogInfo($"Application.unityVersion = {Application.unityVersion}");
+
+            gameObject.AddComponent<RoundTripCommand>();
+            Log.LogInfo($"Round-trip dev command armed — press {RoundTripCommand.Hotkey} inside a running simulation.");
         }
     }
 }
