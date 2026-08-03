@@ -2,6 +2,8 @@
 
 This report expands milestone M2 of `system_decomposition.md`.
 
+**Status: COMPLETE.** The exit test passed on 2026-08-02/03. See *Exit Test*, *Result*.
+
 ## Purpose
 
 M2 is the first vertical slice with a network. It runs two game instances, two sidecars
@@ -44,7 +46,7 @@ Out of scope:
 
 ## Risks
 
-### Risk 1 — The crossing rate. The stated premise was wrong.
+### Risk 1 — The crossing rate. The stated premise was wrong. CLOSED.
 
 Decision D3 said that the vanilla void-avoidance AI keeps the crossing rate near zero.
 `m2_findings.md` disproves that mechanism.
@@ -63,16 +65,23 @@ on the islands because the space between them holds no food.
 Suppression therefore removes a force that is already absent. Suppression alone will not
 raise the crossing rate.
 
-**M2 must measure first.** Open one edge. Count how many organisms enter the border strip
-for each simulated hour. Record that number. If the number is near zero, add the lure.
+**M2 measured first.** WP4 opened one edge in each sim and counted the strip entries. The
+measurement ran for 30 real minutes at 20x speed, with no forcing.
 
-The researched lure is a corridor zone. Add a low-fertility `ZoneSettings` from the
-nearest island to the open edge. Use the public method
+| Sector | Open edge | Strip entries for each simulated hour | Population |
+|---|---|---|---|
+| A | E | 20.5 | ~26 |
+| B | W | 24.4 | ~26 |
+
+Crossing is frequent once an edge is open. **The corridor lure is canceled.** Build the
+lure only after the ecology changes and a new measurement returns a rate near zero.
+
+The researched lure stays on record. It is a low-fertility `ZoneSettings` from the nearest
+island to the open edge, added with the public method
 `ScenarioSettings.Instance.AddNewZone`. The precedent is the `Void` zone of the shipped
 `3 Islands` scenario. Gate the corridor behind a mod configuration flag. Remove the
-corridor when the world unloads, because a zone is persisted world data.
-
-This work moves the lure from M3 into M2. Keep the pheromone beacon in M3.
+corridor when the world unloads, because a zone is persisted world data. Keep the
+pheromone beacon in M3.
 
 Keep the suppression code anyway. It is two small Harmony patches. A player world that
 enables *Void-No-Mo'* still needs it. Read `voidAvoidance.val` at world load first. Write
@@ -127,7 +136,7 @@ first. Restore that value when the world unloads.
 Note the sibling setting. `shadeAvoidance` and `worldWrapping` sit on one `if/else if`
 chain. With shade avoidance on, the wrap branch never runs.
 
-### Risk 5 — The family re-link code is still unexercised.
+### Risk 5 — The family re-link code was unexercised. CLOSED.
 
 M1 implemented the parent and child repair. The test organism had no parents and no
 children. The stale-reference trap therefore never fired.
@@ -136,19 +145,22 @@ A stale `BibiteID` in a parent's `eggLayer.children` makes
 `BibiteEggLayingOrgan.SaveState` throw on the next world save. That failure looks like a
 corrupted save file.
 
-WP2 wrote the repair code and the two counters. No game run has exercised them. The risk
-is unchanged and it moves to WP4.
+WP2 wrote the repair code and the two counters. WP4 exercised both of them in the game on
+2026-08-02/03.
 
-Run one migration in an evolved world. Select an organism with living parents and living
-children. Migrate it. Then save both worlds. Report the repaired counts in the
-`MIGRATE_IN_ACK` fields `relinkedParents` and `relinkedChildren`. A zero in both fields
-means the test did not exercise the code.
+The exit test migrated a child out of the world of its parent. **The trap fired**, and the
+mod cleared it: `cleared 1 stale children entries`. A later hop landed the parent in the
+world of its own child, and the `MIGRATE_IN_ACK` reported `relinkedParents=1`. Both worlds
+then saved with no exception.
+
+Migrate the child before the parent. `BibiteGenes.SaveState` writes the parent identifier
+only while the parent GameObject lives. See *Carried to M3*.
 
 Drive the world save by hand. `SaveSystem.SaveGame` wraps `CreateSave` in a coroutine and
 Unity swallows the exception. Reflect on the private `CreateSave` iterator and call
 `MoveNext()` inside a `try` block.
 
-### Risk 6 — A process kill must never duplicate an organism.
+### Risk 6 — A process kill must never duplicate an organism. CLOSED.
 
 Decision D2 accepts rare loss. It does not accept duplication.
 
@@ -171,10 +183,13 @@ Two more rules protect the invariant:
 - The mod keeps one organism bound to one `migrationId`. It re-sends the identical
   message after a reconnect. It never mints a second identifier for the same organism.
 
+The kill gauntlet ran all three kills on 2026-08-02/03. The organism existed exactly once
+after every recovery. See *Exit Test*, *Result*.
+
 ## Work Packages
 
-Four packages. WP1 and WP2 depend only on `contracts/contract-a.md`. They ran in parallel,
-and their owners did not talk. Both are complete. WP3 and WP4 remain.
+Four packages. All four are complete. WP1 and WP2 depend only on
+`contracts/contract-a.md`. They ran in parallel, and their owners did not talk.
 
 The parallel build worked, and it also proved a cost. Each side resolved the same
 ambiguities alone, and the two answers had to be reconciled afterwards. `contract-a.md`
@@ -238,49 +253,48 @@ Both game instances share one plugin DLL and one BepInEx configuration directory
 instance settings therefore need environment variables. The WSL to Windows hop needs
 `WSLENV` to name each variable. See `dev_environment.md`.
 
-### WP3 — The two-instance rig
+### WP3 — The two-instance rig. DONE, 2026-08-02.
 
 **Depends on:** WP2's environment-variable names.
 **Needs the game:** yes.
+**Delivered in:** `bibites-mod/game.sh` and `e2e/run-m2.sh`, commit `9742cb7`.
 
-Extend `bibites-mod/game.sh` for two instances:
-
-- `game.sh start <instance>` starts one instance with its own environment variables.
-- `game.sh log <instance> [n]` reads the log of that instance. BepInEx gives the first
-  instance `LogOutput.log` and the second instance `LogOutput.log.1`, because the first
-  holds a lock on the first file.
-- `game.sh stop <instance>` stops one instance. The current command stops both, because
-  it matches on the process name. Match on the process identifier instead.
-- `game.sh status` lists both instances with their identifiers.
+- [x] `game.sh <command> <instance>` for `start`, `stop`, `status`, `log`, `logfile`,
+      `pid` and `wait`. The old single-instance forms still work.
+- [x] Per-instance PID tracking. `start` records the identifier that
+      `Start-Process -PassThru` returns, so `stop <instance>` hits one game only.
+      `stop all` stops every recorded instance, then sweeps the orphans by process name.
+- [x] Log resolution by content. Each instance greps both `LogOutput.log` and
+      `LogOutput.log.1` for its own startup marker. BepInEx assigns those two files by
+      lock order, which is a race, not a rule.
+- [x] `e2e/run-m2.sh` drives the whole rig: `build`, `seed`, `up`, the phases, `down`.
 
 Copy `LogOutput.log` before a restart. BepInEx overwrites it on every launch.
 
 Stop the game before every deploy. Windows holds the plugin DLL open.
 
-### WP4 — The end-to-end exit test
+### WP4 — The end-to-end exit test. DONE, 2026-08-02/03.
 
 **Depends on:** WP1, WP2 and WP3.
+**Delivered in:** `e2e/run-m2.sh`, commit `9742cb7`.
 
-Build the automated exit test of the next section. Follow the pattern of
-`bibites-mod/src/AutoTest.cs`. Arm it with an environment variable. Print one result
-line. Then quit.
+The test runs with no operator, and each phase is separately invokable on a healthy rig.
+The rig steers each game through the command file that `MULTIVERSE_CMD_FILE` names
+(`bibites-mod/src/DevCommands.cs`). A forced export only teleports the organism into the
+strip with an outward velocity. The ordinary `MIGRATE_OUT` path and every guard on it then
+run, so the test bypasses nothing.
 
-**Two paths have code but no game evidence. WP4 must exercise both.** Contract tests with
-a fake mod prove the Go half. They cannot prove the C# half, because the fake mod never
+**Two paths had code but no game evidence. WP4 exercised both.** Contract tests with a
+fake mod prove the Go half. They cannot prove the C# half, because the fake mod never
 touches Unity.
 
-1. **The export path.** No organism has left a real sim. The mod has connected, sent
-   `CONFIG_UPDATE` and applied an `EDGE_STATUS`, but the edge reported `no_peer` and the
-   crossing counter reported zero. `MIGRATE_OUT`, the inert state of `§6.3`, the destroy
-   on `MIGRATE_OUT_ACK` and the revive on `MIGRATE_OUT_NACK` are all untested in the game.
-   Test the inert state as well as the transfer. Confirm that an inert organism does not
-   eat, breed, move, or become food.
-2. **The family re-link on a linked organism.** Risk 5 is unchanged. The repair code and
-   the two counters exist. No run has exercised them. A zero in both `relinkedParents` and
-   `relinkedChildren` means the test selected the wrong organism.
+1. **The export path.** [x] An organism left a real sim, went inert, and the mod destroyed
+   it on `MIGRATE_OUT_ACK`.
+2. **The family re-link on a linked organism.** [x] Both counters reported non-zero
+   repairs. See Risk 5.
 
-Both items are exit-test conditions in the next section. Neither needs new production
-code.
+Neither item needed new production code. The test did find one defect in the mod's
+transport. See *Exit Test*, *Result*.
 
 ## Exit Test
 
@@ -295,8 +309,8 @@ opens its west edge.
 3. Select one organism in sim A. Prefer an organism with living parents and living
    children.
 4. Record its payload and its entity ID.
-5. Push the organism across the east edge. Use the corridor zone, or place the organism
-   in the strip with an outward velocity.
+5. Push the organism across the east edge. Place the organism in the strip with an
+   outward velocity.
 6. Wait for the arrival in sim B.
 7. Record the payload in sim B. Compare it against the payload from sim A.
 8. Push the organism back across the west edge of sim B.
@@ -341,6 +355,41 @@ failure.
 Record the count for each kill. A pass with zero copies must name the process that lost
 the organism.
 
+### Result — PASS, 2026-08-02/03
+
+`e2e/run-m2.sh` ran every phase with no operator, against game `0.6.3.1`.
+
+- **Part 1, the round trip.** One organism went A→B→A. A `sha256` comparison found the
+  payloads byte-equal in both directions. The entity identifier stayed equal at every hop.
+- **Part 1, the family re-link.** The Risk 5 trap fired, and the mod cleared it. A parent
+  landed in the world of its own child and reported `relinkedParents=1`. Both worlds saved
+  with no exception.
+- **Part 2, the kill gauntlet.** Three kills ran, one at a time: `kill -9` on the relay,
+  `kill -9` on sidecar B after the journal flush, and a force-stop of game B. The game
+  came back from its autosave holding a resurrected copy, and the custody assertion
+  destroyed that copy.
+
+| Count point | Copies of the organism |
+|---|---|
+| After the A→B→A round trip | 1 |
+| After the relay `kill -9` | 1 |
+| After the sidecar `kill -9` | 1 |
+| After the game force-stop and the autosave rollback | 1 |
+
+The organism existed **exactly once** at every count point — four for four. No count point
+reported zero copies or two copies. The final journal held 512 migrations on each side,
+with no stuck entry.
+
+**One defect, found by this test and fixed in `9742cb7`.** The mod's WebSocket transport
+leaked its send loop across a reconnect. `Task.WhenAny` left the loser of the race alive,
+and the send loop parks on a semaphore that every connection shares. After any disconnect
+the leaked loop stole the first frame of the next session. The sidecar then closed the
+connection with code 4003, and the mod never completed a second handshake. That failure
+silently voided all crash recovery, and Risk 6 depends on that recovery. The fix is a
+per-session cancellation token plus a transport `Generation` counter on every inbound
+event. **Neither per-side test suite catches this defect.** Only a real restart under a
+live game exposes it.
+
 ## Deliverables
 
 - [x] `contracts/contract-a.md` — the wire specification. Amended on 2026-08-02 with the
@@ -352,20 +401,47 @@ the organism.
 - [x] Sidecar integration tests that run with no game
 - [x] A mod build with border detection, export, import and the custody flow
 - [x] An update to `m2_findings.md` with the `bibiteHolder` transform result
-- [ ] A two-instance `game.sh`
-- [ ] The automated M2 exit test, with its recorded result
-- [ ] The measured crossing rate, with and without the corridor zone
+- [x] A two-instance `game.sh`, and the `e2e/run-m2.sh` orchestration
+- [x] The automated M2 exit test, with its recorded result. See *Exit Test*, *Result*.
+- [x] The measured crossing rate at an open edge. The corridor zone is canceled, so no
+      second measurement exists. See Risk 1.
+
+## Carried to M3
+
+- **Guard all four edges.** M2 disables `worldWrapping` while an edge is open (Risk 4).
+  Organisms then escape through the three unguarded edges and never come back. The rig saw
+  one at `y=7186` with `S=2000`. An M2 world therefore leaks population. Choose one answer
+  in M3: wrap the closed edges only, clamp at the closed edges, or open all four edges.
+- **Migration order is child first, then parent.** `BibiteGenes.SaveState` drops the
+  parentage of a child once the parent GameObject is gone. A child that migrates after its
+  parent therefore arrives with no link back. The behaviour matches vanilla, so this is a
+  fidelity limit, not a defect. M3 owns the answer.
+- **Contract debt A5.** `MIGRATE_OUT_NACK` carries no `edge` field. One edge for each sim
+  makes the field redundant in M2. A multi-edge sim needs it. See
+  `contracts/contract-a.md` §13 A5 and §12 open item 6.
+- **Deep bb8 validation.** Gene, node and synapse validation, dialect detection, and the
+  `Utility.Version` alpha quirk. See WP1.
+- **The pheromone beacon.** Held in M3 from the start. The measured crossing rate of
+  Risk 1 removes the reason to build it. See `m2_findings.md` §1.5, option 5.
 
 ## Next Steps
+
+M2 is closed. Every step below is complete.
 
 1. ~~Log the `bibiteHolder` transform.~~ **Done.** The transform is the identity in `x`
    and in `y`. See `m2_findings.md` §4.3.
 2. ~~Log the five boundary settings and `SimulationSize` at world load.~~ **Done.** See
    the runtime table at the top of `m2_findings.md`.
 3. ~~Start WP1 and WP2 in parallel.~~ **Done.** Both are complete.
-4. Build WP3. It is the last dependency of the exit test.
-5. Measure the natural crossing rate in a default world. Report organisms for each
-   simulated hour. The counter already prints the number.
-6. Add the corridor zone if step 5 returns a rate near zero.
-7. Build WP4. Exercise the export path and the family re-link. Then run the exit test.
-8. Record the results in `m2_findings.md`. Update the status of this document.
+4. ~~Build WP3.~~ **Done.** `game.sh` drives two instances, and `e2e/run-m2.sh` drives the
+   rig.
+5. ~~Measure the natural crossing rate in a default world.~~ **Done.** 20.5 and 24.4 strip
+   entries for each simulated hour. See Risk 1.
+6. ~~Add the corridor zone if step 5 returns a rate near zero.~~ **Canceled.** The rate is
+   not near zero.
+7. ~~Build WP4. Exercise the export path and the family re-link. Then run the exit test.~~
+   **Done.** The exit test passed on 2026-08-02/03.
+8. ~~Record the results.~~ **Done.** See *Exit Test*, *Result*, `m2_findings.md` open
+   uncertainty 2, and the M2 entry of `system_decomposition.md`.
+
+Start M3 from *Carried to M3*.

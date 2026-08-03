@@ -7,7 +7,7 @@ decompiled files as they exist in this checkout; they change when the game updat
 `sync-game-refs.sh` regenerates the decompile.
 
 This document answers the five M2 research questions raised against decision **D3**
-(`system_decomposition.md:44`) and the M2 milestone entry (`system_decomposition.md:351`).
+(`system_decomposition.md:44`) and the M2 milestone entry of `system_decomposition.md`.
 It does **not** repeat `m1_findings.md`, which already documents `SaveSystem`,
 `BibiteBody`, `BibiteTracker`, `GameManager`, `TimeController` and the organism round
 trip. Where M2 depends on an M1 fact, this document cites the M1 section instead of
@@ -27,11 +27,13 @@ inferred:
 | `voidAvoidance` | `False` | §1.4 — the shipped default holds in a real world; there is nothing to suppress |
 | `voidAvoidanceDistance` | `100.0` | §1.1 |
 | `shadeOutsideOfBounds` / `shadeAvoidance` | `True` / `False` | §1.3 |
-| `worldWrapping` | `True` | §3 — on by default, as read; the mod disables it while an edge is open |
+| `worldWrapping` | `True` | §3 — on by default, as read; the mod disables it while an edge is open, which costs population through the three unguarded edges (§3, and M3) |
 | `corpsesEnabled` | `True` | §5 |
 
-Open uncertainty 2 — the crossing rate — is still open, and it is now the only one that
-blocks the milestone.
+**Measured 2026-08-02/03** (WP4, the two-instance exit-test rig): open uncertainty 2 — the
+crossing rate — is **resolved**, and no uncertainty blocks the milestone any more. An open
+edge draws **20.5** (sector A, east) and **24.4** (sector B, west) border-strip entries per
+simulated hour at a population of ~26. See *Open uncertainties*, item 2.
 
 ## Headline result
 
@@ -49,8 +51,10 @@ enabled *Void-No-Mo'*, and false for a default world. In a default world the rea
 organisms do not reach the map edge is **ecological, not behavioural**: pellets spawn
 only inside `Zone`s (`SimulationScripts/Zone.cs:251-273`), so there is nothing outside the
 islands worth swimming to. **Suppression is cheap and should still be implemented, but on
-its own it will not raise the crossing rate. M2 needs a lure as well** — see
-*Recommended M2 approach*, item (a).
+its own it will not raise the crossing rate** — see *Recommended M2 approach*, item (a).
+The inference drawn from that in the first draft, *"M2 needs a lure as well"*, did **not**
+survive measurement: an open edge draws ~20–25 strip entries per simulated hour with no
+lure at all (*Open uncertainties*, item 2), so the corridor zone was never built.
 
 | Question | Short answer |
 |---|---|
@@ -289,8 +293,8 @@ Notes on option 5 (the lure). Two shapes, both with precedent in the codebase:
   wired for. Cost: a Harmony postfix on `PherosenseAround`, writing the `internal`
   sense fields — noticeably more invasive than a corridor zone, and it changes what
   evolution optimises for. Park this as the M3 escalation if the corridor zone is not
-  enough (`system_decomposition.md:364` already flags migration-rate tuning as the M3
-  revisit point).
+  enough (the M3 milestone entry of `system_decomposition.md` already flags migration-rate
+  tuning as the M3 revisit point).
 
 ---
 
@@ -463,6 +467,13 @@ What *does* happen further out, in order of radius, all inside
   duplication/teleport bug caused by the mod. Recommend the M2 rig call
   `ScenarioSettings.Instance.worldWrapping.SetValue(false)` while an edge is open, and
   restore it afterwards — one public call, same pattern as §1.5 option 2.
+- **Disabling it trades the teleport for a leak — observed 2026-08-02/03.** With wrapping
+  off and only *one* edge guarded by the mod, the other three edges guard nothing at all:
+  nothing at the square edge stops an organism (see the top of this section), and past
+  `1.5·S + 1000` there is now no wrap either. The M2 rig saw organisms at `y = 7186` with
+  `S = 2000` — outward-bound, alive, and never coming back. **An M2 world therefore leaks
+  population through its unguarded edges.** M2 accepted this; M3 must guard all four edges
+  — wrap selectively (closed edges only), clamp at the closed edges, or open all four.
 
 ---
 
@@ -646,7 +657,10 @@ out to distort the world.
 while an edge is open** (§3), so a missed capture does not turn into a teleport that
 looks like a mod bug. Snapshot and restore like any other setting.
 
-**Layer 2 — the lure, which is probably what actually moves the number.**
+**Layer 2 — the lure. Measured 2026-08-02/03 as *not needed*.** With layers 0–1 only, an
+open edge already draws 20.5 (A) and 24.4 (B) strip entries per simulated hour, so the
+corridor zone below was canceled rather than built (*Open uncertainties*, item 2). What
+follows is the design, kept for the day an ecology change drives the rate back to zero.
 Suppression removes a force that ships disabled; it does not create a reason to go to
 the edge. If the M2 crossing rate is near zero with layers 0–1 in place, add a
 **corridor zone**: a low-fertility `ZoneSettings` reaching from the nearest island to the
@@ -655,7 +669,7 @@ open edge, added through the public `ScenarioSettings.Instance.AddNewZone`
 scenario (§1.4). It is world data, so gate it behind an explicit mod config flag and
 remove it on unload. Escalate to the pheromone-beacon technique
 (`Pherosense.cs:114-125`, sign flipped) only at M3, and only with a measured baseline —
-`system_decomposition.md:364` already owns that decision.
+the M3 milestone entry of `system_decomposition.md` already owns that decision.
 
 ### (b) Border detection placement
 
@@ -773,13 +787,23 @@ with living parents and living children (`system_decomposition.md:343`).
    The re-assert of §(c) stays anyway. It is cheap and idempotent, and it is what defends
    against caveat 2 — the `Rigidbody2D` overwriting a transform-only correction — which is
    a separate and still-live concern.
-2. **Will suppression alone produce a non-zero crossing rate?** (§1.4, §1.5 option 5.)
-   The static evidence says no — void avoidance ships off, and what keeps organisms on
-   islands is food density, not steering. If that is right, D3's stated mechanism is not
-   the bottleneck and layer 2 (the lure) becomes M2 scope rather than M3 scope. **This
-   is the finding most likely to change the milestone plan, and it is the cheapest to
-   test**: run a default world, put a counter on how many organisms enter a strip at
-   `|x| ≥ S − W` per simulated hour, with and without the corridor zone.
+2. ~~**Will suppression alone produce a non-zero crossing rate?**~~ **RESOLVED by
+   measurement, 2026-08-02/03** (§1.4, §1.5 option 5). The static reasoning held — void
+   avoidance ships off, and what keeps organisms on islands is food density, not steering
+   — but the conclusion drawn from it (that a lure would be needed) did **not**. With one
+   edge open and no forcing, `CrossingStats` counted, over 30 real minutes at 20× on a
+   seeded `Default` world:
+
+   | Sector | Open edge | Strip entries / sim-hour | Population |
+   |---|---|---|---|
+   | A | E | 20.5 | ~26 |
+   | B | W | 24.4 | ~26 |
+
+   Roughly one border approach every three simulated minutes per sim, at a population of
+   ~26. **The corridor-zone lure was therefore canceled, not built**, and the pheromone
+   beacon (§1.5 option 5) stays parked in M3. The number to re-measure if the ecology
+   changes is *strip entries per simulated hour*; a rate near zero is what would revive
+   the lure. Raw counter lines land in `e2e/logs/crossing-{A,B}.log`.
 3. **Can `SimulationSize` change mid-simulation through the UI?** (§2.4.) If it can, a
    cached `S` silently relocates the border strip, and two paired sims can drift out of
    agreement mid-run. Subscribing instead of snapshotting costs nothing and removes the

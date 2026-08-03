@@ -12,6 +12,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/`) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`) |
 | Wire specifications | `contracts/` (`contract-a.md` = mod ↔ sidecar, `contract-b-m2.md` = sidecar ↔ relay) |
+| M2 rig and exit test | `e2e/` (`run-m2.sh` = the whole rig, `journal.py` = journal reader) |
+| Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (sidecar journals: the D2 custody record of one machine's run), `e2e/logs/`, `e2e/run/` (pid files) |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
 | Game user data (`Application.persistentDataPath`) | `/mnt/c/Users/<user>/AppData/LocalLow/The Bibites/The Bibites/` — holds `Savefiles/`, `Autosaves/`, `Scenarios/`, `Bibites/` |
 
@@ -30,16 +32,31 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 ## Workflow
 
 ```sh
-bibites-mod/sync-game-refs.sh  # re-sync libs/ + decompiled/ after a game update (no-op if current)
-bibites-mod/deploy.sh          # dotnet build + copy DLL to BepInEx/plugins
-bibites-mod/game.sh start      # launch the game, detached from the shell
-bibites-mod/game.sh log 60     # read the last 60 BepInEx log lines
-bibites-mod/game.sh status     # is the game running?
-bibites-mod/game.sh stop       # kill the game
+bibites-mod/sync-game-refs.sh   # re-sync libs/ + decompiled/ after a game update (no-op if current)
+bibites-mod/deploy.sh           # dotnet build + copy DLL to BepInEx/plugins
+
+# game.sh drives one OR two instances; every command takes an instance name
+# (default `main`, so the old single-instance forms still work).
+bibites-mod/game.sh start A     # launch instance A, detached, and record its Windows PID
+bibites-mod/game.sh log A 60    # last 60 BepInEx log lines of THAT instance
+bibites-mod/game.sh logfile A   # which log file that instance owns
+bibites-mod/game.sh pid A       # its recorded Windows PID
+bibites-mod/game.sh status      # every recorded instance: pid, running/gone, log file
+bibites-mod/game.sh wait A 60   # block until it exits; fail after 60 s
+bibites-mod/game.sh stop A      # stop that instance only
+bibites-mod/game.sh stop        # stop every recorded instance, then sweep orphans by name
 
 # Run the M1 exit test with no operator, then quit. WSLENV is required — see Gotchas.
 WSLENV=MULTIVERSE_AUTOTEST MULTIVERSE_AUTOTEST=1 bibites-mod/game.sh start
 ```
+
+Two rules make multi-instance control work, and both are load-bearing. `start` launches
+through PowerShell `Start-Process -PassThru` and records the returned Windows PID under
+`$BIBITES_RUN_DIR` (default `~/.cache/bibites-multiverse/instances`), so `stop <instance>`
+kills exactly one game instead of every one by process name. And an instance is mapped to
+its log **by content, never by start order**: `game.sh` greps both `LogOutput.log` and
+`LogOutput.log.1` for that instance's own startup marker, because which process gets which
+file is a lock race (see Gotchas).
 
 The auto-test (`bibites-mod/src/AutoTest.cs`) drives the whole M1 exit test unattended: it
 waits for the main menu, seeds or loads its own `M1-AutoTest` world via
@@ -50,7 +67,8 @@ It touches no save other than `M1-AutoTest.zip`. The BepInEx config entry
 
 Smoke test passed 2026-08-02: plugin `Bibites Multiverse 0.1.0` loads and logs
 through the BepInEx chainloader. M1 exit test passed 2026-08-02, on two unattended runs —
-see `m1_findings.md`, *Runtime results*.
+see `m1_findings.md`, *Runtime results*. M2 exit test passed 2026-08-02/03 on the
+two-instance rig below — see `m2_considerations.md`, *Exit Test → Result*.
 
 The Go side — the relay and the sidecar — builds, tests and runs with no game installed.
 Its contract suite drives both contracts with fake mod clients, so it is the fast loop:
@@ -66,7 +84,48 @@ gofmt -l . && go vet ./...           # both must print nothing
 CGO_ENABLED=0 go build -o ../bin/ ./cmd/...
 ```
 
-Start the M2 rig — the relay first, then the two sidecars, then the two game instances:
+`e2e/run-m2.sh` runs the whole M2 rig and its exit test with no operator, and every phase
+is separately invokable on a healthy rig, so a failed phase re-runs without redoing the
+seed or the bring-up:
+
+```sh
+e2e/run-m2.sh build      # Go binaries into bin/
+e2e/run-m2.sh seed       # create (or evolve) M2-SectorA and M2-SectorB, then quit both games
+e2e/run-m2.sh up         # relay → sidecars A,B → games A,B; waits for two open edges
+e2e/run-m2.sh phase1     # happy path: one organism A→B→A, payloads compared
+e2e/run-m2.sh phase2     # family re-link + save both worlds (phase2b: child hop, then parent)
+e2e/run-m2.sh phase3a    # kill -9 the relay mid-migration
+e2e/run-m2.sh phase3b    # kill -9 sidecar B mid-migration (MULTIVERSE_FAULT=post-journal)
+e2e/run-m2.sh phase3c    # force-stop game B after a migration → autosave rollback
+e2e/run-m2.sh phase4 30  # crossing-rate measurement, 30 real minutes at 20×
+e2e/run-m2.sh journal    # summarise both sidecar journals
+e2e/run-m2.sh errors     # every unexplained error line in both BepInEx logs
+e2e/run-m2.sh down       # stop everything and leave no process behind
+e2e/run-m2.sh all        # build, seed, up, phase1..3, errors, down
+```
+
+Two environment variables make an instance scriptable, and `run-m2.sh` sets both. Name
+every one of them in `WSLENV` or WSL forwards none (see Gotchas).
+
+- **`MULTIVERSE_WORLD=<save name>`** loads that world from the main menu through
+  `GameManager.StartGame(path)`, and **seeds it first if it does not exist** — apply the
+  stock scenario, run until the world holds living bibites, save. `WorldSeeder.cs` owns
+  that path and both callers share it: `AutoTest` for M1, `WorldLoader` for the M2 rig.
+  It is what brings `M2-SectorA` and `M2-SectorB` up on a clean profile.
+- **`MULTIVERSE_CMD_FILE=<Windows path>`** is the dev-command channel (`DevCommands.cs`).
+  The mod polls that file and runs one `<token> <verb> [args]` line at a time: `export`,
+  `census`, `count`, `family`, `save`, `timescale`, `autosave`, `quit`. Write it
+  **atomically** (temp file, then rename) — content that does not end in a newline is read
+  as a partial write and left for the next poll. Every finished command appends
+  `<token> OK|ERROR <details>` to `<cmdfile>.log`, which is what a script waits on. Keep
+  the file on the Windows side of the boundary (`$env:TEMP`); a WSL path is not reliably
+  reachable from a Windows process. `F10` triggers the same forced export by hand. An
+  `export` only teleports the organism into the border strip with an outward velocity —
+  the ordinary `MIGRATE_OUT` path and every guard on it still runs, so the test bypasses
+  no part of the migration pipeline.
+
+To drive one component by hand instead, start the rig in dependency order — the relay
+first, then the two sidecars, then the two game instances:
 
 ```sh
 bin/relay --listen 127.0.0.1:8790
@@ -123,13 +182,13 @@ or the sidecar loses every organism it was holding.
   failures go silent.
 - **`LogOutput.log` is overwritten on every launch** (`[Logging.Disk] AppendLog = false`).
   Copy it before restarting the game if you still need the previous run.
-- **Two game instances run fine side by side, and get separate logs.** Verified
-  2026-08-02: both processes persist, the first holds a lock on `BepInEx/LogOutput.log`,
-  and BepInEx falls back to `LogOutput.log.1` for the second — nothing is truncated. But
-  `game.sh log` only ever tails the first file, and `game.sh stop` kills **both** (it stops
-  by process name). Both instances also load the same `plugins/` DLL and the same
-  `config/`, so the M2 two-sim rig needs per-instance settings from the environment, or a
-  second copy of the game.
+- **Two game instances run fine side by side, and get separate logs — but which log is a
+  race.** Verified 2026-08-02: both processes persist, the first to start holds a lock on
+  `BepInEx/LogOutput.log`, and BepInEx falls back to `LogOutput.log.1` for the second, so
+  nothing is truncated. **Never map an instance to a log file by start order.** `game.sh`
+  greps both candidates for that instance's own startup marker instead. Both instances also
+  load the same `plugins/` DLL and the same `config/`, so per-instance settings can only
+  arrive through the environment.
 - **`~/.bashrc` sets `GOROOT=$HOME/go` before any Go exists.** Installing the tarball
   anywhere else leaves every `go` command failing with `cannot find GOROOT directory`. The
   install therefore keeps the real toolchain at `~/go-dist/go` and symlinks `~/go` to it,
@@ -153,6 +212,15 @@ or the sidecar loses every organism it was holding.
   Check with `ss -ltn | grep -E '878[78]|8790'` before starting, and give a throwaway
   smoke test high ports (`--listen 127.0.0.1:0` writes the resolved address to
   `<data-dir>/listen.addr`).
+- **Reconnect bugs only appear in a real restart under a live game.** The M2 exit test
+  found a leaked send loop in the mod's WebSocket transport that no per-side test suite
+  could reach: `Task.WhenAny` left the losing loop alive, it parked on a semaphore shared
+  across connections, and after *any* disconnect it stole the next session's first frame —
+  the sidecar closed 4003 and the mod never re-handshook, silently voiding all crash
+  recovery. Go contract tests pass (the fake mod is a fresh client each time) and the mod
+  loads fine. **Always exercise a kill-and-restart against a running game** before trusting
+  reconnection or recovery. Fixed in `9742cb7` with per-session cancellation plus a
+  transport `Generation` counter stamped on every inbound event.
 - **Fresh timestamps under `Scenarios/` and `Bibites/Templates/` are not your mod.**
   `AppInitializer.ReImportOfficialScenarios()` (`AppInitializer.cs:92, 123`) re-extracts
   the official scenarios and templates on **every** launch. Those archives also contain
