@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using HarmonyLib;
@@ -17,6 +18,7 @@ namespace BibitesMultiverse
     {
         private static MethodInfo serializeBibite;
         private static MethodInfo loadBibite;
+        private static MethodInfo createSave;
 
         /// <summary>SaveSystem.SerializeBibite(GameObject) — private static JObject (SaveSystem.cs:406).</summary>
         internal static JObject SerializeBibite(GameObject bibite)
@@ -59,6 +61,32 @@ namespace BibitesMultiverse
             // which resets health/energy and draws three Random.Range values (BibiteBody.cs:451-456).
             object[] args = { state, true, null, Utility.Version.Present, null };
             return (GameObject)Invoke(loadBibite, save, args);
+        }
+
+        /// <summary>
+        /// SaveSystem.CreateSave(string) — the private iterator behind the public SaveGame
+        /// (SaveSystem.cs:176). SaveGame hands it to StartCoroutine, where an exception is swallowed
+        /// by Unity's coroutine runner; returning the raw enumerator lets the caller drive it and see
+        /// the failure — which is the whole point of the stale-reference check (m1_findings.md §4.3).
+        /// </summary>
+        internal static IEnumerator CreateSaveEnumerator(string path)
+        {
+            if (createSave == null)
+            {
+                createSave = AccessTools.Method(typeof(SaveSystem), "CreateSave");
+                if (createSave == null)
+                {
+                    throw new MissingMethodException("SaveSystem.CreateSave(string) not found — the game API changed.");
+                }
+            }
+
+            SaveSystem save = SaveSystem.instance;
+            if (save == null)
+            {
+                throw new InvalidOperationException("SaveSystem.instance is null — no simulation scene is loaded.");
+            }
+
+            return (IEnumerator)Invoke(createSave, save, new object[] { path });
         }
 
         private static object Invoke(MethodInfo method, object target, object[] args)
