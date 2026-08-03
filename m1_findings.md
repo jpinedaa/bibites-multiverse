@@ -1,4 +1,4 @@
-# M1 Findings — Decompiled-Source Research
+# M1 Findings — Decompiled-Source Research and Runtime Results
 
 Source: `decompiled/BibitesAssembly/` (ilspycmd output of
 `The Bibites_Data/Managed/BibitesAssembly.dll`, Steam app 2736860, buildid 22383127).
@@ -6,8 +6,9 @@ All paths in this document are repo-relative. Line numbers refer to the decompil
 files as they exist in this checkout; they change when the game updates and
 `sync-game-refs.sh` regenerates the decompile.
 
-This report answers the eight research questions raised against Risks 1–5 of
-`m1_considerations.md`.
+§1–§8 answer the eight research questions raised against Risks 1–5 of
+`m1_considerations.md`. **Runtime results** at the end of this document records what the
+in-game exit test actually did, on 2026-08-02.
 
 ## Headline result
 
@@ -23,6 +24,11 @@ live organism. M1 does not need to invent one.
 brain, and resumes the organism. It does not mutate, does not randomize genes, and
 preserves the entity ID. That collapses Risk 1, Risk 2 and Risk 4 to a much smaller
 problem than the milestone assumed.
+
+**Confirmed in-game on 2026-08-02.** The automated exit test passed on both of its two
+runs. On the run against a world loaded from a save, the payloads before and after the
+round trip were equal token for token, the entity ID survived, and the world save that
+follows completed with no exception. See *Runtime results* at the end.
 
 ---
 
@@ -816,9 +822,10 @@ at byte offset 2008, in the PlayerSettings length-prefixed string table:
 persistent data). It is the only game-authored version-shaped string in the file
 (the other is the editor version `6000.0.44f1`, matching `dev_environment.md`).
 
-**Confidence: high, not certain.** Confirm at runtime by logging
-`Application.version` from the plugin — `dev_environment.md` already lists this as TBD.
-This matches `m1_considerations.md:62` ("v0.6.3, Corpses and Seasons").
+**Confirmed at runtime, 2026-08-02.** The plugin logs
+`Application.version = 0.6.3.1` at startup, so the static reading of `globalgamemanagers`
+was correct. This also matches the Steam release note quoted at `initial_research.md:287`
+("The Bibites 0.6.3: Corpses and Seasons").
 
 Steam metadata: app 2736860, `buildid 22383127`, `"name" "The Bibites: Digital Life"`.
 Unity 6000.0.44f1, Mono backend.
@@ -994,12 +1001,114 @@ recomputed by `ResumeBrain()` → `ComputeActiveNeurons()`, so they are immateri
 
 ### Items to verify at runtime in M1
 
-- `Application.version` — confirm the `0.6.3.1` reading (§7.2).
+- ~~`Application.version` — confirm the `0.6.3.1` reading (§7.2).~~ **Done.** The plugin
+  logs `Application.version = 0.6.3.1` at startup. The static reading was correct.
 - Whether Newtonsoft's default contract resolver honours `[NonSerialized]` on
-  `NEATBrain.Node.NIn/NOut` in this shipped `Newtonsoft.Json.dll`. Immaterial to
+  `NEATBrain.Node.NIn/NOut` in this shipped `Newtonsoft.Json.dll`. **Still open** — the
+  exit test compares a payload against a payload, so it passes either way. Immaterial to
   correctness (both are recomputed), but it determines the exact `.bb8` byte shape
   that `bb8-schema` must accept.
-- That the two serializations in the exit test are byte-identical. Fields most likely
-  to drift: `brainTicksCount` / `visionLookupCount` / `visionSensingCount`
-  (`BibiteBody.cs:109-116`) if any tick lands between the two captures, and
-  `clock.ticProgress`.
+- ~~That the two serializations in the exit test are byte-identical.~~ **Done, equal.**
+  See *Runtime results*. The predicted drift fields (`brainTicksCount` /
+  `visionLookupCount` / `visionSensingCount`, `BibiteBody.cs:109-116`, and
+  `clock.ticProgress`) did not drift: the organism does not exist during the one frame
+  the round trip waits for `Destroy`, and the second capture happens immediately after
+  the restore, before the respawned organism ticks. The two paths that did differ on the
+  first run were `$.transform.scale` and `$.body.health`, for reasons unrelated to ticks.
+
+---
+
+## Runtime results — automated exit test, 2026-08-02
+
+The exit test defined in `m1_considerations.md` ran unattended twice on 2026-08-02,
+against game `0.6.3.1`. **Both runs passed.**
+
+### The harness
+
+`bibites-mod/src/AutoTest.cs`, armed either by the BepInEx config entry `[M1] AutoTest` or
+by the environment variable `MULTIVERSE_AUTOTEST=1`. PowerShell `Start-Process` hands its
+own environment to the game, so `game.sh` needed no change — but the WSL → Windows hop
+does need `WSLENV`; see `dev_environment.md`. Phases:
+
+1. Wait for the main menu.
+2. Seed a world named `M1-AutoTest`, if it does not exist yet.
+3. Load it with `GameManager.StartGame(path)` — the same call the Load Game menu makes
+   (`UIScripts/LoadGamePanel.cs:225`).
+4. Pick an adult with synapses and stomach content, not latched to another mouth.
+5. Run the round trip; diff the payload before against the payload after.
+6. Watch the respawned organism for 30 simulated seconds.
+7. Save the world back to `M1-AutoTest`, then quit.
+
+Nothing but `M1-AutoTest.zip` is read, written or deleted.
+
+**The world has to be grown, not loaded.** A fresh install has zero user saves, and the
+shipped `Scenarios/*.zip` archives carry settings only — no bibites. Phase 2 therefore
+applies the stock scenario, starts a fresh simulation, runs it at 10× until an adult with
+food in its stomach exists, and saves that as `M1-AutoTest`.
+
+**The world save is driven by hand, and this is not optional.** `SaveSystem.SaveGame`
+wraps `CreateSave` in `StartCoroutine`, and Unity's coroutine runner swallows exceptions.
+The Risk-5 symptom — `BibiteEggLayingOrgan.SaveState` dereferencing a fake-null
+`BibiteID` (§4.3, §5.3) — would therefore be **invisible**: no log line, no
+`onSavingDone`, just a save that never appears. The harness reflects the private
+`CreateSave` iterator out of `SaveSystem` and calls `MoveNext()` itself inside a `try`, so
+a throwing save becomes a test failure instead of silence. Any future automated check of
+"did the world still save?" must do the same.
+
+### Run 1 — freshly seeded world: PASS
+
+The round trip reported two differing payload paths. Both are float artifacts, not lost
+state:
+
+| Path | Cause |
+|---|---|
+| `$.transform.scale` | The serializer reads the **live transform**: `SerializedTransform(Transform)` takes `scale = transform.localScale.x` (`ScriptHelpers/SerializedTransform.cs:25`). `BibiteGrowth.SetMaturity` pushes a new size into the transform only when relative growth passes `sizeUpdateThreshold` = `0.005f` (`BibiteGrowth.cs:50, 127-128`), so a growing organism's `localScale` lags its `d2Size`. The restore path has no such lag — `ResumeBody()` calls `Set2DSize(d2Size, initialSet: true)` (`BibiteBody.cs:465`) and recomputes the scale exactly from the authoritative `d2Size`. **The respawned organism is more precise than the original.** The artifact appears only when the live scale happens to be stale at the moment of capture. |
+| `$.body.health` | 1.2e-7 relative difference — a float → text → float round trip through the JSON payload. |
+
+Neither is a fidelity loss, and neither needs a mod-side correction.
+
+### Run 2 — world loaded from the seeded save: PASS, payloads EQUAL
+
+- The payload before and the payload after were **equal token for token**. No differing
+  paths at all, `$.transform.scale` included.
+- Entity ID `-843827577` survived the destroy and the respawn.
+- The organism was alive and healthy after 30 simulated seconds.
+- The world save completed with no exception.
+- **Zero** Unity errors, exceptions or assertions across the whole run.
+
+Run 2 is the run that meets the exit test's stated bar, and it is the configuration a
+migration will actually hit: an organism that came out of a save file, not one the
+scenario spawner had just created.
+
+### World-level APIs that proved out
+
+| API | Result |
+|---|---|
+| `GameManager.StartGame(string saveToLoadPath)` (`GameManager.cs:77`) | Loads a named world from mod code, unattended, with no UI interaction. This is the M2 rig's world-loading call. |
+| `SaveSystem.CreateSave` (private iterator), driven with `MoveNext()` | Saves the world *and* surfaces its exceptions. The public `SaveGame` wrapper does not. |
+| `SaveSystem.SerializeBibite` (private static) + `LoadBibiteOrEggFromData` (public) | The full organism round trip, exactly as §1 and §2 predicted from the source. |
+
+### Residual gap — the re-link code is implemented but not yet exercised
+
+The organisms in the seeded world were spawned as adults by the scenario spawner. They had
+no parents and no children. `OrganismLinks` therefore ran against an organism with **no
+actual links**, and the stale-reference trap of §4.3 was never triggered.
+
+The clean world save proves that this round trip left no new stale reference behind. It
+does **not** prove that the repair code works, because there was nothing to repair. This
+carries to M2 as an open risk: run the round trip on an organism with living parents and
+living children, in an evolved world.
+
+### Hazards in the game's own API
+
+Found while building the harness. None is a mod defect, and each one will meet the M2 rig
+as well. Environment-level hazards — deploying while the game runs, the missing Unity log,
+scenario-folder timestamps — are in `dev_environment.md` instead.
+
+| Hazard | Detail |
+|---|---|
+| `SaveSystem.SaveGame` hides save failures | `StartCoroutine(CreateSave(...))`. An exception inside the iterator is swallowed by Unity's coroutine runner. Drive `CreateSave` directly whenever the save result is the thing under test. |
+| `SaveController.GetLastSave()` throws on a fresh profile | `(… .Concat(…) orderby …).First()` (`SaveController.cs:292-297`). `.First()` on an empty sequence throws, so `GameManager.Continue()` (`GameManager.cs:85`) is unsafe until at least one save exists. Do not use it to bootstrap a test. |
+| Auto-save restarts the scene under an automated test | With `UserSettings.ReloadAfterAutosaves` on, `SaveController` subscribes `ReloadAfterAutoSave` to `onSavingDone` (`SaveController.cs:234, 240-248`); it calls `GameManager.StartGame` and reloads the whole scene mid-test. Call `SaveController.Instance.ToggleAutoSave(false)` (`:84`) once the world is ready. That call is runtime-only — it does not write the user's `AutoSave` setting. |
+| Setting the time scale clears every pause | `TimeController.targetTimeScale.SetValue(x)` with `x > 0` routes through `ForcePlay()` (`TimeController.cs:97-100, 166-176`), which does `Pauses.Clear()` — it drops **all** pause sources, `PauseAfterLoad` included. Convenient for a test; destructive for a mod that must respect another system's pause. Use the refcounted `TogglePauseGame(source)` for anything else. |
+| A reloaded world has no name | `CreateSave` never writes a `gameName` key. `SaveSystem.cs:646-648` reads one on load, so `SimulationManager.gameName` comes back empty for any world the game itself saved. Cosmetic, but do not identify a world by it. |

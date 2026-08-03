@@ -329,18 +329,24 @@ Note the mod no longer depends on `bb8-schema` (D4).
 Vertical slices, riskiest first — not component-by-component. `bb8-schema` is not a
 standalone first step: its real shape is discovered in M1 and hardens through M2–M3.
 
-### M1 — In-game round trip (the de-risking spike)
+### M1 — In-game round trip (the de-risking spike) — **COMPLETE**
 One game instance, no sidecar, no network. A dev command in the mod: serialize a live
 organism (genes + brain + live state) → destroy it → respawn via the game's own
 full-state restore (`SaveSystem.LoadBibiteOrEggFromData`, ID preserved) → re-link its
 parent/child references.
 **Exit test:** the organism resumes life with no observable change — same brain
 topology, stomach contents, maturity — and a subsequent world save still succeeds.
+**Passed 2026-08-02**, on two unattended runs against game `0.6.3.1`: run 2 compared the
+before/after payloads as **EQUAL token for token**, the entity ID survived, and the game's
+own world save completed with no exception. The whole exit test now runs headless from
+`bibites-mod/src/AutoTest.cs` (`MULTIVERSE_AUTOTEST=1`), including seeding and loading its
+own world. Carried to M2: the re-link code ran against an organism that had no parents and
+no children, so the stale-reference trap is still unexercised. Full results in
+`m1_findings.md`, *Runtime results*.
 **Why first:** every high-risk unknown in the table below lived here (spawn API,
 state access, destroy safety), and its findings define the true payload shape.
-The decompiled-source pass (`m1_findings.md`) has already closed the spawn-API,
-state-access and payload-fidelity unknowns; the in-game run is what confirms them.
-If M1 fails, nothing else matters.
+The decompiled-source pass (`m1_findings.md`) closed the spawn-API, state-access and
+payload-fidelity unknowns; the in-game run has now confirmed them.
 
 ### M2 — Two sims, one machine
 Trivial relay (frame forwarding + a two-sector registry), sidecar skeleton, Contract A,
@@ -348,8 +354,10 @@ and the full custody chain — all on localhost. Void-avoidance suppression on o
 designated edge per sim.
 **Exit test:** an organism crosses from sim A to sim B and back; `kill -9` any process
 mid-migration and no organism is ever duplicated (rare loss acceptable).
-**Prerequisite to confirm:** two game instances can run on one machine; fallback is
-two machines on a LAN.
+**Prerequisite — confirmed 2026-08-02:** two game instances do run side by side on one
+machine (see the research table), so the two-machine LAN fallback is not needed.
+**Also carried in from M1:** re-run the round trip on an organism that actually has living
+parents and children — M1 exercised the re-link code against an organism with no links.
 
 ### M3 — Real network, N peers
 Hosted relay; handshake/compat enforcement; admission control; journal recovery
@@ -374,7 +382,7 @@ species-catalog module.
 | Component | What we know (from research doc) | What we need to figure out |
 |---|---|---|
 | `bb8-schema` | JSON structure, node layout, synapse rules, gene array, weight polymorphism, validation constraints. From `m1_findings.md`: the game's `.bb8` top-level keys (`transform`, `rb2d`, `genes`, `body`, `clock`, `brain`, `version`, `desc`) and the fact that a `.bb8` carries full live state while a `.bb8template` does not; genes are keyed by enum **name**, so gene reordering is safe and only additions/removals need conversion; **the `Utility.Version` alpha quirk** — a 4-argument `new Version(0,6,3,3)` binds to the alpha overload and means `0.6.3a3`, *not* `0.6.3.3`, and `V3` sorts before `Alpha`, so `bb8-schema` must reproduce that ordering | Version differences between game updates; cross-version conversion (EinsteinEditor prior art); the exact byte shape of community-tool `.bb8` dialects; whether Newtonsoft honours `[NonSerialized]` on `NEATBrain.Node.NIn/NOut` in the shipped DLL; corpse/pellet/egg payload shapes (M5) |
-| `bibites-mod` | BepInEx/Harmony setup, export/import patterns, threading constraints, the Constance-Mod overwrite technique (now only needed for the egg-hatch fallback). From `m1_findings.md`: exact signatures in `BibitesAssembly.dll`; spawn/restore API (`SaveSystem.LoadBibiteOrEggFromData`, public, no mutation, ID-preserving); serialize API (`SaveSystem.SerializeBibite`/`SaveBibite`); live-attribute access is public except `InternalClock` (covered by public `SerializationHelper.DeserializeObject`, so no mod-side reflection); no ID registry exists — IDs are random int32; clean removal is raw `Object.Destroy` after de-listing from `BibiteTracker`; patch targets (`BibiteBody.FixedUpdate()`, `EggHatching.Hatch()`) | Re-linking parent/child references after respawn (the stale-reference trap that breaks the *next* world save); **how to suppress void-avoidance per edge (D3)**; whether two game instances run on one machine (M2 rig); `.csproj` HintPaths |
+| `bibites-mod` | BepInEx/Harmony setup, export/import patterns, threading constraints, the Constance-Mod overwrite technique (now only needed for the egg-hatch fallback). From `m1_findings.md`: exact signatures in `BibitesAssembly.dll`; spawn/restore API (`SaveSystem.LoadBibiteOrEggFromData`, public, no mutation, ID-preserving); serialize API (`SaveSystem.SerializeBibite`/`SaveBibite`); live-attribute access is public except `InternalClock` (covered by public `SerializationHelper.DeserializeObject`, so no mod-side reflection); no ID registry exists — IDs are random int32; clean removal is raw `Object.Destroy` after de-listing from `BibiteTracker`; patch targets (`BibiteBody.FixedUpdate()`, `EggHatching.Hatch()`). **Confirmed in-game 2026-08-02** (`m1_findings.md`, *Runtime results*): the round trip is byte-exact, the ID survives, and the world save that follows succeeds; `GameManager.StartGame(path)` loads a named world headlessly, and `SaveSystem.CreateSave` must be driven by hand because the public `SaveGame` wrapper swallows save exceptions inside a coroutine. **Two game instances do run at once on one machine** — verified 2026-08-02: both processes persisted, and BepInEx gave the second instance `BepInEx/LogOutput.log.1` because the first holds a lock on `LogOutput.log`, so neither log is truncated | Re-linking parent/child references after respawn: implemented, but M1 exercised it against an organism with **no** parents and **no** children, so the stale-reference trap that breaks the *next* world save is still unproven — re-test in an evolved world (M2); **how to suppress void-avoidance per edge (D3)**; per-instance mod config for the M2 rig, since both instances share one plugin DLL and one BepInEx config directory; `.csproj` HintPaths |
 | `multiverse-sidecar` | Custody chain and journal semantics (D2); admission-control levers | Language choice; journal format and crash recovery; Contract A reconnection semantics (replay of un-acked `MIGRATE_IN`s); libp2p maturity per language (M4); lease design and churn healing for sector claims (M4) |
 | `multiverse-relay` | Star routing and single-arbiter sector assignment are well-trodden | **Who operates it** (and later the bootstrap nodes); sector assignment policy (user-chosen vs auto); capacity and abuse limits |
 | `species-catalog` | Community already shares `.bb8` on GitHub/Steam Workshop; content-addressing makes sense | Storage limits, search/index strategy, replication policy (all M5) |

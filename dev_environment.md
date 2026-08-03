@@ -11,12 +11,13 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/`) |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
+| Game user data (`Application.persistentDataPath`) | `/mnt/c/Users/<user>/AppData/LocalLow/The Bibites/The Bibites/` — holds `Savefiles/`, `Autosaves/`, `Scenarios/`, `Bibites/` |
 
 ## Versions
 
 | Component | Version |
 |---|---|
-| The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), still to be confirmed at runtime by logging `Application.version` from the plugin |
+| The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -31,10 +32,21 @@ bibites-mod/game.sh start      # launch the game, detached from the shell
 bibites-mod/game.sh log 60     # read the last 60 BepInEx log lines
 bibites-mod/game.sh status     # is the game running?
 bibites-mod/game.sh stop       # kill the game
+
+# Run the M1 exit test with no operator, then quit. WSLENV is required — see Gotchas.
+WSLENV=MULTIVERSE_AUTOTEST MULTIVERSE_AUTOTEST=1 bibites-mod/game.sh start
 ```
 
+The auto-test (`bibites-mod/src/AutoTest.cs`) drives the whole M1 exit test unattended: it
+waits for the main menu, seeds or loads its own `M1-AutoTest` world via
+`GameManager.StartGame(path)`, picks an adult organism, runs the round trip, watches it for
+30 simulated seconds, saves the world, prints one `[M1-AUTOTEST] RESULT:` line and quits.
+It touches no save other than `M1-AutoTest.zip`. The BepInEx config entry
+`[M1] AutoTest = true` arms it the same way, without the environment variable.
+
 Smoke test passed 2026-08-02: plugin `Bibites Multiverse 0.1.0` loads and logs
-through the BepInEx chainloader.
+through the BepInEx chainloader. M1 exit test passed 2026-08-02, on two unattended runs —
+see `m1_findings.md`, *Runtime results*.
 
 ## Gotchas
 
@@ -56,6 +68,34 @@ through the BepInEx chainloader.
   `libs/` (and reports the Steam buildid); `deploy.sh` runs the same cheap check and
   warns before building against stale references. After any re-sync, re-verify mod
   code against the changed APIs.
+- **Stop the game before you deploy.** With the game running, `deploy.sh` fails at the
+  copy step with `Invalid argument` — Windows holds `BibitesMultiverse.dll` open. The
+  `dotnet build` before it still succeeds, so the output reads like a success until the
+  last line. Run `game.sh stop` first, then `deploy.sh`.
+- **A WSL environment variable does not reach the game on its own.** `MULTIVERSE_AUTOTEST=1
+  game.sh start` is silently ignored: WSL only forwards variables that `WSLENV` names.
+  Use `WSLENV=MULTIVERSE_AUTOTEST MULTIVERSE_AUTOTEST=1 game.sh start`. The second hop is
+  free — PowerShell `Start-Process` passes its own environment to the game — so `game.sh`
+  itself needs no change.
+- **Unity's own errors never reach `LogOutput.log`.** BepInEx ships
+  `[Logging.Disk] WriteUnityLog = false`, and on this install the chainloader also reports
+  `Unable to start Unity log writer` at startup. An in-game `NullReferenceException`
+  therefore leaves no trace in the BepInEx log. The mod subscribes to
+  `Application.logMessageReceived` and forwards errors itself — keep that, or in-game
+  failures go silent.
+- **`LogOutput.log` is overwritten on every launch** (`[Logging.Disk] AppendLog = false`).
+  Copy it before restarting the game if you still need the previous run.
+- **Two game instances run fine side by side, and get separate logs.** Verified
+  2026-08-02: both processes persist, the first holds a lock on `BepInEx/LogOutput.log`,
+  and BepInEx falls back to `LogOutput.log.1` for the second — nothing is truncated. But
+  `game.sh log` only ever tails the first file, and `game.sh stop` kills **both** (it stops
+  by process name). Both instances also load the same `plugins/` DLL and the same
+  `config/`, so the M2 two-sim rig needs per-instance settings from the environment, or a
+  second copy of the game.
+- **Fresh timestamps under `Scenarios/` and `Bibites/Templates/` are not your mod.**
+  `AppInitializer.ReImportOfficialScenarios()` (`AppInitializer.cs:92, 123`) re-extracts
+  the official scenarios and templates on **every** launch. Those archives also contain
+  settings only — no bibites — so they cannot seed a populated test world.
 
 ## Useful decompiled entry points found so far
 
@@ -68,8 +108,13 @@ Full analysis in `m1_findings.md`; line numbers there track the current decompil
   `LoadBibiteOrEggFromData(json, resume, problems, birthAtMaturity)` — public,
   uncalled in-assembly, restores full live state and preserves the entity ID.
   It swallows all exceptions and returns null; reflect on private `LoadBibite` to
-  debug. World-level: `LoadGame(zip)`, plus the parent/child re-link code at
-  `SaveSystem.cs:748-782`.
+  debug. World-level: `LoadGame(zip)`, the private `CreateSave` iterator — drive it
+  yourself, because the public `SaveGame` wrapper hides its exceptions inside a coroutine —
+  plus the parent/child re-link code at `SaveSystem.cs:748-782`.
+- `ManagementScripts.GameManager` (all static) — `StartGame(string saveToLoadPath)` loads a
+  named world with no UI interaction, the same call the Load Game panel makes. Proven by
+  the auto-test. `Continue()` is **not** safe on a fresh profile: `SaveController.GetLastSave()`
+  calls `.First()` on a possibly empty sequence.
 - `ScriptHelpers.SerializationHelper` — the reflection engine behind every payload
   (`SerializeObject` / `DeserializeObject`, public static). It reads and writes
   `[SerializeField]` members including private and `internal` ones, so the mod needs

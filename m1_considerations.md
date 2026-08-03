@@ -56,7 +56,9 @@ the neuron activations. Only the template reader of the user interface
 the template alone. `bb8-schema` must separate the two shapes with the `body` key
 (decision D4). See `m1_findings.md` §2.
 
-### Open
+### Open at the start of M1
+
+Each entry carries its status after the exit test of 2026-08-02.
 
 **Risk 3 — Destroy safety.** A direct `UnityEngine.Object.Destroy(body.gameObject)`
 call makes no corpse, no meat pile and no eggs. `BibiteBody.OnDestroy` spawns nothing
@@ -68,6 +70,9 @@ statistics clean. Unity defers the destruction to the end of the frame. The old
 instance and the new instance therefore exist together for a short time. Do not
 assume that the old object is gone in the same frame. See `m1_findings.md` §5.
 
+Status after the exit test: the round trip ran this path two times with no error and no
+Unity exception.
+
 **Risk 5 — Stale cross-organism references.** `BibiteID.id` is a random 32-bit
 integer. The game has no ID counter and no ID-to-entity registry. Reuse of the
 original ID on respawn is the correct behavior. The real risk is a different one. Two
@@ -78,10 +83,21 @@ failure looks like a corrupted save file, not like a defect in the mod. Re-link 
 sides after the respawn. Mirror the repair code at `SaveSystem.cs:748-782`. See
 `m1_findings.md` §4.3.
 
+Status after the exit test: the world save completed with no exception, so the round trip
+left no new stale reference. The test organism had no parents and no children, so the
+repair code itself is still untested. See *Carried to M2*.
+
 **Risk 6 — Hidden load errors.** `LoadBibiteOrEggFromData` catches every exception
 and returns null. A bad payload gives no diagnostic message. Call the private
 `LoadBibite` through reflection during development to see the real error. Ship the mod
 on the public wrapper. See `m1_findings.md` §1.2.
+
+The save side hides errors in the same way. `SaveSystem.SaveGame` starts `CreateSave` as a
+coroutine, and Unity swallows the exception. A Risk-5 failure is therefore silent. When
+the save result is the thing under test, drive `CreateSave` directly.
+
+Status after the exit test: the respawn returned a valid organism in both runs. The two
+hazards stay in the game API.
 
 ## Prerequisites
 
@@ -114,6 +130,30 @@ The test passes when:
   cross-organism reference remains.
 - The BepInEx console shows no errors.
 
+### Result — PASS, 2026-08-02
+
+The exit test passed on 2026-08-02. The mod ran the test two times with no operator.
+`bibites-mod/src/AutoTest.cs` holds the harness. The BepInEx config entry `[M1] AutoTest`
+and the environment variable `MULTIVERSE_AUTOTEST=1` both start it.
+
+- **Run 1 — PASS.** The harness seeded a new world in the same run. Two payload paths
+  differed: `$.transform.scale` and `$.body.health`. Both differences are float artifacts.
+  The round trip lost no live state.
+- **Run 2 — PASS.** The harness loaded that world from its save file. The two payloads
+  were **equal, token for token**.
+- The entity ID survived the destroy and the respawn in both runs. In run 2 the ID was
+  `-843827577`.
+- The plugin logged `Application.version = 0.6.3.1`. This value satisfies the version
+  condition.
+- The organism stayed alive and healthy for 30 simulated seconds.
+- The world save completed with no exception. The run showed no Unity error.
+
+One deviation from the procedure: step 5 asks for one minute of simulation time. The
+harness watches 30 simulated seconds. Extend the window to 60 seconds, or correct step 5.
+
+`m1_findings.md` gives the full runtime results, the cause of each float artifact, and the
+API hazards that the harness work exposed.
+
 ## Fallbacks
 
 If the restore path fails, one fallback exists:
@@ -126,11 +166,33 @@ If the restore path fails, one fallback exists:
 
 ## Deliverables
 
-- A mod build with the round-trip dev command
-- `m1_findings.md`, with the runtime results of the exit test added
-- An updated risk table for M2
+All three deliverables are complete.
+
+- **Done.** A mod build with the round-trip dev command. The build also carries the
+  unattended exit-test harness `AutoTest.cs`.
+- **Done.** `m1_findings.md`, with the runtime results of the exit test added.
+- **Done.** An updated risk table for M2. See *Carried to M2*.
+
+## Carried to M2
+
+M1 gives three items to the two-sim milestone. Item 3 already has an answer.
+
+1. **The family re-link is untested.** The seeded world spawned adults with no parents and
+   no children. `OrganismLinks` therefore ran against an organism with no links, and the
+   Risk-5 trap never fired. Run the round trip in an evolved world. Select an organism
+   with parents and children that are alive. Then save the world again.
+2. **Void-avoidance suppression.** M1 kept this item out of scope. Organisms avoid the map
+   edge, so migration almost never starts without the suppression (decision D3).
+3. **The two-instance rig — RESOLVED on 2026-08-02.** Two instances of the game run at the
+   same time on this machine. Both processes persist. The first instance locks
+   `BepInEx/LogOutput.log`. BepInEx gives the second instance `LogOutput.log.1` instead, so
+   no log is lost. `game.sh log` reads the first file only. Both instances load the same
+   plugin DLL and the same BepInEx config, so per-instance settings need environment
+   variables or a second game copy.
 
 ## Next Steps
+
+All seven steps are complete. This list stays as the record of the M1 procedure.
 
 1. Write the dev command. Follow the order of operations in `m1_findings.md`.
 2. Serialize the organism with `SaveSystem.SaveBibite` to a temporary file for the
