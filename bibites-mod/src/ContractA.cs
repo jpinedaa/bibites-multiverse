@@ -15,16 +15,26 @@ namespace BibitesMultiverse
     }
 
     /// <summary>
-    /// The wire vocabulary of contracts/contract-a.md, version contract-a/1: the envelope, the nine
+    /// The wire vocabulary of contracts/contract-a.md, version contract-a/1.1: the envelope, the nine
     /// message types, the close codes, the NACK taxonomy and the mod-owned tunables of §10.
     ///
     /// Nothing here touches Unity, so it is safe to call from the socket thread.
     /// </summary>
     internal static class ContractA
     {
-        internal const string Protocol = "contract-a/1";
-        internal const string ProtocolPrefix = "contract-a/";
-        internal const string ProtocolMajor = "1";
+        /// <summary>
+        /// §3, §14 A16 — the identifier carries a major **and** a minor. This release is 1.1: A11
+        /// added <c>exportEdge</c>, A12 added <c>parents</c>, A14 retired <c>sector</c> for
+        /// <c>ringSlot</c>. Every one of those is additive or narrowing, so the major stays at 1 and
+        /// a contract-a/1 peer is still compatible.
+        /// </summary>
+        internal const string Protocol = "contract-a/1.1";
+
+        internal const string ProtocolName = "contract-a";
+        internal const int ProtocolMajor = 1;
+        internal const int ProtocolMinor = 1;
+
+        /// <summary>§3.1 — the path stays major-scoped and serves every contract-a/1.x.</summary>
         internal const string UrlPath = "/contract-a/v1";
         internal const int DefaultPort = 8787;
 
@@ -43,7 +53,9 @@ namespace BibitesMultiverse
         internal const int CloseNormal = 1000;
         internal const int CloseTooBig = 1009;
         internal const int CloseProtocolUnsupported = 4000;
-        internal const int CloseSectorMismatch = 4001;
+
+        /// <summary>4001. Named SECTOR_MISMATCH in M2; the code and the behaviour are unchanged (§14, A14).</summary>
+        internal const int CloseSlotMismatch = 4001;
         internal const int CloseGameVersionUnsupported = 4002;
         internal const int CloseMalformedFrame = 4003;
         internal const int CloseHeartbeatTimeout = 4004;
@@ -55,10 +67,37 @@ namespace BibitesMultiverse
         internal const int MigrateOutTimeoutMs = 5000;
         internal const int ReconnectBackoffMinMs = 1000;
         internal const int ReconnectBackoffMaxMs = 30000;
+        internal const int StableSessionMs = 5000;
+        internal const int SimNotReadyGraceMs = 2000;
         internal const int MaxFrameBytes = 8388608;
         internal const int MaxPayloadBytes = 4194304;
+
+        /// <summary>§10, §14 A12 — a bibite has at most two parents.</summary>
+        internal const int MaxParentBlobs = 2;
+
+        /// <summary>
+        /// §10, §14 A12 — envelope, escaping and JSON overhead the mod reserves under
+        /// <see cref="MaxFrameBytes"/> when it decides whether a parent blob still fits.
+        /// </summary>
+        internal const int FrameHeadroomBytes = 65536;
+
+        /// <summary>§10, §13 A10 — relative tolerance for every comparison of two S values.</summary>
+        internal const double SimSizeEpsilon = 1e-6;
+
         internal const float MigrationCooldownSeconds = 5f;
         internal const float EntryImmunitySeconds = 5f;
+
+        // ---- §5.4, the EDGE_STATUS reasons this side reads ----------------------------------
+        internal const string ReasonPeerLive = "peer_live";
+        internal const string ReasonNoPeer = "no_peer";
+
+        /// <summary>Added by §14 A11: the east neighbour's sidecar is live but has no mod.</summary>
+        internal const string ReasonPeerModAbsent = "peer_mod_absent";
+        internal const string ReasonPeerIncompatible = "peer_incompatible";
+        internal const string ReasonPeerUnreachable = "peer_unreachable";
+        internal const string ReasonPeerOverloaded = "peer_overloaded";
+        internal const string ReasonAdminClosed = "admin_closed";
+        internal const string ReasonSimSizeMismatch = "sim_size_mismatch";
 
         // ---- §9.2, the codes this side emits ------------------------------------------------
         internal const string NackSimNotReady = "SIM_NOT_READY";
@@ -163,7 +202,7 @@ namespace BibitesMultiverse
             if (!MajorMatches(protocol))
             {
                 // §3.1 — a different major version is close 4000, not 4003, and nothing in the frame
-                // may be processed.
+                // may be processed. A different **minor** is never a reason to reject anything.
                 problem = "unsupported protocol '" + protocol + "', this mod speaks " + Protocol;
                 closeCode = CloseProtocolUnsupported;
                 type = null;
@@ -176,15 +215,81 @@ namespace BibitesMultiverse
             return true;
         }
 
-        /// <summary>§3.1 — two peers are compatible when the major part of 'protocol' is equal.</summary>
-        internal static bool MajorMatches(string protocol)
+        /// <summary>
+        /// §3.1, §14 A16 — split at the **last** '/', then split the remainder at the **first** '.'.
+        /// A missing '.' means minor 0, so the M2 string "contract-a/1" reads as major 1, minor 0.
+        /// </summary>
+        internal static bool TryParseProtocol(string protocol, out int major, out int minor)
         {
-            if (string.IsNullOrEmpty(protocol) || !protocol.StartsWith(ProtocolPrefix, StringComparison.Ordinal))
+            major = 0;
+            minor = 0;
+            if (string.IsNullOrEmpty(protocol))
             {
                 return false;
             }
 
-            return protocol.Substring(ProtocolPrefix.Length) == ProtocolMajor;
+            int slash = protocol.LastIndexOf('/');
+            if (slash <= 0 || slash == protocol.Length - 1)
+            {
+                return false;
+            }
+
+            if (!string.Equals(protocol.Substring(0, slash), ProtocolName, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            string version = protocol.Substring(slash + 1);
+            int dot = version.IndexOf('.');
+            string majorText = (dot < 0) ? version : version.Substring(0, dot);
+            string minorText = (dot < 0) ? "0" : version.Substring(dot + 1);
+
+            return TryDecimal(majorText, out major) && TryDecimal(minorText, out minor);
+        }
+
+        private static bool TryDecimal(string text, out int value)
+        {
+            value = 0;
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            foreach (char c in text)
+            {
+                if (c < '0' || c > '9')
+                {
+                    return false;
+                }
+            }
+
+            return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>
+        /// §3.1 — two peers are compatible when the **major** part of 'protocol' is equal. The minor
+        /// is a capability statement, never a negotiation, and never a reason to close.
+        /// </summary>
+        internal static bool MajorMatches(string protocol)
+        {
+            return TryParseProtocol(protocol, out int major, out int _) && major == ProtocolMajor;
+        }
+
+        /// <summary>
+        /// §13 A10 — the one equality test for two simulation half-extents. S starts life as a C#
+        /// 32-bit float and reaches the sidecar as a float64, so an exact comparison is forbidden
+        /// (§4.1). The max(1, …) term keeps the tolerance absolute near zero and relative at
+        /// simulation scale. A non-finite value is never equal to anything.
+        /// </summary>
+        internal static bool SimulationSizeEqual(double a, double b)
+        {
+            if (double.IsNaN(a) || double.IsInfinity(a) || double.IsNaN(b) || double.IsInfinity(b))
+            {
+                return false;
+            }
+
+            double scale = Math.Max(1.0, Math.Max(Math.Abs(a), Math.Abs(b)));
+            return Math.Abs(a - b) <= SimSizeEpsilon * scale;
         }
 
         // ---- edge helpers -------------------------------------------------------------------
@@ -210,6 +315,22 @@ namespace BibitesMultiverse
         internal static string EdgeName(Edge edge)
         {
             return edge.ToString();
+        }
+
+        /// <summary>
+        /// §4.2 — N↔S, E↔W. Under the ring (D8) this is what turns the configured **export** edge
+        /// into the passive **entry** edge: export east, receive west.
+        /// </summary>
+        internal static Edge OppositeEdge(Edge edge)
+        {
+            switch (edge)
+            {
+                case Edge.N: return Edge.S;
+                case Edge.S: return Edge.N;
+                case Edge.E: return Edge.W;
+                case Edge.W: return Edge.E;
+                default: return Edge.None;
+            }
         }
 
         // ---- data-field readers ---------------------------------------------------------------

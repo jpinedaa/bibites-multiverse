@@ -142,8 +142,21 @@ namespace BibitesMultiverse
             return (edge == Edge.N || edge == Edge.S) ? position.x : position.y;
         }
 
-        /// <summary>True when the point is inside the strip on that edge.</summary>
-        internal bool InStrip(Edge edge, Vector2 position)
+        /// <summary>
+        /// §4.3.1 — the capture band, and the **whole** geometric half of the export trigger.
+        ///
+        /// It is half-open and outward-unbounded: it starts at the strip line <c>S − W</c> and runs
+        /// outward past <c>S</c>, past the wrap radius, to any coordinate. There is no outer bound,
+        /// because a fast organism clears the whole strip in one FixedUpdate and M2's inside-only
+        /// rule then let the vanilla wrap teleport it to the antipode, which a player reads as a
+        /// defect in the mod (m3_considerations.md Risk 2, contract-a.md §14 A13).
+        ///
+        /// The other half of the trigger is the outward-velocity test, and it is what separates an
+        /// export from a wrap: a wrapped organism arrives in the outer band on the **far** side and
+        /// travels inward, so it fails that test. The caller applies it — see
+        /// <see cref="MultiverseClient.OnBodyTick"/>.
+        /// </summary>
+        internal bool InCaptureBand(Edge edge, Vector2 position)
         {
             float fixedCoordinate = FixedCoordinate(edge, position);
             bool positiveSide = edge == Edge.N || edge == Edge.E;
@@ -151,6 +164,20 @@ namespace BibitesMultiverse
                 ? fixedCoordinate >= simulationSize - W
                 : fixedCoordinate <= -simulationSize + W;
         }
+
+        /// <summary>The inner boundary of the capture band on that edge, in world units.</summary>
+        internal float BandInnerBoundary(Edge edge)
+        {
+            bool positiveSide = edge == Edge.N || edge == Edge.E;
+            return positiveSide ? simulationSize - W : -simulationSize + W;
+        }
+
+        /// <summary>
+        /// The radius at which <c>BibitePropulsion.UpdateOrgan</c> teleports an organism to the
+        /// antipode: <c>r − bodyLength ≥ 1.5·S + 1000</c> (m2_findings.md §3, BibitePropulsion.cs:240).
+        /// Reported, never enforced — under D10 the mod does not touch the wrap.
+        /// </summary>
+        internal float WrapRadius => 1.5f * simulationSize + 1000f;
 
         /// <summary>True when the point has cleared the strip's inner face by the hysteresis margin.</summary>
         internal bool ClearOfStrip(Edge edge, Vector2 position)
@@ -170,12 +197,22 @@ namespace BibitesMultiverse
             return positiveSide ? fixedCoordinate > simulationSize : fixedCoordinate < -simulationSize;
         }
 
+        /// <summary>
+        /// §4.3 before the clamp. Kept separate so the log can show what the clamp actually did: with
+        /// the band of §4.3.1 reaching outside the square, a diagonal escape at x = 3500, y = 6000
+        /// with S = 2000 produces 2.0, and the clamp is now load-bearing rather than cosmetic
+        /// (§14, A13).
+        /// </summary>
+        internal float RawExitPosition(Edge edge, Vector2 position)
+        {
+            float free = FreeCoordinate(edge, position);
+            return (free + simulationSize) / (2f * simulationSize);
+        }
+
         /// <summary>§4.3 — the normalized position along the edge, always clamped by the sender.</summary>
         internal float ExitPosition(Edge edge, Vector2 position)
         {
-            float free = FreeCoordinate(edge, position);
-            float normalized = (free + simulationSize) / (2f * simulationSize);
-            return Mathf.Clamp01(normalized);
+            return Mathf.Clamp01(RawExitPosition(edge, position));
         }
 
         /// <summary>

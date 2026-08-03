@@ -62,7 +62,7 @@ namespace BibitesMultiverse
         /// </summary>
         internal void Observe(int entityId, Edge edge, BorderGeometry geometry, Vector2 position, long simTick)
         {
-            bool inStrip = geometry.InStrip(edge, position);
+            bool inStrip = geometry.InCaptureBand(edge, position);
             bool beyond = geometry.Beyond(edge, position);
 
             if (observations.TryGetValue(entityId, out Observation previous))

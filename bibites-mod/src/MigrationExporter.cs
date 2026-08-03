@@ -39,6 +39,7 @@ namespace BibitesMultiverse
         }
 
         private readonly MultiverseClient client;
+        private readonly LineageCollector lineage = new LineageCollector();
         private readonly Dictionary<string, InFlight> inFlight = new Dictionary<string, InFlight>();
         private readonly Dictionary<int, string> byEntity = new Dictionary<int, string>();
         private readonly Dictionary<int, Cooldown> cooldowns = new Dictionary<int, Cooldown>();
@@ -61,10 +62,11 @@ namespace BibitesMultiverse
             inFlight.Clear();
             byEntity.Clear();
             cooldowns.Clear();
+            lineage.Clear();
         }
 
         /// <summary>
-        /// The strip test refuses an organism that is cooling down. The cooldown is released by time
+        /// The band test refuses an organism that is cooling down. The cooldown is released by time
         /// **and** by hysteresis — the organism has to clear the strip's inner face before it may
         /// trigger again, so a refused organism cannot spin against the border.
         /// </summary>
@@ -166,7 +168,15 @@ namespace BibitesMultiverse
                 return false;
             }
 
+            // §5.3, §14 A12 — the lineage annex inputs, collected in the same FixedUpdate as the
+            // migrant's own serialization and shipped opaque. The mod never hashes them (D4).
+            LineageCollector.Result parents = lineage.Collect(body, entityId, payloadBytes, client.SimTick, Application.version);
+
             string migrationId = ContractA.NewUuid();
+
+            // §4.3, §14 A13 — the clamp is load-bearing now that the band reaches outside the square:
+            // a diagonal escape produces a normalized position well outside [0, 1].
+            float rawExitPosition = geometry.RawExitPosition(edge, position);
             float exitPosition = geometry.ExitPosition(edge, position);
 
             JObject data = new JObject
@@ -183,6 +193,11 @@ namespace BibitesMultiverse
                 ["simulationSize"] = geometry.S,
                 ["simTick"] = client.SimTick
             };
+
+            if (parents.parents != null)
+            {
+                data["parents"] = parents.parents;
+            }
 
             // Inert before the frame goes out (§6.3): it cannot eat, breed, be eaten, move or be
             // seen as food while the sidecar decides.
@@ -201,11 +216,25 @@ namespace BibitesMultiverse
             byEntity[entityId] = migrationId;
             client.SendFrame(record.frame);
 
+            int frameBytes = System.Text.Encoding.UTF8.GetByteCount(record.frame);
+
             MultiversePlugin.Log.LogInfo(
                 $"[M2] migrationId={migrationId} entityId={entityId} phase=MIGRATE_OUT_SENT edge={ContractA.EdgeName(edge)} " +
                 $"exitPosition={exitPosition.ToString("F6", CultureInfo.InvariantCulture)} " +
+                $"exitPositionRaw={rawExitPosition.ToString("F6", CultureInfo.InvariantCulture)} " +
+                $"clampFired={!Mathf.Approximately(rawExitPosition, exitPosition)} " +
                 $"pos=({position.x:F2},{position.y:F2}) vel=({velocity.x:F2},{velocity.y:F2}) heading={heading:F2} " +
-                $"payloadBytes={payloadBytes} payloadSha256={ContractA.Sha256Hex(payload)} S={geometry.S:F1}");
+                $"outsideSquare={geometry.Beyond(edge, position)} " +
+                $"payloadBytes={payloadBytes} payloadSha256={ContractA.Sha256Hex(payload)} " +
+                $"parents=[{parents.summary}] frameBytes={frameBytes} S={geometry.S:F1}");
+
+            // m3_considerations.md WP4 / Risk 8: the annex costs up to two extra serializations on the
+            // Unity main thread, in the same tick as the migrant's own. Measure it, do not assume it.
+            MultiversePlugin.Log.LogInfo(
+                $"{LineageCollector.Prefix} migrationId={migrationId} entityId={entityId} " +
+                $"parents=[{parents.summary}] blobs={parents.blobs} gaps={parents.gaps} " +
+                $"blobBytes={parents.blobBytes} cacheHits={parents.cacheHits} " +
+                $"parentSerializeMs={parents.serializeMs.ToString("F2", CultureInfo.InvariantCulture)}");
             return true;
         }
 

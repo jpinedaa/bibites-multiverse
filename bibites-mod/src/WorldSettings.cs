@@ -6,14 +6,20 @@ using UnityEngine;
 namespace BibitesMultiverse
 {
     /// <summary>
-    /// The boundary settings the border strip has to fight, plus the one-off runtime facts
+    /// The boundary settings the capture band has to coexist with, plus the one-off runtime facts
     /// m2_findings.md left open.
     ///
-    /// Two settings are overridden while an edge is open, and both are restored on world unload:
+    /// **`worldWrapping` is no longer one of them.** M2 disabled it while an edge was open, so a
+    /// missed capture could not teleport an organism to the antipode — and that traded the teleport
+    /// for a leak, because nothing else in the game contains an organism at the square edge and the
+    /// three unguarded edges then guarded nothing at all (m2_findings.md §3). Decision D10 reverses
+    /// the trade: the wrap stays **ON** at all times and becomes the containment mechanism, and the
+    /// mod only reads and reports the setting (contract-a.md §5.4, §11.2, §14 A13). The two radii do
+    /// not compete — the capture band takes an export from `S − W` outward, before the wrap fires at
+    /// `1.5·S + 1000`.
     ///
-    /// * <c>worldWrapping</c> (default **true**) teleports an organism past 1.5*S + 1000 to the
-    ///   antipode (m2_findings.md §3, m2_considerations.md Risk 4). A missed capture would read to a
-    ///   player as a duplication bug caused by this mod.
+    /// One setting is still overridden, and it is restored on world unload:
+    ///
     /// * <c>voidAvoidance</c> (default **false**) blends the brain's steering towards the nearest
     ///   zone centre (m2_findings.md §1.1). It ships disabled, so this is measure-first: read it, and
     ///   only write when the world actually turned it on (m2_findings.md, Recommended approach,
@@ -25,16 +31,18 @@ namespace BibitesMultiverse
     internal class WorldSettings
     {
         private bool applied;
-        private bool worldWrappingWas;
-        private bool worldWrappingChanged;
         private bool voidAvoidanceWas;
         private bool voidAvoidanceChanged;
+
+        /// <summary>The wrap state as read at world load. Reported on CONFIG_UPDATE, never written.</summary>
+        internal bool WorldWrappingOn { get; private set; }
 
         internal void LogBoundarySettings(float simulationSize)
         {
             try
             {
                 ScenarioSettings settings = ScenarioSettings.Instance;
+                WorldWrappingOn = settings.worldWrapping.val;
                 MultiversePlugin.Log.LogInfo(
                     $"[M2] boundary settings at world load: SimulationSize={simulationSize:F2} " +
                     $"voidAvoidance={settings.voidAvoidance.val} voidAvoidanceDistance={settings.voidAvoidanceDistance.val:F1} " +
@@ -88,26 +96,29 @@ namespace BibitesMultiverse
 
             applied = true;
 
+            // D10, contract-a.md §14 A13: the mod snapshots worldWrapping and reports it. It does not
+            // write it, and there is nothing to restore on unload.
             try
             {
-                BoolSetting wrapping = ScenarioSettings.Instance.worldWrapping;
-                worldWrappingWas = wrapping.val;
-                if (worldWrappingWas)
+                bool wrapping = ScenarioSettings.Instance.worldWrapping.val;
+                WorldWrappingOn = wrapping;
+                if (wrapping)
                 {
-                    wrapping.SetValue(false);
-                    worldWrappingChanged = true;
                     MultiversePlugin.Log.LogInfo(
-                        "[M2] worldWrapping was on — disabled while the edge is open so a missed capture cannot teleport an " +
-                        "organism to the antipode (m2_findings.md §3). It is restored on world unload.");
+                        "[M2] worldWrapping is ON and stays ON — it is the containment mechanism for every edge no " +
+                        "strip guards (D10). The capture band takes an export from S-W outward, before the wrap fires.");
                 }
                 else
                 {
-                    MultiversePlugin.Log.LogInfo("[M2] worldWrapping is already off — nothing to override.");
+                    MultiversePlugin.Log.LogWarning(
+                        "[M2] worldWrapping is OFF in this world. The mod does not turn it on (D10 says the mod never " +
+                        "writes it), so nothing contains an organism that leaves through an unguarded edge — this world " +
+                        "will leak population. Turn the setting on in the scenario.");
                 }
             }
             catch (Exception e)
             {
-                MultiversePlugin.Log.LogWarning($"[M2] could not override worldWrapping: {e.Message}");
+                MultiversePlugin.Log.LogWarning($"[M2] could not read worldWrapping: {e.Message}");
             }
 
             try
@@ -143,20 +154,6 @@ namespace BibitesMultiverse
             }
 
             applied = false;
-
-            if (worldWrappingChanged)
-            {
-                worldWrappingChanged = false;
-                try
-                {
-                    ScenarioSettings.Instance.worldWrapping.SetValue(worldWrappingWas);
-                    MultiversePlugin.Log.LogInfo($"[M2] worldWrapping restored to {worldWrappingWas}.");
-                }
-                catch (Exception e)
-                {
-                    MultiversePlugin.Log.LogWarning($"[M2] could not restore worldWrapping: {e.Message}");
-                }
-            }
 
             if (voidAvoidanceChanged)
             {

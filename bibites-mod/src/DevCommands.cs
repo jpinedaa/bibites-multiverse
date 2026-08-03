@@ -100,7 +100,8 @@ namespace BibitesMultiverse
             MultiversePlugin.Log.LogInfo(
                 $"{Prefix} dev commands armed — file={(string.IsNullOrEmpty(CommandFile) ? "<none>" : CommandFile)} " +
                 $"hotkey={ForceExportHotkey} familyReport={FamilyReportSeconds:F0}s. " +
-                "Verbs: export <family|any|id>, census, count <id>, family, save [name], timescale <x>, autosave <on|off>, quit.");
+                "Verbs: export <family|any|id>, place <family|any|id> <x> <y> [vx] [vy], edge <open|closed>, " +
+                "census, count <id>, family, save [name], timescale <x>, autosave <on|off>, quit.");
         }
 
         /// <summary>
@@ -234,6 +235,14 @@ namespace BibitesMultiverse
                     Export(token, argument);
                     break;
 
+                case "place":
+                    Place(token, argument);
+                    break;
+
+                case "edge":
+                    EdgeOverride(token, argument);
+                    break;
+
                 case "census":
                     Census(token);
                     break;
@@ -321,12 +330,12 @@ namespace BibitesMultiverse
                 return;
             }
 
-            Edge edge = client.Config.BorderEdge;
+            Edge edge = client.Config.ExportEdge;
             BorderGeometry geometry = client.Geometry;
             Vector2 before = target.transform.position;
             Vector2 outward = BorderGeometry.OutwardNormal(edge);
 
-            // Land in the middle of the strip, off the corners, so the placement satisfies InStrip
+            // Land in the middle of the strip, off the corners, so the placement satisfies the capture band
             // without sitting on the neighbouring edges' strips as well.
             float free = BorderGeometry.FreeCoordinate(edge, before);
             float freeLimit = Mathf.Max(0f, geometry.S - (geometry.W + geometry.EntryMargin));
@@ -349,7 +358,7 @@ namespace BibitesMultiverse
             rigidbody.position = destination;
             rigidbody.linearVelocity = velocity;
 
-            bool inStrip = geometry.InStrip(edge, destination);
+            bool inStrip = geometry.InCaptureBand(edge, destination);
             Report(token, true,
                 $"entityId={entityId} selector={how} edge={ContractA.EdgeName(edge)} " +
                 $"from=({before.x.ToString("F2", CultureInfo.InvariantCulture)},{before.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
@@ -363,6 +372,172 @@ namespace BibitesMultiverse
                     $"{Prefix} token={token} the organism was placed but the pipeline will not fire " +
                     $"(inStrip={inStrip} edgeOpen={client.EdgeOpen}).");
             }
+        }
+
+        /// <summary>
+        /// <c>place &lt;selector&gt; &lt;x&gt; &lt;y&gt; [vx] [vy]</c> — put one organism at an exact
+        /// world position with an exact world velocity, and **do not export it**.
+        ///
+        /// This is the instrument the two D10 verifications need (m3_considerations.md Risks 1 and 2).
+        /// <see cref="Export"/> always aims at the middle of the export strip, so it cannot ask the two
+        /// questions D10 poses: what happens to an organism placed **past the wrap radius**, and what
+        /// happens to one placed **outside the square but inside the capture band**, once travelling
+        /// outward and once inward. Nothing about the pipeline is bypassed — the placement is only a
+        /// teleport, and the ordinary FixedUpdate capture rule decides what follows.
+        ///
+        /// Both the transform and the Rigidbody2D are written, in the same frame: the body overwrites
+        /// a transform-only correction on the next tick (m2_findings.md §4.3, caveat 2).
+        /// </summary>
+        private void Place(string token, string argument)
+        {
+            MultiverseClient client = MultiverseClient.Active;
+            if (client == null)
+            {
+                Report(token, false, "no multiverse client is armed (no world loaded, or no export edge configured)");
+                return;
+            }
+
+            if (!GameBridge.SimulationReady())
+            {
+                Report(token, false, "the simulation is not ready");
+                return;
+            }
+
+            string[] parts = (argument ?? string.Empty).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 3)
+            {
+                Report(token, false, "usage: place <family|any|id> <x> <y> [vx] [vy]");
+                return;
+            }
+
+            if (!TryNumber(parts[1], out float x) || !TryNumber(parts[2], out float y))
+            {
+                Report(token, false, $"'{parts[1]} {parts[2]}' is not a world position");
+                return;
+            }
+
+            float vx = 0f;
+            float vy = 0f;
+            if (parts.Length > 3 && !TryNumber(parts[3], out vx))
+            {
+                Report(token, false, $"'{parts[3]}' is not a velocity component");
+                return;
+            }
+
+            if (parts.Length > 4 && !TryNumber(parts[4], out vy))
+            {
+                Report(token, false, $"'{parts[4]}' is not a velocity component");
+                return;
+            }
+
+            BibiteBody target = SelectTarget(parts[0], out string how);
+            if (target == null)
+            {
+                Report(token, false, $"no target for selector '{parts[0]}': {how}");
+                return;
+            }
+
+            Rigidbody2D rigidbody = target.GetComponent<Rigidbody2D>();
+            if (rigidbody == null)
+            {
+                Report(token, false, "the target has no Rigidbody2D");
+                return;
+            }
+
+            int entityId = (target.id != null) ? target.id.id : 0;
+            if (entityId == 0)
+            {
+                Report(token, false, "the target has no entity id");
+                return;
+            }
+
+            BorderGeometry geometry = client.Geometry;
+            Edge edge = client.Config.ExportEdge;
+            Vector2 before = target.transform.position;
+            Vector2 beforeVelocity = rigidbody.linearVelocity;
+            Vector2 destination = new Vector2(x, y);
+            Vector2 velocity = new Vector2(vx, vy);
+
+            // A leftover cooldown or entry-immunity window would silently swallow the very decision the
+            // verification is trying to observe. Clearing them also drops the containment tracker's last
+            // position, so this teleport is not misread as a wrap.
+            client.ClearMigrationBlocks(entityId);
+
+            target.transform.position = new Vector3(destination.x, destination.y, target.transform.position.z);
+            rigidbody.position = destination;
+            rigidbody.linearVelocity = velocity;
+
+            bool inBand = geometry.InCaptureBand(edge, destination);
+            bool outward = Vector2.Dot(velocity, BorderGeometry.OutwardNormal(edge)) > 0f;
+            float radius = destination.magnitude;
+            float bodyLength = 0f;
+            try
+            {
+                bodyLength = target.bodyLength;
+            }
+            catch (Exception)
+            {
+                // Reported value only.
+            }
+
+            bool pastWrapRadius = radius - bodyLength >= geometry.WrapRadius;
+
+            string details =
+                $"entityId={entityId} selector={how} edge={ContractA.EdgeName(edge)} " +
+                $"from=({before.x.ToString("F2", CultureInfo.InvariantCulture)},{before.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
+                $"fromVel=({beforeVelocity.x.ToString("F2", CultureInfo.InvariantCulture)},{beforeVelocity.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
+                $"to=({destination.x.ToString("F2", CultureInfo.InvariantCulture)},{destination.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
+                $"vel=({velocity.x.ToString("F2", CultureInfo.InvariantCulture)},{velocity.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
+                $"r={radius.ToString("F1", CultureInfo.InvariantCulture)} bodyLength={bodyLength.ToString("F2", CultureInfo.InvariantCulture)} " +
+                $"wrapRadius={geometry.WrapRadius.ToString("F1", CultureInfo.InvariantCulture)} pastWrapRadius={pastWrapRadius} " +
+                $"bandInner={geometry.BandInnerBoundary(edge).ToString("F1", CultureInfo.InvariantCulture)} " +
+                $"inCaptureBand={inBand} outward={outward} outsideSquare={geometry.Beyond(edge, destination)} " +
+                $"edgeOpen={client.EdgeOpen} S={geometry.S.ToString("F1", CultureInfo.InvariantCulture)} " +
+                $"W={geometry.W.ToString("F1", CultureInfo.InvariantCulture)}";
+
+            Report(token, true, details);
+            MultiversePlugin.Log.LogInfo($"{Containment.Prefix} event=PLACED {details}");
+        }
+
+        /// <summary>
+        /// <c>edge &lt;open|closed&gt;</c> — force the export-edge gate locally, with no sidecar behind
+        /// it. The D10 verifications run on one game with no rig, and without this the gate of §5.4
+        /// keeps the export edge shut and no capture could ever be observed. It relaxes nothing else,
+        /// and the next real EDGE_STATUS clears it.
+        /// </summary>
+        private void EdgeOverride(string token, string argument)
+        {
+            MultiverseClient client = MultiverseClient.Active;
+            if (client == null)
+            {
+                Report(token, false, "no multiverse client is armed");
+                return;
+            }
+
+            bool open;
+            if (string.Equals(argument, "open", StringComparison.OrdinalIgnoreCase))
+            {
+                open = true;
+            }
+            else if (string.Equals(argument, "closed", StringComparison.OrdinalIgnoreCase) || string.Equals(argument, "close", StringComparison.OrdinalIgnoreCase))
+            {
+                open = false;
+            }
+            else
+            {
+                Report(token, false, $"'{argument}' is not open or closed");
+                return;
+            }
+
+            client.SetDevEdgeOverride(open);
+            Report(token, true, $"devEdgeOverride={open} edgeOpen={client.EdgeOpen} edge={ContractA.EdgeName(client.Config.ExportEdge)}");
+        }
+
+        private static bool TryNumber(string text, out float value)
+        {
+            return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+                && !float.IsNaN(value)
+                && !float.IsInfinity(value);
         }
 
         private BibiteBody SelectTarget(string selector, out string how)

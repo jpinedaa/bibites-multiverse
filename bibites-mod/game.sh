@@ -67,8 +67,8 @@ alive() {
 # The marker that identifies this instance in a BepInEx log. Recorded at start from the
 # environment the instance was launched with.
 marker_for_env() {
-  if [ -n "${MULTIVERSE_SECTOR:-}" ]; then
-    printf '\\[M2\\] config: .*sector=%s ' "$MULTIVERSE_SECTOR"
+  if [ -n "${MULTIVERSE_RING_SLOT:-}" ]; then
+    printf '\\[M2\\] config: .*ringSlot=%s ' "$MULTIVERSE_RING_SLOT"
   elif [ -n "${MULTIVERSE_WORLD:-}" ]; then
     printf 'MULTIVERSE_WORLD=%s' "$MULTIVERSE_WORLD"
   else

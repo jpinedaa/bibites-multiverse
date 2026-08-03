@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.2.0";
+        public const string Version = "0.3.0";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -21,7 +21,7 @@ namespace BibitesMultiverse
         private void Awake()
         {
             Log = Logger;
-            Log.LogInfo($"{Name} {Version} loaded — M2 Contract A client, border strip, export and import pipelines.");
+            Log.LogInfo($"{Name} {Version} loaded — {ContractA.Protocol} client, ring export edge, §4.3.1 capture band, lineage annex, wrap-on containment (D10).");
             Log.LogInfo($"Application.version = {Application.version}");
             Log.LogInfo($"Application.unityVersion = {Application.unityVersion}");
 
@@ -82,8 +82,8 @@ namespace BibitesMultiverse
             if (!config.Enabled)
             {
                 Log.LogInfo(
-                    $"[M2] no border edge is configured ({MultiverseConfig.EnvOpenEdge} or [M2] OpenEdge) — " +
-                    "the Contract A client, the border strip and the crossing counters all stay off.");
+                    $"[M2] no export edge is configured ({MultiverseConfig.EnvExportEdge}, {MultiverseConfig.EnvOpenEdge} " +
+                    "or [M3] ExportEdge) — the Contract A client, the capture band and the crossing counters all stay off.");
                 return config;
             }
 

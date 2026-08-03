@@ -73,7 +73,7 @@ namespace BibitesMultiverse
         /// close 4003 for an unusable CONFIG_UPDATE is the one that matters — into a zero-delay
         /// redial loop, because the connect always succeeds and the ladder never climbs.
         /// </summary>
-        private const int StableSessionMs = 5000;
+        private const int StableSessionMs = ContractA.StableSessionMs;
 
         internal WebSocketTransport(string url)
         {
@@ -521,7 +521,7 @@ namespace BibitesMultiverse
                 case ContractA.CloseNormal: return "1000 NORMAL";
                 case ContractA.CloseTooBig: return "1009 TOO_BIG";
                 case ContractA.CloseProtocolUnsupported: return "4000 PROTOCOL_UNSUPPORTED";
-                case ContractA.CloseSectorMismatch: return "4001 SECTOR_MISMATCH";
+                case ContractA.CloseSlotMismatch: return "4001 SLOT_MISMATCH";
                 case ContractA.CloseGameVersionUnsupported: return "4002 GAME_VERSION_UNSUPPORTED";
                 case ContractA.CloseMalformedFrame: return "4003 MALFORMED_FRAME";
                 case ContractA.CloseHeartbeatTimeout: return "4004 HEARTBEAT_TIMEOUT";

@@ -127,10 +127,16 @@ namespace BibitesMultiverse
                 $"entryPosition={entryPosition.ToString("F6", CultureInfo.InvariantCulture)} attempt={attempt} bounceBack={bounceBack} " +
                 $"payloadBytes={System.Text.Encoding.UTF8.GetByteCount(payload)} payloadSha256={ContractA.Sha256Hex(payload)}");
 
-            if (entryEdge != client.Config.BorderEdge)
+            // §13 A3 + §14 A11 — inbound EDGE_CLOSED means "not a declared edge", never "closed right
+            // now". Under the ring both declared edges accept: "W" for ordinary traffic and this sim's
+            // own exportEdge for a bounce-back, which comes home through the door it left by. A
+            // declared edge that is merely closed still accepts — a bounce-back arrives exactly when
+            // the edge just closed.
+            if (!client.Config.Declares(entryEdge))
             {
                 Nack(migrationId, entityId, ContractA.NackEdgeClosed, ContractA.ClassTransient,
-                    "this sim has no border strip on edge " + ContractA.EdgeName(entryEdge) + " (it declares " + ContractA.EdgeName(client.Config.BorderEdge) + ")",
+                    "this sim has no border strip on edge " + ContractA.EdgeName(entryEdge) + " (it declares ["
+                        + ContractA.EdgeName(client.Config.ExportEdge) + "," + ContractA.EdgeName(client.Config.EntryEdge) + "])",
                     30000);
                 return;
             }
