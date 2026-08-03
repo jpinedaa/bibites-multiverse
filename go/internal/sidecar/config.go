@@ -12,23 +12,30 @@ import (
 )
 
 // Version is reported to the relay in HANDSHAKE.
-const Version = "m2.0"
+const Version = "m3.0"
 
 // Config is the sidecar's runtime configuration. The four required knobs are
 // --listen, --relay, --peer-id and --data-dir; everything else has a contract
 // default and exists so tests can run the real code paths on a short clock.
 type Config struct {
 	// Listen is the Contract A bind address. contract-a.md §2 forbids
-	// binding anything but loopback.
+	// binding anything but loopback, and §14 A17 keeps it unauthenticated:
+	// the mod and its sidecar always share a machine (D9).
 	Listen string
-	// RelayURL is the Contract B endpoint, ws://host:port/contract-b/v1.
+	// RelayURL is the Contract B endpoint, ws://host:port/contract-b/v2.
 	RelayURL string
-	// PeerID is this sidecar's stable identity. Sector reclaim keys on it.
+	// Token is the shared LAN bearer token of contract-b-m3.md §3.1. It goes
+	// on the HTTP upgrade and never in a frame.
+	Token string
+	// PeerID is this sidecar's stable identity. Slot reclaim keys on it, so it
+	// is persisted in <DataDir>/peer-id and generated once if absent (§7.4).
 	PeerID string
-	// DataDir holds the journal and the remembered sector.
+	// DataDir holds the journal, the peer id, the remembered slot and the
+	// genome cache.
 	DataDir string
-	// PreferredSector is an optional "A"/"B" hint for SECTOR_CLAIM.
-	PreferredSector string
+	// PreferredSlot is an optional hint for SECTOR_CLAIM. It is advisory: rule
+	// 1 of §7.2 recovers the slot from the peerId anyway.
+	PreferredSlot int
 
 	Logger *slog.Logger
 
@@ -40,11 +47,14 @@ type Config struct {
 	ExportRetention     time.Duration
 	InboundQueueMax     int
 
-	// Contract B tunables (contract-b-m2.md §9).
-	RelayBackoffMin time.Duration
-	RelayBackoffMax time.Duration
-	ForwardRetry    time.Duration
-	BounceTimeout   time.Duration
+	// Contract B tunables (contract-b-m3.md §12).
+	RelayBackoffMin         time.Duration
+	RelayBackoffMax         time.Duration
+	ForwardRetry            time.Duration
+	BounceTimeout           time.Duration
+	GenomeRequestsPerMinute int
+	GenomeCacheRetention    time.Duration
+	GenomeCacheMaxBytes     int64
 
 	// TickInterval drives the custody scheduler.
 	TickInterval time.Duration
@@ -70,20 +80,23 @@ const (
 // DefaultConfig returns the contract defaults.
 func DefaultConfig() Config {
 	return Config{
-		Listen:              fmt.Sprintf("127.0.0.1:%d", contracta.DefaultPort),
-		RelayURL:            fmt.Sprintf("ws://127.0.0.1:%d%s", contractb.DefaultRelayPort, contractb.ContractBPath),
-		DataDir:             "multiverse-data",
-		HeartbeatTimeout:    contracta.HeartbeatTimeout,
-		WSPingInterval:      contracta.WSPingInterval,
-		WSPongTimeout:       contracta.WSPongTimeout,
-		MigrateInAckTimeout: contracta.MigrateInAckTimeout,
-		ExportRetention:     contracta.ExportRetention,
-		InboundQueueMax:     contracta.InboundQueueMax,
-		RelayBackoffMin:     contractb.RelayBackoffMin,
-		RelayBackoffMax:     contractb.RelayBackoffMax,
-		ForwardRetry:        contractb.ForwardRetry,
-		BounceTimeout:       contractb.BounceTimeout,
-		TickInterval:        250 * time.Millisecond,
+		Listen:                  fmt.Sprintf("127.0.0.1:%d", contracta.DefaultPort),
+		RelayURL:                fmt.Sprintf("ws://127.0.0.1:%d%s", contractb.DefaultRelayPort, contractb.ContractBPath),
+		DataDir:                 "multiverse-data",
+		HeartbeatTimeout:        contracta.HeartbeatTimeout,
+		WSPingInterval:          contracta.WSPingInterval,
+		WSPongTimeout:           contracta.WSPongTimeout,
+		MigrateInAckTimeout:     contracta.MigrateInAckTimeout,
+		ExportRetention:         contracta.ExportRetention,
+		InboundQueueMax:         contracta.InboundQueueMax,
+		RelayBackoffMin:         contractb.RelayBackoffMin,
+		RelayBackoffMax:         contractb.RelayBackoffMax,
+		ForwardRetry:            contractb.ForwardRetry,
+		BounceTimeout:           contractb.BounceTimeout,
+		GenomeRequestsPerMinute: contractb.GenomeRequestsPerMinute,
+		GenomeCacheRetention:    contractb.GenomeCacheRetention,
+		GenomeCacheMaxBytes:     contractb.GenomeCacheMaxBytes,
+		TickInterval:            250 * time.Millisecond,
 	}
 }
 
@@ -137,6 +150,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.BounceTimeout <= 0 {
 		c.BounceTimeout = d.BounceTimeout
+	}
+	if c.GenomeRequestsPerMinute <= 0 {
+		c.GenomeRequestsPerMinute = d.GenomeRequestsPerMinute
+	}
+	if c.GenomeCacheRetention <= 0 {
+		c.GenomeCacheRetention = d.GenomeCacheRetention
+	}
+	if c.GenomeCacheMaxBytes <= 0 {
+		c.GenomeCacheMaxBytes = d.GenomeCacheMaxBytes
 	}
 	if c.TickInterval <= 0 {
 		c.TickInterval = d.TickInterval

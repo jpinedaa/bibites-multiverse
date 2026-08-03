@@ -61,6 +61,14 @@ const (
 	StatusHeld Status = "held"
 )
 
+// ParentRef is one entry of the lineage annex as the journal keeps it
+// (contract-b-m3.md §6.6). An empty GenomeHash is a gap and GapReason says why.
+type ParentRef struct {
+	EntityID   int32  `json:"entityId"`
+	GenomeHash string `json:"genomeHash,omitempty"`
+	GapReason  string `json:"gapReason,omitempty"`
+}
+
 // Entry is the immutable half of a migration record.
 type Entry struct {
 	MigrationID    string  `json:"migrationId"`
@@ -77,9 +85,18 @@ type Entry struct {
 	SimulationSize float64 `json:"simulationSize"`
 	SimTick        int64   `json:"simTick"`
 	SourcePeer     string  `json:"sourcePeer,omitempty"`
-	SourceSector   string  `json:"sourceSector,omitempty"`
-	DestSector     string  `json:"destSector,omitempty"`
-	JournaledAt    int64   `json:"journaledAt"`
+	// SourceSlot and DestSlot are ring slots (contract-b-m3.md §7.1). A
+	// journaled outbound entry keeps the DestSlot it recorded: §7.3 forbids
+	// rewriting it when the east neighbour changes, and routing on the slot is
+	// what makes a ring insertion safe for work in flight.
+	SourceSlot int `json:"sourceSlot,omitempty"`
+	DestSlot   int `json:"destSlot,omitempty"`
+	// GenomeHash and Parents are the lineage annex. The tombstone keeps them
+	// after the payload is dropped, because the archive may ask for that genome
+	// long after the migration completed (contract-b-m3.md §6.7).
+	GenomeHash  string      `json:"genomeHash,omitempty"`
+	Parents     []ParentRef `json:"parents,omitempty"`
+	JournaledAt int64       `json:"journaledAt"`
 }
 
 // State is one migration's full durable state.

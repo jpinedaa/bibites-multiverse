@@ -24,7 +24,7 @@ func sampleEntry(id string) Entry {
 		Heading:        274.11,
 		SimulationSize: 2000,
 		SimTick:        4820344,
-		DestSector:     "B",
+		DestSlot:       2,
 		JournaledAt:    time.Now().UnixMilli(),
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"multiverse/internal/bb8"
 	"multiverse/internal/contracta"
 	"multiverse/internal/wire"
 )
@@ -89,11 +90,18 @@ type fakeModOptions struct {
 	gameVersion string
 	modVersion  string
 	simSize     float64
+	// borderEdges are the edges this mod accepts an inbound organism on.
+	// exportEdge is the one edge it exports through — different doors under the
+	// ring (contract-a.md §14, A11).
 	borderEdges []string
+	exportEdge  string
 	borderWidth float64
-	sector      *contracta.Sector
+	ringSlot    *int
 	heartbeat   time.Duration // 0 disables heartbeats entirely
 	ackMode     ackMode
+	// omitExportEdge makes the mod behave like a contract-a/1 mod that never
+	// learned about the field, exercising the A11 fallback.
+	omitExportEdge bool
 }
 
 // fakeMod is an in-process WebSocket client that speaks Contract A exactly as
@@ -106,16 +114,19 @@ type fakeMod struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu        sync.Mutex
-	frames    []wire.Envelope
-	lastEpoch int64
-	edges     map[string]contracta.EdgeState
-	closeCode websocket.StatusCode
-	closed    bool
-	simTick   int64
-	ackMode   ackMode
-	world     *fakeWorld
-	wg        sync.WaitGroup
+	mu          sync.Mutex
+	frames      []wire.Envelope
+	lastEpoch   int64
+	edges       map[string]contracta.EdgeState
+	edgeHistory []contracta.EdgeStatus
+	closeCode   websocket.StatusCode
+	closed      bool
+	simTick     int64
+	ackMode     ackMode
+	world       *fakeWorld
+	hbStop      chan struct{}
+	hbStopped   bool
+	wg          sync.WaitGroup
 }
 
 func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
@@ -135,6 +146,14 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 	if opts.world == nil {
 		opts.world = newWorld()
 	}
+	if len(opts.borderEdges) == 0 {
+		// Under the ring a sim has exactly two doors: it exports east and
+		// receives west (D8).
+		opts.borderEdges = []string{contracta.EdgeE, contracta.EdgeW}
+	}
+	if opts.exportEdge == "" && !opts.omitExportEdge {
+		opts.exportEdge = contracta.EdgeE
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -151,7 +170,7 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 	m := &fakeMod{
 		t: t, opts: opts, ws: ws, ctx: ctx, cancel: cancel,
 		edges: map[string]contracta.EdgeState{}, ackMode: opts.ackMode, world: opts.world,
-		closeCode: -1,
+		closeCode: -1, hbStop: make(chan struct{}),
 	}
 	m.wg.Add(1)
 	go m.readLoop()
@@ -241,6 +260,7 @@ func (m *fakeMod) handle(env wire.Envelope) {
 			return
 		}
 		m.lastEpoch = st.Epoch
+		m.edgeHistory = append(m.edgeHistory, st)
 		m.edges = map[string]contracta.EdgeState{}
 		for _, e := range st.Edges {
 			m.edges[e.Edge] = e
@@ -350,9 +370,10 @@ func (m *fakeMod) sendConfigUpdate(reason string) {
 		ModVersion:     m.opts.modVersion,
 		SimulationSize: &simSize,
 		BorderEdges:    m.opts.borderEdges,
+		ExportEdge:     m.opts.exportEdge,
 		BorderWidth:    &borderWidth,
-		Sector:         m.opts.sector,
-		WorldName:      "M2-Sector",
+		RingSlot:       m.opts.ringSlot,
+		WorldName:      "M3-Slot",
 	})
 }
 
@@ -363,6 +384,8 @@ func (m *fakeMod) heartbeatLoop(interval time.Duration) {
 	for {
 		select {
 		case <-m.ctx.Done():
+			return
+		case <-m.hbStop:
 			return
 		case <-t.C:
 			m.mu.Lock()
@@ -409,6 +432,21 @@ func (m *fakeMod) migrateOut(entityID int32, edge string, position float64) stri
 
 func (m *fakeMod) migrateOutPayload(migrationID string, entityID int32, edge string, position float64, payload string) string {
 	m.t.Helper()
+	return m.migrateOutFull(migrationID, entityID, edge, position, payload, nil)
+}
+
+// migrateOutParents ships the lineage inputs of contract-a.md §14 A12: the
+// parent entity IDs, and one opaque blob for each parent still alive locally.
+// The mod never looks inside a parent blob (D4).
+func (m *fakeMod) migrateOutParents(entityID int32, edge string, position float64,
+	parents []contracta.ParentBlob) string {
+	m.t.Helper()
+	return m.migrateOutFull(wire.NewUUID(), entityID, edge, position, makePayload(entityID), parents)
+}
+
+func (m *fakeMod) migrateOutFull(migrationID string, entityID int32, edge string, position float64,
+	payload string, parents []contracta.ParentBlob) string {
+	m.t.Helper()
 	m.world.put(entityID)
 	m.mu.Lock()
 	tick := m.simTick
@@ -421,6 +459,7 @@ func (m *fakeMod) migrateOutPayload(migrationID string, entityID int32, edge str
 		Kind:           contracta.KindBibite,
 		GameVersion:    m.opts.gameVersion,
 		Payload:        payload,
+		Parents:        parents,
 		ExitEdge:       edge,
 		ExitPosition:   &position,
 		Velocity:       &contracta.Vec{X: 6.12, Y: 0.44},
@@ -524,6 +563,28 @@ func (m *fakeMod) waitEdge(edge string, open bool, timeout time.Duration) contra
 	}
 }
 
+// waitEdgeReason waits for a specific open/reason pair. A closing edge can pass
+// through more than one reason on its way — a peer that dies takes its mod with
+// it, so peer_mod_absent and no_peer both appear — and a test that cares which
+// one it settles on has to say so.
+func (m *fakeMod) waitEdgeReason(edge string, open bool, reason string, timeout time.Duration) contracta.EdgeState {
+	m.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		m.mu.Lock()
+		st, ok := m.edges[edge]
+		m.mu.Unlock()
+		if ok && st.Open == open && st.Reason == reason {
+			return st
+		}
+		if time.Now().After(deadline) {
+			m.t.Fatalf("fake mod: edge %s did not reach open=%v reason=%q within %s (state %+v)",
+				edge, open, reason, timeout, st)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func (m *fakeMod) waitClosed(timeout time.Duration) websocket.StatusCode {
 	m.t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -605,13 +666,116 @@ func (r *rawMod) waitClosed(timeout time.Duration) int {
 	}
 }
 
-// makePayload builds a canned bb8 blob in the shape contract-a.md §5.3's
-// example shows. It is opaque to everything but bb8.Inspect (D4).
+// makePayload builds a canned bb8 blob in the saved dialect of
+// contract-a.md §5.3 and genome-hash.md §3. It is opaque to everything but
+// bb8.Inspect and the genome projection (D4).
+//
+// The gene values vary with the entity id, so two organisms have two genome
+// hashes and the lineage annex in a test says something.
 func makePayload(entityID int32) string {
+	n := entityID % 1000
+	if n < 0 {
+		n = -n
+	}
 	return fmt.Sprintf(`{"transform":{"position":[2000.0,412.77],"rotation":274.11,"scale":0.9312},`+
 		`"rb2d":{"px":2000.0,"py":412.77,"vx":6.12,"vy":0.44,"r":274.11},`+
-		`"genes":{"names":["a","b"],"values":[0.1,0.2]},`+
+		`"genes":{"tag":"Cyan","speciesID":41,"gen":37,"parent1":-1180911975,`+
+		`"genes":{"SizeRatio":%d.5,"ColorG":0.5,"ColorB":0.30000001192092896}},`+
 		`"body":{"id":{"id":%d},"health":42.0,"energy":11.5},`+
 		`"clock":{"simulatedTime":120507.75},`+
-		`"brain":{"Nodes":[],"Synapses":[]},"version":"0.6.3.1"}`, entityID)
+		`"brain":{"isReady":true,"Nodes":[`+
+		`{"Type":0,"baseActivation":0.0,"TypeName":"Input","Index":0,"Inov":0,"Desc":"Constant",`+
+		`"Value":1.0,"LastInput":0.0,"LastOutput":1.0},`+
+		`{"Type":3,"baseActivation":-0.25,"TypeName":"TanH","Index":48,"Inov":117,"Desc":"Hidden1",`+
+		`"Value":0.13,"LastInput":0.9,"LastOutput":0.13}],`+
+		`"Synapses":[{"Inov":204,"NodeIn":0,"NodeOut":48,"Weight":-1.5,"En":true}]},`+
+		`"version":"0.6.3.1"}`, n, entityID)
+}
+
+// genomeHashOf is the hash a conformant sidecar must put in the annex for a
+// blob makePayload produced.
+func genomeHashOf(t *testing.T, payload string) string {
+	t.Helper()
+	h, err := bb8.GenomeHash(payload, "0.6.3.1")
+	if err != nil {
+		t.Fatalf("test payload does not hash: %v", err)
+	}
+	return h
+}
+
+// stopHeartbeats silences the mod without closing its socket, which is the
+// state contract-a.md §8's heartbeat timeout exists for.
+func (m *fakeMod) stopHeartbeats() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.hbStopped {
+		return
+	}
+	m.hbStopped = true
+	close(m.hbStop)
+}
+
+// edgeEpochNow is the last applied EDGE_STATUS epoch.
+func (m *fakeMod) edgeEpochNow() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastEpoch
+}
+
+// edgeHistorySince returns every EDGE_STATUS applied after epoch, so a test can
+// assert that a lane was never disturbed rather than only that it ended open.
+func (m *fakeMod) edgeHistorySince(epoch int64) []contracta.EdgeStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]contracta.EdgeStatus, 0, len(m.edgeHistory))
+	for _, st := range m.edgeHistory {
+		if st.Epoch > epoch {
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
+func (m *fakeMod) lastEdgeStatus() contracta.EdgeStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.edgeHistory) == 0 {
+		m.t.Fatal("fake mod: no EDGE_STATUS has arrived")
+	}
+	return m.edgeHistory[len(m.edgeHistory)-1]
+}
+
+// waitTypeStatus waits for the first EDGE_STATUS and returns it.
+func (m *fakeMod) waitTypeStatus(timeout time.Duration) contracta.EdgeStatus {
+	m.t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		m.mu.Lock()
+		n := len(m.edgeHistory)
+		var st contracta.EdgeStatus
+		if n > 0 {
+			st = m.edgeHistory[n-1]
+		}
+		m.mu.Unlock()
+		if n > 0 {
+			return st
+		}
+		if time.Now().After(deadline) {
+			m.t.Fatalf("fake mod: no EDGE_STATUS within %s", timeout)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func (m *fakeMod) edgeNow(edge string) contracta.EdgeState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.edges[edge]
+}
+
+// closedNow reports whether the sidecar has closed this connection.
+func (r *rawMod) closedNow() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
 }

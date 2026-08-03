@@ -15,16 +15,18 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 )
 
-// Protocol identifiers.
+// Protocol identifiers. The version segment is <major>.<minor>
+// (contract-a.md §14, A16); compatibility is on the major only.
 const (
-	ProtocolA = "contract-a/1"
-	ProtocolB = "contract-b/1"
+	ProtocolA = "contract-a/1.1"
+	ProtocolB = "contract-b/2.0"
 )
 
-// Shared size limits (contract-a.md §10, contract-b-m2.md §9).
+// Shared size limits (contract-a.md §10, contract-b-m3.md §12).
 const (
 	MaxFrameBytes   = 8 << 20 // 8 MiB
 	MaxPayloadBytes = 4 << 20 // 4 MiB
@@ -95,15 +97,20 @@ func Decode(raw []byte) (Envelope, error) {
 }
 
 // CheckProtocol reports whether a decoded frame speaks a compatible major
-// version of want. Compatibility is on the major part only (contract-a.md §3.1).
+// version of want.
+//
+// The identifier is parsed by splitting at the last "/" and then at the first
+// "."; a missing "." means minor 0 (contract-a.md §14, A16). Compatibility is
+// on the major only and the minor is never a rejection reason, which is what
+// lets a contract-a/1.1 sidecar keep serving a contract-a/1 mod.
 func CheckProtocol(got, want string) error {
-	gf, gm, ok := splitProtocol(got)
+	gf, gm, _, ok := splitProtocol(got)
 	if !ok {
-		return fmt.Errorf("%w: %q is not <family>/<major>", ErrProtocolMajor, got)
+		return fmt.Errorf("%w: %q is not <family>/<major>[.<minor>]", ErrProtocolMajor, got)
 	}
-	wf, wm, ok := splitProtocol(want)
+	wf, wm, _, ok := splitProtocol(want)
 	if !ok {
-		return fmt.Errorf("%w: %q is not <family>/<major>", ErrProtocolMajor, want)
+		return fmt.Errorf("%w: %q is not <family>/<major>[.<minor>]", ErrProtocolMajor, want)
 	}
 	if gf != wf || gm != wm {
 		return fmt.Errorf("%w: got %q, want %q", ErrProtocolMajor, got, want)
@@ -111,12 +118,36 @@ func CheckProtocol(got, want string) error {
 	return nil
 }
 
-func splitProtocol(p string) (family, major string, ok bool) {
+// ProtocolMinor returns the minor version of an identifier, or 0 when it
+// carries none. It is informational: no rule may reject on it.
+func ProtocolMinor(p string) int {
+	_, _, minor, ok := splitProtocol(p)
+	if !ok {
+		return 0
+	}
+	return minor
+}
+
+func splitProtocol(p string) (family, major string, minor int, ok bool) {
 	i := strings.LastIndex(p, "/")
 	if i <= 0 || i == len(p)-1 {
-		return "", "", false
+		return "", "", 0, false
 	}
-	return p[:i], p[i+1:], true
+	family, version := p[:i], p[i+1:]
+	dot := strings.Index(version, ".")
+	if dot < 0 {
+		return family, version, 0, true
+	}
+	if dot == 0 {
+		return "", "", 0, false
+	}
+	n, err := strconv.Atoi(version[dot+1:])
+	if err != nil {
+		// An unparsable minor is still a usable major: the minor is never a
+		// rejection reason.
+		n = 0
+	}
+	return family, version[:dot], n, true
 }
 
 // Encode builds a frame. It mints a fresh messageId and stamps sentAt.

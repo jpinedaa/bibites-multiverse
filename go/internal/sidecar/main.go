@@ -2,18 +2,21 @@ package sidecar
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
+	"multiverse/internal/lantoken"
 )
 
 // Main is the multiverse-sidecar entry point, factored out of package main so
@@ -28,14 +31,30 @@ func Main(args []string, stderr io.Writer) int {
 		fmt.Sprintf("ws://127.0.0.1:%d%s", contractb.DefaultRelayPort, contractb.ContractBPath)),
 		"Contract B relay URL")
 	peerID := fs.String("peer-id", env("MULTIVERSE_PEER_ID", ""),
-		"stable peer identity; sector reclaim keys on it")
+		"stable peer identity; slot reclaim keys on it. Persisted in <data-dir>/peer-id")
 	dataDir := fs.String("data-dir", env("MULTIVERSE_DATA_DIR", "multiverse-data"),
-		"directory for the migration journal")
-	sector := fs.String("sector", env("MULTIVERSE_SECTOR", ""),
-		"preferred sector A or B; advisory, the relay arbitrates")
+		"directory for the migration journal, the peer id, the slot and the genome cache")
+	slot := fs.Int("slot", envInt("MULTIVERSE_SLOT", 0),
+		"preferred ring slot; advisory, the relay arbitrates. Overrides <data-dir>/slot")
+	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
+		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	logger := newLogger(stderr, *logLevel)
+	// contract-b-m3.md §3.1: a missing token is not fatal for a client — the
+	// relay answers 401 and the backoff ladder pins itself — but it is worth
+	// one loud line, because the alternative is a silent failure to join.
+	token, err := lantoken.Load(*tokenFile)
+	if err != nil && !errors.Is(err, lantoken.ErrNoToken) {
+		logger.Error("sidecar: token file is unusable", "err", err)
+		return 1
+	}
+	if token == "" {
+		logger.Warn("sidecar: no LAN token configured; the relay will answer 401 unless it runs " +
+			"--insecure-no-token. Set MULTIVERSE_TOKEN or pass --token-file")
 	}
 
 	cfg := DefaultConfig()
@@ -43,8 +62,9 @@ func Main(args []string, stderr io.Writer) int {
 	cfg.RelayURL = *relayURL
 	cfg.PeerID = *peerID
 	cfg.DataDir = *dataDir
-	cfg.PreferredSector = *sector
-	cfg.Logger = newLogger(stderr, *logLevel)
+	cfg.PreferredSlot = *slot
+	cfg.Token = token
+	cfg.Logger = logger
 
 	s, err := New(cfg)
 	if err != nil {
@@ -74,6 +94,15 @@ func Main(args []string, stderr io.Writer) int {
 func env(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envInt(name string, fallback int) int {
+	if v := os.Getenv(name); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return fallback
 }

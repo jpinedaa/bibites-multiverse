@@ -12,10 +12,17 @@ import (
 	"testing"
 	"time"
 
+	"multiverse/internal/archive"
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
+	"multiverse/internal/journal"
 	"multiverse/internal/relay"
 )
+
+// testToken is the shared LAN token every rig uses. contract-b-m3.md §3.1 wants
+// 16 to 256 bytes of printable ASCII; 32 random bytes hex-encoded is the
+// RECOMMENDED shape, and a fixed one keeps the tests reproducible.
+const testToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 // TestMain doubles as the helper-process entry point for the crash-custody
 // test: the test binary re-executes itself as a real sidecar process so a test
@@ -32,9 +39,14 @@ func testLogger(t *testing.T) *slog.Logger {
 	return slog.New(slog.NewTextHandler(&testWriter{t: t}, &slog.HandlerOptions{Level: slog.LevelInfo}))
 }
 
-type testWriter struct{ t *testing.T }
+type testWriter struct {
+	mu sync.Mutex
+	t  *testing.T
+}
 
 func (w *testWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.t.Logf("%s", strings.TrimRight(string(p), "\n"))
 	return len(p), nil
 }
@@ -70,32 +82,49 @@ func (l *trackingListener) severAll() {
 }
 
 // testRelay is an in-process relay that can be killed and restarted on the same
-// port, which is what the relay-drop test needs.
+// port, which is what the relay-drop test needs. Its ring is durable in a temp
+// directory, so a restart reclaims the same slots (contract-b-m3.md §7.4).
 type testRelay struct {
-	t    *testing.T
-	addr string
-	srv  *http.Server
-	ln   *trackingListener
+	t       *testing.T
+	addr    string
+	dataDir string
+	token   string
+	srv     *http.Server
+	ln      *trackingListener
+	relay   *relay.Server
 }
 
 func startRelay(t *testing.T) *testRelay {
 	t.Helper()
+	return startRelayToken(t, testToken)
+}
+
+func startRelayToken(t *testing.T, token string) *testRelay {
+	t.Helper()
+	// 127.0.0.1:0 only. The rig never binds a fixed port and never touches the
+	// ports the running game owns.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("relay listen: %v", err)
 	}
-	r := &testRelay{t: t, addr: ln.Addr().String()}
+	r := &testRelay{t: t, addr: ln.Addr().String(), dataDir: t.TempDir(), token: token}
 	r.serve(ln)
 	t.Cleanup(r.kill)
 	return r
 }
 
 func (r *testRelay) serve(ln net.Listener) {
-	srv := relay.New(relay.Options{
+	srv, err := relay.New(relay.Options{
 		Logger:       testLogger(r.t),
+		DataDir:      r.dataDir,
+		Token:        r.token,
 		PingInterval: 200 * time.Millisecond,
 		PeerTimeout:  3 * time.Second,
 	})
+	if err != nil {
+		r.t.Fatalf("relay new: %v", err)
+	}
+	r.relay = srv
 	r.srv = &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	r.ln = &trackingListener{Listener: ln}
 	tracked := r.ln
@@ -116,7 +145,7 @@ func (r *testRelay) kill() {
 	r.ln = nil
 }
 
-// restart brings the relay back on the same address.
+// restart brings the relay back on the same address and the same ring.json.
 func (r *testRelay) restart() {
 	r.t.Helper()
 	var ln net.Listener
@@ -135,12 +164,12 @@ func (r *testRelay) restart() {
 // fastConfig is the contract's own behaviour on a short clock, so the suite
 // finishes in seconds instead of minutes. Only the timers move; every rule the
 // tests exercise is the shipped one.
-func fastConfig(t *testing.T, relayURL, peerID, sector string) Config {
+func fastConfig(t *testing.T, relayURL, peerID string) Config {
 	cfg := DefaultConfig()
 	cfg.Listen = "127.0.0.1:0"
 	cfg.RelayURL = relayURL
 	cfg.PeerID = peerID
-	cfg.PreferredSector = sector
+	cfg.Token = testToken
 	cfg.DataDir = t.TempDir()
 	cfg.Logger = testLogger(t)
 	cfg.HeartbeatTimeout = 1500 * time.Millisecond
@@ -168,76 +197,122 @@ func startSidecar(t *testing.T, cfg Config) *Sidecar {
 	return s
 }
 
-// rig is the standard two-sector M2 rig: one relay, two sidecars, two fake mods.
-// Sector A opens its east edge; sector B opens its west edge.
-type rig struct {
-	t     *testing.T
-	relay *testRelay
-	a, b  *Sidecar
-	modA  *fakeMod
-	modB  *fakeMod
-	wA    *fakeWorld
-	wB    *fakeWorld
+// node is one ring member: a sidecar, its fake mod and that mod's world.
+type node struct {
+	side  *Sidecar
+	mod   *fakeMod
+	world *fakeWorld
+	cfg   Config
+	slot  int
 }
 
-type rigOptions struct {
-	tuneA         func(*Config)
-	tuneB         func(*Config)
-	heartbeatA    time.Duration
-	heartbeatB    time.Duration
+// ring is the standard M3 rig: one relay and n slots, every sim exporting east
+// and receiving west (D8). With n = 3 the ring is the exit test's topology.
+type ring struct {
+	t     *testing.T
+	relay *testRelay
+	nodes []*node
+}
+
+type ringOptions struct {
+	// tune adjusts the config of node i before it starts.
+	tune func(i int, c *Config)
+	// heartbeat is each mod's HEARTBEAT cadence; negative disables it.
+	heartbeat time.Duration
+	// noMods leaves the sidecars without mods.
+	noMods bool
+	// skipEdgeCheck skips waiting for every export edge to open.
 	skipEdgeCheck bool
 }
 
-func newRig(t *testing.T, opts rigOptions) *rig {
+func newRing(t *testing.T, n int, opts ringOptions) *ring {
 	t.Helper()
-	if opts.heartbeatA == 0 {
-		opts.heartbeatA = 200 * time.Millisecond
+	if opts.heartbeat == 0 {
+		opts.heartbeat = 200 * time.Millisecond
 	}
-	if opts.heartbeatB == 0 {
-		opts.heartbeatB = 200 * time.Millisecond
+	r := &ring{t: t, relay: startRelay(t)}
+	for i := 0; i < n; i++ {
+		r.addPeer(fmt.Sprintf("peer-slot%d", i+1), opts)
 	}
-	r := &rig{t: t, relay: startRelay(t), wA: newWorld(), wB: newWorld()}
-
-	cfgA := fastConfig(t, r.relay.url(), "peer-a", contractb.SectorA)
-	if opts.tuneA != nil {
-		opts.tuneA(&cfgA)
-	}
-	cfgB := fastConfig(t, r.relay.url(), "peer-b", contractb.SectorB)
-	if opts.tuneB != nil {
-		opts.tuneB(&cfgB)
-	}
-	r.a = startSidecar(t, cfgA)
-	r.b = startSidecar(t, cfgB)
-
-	waitSector(t, r.a, contractb.SectorA)
-	waitSector(t, r.b, contractb.SectorB)
-
-	r.modA = dialFakeMod(t, fakeModOptions{
-		url: r.a.URL(), world: r.wA, borderEdges: []string{contracta.EdgeE},
-		sector: &contracta.Sector{X: 0, Y: 0}, heartbeat: opts.heartbeatA})
-	r.modB = dialFakeMod(t, fakeModOptions{
-		url: r.b.URL(), world: r.wB, borderEdges: []string{contracta.EdgeW},
-		sector: &contracta.Sector{X: 1, Y: 0}, heartbeat: opts.heartbeatB})
-
-	if !opts.skipEdgeCheck {
-		r.modA.waitEdge(contracta.EdgeE, true, 5*time.Second)
-		r.modB.waitEdge(contracta.EdgeW, true, 5*time.Second)
+	if !opts.noMods && !opts.skipEdgeCheck {
+		for _, nd := range r.nodes {
+			nd.mod.waitEdge(contracta.EdgeE, true, 10*time.Second)
+		}
 	}
 	return r
 }
 
-func waitSector(t *testing.T, s *Sidecar, want string) {
+// addPeer starts one more sidecar and waits for its ring slot, so slots are
+// granted in a deterministic order. §7.2 rule 4 appends at the tail, so peer i
+// takes slot i+1.
+func (r *ring) addPeer(peerID string, opts ringOptions) *node {
+	r.t.Helper()
+	cfg := fastConfig(r.t, r.relay.url(), peerID)
+	if opts.tune != nil {
+		opts.tune(len(r.nodes), &cfg)
+	}
+	nd := &node{cfg: cfg, world: newWorld()}
+	nd.side = startSidecar(r.t, cfg)
+	nd.slot = waitSlotAny(r.t, nd.side)
+	if !opts.noMods {
+		slot := nd.slot
+		nd.mod = dialFakeMod(r.t, fakeModOptions{
+			url: nd.side.URL(), world: nd.world, ringSlot: &slot, heartbeat: opts.heartbeat})
+	}
+	r.nodes = append(r.nodes, nd)
+	return nd
+}
+
+func (r *ring) node(i int) *node { return r.nodes[i] }
+
+func waitSlotAny(t *testing.T, s *Sidecar) int {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if got := s.Sector(); got == want {
-			return
+		if got := s.Slot(); got > 0 {
+			return got
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("sidecar did not get sector %s (has %q)", want, s.Sector())
+			t.Fatalf("sidecar %s never got a ring slot", s.PeerID())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func waitSlot(t *testing.T, s *Sidecar, want int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if got := s.Slot(); got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("sidecar %s did not get slot %d (has %d)", s.PeerID(), want, s.Slot())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitEastSlot(t *testing.T, s *Sidecar, want int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if east := s.EastNeighbour(); east != nil && east.Slot == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("sidecar %s east neighbour is %v, want slot %d",
+				s.PeerID(), eastSlotOf(s), want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func eastSlotOf(s *Sidecar) int {
+	if east := s.EastNeighbour(); east != nil {
+		return east.Slot
+	}
+	return 0
 }
 
 func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
@@ -254,7 +329,7 @@ func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool)
 	}
 }
 
-// custodyOf finds one migration's journal state, or nil.
+// custodyOf finds one migration's journal state, or "absent".
 func custodyOf(s *Sidecar, migrationID string) string {
 	for _, st := range s.CustodySnapshot() {
 		if st.Entry.MigrationID == migrationID {
@@ -262,4 +337,41 @@ func custodyOf(s *Sidecar, migrationID string) string {
 		}
 	}
 	return "absent"
+}
+
+// journalEntry returns one migration's journal state, for the annex assertions.
+func journalEntry(t *testing.T, s *Sidecar, migrationID string) *journal.State {
+	t.Helper()
+	for _, st := range s.CustodySnapshot() {
+		if st.Entry.MigrationID == migrationID {
+			return st
+		}
+	}
+	t.Fatalf("sidecar %s has no journal entry for %s", s.PeerID(), migrationID)
+	return nil
+}
+
+// startArchive brings up an in-process multiverse-archive against the rig's
+// relay, on a short retry ladder so a test does not wait a minute for the first
+// re-ask.
+func startArchive(t *testing.T, relayURL string) *archive.Archive {
+	t.Helper()
+	a, err := archive.New(archive.Config{
+		RelayURL:          relayURL,
+		Token:             testToken,
+		PeerID:            "archive-test",
+		DataDir:           t.TempDir(),
+		Logger:            testLogger(t),
+		RelayBackoffMin:   30 * time.Millisecond,
+		RelayBackoffMax:   150 * time.Millisecond,
+		FirstAttemptDelay: 0,
+		RetrySchedule:     []time.Duration{200 * time.Millisecond, 500 * time.Millisecond},
+		TickInterval:      50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("archive: new: %v", err)
+	}
+	a.Start(context.Background())
+	t.Cleanup(func() { _ = a.Close() })
+	return a
 }

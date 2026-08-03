@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
 
 	"multiverse/internal/bb8"
 	"multiverse/internal/contracta"
+	"multiverse/internal/contractb"
 	"multiverse/internal/journal"
 	"multiverse/internal/wire"
 	"multiverse/internal/wsutil"
@@ -26,8 +28,12 @@ type modSession struct {
 	modVersion  string
 	simSize     float64
 	borderWidth float64
+	// borderEdges are the edges the mod will accept an inbound organism on.
+	// exportEdge is the single edge it may export through — different doors
+	// (contract-a.md §14, A11).
 	borderEdges []string
-	sector      *contracta.Sector
+	exportEdge  string
+	ringSlot    *int
 	worldName   string
 
 	lastHeartbeat time.Time
@@ -172,6 +178,14 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 		sess.conn.Close(contracta.CloseGameVersionUnsupport, "bb8-schema has no dialect for "+cfg.GameVersion)
 		return false
 	}
+	// §14 A11: an absent exportEdge is supplied by a single-entry borderEdges,
+	// and only an ambiguous borderEdges is a close. Validate already applied
+	// the same rule, so this cannot fail here — it is read for the value.
+	exportEdge, err := cfg.ResolveExportEdge()
+	if err != nil {
+		sess.conn.Close(contracta.CloseMalformedFrame, err.Error())
+		return false
+	}
 
 	s.mu.Lock()
 	first := !sess.handshaked
@@ -185,13 +199,14 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 	sess.simSize = *cfg.SimulationSize
 	sess.borderWidth = *cfg.BorderWidth
 	sess.borderEdges = append([]string(nil), cfg.BorderEdges...)
-	sess.sector = cfg.Sector
+	sess.exportEdge = exportEdge
+	sess.ringSlot = cfg.RingSlot
 	sess.worldName = cfg.WorldName
 	sess.lastHeartbeat = time.Now()
 
-	if mismatch := s.sectorMismatchLocked(sess); mismatch != "" {
+	if mismatch := s.slotMismatchLocked(sess); mismatch != "" {
 		s.mu.Unlock()
-		sess.conn.Close(contracta.CloseSectorMismatch, mismatch)
+		sess.conn.Close(contracta.CloseSlotMismatch, mismatch)
 		return false
 	}
 
@@ -208,49 +223,32 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 
 	s.log.Info("contract A: handshake", "sessionId", cfg.SessionID, "reason", cfg.Reason,
 		"gameVersion", cfg.GameVersion, "modVersion", cfg.ModVersion,
-		"simulationSize", sess.simSize, "borderEdges", sess.borderEdges, "world", cfg.WorldName)
+		"simulationSize", sess.simSize, "borderEdges", sess.borderEdges,
+		"exportEdge", sess.exportEdge, "ringSlot", derefIntPtr(cfg.RingSlot), "world", cfg.WorldName)
 	s.refreshClaim()
 	return true
 }
 
-// sectorMismatchLocked implements the advisory CONFIG_UPDATE.sector check of
-// contract-a.md §5.1. It can only fire once a sector has been granted.
-func (s *Sidecar) sectorMismatchLocked(sess *modSession) string {
-	if sess.sector == nil || s.sector == "" {
+// slotMismatchLocked implements the advisory CONFIG_UPDATE.ringSlot check of
+// contract-a.md §5.1 and §14 A14. It can only fire once a slot has been
+// granted, and it catches a mis-wired three-instance rig in one second instead
+// of one hour.
+func (s *Sidecar) slotMismatchLocked(sess *modSession) string {
+	if sess.ringSlot == nil || s.slot == 0 {
 		return ""
 	}
-	want, ok := sectorXY(s.sector)
-	if !ok {
-		return ""
-	}
-	if *sess.sector != want {
-		return "mod claims sector " + sectorString(*sess.sector) +
-			" but this sidecar holds " + s.sector + " " + sectorString(want)
+	if *sess.ringSlot != s.slot {
+		return "mod claims ring slot " + strconv.Itoa(*sess.ringSlot) +
+			" but this sidecar holds " + strconv.Itoa(s.slot)
 	}
 	return ""
 }
 
-func sectorString(s contracta.Sector) string {
-	return "(" + itoa(s.X) + "," + itoa(s.Y) + ")"
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
+func derefIntPtr(p *int) int {
+	if p == nil {
+		return 0
 	}
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	var b []byte
-	for i > 0 {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
-	}
-	if neg {
-		return "-" + string(b)
-	}
-	return string(b)
+	return *p
 }
 
 func lowerUUID(s string) string {
@@ -332,6 +330,7 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 
 	s.mu.Lock()
 	// 2 and 3. migrationId dedup against the journal.
+	//nolint:nestif // the two dedup outcomes of §5.3 steps 2 and 3
 	if st, ok := s.jr.Get(out.MigrationID); ok {
 		same := st.Entry.PayloadHash == hash
 		journaledAt := st.Entry.JournaledAt
@@ -351,7 +350,7 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	}
 
 	// 4. Edge and peer checks.
-	dest, code, message := s.edgeOpenLocked(out.ExitEdge, *out.SimulationSize)
+	destSlot, code, message := s.exportOpenLocked(out.ExitEdge, *out.SimulationSize)
 	if code != "" {
 		s.mu.Unlock()
 		s.nackOut(sess, out.MigrationID, entityID, code, message, 15000)
@@ -363,8 +362,15 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 			"too many outbound migrations already in custody", 15000)
 		return true
 	}
+	sourceSlot := s.slot
+	s.mu.Unlock()
 
-	// 5. Durable journal write. Only after this may the sidecar ACK.
+	// 5. Build the lineage annex (§14, A12). This step MUST NOT fail the
+	// migration: a gap is a normal outcome, and D11 already treats a missing
+	// parent as normal.
+	genomeHash, parents := s.buildAnnex(out)
+
+	// 6. Durable journal write. Only after this may the sidecar ACK.
 	entry := journal.Entry{
 		MigrationID:    out.MigrationID,
 		EntityID:       entityID,
@@ -379,10 +385,13 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 		Heading:        *out.Heading,
 		SimulationSize: *out.SimulationSize,
 		SimTick:        *out.SimTick,
-		SourceSector:   s.sector,
-		DestSector:     dest,
+		SourceSlot:     sourceSlot,
+		DestSlot:       destSlot,
+		GenomeHash:     genomeHash,
+		Parents:        parents,
 		JournaledAt:    time.Now().UnixMilli(),
 	}
+	s.mu.Lock()
 	st, err := s.jr.Create(journal.Out, entry, false)
 	s.mu.Unlock()
 	if err != nil {
@@ -391,25 +400,106 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 		return true
 	}
 	s.log.Info("contract A: took custody", "migrationId", out.MigrationID, "entityId", entityID,
-		"exitEdge", out.ExitEdge, "destSector", dest)
+		"exitEdge", out.ExitEdge, "destSlot", destSlot, "genomeHash", genomeHash,
+		"parents", len(parents))
 
 	s.faultPoint(FaultPostJournal)
 
-	// 6. Custody has moved. Tell the mod to destroy the organism.
+	// 7. Custody has moved. Tell the mod to destroy the organism.
 	s.sendMod(contracta.TypeMigrateOutAck, contracta.MigrateOutAck{
 		MigrationID: out.MigrationID, EntityID: entityID, JournaledAt: st.Entry.JournaledAt})
 
-	// 7. Forward. Never before the flush.
+	// 8. Forward, with the annex attached and every parent blob stripped.
+	// Never before the flush.
+	//
+	// This goes through the custody scheduler rather than forwarding directly:
+	// the journal write above released the lock, so the tick may already have
+	// picked the entry up, and forwarding again here would put two identical
+	// frames on the wire. The receiver deduplicates either way, but a
+	// gratuitous duplicate turns every ACK into duplicate: true and makes the
+	// archive's record read as a re-delivery.
 	s.mu.Lock()
-	if s.canForwardLocked(st) && s.forwardLocked(st) {
-		s.schedFor(out.MigrationID).reachedPeer = true
-		s.schedFor(out.MigrationID).nextForward = time.Now().Add(s.cfg.ForwardRetry)
-		if _, err := s.jr.Apply(out.MigrationID, journal.Update{Status: journal.StatusInFlight}); err != nil {
-			s.log.Error("sidecar: journal update failed", "migrationId", out.MigrationID, "err", err)
-		}
-	}
+	s.tickOutbound(st, time.Now())
 	s.mu.Unlock()
 	return true
+}
+
+// buildAnnex implements contract-a.md §14 A12 and contract-b-m3.md §6.6: the
+// mod ships opaque blobs, the sidecar hashes them.
+//
+// It hashes the migrant's genome and every present parent blob with the
+// canonical projection, caches each blob under its hash so a later
+// GENOME_REQUEST can be answered, and records a gap for every parent entry
+// that carries no blob or whose blob will not hash. Nothing in here may fail a
+// migration — the annex is bookkeeping; the organism is custody.
+//
+// The blobs are never returned: the caller journals the annex and forwards it,
+// and the parent blobs go no further than the cache.
+func (s *Sidecar) buildAnnex(out contracta.MigrateOut) (string, []journal.ParentRef) {
+	genomeHash, err := bb8.GenomeHash(out.Payload, out.GameVersion)
+	if err != nil {
+		// genome-hash.md §8: a payload that passed validation and then fails to
+		// hash is a bb8-schema defect and MUST be logged loudly. It is not a
+		// reason to refuse the organism.
+		s.log.Error("contract A: the migrant's own genome will not hash — this is a bb8-schema defect",
+			"migrationId", out.MigrationID, "entityId", derefInt32(out.EntityID), "err", err)
+	} else {
+		s.cacheGenome(genomeHash, out.GameVersion, out.Payload)
+	}
+
+	parents := out.Parents
+	if len(parents) > contracta.MaxParentBlobs {
+		// §10: a longer array is truncated with one warning, never a NACK.
+		s.log.Warn("contract A: MIGRATE_OUT carried more than maxParentBlobs parents, truncating",
+			"migrationId", out.MigrationID, "parents", len(parents))
+		parents = parents[:contracta.MaxParentBlobs]
+	}
+	refs := make([]journal.ParentRef, 0, len(parents))
+	for _, p := range parents {
+		if p.EntityID == nil || *p.EntityID == 0 {
+			// §5.3: 0 is the game's "unassigned" sentinel and such an entry
+			// MUST be omitted by the sender. Drop it rather than record a
+			// lineage node that names nobody.
+			s.log.Warn("contract A: dropping a parent entry with no entityId",
+				"migrationId", out.MigrationID)
+			continue
+		}
+		ref := journal.ParentRef{EntityID: *p.EntityID}
+		if p.Payload == "" {
+			// The usual case: BibiteGenes drops the parentage once the parent
+			// GameObject is gone. A blob the mod dropped for frame size arrives
+			// the same way and is indistinguishable from here.
+			ref.GapReason = contractb.GapParentGone
+			refs = append(refs, ref)
+			continue
+		}
+		version := p.GameVersion
+		if version == "" {
+			// §5.3: absent means "the same as the migrant's gameVersion",
+			// which is always true in practice — both were serialized in the
+			// same tick.
+			version = out.GameVersion
+		}
+		hash, err := bb8.GenomeHash(p.Payload, version)
+		if err != nil {
+			ref.GapReason = contractb.GapBlobInvalid
+			s.log.Warn("contract A: a parent blob will not hash, recording a gap",
+				"migrationId", out.MigrationID, "parentEntityId", *p.EntityID, "err", err)
+			refs = append(refs, ref)
+			continue
+		}
+		ref.GenomeHash = hash
+		s.cacheGenome(hash, version, p.Payload)
+		refs = append(refs, ref)
+	}
+	return genomeHash, refs
+}
+
+func derefInt32(p *int32) int32 {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 func (s *Sidecar) onMigrateInAck(sess *modSession, env wire.Envelope) bool {

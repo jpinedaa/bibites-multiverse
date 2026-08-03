@@ -30,10 +30,13 @@ const (
 
 // WebSocket close codes (contract-a.md §2.1).
 const (
-	CloseNormal               = 1000
-	CloseTooBig               = 1009
-	CloseProtocolUnsupported  = 4000
-	CloseSectorMismatch       = 4001
+	CloseNormal              = 1000
+	CloseTooBig              = 1009
+	CloseProtocolUnsupported = 4000
+	// CloseSlotMismatch keeps 4001's number and behaviour. It was
+	// SECTOR_MISMATCH over the retired {x,y} grid and is now read as
+	// SLOT_MISMATCH (amended — §14, A14).
+	CloseSlotMismatch         = 4001
 	CloseGameVersionUnsupport = 4002
 	CloseMalformedFrame       = 4003
 	CloseHeartbeatTimeout     = 4004
@@ -144,8 +147,11 @@ const KindBibite = "bibite"
 
 // EDGE_STATUS reasons (contract-a.md §5.4).
 const (
-	ReasonPeerLive         = "peer_live"
-	ReasonNoPeer           = "no_peer"
+	ReasonPeerLive = "peer_live"
+	ReasonNoPeer   = "no_peer"
+	// ReasonPeerModAbsent is new in contract-a/1.1 (§14, A11): the east
+	// neighbour's sidecar is live but has no mod, so it cannot spawn anything.
+	ReasonPeerModAbsent    = "peer_mod_absent"
 	ReasonPeerIncompatible = "peer_incompatible"
 	ReasonPeerUnreachable  = "peer_unreachable"
 	ReasonPeerOverloaded   = "peer_overloaded"
@@ -168,12 +174,15 @@ const (
 	MigrateOutTimeoutMs      = 5000
 	MigrationCooldownSeconds = 5
 	EntryImmunitySeconds     = 5
-	HeartbeatTimeout         = HeartbeatTimeoutMs * time.Millisecond
-	MigrateInAckTimeout      = MigrateInAckTimeoutMs * time.Millisecond
-	ExportRetention          = ExportRetentionSeconds * time.Second
-	WSPingInterval           = WSPingIntervalMs * time.Millisecond
-	WSPongTimeout            = WSPongTimeoutMs * time.Millisecond
-	ContractAPath            = "/contract-a/v1"
+	// MaxParentBlobs bounds MIGRATE_OUT.parents (§10, §14 A12). A longer array
+	// is truncated by the sidecar with one warning, never a NACK.
+	MaxParentBlobs      = 2
+	HeartbeatTimeout    = HeartbeatTimeoutMs * time.Millisecond
+	MigrateInAckTimeout = MigrateInAckTimeoutMs * time.Millisecond
+	ExportRetention     = ExportRetentionSeconds * time.Second
+	WSPingInterval      = WSPingIntervalMs * time.Millisecond
+	WSPongTimeout       = WSPongTimeoutMs * time.Millisecond
+	ContractAPath       = "/contract-a/v1"
 )
 
 // Vec is a 2D vector in the source sim's world axes (contract-a.md §4.4).
@@ -182,11 +191,11 @@ type Vec struct {
 	Y float64 `json:"y"`
 }
 
-// Sector is the mod's advisory configured sector (contract-a.md §5.1).
-type Sector struct {
-	X int `json:"x"`
-	Y int `json:"y"`
-}
+// The {x, y} sector of contract-a/1 is retired (§14, A14) and has no Go type
+// here. D8 retires the grid: a contract-a/1.1 mod MUST NOT send `sector`, and a
+// contract-a/1.1 sidecar MUST ignore it when an older mod does. Deleting the
+// field is that ignore — encoding/json drops an unknown field, so an old mod's
+// `sector` reaches nothing and closes nothing. `ringSlot` replaces it.
 
 // ErrInvalid marks a data-level validation failure. It is answered with the
 // matching NACK, never with a close (contract-a.md §3.2, §9.3).
@@ -200,15 +209,45 @@ func invalid(format string, args ...any) error {
 
 // ConfigUpdate is CONFIG_UPDATE (contract-a.md §5.1).
 type ConfigUpdate struct {
-	SessionID      string   `json:"sessionId"`
-	Reason         string   `json:"reason"`
-	GameVersion    string   `json:"gameVersion"`
-	ModVersion     string   `json:"modVersion"`
+	SessionID   string `json:"sessionId"`
+	Reason      string `json:"reason"`
+	GameVersion string `json:"gameVersion"`
+	ModVersion  string `json:"modVersion"`
+	// SimulationSize is S, the playable half-extent.
 	SimulationSize *float64 `json:"simulationSize"`
-	BorderEdges    []string `json:"borderEdges"`
-	BorderWidth    *float64 `json:"borderWidth"`
-	Sector         *Sector  `json:"sector,omitempty"`
-	WorldName      string   `json:"worldName,omitempty"`
+	// BorderEdges are the edges the mod has a strip on and will accept an
+	// inbound organism through — ["E","W"] under the ring (§14, A11).
+	BorderEdges []string `json:"borderEdges"`
+	// ExportEdge is the one edge this sim exports through, REQUIRED from
+	// contract-a/1.1 (§14, A11). Absent is not a close: see ResolveExportEdge.
+	ExportEdge  string   `json:"exportEdge,omitempty"`
+	BorderWidth *float64 `json:"borderWidth"`
+	// RingSlot is the mod's configured ring slot (§14, A14). Advisory; a
+	// disagreement with the slot the sidecar holds closes with 4001.
+	RingSlot  *int   `json:"ringSlot,omitempty"`
+	WorldName string `json:"worldName,omitempty"`
+}
+
+// ResolveExportEdge implements the A16-compatible fallback of §14, A11: an
+// absent exportEdge is supplied by a single-entry borderEdges, and only an
+// ambiguous borderEdges is unusable. That fallback is what keeps the new field
+// additive under §3.1's minor rule instead of a breaking change.
+func (c *ConfigUpdate) ResolveExportEdge() (string, error) {
+	if c.ExportEdge != "" {
+		if !ValidEdge(c.ExportEdge) {
+			return "", invalid("exportEdge %q is not N/S/E/W", c.ExportEdge)
+		}
+		for _, e := range c.BorderEdges {
+			if e == c.ExportEdge {
+				return c.ExportEdge, nil
+			}
+		}
+		return "", invalid("exportEdge %q is not a member of borderEdges %v", c.ExportEdge, c.BorderEdges)
+	}
+	if len(c.BorderEdges) == 1 {
+		return c.BorderEdges[0], nil
+	}
+	return "", invalid("no exportEdge and borderEdges %v does not have exactly one entry", c.BorderEdges)
 }
 
 func (c *ConfigUpdate) Validate() error {
@@ -250,6 +289,12 @@ func (c *ConfigUpdate) Validate() error {
 	}
 	if !wire.Finite(*c.BorderWidth) || *c.BorderWidth < 0 {
 		return invalid("borderWidth %v is not a non-negative finite number", *c.BorderWidth)
+	}
+	if c.RingSlot != nil && *c.RingSlot < 1 {
+		return invalid("ringSlot %d is not a ring slot", *c.RingSlot)
+	}
+	if _, err := c.ResolveExportEdge(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -293,19 +338,34 @@ func (h *Heartbeat) Validate() error {
 	return nil
 }
 
+// ParentBlob is one entry of MIGRATE_OUT.parents (contract-a.md §14, A12).
+//
+// The mod ships; the sidecar hashes. Payload is opaque to the mod — D4 forbids
+// it to parse a genome — and the sidecar hashes it, caches it under that hash
+// and strips it before the envelope goes on Contract B. An absent Payload means
+// the parent is gone, which is the normal case and never an error.
+type ParentBlob struct {
+	EntityID    *int32 `json:"entityId"`
+	Payload     string `json:"payload,omitempty"`
+	GameVersion string `json:"gameVersion,omitempty"`
+}
+
 // MigrateOut is MIGRATE_OUT (contract-a.md §5.3).
 type MigrateOut struct {
-	MigrationID    string   `json:"migrationId"`
-	EntityID       *int32   `json:"entityId"`
-	Kind           string   `json:"kind"`
-	GameVersion    string   `json:"gameVersion"`
-	Payload        string   `json:"payload"`
-	ExitEdge       string   `json:"exitEdge"`
-	ExitPosition   *float64 `json:"exitPosition"`
-	Velocity       *Vec     `json:"velocity"`
-	Heading        *float64 `json:"heading"`
-	SimulationSize *float64 `json:"simulationSize"`
-	SimTick        *int64   `json:"simTick"`
+	MigrationID string `json:"migrationId"`
+	EntityID    *int32 `json:"entityId"`
+	Kind        string `json:"kind"`
+	GameVersion string `json:"gameVersion"`
+	Payload     string `json:"payload"`
+	// Parents are the lineage inputs, in genes.parent1 then genes.parent2
+	// order (§14, A12). Nothing here may ever fail a migration.
+	Parents        []ParentBlob `json:"parents,omitempty"`
+	ExitEdge       string       `json:"exitEdge"`
+	ExitPosition   *float64     `json:"exitPosition"`
+	Velocity       *Vec         `json:"velocity"`
+	Heading        *float64     `json:"heading"`
+	SimulationSize *float64     `json:"simulationSize"`
+	SimTick        *int64       `json:"simTick"`
 }
 
 func (m *MigrateOut) Validate() error {

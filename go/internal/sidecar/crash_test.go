@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"multiverse/internal/contracta"
-	"multiverse/internal/contractb"
 )
 
 // childSidecar is a real multiverse-sidecar process. The test binary
@@ -21,15 +20,14 @@ type childSidecar struct {
 	dir     string
 	relay   string
 	peerID  string
-	sector  string
 	cmd     *exec.Cmd
 	addr    string
 	logFile *os.File
 }
 
-func startChildSidecar(t *testing.T, dir, relayURL, peerID, sector, fault string) *childSidecar {
+func startChildSidecar(t *testing.T, dir, relayURL, peerID, fault string) *childSidecar {
 	t.Helper()
-	c := &childSidecar{t: t, dir: dir, relay: relayURL, peerID: peerID, sector: sector}
+	c := &childSidecar{t: t, dir: dir, relay: relayURL, peerID: peerID}
 	c.start(fault)
 	t.Cleanup(c.kill)
 	return c
@@ -46,13 +44,15 @@ func (c *childSidecar) start(fault string) {
 		"--relay", c.relay,
 		"--peer-id", c.peerID,
 		"--data-dir", c.dir,
-		"--sector", c.sector,
 		"--log-level", "info",
 	}
 	cmd := exec.Command(os.Args[0])
 	cmd.Env = append(os.Environ(),
 		"MULTIVERSE_TEST_HELPER=sidecar",
 		"MULTIVERSE_TEST_ARGS="+strings.Join(args, "\x1f"),
+		// contract-b-m3.md §3.1: the token comes from the environment, never
+		// from a flag that would put it in the process listing.
+		"MULTIVERSE_TOKEN="+testToken,
 	)
 	if fault != "" {
 		cmd.Env = append(cmd.Env, "MULTIVERSE_FAULT="+fault)
@@ -151,26 +151,25 @@ func TestCrashCustodyExactlyOnce(t *testing.T) {
 func runCrashCustody(t *testing.T, fault string) {
 	relaySrv := startRelay(t)
 
-	// Sector B and its mod stay in-process; only the exporting side is a real
-	// process that can be killed.
-	cfgB := fastConfig(t, relaySrv.url(), "peer-b", contractb.SectorB)
+	// The exporting peer is a real process that can be killed; its east
+	// neighbour stays in-process. The killed side claims slot 1, so it must
+	// start first — §7.2 rule 4 appends at the tail.
+	dataDir := t.TempDir()
+	childA := startChildSidecar(t, dataDir, relaySrv.url(), "peer-a", fault)
+
+	cfgB := fastConfig(t, relaySrv.url(), "peer-b")
 	cfgB.MigrateInAckTimeout = 2 * time.Second
 	sideB := startSidecar(t, cfgB)
-	waitSector(t, sideB, contractb.SectorB)
+	waitSlot(t, sideB, 2)
 	worldB := newWorld()
 	modB := dialFakeMod(t, fakeModOptions{
-		url: sideB.URL(), world: worldB, borderEdges: []string{contracta.EdgeW},
-		sector: &contracta.Sector{X: 1, Y: 0}, heartbeat: 200 * time.Millisecond})
-
-	dataDir := t.TempDir()
-	childA := startChildSidecar(t, dataDir, relaySrv.url(), "peer-a", contractb.SectorA, fault)
+		url: sideB.URL(), world: worldB, heartbeat: 200 * time.Millisecond})
 
 	worldA := newWorld()
 	modA := dialFakeMod(t, fakeModOptions{
-		url: childA.url(), world: worldA, borderEdges: []string{contracta.EdgeE},
-		sector: &contracta.Sector{X: 0, Y: 0}, heartbeat: 300 * time.Millisecond})
+		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond})
 	modA.waitEdge(contracta.EdgeE, true, 20*time.Second)
-	modB.waitEdge(contracta.EdgeW, true, 20*time.Second)
+	modB.waitEdge(contracta.EdgeE, true, 20*time.Second)
 
 	migrationID := modA.migrateOut(testEntityID, contracta.EdgeE, 0.6031925)
 
@@ -179,11 +178,11 @@ func runCrashCustody(t *testing.T, fault string) {
 	childA.sigkill()
 	modA.abort()
 
-	// Restart against the same --data-dir, with no fault this time.
+	// Restart against the same --data-dir, with no fault this time. The peer id
+	// and the slot are persisted there, so it reclaims slot 1 (§7.4).
 	childA.start("")
 	modA2 := dialFakeMod(t, fakeModOptions{
-		url: childA.url(), world: worldA, borderEdges: []string{contracta.EdgeE},
-		sector: &contracta.Sector{X: 0, Y: 0}, heartbeat: 300 * time.Millisecond})
+		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond})
 	_ = modA2
 
 	waitFor(t, 30*time.Second, "the organism to be accounted for after the crash", func() bool {
@@ -195,13 +194,13 @@ func runCrashCustody(t *testing.T, fault string) {
 	inA := worldA.spawnCount(migrationID)
 	inB := worldB.spawnCount(migrationID)
 	if inA+inB != 1 {
-		t.Fatalf("the organism is delivered-or-bounced %d times (A=%d, B=%d), want exactly 1; child log:\n%s",
+		t.Fatalf("the organism is delivered-or-bounced %d times (slot1=%d, slot2=%d), want exactly 1; child log:\n%s",
 			inA+inB, inA, inB, childA.tailLog())
 	}
 	if worldA.isAlive(testEntityID) && worldB.isAlive(testEntityID) {
 		t.Fatal("the organism is alive in both sims: this is the duplication D2 forbids")
 	}
 	if got := worldA.destroyCount(migrationID); got > 1 {
-		t.Fatalf("sector A destroyed its copy %d times, want at most 1", got)
+		t.Fatalf("slot 1 destroyed its copy %d times, want at most 1", got)
 	}
 }

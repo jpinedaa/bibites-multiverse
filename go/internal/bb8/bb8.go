@@ -1,18 +1,22 @@
-// Package bb8 is the M2 skeleton of the bb8-schema component
-// (system_decomposition.md §1, D4).
+// Package bb8 is the bb8-schema component (system_decomposition.md §1, D4).
 //
-// The organism payload is opaque to the mod and is validated only here, on the
-// sidecar side, in both directions. M2 needs three things and nothing more:
+// The organism payload is opaque to the mod and is read only here, on the
+// sidecar and archive side. This file holds the structural half:
 //
 //   - a size and shape gate, so a garbage blob is answered with
 //     MIGRATE_OUT_NACK / INVALID_PAYLOAD instead of travelling the wire,
-//   - a stable content hash, which is the payload-identity half of the
-//     migrationId dedup rule (contract-a.md §5.3 step 2),
+//   - a stable content hash of the whole payload string, which is the
+//     payload-identity half of the migrationId dedup rule (contract-a.md §5.3
+//     step 2). This is NOT the genome hash — see genome.go, which never
+//     appears in the same field,
 //   - the two fields the delivery path reads out of the blob: the entity id
 //     (contract-a.md §5.7) and the heading (contract-a.md §4.4).
 //
-// Gene bounds, node and synapse validation, dialect detection and cross-version
-// conversion are M3 work. Hook is the seam they plug into.
+// genome.go adds M3's canonical genome projection and genomeHash
+// (contracts/genome-hash.md), and store.go the content-addressed cache both the
+// sidecar and the archive keep. Gene bounds, node and synapse validation and
+// cross-version conversion are still deferred: Hook is the seam they plug into
+// (genome-hash.md §9).
 package bb8
 
 import (

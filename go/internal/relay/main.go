@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"multiverse/internal/contractb"
+	"multiverse/internal/lantoken"
 )
 
 // Main is the multiverse-relay entry point, factored out of package main so a
@@ -24,22 +25,60 @@ func Main(args []string, stderr io.Writer) int {
 	fs := flag.NewFlagSet("multiverse-relay", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", env("MULTIVERSE_RELAY_LISTEN",
-		fmt.Sprintf("127.0.0.1:%d", contractb.DefaultRelayPort)),
-		"host:port for the Contract B WebSocket server")
+		fmt.Sprintf("0.0.0.0:%d", contractb.DefaultRelayPort)),
+		"host:port for the Contract B WebSocket server; M3 binds a LAN-reachable address")
+	dataDir := fs.String("data-dir", env("MULTIVERSE_RELAY_DATA_DIR", "multiverse-relay-data"),
+		"directory for ring.json, the durable slot reservations")
+	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
+		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
+	insecure := fs.Bool("insecure-no-token", false,
+		"accept unauthenticated connections; for a single-machine test rig only, never on the LAN")
+	releaseSlot := fs.Int("release-slot", 0,
+		"release ring slot n at startup and exit; the operator escape hatch of contract-b-m3.md §7.5")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
 	log := newLogger(stderr, *logLevel)
-	srv := New(Options{Logger: log})
+
+	// There is no flag that takes the token literally: it would put the secret
+	// in every process listing (contract-b-m3.md §3.1).
+	token, err := lantoken.Load(*tokenFile)
+	if err != nil && !*insecure {
+		log.Error("relay: no LAN token", "err", err,
+			"hint", "set MULTIVERSE_TOKEN or pass --token-file; --insecure-no-token is test-rig only")
+		return 1
+	}
+
+	srv, err := New(Options{
+		Logger:          log,
+		DataDir:         *dataDir,
+		Token:           token,
+		InsecureNoToken: *insecure,
+	})
+	if err != nil {
+		log.Error("relay: startup failed", "err", err)
+		return 1
+	}
+
+	if *releaseSlot > 0 {
+		if err := srv.ReleaseSlot(*releaseSlot); err != nil {
+			log.Error("relay: release failed", "slot", *releaseSlot, "err", err)
+			return 1
+		}
+		log.Info("relay: slot released; the number is retired and will not be reused",
+			"slot", *releaseSlot)
+		return 0
+	}
 
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {
 		log.Error("relay: listen failed", "addr", *listen, "err", err)
 		return 1
 	}
-	log.Info("relay: listening", "addr", ln.Addr().String(), "path", contractb.ContractBPath)
+	log.Info("relay: listening", "addr", ln.Addr().String(), "path", contractb.ContractBPath,
+		"dataDir", *dataDir, "ring", srv.RingSnapshot())
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
