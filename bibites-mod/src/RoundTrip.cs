@@ -127,16 +127,11 @@ namespace BibitesMultiverse
                 context.links = OrganismLinks.Capture(context.body);
                 context.links.LogSummary();
 
-                // Remove from the tracker first so OnDestroy -> BibiteDeath does not bump
-                // nDeath or the death-age quantiles (BibiteTracker.cs:172-179).
-                BibiteTracker tracker = BibiteTracker.instance;
-                bool removed = tracker != null && tracker.bibites != null && tracker.bibites.Remove(context.body);
+                // The clean-removal recipe: de-list from the tracker first (so OnDestroy -> BibiteDeath
+                // does not bump nDeath or the death-age quantiles), then a raw Destroy.
+                bool removed = GameBridge.DestroyCleanly(context.body);
                 MultiversePlugin.Log.LogInfo(
-                    $"removed from BibiteTracker.instance.bibites: {removed} (remaining={(tracker != null && tracker.bibites != null ? tracker.bibites.Count : -1)})");
-
-                // Raw Destroy: no corpse, no meat, no stomach pellets, no eggs laid.
-                // Precedent: UIScripts/SelectionPanel.cs:310. Never Die().
-                UnityEngine.Object.Destroy(context.gameObject);
+                    $"removed from BibiteTracker.instance.bibites: {removed} (remaining={GameBridge.LivingPopulation()})");
                 result.destroyed = true;
                 MultiversePlugin.Log.LogInfo("destroyed the organism GameObject — waiting one frame for Unity to finish.");
                 return true;
@@ -287,10 +282,7 @@ namespace BibitesMultiverse
         /// </summary>
         private static string Stamp(JObject payload, string description)
         {
-            JObject stamped = (JObject)payload.DeepClone();
-            stamped["version"] = Application.version;
-            stamped["desc"] = description;
-            return stamped.ToString(Formatting.Indented);
+            return GameBridge.StampVersion(payload, description).ToString(Formatting.Indented);
         }
 
         private static void WritePayload(string fileName, string json)

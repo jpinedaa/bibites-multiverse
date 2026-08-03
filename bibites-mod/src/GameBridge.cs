@@ -151,6 +151,140 @@ namespace BibitesMultiverse
             return body != null && !body.destroyed;
         }
 
+        /// <summary>
+        /// The clean-removal recipe of m1_findings.md §5.2: de-list from BibiteTracker **first**, so
+        /// OnDestroy -> BibiteDeath leaves nDeath and the death-age quantiles untouched, then a raw
+        /// UnityEngine.Object.Destroy — no corpse, no meat pile, no stomach pellets, no eggs laid.
+        /// Never Die(). Precedent: UIScripts/SelectionPanel.cs:310.
+        ///
+        /// Destruction is deferred to the end of the frame: the caller must not assume the object is
+        /// gone in the same frame.
+        /// </summary>
+        internal static bool DestroyCleanly(BibiteBody body)
+        {
+            if (body == null)
+            {
+                return false;
+            }
+
+            bool delisted = Untrack(body);
+            UnityEngine.Object.Destroy(body.gameObject);
+            return delisted;
+        }
+
+        /// <summary>Remove a body from BibiteTracker.instance.bibites. True when it was listed.</summary>
+        internal static bool Untrack(BibiteBody body)
+        {
+            BibiteTracker tracker = BibiteTracker.instance;
+            if (tracker == null || tracker.bibites == null || body == null)
+            {
+                return false;
+            }
+
+            return tracker.bibites.Remove(body);
+        }
+
+        /// <summary>
+        /// Put a body back in the tracker. BibiteTracker.TrackBibite has no duplicate guard
+        /// (m1_findings.md §4.2), so this checks first.
+        /// </summary>
+        internal static bool Track(BibiteBody body)
+        {
+            BibiteTracker tracker = BibiteTracker.instance;
+            if (tracker == null || tracker.bibites == null || body == null)
+            {
+                return false;
+            }
+
+            if (tracker.bibites.Contains(body))
+            {
+                return false;
+            }
+
+            tracker.bibites.Add(body);
+            return true;
+        }
+
+        /// <summary>
+        /// One organism's payload: SaveSystem.SerializeBibite plus the "version" key SaveBibite adds
+        /// (SaveSystem.cs:147). This is the opaque bb8 blob of contract-a.md §4.6 — the mod produces
+        /// it and never parses it beyond the eight position numbers.
+        /// </summary>
+        internal static JObject StampVersion(JObject payload, string description = null)
+        {
+            JObject stamped = (JObject)payload.DeepClone();
+            stamped["version"] = Application.version;
+            if (!string.IsNullOrEmpty(description))
+            {
+                stamped["desc"] = description;
+            }
+
+            return stamped;
+        }
+
+        internal static int LivingPopulation()
+        {
+            BibiteTracker tracker = BibiteTracker.instance;
+            if (tracker == null || tracker.bibites == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (BibiteBody body in tracker.bibites)
+            {
+                if (body != null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        internal static int EggPopulation()
+        {
+            BibiteTracker tracker = BibiteTracker.instance;
+            if (tracker == null || tracker.eggs == null)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (EggHatching egg in tracker.eggs)
+            {
+                if (egg != null)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// One definition of "a world is loaded and an organism can be spawned into it".
+        ///
+        /// The ProceduralSpriteManager check is not cosmetic: BibiteBody.FinalizeBirth calls
+        /// RequestBodySprite, which indexes the sprite lists directly, so restoring an organism before
+        /// the atlas is built throws IndexOutOfRange inside LoadBibite. That exception is swallowed by
+        /// LoadBibiteOrEggFromData, so without this gate a transient condition would be reported as a
+        /// permanent DESERIALIZE_FAILED.
+        /// </summary>
+        internal static bool SimulationReady()
+        {
+            return GameManager.isSim
+                && SimulationManager.Instance != null
+                && SaveSystem.instance != null
+                && SaveController.Instance != null
+                && TimeController.Instance != null
+                && BibiteTracker.instance != null
+                && BibiteTracker.instance.bibites != null
+                && WorldObjectsSpawner.Instance != null
+                && ProceduralSpriteManager.Instance != null
+                && ProceduralSpriteManager.Instance.done;
+        }
+
         /// <summary>Linear scan by entity ID, the same lookup LoadGame uses (SaveSystem.cs:754-782).</summary>
         internal static BibiteBody FindBodyById(int id)
         {
