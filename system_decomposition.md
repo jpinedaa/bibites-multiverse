@@ -63,9 +63,13 @@ Recorded so divergences are deliberate, not accidental. Section references (§) 
 - Validation rules: no input→input synapses, index bounds, weight type handling,
   gene bounds, NaN/Inf rejection, synapse-count and blob-size caps
 - Live attribute schema (health, energy, stomach, maturity, size, position, velocity)
+- Dialect detection: a `.bb8` written by the game's own `SaveSystem.SaveBibite` carries
+  full live state under a `body` key; a `.bb8template` (and community template exports)
+  carry genes + brain topology only
 - Payload-kind registry: `bibite` now; `corpse`/`pellet`/`egg` shapes later (§6.4)
 - Versioning — tagged with the game version it targets; cross-version conversion
-  (prior art: EinsteinEditor's auto-conversion)
+  (prior art: EinsteinEditor's auto-conversion). Version ordering must match the game's
+  `Utility.Version` semantics, alpha quirk included (see the research table below)
 
 ---
 
@@ -77,14 +81,18 @@ no `bb8-schema` (D4).
 **Tested by:** In-game manual testing; the M1 round-trip spike is its first exit test.
 
 **Owns:**
-- Harmony patches on `SimulationScripts.BibiteScripts.Bibite`
-- Border detection (position check each `Update()`, hysteresis zone)
+- Harmony patches on `SimulationScripts.BibiteScripts.BibiteBody` (the live organism
+  class; `BibiteBody.FixedUpdate()` is the per-organism tick)
+- Border detection (position check each `FixedUpdate()`, hysteresis zone)
 - **Void-avoidance suppression at open edges** (D3) — without it, migration ~never happens
-- Export: game-native serialize → opaque blob + version tag + exit edge + border
-  position + velocity → `MIGRATE_OUT` → destroy locally **only on `MIGRATE_OUT_ACK`**
-  (custody transferred, D2)
-- Import: `MIGRATE_IN` → thread-safe queue → `FixedUpdate()` dequeue → native spawn →
-  postfix state overwrite → entity ID re-index → **report `MIGRATE_IN_ACK/NACK`**
+- Export: game-native serialize (`SaveSystem.SerializeBibite`) → opaque blob + version
+  tag + exit edge + border position + velocity → `MIGRATE_OUT` → destroy locally
+  **only on `MIGRATE_OUT_ACK`** (custody transferred, D2). Local removal is a raw
+  `Object.Destroy` after de-listing from `BibiteTracker` — no corpse, no meat, no eggs
+- Import: `MIGRATE_IN` → thread-safe queue → `FixedUpdate()` dequeue → native
+  full-state restore (`SaveSystem.LoadBibiteOrEggFromData`, which preserves the entity
+  ID and needs no state overwrite) → re-link parent/child references →
+  **report `MIGRATE_IN_ACK/NACK`**
 - All Unity main-thread constraints (instantiation, destroy, transform writes)
 - Config: sector bounds, sidecar address/port, migration cooldown
 
@@ -196,7 +204,8 @@ EDGE_STATUS        Which edges (N/S/E/W) are currently open for migration — dr
    Mod destroys the organism.
 3. Sidecar sends `MIGRATION_PAYLOAD` (via relay in M2–M3, direct in M4).
 4. Receiving sidecar validates, admission-checks, journals, sends `MIGRATE_IN` to its
-   mod. Mod spawns + overwrites, replies `MIGRATE_IN_ACK`.
+   mod. Mod restores the organism from the blob and re-links its parent/child
+   references, then replies `MIGRATE_IN_ACK`.
 5. Receiving sidecar sends `MIGRATION_ACK`; the sender deletes its journal entry.
 6. Any remote NACK or timeout → the sender re-injects the organism into its own sim
    via `MIGRATE_IN` at the same edge (bounce-back).
@@ -279,7 +288,8 @@ BibitePayload
 │   ├── nodeOut: int                   #   target node index
 │   ├── weight: float | string         #   signal multiplier OR gene reference
 │   └── en: bool                       #   active/dormant
-└── liveState: LiveState               # runtime attributes (not in static bb8 files)
+└── liveState: LiveState               # the game's own .bb8 already persists all of
+                                       #   this; only .bb8template strips it
     ├── health, energy, stomach, maturity, size, age: float
     ├── position: {x, y}
     ├── velocity: {x, y}
@@ -321,12 +331,15 @@ standalone first step: its real shape is discovered in M1 and hardens through M2
 
 ### M1 — In-game round trip (the de-risking spike)
 One game instance, no sidecar, no network. A dev command in the mod: serialize a live
-organism (genes + brain + live state) → destroy it → respawn via the native spawn
-path → postfix overwrite → entity ID re-index.
+organism (genes + brain + live state) → destroy it → respawn via the game's own
+full-state restore (`SaveSystem.LoadBibiteOrEggFromData`, ID preserved) → re-link its
+parent/child references.
 **Exit test:** the organism resumes life with no observable change — same brain
-topology, stomach contents, maturity.
-**Why first:** every high-risk unknown in the table below lives here (spawn API,
-reflection paths, destroy safety), and its findings define the true payload shape.
+topology, stomach contents, maturity — and a subsequent world save still succeeds.
+**Why first:** every high-risk unknown in the table below lived here (spawn API,
+state access, destroy safety), and its findings define the true payload shape.
+The decompiled-source pass (`m1_findings.md`) has already closed the spawn-API,
+state-access and payload-fidelity unknowns; the in-game run is what confirms them.
 If M1 fails, nothing else matters.
 
 ### M2 — Two sims, one machine
@@ -360,8 +373,8 @@ species-catalog module.
 
 | Component | What we know (from research doc) | What we need to figure out |
 |---|---|---|
-| `bb8-schema` | JSON structure, node layout, synapse rules, gene array, weight polymorphism, validation constraints | Exact field names from real `.bb8` files; version differences between game updates; cross-version conversion (EinsteinEditor prior art); corpse/pellet/egg payload shapes (M5) |
-| `bibites-mod` | BepInEx/Harmony setup, patch targets (`Bibite.Update()`), export/import patterns, Constance-Mod overwrite technique, threading constraints | Exact class/method signatures in current `BibitesAssembly.dll`; spawn function API; entity ID registry internals; live-attribute access via reflection; **how to suppress void-avoidance per edge (D3)**; whether two game instances run on one machine (M2 rig); `.csproj` HintPaths |
+| `bb8-schema` | JSON structure, node layout, synapse rules, gene array, weight polymorphism, validation constraints. From `m1_findings.md`: the game's `.bb8` top-level keys (`transform`, `rb2d`, `genes`, `body`, `clock`, `brain`, `version`, `desc`) and the fact that a `.bb8` carries full live state while a `.bb8template` does not; genes are keyed by enum **name**, so gene reordering is safe and only additions/removals need conversion; **the `Utility.Version` alpha quirk** — a 4-argument `new Version(0,6,3,3)` binds to the alpha overload and means `0.6.3a3`, *not* `0.6.3.3`, and `V3` sorts before `Alpha`, so `bb8-schema` must reproduce that ordering | Version differences between game updates; cross-version conversion (EinsteinEditor prior art); the exact byte shape of community-tool `.bb8` dialects; whether Newtonsoft honours `[NonSerialized]` on `NEATBrain.Node.NIn/NOut` in the shipped DLL; corpse/pellet/egg payload shapes (M5) |
+| `bibites-mod` | BepInEx/Harmony setup, export/import patterns, threading constraints, the Constance-Mod overwrite technique (now only needed for the egg-hatch fallback). From `m1_findings.md`: exact signatures in `BibitesAssembly.dll`; spawn/restore API (`SaveSystem.LoadBibiteOrEggFromData`, public, no mutation, ID-preserving); serialize API (`SaveSystem.SerializeBibite`/`SaveBibite`); live-attribute access is public except `InternalClock` (covered by public `SerializationHelper.DeserializeObject`, so no mod-side reflection); no ID registry exists — IDs are random int32; clean removal is raw `Object.Destroy` after de-listing from `BibiteTracker`; patch targets (`BibiteBody.FixedUpdate()`, `EggHatching.Hatch()`) | Re-linking parent/child references after respawn (the stale-reference trap that breaks the *next* world save); **how to suppress void-avoidance per edge (D3)**; whether two game instances run on one machine (M2 rig); `.csproj` HintPaths |
 | `multiverse-sidecar` | Custody chain and journal semantics (D2); admission-control levers | Language choice; journal format and crash recovery; Contract A reconnection semantics (replay of un-acked `MIGRATE_IN`s); libp2p maturity per language (M4); lease design and churn healing for sector claims (M4) |
 | `multiverse-relay` | Star routing and single-arbiter sector assignment are well-trodden | **Who operates it** (and later the bootstrap nodes); sector assignment policy (user-chosen vs auto); capacity and abuse limits |
 | `species-catalog` | Community already shares `.bb8` on GitHub/Steam Workshop; content-addressing makes sense | Storage limits, search/index strategy, replication policy (all M5) |

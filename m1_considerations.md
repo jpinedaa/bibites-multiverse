@@ -5,9 +5,13 @@ This report expands milestone M1 of `system_decomposition.md`.
 ## Purpose
 
 M1 is a spike: one game instance, no sidecar, no network. The spike moves one live
-organism through a full round trip: serialize, destroy, respawn, overwrite. The goal
+organism through a full round trip: serialize, destroy, respawn, re-link. The goal
 is to remove the largest project risks first. All later milestones depend on this
 result. If M1 fails, the network design does not matter.
+
+A research pass on the decompiled game source removed three of the five initial risks.
+`m1_findings.md` holds that research. It is the source for the API names in this
+document.
 
 ## Scope
 
@@ -16,9 +20,8 @@ In scope:
 - Serialization of one live organism with the game's own Newtonsoft code
 - Capture of the live state: health, energy, stomach, maturity, age, position, velocity
 - Destruction of the organism with `UnityEngine.Object.Destroy()`
-- Respawn through the native spawn path in `SimulationScripts`
-- State overwrite in a postfix hook (the Constance-Mod technique)
-- Re-index of the entity ID
+- Respawn with `SaveSystem.LoadBibiteOrEggFromData`
+- Repair of the parent links and the child links after the respawn
 - A dev command in the mod that starts the round trip
 
 Out of scope:
@@ -29,82 +32,113 @@ Out of scope:
 - Thread-safe queues (M1 runs fully on the main thread; M2 adds the queue)
 - Corpses, pellets, and eggs (M5)
 
-## Risks That M1 Must Remove
+## Risks
 
-**Risk 1 — The spawn API.** The research does not name the native spawn function. We
-must find it in `BibitesAssembly.dll` with a decompiler. The spawn path can have side
-effects. For example, the game can randomize the newborn organism. A postfix hook
-must overwrite the organism after these effects. This function is the largest unknown
-in the project.
+### Resolved by the research pass
 
-**Risk 2 — Read access to the live state.** The Constance-Mod proves write access to
-the live attributes: health, energy, stomach, maturity. It does not prove read access
-on a live organism. M1 must find the read path for each attribute. If the fields are
-not public, reflection is the method.
+**Risk 1 — The spawn API. RESOLVED.** The spawn function is
+`SaveSystem.LoadBibiteOrEggFromData`. The function is public. No other code in the
+assembly calls it. The restore branch applies no mutation and no gene randomization.
+It keeps the entity ID, the position, the velocity, the age and the neuron
+activations. A postfix hook to undo randomization is not necessary. See
+`m1_findings.md` §1.
 
-**Risk 3 — Destroy safety.** `UnityEngine.Object.Destroy()` removes the organism
-object from the scene. Other systems can hold references to this object, for example
-predator targets or the selection UI. A stale reference causes an engine error. M1
-must prove that the destruction of one organism is safe while the simulation runs.
+**Risk 2 — Read access to the live state. RESOLVED.** Every attribute that M1 needs
+is public, with one exception: the `InternalClock` fields are `internal`. The public
+static method `SerializationHelper.DeserializeObject` reads and writes those fields.
+The mod needs no reflection of its own. See `m1_findings.md` §3.
 
-**Risk 4 — Fidelity of the payload.** The static `.bb8` schema is known from
-community tools. The full live payload is unknown. Field names can differ between
-game versions. M1 must record the exact field names and the source game version.
-This record becomes the first input for `bb8-schema` (decision D4).
+**Risk 4 — Fidelity of the payload. RESOLVED, and the assumption was wrong.** An
+on-disk `.bb8` file holds the full live runtime state. `SaveSystem.SaveBibite` writes
+the position, the velocity, the health, the energy, the stomach, the size, the age and
+the neuron activations. Only the template reader of the user interface
+(`Utility/BibiteTemplate.cs`) discards this data on import. A `.bb8template` file holds
+the template alone. `bb8-schema` must separate the two shapes with the `body` key
+(decision D4). See `m1_findings.md` §2.
 
-**Risk 5 — The entity ID re-index.** The game gives each active entity an internal
-integer ID. A respawned organism gets a new ID from the registry. M1 must find where
-the registry lives and how the game assigns the IDs. ID collisions cause memory
-access violations (research §6.5).
+### Open
+
+**Risk 3 — Destroy safety.** A direct `UnityEngine.Object.Destroy(body.gameObject)`
+call makes no corpse, no meat pile and no eggs. `BibiteBody.OnDestroy` spawns nothing
+and cleans all registries. The shipped user interface uses the same call in
+`SelectionPanel.DeleteSelection`. Do not call `Die()`. That path makes a corpse, or
+meat when corpses are off. Remove the body from `BibiteTracker.instance.bibites`
+before the destroy call. This step keeps the death counters and the death-age
+statistics clean. Unity defers the destruction to the end of the frame. The old
+instance and the new instance therefore exist together for a short time. Do not
+assume that the old object is gone in the same frame. See `m1_findings.md` §5.
+
+**Risk 5 — Stale cross-organism references.** `BibiteID.id` is a random 32-bit
+integer. The game has no ID counter and no ID-to-entity registry. Reuse of the
+original ID on respawn is the correct behavior. The real risk is a different one. Two
+reference sets survive the destruction: the parent's `BibiteEggLayingOrgan.children`
+and the child's `BibiteGenes.parent1` and `parent2`. A stale reference makes
+`BibiteEggLayingOrgan.SaveState` throw an exception on the next world save. That
+failure looks like a corrupted save file, not like a defect in the mod. Re-link both
+sides after the respawn. Mirror the repair code at `SaveSystem.cs:748-782`. See
+`m1_findings.md` §4.3.
+
+**Risk 6 — Hidden load errors.** `LoadBibiteOrEggFromData` catches every exception
+and returns null. A bad payload gives no diagnostic message. Call the private
+`LoadBibite` through reflection during development to see the real error. Ship the mod
+on the public wrapper. See `m1_findings.md` §1.2.
 
 ## Prerequisites
 
 - The installed game. Steam can update the game at any time. `sync-game-refs.sh` updates
   the reference DLLs and the decompiled source to the installed version
 - BepInEx, installed in the game directory
-- dnSpy (or an equal decompiler) and read access to `BibitesAssembly.dll`
+- The decompiled game source in `decompiled/BibitesAssembly/`. `sync-game-refs.sh`
+  makes it with `ilspycmd`
 - A C# plugin project with `<HintPath>` references to the Managed DLLs
 
 ## Exit Test
 
-The test uses one adult organism with a complex brain and food in the stomach.
+The test uses one adult organism with a complex brain and food in the stomach. The
+organism must not be latched to the mouth of another organism.
 
-1. Serialize the organism. Write the payload to a log file.
-2. Run the round-trip command on the organism.
-3. Serialize the organism again. Compare the two payloads.
-4. Watch the organism for one minute of simulation time.
+1. Start the game. Read the logged `Application.version` value in the BepInEx console.
+2. Serialize the organism. Write the payload to a log file.
+3. Run the round-trip command on the organism.
+4. Serialize the organism again. Compare the two payloads.
+5. Watch the organism for one minute of simulation time.
+6. Save the world from the game menu.
 
 The test passes when:
 
-- The two payloads are equal. Only the entity ID can differ.
+- The logged game version is `0.6.3.1`.
+- The two payloads are equal. The entity ID is equal too. Only the tick counters and
+  `clock.ticProgress` can differ, and only by the ticks between the two captures.
 - The organism continues its normal behavior: movement, food search, no health loss.
+- The world save completes with no error. This result proves that no stale
+  cross-organism reference remains.
 - The BepInEx console shows no errors.
 
 ## Fallbacks
 
-If a clean hook on the spawn function is not possible, two fallbacks exist:
+If the restore path fails, one fallback exists:
 
-- **The import path.** The game has an internal import routine for `.bb8` files. The
-  mod can call this routine with a temporary file.
-- **The egg path.** The Constance-Mod intercepts the newborn at the hatch point. The
-  mod can spawn an egg and overwrite the organism at hatch time. This path is slower,
-  but the hook point is proven.
+- **The egg path.** Spawn an egg and let it hatch. Patch `EggHatching.Hatch()` with a
+  Harmony postfix. Overwrite `__instance.newBornBody` with
+  `SerializationHelper.DeserializeObject`. This path is worse than the restore path:
+  `StartBody()` resets the health, the size and the clock, and `CopyBrain` zeroes the
+  neuron activations. Keep this path as a fallback only.
 
 ## Deliverables
 
 - A mod build with the round-trip dev command
-- A findings document with the class names, the method signatures, the field paths,
-  and the true payload shape
+- `m1_findings.md`, with the runtime results of the exit test added
 - An updated risk table for M2
 
 ## Next Steps
 
-1. Run `sync-game-refs.sh` to update the reference DLLs and the decompiled source.
-2. Install BepInEx in the game directory.
-3. Decompile `BibitesAssembly.dll` with dnSpy.
-4. Find the spawn functions and the serialization entry points. Record each signature
-   in the findings document.
-5. Create the C# plugin project with the `<HintPath>` references.
-6. Write a hotkey command that serializes the selected organism to a log file.
-7. Add the destroy step, the respawn step, and the overwrite step to the command.
-8. Run the exit test.
+1. Write the dev command. Follow the order of operations in `m1_findings.md`.
+2. Serialize the organism with `SaveSystem.SaveBibite` to a temporary file for the
+   first run. Switch to the in-memory `SerializeBibite` path after the test passes.
+3. Remove the body from `BibiteTracker.instance.bibites`. Then destroy the GameObject.
+4. Respawn with
+   `SaveSystem.instance.LoadBibiteOrEggFromData(json, true, null, null)`. Null-check
+   the result.
+5. Re-link the parent references and the child references after the respawn.
+6. Deploy the build with `deploy.sh`. Start the game with `game.sh start`.
+7. Run the exit test. Record the results in `m1_findings.md`.

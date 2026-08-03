@@ -16,7 +16,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 
 | Component | Version |
 |---|---|
-| The Bibites | Steam app 2736860, buildid 22383127; game version TBD — log `Application.version` from the plugin |
+| The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), still to be confirmed at runtime by logging `Application.version` from the plugin |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -59,5 +59,34 @@ through the BepInEx chainloader.
 
 ## Useful decompiled entry points found so far
 
+Full analysis in `m1_findings.md`; line numbers there track the current decompile.
+
+- `ManagementScripts.SaveSystem` (singleton `SaveSystem.instance`) — the whole
+  organism round trip: `SerializeBibite(GameObject)` (private, the payload builder),
+  `SaveBibite(GameObject, path, desc)` → `.bb8` with full live state,
+  `SaveBibiteAsTemplate` / `SaveTemplate` → `.bb8template`, and
+  `LoadBibiteOrEggFromData(json, resume, problems, birthAtMaturity)` — public,
+  uncalled in-assembly, restores full live state and preserves the entity ID.
+  It swallows all exceptions and returns null; reflect on private `LoadBibite` to
+  debug. World-level: `LoadGame(zip)`, plus the parent/child re-link code at
+  `SaveSystem.cs:748-782`.
+- `ScriptHelpers.SerializationHelper` — the reflection engine behind every payload
+  (`SerializeObject` / `DeserializeObject`, public static). It reads and writes
+  `[SerializeField]` members including private and `internal` ones, so the mod needs
+  no reflection of its own (e.g. for `InternalClock`).
+- `ManagementScripts.BibiteTracker` (`BibiteTracker.instance.bibites` / `.eggs`) —
+  the live-entity lists; the only way to enumerate or look up organisms (there is no
+  ID→entity registry).
+- `ManagementScripts.WorldObjectsSpawner.Instance` — `GenerateNewBibite`,
+  `SpawnBibiteFromTemplate` / `SpawnEggFromTemplate` (template paths mutate; not for
+  migration), `SpawnMeatPile`.
+- `SimulationScripts.BibiteScripts.EggHatching.Hatch()` — the Constance-Mod hook
+  point (postfix; `__instance.newBornBody`); public `onHatch` event as a no-patch
+  alternative.
+- `SimulationScripts.BibiteScripts.BibiteBody` — the live organism.
+  `FixedUpdate()` (private) is the per-organism tick and **the M2 border-hook
+  target**; `SaveState`/`LoadState` define the `body` payload; `OnDestroy` cleans the
+  registries, `Die()` does not (it makes corpses/meat).
 - `ScriptHelpers.VersionTracker`, `Utility.Version` — the game's own save-version
-  compatibility machinery; relevant to `bb8-schema` versioning.
+  compatibility machinery; relevant to `bb8-schema` versioning. Watch the constructor
+  quirk: `new Version(0,6,3,3)` means `0.6.3a3`, not `0.6.3.3`.
