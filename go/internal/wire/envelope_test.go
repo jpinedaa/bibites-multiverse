@@ -1,0 +1,179 @@
+package wire
+
+import (
+	"encoding/json"
+	"errors"
+	"math"
+	"strings"
+	"testing"
+)
+
+func TestDecodeAcceptsTheContractExample(t *testing.T) {
+	// contract-a.md §3's example, verbatim.
+	raw := []byte(`{
+	  "protocol": "contract-a/1",
+	  "type": "MIGRATE_OUT",
+	  "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
+	  "sentAt": 1785693600123,
+	  "data": { }
+	}`)
+	env, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if env.Protocol != ProtocolA || env.Type != "MIGRATE_OUT" {
+		t.Fatalf("decoded %+v", env)
+	}
+	if env.SentAt != 1785693600123 {
+		t.Fatalf("sentAt = %d", env.SentAt)
+	}
+	if string(env.Data) == "" {
+		t.Fatal("data was not captured")
+	}
+}
+
+func TestDecodeRejectsMalformedFrames(t *testing.T) {
+	cases := map[string]string{
+		"not json":             `{`,
+		"not an object":        `["contract-a/1"]`,
+		"null":                 `null`,
+		"missing protocol":     `{"type":"HEARTBEAT","messageId":"a","sentAt":1,"data":{}}`,
+		"missing type":         `{"protocol":"contract-a/1","messageId":"a","sentAt":1,"data":{}}`,
+		"missing messageId":    `{"protocol":"contract-a/1","type":"HEARTBEAT","sentAt":1,"data":{}}`,
+		"missing sentAt":       `{"protocol":"contract-a/1","type":"HEARTBEAT","messageId":"a","data":{}}`,
+		"missing data":         `{"protocol":"contract-a/1","type":"HEARTBEAT","messageId":"a","sentAt":1}`,
+		"data is null":         `{"protocol":"contract-a/1","type":"HEARTBEAT","messageId":"a","sentAt":1,"data":null}`,
+		"data is an array":     `{"protocol":"contract-a/1","type":"HEARTBEAT","messageId":"a","sentAt":1,"data":[]}`,
+		"sentAt is a string":   `{"protocol":"contract-a/1","type":"HEARTBEAT","messageId":"a","sentAt":"1","data":{}}`,
+		"type is a number":     `{"protocol":"contract-a/1","type":7,"messageId":"a","sentAt":1,"data":{}}`,
+		"lowercase type":       `{"protocol":"contract-a/1","type":"heartbeat","messageId":"a","sentAt":1,"data":{}}`,
+		"type with a hyphen":   `{"protocol":"contract-a/1","type":"MIGRATE-OUT","messageId":"a","sentAt":1,"data":{}}`,
+		"protocol is a number": `{"protocol":1,"type":"HEARTBEAT","messageId":"a","sentAt":1,"data":{}}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Decode([]byte(raw)); !errors.Is(err, ErrMalformed) {
+				t.Fatalf("Decode(%s) error = %v, want ErrMalformed", raw, err)
+			}
+		})
+	}
+}
+
+func TestDecodeIgnoresUnknownEnvelopeFields(t *testing.T) {
+	// contract-a.md §3.1: unknown fields inside the envelope are ignored.
+	raw := `{"protocol":"contract-a/1","type":"HEARTBEAT","messageId":"a","sentAt":1,"data":{},"future":42}`
+	if _, err := Decode([]byte(raw)); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+}
+
+func TestCheckProtocolComparesMajorOnly(t *testing.T) {
+	if err := CheckProtocol("contract-a/1", ProtocolA); err != nil {
+		t.Fatalf("same version: %v", err)
+	}
+	if err := CheckProtocol("contract-a/2", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
+		t.Fatalf("different major: %v", err)
+	}
+	if err := CheckProtocol("contract-b/1", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
+		t.Fatalf("different family: %v", err)
+	}
+	if err := CheckProtocol("garbage", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
+		t.Fatalf("unparsable: %v", err)
+	}
+}
+
+func TestEncodeRoundTrip(t *testing.T) {
+	type body struct {
+		N int `json:"n"`
+	}
+	frame, err := Encode(ProtocolB, "PING", 99, body{N: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := Decode(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Protocol != ProtocolB || env.Type != "PING" || env.SentAt != 99 {
+		t.Fatalf("round trip lost fields: %+v", env)
+	}
+	if !ValidUUID(env.MessageID) {
+		t.Fatalf("messageId %q is not a uuid", env.MessageID)
+	}
+	var got body
+	if err := json.Unmarshal(env.Data, &got); err != nil || got.N != 7 {
+		t.Fatalf("data round trip: %v %+v", err, got)
+	}
+}
+
+func TestEncodeNilDataIsAnEmptyObject(t *testing.T) {
+	frame, err := Encode(ProtocolA, "HEARTBEAT", 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := Decode(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(env.Data)) != "{}" {
+		t.Fatalf("data = %s, want {}", env.Data)
+	}
+}
+
+func TestUUIDShapeAndComparison(t *testing.T) {
+	id := NewUUID()
+	if len(id) != 36 || !ValidUUID(id) {
+		t.Fatalf("NewUUID produced %q", id)
+	}
+	if id != strings.ToLower(id) {
+		t.Fatalf("NewUUID must emit lowercase, got %q", id)
+	}
+	if !SameUUID(id, strings.ToUpper(id)) {
+		t.Fatal("uuid comparison must be case-insensitive")
+	}
+	for _, bad := range []string{"", "abc", strings.Repeat("g", 36),
+		"b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a", "b7d1e0c49f2a4c318b6d2e0a41f5c7a9"} {
+		if ValidUUID(bad) {
+			t.Fatalf("ValidUUID(%q) = true", bad)
+		}
+	}
+}
+
+func TestFiniteRejectsNaNAndInf(t *testing.T) {
+	// contract-a.md §4.1: NaN and ±Inf are forbidden anywhere.
+	if Finite(math.NaN()) || Finite(math.Inf(1)) || Finite(math.Inf(-1)) {
+		t.Fatal("Finite accepted a non-finite value")
+	}
+	if !Finite(0) || !Finite(-2000.5) {
+		t.Fatal("Finite rejected a finite value")
+	}
+	// contract-a.md §11.1 warns that 1e999 decodes to +Inf. Go's encoding/json
+	// is stricter than that and refuses the token outright, so an out-of-range
+	// literal is caught one layer earlier — as a malformed frame. Finite stays
+	// as the second net, for values that turn non-finite by any other route.
+	var v float64
+	if err := json.Unmarshal([]byte(`1e999`), &v); err == nil {
+		t.Fatal("encoding/json accepted 1e999")
+	}
+	raw := `{"protocol":"contract-a/1","type":"HEARTBEAT","messageId":"a","sentAt":1,"data":{"x":1e999}}`
+	env, err := Decode([]byte(raw))
+	if err != nil {
+		t.Fatalf("Decode with 1e999 in data: %v", err)
+	}
+	var body struct {
+		X float64 `json:"x"`
+	}
+	if err := json.Unmarshal(env.Data, &body); err == nil {
+		t.Fatal("decoding 1e999 into a float64 must fail")
+	}
+}
+
+func TestDecodeRejectsOversizeFrames(t *testing.T) {
+	big := make([]byte, MaxFrameBytes+1)
+	for i := range big {
+		big[i] = ' '
+	}
+	if _, err := Decode(big); !errors.Is(err, ErrMalformed) {
+		t.Fatalf("oversize frame error = %v", err)
+	}
+}

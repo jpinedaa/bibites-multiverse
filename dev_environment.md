@@ -10,6 +10,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Game assembly | `…/The Bibites_Data/Managed/BibitesAssembly.dll` |
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/`) |
+| Go module (`multiverse-relay`, `multiverse-sidecar`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`) |
+| Wire specifications | `contracts/` (`contract-a.md` = mod ↔ sidecar, `contract-b-m2.md` = sidecar ↔ relay) |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
 | Game user data (`Application.persistentDataPath`) | `/mnt/c/Users/<user>/AppData/LocalLow/The Bibites/The Bibites/` — holds `Savefiles/`, `Autosaves/`, `Scenarios/`, `Bibites/` |
 
@@ -22,6 +24,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
 | ilspycmd | 9.0.0.7889 (pinned; newer versions need a newer .NET) |
+| Go | 1.26.5 (linux-amd64), installed without sudo from the official tarball into `~/go-dist/go`. `~/go` is a symlink to it, which is what makes the pre-existing `export GOROOT=$HOME/go` in `~/.bashrc` correct and puts `go` on the inherited `PATH` through `$HOME/go/bin`. `GOPATH` stays `~/gopath`. |
+| Go dependencies | `github.com/coder/websocket` v1.8.15, the only non-stdlib import. It has no transitive dependencies and needs no cgo. |
 
 ## Workflow
 
@@ -47,6 +51,40 @@ It touches no save other than `M1-AutoTest.zip`. The BepInEx config entry
 Smoke test passed 2026-08-02: plugin `Bibites Multiverse 0.1.0` loads and logs
 through the BepInEx chainloader. M1 exit test passed 2026-08-02, on two unattended runs —
 see `m1_findings.md`, *Runtime results*.
+
+The Go side — the relay and the sidecar — builds, tests and runs with no game installed.
+Its contract suite drives both contracts with fake mod clients, so it is the fast loop:
+
+```sh
+cd go
+go build ./...                       # compile everything
+go test ./...                        # the whole contract suite, ~11 s
+go test -race ./...                  # same, with the race detector
+gofmt -l . && go vet ./...           # both must print nothing
+
+# Static binaries for the two-instance rig.
+CGO_ENABLED=0 go build -o ../bin/ ./cmd/...
+```
+
+Start the M2 rig — the relay first, then the two sidecars, then the two game instances:
+
+```sh
+bin/relay --listen 127.0.0.1:8790
+bin/sidecar --listen 127.0.0.1:8787 --relay ws://127.0.0.1:8790/contract-b/v1 \
+            --peer-id sector-a --data-dir ./data/sector-a --sector A
+bin/sidecar --listen 127.0.0.1:8788 --relay ws://127.0.0.1:8790/contract-b/v1 \
+            --peer-id sector-b --data-dir ./data/sector-b --sector B
+```
+
+`--listen` is loopback-only by contract and refuses a wildcard address. `--sector` is an
+advisory preference; the relay arbitrates it, and it is what stops a relay restart from
+swapping the two sims. Every flag also reads an environment variable:
+`MULTIVERSE_LISTEN`, `MULTIVERSE_RELAY`, `MULTIVERSE_PEER_ID`, `MULTIVERSE_DATA_DIR`,
+`MULTIVERSE_SECTOR`, `MULTIVERSE_LOG_LEVEL`. Both processes answer `GET /healthz`, and
+each sidecar writes its resolved listen address to `<data-dir>/listen.addr`, which is how
+`--listen 127.0.0.1:0` stays usable from a script. The journal lives in
+`<data-dir>/journal/` and is the durable custody of decision D2 — keep it across a restart
+or the sidecar loses every organism it was holding.
 
 ## Gotchas
 
@@ -92,6 +130,14 @@ see `m1_findings.md`, *Runtime results*.
   by process name). Both instances also load the same `plugins/` DLL and the same
   `config/`, so the M2 two-sim rig needs per-instance settings from the environment, or a
   second copy of the game.
+- **`~/.bashrc` sets `GOROOT=$HOME/go` before any Go exists.** Installing the tarball
+  anywhere else leaves every `go` command failing with `cannot find GOROOT directory`. The
+  install therefore keeps the real toolchain at `~/go-dist/go` and symlinks `~/go` to it,
+  which satisfies the stale variable and the stale `PATH` entry at the same time. Do not
+  delete the symlink, and do not use `~/go` as a `GOPATH` — that is `~/gopath`.
+- **The M2 rig binds four loopback ports:** `8790` (relay, Contract B), `8787` and `8788`
+  (sidecar A and B, Contract A). Two agents working in this repo at once will collide on
+  them; use high ports for a throwaway smoke test.
 - **Fresh timestamps under `Scenarios/` and `Bibites/Templates/` are not your mod.**
   `AppInitializer.ReImportOfficialScenarios()` (`AppInitializer.cs:92, 123`) re-extracts
   the official scenarios and templates on **every** launch. Those archives also contain
