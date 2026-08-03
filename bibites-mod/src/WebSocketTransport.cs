@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.WebSockets;
@@ -59,6 +60,16 @@ namespace BibitesMultiverse
 
         /// <summary>Bound on the send queue, so an unread socket cannot grow memory without limit.</summary>
         private const int MaxQueuedFrames = 256;
+
+        /// <summary>
+        /// How long a session must stay up before it counts as healthy and the backoff ladder starts
+        /// again from its lowest rung (contract-a.md §13, amendment A8).
+        ///
+        /// Resetting on the bare TCP connect instead is what turns a repeated close-on-handshake —
+        /// close 4003 for an unusable CONFIG_UPDATE is the one that matters — into a zero-delay
+        /// redial loop, because the connect always succeeds and the ladder never climbs.
+        /// </summary>
+        private const int StableSessionMs = 5000;
 
         internal WebSocketTransport(string url)
         {
@@ -210,6 +221,7 @@ namespace BibitesMultiverse
                 attempt++;
                 int closeCode = ContractA.CloseNormal;
                 string closeReason = "closed";
+                Stopwatch session = new Stopwatch();
 
                 ClientWebSocket socket = null;
                 try
@@ -218,8 +230,8 @@ namespace BibitesMultiverse
                     DrainOutbound();
                     await socket.ConnectAsync(uri, token).ConfigureAwait(false);
 
-                    Report(TransportLogLevel.Info, $"connected to {url} on attempt {attempt}.");
-                    attempt = 0;
+                    Report(TransportLogLevel.Info, $"connected to {url} on backoff rung {attempt}.");
+                    session.Start();
                     connected = true;
                     inbound.Enqueue(new TransportEvent { kind = TransportEventKind.Connected });
 
@@ -254,6 +266,7 @@ namespace BibitesMultiverse
                 {
                     bool wasConnected = connected;
                     connected = false;
+                    session.Stop();
                     await CloseQuietlyAsync(socket, wasConnected).ConfigureAwait(false);
                     socket?.Dispose();
 
@@ -265,6 +278,15 @@ namespace BibitesMultiverse
                             closeCode = closeCode,
                             text = closeReason
                         });
+                    }
+
+                    // §6.2 + §13 amendment A8: the ladder resets only after a session that stayed
+                    // up, and it resets to rung 1 rather than to "dial immediately", so every
+                    // reconnect still waits out a backoff. A session that died on the handshake
+                    // leaves the ladder climbing to the 30 s ceiling instead of spinning.
+                    if (wasConnected && session.ElapsedMilliseconds >= StableSessionMs)
+                    {
+                        attempt = 1;
                     }
                 }
             }

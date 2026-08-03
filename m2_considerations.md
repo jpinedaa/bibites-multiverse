@@ -53,6 +53,9 @@ Void avoidance is one torque blend in `BibitePropulsion.UpdateOrgan`. A single g
 static gates it. The setting `ScenarioSettings.voidAvoidance` has `DefaultValue = false`.
 No shipped scenario turns it on. The `Apocalypse` scenario sets it to `false` explicitly.
 
+WP2 confirmed this in the game on 2026-08-02. A loaded world reported
+`voidAvoidance=False`. The mod wrote no patch and logged the reason.
+
 The real wall is food density. Pellets spawn only inside a `Zone`. The `3 Islands`
 scenario separates its islands with a fertility ratio of about 3000 to 1. Organisms stay
 on the islands because the space between them holds no food.
@@ -78,21 +81,23 @@ no patch when the flag is already off.
 Always change a game setting with `Setting.SetValue`. A direct write to `val` fires no
 event. The cached static then stays stale.
 
-### Risk 2 — The parent transform of the payload is unproven.
+### Risk 2 — The parent transform of the payload. CLOSED.
 
 The payload key `transform` holds `transform.localPosition`. The key `rb2d` holds the
 world position. The two agree only when the parent transform is the identity. The parent
 is `WorldObjectsSpawner.Instance.bibiteHolder`. That object is Unity scene data, so the
 decompiled source cannot settle the question.
 
-The M1 round trip does not settle it either. Both sides of that test used
-`localPosition`.
+WP2 settled it at runtime on 2026-08-02. The mod logs the holder transform one time for
+each world load. The holder is at `position=(0, 0, −0.01)`. Its rotation is zero. Its
+scale is one. The transform is therefore the identity in `x` and in `y`. The payload key
+`transform` is world space in the two coordinates that a migration writes. See
+`m2_findings.md` §4.3 and open uncertainty 1.
 
-Do two things. Log the position, the rotation and the scale of
-`bibiteHolder.transform` one time at startup. Then update `m2_findings.md` with the
-result. Always re-assert both `transform.position` and `rb2d.position` after a restore.
-Do the re-assert in the same frame as the restore. Also re-assert the velocity and both
-rotations. The `Rigidbody2D` overwrites a transform-only correction on the next tick.
+Keep the re-assert. Always re-assert `transform.position` and `rb2d.position` after a
+restore. Do the re-assert in the same frame as the restore. Also re-assert the velocity
+and both rotations. The `Rigidbody2D` overwrites a transform-only correction on the next
+tick. That second caveat stays open, and it is the reason for the re-assert.
 
 ### Risk 3 — `SimulationSize` is live-mutable.
 
@@ -131,6 +136,9 @@ A stale `BibiteID` in a parent's `eggLayer.children` makes
 `BibiteEggLayingOrgan.SaveState` throw on the next world save. That failure looks like a
 corrupted save file.
 
+WP2 wrote the repair code and the two counters. No game run has exercised them. The risk
+is unchanged and it moves to WP4.
+
 Run one migration in an evolved world. Select an organism with living parents and living
 children. Migrate it. Then save both worlds. Report the repaired counts in the
 `MIGRATE_IN_ACK` fields `relinkedParents` and `relinkedChildren`. A zero in both fields
@@ -165,48 +173,66 @@ Two more rules protect the invariant:
 
 ## Work Packages
 
-Four packages. WP1 and WP2 depend only on `contracts/contract-a.md`. They run in
-parallel, and their owners do not need to talk.
+Four packages. WP1 and WP2 depend only on `contracts/contract-a.md`. They ran in parallel,
+and their owners did not talk. Both are complete. WP3 and WP4 remain.
 
-### WP1 — The Go side
+The parallel build worked, and it also proved a cost. Each side resolved the same
+ambiguities alone, and the two answers had to be reconciled afterwards. `contract-a.md`
+§13 holds the ten resolutions. `contract-b-m2.md` §8 holds three more.
+
+### WP1 — The Go side. DONE, 2026-08-02.
 
 **Depends on:** `contracts/contract-a.md`.
 **Needs the game:** no.
+**Delivered in:** `go/`, commit `3546f15`.
 
-- A `bb8-schema` skeleton. It validates the top-level keys, the gene object, the node
-  and synapse arrays, and the size caps. It detects the two dialects with the `body` key.
-  It reproduces the `Utility.Version` alpha quirk in its version ordering.
-- `multiverse-relay`. It forwards Contract B frames. It holds a two-sector registry. It
-  never parses a bb8 body.
-- `multiverse-sidecar`. It serves Contract A. It owns the migration journal, the routing
-  from exit edge to peer, the admission control and the bounce-back path.
-- A durable journal with a crash-recovery test. Flush the entry before the ACK.
-- Integration tests with fake mod clients. The tests cover the happy path, every NACK
-  code, a reconnection with replay, and a session rollback with custody reassertion.
+- [x] A `bb8-schema` skeleton (`internal/bb8`). It validates the size cap and the
+      top-level object shape. It hashes the payload. It reads the entity ID, the heading
+      and the version key out of the blob. The `Hook` variable is the seam for deep
+      validation.
+- [ ] Gene, node and synapse validation. Dialect detection. The `Utility.Version` alpha
+      quirk in the version order. **These four move to M3.** The M2 delivery path does not
+      need them. A skeleton that claims to validate a gene object is worse than one that
+      does not claim it.
+- [x] `multiverse-relay` (`internal/relay`). It forwards Contract B frames. It holds a
+      two-sector registry. It never parses a bb8 body.
+- [x] `multiverse-sidecar` (`internal/sidecar`). It serves Contract A. It owns the
+      journal, the route from exit edge to peer, the admission control and the bounce-back
+      path.
+- [x] A durable journal (`internal/journal`). Every mutating call flushes before it
+      returns. The tests cover a torn tail, compaction and a `kill -9` between the flush
+      and the ACK.
+- [x] Integration tests with fake mod clients. They cover the happy path, a reconnection
+      with replay, a session rollback with custody reassertion, a relay drop, a heartbeat
+      timeout, every close code, and the main NACK codes.
 
-Finish WP1 with no game installed. A fake mod client is a WebSocket client and a
-canned payload string.
+Contract A and Contract B both run with no game installed. A fake mod client is a
+WebSocket client and a canned payload string.
 
-### WP2 — The mod side
+### WP2 — The mod side. DONE, 2026-08-02.
 
 **Depends on:** `contracts/contract-a.md`.
 **Needs the game:** yes.
+**Delivered in:** `bibites-mod/src/`, commit `7b5e4d9`.
 
-- Border-strip detection. Anchor it on a Harmony postfix on `BibiteBody.FixedUpdate`.
-  Re-apply every guard that the early returns of the method imply: `Time.timeScale > 0`,
-  `born`, `!dead`, `!destroyed`, and "not already in flight".
-- The outward-velocity test. Trigger only on a positive dot product with the outward
-  normal.
-- Export. Reuse the M1 serialization machinery. Add the custody flow of Contract A. Make
-  the organism inert on send. Destroy it only on `MIGRATE_OUT_ACK`.
-- Import. Rewrite the eight position numbers in the payload. Restore with
-  `LoadBibiteOrEggFromData`. Re-assert the position, the velocity and the rotation in the
-  same frame. Repair the parent and child links. Then reply.
-- The entry-immunity window, keyed on the entity ID.
-- A thread-safe inbound queue. Drain it on the Unity main thread only.
-- Configuration from environment variables: the sector, the sidecar port, the open edge,
-  the strip width and the corridor-zone flag.
-- The settings work of Risks 1, 3 and 4.
+- [x] Border-strip detection, on a Harmony postfix on `BibiteBody.FixedUpdate`
+      (`BorderPatches.cs`). It re-applies every guard of the method's early returns.
+- [x] The outward-velocity test (`MultiverseClient.cs`, `BorderGeometry.OutwardNormal`).
+- [x] Export with the full custody flow (`MigrationExporter.cs`). The organism goes inert
+      on send. It is destroyed only on `MIGRATE_OUT_ACK`.
+- [x] Import (`MigrationImporter.cs`). It rewrites the eight position numbers, restores,
+      re-asserts in the same frame, repairs the family links, and replies.
+- [x] The entry-immunity window, keyed on the entity ID.
+- [x] A thread-safe inbound queue (`WebSocketTransport.cs`). Control frames drain in
+      `Update`. Organism work runs in `FixedUpdate`. See `contract-a.md` §13, A4.
+- [x] Configuration from environment variables (`MultiverseConfig.cs`).
+- [x] The settings work of Risks 1, 3 and 4 (`WorldSettings.cs`), and the runtime readings
+      of Risk 2.
+- [x] The crossing-rate counter (`CrossingStats.cs`). It prints one `[M2-CROSSING]` line
+      for each simulated minute.
+
+A world load, a Contract A handshake and an `EDGE_STATUS` all ran in the game on
+2026-08-02. Two paths have code but no game evidence. WP4 owns them.
 
 Both game instances share one plugin DLL and one BepInEx configuration directory. Per
 instance settings therefore need environment variables. The WSL to Windows hop needs
@@ -238,6 +264,23 @@ Stop the game before every deploy. Windows holds the plugin DLL open.
 Build the automated exit test of the next section. Follow the pattern of
 `bibites-mod/src/AutoTest.cs`. Arm it with an environment variable. Print one result
 line. Then quit.
+
+**Two paths have code but no game evidence. WP4 must exercise both.** Contract tests with
+a fake mod prove the Go half. They cannot prove the C# half, because the fake mod never
+touches Unity.
+
+1. **The export path.** No organism has left a real sim. The mod has connected, sent
+   `CONFIG_UPDATE` and applied an `EDGE_STATUS`, but the edge reported `no_peer` and the
+   crossing counter reported zero. `MIGRATE_OUT`, the inert state of `§6.3`, the destroy
+   on `MIGRATE_OUT_ACK` and the revive on `MIGRATE_OUT_NACK` are all untested in the game.
+   Test the inert state as well as the transfer. Confirm that an inert organism does not
+   eat, breed, move, or become food.
+2. **The family re-link on a linked organism.** Risk 5 is unchanged. The repair code and
+   the two counters exist. No run has exercised them. A zero in both `relinkedParents` and
+   `relinkedChildren` means the test selected the wrong organism.
+
+Both items are exit-test conditions in the next section. Neither needs new production
+code.
 
 ## Exit Test
 
@@ -300,26 +343,29 @@ the organism.
 
 ## Deliverables
 
-- `contracts/contract-a.md` — the wire specification. **Done.**
-- A `bb8-schema` skeleton with unit tests
-- A `multiverse-relay` binary with a two-sector registry
-- A `multiverse-sidecar` binary with a durable journal and the Contract A server
-- Sidecar integration tests that run with no game
-- A mod build with border detection, export, import and the custody flow
-- A two-instance `game.sh`
-- The automated M2 exit test, with its recorded result
-- The measured crossing rate, with and without the corridor zone
-- An update to `m2_findings.md` with the `bibiteHolder` transform result
+- [x] `contracts/contract-a.md` — the wire specification. Amended on 2026-08-02 with the
+      ten resolutions of §13.
+- [x] `contracts/contract-b-m2.md` — the sidecar-to-relay subset, with three amendments.
+- [x] A `bb8-schema` skeleton with unit tests. Deep validation moves to M3. See WP1.
+- [x] A `multiverse-relay` binary with a two-sector registry
+- [x] A `multiverse-sidecar` binary with a durable journal and the Contract A server
+- [x] Sidecar integration tests that run with no game
+- [x] A mod build with border detection, export, import and the custody flow
+- [x] An update to `m2_findings.md` with the `bibiteHolder` transform result
+- [ ] A two-instance `game.sh`
+- [ ] The automated M2 exit test, with its recorded result
+- [ ] The measured crossing rate, with and without the corridor zone
 
 ## Next Steps
 
-1. Log the `bibiteHolder` transform. Update `m2_findings.md`. This is one line of code
-   and it closes the largest open uncertainty of `m2_findings.md`.
-2. Log the five boundary settings and `SimulationSize` at world load.
-3. Measure the natural crossing rate in a default world. Report organisms for each
-   simulated hour.
-4. Start WP1 and WP2 in parallel.
-5. Add the corridor zone if step 3 returns a rate near zero.
-6. Build WP3.
-7. Build WP4 and run the exit test.
+1. ~~Log the `bibiteHolder` transform.~~ **Done.** The transform is the identity in `x`
+   and in `y`. See `m2_findings.md` §4.3.
+2. ~~Log the five boundary settings and `SimulationSize` at world load.~~ **Done.** See
+   the runtime table at the top of `m2_findings.md`.
+3. ~~Start WP1 and WP2 in parallel.~~ **Done.** Both are complete.
+4. Build WP3. It is the last dependency of the exit test.
+5. Measure the natural crossing rate in a default world. Report organisms for each
+   simulated hour. The counter already prints the number.
+6. Add the corridor zone if step 5 returns a rate near zero.
+7. Build WP4. Exercise the export path and the family re-link. Then run the exit test.
 8. Record the results in `m2_findings.md`. Update the status of this document.

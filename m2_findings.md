@@ -13,9 +13,25 @@ It does **not** repeat `m1_findings.md`, which already documents `SaveSystem`,
 trip. Where M2 depends on an M1 fact, this document cites the M1 section instead of
 re-deriving it.
 
-**Nothing here has been confirmed in-game yet.** Every claim is read off the decompiled
-source, plus four shipped scenario files read off disk. Items that could not be settled
-statically are marked **UNCERTAIN**.
+Every claim here was originally read off the decompiled source, plus four shipped scenario
+files read off disk. Items that could not be settled statically were marked **UNCERTAIN**.
+
+**Runtime confirmations, 2026-08-02** (WP2, game `0.6.3.1`). The mod now logs the
+boundary settings and the holder transform once per world load, so these are measured, not
+inferred:
+
+| Reading | Value | Settles |
+|---|---|---|
+| `bibiteHolder.transform` | `position=(0,0,−0.01)`, `rotation=(0,0,0)`, `lossyScale=(1,1,1)` | Open uncertainty 1 — §4.3 caveat 1. Identity in `x`/`y`; the payload's `transform` key is world space where it matters |
+| `SimulationSize` | `2000.00` | §2.1 |
+| `voidAvoidance` | `False` | §1.4 — the shipped default holds in a real world; there is nothing to suppress |
+| `voidAvoidanceDistance` | `100.0` | §1.1 |
+| `shadeOutsideOfBounds` / `shadeAvoidance` | `True` / `False` | §1.3 |
+| `worldWrapping` | `True` | §3 — on by default, as read; the mod disables it while an edge is open |
+| `corpsesEnabled` | `True` | §5 |
+
+Open uncertainty 2 — the crossing rate — is still open, and it is now the only one that
+blocks the milestone.
 
 ## Headline result
 
@@ -500,14 +516,15 @@ $.rb2d.px, $.rb2d.py, $.rb2d.vx, $.rb2d.vy, $.rb2d.r
 Caveat 1 — **`transform` is `localPosition`, `rb2d` is world position.** The restored
 GameObject is parented to `WorldObjectsSpawner.Instance.bibiteHolder`
 (`WorldObjectsSpawner.cs:68`, `GenerateNewBibite` at `:138-141`). The two keys agree
-only when `bibiteHolder`'s transform is identity. **UNCERTAIN** — `bibiteHolder` is a
-`[SerializeField] GameObject` set in the Unity scene, which is not in the decompiled C#.
-M1's byte-exact round trip is *consistent with* identity but does not prove it, because
-both the read and the write used `localPosition`. **Verify at runtime in M2** with a
-one-line log of `WorldObjectsSpawner.Instance.bibiteHolder.transform.position /
-.lossyScale / .rotation`. If it is not identity, convert with
-`bibiteHolder.transform.InverseTransformPoint(worldPos)` before writing `transform`, and
-write the world position into `rb2d`.
+only when `bibiteHolder`'s transform is identity in `x` and `y`.
+
+**RESOLVED at runtime, 2026-08-02** (see *Open uncertainties*, item 1): the holder sits at
+`position=(0, 0, −0.01)`, `rotation=(0,0,0)`, `lossyScale=(1,1,1)`. It is a depth offset
+and nothing else, so `localPosition.x/y == position.x/y` and the two payload keys agree on
+every number the migration path writes. No `InverseTransformPoint` conversion is needed.
+Re-check this line after a game update — it is one log line per world load and it is the
+only evidence, because `bibiteHolder` is a `[SerializeField] GameObject` set in the Unity
+scene, which never appears in the decompiled C#.
 
 Caveat 2 — **`Rigidbody2D` wins.** Writing only `transform.position` after the restore
 is not enough: the next `FixedUpdate` re-synchronises the transform from the body, so a
@@ -703,9 +720,10 @@ restore step, and nothing downstream moves the organism (§4.2).
 
 **Then re-assert, in the same frame** (§4.3): write `go.transform.position`,
 `rb.position`, `rb.linearVelocity`, `rb.rotation` and `go.transform.rotation` directly.
-Two lines of insurance that make the result independent of the unresolved
-`bibiteHolder`-transform question, and that survive a future change to
-`SerializedTransform`.
+Two lines of insurance that keep the result independent of the parent transform — now
+measured and benign (§4.3, caveat 1) but re-measured on every world load — and that
+survive a future change to `SerializedTransform`. Caveat 2, the `Rigidbody2D` overwriting
+a transform-only correction, is the live reason to keep them.
 
 **Coordinate mapping**, for an organism leaving sim A eastward at `(S, y)` with velocity
 `v`, entering sim B at its west edge:
@@ -730,11 +748,31 @@ with living parents and living children (`system_decomposition.md:343`).
 
 ## Open uncertainties, ranked
 
-1. **Is `WorldObjectsSpawner.bibiteHolder`'s transform the identity?** (§4.3, caveat 1.)
-   Decides whether the `transform` key in the payload is world-space. Cannot be answered
-   from the decompiled C# — it is Unity scene data. M1's byte-exact round trip does not
-   settle it, because both sides used `localPosition`. **Mitigated** by the re-assert in
-   §(c), but it should be logged once at M2 startup and this document updated.
+1. ~~**Is `WorldObjectsSpawner.bibiteHolder`'s transform the identity?**~~ **RESOLVED at
+   runtime, 2026-08-02** (§4.3, caveat 1). The mod logs it once per world load
+   (`WorldSettings.LogBibiteHolderTransform`), and on game `0.6.3.1` it reports:
+
+   ```
+   bibiteHolder transform: position=(0.000000,0.000000,-0.010000)
+                           rotation=(0.00, 0.00, 0.00) lossyScale=(1.00, 1.00, 1.00)
+   ```
+
+   **Identity in `x` and `y`, offset by `−0.01` in `z`, no rotation, unit scale.** The
+   holder is a plain depth-sorting offset. The payload's `transform` key is therefore
+   **world-space in the two coordinates the migration path writes**: `localPosition.x/y`
+   equals `position.x/y`, and `transform` and `rb2d` agree on every number this contract
+   touches. No `InverseTransformPoint` conversion is needed.
+
+   Two consequences worth keeping:
+
+   - A strict identity test reports `false` because of the `z` term. Test `x` and `y`, not
+     `Vector3` equality, if anything ever branches on this.
+   - `z` is not in the payload and the migration path never writes it, so the restored
+     organism inherits the holder's depth like any other. Nothing to correct.
+
+   The re-assert of §(c) stays anyway. It is cheap and idempotent, and it is what defends
+   against caveat 2 — the `Rigidbody2D` overwriting a transform-only correction — which is
+   a separate and still-live concern.
 2. **Will suppression alone produce a non-zero crossing rate?** (§1.4, §1.5 option 5.)
    The static evidence says no — void avoidance ships off, and what keeps organisms on
    islands is food density, not steering. If that is right, D3's stated mechanism is not

@@ -228,6 +228,17 @@ namespace BibitesMultiverse
             return value != null;
         }
 
+        /// <summary>
+        /// The one field a frame cannot be answered without: every MIGRATE_IN_ACK and every
+        /// MIGRATE_IN_NACK is keyed on it (§5.8, §5.9), so a frame that carries no usable value has no
+        /// reply channel at all (§13, amendment A2). An empty string counts as absent, because the
+        /// sidecar rejects it in the reply and would close 4003 on our answer.
+        /// </summary>
+        internal static bool TryMigrationId(JObject data, out string value)
+        {
+            return TryString(data, "migrationId", out value) && value.Length > 0;
+        }
+
         internal static bool TryFloat(JObject data, string name, out float value)
         {
             value = 0f;

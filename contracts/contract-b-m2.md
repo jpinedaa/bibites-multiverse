@@ -1,6 +1,11 @@
 # Contract B — M2 Subset (Sidecar ↔ Relay ↔ Sidecar)
 
 **Version:** `contract-b/1`
+**Amended:** 2026-08-02. Three resolutions from the Go implementation are folded into §8 —
+**B1** the authority order for `entityId` and `heading` (item 2), **B2** the two accepted
+shapes of `$.body.id` (item 2), **B3** the on-disk sector file (item 4). Contract A's
+matching amendment set is `contract-a.md` §13; A6 and A7 there align Contract A's wording
+with §7 of this document, and change nothing here.
 **Status:** the minimum M2 needs. Not the full Contract B.
 
 `system_decomposition.md` lists ten Contract B message types. M2 needs six of them plus
@@ -165,7 +170,7 @@ claim.
 
 | Field | Type | Required | Semantics |
 |---|---|---|---|
-| `preferredSector` | string | no | `"A"` or `"B"`. Advisory. A sidecar that has held a sector before persists it and asks for it again, so a relay restart does not swap the two sims. |
+| `preferredSector` | string | no | `"A"` or `"B"`. Advisory. A sidecar that has held a sector before persists it and asks for it again, so a relay restart does not swap the two sims. §8 item 4 names the file it persists it in. |
 | `simulationSize` | float | yes | `S`, as last reported by the mod. `0` while no mod is connected. |
 | `borderEdges` | array of edge | yes | The mod's declared edges. Empty while no mod is connected. |
 | `gameVersion` | string | no | Updates the value from `HANDSHAKE`. |
@@ -369,15 +374,34 @@ M2's message list and a lost return frame would lose the organism outright. Cont
 2. **`entityId` and `heading` are carried explicitly** (§5.6), even though Contract C's
    field list has neither. Contract A's `MIGRATE_IN` requires both. Contract A §5.7 says
    `entityId` is "extracted from the blob by `bb8-schema`", and §4.4 puts `heading` at
-   `$.rb2d.r` — both are still true, and a sidecar **SHOULD** cross-check the wire values
-   against the blob and log a mismatch. Carrying them explicitly keeps the delivery path
+   `$.rb2d.r` — both are still true. Carrying them explicitly keeps the delivery path
    working while `bb8-schema` is still a skeleton, and it is an additive change.
+
+   **Which value wins is not the same for the two fields, and the asymmetry is
+   deliberate** (amendment B1):
+
+   | Field | Authority | Why |
+   |---|---|---|
+   | `entityId` | The **blob**, when `bb8-schema` can read one. A wire value that disagrees is overridden and logged as a warning. | The blob is what `LoadBibiteOrEggFromData` restores, so the blob's id is the id that will actually exist. The mod's durable dedup key (Contract A §7.3) has to match it. |
+   | `heading` | The **wire**. The blob's `$.rb2d.r` fills in only when the wire field is absent or zero. | The receiving mod rewrites `$.transform.rotation` and `$.rb2d.r` from the `MIGRATE_IN` heading before it restores (Contract A §5.7 step 3), so the wire value is authoritative by construction. |
+
+   **The shape of `$.body.id` is not fixed by Contract A** (amendment B2). Its §5.3 example
+   elides the `BibiteID` wrapper — `"body":{"id":-843827577, ... }` — while the game's own
+   type is `BibiteID` with an inner `id`. The two are indistinguishable from that document
+   alone, so `bb8-schema` **MUST** accept both: `{"body":{"id":N}}` with a bare number, and
+   `{"body":{"id":{"id":N}}}` with the wrapper. Neither is an error. Extraction is
+   best-effort throughout — every field `Inspect` reads is optional, and a blob it cannot
+   parse simply falls back to the wire values.
 3. **`HANDSHAKE_ACK`, `SECTOR_GRANT` and `PEER_STATUS` are new names.** The ratified list
    names only the requests. A relay-arbitrated sector map needs a reply and a liveness
    broadcast; these three are the smallest set that provides them.
 4. **`preferredSector` on `SECTOR_CLAIM`** (§5.3) exists so a relay restart cannot swap
    the two sims. The sidecar persists its granted sector in `--data-dir` and asks for it
-   again.
+   again. The file is `<data-dir>/sector`, one line, `A` or `B` (amendment B3). It is
+   written on every **granted** `SECTOR_GRANT` and read once at startup. An explicit
+   `--sector` flag overrides it. An unreadable or unrecognised value is treated as absent,
+   which leaves the claim to §5.3's arbitration rules 3 and 4. It is deliberately **not**
+   in the journal: losing it costs a sector swap, not an organism.
 5. **The timeout half of bounce-back is narrowed** (§7). This is a correctness fix, not a
    convenience: the literal rule duplicates organisms, which D2 rules out.
 

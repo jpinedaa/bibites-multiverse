@@ -1,6 +1,12 @@
 # Contract A — Mod ↔ Sidecar Wire Specification
 
 **Version:** `contract-a/1`
+**Amended:** 2026-08-02, amendment set `contract-a/1 + A1–A10` (§13). Both implementations
+exist, and each side resolved an ambiguity locally before the other could see it; §13
+makes every resolution law. Each place in the body that was wrong or under-specified now
+carries an `(amended — §13, Ax)` marker. **§13 wins over the body wherever the two
+disagree.** The amendments are additive clarifications, not wire changes: no field, type
+or enum value changed, so the protocol identifier stays `contract-a/1` (§3.1).
 **Status:** implementation-ready for M2. Derived from the ratified decisions D1–D7 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, and the world-geometry
 and entry-position research in `m2_findings.md`.
@@ -53,7 +59,8 @@ Five ratified constraints shape everything below:
 
 The mod connects only while a simulation world is loaded. It connects after the world is
 ready and closes with code `1000` when the world unloads or the game quits. The mod
-**MUST NOT** hold a connection open on the main menu.
+**MUST NOT** hold a connection open on the main menu, and **MUST NOT** dial from it
+(amended — §13, A1).
 
 If a second mod connection arrives while one is live, the sidecar **MUST** close the
 older connection with code `4006` and serve the newer one. This makes a stale connection
@@ -135,7 +142,7 @@ frame. It is answered with the matching NACK, and the connection stays open. See
 | `uuid` | string | UUID v4, lowercase, hyphenated, 36 characters. Emit lowercase. Compare case-insensitively. |
 | `entityId` | number | **Signed 32-bit integer.** `BibiteBody.id.id` is `Random.Range(int.MinValue, int.MaxValue)` and is very often **negative** (`m1_findings.md` §4.1). Go implementers **MUST** use `int32`, never `uint32`. `0` never appears — it is the game's "unassigned" sentinel. |
 | `timestampMs` | number | Unix milliseconds, int64. Informational (D5). |
-| `float` | number | IEEE-754. The mod's source values are C# `float` (32-bit), so a Go `float64` round trip is lossless in one direction only. No side compares two floats for exact equality. `NaN` and `±Inf` are **forbidden** anywhere in this contract; a frame carrying one is malformed. |
+| `float` | number | IEEE-754. The mod's source values are C# `float` (32-bit), so a Go `float64` round trip is lossless in one direction only. No side compares two floats for exact equality — where this contract says two floats are equal, it means the relative test of §13, A10. `NaN` and `±Inf` are **forbidden** anywhere in this contract; a frame carrying one is malformed. |
 | `simTick` | number | Int64. The source sim's tick counter. Informational, and not comparable across sims (D5). |
 
 ### 4.2 The edge enum
@@ -368,7 +375,8 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
 3. If an entry exists with a **different** payload hash, reply `MIGRATE_OUT_NACK` /
    `DUPLICATE_MIGRATION_ID`. That is a mod defect and it must be loud.
 4. Check that `exitEdge` is currently open and that the neighbour's `S` equals
-   `simulationSize`. On failure reply the matching NACK from §9.1.
+   `simulationSize`, by the relative test of §13, A10 — never by `==`
+   (amended — §13, A10). On failure reply the matching NACK from §9.1.
 5. Write the journal entry and **flush it to durable storage** (`fsync` the file and its
    directory). Only then reply `MIGRATE_OUT_ACK`. An ACK before the flush breaks D2.
 6. Forward over Contract B. Never before step 5.
@@ -535,9 +543,15 @@ the strip forever.
 
 ### 5.7 `MIGRATE_IN` — sidecar → mod
 
-**When sent.** The sidecar holds a journaled inbound organism and the mod is connected
-and has applied an `EDGE_STATUS`. Also sent for a **bounce-back**: an organism the local
-sim exported whose remote delivery failed (custody chain step 6).
+**When sent.** The sidecar holds a journaled inbound organism and the mod is connected and
+handshaken. The sidecar **MUST** send the handshake's `EDGE_STATUS` before any
+`MIGRATE_IN` on that connection (§6.1); the mod does **not** gate an inbound delivery on
+having applied one, because a bounce-back can be the very first frame it sees.
+
+Also sent for a **bounce-back**: an organism the local sim exported that the sidecar has
+proved is not at its destination (custody chain step 6). "Proved" is narrow, and §13, A6
+defines it — a delivery timeout on its own is **not** proof and **MUST NOT** bounce
+(amended — §13, A6).
 
 The sidecar **MUST** send inbound organisms in journal order and **MUST NOT** have more
 than `inboundQueueMax` un-ACKed deliveries outstanding.
@@ -558,7 +572,16 @@ than `inboundQueueMax` un-ACKed deliveries outstanding.
 | `ackDeadlineMs` | number (int) | no | How long the sidecar waits before it re-queues this delivery. Default `migrateInAckTimeoutMs`. Advisory. |
 
 **Receiver obligations.** The mod **MUST** enqueue the message on a thread-safe queue and
-process it on the Unity main thread inside `FixedUpdate`. Processing order:
+process it on the Unity main thread inside `FixedUpdate`. `FixedUpdate` does not run at
+`timeScale` 0, so a delivery that has waited more than two wall-clock seconds in that
+queue while the sim is stopped is answered `MIGRATE_IN_NACK` / `SIM_NOT_READY` from
+`Update` instead of waiting for a tick that will not come (amended — §13, A4).
+
+A `MIGRATE_IN` whose `migrationId` is absent, not a string, or empty **MUST** be dropped
+with one logged error and no reply — every reply is keyed on that field, so the frame has
+no answer channel (amended — §13, A2).
+
+Processing order:
 
 1. Deduplicate (§7.3). On a hit, reply `MIGRATE_IN_ACK` with `duplicate: true` and spawn
    nothing.
@@ -666,11 +689,15 @@ replying.
 | `retryAfterMs` | number (int) | no | Present on transient codes. The sidecar **MUST NOT** re-deliver before this delay elapses. |
 
 **Receiver obligations.** On a `"transient"` class the sidecar keeps the journal entry and
-re-delivers after the delay, with `attempt` incremented. On a `"permanent"` class it
-**MUST NOT** re-deliver to this mod; it bounces the organism back to the origin peer over
-Contract B, or holds it in the journal for an operator when no origin is reachable. It
-**MUST NOT** silently drop it — a drop is the one failure mode D2 accepts, but it is
-never the first choice.
+re-delivers after the delay, with `attempt` incremented. It **MUST** honour
+`retryAfterMs`, and it **MUST NOT** count the silence of a paused mod as a missed
+delivery (§8).
+
+On a `"permanent"` class it **MUST NOT** re-deliver to this mod, and in M2 it
+**MUST NOT** return the organism over Contract B either. It moves the journal entry to a
+`held` state, keeps it there for an operator, and logs one loud line
+(amended — §13, A7; `contract-b-m2.md` §7). It **MUST NOT** silently drop it — a drop is
+the one failure mode D2 accepts, but it is never the first choice.
 
 ```json
 {
@@ -712,6 +739,11 @@ The mod is the reconnecting side. The sidecar never dials.
 
 - Backoff: exponential with **full jitter**, from `reconnectBackoffMinMs` (1000 ms) to
   `reconnectBackoffMaxMs` (30000 ms). `delay = random(0, min(max, min·2^n))`.
+- The backoff ladder `n` resets only after a session that **stayed up** for at least
+  `stableSessionMs` (5000 ms). It **MUST NOT** reset on the TCP or WebSocket connect
+  itself: a sidecar that accepts the socket and then closes it every time — close `4003`
+  on an unusable `CONFIG_UPDATE` is the case that matters — would otherwise hold `n` at
+  its floor and produce an unthrottled redial loop (amended — §13, A8).
 - The connect attempt **MUST** run off the Unity main thread. A blocking connect on the
   main thread freezes the simulation.
 - Close codes `4000`, `4001`, `4002` and `4006` stop reconnection until the mod is
@@ -886,18 +918,23 @@ switch on `code` without a default branch.
 | `MALFORMED_MESSAGE` | permanent | The `data` object failed field validation — a bad enum, an out-of-range `exitPosition`, a `NaN`. | Revive. Log loudly. This is a mod defect. |
 | `SHUTTING_DOWN` | transient | The sidecar is draining. | Revive. The connection closes with `4005` next. |
 
+No `MIGRATE_OUT_NACK` carries an `edge` field. `EDGE_CLOSED` and `SIM_SIZE_MISMATCH` are
+about one specific edge, and the mod recovers it by looking the `migrationId` up in its
+own in-flight record. M2 declares exactly one edge, so the two are the same answer; a
+multi-edge version needs the field (amended — §13, A5; §12 open item 6).
+
 ### 9.2 `MIGRATE_IN_NACK` codes (mod → sidecar)
 
 | Code | Class | Cause | Required sidecar reaction |
 |---|---|---|---|
 | `SIM_NOT_READY` | transient | No world is loaded, the world is still loading, or the sim is paused. | Keep custody. Re-deliver after `retryAfterMs`. |
 | `SIM_OVERLOADED` | transient | The local population is above the mod's admission ceiling. | Keep custody. Re-deliver after `retryAfterMs`. Feed this into admission control. |
-| `EDGE_CLOSED` | transient | The mod has no border strip on `entryEdge`, or it has that edge closed locally. | Keep custody. Do not re-deliver on this edge until `CONFIG_UPDATE` changes `borderEdges`. |
-| `DESERIALIZE_FAILED` | permanent | `LoadBibiteOrEggFromData` returned `null`. The method swallows every exception, so no detail is available (`m1_findings.md` §1.2). | Do not re-deliver. Bounce back to the origin peer, or hold for an operator. |
-| `RELINK_FAILED` | permanent | The restore succeeded but the parent/child repair threw. The mod destroyed the half-restored organism before replying. | Do not re-deliver. Bounce back or hold. Log loudly — this is the M1 carried gap firing. |
-| `VERSION_UNSUPPORTED` | permanent | `gameVersion` does not match the running `Application.version` and the mod refuses the risk. | Do not re-deliver. Bounce back. Mark the peer pair incompatible. |
-| `KIND_UNSUPPORTED` | permanent | `kind` is not `"bibite"`. | Do not re-deliver. |
-| `MALFORMED_MESSAGE` | permanent | The `data` object failed field validation. A sidecar defect. | Do not re-deliver. Log loudly. |
+| `EDGE_CLOSED` | transient | `entryEdge` is not one of the edges the mod **declared** in `CONFIG_UPDATE.borderEdges`. A declared edge that is merely closed right now still accepts inbound organisms — a bounce-back arrives exactly when the edge just closed (amended — §13, A3). | Keep custody. Do not re-deliver on this edge until `CONFIG_UPDATE` changes `borderEdges`. |
+| `DESERIALIZE_FAILED` | permanent | `LoadBibiteOrEggFromData` returned `null`. The method swallows every exception, so no detail is available (`m1_findings.md` §1.2). | Do not re-deliver. Hold in the journal for an operator (amended — §13, A7). |
+| `RELINK_FAILED` | permanent | The restore succeeded but the parent/child repair threw. The mod destroyed the half-restored organism before replying. | Do not re-deliver. Hold for an operator. Log loudly — this is the M1 carried gap firing (amended — §13, A7). |
+| `VERSION_UNSUPPORTED` | permanent | `gameVersion` does not match the running `Application.version` and the mod refuses the risk. | Do not re-deliver. Hold for an operator. Mark the peer pair incompatible (amended — §13, A7). |
+| `KIND_UNSUPPORTED` | permanent | `kind` is not `"bibite"`. | Do not re-deliver. Hold for an operator. |
+| `MALFORMED_MESSAGE` | permanent | The `data` object failed field validation. A sidecar defect. | Do not re-deliver. Hold for an operator. Log loudly. |
 | `SHUTTING_DOWN` | transient | The game is unloading the world or quitting. | Keep custody. Re-deliver after the next handshake. |
 
 ### 9.3 What is a NACK and what is a close
@@ -908,7 +945,10 @@ switch on `code` without a default branch.
 | Unsupported `protocol` major version | Close `4000` |
 | Unknown `type` | Ignore, log one warning, keep the connection |
 | Unknown field inside `data` | Ignore silently |
-| A `data` field fails validation | The matching NACK with `MALFORMED_MESSAGE`, keep the connection |
+| A `data` field fails validation on a type that **has** a NACK (`MIGRATE_OUT`, `MIGRATE_IN`) | The matching NACK with `MALFORMED_MESSAGE`, keep the connection |
+| A `data` field fails validation on a type with **no** NACK channel (`CONFIG_UPDATE`, `HEARTBEAT`, `MIGRATE_IN_ACK`, `MIGRATE_IN_NACK`) | Close `4003` (amended — §13, A8) |
+| A well-formed `MIGRATE_IN_ACK` / `MIGRATE_IN_NACK` naming an unknown `migrationId` | Log one warning and ignore. Not a close — it is a late reply after a purge or a restart (amended — §13, A8) |
+| A `MIGRATE_IN` with no usable `migrationId` | Log one error and drop the frame. No NACK, no close (amended — §13, A2) |
 | Frame over `maxFrameBytes` | Close `1009` or `4003` |
 | `payload` over `maxPayloadBytes` | `MIGRATE_OUT_NACK` / `INVALID_PAYLOAD`, keep the connection |
 
@@ -929,6 +969,9 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `migrateInAckTimeoutMs` | `10000` | sidecar | How long the sidecar waits for `MIGRATE_IN_ACK` before it re-queues. |
 | `reconnectBackoffMinMs` | `1000` | mod | Backoff floor. |
 | `reconnectBackoffMaxMs` | `30000` | mod | Backoff ceiling. |
+| `stableSessionMs` | `5000` | mod | How long a connection must live before the backoff ladder resets (§6.2, §13 A8). |
+| `simNotReadyGraceMs` | `2000` | mod | How long a `MIGRATE_IN` may sit queued at `timeScale` 0 before `SIM_NOT_READY` (§13, A4). |
+| `simSizeEpsilon` | `1e-6` | both | Relative tolerance for every `S` comparison (§13, A10). |
 | `maxFrameBytes` | `8388608` | both | 8 MiB WebSocket frame limit. |
 | `maxPayloadBytes` | `4194304` | both | 4 MiB limit on the `payload` string, in UTF-8 bytes. |
 | `inboundQueueMax` | `64` | sidecar | Un-delivered journal entries before inbound admission control kicks in. |
@@ -963,10 +1006,13 @@ These notes are non-normative. They exist so the two sides do not have to negoti
   from a handler.
 - **`entityId` is `int32` and often negative.** Do not use `uint32` and do not use
   `json.Number` comparisons.
-- **Reject `NaN`/`Inf` explicitly.** Go's `encoding/json` refuses to *encode* them but
-  will *decode* nothing of the sort from standard JSON; a non-standard producer can still
-  send `NaN` as a bare token, which fails the decode. Validate finiteness on every float
-  after decode anyway, because `1e999` decodes to `+Inf`.
+- **Reject `NaN`/`Inf` explicitly, but expect the decoder to get there first.** Go's
+  `encoding/json` refuses to encode them, refuses a bare `NaN` token as invalid JSON, and
+  refuses an overflowing literal: `1e999` into a `float64` fails with *"cannot unmarshal
+  number 1e999"*. It does **not** decode to `+Inf` (amended — §13, A9). Both therefore
+  surface one layer earlier — as a malformed envelope field, or as a failed `data` decode
+  that §9.3 answers. Keep the finiteness check as a second net for a value a future codec,
+  a `json.Number` path, or arithmetic could still produce.
 - **Durability before ACK.** `MIGRATE_OUT_ACK` is only correct after `f.Sync()` on the
   journal file **and** on its parent directory. An `os.Rename` without a directory sync is
   not durable across a power loss.
@@ -981,9 +1027,16 @@ These notes are non-normative. They exist so the two sides do not have to negoti
 
 - **Nothing touches Unity off the main thread.** The WebSocket runs on a background
   thread or a `Task`. Inbound frames go onto a `ConcurrentQueue<string>` and are drained
-  inside the `BibiteBody.FixedUpdate` postfix or a dedicated `MonoBehaviour.FixedUpdate`.
-  Outbound frames go onto a second `ConcurrentQueue<string>` that the socket thread
-  drains. Instantiate, destroy and transform writes are all main-thread-only.
+  on the main thread. Outbound frames go onto a second `ConcurrentQueue<string>` that the
+  socket thread drains. Instantiate, destroy and transform writes are all
+  main-thread-only.
+- **Drain in `Update`, act in `FixedUpdate`** (amended — §13, A4). `FixedUpdate` does not
+  run at `timeScale` 0, so a mod that drains only there goes silent the moment a player
+  pauses — no heartbeat, no `EDGE_STATUS` applied, no reconnect. Split the work: the
+  socket queue drain, connect and disconnect handling, `EDGE_STATUS`, and the wall-clock
+  `HEARTBEAT` all run in `Update`; every organism spawn, destroy and revive is deferred to
+  `FixedUpdate`, which is the only place Unity physics and the game's own tick are
+  coherent.
 - **Never block the main thread on I/O.** No synchronous connect, no `.Result`, no
   `.Wait()`. A 5-second DNS or connect stall is a 5-second frozen simulation.
 - **Parse the payload with `Newtonsoft.Json.Linq` only for the eight position numbers.**
@@ -1030,3 +1083,220 @@ These notes are non-normative. They exist so the two sides do not have to negoti
    `rb2d.simulated = false`. That combination is inferred from the decompiled source and
    has not been confirmed in-game. If it turns out to have side effects, the fallback is
    to accept a brief live overlap during a reconnect.
+6. **`MIGRATE_OUT_NACK` has no `edge` field** (§9.1, §13 A5). M2 declares one edge per
+   sim, so `EDGE_CLOSED` and `SIM_SIZE_MISMATCH` are unambiguous and the mod correlates
+   through `migrationId`. The first multi-edge sim needs `edge` on the NACK, which is an
+   additive field and does not need a major bump.
+
+---
+
+## 13. Amendments (`contract-a/1`, 2026-08-02)
+
+The Go side (`go/`) and the mod side (`bibites-mod/`) were built independently from the
+text above. Each found ambiguities and resolved them locally. This section makes those
+resolutions law. Every amendment names the ambiguity, the resolution, and **which side
+enforces it** — the side whose code makes the rule true, and which therefore has to be
+changed if the rule changes.
+
+Where an amendment contradicts the body, the amendment wins. The body carries an
+`(amended — §13, Ax)` marker at each such point.
+
+### A1 — The mod dials only from a loaded world (§2)
+
+**Ambiguity.** §2 says the mod connects only while a simulation world is loaded, but an
+earlier smoke-test instruction had the mod dial from the main menu so a rig could be
+brought up in any order.
+
+**Resolution.** The contract wins. The mod dials after the world is ready and closes with
+`1000` when the world unloads. It never holds — and never opens — a connection on the main
+menu. The consequence for the sidecar is stated, not implied: **no mod connection is not
+an error.** The sidecar keeps every journal entry, publishes closed edges over Contract B,
+and waits (§8).
+
+**Enforced by:** the mod. The sidecar cannot distinguish "no world loaded" from "game not
+running" and must not try.
+
+### A2 — A `MIGRATE_IN` with no usable `migrationId` is dropped (§5.7, §5.9, §9.3)
+
+**Ambiguity.** §5.7 says the mod replies to every `MIGRATE_IN` with an ACK or a NACK, and
+§11.2 repeats it. But §5.9 makes `migrationId` a REQUIRED field of the NACK, so a
+`MIGRATE_IN` that arrives without one cannot be answered at all.
+
+**Resolution.** The mod logs one error and drops the frame. No NACK, no close, no invented
+id. "Without one" means absent, not a string, **or the empty string** — an empty value
+fails the receiving side's own UUID check, so a reply carrying it would be answered with
+close `4003`.
+
+The sidecar's obligation is the other half: it **MUST** make the case impossible. Every
+`MIGRATE_IN` is built from a journal entry, and no journal entry is created before
+`migrationId` has passed a UUID check — on Contract A in `MIGRATE_OUT` validation, and on
+Contract B in `MIGRATION_PAYLOAD` validation. A bounce-back reuses the original entry and
+its id.
+
+**Enforced by:** both. The mod for the drop, the sidecar for the impossibility.
+
+### A3 — Inbound `EDGE_CLOSED` means "not a declared edge" (§9.2)
+
+**Ambiguity.** §9.2's `EDGE_CLOSED` row gave two causes joined by "or": the mod has no
+border strip on `entryEdge`, **or** it has that edge closed locally. The second reading
+makes a bounce-back undeliverable, because an edge closes exactly when its peer dies —
+which is the event that produced the bounce-back in the first place.
+
+**Resolution.** Only the first cause stands. The mod answers `EDGE_CLOSED` when
+`entryEdge` is not in the `borderEdges` list it declared in `CONFIG_UPDATE`. A declared
+edge that is currently closed still accepts inbound organisms. Open/closed state gates
+**outbound** migration only (§5.4).
+
+**Enforced by:** the mod. The sidecar's stated reaction is unchanged and stays correct:
+keep custody, and do not re-deliver on that edge until a `CONFIG_UPDATE` changes
+`borderEdges`.
+
+### A4 — `Update` carries control, `FixedUpdate` carries organisms (§8, §11.2)
+
+**Ambiguity.** §11.2 told the mod to drain the inbound queue inside `FixedUpdate`. §8
+requires the heartbeat to keep its wall-clock cadence through a pause and a `0×` time
+scale. Unity does not run `FixedUpdate` at `timeScale` 0, so the two requirements cannot
+both be met from one callback.
+
+**Resolution.** Split them.
+
+| Work | Callback | Why |
+|---|---|---|
+| Socket queue drain, connect/disconnect, `EDGE_STATUS`, `CONFIG_UPDATE`, `HEARTBEAT` | `Update` | Must keep running while the sim is stopped |
+| Organism spawn, destroy, revive; migration timeouts; the border-strip test | `FixedUpdate` | Must be coherent with physics and the game's own tick |
+
+A `MIGRATE_IN` therefore lands in a queue that `FixedUpdate` cannot drain while the sim is
+stopped. A delivery that has waited more than `simNotReadyGraceMs` (2000 ms wall clock) at
+`timeScale` 0 is answered from `Update` with `MIGRATE_IN_NACK` / `SIM_NOT_READY`,
+`class: "transient"`, `retryAfterMs: 5000`, and removed from the queue.
+
+**Enforced by:** the mod for the split and the NACK; the sidecar for the answer — it
+**MUST** honour `retryAfterMs`, **MUST** keep custody, and **MUST NOT** count the silence
+of a mod whose last `HEARTBEAT` reported `paused: true` or `timeScale: 0` as a missed
+delivery (§8).
+
+### A5 — `MIGRATE_OUT_NACK` carries no `edge` field (§9.1)
+
+**Ambiguity.** `EDGE_CLOSED` and `SIM_SIZE_MISMATCH` are statements about one edge, and
+§5.6's field list has no `edge`. With more than one open edge, the mod could not tell
+which one to stop using.
+
+**Resolution.** Accepted as-is for M2, which ships exactly one edge per sim. The mod
+correlates the NACK through `migrationId` to its own in-flight record, which knows the
+exit edge, and closes that edge until the next `EDGE_STATUS`. Recorded as §12 open item 6:
+the first multi-edge sim adds `edge` to `MIGRATE_OUT_NACK`, which is an additive field and
+needs no major bump.
+
+**Enforced by:** neither, today. It is a bounded debt, not a rule.
+
+### A6 — Bounce-back needs proof, and a timeout is not proof (§5.7)
+
+**Ambiguity.** The custody chain's step 6 says a remote NACK **or a timeout** re-injects
+the organism into the origin sim. Taken literally the timeout half duplicates: the
+destination may have delivered the organism and ACKed it, and only the `MIGRATION_ACK` may
+have been lost. D2 forbids duplication and prefers loss.
+
+**Resolution.** The origin sidecar bounces in exactly two cases:
+
+| Situation | Action |
+|---|---|
+| A Contract B `MIGRATION_NACK` arrived, any code | **Bounce.** `contract-b-m2.md` §5.8 forbids a NACK after durable custody, so a NACK proves custody never moved. |
+| The forward never reached a live peer — relay link down, or the destination sector vacant — for longer than `bounceTimeoutMs` | **Bounce.** The frame was never handed to anyone. |
+| The forward reached a live peer and no answer came back | **Hold and re-forward.** Never bounce. The destination deduplicates on `migrationId`, so a re-forward costs nothing and holding turns a possible duplication into a bounded delay. |
+
+**Enforced by:** the sidecar. Already specified in `contract-b-m2.md` §7 and §8 item 5;
+this amendment aligns Contract A's wording with it. The mod needs no change — a
+bounce-back is an ordinary `MIGRATE_IN` with `bounceBack: true`.
+
+### A7 — A permanent `MIGRATE_IN_NACK` is held, never returned (§5.9, §9.2)
+
+**Ambiguity.** §5.9 offered the destination sidecar two options on a permanent NACK:
+bounce the organism back to the origin peer over Contract B, or hold it for an operator.
+The first option is unsafe. The payload is already durably journaled at the destination,
+M2's message list has no two-phase return, and a lost return frame loses the organism
+outright.
+
+**Resolution.** Hold. The destination sidecar moves the journal entry to a `held` state,
+keeps it for an operator, and logs one loud line. It never returns the organism over
+Contract B in M2. `contract-b-m2.md` §7 and §10 item 4 already say this; §5.9 and the
+three permanent rows of §9.2 now match.
+
+**Enforced by:** the sidecar.
+
+### A8 — No NACK channel means close `4003`, and the mod must back off (§9.3, §6.2)
+
+**Ambiguity.** §9.3 answers a failed `data` validation with "the matching NACK". Four
+message types have no matching NACK: `CONFIG_UPDATE`, `HEARTBEAT`, `MIGRATE_IN_ACK` and
+`MIGRATE_IN_NACK`.
+
+**Resolution, sidecar side.** An unusable frame of those four types closes the connection
+with `4003`. §5.1 already sets the precedent by closing `4003` on a first frame that is
+not `CONFIG_UPDATE`.
+
+One exception: a `MIGRATE_IN_ACK` or `MIGRATE_IN_NACK` that is **well-formed** but names a
+`migrationId` the sidecar does not know is logged at warning level and ignored. It is a
+late reply to a delivery that has since been completed, purged or restarted through — a
+normal race, not a defect, and closing on it would turn a race into an outage.
+
+**Resolution, mod side.** Close `4003` therefore arrives *after* a successful socket
+connect, on every attempt, for as long as the fault lasts. The mod's reconnect backoff
+**MUST** treat that as a failure: the ladder resets only after a session that stayed up
+for `stableSessionMs`, never on the connect itself, and every reconnect waits out at least
+rung 1 (§6.2). Resetting on connect holds the ladder at its floor and produces an
+unthrottled redial loop against a peer that is failing deterministically.
+
+**Enforced by:** both. The sidecar for the close, the mod for surviving it.
+
+### A9 — `1e999` does not decode to `+Inf` in Go (§11.1)
+
+**Ambiguity.** §11.1 justified the mandatory finiteness check with the claim that `1e999`
+decodes to `+Inf` in Go. It does not. `encoding/json` rejects an overflowing literal for a
+`float64` target with *"cannot unmarshal number 1e999 into Go value of type float64"*, and
+a bare `NaN` token is not valid JSON at all.
+
+**Resolution.** Both faults surface one layer earlier than §11.1 assumed:
+
+- in an envelope field, as a malformed frame → close `4003` (§3.2);
+- inside `data`, as a failed body decode → the answer §9.3 gives for that type, which is
+  `MALFORMED_MESSAGE` where a NACK exists and close `4003` where one does not (A8).
+
+The finiteness check stays, as a second net rather than the first one. It still catches a
+value that arrives through a `json.Number` path, from a non-Go peer, or out of arithmetic.
+§4.1's ban on `NaN` and `±Inf` is unchanged.
+
+**Enforced by:** the sidecar. Documentation-only — no behaviour changed.
+
+### A10 — `S` equality is a relative epsilon (§4.1, §5.3, §5.4)
+
+**Ambiguity.** §5.3 step 4 tells the sidecar to check that the neighbour's `S` **equals**
+`simulationSize`, and §5.4 tells the mod to compare `peerSimulationSize` against its own
+`S`. §4.1 forbids comparing two floats for exact equality — `S` starts life as a C#
+32-bit `float` and reaches the sidecar as a `float64`.
+
+**Resolution.** One test, used by both sides everywhere this contract says two `S` values
+are equal:
+
+```
+equal(a, b)  ⇔  finite(a) ∧ finite(b) ∧ |a − b| ≤ 1e-6 · max(1, |a|, |b|)
+```
+
+The `max(1, …)` term keeps the tolerance absolute near zero and relative at simulation
+scale: at `S = 2000` it is 2 mm of world units, far below any real resize and far above
+any float round trip. A non-finite value on either side is never equal to anything.
+
+The same function backs `MIGRATE_OUT` step 4, the `EDGE_STATUS` computation of §5.4, and
+Contract B's inbound admission check.
+
+**Enforced by:** the sidecar for the wire decisions, the mod for its own second check of
+`peerSimulationSize` (§5.4).
+
+### Amendments that live in `contract-b-m2.md`
+
+Three resolutions from the Go side are Contract B's business and are written there. They
+are listed here so a Contract A reader is not left looking for them.
+
+| Resolution | Where it is written | Summary |
+|---|---|---|
+| `entityId` and `heading` travel explicitly on the Contract B wire | `contract-b-m2.md` §5.6, §8 item 2 | Additive fields. `entityId` from the blob wins over the wire value, with a warning on a mismatch, because the blob is what the destination restores. `heading` is the reverse: the wire value wins, because the receiving mod rewrites the blob from it (§5.7 step 3). |
+| The shape of `$.body.id` in a bb8 blob | `contract-b-m2.md` §8 item 2 | Both `{"body":{"id":N}}` and `{"body":{"id":{"id":N}}}` are accepted. §5.3's example elides the `BibiteID` wrapper, so the two are indistinguishable from this document alone. |
+| The sidecar persists its granted sector | `contract-b-m2.md` §5.3, §8 item 4 | `<data-dir>/sector`, replayed as `preferredSector` on the next `SECTOR_CLAIM`, so a relay restart cannot swap the two sims. |

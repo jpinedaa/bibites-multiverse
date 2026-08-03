@@ -607,6 +607,51 @@ func TestMalformedFrameClosesWith4003(t *testing.T) {
 	}
 }
 
+// TestUnusableConfigUpdateClosesWith4003 covers contract-a.md §13 amendment A8:
+// the envelope is well-formed, so §3.2 does not apply, but CONFIG_UPDATE has no
+// NACK channel — the only answer left is a close.
+func TestUnusableConfigUpdateClosesWith4003(t *testing.T) {
+	r := newRig(t, rigOptions{skipEdgeCheck: true})
+	bad := dialRawMod(t, r.b.URL())
+	size, width := 2000.0, 40.0
+	frame, err := wire.Encode(wire.ProtocolA, contracta.TypeConfigUpdate, time.Now().UnixMilli(),
+		contracta.ConfigUpdate{
+			SessionID: wire.NewUUID(),
+			// Not one of §5.1's four reasons. Every other field is valid.
+			Reason:         "because",
+			GameVersion:    "0.6.3.1",
+			ModVersion:     "0.2.0",
+			SimulationSize: &size,
+			BorderEdges:    []string{contracta.EdgeE},
+			BorderWidth:    &width,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad.write(frame)
+	if code := bad.waitClosed(5 * time.Second); code != contracta.CloseMalformedFrame {
+		t.Fatalf("close code = %d, want %d (MALFORMED_FRAME)", code, contracta.CloseMalformedFrame)
+	}
+}
+
+// TestUnknownMigrationIDOnMigrateInAckIsIgnored covers the exception in
+// contract-a.md §13 amendment A8: a well-formed reply naming a migration the
+// sidecar no longer knows is a late race, not a defect. Closing on it would turn
+// a race into an outage.
+func TestUnknownMigrationIDOnMigrateInAckIsIgnored(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	entityID := testEntityID
+	dup, tick := false, int64(1)
+	r.modB.sendFrame(contracta.TypeMigrateInAck, contracta.MigrateInAck{
+		MigrationID: wire.NewUUID(), EntityID: &entityID, Duplicate: &dup, SimTick: &tick})
+
+	// The connection stays open and the custody chain still runs end to end.
+	migrationID := r.modA.migrateOut(testEntityID, contracta.EdgeE, 0.42)
+	waitFor(t, 5*time.Second, "the migration to complete after a stray MIGRATE_IN_ACK", func() bool {
+		return r.wB.spawnCount(migrationID) == 1
+	})
+}
+
 // TestUnsupportedProtocolClosesWith4000 covers contract-a.md §3.1.
 func TestUnsupportedProtocolClosesWith4000(t *testing.T) {
 	r := newRig(t, rigOptions{skipEdgeCheck: true})

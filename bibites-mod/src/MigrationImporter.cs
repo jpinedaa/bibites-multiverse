@@ -70,10 +70,10 @@ namespace BibitesMultiverse
             string migrationId = null;
             int entityId = 0;
 
-            if (!ContractA.TryString(data, "migrationId", out migrationId))
+            if (!ContractA.TryMigrationId(data, out migrationId))
             {
                 MultiversePlugin.Log.LogError(
-                    "[M2] MIGRATE_IN without a usable 'migrationId' — the NACK is keyed on that field, so this frame cannot be answered. Dropped.");
+                    "[M2] MIGRATE_IN without a usable 'migrationId' — the NACK is keyed on that field, so this frame cannot be answered. Dropped (§13, amendment A2).");
                 return;
             }
 
@@ -365,7 +365,7 @@ namespace BibitesMultiverse
         /// </summary>
         internal void NackNotReady(JObject data, string why)
         {
-            if (!ContractA.TryString(data, "migrationId", out string migrationId))
+            if (!ContractA.TryMigrationId(data, out string migrationId))
             {
                 return;
             }
@@ -377,7 +377,7 @@ namespace BibitesMultiverse
         /// <summary>§9.2 SHUTTING_DOWN — the world is unloading with deliveries still queued.</summary>
         internal void NackShuttingDown(JObject data)
         {
-            if (!ContractA.TryString(data, "migrationId", out string migrationId))
+            if (!ContractA.TryMigrationId(data, out string migrationId))
             {
                 return;
             }

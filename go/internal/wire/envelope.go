@@ -198,7 +198,14 @@ func isHex(c byte) bool {
 }
 
 // Finite rejects NaN and ±Inf, which are forbidden anywhere in these contracts
-// (contract-a.md §4.1). 1e999 decodes to +Inf, so this check is not optional.
+// (contract-a.md §4.1).
+//
+// It is a second net, not the first one. encoding/json refuses an overflowing
+// literal outright — 1e999 into a float64 fails with "cannot unmarshal number
+// 1e999", and a bare NaN token is not JSON at all — so both surface one layer
+// earlier, as a malformed envelope field or a failed data decode
+// (contract-a.md §13, amendment A9). This check covers what a future codec, a
+// json.Number path or a computed value could still produce.
 func Finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
 
 func requireString(fields map[string]json.RawMessage, name string) (string, error) {

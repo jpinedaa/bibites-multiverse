@@ -135,9 +135,24 @@ or the sidecar loses every organism it was holding.
   install therefore keeps the real toolchain at `~/go-dist/go` and symlinks `~/go` to it,
   which satisfies the stale variable and the stale `PATH` entry at the same time. Do not
   delete the symlink, and do not use `~/go` as a `GOPATH` — that is `~/gopath`.
-- **The M2 rig binds four loopback ports:** `8790` (relay, Contract B), `8787` and `8788`
-  (sidecar A and B, Contract A). Two agents working in this repo at once will collide on
-  them; use high ports for a throwaway smoke test.
+- **Never load a world before `ProceduralSpriteManager.Instance.done`.** `MenuInitializer`
+  starts the sprite atlas build asynchronously, and until it reports `done` every bibite
+  spawn throws `IndexOutOfRangeException` out of `BibiteBody.FinalizeBirth` →
+  `RequestBodySprite`. `LoadBibiteOrEggFromData` swallows that exception and returns
+  `null`, so the symptom is **a world that loads empty**, or a migration answered
+  `DESERIALIZE_FAILED` — a transient condition reported as a permanent fault, with no
+  stack trace anywhere. The mod already gates on it, in two places: `WorldLoader.MenuReady`
+  before it calls `GameManager.StartGame`, and `GameBridge.SimulationReady` before any
+  spawn. **Any E2E rig, script or auto-test that loads a world must wait on the same
+  flag** — sleeping for a fixed number of seconds is not a substitute, because the build
+  time scales with the sprite set.
+- **The M2 rig binds three loopback ports:** `8790` (relay, Contract B), `8787` and `8788`
+  (sidecar A and B, Contract A). They are fixed defaults shared by every rig in this
+  checkout, so **only one rig can run at a time** — a second one, or a second agent
+  working in this repo, silently attaches to or fights over the first one's processes.
+  Check with `ss -ltn | grep -E '878[78]|8790'` before starting, and give a throwaway
+  smoke test high ports (`--listen 127.0.0.1:0` writes the resolved address to
+  `<data-dir>/listen.addr`).
 - **Fresh timestamps under `Scenarios/` and `Bibites/Templates/` are not your mod.**
   `AppInitializer.ReImportOfficialScenarios()` (`AppInitializer.cs:92, 123`) re-extracts
   the official scenarios and templates on **every** launch. Those archives also contain
