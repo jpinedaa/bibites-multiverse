@@ -1,2 +1,8 @@
-# The bundle and its download cache: binaries, never committed.
-dist/
+# The bundle's build scratch and download cache: binaries, never committed.
+# `dist/*` rather than `dist/` so git still descends into the directory and the
+# negation below can take effect.
+dist/*
+
+# Exception: the far-end bundle ships through the repo, so the second computer
+# clones it instead of copying it over USB.
+!dist/farend-bundle.zip
