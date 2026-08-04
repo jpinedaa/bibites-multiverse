@@ -486,7 +486,7 @@ machine deliberately (D9), and keeps the two-instance trick to fill its third ri
 **Carried in from M1 and now closed:** the round trip ran on an organism with living
 parents and living children, so the stale-reference trap is proven, not just implemented.
 
-### M3 — The LAN ring: two machines, one current
+### M3 — The LAN ring: two machines, one current — **COMPLETE**
 **Redefined 2026-08-03 by D8–D11. Full plan: `m3_considerations.md`.**
 
 The first milestone with a genuinely remote peer, and the first with a topology. The relay
@@ -540,9 +540,17 @@ of the kill gauntlet repeats cross-machine; every world and every journal stays 
 ring needs **three** slots for that — two slots make a degenerate ring where one hop is
 already a return trip — so the main machine runs two of them and the second computer runs
 the third. Full conditions in `m3_considerations.md`.
+**Passed 2026-08-03**, every phase on the first attempt (`e2e/run-m3-lan.sh`): the ring
+closed across two physical machines — slots 1 and 3 here, slot 2 on the owner's second
+computer — and a *natural* emigrant, not the forced one, completed the circuit and came home
+byte-equal, counted **exactly once** ring-wide. Natural migration is already flowing across
+the LAN: the far world exported seven organisms on its own in the ~12 minutes the ring was
+live before the test began, so phase 3 never had to wait. **The rig was left running as a
+living deployment.** Full result in `m3_considerations.md`, *Exit Test → Result*.
 
-### M4 — Public release
-The public half of the old M3, moved out intact by D9. A hosted relay on a VPS; TLS and
+### M4 — Public release — **NEXT**
+The public half of the old M3, moved out intact by D9 — and the current milestone now that
+M3 closed on 2026-08-03. The scope below is unchanged. A hosted relay on a VPS; TLS and
 authentication for public exposure; capacity and abuse limits; packaging so a player
 installs the mod and the sidecar without a build toolchain; ring insertion under strangers
 joining and leaving.

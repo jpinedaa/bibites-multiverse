@@ -315,9 +315,15 @@ refuses to build when `setup-farend.ps1`'s pinned `$AssemblySha256` no longer eq
 `bibites-mod/libs/BibitesAssembly.dll` — that pin **is** the version gate on the far end, and a
 stale one would let two different game builds into one ring.
 
-Copy three things to the second computer: the zip, `~/.multiverse-token` (as `token.txt`), and
-the relay's LAN address. Its operator then runs two commands, and `farend/README.md` is the
-whole of their instructions:
+**The repo distributes the bundle.** `farend/dist/farend-bundle.zip` is tracked as of
+`8463b72`, so the second computer clones the private GitHub repo and takes the zip out of the
+checkout instead of receiving a hand-copied file. Only two things still travel by hand:
+`~/.multiverse-token` (as `token.txt`) and the relay's LAN address — **neither belongs in the
+repo**. Re-run `make-farend-bundle.sh` and commit the new zip whenever the plugin, the sidecar
+binary or the `$AssemblySha256` pin changes; a stale committed bundle is a stale far end.
+
+With the zip in hand, its operator runs two commands, and `farend/README.md` is the whole of
+their instructions:
 
 ```powershell
 .\setup-farend.ps1 -RelayHost <relay LAN address> -TokenFile .\token.txt
@@ -343,9 +349,10 @@ the VM. Both commands below need an elevated PowerShell and both are **owner ste
 `e2e/run-m3-lan.sh lanhost` prints them with the current addresses filled in.
 
 ```powershell
-# once
+# once. -Profile Any, NOT Private: an Ethernet NIC classified "Public" silently ignores a
+# Private-only rule, and the far end just reports the relay unreachable. See Gotchas.
 New-NetFirewallRule -DisplayName "Bibites Multiverse relay" -Direction Inbound `
-  -Action Allow -Protocol TCP -LocalPort 8790 -Profile Private
+  -Action Allow -Protocol TCP -LocalPort 8790 -Profile Any
 
 # after every WSL restart: the WSL address changes
 netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0
@@ -446,6 +453,27 @@ a `172.x` hypervisor address. Record it here once it is chosen, and give the sam
   `<data-dir>/listen.addr`). The M2 rig used `8787`/`8788`/`8790` and collides head-on. On
   the LAN rig only `8787`, `18789` and `8790` are local; the far end's `8787` is on its own
   machine.
+- **`kill $!` does not kill a program launched in the background *inside* a compound
+  command.** In `( … & )`, or in `cmd1 && cmd2 &`, `$!` is the pid of the **subshell**; the
+  real program is its child and outlives the kill. A relay started that way survived its own
+  cleanup and kept holding `8790`, so the next rig start failed on an address already in use
+  while nothing in the script's process table looked wrong. Kill by port
+  (`ss -ltnp | grep 8790`) or by pattern (`pkill -f 'bin/relay'`), and check the port is free
+  before starting a rig — do not trust a recorded `$!`.
+- **A Windows Firewall rule scoped to the Private profile does nothing on a network Windows
+  has classified `Public`.** This is what blocked the first LAN attempt: the relay, the port
+  proxy and the rule all looked correct, and the far end simply reported the relay
+  unreachable. The Ethernet adapter here was on a `Public` profile, so the `-Profile Private`
+  rule never matched. Check with `Get-NetConnectionProfile` in an elevated PowerShell, and fix
+  with `Set-NetFirewallRule -DisplayName "Bibites Multiverse relay" -Profile Any`. Windows
+  re-classifies a network on its own, so `-Profile Any` is the durable form — the command in
+  *Owner steps* above now uses it.
+- **Never test LAN reachability with `curl` from WSL to this host's own LAN address.** WSL2
+  here is NAT'd and has no hairpin route back to the Windows host it runs on, so
+  `curl http://<this machine's LAN IP>:8790` fails from WSL even when the firewall rule, the
+  port proxy and the relay are all healthy. It is a false negative that reads exactly like a
+  blocked port, and it costs an hour of chasing the firewall. Test from a Windows PowerShell
+  on this machine, or from the second computer — never from WSL.
 - **The archive ledger is cumulative, so an archive assertion needs a lower time bound.**
   `migrations.jsonl` keeps every hop of every earlier run, so "wait until a `slot 2 -> slot 3`
   record exists" succeeded instantly against an hour-old record and reported a crossing that

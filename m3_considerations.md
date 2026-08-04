@@ -2,9 +2,10 @@
 
 This report expands milestone M3 of `system_decomposition.md`.
 
-**Status: IN PROGRESS.** The owner redefined this milestone on 2026-08-03. Decisions D8 to
-D11 hold the new shape. The three-slot rehearsal on one machine passed. The LAN packaging
-is built. The LAN exit test is the remaining step.
+**Status: COMPLETE.** The owner redefined this milestone on 2026-08-03. Decisions D8 to
+D11 hold the new shape. The LAN exit test passed on 2026-08-03, on the first attempt. The
+ring ran across two physical machines. See *Exit Test*, *Result*. The rig stays up as a
+living deployment.
 
 ## Purpose
 
@@ -204,7 +205,9 @@ end.** `e2e/run-m3-lan.sh` reads every fact about slot 2 on the main machine:
 - Slot 3 records the arrival of each organism that leaves slot 2.
 
 The rig cannot force an export on the far end, and it does not need to. Organisms cross
-east by themselves. Phase 3 waits for that natural crossing, with a wide timeout. The
+east by themselves. Phase 3 waits for that natural crossing, with a wide timeout. **The
+wide timeout proved unnecessary on 2026-08-03.** The far world had already exported seven
+organisms before the test started. See *Exit Test*, *Result*. The
 operator of the second computer runs two scripts and nothing more. The unattended property
 of M2 stays intact for every part of the test that this machine owns.
 
@@ -302,6 +305,7 @@ Seven packages. WP1 gates every other package, because it settles the wire.
 
 **Depends on:** this document.
 **Needs the game:** no.
+**Status: DONE, 2026-08-03.**
 
 - The ten items of *Contract Changes Needed*
 - One worked example for each new message
@@ -314,6 +318,7 @@ ambiguity alone. `contract-a.md` §13 holds ten such resolutions.
 
 **Depends on:** WP1.
 **Needs the game:** no.
+**Status: DONE, 2026-08-03.**
 
 - The canonical genome projection, and the hash over it (Risk 9)
 - Gene, node and synapse validation, carried from M2
@@ -327,6 +332,7 @@ WP2 blocks WP3 and WP5. Both of them hash genomes.
 
 **Depends on:** WP1, WP2.
 **Needs the game:** no.
+**Status: DONE, 2026-08-03.**
 
 - Ring insertion at the relay, keyed on `peerId`, with a held slot and a manual release
 - ✓ A manual reservation as well, `--reserve-slot <peerId>`. It writes the ring order
@@ -343,6 +349,7 @@ WP2 blocks WP3 and WP5. Both of them hash genomes.
 
 **Depends on:** WP1.
 **Needs the game:** yes.
+**Status: DONE, 2026-08-03.**
 
 - Stop disabling `worldWrapping`. Snapshot the value and report it only (D10)
 - Extend the export capture to the band outside the square, with the outward-velocity
@@ -356,6 +363,7 @@ WP2 blocks WP3 and WP5. Both of them hash genomes.
 
 **Depends on:** WP1, WP2, WP3.
 **Needs the game:** no.
+**Status: DONE, 2026-08-03.**
 
 - The envelope record, with both ring slots, both peer ids and the relay receive time
 - The content-addressed genome store
@@ -372,7 +380,7 @@ deliberately dumb relay (D1). A slot-less peer adds a member that owns no world.
 
 **Depends on:** WP3, WP4.
 **Needs the game:** yes.
-**Status: built on 2026-08-03. The LAN exit test is the remaining step.**
+**Status: DONE, 2026-08-03. The ring formed across both machines, and the rig stays up.**
 
 - ✓ The artifact set for the second computer, and the script that starts it (Risk 6).
   `farend/`: `make-farend-bundle.sh`, `setup-farend.ps1`, the generated `start-slot2.ps1`
@@ -393,6 +401,8 @@ deliberately dumb relay (D1). A slot-less peer adds a member that owns no world.
 
 **Depends on:** WP2, WP3, WP4, WP5, WP6.
 **Needs the game:** yes.
+**Status: DONE, 2026-08-03. Every phase passed on the first attempt. See *Exit Test*,
+*Result*.**
 
 Build the test on `e2e/run-m2.sh`. The phases, the command file and the forced export all
 carry over. A forced export still teleports the organism into the strip with an outward
@@ -496,24 +506,75 @@ operator-driven. Its operator stops the process by hand and starts it again with
 `.\start-slot2.ps1`. Record both kills as manual steps. The count after each recovery
 comes from the main machine, in the same way as phase 6 of `e2e/run-m3-lan.sh`.
 
+### Result — PASS, 2026-08-03
+
+`e2e/run-m3-lan.sh` ran every phase against game `0.6.3.1`. All six phases passed on the
+first attempt. Slot 1 and slot 3 ran on the main machine. Slot 2 ran on the second computer
+of the owner, over the LAN.
+
+The far end installed itself from the repository bundle. Its operator cloned the private
+repository and ran `setup-farend.ps1`, and the script verified game `0.6.3.1` by hash.
+`start-slot2.ps1` then claimed slot 2 with `reason=reclaimed`, and the relay reported
+`ringSize=3`.
+
+- **Phase 1 — the ring.** Three slots formed in ring order, across two physical machines.
+- **Phase 2 — the forced export.** One organism crossed the LAN from slot 1 into slot 2,
+  with a parent in its annex.
+- **Phase 3 — the natural crossing.** This phase waited for nothing. A natural emigrant,
+  entity `1988005215`, left slot 2 by itself and landed in slot 3.
+- **Phase 4 — the return hop.** Entity `1988005215` came home to slot 1 byte-equal, at
+  `sha256` `54ccc86b…`. The circuit closed.
+- **Phase 5 — archive truth.** The archive held all three lanes, joined the lineage, and
+  held each parent genome by hash. No genome blob crossed the wire.
+- **Phase 6 — exactly once.** The ring held one copy of entity `1988005215`. The count was
+  1.
+- **The error sweep.** No BepInEx log and no sidecar log held an error.
+
+**The eastward current runs by itself.** The ring was live for about twelve minutes before
+the test started. In that time the far world exported seven organisms naturally, with no
+forcing. Phase 3 therefore waited for nothing. No phase asserts that number, and it answers
+the migration-rate question across a real network hop.
+
+**Part 3, the kill gauntlet.** The three-slot rehearsal on this machine killed the relay
+and a sidecar mid-migration, and counted one copy after each recovery. Phase 6 repeated the
+exactly-once count for the cross-machine circuit. The two kills on the second computer stay
+operator-driven, and this run left them alone.
+
+**One setup defect appeared, and it was on the network, not in the code.** The Windows
+Ethernet profile of the relay host read `Public`, so the Private-profile firewall rule
+blocked the LAN. The far end reported the relay unreachable. `dev_environment.md`,
+*Gotchas*, records that defect and two more from the same session.
+
+**The rig runs on.** The owner left every process up after the test. M3 is a living
+deployment, not a rehearsal that ends in a teardown. Read the port gotcha in
+`dev_environment.md` before you start a second rig in this checkout.
+
 ## Deliverables
 
-- An amended `contracts/contract-a.md` and `contracts/contract-b-m2.md`, from WP1
-- A `bb8-schema` with the genome projection, the hash and the deep validation
-- A `multiverse-relay` with ring insertion and a held slot
-- A `multiverse-sidecar` with annex assembly, the genome cache and the fetch answer
-- A `multiverse-archive` binary, with its store and its query surface
-- A mod build with wrap containment, the outside band and parent collection
-- ✓ The artifact set and the start script for the second computer (`farend/`)
+- ✓ The wire specification, from WP1. `contracts/contract-a.md` at `contract-a/1.1`,
+  `contracts/contract-b-m3.md` at `contract-b/2.0`, which supersedes `contract-b-m2.md` in
+  full, and `contracts/genome-hash.md` at `bb8-genome/1`
+- ✓ A `bb8-schema` with the genome projection, the hash and the deep validation
+- ✓ A `multiverse-relay` with ring insertion and a held slot
+- ✓ A `multiverse-sidecar` with annex assembly, the genome cache and the fetch answer
+- ✓ A `multiverse-archive` binary, with its store and its query surface
+- ✓ A mod build with wrap containment, the outside band and parent collection
+- ✓ The artifact set and the start script for the second computer (`farend/`). The repo
+  distributes the bundle from `farend/dist/farend-bundle.zip`
 - ✓ An update to `dev_environment.md` with the LAN rig, the bundle workflow, the firewall
   rule and the port forward
-- The recorded results of the two D10 tests
-- The automated M3 exit test, with its recorded result
-- An `m3_findings.md` with the research results of the milestone
+- ✓ The recorded results of the two D10 tests. The one-machine rehearsal passed both: no
+  export without an outward velocity, and no leak north past the wrap radius
+- ✓ The automated M3 exit test, with its recorded result. See *Exit Test*, *Result*
+- An `m3_findings.md` with the research results of the milestone. **The one open item.**
 
 ## Design Calls for the Owner
 
-Four calls need an answer before WP1 closes.
+**All four calls are answered.** WP1 settled calls 1 to 3 on 2026-08-03, in
+`contracts/contract-a.md`, `contracts/contract-b-m3.md` and `contracts/genome-hash.md`. The
+mod ships opaque parent blobs and the sidecar hashes them (call 1). The relay copies each
+envelope to the archive (call 2). The annex carries an explicit `lineage.genomeHash`
+(call 3). Call 4 keeps its answer below.
 
 1. **The parent-blob route** (Risk 8). The mod sends opaque parent blobs, and the sidecar
    hashes them. This route keeps decision D4 intact and gives the archive a source for
@@ -531,12 +592,12 @@ Four calls need an answer before WP1 closes.
 
 ## Next Steps
 
-1. Answer the four calls in *Design Calls for the Owner*.
-2. Write WP1. Amend both contracts, and bump the major version.
-3. Run the two D10 tests as early as possible. They gate the containment design.
-4. Start WP2. The genome projection blocks the annex and the archive.
-5. Start WP3 and WP4 in parallel, from the amended contracts.
-6. Build WP5 after the archive route of call 2 is settled.
-7. ✓ Build WP6. The bundle, the LAN rig and the two network commands are ready. The owner
-   installs the second computer and opens the port, with the ten-step procedure above.
-8. Run WP7. Record the results in `m3_findings.md` and in this document.
+The original eight steps are done. Steps 1 to 6 closed with WP1 to WP5, step 7 with WP6,
+and step 8 with the passing exit test above. What M3 leaves behind is short.
+
+1. Write `m3_findings.md` from the run logs, the journals and the archive. It is the last
+   M3 deliverable.
+2. Keep the rig alive. Watch the eastward current over days, not minutes.
+3. Repeat the two remote kills of Part 3 when the operator of the second computer is free.
+4. Open M4, public release. Decision D9 moved that scope out of M3 intact, and
+   `system_decomposition.md` holds it.
