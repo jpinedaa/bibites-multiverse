@@ -360,11 +360,17 @@ netsh interface portproxy add v4tov4 listenport=8790 listenaddress=0.0.0.0 `
   connectport=8790 connectaddress=<the WSL address from `lanhost`>
 ```
 
-**Relay LAN host: `TODO-owner`.** The address the second computer dials is one of this
-machine's Windows IPv4 addresses, and only the owner can say which network is the home LAN.
-`lanhost` lists the candidates; the home-LAN one is normally `192.168.x.x` or `10.x.x.x`, never
-a `172.x` hypervisor address. Record it here once it is chosen, and give the same value to
-`setup-farend.ps1 -RelayHost`.
+**Relay LAN host: `192.168.1.227`.** Confirmed 2026-08-03 by the far end itself: the second
+computer ran `setup-farend.ps1 -RelayHost 192.168.1.227`, was granted slot 2, and the relay
+reported `ringSize=3`. Give the same value to `setup-farend.ps1 -RelayHost`. It is one of this
+machine's Windows IPv4 addresses; `lanhost` lists the candidates, and the home-LAN one is
+normally `192.168.x.x` or `10.x.x.x`, never a `172.x` hypervisor address.
+
+**The address alone is not enough — the portproxy behind it must exist.** `192.168.1.227:8790`
+only reaches the relay while the `netsh` portproxy above points at the *current* WSL address,
+and that address changes on every WSL restart. Re-run `e2e/run-m3-lan.sh lanhost` after a
+restart and re-add the portproxy with the value it prints; the LAN host itself does not change,
+so this line stays correct even when the far end suddenly cannot connect.
 
 ## Gotchas
 
