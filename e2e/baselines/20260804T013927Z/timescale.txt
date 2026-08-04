@@ -1,0 +1,2 @@
+slot1 lastCommandedTimeScale=3.00 (Time.timeScale=3.00) log=/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx/LogOutput.log
+slot3 lastCommandedTimeScale=3.00 (Time.timeScale=3.00) log=/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx/LogOutput.log.1

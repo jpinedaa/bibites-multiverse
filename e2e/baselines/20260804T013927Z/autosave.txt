@@ -1,0 +1,8 @@
+gameDefaults: UserSettings.AutoSave=true  ReloadAfterAutosaves=false  AutoSavePeriod=TenMinutes  AutoSaveRealTime=true
+  (UserSettings.cs:27-75 — the shipped defaults, not this profile)
+persistedUserSettings (Unity PlayerPrefs, HKCU\Software\The Bibites\The Bibites):
+  ReloadAfterAutoSaves_h727348301 = 0
+autosaveFolder: /mnt/c/Users/j_jor/AppData/LocalLow/The Bibites/The Bibites/Savefiles/Autosaves exists, 0 file(s)
+slot1 runtimeAutosave=DISABLED by the mod: [Info   :Bibites Multiverse] [M2-CMD] autosave disabled for this session (runtime only) — the rig drives every world save.
+slot3 runtimeAutosave=DISABLED by the mod: [Info   :Bibites Multiverse] [M2-CMD] autosave disabled for this session (runtime only) — the rig drives every world save.
+bepinexPluginConfig: AutoTest = false 

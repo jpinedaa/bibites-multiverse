@@ -1,0 +1,4 @@
+askedSlot=1 entityFromSlot=1 t1785807571836775326 OK entityId=2029083964 present=1 alive=1 population=22
+askedSlot=3 entityFromSlot=1 t1785807572115878211 OK entityId=2029083964 present=0 alive=0 population=23
+askedSlot=1 entityFromSlot=3 t1785807572173659712 OK entityId=-744357222 present=0 alive=0 population=21
+askedSlot=3 entityFromSlot=3 t1785807572447520794 OK entityId=-744357222 present=1 alive=1 population=24

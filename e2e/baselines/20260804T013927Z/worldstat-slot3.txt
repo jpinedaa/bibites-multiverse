@@ -1,0 +1,9 @@
+M3-Slot3 (slot 3)  /home/ubuntu/bibites-multiverse/e2e/baselines/20260804T013927Z/M3-Slot3.zip
+  population 24  (dead in save 9, eggs 1)  simTime 34538.5 s  S=2000 W=40
+  unique genomes 24  species 7  generation mean 9.67 max 12
+  brains: synapses mean 7.62 (min 5 max 12)  hidden nodes mean 1.75 (max 4)
+  age mean 2262 s  maturity mean 1.04  health mean 131.5  energy mean 75.7
+  spatial: mean (x,y) = (-213.6, +250.0)  stddev x 1045.1  mean dist to E edge 2213.6
+  west quarter 5 | middle half 17 | east quarter 2 | capture band 0 | outside square E 0
+  x histogram [3 0 0 3 3 8 3 0 0 2] (below 2, above 0)
+  top genome 0a165fa5e0a0… x1

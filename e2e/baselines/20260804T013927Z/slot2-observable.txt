@@ -1,0 +1,2 @@
+ringMembership: slot1=slot-1 slot2=slot-2 slot3=slot-3
+edgeStatusRipple(slot1 -> its east neighbour slot 2): [Info   :Bibites Multiverse] [M2] EDGE_STATUS epoch=3 exportEdge=E open=True reason=peer_live peerS=2000.00 entries=1 applied=1 ignored=0 changed=True (entryEdge W is passive and never appears here)

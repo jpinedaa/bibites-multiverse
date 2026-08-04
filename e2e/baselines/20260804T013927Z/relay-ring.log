@@ -1,0 +1,22 @@
+time=2026-08-03T17:19:38.012-04:00 level=INFO msg="relay: client connected" peer=archive-main role=archive assignedSlot=0 ringSize=3
+time=2026-08-03T17:19:38.038-04:00 level=INFO msg="relay: client connected" peer=slot-1 role=peer assignedSlot=1 ringSize=3
+time=2026-08-03T17:19:38.038-04:00 level=INFO msg="relay: ring claim" peer=slot-1 slot=1 reason=reclaimed simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T17:19:38.383-04:00 level=INFO msg="relay: client connected" peer=slot-3 role=peer assignedSlot=3 ringSize=3
+time=2026-08-03T17:19:38.383-04:00 level=INFO msg="relay: ring claim" peer=slot-3 slot=3 reason=reclaimed simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T17:19:45.847-04:00 level=INFO msg="relay: ring claim" peer=slot-1 slot=1 reason=updated simulationSize=2000 modConnected=true exportEdge=E
+time=2026-08-03T17:19:53.548-04:00 level=INFO msg="relay: ring claim" peer=slot-3 slot=3 reason=updated simulationSize=2000 modConnected=true exportEdge=E
+time=2026-08-03T17:20:43.722-04:00 level=INFO msg="relay: client connected" peer=slot-2 role=peer assignedSlot=2 ringSize=3
+time=2026-08-03T17:20:43.725-04:00 level=INFO msg="relay: ring claim" peer=slot-2 slot=2 reason=reclaimed simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T17:20:51.104-04:00 level=INFO msg="relay: ring claim" peer=slot-2 slot=2 reason=updated simulationSize=2000 modConnected=true exportEdge=E
+time=2026-08-03T17:36:26.045-04:00 level=INFO msg="relay: ring claim" peer=slot-1 slot=1 reason=updated simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T17:36:26.081-04:00 level=INFO msg="relay: ring claim" peer=slot-3 slot=3 reason=updated simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T20:50:51.078-04:00 level=INFO msg="relay: client connected" peer=archive-main role=archive assignedSlot=0 ringSize=3
+time=2026-08-03T20:50:51.110-04:00 level=INFO msg="relay: client connected" peer=slot-1 role=peer assignedSlot=1 ringSize=3
+time=2026-08-03T20:50:51.111-04:00 level=INFO msg="relay: ring claim" peer=slot-1 slot=1 reason=reclaimed simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T20:50:54.790-04:00 level=INFO msg="relay: client connected" peer=slot-3 role=peer assignedSlot=3 ringSize=3
+time=2026-08-03T20:50:54.790-04:00 level=INFO msg="relay: ring claim" peer=slot-3 slot=3 reason=reclaimed simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T20:51:02.442-04:00 level=INFO msg="relay: ring claim" peer=slot-1 slot=1 reason=updated simulationSize=2000 modConnected=true exportEdge=E
+time=2026-08-03T20:51:10.640-04:00 level=INFO msg="relay: ring claim" peer=slot-3 slot=3 reason=updated simulationSize=2000 modConnected=true exportEdge=E
+time=2026-08-03T21:00:58.780-04:00 level=INFO msg="relay: client connected" peer=slot-2 role=peer assignedSlot=2 ringSize=3
+time=2026-08-03T21:00:58.781-04:00 level=INFO msg="relay: ring claim" peer=slot-2 slot=2 reason=reclaimed simulationSize=0 modConnected=false exportEdge=""
+time=2026-08-03T21:01:20.867-04:00 level=INFO msg="relay: ring claim" peer=slot-2 slot=2 reason=updated simulationSize=2000 modConnected=true exportEdge=E

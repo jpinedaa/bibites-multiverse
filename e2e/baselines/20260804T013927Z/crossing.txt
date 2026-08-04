@@ -1,0 +1,2 @@
+slot1 [Info   :Bibites Multiverse] [M2-CROSSING] edge=E simMinute=615 stripEntries=1 crossings=0 totalStripEntries=294 totalCrossings=112 cumulativeStripEntriesPerSimMin=0.48 population=20 S=2000.0 W=40.0 simTick=1476001
+slot3 [Info   :Bibites Multiverse] [M2-CROSSING] edge=E simMinute=575 stripEntries=0 crossings=0 totalStripEntries=308 totalCrossings=109 cumulativeStripEntriesPerSimMin=0.54 population=23 S=2000.0 W=40.0 simTick=1380001
