@@ -1,0 +1,8 @@
+ABSENT — no census was taken at T1.
+A census is a live dev command. The game for slot 1 was closed by the owner
+before this capture and starting one was forbidden, so there is nothing to
+ask. The last census this world ever answered is in the T0 directory.
+
+The population at the END of the run is known from another source and is
+recorded in crossing.txt and crossing-series-slot1.csv: CrossingStats logged
+it once per simulated minute for the whole night.

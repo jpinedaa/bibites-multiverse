@@ -1,0 +1,11 @@
+ABSENT — no exactly-once cross-check was taken at T1.
+`count <id>` is a live dev command asked of two running worlds. Both games
+were closed before this capture. The T0 directory holds the last one.
+
+What the archive can still say about exactly-once over the whole night:
+  23290 MIGRATION records and 23289 ACK records — one acknowledgement per
+  hop, with a single hop unacknowledged at the instant the rig died.
+  journal-custody.txt identifies it: migrationId 9d6db335-b1ae-433e-a44a-bb2109912913,
+  slot 1 outbound, status in_flight, journaled 2026-08-04T14:13:14.201Z.
+  Its entry survives in slot 1's journal, which is what `reassertCustodyLocked`
+  (contract-a.md §7.4) exists to replay.

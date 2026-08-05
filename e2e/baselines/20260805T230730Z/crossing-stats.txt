@@ -1,0 +1,23 @@
+slot1 rows=20066 firstSimMinute=1 lastSimMinute=20066
+slot1 last edge=E min=20066 se=0 cr=0 tse=10195 tc=2791 rate=0.51 pop=20 S=2000.0 W=40.0 tick=48158401
+slot1 whole-session n=20066 min=10 max=51 mean=22.4 sd=5.5 simMinute 1..20066
+slot1 overnight (after T0) n=19451 min=10 max=49 mean=22.2 sd=5.3 simMinute 616..20066
+slot1 last-240 (same window as T0's summary) n=240 min=16 max=33 mean=21.9 sd=3.4 simMinute 19827..20066
+slot1 overnight-quarter1 simMinute 616..5477 min=10 max=49 mean=25.8
+slot1 overnight-quarter2 simMinute 5478..10339 min=12 max=35 mean=20.6
+slot1 overnight-quarter3 simMinute 10340..15201 min=10 max=33 mean=18.2
+slot1 overnight-quarter4 simMinute 15202..20066 min=12 max=42 mean=24.1
+slot1 stripEntries T0=294 end=10195 (+9901)
+slot1 crossings    T0=112 end=2791 (+2679)
+
+slot3 rows=17621 firstSimMinute=1 lastSimMinute=17621
+slot3 last edge=E min=17621 se=1 cr=0 tse=7134 tc=992 rate=0.40 pop=27 S=2000.0 W=40.0 tick=42290401
+slot3 whole-session n=17621 min=10 max=61 mean=23.7 sd=6.3 simMinute 1..17621
+slot3 overnight (after T0) n=17046 min=10 max=61 mean=23.5 sd=6.1 simMinute 576..17621
+slot3 last-240 (same window as T0's summary) n=240 min=17 max=33 mean=24.5 sd=3.0 simMinute 17382..17621
+slot3 overnight-quarter1 simMinute 576..4836 min=13 max=61 mean=27.5
+slot3 overnight-quarter2 simMinute 4837..9097 min=12 max=39 mean=21.7
+slot3 overnight-quarter3 simMinute 9098..13358 min=10 max=47 mean=21.5
+slot3 overnight-quarter4 simMinute 13359..17621 min=10 max=41 mean=23.5
+slot3 stripEntries T0=308 end=7134 (+6826)
+slot3 crossings    T0=109 end=992 (+883)

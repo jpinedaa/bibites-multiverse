@@ -1,0 +1,225 @@
+########## 20260804T013927Z  ->  20260805T230730Z ##########
+
+=== M3-Slot1: 2026-08-04T01:39:34Z  ->  2026-08-05T23:07:40Z
+    simulated time 37394.1 s -> 37963.3 s  (+569.2 s = 0.16 sim hours)
+
+-- population
+    living           20 -> 26   (+6)
+    dead in save     10 -> 4
+    eggs             0 -> 0
+    generation mean  10.00 -> 10.08   (+0.08), max 12 -> 11
+    age mean         2310.6 s -> 1879.6 s   (-431.0)
+    maturity mean    1.170 -> 0.998   (-0.173)
+    health mean      141.8 -> 128.8   (-13.0)
+    energy mean      96.6 -> 97.3   (+0.6)
+
+-- genomes (canonical bb8-genome/1 projection)
+    unique genomes   20 -> 26   (+6)
+    new genomes      11
+    extinct genomes  5
+    carried over     15
+    per-genome survival (T0 genomes, count then -> count now):
+      225284c0ea77…  1 -> 1
+      25bde38c00b6…  1 -> EXTINCT
+      2b5df74d9c7c…  1 -> 1
+      2d871a4bdcb6…  1 -> 1
+      2f90fa2bbd4f…  1 -> 1
+      373b8dcb153d…  1 -> EXTINCT
+      374bc39b19df…  1 -> EXTINCT
+      3e1591532736…  1 -> EXTINCT
+      416a68e8f761…  1 -> 1
+      4fcf1d4d380d…  1 -> 1
+      611fae057acc…  1 -> 1
+      765f3907bf2d…  1 -> 1
+      ... and 8 more T0 genomes
+    new genomes by size now:
+      048c87c393ce…  1
+      24e1de0232f9…  1
+      49c41f416074…  1
+      4e43dab707ef…  1
+      64cc592040c4…  1
+      98c3fd68c2da…  1
+      a8995066fd87…  1
+      b8691e732a20…  1
+      ... and 3 more new genomes
+
+-- species (the game's own speciesID)
+    distinct species 4 -> 4
+      species 1      14 -> 19
+      species 22     3 -> 2
+      species 25     1 -> 1
+      species 27     2 -> 4
+
+-- gene drift (largest mean shifts, by |delta| in units of the T0 stddev)
+    [16] Diet                    0.2993 ->     0.2965     -0.0028  (-0.67 sd)  sd 0.0041 -> 0.0089
+    [0] LayTime                 16.4559 ->    16.7091     +0.2532  (+0.31 sd)  sd 0.8109 -> 0.8865
+    [32] MoveMusclesWAG          0.6585 ->     0.5776     -0.0809  (-0.31 sd)  sd 0.2639 -> 0.0963
+    [6] ColorG                   0.1222 ->     0.1271     +0.0049  (+0.30 sd)  sd 0.0161 -> 0.0082
+    [28] FatWAG                  2.3952 ->     2.3620     -0.0332  (-0.28 sd)  sd 0.1184 -> 0.1123
+    [10] BrainMutationSigma      0.0996 ->     0.0978     -0.0018  (-0.28 sd)  sd 0.0065 -> 0.0037
+    [7] ColorB                   0.1046 ->     0.0941     -0.0105  (-0.28 sd)  sd 0.0379 -> 0.0411
+    [15] PheroSense            153.7075 ->   151.2215     -2.4860  (-0.27 sd)  sd 9.2328 -> 8.2054
+    [34] FatStorageDeadband      0.2522 ->     0.2559     +0.0037  (+0.25 sd)  sd 0.0146 -> 0.0134
+    [29] ArmorWAG                0.0705 ->     0.0412     -0.0293  (-0.24 sd)  sd 0.1241 -> 0.1041
+    [30] ThroatWAG               1.1114 ->     1.0708     -0.0406  (-0.23 sd)  sd 0.1728 -> 0.1323
+    [14] ClockSpeed              0.9658 ->     0.9249     -0.0410  (-0.23 sd)  sd 0.1768 -> 0.1657
+
+-- brain complexity
+    synapses     mean 4.80 -> 4.35  (-0.45)   max 9 -> 9
+    hidden nodes mean 0.55 -> 0.27  (-0.28)   max 4 -> 2
+    total nodes  mean 48.55 -> 48.27  (-0.28)   max 52 -> 50
+    synapse-count histogram   T0: 2:1 3:2 4:9 5:3 6:2 7:1 9:2
+                              T1: 2:1 3:3 4:15 5:3 6:3 9:1
+    hidden-node histogram     T0: 0:15 1:2 2:1 3:1 4:1
+                              T1: 0:20 1:5 2:1
+
+-- geography (export edge E, S=2000, capture band x >= 1960)
+    mean x                -251.5 -> +22.0   (+273.5)  <= MOVED EAST, towards the export edge
+    mean y                +76.5 -> +257.5   (+181.0)
+    stddev x               954.4 -> 841.6   (-112.8)  (more clustered)
+    mean distance to edge 2251.5 -> 1978.0   (-273.5)
+    mean vx               +0.37 -> -1.36
+    west entry quarter    6 (30%) -> 2 (8%)
+    middle half           13 (65%) -> 21 (81%)
+    east export quarter   1 (5%) -> 3 (12%)
+    in capture band       0 -> 0
+    outside square (E)    0 -> 0
+    x histogram [-S..S]   T0: [0 4 1 1 4 4 4 0 1 0]  (below 1, above 0)
+                          T1: [0 0 3 3 4 6 5 2 1 1]  (below 1, above 0)
+
+-- individuals
+    present at both T0 and T1   15
+    gone since T0 (died/left)   5
+    new since T0 (born/arrived) 11
+    survivors' own eastward movement:
+      mean dx across 15 survivors: -19.8
+      -2072690327  x  -1372.7 ->   -954.4 ( +418.3)  age 4368 -> 4934  syn 4 -> 4
+      -1653344353  x   -195.6 ->   +287.2 ( +482.8)  age 2076 -> 2643  syn 3 -> 3
+      -403088161   x  -1129.3 ->  -2354.6 (-1225.3)  age 284 -> 854  syn 3 -> 3
+      25726165     x   -484.0 ->   -114.7 ( +369.2)  age 527 -> 1097  syn 4 -> 4
+      218592216    x   +541.1 ->   +195.0 ( -346.1)  age 2140 -> 2707  syn 4 -> 4
+      308922080    x   +637.8 ->    +64.9 ( -572.9)  age 3668 -> 4235  syn 6 -> 6
+      375917346    x   -112.0 ->   +841.6 ( +953.6)  age 2604 -> 3171  syn 4 -> 4
+      662860515    x   +267.3 ->    +92.3 ( -175.0)  age 4928 -> 5495  syn 6 -> 6
+      670025147    x   +737.5 ->   -281.6 (-1019.1)  age 4535 -> 5102  syn 4 -> 4
+      1241588742   x    +95.9 ->   +428.7 ( +332.9)  age 42 -> 611  syn 4 -> 4
+      ... and 5 more survivors
+
+=== M3-Slot3: 2026-08-04T01:39:34Z  ->  2026-08-05T23:07:40Z
+    simulated time 34538.5 s -> 35084.1 s  (+545.6 s = 0.15 sim hours)
+
+-- population
+    living           24 -> 26   (+2)
+    dead in save     9 -> 4
+    eggs             1 -> 1
+    generation mean  9.67 -> 9.62   (-0.05), max 12 -> 12
+    age mean         2261.8 s -> 1994.7 s   (-267.1)
+    maturity mean    1.043 -> 0.954   (-0.089)
+    health mean      131.5 -> 129.3   (-2.3)
+    energy mean      75.7 -> 94.5   (+18.8)
+
+-- genomes (canonical bb8-genome/1 projection)
+    unique genomes   24 -> 26   (+2)
+    new genomes      12
+    extinct genomes  10
+    carried over     14
+    per-genome survival (T0 genomes, count then -> count now):
+      0a165fa5e0a0…  1 -> EXTINCT
+      1120ab731250…  1 -> 1
+      1dfd5d090d7c…  1 -> 1
+      252f19314dc1…  1 -> 1
+      299af5619972…  1 -> 1
+      3bb0376c0765…  1 -> 1
+      478ab4bc3baf…  1 -> EXTINCT
+      4cc23c566ef1…  1 -> 1
+      572502f5c42b…  1 -> 1
+      6ab5e9692267…  1 -> EXTINCT
+      945a22bc165d…  1 -> EXTINCT
+      952e42730263…  1 -> 1
+      ... and 12 more T0 genomes
+    new genomes by size now:
+      0a8c84fc9fac…  1
+      0b37ca4daf09…  1
+      11d7cbb8d765…  1
+      31b75a5a8add…  1
+      403399df3226…  1
+      40fb54449baa…  1
+      4b2b6b76f73c…  1
+      595626145a39…  1
+      ... and 4 more new genomes
+
+-- species (the game's own speciesID)
+    distinct species 7 -> 5
+      species 1      6 -> 4
+      species 8      4 -> 6
+      species 10     1 -> 3
+      species 15     2 -> 4
+      species 18     1 -> 0
+      species 23     8 -> 9
+      species 25     2 -> 0
+
+-- gene drift (largest mean shifts, by |delta| in units of the T0 stddev)
+    [25] EyeOffset               0.4842 ->     0.4979     +0.0138  (+0.60 sd)  sd 0.0228 -> 0.0220
+    [3] SizeRatio                1.0292 ->     0.9861     -0.0431  (-0.47 sd)  sd 0.0917 -> 0.0809
+    [5] ColorR                   0.1033 ->     0.0986     -0.0047  (-0.45 sd)  sd 0.0105 -> 0.0140
+    [12] ViewAngle             192.9553 ->   188.4196     -4.5358  (-0.42 sd)  sd 10.8805 -> 13.7399
+    [18] HerdAlignmentWeight     1.5341 ->     1.5628     +0.0287  (+0.41 sd)  sd 0.0693 -> 0.0413
+    [33] FatStorageThreshold     0.4875 ->     0.4810     -0.0064  (-0.41 sd)  sd 0.0159 -> 0.0180
+    [20] HerdVelocityWeight      0.2654 ->     0.2537     -0.0117  (-0.39 sd)  sd 0.0298 -> 0.0300
+    [14] ClockSpeed              1.1728 ->     1.1118     -0.0610  (-0.39 sd)  sd 0.1569 -> 0.1692
+    [6] ColorG                   0.1376 ->     0.1301     -0.0075  (-0.39 sd)  sd 0.0194 -> 0.0235
+    [8] MutationAmountSigma      0.0207 ->     0.0186     -0.0021  (-0.38 sd)  sd 0.0055 -> 0.0051
+    [26] StomachWAG              5.0000 ->     4.9732     -0.0268  (-0.38 sd)  sd 0.0699 -> 0.0552
+    [27] WombWAG                 2.6465 ->     2.7318     +0.0853  (+0.38 sd)  sd 0.2259 -> 0.2359
+
+-- brain complexity
+    synapses     mean 7.62 -> 7.77  (+0.14)   max 12 -> 11
+    hidden nodes mean 1.75 -> 2.15  (+0.40)   max 4 -> 4
+    total nodes  mean 49.75 -> 50.15  (+0.40)   max 52 -> 52
+    synapse-count histogram   T0: 5:1 6:5 7:9 8:1 9:6 11:1 12:1
+                              T1: 5:1 6:3 7:10 8:3 9:7 11:2
+    hidden-node histogram     T0: 0:2 1:8 2:9 3:4 4:1
+                              T1: 0:1 1:4 2:12 3:8 4:1
+
+-- geography (export edge E, S=2000, capture band x >= 1960)
+    mean x                -213.6 -> -174.8   (+38.8)  <= MOVED EAST, towards the export edge
+    mean y                +250.0 -> +130.4   (-119.5)
+    stddev x               1045.1 -> 781.2   (-263.9)  (more clustered)
+    mean distance to edge 2213.6 -> 2174.8   (-38.8)
+    mean vx               +0.83 -> +0.88
+    west entry quarter    5 (21%) -> 4 (15%)
+    middle half           17 (71%) -> 19 (73%)
+    east export quarter   2 (8%) -> 3 (12%)
+    in capture band       0 -> 0
+    outside square (E)    0 -> 0
+    x histogram [-S..S]   T0: [3 0 0 3 3 8 3 0 0 2]  (below 2, above 0)
+                          T1: [0 3 4 4 5 4 3 1 2 0]  (below 0, above 0)
+
+-- individuals
+    present at both T0 and T1   14
+    gone since T0 (died/left)   10
+    new since T0 (born/arrived) 12
+    survivors' own eastward movement:
+      mean dx across 14 survivors: -337.2
+      -1425950560  x   +219.8 ->   -419.4 ( -639.1)  age 4664 -> 5207  syn 9 -> 9
+      -744357222   x    +35.4 ->   -673.5 ( -708.9)  age 11727 -> 12281  syn 7 -> 7
+      -644256354   x   -158.4 ->  -1242.2 (-1083.8)  age 73 -> 619  syn 9 -> 9
+      -122153489   x  +1618.9 ->  +1525.3 (  -93.6)  age 2328 -> 2871  syn 9 -> 9
+      114066618    x    -26.5 ->  -1250.6 (-1224.0)  age 7320 -> 7863  syn 5 -> 5
+      382148017    x  -2169.7 ->   -993.3 (+1176.4)  age 4507 -> 5051  syn 9 -> 9
+      516215168    x   +328.1 ->   +554.0 ( +225.9)  age 5151 -> 5695  syn 7 -> 7
+      915780041    x   +550.0 ->   +408.4 ( -141.6)  age 938 -> 1484  syn 7 -> 7
+      947799556    x    -39.4 ->   +119.2 ( +158.6)  age 2095 -> 2638  syn 7 -> 7
+      1077049404   x   +392.5 ->   +114.6 ( -277.9)  age 27 -> 573  syn 6 -> 6
+      ... and 4 more survivors
+
+########## archive: migration flow between the two captures ##########
+
+migrations                 695 -> 23290   (+22595)
+distinctMigrantEntities    546 -> 20495   (+19949)
+distinctMigrantGenomes     528 -> 10385   (+9857)
+
+per-lane hops (T0 total -> T1 total, overnight delta):
+  slot 1 -> slot 2   203 -> 7151   (+6948)
+  slot 2 -> slot 3   282 -> 9926   (+9644)
+  slot 3 -> slot 1   210 -> 6213   (+6003)

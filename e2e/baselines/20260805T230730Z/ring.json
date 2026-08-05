@@ -1,0 +1,17 @@
+{
+  "ring": [
+    {
+      "slot": 1,
+      "peerId": "slot-1"
+    },
+    {
+      "slot": 2,
+      "peerId": "slot-2"
+    },
+    {
+      "slot": 3,
+      "peerId": "slot-3"
+    }
+  ],
+  "maxSlotEverIssued": 3
+}

@@ -1,0 +1,9 @@
+slot1 lastCommandedTimeScale=3.00 (Time.timeScale=3.00)
+slot3 lastCommandedTimeScale=3.00 (Time.timeScale=3.00)
+
+That is the last value THIS RIG commanded, and it is not the speed the
+worlds actually ran at overnight. The simulated-minute-per-wall-hour rate in
+population-hourly.txt shows both worlds running at roughly 17x to 33x real
+time from about 02:00Z onward — faster than the 3.00 above. Something
+outside this rig raised the speed after T0; the game's own speed control is
+the obvious candidate and nothing here records it.

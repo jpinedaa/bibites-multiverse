@@ -1,0 +1,16 @@
+label=T1
+stamp=20260805T230730Z
+wallClockUTC=2026-08-05T23:19:05Z
+wallClockLocal=2026-08-05 19:19:05 EDT
+epochSeconds=1785971945
+host=DESKTOP-4NKEO7A
+repoHead=cb6e1b4
+localSlots=1 3
+remoteSlot=2
+captureMode=OFFLINE — hand-assembled. e2e/baseline.sh capture refuses to run
+  (require_rig: no relay, no archive, no sidecars, no games), and starting
+  anything to satisfy it was forbidden. Every file here was produced from
+  state that already existed on disk. No game was started; no Go process was
+  stopped; no dev command was sent to any world.
+rigState=STOPPED. Nothing of the M3 LAN rig is running: no relay, no archive,
+  no sidecar 1 or 3, and no game on this machine. See shutdown.txt.

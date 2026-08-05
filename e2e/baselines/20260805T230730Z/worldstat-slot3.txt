@@ -1,0 +1,9 @@
+M3-Slot3 (slot 3)  e2e/baselines/20260805T230730Z/M3-Slot3.zip
+  population 26  (dead in save 4, eggs 1)  simTime 35084.1 s  S=2000 W=40
+  unique genomes 26  species 5  generation mean 9.62 max 12
+  brains: synapses mean 7.77 (min 5 max 11)  hidden nodes mean 2.15 (max 4)
+  age mean 1995 s  maturity mean 0.95  health mean 129.3  energy mean 94.5
+  spatial: mean (x,y) = (-174.8, +130.4)  stddev x 781.2  mean dist to E edge 2174.8
+  west quarter 4 | middle half 19 | east quarter 3 | capture band 0 | outside square E 0
+  x histogram [0 3 4 4 5 4 3 1 2 0] (below 0, above 0)
+  top genome 0a8c84fc9fac… x1

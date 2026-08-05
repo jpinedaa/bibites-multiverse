@@ -1,0 +1,58 @@
+# How the overnight run ended
+#
+# The owner closed the game windows on both machines. Nothing was asked to
+# stop the Go processes, and they are not running either: every component of
+# the rig stopped inside three seconds of the games, which is not what a
+# graceful shutdown looks like.
+
+## Last write of every rig artefact (local filesystem mtime, UTC)
+  e2e/logs-m3-lan/relay.log                    2026-08-04T11:46:43Z
+  e2e/logs-m3-lan/sidecar-1.log                2026-08-04T14:13:14Z
+  e2e/logs-m3-lan/sidecar-3.log                2026-08-04T14:13:11Z
+  e2e/logs-m3-lan/archive.log                  2026-08-04T14:13:11Z
+  e2e/archive-data/migrations.jsonl            2026-08-04T14:13:14Z
+  e2e/data/slot-1/journal/journal.log          2026-08-04T14:13:14Z
+  e2e/data/slot-3/journal/journal.log          2026-08-04T14:13:11Z
+
+relay.log is the exception and it is not evidence of an early exit: the relay
+logs only when the ring changes, and after slot 2 came back at 11:46:43Z the
+ring did not change again. Its file simply had nothing more to say.
+
+## Last record each component produced
+  archive ledger, last MIGRATION   2026-08-04T14:13:14.202Z
+  slot-1 journal, last write       2026-08-04T14:13:14.201Z
+  slot-3 journal, last write       2026-08-04T14:13:11.859Z
+  slot-1 game, last simulated minute 20066
+  slot-3 game, last simulated minute 17621
+
+sidecar-1.log, sidecar-3.log and archive.log all end mid-record and are then
+padded with NUL bytes to the next block boundary. That is the filesystem
+signature of a process whose pages were never flushed — the WSL VM or the
+machine went away underneath them rather than each service exiting. It also
+means the last few log lines of each file may be missing; the JOURNALS and
+the ARCHIVE LEDGER are fsync'd records and are not affected.
+
+## Nothing of the rig is running now (2026-08-05T23:0xZ)
+  ps: no relay, no archive, no sidecar process on this machine
+  Windows tasklist: no Bibites process on this machine
+  The relay's ring.json still names all three slots, so the reservations
+  survive on disk and a restart would reclaim them.
+
+## Slot 2's night, as seen from the relay
+
+  2026-08-04T01:01:20Z  modConnected=true   (already up at T0)
+  2026-08-04T08:46:39Z  last migration slot 2 ever exported
+  2026-08-04T09:49:44Z  modConnected=false  — the relay notices the game is gone
+  2026-08-04T10:08:59Z  client gone         — slot 2's sidecar disconnects too
+  2026-08-04T10:11:39Z  client connected, modConnected=false
+  2026-08-04T10:27:48Z  modConnected=true for 4 seconds, then false again
+  2026-08-04T11:36:05Z  client gone; reconnects 15 s later
+  2026-08-04T11:46:43Z  modConnected=true simulationSize=2000 exportEdge=E
+  2026-08-04T11:47:20Z  slot 2 exports again
+
+Slot 2 was out of the ring for three hours (08:46Z to 11:47Z by its own
+traffic; 09:49Z to 11:46Z by the relay's view of its mod). The gap between
+the two — an hour in which the relay still believed the mod was connected
+while no organism crossed — is what a suspended machine looks like from
+here: the socket stayed nominally open and nothing came down it. Nothing on
+this side can confirm that; it is the shape of the evidence, not a fact.

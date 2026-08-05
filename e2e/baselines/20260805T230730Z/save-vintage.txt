@@ -1,0 +1,63 @@
+# Save vintage — what the two local .zip files in this directory actually are
+#
+# VERDICT: they are NOT the overnight end state. Both worlds were saved for
+# the last time 25 seconds after the T0 baseline, and then ran for another
+# 12.5 hours without ever being saved again. The zips here are T0 + about
+# nine simulated minutes.
+
+## 1. The mod's own save receipts — the last save each world ever performed
+
+slot1 request  [Info   :Bibites Multiverse] [M2-CMD] token=t1785807598756880034 verb=save arg='M3-Slot1' accepted.
+slot1 receipt  [Info   :Bibites Multiverse] [M2-CMD] t1785807598756880034 OK world='M3-Slot1' path='C:/Users/j_jor/AppData/LocalLow/The Bibites/The Bibites\Savefiles\M3-Slot1.zip' bytes=194026 population=26
+slot3 request  [Info   :Bibites Multiverse] [M2-CMD] token=t1785807599306059541 verb=save arg='M3-Slot3' accepted.
+slot3 receipt  [Info   :Bibites Multiverse] [M2-CMD] t1785807599306059541 OK world='M3-Slot3' path='C:/Users/j_jor/AppData/LocalLow/The Bibites/The Bibites\Savefiles\M3-Slot3.zip' bytes=207567 population=27
+
+The token is the request time in epoch milliseconds:
+  t1785807598756880034 -> 2026-08-04T01:39:58.756Z   (slot 1 save)
+  t1785807599306059541 -> 2026-08-04T01:39:59.306Z   (slot 3 save)
+That sequence opened with a census at t1785807597063 (01:39:57.063Z). T0's own
+saves were t1785807572721 (01:39:32.721Z) and t1785807573490
+(01:39:33.490Z), which is why the zips in the T0 directory are a different
+file: a FOURTH census/count/save sequence ran 25 seconds after T0's and
+overwrote both saves in place. Nothing saved either world after that — these
+are the last two [M2-CMD] save lines in either log, and both logs run on for
+another 12.5 hours.
+
+## 2. The file on disk matches that receipt, byte for byte
+
+M3-Slot1.zip  mtime 2026-08-03 21:39:57.826188300 -0400  bytes 194026
+M3-Slot3.zip  mtime 2026-08-03 21:39:58.599284600 -0400  bytes 207567
+  (the receipts above say bytes=194026 and bytes=207567 — the same numbers)
+
+## 3. How far short of the end that is
+
+slot 1:
+  T0 save         simulatedTime    37394.1 s  = simulated minute    623.2
+  the zip here    simulatedTime    37963.3 s  = simulated minute    632.7
+  the run ENDED at                            simulated minute    20066   ([M2-CROSSING], crossing.txt)
+  the save holds 3.2% of the simulated time the world reached
+slot 3:
+  T0 save         simulatedTime    34538.5 s  = simulated minute    575.6
+  the zip here    simulatedTime    35084.1 s  = simulated minute    584.7
+  the run ENDED at                            simulated minute    17621   ([M2-CROSSING], crossing.txt)
+  the save holds 3.3% of the simulated time the world reached
+
+## 4. Cross-check: the population in the zip is the population the log
+##    reported at that simulated minute
+
+slot 3 is exact. The zip is at simulated minute 584.7 and reports 26 living
+organisms; crossing-series-slot3.csv reports population=26 at minutes 584,
+585 and 586. slot 1's zip is at minute 632.7 with 26 living, and the series
+sits between 23 and 28 across minutes 626-636. The zips are exactly where
+their timestamps say they are.
+
+## 5. No autosave exists to fall back on
+
+autosaveFolder: /mnt/c/Users/j_jor/AppData/LocalLow/The Bibites/The Bibites/Savefiles/Autosaves
+  *.zip files present: 0
+This is what the T0 report predicted: DevCommands.DisableAutosaveOnce turns
+the game's autosave off at runtime for every instance started with
+MULTIVERSE_CMD_FILE, so the rig owns every save. It kept the overnight run
+safe from a scene reload, and it is also the reason there is no end-state
+save: with autosave off and the rig sending no save before the windows
+closed, the last in-memory state of both worlds was discarded on exit.

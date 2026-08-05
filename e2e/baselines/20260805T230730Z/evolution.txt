@@ -1,0 +1,315 @@
+The evolution reading of the migrant stream, done honestly.
+
+Two facts about `genomeHash` shape everything below, and both come from
+contracts/genome-hash.md §4: the projection it hashes is EXACTLY the 35-gene
+array plus the brain's nodes and synapses plus the game version. It does not
+include generation, speciesID or isMutant, which sit one level up in the .bb8.
+
+So:
+  * every gene value and every brain measurement below is EXACT — it is
+    literally the thing the hash covers, read back from the archived genome;
+  * generation and speciesID are the values of the FIRST organism ever recorded
+    carrying that genome. They date when the genome first appeared, which is
+    what makes them useful, but they are not a per-hop measurement and they are
+    never averaged as if they were.
+
+==============================================================================
+## 1. The ancestral wild type never went away
+
+distinctWildTypeGenomes 5   (generation 0, speciesID 1, isMutant false)
+overnightHopsCarryingIt  10307 of 22595  (45.6%)
+  slot 1:   3268 of   6948 hops were wild type  (47.0%)
+  slot 2:   4601 of   9644 hops were wild type  (47.7%)
+  slot 3:   2438 of   6003 hops were wild type  (40.6%)
+wildTypeBrain synapses=3.00 hiddenNodes=0.00
+
+wild-type share of each world's export stream, per UTC hour:
+  hourUTC        slot 1            slot 2            slot 3
+  01:00Z     0.0% of    55    0.0% of   132    0.0% of    47
+  02:00Z    26.3% of   369   37.1% of   672   26.2% of   321
+  03:00Z    45.7% of   512   45.1% of   811   43.8% of   495
+  04:00Z    48.1% of   742   49.3% of  1031   48.0% of   640
+  05:00Z    51.3% of   784   47.3% of  1071   48.8% of   689
+  06:00Z    45.9% of   676   47.8% of   906   52.4% of   603
+  07:00Z    49.9% of   817   51.8% of  1089   51.4% of   766
+  08:00Z    48.2% of   924   48.6% of   865   43.2% of   780
+  09:00Z    43.0% of   461     (silent)         0.0% of   201
+  10:00Z      (silent)          (silent)         0.0% of   144
+  11:00Z    58.2% of    98   58.8% of   177    0.5% of   208
+  12:00Z    56.1% of   585   56.1% of  1263   28.9% of   277
+  13:00Z    46.8% of   750   45.9% of  1367   43.1% of   652
+  14:00Z    46.3% of   175   44.2% of   260   47.2% of   180
+
+Read the two blackout hours (09Z, 10Z) against the rest. Slot 2's game was
+gone, so slot 3 received nothing from it, and slot 3's export stream fell to
+almost no wild type at all: the wild type reaching slot 3 is through-traffic
+from slot 2, not slot 3's own production.
+
+==============================================================================
+## 2. Genome diversity over the night
+
+hops        migrations recorded in that hour from that world
+distinct    distinct genomeHash values among them (EXACT)
+new         genomeHashes never recorded anywhere before that hour
+cumDistinct distinct genomeHashes from that world up to the end of the hour
+evolved%    share of hops NOT carrying the ancestral wild type
+syn/hid     mean synapse and hidden-node count over the EVOLVED hops only
+firstSeenGen  mean generation of the first carrier of each evolved genome
+
+hourUTC        src   hops distinct   new  cumDist  evolved%    syn    hid  firstSeenGen
+2026-08-04T01    1     55       55    55      239    100.0%   5.20   0.35          12.9
+2026-08-04T01    2    132      132   121      400    100.0%   7.27   0.83          14.1
+2026-08-04T01    3     47       47    36      238    100.0%   6.34   0.64          13.2
+
+2026-08-04T02    1    369      275   273      513     73.7%   6.87   0.80          21.0
+2026-08-04T02    2    672      423   389      822     62.9%   6.48   0.77          17.8
+2026-08-04T02    3    321      239   180      475     73.8%   6.79   0.97          17.2
+
+2026-08-04T03    1    512      277   274      788     54.3%   9.72   1.17          41.6
+2026-08-04T03    2    811      444   387     1264     54.9%   8.87   0.91          38.8
+2026-08-04T03    3    495      278   201      751     56.2%   8.94   0.93          38.9
+
+2026-08-04T04    1    742      374   372     1160     51.9%   8.48   0.50          60.8
+2026-08-04T04    2   1031      519   421     1781     50.7%   8.24   0.53          57.0
+2026-08-04T04    3    640      329   207     1078     52.0%   8.66   0.55          61.0
+
+2026-08-04T05    1    784      377   375     1535     48.7%   9.07   0.78          75.7
+2026-08-04T05    2   1071      560   468     2338     52.7%   9.68   0.88          81.1
+2026-08-04T05    3    689      349   236     1425     51.2%   9.71   0.91          80.6
+
+2026-08-04T06    1    676      360   355     1893     54.1%  13.58   1.64         115.1
+2026-08-04T06    2    906      461   362     2796     52.2%  12.94   1.46         112.2
+2026-08-04T06    3    603      282   181     1705     47.6%  13.17   1.46         112.0
+
+2026-08-04T07    1    817      386   380     2277     50.1%  13.99   2.04         137.2
+2026-08-04T07    2   1089      502   362     3296     48.2%  14.16   2.10         137.4
+2026-08-04T07    3    766      349   189     2052     48.6%  13.90   2.00         135.6
+
+2026-08-04T08    1    924      457   453     2731     51.8%  11.29   1.66         137.5
+2026-08-04T08    2    865      417   285     3708     51.4%  12.40   1.87         149.4
+2026-08-04T08    3    780      424   229     2473     56.8%  11.40   1.70         135.0
+
+2026-08-04T09    1    461      264   262     2994     57.0%   8.47   1.27          80.3
+2026-08-04T09    3    201      201   185     2674    100.0%   5.14   0.76           9.7
+
+2026-08-04T10    3    144      144   144     2818    100.0%  10.21   1.07          35.6
+
+2026-08-04T11    1     98       42    41     3035     41.8%  13.32   1.76          53.1
+2026-08-04T11    2    177       76    71     3782     41.2%  11.55   1.41          45.5
+2026-08-04T11    3    208      208   192     3026     99.5%  15.49   2.51          66.3
+
+2026-08-04T12    1    585      254   252     3288     43.9%  12.89   1.21          78.5
+2026-08-04T12    2   1263      553   487     4333     43.9%  13.22   1.35          81.0
+2026-08-04T12    3    277      196   110     3219     71.1%  15.23   1.62          93.5
+
+2026-08-04T13    1    750      374   369     3660     53.2%  13.85   0.94         109.8
+2026-08-04T13    2   1367      702   561     5031     54.1%  13.40   0.97         101.3
+2026-08-04T13    3    652      340   152     3555     56.9%  14.51   0.99         117.6
+
+2026-08-04T14    1    175       93    88     3751     51.4%  15.51   1.24         136.3
+2026-08-04T14    2    260      140   108     5168     52.7%  14.60   1.24         125.2
+2026-08-04T14    3    180       95    44     3647     50.6%  14.33   1.03         126.7
+
+==============================================================================
+## 3. Gene and brain drift, measured on the EVOLVED fraction
+
+The ancestral wild type is excluded: it is a fixed genome, so leaving it in
+would measure how often a clone happened to cross, not how the population
+changed. Each world's evolved export stream is split into its first and last
+1000 hops after T0. `sdT0` is that gene's standard deviation in the T0 world
+save, so |z| is the shift measured against the spread of the population that
+produced it. Slot 2 has no T0 save on this machine, so its shift is raw only.
+
+### slot 1 — 3676 evolved hops, window 1000
+  first window 2026-08-04T01:40:14Z .. 2026-08-04T05:01:42Z
+  last  window 2026-08-04T09:10:45Z .. 2026-08-04T14:12:39Z
+
+  synapses                  8.165 ->    12.686   (+4.521)
+  synapsesEnabled           7.133 ->    11.142   (+4.009)
+  hiddenNodes               0.754 ->     1.162   (+0.408)
+  nodes                    48.754 ->    49.162   (+0.408)
+  firstSeenGeneration      41.584 ->    97.490   (+55.906)
+  firstSeenSpeciesID      134.749 ->   525.371   (+390.622)
+
+  gene                           first        last       delta      sdT0        z
+  Diet                          0.2440      0.1568     -0.0872    0.0041   -21.02
+  MutationAmountSigma           0.0153      0.0283     +0.0129    0.0027     4.87
+  EyeOffset                     0.4130      0.5433     +0.1303    0.0285     4.57
+  AverageMutationNumber         4.0373      1.6898     -2.3475    0.5243    -4.48
+  PheroSense                  151.1504    110.6094    -40.5410    9.2328    -4.39
+  ThroatWAG                     1.5789      2.3123     +0.7334    0.1728     4.24
+  ColorG                        0.1231      0.1875     +0.0644    0.0161     4.00
+  GrowthMaturityFactor          2.0059      1.5027     -0.5032    0.1550    -3.25
+  ViewAngle                   188.0057    165.7253    -22.2804    7.0579    -3.16
+  HerdCohesionWeight            1.0787      1.2418     +0.1631    0.0540     3.02
+  FatStorageThreshold           0.4601      0.5544     +0.0944    0.0352     2.68
+  MouthMusclesWAG               0.9959      1.2477     +0.2519    0.0946     2.66
+  WombWAG                       2.3823      1.9368     -0.4455    0.1682    -2.65
+  GrowthScale                   0.3423      0.3770     +0.0347    0.0132     2.63
+  ClockSpeed                    1.1101      1.5740     +0.4639    0.1768     2.62
+  ColorR                        0.1079      0.0686     -0.0393    0.0151    -2.61
+  SizeRatio                     0.9959      1.2789     +0.2830    0.1103     2.57
+  HatchTime                    14.9469     11.9910     -2.9560    1.1709    -2.52
+  BroodTime                    27.0699     21.5651     -5.5049    2.4824    -2.22
+  SpeedRatio                    1.3686      1.1715     -0.1970    0.0910    -2.17
+  ColorB                        0.0757      0.1559     +0.0802    0.0379     2.12
+  StomachWAG                    6.2189      5.2471     -0.9718    0.4601    -2.11
+  HerdSeparationDistance       34.1227     37.9208     +3.7980    1.9454     1.95
+  LayTime                      16.7639     15.6676     -1.0963    0.8109    -1.35
+  BrainMutationSigma            0.1045      0.0959     -0.0086    0.0065    -1.33
+  HerdVelocityWeight            0.2249      0.2686     +0.0437    0.0350     1.25
+  ArmorWAG                     -0.0812      0.0425     +0.1238    0.1241     1.00
+  ViewRadius                   98.2100    102.7994     +4.5894    4.6579     0.99
+  FatStorageDeadband            0.2664      0.2787     +0.0123    0.0146     0.84
+  HerdSeparationWeight          1.0214      0.9951     -0.0263    0.0330    -0.80
+  HerdAlignmentWeight           1.2536      1.3591     +0.1055    0.1364     0.77
+  FatWAG                        2.1287      2.2108     +0.0820    0.1184     0.69
+  GrowthMaturityExponent        0.7082      0.4875     -0.2207    0.3385    -0.65
+  BrainAverageMutation          1.4998      1.6643     +0.1645    0.3252     0.51
+  MoveMusclesWAG                0.8102      0.8859     +0.0757    0.2639     0.29
+
+### slot 2 — 5035 evolved hops, window 1000
+  first window 2026-08-04T01:39:36Z .. 2026-08-04T03:59:54Z
+  last  window 2026-08-04T12:50:39Z .. 2026-08-04T14:12:15Z
+
+  synapses                  7.645 ->    13.503   (+5.858)
+  synapsesEnabled           6.739 ->    12.007   (+5.268)
+  hiddenNodes               0.841 ->     1.000   (+0.159)
+  nodes                    48.841 ->    49.000   (+0.159)
+  firstSeenGeneration      26.679 ->   103.479   (+76.800)
+  firstSeenSpeciesID       92.995 ->   194.847   (+101.852)
+
+  gene                           first        last       delta      sdT0        z
+  WombWAG                       2.4127      1.9841     -0.4287    0.0000      n/a
+  ViewRadius                   87.6182    100.4958    +12.8776    0.0000      n/a
+  ViewAngle                   191.9973    159.8818    -32.1155    0.0000      n/a
+  ThroatWAG                     1.4142      2.5001     +1.0859    0.0000      n/a
+  StomachWAG                    6.2685      5.0281     -1.2404    0.0000      n/a
+  SpeedRatio                    1.2528      1.1471     -0.1056    0.0000      n/a
+  SizeRatio                     0.9363      1.2846     +0.3483    0.0000      n/a
+  PheroSense                  149.0751     97.2013    -51.8739    0.0000      n/a
+  MutationAmountSigma           0.0187      0.0296     +0.0109    0.0000      n/a
+  MoveMusclesWAG                0.7352      0.8705     +0.1353    0.0000      n/a
+  MouthMusclesWAG               0.8755      1.3340     +0.4585    0.0000      n/a
+  LayTime                      17.0488     15.0499     -1.9989    0.0000      n/a
+  HerdVelocityWeight            0.2178      0.2563     +0.0385    0.0000      n/a
+  HerdSeparationWeight          1.0680      0.9538     -0.1141    0.0000      n/a
+  HerdSeparationDistance       32.1961     36.4697     +4.2736    0.0000      n/a
+  HerdCohesionWeight            1.0322      1.2153     +0.1831    0.0000      n/a
+  HerdAlignmentWeight           1.3268      1.3287     +0.0019    0.0000      n/a
+  HatchTime                    13.8270     12.2740     -1.5530    0.0000      n/a
+  GrowthScale                   0.3408      0.3990     +0.0581    0.0000      n/a
+  GrowthMaturityFactor          1.8950      1.4905     -0.4045    0.0000      n/a
+  GrowthMaturityExponent        0.8055      0.4397     -0.3658    0.0000      n/a
+  FatWAG                        2.1837      2.1682     -0.0155    0.0000      n/a
+  FatStorageThreshold           0.4625      0.5593     +0.0968    0.0000      n/a
+  FatStorageDeadband            0.2592      0.2698     +0.0106    0.0000      n/a
+  EyeOffset                     0.4293      0.5697     +0.1405    0.0000      n/a
+  Diet                          0.2524      0.1468     -0.1056    0.0000      n/a
+  ColorR                        0.1025      0.0548     -0.0477    0.0000      n/a
+  ColorG                        0.1208      0.2146     +0.0939    0.0000      n/a
+  ColorB                        0.0800      0.1801     +0.1001    0.0000      n/a
+  ClockSpeed                    1.0758      1.6777     +0.6019    0.0000      n/a
+  BroodTime                    25.5652     21.0153     -4.5498    0.0000      n/a
+  BrainMutationSigma            0.1044      0.0906     -0.0138    0.0000      n/a
+  BrainAverageMutation          1.7544      1.7638     +0.0093    0.0000      n/a
+  AverageMutationNumber         3.8515      0.9067     -2.9447    0.0000      n/a
+  ArmorWAG                     -0.0070     -0.0484     -0.0414    0.0000      n/a
+
+### slot 3 — 3561 evolved hops, window 1000
+  first window 2026-08-04T01:39:37Z .. 2026-08-04T05:19:55Z
+  last  window 2026-08-04T10:03:43Z .. 2026-08-04T14:12:17Z
+
+  synapses                  8.188 ->    14.290   (+6.102)
+  synapsesEnabled           7.171 ->    12.409   (+5.238)
+  hiddenNodes               0.797 ->     1.445   (+0.648)
+  nodes                    48.797 ->    49.445   (+0.648)
+  firstSeenGeneration      42.985 ->    92.165   (+49.180)
+  firstSeenSpeciesID      154.851 ->   504.373   (+349.522)
+
+  gene                           first        last       delta      sdT0        z
+  Diet                          0.2473      0.1614     -0.0859    0.0099    -8.69
+  AverageMutationNumber         4.2036      0.9755     -3.2280    0.4273    -7.55
+  SpeedRatio                    1.3660      1.1541     -0.2120    0.0296    -7.16
+  EyeOffset                     0.4141      0.5565     +0.1425    0.0228     6.24
+  PheroSense                  151.9484    107.0802    -44.8682    7.5434    -5.95
+  FatStorageThreshold           0.4673      0.5538     +0.0865    0.0159     5.44
+  HatchTime                    14.6408     11.8980     -2.7428    0.5129    -5.35
+  ColorB                        0.0740      0.1636     +0.0897    0.0170     5.27
+  BroodTime                    27.0824     21.6135     -5.4690    1.0559    -5.18
+  ColorR                        0.1118      0.0576     -0.0542    0.0105    -5.16
+  StomachWAG                    6.0104      5.6807     -0.3297    0.0699    -4.72
+  HerdCohesionWeight            1.0800      1.2919     +0.2119    0.0554     3.82
+  ColorG                        0.1215      0.1909     +0.0695    0.0194     3.59
+  ThroatWAG                     1.5947      2.5371     +0.9424    0.2896     3.25
+  ClockSpeed                    1.1094      1.5808     +0.4714    0.1569     3.00
+  MutationAmountSigma           0.0148      0.0305     +0.0157    0.0055     2.87
+  GrowthScale                   0.3429      0.3956     +0.0527    0.0194     2.71
+  SizeRatio                     1.0325      1.2592     +0.2268    0.0917     2.47
+  MouthMusclesWAG               1.0528      1.2569     +0.2042    0.0849     2.40
+  GrowthMaturityExponent        0.7221      0.4017     -0.3204    0.1396    -2.30
+  ViewAngle                   185.1076    163.8114    -21.2963   10.8805    -1.96
+  GrowthMaturityFactor          1.9984      1.4244     -0.5739    0.3208    -1.79
+  BrainMutationSigma            0.1057      0.0990     -0.0068    0.0041    -1.64
+  HerdVelocityWeight            0.2303      0.2765     +0.0462    0.0298     1.55
+  LayTime                      16.4793     14.9829     -1.4963    1.1012    -1.36
+  WombWAG                       2.3139      2.0334     -0.2804    0.2259    -1.24
+  ViewRadius                   99.4500    102.5916     +3.1416    2.7626     1.14
+  BrainAverageMutation          1.5047      1.6685     +0.1638    0.1558     1.05
+  FatStorageDeadband            0.2660      0.2731     +0.0070    0.0098     0.72
+  HerdSeparationWeight          0.9929      0.9217     -0.0712    0.1053    -0.68
+  HerdAlignmentWeight           1.2735      1.3101     +0.0366    0.0693     0.53
+  MoveMusclesWAG                0.8382      0.7855     -0.0528    0.1691    -0.31
+  HerdSeparationDistance       34.6396     35.2572     +0.6177    2.5844     0.24
+  FatWAG                        2.1775      2.1265     -0.0511    0.4394    -0.12
+  ArmorWAG                     -0.1011     -0.1021     -0.0010    0.0691    -0.01
+
+==============================================================================
+## 4. Did the three worlds evolve together or apart?
+
+The three worlds are coupled only by migration. If the ring is mixing them
+hard enough, they are one population and should land on the same gene means.
+Below, for each gene: the spread between the three worlds' first-window means
+and the spread between their last-window means, and how far the mean itself
+moved. A last-window spread that stays small while the mean moves a lot is
+three worlds evolving as one.
+
+  gene                      spreadFirst  spreadLast   meanShift  shift/spread
+  LayTime                        0.5696      0.6847     -1.5305           2.2
+  BroodTime                      1.5172      0.5981     -5.1746           8.7
+  HatchTime                      1.1199      0.3761     -2.4173           6.4
+  SizeRatio                      0.0962      0.0253     +0.2860          11.3
+  SpeedRatio                     0.1158      0.0244     -0.1715           7.0
+  ColorR                         0.0093      0.0138     -0.0471           3.4
+  ColorG                         0.0024      0.0271     +0.0759           2.8
+  ColorB                         0.0060      0.0242     +0.0900           3.7
+  MutationAmountSigma            0.0039      0.0022     +0.0132           6.0
+  AverageMutationNumber          0.3521      0.7831     -2.8401           3.6
+  BrainMutationSigma             0.0013      0.0084     -0.0098           1.2
+  BrainAverageMutation           0.2546      0.0994     +0.1126           1.1
+  ViewAngle                      6.8897      5.8435    -25.2307           4.3
+  ViewRadius                    11.8318      2.3036     +6.8695           3.0
+  ClockSpeed                     0.0343      0.1037     +0.5124           4.9
+  PheroSense                     2.8732     13.4081    -45.7610           3.4
+  Diet                           0.0083      0.0146     -0.0929           6.4
+  HerdSeparationWeight           0.0751      0.0734     -0.0705           1.0
+  HerdAlignmentWeight            0.0733      0.0490     +0.0480           1.0
+  HerdCohesionWeight             0.0478      0.0766     +0.1861           2.4
+  HerdVelocityWeight             0.0125      0.0202     +0.0428           2.1
+  HerdSeparationDistance         2.4435      2.6635     +2.8964           1.1
+  GrowthScale                    0.0021      0.0220     +0.0485           2.2
+  GrowthMaturityFactor           0.1109      0.0782     -0.4939           6.3
+  GrowthMaturityExponent         0.0973      0.0858     -0.3023           3.5
+  EyeOffset                      0.0163      0.0264     +0.1377           5.2
+  StomachWAG                     0.2580      0.6527     -0.8473           1.3
+  WombWAG                        0.0989      0.0966     -0.3849           4.0
+  FatWAG                         0.0549      0.0843     +0.0052           0.1
+  ArmorWAG                       0.0941      0.1446     +0.0271           0.2
+  ThroatWAG                      0.1805      0.2248     +0.9206           4.1
+  MouthMusclesWAG                0.1773      0.0862     +0.3048           3.5
+  MoveMusclesWAG                 0.1030      0.1004     +0.0527           0.5
+  FatStorageThreshold            0.0072      0.0055     +0.0926          16.8
+  FatStorageDeadband             0.0072      0.0089     +0.0100           1.1
+
+genesWhereTheSharedShiftIsMoreThan3xTheBetweenWorldSpread 19 of 35
+  BroodTime, HatchTime, SizeRatio, SpeedRatio, ColorR, ColorB, MutationAmountSigma, AverageMutationNumber, ViewAngle, ClockSpeed, PheroSense, Diet, GrowthMaturityFactor, GrowthMaturityExponent, EyeOffset, WombWAG, ThroatWAG, MouthMusclesWAG, FatStorageThreshold

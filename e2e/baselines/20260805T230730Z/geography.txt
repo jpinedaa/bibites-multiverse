@@ -1,0 +1,61 @@
+# Geographic behaviour over the night
+#
+# The world saves are stale (see save-vintage.txt), so the T0 spatial table —
+# mean x, the x histogram, east-quarter occupancy — has no T1 counterpart and
+# CANNOT be produced. Nothing in the archive substitutes for it: every genome
+# the archive stored was captured at the moment its organism reached the export
+# edge, so their positions pile up at x = S-W = 1960 and describe the edge, not
+# the world. A sample of 1499 archived genomes puts the median x at 1960.
+#
+# What does survive is the mod's own edge instrumentation, logged once per
+# simulated minute for the whole night (CrossingStats.cs):
+#
+#   stripEntries — an organism crossing INTO the border strip from inside;
+#   crossings    — an organism passing the playable square edge itself.
+#
+# Divided by the population, that is how hard the living population is pressing
+# on its eastern boundary — the geographic question the spatial table answered
+# at a single instant, asked instead over 12.5 hours.
+
+## slot 1
+  hourUTC        simMin  meanPop  stripEntries  crossings  entries/simMin  entries/simMin/10bibites
+  2026-08-04T01    1049     28.3           350        113           0.334                     0.118
+  2026-08-04T02    1072     30.0           434         66           0.405                     0.135
+  2026-08-04T03    1157     29.0           596         87           0.515                     0.178
+  2026-08-04T04    1514     22.9           816         85           0.539                     0.236
+  2026-08-04T05    1688     20.1           903        124           0.535                     0.267
+  2026-08-04T06    1478     22.0           759         90           0.514                     0.234
+  2026-08-04T07    1786     20.0           929        113           0.520                     0.260
+  2026-08-04T08    1964     17.8          1079        181           0.549                     0.308
+  2026-08-04T09    1818     19.0           823        328           0.453                     0.239
+  2026-08-04T10    1797     18.4           965        803           0.537                     0.291
+  2026-08-04T11    1669     25.2           854        611           0.512                     0.203
+  2026-08-04T12    1336     24.7           667         83           0.499                     0.202
+  2026-08-04T13    1423     22.9           832         89           0.585                     0.255
+  2026-08-04T14     315     22.2           188         18           0.597                     0.269
+  whole night: 10195 strip entries, 2791 square crossings over 20066 simulated minutes
+
+## slot 3
+  hourUTC        simMin  meanPop  stripEntries  crossings  entries/simMin  entries/simMin/10bibites
+  2026-08-04T00      25     16.2             5          1           0.200                     0.124
+  2026-08-04T01     905     29.3           352        110           0.389                     0.133
+  2026-08-04T02     947     31.9           421        104           0.445                     0.139
+  2026-08-04T03    1081     30.2           579         84           0.536                     0.177
+  2026-08-04T04    1310     24.8           724         89           0.553                     0.223
+  2026-08-04T05    1493     21.2           777         90           0.520                     0.245
+  2026-08-04T06    1298     22.9           679         86           0.523                     0.229
+  2026-08-04T07    1558     21.3           874        113           0.561                     0.263
+  2026-08-04T08    1785     17.8           944        187           0.529                     0.297
+  2026-08-04T09    1310     26.8           205          3           0.156                     0.058
+  2026-08-04T10    1587     20.8           144          0           0.091                     0.044
+  2026-08-04T11    1710     19.2           214          6           0.125                     0.065
+  2026-08-04T12    1201     25.4           302         29           0.251                     0.099
+  2026-08-04T13    1132     27.5           715         69           0.632                     0.230
+  2026-08-04T14     279     24.0           199         21           0.713                     0.297
+  whole night: 7134 strip entries, 992 square crossings over 17621 simulated minutes
+
+Read `crossings` against `stripEntries`. An organism that reaches the strip is
+a candidate for export; one that passes the square edge left the playable area
+under its own steam. The ratio is the honest measure of how leaky the eastern
+boundary is, and it is the number decision D3 assumed and m2_findings.md §1.4
+said had to be measured.

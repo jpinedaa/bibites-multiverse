@@ -1,0 +1,10 @@
+The overnight-safety question the T0 report asked — can a world restart
+under the rig? — was answered NO, and the night bore that out: both local
+games ran a single unbroken session from simulated minute 1 to the end
+(20066 and 17621), with no scene reload and no second [M2] config line.
+
+autosaveFolder: /mnt/c/Users/j_jor/AppData/LocalLow/The Bibites/The Bibites/Savefiles/Autosaves
+  *.zip files present: 0 (still none)
+
+The same mechanism that made the run safe is what cost the end state. See
+save-vintage.txt §5.

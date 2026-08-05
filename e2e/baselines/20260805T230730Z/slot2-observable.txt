@@ -1,0 +1,20 @@
+ringMembership: slot1=slot-1 slot2=slot-2 slot3=slot-3
+edgeStatusRipple(slot1 -> its east neighbour slot 2), last value: [Info   :Bibites Multiverse] [M2] EDGE_STATUS epoch=13 exportEdge=E open=True reason=peer_live peerS=2000.00 entries=1 applied=1 ignored=0 changed=True (entryEdge W is passive and never appears here)
+
+slot 1's export edge went through 13 EDGE_STATUS epochs, and that sequence IS
+slot 2's liveness, because the edge is open only while the east neighbour is
+live and mod-connected:
+
+  epoch 1-2   simMinute <30      closed while slot 2 was still coming up
+  epoch 3     simMinute 30       OPEN — and it stayed open for 13190 simulated
+                                 minutes, the whole night
+  epoch 4-12  simMinute 13220    nine epochs of flapping, from about 09:50Z to
+              .. 16479           11:46Z, while slot 2's game was gone
+  epoch 13    simMinute 16724    OPEN again (peer_live), and it stayed open to
+                                 the end of the run
+
+slot 3's export edge (to slot 1) opened once at epoch 1 and never closed: slot
+1 never left.
+
+  slot 2 -> slot 3  9644
+  slot 1 -> slot 2  6948

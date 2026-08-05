@@ -1,0 +1,21 @@
+# Sidecar journal custody at the instant the rig stopped
+#
+# e2e/data/slot-N/journal/journal.log is the durable custody record (D2). An
+# entry is created when the sidecar takes custody and purged once the hop is
+# done and acknowledged. Anything still un-purged and not `done` was IN FLIGHT
+# when the games disappeared, and §7.4/§7.5 of contract-a.md would replay it if
+# the rig came back up against these same journals.
+
+slot 1: 13352 entries created, 11853 purged, 1499 still in the journal
+  of those still in the journal: 1498 are `done` and awaiting the purge sweep, 1 are NOT done
+  lastJournalWrite 2026-08-04T14:13:14.201000Z
+  in-flight by direction: {'out': 1}
+  states: {'in_flight': 1}
+    9d6db335-b1ae-433e-a44a-bb2109912913 direction=out status=in_flight
+
+slot 3: 16132 entries created, 14076 purged, 2056 still in the journal
+  of those still in the journal: 2056 are `done` and awaiting the purge sweep, 0 are NOT done
+  lastJournalWrite 2026-08-04T14:13:11.859000Z
+  NOTHING was in flight: every organism the rig had custody of was
+  delivered and acknowledged before the games disappeared.
+
