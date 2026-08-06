@@ -1,5 +1,29 @@
 # Contract B — M3 (Sidecar ↔ Relay ↔ Sidecar ↔ Archive)
 
+> ## ⚠ SUPERSEDED — 2026-08-05. Historical record only.
+>
+> **Contract B is now `contracts/contract-b-m4.md` (`contract-b/3.0`).** Decisions D12–D16
+> replaced the ring with a two-axis map that heals around a gap, so this document describes a
+> wire that no M4 component speaks. It is kept because `m3_considerations.md`, the M3 exit-test
+> record and the T0/T1 baselines cite it as the specification the passing M3 rig ran against.
+>
+> **Do not implement from this file.** Read it only to understand what M3 did.
+>
+> What changed, in one table:
+>
+> | This document says | M4 says | Where |
+> |---|---|---|
+> | One ring of slots; each peer has one east neighbour (§2) | A rectangular map addressed by slot and positioned by coordinate; each peer has one effective neighbour **per export edge**, east and north. The ring is the one-row case (D13) | `contract-b-m4.md` §2 |
+> | A peer's export edge **closes** when its east neighbour is not deliverable (§8) | The lane **re-pairs** to the next deliverable slot on that axis; an edge closes only when no slot on the axis is deliverable (D12) | `contract-b-m4.md` §8 |
+> | `SECTOR_GRANT` returns the slot and one `eastNeighbour` (§6.4) | It returns the slot, the **position**, the map, and `neighbours` keyed by export edge, each with the slots it **skipped** (D12, D13) | `contract-b-m4.md` §6.4 |
+> | `SECTOR_CLAIM` carries a singular `exportEdge` (§6.3) | It carries `exportEdges`, an advisory position or splice point, and a peer stats block (D13, D15) | `contract-b-m4.md` §6.3 |
+> | `PEER_STATUS` reports the ring order (§6.5) | It reports the **structural** order of a rectangle, with positions, populations, `darkSinceMs` and stats (D12, D15) | `contract-b-m4.md` §6.5 |
+> | Insertion appends at the tail (§7.2 rule 4) | A peer splices in **anywhere** on either axis, or fills a hole, or extends the map by one column or row (D12) | `contract-b-m4.md` §7.2 |
+> | A journal entry's destination is never rewritten (§7.3) | One exception, and it carries its own evidence: a **re-route under a relay proof of non-delivery** (D12) | `contract-b-m4.md` §7.3, §9.2 |
+> | An orphaned in-flight organism is held indefinitely (§9) | It is held while its destination is **dark**, and bounces home by itself at `holdTimeoutMs` — 24 hours by default (D2, amended) | `contract-b-m4.md` §9.3 |
+> | `SLOT_VACANT` is transient (§6.8) | `SLOT_VACANT` is **permanent**, `PEER_OFFLINE` is the transient case, `NOT_FORWARDED` is new, and a relay NACK may carry the `neverForwarded` proof | `contract-b-m4.md` §6.8, §5.2 |
+> | Milestone numbers: TLS in M4, gossip in M5, catalog in M6 | D16 renumbered: TLS in **M5**, gossip in **M6**, catalog in **M7**. Corrected in place below | `system_decomposition.md` D16 |
+
 **Version:** `contract-b/2.0`
 **Status:** implementation-ready for M3. Written 2026-08-03 from the ratified decisions
 D8–D11 (`system_decomposition.md`) and the work order in `m3_considerations.md`,
@@ -51,8 +75,8 @@ one archive, ring insertion keyed on peer identity, the lineage annex, genome fe
 hash, and a shared token on the wire (D9).
 
 Out of scope, and named so nobody builds them by accident: TLS and per-peer authentication
-(M4), capacity and abuse limits (M4), `TOPOLOGY_GOSSIP` and `PEER_EXCHANGE` (M5),
-`CATALOG_QUERY` and `CATALOG_RESPONSE` (M6), and any write interface on the archive — M3
+(M5), capacity and abuse limits (M5), `TOPOLOGY_GOSSIP` and `PEER_EXCHANGE` (M6),
+`CATALOG_QUERY` and `CATALOG_RESPONSE` (M7), and any write interface on the archive — M3
 records and reads only (D11).
 
 ---
@@ -103,7 +127,7 @@ already a return trip, so the M3 exit test needs three slots
 
 | Property | Value |
 |---|---|
-| Protocol | WebSocket (RFC 6455) over plain HTTP. TLS is M4 (D9). |
+| Protocol | WebSocket (RFC 6455) over plain HTTP. TLS is M5 (D9, renumbered by D16). |
 | URL | `ws://{relay-host}:{port}/contract-b/v2` |
 | Default port | `8790` |
 | Bind address | The relay binds a LAN-reachable address in M3, **not** loopback. The operator opens the Windows Firewall rule for the port and records the host name in `dev_environment.md` (`m3_considerations.md`, Risk 6). |
@@ -120,7 +144,8 @@ already a return trip, so the M3 exit test needs three slots
 M2 ran on loopback and needed no authentication. M3's wire crosses a LAN, so any device on
 that network can reach the relay port. The answer is deliberately the smallest one that
 works, because **M3 is not the public milestone** — D9 moved TLS, per-peer identity and
-abuse limits to M4 as one coherent set.
+abuse limits to the public-release milestone — M4 when D9 was written, **M5** after D16 —
+as one coherent set.
 
 | Rule | Statement |
 |---|---|
@@ -139,7 +164,7 @@ ring. It does **not** authenticate a peer *identity*: a token holder can present
 evict the legitimate peer. It does **not** provide confidentiality — the wire is plain
 HTTP, so anything on the LAN path can read a genome, a token or a peer id in transit. Both
 gaps are accepted for a milestone whose entire network is two computers the owner owns, and
-both are closed by M4's TLS and per-peer credentials.
+both are closed by M5's TLS and per-peer credentials (D16 renumbered that milestone).
 
 ### 3.2 Close codes
 
@@ -488,7 +513,7 @@ The Contract C `MigrationEnvelope`, carried in `data`, now with the lineage anne
 | `sourcePeer` | string | yes | Origin peer id. The relay verifies it. |
 | `sourceSlot` | number (int) | yes | The origin's ring slot. |
 | `destSlot` | number (int) | yes | The origin's **east neighbour** slot at the moment the migration was journaled. The relay routes on this. |
-| `exitEdge` | edge enum | yes | Always `"E"` under the ring. Kept as an enum for the retired grid and M6's payload kinds. |
+| `exitEdge` | edge enum | yes | Always `"E"` under the ring. Kept as an enum for the retired grid and M7's payload kinds. |
 | `exitPosition` | float | yes | `[0,1]` along that edge, by Contract A §4.3. Already clamped by the origin mod — the capture band makes an unclamped raw value routine (Contract A §4.3.1). |
 | `velocity` | `{x,y}` | yes | Copied, never mirrored (Contract A §4.4). |
 | `heading` | float | yes | Degrees (Contract A §4.4). |
@@ -1109,21 +1134,21 @@ its own tunable, not this one.
 
 ---
 
-## 13. Open items for M4
+## 13. Open items for M5
 
 1. **No TLS, and one shared token** (§3.1). The wire is plain HTTP on a LAN, so a genome, a
    peer id and the token itself are readable in transit, and any token holder can present
-   any `peerId`. M4 brings TLS and per-peer credentials together, because splitting them
+   any `peerId`. M5 brings TLS and per-peer credentials together, because splitting them
    produces a half-secured relay that reads as secured.
 2. **A permanently rejected inbound organism is held, never returned** (§9). A safe
    two-phase return needs one more message pair. It stays parked while "held for an
    operator" remains an honest answer.
 3. **Ring insertion under churn is untested by design.** M3 inserts three known peers, once
-   each, by hand. Strangers joining and leaving continuously is M4's problem, and it is
+   each, by hand. Strangers joining and leaving continuously is M5's problem, and it is
    where the append-at-tail rule will first be stressed.
 4. **The archive has no write interface and no authentication of its own.** It is a
    subscriber that trusts the ring token. A public relay cannot copy every envelope to
-   whoever asks, so M4 needs a subscriber authorisation rule.
+   whoever asks, so M5 needs a subscriber authorisation rule.
 5. **Slot release is a startup flag** (§7.5). If the ring ever grows past what one operator
    can restart at will, release needs an authenticated admin path — which is another reason
    it waits for the milestone that brings authentication.

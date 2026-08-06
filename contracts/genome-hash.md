@@ -1,8 +1,13 @@
 # The Canonical Genome Projection and `genomeHash`
 
 **Version:** `bb8-genome/1`
-**Status:** implementation-ready for M3. New on 2026-08-03, from decision D11 and
-`m3_considerations.md` Risk 9.
+**Status:** implementation-ready for M3 and **unchanged by M4**. New on 2026-08-03, from
+decision D11 and `m3_considerations.md` Risk 9. Re-verified on 2026-08-05 against the M4
+contract wave: the projection covers one organism's genes, brain and version tag, and
+nothing in D12–D16 touches any of them. The grid, route-around, the bounded hold and the
+delivery rate limit all move *where* and *when* an organism goes, never what its genome is,
+so the digest of a given organism is the same value under `contract-b/2.0` and
+`contract-b/3.0`. Only the cross-references below moved.
 **Owner:** `bb8-schema` (Go, sidecar-side only — D4, D7).
 
 `genomeHash` is the join key of `multiverse-archive` and the node identity of the lineage
@@ -25,7 +30,7 @@ The key words **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **REQUIRED**,
 | `multiverse-sidecar` | The lineage annex on `MIGRATION_PAYLOAD`, and the key of its genome cache | Yes, through `bb8-schema` |
 | `multiverse-archive` | Content-addressed genome storage, the lineage graph, `GENOME_REQUEST` | Yes, through `bb8-schema` |
 | `bibites-mod` | **Nothing** | **No — forbidden.** D4 keeps the bb8 body opaque to the mod. The mod ships opaque parent blobs and the sidecar hashes them (`contract-a.md` §14, A12). |
-| `species-catalog` (M6) | Content addressing | Later, through the same projection |
+| `species-catalog` (M7) | Content addressing | Later, through the same projection |
 
 The hash covers **one organism's genome**. It never covers a migration, a message, or a
 file. The unrelated `bb8.Hash` used by `contract-a.md` §5.3 step 2 to detect a repeated
@@ -464,7 +469,7 @@ partial hash, a placeholder, or the hash of a repaired projection.
 already specified elsewhere:
 
 - An unhashable **parent** blob is recorded as a gap in the lineage annex, with
-  `gapReason: "blob_invalid"` (`contract-b-m3.md` §6.6). It is not an error, the migration
+  `gapReason: "blob_invalid"` (`contract-b-m4.md` §6.6). It is not an error, the migration
   proceeds, and D11 already treats a missing parent as normal.
 - An unhashable **migrant** blob means the payload itself is broken, and the deep
   validation gate rejects it first with `INVALID_PAYLOAD` (`contract-a.md` §9.1). A
@@ -513,16 +518,16 @@ validation may reject something this document would happily hash.
 2. **The version tag is in the hash.** One genome hashes differently under two game
    versions. That is deliberate: gene names and `NodeType` ordinals are version-scoped, so
    a version-independent hash needs the cross-version conversion layer that
-   `bb8-schema` has not built yet. It is harmless in M3 because the relay rejects a
-   version mismatch at connect (`contract-b-m3.md` §6.1), so one ring runs one version.
-   A mixed-version ring would split the lineage graph at the version boundary, and the
+   `bb8-schema` has not built yet. It is harmless in M3 and M4 because the relay rejects a
+   version mismatch at connect (`contract-b-m4.md` §6.1), so one map runs one version.
+   A mixed-version map would split the lineage graph at the version boundary, and the
    answer is conversion-then-hash, not a weaker hash.
 3. **`Inov` is in the hash.** Two independently evolved but structurally identical brains
    hash differently, because their innovation numbers differ. This is correct for lineage —
    they *are* different genomes by descent — but it means the hash is not a structural
-   similarity key. M6's species catalog will need a second, coarser key. That key is not
+   similarity key. M7's species catalog will need a second, coarser key. That key is not
    this one.
 4. **Identity is the genome, not the individual.** Two organisms with byte-identical
    projections share one hash. The archive's lineage graph is therefore a graph over
    genomes; `entityId` in the annex is what distinguishes two individuals that carry the
-   same genome (`contract-b-m3.md` §6.6).
+   same genome (`contract-b-m4.md` §6.6).
