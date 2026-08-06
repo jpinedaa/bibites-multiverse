@@ -74,6 +74,14 @@ func (w *fakeWorld) put(entityID int32) {
 	w.alive[entityID] = true
 }
 
+// alivePopulation is what HEARTBEAT.population reports, which is what
+// PEER_STATUS republishes and the status page renders.
+func (w *fakeWorld) alivePopulation() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.alive)
+}
+
 // ackMode drives how the fake mod answers MIGRATE_IN.
 type ackMode int
 
@@ -90,18 +98,26 @@ type fakeModOptions struct {
 	gameVersion string
 	modVersion  string
 	simSize     float64
-	// borderEdges are the edges this mod accepts an inbound organism on.
-	// exportEdge is the one edge it exports through — different doors under the
-	// ring (contract-a.md §14, A11).
+	// borderEdges are the edges this mod accepts an inbound organism on — all
+	// four under the grid. exportEdges are the edges it runs a capture band on:
+	// different doors, and one EDGE_STATUS entry per export edge
+	// (contract-a.md §15, A18).
 	borderEdges []string
-	exportEdge  string
+	exportEdges []string
 	borderWidth float64
 	ringSlot    *int
 	heartbeat   time.Duration // 0 disables heartbeats entirely
 	ackMode     ackMode
-	// omitExportEdge makes the mod behave like a contract-a/1 mod that never
-	// learned about the field, exercising the A11 fallback.
-	omitExportEdge bool
+	// omitExportEdges sends a CONFIG_UPDATE with no exportEdges at all. A18
+	// REMOVED the singular field and its fallback, so this is a close, not a
+	// resolution.
+	omitExportEdges bool
+	// simStep is how much simulated time one HEARTBEAT advances. It is what the
+	// pacing test turns down to make a simulated minute pass in a test's
+	// lifetime (contract-a.md §7.5).
+	simStep float64
+	// lastSave, when set, rides every HEARTBEAT as the save receipt of §15 A21.
+	lastSave *contracta.SaveReceipt
 }
 
 // fakeMod is an in-process WebSocket client that speaks Contract A exactly as
@@ -122,6 +138,9 @@ type fakeMod struct {
 	closeCode   websocket.StatusCode
 	closed      bool
 	simTick     int64
+	simTime     float64
+	simStep     float64
+	paused      bool
 	ackMode     ackMode
 	world       *fakeWorld
 	hbStop      chan struct{}
@@ -147,12 +166,15 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 		opts.world = newWorld()
 	}
 	if len(opts.borderEdges) == 0 {
-		// Under the ring a sim has exactly two doors: it exports east and
-		// receives west (D8).
-		opts.borderEdges = []string{contracta.EdgeE, contracta.EdgeW}
+		// Under the grid a sim has four doors: it EXPORTS east and north and
+		// RECEIVES west and south (D13, §15 A18).
+		opts.borderEdges = []string{contracta.EdgeE, contracta.EdgeN, contracta.EdgeW, contracta.EdgeS}
 	}
-	if opts.exportEdge == "" && !opts.omitExportEdge {
-		opts.exportEdge = contracta.EdgeE
+	if len(opts.exportEdges) == 0 && !opts.omitExportEdges {
+		opts.exportEdges = []string{contracta.EdgeE, contracta.EdgeN}
+	}
+	if opts.simStep == 0 {
+		opts.simStep = 1
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -170,7 +192,7 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 	m := &fakeMod{
 		t: t, opts: opts, ws: ws, ctx: ctx, cancel: cancel,
 		edges: map[string]contracta.EdgeState{}, ackMode: opts.ackMode, world: opts.world,
-		closeCode: -1, hbStop: make(chan struct{}),
+		simStep: opts.simStep, closeCode: -1, hbStop: make(chan struct{}),
 	}
 	m.wg.Add(1)
 	go m.readLoop()
@@ -370,10 +392,10 @@ func (m *fakeMod) sendConfigUpdate(reason string) {
 		ModVersion:     m.opts.modVersion,
 		SimulationSize: &simSize,
 		BorderEdges:    m.opts.borderEdges,
-		ExportEdge:     m.opts.exportEdge,
+		ExportEdges:    m.opts.exportEdges,
 		BorderWidth:    &borderWidth,
 		RingSlot:       m.opts.ringSlot,
-		WorldName:      "M3-Slot",
+		WorldName:      "M4-Slot",
 	})
 }
 
@@ -391,15 +413,31 @@ func (m *fakeMod) heartbeatLoop(interval time.Duration) {
 			m.mu.Lock()
 			m.simTick++
 			tick := m.simTick
+			step := m.simStep
+			paused := m.paused
+			if !paused {
+				// A paused world's SIMULATED clock does not advance, which is the
+				// whole reason the pacing clock is simulated (contract-a.md §7.5).
+				m.simTime += step
+			}
+			simTime := m.simTime
 			m.mu.Unlock()
-			simTime := float64(tick)
-			pop := 100
-			paused := false
+			pop := m.world.alivePopulation()
+			eggs := 3
 			scale := 1.0
+			if paused {
+				scale = 0
+			}
 			simSize := m.opts.simSize
-			m.sendFrame(contracta.TypeHeartbeat, contracta.Heartbeat{
+			hb := contracta.Heartbeat{
 				SessionID: m.world.sessionID, SimTick: &tick, SimulatedTime: &simTime,
-				Population: &pop, Paused: &paused, TimeScale: &scale, SimulationSize: &simSize})
+				Population: &pop, EggCount: &eggs, Paused: &paused, TimeScale: &scale,
+				SimulationSize: &simSize}
+			if m.opts.lastSave != nil {
+				save := *m.opts.lastSave
+				hb.LastSave = &save
+			}
+			m.sendFrame(contracta.TypeHeartbeat, hb)
 		}
 	}
 }
@@ -492,6 +530,31 @@ func (m *fakeMod) setAckMode(mode ackMode) {
 	m.mu.Lock()
 	m.ackMode = mode
 	m.mu.Unlock()
+}
+
+// setSimStep changes how fast the world's SIMULATED clock runs, which is the
+// only clock the delivery rate limit reads (contract-a.md §7.5).
+func (m *fakeMod) setSimStep(step float64) {
+	m.mu.Lock()
+	m.simStep = step
+	m.mu.Unlock()
+}
+
+// setPaused makes the mod report paused: true and timeScale 0, which stops the
+// pacing clock — no tokens accrue in the dark, so a paused world does not bank
+// a burst.
+func (m *fakeMod) setPaused(p bool) {
+	m.mu.Lock()
+	m.paused = p
+	m.mu.Unlock()
+}
+
+// simTimeNow is the world's simulated clock, which is the only clock the
+// delivery rate limit reads.
+func (m *fakeMod) simTimeNow() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.simTime
 }
 
 // ---------------------------------------------------------------- assertions

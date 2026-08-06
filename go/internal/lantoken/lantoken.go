@@ -1,5 +1,5 @@
 // Package lantoken loads and compares the shared bearer token of
-// contract-b-m3.md §3.1.
+// contract-b-m4.md §3.1.
 //
 // M2 ran on loopback and needed no authentication. M3's wire crosses a LAN, so
 // any device on that network can reach the relay port. This is deliberately the

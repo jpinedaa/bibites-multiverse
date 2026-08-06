@@ -9,9 +9,9 @@ import (
 )
 
 func TestDecodeAcceptsTheContractExample(t *testing.T) {
-	// contract-a.md §3's example, verbatim at contract-a/1.1.
+	// contract-a.md §3's example, verbatim at contract-a/2.0 (§15, A23).
 	raw := []byte(`{
-	  "protocol": "contract-a/1.1",
+	  "protocol": "contract-a/2.0",
 	  "type": "MIGRATE_OUT",
 	  "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
 	  "sentAt": 1785693600123,
@@ -67,22 +67,25 @@ func TestDecodeIgnoresUnknownEnvelopeFields(t *testing.T) {
 	}
 }
 
-// TestCheckProtocolComparesMajorOnly covers contract-a.md §14 A16: the version
-// segment is <major>.<minor>, a missing minor means 0, and the minor is never a
-// rejection reason.
+// TestCheckProtocolComparesMajorOnly covers contract-a.md §14 A16 and §15 A23:
+// the version segment is <major>.<minor>, a missing minor means 0, the minor is
+// never a rejection reason, and M4's MAJOR bump on both wires is what stops an
+// M3 peer from ever meeting an M4 one.
 func TestCheckProtocolComparesMajorOnly(t *testing.T) {
-	for _, got := range []string{"contract-a/1", "contract-a/1.0", "contract-a/1.1", "contract-a/1.7"} {
+	for _, got := range []string{"contract-a/2", "contract-a/2.0", "contract-a/2.1", "contract-a/2.7"} {
 		if err := CheckProtocol(got, ProtocolA); err != nil {
 			t.Fatalf("CheckProtocol(%q): %v", got, err)
 		}
 	}
-	if err := CheckProtocol("contract-a/2", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
-		t.Fatalf("different major: %v", err)
+	// The M3 wire. A contract-a/1.1 mod and a contract-a/2.0 sidecar are
+	// incompatible BY DESIGN, and both sides say so loudly rather than misreading
+	// a field (§15, A23).
+	for _, old := range []string{"contract-a/1", "contract-a/1.1"} {
+		if err := CheckProtocol(old, ProtocolA); !errors.Is(err, ErrProtocolMajor) {
+			t.Fatalf("CheckProtocol(%q) accepted an M3 mod: %v", old, err)
+		}
 	}
-	if err := CheckProtocol("contract-a/2.1", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
-		t.Fatalf("different major with a minor: %v", err)
-	}
-	if err := CheckProtocol("contract-b/2.0", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
+	if err := CheckProtocol("contract-b/3.0", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
 		t.Fatalf("different family: %v", err)
 	}
 	if err := CheckProtocol("garbage", ProtocolA); !errors.Is(err, ErrProtocolMajor) {
@@ -91,10 +94,15 @@ func TestCheckProtocolComparesMajorOnly(t *testing.T) {
 	if err := CheckProtocol(ProtocolB, ProtocolB); err != nil {
 		t.Fatalf("contract B against itself: %v", err)
 	}
-	if got := ProtocolMinor("contract-a/1.1"); got != 1 {
+	// M3's contract-b/2.0 against M4's contract-b/3.0: close 4000, never a
+	// misrouted organism (contract-b-m4.md §4).
+	if err := CheckProtocol("contract-b/2.0", ProtocolB); !errors.Is(err, ErrProtocolMajor) {
+		t.Fatalf("an M3 sidecar was accepted by an M4 relay: %v", err)
+	}
+	if got := ProtocolMinor("contract-a/2.1"); got != 1 {
 		t.Fatalf("ProtocolMinor = %d, want 1", got)
 	}
-	if got := ProtocolMinor("contract-b/2"); got != 0 {
+	if got := ProtocolMinor("contract-b/3"); got != 0 {
 		t.Fatalf("a missing minor must read as 0, got %d", got)
 	}
 }

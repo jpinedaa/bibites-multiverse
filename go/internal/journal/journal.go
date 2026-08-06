@@ -58,12 +58,41 @@ const (
 	// for exportRetentionSeconds (contract-a.md §7.2).
 	StatusDone Status = "done"
 	// StatusHeld: permanently undeliverable and not safely returnable. Kept
-	// for an operator (contract-a.md §5.9, contract-b-m2.md §7).
+	// for an operator (contract-a.md §5.9, contract-b-m4.md §9.4).
 	StatusHeld Status = "held"
 )
 
+// Handoff is the durable handoff state of contract-b-m4.md §9.2. It answers the
+// one question a re-route turns on: COULD CUSTODY HAVE MOVED?
+//
+//	pending   journaled, never written to a live relay connection   NO
+//	sent      written to a live relay connection, no answer yet     YES, unknowably
+//	held      sent, and the destination is observed dark            YES, unknowably
+//	refused   a statement arrived that proves no custody moved      NO
+//	done      MIGRATION_ACK received; becomes a tombstone           it moved, and completed
+//
+// A bounce is a TERMINAL ACTION, not a sixth state: the entry leaves the
+// outbound journal, becomes an inbound delivery into this peer's own mod, and
+// leaves a tombstone behind.
+type Handoff string
+
+const (
+	HandoffPending Handoff = "pending"
+	HandoffSent    Handoff = "sent"
+	HandoffHeld    Handoff = "held"
+	HandoffRefused Handoff = "refused"
+	HandoffDone    Handoff = "done"
+)
+
+// CustodyMayHaveMoved reports whether the far side could hold this organism.
+// It is the whole of the re-route safety rule: only pending and refused are
+// safe to redirect, and silence never turns "yes" into "no".
+func (h Handoff) CustodyMayHaveMoved() bool {
+	return h == HandoffSent || h == HandoffHeld
+}
+
 // ParentRef is one entry of the lineage annex as the journal keeps it
-// (contract-b-m3.md §6.6). An empty GenomeHash is a gap and GapReason says why.
+// (contract-b-m4.md §6.6). An empty GenomeHash is a gap and GapReason says why.
 type ParentRef struct {
 	EntityID   int32  `json:"entityId"`
 	GenomeHash string `json:"genomeHash,omitempty"`
@@ -86,21 +115,29 @@ type Entry struct {
 	SimulationSize float64 `json:"simulationSize"`
 	SimTick        int64   `json:"simTick"`
 	SourcePeer     string  `json:"sourcePeer,omitempty"`
-	// SourceSlot and DestSlot are ring slots (contract-b-m3.md §7.1). A
-	// journaled outbound entry keeps the DestSlot it recorded: §7.3 forbids
-	// rewriting it when the east neighbour changes, and routing on the slot is
-	// what makes a ring insertion safe for work in flight.
+	// SourceSlot and DestSlot are map slots (contract-b-m4.md §7.1). A journaled
+	// outbound entry keeps the DestSlot it recorded: §7.3 forbids rewriting it
+	// when the effective neighbour changes, and routing on the slot is what
+	// makes a splice safe for work in flight. The ONE exception is a re-route
+	// under a proof of non-delivery (§9.2), which rewrites it through
+	// Update.DestSlot and records the evidence beside it.
 	SourceSlot int `json:"sourceSlot,omitempty"`
 	DestSlot   int `json:"destSlot,omitempty"`
 	// GenomeHash and Parents are the lineage annex. The tombstone keeps them
 	// after the payload is dropped, because the archive may ask for that genome
-	// long after the migration completed (contract-b-m3.md §6.7).
+	// long after the migration completed (contract-b-m4.md §6.7).
 	GenomeHash  string      `json:"genomeHash,omitempty"`
 	Parents     []ParentRef `json:"parents,omitempty"`
 	JournaledAt int64       `json:"journaledAt"`
 }
 
 // State is one migration's full durable state.
+//
+// The M4 fields are LOAD-BEARING and must survive a restart (§7.4): the handoff
+// state says whether custody may have moved, RelaySessionID scopes the proof,
+// AccruedHoldMs is what the bounded hold counts, and RerouteCount is what bounds
+// it. A sidecar that reconstructs any of them from memory at startup has lost
+// the safety property, not just the bookkeeping.
 type State struct {
 	Entry         Entry     `json:"entry"`
 	Direction     Direction `json:"direction"`
@@ -111,7 +148,32 @@ type State struct {
 	Duplicate     bool      `json:"duplicate"`
 	Note          string    `json:"note,omitempty"`
 	CompletedAt   int64     `json:"completedAt,omitempty"`
-	seq           uint64
+
+	// Handoff is §9.2's state. Outbound entries only.
+	Handoff Handoff `json:"handoff,omitempty"`
+	// RelaySessionID is the relay session in force at the FIRST write to a live
+	// relay connection. A relay-generated neverForwarded: true counts as proof
+	// only when its relaySessionId equals this one (§5.2): a link flap keeps the
+	// id and keeps the proof; a relay restart changes it and the sender holds.
+	RelaySessionID string `json:"relaySessionId,omitempty"`
+	// AccruedHoldMs is ACCRUED dark time, not a deadline. A wall-clock deadline
+	// cannot express a clock that stops, so the entry carries the accrual
+	// instead — a restart cannot lose time already served, and cannot invent
+	// time that was never served (§9.3).
+	AccruedHoldMs int64 `json:"accruedHoldMs,omitempty"`
+	// RerouteCount, RerouteFrom, RerouteProof and RerouteAtMs are the §6.6
+	// reroute block, kept so a re-forward reproduces it and the archive can say
+	// WHY an organism took the lane it took.
+	RerouteCount int    `json:"rerouteCount,omitempty"`
+	RerouteFrom  int    `json:"rerouteFrom,omitempty"`
+	RerouteProof string `json:"rerouteProof,omitempty"`
+	RerouteAtMs  int64  `json:"rerouteAtMs,omitempty"`
+	// BouncedTimeout marks the tombstone of an entry the hold timeout bounced.
+	// A MIGRATION_ACK that arrives afterwards is the accepted duplication case
+	// of §9.3 announcing itself, and it MUST be logged at error level.
+	BouncedTimeout bool `json:"bouncedTimeout,omitempty"`
+
+	seq uint64
 }
 
 // Clone returns a copy safe to hand outside the journal's lock.
@@ -135,6 +197,16 @@ type record struct {
 	Note        string    `json:"note,omitempty"`
 	CompletedAt *int64    `json:"completedAt,omitempty"`
 	Purge       bool      `json:"purge,omitempty"`
+
+	Handoff        *Handoff `json:"handoff,omitempty"`
+	RelaySessionID *string  `json:"relaySessionId,omitempty"`
+	AccruedHoldMs  *int64   `json:"accruedHoldMs,omitempty"`
+	DestSlot       *int     `json:"destSlot,omitempty"`
+	RerouteCount   *int     `json:"rerouteCount,omitempty"`
+	RerouteFrom    *int     `json:"rerouteFrom,omitempty"`
+	RerouteProof   *string  `json:"rerouteProof,omitempty"`
+	RerouteAtMs    *int64   `json:"rerouteAtMs,omitempty"`
+	BouncedTimeout *bool    `json:"bouncedTimeout,omitempty"`
 }
 
 const (
@@ -264,6 +336,11 @@ func (j *Journal) apply(rec record) {
 			Attempt:   0,
 			seq:       j.seq,
 		}
+		if rec.Direction == Out {
+			// §9.2: a journal write lands in pending. The frame was never handed
+			// to anybody, and the sender's own record is sufficient proof of that.
+			st.Handoff = HandoffPending
+		}
 		if rec.BounceBack != nil {
 			st.BounceBack = *rec.BounceBack
 		}
@@ -304,6 +381,33 @@ func (j *Journal) apply(rec record) {
 		if rec.Note != "" {
 			st.Note = rec.Note
 		}
+		if rec.Handoff != nil {
+			st.Handoff = *rec.Handoff
+		}
+		if rec.RelaySessionID != nil {
+			st.RelaySessionID = *rec.RelaySessionID
+		}
+		if rec.AccruedHoldMs != nil {
+			st.AccruedHoldMs = *rec.AccruedHoldMs
+		}
+		if rec.DestSlot != nil {
+			st.Entry.DestSlot = *rec.DestSlot
+		}
+		if rec.RerouteCount != nil {
+			st.RerouteCount = *rec.RerouteCount
+		}
+		if rec.RerouteFrom != nil {
+			st.RerouteFrom = *rec.RerouteFrom
+		}
+		if rec.RerouteProof != nil {
+			st.RerouteProof = *rec.RerouteProof
+		}
+		if rec.RerouteAtMs != nil {
+			st.RerouteAtMs = *rec.RerouteAtMs
+		}
+		if rec.BouncedTimeout != nil {
+			st.BouncedTimeout = *rec.BouncedTimeout
+		}
 		if st.Status == StatusDone {
 			// A tombstone keeps the identity and drops the bytes.
 			st.Entry.Payload = ""
@@ -332,7 +436,18 @@ func (j *Journal) compact() error {
 		status := record{Op: opStatus, MigrationID: entry.MigrationID, At: time.Now().UnixMilli(),
 			Direction: st.Direction, Status: st.Status, Attempt: intPtr(st.Attempt),
 			BounceBack: boolPtr(st.BounceBack), Acked: boolPtr(st.AckedUpstream),
-			Duplicate: boolPtr(st.Duplicate), Note: st.Note}
+			Duplicate: boolPtr(st.Duplicate), Note: st.Note,
+			AccruedHoldMs: int64Ptr(st.AccruedHoldMs), DestSlot: intPtr(st.Entry.DestSlot),
+			RerouteCount: intPtr(st.RerouteCount), RerouteFrom: intPtr(st.RerouteFrom),
+			RerouteProof: strPtr(st.RerouteProof), RerouteAtMs: int64Ptr(st.RerouteAtMs),
+			BouncedTimeout: boolPtr(st.BouncedTimeout)}
+		if st.Handoff != "" {
+			h := st.Handoff
+			status.Handoff = &h
+		}
+		if st.RelaySessionID != "" {
+			status.RelaySessionID = strPtr(st.RelaySessionID)
+		}
 		if st.CompletedAt != 0 {
 			status.CompletedAt = int64Ptr(st.CompletedAt)
 		}
@@ -418,6 +533,19 @@ type Update struct {
 	Edge        *string
 	CompletedAt *int64
 	Note        string
+
+	Handoff        Handoff
+	RelaySessionID *string
+	AccruedHoldMs  *int64
+	// DestSlot is the ONE exception to §7.3's no-rewrite rule, and it carries
+	// its own evidence: a re-route under a proof of non-delivery (§9.2). Every
+	// other entry keeps the destination it recorded.
+	DestSlot       *int
+	RerouteCount   *int
+	RerouteFrom    *int
+	RerouteProof   *string
+	RerouteAtMs    *int64
+	BouncedTimeout *bool
 }
 
 // Apply durably records u against migrationID.
@@ -433,7 +561,14 @@ func (j *Journal) Apply(migrationID string, u Update) (*State, error) {
 	rec := record{Op: opStatus, MigrationID: migrationID, At: time.Now().UnixMilli(),
 		Status: u.Status, Direction: u.Direction, Attempt: u.Attempt, BounceBack: u.BounceBack,
 		Acked: u.Acked, Duplicate: u.Duplicate, Edge: u.Edge, CompletedAt: u.CompletedAt,
-		Note: u.Note}
+		Note: u.Note, RelaySessionID: u.RelaySessionID, AccruedHoldMs: u.AccruedHoldMs,
+		DestSlot: u.DestSlot, RerouteCount: u.RerouteCount, RerouteFrom: u.RerouteFrom,
+		RerouteProof: u.RerouteProof, RerouteAtMs: u.RerouteAtMs,
+		BouncedTimeout: u.BouncedTimeout}
+	if u.Handoff != "" {
+		h := u.Handoff
+		rec.Handoff = &h
+	}
 	if err := j.append(rec); err != nil {
 		return nil, err
 	}
@@ -534,3 +669,4 @@ func (j *Journal) Close() error {
 func boolPtr(b bool) *bool    { return &b }
 func intPtr(i int) *int       { return &i }
 func int64Ptr(i int64) *int64 { return &i }
+func strPtr(s string) *string { return &s }

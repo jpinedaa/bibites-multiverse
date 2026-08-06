@@ -18,7 +18,7 @@ import (
 )
 
 // Main is the multiverse-archive entry point. Two subcommands: the default
-// runs the recorder, and `list` is the one read path M3 has.
+// runs the recorder and the status page, and `list` is the ledger read path.
 func Main(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "list" {
 		return listMain(args[1:], stdout, stderr)
@@ -35,7 +35,11 @@ func runMain(args []string, stderr io.Writer) int {
 	peerID := fs.String("peer-id", env("MULTIVERSE_ARCHIVE_PEER_ID", "archive-main"),
 		"this subscriber's identity on the ring")
 	dataDir := fs.String("data-dir", env("MULTIVERSE_ARCHIVE_DATA_DIR", "multiverse-archive-data"),
-		"directory for migrations.jsonl and the content-addressed genome store")
+		"directory for migrations.jsonl, metrics.jsonl and the content-addressed genome store")
+	httpListen := fs.String("http", env("MULTIVERSE_ARCHIVE_HTTP", "127.0.0.1:8791"),
+		"bind address for the live status page and its JSON endpoint; empty disables it")
+	metricsInterval := fs.Duration("metrics-interval", time.Minute,
+		"how often a PEER_STATUS sample is appended to metrics.jsonl")
 	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
 		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
@@ -55,11 +59,13 @@ func runMain(args []string, stderr io.Writer) int {
 	}
 
 	a, err := New(Config{
-		RelayURL: *relayURL,
-		Token:    token,
-		PeerID:   *peerID,
-		DataDir:  *dataDir,
-		Logger:   log,
+		RelayURL:        *relayURL,
+		Token:           token,
+		PeerID:          *peerID,
+		DataDir:         *dataDir,
+		Logger:          log,
+		HTTPListen:      *httpListen,
+		MetricsInterval: *metricsInterval,
 	})
 	if err != nil {
 		log.Error("archive: startup failed", "err", err)
@@ -68,7 +74,14 @@ func runMain(args []string, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	a.Start(ctx)
+	if err := a.Start(ctx); err != nil {
+		log.Error("archive: start failed", "err", err)
+		return 1
+	}
+	if addr := a.HTTPAddr(); addr != "" {
+		log.Info("archive: status page", "url", "http://"+addr+"/", "json", "http://"+addr+"/api/status",
+			"terminal", "ringstat --url http://"+addr)
+	}
 	<-ctx.Done()
 	log.Info("archive: shutting down", "pendingGaps", a.PendingGaps())
 	done := make(chan struct{})
@@ -83,7 +96,7 @@ func runMain(args []string, stderr io.Writer) int {
 
 // listMain is the read path: every recorded migration with its lineage, and
 // whether the archive actually holds each genome. A hash with no genome is the
-// gap report of contract-b-m3.md §10 — the archive's honest statement of what
+// gap report of contract-b-m4.md §10 — the archive's honest statement of what
 // it does not have.
 func listMain(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("multiverse-archive list", flag.ContinueOnError)
@@ -101,7 +114,7 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 	}
 	shown, gaps, unhashable := 0, 0, 0
 	for _, m := range migrations {
-		// contract-b-m3.md §10: the gap report names "a hash that no peer can
+		// contract-b-m4.md §10: the gap report names "a hash that no peer can
 		// serve" — an UNRESOLVED hash. A lineage entry with no hash at all is a
 		// different thing: `gapReason: "parent_gone"` means the genome never
 		// existed to be recorded, and no retry can produce one. Counting those

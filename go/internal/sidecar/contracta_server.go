@@ -28,24 +28,59 @@ type modSession struct {
 	modVersion  string
 	simSize     float64
 	borderWidth float64
-	// borderEdges are the edges the mod will accept an inbound organism on.
-	// exportEdge is the single edge it may export through — different doors
-	// (contract-a.md §14, A11).
+	// borderEdges are the edges the mod will accept an inbound organism on —
+	// all four under the grid. exportEdges are the edges it runs a capture band
+	// on: different doors, one entry per export edge in EDGE_STATUS
+	// (contract-a.md §15, A18).
 	borderEdges []string
-	exportEdge  string
+	exportEdges []string
 	ringSlot    *int
 	worldName   string
 
 	lastHeartbeat time.Time
 	paused        bool
 	timeScale     float64
+
+	// The HEARTBEAT-derived half of the peer stats block (contract-b-m4.md
+	// §6.3.1). "have" flags keep absence a value: a stat the mod has not
+	// reported is OMITTED, never defaulted to zero.
+	havePopulation bool
+	population     int
+	haveEggCount   bool
+	eggCount       int
+	haveSimTime    bool
+	simulatedTime  float64
+	// lastSave is the mod's save receipt, copied verbatim and never computed
+	// (§15, A21). A mod that omits it is conformant and the status page shows
+	// that world's save state as unknown.
+	lastSave *contracta.SaveReceipt
+}
+
+// serveRetiredContractA implements contract-a.md §15 A23: an M3 mod dials
+// /contract-a/v1, and the M4 sidecar MUST close that connection immediately
+// with 4000 PROTOCOL_UNSUPPORTED. A bare HTTP 404 would be a socket error in a
+// BepInEx log and half an evening of diagnosis; 4000 is a defined close the mod
+// already handles by logging one loud error and not reconnecting.
+func (s *Sidecar) serveRetiredContractA(w http.ResponseWriter, r *http.Request) {
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		CompressionMode:    websocket.CompressionDisabled,
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return
+	}
+	s.log.Error("contract A: refusing a connection on the retired /contract-a/v1 path",
+		"hint", "this sidecar speaks "+wire.ProtocolA+" on "+contracta.ContractAPath+
+			"; update the mod")
+	_ = ws.Close(contracta.CloseProtocolUnsupported,
+		"contract-a/v1 is retired; this sidecar serves "+contracta.ContractAPath)
 }
 
 func (s *Sidecar) serveContractA(w http.ResponseWriter, r *http.Request) {
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		// contract-a.md §2: permessage-deflate MUST NOT be negotiated.
 		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true, // loopback only; auth is the M3 item of §12
+		InsecureSkipVerify: true, // loopback only; auth is the M5 item of §12 (§15, A24)
 	})
 	if err != nil {
 		s.log.Warn("contract A: upgrade failed", "err", err)
@@ -55,9 +90,12 @@ func (s *Sidecar) serveContractA(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.modGen++
-	sess := &modSession{gen: s.modGen, conn: conn, lastHeartbeat: time.Now(), timeScale: 1}
+	sess := &modSession{gen: s.modGen, conn: conn, lastHeartbeat: s.now(), timeScale: 1}
 	old := s.mod
 	s.mod = sess
+	// A new mod session is a new world clock, so the pacing bucket starts cold
+	// rather than carrying a stale simulated time across the gap (§7.5).
+	s.pace.reset()
 	s.edgeEpoch = 0 // contract-a.md §5.4: the epoch counter resets per connection
 	s.lastEdges = nil
 	s.mu.Unlock()
@@ -178,10 +216,10 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 		sess.conn.Close(contracta.CloseGameVersionUnsupport, "bb8-schema has no dialect for "+cfg.GameVersion)
 		return false
 	}
-	// §14 A11: an absent exportEdge is supplied by a single-entry borderEdges,
-	// and only an ambiguous borderEdges is a close. Validate already applied
-	// the same rule, so this cannot fail here — it is read for the value.
-	exportEdge, err := cfg.ResolveExportEdge()
+	// §15 A18: exportEdges is REQUIRED, has at least one member, no duplicates,
+	// and every member is also in borderEdges. Validate already applied the same
+	// rule, so this cannot fail here — it is read for the value.
+	exportEdges, err := cfg.ResolveExportEdges()
 	if err != nil {
 		sess.conn.Close(contracta.CloseMalformedFrame, err.Error())
 		return false
@@ -199,10 +237,10 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 	sess.simSize = *cfg.SimulationSize
 	sess.borderWidth = *cfg.BorderWidth
 	sess.borderEdges = append([]string(nil), cfg.BorderEdges...)
-	sess.exportEdge = exportEdge
+	sess.exportEdges = exportEdges
 	sess.ringSlot = cfg.RingSlot
 	sess.worldName = cfg.WorldName
-	sess.lastHeartbeat = time.Now()
+	sess.lastHeartbeat = s.now()
 
 	if mismatch := s.slotMismatchLocked(sess); mismatch != "" {
 		s.mu.Unlock()
@@ -224,7 +262,7 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 	s.log.Info("contract A: handshake", "sessionId", cfg.SessionID, "reason", cfg.Reason,
 		"gameVersion", cfg.GameVersion, "modVersion", cfg.ModVersion,
 		"simulationSize", sess.simSize, "borderEdges", sess.borderEdges,
-		"exportEdge", sess.exportEdge, "ringSlot", derefIntPtr(cfg.RingSlot), "world", cfg.WorldName)
+		"exportEdges", sess.exportEdges, "ringSlot", derefIntPtr(cfg.RingSlot), "world", cfg.WorldName)
 	s.refreshClaim()
 	return true
 }
@@ -278,11 +316,26 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 		sess.conn.Close(contracta.CloseMalformedFrame, "HEARTBEAT sessionId does not match the handshake")
 		return false
 	}
-	sess.lastHeartbeat = time.Now()
+	now := s.now()
+	sess.lastHeartbeat = now
 	sess.paused = *hb.Paused
 	sess.timeScale = *hb.TimeScale
 	resized := !sameSize(sess.simSize, *hb.SimulationSize)
 	sess.simSize = *hb.SimulationSize
+	// The stats block of contract-b-m4.md §6.3.1 comes from here, and so does
+	// the pacing clock: simulated, never wall (§7.5).
+	sess.havePopulation, sess.population = true, *hb.Population
+	if hb.EggCount != nil {
+		sess.haveEggCount, sess.eggCount = true, *hb.EggCount
+	}
+	sess.haveSimTime, sess.simulatedTime = true, *hb.SimulatedTime
+	if hb.LastSave != nil {
+		save := *hb.LastSave
+		sess.lastSave = &save
+	}
+	if sess == s.mod {
+		s.pace.beat(*hb.SimulatedTime, !*hb.Paused && *hb.TimeScale > 0, now)
+	}
 	if resized {
 		// contract-a.md §5.2: a changed S re-checks peer agreement exactly as a
 		// CONFIG_UPDATE would. SimulationSize is live-mutable.
@@ -318,6 +371,13 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	if out.Kind != contracta.KindBibite {
 		s.nackOut(sess, out.MigrationID, entityID, contracta.OutKindUnsupported,
 			"kind "+out.Kind+" is not supported in M2", 0)
+		return true
+	}
+	if out.ExitEdge != contracta.EdgeE && out.ExitEdge != contracta.EdgeN {
+		// §15 A18: exitEdge is always a member of the declared exportEdges, and
+		// the grid exports east and north.
+		s.nackOut(sess, out.MigrationID, entityID, contracta.OutEdgeClosed,
+			"exitEdge "+out.ExitEdge+" is not an export edge under the grid", 0)
 		return true
 	}
 	if err := bb8.Validate(out.GameVersion, out.Payload); err != nil {
@@ -424,7 +484,7 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	return true
 }
 
-// buildAnnex implements contract-a.md §14 A12 and contract-b-m3.md §6.6: the
+// buildAnnex implements contract-a.md §14 A12 and contract-b-m4.md §6.6: the
 // mod ships opaque blobs, the sidecar hashes them.
 //
 // It hashes the migrant's genome and every present parent blob with the
@@ -579,8 +639,10 @@ func (s *Sidecar) onMigrateInNack(sess *modSession, env wire.Envelope) bool {
 			"migrationId", nack.MigrationID, "code", nack.Code, "retryAfter", retry)
 		return true
 	}
-	// Permanent. contract-b-m2.md §7: hold for an operator rather than return
-	// the organism over a wire that has no two-phase return in M2.
+	// Permanent. contract-b-m4.md §9.4: the destination sidecar HOLDS the entry
+	// for an operator and logs it loudly. It does not return the organism over
+	// Contract B, because there is no two-phase return in M4's message list and
+	// a lost return frame would lose the organism outright.
 	if _, err := s.jr.Apply(nack.MigrationID, journal.Update{
 		Status: journal.StatusHeld, Note: "MIGRATE_IN_NACK " + nack.Code}); err != nil {
 		s.log.Error("contract A: journal update failed", "migrationId", nack.MigrationID, "err", err)
@@ -622,9 +684,16 @@ func (s *Sidecar) reassertCustodyLocked() {
 }
 
 // replayInboundLocked implements contract-a.md §7.5: every journaled inbound
-// organism with no MIGRATE_IN_ACK is replayed in journal order, unconditionally.
+// organism with no MIGRATE_IN_ACK is replayed in journal order, unconditionally
+// — and THROUGH THE DELIVERY RATE LIMIT (§15, A20). Replay is exactly the case
+// pacing exists for: a slot that slept accumulated a dam, and releasing it all
+// at wake is the failure T1 measured.
+//
+// Every entry is marked due immediately and the paced tick releases them as
+// tokens allow. PACING MUST NOT REORDER, and the tick walks the journal in
+// order, so it does not.
 func (s *Sidecar) replayInboundLocked() {
-	now := time.Now()
+	now := s.now()
 	n := 0
 	for _, st := range s.jr.List() {
 		if st.Direction != journal.In {
@@ -633,11 +702,15 @@ func (s *Sidecar) replayInboundLocked() {
 		if st.Status != journal.StatusOpen && st.Status != journal.StatusInFlight {
 			continue
 		}
+		// Clear the previous delivery's ACK deadline: the mod that owed that ACK
+		// is gone, so the entry is due now rather than in migrateInAckTimeoutMs.
+		s.schedFor(st.Entry.MigrationID).nextDeliver = time.Time{}
 		s.deliverLocked(st, now)
 		n++
 	}
 	if n > 0 {
-		s.log.Info("contract A: replayed un-ACKed inbound deliveries", "count", n)
+		s.log.Info("contract A: queued un-ACKed inbound deliveries for replay",
+			"count", n, "pacedDepth", s.pacedDepthLocked())
 	}
 }
 
@@ -652,7 +725,11 @@ func (s *Sidecar) modHeartbeatMonitor(sess *modSession) {
 			return
 		case <-s.ctx.Done():
 			return
-		case now := <-t.C:
+		case <-t.C:
+			// The sidecar's own clock, never the ticker's: every deadline in this
+			// process reads one time source, so a test that controls it controls
+			// all of them (§9.3's injectable clock).
+			now := s.now()
 			s.mu.Lock()
 			last := sess.lastHeartbeat
 			s.mu.Unlock()

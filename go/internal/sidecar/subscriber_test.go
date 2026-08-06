@@ -17,7 +17,7 @@ import (
 )
 
 // subscriber is a bare role:"archive" client. It exists so a test can try the
-// things contract-b-m3.md §5.1 forbids a subscriber to do, which the real
+// things contract-b-m4.md §5.1 forbids a subscriber to do, which the real
 // archive never attempts.
 type subscriber struct {
 	t      *testing.T
@@ -126,17 +126,69 @@ func (s *subscriber) sendMigrationAndWaitNack(t *testing.T, timeout time.Duratio
 	return nack
 }
 
-// claimAndWaitGrant tries a SECTOR_CLAIM, which §7.2 rule 5 refuses.
+// claimAndWaitGrant tries a SECTOR_CLAIM, which §7.2 rule 7 refuses.
 func (s *subscriber) claimAndWaitGrant(t *testing.T, timeout time.Duration) contractb.SectorGrant {
 	t.Helper()
 	s.send(contractb.TypeSectorClaim, contractb.SectorClaim{
-		SimulationSize: 0, ExportEdge: "", BorderEdges: []string{}, ModConnected: false})
+		SimulationSize: 0, ExportEdges: []string{}, BorderEdges: []string{}, ModConnected: false})
 	env := s.wait(contractb.TypeSectorGrant, timeout)
 	var grant contractb.SectorGrant
 	if err := json.Unmarshal(env.Data, &grant); err != nil {
 		t.Fatalf("subscriber: decode grant: %v", err)
 	}
 	return grant
+}
+
+// peerStatuses decodes every PEER_STATUS this subscriber has been broadcast, in
+// arrival order. §6.5 makes it full state, so a test reads the last one — except
+// where it is asserting the REPUBLISH, which needs two.
+func (s *subscriber) peerStatuses(t *testing.T) []contractb.PeerStatus {
+	t.Helper()
+	s.mu.Lock()
+	frames := append([]wire.Envelope(nil), s.frames...)
+	s.mu.Unlock()
+	out := []contractb.PeerStatus{}
+	for _, env := range frames {
+		if env.Type != contractb.TypePeerStatus {
+			continue
+		}
+		var st contractb.PeerStatus
+		if json.Unmarshal(env.Data, &st) == nil {
+			out = append(out, st)
+		}
+	}
+	return out
+}
+
+// dialRawRelay is a bare Contract B socket with no handshake, for the path and
+// close-code rules of §3 and §3.2.
+func dialRawRelay(t *testing.T, url, token string) *rawMod {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	ws, _, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{
+		CompressionMode: websocket.CompressionDisabled,
+		HTTPHeader:      http.Header{"Authorization": []string{lantoken.Header(token)}},
+	})
+	dialCancel()
+	if err != nil {
+		cancel()
+		t.Fatalf("raw relay client: dial %s: %v", url, err)
+	}
+	r := &rawMod{t: t, ws: ws, ctx: ctx, cancel: cancel, code: -1}
+	go func() {
+		for {
+			if _, _, err := ws.Read(ctx); err != nil {
+				r.mu.Lock()
+				r.closed = true
+				r.code = int(websocket.CloseStatus(err))
+				r.mu.Unlock()
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() { cancel(); _ = ws.CloseNow() })
+	return r
 }
 
 // probeRelay does the HTTP upgrade by hand so a test can read the status and

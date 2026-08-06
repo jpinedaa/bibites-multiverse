@@ -1,6 +1,6 @@
 // Package wire implements the JSON envelope shared by Contract A
-// (contracts/contract-a.md §3) and the M2 subset of Contract B
-// (contracts/contract-b-m2.md §3).
+// (contracts/contract-a.md §3) and Contract B
+// (contracts/contract-b-m4.md §4).
 //
 // Both contracts use exactly the same five-field envelope, the same
 // major-version compatibility rule, and the same "ignore unknown fields,
@@ -22,11 +22,11 @@ import (
 // Protocol identifiers. The version segment is <major>.<minor>
 // (contract-a.md §14, A16); compatibility is on the major only.
 const (
-	ProtocolA = "contract-a/1.1"
-	ProtocolB = "contract-b/2.0"
+	ProtocolA = "contract-a/2.0"
+	ProtocolB = "contract-b/3.0"
 )
 
-// Shared size limits (contract-a.md §10, contract-b-m3.md §12).
+// Shared size limits (contract-a.md §10, contract-b-m4.md §12).
 const (
 	MaxFrameBytes   = 8 << 20 // 8 MiB
 	MaxPayloadBytes = 4 << 20 // 4 MiB

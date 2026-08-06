@@ -12,7 +12,7 @@
 //   - the two fields the delivery path reads out of the blob: the entity id
 //     (contract-a.md §5.7) and the heading (contract-a.md §4.4).
 //
-// genome.go adds M3's canonical genome projection and genomeHash
+// genome.go adds the canonical genome projection and genomeHash
 // (contracts/genome-hash.md), and store.go the content-addressed cache both the
 // sidecar and the archive keep. Gene bounds, node and synapse validation and
 // cross-version conversion are still deferred: Hook is the seam they plug into
@@ -37,7 +37,7 @@ var (
 	ErrNoVersion     = errors.New("bb8: no game version")
 )
 
-// Hook is the validation seam for the real bb8-schema (M3). It is called last,
+// Hook is the validation seam for the real bb8-schema. It is called last,
 // after the structural gate, and its error is returned unchanged. Nil disables
 // deep validation, which is the M2 default.
 //

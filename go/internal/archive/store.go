@@ -7,8 +7,8 @@ package archive
 // (<data-dir>/genomes/, bb8.Store). One JSON object per line, fsynced on every
 // append, never rewritten in place.
 //
-// M3's archive is a recorder, not a query engine (D11, contract-b-m3.md §1:
-// "M3 records and reads only"). Three properties decided it over SQLite or a
+// The archive is a recorder, not a query engine (D11, contract-b-m4.md §1:
+// "M4 records and reads only"). Three properties decided it over SQLite or a
 // key-value store:
 //
 //  1. It is inspectable with tools that are already on both machines — tail,
@@ -18,12 +18,12 @@ package archive
 //     the sidecar journal already uses, so there is one crash story in the
 //     system rather than two.
 //  3. It has no schema to migrate. The lineage graph M6 will want is a
-//     different shape from anything M3 could guess, and a ledger replays into
+//     different shape from anything M4 could guess, and a ledger replays into
 //     whatever shape that turns out to be.
 //
 // The cost is honest and bounded: reads are a full-file replay, so a query
 // surface beyond "list what you recorded" would need an index. That is exactly
-// the ambition M3 does not have.
+// the ambition M4 does not have.
 
 import (
 	"bufio"
@@ -50,7 +50,7 @@ const (
 type Record struct {
 	Type string `json:"type"`
 	// RecordedAt is the archive's own clock. Two machines have two clocks
-	// (m3_considerations.md Risk 5), so the archive orders by the one clock it
+	// (m3_considerations.md Risk 5, m4_considerations.md Risk 4), so the archive orders by the one clock it
 	// controls and keeps the origin's timestamp beside it as data.
 	RecordedAt  int64              `json:"recordedAt"`
 	MigrationID string             `json:"migrationId,omitempty"`

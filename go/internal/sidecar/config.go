@@ -12,7 +12,7 @@ import (
 )
 
 // Version is reported to the relay in HANDSHAKE.
-const Version = "m3.0"
+const Version = "m4.0"
 
 // Config is the sidecar's runtime configuration. The four required knobs are
 // --listen, --relay, --peer-id and --data-dir; everything else has a contract
@@ -22,22 +22,34 @@ type Config struct {
 	// binding anything but loopback, and §14 A17 keeps it unauthenticated:
 	// the mod and its sidecar always share a machine (D9).
 	Listen string
-	// RelayURL is the Contract B endpoint, ws://host:port/contract-b/v2.
+	// RelayURL is the Contract B endpoint, ws://host:port/contract-b/v3.
 	RelayURL string
-	// Token is the shared LAN bearer token of contract-b-m3.md §3.1. It goes
+	// Token is the shared LAN bearer token of contract-b-m4.md §3.1. It goes
 	// on the HTTP upgrade and never in a frame.
 	Token string
 	// PeerID is this sidecar's stable identity. Slot reclaim keys on it, so it
 	// is persisted in <DataDir>/peer-id and generated once if absent (§7.4).
 	PeerID string
-	// DataDir holds the journal, the peer id, the remembered slot and the
-	// genome cache.
+	// DataDir holds the journal, the peer id, the remembered slot and position,
+	// and the genome cache.
 	DataDir string
 	// PreferredSlot is an optional hint for SECTOR_CLAIM. It is advisory: rule
 	// 1 of §7.2 recovers the slot from the peerId anyway.
 	PreferredSlot int
+	// PreferredPosition is the advisory coordinate of §7.2 rule 4. It is how a
+	// rig that wants a SPECIFIC layout names it, because auto-placement
+	// reproduces the SHAPE and not the assignment.
+	PreferredPosition *contractb.Position
+	// InsertAfterSlot and InsertAxis are the advisory splice of §7.2 rule 5:
+	// "place me immediately after this slot on this axis".
+	InsertAfterSlot int
+	InsertAxis      string
 
 	Logger *slog.Logger
+	// Clock is the time source. It exists so the bounded hold of §9.3 — a
+	// twenty-four hour accrual — can be tested in milliseconds without changing
+	// a single rule it tests.
+	Clock func() time.Time
 
 	// Contract A tunables (contract-a.md §10).
 	HeartbeatTimeout    time.Duration
@@ -46,12 +58,26 @@ type Config struct {
 	MigrateInAckTimeout time.Duration
 	ExportRetention     time.Duration
 	InboundQueueMax     int
+	// The delivery rate limit (§7.5, §15 A20).
+	InboundRatePerSimMinute float64
+	InboundRateBurst        float64
+	PacingIdleGrace         time.Duration
 
-	// Contract B tunables (contract-b-m3.md §12).
-	RelayBackoffMin         time.Duration
-	RelayBackoffMax         time.Duration
-	ForwardRetry            time.Duration
-	BounceTimeout           time.Duration
+	// Contract B tunables (contract-b-m4.md §12).
+	RelayBackoffMin time.Duration
+	RelayBackoffMax time.Duration
+	ForwardRetry    time.Duration
+	BounceTimeout   time.Duration
+	// HoldTimeout is the ACCRUED dark time before a held entry bounces home by
+	// itself (§9.3). The clock runs only while the destination is dark and this
+	// sidecar can see it.
+	HoldTimeout time.Duration
+	// HoldAccrualFlush is how often that accrual is written to the journal. A
+	// crash loses at most this much, in the safe direction.
+	HoldAccrualFlush time.Duration
+	// MaxReroutes bounds the re-routes one entry may take (§9.2).
+	MaxReroutes             int
+	StatsInterval           time.Duration
 	GenomeRequestsPerMinute int
 	GenomeCacheRetention    time.Duration
 	GenomeCacheMaxBytes     int64
@@ -83,16 +109,24 @@ func DefaultConfig() Config {
 		Listen:                  fmt.Sprintf("127.0.0.1:%d", contracta.DefaultPort),
 		RelayURL:                fmt.Sprintf("ws://127.0.0.1:%d%s", contractb.DefaultRelayPort, contractb.ContractBPath),
 		DataDir:                 "multiverse-data",
+		Clock:                   time.Now,
 		HeartbeatTimeout:        contracta.HeartbeatTimeout,
 		WSPingInterval:          contracta.WSPingInterval,
 		WSPongTimeout:           contracta.WSPongTimeout,
 		MigrateInAckTimeout:     contracta.MigrateInAckTimeout,
 		ExportRetention:         contracta.ExportRetention,
 		InboundQueueMax:         contracta.InboundQueueMax,
+		InboundRatePerSimMinute: contracta.InboundRatePerSimMinute,
+		InboundRateBurst:        contracta.InboundRateBurst,
+		PacingIdleGrace:         contracta.PacingIdleGrace,
 		RelayBackoffMin:         contractb.RelayBackoffMin,
 		RelayBackoffMax:         contractb.RelayBackoffMax,
 		ForwardRetry:            contractb.ForwardRetry,
 		BounceTimeout:           contractb.BounceTimeout,
+		HoldTimeout:             contractb.HoldTimeout,
+		HoldAccrualFlush:        contractb.HoldAccrualFlush,
+		MaxReroutes:             contractb.MaxReroutes,
+		StatsInterval:           contractb.StatsInterval,
 		GenomeRequestsPerMinute: contractb.GenomeRequestsPerMinute,
 		GenomeCacheRetention:    contractb.GenomeCacheRetention,
 		GenomeCacheMaxBytes:     contractb.GenomeCacheMaxBytes,
@@ -121,6 +155,9 @@ func (c *Config) applyDefaults() {
 	if c.Logger == nil {
 		c.Logger = slog.Default()
 	}
+	if c.Clock == nil {
+		c.Clock = time.Now
+	}
 	if c.HeartbeatTimeout <= 0 {
 		c.HeartbeatTimeout = d.HeartbeatTimeout
 	}
@@ -139,6 +176,15 @@ func (c *Config) applyDefaults() {
 	if c.InboundQueueMax <= 0 {
 		c.InboundQueueMax = d.InboundQueueMax
 	}
+	if c.InboundRatePerSimMinute <= 0 {
+		c.InboundRatePerSimMinute = d.InboundRatePerSimMinute
+	}
+	if c.InboundRateBurst <= 0 {
+		c.InboundRateBurst = d.InboundRateBurst
+	}
+	if c.PacingIdleGrace <= 0 {
+		c.PacingIdleGrace = d.PacingIdleGrace
+	}
 	if c.RelayBackoffMin <= 0 {
 		c.RelayBackoffMin = d.RelayBackoffMin
 	}
@@ -150,6 +196,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.BounceTimeout <= 0 {
 		c.BounceTimeout = d.BounceTimeout
+	}
+	if c.HoldTimeout <= 0 {
+		c.HoldTimeout = d.HoldTimeout
+	}
+	if c.HoldAccrualFlush <= 0 {
+		c.HoldAccrualFlush = d.HoldAccrualFlush
+	}
+	if c.MaxReroutes <= 0 {
+		c.MaxReroutes = d.MaxReroutes
+	}
+	if c.StatsInterval <= 0 {
+		c.StatsInterval = d.StatsInterval
 	}
 	if c.GenomeRequestsPerMinute <= 0 {
 		c.GenomeRequestsPerMinute = d.GenomeRequestsPerMinute

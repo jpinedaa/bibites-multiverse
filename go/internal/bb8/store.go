@@ -1,6 +1,6 @@
 package bb8
 
-// Store is the on-disk, content-addressed genome cache of contract-b-m3.md §10.
+// Store is the on-disk, content-addressed genome cache of contract-b-m4.md §10.
 //
 // It is a directory of small JSON files under <dir>/<first two hex digits of
 // the digest>/<full digest>.json, each holding the game version and the opaque
@@ -145,7 +145,7 @@ func (s *Store) walk(fn func(path string, info os.FileInfo) error) error {
 	})
 }
 
-// Sweep enforces contract-b-m3.md §12's genomeCacheRetentionDays and
+// Sweep enforces contract-b-m4.md §12's genomeCacheRetentionDays and
 // genomeCacheMaxBytes, least-recently-served first. It returns the number of
 // entries removed.
 func (s *Store) Sweep(retention time.Duration, maxBytes int64) (int, error) {

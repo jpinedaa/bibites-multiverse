@@ -182,7 +182,21 @@ const (
 	ExportRetention     = ExportRetentionSeconds * time.Second
 	WSPingInterval      = WSPingIntervalMs * time.Millisecond
 	WSPongTimeout       = WSPongTimeoutMs * time.Millisecond
-	ContractAPath       = "/contract-a/v1"
+
+	// ContractAPath moved with the major (§15, A23). The sidecar MUST keep
+	// serving RetiredContractAPath and MUST close every connection on it
+	// immediately with 4000, so an M3 mod gets the defined loud error instead of
+	// a bare HTTP 404.
+	ContractAPath        = "/contract-a/v2"
+	RetiredContractAPath = "/contract-a/v1"
+
+	// The delivery rate limit (§7.5, §15 A20). It paces MIGRATE_IN out of the
+	// journal in SIMULATED minutes of the receiving world, so a dam released at
+	// wake becomes a trickle the world can absorb.
+	InboundRatePerSimMinute = 2.0
+	InboundRateBurst        = 5.0
+	PacingIdleGraceMs       = 10000
+	PacingIdleGrace         = PacingIdleGraceMs * time.Millisecond
 )
 
 // Vec is a 2D vector in the source sim's world axes (contract-a.md §4.4).
@@ -216,11 +230,14 @@ type ConfigUpdate struct {
 	// SimulationSize is S, the playable half-extent.
 	SimulationSize *float64 `json:"simulationSize"`
 	// BorderEdges are the edges the mod has a strip on and will accept an
-	// inbound organism through — ["E","W"] under the ring (§14, A11).
+	// inbound organism through — ["E","N","W","S"] under the grid (§15, A18).
 	BorderEdges []string `json:"borderEdges"`
-	// ExportEdge is the one edge this sim exports through, REQUIRED from
-	// contract-a/1.1 (§14, A11). Absent is not a close: see ResolveExportEdge.
-	ExportEdge  string   `json:"exportEdge,omitempty"`
+	// ExportEdges are the edges this sim runs a capture band on, REQUIRED from
+	// contract-a/2.0 (§15, A18). It declares GEOMETRY — "I run a capture band on
+	// these edges" — never topology. The singular exportEdge is REMOVED, with no
+	// fallback: an M3 mod cannot reach field validation because its protocol
+	// major is rejected first (A23).
+	ExportEdges []string `json:"exportEdges"`
 	BorderWidth *float64 `json:"borderWidth"`
 	// RingSlot is the mod's configured ring slot (§14, A14). Advisory; a
 	// disagreement with the slot the sidecar holds closes with 4001.
@@ -228,26 +245,37 @@ type ConfigUpdate struct {
 	WorldName string `json:"worldName,omitempty"`
 }
 
-// ResolveExportEdge implements the A16-compatible fallback of §14, A11: an
-// absent exportEdge is supplied by a single-entry borderEdges, and only an
-// ambiguous borderEdges is unusable. That fallback is what keeps the new field
-// additive under §3.1's minor rule instead of a breaking change.
-func (c *ConfigUpdate) ResolveExportEdge() (string, error) {
-	if c.ExportEdge != "" {
-		if !ValidEdge(c.ExportEdge) {
-			return "", invalid("exportEdge %q is not N/S/E/W", c.ExportEdge)
-		}
-		for _, e := range c.BorderEdges {
-			if e == c.ExportEdge {
-				return c.ExportEdge, nil
-			}
-		}
-		return "", invalid("exportEdge %q is not a member of borderEdges %v", c.ExportEdge, c.BorderEdges)
+// ResolveExportEdges validates CONFIG_UPDATE.exportEdges under §15, A18: an
+// array, REQUIRED, at least one member, no duplicates, every member also in
+// borderEdges.
+//
+// A18 removed the singular exportEdge and its single-entry borderEdges
+// fallback deliberately: "a compatibility path that only an already-rejected
+// peer can take is dead code that reads like a supported configuration".
+func (c *ConfigUpdate) ResolveExportEdges() ([]string, error) {
+	if len(c.ExportEdges) == 0 {
+		return nil, invalid("exportEdges is missing or empty; contract-a/2.0 REQUIRES at least one member")
 	}
-	if len(c.BorderEdges) == 1 {
-		return c.BorderEdges[0], nil
+	seen := map[string]bool{}
+	border := map[string]bool{}
+	for _, e := range c.BorderEdges {
+		border[e] = true
 	}
-	return "", invalid("no exportEdge and borderEdges %v does not have exactly one entry", c.BorderEdges)
+	out := make([]string, 0, len(c.ExportEdges))
+	for _, e := range c.ExportEdges {
+		if !ValidEdge(e) {
+			return nil, invalid("exportEdges contains %q, which is not N/S/E/W", e)
+		}
+		if seen[e] {
+			return nil, invalid("exportEdges repeats %q", e)
+		}
+		seen[e] = true
+		if !border[e] {
+			return nil, invalid("exportEdges member %q is not in borderEdges %v", e, c.BorderEdges)
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 func (c *ConfigUpdate) Validate() error {
@@ -293,10 +321,23 @@ func (c *ConfigUpdate) Validate() error {
 	if c.RingSlot != nil && *c.RingSlot < 1 {
 		return invalid("ringSlot %d is not a ring slot", *c.RingSlot)
 	}
-	if _, err := c.ResolveExportEdge(); err != nil {
+	if _, err := c.ResolveExportEdges(); err != nil {
 		return err
 	}
 	return nil
+}
+
+// SaveReceipt is HEARTBEAT.lastSave (§5.2, §15 A21). It is a receipt, not a
+// request: no component asks for a save, schedules one, or reacts to a missing
+// one, and no correctness decision reads atMs (D5). The sidecar copies it into
+// its peer stats verbatim and never computes it.
+type SaveReceipt struct {
+	AtMs          int64   `json:"atMs"`
+	SimulatedTime float64 `json:"simulatedTime"`
+	Population    int     `json:"population"`
+	Name          string  `json:"name,omitempty"`
+	Bytes         int64   `json:"bytes,omitempty"`
+	DurationMs    int     `json:"durationMs,omitempty"`
 }
 
 // Heartbeat is HEARTBEAT (contract-a.md §5.2).
@@ -311,6 +352,9 @@ type Heartbeat struct {
 	SimulationSize *float64 `json:"simulationSize"`
 	InFlightOut    *int     `json:"inFlightOut,omitempty"`
 	PendingIn      *int     `json:"pendingIn,omitempty"`
+	// LastSave is OPTIONAL (§15, A21). A mod that omits it is conformant and the
+	// status page shows that world's save state as unknown.
+	LastSave *SaveReceipt `json:"lastSave,omitempty"`
 }
 
 func (h *Heartbeat) Validate() error {

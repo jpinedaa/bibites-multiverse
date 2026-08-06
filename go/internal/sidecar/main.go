@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -22,7 +23,7 @@ import (
 // Main is the multiverse-sidecar entry point, factored out of package main so
 // the crash-custody test can run the same code path in a subprocess and SIGKILL
 // it.
-func Main(args []string, stderr io.Writer) int {
+func Main(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("multiverse-sidecar", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	listen := fs.String("listen", env("MULTIVERSE_LISTEN", fmt.Sprintf("127.0.0.1:%d", contracta.DefaultPort)),
@@ -33,18 +34,42 @@ func Main(args []string, stderr io.Writer) int {
 	peerID := fs.String("peer-id", env("MULTIVERSE_PEER_ID", ""),
 		"stable peer identity; slot reclaim keys on it. Persisted in <data-dir>/peer-id")
 	dataDir := fs.String("data-dir", env("MULTIVERSE_DATA_DIR", "multiverse-data"),
-		"directory for the migration journal, the peer id, the slot and the genome cache")
+		"directory for the migration journal, the peer id, the slot, the position and the genome cache")
 	slot := fs.Int("slot", envInt("MULTIVERSE_SLOT", 0),
-		"preferred ring slot; advisory, the relay arbitrates. Overrides <data-dir>/slot")
+		"preferred slot; advisory, the relay arbitrates. Overrides <data-dir>/slot")
+	position := fs.String("position", env("MULTIVERSE_POSITION", ""),
+		"preferred map position <col>,<row>; advisory. It may name a hole or one column/row "+
+			"beyond the current rectangle. Overrides <data-dir>/position")
+	insertAfter := fs.Int("insert-after-slot", 0,
+		"advisory splice: place me immediately after this slot on --insert-axis")
+	insertAxis := fs.String("insert-axis", "",
+		"E or N; the axis --insert-after-slot splices on. Default E")
 	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
 		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
+	listInflight := fs.Bool("list-inflight", false,
+		"print the journal entries this sidecar still holds custody of, then exit "+
+			"(contract-b-m4.md §7.5). Answers what the relay cannot.")
+	destSlot := fs.Int("dest-slot", 0, "with --list-inflight: only entries addressed to this slot")
+	releaseInflight := fs.String("release-inflight", "",
+		"<migrationId>: release one held entry by hand, then exit. Needs bounce|drop as the "+
+			"next argument (contract-b-m4.md §9.3)")
+	yes := fs.Bool("yes", false, "skip the confirmation prompt for --release-inflight")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
 	logger := newLogger(stderr, *logLevel)
-	// contract-b-m3.md §3.1: a missing token is not fatal for a client — the
+
+	if *listInflight {
+		return listInflightCommand(*dataDir, *destSlot, stdout, stderr)
+	}
+	if *releaseInflight != "" {
+		action := fs.Arg(0)
+		return releaseInflightCommand(*dataDir, *releaseInflight, action, *yes, stdout, stderr)
+	}
+
+	// contract-b-m4.md §3.1: a missing token is not fatal for a client — the
 	// relay answers 401 and the backoff ladder pins itself — but it is worth
 	// one loud line, because the alternative is a silent failure to join.
 	token, err := lantoken.Load(*tokenFile)
@@ -63,8 +88,18 @@ func Main(args []string, stderr io.Writer) int {
 	cfg.PeerID = *peerID
 	cfg.DataDir = *dataDir
 	cfg.PreferredSlot = *slot
+	cfg.InsertAfterSlot = *insertAfter
+	cfg.InsertAxis = *insertAxis
 	cfg.Token = token
 	cfg.Logger = logger
+	if *position != "" {
+		pos, err := parsePosition(*position)
+		if err != nil {
+			logger.Error("sidecar: bad --position", "value", *position, "err", err)
+			return 1
+		}
+		cfg.PreferredPosition = pos
+	}
 
 	s, err := New(cfg)
 	if err != nil {
@@ -89,6 +124,99 @@ func Main(args []string, stderr io.Writer) int {
 		cfg.Logger.Warn("sidecar: shutdown timed out")
 	}
 	return 0
+}
+
+// listInflightCommand answers §7.5's third question — WHICH entries name this
+// slot, and what are they — on the machine that owns them.
+func listInflightCommand(dataDir string, destSlot int, stdout, stderr io.Writer) int {
+	entries, err := ListInflight(dataDir, destSlot, DefaultConfig().HoldTimeout)
+	if err != nil {
+		fmt.Fprintf(stderr, "sidecar: %v\n"+
+			"(the sidecar for this data directory must be stopped: the journal is a single-writer file)\n", err)
+		return 1
+	}
+	if destSlot > 0 {
+		fmt.Fprintf(stdout, "in-flight entries addressed to slot %d, in %s:\n\n", destSlot, dataDir)
+	} else {
+		fmt.Fprintf(stdout, "in-flight entries in %s:\n\n", dataDir)
+	}
+	for _, e := range entries {
+		fmt.Fprintf(stdout, "%s  entity %d  %s/%s\n", e.MigrationID, e.EntityID, e.Direction, e.Status)
+		if e.Direction == "out" {
+			fmt.Fprintf(stdout, "    destSlot %d via %s   handoff %s\n", e.DestSlot, e.ExitEdge, e.Handoff)
+			fmt.Fprintf(stdout, "    accrued hold %s   deadline in %s   (the clock runs only while the\n",
+				e.AccruedHold.Truncate(time.Second), e.Deadline.Truncate(time.Second))
+			fmt.Fprintf(stdout, "    destination is dark AND this sidecar can see it)\n")
+			if e.Reroutes > 0 {
+				fmt.Fprintf(stdout, "    re-routed %d time(s) from slot %d under %s\n",
+					e.Reroutes, e.RerouteFrom, e.RerouteProof)
+			}
+			if e.RelaySession != "" {
+				fmt.Fprintf(stdout, "    relaySessionId %s\n", e.RelaySession)
+			}
+		}
+		if e.Note != "" {
+			fmt.Fprintf(stdout, "    %s\n", e.Note)
+		}
+	}
+	fmt.Fprintf(stdout, "\n%d entr(y|ies). Release one with:\n"+
+		"    multiverse-sidecar --data-dir %s --release-inflight <migrationId> bounce|drop\n",
+		len(entries), dataDir)
+	return 0
+}
+
+func releaseInflightCommand(dataDir, migrationID, action string, yes bool, stdout, stderr io.Writer) int {
+	if action == "" {
+		fmt.Fprintf(stderr, "sidecar: --release-inflight needs bounce or drop as the next argument\n")
+		return 2
+	}
+	entries, err := ListInflight(dataDir, 0, DefaultConfig().HoldTimeout)
+	if err != nil {
+		fmt.Fprintf(stderr, "sidecar: %v\n", err)
+		return 1
+	}
+	for _, e := range entries {
+		if e.MigrationID != migrationID {
+			continue
+		}
+		fmt.Fprintf(stdout, "\n%s  entity %d  destSlot %d via %s  handoff %s  accrued hold %s\n",
+			e.MigrationID, e.EntityID, e.DestSlot, e.ExitEdge, e.Handoff,
+			e.AccruedHold.Truncate(time.Second))
+	}
+	fmt.Fprint(stdout, InflightRisk)
+	if !yes {
+		fmt.Fprintf(stdout, "\nType YES to %s %s: ", action, migrationID)
+		in := bufio.NewReader(os.Stdin)
+		line, err := in.ReadString('\n')
+		if err != nil || strings.TrimSpace(line) != "YES" {
+			fmt.Fprintln(stdout, "aborted; nothing changed")
+			return 1
+		}
+	}
+	msg, err := ReleaseInflight(dataDir, migrationID, action)
+	if err != nil {
+		fmt.Fprintf(stderr, "sidecar: %v\n"+
+			"(the sidecar for this data directory must be stopped: the journal is a single-writer file)\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, msg)
+	return 0
+}
+
+func parsePosition(v string) (*contractb.Position, error) {
+	colStr, rowStr, ok := strings.Cut(v, ",")
+	if !ok {
+		return nil, errors.New("a position is <col>,<row>")
+	}
+	col, err := strconv.Atoi(strings.TrimSpace(colStr))
+	if err != nil || col < 0 {
+		return nil, fmt.Errorf("col %q is not a non-negative integer", colStr)
+	}
+	row, err := strconv.Atoi(strings.TrimSpace(rowStr))
+	if err != nil || row < 0 {
+		return nil, fmt.Errorf("row %q is not a non-negative integer", rowStr)
+	}
+	return &contractb.Position{Col: col, Row: row}, nil
 }
 
 func env(name, fallback string) string {

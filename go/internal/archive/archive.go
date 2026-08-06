@@ -1,15 +1,18 @@
 // Package archive implements multiverse-archive: the read-only subscriber of
-// contract-b-m3.md §5.1 and the genome recorder of §10.
+// contract-b-m4.md §5.1, the genome recorder of §10, and M4's operator surface
+// — the live status page of §10.1 and the durable metrics behind it.
 //
 // It connects to the relay with role "archive", records every migration
-// envelope and its lineage annex durably, and fetches by hash any genome it has
-// never seen. Everything it does is off the migration path: a subscriber that
-// is absent, slow or dead changes nothing about a migration, and a missing
-// genome is a gap on a record rather than a reason to delay one.
+// envelope and its lineage annex durably, fetches by hash any genome it has
+// never seen, and serves the whole map from the PEER_STATUS broadcasts it
+// already receives. Everything it does is off the migration path: a subscriber
+// that is absent, slow or dead changes nothing about a migration, a missing
+// genome is a gap on a record rather than a reason to delay one, and NOTHING ON
+// THE MIGRATION PATH EVER WAITS FOR A READER (Risk 4).
 //
-// M3's archive is a recorder. It has no write interface, no query engine and
-// no authentication of its own — it is a subscriber that trusts the ring token
-// (§13 item 4).
+// M4's archive is still a recorder. It has no write interface, no query engine
+// and no authentication of its own — it is a subscriber that trusts the shared
+// token (§13 item 4).
 package archive
 
 import (
@@ -17,6 +20,7 @@ import (
 	"errors"
 	"log/slog"
 	"math/rand"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -33,9 +37,9 @@ import (
 )
 
 // Version is reported to the relay in HANDSHAKE.sidecarVersion.
-const Version = "m3.0"
+const Version = "m4.0"
 
-// DefaultRetrySchedule is contract-b-m3.md §10's ladder: 1 minute, 5 minutes,
+// DefaultRetrySchedule is contract-b-m4.md §10's ladder: 1 minute, 5 minutes,
 // 30 minutes, 6 hours, then daily.
 var DefaultRetrySchedule = []time.Duration{
 	time.Minute, 5 * time.Minute, 30 * time.Minute, 6 * time.Hour, 24 * time.Hour,
@@ -58,6 +62,16 @@ type Config struct {
 	RetrySchedule     []time.Duration
 	RequestsPerMinute int
 	TickInterval      time.Duration
+
+	// HTTPListen is the status page's bind address, "" for no page. The rig
+	// uses 127.0.0.1:8791; a test uses 127.0.0.1:0.
+	HTTPListen string
+	// StatsStale is §10.1's honesty threshold: a stats block older than this
+	// renders as UNKNOWN rather than as state.
+	StatsStale time.Duration
+	// MetricsInterval is how often a PEER_STATUS sample is appended to
+	// <data-dir>/metrics.jsonl, so history survives everything (WP3, WP5).
+	MetricsInterval time.Duration
 }
 
 func (c *Config) applyDefaults() {
@@ -87,6 +101,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.TickInterval <= 0 {
 		c.TickInterval = time.Second
+	}
+	if c.StatsStale <= 0 {
+		c.StatsStale = contractb.StatsStale
+	}
+	if c.MetricsInterval <= 0 {
+		c.MetricsInterval = time.Minute
 	}
 }
 
@@ -118,15 +138,26 @@ type Archive struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	mu         sync.Mutex
-	conn       *wsutil.Conn
-	ready      bool
-	peerEpoch  int64
-	ring       []contractb.SlotInfo
-	seen       map[string]bool // "TYPE/migrationId", the §5.1 duplicate rule
-	pending    map[string]*fetch
-	sentWindow map[string]*rateWindow
-	closed     bool
+	httpLn  net.Listener
+	httpSrv *http.Server
+	metrics *MetricsLog
+
+	mu        sync.Mutex
+	conn      *wsutil.Conn
+	ready     bool
+	peerEpoch int64
+	// status is the last PEER_STATUS, and it is the ONLY source the status page
+	// has for the map (§10.1 rule 1).
+	status   contractb.PeerStatus
+	statusAt time.Time
+	// lanes counts the envelopes copied on each ordered slot pair, which is what
+	// turns the ledger into a per-lane flow rate.
+	lanes       map[lanePair]*lane
+	recordCount int
+	seen        map[string]bool // "TYPE/migrationId", the §5.1 duplicate rule
+	pending     map[string]*fetch
+	sentWindow  map[string]*rateWindow
+	closed      bool
 }
 
 type rateWindow struct {
@@ -145,11 +176,17 @@ func New(cfg Config) (*Archive, error) {
 	if err != nil {
 		return nil, err
 	}
+	metrics, err := OpenMetrics(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	a := &Archive{
 		cfg:        cfg,
 		log:        cfg.Logger.With("archive", cfg.PeerID),
 		ledger:     ledger,
 		genomes:    genomes,
+		metrics:    metrics,
+		lanes:      map[lanePair]*lane{},
 		seen:       map[string]bool{},
 		pending:    map[string]*fetch{},
 		sentWindow: map[string]*rateWindow{},
@@ -163,11 +200,18 @@ func New(cfg Config) (*Archive, error) {
 		return nil, err
 	}
 	now := time.Now()
+	a.recordCount = len(records)
 	for _, rec := range records {
 		if rec.MigrationID != "" {
 			a.seen[rec.Type+"/"+rec.MigrationID] = true
 		}
-		if rec.Type != RecordMigration || rec.Lineage == nil {
+		if rec.Type != RecordMigration {
+			continue
+		}
+		// The lane counters are rebuilt from the ledger, so a restart does not
+		// reset the flow the operator was reading.
+		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.RecordedAt)
+		if rec.Lineage == nil {
 			continue
 		}
 		for _, h := range hashesOf(rec) {
@@ -197,15 +241,58 @@ func hashesOf(rec Record) []string {
 	return out
 }
 
-// Start dials the relay and starts the fetch scheduler.
-func (a *Archive) Start(ctx context.Context) {
+// Start dials the relay, starts the fetch scheduler, and — when HTTPListen is
+// set — serves the status page.
+func (a *Archive) Start(ctx context.Context) error {
 	a.ctx, a.cancel = context.WithCancel(ctx)
+	if a.cfg.HTTPListen != "" {
+		ln, err := net.Listen("tcp", a.cfg.HTTPListen)
+		if err != nil {
+			return err
+		}
+		a.httpLn = ln
+		a.httpSrv = &http.Server{Handler: a.httpHandler(), ReadHeaderTimeout: 10 * time.Second}
+		a.wg.Add(1)
+		go func() { defer a.wg.Done(); a.serveHTTP() }()
+	}
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); a.relayLoop() }()
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); a.tickLoop() }()
+	a.wg.Add(1)
+	go func() { defer a.wg.Done(); a.metricsLoop() }()
 	a.log.Info("archive: started", "relay", a.cfg.RelayURL, "dataDir", a.cfg.DataDir,
-		"ledger", a.ledger.Path())
+		"ledger", a.ledger.Path(), "metrics", a.metrics.Path(), "statusPage", a.HTTPAddr())
+	return nil
+}
+
+// metricsLoop appends a PEER_STATUS sample to the durable metrics file, so the
+// history an operator reads survives a restart of everything — including the
+// browser tab (WP3, WP5).
+func (a *Archive) metricsLoop() {
+	t := time.NewTicker(a.cfg.MetricsInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			// One last sample on the way out, so the file ends with the state the
+			// map was in when the archive stopped.
+			a.sampleMetrics()
+			return
+		case <-t.C:
+			a.sampleMetrics()
+		}
+	}
+}
+
+func (a *Archive) sampleMetrics() {
+	view := a.StatusView()
+	if !view.HaveStatus {
+		return
+	}
+	if err := a.metrics.Append(view); err != nil {
+		a.log.Warn("archive: metrics append failed", "err", err)
+	}
 }
 
 // Close stops the archive and flushes its ledger.
@@ -224,9 +311,20 @@ func (a *Archive) Close() error {
 	if a.cancel != nil {
 		a.cancel()
 	}
+	if a.httpSrv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = a.httpSrv.Shutdown(ctx)
+		cancel()
+	}
 	a.wg.Wait()
+	if err := a.metrics.Close(); err != nil {
+		a.log.Warn("archive: metrics close failed", "err", err)
+	}
 	return a.ledger.Close()
 }
+
+// MetricsPath is the durable sample file, for tests and operator tools.
+func (a *Archive) MetricsPath() string { return a.metrics.Path() }
 
 // Genomes is the content-addressed store, for tests and operator tools.
 func (a *Archive) Genomes() *bb8.Store { return a.genomes }
@@ -375,7 +473,8 @@ func (a *Archive) handle(conn *wsutil.Conn, frame []byte) bool {
 			a.mu.Lock()
 			if status.Epoch > a.peerEpoch {
 				a.peerEpoch = status.Epoch
-				a.ring = status.Slots
+				a.status = status
+				a.statusAt = time.Now()
 			}
 			a.mu.Unlock()
 		}
@@ -440,17 +539,41 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 		a.log.Error("archive: ledger append failed", "migrationId", p.MigrationID, "err", err)
 		return true
 	}
+	reroute := ""
+	if p.Reroute != nil {
+		// §6.6: a re-routed copy carries a different destSlot with the SAME
+		// migrationId. It is not a duplicate organism, it is the same organism on
+		// a new lane, and the block says why it took it.
+		reroute = p.Reroute.Proof
+	}
 	a.log.Info("archive: recorded a migration", "migrationId", p.MigrationID,
 		"sourcePeer", p.SourcePeer, "sourceSlot", p.SourceSlot, "destSlot", p.DestSlot,
+		"exitEdge", p.ExitEdge, "reroute", reroute,
 		"genomeHash", lineage.GenomeHash, "parents", len(lineage.Parents))
 
 	now := time.Now()
 	a.mu.Lock()
+	a.recordCount++
+	a.observeLaneLocked(p.SourceSlot, p.DestSlot, rec.RecordedAt)
 	for _, h := range hashesOf(rec) {
 		a.trackLocked(h, p.SourcePeer, p.MigrationID, p.EntityID, now)
 	}
 	a.mu.Unlock()
 	return true
+}
+
+// observeLaneLocked counts one envelope on the ordered slot pair it crossed.
+func (a *Archive) observeLaneLocked(from, to int, atMs int64) {
+	if from == 0 && to == 0 {
+		return
+	}
+	key := lanePair{from, to}
+	l, ok := a.lanes[key]
+	if !ok {
+		l = &lane{}
+		a.lanes[key] = l
+	}
+	l.observe(atMs)
 }
 
 func (a *Archive) onAck(env wire.Envelope) bool {
@@ -461,6 +584,9 @@ func (a *Archive) onAck(env wire.Envelope) bool {
 	if a.markSeen(RecordAck, ack.MigrationID) {
 		return true
 	}
+	a.mu.Lock()
+	a.recordCount++
+	a.mu.Unlock()
 	_ = a.ledger.Append(Record{
 		Type:        RecordAck,
 		RecordedAt:  time.Now().UnixMilli(),
@@ -481,6 +607,9 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 	if a.markSeen(RecordNack, nack.MigrationID+"/"+nack.Code) {
 		return true
 	}
+	a.mu.Lock()
+	a.recordCount++
+	a.mu.Unlock()
 	_ = a.ledger.Append(Record{
 		Type:        RecordNack,
 		RecordedAt:  time.Now().UnixMilli(),
@@ -620,13 +749,13 @@ func (a *Archive) retryDelay(attempts int) time.Duration {
 	return a.cfg.RetrySchedule[attempts-1]
 }
 
-// nextPeerLocked picks who to ask: the source peer first, then live ring
-// members in ring order, skipping anyone already asked in this round.
+// nextPeerLocked picks who to ask: the source peer first, then live peers in
+// STRUCTURAL ORDER (§6.5), skipping anyone already asked in this round.
 func (a *Archive) nextPeerLocked(f *fetch) string {
 	if f.sourcePeer != "" && !f.asked[f.sourcePeer] && a.liveLocked(f.sourcePeer) {
 		return f.sourcePeer
 	}
-	for _, slot := range a.ring {
+	for _, slot := range a.status.Slots {
 		if slot.Live && !f.asked[slot.PeerID] {
 			return slot.PeerID
 		}
@@ -635,14 +764,14 @@ func (a *Archive) nextPeerLocked(f *fetch) string {
 }
 
 func (a *Archive) liveLocked(peerID string) bool {
-	for _, slot := range a.ring {
+	for _, slot := range a.status.Slots {
 		if slot.PeerID == peerID {
 			return slot.Live
 		}
 	}
-	// Before the first PEER_STATUS the archive knows nothing about the ring.
+	// Before the first PEER_STATUS the archive knows nothing about the map.
 	// Asking is cheap and the relay answers peer_offline if it is wrong.
-	return len(a.ring) == 0
+	return len(a.status.Slots) == 0
 }
 
 func (a *Archive) allowSendLocked(peerID string, now time.Time) bool {

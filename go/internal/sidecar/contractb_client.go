@@ -20,7 +20,7 @@ import (
 )
 
 // relayLoop keeps a Contract B link to the relay up, reconnecting with
-// exponential backoff and full jitter (contract-b-m3.md §3).
+// exponential backoff and full jitter (contract-b-m4.md §3).
 //
 // A run of HTTP 401s pins the backoff at the ceiling: a wrong token is an
 // operator problem and hammering the relay will not fix it (§3.1).
@@ -110,8 +110,8 @@ func (s *Sidecar) relaySession() error {
 	s.relayConn = conn
 	s.relayReady = true
 	s.peerEpoch = 0
-	s.east = nil
-	s.ring = nil
+	s.neighbours = map[string]*contractb.Neighbour{}
+	s.status = contractb.PeerStatus{}
 	hs := contractb.Handshake{
 		PeerID:          s.cfg.PeerID,
 		Role:            contractb.RolePeer,
@@ -129,6 +129,10 @@ func (s *Sidecar) relaySession() error {
 	}
 	s.log.Info("contract B: connected to the relay", "url", s.cfg.RelayURL)
 	s.refreshClaim()
+
+	sessionCtx, stopPing := context.WithCancel(s.ctx)
+	go s.statsPingLoop(sessionCtx, conn)
+	defer stopPing()
 
 	for {
 		readCtx, readCancel := context.WithCancel(s.ctx)
@@ -150,14 +154,39 @@ func (s *Sidecar) relaySession() error {
 	}
 }
 
+// statsPingLoop is §6.11's stats-bearing PING: at most one per statsIntervalMs,
+// and it is where a FRESH population comes from. A SECTOR_CLAIM is sent on
+// change and would leave the map view showing the population each world had
+// when it last resized, which is worse than no number at all.
+func (s *Sidecar) statsPingLoop(ctx context.Context, conn *wsutil.Conn) {
+	t := time.NewTicker(s.cfg.StatsInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-conn.Done():
+			return
+		case <-t.C:
+			s.mu.Lock()
+			stats := s.statsLocked()
+			s.sendRelayLocked(contractb.TypePing, contractb.Ping{
+				Nonce: wire.NewUUID(), Stats: &stats})
+			s.mu.Unlock()
+		}
+	}
+}
+
 func (s *Sidecar) dropRelay() {
 	s.mu.Lock()
 	s.relayConn = nil
 	s.relayReady = false
-	s.east = nil
-	s.ring = nil
-	// §8: with the link down the sidecar knows nothing about its east
-	// neighbour, so the export edge closes as peer_unreachable.
+	s.relaySessionID = ""
+	s.neighbours = map[string]*contractb.Neighbour{}
+	s.status = contractb.PeerStatus{}
+	// §8: with the link down the sidecar knows nothing about its neighbours, so
+	// every export edge closes as peer_unreachable. §9.3: the hold clock also
+	// stops, because this sidecar is now blind and never observed anything.
 	s.publishEdgesLocked(false)
 	s.mu.Unlock()
 }
@@ -176,12 +205,22 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 	case contractb.TypeHandshakeAck:
 		var ack contractb.HandshakeAck
 		if contractb.DecodeData(env.Data, &ack) == nil {
+			s.mu.Lock()
+			// §5.2: the session id scopes every non-delivery proof this link can
+			// produce. It is recorded against an entry at the first write, not
+			// here, but the connection has to know it.
+			s.relaySessionID = ack.RelaySessionID
+			s.mapShape = ack.Map
+			s.slotCount = ack.SlotCount
+			s.mu.Unlock()
 			slot := 0
 			if ack.AssignedSlot != nil {
 				slot = *ack.AssignedSlot
 			}
 			s.log.Info("contract B: handshake accepted", "relayVersion", ack.RelayVersion,
-				"assignedSlot", slot, "ringSize", ack.RingSize, "relayClock", ack.ReceivedAt)
+				"assignedSlot", slot, "assignedPosition", ack.AssignedPosition,
+				"map", ack.Map, "slotCount", ack.SlotCount,
+				"relaySessionId", ack.RelaySessionID, "relayClock", ack.ReceivedAt)
 		}
 		return true
 	case contractb.TypeSectorGrant:
@@ -197,7 +236,7 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 	case contractb.TypeGenomeRequest:
 		return s.onGenomeRequest(env)
 	case contractb.TypeGenomeResponse:
-		// A sidecar does not fetch genomes in M3; the archive does. A stray
+		// A sidecar does not fetch genomes in M4; the archive does. A stray
 		// answer is ignored rather than treated as a fault.
 		return true
 	case contractb.TypePing:
@@ -216,44 +255,65 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 	}
 }
 
+// onSectorGrant applies the authority on this peer's routing (§6.4): its slot,
+// its position, the map, and ONE EFFECTIVE NEIGHBOUR PER EXPORT EDGE. A key
+// absent from neighbours closes that edge.
 func (s *Sidecar) onSectorGrant(env wire.Envelope) bool {
 	var grant contractb.SectorGrant
 	if err := contractb.DecodeData(env.Data, &grant); err != nil {
 		return true
 	}
 	if !grant.Granted {
-		s.log.Error("contract B: ring claim refused", "reason", grant.Reason)
+		s.log.Error("contract B: placement claim refused", "reason", grant.Reason)
 		s.mu.Lock()
 		s.slot = 0
-		s.east = nil
-		s.ringSize = grant.RingSize
+		s.neighbours = map[string]*contractb.Neighbour{}
+		s.mapShape = grant.Map
+		s.slotCount = grant.SlotCount
 		s.publishEdgesLocked(false)
 		s.mu.Unlock()
 		return true
 	}
 	s.mu.Lock()
 	newSlot := s.slot != grant.Slot
+	moved := grant.Position != nil && s.position != *grant.Position
 	s.slot = grant.Slot
-	s.ringSize = grant.RingSize
-	s.east = grant.EastNeighbour
+	if grant.Position != nil {
+		s.position = *grant.Position
+	}
+	s.mapShape = grant.Map
+	s.slotCount = grant.SlotCount
+	s.neighbours = map[string]*contractb.Neighbour{}
+	for edge, n := range grant.Neighbours {
+		if n != nil {
+			c := *n
+			s.neighbours[edge] = &c
+		}
+	}
 	s.cfg.PreferredSlot = grant.Slot
+	if grant.Position != nil {
+		p := *grant.Position
+		s.cfg.PreferredPosition = &p
+	}
 	var mismatch string
 	if s.mod != nil && s.mod.handshaked {
 		mismatch = s.slotMismatchLocked(s.mod)
 	}
 	mod := s.mod
+	position := s.position
 	s.publishEdgesLocked(false)
 	s.mu.Unlock()
+
+	// §7.4: the slot and the position are written on EVERY granted grant, and
+	// read once at startup. Losing them costs a placement mix-up, never an
+	// organism.
 	s.writeSlot(grant.Slot)
-	east := 0
-	eastPeer := ""
-	if grant.EastNeighbour != nil {
-		east = grant.EastNeighbour.Slot
-		eastPeer = grant.EastNeighbour.PeerID
-	}
-	if newSlot || grant.Reason != contractb.GrantUpdated {
-		s.log.Info("contract B: ring slot granted", "slot", grant.Slot, "reason", grant.Reason,
-			"ringSize", grant.RingSize, "eastSlot", east, "eastPeer", eastPeer)
+	s.writePosition(position)
+
+	if newSlot || moved || grant.Reason != contractb.GrantUpdated {
+		s.log.Info("contract B: slot granted", "slot", grant.Slot, "position", position,
+			"reason", grant.Reason, "map", grant.Map, "slotCount", grant.SlotCount,
+			"lanes", describeLanes(grant.Neighbours))
 	}
 	if mismatch != "" && mod != nil {
 		// contract-a.md §14 A14: a mis-wired rig is caught in one second.
@@ -262,6 +322,58 @@ func (s *Sidecar) onSectorGrant(env wire.Envelope) bool {
 	return true
 }
 
+// describeLanes renders the effective lanes for a log line a human reads while
+// looking at a map, bypasses included.
+func describeLanes(n map[string]*contractb.Neighbour) string {
+	if len(n) == 0 {
+		return "none (every export edge is closed)"
+	}
+	parts := make([]string, 0, len(n))
+	for _, edge := range []string{contracta.EdgeE, contracta.EdgeN} {
+		lane, ok := n[edge]
+		if !ok || lane == nil {
+			continue
+		}
+		part := edge + "->slot " + itoa(lane.Slot)
+		if len(lane.Skipped) > 0 {
+			part += " (bypassing"
+			for _, sk := range lane.Skipped {
+				if sk.Slot != nil {
+					part += " slot " + itoa(*sk.Slot) + ":" + sk.Reason
+				} else {
+					part += " hole(" + itoa(sk.Position.Col) + "," + itoa(sk.Position.Row) + ")"
+				}
+			}
+			part += ")"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, " ")
+}
+
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	neg := i < 0
+	if neg {
+		i = -i
+	}
+	var b []byte
+	for i > 0 {
+		b = append([]byte{byte('0' + i%10)}, b...)
+		i /= 10
+	}
+	if neg {
+		return "-" + string(b)
+	}
+	return string(b)
+}
+
+// onPeerStatus applies the STRUCTURE (§6.5). The sidecar routes on the grant,
+// not on this frame; the structure is what tells it whether a journaled
+// destSlot has a live peer right now, and what lets it name the reason a closed
+// axis is closed.
 func (s *Sidecar) onPeerStatus(env wire.Envelope) bool {
 	var status contractb.PeerStatus
 	if err := contractb.DecodeData(env.Data, &status); err != nil {
@@ -274,39 +386,23 @@ func (s *Sidecar) onPeerStatus(env wire.Envelope) bool {
 		return true
 	}
 	s.peerEpoch = status.Epoch
-	s.ringSize = status.RingSize
-	s.ring = status.Slots
+	s.mapShape = status.Map
+	s.slotCount = status.SlotCount
+	s.status = status
 	if status.You.Slot != nil {
 		s.slot = *status.You.Slot
 	}
-	// The east neighbour is read out of the ring order, which is the whole
-	// topology a sidecar needs (D8). PEER_STATUS is full state, so the previous
-	// view is discarded outright.
-	s.east = nil
-	if status.You.EastNeighbourSlot != nil {
-		for _, slot := range status.Slots {
-			if slot.Slot != *status.You.EastNeighbourSlot {
-				continue
-			}
-			s.east = &contractb.Neighbour{
-				Slot:           slot.Slot,
-				PeerID:         slot.PeerID,
-				Live:           slot.Live,
-				ModConnected:   slot.ModConnected,
-				GameVersion:    slot.GameVersion,
-				SimulationSize: slot.SimulationSize,
-			}
-			break
-		}
+	if status.You.Position != nil {
+		s.position = *status.You.Position
 	}
 	s.publishEdgesLocked(false)
 	s.mu.Unlock()
-	s.log.Info("contract B: ring status", "epoch", status.Epoch, "ringSize", status.RingSize,
-		"observers", status.Observers)
+	s.log.Debug("contract B: map status", "epoch", status.Epoch, "map", status.Map,
+		"slotCount", status.SlotCount, "observers", status.Observers)
 	return true
 }
 
-// onMigrationPayload implements contract-b-m3.md §6.6's seven receiver
+// onMigrationPayload implements contract-b-m4.md §6.6's seven receiver
 // obligations, in order.
 func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 	var payload contractb.MigrationPayload
@@ -320,28 +416,45 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 	}
 	if payload.Kind != contracta.KindBibite {
 		s.nackUpstream(payload.MigrationID, payload.SourcePeer, contractb.NackKindUnsupported,
-			"kind "+payload.Kind+" is not supported in M3")
+			"kind "+payload.Kind+" is not supported in M4")
 		return true
 	}
 
 	s.mu.Lock()
-	// 1. Dedup on migrationId against the journal and its tombstones.
+	// 1. Dedup on migrationId against the journal AND its tombstones. A
+	// RE-ROUTED frame deduplicates on exactly the same key, which is what makes
+	// a re-route that races a late delivery safe.
 	if st, ok := s.jr.Get(payload.MigrationID); ok {
 		s.mu.Unlock()
-		s.log.Info("contract B: duplicate MIGRATION_PAYLOAD, re-ACKing without delivery",
-			"migrationId", payload.MigrationID, "status", st.Status)
-		s.ackUpstreamNow(payload.MigrationID, payload.SourcePeer, st.Entry.EntityID, true)
+		// §6.7: a sidecar MUST NOT send MIGRATION_ACK when it has MERELY
+		// JOURNALED the payload. The one exception is a migrationId that is
+		// already TOMBSTONED — it was ACKed once before, so re-ACKing it carries
+		// the same meaning.
+		//
+		// An entry still awaiting its mod is NOT that case, and pacing makes it a
+		// long-lived one: a paced delivery can sit in this journal for minutes of
+		// simulated time, and ACKing it here would release the sender's custody
+		// before the spawn that is supposed to prove the delivery. The sender's
+		// retry is free — it lands right back in this branch — and its hold clock
+		// does not run against a live peer (Risk 9).
+		acked := st.Status == journal.StatusDone || st.AckedUpstream
+		s.log.Info("contract B: duplicate MIGRATION_PAYLOAD, delivering nothing",
+			"migrationId", payload.MigrationID, "status", st.Status,
+			"reAcked", acked, "reroute", payload.Reroute != nil)
+		if acked {
+			s.ackUpstreamNow(payload.MigrationID, payload.SourcePeer, st.Entry.EntityID, true)
+		}
 		return true
 	}
-	// 2. Admission control.
+	// 2. Admission control. Under M4 this is also what a PACED BACKLOG produces
+	// when it stops draining (contract-a.md §7.5): a peer-local refusal, and
+	// therefore proof no custody moved, so the sender re-routes instead of
+	// piling more onto a saturated peer.
 	if s.jr.CountPending(journal.In) >= s.cfg.InboundQueueMax {
 		hasMod := s.mod != nil && s.mod.handshaked
 		s.mu.Unlock()
-		// §6.8: MOD_ABSENT is the code for a full queue behind a sim that has
-		// no mod to drain it; OVERLOADED is the code when the mod is simply
-		// behind. Both are transient and the sender keeps custody either way.
 		code := contractb.NackOverloaded
-		message := "inboundQueueMax reached"
+		message := "inboundQueueMax reached; the paced backlog is not draining"
 		if !hasMod {
 			code = contractb.NackModAbsent
 			message = "no mod is connected and inboundQueueMax is reached"
@@ -350,11 +463,8 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 		return true
 	}
 	// 3. Check S against our own, by the relative test of contract-a.md §13 A10.
-	// The sender is a slot in the ring — this peer's west neighbour under
-	// ordinary traffic — so the size comes out of the ring order, not out of
-	// the east-neighbour view.
 	if s.mod != nil && s.mod.handshaked {
-		if si, ok := s.slotInfoLocked(payload.SourceSlot); ok && si.SimulationSize > 0 &&
+		if si, ok := findSlot(s.status, payload.SourceSlot); ok && si.SimulationSize > 0 &&
 			!sameSize(si.SimulationSize, s.mod.simSize) {
 			s.mu.Unlock()
 			s.nackUpstream(payload.MigrationID, payload.SourcePeer, contractb.NackSimSizeMismatch,
@@ -362,16 +472,15 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 			return true
 		}
 	}
-	// The entry edge is derived, never carried: sending it would let a sender
-	// dictate a receiver's geometry (§11 item 7). Under the ring it is the
-	// passive edge facing this sim's export edge.
-	entryEdge := contracta.EdgeW
-	if s.mod != nil && s.mod.exportEdge != "" {
-		if opp, ok := contracta.Opposite(s.mod.exportEdge); ok {
-			entryEdge = opp
-		}
-	}
 	s.mu.Unlock()
+
+	// The entry edge is DERIVED, never carried: sending it would let a sender
+	// dictate a receiver's geometry (§11 item 7). Under the grid it is the
+	// opposite of the sender's exitEdge — W off an east lane, S off a north one.
+	entryEdge := contracta.EdgeW
+	if opp, ok := contracta.Opposite(payload.ExitEdge); ok {
+		entryEdge = opp
+	}
 
 	// 4. bb8-schema validation. Nothing invalid ever reaches a mod.
 	if err := bb8.Validate(payload.Body.Version, payload.Body.BB8); err != nil {
@@ -381,7 +490,7 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 	}
 
 	// contract-a.md §5.7: entityId comes out of the blob when bb8-schema can
-	// read one; the wire value is the fallback (contract-b-m3.md §11 item 3).
+	// read one; the wire value is the fallback (contract-b-m4.md §11 item 3).
 	entityID := payload.EntityID
 	heading := payload.Heading
 	info := bb8.Inspect(payload.Body.BB8)
@@ -405,6 +514,8 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 		Payload:     payload.Body.BB8,
 		PayloadHash: bb8.Hash(payload.Body.BB8),
 		Edge:        entryEdge,
+		// contract-a.md §4.3: entryPosition is exitPosition, copied. The
+		// transverse continuity D3 buys is unchanged on both axes.
 		Position:    payload.ExitPosition,
 		VelocityX:   payload.Velocity.X,
 		VelocityY:   payload.Velocity.Y,
@@ -414,7 +525,7 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 		DestSlot:    payload.DestSlot,
 		GenomeHash:  payload.Lineage.GenomeHash,
 		Parents:     parentRefs(payload.Lineage.Parents),
-		JournaledAt: time.Now().UnixMilli(),
+		JournaledAt: s.now().UnixMilli(),
 	}
 	s.mu.Lock()
 	st, err := s.jr.Create(journal.In, entry, false)
@@ -426,10 +537,11 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 	}
 	s.log.Info("contract B: took custody of an inbound organism",
 		"migrationId", payload.MigrationID, "entityId", entityID, "entryEdge", entryEdge,
-		"genomeHash", payload.Lineage.GenomeHash)
-	// 7. Deliver, and keep replaying until the mod ACKs.
+		"exitEdge", payload.ExitEdge, "genomeHash", payload.Lineage.GenomeHash)
+	// 7. Deliver, THROUGH THE DELIVERY RATE LIMIT, and keep replaying until the
+	// mod ACKs. Pacing sits after step 5, never before it.
 	if s.mod != nil && s.mod.handshaked {
-		s.deliverLocked(st, time.Now())
+		s.deliverLocked(st, s.now())
 	}
 	s.mu.Unlock()
 
@@ -446,6 +558,15 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 		s.cacheGenome(payload.Lineage.GenomeHash, payload.Body.Version, payload.Body.BB8)
 	}
 	return true
+}
+
+func findSlot(status contractb.PeerStatus, slot int) (contractb.SlotInfo, bool) {
+	for _, si := range status.Slots {
+		if si.Slot == slot {
+			return si, true
+		}
+	}
+	return contractb.SlotInfo{}, false
 }
 
 func parentRefs(in []contractb.Parent) []journal.ParentRef {
@@ -468,17 +589,37 @@ func (s *Sidecar) onMigrationAck(env wire.Envelope) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	st, ok := s.jr.Get(ack.MigrationID)
-	if !ok || st.Direction != journal.Out {
+	if !ok {
+		// §9.2: an implementation that swallows an ACK for an unknown
+		// migrationId silently throws away the only automatic signal the map
+		// will ever give.
+		s.log.Warn("contract B: MIGRATION_ACK for a migration this sidecar does not know",
+			"migrationId", ack.MigrationID, "from", ack.SourcePeer)
+		return true
+	}
+	if st.BouncedTimeout {
+		// THE ACCEPTED DUPLICATION CASE OF §9.3, ANNOUNCING ITSELF. The far peer
+		// took custody, died before its acknowledgement, this sidecar's hold
+		// expired and bounced the organism home, and the far peer has now
+		// returned and delivered it. Two organisms exist.
+		s.duplicateSuspected++
+		s.log.Error("contract B: MIGRATION_ACK arrived for an entry a hold timeout already bounced — "+
+			"THE MAP NOW HOLDS TWO COPIES OF THIS ORGANISM",
+			"migrationId", ack.MigrationID, "entityId", ack.EntityID,
+			"deliveredBy", ack.SourcePeer, "duplicateSuspected", s.duplicateSuspected)
+		return true
+	}
+	if st.Direction != journal.Out {
 		return true
 	}
 	if st.Status == journal.StatusDone {
 		return true
 	}
-	completed := time.Now().UnixMilli()
+	completed := s.now().UnixMilli()
 	acked := true
 	if _, err := s.jr.Apply(ack.MigrationID, journal.Update{
 		Status: journal.StatusDone, CompletedAt: &completed, Acked: &acked,
-		Duplicate: &ack.Duplicate}); err != nil {
+		Handoff: journal.HandoffDone, Duplicate: &ack.Duplicate}); err != nil {
 		s.log.Error("contract B: journal update failed", "migrationId", ack.MigrationID, "err", err)
 		return true
 	}
@@ -490,6 +631,10 @@ func (s *Sidecar) onMigrationAck(env wire.Envelope) bool {
 	return true
 }
 
+// onMigrationNack applies §9.2's evidence table. It is the most load-bearing
+// switch in the sidecar: SILENCE IS NEVER PROOF, and every ambiguity resolves
+// toward holding, because holding costs a delay and re-routing on a bad proof
+// costs a duplicated organism.
 func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	var nack contractb.MigrationNack
 	if err := contractb.DecodeData(env.Data, &nack); err != nil {
@@ -504,37 +649,89 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 	if st.Status != journal.StatusOpen && st.Status != journal.StatusInFlight {
 		return true
 	}
+	relayGenerated := nack.SourcePeer == ""
 	s.log.Warn("contract B: MIGRATION_NACK", "migrationId", nack.MigrationID,
-		"code", nack.Code, "class", nack.Class, "message", nack.Message)
+		"code", nack.Code, "class", nack.Class, "relayGenerated", relayGenerated,
+		"neverForwarded", nack.NeverForwarded, "relaySessionId", nack.RelaySessionID,
+		"entrySession", st.RelaySessionID, "handoff", st.Handoff, "message", nack.Message)
 
-	class := nack.Class
-	if class == "" {
-		class = contractb.ClassOf(nack.Code)
-	}
-	if class == contractb.ClassPermanent {
-		// §9: a NACK proves custody never moved, so the bounce cannot duplicate.
-		s.bounceLocked(st, "MIGRATION_NACK "+nack.Code)
-		return true
-	}
+	now := s.now()
 	sc := s.schedFor(nack.MigrationID)
-	if nack.Code == contractb.NackSlotVacant || nack.Code == contractb.NackPeerUnknown {
-		// The relay is authoritative that nobody received the frame, so the
-		// bounce timer may run again.
-		sc.reachedPeer = false
-		if sc.bounceAt.IsZero() {
-			sc.bounceAt = time.Now().Add(s.cfg.BounceTimeout)
-		}
-	}
 	retry := s.cfg.ForwardRetry
 	if nack.RetryAfterMs > 0 {
 		retry = time.Duration(nack.RetryAfterMs) * time.Millisecond
 	}
-	sc.nextForward = time.Now().Add(retry)
+	sc.nextForward = now.Add(retry)
+
+	switch {
+	case !relayGenerated && contractb.PayloadRefusal(nack.Code):
+		// Refused for a payload reason: every slot refuses this organism, so the
+		// map is not the answer. A sidecar NACK is only ever sent BEFORE durable
+		// custody (§6.8), so the bounce cannot duplicate.
+		s.bounceLocked(st, "MIGRATION_NACK "+nack.Code+" — every slot would refuse this payload", false)
+		return true
+
+	case !relayGenerated && contractb.PeerLocalRefusal(nack.Code):
+		// The receiver STATED it took no custody. Re-route: another slot accepts
+		// the same organism.
+		s.markRefusedLocked(st, contractb.ProofPeerRefused,
+			"peer-local refusal "+nack.Code+" proves no custody moved")
+		if s.rerouteLocked(st, contractb.ProofPeerRefused, now) {
+			sc.bounceAt = time.Time{}
+			sc.nextForward = time.Time{}
+		}
+		return true
+
+	case relayGenerated && nack.ProvesNoCustody(st.RelaySessionID):
+		// The relay has forwarded no frame with this migrationId to anyone
+		// during a session that covers the entry's WHOLE LIFE (§5.2).
+		s.markRefusedLocked(st, contractb.ProofRelayNeverForwarded,
+			"relay proof: neverForwarded under the recorded relaySessionId")
+		if s.rerouteLocked(st, contractb.ProofRelayNeverForwarded, now) {
+			sc.bounceAt = time.Time{}
+			sc.nextForward = time.Time{}
+		}
+		return true
+
+	case relayGenerated && st.Handoff == journal.HandoffPending:
+		// The sender's own record is sufficient: the frame was never handed to
+		// anybody. tickOutbound re-routes it on the next pass.
+		return true
+
+	case relayGenerated && nack.NeverForwarded == nil:
+		// A conforming relay always sets it on a NACK it generated (§6.8), so a
+		// missing field is a defect or a frame that came from somewhere else.
+		// Treat a missing proof as NO PROOF, and log it.
+		s.log.Error("contract B: a relay-generated MIGRATION_NACK carried no neverForwarded field — "+
+			"treating it as no proof and holding", "migrationId", nack.MigrationID, "code", nack.Code)
+		return true
+
+	case relayGenerated && nack.NeverForwarded != nil && *nack.NeverForwarded &&
+		nack.RelaySessionID != st.RelaySessionID:
+		// The relay restarted; it cannot speak for what the previous process
+		// forwarded, so the sender falls back to holding.
+		s.log.Warn("contract B: neverForwarded arrived under a DIFFERENT relaySessionId — "+
+			"the relay restarted and cannot speak for this entry; holding",
+			"migrationId", nack.MigrationID, "nackSession", nack.RelaySessionID,
+			"entrySession", st.RelaySessionID)
+		return true
+	}
+	// Everything else: no proof. The entry keeps its recorded destination and
+	// tickOutbound decides between a re-forward and the bounded hold.
 	return true
 }
 
+func (s *Sidecar) markRefusedLocked(st *journal.State, proof, note string) {
+	if _, err := s.jr.Apply(st.Entry.MigrationID, journal.Update{
+		Handoff: journal.HandoffRefused, Note: note}); err != nil {
+		s.log.Error("contract B: journal update failed", "migrationId", st.Entry.MigrationID, "err", err)
+		return
+	}
+	st.Handoff = journal.HandoffRefused
+}
+
 // onGenomeRequest answers exactly one GENOME_RESPONSE from the genome cache
-// (contract-b-m3.md §6.9). It never blocks a migration to serve one, and a
+// (contract-b-m4.md §6.9). It never blocks a migration to serve one, and a
 // request it cannot serve is a normal answer rather than an error.
 func (s *Sidecar) onGenomeRequest(env wire.Envelope) bool {
 	var req contractb.GenomeRequest
@@ -575,7 +772,7 @@ func (s *Sidecar) onGenomeRequest(env wire.Envelope) bool {
 func (s *Sidecar) allowGenomeRequest(requester string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
+	now := s.now()
 	w, ok := s.genomeServed[requester]
 	if !ok || now.Sub(w.windowStart) > time.Minute {
 		s.genomeServed[requester] = &rateWindow{windowStart: now, count: 1}
@@ -635,26 +832,35 @@ func (s *Sidecar) ackUpstreamNow(migrationID, destPeer string, entityID int32, d
 		DestPeer:    destPeer,
 		EntityID:    entityID,
 		Duplicate:   duplicate,
-		DeliveredAt: time.Now().UnixMilli(),
+		DeliveredAt: s.now().UnixMilli(),
 	})
 }
 
-// refreshClaim re-sends SECTOR_CLAIM so the relay — and through it the west
-// neighbour — learns the current simulationSize, export edge, border edges and
-// mod presence (contract-b-m3.md §6.3).
+// refreshClaim re-sends SECTOR_CLAIM so the relay — and through it every peer
+// whose lane points here — learns the current simulationSize, export edges,
+// border edges, mod presence and stats (contract-b-m4.md §6.3).
 func (s *Sidecar) refreshClaim() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	claim := contractb.SectorClaim{PreferredSlot: s.cfg.PreferredSlot}
+	stats := s.statsLocked()
+	claim := contractb.SectorClaim{
+		PreferredSlot:     s.cfg.PreferredSlot,
+		PreferredPosition: s.cfg.PreferredPosition,
+		InsertAfterSlot:   s.cfg.InsertAfterSlot,
+		InsertAxis:        s.cfg.InsertAxis,
+		Stats:             &stats,
+	}
 	if s.mod != nil && s.mod.handshaked {
 		claim.SimulationSize = s.mod.simSize
-		claim.ExportEdge = s.mod.exportEdge
+		claim.ExportEdges = append([]string(nil), s.mod.exportEdges...)
 		claim.BorderEdges = append([]string(nil), s.mod.borderEdges...)
 		claim.GameVersion = s.mod.gameVersion
 		claim.ModConnected = true
 	} else {
 		// §6.3: empty while no mod is connected. A sidecar with no mod cannot
-		// spawn an organism, and its west neighbour's export edge closes.
+		// spawn an organism, so it is not DELIVERABLE and every lane pointed at
+		// it re-pairs around it.
+		claim.ExportEdges = []string{}
 		claim.BorderEdges = []string{}
 	}
 	s.sendRelayLocked(contractb.TypeSectorClaim, claim)

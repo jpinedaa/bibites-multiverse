@@ -1,8 +1,9 @@
-// Command multiverse-archive is the ring's read-only subscriber: it records
+// Command multiverse-archive is the map's read-only subscriber: it records
 // every migration envelope and its lineage annex, fetches by hash any genome it
-// has never seen, and lists what it recorded. It owns no world, holds no ring
-// slot, and never appears in the ring order. See contracts/contract-b-m3.md
-// §5.1 and §10.
+// has never seen, serves the live status page of D15, and appends periodic
+// PEER_STATUS samples to a durable metrics file. It owns no world, holds no
+// slot, and never appears in the structural order. See
+// contracts/contract-b-m4.md §5.1, §10 and §10.1.
 package main
 
 import (

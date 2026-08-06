@@ -50,7 +50,7 @@ func (c *childSidecar) start(fault string) {
 	cmd.Env = append(os.Environ(),
 		"MULTIVERSE_TEST_HELPER=sidecar",
 		"MULTIVERSE_TEST_ARGS="+strings.Join(args, "\x1f"),
-		// contract-b-m3.md §3.1: the token comes from the environment, never
+		// contract-b-m4.md §3.1: the token comes from the environment, never
 		// from a flag that would put it in the process listing.
 		"MULTIVERSE_TOKEN="+testToken,
 	)
@@ -153,7 +153,7 @@ func runCrashCustody(t *testing.T, fault string) {
 
 	// The exporting peer is a real process that can be killed; its east
 	// neighbour stays in-process. The killed side claims slot 1, so it must
-	// start first — §7.2 rule 4 appends at the tail.
+	// start first — auto-placement (§7.2 rule 6) is start order on an empty map.
 	dataDir := t.TempDir()
 	childA := startChildSidecar(t, dataDir, relaySrv.url(), "peer-a", fault)
 
@@ -178,8 +178,9 @@ func runCrashCustody(t *testing.T, fault string) {
 	childA.sigkill()
 	modA.abort()
 
-	// Restart against the same --data-dir, with no fault this time. The peer id
-	// and the slot are persisted there, so it reclaims slot 1 (§7.4).
+	// Restart against the same --data-dir, with no fault this time. The peer id,
+	// the slot and the position are persisted there, so it reclaims slot 1 at
+	// its own coordinate (§7.4).
 	childA.start("")
 	modA2 := dialFakeMod(t, fakeModOptions{
 		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond})
