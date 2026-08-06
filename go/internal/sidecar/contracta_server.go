@@ -151,6 +151,11 @@ func (s *Sidecar) readModLoop(ctx context.Context, sess *modSession) {
 		frame, err := sess.conn.Read(readCtx)
 		cancel()
 		if err != nil {
+			// One line, once per session end. A swallowed read error hid the
+			// evidence during the slot-6 stall diagnosis: whether the mod sent a
+			// close (and with what reason), the peer reset, or the monitor's own
+			// 4004 cancelled the read is exactly what the next diagnosis needs.
+			s.log.Info("contract A: read ended", "gen", sess.gen, "err", err)
 			return
 		}
 		if !s.handleModFrame(sess, frame) {

@@ -95,6 +95,48 @@ Deliberately **not** done, and why:
 - `dotnet build -c Release` of the mod: clean, 0 errors (only the pre-existing
   `MSB3277` warning). No C# test suite exists; the mod-side changes were review-verified.
 
+## 4b. The second act — the graveyard at the origin (evening of 2026-08-06)
+
+Deploying the defences did not revive slot 6, and the reason rewrites this document's
+compute story. The evening's evidence, in the order it forced itself on the diagnosis:
+
+1. With new binaries the mod cycled `connect → CONFIG_UPDATE → 4004` forever — but a Go
+   `fakemod` client handshook the same sidecar instantly, and the **old** mod DLL failed
+   identically, exonerating both sides' new code.
+2. Temporary read-path instrumentation showed the sidecar receiving **zero frames** most
+   cycles: the game's `Update` was running about **once every 4–6 seconds**, so the mod
+   physically could not meet a 1 s heartbeat cadence inside a 3.5 s deadline. The
+   `timescale` dev command answered `targetTimeScale=1.00 Time.timeScale=0.10` — the game's
+   own auto-throttle could not hold even 1× on a 220-organism world.
+3. A per-thread CPU census showed **five worker threads each ~80% of a core, continuously**
+   — a saturated parallel pool, not a busy main thread. PhysX runs multi-threaded.
+4. Save forensics found the tumour: **1,081 meat pellets stacked inside a 30-unit blob at
+   the world origin** (plus 89 pellets outside the world bounds entirely) — the decayed
+   corpses of the flood's ~10,500 starved migrants, apparently position-clamped to (0,0)
+   when organisms die out of bounds. Overlapping colliders cost PhysX ~n²/2 contact pairs:
+   ~1,081 give ≈580k pairs recomputed every physics step.
+
+**Corrected attribution.** The daytime "~1 TPS at 2.3 cores with 50 alive" was primarily
+this pile growing all day, with the §2 replay livelock as a second-order amplifier riding
+on the frames it lengthened. Both were real; the §3 defences stand on their own evidence
+(the 4004/replay cycling is in the morning log); but the compute floor under the whole
+incident was vanilla physics grinding a corpse pile, not migration ingest.
+
+**The remedy** was save surgery, not code: stop the game, back up the save
+(`M4-Slot6-pre-pellet-purge.bak.zip` beside it), delete every pellet within r=60 of the
+pile centre and every out-of-bounds pellet (1,170 removed, 342 kept, `scene.bb8scene`'s
+`nPellets` updated), reload. The world came back instantly: handshake on the first
+connection, zero heartbeat timeouts, the 64-entry backlog replaying paced.
+
+**New follow-ups.** (a) Watch for pile regrowth — if out-of-bounds deaths really clamp
+corpse pellets to the origin, any future breakout re-seeds it; a cheap mod-side watchdog
+(log pellet count within r=60 of origin once per save) would name it early. (b) The
+diagnosis ran a `fakemod` against the live sidecar; it took custody of ~10 replayed
+organisms into `multiverse-farend/fakemod-diag-state.json` before it was stopped — they
+are recorded there, not lost, and can be re-injected or written off. (c) `readModLoop` now
+logs why a session's read ended — the silently swallowed read error hid the "who closed,
+and with what reason" evidence for most of an evening.
+
 ## 5. Recovery and deployment notes
 
 The livelock does not self-heal on old binaries — the 64-entry journal batch replays
