@@ -2,9 +2,10 @@
 
 This report expands milestone M4 of `system_decomposition.md`.
 
-**Status: OPEN.** The owner ratified decisions D12 to D16 on 2026-08-05. This document
-holds the design work behind them. M3 stays complete. M4 keeps the LAN rig and adds no
-public exposure.
+**Status: SIGNED OFF.** The owner ratified decisions D12 to D16 on 2026-08-05. The owner
+signed off this design on the same day, and overrode three of its recommendations. The
+section *Owner Sign-Offs* records the four calls, and each affected section carries the
+result. M3 stays complete. M4 keeps the LAN rig and adds no public exposure.
 
 ## Purpose
 
@@ -27,7 +28,7 @@ Everything around the migration layer failed:
 
 M4 answers those three failures with decisions D12, D14 and D15. Decision D13 adds the
 next shape of the map, because the wire must carry that shape before M5 makes the wire
-public.
+public. The owner's sign-off runs that shape live, on a 3×2 map of six instances.
 
 M1 removed the in-game risks. M2 proved the custody chain. M3 proved the ring across two
 machines. `m1_findings.md`, `m2_findings.md`, `m3_considerations.md`,
@@ -60,19 +61,19 @@ A peer joins between two live slots, not only at the tail:
              one new lane, two changed lanes, no renumbering
 ```
 
-The grid is the same map with a second axis. M4 builds the abstractions and keeps the
-vertical lanes switched off:
+The grid is the same map with a second axis. M4 builds it and runs it:
 
 ```
    row 1:  ┌──► (0,1) ──► (1,1) ──► (2,1) ──┐
            └───────── east wrap ────────────┘
-              ▲          ▲          ▲          north lanes, flag off in M4
+              ▲          ▲          ▲          north lanes, live in M4
               │          │          │          (they wrap to row 1)
    row 0:  ┌──► (0,0) ──► (1,0) ──► (2,0) ──┐
            └───────── east wrap ────────────┘
 
    A map of one row is the ring. Each peer exports east and north.
    Each peer receives west and south. No lane returns to its source.
+   The 3×2 map above is M4's target rig: six instances, two machines.
 ```
 
 ## Scope
@@ -86,7 +87,8 @@ In scope:
 - Plural export edges on Contract A, and one edge state for each of them (D13)
 - Coordinate addressing beside the slot number, with the ring as the one-row case (D13)
 - Per-axis route-around (D13)
-- The vertical lanes, behind a flag that ships off (D13)
+- The vertical lanes, live, with the second capture band and the corner rule (D13)
+- A rig of six instances in a 3×2 map, across the two machines (D13)
 - Periodic world saves, a save on quit, and a save rotation (D14)
 - A scripted recovery procedure for one instance (D14)
 - A rig-wide resume test that delivers the organism in flight since 2026-08-04 (D14)
@@ -96,9 +98,10 @@ In scope:
 - Log preservation at shutdown (D15)
 - A slot handover command at the relay (D15)
 - A join kit for a new instance (D15)
-- An entry-edge crowding metric, and one candidate mitigation as a design item (D15)
-- The portal work item. `m4_portal_findings.md` is its input, and that research is in
-  progress
+- A delivery rate limit at the sidecar, which paces every arrival burst (D15)
+- An entry-edge crowding metric, which verifies the rate limit (D15)
+- A bounded hold on an orphaned journal entry, and its automatic bounce (D2, D12)
+- The portal work item, built to the recommendation in `m4_portal_findings.md`
 
 Out of scope. Decision D16 keeps these items in M5:
 
@@ -112,8 +115,8 @@ Also out of scope:
 
 - **Sleep prevention, and crash prevention.** Decision D14 accepts the hard stop and
   builds the recovery
-- The live grid: vertical lanes switched on, the second capture band in production, and a
-  rig with six or more instances (D13, and *Design Calls for the Owner*)
+- **Arrival-position spreading.** The rate limit answers the crowd, so decision D15 keeps
+  this mitigation parked (Question 9)
 - libp2p and direct peer-to-peer transport (M6)
 - The `species-catalog` module (M7)
 - Corpse, pellet and egg payloads (M7)
@@ -153,7 +156,7 @@ mod free of topology, and M4 must not break it.
 broadcasts `PEER_STATUS` with a higher epoch. It then sends a fresh `SECTOR_GRANT` to each
 peer whose effective neighbour changed. A receiver applies the highest epoch only.
 
-## Design Question 2 — An orphaned journal hop: re-route or hold
+## Design Question 2 — An orphaned journal hop: re-route, hold or bounce
 
 A journaled hop names the slot it recorded. That slot goes dark. Three answers exist:
 hold the entry, bounce the organism home, or re-route the entry east.
@@ -179,17 +182,28 @@ that explicitly, and the sender treats that statement as proof.
 | Never forwarded | The relay answers `SLOT_VACANT`, `PEER_OFFLINE` or `NOT_FORWARDED` | **Re-route** east to the current effective neighbour. Keep the `migrationId`. Rewrite `destSlot`. |
 | Refused for a peer-local reason | `MIGRATION_NACK` with `OVERLOADED` or `SIM_SIZE_MISMATCH` | **Re-route.** The receiver states that it took no custody. Another slot accepts the same organism. |
 | Refused for a payload reason | `MIGRATION_NACK` with `INVALID_PAYLOAD` or `KIND_UNSUPPORTED` | **Bounce home.** Every slot refuses this organism, so the ring is not the answer. |
-| Forwarded, then silence | None | **Hold.** Retry the recorded `destSlot` on the retry cadence. The retry is idempotent. |
+| Forwarded, then silence | None | **Hold, then bounce.** Retry the recorded `destSlot` on the retry cadence. The retry is idempotent. Bounce home at the hold timeout. |
 
-**Hold has no deadline, and that is deliberate.** A held organism is alive in a journal. It
-is not lost and it is not duplicated. The T1 run holds exactly one such entry, and a rig
-that comes back delivers it. A timer that converts a hold into a bounce trades a certain
-state for a possible duplicate.
+**The hold is bounded, and the owner set the bound.** A held entry waits for its recorded
+`destSlot` for a configurable timeout. The default is 24 hours. The sidecar then bounces
+the organism home by itself, and records the reason.
 
-**Give the operator one escape hatch.** `multiverse-sidecar --release-inflight <migrationId>
-bounce|drop` releases one held entry by hand. The command names the duplication risk in
-its own output. It is the custody twin of `--release-slot`, and it is a deliberate act on
-the machine that holds the journal.
+**The owner accepts the residual risk.** One case duplicates: the far sidecar took
+custody, died before its acknowledgement, and replays its own journal on its return. That
+case needs an invisible delivery and a return after the timeout. Weigh it against the
+alternative. An unbounded hold strands the organism in a file that nobody reads, and a
+stranded organism is invisible.
+
+**The deadline lives in the journal entry.** The timer starts at the forward. A sidecar
+that restarts therefore reads one deadline back, and never starts a fresh one.
+
+**Keep the escape hatch for earlier intervention.** `multiverse-sidecar --release-inflight
+<migrationId> bounce|drop` releases one held entry by hand, before the timeout expires.
+The command names the duplication risk in its own output. It is the custody twin of
+`--release-slot`, and it is a deliberate act on the machine that holds the journal.
+
+**Report every bounce that a timeout caused.** The status page and `ringstat` both name
+it. An automatic bounce is a fact the operator reads, not a silent repair.
 
 **Rewrite the destination in one place only.** Section 7.3 of `contract-b-m3.md` forbids a
 journal rewrite. M4 amends that rule with one exception, and the exception carries its own
@@ -357,41 +371,48 @@ contract, because two mods that answer differently produce different maps.
 - The corner rule
 - A second passive entry edge on the south side
 - A second entry-position mapping, from `contract-a.md` §4.3
-- A flag that disables the vertical pair, and that ships off
+- No flag. The sidecar sets `exportEdges` from the grant, so a one-row map gives one edge
 
 The per-tick cost is two comparisons for each organism. The M3 band test already runs each
 `FixedUpdate`, so the second band adds no new pattern.
 
 ## Design Question 7 — How much grid M4 builds
 
-**Recommendation: build the abstractions, ship the vertical lanes behind a flag, and defer
-the live grid.**
+**The owner's answer: all of it.** The live two-axis grid ships in M4, and the exit test
+proves it. This overrides the earlier recommendation, which shipped the vertical lanes
+behind a flag that was off.
 
-Three facts drive the recommendation.
-
-**Fact 1 — the wire deadline is real.** `exportEdges` and the plural `EDGE_STATUS` break
+**The wire deadline still holds.** `exportEdges` and the plural `EDGE_STATUS` break
 Contract A. M5 puts the wire in front of strangers. A break before M5 costs a rebuild of
 three binaries and one mod. A break after M5 costs a version-migration path for people the
-owner cannot reach.
+owner cannot reach. This argument put the abstractions in M4, and it is unchanged.
 
-**Fact 2 — the proof needs a rig the owner does not have.** A 2×2 map is degenerate on both
-axes, exactly as a two-slot ring is. One hop east and one hop north already return an
-organism to its own row and column. An honest two-axis proof wants 3×3. A 3×2 map is the
-smallest map that proves anything about a north lane. The rig runs three instances today,
-on two machines. Six is a hardware question, not a code question.
+**A flag that ships off proves nothing.** An untested lane is an unknown, and M5 exports
+every unknown to strangers. The flag also hides the two items that need the game: the
+second capture band under real organisms, and the corner rule. A flag moves that risk into
+M5. It does not remove it.
 
-**Fact 3 — the cost split favours the abstractions.** The abstractions are contract text,
-relay bookkeeping and sidecar plumbing. They need no game. The remainder needs the game, the
-hardware and a new test harness. It holds four items: the second capture band in
-production, the corner rule under real organisms, a six-instance rig, and a two-axis exit
-test. The abstractions are the smaller part, and they carry the deadline.
+**The rig arithmetic answers the hardware objection.** The earlier recommendation called
+six instances hardware that does not exist. Measure it instead:
 
-**What "behind a flag" means here.** Build the north lane end to end. Test it with two local
-slots and a 1×2 map. Ship the flag off. M4's shipped behaviour is then exactly the ring, so
-the living deployment carries no new risk.
+| Fact | Value |
+|---|---|
+| Game instances that run together on the main machine today | 3, comfortably |
+| Memory for each instance | about 550 MB |
+| Main machine memory | 128 GiB |
+| Instances that the memory alone allows | far more than six |
 
-**This recommendation defers part of decision D13, so it needs the owner's sign-off.** See
-*Design Calls for the Owner*, call 1.
+Four or five instances on the main machine, plus one or two on the second computer, give
+six. **Attempt 4+2 or 5+1 across the two machines.** Watch CPU, not memory, because each
+instance runs its own simulation at 20×.
+
+**The smallest honest map is 3×2.** A 2×2 map is degenerate on both axes, exactly as a
+two-slot ring is. One hop east and one hop north return an organism to its own row and its
+own column. A 3×2 map gives a real east cycle of three, and it is M4's target.
+
+**Name the fallback, and keep it a fallback.** A degenerate proof — a 1×2 map on one
+machine — is acceptable **only** when the two machines cannot hold six instances. Record
+the measurement that forces that choice. Do not take it first.
 
 ## Design Question 8 — The recovery flow
 
@@ -447,14 +468,33 @@ is lost, and decision D2 accepts loss. Name both cases in the recovery script's 
 
 ## Design Question 9 — The entry edge
 
-The owner saw a mass of organisms on the west border after the overnight run. No
-measurement exists. Decision D15 therefore measures first.
+The owner saw a mass of organisms on the west border after the overnight run. The owner
+also named the mechanism. M4 therefore builds the answer, and measures it.
+
+**The sleeping machine dammed the flow.** One slot went dark for two hours. Its inbound
+deliveries queued in its west neighbour's journal. That neighbour also lost its export
+target, and contained the organisms with no open lane. Both piles released together at
+wake, and the entry edge took all of them at once.
+
+**This is a burst, not a rate.** A steady rate spreads a crowd across hours. A dam delivers
+hours of traffic in seconds. The two need different answers, and the dam is what the owner
+saw.
+
+**M4 ships a delivery rate limit.** The sidecar releases each `MIGRATE_IN` from its journal
+at a configurable maximum spawn rate, per unit of simulated time. Every burst then trickles
+in: sleep recovery, an edge that reopens, and a future mass migration.
+
+**Pace at the sidecar, not at the mod.** The journal is where a burst accumulates, and the
+sidecar owns the journal. The mod keeps one arrival path and needs no change, so decision
+D8 holds. Pacing changes when an organism arrives. It never changes whether an organism
+arrives, and custody is untouched.
 
 **What the geometry does today.** An organism leaves the east edge at `y`. It arrives at
 `x = −S + W + margin` with the same `y`, the same velocity and the same heading
 (`m2_findings.md` §4.4). It therefore arrives inside the world and travels east.
 
-**Four candidate causes.**
+**Four secondary contributors stay open.** They raise the resting crowd. They do not
+explain the pile-up, and the metric ranks them:
 
 1. **Arrival rate.** Slot 1 imported 6 003 organisms in 12.56 hours, into a population near
    22. Each world receives about 21 organisms each simulated hour. Most of the population
@@ -466,32 +506,44 @@ measurement exists. Decision D15 therefore measures first.
 4. **The shaded band.** An organism that walks west leaves the square and travels to 4000
    before the wrap fires. It stays alive and visible outside the west edge for a long time.
 
-**The metric.** Add to the mod's `[M2-CROSSING]` series, once each simulated minute:
+**The metric ships too, and it verifies the rate limit.** It is cheap, and it is the only
+proof that a burst arrived as a stream. Add to the mod's `[M2-CROSSING]` series, once each
+simulated minute:
 
 - The count of organisms inside the entry band
 - A histogram of arrival positions along the entry edge
 - The residence time between an arrival and its first departure from the band
 
-**The candidate mitigation, and its cost.** Spread arrival positions along the entry edge
-instead of mirroring `exitPosition`. This flattens the arrival histogram. It also breaks
-the transverse continuity that decision D3 buys. An organism that leaves at one `y` then
-arrives at a different `y`, and the one-continuous-world illusion weakens. Hold the
-mitigation until the metric names the cause.
+Add one series at the sidecar: the journal depth waiting on the rate limit. A depth that
+never falls names a limit that is too low.
+
+**Arrival-position spreading stays parked.** Spreading arrivals along the entry edge, in
+place of mirroring `exitPosition`, flattens the histogram. It also breaks the transverse
+continuity that decision D3 buys. An organism that leaves at one `y` then arrives at a
+different `y`, and the one-continuous-world illusion weakens. The dam caused the crowd, so
+pay that price only if the metric shows a crowd after the pacing works.
 
 ## Risks
 
-### Risk 1 — Grid scope creep
+### Risk 1 — The six-instance rig
 
-Decision D13 describes a complete new topology. M4 builds part of it. The boundary is easy
-to cross, because each grid item looks small beside the one before it.
+The sign-off puts the live grid in M4, so the rig grows from three instances to six. The
+old scope boundary — the wire only, and nothing the game needs — is retired with it. The
+memory arithmetic is comfortable (Question 7). Nothing else is measured.
 
-Hold the boundary at one line: **M4 builds what the wire needs, and nothing the game
-needs.** Contract text, relay bookkeeping, sidecar lanes and a flagged north lane are in.
-The second capture band in production, the corner rule under real organisms, and a
-six-instance rig are out.
+Four things scale with the instance count:
 
-Test the boundary with one question for each item: does M5 break the wire without it? A
-"no" moves the item out of M4.
+- **CPU.** Each instance runs its own simulation at 20×.
+- **BepInEx logs.** The second instance already needs `LogOutput.log.1`, because the first
+  holds a lock.
+- **Per-instance configuration.** The environment variables travel through `WSLENV`.
+- **The far end.** `start-slot2.ps1` and `stop-slot2.ps1` each drive one instance today.
+
+Measure the rig before WP8 depends on it. Start six instances, run them for one hour, and
+record the simulation rate of each one. A rig that loses speed at six proves a slower grid.
+It does not prove a broken one.
+
+Take the 1×2 fallback of Question 7 only against a recorded measurement.
 
 ### Risk 2 — Healing interacts with at-most-once custody
 
@@ -502,7 +554,11 @@ Question 2 holds the answer: re-route only under a relay proof of non-delivery, 
 otherwise. The risk is not the rule. The risk is an implementation that treats silence as
 proof.
 
-Three tests gate this risk:
+The bounded hold adds one accepted exception, and the owner owns it. A far sidecar that
+took custody, died before its acknowledgement, and returns after the timeout produces two
+organisms. Do not widen that exception. Every other path stays at most once.
+
+Four tests gate this risk:
 
 - Kill a destination sidecar **after** the relay forwards a frame and **before** the
   acknowledgement. Restart it. The organism exists exactly once.
@@ -510,22 +566,30 @@ Three tests gate this risk:
   organism exists exactly once, in the new destination.
 - Hold an entry for one hour against a dark slot. Return the slot. The organism arrives,
   and no copy exists anywhere else.
+- Set the hold timeout to minutes. Hold an entry against a slot that stays dark. The
+  organism bounces home, exists exactly once, and the bounce is reported.
 
-A count of two organisms in any test fails the milestone.
+A count of two organisms in the first three tests fails the milestone.
 
 ### Risk 3 — The save timer competes with the simulation
 
 A save serializes every organism, every pellet and every zone. The rig runs at 20× or more.
 A save that stalls the simulation reduces the very throughput that M4 measures.
 
+**The owner set the budget: a periodic save stalls the simulation for 2 seconds at most.**
+That number is the test bar for the save-timer work item, and it selects the design. A
+simple synchronous save is the shipped answer while it holds the budget.
+
 Measure the save cost first. Record the duration against the population and the world size.
 Then choose the cadence from the measurement, not from a guess.
 
 Two rules limit the damage. Never save two worlds on one machine at the same moment. Never
-start a save while a `MIGRATE_IN` waits in the mod's queue.
+start a save while a `MIGRATE_IN` waits in the mod's queue. Both rules matter more at six
+instances than at three (Risk 1).
 
-A save that costs more than a few seconds needs a different cadence. It does not need a
-different decision. Decision D14 accepts a slower rig over a lost night.
+A save that breaks the 2-second budget needs a different cadence, or a save path that does
+not block the tick. It does not need a different decision. Decision D14 accepts a slower
+rig over a lost night.
 
 ### Risk 4 — The observability data path competes with the migration path
 
@@ -567,15 +631,39 @@ perform: a periodic save, and a log preservation step.
 Put both in `start-slot2.ps1` and `stop-slot2.ps1`. The far operator then runs the same two
 scripts as before, and the join kit ships them.
 
-### Risk 8 — The portal work item has no research yet
+### Risk 8 — The portal renders nothing, and reports no error
 
-`m4_portal_findings.md` is in progress in a parallel pass. This document records the
-dependency and nothing more.
+`m4_portal_findings.md` landed on 2026-08-05. The research is complete, and the portal is
+an M4 deliverable (WP7).
 
-Do not schedule construction against the portal until those findings land. Read them first.
-Then decide between three answers. The portal is an M4 deliverable, a mitigation for
-entry-edge crowding (Question 9), or a revival of the gateway towers that decision D3
-parked.
+One risk survives that research, and it is ranked first there: the camera's layer and its
+culling mask. Layers live in prefabs, not in the assembly, so no static evidence settles
+them. A portal on a layer the camera does not draw is invisible, and nothing writes an
+error.
+
+Mitigate it in the first runtime session. Copy the layer from a live zone renderer. Log
+`Camera.main.cullingMask`, the donor layer and the rectangle's world bounds. Confirm that
+`Shader.Find("Shapes/Rect Additive")` returns a shader.
+
+The second risk is the sorting order against organisms and pellets. The assembly does not
+answer it. Make the order configurable, and tune it in the same session.
+
+### Risk 9 — The rate limit interacts with the hold timeout
+
+Pacing delays each `MIGRATE_IN`. `MIGRATION_ACK` waits for the mod's `MIGRATE_IN_ACK`, so
+pacing also delays the sender's release. A deep backlog at a live peer then looks like
+silence at the sender.
+
+The sign-off scopes the timeout narrowly, and that scope is the answer. **The hold clock
+runs only while the destination is dark.** A live and connected destination is slow, not
+orphaned. Stop the clock when the destination returns.
+
+Do not answer this by moving the custody gate. `MIGRATION_ACK` follows the receiving mod's
+`MIGRATE_IN_ACK` today (`contract-b-m3.md` §6.7, §9), and that gate makes the spawn the
+proof of delivery.
+
+Test it. Set a low rate limit, a short hold timeout and a deep backlog against a live peer.
+No entry bounces, and no organism duplicates.
 
 ## Contract Changes Needed
 
@@ -597,17 +685,19 @@ implementation wave.
 | 11 | `contract-a.md` §13 A5 | Record that the debt stays moot under two export edges. Correlation is on `migrationId`. | D13 |
 | 12 | Both documents | Bump the major version, because item 9 changes a field type. | D13 |
 | 13 | Both documents | Replace each "M4" that means public release with "M5". | D16 |
+| 14 | `contract-b-m3.md` §9, §12 | State the bounded hold: the timeout, its 24-hour default, the automatic bounce and the accepted duplication case. The clock runs only while the destination is dark. | D2, D12 |
+| 15 | `contract-a.md` §7.5, §10 | State that the sidecar paces inbound delivery, and add the rate limit to the tunables. Replay keeps its journal order. | D15 |
 
 ## Work Packages
 
-Eight packages. WP1 gates the wire work. WP7 gates the exit test.
+Eight packages. WP1 gates the wire work. WP6 gates the exit test.
 
 ### WP1 — The contract amendments
 
 **Depends on:** this document.
 **Needs the game:** no.
 
-- The thirteen items of *Contract Changes Needed*
+- The fifteen items of *Contract Changes Needed*
 - One worked example for each changed message
 - The version bump, and a migration note for the M3 rig
 
@@ -623,20 +713,23 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 - Insertion at a position, with the tail as the fallback
 - The explicit non-delivery answer
 - `--handover-slot`, and the held-entry report for both operator commands
-- Per-axis walking, behind the vertical-lane flag
+- Per-axis walking, east and north, on the live grid
+- The coordinate map: fill a hole, extend an axis, and refuse a ragged rectangle
 
 ### WP3 — The sidecar: handoff state, re-route and metrics
 
 **Depends on:** WP1, WP2.
 **Needs the game:** no.
 
-- The handoff state on each journal entry
+- The handoff state on each journal entry, and its hold deadline
 - The re-route, bounce and hold rule of Question 2
+- The hold timeout, its automatic bounce, and the dark-only clock of Risk 9
 - `--release-inflight`
+- The delivery rate limit of Question 9, and the journal-depth series behind it
 - Outbound re-evaluation at reconnect (Question 4)
 - Durable metrics: population, crossings, edge state, custody depth, save receipts
 - Population on the ring claim
-- One lane for each export edge, with the second lane behind the flag
+- One lane for each export edge, east and north, both live
 
 ### WP4 — The mod: saves, edges and instrumentation
 
@@ -645,9 +738,10 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 
 - The periodic save, the save on quit and the rotation
 - The save receipt line and its metric record
-- The save-cost measurement of Risk 3
+- The save-cost measurement of Risk 3, against the 2-second budget
 - `exportEdges` on `CONFIG_UPDATE`, and one edge state for each
-- The second capture band and the corner rule, behind the flag
+- The second capture band and the corner rule, in production
+- The second passive entry edge, and its entry-position mapping
 - The entry-edge metrics of Question 9
 
 ### WP5 — The archive: the status page
@@ -655,8 +749,9 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 **Depends on:** WP1, WP3.
 **Needs the game:** no.
 
-- A live HTML status page: slots, liveness, effective lanes, bypasses, populations,
-  per-lane flow, custody depth and the last save of each world
+- A live HTML status page: the map shape, slots, liveness, effective lanes, bypasses,
+  populations, per-lane flow, custody depth and the last save of each world
+- Each bounce that a hold timeout caused
 - The honest-gap rule of Risk 4
 - `ringstat`, over the same data, in the terminal
 
@@ -669,15 +764,29 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 - Log preservation in the stop script, and the refusal in the start script
 - The far-end save and preservation steps, in the two PowerShell scripts
 - The join kit: the bundle, the token, the relay address and one page of steps
-- A fourth instance, for the splice-in test
+- **The six-instance rig**: 4+2 or 5+1 across the two machines, in a 3×2 map
+- The rig measurement of Risk 1, before WP8 depends on it
+- Per-instance log names, environment variables and far-end scripts, for six slots
 
 ### WP7 — The portal
 
-**Depends on:** `m4_portal_findings.md`.
-**Needs the game:** unknown.
+**Depends on:** WP4. Input: `m4_portal_findings.md`.
+**Needs the game:** yes.
 
-Blocked on research. Read the findings first. Then scope this package, or move it out of
-M4.
+Build the recommended approach of the findings, and nothing else:
+
+- One `Shapes.Rectangle` for each open edge, additive blend with a linear-gradient fill
+- A chevron `DashOffset` flow: outward on an export edge, inward on an entry edge
+- `ThicknessSpace.Pixels`, which holds the line legible across the 800× zoom range
+- Geometry from `BorderGeometry.W` and `BandInnerBoundary(edge)`, and the live
+  `SimulationSize` callback, so the visual cannot drift from the capture rule
+- One expanding additive `Disc` for each migration event, rate-limited, hooked at
+  `MigrationExporter` and `MigrationImporter`
+- The runtime checks of Risk 8, in the order the findings give
+
+Do not use immediate mode. `Shapes.Draw.*` needs a `ShapesRenderFeature` on the URP
+renderer, and a mod cannot add one. Keep `ParticlesMaster` as an optional extra only: the
+game silences it when the player turns pheromone display off.
 
 ### WP8 — The exit test
 
@@ -685,97 +794,151 @@ M4.
 **Needs the game:** yes.
 
 Build the test on `e2e/run-m3-lan.sh`. The ring form-up, the command file and the archive
-checks all carry over.
+checks all carry over. The rig grows to six instances, so the harness starts and stops
+each slot by number.
 
 ## Exit Test
 
-The test uses the M3 rig and one new instance. Slot 1 and slot 3 run on the main machine.
-Slot 2 runs on the second computer. Slot 4 joins during the test.
+The test runs a live **3×2 map**: six instances, four or five on the main machine and one
+or two on the second computer. Row 0 holds slots 1 to 3. Row 1 holds slots 4 to 6. Each
+peer exports east and north, and receives west and south.
 
-### Part 1 — The ring heals around a hard stop
+Attempt that shape first. Take the 1×2 fallback of Question 7 only against a recorded rig
+measurement (Risk 1). A fallback run states which parts it did not prove.
 
-1. Start the rig. Confirm three slots, in ring order, with all lanes open.
-2. Record the per-lane flow for ten minutes.
-3. Hard-kill the game and the sidecar of slot 3, mid-flow.
-4. Watch slot 1's export edge and slot 2's export target.
+### Part 1 — The two-axis current runs
+
+1. Start the rig. Confirm six slots, in a 3×2 map, with every lane open.
+2. Record the per-lane flow for ten minutes, on both axes.
+3. Track one organism by entity ID across four hops or more.
 
 The test passes when all of these conditions hold:
 
-- Slot 2's lane re-pairs to slot 1, and its export edge stays open.
-- No export edge closes.
-- The current continues. Slot 1 and slot 2 keep exchanging organisms.
-- The status page shows slot 3 as bypassed, with the time it went dark.
-- Each organism in flight to slot 3 at the kill is held, re-routed or bounced by the rule
+- Every peer exports on two edges, and receives on two edges.
+- East flow and north flow are both non-zero, on every lane.
+- The tracked organism drifts diagonally. It returns to its own slot only after a whole
+  number of both circuits.
+- The corner rule gives each organism in both bands exactly one export edge. No organism
+  exports twice.
+- The map holds exactly one copy of each organism, counted by entity ID.
+
+### Part 2 — The map heals around a hard stop
+
+4. Hard-kill the game and the sidecar of slot 5, mid-flow.
+5. Watch its west neighbour's export edge, and its south neighbour's export target.
+
+The test passes when all of these conditions hold:
+
+- The east lane re-pairs along row 1. The north lane re-pairs up the middle column.
+- No export edge closes. Each row and each column still holds a deliverable slot.
+- The current continues on both axes.
+- The status page shows slot 5 as bypassed, with the time it went dark.
+- Each organism in flight to slot 5 at the kill is held, re-routed or bounced by the rule
   of Question 2. Each entry states which answer it took, and why.
-- The ring holds exactly one copy of each organism, counted by entity ID.
+- The map holds exactly one copy of each organism, counted by entity ID.
 
-### Part 2 — The dead slot splices back in
+### Part 3 — The dead slot splices back in
 
-5. Start slot 3's sidecar. Confirm the reclaim of its slot number and its position.
-6. Start slot 3's game against its last periodic save.
-7. Watch slot 2's export target.
+6. Start slot 5's sidecar. Confirm the reclaim of its slot number and its coordinate.
+7. Start slot 5's game against its last periodic save.
+8. Watch both neighbours' export targets.
 
 The test passes when all of these conditions hold:
 
-- Slot 3 returns to the same slot number and the same position between slot 2 and slot 1.
-- Slot 2's lane re-pairs back to slot 3, with no operator action.
-- Slot 3 replays every un-acknowledged inbound entry to its mod.
-- Slot 3's world holds the population of its last save, and not the population of its
+- Slot 5 returns to the same slot number and the same coordinate.
+- Both lanes re-pair back to slot 5, with no operator action.
+- Slot 5 replays every un-acknowledged inbound entry to its mod.
+- Slot 5's world holds the population of its last save, and not the population of its
   first start.
-- Any held entry that names slot 3 is delivered, and the organism exists exactly once.
+- Any held entry that names slot 5 is delivered, and the organism exists exactly once.
 
-### Part 3 — A brand-new instance splices into a live ring
+### Part 4 — A brand-new instance splices into a live map
 
-8. Start a fourth sidecar with a new `peerId`. Ask for a position between slot 1 and slot 2.
-9. Start a fourth game, on a new world.
+9. Start a seventh sidecar with a new `peerId`. Ask the relay to extend the map to 4×2.
+10. Start a seventh game, on a new world.
 
 The test passes when all of these conditions hold:
 
-- The relay grants slot 4 between slot 1 and slot 2, with no renumbering of any other slot.
-- Slot 1 exports into slot 4, and slot 4 exports into slot 2, within one status broadcast.
+- The relay grants the newcomer a position in the new column, and renumbers no other slot.
+- The second position in the new column is a hole, and both axes route around it.
+- Its west neighbour and its south neighbour re-pair, within one status broadcast.
 - No organism in flight at the moment of the insertion changes its destination.
-- Organisms cross into slot 4 and out of it, without a forced export.
-- The archive records both new lanes.
+- Organisms cross into the new slot and out of it, without a forced export.
+- The archive records every new lane.
 
-### Part 4 — The resume test
+A rig that cannot hold a seventh instance proves the same rule differently. Release one
+slot, which leaves a hole, and splice a new instance into that hole. Record the
+substitution.
 
-10. Stop the rig. Keep every journal.
-11. Start the rig against `e2e/data/slot-1/journal` from 2026-08-04.
+### Part 5 — A burst arrives paced, not all at once
+
+11. Set the delivery rate limit to a value the entry-edge metric resolves.
+12. Hard-stop one slot. Let its inbound traffic and its west neighbour's export pile
+    accumulate for one hour.
+13. Wake the slot. Start its sidecar, then its game.
+14. Record the arrival histogram, the entry-band count and the journal depth, each
+    simulated minute.
+
+The test passes when all of these conditions hold:
+
+- Delivery never exceeds the configured rate, in any sampled minute.
+- The journal depth falls steadily to zero.
+- The entry-band count stays below the count the T1 run recorded after its outage.
+- No held entry bounces while its destination is live (Risk 9).
+- Every accumulated organism arrives, and each one exists exactly once.
+
+### Part 6 — The resume test
+
+15. Stop the rig. Keep every journal.
+16. Start the rig against `e2e/data/slot-1/journal` from 2026-08-04.
 
 The test passes when migration `9d6db335-b1ae-433e-a44a-bb2109912913`, entity
-`2004967003`, arrives in slot 2 and exists exactly once in the ring.
+`2004967003`, arrives in slot 2 and exists exactly once in the map.
 
-### Part 5 — Periodic saves, proven by a kill and a reload
+### Part 7 — Periodic saves, proven by a kill and a reload
 
-12. Run one world for one hour with the periodic save on.
-13. Record its population and its simulated minute.
-14. Hard-kill the game.
-15. Restart it against its last periodic save.
+17. Run one world for one hour with the periodic save on.
+18. Record its population and its simulated minute.
+19. Hard-kill the game.
+20. Restart it against its last periodic save.
 
 The test passes when all of these conditions hold:
 
 - The reloaded world is within one save interval of the recorded state.
 - The reloaded world is **not** the state of the first start.
 - The save receipts name every save of the hour.
+- No save stalls the simulation for more than 2 seconds, at six instances.
 - `worldstat` reads the reloaded save with no error.
 - The recovery script runs the whole sequence with no manual step on this machine.
 
-### Part 6 — The status page shows it all
+### Part 8 — The portal is visible
 
-16. Read the status page after each part above.
+21. Watch one export edge and one entry edge, at four zoom levels.
+
+The test passes when all of these conditions hold:
+
+- Each open edge carries a portal strip. A closed edge carries none.
+- The chevrons flow outward on an export edge, and inward on an entry edge.
+- The strip stays legible at `orthographicSize` 5, 250, 2000 and 4000.
+- A migration event draws its ring, and the ring never blocks the simulation.
+- The strip follows a live `SimulationSize` change.
+
+### Part 9 — The status page shows it all
+
+22. Read the status page after each part above.
 
 The test passes when the page states all of these values, at each point above:
 
-- The map and its shape
+- The map, its shape and every hole
 - The liveness and the population of each slot
 - Each effective lane, and each bypass with its start time
-- The custody depth of each sidecar
+- The custody depth of each sidecar, and each bounce a hold timeout caused
 - The last save of each world
-- The entry-edge crowding metric
+- The entry-edge crowding metric, and the paced journal depth
 
 An unknown value reads as unknown. A zero reads as a measurement.
 
-### Part 7 — The error sweep
+### Part 10 — The error sweep
 
 The test passes when no log holds an error at the end of the run. Sweep every BepInEx log,
 sidecar log, relay log and archive log.
@@ -784,48 +947,58 @@ sidecar log, relay log and archive log.
 
 - The wire specification, from WP1: `contract-a.md` and `contract-b` at a new major
   version
-- A relay with lane re-pairing, insertion at a position, handover and the non-delivery
-  answer
-- A sidecar with the handoff state, the re-route rule, `--release-inflight` and durable
-  metrics
-- A mod with periodic saves, save-on-quit, save rotation, plural export edges and the
-  entry-edge metrics
-- The vertical lane, complete and switched off, with a 1×2 test that exercises it
+- A relay with lane re-pairing, insertion at a position, handover, the coordinate map and
+  the non-delivery answer
+- A sidecar with the handoff state, the re-route rule, the bounded hold and its automatic
+  bounce, `--release-inflight`, the delivery rate limit and durable metrics
+- A mod with periodic saves, save-on-quit, save rotation, plural export edges, the second
+  capture band, the corner rule and the entry-edge metrics
+- A live 3×2 map, running on both axes across the two machines
 - An archive with a live status page, and a `ringstat` command
+- A visible portal at each open edge, built to `m4_portal_findings.md`
 - A scripted single-instance recovery procedure
 - A join kit for a new instance
 - Log preservation in the start and stop scripts
-- The save-cost measurement of Risk 3
-- The entry-edge crowding measurement of Question 9
+- The save-cost measurement of Risk 3, against the 2-second budget
+- The rig measurement of Risk 1, at six instances
+- The entry-edge crowding measurement of Question 9, which verifies the pacing
 - The automated M4 exit test, with its recorded result
 - An `m4_findings.md` with the research results of the milestone
-- A scoped or discharged portal work item, after `m4_portal_findings.md` lands
 
-## Design Calls for the Owner
+## Owner Sign-Offs
 
-1. **How much grid M4 builds** (Question 7). The recommendation defers the live grid. Build
-   the abstractions. Ship the vertical lanes behind a flag that is off. Hold the second
-   capture band, the corner rule under real organisms and a six-instance rig for a later
-   milestone. The reason is the rig, not the code. A 2×2 map is degenerate on both axes,
-   and an honest proof wants six to nine instances against three today. **This defers part
-   of decision D13 and needs a sign-off.**
-2. **Where the live grid lands.** It has no milestone number yet.
-   `system_decomposition.md` records it as unscheduled. Name it after call 1.
-3. **The hold has no deadline** (Question 2). A held organism waits for its recorded
-   destination forever, and only `--release-inflight` ends the wait. Confirm that decision
-   D2's preference for loss over duplication extends to an unbounded hold.
-4. **The entry-edge mitigation** (Question 9). Spreading arrivals along the entry edge
-   flattens the crowd and weakens decision D3's one-continuous-world illusion. The
-   recommendation measures first and holds the mitigation. Confirm that order.
-5. **The save cadence** (Risk 3). The measurement chooses it. Name the acceptable stall
-   before the measurement runs, so the result has a test to pass.
+The owner signed this design off on 2026-08-05, and overrode three recommendations. Every
+call below is settled. The sections named beside each one carry the result.
+
+1. **The full grid ships in M4** (Question 7, D13). The live two-axis grid ships and is
+   proven in M4. **This overrides the recommendation** to ship the vertical lanes behind a
+   flag that is off. The exit test attempts an honest 3×2 map: six instances, 4+2 or 5+1
+   across the two machines. The premise of hardware that does not exist is withdrawn. The
+   main machine already runs three instances comfortably, at about 550 MB each on a
+   128 GiB host. A degenerate proof is the fallback, and only when the two machines
+   genuinely cannot hold six instances.
+2. **A hold is bounded, and then it bounces** (Question 2, D2). An orphaned in-flight
+   organism waits for a configurable timeout, 24 hours by default, and then bounces home
+   by itself. An orphan is a forwarded organism with no proof of non-delivery and a dark
+   destination. **This overrides the recommendation** of an unbounded hold. The owner accepts the residual
+   duplication risk of the invisible-delivery case. At-most-once now carries this one
+   bounded exception, and no other. `--release-inflight` stays, for earlier intervention.
+3. **Arrival pacing ships now** (Question 9, D15). The owner named the mechanism: the
+   sleeping machine dammed the flow, and the queued custody deliveries plus the
+   neighbour's contained export pile released together at wake. M4 therefore ships a
+   delivery rate limit at the sidecar. **This replaces the measure-first-versus-mitigate
+   question.** The crowding metric ships too, because it is cheap and because it verifies
+   the pacing. Arrival-position spreading stays parked.
+4. **The save budget is 2 seconds** (Risk 3, D14). A periodic save stalls the simulation
+   for 2 seconds at most. That selects the simple synchronous save, and it gives the
+   save-timer work item a bar to pass.
 
 ## Next Steps
 
-1. Read `m4_portal_findings.md` when it lands. Scope WP7, or move it out of M4.
-2. Answer the five design calls above.
-3. Write WP1. No code starts before the wire settles.
-4. Measure the save cost (Risk 3) on the M3 rig, before WP4 fixes a cadence.
-5. Preserve the T1 journals and the harvested BepInEx logs. Part 4 has no other input.
-6. Bring the M3 rig back up with periodic saves as soon as WP4 lands. The next overnight
-   run then produces a full comparison, not a partial one.
+1. Write WP1. No code starts before the wire settles.
+2. Measure the save cost (Risk 3) against the 2-second budget, before WP4 fixes a cadence.
+3. Measure the rig at six instances (Risk 1), before WP8 depends on it.
+4. Settle the portal's layer and culling mask in one runtime session (Risk 8).
+5. Preserve the T1 journals and the harvested BepInEx logs. Part 6 has no other input.
+6. Bring the rig back up with periodic saves as soon as WP4 lands. The next overnight run
+   then produces a full comparison, not a partial one.
