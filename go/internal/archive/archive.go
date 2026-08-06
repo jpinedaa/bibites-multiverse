@@ -154,7 +154,7 @@ type Archive struct {
 	// turns the ledger into a per-lane flow rate.
 	lanes       map[lanePair]*lane
 	recordCount int
-	seen        map[string]bool // "TYPE/migrationId", the §5.1 duplicate rule
+	seen        map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
 	pending     map[string]*fetch
 	sentWindow  map[string]*rateWindow
 	closed      bool
@@ -203,7 +203,11 @@ func New(cfg Config) (*Archive, error) {
 	a.recordCount = len(records)
 	for _, rec := range records {
 		if rec.MigrationID != "" {
-			a.seen[rec.Type+"/"+rec.MigrationID] = true
+			// Rebuild the key the live path uses, not a lookalike. A NACK
+			// dedups on migrationId+code (§14, B7), so replaying it under
+			// migrationId alone would never match and every re-copied NACK
+			// would be recorded a second time after a restart.
+			a.seen[rec.Type+"/"+dedupKey(rec.Type, rec.MigrationID, rec.Code)] = true
 		}
 		if rec.Type != RecordMigration {
 			continue
@@ -604,7 +608,7 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 	if contractb.DecodeData(env.Data, &nack) != nil {
 		return true
 	}
-	if a.markSeen(RecordNack, nack.MigrationID+"/"+nack.Code) {
+	if a.markSeen(RecordNack, dedupKey(RecordNack, nack.MigrationID, nack.Code)) {
 		return true
 	}
 	a.mu.Lock()
@@ -620,6 +624,19 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 		Message:     nack.Message,
 	})
 	return true
+}
+
+// dedupKey builds the §5.1 duplicate key for one record type. It is the single
+// definition both the live path and the restart replay use, so the two cannot
+// drift apart. A MIGRATION_NACK dedups on the pair migrationId + code, because
+// one migration legitimately produces several different refusals on its way to
+// a lane and each one is a separate fact (§14, B7). Everything else dedups on
+// migrationId alone.
+func dedupKey(typ, migrationID, code string) string {
+	if typ == RecordNack {
+		return migrationID + "/" + code
+	}
+	return migrationID
 }
 
 func (a *Archive) markSeen(typ, key string) bool {

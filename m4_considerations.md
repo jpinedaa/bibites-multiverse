@@ -692,6 +692,10 @@ implementation wave.
 
 Eight packages. WP1 gates the wire work. WP6 gates the exit test.
 
+**Delivery, as of 2026-08-05.** WP1 to WP5 and WP7 are done. WP6 and WP8 are open, and both
+need a running game. Each package carries its own status line below, and each open item stays
+named there.
+
 ### WP1 — The contract amendments
 
 **Depends on:** this document.
@@ -702,6 +706,13 @@ Eight packages. WP1 gates the wire work. WP6 gates the exit test.
 - The version bump, and a migration note for the M3 rig
 
 Write WP1 before any code. M2 and M3 both paid for the alternative.
+
+**Status: DONE, 2026-08-05** (`8d6bdce`). `contract-a.md` §15 carries A18 to A25.
+`contract-b-m4.md` supersedes `contract-b-m3.md` at `contract-b/3.0`.
+
+**Reconciled 2026-08-05**, after both implementations landed. Six resolutions from the code
+are now law: `contract-a.md` §15 A26 and A27, and `contract-b-m4.md` §14 B4 to B7. All six
+are clarifying. Neither version moves.
 
 ### WP2 — The relay: healing, insertion and handover
 
@@ -715,6 +726,10 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 - `--handover-slot`, and the held-entry report for both operator commands
 - Per-axis walking, east and north, on the live grid
 - The coordinate map: fill a hole, extend an axis, and refuse a ragged rectangle
+
+**Status: DONE, 2026-08-05** (`823a70f`). `go/internal/relay/` and `go/internal/mapwalk/`
+carry every item. `--reserve-slot <peerId>[@<col>,<row>]` places a peer before it connects.
+`--handover-slot <n>=<peerId>` rebinds a reservation.
 
 ### WP3 — The sidecar: handoff state, re-route and metrics
 
@@ -731,6 +746,10 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 - Population on the ring claim
 - One lane for each export edge, east and north, both live
 
+**Status: DONE, 2026-08-05** (`823a70f`). `go/internal/sidecar/` carries every item.
+`--position <col>,<row>`, `--insert-after-slot` and `--insert-axis` place the peer.
+`--list-inflight` and `--release-inflight` operate the custody hatch.
+
 ### WP4 — The mod: saves, edges and instrumentation
 
 **Depends on:** WP1.
@@ -744,6 +763,17 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 - The second passive entry edge, and its entry-position mapping
 - The entry-edge metrics of Question 9
 
+**Status: DONE, 2026-08-05** (`efd74a1`), with one measurement still open. `WorldSaver.cs`
+saves, verifies, rotates and prunes. `CrossingStats.cs` reports one `[M2-CROSSING]` line per
+export edge and one `[M4-CROWDING]` line per entry edge. `MultiverseConfig.cs` parses
+`exportEdges` and derives the entry and border sets. The corner rule runs in
+`MultiverseClient.OnBodyTick`.
+
+**Still open: the save-stall re-measure at six instances.** The mod logs `stallMs` against a
+2 000 ms budget on every save, and logs `event=BUDGET_EXCEEDED` above it. Nobody has run that
+against six concurrent instances. The save lock and its six 15-second deferrals exist for
+that contention, and they are untested at six. Measure it in WP6.
+
 ### WP5 — The archive: the status page
 
 **Depends on:** WP1, WP3.
@@ -754,6 +784,10 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 - Each bounce that a hold timeout caused
 - The honest-gap rule of Risk 4
 - `ringstat`, over the same data, in the terminal
+
+**Status: DONE, 2026-08-05** (`823a70f`). `go/internal/archive/status.go` and `page.go` serve
+the page on `--http`, default `127.0.0.1:8791`. `go/cmd/ringstat/` reads the same data.
+An absent stat renders as `unknown`, and `statsAsOfMs` ages every block.
 
 ### WP6 — The rig: recovery, preservation and the join kit
 
@@ -767,6 +801,11 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 - **The six-instance rig**: 4+2 or 5+1 across the two machines, in a 3×2 map
 - The rig measurement of Risk 1, before WP8 depends on it
 - Per-instance log names, environment variables and far-end scripts, for six slots
+
+**Status: OPEN.** No `e2e/run-m4.sh` exists. The M3 scripts still speak the retired wire, and
+`dev_environment.md`, *The M4 rig modernization*, lists every line to change. WP6 also owns
+the save-stall re-measure that WP4 left open, and the rehearsal and LAN phases the exit test
+depends on.
 
 ### WP7 — The portal
 
@@ -788,6 +827,21 @@ Do not use immediate mode. `Shapes.Draw.*` needs a `ShapesRenderFeature` on the 
 renderer, and a mod cannot add one. Keep `ParticlesMaster` as an optional extra only: the
 game silences it when the player turns pheromone display off.
 
+**Status: BUILT, 2026-08-05** (`efd74a1`), and unproven on screen. `PortalVisual.cs` draws one
+strip per open export edge and one per declared entry edge. `MULTIVERSE_PORTAL` and
+`MULTIVERSE_PORTAL_FLOURISHES` gate it, both on by default. `[M4-PORTAL] event=BUILT` reports
+the layer, the culling mask, the shaders and the first strip's world bounds, which is Risk 8's
+runtime check. Entry-portal visibility is now defined in `contract-a.md` §15 A27.
+
+**Two looks are still open, and both need a running game.**
+
+1. **The sorting order.** `[M4] PortalSortingOrder` defaults to `-50` and has no environment
+   variable. Nobody has confirmed the strip draws behind the organisms and in front of the
+   background.
+2. **The zoom-legibility sweep.** Check the strip at `orthographicSize` 5, 250, 2 000 and
+   4 000. The new `camera <orthographicSize> [x] [y]` command-file verb drives that sweep from
+   a script. The sweep has not run.
+
 ### WP8 — The exit test
 
 **Depends on:** WP2, WP3, WP4, WP5, WP6.
@@ -796,6 +850,9 @@ game silences it when the player turns pheromone display off.
 Build the test on `e2e/run-m3-lan.sh`. The ring form-up, the command file and the archive
 checks all carry over. The rig grows to six instances, so the harness starts and stops
 each slot by number.
+
+**Status: OPEN.** It depends on WP6, which is open. Part 2 changed on 2026-08-05 — see the
+amendment under *Exit Test*, Part 2.
 
 ## Exit Test
 
@@ -829,13 +886,30 @@ The test passes when all of these conditions hold:
 
 The test passes when all of these conditions hold:
 
-- The east lane re-pairs along row 1. The north lane re-pairs up the middle column.
-- No export edge closes. Each row and each column still holds a deliverable slot.
-- The current continues on both axes.
+- The east lane re-pairs along row 1. Slot 4 exports east to slot 6, and skips slot 5.
+- The east lane stays open. Row 1 still holds two deliverable slots.
+- **Slot 2 closes its north lane with `no_peer`.** Column 1 holds only slot 2 and slot 5.
+- The east current continues. The north current continues on both other columns.
 - The status page shows slot 5 as bypassed, with the time it went dark.
 - Each organism in flight to slot 5 at the kill is held, re-routed or bounced by the rule
   of Question 2. Each entry states which answer it took, and why.
 - The map holds exactly one copy of each organism, counted by entity ID.
+
+**Amendment, 2026-08-05: a height-2 map proves the degenerate answer, not the re-pair.**
+The first three conditions above replace an earlier pair that required the north lane to
+re-pair and required no export edge to close. Those two conditions are unsatisfiable on a
+3×2 map, and Contract B §2.1 says why. A lane needs a third party to route around a gap.
+Column 1 of a 3×2 map holds two slots. Kill one and the survivor has nothing to re-pair to.
+
+The corrected conditions assert the **correct degenerate behaviour**: the width axis routes
+around the dead slot, and the height axis closes with `no_peer`. That result proves
+route-around works against a degenerate axis. A closed north lane here is a pass, not a
+failure, and an implementation that re-pairs it is defective.
+
+**The full north re-pair applies only on a map of height 3 or more.** Record it as the 3×3
+stretch goal. Run it when the two machines hold nine instances, and measure the rig first
+(Risk 1). A 3×3 run asserts the original conditions unchanged: both lanes re-pair, and no
+export edge closes.
 
 ### Part 3 — The dead slot splices back in
 
@@ -995,10 +1069,19 @@ call below is settled. The sections named beside each one carry the result.
 
 ## Next Steps
 
-1. Write WP1. No code starts before the wire settles.
-2. Measure the save cost (Risk 3) against the 2-second budget, before WP4 fixes a cadence.
-3. Measure the rig at six instances (Risk 1), before WP8 depends on it.
-4. Settle the portal's layer and culling mask in one runtime session (Risk 8).
-5. Preserve the T1 journals and the harvested BepInEx logs. Part 6 has no other input.
-6. Bring the rig back up with periodic saves as soon as WP4 lands. The next overnight run
-   then produces a full comparison, not a partial one.
+Updated 2026-08-05, after WP1 to WP5 and WP7 landed. Every remaining step needs a running
+game, which is what makes WP6 the gate.
+
+1. **Modernize the rig, and build `e2e/run-m4.sh`** (WP6). It is the only open dependency of
+   every step below. `dev_environment.md`, *The M4 rig modernization*, lists each line.
+   Fix the port plan first: the relay default `8790` and the archive default `8791` both sit
+   inside the six-slot Contract A range `8787`–`8792`.
+2. **Measure the rig at six instances** (Risk 1), before WP8 depends on it.
+3. **Re-measure the save stall at six instances** (Risk 3), against the 2 000 ms budget. The
+   budget check ships and logs `event=BUDGET_EXCEEDED`. Only the contention is unmeasured.
+4. **Settle the portal's layer, culling mask and sorting order in one runtime session**
+   (Risk 8), then sweep the zoom range with the `camera` verb.
+5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.
+6. **Bring the rig back up with periodic saves.** The mod saves every 10 minutes by default.
+   The next overnight run then produces a full comparison, not a partial one.
+7. **Run the exit test** (WP8), against the amended Part 2.

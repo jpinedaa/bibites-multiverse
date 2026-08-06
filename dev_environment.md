@@ -9,10 +9,10 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Game install (Windows) | `/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites` |
 | Game assembly | `…/The Bibites_Data/Managed/BibitesAssembly.dll` |
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
-| Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/`) |
+| Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`) |
-| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, `contract-a/1.1`), `contract-b-m3.md` (sidecar ↔ relay ↔ sidecar ↔ archive, `contract-b/2.0`), `genome-hash.md` (the canonical genome projection). `contract-b-m2.md` is the superseded M2 wire, kept as the record of what `contract-b/1` said |
-| Rigs and exit tests | `e2e/` — `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `journal.py` = journal reader |
+| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.0`**, amended in place; §15 is the M4 set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.0`**; §14 is its reconciliation set), `genome-hash.md` (the canonical genome projection, unchanged by M4). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
+| Rigs and exit tests | `e2e/` — `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **There is no `run-m4.sh` yet, and the M3 scripts still speak the retired wire** — see *The M4 rig modernization* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The bundle itself lands in `farend/dist/`, which is **gitignored**: it holds binaries and a downloaded BepInEx release |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
 | Shared LAN token — **never in the repo** | `~/.multiverse-token`, mode `600`. See *The LAN token* below |
@@ -59,6 +59,28 @@ kills exactly one game instead of every one by process name. And an instance is 
 its log **by content, never by start order**: `game.sh` greps both `LogOutput.log` and
 `LogOutput.log.1` for that instance's own startup marker, because which process gets which
 file is a lock race (see Gotchas).
+
+### The reference DLL set
+
+`bibites-mod/sync-game-refs.sh` copies thirteen DLLs into `bibites-mod/libs/` — eleven from
+the game's `The Bibites_Data/Managed`, and `0Harmony.dll` and `BepInEx.dll` from
+`BepInEx/core`. It then regenerates `decompiled/BibitesAssembly/` with `ilspycmd`, and writes
+`libs/.sync-stamp` with the Steam buildid and the `BibitesAssembly.dll` hash.
+
+**`ShapesRuntime.dll` joined the set for M4** (`efd74a1`), and it is what the portal is drawn
+with. `bibites-mod/BibitesMultiverse.csproj` references it like every other one, with
+`Private="false"` so it is never copied into `plugins/`. The full Managed set is
+`BibitesAssembly`, `Newtonsoft.Json`, `Newtonsoft.Json.UnityConverters`, **`ShapesRuntime`**,
+`UnityEngine`, `UnityEngine.CoreModule`, `UnityEngine.InputLegacyModule`,
+`UnityEngine.JSONSerializeModule`, `UnityEngine.Physics2DModule`, `UnityEngine.PhysicsModule`
+and `UnityEngine.UI`.
+
+**The freshness check only looks at `BibitesAssembly.dll`.** It compares that one file's
+SHA-256 against `libs/` and reports the Steam buildid; when they match it prints
+`up to date (buildid N)` and **copies nothing**. So a `libs/` that is missing or stale on
+`ShapesRuntime.dll` alone is not detected — which is exactly the state every checkout was in
+before M4. Run `sync-game-refs.sh --force` after any change to the DLL list, and whenever the
+build fails to resolve a reference that the script claims to have copied.
 
 The auto-test (`bibites-mod/src/AutoTest.cs`) drives the whole M1 exit test unattended: it
 waits for the main menu, seeds or loads its own `M1-AutoTest` world via
@@ -160,17 +182,67 @@ sectors, `contract-b/1`, `MULTIVERSE_SECTOR`, `--sector A`, `/contract-b/v1` —
 those reach the current binaries. Read it for its phase structure and its evidence, not as a
 runnable rig; `run-m3.sh` is the one that runs.
 
+### The M4 rig modernization
+
+**There is no `e2e/run-m4.sh`, and the M3 scripts speak a wire the binaries retired.** M4
+bumped both majors (`contract-a/2.0`, `contract-b/3.0`) and moved both paths. A relay and a
+sidecar still *serve* the old paths and then close the connection with an explanation, so a
+stale script does not fail with a socket error — it connects, gets closed, and looks like a
+peer that will not join. That is the failure to expect, and it is why this list exists.
+
+| What the scripts speak | What M4 speaks | Where |
+|---|---|---|
+| `/contract-b/v2` | **`/contract-b/v3`** | `e2e/run-m3.sh` (`RELAY_URL`), and it is **sourced as a library** by `run-m3-lan.sh` and `baseline.sh`, so this one line reaches all three. Also `e2e/run-m3-lan.sh` (the operator note) and `farend/setup-farend.ps1`. `e2e/run-m2.sh` still says `/contract-b/v1`, two majors back. |
+| `/contract-a/v1` | **`/contract-a/v2`** | **Nothing to change.** No script hardcodes a Contract A path — the sidecar's `--listen` and the mod's `MULTIVERSE_SIDECAR_PORT` carry it, and both sides already agree. |
+| `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N`** | `e2e/run-m3.sh` and `farend/setup-farend.ps1`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. |
+| the relay's `ring.json` key `"ring"` | **`"slots"`**, with `width`, `height`, `col`, `row` | `e2e/run-m3-lan.sh` (`ring_order()`) and `e2e/baseline.sh`. **This is the silent one.** `"ring"` is a read-only migration path: an M4 relay reads an M3 file once and never writes that key again. Both readers work today against the committed M3 `ring.json` and start returning empty the first time an M4 relay saves. |
+| nothing | the archive's **`--http`** flag, and **`ringstat`** | No script mentions either. The archive is started without `--http`, so it binds the default `127.0.0.1:8791` — which is slot 5's Contract A port on a six-slot rig. `baseline.sh` reads the archive only through the filesystem, so the whole M4 observability surface — map shape, effective lanes, bypasses, custody/paced/held depths, hold-timeout bounces — is absent from the baseline capture. |
+| `grep '[M2-CROSSING]' \| tail -n 1` | a filter on **`edge=`** | `e2e/baseline.sh`, in both `last_crossing()` and the population trend. See *Reading the logs* below: one window now emits one line **per export edge**. |
+
+**`--reserve-slot` did not change, and a report saying otherwise is wrong.** The relay's flag
+is `--reserve-slot <peerId>[@<col>,<row>]`, and the coordinate suffix is **optional** — a bare
+`--reserve-slot slot-1` is valid M4 syntax and lets the §7.2 placement rules choose. There is
+no `--position` on the relay. `--position <col>,<row>` is a **sidecar** flag, beside
+`--insert-after-slot` and `--insert-axis`. So `run-m3-lan.sh reserve` still parses; it simply
+no longer pins a coordinate, which for a three-slot line is the same outcome.
+
 Environment variables are what make an instance scriptable, and `run-m3.sh` sets them all.
 Name every one of them in `WSLENV` or WSL forwards none (see Gotchas).
 
 | Variable | Meaning |
 |---|---|
-| `MULTIVERSE_EXPORT_EDGE` | The one edge this sim exports through — `E` under the ring (`contract-a.md` §14 A11). The opposite edge becomes the passive entry edge. Unset disables the multiverse client. M2's `MULTIVERSE_OPEN_EDGE` still reads as a fallback. |
+| `MULTIVERSE_EXPORT_EDGES` | **M4.** The edges this sim exports through, as a list — `E,N` under the grid (`contract-a.md` §15 A18). Separators are comma, semicolon, space or tab; each token is trimmed and upper-cased. The **opposite** of each becomes a passive entry edge, and the union of both sets becomes `borderEdges`. Unset **disables the multiverse client entirely**. |
+| `MULTIVERSE_EXPORT_EDGE` | **The M3 singular name, still read, and it takes a list too** — it is the same parser behind a different name. Kept so an M3 script keeps working. |
+| `MULTIVERSE_OPEN_EDGE` | M2's name for the same thing. Also still read. |
 | `MULTIVERSE_RING_SLOT` | The advisory ring slot, an integer `≥ 1`. It is a **label**, not a routing input: the sidecar closes `4001` when it disagrees with the slot the relay granted, which turns a mis-wired rig into one second of diagnosis. **Replaces `MULTIVERSE_SECTOR`, which no longer reaches the mod at all** — D8 retired the `{x, y}` grid (`contract-a.md` §14 A14). |
-| `MULTIVERSE_SIDECAR_PORT` | The loopback Contract A port this instance dials. One per instance; this is what separates three games on one machine. |
-| `MULTIVERSE_WORLD` | See below. |
+| `MULTIVERSE_SIDECAR_PORT` | The loopback Contract A port this instance dials. Default `8787`. One per instance; this is what separates six games on one machine. |
+| `MULTIVERSE_WORLD` | See below. Under M4 it also names the **save file**, and therefore the whole rotation set. |
 | `MULTIVERSE_CMD_FILE` | See below. |
 | `MULTIVERSE_BORDER_WIDTH` | `W` in world units, which is also the inner boundary of the capture band. `0`/unset derives `0.02·S`, floor 20 u. |
+| `MULTIVERSE_SAVE_MINUTES` | **M4.** Periodic-save interval in simulated minutes. Default `10`. `0` turns the timer off; save-on-quit is unaffected. |
+| `MULTIVERSE_SAVE_KEEP` | **M4.** How many timestamped backups of *this world* survive a prune. Default `6`. `0` keeps none. |
+| `MULTIVERSE_SAVE_ON_QUIT` | **M4.** Save once on `OnApplicationQuit`. Default `true`. |
+| `MULTIVERSE_PORTAL` | **M4.** Draw the portal strips. Default `true`. `false` never creates the component, so no strip of either kind appears. |
+| `MULTIVERSE_PORTAL_FLOURISHES` | **M4.** Draw the arrival and departure rings. Default `true`. It does **not** gate the strips. |
+| `MULTIVERSE_FAMILY_REPORT` | Seconds between `[M2-FAMILY]` reports. Default `0`, off. |
+| `MULTIVERSE_AUTOTEST` | Arms the M1 auto-test. It **ORs** with the `[M1] AutoTest` config entry rather than overriding it. |
+
+**Three names reach the same field, and the first non-empty one wins outright:**
+`MULTIVERSE_EXPORT_EDGES`, then `MULTIVERSE_EXPORT_EDGE`, then `MULTIVERSE_OPEN_EDGE`, then
+the BepInEx entry `[M4] ExportEdges`. **They do not merge.** Set the plural one and the other
+two are ignored — and note that the mod's `[M2] config sources:` line still echoes all three,
+which reads as if the others applied. They did not.
+
+**A rejected edge set disables the client silently, and that is the one trap here.** An
+unparseable token, a duplicate edge, or an edge declared together with its opposite
+(`E,W`) all clear the set and leave the client off. Each of those three logs an error. A
+value that is only separators — `MULTIVERSE_EXPORT_EDGES=","` — clears it with **no** error,
+and the only symptom is the generic "no export edge is configured" line. Check that line
+before chasing a sidecar that never sees a mod.
+
+Two knobs have **no** environment variable and are BepInEx config entries only:
+`[M4] PortalSortingOrder` (default `-50`) and `[M4] PortalEntryWidth` (default `0`, which
+derives the entry strip's depth from `W` plus the entry margin).
 
 - **`MULTIVERSE_WORLD=<save name>`** loads that world from the main menu through
   `GameManager.StartGame(path)`, and **seeds it first if it does not exist** — apply the
@@ -178,24 +250,108 @@ Name every one of them in `WSLENV` or WSL forwards none (see Gotchas).
   that path and both callers share it: `AutoTest` for M1, `WorldLoader` for every rig
   since. It is what brings `M3-Slot1`, `M3-Slot2` and `M3-Slot3` up on a clean profile.
 - **`MULTIVERSE_CMD_FILE=<Windows path>`** is the dev-command channel (`DevCommands.cs`).
-  The mod polls that file and runs one `<token> <verb> [args]` line at a time. Write it
-  **atomically** (temp file, then rename) — content that does not end in a newline is read
-  as a partial write and left for the next poll. Every finished command appends
-  `<token> OK|ERROR <details>` to `<cmdfile>.log`, which is what a script waits on. Keep
-  the file on the Windows side of the boundary (`$env:TEMP`); a WSL path is not reliably
-  reachable from a Windows process. `F10` triggers the same forced export by hand.
+  There is **no default** — unset it and only the `F10` hotkey works. The mod polls that file
+  every 0.2 s and runs **one command per file**, never one per line: it reads the whole file,
+  runs the first three whitespace-separated fields as `<token> <verb> [argument]`, and
+  **deletes the file before running the command**. Write it **atomically** (temp file, then
+  rename) — content that does not end in a newline is read as a partial write and left for
+  the next poll. Every finished command appends `<token> OK|ERROR <details>` to
+  `<cmdfile>.log`, which is what a script waits on. Keep the file on the Windows side of the
+  boundary (`$env:TEMP`); a WSL path is not reliably reachable from a Windows process.
 
   | Verb | What it does |
   |---|---|
-  | `export <family\|any\|id>` | Force one migration. It only teleports the organism into the border strip with an outward velocity — the ordinary `MIGRATE_OUT` path and every guard on it still runs, so the test bypasses no part of the pipeline. `family` prefers an organism with living parents, which is what makes the lineage annex non-empty. |
+  | `export <family\|any\|id> [E\|N\|W\|S]` | Force one migration. It only teleports the organism into the border strip with an outward velocity — the ordinary `MIGRATE_OUT` path and every guard on it still runs, so the test bypasses no part of the pipeline. `family` prefers an organism with living parents, which is what makes the lineage annex non-empty. **M4 added the trailing edge**; omit it and the first declared export edge in canonical order is used. A letter that is not a declared export edge is refused, and the error names the declared set. |
   | `place <family\|any\|id> <x> <y> [vx] [vy]` | **M3.** Put one organism at an exact world position with an exact velocity, then report the capture-band verdict. This is how the two D10 containment questions are asked: an organism outside the square travelling **inward** (must not export), and one past the wrap radius (the wrap must return it). It clears the migration cooldown and the entry-immunity window first, so the decision under test is not swallowed by a leftover guard, and it drops the containment tracker's last position so the teleport is not misread as a wrap. Nothing in the pipeline is bypassed. |
-  | `edge <open\|closed>` | **M3.** Force this instance's export edge open or closed locally, without touching the sidecar or the relay. |
+  | `edge <open\|closed\|close> [E\|N\|W\|S\|all]` | **M3, extended in M4.** Force an export edge open or closed locally, without touching the sidecar or the relay. **The target is new**: omit it, or pass `all`, and every declared export edge moves together — so the bare M3 form `edge open` still works and now means "all". A letter that is not a declared export edge is refused. |
+  | `camera <orthographicSize> [x] [y]` | **M4.** Set the camera zoom, and move it when both coordinates are given. It drives `CameraManager.SetCamSize` and then fires the zoom-change events, so anything that reacts to a manual zoom reacts to this. It reports the resulting `orthographicSize`, `position` and `cullingMask`. **This is what makes the WP7 zoom-legibility sweep scriptable** — 5, 250, 2 000 and 4 000 in four commands. |
+  | `flourish <export\|entry> [x] [y]` | **M4.** Fire one portal flourish ring by hand, without waiting for a migration. Anything other than `entry` in the first argument selects `export`, including a missing argument. Both coordinates are read only when both are present; otherwise the ring fires at the origin. |
   | `census`, `count <id>`, `family` | Population and lineage readouts. `count <id>` is the exactly-once check. |
-  | `save [name]`, `timescale <x>`, `autosave <on\|off>`, `quit` | World control. |
+  | `save [name]`, `timescale <x>`, `autosave <on\|off>`, `quit` | World control. `save` runs the same write-verify-rotate-prune path as a periodic save. |
+
+### Reading the logs — the grepable series
+
+Every mod log line carries a bracketed series tag, and the tag is the whole filter. **The Go
+side carries none** — the relay, the sidecar, the archive and `ringstat` all log structured
+`slog` key/value records, so grep them by key instead.
+
+| Tag | What it reports |
+|---|---|
+| `[M2]` | The general mod series: config, connection, edge state, exports. |
+| `[M2-CROSSING]` | Per-simulated-minute crossing counters, **one line per export edge**. |
+| `[M2-CMD]` | Every command-file result, the same text as `<cmdfile>.log`. |
+| `[M2-FAMILY]` | Family scans, on `MULTIVERSE_FAMILY_REPORT`. |
+| `[M2-WORLD]` | World load and seed. |
+| `[M3-D10]` | Containment: `event=WRAP`, `event=PLACED`, and each capture verdict. |
+| `[M3-LINEAGE]` | The parent-blob collector. |
+| `[M4-SAVE]` | **M4.** `event=SAVED`, `event=FAILED`, `event=BUDGET_EXCEEDED`, plus the armed line and each deferral. |
+| `[M4-CROWDING]` | **M4.** Per-simulated-minute arrival crowding, **one line per entry edge**. |
+| `[M4-PORTAL]` | **M4.** `event=BUILT`, `event=SHOWN`, `event=HIDDEN`, `event=RELAYOUT`. |
+| `[M1-AUTOTEST]` | The M1 auto-test, including its one `RESULT:` line. |
+
+**`[M2-CROSSING]` is now several lines per window, and every parser must key on `edge=`.**
+The field itself is not new — the M3 line already carried `edge=`, with the same field names
+in the same order — but M3 declared one export edge, so one window produced one line. Under
+the grid a window produces **one line per declared export edge**, and each line's counters are
+**that edge's**, not the world's. There is no cross-edge total on the line at all. Two
+consequences, and both have already bitten `e2e/baseline.sh`:
+
+- `grep '[M2-CROSSING]' | tail -n 1` no longer returns "the" sample. It returns whichever
+  edge happened to be emitted last, and reports it as the world's figure.
+- A population trend built by `sed`-ing `population=` out of every line now yields *N*
+  identical samples per simulated minute, so a fixed-length tail covers `1/N` of the time it
+  claims and the sample count is inflated *N*-fold.
+
+Filter to one edge for a world-level series, or sum across edges deliberately. The full
+field order is `edge simMinute stripEntries crossings totalStripEntries totalCrossings
+cumulativeStripEntriesPerSimMin population S W simTick`.
+
+`[M4-CROWDING]` mirrors it on the **entry** side, one line per entry edge per simulated
+minute, and carries `inQuarter`, `quarterShare`, `arrivals`, `arrivalsPerSimMin` and an
+eight-bucket `arrivalHistogram=[…]` along the edge. It is what verifies the arrival pacing.
+
+### The save-file rotation layout
+
+M4 gave the mod its own periodic save (`WorldSaver.cs`), and it writes **three kinds of file**
+into the game's `Savefiles/` directory — the same directory the game itself uses, which is
+`Application.persistentDataPath/Savefiles`. `<world>` is `MULTIVERSE_WORLD`, falling back to
+the loaded game's name.
+
+| File | What it is |
+|---|---|
+| `<world>.zip` | **The live save.** The name is stable, so it always points at the newest good save. |
+| `<world>-<yyyyMMddTHHmmssZ>.zip` | A rotated backup. UTC, second resolution, fixed width — so an **ordinal name sort is an age sort**. `MULTIVERSE_SAVE_KEEP` (default 6) of them survive a prune, and only this world's are ever pruned. |
+| `<world>.partial.zip` | **Transient.** The save is written here first, verified as a zip containing `scene.bb8scene`, and only then rotated into place. A failure at any step deletes it and **leaves the previous live save untouched**. |
+| `.multiverse-save.lock` | The cross-instance save lock. Broken automatically when older than 180 s. |
+
+The order is write → verify → rotate → prune, and rotate is **two renames**: the old
+`<world>.zip` becomes the timestamped backup, then the partial becomes `<world>.zip`.
+
+**What this means for anything that scans the directory** — `worldstat`, a recovery
+procedure, a baseline capture:
+
+- **`worldstat` itself is safe by construction.** It takes exactly one `.zip` argument and
+  never scans a directory. The hazard is entirely in the caller. `e2e/baseline.sh` does it
+  correctly: it names `<world>.zip` explicitly and copies the zip out before reading it.
+- **A `*.zip` glob now picks up files that are not worlds you want.** Exclude
+  `*.partial.zip`, and match a backup with `-\d{8}T\d{6}Z\.zip$`. The game's own `quick.zip`
+  and its `Autosaves/` subdirectory are also in there.
+- **Between the two renames, `<world>.zip` does not exist at all.** A tool that assumes the
+  live name is always present fails with "file not found" for the width of two filesystem
+  metadata operations. **Retry — do not treat it as a missing world.**
+- **A `<world>.partial.zip` found at rest means a run died mid-save.** It is safe to delete,
+  and the mod deletes it itself the next time it arms.
+- Recovery reads the live name for the newest good save, and the highest-sorting backup name
+  for the one before it.
+
+A periodic save is deferred by 15 s, up to six times, while a `MIGRATE_IN` is queued or while
+another instance holds the lock; after six it saves anyway and warns. The save on quit ignores
+the lock. Every outcome is one `[M4-SAVE]` line with a `stallMs` measured against the 2 000 ms
+budget of Risk 3.
 
 ### The LAN token
 
-`contract-b-m3.md` §3.1 puts one shared bearer token on the Contract B upgrade, because M3's
+`contract-b-m4.md` §3.1 puts one shared bearer token on the Contract B upgrade, because M3's
 wire leaves the loopback. **There is no flag that takes the token literally** — that is a
 rule, not an omission, because a literal flag puts the secret in every process listing. Mint
 it once, into a file only you can read:
@@ -222,25 +378,34 @@ sidecars, then the three game instances:
 ```sh
 bin/relay   --listen 127.0.0.1:8790 --data-dir ./e2e/relay-data \
             --token-file ~/.multiverse-token
-bin/archive --relay ws://127.0.0.1:8790/contract-b/v2 --peer-id archive-main \
-            --data-dir ./e2e/archive-data --token-file ~/.multiverse-token
-bin/sidecar --listen 127.0.0.1:8787 --relay ws://127.0.0.1:8790/contract-b/v2 \
-            --peer-id slot-1 --data-dir ./e2e/data/slot-1 --token-file ~/.multiverse-token
-bin/sidecar --listen 127.0.0.1:8788 --relay ws://127.0.0.1:8790/contract-b/v2 \
-            --peer-id slot-2 --data-dir ./e2e/data/slot-2 --token-file ~/.multiverse-token
-bin/sidecar --listen 127.0.0.1:18789 --relay ws://127.0.0.1:8790/contract-b/v2 \
-            --peer-id slot-3 --data-dir ./e2e/data/slot-3 --token-file ~/.multiverse-token
+bin/archive --relay ws://127.0.0.1:8790/contract-b/v3 --peer-id archive-main \
+            --data-dir ./e2e/archive-data --token-file ~/.multiverse-token \
+            --http 127.0.0.1:8791
+bin/sidecar --listen 127.0.0.1:8787 --relay ws://127.0.0.1:8790/contract-b/v3 \
+            --peer-id slot-1 --position 0,0 \
+            --data-dir ./e2e/data/slot-1 --token-file ~/.multiverse-token
+bin/sidecar --listen 127.0.0.1:8788 --relay ws://127.0.0.1:8790/contract-b/v3 \
+            --peer-id slot-2 --position 1,0 \
+            --data-dir ./e2e/data/slot-2 --token-file ~/.multiverse-token
+bin/sidecar --listen 127.0.0.1:18789 --relay ws://127.0.0.1:8790/contract-b/v3 \
+            --peer-id slot-3 --position 2,0 \
+            --data-dir ./e2e/data/slot-3 --token-file ~/.multiverse-token
 ```
 
-Three things about that invocation are load-bearing:
+Four things about that invocation are load-bearing:
 
-- **The path is `/contract-b/v2`.** M2's `/contract-b/v1` is a different wire and the relay
-  does not serve it.
-- **Slot order is start order.** The relay appends a new peer at the **tail** of the ring
-  (`contract-b-m3.md` §7.2 rule 4), so the first sidecar to claim gets slot 1, the second
-  gets slot 2, and so on. `--slot n` (or `MULTIVERSE_SLOT`) is only a preference; the relay
-  arbitrates, and rule 1 recovers a remembered slot from the `peerId` regardless. **Do not
-  rely on `--slot` to order the ring — start them in the order you want.**
+- **The path is `/contract-b/v3`.** M3's `/contract-b/v2` and M2's `/contract-b/v1` are
+  different wires. The relay still *answers* on `v2` and closes the connection with `4000`,
+  so a stale client looks like a peer that will not join rather than a 404.
+- **`--position <col>,<row>` is a sidecar flag, and it is how a map takes a shape.** Without
+  it a peer is placed by the relay: the first hole in row-major order, or a new column on the
+  shorter axis. That is deterministic but it is not *your* layout. `--insert-after-slot` and
+  `--insert-axis` splice a newcomer between two live slots instead.
+- **Slot order is still start order when nobody expresses a preference**, so the first
+  sidecar to claim gets slot 1. `--slot n` (or `MULTIVERSE_SLOT`) is only a preference; the
+  relay arbitrates, and it recovers a remembered slot from the `peerId` regardless. **Do not
+  rely on `--slot` to order the map — pass `--position`, or pre-place with the relay's
+  `--reserve-slot`.**
 - **`--peer-id` is the slot's identity, and it is persisted.** It lands in
   `<data-dir>/peer-id` and is generated once if omitted, so a sidecar restarted against the
   same data dir reclaims the same slot. A reinstall with a fresh data dir takes a *new* slot
@@ -269,11 +434,11 @@ Each migration prints one header line — receive time, `migrationId`, entity, `
 m`, source peer, outcome — then the migrant's genome hash and each parent, every hash tagged
 `[held]` or `[MISSING]` by whether the archive actually has the bytes. A parent with no hash
 prints as `gap: <gapReason>`. The `[MISSING]` set **is** the gap report of
-`contract-b-m3.md` §10: the archive's honest statement of what it does not have, and the
+`contract-b-m4.md` §10: the archive's honest statement of what it does not have, and the
 retry queue's input.
 
 **Releasing a ring slot.** A slot reservation never expires — that is what keeps a peer's
-place while it is offline (`contract-b-m3.md` §7.4). The escape hatch for a slot reserved by
+place while it is offline (`contract-b-m4.md` §7.4). The escape hatch for a slot reserved by
 a peer that is never coming back is a **startup flag**: the relay releases the slot, says so,
 and exits without serving.
 
@@ -284,18 +449,35 @@ bin/relay --data-dir ./e2e/relay-data --release-slot 2   # releases, logs, exits
 The released number is **retired, not reused**: the next peer appends at the tail. Stop the
 relay before running it, and restart it afterwards.
 
-**Reserving a ring slot before its peer connects.** The mirror image of the release flag, and
-the reason the LAN ring can form in any start order:
+**Handing a slot to a different peer.** M4's addition, and the answer to a reinstall that took
+a fresh data dir and therefore a fresh `peerId`. It rebinds the reservation — slot, position
+and all — to the new identity, and it is deliberately **not** a wire operation: on this
+transport a `peerId` is a claim, not a credential, so only a command on the relay's own
+machine can do it.
+
+```sh
+bin/relay --data-dir ./e2e/relay-data --handover-slot 5=peer-lan-slot5-new   # rebinds, logs, exits 0
+```
+
+**Reserving a slot before its peer connects.** The mirror image of the release flag, and
+the reason a LAN map can form in any start order:
 
 ```sh
 bin/relay --data-dir ./e2e/relay-data \
-          --reserve-slot slot-1 --reserve-slot slot-2 --reserve-slot slot-3   # writes, logs, exits 0
+          --reserve-slot slot-1@0,0 --reserve-slot slot-2@1,0 --reserve-slot slot-3@2,0 \
+          --reserve-slot slot-4@0,1 --reserve-slot slot-5@1,1 --reserve-slot slot-6@2,1
 ```
 
-Each `--reserve-slot` appends one reservation at the tail, in the order given, so the flags
-*are* the ring order. It is idempotent — a `peerId` that already holds a slot keeps it — and,
-like `--release-slot`, it is a startup command: the relay writes `ring.json` and exits without
-serving. `e2e/run-m3-lan.sh reserve` is the wrapper the LAN rig uses.
+**The `@<col>,<row>` suffix is M4's, and it is optional.** With it the flags *are* the map, and
+a 3×2 grid forms whatever order the six peers join in. Without it — the M3 form,
+`--reserve-slot slot-1` — each reservation appends in the order given and the relay places it,
+which is still valid and is what `e2e/run-m3-lan.sh reserve` uses. There is **no `--position`
+on the relay**; that flag belongs to the sidecar, which expresses the same preference from the
+other end.
+
+Both are idempotent — a `peerId` that already holds a slot keeps it — and, like
+`--release-slot`, both are startup commands: the relay writes `ring.json` and exits without
+serving.
 
 ## The far end — the second computer
 
@@ -459,6 +641,18 @@ so this line stays correct even when the far end suddenly cannot connect.
   `<data-dir>/listen.addr`). The M2 rig used `8787`/`8788`/`8790` and collides head-on. On
   the LAN rig only `8787`, `18789` and `8790` are local; the far end's `8787` is on its own
   machine.
+- **The M4 six-slot rig collides with its own defaults, on two ports. Plan the ports before
+  building it.** `contract-a.md` §10 gives the six slots the Contract A range `8787`–`8792`.
+  The relay's default listen port is **`8790`**, which is **slot 4's** port. The archive's
+  default status-page bind is **`127.0.0.1:8791`**, which is **slot 5's**. Both defaults sit
+  inside the range they have to avoid, and `ringstat` defaults to the archive's URL, so the
+  collision moves with it. Nothing in the repo uses `8795` — a report that mentions it is
+  describing a workaround somebody ran by hand, not a checked-in default. The M3 rig dodged
+  the same problem differently: it gave slot 3 the five-digit port `18789`. **Pick one of the
+  two dodges and write it down** — move the relay and the archive out of the way with
+  `--listen` / `MULTIVERSE_RELAY_LISTEN` and `--http`, or give the slots five-digit ports.
+  Do not leave it to the defaults; the symptom is a sidecar that cannot bind, or worse, a
+  game that connects to the relay.
 - **`kill $!` does not kill a program launched in the background *inside* a compound
   command.** In `( … & )`, or in `cmd1 && cmd2 &`, `$!` is the pid of the **subshell**; the
   real program is its child and outlives the kill. A relay started that way survived its own

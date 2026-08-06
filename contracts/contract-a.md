@@ -328,7 +328,7 @@ wrap returns it (D10, §14 A11, D13).
 > without any of them travelling anywhere, and the fix would be a floor on the **outward
 > component over several ticks**, not on one sample.
 
-### 4.3.2 The corner rule — which edge claims an organism in two bands (added — §15, A19)
+### 4.3.2 The corner rule — which edge claims an organism in two bands (added — §15, A19; generalized — §15, A26)
 
 The two bands **overlap** in the north-east corner, `x ≥ S − W ∧ y ≥ S − W`. An organism
 there with both velocity components outward is in both bands at once, and something has to
@@ -336,21 +336,32 @@ choose. Nothing in the geometry answers it, so the contract does: **two mods tha
 differently produce two different maps out of one world** (`m4_considerations.md`,
 Question 6).
 
-The rule, evaluated **in this order**, every `FixedUpdate`, for one organism:
+The rule, evaluated **in this order**, every `FixedUpdate`, for one organism. It is stated
+for an arbitrary declared set, because the mod implements it that way and a rule written only
+for `{E, N}` would leave the next export set undefined (A26):
 
 ```
-candidates = { e ∈ exportEdges : inBand(organism, e) ∧ open(e) }
+outward(v, e) = v · n(e),   n(E) = (1,0)   n(N) = (0,1)
+                            n(W) = (−1,0)  n(S) = (0,−1)
+
+candidates = { e ∈ exportEdges : inBand(organism, e) ∧ outward(v, e) > 0 ∧ open(e) }
 
 |candidates| = 0   →  no export this tick
 |candidates| = 1   →  that edge
-|candidates| = 2   →  "E" when velocity.x ≥ velocity.y, otherwise "N"
+|candidates| ≥ 2   →  the candidate with the largest outward(v, e);
+                      on an exact tie, the earlier edge in canonical order E, N, W, S
 ```
+
+Under the grid `exportEdges` is `["E", "N"]`, both components are positive inside the corner,
+so `outward(v, E)` is `velocity.x` and `outward(v, N)` is `velocity.y` — and the general rule
+reduces to **`"E"` when `velocity.x ≥ velocity.y`, otherwise `"N"`**, which is the form this
+section carried before A26 and the form to reason about on the M4 rig.
 
 | Rule | Statement |
 |---|---|
 | Openness first | An edge that `EDGE_STATUS` reports closed is **not** a candidate. An organism in both bands with only the north lane open exports **north**, and is never pinned against a closed corner while a live lane exists. |
-| The larger outward component wins | Both components are positive inside the corner, so the comparison is between two positive floats and it needs no absolute value. |
-| `E` takes the tie | `velocity.x ≥ velocity.y` selects `E`, so the tie needs no separate branch and the whole rule is one comparison. |
+| The larger outward component wins | The projection is onto each edge's own outward normal, so an inward component scores negative and §4.3.1's direction test is the same comparison. Inside the north-east corner both projections are positive, and the comparison is between two positive floats with no absolute value. |
+| The earlier edge takes the tie | Canonical order is `E, N, W, S`. The mod sorts its declared set into that order once, at configuration, and keeps the incumbent on an exact tie — so the tie needs no separate branch and the whole rule is one comparison. On `{E, N}` that is exactly `velocity.x ≥ velocity.y` selecting `E`. |
 | **No epsilon** | An exact `≥` on two `float`s is deliberate. A tie is not a physical event — it is a determinism requirement — and an epsilon would only widen the window in which two implementations must agree on a *third* rule. Both operands are the same mod's own floats from one `Rigidbody2D` read, so there is no cross-machine float question here. This is the one place in this contract where an exact float comparison is correct, and §4.1's ban is on *equality* tests between two independently-derived values. |
 | One migration | The chosen edge becomes `MIGRATE_OUT.exitEdge`, and the organism gets exactly one `migrationId` (§6.3). A mod that emits two frames for one organism in a corner is defective. |
 | `exitPosition` | Computed for the **chosen** edge by §4.3, then clamped. In the corner the raw value on either axis is routinely outside `[0, 1]`, exactly as §4.3.1 describes. |
@@ -1634,6 +1645,18 @@ These notes are non-normative. They exist so the two sides do not have to negoti
    sidecar records it as `"parent_gone"` because the two look identical on the wire, so
    `contract-b-m4.md` §6.6's `"blob_dropped_for_size"` is defined and never emitted. The
    fix is one additive optional field on `parents[]`; M3 does not add it.
+9. **Neither side refuses a non-grid `exportEdges` set at `CONFIG_UPDATE`** (§5.1, §15 A18,
+   §15 A26). A18 requires at least one member, no duplicates, and every member also in
+   `borderEdges`, and both implementations enforce exactly that. A set the map cannot use —
+   `["E", "S"]`, say — passes every check, handshakes cleanly, and is then refused **one
+   organism at a time** at `MIGRATE_OUT`, because M4's grid exports east and north and
+   nothing else. The mod additionally rejects an edge declared with its opposite, which
+   catches `["E", "W"]` but not `["E", "S"]`. Open rather than fixed because the rule that
+   would close it is a **topology** rule — "these are the map's export axes" — and A18's whole
+   point is that the mod declares geometry and learns no topology. The honest fix is a
+   startup refusal in the sidecar, which knows the map; M4 does not add it, and a
+   misconfigured slot is therefore diagnosed from a stream of NACKs rather than from one
+   startup error.
 
 ---
 
@@ -2101,11 +2124,12 @@ not implement a token that no milestone asked for.
 
 Decisions D12–D16 were ratified on 2026-08-05 and redefined M4, and the owner signed the
 design off the same day (`system_decomposition.md`; `m4_considerations.md`, *Owner
-Sign-Offs*). This section carries the four items that document's *Contract Changes Needed*
-table assigns to Contract A — items 9, 10, 11 and 15 — plus the four consequences that fall
-out of them: the major version bump (item 12), the milestone renumbering (item 13), one
-optional observability field that the exit test needs and the table did not name, and an
-explicit list of the things M4 does **not** change.
+Sign-Offs*). **Ten amendments, A18 to A27, in two batches.** The first eight were written from
+the design and carry the four items that document's *Contract Changes Needed* table assigns to
+Contract A — items 9, 10, 11 and 15 — plus the four consequences that fall out of them: the
+major version bump (item 12), the milestone renumbering (item 13), one optional observability
+field that the exit test needs and the table did not name, and an explicit list of the things
+M4 does **not** change. **The last two, A26 and A27, were written from the code** — see below.
 
 The section follows §13's and §14's pattern. Each amendment names the ambiguity or change,
 the resolution, and **which side enforces it** — the side whose code makes the rule true, and
@@ -2115,6 +2139,15 @@ which therefore has to change if the rule changes. Where an amendment contradict
 
 Unlike §13 and §14, this set is **breaking**. A18 removes a field and replaces it with one of
 a different type, which §3.1's own rule answers with a major bump — see A23.
+
+**A26 and A27 were folded in on 2026-08-05, after the mod implementation landed** (commit
+`efd74a1`), by the reconciliation pass that read the code back against this document. Both are
+**clarifying, not breaking**: they add no field, remove none, and change no enum, so
+`contract-a/2.0` is unchanged and no implementation has to move. A26 generalizes a rule the
+mod already implements more generally than §4.3.2 stated it; A27 writes down a behaviour this
+document left entirely unspecified, which is the more dangerous of the two gaps because
+nothing in it was wrong — there was simply nothing there. `contract-b-m4.md` §14 carries the
+matching set for the other wire, B4 to B7, and none of the seven interacts with another.
 
 > ### Why an amendment set and not a successor document
 >
@@ -2405,3 +2438,87 @@ here is one that was never asked for.*
 
 **Enforced by:** everyone, negatively. The test for each row is that the implementation has
 no code for it.
+
+### A26 — The corner rule is stated for any declared export set (§4.3.2, §5.3)
+
+*Folded in from the mod implementation, 2026-08-05. Clarifying: no wire change.*
+
+**Change.** A19 wrote §4.3.2 for the only set M4 ships, `["E", "N"]`, and its whole selection
+rule was the single comparison `velocity.x ≥ velocity.y`. The mod implements the general form
+— a projection onto each edge's outward normal, taken over whatever set is declared — because
+`exportEdges` is an array whose contents the mod does not get to assume. The two forms agree
+on `{E, N}` and the contract only described one of them, so a third export edge would have had
+no defined answer.
+
+**Resolution.** §4.3.2 now states the rule as it is implemented:
+
+| Rule | Statement |
+|---|---|
+| The score | `outward(v, e) = v · n(e)`, with `n(E) = (1,0)`, `n(N) = (0,1)`, `n(W) = (−1,0)`, `n(S) = (0,−1)`. One expression covers all four edges, and §4.3.1's outward-direction test is `outward(v, e) > 0` — the same quantity, not a second one. |
+| The winner | The candidate with the **largest** `outward(v, e)`. |
+| The tie | The **earlier edge in canonical order `E, N, W, S`**. The mod sorts its declared set into that order at configuration time and keeps the incumbent on an exact tie, so the ordering *is* the tie-break and there is no separate branch. |
+| Reduction | On `["E", "N"]` this is `"E"` when `velocity.x ≥ velocity.y`, otherwise `"N"` — **byte for byte the rule A19 gave**, reproduced and not replaced. |
+| **Still no epsilon** | Unchanged, and A19's reasoning is unchanged with it. The comparison is a strict `>` between two floats read from one `Rigidbody2D` in one tick. §4.3.2's `No epsilon` row still applies verbatim. |
+
+**Why canonical order and not, say, declaration order.** Declaration order is an operator's
+environment variable, so it would make the corner rule depend on how a slot was configured —
+two mods with the same edges in a different order would answer a corner differently, which is
+the exact failure §4.3.2 exists to prevent. Canonical order is a property of the contract.
+The mod sorting its own set on read is what makes the two statements the same statement.
+
+**What this does not authorize.** M4 declares `["E", "N"]` and nothing else. A26 defines the
+answer for a larger set; it does not make one legal. §15 A18's rules still hold — at least one
+member, no duplicates, every member also in `borderEdges` — and neither side rejects a set
+like `["E", "S"]` at `CONFIG_UPDATE`, so a misconfigured rig is refused one organism at a time
+rather than at startup. That is an open item, recorded in §12.
+
+**Enforced by:** the mod, for the projection, the canonical sort and the strict comparison.
+The sidecar checks only that `MIGRATE_OUT.exitEdge` is a member of the declared set (§5.3); it
+neither knows nor re-derives which band won.
+
+### A27 — An entry-edge portal is visible while the mod's Contract A session is up (§4.2, §5.1, §5.4, §14 A11)
+
+*Folded in from the mod implementation, 2026-08-05. Records a behaviour this document did not
+specify at all.*
+
+**The gap.** §14 A11 makes an entry edge **passive**: it is never listed in `EDGE_STATUS`,
+never opened and never closed, because it accepts an inbound organism unconditionally and has
+no lane state to report. That is right for the wire and it leaves the mod with a question the
+wire cannot answer — **when should the player see an entry portal?** An export portal follows
+`EDGE_STATUS`. An entry portal has no `EDGE_STATUS` entry to follow, so a mod author reading
+this document found nothing, and "nothing" is how two installs end up drawing different
+worlds out of the same map.
+
+**Resolution — the defined behaviour.** An entry-edge portal is drawn **exactly while the
+mod holds an established Contract A session on the current connection**: the transport is
+connected *and* the mod has sent its `CONFIG_UPDATE` on that same connection generation. It is
+**never** gated on `EDGE_STATUS`, on an epoch, on a peer's liveness, or on any sidecar reply.
+
+| Condition | Entry portal | Export portal |
+|---|---|---|
+| Contract A session established | **shown** | shown only when `EDGE_STATUS` reports that edge `open` |
+| Session established, every export edge closed with `no_peer` | **shown** | hidden |
+| Transport connected, `CONFIG_UPDATE` not yet sent on this generation | hidden | hidden |
+| Transport down, or reconnecting | hidden | hidden |
+
+Four preconditions sit in front of that gate, and all four are the mod's own, not the wire's:
+the portal is enabled in configuration; a world is loaded; the portal built successfully; and
+the edge is a declared entry edge — the opposite of a declared export edge (§14 A11). A
+build failure tears the portal down for the session and is reported, never retried silently.
+
+**Why the connection and not the arrival rate.** An entry edge accepts an organism the moment
+one arrives, and nothing else about it is observable. Drawing it on arrivals would make a
+quiet lane look like a closed one, and drawing it always would promise a door that nothing can
+come through while the mod is disconnected. The session is the honest statement: **the door
+works exactly while the mod can be handed something.**
+
+**Why this is asymmetric with the export portal, deliberately.** The export portal shows
+whether *this world can send*, which is a fact about the map and therefore `EDGE_STATUS`'s to
+report. The entry portal shows whether *this world can receive*, which is a fact about the
+process. The asymmetry on screen is the asymmetry A11 put on the wire, and a player who sees
+one edge glowing while the other is dark is reading the topology correctly.
+
+**Enforced by:** the mod alone. No sidecar behaviour changes, no frame changes, and a
+conforming sidecar can neither observe nor influence any of it. It is recorded here because
+Contract A is where the edge model lives, and an unspecified behaviour on a specified model is
+this document's gap to close.
