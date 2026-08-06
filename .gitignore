@@ -20,3 +20,13 @@ e2e/run/
 
 # The LAN rig's logs (slot 2 is on the second computer)
 e2e/logs-m3-lan/
+
+# The M4 six-slot rig's runtime state. e2e/data-m4/slot-1 is a COPY of the T1
+# journal made by `run-m4.sh arm`; the original under e2e/data/ is the only copy
+# of the resume test's input and is never moved. The trailing slash on
+# e2e/run-m4/ keeps e2e/run-m4.sh itself tracked.
+e2e/data-m4/
+e2e/logs-m4/
+e2e/relay-data-m4/
+e2e/archive-data-m4/
+e2e/run-m4/

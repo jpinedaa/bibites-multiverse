@@ -328,3 +328,77 @@ func fileSize(t *testing.T, path string) int64 {
 	}
 	return info.Size()
 }
+
+// TestM3InFlightEntryReplaysAsSent pins the M3 -> M4 journal migration path.
+//
+// An M3 journal carries no `handoff` field. Its sidecar moved an outbound entry
+// to in_flight only after MIGRATION_PAYLOAD had been written to a live relay
+// connection, so that state means what M4 calls `sent`: custody MAY have moved.
+// Replaying it as `pending` would say the frame reached nobody, and
+// contract-b-m4.md §9.2 lets a pending entry re-route to a DIFFERENT slot with
+// no proof of non-delivery — which is the duplication D2 refuses.
+//
+// Found by the M4 rehearsal, against the real T1 journal of 2026-08-04.
+func TestM3InFlightEntryReplaysAsSent(t *testing.T) {
+	dir := t.TempDir()
+	// Two records in exactly M3's shape: a create with no handoff, and a status
+	// with no handoff.
+	lines := `{"op":"create","migrationId":"9d6db335-b1ae-433e-a44a-bb2109912913","at":1785852794196,` +
+		`"direction":"out","entry":{"migrationId":"9d6db335-b1ae-433e-a44a-bb2109912913","entityId":2004967003,` +
+		`"kind":"bibite","gameVersion":"0.6.3.1","payload":"{}","payloadHash":"c35a","edge":"E","position":0.22,` +
+		`"velocityX":11.6,"velocityY":-5.7,"heading":-116,"simulationSize":2000,"simTick":48160940,` +
+		`"sourceSlot":1,"destSlot":2,"journaledAt":1785852794196},"bounceBack":false}
+{"op":"status","migrationId":"9d6db335-b1ae-433e-a44a-bb2109912913","at":1785852794201,"status":"in_flight"}
+`
+	if err := os.WriteFile(filepath.Join(dir, "journal.log"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer j.Close()
+
+	st, ok := j.Get("9d6db335-b1ae-433e-a44a-bb2109912913")
+	if !ok {
+		t.Fatal("the M3 entry did not survive replay")
+	}
+	if st.Status != StatusInFlight {
+		t.Fatalf("status = %q, want %q", st.Status, StatusInFlight)
+	}
+	if st.Handoff != HandoffSent {
+		t.Fatalf("handoff = %q, want %q — an M3 in_flight entry was written to a live relay "+
+			"connection, so custody MAY have moved", st.Handoff, HandoffSent)
+	}
+	if !st.Handoff.CustodyMayHaveMoved() {
+		t.Fatal("the replayed entry reports that custody cannot have moved; §9.2 would re-route it")
+	}
+	if st.Entry.DestSlot != 2 {
+		t.Fatalf("destSlot = %d, want the recorded 2", st.Entry.DestSlot)
+	}
+}
+
+// TestM4InFlightEntryKeepsItsRecordedHandoff is the other half: an M4 record
+// carries handoff explicitly and the migration rule must never overwrite it.
+func TestM4InFlightEntryKeepsItsRecordedHandoff(t *testing.T) {
+	dir := t.TempDir()
+	lines := `{"op":"create","migrationId":"11111111-1111-4111-8111-111111111111","at":1,` +
+		`"direction":"out","entry":{"migrationId":"11111111-1111-4111-8111-111111111111","entityId":7,` +
+		`"kind":"bibite","gameVersion":"0.6.3.1","payload":"{}","payloadHash":"aa","edge":"E","position":0.5,` +
+		`"velocityX":1,"velocityY":0,"heading":0,"simulationSize":2000,"simTick":1,` +
+		`"sourceSlot":1,"destSlot":2,"journaledAt":1},"bounceBack":false}
+{"op":"status","migrationId":"11111111-1111-4111-8111-111111111111","at":2,"status":"in_flight","handoff":"held"}
+`
+	if err := os.WriteFile(filepath.Join(dir, "journal.log"), []byte(lines), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	j, err := Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer j.Close()
+	st, _ := j.Get("11111111-1111-4111-8111-111111111111")
+	if st.Handoff != HandoffHeld {
+		t.Fatalf("handoff = %q, want %q — a recorded handoff always wins", st.Handoff, HandoffHeld)
+	}
+}

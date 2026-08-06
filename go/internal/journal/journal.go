@@ -383,6 +383,25 @@ func (j *Journal) apply(rec record) {
 		}
 		if rec.Handoff != nil {
 			st.Handoff = *rec.Handoff
+		} else if st.Direction == Out && rec.Status == StatusInFlight && st.Handoff == HandoffPending {
+			// AN M3 JOURNAL HAS NO HANDOFF FIELD, AND REPLAYING IT AS `pending`
+			// WOULD BE A LIE THAT COSTS AN ORGANISM.
+			//
+			// M3's sidecar moved an outbound entry to in_flight only after
+			// MIGRATION_PAYLOAD had been written to a live relay connection, so
+			// an M3 in_flight entry means exactly what M4 calls `sent`: custody
+			// MAY have moved, unknowably. `pending` means the opposite — the
+			// frame reached nobody — and §9.2 lets a pending entry RE-ROUTE to a
+			// different slot with no proof of non-delivery. That re-route is the
+			// duplication D2 refuses.
+			//
+			// The condition is exact rather than broad: every M4 write that sets
+			// an OUTBOUND status to in_flight is forwardLocked, and it sets
+			// handoff=sent in the same record. An outbound in_flight with no
+			// handoff field therefore identifies an M3 record and nothing else.
+			// Inbound entries are excluded because their in_flight means "with
+			// the mod" and they have no handoff state at all (§9.2).
+			st.Handoff = HandoffSent
 		}
 		if rec.RelaySessionID != nil {
 			st.RelaySessionID = *rec.RelaySessionID

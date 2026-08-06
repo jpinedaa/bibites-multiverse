@@ -46,6 +46,13 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"E or N; the axis --insert-after-slot splices on. Default E")
 	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
 		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
+	// holdTimeoutMs is a contract-b-m4.md §12 tunable and had no knob. Its
+	// default is 24 hours, which is a policy, not a measurement (§9.3) — and a
+	// rig that wants to SEE the automatic bounce cannot wait a day for it.
+	holdTimeout := fs.Duration("hold-timeout", envDuration("MULTIVERSE_HOLD_TIMEOUT", 0),
+		"accrued dark time before a held entry bounces home by itself (contract-b-m4.md §9.3, "+
+			"holdTimeoutMs). 0 keeps the 24-hour default. The clock runs only while the "+
+			"destination is dark and this sidecar can see it")
 	listInflight := fs.Bool("list-inflight", false,
 		"print the journal entries this sidecar still holds custody of, then exit "+
 			"(contract-b-m4.md §7.5). Answers what the relay cannot.")
@@ -92,6 +99,12 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cfg.InsertAxis = *insertAxis
 	cfg.Token = token
 	cfg.Logger = logger
+	if *holdTimeout > 0 {
+		cfg.HoldTimeout = *holdTimeout
+		logger.Warn("sidecar: holdTimeoutMs overridden; a held entry bounces home sooner than the "+
+			"contract default, and §9.3's accepted duplication case widens with it",
+			"holdTimeout", *holdTimeout, "default", DefaultConfig().HoldTimeout)
+	}
 	if *position != "" {
 		pos, err := parsePosition(*position)
 		if err != nil {
@@ -222,6 +235,15 @@ func parsePosition(v string) (*contractb.Position, error) {
 func env(name, fallback string) string {
 	if v := os.Getenv(name); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envDuration(name string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(name); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return fallback
 }

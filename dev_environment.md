@@ -10,9 +10,9 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Game assembly | `…/The Bibites_Data/Managed/BibitesAssembly.dll` |
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
-| Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`) |
+| Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
 | Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.0`**, amended in place; §15 is the M4 set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.0`**; §14 is its reconciliation set), `genome-hash.md` (the canonical genome projection, unchanged by M4). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
-| Rigs and exit tests | `e2e/` — `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **There is no `run-m4.sh` yet, and the M3 scripts still speak the retired wire** — see *The M4 rig modernization* |
+| Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rig modernization* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The bundle itself lands in `farend/dist/`, which is **gitignored**: it holds binaries and a downloaded BepInEx release |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
 | Shared LAN token — **never in the repo** | `~/.multiverse-token`, mode `600`. See *The LAN token* below |
@@ -220,7 +220,7 @@ Name every one of them in `WSLENV` or WSL forwards none (see Gotchas).
 | `MULTIVERSE_WORLD` | See below. Under M4 it also names the **save file**, and therefore the whole rotation set. |
 | `MULTIVERSE_CMD_FILE` | See below. |
 | `MULTIVERSE_BORDER_WIDTH` | `W` in world units, which is also the inner boundary of the capture band. `0`/unset derives `0.02·S`, floor 20 u. |
-| `MULTIVERSE_SAVE_MINUTES` | **M4.** Periodic-save interval in simulated minutes. Default `10`. `0` turns the timer off; save-on-quit is unaffected. |
+| `MULTIVERSE_SAVE_MINUTES` | **M4.** Periodic-save interval in **wall-clock** minutes. Default `10`. `0` turns the timer off; save-on-quit is unaffected. **The name says minutes and the timer is `Time.realtimeSinceStartup`** (`WorldSaver.cs`), which is what D14 asked for — "a wall-clock timer drives `SaveSystem.CreateSave`" — so a world at 20× saves every 10 real minutes, not every 10 simulated ones. An earlier version of this row said *simulated*; it was wrong, and the difference is a factor of the time scale. |
 | `MULTIVERSE_SAVE_KEEP` | **M4.** How many timestamped backups of *this world* survive a prune. Default `6`. `0` keeps none. |
 | `MULTIVERSE_SAVE_ON_QUIT` | **M4.** Save once on `OnApplicationQuit`. Default `true`. |
 | `MULTIVERSE_PORTAL` | **M4.** Draw the portal strips. Default `true`. `false` never creates the component, so no strip of either kind appears. |
@@ -647,6 +647,27 @@ so this line stays correct even when the far end suddenly cannot connect.
   smoke test high ports (`--listen 127.0.0.1:0` writes the resolved address to
   `<data-dir>/listen.addr`). The historical rigs collide head-on with the current one: M2
   used `8787`/`8788`/`8790`, and M3 used `8787`/`8788`/`18789` plus the relay on `8790`.
+- **The five-instance ceiling, measured 2026-08-06. It is BepInEx, not the hardware.**
+  Six game instances run together at about 550 MB each — 3.3 GB of 62 GB — at a load
+  average near 2.4 on 16 cores. But BepInEx's `DiskLogListener` walks `LogOutput.log`,
+  then `LogOutput.log.1` .. `.4`, and then gives up with *"Skipping log file creation"*.
+  **An instance that gets no log file does not merely lose its log: the mod never runs in
+  it.** Measured in both directions — the sixth instance sat at the main menu at 355 MB
+  and 208 s of CPU while the other five were at ~590 MB and ~1200 s and had seeded their
+  worlds; freeing one log file made that same instance seed in forty seconds and left the
+  instance that gave up the file idle in its place. So five real games is the ceiling on
+  this install, and `e2e/run-m4.sh` drives its sixth slot with `bin/fakemod` instead. The
+  LAN phase does not hit this at all: the second computer has its own BepInEx.
+- **A stale `netsh portproxy` steals a Contract A port from Windows processes only.** The
+  M3 LAN rig left `0.0.0.0:8790 -> <a dead WSL address>:8790` behind. It listens on
+  `0.0.0.0`, so it shadows `127.0.0.1:8790` for **Windows** processes while WSL keeps its
+  own. The sidecar binds 8790 inside WSL and reports success; the game dials it from
+  Windows and gets *"An existing connection was forcibly closed by the remote host"* six
+  times, and the map forms one slot short with the reason `peer_mod_absent` — which reads
+  like a mod bug. `e2e/run-m4.sh up` checks the Windows listener table before it starts
+  anything. **TODO-owner**, in an elevated PowerShell:
+  `netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0`. Until
+  then, `SLOT_PORT_BASE=18787 e2e/run-m4.sh up`.
 - **The M4 port plan — settled 2026-08-05, and these are now the compiled defaults.** The
   six-slot rig has to fit inside `contract-a.md` §10's Contract A range `8787`–`8792`
   without the relay or the archive standing on one of those six ports, which is exactly what
