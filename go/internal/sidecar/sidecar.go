@@ -104,6 +104,12 @@ type sched struct {
 	nextForward time.Time
 	bounceAt    time.Time
 	nextDeliver time.Time
+	// liveForwardCount is how many times this entry has been re-forwarded to a
+	// LIVE destination on the current run, driving the exponential backoff of
+	// §9.3/B5. It resets on a liveness flip and on any state change — a dark
+	// destination (dark uses the flat cadence), a re-route, and an ACK or bounce
+	// that drops the sched entry entirely. In memory only, like the rest here.
+	liveForwardCount int
 	// holdSince is when the hold clock last started running for this entry. The
 	// clock is not a deadline: it accrues, it stops, and it resumes.
 	holdSince      time.Time
@@ -416,6 +422,10 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 				s.stopHoldLocked(st, sc, now)
 			}
 		} else {
+			// A dark destination keeps the flat retry cadence, so the live-forward
+			// backoff resets here: the next time this destination is live, the
+			// backoff climbs from forwardRetryMs again.
+			sc.liveForwardCount = 0
 			if st.Handoff != journal.HandoffHeld {
 				s.setHandoffLocked(st, journal.HandoffHeld, fmt.Sprintf(
 					"destination slot %d is dark and no proof of non-delivery arrived",
@@ -439,10 +449,29 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 			return
 		}
 		if s.forwardLocked(st, now) {
-			sc.nextForward = now.Add(s.cfg.ForwardRetry)
+			if live {
+				// A LIVE peer that has not answered is slow — a deep paced backlog
+				// (Risk 9) — not gone. Back the re-forward off exponentially so a
+				// silent-but-live destination is not hammered every forwardRetryMs
+				// forever, which is the shape that produced 203 735 duplicate
+				// deliveries into the stalled slot 6.
+				interval := backoffInterval(s.cfg.ForwardRetry, s.cfg.ForwardRetryMax, sc.liveForwardCount)
+				sc.nextForward = now.Add(interval)
+				if interval < s.cfg.ForwardRetryMax {
+					sc.liveForwardCount++
+				}
+			} else {
+				// The dark cadence is flat and deliberately untouched (§9.3, B5):
+				// the hold clock accrues against exactly this retry, and it is the
+				// only conduit the non-delivery proof has.
+				sc.nextForward = now.Add(s.cfg.ForwardRetry)
+			}
 		}
 
 	case journal.HandoffPending, journal.HandoffRefused:
+		// A never-sent or re-routed entry is a state change: reset the live-forward
+		// backoff so the destination it is (re-)sent to starts from forwardRetryMs.
+		sc.liveForwardCount = 0
 		s.stopHoldLocked(st, sc, now)
 		if live {
 			sc.bounceAt = time.Time{}
@@ -481,6 +510,21 @@ func (s *Sidecar) tickOutbound(st *journal.State, now time.Time) {
 				" axis within bounceTimeoutMs, and no custody was ever taken", false)
 		}
 	}
+}
+
+// backoffInterval doubles base, up to max, n times — the exponential backoff of
+// §9.3/B5 for a re-forward to a live-but-silent destination. n is how many live
+// re-forwards this entry has already spent. The loop stops at max, so a large n
+// never overflows the Duration.
+func backoffInterval(base, max time.Duration, n int) time.Duration {
+	d := base
+	for i := 0; i < n && d < max; i++ {
+		d *= 2
+	}
+	if d > max {
+		d = max
+	}
+	return d
 }
 
 // destLiveLocked answers §9.3's third condition from the latest PEER_STATUS:
@@ -667,6 +711,12 @@ func (s *Sidecar) tickInbound(st *journal.State, now time.Time) {
 	}
 	sc := s.schedFor(id)
 	if st.Status == journal.StatusOpen {
+		if now.Before(sc.nextDeliver) {
+			// A replay batch waits behind its escalating delay before the pacer
+			// takes over (§7.5). An ordinary fresh arrival carries a zero
+			// nextDeliver, so now.Before is false and it is released at once.
+			return
+		}
 		s.deliverLocked(st, now)
 		return
 	}
@@ -974,6 +1024,20 @@ func (s *Sidecar) bounceLocked(st *journal.State, why string, timeout bool) {
 // the speed of the world.
 func (s *Sidecar) deliverLocked(st *journal.State, now time.Time) {
 	if !s.pace.allow(now, s.cfg.PacingIdleGrace) {
+		return
+	}
+	// Hold delivery into a mod that has gone quiet at the application layer. The
+	// pacer's own idle grace (pacingIdleGraceMs, 10 s) is LONGER than the 3.5 s
+	// heartbeat timeout, so during a stall the socket is closed with 4004 before
+	// that branch can trip — which left this function releasing MIGRATE_IN frames
+	// right up to the close, into a mod whose main thread was already drowning.
+	// Gate on heartbeat freshness instead: a mod whose last app-level HEARTBEAT
+	// is older than heartbeatDeliveryGraceMs (~1.5x the interval) is not keeping
+	// up, so the entry stays scheduled and delivers when heartbeats resume. This
+	// changes WHEN, not WHETHER (§7.5); the token is spent only after the journal
+	// write below, so a held delivery costs nothing. lastHeartbeat is s.mu-owned
+	// and every caller holds s.mu, so this read is race-free.
+	if s.mod != nil && now.Sub(s.mod.lastHeartbeat) > s.cfg.HeartbeatDeliveryGrace {
 		return
 	}
 	id := st.Entry.MigrationID

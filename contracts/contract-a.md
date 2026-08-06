@@ -548,7 +548,7 @@ timer that does not depend on the simulation. A paused sim still heartbeats. See
 | `timeScale` | float | yes | The effective time scale. `0` means stopped. |
 | `simulationSize` | float | yes | `S`, read live. A change here **MUST** make the sidecar re-check peer agreement, exactly as a `CONFIG_UPDATE` would. This is the belt to `CONFIG_UPDATE`'s braces, because `SimulationSize` is live-mutable (`m2_findings.md` §2.4). |
 | `inFlightOut` | number (int) | no | How many `MIGRATE_OUT`s the mod is currently waiting on. Useful for diagnosing a stuck custody chain. |
-| `pendingIn` | number (int) | no | How many `MIGRATE_IN`s are queued in the mod but not yet spawned. |
+| `pendingIn` | number (int) | no | How many `MIGRATE_IN`s are queued in the mod but not yet spawned — **including frames still unparsed in the transport queue** under §5.7's ingest budget, so the sidecar's pacing sees the whole backlog, not the parsed part of it (amended — §15, A29). |
 | `lastSave` | object | no | **The most recent periodic world save** (added — §15, A21). Absent until the mod has written one, and absent forever from a mod that does not save. It is a **receipt, not a request**: the sidecar never asks for a save and never schedules one. |
 | `lastSave.atMs` | `timestampMs` | yes | The mod's wall clock when the save completed. Informational (D5) — it is a label for an operator, never an input to a decision. |
 | `lastSave.simulatedTime` | float | yes | `TimeKeeper.simulatedTime` at the save. This is the value that says how much world the last save holds. |
@@ -999,6 +999,15 @@ A `MIGRATE_IN` whose `migrationId` is absent, not a string, or empty **MUST** be
 with one logged error and no reply — every reply is keyed on that field, so the frame has
 no answer channel (amended — §13, A2).
 
+**The queue drains under a budget, strictly in order** (added — §15, A29). The mod applies
+at most a few deliveries per `FixedUpdate` (a wall-clock budget of ~8 ms or 4 spawns,
+whichever trips first, and always at least one) and parses at most a handful of frames per
+`Update` (~2 ms or 16 frames); the remainder waits, in arrival order, and `pendingIn`
+(§5.2) reports it. A budget stops early, it never skips or reorders. This is what keeps
+`Update` — and therefore the §8 heartbeat — running through any burst: the slot-6 livelock
+was a 64-deep replay applied in one `FixedUpdate`, which starved the heartbeat past
+`heartbeatTimeoutMs` and turned one stall into a permanent reconnect loop.
+
 Processing order:
 
 1. Deduplicate (§7.3). On a hit, reply `MIGRATE_IN_ACK` with `duplicate: true` and spawn
@@ -1276,12 +1285,13 @@ identifies a *frame*, not a *migration*, and is never used for deduplication.
 
 ### 7.3 Mod-side deduplication — two keys, two lifetimes
 
-The mod is stateless across connections and across world loads. It therefore needs a key
-that lives in the world data, not in mod memory.
+The mod is stateless across world loads, and across socket reconnects it keeps exactly one
+thing: the `migrationId` ledger below (amended — §15, A29). It still needs a key that lives
+in the world data, not in mod memory, for everything a restart can lose.
 
 | Key | Lifetime | Used for |
 |---|---|---|
-| `migrationId` | In memory, for the current connection | Fast rejection of an immediate replay after a lost `MIGRATE_IN_ACK`. |
+| `migrationId` | In memory, for the current **world session** — it survives a socket reconnect and clears only when `sessionId` changes (amended — §15, A29) | Fast O(1) rejection of any replay of a handled delivery — a lost `MIGRATE_IN_ACK`, or §7.5's un-ACKed replay after a reconnect — **even when the spawned organism has since died**, which is the case the entityId scan cannot catch and the case the slot-6 livelock was made of. |
 | `entityId` | **In the world itself** | The durable check. Before spawning, the mod scans `BibiteTracker.instance.bibites` for `id.id == entityId`. A hit means the organism is already here. |
 
 The `entityId` scan is what survives a game restart. Without it, this sequence duplicates
@@ -1344,6 +1354,9 @@ delivers it in one breath, and the two need different answers.
 | Order | Pacing **MUST NOT** reorder. Journal order is journal order, at any rate. |
 | Scope | Every `MIGRATE_IN` the sidecar emits: fresh arrivals, replays after a reconnect, and bounce-backs. One queue, one rate. |
 | Custody | Untouched. Pacing delays a delivery; it never drops one, never NACKs one, and never releases custody early. |
+| A stalled mod | Delivery also holds while the mod's newest `HEARTBEAT` is older than `heartbeatDeliveryGraceMs` (1500 ms) — an intermediate state between keeping up and §8's `4004`, reached long before `pacingIdleGraceMs` stops the clock. A mod that is merely behind gets a quiet line, not a flood. It delays, never drops (added — §15, A29). |
+| Replay backoff | A reconnect's un-ACKed replay batch waits `min((minAttempt − 1) · replayDelayStepMs, replayDelayCapMs)` before the pacer takes over — one delay for the whole batch, so journal order is preserved. A first-attempt batch (a sidecar-restart recovery, or a batch delivered once) is prompt; a batch that keeps forcing `4004` decays instead of re-flooding the instant the mod returns (added — §15, A29). |
+| The bucket's lifetime | The token bucket resets only when `sessionId` changes. A same-session socket reconnect keeps it: the same world clock was running the whole time, the burst was spent, and a reconnect does not refund it (added — §15, A29). |
 | Backpressure | A paced backlog is journal depth. When it passes `inboundQueueMax` the sidecar refuses **upstream** with Contract B `MIGRATION_NACK` / `OVERLOADED` (`contract-b-m4.md` §6.6, §6.8), which is a peer-local refusal and therefore proof that no custody moved — so the sender re-routes the organism to another slot instead of piling more onto a saturated one. Pacing and route-around compose into admission control for the whole map. |
 | Observability | The depth waiting on the limit is a metric, not a wire field (WP3). A depth that never falls names a limit set too low. |
 
@@ -1374,6 +1387,14 @@ than one instant. Retune it from the entry-edge crowding metric, not from a gues
 
 The mod's heartbeat timer runs on wall-clock time, not simulated time. A paused sim, a
 `0×` time scale and a 20× time scale all produce the same heartbeat cadence.
+
+**Before heartbeats are stopped, they go quiet, and the sidecar reacts to quiet first**
+(added — §15, A29): once the newest `HEARTBEAT` is older than `heartbeatDeliveryGraceMs`
+(1500 ms), the sidecar holds further `MIGRATE_IN` release (§7.5) while the countdown to
+`heartbeatTimeoutMs` runs. A mod that recovers inside the window resumes delivery and
+nothing else happens; a mod that does not still gets the `4004` below, on schedule. What
+this removes is the third outcome the slot-6 livelock exposed: a sidecar force-feeding
+deliveries into a stalling main thread for the whole 3.5 s and then replaying all of them.
 
 **When heartbeats stop**, the sidecar **MUST**, in this order:
 
@@ -1509,6 +1530,9 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `inboundRatePerSimMinute` | `2.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). |
 | `inboundRateBurst` | `5` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). |
 | `pacingIdleGraceMs` | `10000` | sidecar | Wall-clock silence from `HEARTBEAT` after which the pacing clock stops advancing (§7.5, §15 A20). |
+| `heartbeatDeliveryGraceMs` | `1500` | sidecar | Age of the newest `HEARTBEAT` beyond which `MIGRATE_IN` release is held — the quiet-mod gate that trips before `heartbeatTimeoutMs` does (§7.5, §8, §15 A29). |
+| `replayDelayStepMs` | `500` | sidecar | Per-generation step of the reconnect replay delay, keyed on the batch's least-delivered `attempt` (§7.5, §15 A29). |
+| `replayDelayCapMs` | `5000` | sidecar | Ceiling of that delay (§7.5, §15 A29). |
 
 ---
 
@@ -2147,7 +2171,7 @@ not implement a token that no milestone asked for.
 
 Decisions D12–D16 were ratified on 2026-08-05 and redefined M4, and the owner signed the
 design off the same day (`system_decomposition.md`; `m4_considerations.md`, *Owner
-Sign-Offs*). **Eleven amendments, A18 to A28, in three batches.** The first eight were written from
+Sign-Offs*). **Twelve amendments, A18 to A29, in four batches.** The first eight were written from
 the design and carry the four items that document's *Contract Changes Needed* table assigns to
 Contract A — items 9, 10, 11 and 15 — plus the four consequences that fall out of them: the
 major version bump (item 12), the milestone renumbering (item 13), one optional observability
@@ -2180,6 +2204,17 @@ the unclamped formula to conclusions that are arithmetically unreachable. A28 st
 clamp, states the guarantee it buys, and re-derives the entry-immunity window's justification
 from the ticks *after* the spawn rather than from the spawn itself. Clarifying, like A26 and
 A27: no field, no enum, no default, no implementation change.
+
+**A29 was folded in on 2026-08-06, from the slot-6 livelock**, and it is a fourth kind of
+gap: no single rule was missing or wrong, but four rules that are each correct composed into
+a failure none of them names. A morning arrival flood, a 64-deep paced backlog, one long
+`FixedUpdate`, the mandatory `4004`, and an unconditional replay closed into a cycle that
+held a live world at ~1 TPS for hours. A29 records the defences both sides now carry —
+delivery that pauses for a quiet mod, a session-scoped pacing bucket, an escalating replay
+delay, a mod-side ingest budget, and a dedup ledger that survives a reconnect. **The
+message catalogue, every field and every enum are untouched**; three named defaults are
+added to §10, so `contract-a/2.0` is unchanged and the wire needs no version bump.
+`contract-b-m4.md` §14 B8 carries the matching pair for the other wire.
 
 > ### Why an amendment set and not a successor document
 >
@@ -2607,3 +2642,60 @@ one previously-undocumented line of geometry.
 **Enforced by:** the mod, in `BorderGeometry.EntryPoint`. The sidecar cannot observe it,
 which is precisely why it had to be written down: a second mod implementation reading §4.3
 before this amendment would have produced a different world out of the same `MIGRATE_IN`.
+
+### A29 — A stalled mod is paused into, not flooded into: the livelock defences (§5.2, §5.7, §7.3, §7.5, §8, §10)
+
+*Folded in on 2026-08-06, from the slot-6 incident. Five rules, none of them a wire change.*
+
+**The failure, because the rules that follow only make sense against it.** Slot 6 accepted
+~10,800 migrants in a morning; its paced backlog pinned at `inboundQueueMax` (64). At 14:39
+one `FixedUpdate` spent >3.5 s applying deliveries, `Update` — and with it the §8
+heartbeat — never ran, the sidecar closed `4004` on schedule, and §7.5's unconditional
+replay re-delivered the same 64 into the next `FixedUpdate`. The mod's dedup ledger had
+been cleared by the reconnect, the flood-spawned organisms had already starved, so the
+`entityId` scan missed too and every entry re-ran the **full** spawn. Each generation
+re-created the stall that caused it; eleven generations later the world was pegged at ~1
+TPS with 50 organisms alive, while the upstream sender re-forwarded every stuck entry every
+`forwardRetryMs` forever — 203,735 duplicate deliveries, each paying a full decode. Every
+individual rule behaved as written.
+
+**The five defences.** Each breaks a different link; any one of them would have degraded
+the cycle, and all five together are why it cannot re-form:
+
+1. **The ingest budget** (§5.7). The mod applies deliveries under a per-`FixedUpdate`
+   budget and parses frames under a per-`Update` budget, strictly in order, at least one
+   per tick. No burst, whatever its depth, can starve `Update` — so the heartbeat cadence
+   survives the load that used to kill it, and `4004` is reserved for a mod that is
+   actually gone. `pendingIn` (§5.2) counts the whole deferred backlog so pacing stays
+   honest. **Enforced by: the mod.**
+2. **The durable dedup ledger** (§7.3). The `migrationId` ledger survives a socket
+   reconnect and clears only on a `sessionId` change. A replayed handled delivery — even
+   one whose organism has since died — is an O(1) hit answered `duplicate: true`, never a
+   re-spawn. Replay converges instead of amplifying. **Enforced by: the mod.**
+3. **The quiet-mod gate** (§7.5, §8). The sidecar holds `MIGRATE_IN` release once the
+   newest `HEARTBEAT` is older than `heartbeatDeliveryGraceMs` (1500 ms). The previous
+   arrangement — `pacingIdleGraceMs` (10 s) far beyond `heartbeatTimeoutMs` (3.5 s) —
+   meant the pause branch could never win the race against the close: the sidecar
+   force-fed a dying connection right up to the `4004`. It delays, never drops.
+   **Enforced by: the sidecar.**
+4. **The session-scoped bucket and the escalating replay delay** (§7.5). The pacing bucket
+   is no longer reset on every socket connect — a same-session reconnect is the same world
+   clock, and the burst it would refund is exactly the flood pacing exists to prevent. The
+   replay batch itself waits one order-preserving delay that climbs with its
+   least-delivered `attempt`, so a batch that keeps forcing `4004` backs off a little more
+   each generation instead of arriving harder. Replay stays unconditional — delayed is not
+   skipped. **Enforced by: the sidecar.**
+5. **The upstream half lives on the other wire** — dedup-before-decode and the
+   live-destination retry backoff are `contract-b-m4.md` §14 B8's, and they are what
+   removed the 203k-duplicate CPU tax that kept the stalled world stalled.
+
+**What a second implementation must know.** Rules 1 and 2 are mod-law: a mod that drains
+its whole queue in one tick, or wipes its ledger on reconnect, satisfies every pre-A29
+sentence of this document and still livelocks exactly as slot 6 did. Rules 3 and 4 are
+sidecar-law with named defaults in §10 (`heartbeatDeliveryGraceMs`, `replayDelayStepMs`,
+`replayDelayCapMs`). None of the five changes a message, a field, an enum or the custody
+chain: `4004` still closes at 3500 ms, replay is still unconditional, pacing still runs on
+simulated time and still never reorders, and the spawn is still the proof of delivery.
+
+**Enforced by:** both sides, each for its own half — which is the point. The livelock was
+a composition of correct parts, so the defence had to be composed too.

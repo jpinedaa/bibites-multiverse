@@ -51,7 +51,30 @@ namespace BibitesMultiverse
     internal class WebSocketTransport
     {
         private readonly string url;
+
+        /// <summary>
+        /// Received events waiting for the game thread to drain them. It carries Log / Connected /
+        /// Disconnected / Frame events in arrival order.
+        ///
+        /// C4 — the Frame backlog here is bounded in practice, which is why neither this queue nor the
+        /// mod's pendingMutations list carries a cap of its own. The sidecar caps its un-ACKed inbound
+        /// deliveries at 64 and paces their release (contract-a §7.5, §15 A20, and the parallel Go-side
+        /// fix), so it cannot pile MIGRATE_IN frames here faster than the mod ACKs them back. The one
+        /// residual way this queue could grow unbounded is a misbehaving sidecar flooding a frame type that
+        /// carries no ACK gate — EDGE_STATUS is the only inbound example — which is why the count below is
+        /// exposed but deliberately not turned into a silent drop: a dropped control frame would be a worse
+        /// failure than the memory it saves.
+        /// </summary>
         private readonly ConcurrentQueue<TransportEvent> inbound = new ConcurrentQueue<TransportEvent>();
+
+        /// <summary>
+        /// C1/C4 — the number of Frame events currently in <see cref="inbound"/>, maintained with
+        /// Interlocked because the receive loop increments it and the game thread decrements it in
+        /// <see cref="TryDequeue"/>. The client reads it through <see cref="QueuedFrameCount"/> to keep
+        /// §5.2 <c>pendingIn</c> honest once DrainTransport parses only a few frames per Update.
+        /// </summary>
+        private int queuedFrames;
+
         private readonly ConcurrentQueue<string> outbound = new ConcurrentQueue<string>();
         private readonly SemaphoreSlim outboundSignal = new SemaphoreSlim(0);
         private readonly Random random = new Random();
@@ -175,8 +198,24 @@ namespace BibitesMultiverse
 
         internal bool TryDequeue(out TransportEvent transportEvent)
         {
-            return inbound.TryDequeue(out transportEvent);
+            if (!inbound.TryDequeue(out transportEvent))
+            {
+                return false;
+            }
+
+            if (transportEvent.kind == TransportEventKind.Frame)
+            {
+                Interlocked.Decrement(ref queuedFrames);
+            }
+
+            return true;
         }
+
+        /// <summary>
+        /// §5.2 <c>pendingIn</c> — received frames not yet drained by the game thread. The client adds this
+        /// to its own not-yet-applied count so a deferred DrainTransport backlog (C1) is reported honestly.
+        /// </summary>
+        internal int QueuedFrameCount => Math.Max(0, Volatile.Read(ref queuedFrames));
 
         /// <summary>
         /// Answer the "does the BCL WebSocket exist in this Mono?" question once, at startup, so a
@@ -379,6 +418,7 @@ namespace BibitesMultiverse
                     string text = Encoding.UTF8.GetString(assembled.GetBuffer(), 0, (int)assembled.Length);
                     assembled.SetLength(0);
                     inbound.Enqueue(new TransportEvent { kind = TransportEventKind.Frame, text = text });
+                    Interlocked.Increment(ref queuedFrames);
                 }
             }
         }

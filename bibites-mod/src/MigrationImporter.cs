@@ -20,8 +20,27 @@ namespace BibitesMultiverse
     internal class MigrationImporter
     {
         private readonly MultiverseClient client;
+
+        /// <summary>
+        /// §7.3 — the migrationId dedup ledger. C2 (Slot-6 livelock): it is keyed to the world identity,
+        /// not the socket. §7.3 lets it live only "for the current connection"; this mod keeps it for the
+        /// whole world **session**, which is stricter (loss-not-duplication is preserved) and is what makes
+        /// a socket reconnect's replayed backlog an O(1) dedup hit instead of a full re-spawn. It is a
+        /// HashSet, so it grows for the life of the session — roughly 10k migrationId strings a day at the
+        /// worst observed rate, about a megabyte a day, and a world load or rollback (a new sessionId, see
+        /// <see cref="OnHandshake"/>) empties it. That is deliberately not capped: the durable backstop for
+        /// an evicted entry would be the entityId world scan (§7.3), so a cap would trade bounded memory
+        /// for a reintroduced duplication window, the wrong direction for D2.
+        /// </summary>
         private readonly HashSet<string> seenMigrations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<int, double> immunityUntilSimTime = new Dictionary<int, double>();
+
+        /// <summary>
+        /// C2 (§7.3, §7.4) — the world identity the ledger above belongs to. <see cref="OnHandshake"/>
+        /// clears the ledger only when this changes, which is exactly when §7.4 custody reassertion wants
+        /// it gone.
+        /// </summary>
+        private string ledgerSessionId;
 
         internal MigrationImporter(MultiverseClient client)
         {
@@ -32,12 +51,33 @@ namespace BibitesMultiverse
         {
             seenMigrations.Clear();
             immunityUntilSimTime.Clear();
+            ledgerSessionId = null;
         }
 
-        internal void ClearConnectionState()
+        /// <summary>
+        /// C2 (§7.3, §7.4) — called on every handshake with the world's current sessionId. A plain socket
+        /// reconnect keeps the same sessionId (§6.3), so the dedup ledger survives it: without this, the
+        /// old <c>ClearConnectionState</c> wiped the ledger on every reconnect, and the sidecar's replayed
+        /// 64 un-ACKed deliveries then missed the O(1) key and re-ran the full spawn, stalling the main
+        /// thread into the next 4004 — the Slot-6 livelock. The ledger is cleared only when the sessionId
+        /// actually changes: a world load or rollback, which is where §7.4 reasserts custody.
+        /// </summary>
+        internal void OnHandshake(string sessionId)
         {
-            // migrationId dedup is per connection (§7.3). entityId dedup lives in the world itself.
+            if (string.Equals(ledgerSessionId, sessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (ledgerSessionId != null && seenMigrations.Count > 0)
+            {
+                MultiversePlugin.Log.LogInfo(
+                    $"[M2] world identity changed (sessionId {ledgerSessionId} -> {sessionId}) — clearing the " +
+                    $"{seenMigrations.Count}-entry migrationId dedup ledger (§7.4).");
+            }
+
             seenMigrations.Clear();
+            ledgerSessionId = sessionId;
         }
 
         /// <summary>m2_findings.md §4.4 guard 3 — a freshly arrived organism cannot re-trigger the strip.</summary>
@@ -122,10 +162,17 @@ namespace BibitesMultiverse
                 return;
             }
 
-            MultiversePlugin.Log.LogInfo(
-                $"[M2] migrationId={migrationId} entityId={entityId} phase=MIGRATE_IN_RECEIVED edge={ContractA.EdgeName(entryEdge)} " +
-                $"entryPosition={entryPosition.ToString("F6", CultureInfo.InvariantCulture)} attempt={attempt} bounceBack={bounceBack} " +
-                $"payloadBytes={System.Text.Encoding.UTF8.GetByteCount(payload)} payloadSha256={ContractA.Sha256Hex(payload)}");
+            // C3 (Slot-6 livelock) — the received line and its payload SHA-256 are debug-only. The SHA is
+            // log-only (nothing consumes it), and hashing a ~10 kB payload on every ingest is dead weight
+            // on the main thread under a backlog. On success the SPAWNED line below carries the same key
+            // fields; on rejection the NACK line does; both are always logged.
+            if (client.Config.DebugIngest)
+            {
+                MultiversePlugin.Log.LogInfo(
+                    $"[M2] migrationId={migrationId} entityId={entityId} phase=MIGRATE_IN_RECEIVED edge={ContractA.EdgeName(entryEdge)} " +
+                    $"entryPosition={entryPosition.ToString("F6", CultureInfo.InvariantCulture)} attempt={attempt} bounceBack={bounceBack} " +
+                    $"payloadBytes={System.Text.Encoding.UTF8.GetByteCount(payload)} payloadSha256={ContractA.Sha256Hex(payload)}");
+            }
 
             // §13 A3 + §14 A11 + §15 A18 — inbound EDGE_CLOSED means "not a declared edge", never
             // "closed right now". Under the grid all four values appear here: "W" off an east lane, "S"
@@ -155,6 +202,11 @@ namespace BibitesMultiverse
             }
 
             // ---- dedup, two keys (§7.3) --------------------------------------------------------
+            // C2 (Slot-6 livelock) — this is the O(1) key, checked before the O(N) entityId world scan and
+            // before any spawn. Because the ledger now survives a socket reconnect, a replayed already-
+            // handled migrationId lands here and is answered with a duplicate ACK for the cost of one
+            // HashSet lookup — even if the organism it once spawned has since died, since that path is never
+            // reached. The duplicate ACK is what clears the sidecar's journal entry (§5.8).
             if (seenMigrations.Contains(migrationId))
             {
                 Ack(migrationId, entityId, duplicate: true, counts: default(LinkRepairCounts));
@@ -244,8 +296,14 @@ namespace BibitesMultiverse
             try
             {
                 OrganismLinks links = OrganismLinks.CaptureForArrival(restoredId != 0 ? restoredId : entityId);
-                links.LogSummary();
-                counts = links.Restore(body);
+                if (client.Config.DebugIngest)
+                {
+                    // C3 — the capture summary and the per-link relink detail are debug-only chatter. The
+                    // relink COUNTS still reach the SPAWNED line below (relinkedParents/relinkedChildren).
+                    links.LogSummary();
+                }
+
+                counts = links.Restore(body, client.Config.DebugIngest);
             }
             catch (Exception e)
             {
@@ -346,9 +404,16 @@ namespace BibitesMultiverse
             };
 
             client.SendFrame(ContractA.Envelope(ContractA.TypeMigrateInAck, data).ToString(Formatting.None));
-            MultiversePlugin.Log.LogInfo(
-                $"[M2] migrationId={migrationId} entityId={entityId} phase=MIGRATE_IN_ACK duplicate={duplicate} " +
-                $"relinkedParents={counts.parents} relinkedChildren={counts.children}");
+
+            // C3 — the ACK-sent confirmation is debug-only. On success the SPAWNED line already logged the
+            // outcome one call earlier, and on a dedup hit the DUPLICATE line did; both name the same key
+            // fields, so this line is pure duplication at info level.
+            if (client.Config.DebugIngest)
+            {
+                MultiversePlugin.Log.LogInfo(
+                    $"[M2] migrationId={migrationId} entityId={entityId} phase=MIGRATE_IN_ACK duplicate={duplicate} " +
+                    $"relinkedParents={counts.parents} relinkedChildren={counts.children}");
+            }
         }
 
         private void Nack(string migrationId, int entityId, string code, string nackClass, string message, int retryAfterMs)

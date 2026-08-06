@@ -402,9 +402,57 @@ func (s *Sidecar) onPeerStatus(env wire.Envelope) bool {
 	return true
 }
 
+// migrationHead is the minimal projection of a MIGRATION_PAYLOAD the dedup fast
+// path needs: the idempotency key, plus sourcePeer (for a tombstone re-ACK) and
+// the informational reroute flag (for the duplicate log line). Decoding into it
+// SKIPS body.bb8 — up to 4 MiB — so a duplicate never pays that decode.
+type migrationHead struct {
+	MigrationID string             `json:"migrationId"`
+	SourcePeer  string             `json:"sourcePeer"`
+	Reroute     *contractb.Reroute `json:"reroute,omitempty"`
+}
+
 // onMigrationPayload implements contract-b-m4.md §6.6's seven receiver
 // obligations, in order.
 func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
+	// 1. Dedup on migrationId against the journal AND its tombstones, BEFORE the
+	// full body decode. A duplicate — the retry hammer of §9.2/B5 — then costs an
+	// O(1) journal lookup and a tiny header parse instead of a multi-MiB body.bb8
+	// unmarshal followed by validation and a genome hash: the shape that paid
+	// 203 735 full decodes into the stalled slot 6. A RE-ROUTED frame
+	// deduplicates on exactly the same key, which is what makes a re-route that
+	// races a late delivery safe.
+	var head migrationHead
+	if err := contractb.DecodeData(env.Data, &head); err == nil && head.MigrationID != "" {
+		s.mu.Lock()
+		if st, ok := s.jr.Get(head.MigrationID); ok {
+			s.mu.Unlock()
+			// §6.7: a sidecar MUST NOT send MIGRATION_ACK when it has MERELY
+			// JOURNALED the payload. The one exception is a migrationId that is
+			// already TOMBSTONED — it was ACKed once before, so re-ACKing it
+			// carries the same meaning.
+			//
+			// An entry still awaiting its mod is NOT that case, and pacing makes it
+			// a long-lived one: a paced delivery can sit in this journal for
+			// minutes of simulated time, and ACKing it here would release the
+			// sender's custody before the spawn that is supposed to prove the
+			// delivery. The sender's retry is free — it lands right back in this
+			// branch — and its hold clock does not run against a live peer (Risk 9).
+			acked := st.Status == journal.StatusDone || st.AckedUpstream
+			s.log.Info("contract B: duplicate MIGRATION_PAYLOAD, delivering nothing",
+				"migrationId", head.MigrationID, "status", st.Status,
+				"reAcked", acked, "reroute", head.Reroute != nil)
+			if acked {
+				s.ackUpstreamNow(head.MigrationID, head.SourcePeer, st.Entry.EntityID, true)
+			}
+			return true
+		}
+		s.mu.Unlock()
+	}
+
+	// A NEW migrationId (or a frame too malformed to yield one): only now pay for
+	// the full body decode and the identical validation the receiver has always
+	// run before taking custody. A duplicate never reaches any of this.
 	var payload contractb.MigrationPayload
 	if err := contractb.DecodeData(env.Data, &payload); err != nil {
 		s.nackUpstream(payload.MigrationID, "", contractb.NackMalformedMessage, err.Error())
@@ -421,35 +469,11 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 	}
 
 	s.mu.Lock()
-	// 1. Dedup on migrationId against the journal AND its tombstones. A
-	// RE-ROUTED frame deduplicates on exactly the same key, which is what makes
-	// a re-route that races a late delivery safe.
-	if st, ok := s.jr.Get(payload.MigrationID); ok {
-		s.mu.Unlock()
-		// §6.7: a sidecar MUST NOT send MIGRATION_ACK when it has MERELY
-		// JOURNALED the payload. The one exception is a migrationId that is
-		// already TOMBSTONED — it was ACKed once before, so re-ACKing it carries
-		// the same meaning.
-		//
-		// An entry still awaiting its mod is NOT that case, and pacing makes it a
-		// long-lived one: a paced delivery can sit in this journal for minutes of
-		// simulated time, and ACKing it here would release the sender's custody
-		// before the spawn that is supposed to prove the delivery. The sender's
-		// retry is free — it lands right back in this branch — and its hold clock
-		// does not run against a live peer (Risk 9).
-		acked := st.Status == journal.StatusDone || st.AckedUpstream
-		s.log.Info("contract B: duplicate MIGRATION_PAYLOAD, delivering nothing",
-			"migrationId", payload.MigrationID, "status", st.Status,
-			"reAcked", acked, "reroute", payload.Reroute != nil)
-		if acked {
-			s.ackUpstreamNow(payload.MigrationID, payload.SourcePeer, st.Entry.EntityID, true)
-		}
-		return true
-	}
 	// 2. Admission control. Under M4 this is also what a PACED BACKLOG produces
 	// when it stops draining (contract-a.md §7.5): a peer-local refusal, and
 	// therefore proof no custody moved, so the sender re-routes instead of
-	// piling more onto a saturated peer.
+	// piling more onto a saturated peer. The OVERLOADED check stays AFTER dedup,
+	// so it only ever fires for a NEW migrationId (§6.6 step 2).
 	if s.jr.CountPending(journal.In) >= s.cfg.InboundQueueMax {
 		hasMod := s.mod != nil && s.mod.handshaked
 		s.mu.Unlock()

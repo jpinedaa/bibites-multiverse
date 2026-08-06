@@ -826,7 +826,12 @@ not add it either (`contract-a.md` §14 A12, §12 item 8).
 The receiving sidecar **MUST**, in this order:
 
 1. Deduplicate on `migrationId` against its journal **and its tombstones**. **A hit delivers
-   nothing** (`contract-a.md` §7.2). Whether it is also *answered* depends on which kind of
+   nothing** (`contract-a.md` §7.2). "In this order" includes the decode: the receiver
+   extracts `migrationId` with a minimal parse and answers a hit **before** it decodes
+   `body.bb8`, so a duplicate costs an O(1) lookup, never a multi-MiB unmarshal — and a
+   duplicate whose body would not even parse is still answered by this table, because the
+   question is the organism's custody, not the frame's validity (amended — §14, B8).
+   Whether a hit is also *answered* depends on which kind of
    hit it is, and the two cases are not the same (amended — §14, B6):
 
    | The hit | Answer |
@@ -1682,7 +1687,7 @@ for an unknown `migrationId` silently throws it away.
 | Never forwarded | `pending`, or a relay `SLOT_VACANT` / `PEER_OFFLINE` / `NOT_FORWARDED` carrying a matched `neverForwarded: true` | **Re-route** along the same axis to the current effective neighbour. Keep the `migrationId`. Rewrite `destSlot`. |
 | Refused for a peer-local reason | `MIGRATION_NACK` with `OVERLOADED`, `SIM_SIZE_MISMATCH` or `MOD_ABSENT` | **Re-route.** The receiver stated it took no custody, and another slot accepts the same organism. |
 | Refused for a payload reason | `MIGRATION_NACK` with `INVALID_PAYLOAD`, `KIND_UNSUPPORTED`, `VERSION_UNSUPPORTED` or `MALFORMED_MESSAGE` | **Bounce home.** Every slot refuses this organism, so the map is not the answer. |
-| Forwarded, then silence | none | **Hold, then bounce** (§9.3). Retry the recorded `destSlot` on the retry cadence; the retry is idempotent because the destination deduplicates. |
+| Forwarded, then silence | none | **Hold, then bounce** (§9.3). Retry the recorded `destSlot` on the retry cadence — flat toward a dark destination, backing off exponentially toward a live one (amended — §14, B8); the retry is idempotent because the destination deduplicates. |
 
 **Re-route mechanics.**
 
@@ -1709,7 +1714,7 @@ destination. It waits. **The wait is bounded**, and then the organism comes home
 | Rule | Statement |
 |---|---|
 | The clock | `holdTimeoutMs`, default **86 400 000 ms (24 hours)**, of **accrued** hold time. |
-| **The retry keeps running** | A `held` entry **MUST** keep re-forwarding its **recorded** `destSlot` on the ordinary `forwardRetryMs` cadence, dark destination and all (added — §14, B5). The retry does **not** reset the handoff state, and it does **not** reset or pause the accrual. §9.2 row 4 states the same rule from the other side; it is repeated here because this is the section an implementer reads while building the hold, and a hold that stops retrying is the natural thing to build. |
+| **The retry keeps running** | A `held` entry **MUST** keep re-forwarding its **recorded** `destSlot` on the ordinary `forwardRetryMs` cadence, dark destination and all (added — §14, B5). The retry does **not** reset the handoff state, and it does **not** reset or pause the accrual. §9.2 row 4 states the same rule from the other side; it is repeated here because this is the section an implementer reads while building the hold, and a hold that stops retrying is the natural thing to build. The **dark** cadence stays flat because this retry is the proof's only conduit; it is the retry toward a **live** destination that backs off (§14, B8). |
 | **When it runs** | Only while **all three** hold: the entry is in `held`; the sender has a **live relay connection**; and the destination slot is, in the sender's latest `PEER_STATUS`, **not live** (`live: false`) or **absent from the map** entirely. |
 | **When it stops** | The moment any of those stops being true. The destination coming back stops it. The **sender** losing its own relay connection stops it. A relay restart stops it until the sender reconnects and sees the map again. |
 | What it never counts | Time while the destination is **live**. A live peer with a deep paced backlog is **slow, not orphaned** (Risk 9), and pacing can make a live peer silent for a long simulated while. Counting that time would bounce an organism that was about to be spawned — and that is a duplication, not a delay. |
@@ -1775,7 +1780,7 @@ unchanged from M2 and M3 in its first three rows, with M4's bounded hold as the 
 |---|---|
 | `MIGRATION_NACK` received, any code | **Bounce**, or re-route first where §9.2's table says so. A NACK is only ever sent before durable custody (§6.8), so it proves the organism is not at the destination. |
 | The forward never reached a live peer — the relay link is down, or `destSlot` is vacant — for longer than `bounceTimeoutMs`, **and route-around has no lane to offer** | **Bounce.** The frame was never handed to anyone. |
-| The forward reached a live peer and no answer came back, and the destination is **live** | **Hold and re-forward.** Never bounce. The destination deduplicates, so a re-forward is free, and holding converts a possible duplication into a bounded delay. |
+| The forward reached a live peer and no answer came back, and the destination is **live** | **Hold and re-forward.** Never bounce. The destination deduplicates, so a re-forward is free, and holding converts a possible duplication into a bounded delay. The re-forward cadence backs off exponentially to `forwardRetryMaxMs` — free is not the same as costless at scale (amended — §14, B8). |
 | The forward reached a live peer and no answer came back, and the destination is **dark** | **Hold with the clock of §9.3**, then bounce at the timeout. |
 
 A bounce re-delivers the organism to the origin's own mod as a Contract A `MIGRATE_IN` with
@@ -1967,7 +1972,8 @@ those two sections carry fields that no routing decision reads.
 | `statsBroadcastIntervalMs` | `5000` | relay | **New in M4** (added — §14, B4). The §6.5 timer that republishes `PEER_STATUS`, and re-sends any changed `SECTOR_GRANT`, because **stats change without the registry changing**. §6.5 named it and this table did not define it. Set to `statsIntervalMs`, the cadence at which the stats it carries arrive: a faster timer would republish the same block, a slower one would age it. It is a compiled default with no flag and no environment variable. |
 | `statsIntervalMs` | `5000` | sidecar | Minimum spacing between stats-bearing `PING`s (§6.11). |
 | `statsStaleMs` | `30000` | archive | Age at which a `stats` block renders as unknown rather than as state (§10.1). |
-| `forwardRetryMs` | `5000` | sidecar | Re-forward cadence for a journaled outbound entry with no answer. |
+| `forwardRetryMs` | `5000` | sidecar | Re-forward cadence for a journaled outbound entry with no answer — flat toward a dark destination, and the backoff floor toward a live one (§14, B8). |
+| `forwardRetryMaxMs` | `60000` | sidecar | **New after M4** (added — §14, B8). Ceiling of the doubling re-forward backoff toward a **live** destination that has not answered (§9.2, §9.4). Resets on any state change or liveness flip. A dark destination keeps the flat `forwardRetryMs` (§9.3, B5). |
 | `bounceTimeoutMs` | `20000` | sidecar | How long an outbound entry that never reached a live peer, **and has no lane to re-route to**, waits before it is bounced home (§9.2, §9.4). |
 | `migrationAckTimeoutMs` | `30000` | sidecar | Informational deadline for `MIGRATION_ACK`; expiry re-forwards, it never bounces (§9.4). |
 | `holdTimeoutMs` | `86400000` | sidecar | **New in M4.** Accrued dark time before a held entry bounces home by itself — 24 hours (D2, signed off 2026-08-05). The clock runs only while the destination is dark and the sender can see it (§9.3). |
@@ -2069,6 +2075,12 @@ expect: each amendment names the ambiguity or gap, the resolution, and **which s
 it** — the side whose code makes the rule true, and which therefore has to change if the rule
 changes. Where an amendment sharpens the body, the body carries an `(amended — §14, Bx)` or
 `(added — §14, Bx)` marker at that point.
+
+**B8 was folded in on 2026-08-06, from the slot-6 livelock** (`contract-a.md` §15 A29 is
+the matching set for the other wire). It is behavioural, not structural: no field, no enum,
+no frame shape — one decode-order rule §6.6 already implied, one retry cadence §9.3 never
+bounded, and one new named default in §12 (`forwardRetryMaxMs`). `contract-b/3.0` is
+unchanged.
 
 ### B4 — `statsBroadcastIntervalMs` is defined, at 5 000 ms (§6.5, §12)
 
@@ -2194,3 +2206,48 @@ reconciliation pass collapsed both call sites onto one key function.
 
 **Enforced by:** the relay, for the fan-out; the archive, for the key — and for keeping the
 key single-sourced, which is the part that broke.
+
+### B8 — Dedup precedes the decode, and a live destination's retry backs off (§6.6, §9.2, §9.3, §9.4, §12)
+
+*Folded in on 2026-08-06, from the slot-6 livelock. `contract-a.md` §15 A29 carries the
+Contract A half of the same incident.*
+
+**The gap.** §6.6 orders the receiver's obligations and puts dedup first, and §9.2/B5 order
+the sender to keep re-forwarding because "the retry is free — the destination
+deduplicates." Both sentences are true and their composition is not: nothing said dedup
+comes before the *decode*, and nothing bounded the retry toward a destination that is live
+but not answering. Slot 6 was exactly that destination for seven hours — its paced backlog
+pinned at `inboundQueueMax`, its mod livelocked, its relay link healthy — so its sender
+re-forwarded every stuck entry every `forwardRetryMs`, and slot 6 paid a full
+`MIGRATION_PAYLOAD` decode, multi-MiB `body.bb8` included, for each of 203,735 duplicates
+before looking up the `migrationId` that made the whole frame moot. The "free" retry was a
+CPU tax on the one machine that had none to spare.
+
+**The resolution, receiver half.** §6.6 step 1 is a decode order, not just a processing
+order: extract `migrationId` with a minimal parse, look it up, and answer a hit from the
+table **before** decoding the body. Two consequences, both deliberate:
+
+1. A duplicate costs an O(1) lookup and a header parse, whatever its size.
+2. A duplicate whose body is malformed is answered as a *duplicate* — silence, or a
+   tombstone re-ACK — never `MALFORMED_MESSAGE`. Before B8 the decode ran first, so such a
+   frame drew a NACK the table never sanctioned. The organism is already in this journal;
+   its custody is the question, and the frame's validity stopped mattering when the first
+   copy was journaled. A **new** `migrationId` with the same bad body still fails
+   validation exactly as before.
+
+**The resolution, sender half.** The re-forward toward a **live** destination doubles from
+`forwardRetryMs` up to `forwardRetryMaxMs` (60 000 ms), per entry, resetting on any handoff
+state change or liveness flip. The dark cadence is untouched — B5's argument stands whole:
+toward a dark destination the retry is the only conduit the non-delivery proof has, and the
+hold clock accrues against it. Toward a live destination no proof is pending — the
+destination has the frame and is pacing it toward its mod (Risk 9) — so the retry exists
+only to survive a lost frame, and a decaying cadence serves that at a fortieth of the cost.
+
+**What does not move.** `MIGRATION_ACK` still waits for the receiving mod's
+`MIGRATE_IN_ACK` (§6.7); a merely-journaled duplicate is still answered with nothing; the
+hold clock still runs only while the destination is dark; and no frame, field or enum
+changes. One default is added to §12.
+
+**Enforced by:** the receiving sidecar, for the decode order; the sending sidecar, for the
+backoff. The relay carries no part of it — it forwards retries as dumbly as ever, which is
+why the sender had to learn restraint.

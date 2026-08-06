@@ -48,7 +48,29 @@ namespace BibitesMultiverse
             internal float queuedAtRealtime;
         }
 
+        /// <summary>
+        /// The inbound mutations parsed out of the transport, waiting for FixedUpdate to apply them in
+        /// arrival order.
+        ///
+        /// C4 — this list is bounded in practice and needs no cap of its own: the sidecar caps its un-ACKed
+        /// inbound deliveries at 64 and paces their release (§7.5, §15 A20 and the parallel Go-side fix), so
+        /// it cannot enqueue MIGRATE_INs faster than the mod ACKs them, and <see cref="ApplyMutations"/>
+        /// drains this under a per-FixedUpdate budget (C1) far faster than that pacing refills it. Only
+        /// MIGRATE_* frames ever land here; EDGE_STATUS and other control frames are applied straight out of
+        /// <see cref="DrainTransport"/> and never queue.
+        /// </summary>
         private readonly List<PendingMutation> pendingMutations = new List<PendingMutation>();
+
+        // C1 (Slot-6 livelock) — inbound work is metered so one FixedUpdate and one Update can never spend
+        // seconds on the main thread and starve the heartbeat into a 4004. The budgets are a wall-clock
+        // ceiling and a count cap, whichever trips first; leftover work stays queued, strictly in order,
+        // for the next frame. See ApplyMutations (FixedUpdate) and DrainTransport (Update).
+        private const int MutationBudgetMs = 8;
+        private const int MaxMutationsPerFixedUpdate = 4;
+        private const int DrainBudgetMs = 2;
+        private const int MaxFramesPerUpdate = 16;
+        private readonly System.Diagnostics.Stopwatch mutationClock = new System.Diagnostics.Stopwatch();
+        private readonly System.Diagnostics.Stopwatch drainClock = new System.Diagnostics.Stopwatch();
 
         private bool armed;
         private string sessionId;
@@ -349,6 +371,17 @@ namespace BibitesMultiverse
                 return;
             }
 
+            // C1 (Slot-6 livelock) — parse at most a bounded number of frames per Update. Each MIGRATE_IN
+            // is a ~10 kB JSON envelope parse, and draining a replayed backlog of 64 in one Update spent
+            // long enough on the main thread to delay the heartbeat. Leftover frames stay in the transport's
+            // inbound queue, strictly in arrival order, for the next Update, and PendingInboundCount() counts
+            // them so §5.2 pendingIn stays honest. Cheap control events (Connected / Disconnected / Log) are
+            // never metered: they parse no payload, and Connected must reach the handshake promptly. Because
+            // events are drained in arrival order, a control event can only ever sit behind frames of the
+            // SAME or an earlier connection, and transport.IsConnected / Generation are already correct
+            // before their Disconnected / Connected event is drained, so PumpHeartbeat is unaffected.
+            drainClock.Restart();
+            int frames = 0;
             while (transport.TryDequeue(out TransportEvent transportEvent))
             {
                 switch (transportEvent.kind)
@@ -367,6 +400,14 @@ namespace BibitesMultiverse
 
                     case TransportEventKind.Frame:
                         OnFrame(transportEvent.text);
+                        frames++;
+                        if (frames >= MaxFramesPerUpdate || drainClock.ElapsedMilliseconds >= DrainBudgetMs)
+                        {
+                            // Stop after a whole frame, never mid-frame. The rest wait, in order, for the
+                            // next Update — a small, bounded control-frame latency (worst case one Update).
+                            return;
+                        }
+
                         break;
                 }
             }
@@ -401,7 +442,13 @@ namespace BibitesMultiverse
             // last-applied epoch when it opens one.
             lastEdgeStatusEpoch = 0;
             edgeStates = EdgeStates.AllClosed(config.ExportEdges, 0, ContractA.ReasonNoPeer);
-            importer.ClearConnectionState();
+
+            // C2 (§7.3, §7.4) — the dedup ledger is keyed to the world identity, not the socket. This
+            // reconnect carries the same sessionId (§6.3), so the ledger is kept: the sidecar's replayed
+            // un-ACKed deliveries then hit the O(1) dedup key instead of re-running the full spawn, which
+            // is the mod side of the Slot-6 livelock fix. Only a new sessionId — a world load or rollback —
+            // clears it, because §7.4 custody reassertion keys off exactly that change.
+            importer.OnHandshake(sessionId);
 
             handshakeGeneration = connectionGeneration;
             SendConfigUpdate("connect");
@@ -496,11 +543,24 @@ namespace BibitesMultiverse
                 return;
             }
 
-            List<PendingMutation> batch = new List<PendingMutation>(pendingMutations);
-            pendingMutations.Clear();
-
-            foreach (PendingMutation entry in batch)
+            // C1 (Slot-6 livelock) — apply pending mutations in arrival order, but stop when the wall-clock
+            // budget or the count cap is hit, whichever comes first. Each MIGRATE_IN can cost a JSON parse,
+            // a prefab instantiate, a brain-graph build and an O(N) world scan; applying a replayed backlog
+            // of 64 in one FixedUpdate spent 2.5-4 s on the main thread, so Update never ran, no HEARTBEAT
+            // was enqueued, and the sidecar closed 4004 (§5.7 permits a slower drain — the backlog is
+            // reported honestly by pendingIn). Leftover entries stay queued, in order, for the next
+            // FixedUpdate.
+            //
+            // Forward progress is guaranteed: the budget is tested only AFTER an entry is applied, so at
+            // least one is always processed. A single pathological organism therefore costs exactly one
+            // FixedUpdate and can never wedge the queue behind it.
+            mutationClock.Restart();
+            int applied = 0;
+            while (applied < pendingMutations.Count)
             {
+                PendingMutation entry = pendingMutations[applied];
+                applied++;
+
                 try
                 {
                     switch (entry.type)
@@ -520,7 +580,17 @@ namespace BibitesMultiverse
                 {
                     MultiversePlugin.Log.LogError($"{Prefix} handling {entry.type} threw — {e}");
                 }
+
+                if (applied >= MaxMutationsPerFixedUpdate || mutationClock.ElapsedMilliseconds >= MutationBudgetMs)
+                {
+                    break;
+                }
             }
+
+            // Nothing appends to pendingMutations during this loop (DrainTransport and RejectWhilePaused
+            // both run in Update, not FixedUpdate), so the first `applied` entries are exactly the ones
+            // just handled, in order. Drop them and leave the rest for the next FixedUpdate.
+            pendingMutations.RemoveRange(0, applied);
         }
 
         /// <summary>
@@ -916,6 +986,17 @@ namespace BibitesMultiverse
                 {
                     count++;
                 }
+            }
+
+            // C1 — DrainTransport now parses only a few frames per Update, so inbound MIGRATE_INs can still
+            // be sitting in the transport's queue, not yet parsed into pendingMutations. §5.2 pendingIn MUST
+            // report the whole not-yet-applied backlog, or the sidecar's pacing over-sends into a queue it
+            // believes is short — the exact pressure behind the Slot-6 flood. QueuedFrameCount is a small
+            // over-estimate (a rarely-queued EDGE_STATUS frame counts too), which is the safe way to round:
+            // it makes the sidecar pace slightly more conservatively, never less.
+            if (transport != null)
+            {
+                count += transport.QueuedFrameCount;
             }
 
             return count;

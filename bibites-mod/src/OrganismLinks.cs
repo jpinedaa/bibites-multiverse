@@ -204,14 +204,20 @@ namespace BibitesMultiverse
             }
         }
 
-        /// <summary>Re-apply every recorded link to the respawned instance, both directions.</summary>
-        internal LinkRepairCounts Restore(BibiteBody newBody)
+        /// <summary>
+        /// Re-apply every recorded link to the respawned instance, both directions. <paramref
+        /// name="verbose"/> gates the per-link relink detail lines (C3, Slot-6 livelock): the import hot
+        /// path passes the ingest debug flag, and the returned counts are always reported by the caller's
+        /// one SPAWNED line, so nothing observable is lost when it is off. The dev round-trip test keeps
+        /// the default and stays verbose.
+        /// </summary>
+        internal LinkRepairCounts Restore(BibiteBody newBody, bool verbose = true)
         {
             LinkRepairCounts counts = default(LinkRepairCounts);
-            counts.parents += RestoreOwnParents(newBody);
-            counts.children += RestoreOwnChildren(newBody);
-            counts.children += RestoreHolders(newBody);
-            counts.parents += RestoreDependants(newBody);
+            counts.parents += RestoreOwnParents(newBody, verbose);
+            counts.children += RestoreOwnChildren(newBody, verbose);
+            counts.children += RestoreHolders(newBody, verbose);
+            counts.parents += RestoreDependants(newBody, verbose);
             return counts;
         }
 
@@ -271,7 +277,7 @@ namespace BibitesMultiverse
                 $"[M2] detach id={selfId}: cleared {clearedChildren} stale children entr(ies) and {clearedParents} parent reference(s).");
         }
 
-        private int RestoreOwnParents(BibiteBody newBody)
+        private int RestoreOwnParents(BibiteBody newBody, bool verbose)
         {
             BibiteGenes genes = newBody.gene;
             if (genes == null)
@@ -290,13 +296,17 @@ namespace BibitesMultiverse
             genes.parent1 = (first != null) ? first.gameObject : null;
             genes.parent2 = (second != null) ? second.gameObject : null;
 
-            MultiversePlugin.Log.LogInfo(
-                $"relink: parents parent1={p1}{(p1 != 0 && first == null ? " (not live)" : "")} " +
-                $"parent2={p2}{(p2 != 0 && second == null ? " (not live)" : "")}");
+            if (verbose)
+            {
+                MultiversePlugin.Log.LogInfo(
+                    $"relink: parents parent1={p1}{(p1 != 0 && first == null ? " (not live)" : "")} " +
+                    $"parent2={p2}{(p2 != 0 && second == null ? " (not live)" : "")}");
+            }
+
             return ((first != null) ? 1 : 0) + ((second != null) ? 1 : 0);
         }
 
-        private int RestoreOwnChildren(BibiteBody newBody)
+        private int RestoreOwnChildren(BibiteBody newBody, bool verbose)
         {
             BibiteEggLayingOrgan layer = newBody.eggLayer;
             if (layer == null)
@@ -311,7 +321,11 @@ namespace BibitesMultiverse
 
             if (layer.childIDs == null)
             {
-                MultiversePlugin.Log.LogInfo("relink: no children recorded in the payload.");
+                if (verbose)
+                {
+                    MultiversePlugin.Log.LogInfo("relink: no children recorded in the payload.");
+                }
+
                 return 0;
             }
 
@@ -337,11 +351,15 @@ namespace BibitesMultiverse
                 }
             }
 
-            MultiversePlugin.Log.LogInfo($"relink: own children resolved={resolved} unresolved={missing}");
+            if (verbose)
+            {
+                MultiversePlugin.Log.LogInfo($"relink: own children resolved={resolved} unresolved={missing}");
+            }
+
             return resolved;
         }
 
-        private int RestoreHolders(BibiteBody newBody)
+        private int RestoreHolders(BibiteBody newBody, bool verbose)
         {
             BibiteID newId = newBody.id;
             if (newId == null)
@@ -373,11 +391,15 @@ namespace BibitesMultiverse
                 }
             }
 
-            MultiversePlugin.Log.LogInfo($"relink: parent children lists repaired in place={replaced} appended={appended}");
+            if (verbose)
+            {
+                MultiversePlugin.Log.LogInfo($"relink: parent children lists repaired in place={replaced} appended={appended}");
+            }
+
             return replaced + appended;
         }
 
-        private int RestoreDependants(BibiteBody newBody)
+        private int RestoreDependants(BibiteBody newBody, bool verbose)
         {
             int restored = 0;
             foreach (ParentSlot slot in dependants)
@@ -402,7 +424,11 @@ namespace BibitesMultiverse
                 restored++;
             }
 
-            MultiversePlugin.Log.LogInfo($"relink: organisms pointing at me as parent repaired={restored}");
+            if (verbose)
+            {
+                MultiversePlugin.Log.LogInfo($"relink: organisms pointing at me as parent repaired={restored}");
+            }
+
             return restored;
         }
     }

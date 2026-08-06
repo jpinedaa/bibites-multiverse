@@ -93,9 +93,12 @@ func (s *Sidecar) serveContractA(w http.ResponseWriter, r *http.Request) {
 	sess := &modSession{gen: s.modGen, conn: conn, lastHeartbeat: s.now(), timeScale: 1}
 	old := s.mod
 	s.mod = sess
-	// A new mod session is a new world clock, so the pacing bucket starts cold
-	// rather than carrying a stale simulated time across the gap (§7.5).
-	s.pace.reset()
+	// The pacing bucket is deliberately NOT reset here. A socket reconnect under
+	// the SAME sessionId is the same world clock: simulated time kept advancing
+	// while the socket was down, the burst was never refunded, and refilling it
+	// now would let the un-ACKed replay of §7.5 arrive as the very flood pacing
+	// exists to prevent — the slot-6 livelock. The reset belongs to a genuinely
+	// new sessionId, and onConfigUpdate does it there once the handshake is read.
 	s.edgeEpoch = 0 // contract-a.md §5.4: the epoch counter resets per connection
 	s.lastEdges = nil
 	s.mu.Unlock()
@@ -254,6 +257,11 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 	// contract-a.md §6.1: exactly one EDGE_STATUS follows the handshake.
 	s.publishEdgesLocked(true)
 	if newSession {
+		// A new sessionId is a new world clock (§7.5): the pacing bucket starts
+		// cold rather than carrying a stale simulated time across the gap, and its
+		// internal lastSim/haveSim are cleared so the first HEARTBEAT re-anchors
+		// them. A same-session reconnect keeps all of it — see serveContractA.
+		s.pace.reset()
 		s.reassertCustodyLocked()
 	}
 	s.replayInboundLocked()
@@ -689,12 +697,17 @@ func (s *Sidecar) reassertCustodyLocked() {
 // pacing exists for: a slot that slept accumulated a dam, and releasing it all
 // at wake is the failure T1 measured.
 //
-// Every entry is marked due immediately and the paced tick releases them as
-// tokens allow. PACING MUST NOT REORDER, and the tick walks the journal in
-// order, so it does not.
+// The batch is scheduled behind ONE escalating, order-preserving delay
+// (replayBatchDelay) and the paced tick then releases the entries as tokens
+// allow — it is never delivered synchronously here. The delay is the sidecar's
+// answer to a reconnect livelock: a batch that keeps stalling its mod and
+// forcing a 4004 backs off a little more each generation instead of re-flooding
+// the instant the mod reconnects. PACING MUST NOT REORDER, and the tick walks
+// the journal in order, so it does not.
 func (s *Sidecar) replayInboundLocked() {
 	now := s.now()
-	n := 0
+	batch := make([]*journal.State, 0)
+	minAttempt := -1
 	for _, st := range s.jr.List() {
 		if st.Direction != journal.In {
 			continue
@@ -702,16 +715,52 @@ func (s *Sidecar) replayInboundLocked() {
 		if st.Status != journal.StatusOpen && st.Status != journal.StatusInFlight {
 			continue
 		}
-		// Clear the previous delivery's ACK deadline: the mod that owed that ACK
-		// is gone, so the entry is due now rather than in migrateInAckTimeoutMs.
-		s.schedFor(st.Entry.MigrationID).nextDeliver = time.Time{}
-		s.deliverLocked(st, now)
-		n++
+		if minAttempt < 0 || st.Attempt < minAttempt {
+			minAttempt = st.Attempt
+		}
+		batch = append(batch, st)
 	}
-	if n > 0 {
-		s.log.Info("contract A: queued un-ACKed inbound deliveries for replay",
-			"count", n, "pacedDepth", s.pacedDepthLocked())
+	if len(batch) == 0 {
+		return
 	}
+	// One due time for the whole batch keeps journal order: the previous
+	// delivery's ACK deadline is overwritten on purpose — the mod that owed that
+	// ACK is gone — and the entries become due together, so the tick releases
+	// them in journal order at the pacer's rate.
+	delay := replayBatchDelay(minAttempt)
+	due := now.Add(delay)
+	for _, st := range batch {
+		s.schedFor(st.Entry.MigrationID).nextDeliver = due
+	}
+	s.log.Info("contract A: queued un-ACKed inbound deliveries for replay",
+		"count", len(batch), "replayDelay", delay, "pacedDepth", s.pacedDepthLocked())
+}
+
+// The escalating replay delay of §7.5. A batch that keeps forcing a 4004 climbs
+// one step per delivery generation, capped, so a livelock decays instead of
+// spinning; ordinary traffic never reaches it because a fresh arrival is not a
+// replay.
+const (
+	replayDelayStep = 500 * time.Millisecond
+	replayDelayCap  = 5 * time.Second
+)
+
+// replayBatchDelay is the order-preserving delay a reconnect's un-ACKed inbound
+// batch waits before the pacer takes over. It escalates with the LEAST-delivered
+// entry's attempt count (incremented in deliverLocked), so the livelock —
+// deliver, stall, 4004, replay — backs off a little more each generation. A
+// first-attempt replay (a delivered-once batch, or a sidecar-restart recovery
+// that never delivered, minAttempt 0 or 1) stays prompt; only a repeatedly
+// replayed batch is held, up to replayDelayCap.
+func replayBatchDelay(minAttempt int) time.Duration {
+	d := time.Duration(minAttempt-1) * replayDelayStep
+	if d < 0 {
+		return 0
+	}
+	if d > replayDelayCap {
+		return replayDelayCap
+	}
+	return d
 }
 
 // modHeartbeatMonitor implements contract-a.md §8. Missed heartbeats close the

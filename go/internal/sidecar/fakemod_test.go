@@ -141,11 +141,16 @@ type fakeMod struct {
 	simTime     float64
 	simStep     float64
 	paused      bool
-	ackMode     ackMode
-	world       *fakeWorld
-	hbStop      chan struct{}
-	hbStopped   bool
-	wg          sync.WaitGroup
+	// hbSuppressed silences HEARTBEATs on the same socket without closing it, so
+	// a test can take the mod app-silent and bring it back with no reconnect —
+	// the state contract-a.md §8's timeout and the sidecar's delivery-freshness
+	// gate both watch for.
+	hbSuppressed bool
+	ackMode      ackMode
+	world        *fakeWorld
+	hbStop       chan struct{}
+	hbStopped    bool
+	wg           sync.WaitGroup
 }
 
 func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
@@ -411,6 +416,11 @@ func (m *fakeMod) heartbeatLoop(interval time.Duration) {
 			return
 		case <-t.C:
 			m.mu.Lock()
+			if m.hbSuppressed {
+				// App-silent: the socket stays open, but no HEARTBEAT is sent.
+				m.mu.Unlock()
+				continue
+			}
 			m.simTick++
 			tick := m.simTick
 			step := m.simStep
@@ -547,6 +557,23 @@ func (m *fakeMod) setPaused(p bool) {
 	m.mu.Lock()
 	m.paused = p
 	m.mu.Unlock()
+}
+
+// suppressHeartbeats stops or resumes HEARTBEATs on the live socket. Unlike
+// stopHeartbeats it is reversible, so a test can watch the delivery-freshness
+// gate close and reopen without a reconnect (contract-a.md §8).
+func (m *fakeMod) suppressHeartbeats(v bool) {
+	m.mu.Lock()
+	m.hbSuppressed = v
+	m.mu.Unlock()
+}
+
+// isClosed reports whether the sidecar has closed this connection (e.g. the
+// §8 4004), so a delivery-gate test can prove it acted in the window BEFORE that.
+func (m *fakeMod) isClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
 }
 
 // simTimeNow is the world's simulated clock, which is the only clock the

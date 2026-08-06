@@ -57,6 +57,9 @@ namespace BibitesMultiverse
         /// <summary>WP7 — the per-event expanding ring.</summary>
         internal const string EnvPortalFlourishes = "MULTIVERSE_PORTAL_FLOURISHES";
 
+        /// <summary>C3 (Slot-6 livelock) — opt-in verbose per-MIGRATE_IN logging and the payload SHA-256.</summary>
+        internal const string EnvDebugIngest = "MULTIVERSE_DEBUG_INGEST";
+
         /// <summary>Fraction of the half-extent S used for the border strip when nothing overrides it.</summary>
         internal const float DefaultWidthFactor = 0.02f;
 
@@ -90,6 +93,14 @@ namespace BibitesMultiverse
         internal bool Portal = true;
         internal bool PortalFlourishes = true;
         internal int PortalSortingOrder = -50;
+
+        /// <summary>
+        /// C3 (Slot-6 livelock) — when false (the default) each MIGRATE_IN logs a single outcome line and
+        /// never pays the hot-path SHA-256 of its ~10 kB payload. Turn it on to restore the full per-ingest
+        /// trace — the received line with <c>payloadSha256</c>, the link-capture summary, and the per-link
+        /// relink detail — when a migration needs debugging. Errors and NACKs are logged either way.
+        /// </summary>
+        internal bool DebugIngest;
 
         /// <summary>Entry-strip depth for the portal, in world units. 0 derives it from W + entryMargin.</summary>
         internal float PortalEntryWidth;
@@ -203,6 +214,16 @@ namespace BibitesMultiverse
                 "Depth of the entry-edge portal strip in world units. 0 derives it from W + entryMargin, " +
                 "which is exactly where an arriving organism is placed (contract-a.md §4.3).");
 
+            ConfigEntry<bool> debugIngestEntry = config.Bind(
+                "M4",
+                "DebugIngest",
+                false,
+                "Verbose per-MIGRATE_IN logging: the received line with payloadSha256, the link-capture " +
+                "summary and the per-link relink detail. Off by default because a deep inbound backlog would " +
+                "otherwise spend the main thread on log I/O and a SHA-256 of every ~10 kB payload (the Slot-6 " +
+                "livelock). The environment variable " + EnvDebugIngest + " overrides this. Errors and NACKs " +
+                "are always logged.");
+
             MultiverseConfig result = new MultiverseConfig();
 
             string edgeText = Prefer(Prefer(Prefer(Env(EnvExportEdges), Env(EnvExportEdge)), Env(EnvOpenEdge)), edgeEntry.Value);
@@ -273,6 +294,7 @@ namespace BibitesMultiverse
             result.PortalFlourishes = ReadBool(EnvPortalFlourishes, flourishEntry.Value);
             result.PortalSortingOrder = sortingEntry.Value;
             result.PortalEntryWidth = Math.Max(0f, entryWidthEntry.Value);
+            result.DebugIngest = ReadBool(EnvDebugIngest, debugIngestEntry.Value);
 
             return result;
         }
@@ -363,7 +385,8 @@ namespace BibitesMultiverse
                 $"[M4] config: saveMinutes={SaveMinutes.ToString("F1", CultureInfo.InvariantCulture)} saveKeep={SaveKeep} " +
                 $"saveOnQuit={SaveOnQuit} portal={Portal} portalFlourishes={PortalFlourishes} " +
                 $"portalSortingOrder={PortalSortingOrder} " +
-                $"portalEntryWidth={(PortalEntryWidth > 0f ? PortalEntryWidth.ToString("F1", CultureInfo.InvariantCulture) : "W+entryMargin")}");
+                $"portalEntryWidth={(PortalEntryWidth > 0f ? PortalEntryWidth.ToString("F1", CultureInfo.InvariantCulture) : "W+entryMargin")} " +
+                $"debugIngest={DebugIngest}");
             MultiversePlugin.Log.LogInfo(
                 $"[M2] config sources: {EnvExportEdges}={Show(Env(EnvExportEdges))} {EnvExportEdge}={Show(Env(EnvExportEdge))} " +
                 $"{EnvOpenEdge}={Show(Env(EnvOpenEdge))} " +

@@ -14,6 +14,23 @@ import (
 // Version is reported to the relay in HANDSHAKE.
 const Version = "m4.0"
 
+// Sidecar defence-in-depth defaults. Neither is a wire value: they are the
+// sidecar's own answer to the slot-6 livelock, so they live here rather than in
+// the contract packages.
+const (
+	// defaultHeartbeatDeliveryGrace is ~1.5x the 1000 ms heartbeat interval
+	// (contract-a.md §8). A mod silent for longer than this at the application
+	// layer is not keeping up, so inbound delivery is HELD until heartbeats
+	// resume — the pacer's own idle grace (10 s) is longer than the 3.5 s
+	// heartbeat timeout and so never trips during a stall (contract-a.md §7.5).
+	defaultHeartbeatDeliveryGrace = 1500 * time.Millisecond
+	// defaultForwardRetryMax caps the exponential backoff a re-forward to a LIVE
+	// destination climbs to: 5 s, 10 s, 20 s, 40 s, then this. It bounds the
+	// re-forward hammer at a live-but-slow peer without touching the dark-side
+	// cadence or the hold clock (contract-b-m4.md §9.3, B5).
+	defaultForwardRetryMax = 60 * time.Second
+)
+
 // Config is the sidecar's runtime configuration. The four required knobs are
 // --listen, --relay, --peer-id and --data-dir; everything else has a contract
 // default and exists so tests can run the real code paths on a short clock.
@@ -62,11 +79,22 @@ type Config struct {
 	InboundRatePerSimMinute float64
 	InboundRateBurst        float64
 	PacingIdleGrace         time.Duration
+	// HeartbeatDeliveryGrace holds inbound MIGRATE_IN delivery into a mod whose
+	// last app-level HEARTBEAT is older than this. It is the defence-in-depth
+	// gate of the slot-6 livelock: keep releasing frames into a mod whose main
+	// thread is already drowning and the stall never ends. It changes WHEN a
+	// delivery happens, never WHETHER (§7.5).
+	HeartbeatDeliveryGrace time.Duration
 
 	// Contract B tunables (contract-b-m4.md §12).
 	RelayBackoffMin time.Duration
 	RelayBackoffMax time.Duration
 	ForwardRetry    time.Duration
+	// ForwardRetryMax caps the exponential backoff a re-forward to a LIVE
+	// destination climbs to (§9.3, B5). Re-forwards toward a DARK destination
+	// keep the flat ForwardRetry cadence, because that retry is the only conduit
+	// the non-delivery proof has and the hold clock accrues against it.
+	ForwardRetryMax time.Duration
 	BounceTimeout   time.Duration
 	// HoldTimeout is the ACCRUED dark time before a held entry bounces home by
 	// itself (§9.3). The clock runs only while the destination is dark and this
@@ -119,9 +147,11 @@ func DefaultConfig() Config {
 		InboundRatePerSimMinute: contracta.InboundRatePerSimMinute,
 		InboundRateBurst:        contracta.InboundRateBurst,
 		PacingIdleGrace:         contracta.PacingIdleGrace,
+		HeartbeatDeliveryGrace:  defaultHeartbeatDeliveryGrace,
 		RelayBackoffMin:         contractb.RelayBackoffMin,
 		RelayBackoffMax:         contractb.RelayBackoffMax,
 		ForwardRetry:            contractb.ForwardRetry,
+		ForwardRetryMax:         defaultForwardRetryMax,
 		BounceTimeout:           contractb.BounceTimeout,
 		HoldTimeout:             contractb.HoldTimeout,
 		HoldAccrualFlush:        contractb.HoldAccrualFlush,
@@ -185,6 +215,9 @@ func (c *Config) applyDefaults() {
 	if c.PacingIdleGrace <= 0 {
 		c.PacingIdleGrace = d.PacingIdleGrace
 	}
+	if c.HeartbeatDeliveryGrace <= 0 {
+		c.HeartbeatDeliveryGrace = d.HeartbeatDeliveryGrace
+	}
 	if c.RelayBackoffMin <= 0 {
 		c.RelayBackoffMin = d.RelayBackoffMin
 	}
@@ -193,6 +226,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.ForwardRetry <= 0 {
 		c.ForwardRetry = d.ForwardRetry
+	}
+	if c.ForwardRetryMax <= 0 {
+		c.ForwardRetryMax = d.ForwardRetryMax
 	}
 	if c.BounceTimeout <= 0 {
 		c.BounceTimeout = d.BounceTimeout
