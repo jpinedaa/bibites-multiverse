@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.3.0";
+        public const string Version = "0.4.0";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -21,16 +21,65 @@ namespace BibitesMultiverse
         private void Awake()
         {
             Log = Logger;
-            Log.LogInfo($"{Name} {Version} loaded — {ContractA.Protocol} client, ring export edge, §4.3.1 capture band, lineage annex, wrap-on containment (D10).");
+            Log.LogInfo(
+                $"{Name} {Version} loaded — {ContractA.Protocol} client, plural export edges with a capture band each " +
+                "(§4.3.1) and the corner rule (§4.3.2), lineage annex, wrap-on containment (D10), periodic world saves " +
+                "(D14) and the portal (WP7).");
             Log.LogInfo($"Application.version = {Application.version}");
             Log.LogInfo($"Application.unityVersion = {Application.unityVersion}");
 
             gameObject.AddComponent<RoundTripCommand>();
             Log.LogInfo($"Round-trip dev command armed — press {RoundTripCommand.Hotkey} inside a running simulation.");
 
-            MultiverseConfig config = StartMultiverseClient();
+            MultiverseConfig config = ReadConfig();
+
+            // The saver is created **before** the client, because the client hands it the "a MIGRATE_IN
+            // is waiting" gate of Risk 3 at Initialize time and AddComponent runs Awake immediately.
+            StartWorldSaver(config);
+            StartMultiverseClient(config);
             StartDevCommands(config);
             StartAutoTest();
+        }
+
+        private MultiverseConfig ReadConfig()
+        {
+            MultiverseConfig config;
+            try
+            {
+                config = MultiverseConfig.Read(Config);
+            }
+            catch (Exception e)
+            {
+                Log.LogError($"[M2] configuration failed — the multiverse client stays off: {e}");
+                return null;
+            }
+
+            config.LogSummary();
+            return config;
+        }
+
+        /// <summary>
+        /// D14's periodic save. It is deliberately **not** gated on the multiverse client: a world is
+        /// worth saving whether or not this instance is wired into a map, and the save timer is the one
+        /// thing T1 proved the rig could not do without.
+        /// </summary>
+        private void StartWorldSaver(MultiverseConfig config)
+        {
+            try
+            {
+                WorldSaver saver = gameObject.AddComponent<WorldSaver>();
+                if (config != null)
+                {
+                    saver.IntervalMinutes = config.SaveMinutes;
+                    saver.Keep = config.SaveKeep;
+                    saver.SaveOnQuit = config.SaveOnQuit;
+                    saver.PreferredWorldName = config.WorldToLoad;
+                }
+            }
+            catch (Exception e)
+            {
+                Log.LogError($"{WorldSaver.Prefix} the world saver could not be created — {e}");
+            }
         }
 
         /// <summary>
@@ -57,21 +106,13 @@ namespace BibitesMultiverse
             commands.FallbackWorldName = (config != null) ? config.WorldToLoad : string.Empty;
         }
 
-        /// <summary>The M2 client: configuration, the Harmony border hook and the Contract A transport.</summary>
-        private MultiverseConfig StartMultiverseClient()
+        /// <summary>The Contract A client: the world loader, the Harmony border hook and the transport.</summary>
+        private void StartMultiverseClient(MultiverseConfig config)
         {
-            MultiverseConfig config;
-            try
+            if (config == null)
             {
-                config = MultiverseConfig.Read(Config);
+                return;
             }
-            catch (Exception e)
-            {
-                Log.LogError($"[M2] configuration failed — the multiverse client stays off: {e}");
-                return null;
-            }
-
-            config.LogSummary();
 
             if (!string.IsNullOrEmpty(config.WorldToLoad))
             {
@@ -82,20 +123,20 @@ namespace BibitesMultiverse
             if (!config.Enabled)
             {
                 Log.LogInfo(
-                    $"[M2] no export edge is configured ({MultiverseConfig.EnvExportEdge}, {MultiverseConfig.EnvOpenEdge} " +
-                    "or [M3] ExportEdge) — the Contract A client, the capture band and the crossing counters all stay off.");
-                return config;
+                    $"[M2] no export edge is configured ({MultiverseConfig.EnvExportEdges}, {MultiverseConfig.EnvExportEdge}, " +
+                    $"{MultiverseConfig.EnvOpenEdge} or [M4] ExportEdges) — the Contract A client, the capture bands, the " +
+                    "crossing counters and the portal all stay off. The periodic world save is unaffected.");
+                return;
             }
 
             if (!BorderPatches.Apply(Guid))
             {
                 Log.LogError("[M2] the border hook could not be installed — the multiverse client stays off.");
-                return config;
+                return;
             }
 
             MultiverseClient client = gameObject.AddComponent<MultiverseClient>();
             client.Initialize(config);
-            return config;
         }
 
         private void StartAutoTest()

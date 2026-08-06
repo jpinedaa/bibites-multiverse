@@ -165,6 +165,33 @@ namespace BibitesMultiverse
                 : fixedCoordinate <= -simulationSize + W;
         }
 
+        /// <summary>
+        /// §4.3.1's other half, made explicit so every caller applies the same rule: the organism must
+        /// be **leaving** through that edge. This is what separates an export from a wrap — a wrapped
+        /// organism arrives in the outer band on the far side and travels inward, so it fails the test
+        /// (m3_considerations.md Risk 1). It is REQUIRED everywhere in the band, not only outside the
+        /// square, and it is a strict comparison against zero with no magnitude floor
+        /// (contract-a.md §12, open item 7).
+        /// </summary>
+        internal static float OutwardComponent(Edge edge, Vector2 velocity)
+        {
+            return Vector2.Dot(velocity, OutwardNormal(edge));
+        }
+
+        /// <summary>
+        /// The quarter of the playable square nearest one edge — the crowding metric's window
+        /// (m4_considerations.md, Question 9). The entry quarter of `W` is `x ≤ −S/2`, which is a
+        /// quarter of the map's area and wide enough to hold the mass the T1 run left on that border
+        /// without being so wide that ordinary traffic saturates it.
+        /// </summary>
+        internal bool InEntryQuarter(Edge edge, Vector2 position)
+        {
+            float fixedCoordinate = FixedCoordinate(edge, position);
+            bool positiveSide = edge == Edge.N || edge == Edge.E;
+            float boundary = 0.5f * simulationSize;
+            return positiveSide ? fixedCoordinate >= boundary : fixedCoordinate <= -boundary;
+        }
+
         /// <summary>The inner boundary of the capture band on that edge, in world units.</summary>
         internal float BandInnerBoundary(Edge edge)
         {

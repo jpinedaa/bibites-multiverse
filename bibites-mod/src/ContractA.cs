@@ -15,7 +15,7 @@ namespace BibitesMultiverse
     }
 
     /// <summary>
-    /// The wire vocabulary of contracts/contract-a.md, version contract-a/1.1: the envelope, the nine
+    /// The wire vocabulary of contracts/contract-a.md, version contract-a/2.0: the envelope, the nine
     /// message types, the close codes, the NACK taxonomy and the mod-owned tunables of §10.
     ///
     /// Nothing here touches Unity, so it is safe to call from the socket thread.
@@ -23,19 +23,20 @@ namespace BibitesMultiverse
     internal static class ContractA
     {
         /// <summary>
-        /// §3, §14 A16 — the identifier carries a major **and** a minor. This release is 1.1: A11
-        /// added <c>exportEdge</c>, A12 added <c>parents</c>, A14 retired <c>sector</c> for
-        /// <c>ringSlot</c>. Every one of those is additive or narrowing, so the major stays at 1 and
-        /// a contract-a/1 peer is still compatible.
+        /// §3, §15 A23 — this release is **2.0**, and it is the first breaking change to Contract A.
+        /// A18 removes <c>exportEdge</c> and replaces it with <c>exportEdges</c>, an array: a field
+        /// removal **and** a type change, which §3.1's own rule answers with a major bump. There is no
+        /// singular fallback — a contract-a/1.x peer is rejected at the version check (close 4000)
+        /// long before a field-level fallback could matter.
         /// </summary>
-        internal const string Protocol = "contract-a/1.1";
+        internal const string Protocol = "contract-a/2.0";
 
         internal const string ProtocolName = "contract-a";
-        internal const int ProtocolMajor = 1;
-        internal const int ProtocolMinor = 1;
+        internal const int ProtocolMajor = 2;
+        internal const int ProtocolMinor = 0;
 
-        /// <summary>§3.1 — the path stays major-scoped and serves every contract-a/1.x.</summary>
-        internal const string UrlPath = "/contract-a/v1";
+        /// <summary>§3.1, §15 A23 — the path is major-scoped, so a major bump moves it. Serves every contract-a/2.x.</summary>
+        internal const string UrlPath = "/contract-a/v2";
         internal const int DefaultPort = 8787;
 
         // ---- §5, the nine message types -------------------------------------------------
@@ -331,6 +332,64 @@ namespace BibitesMultiverse
                 case Edge.W: return Edge.E;
                 default: return Edge.None;
             }
+        }
+
+        /// <summary>
+        /// The order two edges are declared and evaluated in: `E`, `N`, `W`, `S`.
+        ///
+        /// It is not cosmetic. §4.3.2's corner rule says the **larger outward component** wins and that
+        /// `E` takes the tie, and the capture loop implements the tie as "the first declared edge keeps
+        /// the win". Canonicalizing the declared set into this order is therefore what makes
+        /// `velocity.x ≥ velocity.y → "E"` true without a special case, and what stops the answer
+        /// depending on the order somebody typed into MULTIVERSE_EXPORT_EDGES.
+        /// </summary>
+        internal static int EdgeRank(Edge edge)
+        {
+            switch (edge)
+            {
+                case Edge.E: return 0;
+                case Edge.N: return 1;
+                case Edge.W: return 2;
+                case Edge.S: return 3;
+                default: return 4;
+            }
+        }
+
+        /// <summary>A comma-joined edge list for a log line or a message: <c>E,N</c>.</summary>
+        internal static string EdgeNames(System.Collections.Generic.IList<Edge> edges)
+        {
+            if (edges == null || edges.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            for (int i = 0; i < edges.Count; i++)
+            {
+                if (i > 0)
+                {
+                    text.Append(',');
+                }
+
+                text.Append(EdgeName(edges[i]));
+            }
+
+            return text.ToString();
+        }
+
+        /// <summary>§5.1 — an edge-enum JSON array, in the canonical order.</summary>
+        internal static JArray EdgeArray(System.Collections.Generic.IList<Edge> edges)
+        {
+            JArray array = new JArray();
+            if (edges != null)
+            {
+                foreach (Edge edge in edges)
+                {
+                    array.Add(EdgeName(edge));
+                }
+            }
+
+            return array;
         }
 
         // ---- data-field readers ---------------------------------------------------------------

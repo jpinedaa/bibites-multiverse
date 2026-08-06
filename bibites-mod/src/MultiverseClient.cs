@@ -38,6 +38,7 @@ namespace BibitesMultiverse
         private MigrationExporter exporter;
         private MigrationImporter importer;
         private WebSocketTransport transport;
+        private PortalVisual portal;
 
         /// <summary>A frame that will spawn, destroy or revive an organism, waiting for FixedUpdate.</summary>
         private struct PendingMutation
@@ -53,7 +54,16 @@ namespace BibitesMultiverse
         private string sessionId;
         private long simTick;
         private long lastEdgeStatusEpoch;
-        private bool edgeOpen;
+
+        /// <summary>
+        /// §5.4, §11.2, §15 A18 — the applied state of **every** declared export edge, in one immutable
+        /// object. It is replaced whole by <see cref="ApplyEdgeStatus"/> in Update and read once per
+        /// tick by <see cref="OnBodyTick"/>, because the corner rule (§4.3.2) needs both edges' `open`
+        /// flags inside one FixedUpdate and a frame that lands mid-tick must not change the answer half
+        /// way through the organism loop.
+        /// </summary>
+        private EdgeStates edgeStates;
+
         private bool handshakeSent;
 
         /// <summary>
@@ -66,15 +76,15 @@ namespace BibitesMultiverse
         private bool haltedReported;
 
         /// <summary>
-        /// The dev channel's local override of the EDGE_STATUS gate (<see cref="DevCommands"/>,
-        /// verb <c>edge</c>). It exists for the two D10 verifications, which exercise the capture
-        /// band and the wrap with no sidecar in the rig: without it the export edge is closed and
-        /// <see cref="OnBodyTick"/> can never reach <see cref="MigrationExporter.TryBegin"/>, so a
-        /// capture could not be observed at all. It relaxes nothing else — the band, the
-        /// outward-velocity test, the in-flight rule and the whole custody flow still run — and a real
-        /// EDGE_STATUS clears it.
+        /// The dev channel's local override of the EDGE_STATUS gate, per edge (<see cref="DevCommands"/>,
+        /// verb <c>edge</c>). It exists for the D10 verifications and the M4 portal check, which
+        /// exercise the capture bands with no sidecar in the rig: without it every export edge is
+        /// closed and <see cref="OnBodyTick"/> can never reach <see cref="MigrationExporter.TryBegin"/>,
+        /// so a capture could not be observed at all. It relaxes nothing else — the bands, the
+        /// outward-velocity test, the corner rule, the in-flight rule and the whole custody flow still
+        /// run — and a real EDGE_STATUS clears it.
         /// </summary>
-        private bool devEdgeOverride;
+        private readonly bool[] devEdgeOverride = new bool[5];
 
         internal MultiverseConfig Config => config;
         internal BorderGeometry Geometry => geometry;
@@ -82,7 +92,51 @@ namespace BibitesMultiverse
         internal MigrationExporter Exporter => exporter;
         internal MigrationImporter Importer => importer;
         internal long SimTick => simTick;
-        internal bool EdgeOpen => devEdgeOverride || (edgeOpen && transport != null && transport.IsConnected);
+
+        /// <summary>True while the socket is up and the handshake for **this** connection has gone out.</summary>
+        internal bool Connected => transport != null && transport.IsConnected && handshakeSent && transport.Generation == handshakeGeneration;
+
+        /// <summary>
+        /// §5.4 — one export edge's gate. Until the mod has applied its first EDGE_STATUS, and whenever
+        /// it is disconnected, this is false for every edge: a mod that cannot reach its sidecar quietly
+        /// stops migrating instead of losing organisms.
+        /// </summary>
+        internal bool IsEdgeOpen(Edge edge)
+        {
+            if (edge == Edge.None || !config.Exports(edge))
+            {
+                return false;
+            }
+
+            if (devEdgeOverride[(int)edge])
+            {
+                return true;
+            }
+
+            return edgeStates != null && edgeStates.IsOpen(edge) && transport != null && transport.IsConnected;
+        }
+
+        /// <summary>Every declared export edge and its gate, for a log line or a command result.</summary>
+        internal string EdgeSummary()
+        {
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            for (int i = 0; i < config.ExportEdges.Count; i++)
+            {
+                Edge edge = config.ExportEdges[i];
+                if (i > 0)
+                {
+                    text.Append(' ');
+                }
+
+                text.Append(ContractA.EdgeName(edge)).Append(':').Append(IsEdgeOpen(edge) ? "open" : "closed");
+                if (devEdgeOverride[(int)edge])
+                {
+                    text.Append("(dev)");
+                }
+            }
+
+            return text.ToString();
+        }
 
         internal void Initialize(MultiverseConfig configuration)
         {
@@ -94,6 +148,30 @@ namespace BibitesMultiverse
             exporter = new MigrationExporter(this);
             importer = new MigrationImporter(this);
             transport = new WebSocketTransport(config.Url);
+            edgeStates = EdgeStates.AllClosed(config.ExportEdges, 0, ContractA.ReasonNoPeer);
+
+            if (config.Portal)
+            {
+                try
+                {
+                    portal = gameObject.AddComponent<PortalVisual>();
+                    portal.Initialize(config, geometry, IsEdgeOpen, () => Connected);
+                }
+                catch (Exception e)
+                {
+                    // ShapesRuntime.dll ships with the game, so this only fires if a game update moved
+                    // it. The migration path must not care.
+                    portal = null;
+                    MultiversePlugin.Log.LogError(
+                        $"{PortalVisual.Prefix} the portal could not be created and is off for this session — {e}");
+                }
+            }
+
+            // Risk 3, rule 2: never start a save while a MIGRATE_IN waits in the mod's queue.
+            if (WorldSaver.Instance != null)
+            {
+                WorldSaver.Instance.DeferWhile = () => PendingInboundCount() > 0;
+            }
 
             MultiversePlugin.Log.LogInfo($"{Prefix} transport probe: {WebSocketTransport.ProbeAvailability()}");
             MultiversePlugin.Log.LogInfo(
@@ -143,7 +221,7 @@ namespace BibitesMultiverse
                 simTick++;
                 ApplyMutations();
                 exporter.CheckTimeouts();
-                crossing.Tick(config.ExportEdge, geometry, GameBridge.LivingPopulation(), simTick);
+                crossing.Tick(config, geometry, GameBridge.LivingPopulation(), simTick);
                 containment.Prune(simTick);
             }
             catch (Exception e)
@@ -179,11 +257,11 @@ namespace BibitesMultiverse
             sessionId = ContractA.NewUuid();
             simTick = 0;
             lastEdgeStatusEpoch = 0;
-            edgeOpen = false;
+            edgeStates = EdgeStates.AllClosed(config.ExportEdges, 0, ContractA.ReasonNoPeer);
             handshakeSent = false;
             handshakeGeneration = -1;
             haltedReported = false;
-            devEdgeOverride = false;
+            Array.Clear(devEdgeOverride, 0, devEdgeOverride.Length);
             pendingMutations.Clear();
             exporter.Clear();
             importer.Clear();
@@ -194,11 +272,13 @@ namespace BibitesMultiverse
             worldSettings.LogBoundarySettings(geometry.S);
             worldSettings.LogBibiteHolderTransform();
             worldSettings.Apply();
-            Containment.LogSetup(geometry, config.ExportEdge, config.EntryEdge);
+            Containment.LogSetup(geometry, config.ExportEdges, config.EntryEdges);
+            portal?.OnWorldLoaded();
 
             MultiversePlugin.Log.LogInfo(
-                $"{Prefix} world loaded — sessionId={sessionId} exportEdge={ContractA.EdgeName(config.ExportEdge)} " +
-                $"entryEdge={ContractA.EdgeName(config.EntryEdge)}(passive) " +
+                $"{Prefix} world loaded — sessionId={sessionId} exportEdges=[{ContractA.EdgeNames(config.ExportEdges)}] " +
+                $"entryEdges=[{ContractA.EdgeNames(config.EntryEdges)}](passive) " +
+                $"borderEdges=[{ContractA.EdgeNames(config.BorderEdges)}] " +
                 $"S={geometry.S.ToString("F2", CultureInfo.InvariantCulture)} W={geometry.W.ToString("F2", CultureInfo.InvariantCulture)} " +
                 $"entryInset={(geometry.W + geometry.EntryMargin).ToString("F2", CultureInfo.InvariantCulture)} " +
                 $"population={GameBridge.LivingPopulation()}. Dialling {config.Url}.");
@@ -224,10 +304,11 @@ namespace BibitesMultiverse
             importer.Clear();
             geometry.Unsubscribe();
             worldSettings.Restore();
+            portal?.OnWorldUnloaded();
 
             transport.Stop(ContractA.CloseNormal, why);
 
-            edgeOpen = false;
+            edgeStates = EdgeStates.AllClosed(config.ExportEdges, 0, ContractA.ReasonNoPeer);
             handshakeSent = false;
             handshakeGeneration = -1;
             armed = false;
@@ -236,6 +317,11 @@ namespace BibitesMultiverse
             MultiversePlugin.Log.LogInfo(
                 $"{CrossingStats.Prefix} session summary: totalStripEntries={crossing.TotalStripEntries} " +
                 $"totalCrossings={crossing.TotalCrossings}");
+
+            if (portal != null)
+            {
+                MultiversePlugin.Log.LogInfo($"{PortalVisual.Prefix} session summary: {portal.Summary()}");
+            }
         }
 
         private void OnSimulationSizeChanged(float value)
@@ -248,6 +334,10 @@ namespace BibitesMultiverse
             // §5.1 receiver obligations: a change in simulationSize makes the sidecar re-check peer
             // agreement. Belt to the heartbeat's braces.
             SendConfigUpdate("sim_size_changed");
+
+            // The portal is laid out from the same S the capture band is tested against, so it follows
+            // a live change rather than drifting away from the rule it draws.
+            portal?.Relayout();
         }
 
         // ---- transport drain ---------------------------------------------------------------------
@@ -310,7 +400,7 @@ namespace BibitesMultiverse
             // §6.2 — the EDGE_STATUS epoch counter resets on a new connection, so the mod resets its
             // last-applied epoch when it opens one.
             lastEdgeStatusEpoch = 0;
-            edgeOpen = false;
+            edgeStates = EdgeStates.AllClosed(config.ExportEdges, 0, ContractA.ReasonNoPeer);
             importer.ClearConnectionState();
 
             handshakeGeneration = connectionGeneration;
@@ -326,8 +416,8 @@ namespace BibitesMultiverse
         {
             handshakeSent = false;
             handshakeGeneration = -1;
-            bool wasOpen = edgeOpen;
-            edgeOpen = false;
+            string wasOpen = edgeStates.Describe(config.ExportEdges);
+            edgeStates = EdgeStates.AllClosed(config.ExportEdges, 0, "disconnected");
 
             bool fatal = closeCode == ContractA.CloseProtocolUnsupported
                 || closeCode == ContractA.CloseSlotMismatch
@@ -349,10 +439,7 @@ namespace BibitesMultiverse
                     "reconnecting with full-jitter backoff.");
             }
 
-            if (wasOpen)
-            {
-                MultiversePlugin.Log.LogInfo($"{Prefix} exportEdge={ContractA.EdgeName(config.ExportEdge)} open=false reason=disconnected");
-            }
+            MultiversePlugin.Log.LogInfo($"{Prefix} exportEdges were {wasOpen} — every one is now closed, reason=disconnected");
         }
 
         private void OnFrame(string text)
@@ -506,14 +593,21 @@ namespace BibitesMultiverse
         // ---- EDGE_STATUS (§5.4, §14 A11) -----------------------------------------------------------
 
         /// <summary>
-        /// Full state, not a delta, and under the ring it carries **exactly one entry** — this sim's
-        /// export edge (§14, A11). The entry edge never appears here: it is passive, it always accepts
-        /// an inbound organism, and it has no capture band at all (§4.3.1). An empty <c>edges</c> array
-        /// closes the export edge and is the correct frame when the sidecar holds no ring slot.
+        /// Full state, not a delta, and under the grid it carries **one entry for each declared export
+        /// edge** (§15, A18). The entry edges never appear here: they are passive, they always accept an
+        /// inbound organism, and they have no capture band at all (§4.3.1). An empty <c>edges</c> array
+        /// closes **every** export edge and is the correct frame when the sidecar holds no slot.
         ///
-        /// An array with more than one entry is a sidecar defect, not a fault: apply the entry for the
-        /// declared export edge, ignore every other, log one warning, and never close the connection —
-        /// an extra entry is a forward-compatible shape under a later ring extension.
+        /// Three rules, all of which follow from "full state":
+        ///
+        /// * <b>A declared export edge with no entry is CLOSED.</b> Absence is not "no change". That is
+        ///   the fail-safe direction, and it is why the snapshot starts closed.
+        /// * <b>An entry for an edge this mod did not declare is ignored</b>, with one logged warning
+        ///   and no close. It is a forward-compatible shape under a later map extension, not a fault.
+        /// * <b>The whole frame is applied atomically.</b> One snapshot is built and published with one
+        ///   reference assignment, because a corner capture reads both edges in one FixedUpdate
+        ///   (§4.3.2) and a half-applied frame could export an organism through an edge that just
+        ///   closed.
         /// </summary>
         private void ApplyEdgeStatus(JObject data)
         {
@@ -537,13 +631,11 @@ namespace BibitesMultiverse
 
             lastEdgeStatusEpoch = epoch;
 
-            // Full state, not a delta: an export edge that is absent from the array is closed.
-            bool open = false;
-            string reason = ContractA.ReasonNoPeer;
-            float peerSize = 0f;
-            bool peerSizeKnown = false;
+            // Full state: every declared export edge starts closed, and only an entry reopens it.
+            EdgeStates next = EdgeStates.AllClosed(config.ExportEdges, epoch, ContractA.ReasonNoPeer);
             int applied = 0;
             int ignored = 0;
+            int seenMask = 0;
 
             foreach (JToken token in edges)
             {
@@ -559,102 +651,156 @@ namespace BibitesMultiverse
                     continue;
                 }
 
-                if (edge != config.ExportEdge)
+                if (!config.Exports(edge))
                 {
                     ignored++;
                     MultiversePlugin.Log.LogWarning(
-                        $"{Prefix} EDGE_STATUS carries edge {edgeText}, which is not this sim's exportEdge " +
-                        $"({ContractA.EdgeName(config.ExportEdge)}) — ignored, and the connection stays open (§14, A11).");
+                        $"{Prefix} EDGE_STATUS carries edge {edgeText}, which this sim did not declare in exportEdges " +
+                        $"([{ContractA.EdgeNames(config.ExportEdges)}]) — ignored, and the connection stays open (§15, A18).");
                     continue;
                 }
 
+                if ((seenMask & (1 << (int)edge)) != 0)
+                {
+                    // §5.4 — a duplicate `edge` is a sidecar defect: apply the FIRST and log one warning.
+                    ignored++;
+                    MultiversePlugin.Log.LogWarning(
+                        $"{Prefix} EDGE_STATUS carries edge {edgeText} twice — the first entry is applied and this one is ignored.");
+                    continue;
+                }
+
+                seenMask |= 1 << (int)edge;
                 applied++;
-                ContractA.TryBool(entry, "open", out open);
-                if (!ContractA.TryString(entry, "reason", out reason))
+
+                ContractA.TryBool(entry, "open", out bool open);
+                if (!ContractA.TryString(entry, "reason", out string reason))
                 {
                     reason = open ? ContractA.ReasonPeerLive : ContractA.ReasonNoPeer;
                 }
 
-                peerSizeKnown = ContractA.TryFloat(entry, "peerSimulationSize", out peerSize);
+                bool peerSizeKnown = ContractA.TryFloat(entry, "peerSimulationSize", out float peerSize);
+
+                // §5.4 — the mod compares peerSimulationSize against its own S and treats **that** edge
+                // as closed on a mismatch, even though the sidecar already checked. Two independent
+                // checks, because a mid-run resize can race, and the two edges are different peers so
+                // the check is per edge. §13 A10 gives the one relative test both sides use.
+                if (open && peerSizeKnown && !ContractA.SimulationSizeEqual(peerSize, geometry.S))
+                {
+                    MultiversePlugin.Log.LogWarning(
+                        $"{Prefix} EDGE_STATUS says export edge {edgeText} is open, but that peer's S is " +
+                        $"{peerSize:F2} and this sim's S is {geometry.S:F2} — holding that edge closed.");
+                    open = false;
+                    reason = ContractA.ReasonSimSizeMismatch;
+                }
+
+                next.Set(edge, open, reason, peerSizeKnown, peerSize);
+
+                // §14 A11 added this reason, and it is the one an operator can act on: the neighbour's
+                // sidecar answered, so the map is wired correctly — the neighbour's *game* is not running.
+                if (!open && string.Equals(reason, ContractA.ReasonPeerModAbsent, StringComparison.Ordinal))
+                {
+                    MultiversePlugin.Log.LogWarning(
+                        $"{Prefix} export edge {edgeText} is closed because that neighbour's sidecar is live but has no mod " +
+                        "connected — that peer's game is not running, or its world is not loaded. Nothing is wrong on this " +
+                        "side; migration resumes when the neighbour loads a world.");
+                }
             }
 
-            // §5.4 — the mod compares peerSimulationSize against its own S and treats the edge as
-            // closed on a mismatch, even though the sidecar already checked. Two independent checks,
-            // because a mid-run resize can race. §13 A10 gives the one relative test both sides use.
-            if (open && peerSizeKnown && !ContractA.SimulationSizeEqual(peerSize, geometry.S))
-            {
-                MultiversePlugin.Log.LogWarning(
-                    $"{Prefix} EDGE_STATUS says exportEdge {ContractA.EdgeName(config.ExportEdge)} is open, but the peer's S is " +
-                    $"{peerSize:F2} and this sim's S is {geometry.S:F2} — holding the edge closed.");
-                open = false;
-                reason = ContractA.ReasonSimSizeMismatch;
-            }
+            string before = edgeStates.Describe(config.ExportEdges);
 
-            bool changed = open != edgeOpen;
-            edgeOpen = open;
+            // One reference assignment: the frame lands whole or not at all.
+            edgeStates = next;
 
-            if (devEdgeOverride)
-            {
-                devEdgeOverride = false;
-                MultiversePlugin.Log.LogWarning(
-                    $"{Prefix} the dev edge override is cleared — a real EDGE_STATUS always wins over it.");
-            }
+            ClearDevOverride("a real EDGE_STATUS always wins over it");
 
             MultiversePlugin.Log.LogInfo(
-                $"{Prefix} EDGE_STATUS epoch={epoch} exportEdge={ContractA.EdgeName(config.ExportEdge)} open={open} reason={reason} " +
-                $"peerS={(peerSizeKnown ? peerSize.ToString("F2", CultureInfo.InvariantCulture) : "<absent>")} " +
-                $"entries={edges.Count} applied={applied} ignored={ignored} changed={changed} " +
-                $"(entryEdge {ContractA.EdgeName(config.EntryEdge)} is passive and never appears here)");
+                $"{Prefix} EDGE_STATUS epoch={epoch} entries={edges.Count} applied={applied} ignored={ignored} " +
+                $"before=[{before}] after=[{next.Describe(config.ExportEdges)}] " +
+                $"(entryEdges [{ContractA.EdgeNames(config.EntryEdges)}] are passive and never appear here)");
 
-            // §14 A11 added this reason, and it is the one an operator can act on: the neighbour's
-            // sidecar answered, so the ring is wired correctly — the neighbour's *game* is not running.
-            if (!open && string.Equals(reason, ContractA.ReasonPeerModAbsent, StringComparison.Ordinal))
+            if (applied < config.ExportEdges.Count)
             {
-                MultiversePlugin.Log.LogWarning(
-                    $"{Prefix} exportEdge {ContractA.EdgeName(config.ExportEdge)} is closed because the east neighbour's " +
-                    "sidecar is live but has no mod connected — that peer's game is not running, or its world is not " +
-                    "loaded. Nothing is wrong on this side; migration resumes when the neighbour loads a world.");
-            }
-
-            if (applied == 0 && edges.Count > 0)
-            {
-                MultiversePlugin.Log.LogWarning(
-                    $"{Prefix} EDGE_STATUS epoch={epoch} carried {edges.Count} entr(ies) and none of them named this sim's " +
-                    "exportEdge — the export edge is therefore closed.");
+                MultiversePlugin.Log.LogInfo(
+                    $"{Prefix} EDGE_STATUS epoch={epoch} named {applied} of this sim's {config.ExportEdges.Count} declared export " +
+                    "edge(s). A declared edge with no entry is CLOSED — the frame is the whole state, not a delta (§15, A18).");
             }
         }
 
         /// <summary>
-        /// The dev channel's local override of the export-edge gate. Loud on purpose: it is a test
-        /// affordance for the D10 verifications, not a mode anyone should run a rig in.
+        /// The dev channel's local override of an export-edge gate. Loud on purpose: it is a test
+        /// affordance for the D10 verifications and the portal check, not a mode anyone should run a
+        /// rig in. <c>Edge.None</c> means every declared export edge.
         /// </summary>
-        internal void SetDevEdgeOverride(bool value)
+        internal void SetDevEdgeOverride(Edge edge, bool value)
         {
-            devEdgeOverride = value;
-            if (value)
+            if (edge == Edge.None)
             {
-                MultiversePlugin.Log.LogWarning(
-                    $"{Prefix} DEV OVERRIDE: exportEdge {ContractA.EdgeName(config.ExportEdge)} is forced OPEN with no EDGE_STATUS " +
-                    "behind it. Every other guard still applies, and the next real EDGE_STATUS clears this.");
+                foreach (Edge declared in config.ExportEdges)
+                {
+                    devEdgeOverride[(int)declared] = value;
+                }
             }
             else
             {
-                MultiversePlugin.Log.LogWarning($"{Prefix} DEV OVERRIDE cleared — the export edge is back under EDGE_STATUS control.");
+                devEdgeOverride[(int)edge] = value;
+            }
+
+            string which = (edge == Edge.None) ? "[" + ContractA.EdgeNames(config.ExportEdges) + "]" : ContractA.EdgeName(edge);
+            if (value)
+            {
+                MultiversePlugin.Log.LogWarning(
+                    $"{Prefix} DEV OVERRIDE: export edge {which} is forced OPEN with no EDGE_STATUS behind it. Every other " +
+                    "guard still applies — the band, the outward-velocity test and the corner rule — and the next real " +
+                    "EDGE_STATUS clears this.");
+            }
+            else
+            {
+                MultiversePlugin.Log.LogWarning(
+                    $"{Prefix} DEV OVERRIDE cleared for {which} — that edge is back under EDGE_STATUS control.");
             }
         }
 
-        /// <summary>A transient NACK that names the edge stops migration there until a new EDGE_STATUS.</summary>
-        internal void CloseEdgeUntilNextStatus(string code)
+        private void ClearDevOverride(string why)
         {
-            if (!edgeOpen)
+            bool any = false;
+            for (int i = 0; i < devEdgeOverride.Length; i++)
+            {
+                if (devEdgeOverride[i])
+                {
+                    devEdgeOverride[i] = false;
+                    any = true;
+                }
+            }
+
+            if (any)
+            {
+                MultiversePlugin.Log.LogWarning($"{Prefix} the dev edge override is cleared — {why}.");
+            }
+        }
+
+        /// <summary>
+        /// §9.1, §15 A22 — a transient NACK closes **only the edge the organism left by**, until a new
+        /// EDGE_STATUS. The NACK carries no <c>edge</c> field and does not need one: the exporter's
+        /// in-flight record holds it. Closing every edge because one NACK arrived throws away a lane
+        /// that is open, and that is the bug the amendment exists to name.
+        /// </summary>
+        internal void CloseEdgeUntilNextStatus(Edge edge, string code)
+        {
+            if (edge == Edge.None || !config.Exports(edge))
             {
                 return;
             }
 
-            edgeOpen = false;
-            devEdgeOverride = false;
+            devEdgeOverride[(int)edge] = false;
+            if (!edgeStates.IsOpen(edge))
+            {
+                return;
+            }
+
+            edgeStates = edgeStates.WithEdgeClosed(edge, "local_" + code.ToLowerInvariant());
             MultiversePlugin.Log.LogWarning(
-                $"{Prefix} exportEdge={ContractA.EdgeName(config.ExportEdge)} closed locally after {code}; it reopens only on a new EDGE_STATUS.");
+                $"{Prefix} export edge {ContractA.EdgeName(edge)} closed locally after {code}; it reopens only on a new " +
+                $"EDGE_STATUS. Every other declared edge is untouched — now [{edgeStates.Describe(config.ExportEdges)}].");
         }
 
         // ---- outbound ------------------------------------------------------------------------------
@@ -665,10 +811,16 @@ namespace BibitesMultiverse
         }
 
         /// <summary>
-        /// §5.1, §14 A11/A14. <c>borderEdges</c> is the set of edges that **accept** an inbound
-        /// organism — ["E", "W"] under the ring — and <c>exportEdge</c>, new in 1.1, is the one edge
-        /// this sim may export through. <c>sector</c> is retired: a contract-a/1.1 mod MUST NOT send
-        /// it, and <c>ringSlot</c> replaces it as an advisory integer.
+        /// §5.1, §15 A18. <c>borderEdges</c> is the set of edges that **accept** an inbound organism —
+        /// all four under the grid — and <c>exportEdges</c>, an array, is the set this sim may export
+        /// through. The singular <c>exportEdge</c> is **removed** in contract-a/2.0 and is not sent:
+        /// there is no fallback, because a peer that speaks contract-a/1.x is rejected at the version
+        /// check (close 4000) long before a field-level fallback could matter. <c>sector</c> stays
+        /// retired, and <c>ringSlot</c> is the advisory integer that replaced it.
+        ///
+        /// The declaration is about **geometry, not topology**: it says "I run a capture band on these
+        /// edges". Whether an edge has a lane is the sidecar's answer in EDGE_STATUS, and the mod never
+        /// learns a coordinate, a neighbour or a map shape.
         /// </summary>
         private void SendConfigUpdate(string reason)
         {
@@ -679,8 +831,8 @@ namespace BibitesMultiverse
                 ["gameVersion"] = Application.version,
                 ["modVersion"] = MultiversePlugin.Version,
                 ["simulationSize"] = geometry.S,
-                ["borderEdges"] = new JArray { ContractA.EdgeName(config.ExportEdge), ContractA.EdgeName(config.EntryEdge) },
-                ["exportEdge"] = ContractA.EdgeName(config.ExportEdge),
+                ["borderEdges"] = ContractA.EdgeArray(config.BorderEdges),
+                ["exportEdges"] = ContractA.EdgeArray(config.ExportEdges),
                 ["borderWidth"] = geometry.W
             };
 
@@ -700,8 +852,8 @@ namespace BibitesMultiverse
                 $"{Prefix} CONFIG_UPDATE reason={reason} protocol={ContractA.Protocol} sessionId={sessionId} " +
                 $"ringSlot={(config.HasRingSlot ? config.RingSlot.ToString(CultureInfo.InvariantCulture) : "<omitted>")} " +
                 $"S={geometry.S.ToString("F2", CultureInfo.InvariantCulture)} W={geometry.W.ToString("F2", CultureInfo.InvariantCulture)} " +
-                $"borderEdges=[{ContractA.EdgeName(config.ExportEdge)},{ContractA.EdgeName(config.EntryEdge)}] " +
-                $"exportEdge={ContractA.EdgeName(config.ExportEdge)} " +
+                $"borderEdges=[{ContractA.EdgeNames(config.BorderEdges)}] " +
+                $"exportEdges=[{ContractA.EdgeNames(config.ExportEdges)}] " +
                 $"worldWrapping={worldSettings.WorldWrappingOn} (reported, never written — D10)");
         }
 
@@ -738,27 +890,60 @@ namespace BibitesMultiverse
                 ["timeScale"] = Time.timeScale,
                 ["simulationSize"] = geometry.S,
                 ["inFlightOut"] = exporter.InFlightCount,
-                ["pendingIn"] = pendingMutations.Count
+                ["pendingIn"] = PendingInboundCount()
             };
 
+            // §5.2, §15 A21 — the OPTIONAL save receipt. It is the only wire path the operator surface
+            // has to a world's save state, and it exists because a sidecar on the second machine has no
+            // file the archive can read. Absent until this mod has written a save, and absent forever
+            // from a mod that does not save: an honest gap, never a zero.
+            SaveReceipt lastSave = (WorldSaver.Instance != null) ? WorldSaver.Instance.LastSave : null;
+            if (lastSave != null)
+            {
+                data["lastSave"] = lastSave.ToJson();
+            }
+
             SendFrame(ContractA.Envelope(ContractA.TypeHeartbeat, data).ToString(Formatting.None));
+        }
+
+        /// <summary>§5.2 <c>pendingIn</c> — MIGRATE_INs queued in the mod but not yet spawned.</summary>
+        private int PendingInboundCount()
+        {
+            int count = 0;
+            for (int i = 0; i < pendingMutations.Count; i++)
+            {
+                if (string.Equals(pendingMutations[i].type, ContractA.TypeMigrateIn, StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         // ---- the capture band (called from the Harmony postfix) --------------------------------------
 
         /// <summary>
-        /// One organism, one tick, on the **export** edge only. Every guard the early returns of
-        /// BibiteBody.FixedUpdate imply is re-applied here, because a postfix runs on every return
+        /// One organism, one tick, across **every declared export band**. Every guard the early returns
+        /// of BibiteBody.FixedUpdate imply is re-applied here, because a postfix runs on every return
         /// path (m2_findings.md §(b)).
         ///
-        /// The capture rule is contract-a.md §4.3.1, and every clause of it is load-bearing:
+        /// The capture rule is contract-a.md §4.3.1 and §4.3.2, and every clause is load-bearing:
         ///
         /// <code>
-        /// capture ⇔ x ≥ S − W          the band starts at the strip line and has NO outer bound
-        ///         ∧ velocity.x > 0     and it must be leaving, everywhere in the band
-        ///         ∧ not already in flight
-        ///         ∧ entry immunity has expired
+        /// inBand(o, E)  ⇔  x ≥ S − W  ∧  velocity.x > 0
+        /// inBand(o, N)  ⇔  y ≥ S − W  ∧  velocity.y > 0
+        ///
+        /// candidates    =  { e ∈ exportEdges : inBand(o, e) ∧ open(e) }
+        /// |candidates| = 0 → no export this tick
+        /// |candidates| = 1 → that edge
+        /// |candidates| = 2 → "E" when velocity.x ≥ velocity.y, otherwise "N"
         /// </code>
+        ///
+        /// The band is half-open and **outward-unbounded**: it starts at the strip line and runs past
+        /// `S`, past the wrap radius, to any coordinate — because a fast organism clears the whole strip
+        /// in one FixedUpdate, and M2's inside-only rule then let the vanilla wrap teleport it to the
+        /// antipode (m3_considerations.md Risk 2).
         ///
         /// The cadence is what makes the band beat the wrap: this runs every FixedUpdate, inside the
         /// organism's own tick, because the wrap fires from <c>BibitePropulsion.UpdateOrgan</c> a few
@@ -770,8 +955,15 @@ namespace BibitesMultiverse
         /// Remove it and every wrapped arrival immediately exports through the edge it landed behind
         /// (m3_considerations.md Risk 1).
         ///
-        /// The entry edge is not tested at all: it is passive, and an organism that walks out through
-        /// it is not a migrant — the vanilla wrap returns it (D10, §14 A11).
+        /// **Every band is evaluated; the loop never breaks on the first match** (§11.2). A first-match
+        /// loop silently implements "whichever edge I wrote first wins", which is the exact defect the
+        /// corner rule exists to prevent, and it would not show up until an organism reached a corner at
+        /// speed. The tie is folded into the declaration order — <c>ExportEdges</c> is canonicalized to
+        /// E, N, W, S — so <c>outward > best</c> keeps `E` on an exact tie with no separate branch, which
+        /// is §4.3.2's rule and its deliberate absence of an epsilon.
+        ///
+        /// The entry edges are not tested at all: they are passive, and an organism that walks out
+        /// through one is not a migrant — the vanilla wrap returns it (D10, §14 A11, §15 A19).
         /// </summary>
         internal void OnBodyTick(BibiteBody body)
         {
@@ -792,24 +984,40 @@ namespace BibitesMultiverse
             }
 
             int entityId = identity.id;
-            Edge edge = config.ExportEdge;
             Vector2 position = body.transform.position;
 
-            crossing.Observe(entityId, edge, geometry, position, simTick);
-            containment.Observe(body, entityId, edge, geometry, position, simTick);
+            // §11.2 — read the edge state **once** per tick. EDGE_STATUS is applied in Update, and the
+            // corner decision below has to see both edges as of the same instant.
+            EdgeStates states = edgeStates;
 
-            // §4.3.1 — half-open and outward-unbounded: from the strip line outward, to any x.
-            if (!geometry.InCaptureBand(edge, position))
+            crossing.Observe(entityId, config, geometry, position, simTick);
+            containment.Observe(body, entityId, config.ExportEdges, geometry, position, simTick);
+
+            // Cheap geometric pre-filter: the overwhelming majority of organisms are in no band at all,
+            // and this keeps the per-organism cost at one comparison per declared edge.
+            bool anyBand = false;
+            for (int i = 0; i < config.ExportEdges.Count; i++)
+            {
+                if (geometry.InCaptureBand(config.ExportEdges[i], position))
+                {
+                    anyBand = true;
+                    break;
+                }
+            }
+
+            if (!anyBand)
             {
                 return;
             }
 
+            // §6.3 — one organism has at most one live migrationId. §5.7 step 6 — the entry-immunity
+            // window is keyed on entityId and covers **both** bands.
             if (exporter.IsInFlight(entityId) || importer.HasImmunity(entityId))
             {
                 return;
             }
 
-            if (exporter.IsBlocked(entityId, edge, geometry, position))
+            if (exporter.IsBlocked(entityId, geometry, position))
             {
                 return;
             }
@@ -822,21 +1030,53 @@ namespace BibitesMultiverse
 
             Vector2 velocity = rigidbody.linearVelocity;
 
-            // §4.3.1 — REQUIRED everywhere in the band, not only outside the square.
-            if (Vector2.Dot(velocity, BorderGeometry.OutwardNormal(edge)) <= 0f)
+            Edge chosen = Edge.None;
+            float best = 0f;
+
+            for (int i = 0; i < config.ExportEdges.Count; i++)
             {
-                containment.NoteBandDecision("BAND_INWARD_REFUSED", entityId, edge, geometry, position, velocity, EdgeOpen, simTick, throttle: true);
+                Edge edge = config.ExportEdges[i];
+                if (!geometry.InCaptureBand(edge, position))
+                {
+                    continue;
+                }
+
+                // §4.3.1 — REQUIRED everywhere in the band, not only outside the square.
+                float outward = BorderGeometry.OutwardComponent(edge, velocity);
+                if (outward <= 0f)
+                {
+                    containment.NoteBandDecision(
+                        "BAND_INWARD_REFUSED", entityId, edge, geometry, position, velocity, IsEdgeOpen(edge), simTick, throttle: true);
+                    continue;
+                }
+
+                // §4.3.2 — openness filters **before** the tie-break. An organism in both bands with only
+                // the north lane open exports north, and is never pinned against a closed corner while a
+                // live lane exists.
+                if (!(devEdgeOverride[(int)edge] || (states.IsOpen(edge) && transport != null && transport.IsConnected)))
+                {
+                    containment.NoteBandDecision(
+                        "BAND_WITHHELD_EDGE_CLOSED", entityId, edge, geometry, position, velocity, false, simTick, throttle: true);
+                    continue;
+                }
+
+                if (chosen == Edge.None || outward > best)
+                {
+                    chosen = edge;
+                    best = outward;
+                }
+            }
+
+            if (chosen == Edge.None)
+            {
                 return;
             }
 
-            if (!EdgeOpen)
-            {
-                containment.NoteBandDecision("BAND_WITHHELD_EDGE_CLOSED", entityId, edge, geometry, position, velocity, false, simTick, throttle: true);
-                return;
-            }
+            containment.NoteBandDecision("BAND_CAPTURE", entityId, chosen, geometry, position, velocity, true, simTick, throttle: false);
 
-            containment.NoteBandDecision("BAND_CAPTURE", entityId, edge, geometry, position, velocity, true, simTick, throttle: false);
-            exporter.TryBegin(body, rigidbody, edge, geometry);
+            // Exactly one MIGRATE_OUT per organism per tick. A mod that emits two frames for one
+            // organism in a corner is defective (§4.3.2).
+            exporter.TryBegin(body, rigidbody, chosen, geometry);
         }
 
         internal void NoteDeparture(int entityId)
@@ -847,9 +1087,10 @@ namespace BibitesMultiverse
             exporter.Forget(entityId);
         }
 
-        internal void NoteArrival(int entityId)
+        internal void NoteArrival(int entityId, Edge entryEdge, float entryPosition)
         {
             crossing.Forget(entityId);
+            crossing.NoteArrival(entryEdge, entryPosition);
             containment.Forget(entityId);
             exporter.Forget(entityId);
         }

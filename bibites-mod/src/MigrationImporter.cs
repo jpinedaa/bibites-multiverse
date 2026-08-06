@@ -127,16 +127,16 @@ namespace BibitesMultiverse
                 $"entryPosition={entryPosition.ToString("F6", CultureInfo.InvariantCulture)} attempt={attempt} bounceBack={bounceBack} " +
                 $"payloadBytes={System.Text.Encoding.UTF8.GetByteCount(payload)} payloadSha256={ContractA.Sha256Hex(payload)}");
 
-            // §13 A3 + §14 A11 — inbound EDGE_CLOSED means "not a declared edge", never "closed right
-            // now". Under the ring both declared edges accept: "W" for ordinary traffic and this sim's
-            // own exportEdge for a bounce-back, which comes home through the door it left by. A
-            // declared edge that is merely closed still accepts — a bounce-back arrives exactly when
-            // the edge just closed.
+            // §13 A3 + §14 A11 + §15 A18 — inbound EDGE_CLOSED means "not a declared edge", never
+            // "closed right now". Under the grid all four values appear here: "W" off an east lane, "S"
+            // off a north lane, and an export edge for a bounce-back, which comes home through the door
+            // it left by. A declared edge that is merely closed still accepts — a bounce-back arrives
+            // exactly when the edge just closed.
             if (!client.Config.Declares(entryEdge))
             {
                 Nack(migrationId, entityId, ContractA.NackEdgeClosed, ContractA.ClassTransient,
                     "this sim has no border strip on edge " + ContractA.EdgeName(entryEdge) + " (it declares ["
-                        + ContractA.EdgeName(client.Config.ExportEdge) + "," + ContractA.EdgeName(client.Config.EntryEdge) + "])",
+                        + ContractA.EdgeNames(client.Config.BorderEdges) + "])",
                     30000);
                 return;
             }
@@ -258,10 +258,18 @@ namespace BibitesMultiverse
 
             seenMigrations.Add(migrationId);
             int immunityKey = (restoredId != 0) ? restoredId : entityId;
+
+            // §5.7 step 6, §14 A11, §15 A19 — the entry-immunity window is REQUIRED and it covers
+            // **both** capture bands. Two cases need it: a bounce-back lands inside the band it left
+            // from, moving outward; and under the grid an ordinary arrival through W near a corner can
+            // land inside the north band already travelling north. Neither may export in the arrival
+            // tick, or one hop becomes indistinguishable from two. The key is the entity ID, and
+            // HasImmunity is asked before any band is tested, so one window covers every band.
             immunityUntilSimTime[immunityKey] = TimeKeeper.simulatedTime + ContractA.EntryImmunitySeconds;
-            client.NoteArrival(immunityKey);
+            client.NoteArrival(immunityKey, entryEdge, entryPosition);
 
             Vector2 finalPosition = body.transform.position;
+            PortalVisual.Flash(finalPosition, export: false);
             MultiversePlugin.Log.LogInfo(
                 $"[M2] migrationId={migrationId} entityId={restoredId} phase=SPAWNED edge={ContractA.EdgeName(entryEdge)} " +
                 $"pos=({finalPosition.x:F2},{finalPosition.y:F2}) vel=({velocity.x:F2},{velocity.y:F2}) heading={heading:F2} " +

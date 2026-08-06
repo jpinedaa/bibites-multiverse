@@ -100,7 +100,8 @@ namespace BibitesMultiverse
             MultiversePlugin.Log.LogInfo(
                 $"{Prefix} dev commands armed — file={(string.IsNullOrEmpty(CommandFile) ? "<none>" : CommandFile)} " +
                 $"hotkey={ForceExportHotkey} familyReport={FamilyReportSeconds:F0}s. " +
-                "Verbs: export <family|any|id>, place <family|any|id> <x> <y> [vx] [vy], edge <open|closed>, " +
+                "Verbs: export <family|any|id> [edge], place <family|any|id> <x> <y> [vx] [vy], " +
+                "edge <open|closed> [E|N|W|S|all], camera <size> [x] [y], flourish <export|entry> [x] [y], " +
                 "census, count <id>, family, save [name], timescale <x>, autosave <on|off>, quit.");
         }
 
@@ -243,6 +244,14 @@ namespace BibitesMultiverse
                     EdgeOverride(token, argument);
                     break;
 
+                case "camera":
+                    CameraView(token, argument);
+                    break;
+
+                case "flourish":
+                    Flourish(token, argument);
+                    break;
+
                 case "census":
                     Census(token);
                     break;
@@ -308,11 +317,26 @@ namespace BibitesMultiverse
                 return;
             }
 
+            // `export <selector> [edge]` — the edge is optional and defaults to the first declared
+            // export edge, so every M2/M3 rig script keeps working unchanged.
+            string[] words = (selector ?? string.Empty).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            string who = (words.Length > 0) ? words[0] : "family";
+            Edge requested = client.Config.PrimaryExportEdge;
+            if (words.Length > 1)
+            {
+                if (!ContractA.TryParseEdge(words[1], out requested) || !client.Config.Exports(requested))
+                {
+                    Report(token, false,
+                        $"'{words[1]}' is not one of this sim's declared export edges [{ContractA.EdgeNames(client.Config.ExportEdges)}]");
+                    return;
+                }
+            }
+
             string how;
-            BibiteBody target = SelectTarget(string.IsNullOrEmpty(selector) ? "family" : selector, out how);
+            BibiteBody target = SelectTarget(who, out how);
             if (target == null)
             {
-                Report(token, false, $"no target for selector '{selector}': {how}");
+                Report(token, false, $"no target for selector '{who}': {how}");
                 return;
             }
 
@@ -330,7 +354,7 @@ namespace BibitesMultiverse
                 return;
             }
 
-            Edge edge = client.Config.ExportEdge;
+            Edge edge = requested;
             BorderGeometry geometry = client.Geometry;
             Vector2 before = target.transform.position;
             Vector2 outward = BorderGeometry.OutwardNormal(edge);
@@ -359,18 +383,19 @@ namespace BibitesMultiverse
             rigidbody.linearVelocity = velocity;
 
             bool inStrip = geometry.InCaptureBand(edge, destination);
+            bool edgeOpen = client.IsEdgeOpen(edge);
             Report(token, true,
                 $"entityId={entityId} selector={how} edge={ContractA.EdgeName(edge)} " +
                 $"from=({before.x.ToString("F2", CultureInfo.InvariantCulture)},{before.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
                 $"to=({destination.x.ToString("F2", CultureInfo.InvariantCulture)},{destination.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
                 $"vel=({velocity.x.ToString("F2", CultureInfo.InvariantCulture)},{velocity.y.ToString("F2", CultureInfo.InvariantCulture)}) " +
-                $"inStrip={inStrip} edgeOpen={client.EdgeOpen} S={geometry.S:F1} W={geometry.W:F1}");
+                $"inStrip={inStrip} edgeOpen={edgeOpen} edges=[{client.EdgeSummary()}] S={geometry.S:F1} W={geometry.W:F1}");
 
-            if (!inStrip || !client.EdgeOpen)
+            if (!inStrip || !edgeOpen)
             {
                 MultiversePlugin.Log.LogWarning(
                     $"{Prefix} token={token} the organism was placed but the pipeline will not fire " +
-                    $"(inStrip={inStrip} edgeOpen={client.EdgeOpen}).");
+                    $"(inStrip={inStrip} edgeOpen={edgeOpen}).");
             }
         }
 
@@ -452,7 +477,7 @@ namespace BibitesMultiverse
             }
 
             BorderGeometry geometry = client.Geometry;
-            Edge edge = client.Config.ExportEdge;
+            Edge edge = client.Config.PrimaryExportEdge;
             Vector2 before = target.transform.position;
             Vector2 beforeVelocity = rigidbody.linearVelocity;
             Vector2 destination = new Vector2(x, y);
@@ -492,7 +517,8 @@ namespace BibitesMultiverse
                 $"wrapRadius={geometry.WrapRadius.ToString("F1", CultureInfo.InvariantCulture)} pastWrapRadius={pastWrapRadius} " +
                 $"bandInner={geometry.BandInnerBoundary(edge).ToString("F1", CultureInfo.InvariantCulture)} " +
                 $"inCaptureBand={inBand} outward={outward} outsideSquare={geometry.Beyond(edge, destination)} " +
-                $"edgeOpen={client.EdgeOpen} S={geometry.S.ToString("F1", CultureInfo.InvariantCulture)} " +
+                $"bands=[{Bands(client, geometry, destination)}] " +
+                $"edges=[{client.EdgeSummary()}] S={geometry.S.ToString("F1", CultureInfo.InvariantCulture)} " +
                 $"W={geometry.W.ToString("F1", CultureInfo.InvariantCulture)}";
 
             Report(token, true, details);
@@ -500,10 +526,35 @@ namespace BibitesMultiverse
         }
 
         /// <summary>
-        /// <c>edge &lt;open|closed&gt;</c> — force the export-edge gate locally, with no sidecar behind
-        /// it. The D10 verifications run on one game with no rig, and without this the gate of §5.4
-        /// keeps the export edge shut and no capture could ever be observed. It relaxes nothing else,
-        /// and the next real EDGE_STATUS clears it.
+        /// One line per declared export edge: whether the placed organism is inside that band.
+        /// The corner is the interesting case, and this is what makes it visible in a command result.
+        /// </summary>
+        private static string Bands(MultiverseClient client, BorderGeometry geometry, Vector2 point)
+        {
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            for (int i = 0; i < client.Config.ExportEdges.Count; i++)
+            {
+                Edge edge = client.Config.ExportEdges[i];
+                if (i > 0)
+                {
+                    text.Append(' ');
+                }
+
+                text.Append(ContractA.EdgeName(edge)).Append('=').Append(geometry.InCaptureBand(edge, point));
+            }
+
+            return text.ToString();
+        }
+
+        /// <summary>
+        /// <c>edge &lt;open|closed&gt; [E|N|W|S|all]</c> — force an export-edge gate locally, with no
+        /// sidecar behind it. The D10 verifications and the M4 portal check run on one game with no rig,
+        /// and without this the gate of §5.4 keeps every export edge shut, so no capture and no portal
+        /// could ever be observed. It relaxes nothing else — the bands, the outward-velocity test and
+        /// the corner rule all still run — and the next real EDGE_STATUS clears it.
+        ///
+        /// The edge argument is optional and defaults to every declared export edge, so the M3 form
+        /// <c>edge open</c> keeps working.
         /// </summary>
         private void EdgeOverride(string token, string argument)
         {
@@ -514,12 +565,15 @@ namespace BibitesMultiverse
                 return;
             }
 
+            string[] words = (argument ?? string.Empty).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            string state = (words.Length > 0) ? words[0] : string.Empty;
+
             bool open;
-            if (string.Equals(argument, "open", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(state, "open", StringComparison.OrdinalIgnoreCase))
             {
                 open = true;
             }
-            else if (string.Equals(argument, "closed", StringComparison.OrdinalIgnoreCase) || string.Equals(argument, "close", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(state, "closed", StringComparison.OrdinalIgnoreCase) || string.Equals(state, "close", StringComparison.OrdinalIgnoreCase))
             {
                 open = false;
             }
@@ -529,8 +583,21 @@ namespace BibitesMultiverse
                 return;
             }
 
-            client.SetDevEdgeOverride(open);
-            Report(token, true, $"devEdgeOverride={open} edgeOpen={client.EdgeOpen} edge={ContractA.EdgeName(client.Config.ExportEdge)}");
+            Edge edge = Edge.None;
+            if (words.Length > 1 && !string.Equals(words[1], "all", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!ContractA.TryParseEdge(words[1], out edge) || !client.Config.Exports(edge))
+                {
+                    Report(token, false,
+                        $"'{words[1]}' is not one of this sim's declared export edges [{ContractA.EdgeNames(client.Config.ExportEdges)}]");
+                    return;
+                }
+            }
+
+            client.SetDevEdgeOverride(edge, open);
+            Report(token, true,
+                $"devEdgeOverride={open} target={(edge == Edge.None ? "all" : ContractA.EdgeName(edge))} " +
+                $"edges=[{client.EdgeSummary()}]");
         }
 
         private static bool TryNumber(string text, out float value)
@@ -571,6 +638,93 @@ namespace BibitesMultiverse
 
             how = "the world holds no living organism";
             return null;
+        }
+
+        /// <summary>
+        /// <c>flourish &lt;export|entry&gt; [x] [y]</c> — draw one migration ring on demand.
+        ///
+        /// The ring's real triggers are a completed export and a completed arrival, and **both need a
+        /// sidecar**: the export ring fires on <c>MIGRATE_OUT_ACK</c> and the arrival ring fires on a
+        /// spawn. A mod-only smoke test can therefore never reach either, so without this verb the
+        /// question "does the Disc path throw?" stays open until the rehearsal rig runs. It draws
+        /// through exactly the same <see cref="PortalVisual.Flash"/> entry point the two hooks use, so a
+        /// green result here is a real statement about the shipped path.
+        /// </summary>
+        private void Flourish(string token, string argument)
+        {
+            string[] parts = (argument ?? string.Empty).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            bool export = parts.Length == 0 || !string.Equals(parts[0], "entry", StringComparison.OrdinalIgnoreCase);
+
+            float x = 0f;
+            float y = 0f;
+            if (parts.Length >= 3 && (!TryNumber(parts[1], out x) || !TryNumber(parts[2], out y)))
+            {
+                Report(token, false, "usage: flourish <export|entry> [x] [y]");
+                return;
+            }
+
+            PortalVisual.Flash(new Vector3(x, y, 0f), export);
+            Report(token, true, $"flourish role={(export ? "export" : "entry")} at=({x.ToString("F1", CultureInfo.InvariantCulture)},{y.ToString("F1", CultureInfo.InvariantCulture)})");
+        }
+
+        /// <summary>
+        /// <c>camera &lt;orthographicSize&gt; [x] [y]</c> — put the view where a check can see it.
+        ///
+        /// The portal has to be legible across an 800× zoom range (`m4_portal_findings.md` §5.1), and
+        /// the exit test's Part 8 sweeps `orthographicSize` 5, 250, 2000 and 4000. A hand-driven mouse
+        /// wheel cannot do that unattended, so the rig needs the same affordance the command file gives
+        /// everything else. It drives the game's own public <c>CameraManager.SetCamSize</c> and then
+        /// fires the two zoom events, so the background grid stays coherent with the new size exactly
+        /// as it does after a real zoom.
+        /// </summary>
+        private void CameraView(string token, string argument)
+        {
+            string[] parts = (argument ?? string.Empty).Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 1 || !TryNumber(parts[0], out float size) || size <= 0f)
+            {
+                Report(token, false, "usage: camera <orthographicSize> [x] [y]");
+                return;
+            }
+
+            Camera camera = Camera.main;
+            if (camera == null)
+            {
+                Report(token, false, "Camera.main is null — no simulation camera to drive");
+                return;
+            }
+
+            try
+            {
+                CameraManager manager = CameraManager.instance;
+                if (manager != null)
+                {
+                    manager.SetCamSize(size);
+                }
+                else
+                {
+                    camera.orthographicSize = size;
+                }
+
+                if (parts.Length >= 3 && TryNumber(parts[1], out float x) && TryNumber(parts[2], out float y))
+                {
+                    Vector3 where = camera.transform.position;
+                    camera.transform.position = new Vector3(x, y, where.z);
+                }
+
+                CameraManager.OnCameraZoomChange.Invoke();
+                CameraManager.onCameraSizeChange.Invoke(size);
+            }
+            catch (Exception e)
+            {
+                Report(token, false, "could not drive the camera: " + e.Message);
+                return;
+            }
+
+            Vector3 position = camera.transform.position;
+            Report(token, true,
+                $"orthographicSize={camera.orthographicSize.ToString("F1", CultureInfo.InvariantCulture)} " +
+                $"position=({position.x.ToString("F1", CultureInfo.InvariantCulture)},{position.y.ToString("F1", CultureInfo.InvariantCulture)},{position.z.ToString("F1", CultureInfo.InvariantCulture)}) " +
+                $"cullingMask=0x{camera.cullingMask:X8}");
         }
 
         private void Census(string token)

@@ -68,7 +68,7 @@ namespace BibitesMultiverse
         /// One line at world load: the settings the containment claim rests on, and the two radii it
         /// says do not compete. Read-only — under D10 the mod never writes <c>worldWrapping</c>.
         /// </summary>
-        internal static void LogSetup(BorderGeometry geometry, Edge exportEdge, Edge entryEdge)
+        internal static void LogSetup(BorderGeometry geometry, IList<Edge> exportEdges, IList<Edge> entryEdges)
         {
             string wrapping = "<unreadable>";
             string shade = "<unreadable>";
@@ -90,8 +90,9 @@ namespace BibitesMultiverse
                 $"shadeOutsideOfBounds={shade} shadeAvoidance={shadeAvoidance} " +
                 $"S={geometry.S.ToString("F1", CultureInfo.InvariantCulture)} " +
                 $"W={geometry.W.ToString("F1", CultureInfo.InvariantCulture)} " +
-                $"exportEdge={ContractA.EdgeName(exportEdge)} entryEdge={ContractA.EdgeName(entryEdge)}(passive, no capture band) " +
-                $"bandInner={geometry.BandInnerBoundary(exportEdge).ToString("F1", CultureInfo.InvariantCulture)} " +
+                $"exportEdges=[{ContractA.EdgeNames(exportEdges)}] " +
+                $"entryEdges=[{ContractA.EdgeNames(entryEdges)}](passive, no capture band) " +
+                $"bandInner=[{BandInnerBoundaries(geometry, exportEdges)}] " +
                 $"bandOuter=none wrapRadius={geometry.WrapRadius.ToString("F1", CultureInfo.InvariantCulture)}");
 
             if (!string.Equals(shadeAvoidance, "False", System.StringComparison.OrdinalIgnoreCase))
@@ -108,10 +109,44 @@ namespace BibitesMultiverse
         /// displacement it produces: the game writes <c>rb2d.position</c> directly, so the jump shows
         /// up in <c>transform.position</c> on the tick after it fired.
         /// </summary>
+        private static string BandInnerBoundaries(BorderGeometry geometry, IList<Edge> exportEdges)
+        {
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            for (int i = 0; i < exportEdges.Count; i++)
+            {
+                if (i > 0)
+                {
+                    text.Append(' ');
+                }
+
+                text.Append(ContractA.EdgeName(exportEdges[i])).Append('=')
+                    .Append(geometry.BandInnerBoundary(exportEdges[i]).ToString("F1", CultureInfo.InvariantCulture));
+            }
+
+            return text.ToString();
+        }
+
+        private static string LandedIn(BorderGeometry geometry, IList<Edge> exportEdges, Vector2 position)
+        {
+            System.Text.StringBuilder text = new System.Text.StringBuilder();
+            for (int i = 0; i < exportEdges.Count; i++)
+            {
+                if (i > 0)
+                {
+                    text.Append(' ');
+                }
+
+                text.Append(ContractA.EdgeName(exportEdges[i])).Append('=')
+                    .Append(geometry.InCaptureBand(exportEdges[i], position));
+            }
+
+            return text.ToString();
+        }
+
         internal void Observe(
             BibiteBody body,
             int entityId,
-            Edge exportEdge,
+            IList<Edge> exportEdges,
             BorderGeometry geometry,
             Vector2 position,
             long simTick)
@@ -153,7 +188,7 @@ namespace BibitesMultiverse
                         $"heading={body.transform.localRotation.eulerAngles.z.ToString("F2", CultureInfo.InvariantCulture)} " +
                         $"health={health.ToString("F2", CultureInfo.InvariantCulture)} bodyLength={bodyLength.ToString("F2", CultureInfo.InvariantCulture)} " +
                         $"wrapRadius={geometry.WrapRadius.ToString("F1", CultureInfo.InvariantCulture)} " +
-                        $"landedInCaptureBand={geometry.InCaptureBand(exportEdge, position)} " +
+                        $"landedInCaptureBand=[{LandedIn(geometry, exportEdges, position)}] " +
                         $"totalWrapEvents={wrapEvents} population={GameBridge.LivingPopulation()}");
 
                     previous.nextBandLogSimTime = 0.0; // let the next band decision speak immediately

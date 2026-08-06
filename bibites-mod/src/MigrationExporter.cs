@@ -24,6 +24,15 @@ namespace BibitesMultiverse
         {
             internal string migrationId;
             internal int entityId;
+
+            /// <summary>
+            /// §9.1, §15 A22 — **the mod MUST record `exitEdge` in its in-flight record.** That is what
+            /// turns an edgeless MIGRATE_OUT_NACK into "close the north lane", and closing both lanes
+            /// because one NACK arrived throws away a live one. It is the whole reason contract debt A5
+            /// is still moot under two export edges.
+            /// </summary>
+            internal Edge exitEdge;
+
             internal BibiteBody body;
             internal string frame;          // the exact MIGRATE_OUT frame, for an identical replay
             internal float sentAtRealtime;
@@ -36,6 +45,13 @@ namespace BibitesMultiverse
             internal double untilSimTime;
             internal bool permanent;
             internal bool requireExit;
+
+            /// <summary>
+            /// The band the organism was refused on. The cooldown is per **organism**, so the hysteresis
+            /// has to name the band it must clear — otherwise a refusal on one axis would be released by
+            /// wandering out of the other one.
+            /// </summary>
+            internal Edge edge;
         }
 
         private readonly MultiverseClient client;
@@ -70,7 +86,7 @@ namespace BibitesMultiverse
         /// **and** by hysteresis — the organism has to clear the strip's inner face before it may
         /// trigger again, so a refused organism cannot spin against the border.
         /// </summary>
-        internal bool IsBlocked(int entityId, Edge edge, BorderGeometry geometry, Vector2 position)
+        internal bool IsBlocked(int entityId, BorderGeometry geometry, Vector2 position)
         {
             if (!cooldowns.TryGetValue(entityId, out Cooldown cooldown))
             {
@@ -84,7 +100,7 @@ namespace BibitesMultiverse
 
             if (cooldown.requireExit)
             {
-                if (!geometry.ClearOfStrip(edge, position))
+                if (cooldown.edge != Edge.None && !geometry.ClearOfStrip(cooldown.edge, position))
                 {
                     return true;
                 }
@@ -135,7 +151,7 @@ namespace BibitesMultiverse
             {
                 MultiversePlugin.Log.LogWarning(
                     $"[M2] entity={entityId} has a non-finite position/velocity/heading — NaN and Inf are forbidden on the wire (§4.1). Not migrating.");
-                Block(entityId, permanent: true, seconds: 0f);
+                Block(entityId, edge, permanent: true, seconds: 0f);
                 return false;
             }
 
@@ -146,7 +162,7 @@ namespace BibitesMultiverse
                 if (serialized == null)
                 {
                     MultiversePlugin.Log.LogWarning($"[M2] entity={entityId}: SerializeBibite returned null — not migrating.");
-                    Block(entityId, permanent: true, seconds: 0f);
+                    Block(entityId, edge, permanent: true, seconds: 0f);
                     return false;
                 }
 
@@ -155,7 +171,7 @@ namespace BibitesMultiverse
             catch (Exception e)
             {
                 MultiversePlugin.Log.LogError($"[M2] entity={entityId}: serialization threw — {e}");
-                Block(entityId, permanent: false, seconds: ContractA.MigrationCooldownSeconds);
+                Block(entityId, edge, permanent: false, seconds: ContractA.MigrationCooldownSeconds);
                 return false;
             }
 
@@ -164,7 +180,7 @@ namespace BibitesMultiverse
             {
                 MultiversePlugin.Log.LogError(
                     $"[M2] entity={entityId}: payload is {payloadBytes} bytes, over maxPayloadBytes ({ContractA.MaxPayloadBytes}) — not migrating.");
-                Block(entityId, permanent: true, seconds: 0f);
+                Block(entityId, edge, permanent: true, seconds: 0f);
                 return false;
             }
 
@@ -207,6 +223,7 @@ namespace BibitesMultiverse
             {
                 migrationId = migrationId,
                 entityId = entityId,
+                exitEdge = edge,
                 body = body,
                 frame = ContractA.Envelope(ContractA.TypeMigrateOut, data).ToString(Formatting.None),
                 sentAtRealtime = Time.realtimeSinceStartup
@@ -342,7 +359,13 @@ namespace BibitesMultiverse
                 MultiversePlugin.Log.LogError($"[M2] migrationId={migrationId} entityId={entityId}: link detach threw — {e}");
             }
 
+            // WP7 — the flourish marks the point the organism actually left, while it is still alive and
+            // placed. It is fire-and-forget and exception-guarded inside PortalVisual: a visual must
+            // never be able to break custody transfer. A rejected export deliberately draws nothing.
+            Vector3 departurePoint = body.transform.position;
+
             bool delisted = GameBridge.DestroyCleanly(body);
+            PortalVisual.Flash(departurePoint, export: true);
             client.NoteDeparture(entityId);
             MultiversePlugin.Log.LogInfo(
                 $"[M2] migrationId={migrationId} entityId={entityId} phase=DESTROYED reason={why} delisted={delisted} " +
@@ -372,27 +395,32 @@ namespace BibitesMultiverse
                 seconds = Mathf.Max(seconds, retryAfterMs / 1000f);
             }
 
-            Block(record.entityId, permanent, seconds);
+            Block(record.entityId, record.exitEdge, permanent, seconds);
 
-            // EDGE_CLOSED and SIM_SIZE_MISMATCH additionally stop this edge until a new EDGE_STATUS.
+            // §9.1, §15 A22 — EDGE_CLOSED and SIM_SIZE_MISMATCH stop **only the edge this organism
+            // left by**, until a new EDGE_STATUS. The NACK carries no `edge` field and does not need
+            // one: the in-flight record holds it, which is exactly the obligation that keeps contract
+            // debt A5 moot under two export edges.
             if (string.Equals(code, "EDGE_CLOSED", StringComparison.Ordinal)
                 || string.Equals(code, "SIM_SIZE_MISMATCH", StringComparison.Ordinal))
             {
-                client.CloseEdgeUntilNextStatus(code);
+                client.CloseEdgeUntilNextStatus(record.exitEdge, code);
             }
 
             MultiversePlugin.Log.LogWarning(
                 $"[M2] migrationId={migrationId} entityId={record.entityId} phase=MIGRATE_OUT_NACK code={code} class={nackClass} " +
+                $"exitEdge={ContractA.EdgeName(record.exitEdge)} " +
                 $"revived={revived} cooldown={seconds:F1}s permanent={permanent} message=\"{message}\"");
         }
 
-        private void Block(int entityId, bool permanent, float seconds)
+        private void Block(int entityId, Edge edge, bool permanent, float seconds)
         {
             cooldowns[entityId] = new Cooldown
             {
                 permanent = permanent,
                 untilSimTime = TimeKeeper.simulatedTime + seconds,
-                requireExit = true
+                requireExit = true,
+                edge = edge
             };
         }
 

@@ -23,6 +23,7 @@ MANAGED_DLLS=(
   BibitesAssembly.dll
   Newtonsoft.Json.dll
   Newtonsoft.Json.UnityConverters.dll
+  ShapesRuntime.dll
   UnityEngine.dll
   UnityEngine.CoreModule.dll
   UnityEngine.InputLegacyModule.dll

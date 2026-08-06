@@ -20,6 +20,9 @@
     <Reference Include="libs/BepInEx.dll" Private="false" />
     <Reference Include="libs/0Harmony.dll" Private="false" />
     <Reference Include="libs/BibitesAssembly.dll" Private="false" />
+    <!-- Freya Holmér's Shapes, shipped by the game. The M4 portal (m4_portal_findings.md,
+         Recommended approach) is built from its retained-mode renderers. -->
+    <Reference Include="libs/ShapesRuntime.dll" Private="false" />
     <Reference Include="libs/Newtonsoft.Json.dll" Private="false" />
     <Reference Include="libs/Newtonsoft.Json.UnityConverters.dll" Private="false" />
     <Reference Include="libs/UnityEngine.dll" Private="false" />
