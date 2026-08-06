@@ -22,7 +22,7 @@
    Sidecar↔sidecar transport is phased. Contract B message shapes are
    identical in both phases — only the pipe changes:
 
-   Phase 1 (M2–M4): star through the relay     Phase 2 (M5): direct mesh
+   Phase 1 (M2–M5): star through the relay     Phase 2 (M6): direct mesh
    ─────────────────────────────────────────   ──────────────────────────
               ┌──────────────────┐                 Peer B ◄────► Peer C
     Peer B ──►│ multiverse-relay │◄── Peer C          ▲            ▲
@@ -33,6 +33,11 @@
    east edge into its one east neighbour and receives through its west edge —
    B → C → D → B, one way round. `multiverse-archive` (D11) sits beside the relay
    from M3 and records every envelope that crosses it.
+
+   From M4 the map heals and grows (D12): a dark slot is routed around rather than
+   waited on, and a peer splices in between two live slots. D13 generalizes the map
+   again — the ring is the one-row case of a one-way grid, and vertical lanes ship
+   behind a flag.
 ```
 
 ---
@@ -44,17 +49,22 @@ Recorded so divergences are deliberate, not accidental. Section references (§) 
 
 | # | Decision | Why | Consequence |
 |---|---|---|---|
-| **D1** | **Relay-first, P2P-ready.** MVP transport is a deliberately dumb relay server (the topology §6.1 recommends); direct libp2p arrives in M5 behind unchanged Contract B message shapes. | Full P2P puts NAT traversal, gossip, DHT, and CRDTs on the critical path, and the research itself judged a pure mesh unviable. The sidecar boundary means the mod never notices the transport change. | New `multiverse-relay` component. Ring insertion (D8) is relay-arbitrated until M5. "Dumb" is load-bearing: it is why the organism database is a separate service (D11) and not a relay feature. |
+| **D1** | **Relay-first, P2P-ready.** MVP transport is a deliberately dumb relay server (the topology §6.1 recommends); direct libp2p arrives in M6 behind unchanged Contract B message shapes. | Full P2P puts NAT traversal, gossip, DHT, and CRDTs on the critical path, and the research itself judged a pure mesh unviable. The sidecar boundary means the mod never notices the transport change. | New `multiverse-relay` component. Ring insertion (D8) is relay-arbitrated until M6. "Dumb" is load-bearing: it is why the organism database is a separate service (D11) and not a relay feature. |
 | **D2** | **Durable custody handoff, idempotent delivery.** The sidecar journals an organism to disk *before* ACKing `MIGRATE_OUT`; receivers dedup on `migrationId`; failed deliveries bounce back into the local sim. Preference: rare loss over duplication. | Destroy-on-ACK without persistence silently kills organisms on any crash; retries without dedup clone them. Loss reads as natural death; duplication reads as cloning. | Contract A gains `MIGRATE_IN_ACK/NACK`; the envelope gains `migrationId`; the sidecar owns a migration journal. See the custody chain under Contract A. |
 | **D3** | **Map-edge borders; gateway towers deferred.** Migration triggers at designated map edges, and the mod owns whatever it takes to get organisms *to* an open edge (§5.1). | Edges preserve the illusion of one continuous world. Towers (§5.3) remain the fallback if crossing rates stay too low — parked, and revisited only if a real multi-peer world crosses far below M2's measured rate. **Mechanism corrected 2026-08-02 (`m2_findings.md`):** the original rationale — "vanilla void-avoidance AI keeps crossing rates near zero" — misattributed the cause. Void avoidance is a single torque blend in `BibitePropulsion.UpdateOrgan` gated on a global static that **ships off** (`ScenarioSettings.voidAvoidance`, `DefaultValue = false`; no shipped scenario enables it, and `Apocalypse` disables it explicitly). What actually keeps organisms on their islands is **food density**: pellets spawn only inside a `Zone`, and `3 Islands` separates its islands with a ~3000× fertility ratio, not with a steering rule. | Mod still owns the void-avoidance override (cheap, and worlds that enable *Void-No-Mo'* need it); the sidecar tells the mod which edges are open (`EDGE_STATUS`). **Consequence of the correction:** suppression alone cannot raise a rate that steering was never holding down, so M2 *measured* the natural crossing rate at an open edge first. **Measured 2026-08-02/03: the lure is unnecessary** — crossing is frequent once an edge is open (20.5 and 24.4 strip entries per sim-hour), so the corridor zone was canceled and the pheromone beacon stays parked. M2 also disabled `worldWrapping` while an edge was open, so a missed capture could not teleport an organism to the antipode — which in turn leaked organisms out of the three unguarded edges. **D10 reverses that trade for M3:** the vanilla wrap goes back on and becomes the containment mechanism. |
 | **D4** | **The bb8 body is opaque to the mod.** The mod ships the game's own Newtonsoft output as a version-tagged blob; parsing, validation, and indexing live only in the sidecar's `bb8-schema`. | The authoritative serializer is the game itself. One schema implementation instead of two, no cross-language fidelity risk, and the mod survives game updates that add fields. | `bb8-schema` needs no C# implementation. All payload validation happens sidecar-side, before anything reaches a mod. |
 | **D5** | **No global clock.** Every sector runs at its own sim speed; envelope timestamps are informational; a migrating organism may experience time discontinuities. | Peers' sim speeds differ by hardware and settings; synchronizing would couple every peer to the slowest. | Age/season continuity across sectors is explicitly not guaranteed. |
-| **D6** | **Species catalog is a module inside the sidecar, post-MVP (M6).** | It shares the sidecar's storage and (later) DHT; a standalone service created a circular dependency in the earlier draft. | Off the MVP critical path. **D11 does not overturn this:** `multiverse-archive` is one central recorder on the relay's host, not a per-peer library, and it depends on no sidecar internals. Whether the M6 catalog seeds from the archive or supersedes it is open — see the research table. |
-| **D7** | **Sidecar and relay are written in Go.** | go-libp2p is the reference libp2p implementation, which settles the M5 transport. A single static binary is also the easiest thing to ask a player to run alongside the mod. | `multiverse-sidecar`, `multiverse-relay`, `multiverse-archive` (D11) and `bb8-schema` are Go. `bb8-schema` needs no second implementation — D4 already removed the C# side. |
+| **D6** | **Species catalog is a module inside the sidecar, post-MVP (M7).** | It shares the sidecar's storage and (later) DHT; a standalone service created a circular dependency in the earlier draft. | Off the MVP critical path. **D11 does not overturn this:** `multiverse-archive` is one central recorder on the relay's host, not a per-peer library, and it depends on no sidecar internals. Whether the M7 catalog seeds from the archive or supersedes it is open — see the research table. |
+| **D7** | **Sidecar and relay are written in Go.** | go-libp2p is the reference libp2p implementation, which settles the M6 transport. A single static binary is also the easiest thing to ask a player to run alongside the mod. | `multiverse-sidecar`, `multiverse-relay`, `multiverse-archive` (D11) and `bb8-schema` are Go. `bb8-schema` needs no second implementation — D4 already removed the C# side. |
 | **D8** | **Ring topology with one-way lanes.** Peers form one ring. Every instance has exactly two neighbours: it **exports through its east edge** and **receives through its west edge**. Out and in are different doors, so a returning organism must traverse the whole neighbouring world — no boomerang at the shared edge. A sector is a **ring slot**, and a slot belongs to a **peer identity, not a connection**: an offline peer keeps its slot (its edges close, the reservation does not expire), a new peer inserts into the ring, and the map never reshuffles. The `{x, y}` grid is retired — kept on record as a possible far-future extension, not deleted from history. | A 2-D grid needs per-edge pairing, up to four live neighbours per peer, and a map that re-flows whenever a peer joins or leaves. A ring needs one rule and one neighbour link. One-way lanes turn migration into a permanent eastward current: an organism that wants to come home circles the whole ring, so genes mix across every peer instead of oscillating between two. A stable slot-to-identity binding means a peer that goes away for a week comes back to the same neighbours. | Relay sector assignment becomes **ring insertion**. `EDGE_STATUS` governs the **export edge only**; the entry edge is passive and always accepts (Contract A). Contract C simplifies: `sourceSector`/`destSector` are ring slots and `exitEdge` is always `E`. Contract debt A5 (`MIGRATE_OUT_NACK` carries no `edge`) stays moot while each sim exports through exactly one edge. |
-| **D9** | **M3 is a LAN milestone.** No VPS, no public relay, no strangers. The relay runs on the owner's main machine; the owner's second computer joins over the LAN as a real remote peer. | A LAN peer is a *real* remote peer — second machine, second clock, second install, real network hop — and it buys that proof without buying hosting, TLS for public exposure, abuse limits, or unknown game versions at the same time. Those belong to one risk set and deserve their own milestone. | The public items move intact to a new **M4 — Public release**; the old M4 (direct P2P) becomes **M5** and the old M5 (ecosystem completeness) becomes **M6**. M3 acquires a new problem the single-machine rig never had: an install story for a Windows machine with no dev environment. |
+| **D9** | **M3 is a LAN milestone.** No VPS, no public relay, no strangers. The relay runs on the owner's main machine; the owner's second computer joins over the LAN as a real remote peer. | A LAN peer is a *real* remote peer — second machine, second clock, second install, real network hop — and it buys that proof without buying hosting, TLS for public exposure, abuse limits, or unknown game versions at the same time. Those belong to one risk set and deserve their own milestone. | The public items move intact to a new **M4 — Public release**; the old M4 (direct P2P) becomes **M5** and the old M5 (ecosystem completeness) becomes **M6**. **D16 renumbered again on 2026-08-05**: public release is now M5, direct P2P M6, ecosystem completeness M7, and M4 is operations. M3 acquires a new problem the single-machine rig never had: an install story for a Windows machine with no dev environment. |
 | **D10** | **Containment via the vanilla world wrap**, replacing the "guard all four edges" item carried out of M2. M3 keeps `worldWrapping` **ON**. | The M2 leak was self-inflicted: M2 turned the wrap off while an edge was open, and nothing else in the game contains an organism at the square edge (`m2_findings.md` §3). The two radii do not compete — the migration strips capture at `±S`, the wrap fires at `1.5·S + 1000` (4000 with `S = 2000`), so an export always wins the race. The wrap then catches what the strips do not: the north and south edges, and anything that slips past the passive entry edge. | The four-edge guard is dropped. Two **in-game verifications**, not assumptions, gate the decision: **(a)** wrap-on coexists with the strips — no false migration, no interference; **(b)** export capture must reach organisms already **outside** the square past the strip line (the 2000–4000 band), not only those inside the strip. See `m3_considerations.md`, Risks 1 and 2. |
-| **D11** | **Lineage annex on every envelope, recorded by a new `multiverse-archive` service.** The annex carries the parent entity IDs plus a content hash of each parent genome. The mod supplies the parents as opaque blobs and the **sidecar** hashes them, because D4 keeps the body opaque to the mod. The archive runs beside the relay, records every envelope and annex, and fetches an unknown genome by hash from the source sidecar. | Migration is already the moment a genome crosses a machine boundary, so it is the cheapest possible place to build the organism database — and that database is the seed of the M6 species catalog. Without the annex an archive holds a pile of unrelated arrivals; with it, the same stream is a lineage graph. The archive sits **outside** the relay because D1 makes the relay dumb, and a relay that indexes genomes is no longer a frame forwarder. | New `multiverse-archive` component. Contract C gains the annex; Contract B gains a genome fetch by hash. **Known limit:** a database built from migrations holds migrants and their ancestors only, never the resident population. Periodic census uploads are a later option, not M3. |
+| **D11** | **Lineage annex on every envelope, recorded by a new `multiverse-archive` service.** The annex carries the parent entity IDs plus a content hash of each parent genome. The mod supplies the parents as opaque blobs and the **sidecar** hashes them, because D4 keeps the body opaque to the mod. The archive runs beside the relay, records every envelope and annex, and fetches an unknown genome by hash from the source sidecar. | Migration is already the moment a genome crosses a machine boundary, so it is the cheapest possible place to build the organism database — and that database is the seed of the M7 species catalog. Without the annex an archive holds a pile of unrelated arrivals; with it, the same stream is a lineage graph. The archive sits **outside** the relay because D1 makes the relay dumb, and a relay that indexes genomes is no longer a frame forwarder. | New `multiverse-archive` component. Contract C gains the annex; Contract B gains a genome fetch by hash. **Known limit:** a database built from migrations holds migrants and their ancestors only, never the resident population. Periodic census uploads are a later option, not M3. |
+| **D12** | **Route around gaps; splice in anywhere.** When a slot stops being deliverable the ring **heals**: its west neighbour's lane re-pairs to the next deliverable slot east and the current keeps flowing. Insertion is no longer tail-only — a peer splices in **between two live slots**, and one mechanism serves both growth and return. | The overnight run measured the cost of the old rule (`e2e/baselines/20260805T230730Z/t1-report.md`): slot 2 went dark for two hours, slot 1's export edge closed, and its organisms then walked out of the playable square instead of migrating — square crossings spiked about 9× while slot 3's inbound stream, and with it most of its genetic mixing, collapsed. A ring that stops at its first gap couples every peer's liveness to every other peer's, and that is the one property a public ring cannot have. Healing also makes *return* free: a reclaimed slot keeps its number and its position, so coming back is a liveness event, not a topology change. | The relay computes an **effective** east neighbour and names it in `SECTOR_GRANT`; `PEER_STATUS` still publishes the structural ring order, so the map stays readable. `EDGE_STATUS` closes only when **no** slot in the ring is deliverable. The migration journal gains a handoff state, because re-routing a journaled hop is safe only when the relay can prove the frame was never forwarded — where custody may already have moved, D2 makes holding the correct answer. Insertion is safe for work in flight by construction: a released slot number is never reissued, so no journaled `destSlot` can ever name a newcomer. Releasing or handing over a slot never transfers a journal. |
+| **D13** | **The grid.** The topology generalizes from a one-way ring to a **one-way 2-D structure**: a peer exports **east and north**, receives **west and south**, and has up to four neighbours. No-boomerang holds per axis, and the two currents compose into a diagonal drift. **M4 ships the abstractions grid-ready — plural exports, per-lane edge state, coordinate addressing, per-axis route-around — and keeps the vertical lanes behind a flag that ships off.** The ring is the one-row case of the grid. | One current mixes genes along one cycle; two currents mix them across a torus, and an organism comes home only after a whole number of both circuits. The abstractions have to land **before** M5 makes the wire public, because a breaking wire change after strangers run the build costs a migration story rather than a rebuild. The live grid has to wait for a rig that can prove it: a 2×2 grid is degenerate in both axes exactly as a 2-slot ring is, so an honest proof wants six to nine instances, and the owner has two machines. | `exportEdge` becomes `exportEdges`; `EDGE_STATUS.edges` carries one entry per export edge; `borderEdges` becomes all four edges. A reservation gains coordinates while the **slot number stays the routing address** — positions move, addresses never do. The mod gains a second capture band, a second entry mapping, and a corner rule where the two bands overlap. Contract debt A5 stays moot: a `MIGRATE_OUT_NACK` is correlated on `migrationId`, not on an edge. **Deferring the live grid needs the owner's sign-off** — see M4 and `m4_considerations.md`. |
+| **D14** | **Hard-stop recovery is a first-class feature, and a world save is part of it.** Any single instance may crash or hard-stop and must recover cleanly: the world reloads from its last periodic save, the sidecar replays its journal, and custody reassertion handles the resurrection. **No work goes into preventing sleep or crashes.** | T1 is the argument. The overnight run was *safe* and still lost the worlds: 22 595 hops held exactly-once, no organism was lost, and about **97% of the simulated world state was discarded**, because the rig turns the game's autosave off — a scene reload under a live rig is the worse failure — and then never sent a save of its own. Custody protects organisms in flight; nothing protected the organisms at home. Recovery is also the cheaper half: the rig runs on a desktop the owner uses, so hard stops are normal input, not incidents. | The mod owns a periodic save on a wall-clock timer, a save on quit, and a rotation so one bad save cannot destroy the last good one. Save cost is measured against the sim before the cadence is fixed. The journal replay and custody reassertion of `contract-a.md` §7.4–§7.5 become **tested** paths instead of believed ones. `e2e/data/slot-1/journal` still holds one real in-flight hop from 2026-08-04 — migration `9d6db335-b1ae-433e-a44a-bb2109912913`, entity `2004967003`, slot 1 → slot 2 — and delivering it is M4's resume test. Those journals must not be deleted. |
+| **D15** | **Operations and observability are milestone work, not a side effect.** M4 buys the operator surface: population on the Contract B ring view, durable metrics outside the BepInEx logs, an archive-served live HTML status page and a `ringstat` terminal command, log preservation at shutdown, a slot handover command, and a join kit. It also **instruments the entry edge**, where the owner observed a mass of organisms on the west border after the overnight run. | T1 produced every one of its findings from 147 MB of BepInEx logs that BepInEx overwrites on the next game launch, and its best series — population and edge pressure per simulated minute — existed nowhere else. An operator who cannot see the ring cannot run it, and M5 puts strangers on it. The entry-edge mass is an observation with no measurement behind it yet, and a mitigation chosen before the cause is named is a guess. | `HEARTBEAT` already carries population on Contract A; Contract B carries it to the relay so the ring view has it without reading a log. The archive gains a read-only HTML surface beside its query surface, because it already subscribes to every envelope and already runs beside the relay. Entry-edge crowding gets a **metric first and a mitigation second**: spreading arrivals along the entry edge trades D3's one-continuous-world illusion for a flatter arrival distribution, so it stays a candidate until the metric names the cause. |
+| **D16** | **Milestone renumbering.** M4 becomes **Operations: resilience, topology, observability**. Public release moves to **M5**, direct P2P to **M6**, and ecosystem completeness with the species catalog to **M7**. | D12 to D15 are one coherent risk set — a ring that survives its own operators — and they are prerequisites for a public ring rather than parts of it. Shipping a public relay on a topology that stops at the first dark peer, with a rig that loses a night of worlds and an operator surface made of perishable log files, exports all three defects to strangers. | Every "M4" that meant public release, every "M5" that meant libp2p and every "M6" that meant the catalog shifts by one. This document is corrected throughout. The contracts are **not**: `contracts/contract-b-m3.md` §13 and `contracts/contract-a.md` §12–§14 say "M4" where they now mean M5, and the implementation wave corrects them. |
 
 The project owner ratified D1 (relay-first), D2 (at-most-once custody), and D3
 (edges-over-towers) on 2026-08-02; they are settled, not provisional.
@@ -64,6 +74,19 @@ The owner ratified D8 (ring topology), D9 (LAN M3), D10 (wrap containment) and D
 sector grid, supersede M2's "guard all four edges" carry item, and shift the public
 milestone out of M3. Where an older passage in this document disagrees with them, D8–D11
 win.
+
+The owner ratified D12 (route around gaps, splice in anywhere), D13 (the grid), D14
+(hard-stop recovery), D15 (operations and observability) and D16 (renumbering) on
+**2026-08-05**, after the overnight run and its harvest (T1). Together they define a new
+M4 and push every later milestone out by one. **D12 and D13 amend D8 rather than replace
+it:** a slot still belongs to a peer identity, slot numbers are still never reused, and
+out and in are still different doors. What changes is that a gap no longer stops the
+current, a peer no longer has to join at the tail, and the ring is no longer the only
+shape the map can take. The `{x, y}` grid D8 retired comes back in a different form —
+one-way per axis, addressed by slot and positioned by coordinate — and D13 states why the
+old objection (per-edge pairing, four live neighbours, a map that re-flows on every join)
+no longer holds: route-around is what makes a map with holes viable. Where an older
+passage disagrees with D12–D16, the new rows win.
 
 ---
 
@@ -103,7 +126,18 @@ no `bb8-schema` (D4).
 - Harmony patches on `SimulationScripts.BibiteScripts.BibiteBody` (the live organism
   class; `BibiteBody.FixedUpdate()` is the per-organism tick)
 - Border detection (position check each `FixedUpdate()`, hysteresis zone) — on the
-  **export edge (east)** and the **passive entry edge (west)** from M3 (D8)
+  **export edge (east)** and the **passive entry edge (west)** from M3 (D8). From M4 the
+  mod declares **`exportEdges`, plural**, and carries a second capture band and a second
+  passive entry edge for the north/south axis (D13). The vertical pair ships behind a flag
+  that is off, so M4's shipped behaviour is still the ring
+- **Periodic world save and save-on-quit** (D14). A wall-clock timer drives the game's own
+  `SaveSystem.CreateSave` by hand — the public `SaveGame` wrapper swallows exceptions
+  inside a coroutine (`m1_findings.md`) — with a rotation of the last N saves, and one
+  receipt line per save for the harvest tooling. The game's own autosave stays **off**: it
+  reloads the scene under a live rig, which is the worse failure (D14)
+- **Edge instrumentation** (D15): the existing `[M2-CROSSING]` series gains entry-edge
+  occupancy and an arrival histogram along the entry edge, so the crowding the owner saw
+  after the overnight run is measured before it is treated
 - **Void-avoidance suppression at open edges** (D3) — without it, migration ~never happens
 - **World wrapping stays ON** (D10). The strips capture at `±S`; the vanilla wrap at
   `1.5·S + 1000` contains everything the strips do not. The mod no longer touches the
@@ -133,14 +167,20 @@ the sidecar's job.
 
 ### 3. `multiverse-sidecar` — The Network Brain
 **What it is:** A standalone daemon that handles all networking and custody.
-**Language:** Go — go-libp2p for M5, and one static binary for players to run (D7).
+**Language:** Go — go-libp2p for M6, and one static binary for players to run (D7).
 **Depends on:** `bb8-schema`. Contains the `species-catalog` module (D6).
 **Tested by:** Integration tests with multiple sidecar instances, no game needed.
 
 **Owns — in every phase:**
 - Localhost API server (Contract A — serves the mod)
-- Migration journal: durable custody of in-flight organisms, recovery on restart (D2)
-- Routing: the export edge → the ring's next slot east (D8). The mod never sees this
+- Migration journal: durable custody of in-flight organisms, recovery on restart (D2).
+  From M4 an entry also records its **handoff state** — never forwarded, forwarded, or
+  acknowledged — because that is what decides whether an orphaned hop may be re-routed
+  (D12)
+- Routing: the export edge → the ring's next slot east (D8). From M4 that target is the
+  **effective** east neighbour: the next *deliverable* slot, with dark slots bypassed
+  (D12), and one target per export edge once the vertical lanes are enabled (D13). The mod
+  never sees any of this — route-around and the grid are invisible on Contract A
 - Payload validation via `bb8-schema` — nothing invalid ever reaches a mod, in
   either direction
 - Admission control: inbound migration rate limits, population-aware via `HEARTBEAT`
@@ -151,10 +191,17 @@ the sidecar's job.
 - Serving a genome by content hash to `multiverse-archive` (D11) — from that cache, the
   migration journal and its tombstones
 
-**Owns — M2–M4 (relay transport):**
-- Relay client connection (TLS from M4; a shared token over the LAN in M3)
+**Owns — from M4 (operations, D14–D15):**
+- Durable metrics outside the BepInEx logs: per-slot population, crossings, edge state,
+  custody depth and save receipts, written at a fixed cadence to a file the harvest tools
+  and `ringstat` read
+- Journal replay and custody reassertion as a **scripted, tested** recovery path, not an
+  assumed one
 
-**Owns — M5 (direct P2P):**
+**Owns — M2–M5 (relay transport):**
+- Relay client connection (TLS from M5; a shared token over the LAN from M3)
+
+**Owns — M6 (direct P2P):**
 - libp2p transport, NAT traversal (hole punching, STUN, relay fallback)
 - Peer discovery (bootstrap nodes, mDNS for LAN, peer exchange)
 - Gossip-based topology dissemination; lease-based sector claims (design open)
@@ -170,19 +217,33 @@ between sidecars and arbitrates the ring. It never parses bb8 bodies.
 
 **Owns:**
 - Peer registry and connections
-- **Ring insertion** (D8): the single arbiter of the ring — which peer identity holds
-  which slot, and therefore who each peer's one east neighbour is (until M5's leases).
+- **Ring insertion** (D8): the single arbiter of the map — which peer identity holds
+  which slot, and therefore who each peer's neighbours are (until M6's leases).
   A slot is bound to a `peerId`, so an offline peer keeps it and the reservation does not
-  expire. A new peer inserts; the ring never reshuffles
+  expire. Slot numbers are never reused, and no surviving slot is ever renumbered
+- **Insertion anywhere** (D12): a peer joins between two live slots, not only at the tail.
+  Insertion changes two structural lanes and no slot numbers, so it can never redirect an
+  organism already in flight
+- **The effective-neighbour map** (D12): the first *deliverable* slot along each axis,
+  recomputed on every liveness change and published in `SECTOR_GRANT`, while
+  `PEER_STATUS` keeps publishing the structural order. Computing it uses only state the
+  relay already holds; it still parses no body and indexes nothing (D1)
+- **A proof of non-delivery** (D12): a frame the relay could not forward is answered so,
+  explicitly. That answer is what lets a sender re-route a journaled hop without risking
+  the duplication D2 forbids
 - Frame forwarding (`MIGRATION_PAYLOAD`, ACKs, etc.)
 - Compatibility enforcement at connect (reject mismatched game/mod versions)
-- Liveness: dead peers dropped and their slots held. The ripple is one-directional, like
-  the lanes — the dead peer's **west** neighbour loses its export target and closes its
-  export edge (`EDGE_STATUS`); the dead peer's east neighbour simply receives nothing
-- **M5 role:** degrades to bootstrap/rendezvous node + relay-of-last-resort for
+- Liveness: a dark peer keeps its slot, and the ring **heals around it** (D12). The west
+  neighbour re-pairs to the next deliverable slot east and keeps exporting; the dark
+  peer's own east neighbour is unaffected and simply receives nothing. An export edge
+  closes only when the ring holds no deliverable slot at all
+- **Slot handover** (D15): an operator command that rebinds a reservation to a new
+  `peerId` in place, keeping the slot number and the position. It never moves a journal —
+  custody stays on the machine that holds it
+- **M6 role:** degrades to bootstrap/rendezvous node + relay-of-last-resort for
   unpunchable NATs
 
-Who operates it: the owner's main machine in M3 (D9). Who operates a public one is an M4
+Who operates it: the owner's main machine from M3 (D9). Who operates a public one is an M5
 question (see research table).
 
 ---
@@ -204,21 +265,26 @@ forwarder, and a forwarder that indexes genomes is not dumb any more.
   source sidecar for it over Contract B
 - The lineage graph: child genome hash → parent genome hashes, assembled from annexes
 - A query surface over the two (read-only in M3)
+- **From M4 (D15): the live status page.** The archive already subscribes to every
+  envelope and already runs beside the relay, so it is the one process that can serve a
+  self-contained HTML view of the whole ring — slots, liveness, effective lanes,
+  populations, per-lane flow and custody depth — with no new component and no rule added
+  to the relay. `ringstat` reads the same data from the terminal
 
 **Known limit, by construction:** a database built from migrations holds migrants and
 their ancestors — never the resident population of a peer. Periodic census uploads would
 close the gap and are a later option (D11).
 
 Open: how it sees every envelope (a relay copy, or the archive joining as a slot-less
-peer); the fetch protocol; and whether M6's `species-catalog` seeds from it or supersedes
+peer); the fetch protocol; and whether M7's `species-catalog` seeds from it or supersedes
 it (D6). See the research table.
 
 ---
 
-### 6. `species-catalog` — The Distributed Library (module, M6)
+### 6. `species-catalog` — The Distributed Library (module, M7)
 **What it is:** Content-addressed storage and replication of `.bb8` genomes, as a
 module inside the sidecar (D6).
-**Depends on:** `bb8-schema` (indexing/metadata), sidecar storage and (M5) DHT.
+**Depends on:** `bb8-schema` (indexing/metadata), sidecar storage and (M6) DHT.
 **Tested by:** Unit tests for storage, integration tests for replication.
 
 **Owns:**
@@ -230,7 +296,7 @@ module inside the sidecar (D6).
 
 M3's `multiverse-archive` is the centralized ancestor of this module, not a competitor:
 one recorder on one host, no DHT, no per-peer choice. It hashes genomes with the same
-`bb8-schema` projection, so its records stay meaningful to whatever M6 builds.
+`bb8-schema` projection, so its records stay meaningful to whatever M7 builds.
 
 ---
 
@@ -265,7 +331,10 @@ MIGRATE_OUT_NACK   Sidecar can't take custody (edge has no live neighbor, journa
 EDGE_STATUS        Whether the export edge is open for migration — drives the mod's
                    void-avoidance suppression. From M3 the ring gives each sim one
                    export edge (east) and one passive entry edge (west, always
-                   accepts), so this message narrows to the export edge (D8)
+                   accepts), so this message narrows to the export edge (D8). From M4
+                   it carries one entry per export edge — one under the ring, two once
+                   the vertical lane is enabled (D13) — and a lane that re-pairs
+                   around a dark slot never closes it at all (D12)
 ```
 
 > [!IMPORTANT]
@@ -278,7 +347,7 @@ EDGE_STATUS        Whether the export edge is open for migration — drives the 
 1. Mod sends `MIGRATE_OUT`.
 2. Sidecar validates, journals to disk, replies `MIGRATE_OUT_ACK`. Custody: sidecar.
    Mod destroys the organism.
-3. Sidecar sends `MIGRATION_PAYLOAD` (via relay in M2–M4, direct in M5).
+3. Sidecar sends `MIGRATION_PAYLOAD` (via relay in M2–M5, direct in M6).
 4. Receiving sidecar validates, admission-checks, journals, sends `MIGRATE_IN` to its
    mod. Mod restores the organism from the blob and re-links its parent/child
    references, then replies `MIGRATE_IN_ACK`.
@@ -288,22 +357,33 @@ EDGE_STATUS        Whether the export edge is open for migration — drives the 
 7. Receivers dedup `MIGRATION_PAYLOAD` on `migrationId`, so a resend after a lost ACK
    is idempotent. Loss is possible only if a journal is destroyed mid-flight — and
    reads as death (D2).
+8. **From M4 (D12), a hop whose destination went dark is re-routed, bounced or held —
+   and which one it is depends on custody, never on convenience.** A frame the relay
+   proves it never forwarded may be re-routed east to the effective neighbour under its
+   original `migrationId`; a peer-specific refusal (overloaded, size mismatch) may be
+   re-routed the same way; a payload-fatal refusal bounces home as in step 6. A frame
+   that was forwarded and never answered is **held**, because the far sidecar may
+   already have taken custody and a second delivery elsewhere would be duplication.
+   Holding is unbounded by design, and an operator command is the only way out of it.
 
 ---
 
 ### Contract B: Sidecar ↔ Sidecar (wire protocol)
 
 Transport: relay-forwarded frames, plain over the LAN with a shared token (M3) and over
-TLS once the relay is public (M4); libp2p streams (M5). Same shapes in every phase (D1).
+TLS once the relay is public (M5); libp2p streams (M6). Same shapes in every phase (D1).
 Format: TBD (Protobuf likely for the envelope — the bb8 body stays an opaque bytes
 field per D4)
 
 ```
 HANDSHAKE          Game version, mod list, node count, protocol version
-SECTOR_CLAIM       Request/renew a ring slot — relay-arbitrated in M2–M4; lease-based
-                   design open for M5. From M3 a grant also names the peer's one east
-                   neighbour, which is the whole topology a sidecar needs (D8)
-TOPOLOGY_GOSSIP    Ring-map dissemination (M5 only — before that the relay is the
+SECTOR_CLAIM       Request/renew a ring slot — relay-arbitrated in M2–M5; lease-based
+                   design open for M6. From M3 a grant also names the peer's one east
+                   neighbour, which is the whole topology a sidecar needs (D8). From M4
+                   the claim carries live population for the ring view (D15) and an
+                   advisory insertion position (D12); the grant names the *effective*
+                   neighbour per export edge (D12, D13)
+TOPOLOGY_GOSSIP    Ring-map dissemination (M6 only — before that the relay is the
                    single source of truth)
 MIGRATION_PAYLOAD  MigrationEnvelope (Contract C); receivers dedup on migrationId
 MIGRATION_ACK      Receiving mod confirmed the spawn (sent only after MIGRATE_IN_ACK)
@@ -313,9 +393,9 @@ MIGRATION_NACK     Rejected (incompatible, overloaded, invalid payload) — send
 GENOME_REQUEST     multiverse-archive asks a sidecar for a genome by content hash,
                    for an annex hash it has never seen (M3, D11)
 GENOME_RESPONSE    The genome, or "unknown hash" (M3, D11)
-PEER_EXCHANGE      Share known peer addresses (M5)
-CATALOG_QUERY      Request a bb8 by content hash (M6)
-CATALOG_RESPONSE   Return a bb8 file, or "not found, try these peers" (M6)
+PEER_EXCHANGE      Share known peer addresses (M6)
+CATALOG_QUERY      Request a bb8 by content hash (M7)
+CATALOG_RESPONSE   Return a bb8 file, or "not found, try these peers" (M7)
 PING / PONG        Liveness
 ```
 
@@ -329,18 +409,23 @@ Not a network contract — a **code contract** over what a migration carries:
 MigrationEnvelope
 ├── migrationId: uuid                  # idempotency key — receivers dedup on it
 ├── kind: enum(bibite, corpse, pellet, egg)  # MVP ships bibite; others are
-│                                      #   protocol-ready for M6 (§6.4)
+│                                      #   protocol-ready for M7 (§6.4)
 ├── body: (by kind, below)
 ├── lineage: LineageAnnex              # D11 — below
 ├── sourcePeer: string                 # peer ID of sender
 ├── sourceSector: ringSlot             # the sender's slot in the ring (D8)
-├── destSector: ringSlot               # always the sender's east neighbour (D8)
+├── destSector: ringSlot               # the sender's east neighbour (D8). From M4 the
+│                                      #   *effective* one — dark slots are bypassed
+│                                      #   (D12) — and a journaled value is rewritten
+│                                      #   only under a relay proof of non-delivery
 ├── exitEdge: enum(N, S, E, W)         # which border it crossed. Always E under the
-│                                      #   ring, and the receiver's entry edge is
-│                                      #   always W. Kept as an enum for the retired
-│                                      #   grid and for M6's payload kinds
+│                                      #   ring; E or N once the vertical lane is
+│                                      #   enabled (D13), with the entry edge the
+│                                      #   opposite one and always passive
 ├── exitPosition: float                # 0..1 along that edge — receiver mirrors it
-│                                      #   into entry coordinates
+│                                      #   into entry coordinates. Spreading arrivals
+│                                      #   instead of mirroring is the candidate
+│                                      #   crowding mitigation (D15)
 ├── velocity: {x, y}
 └── timestamp: int64                   # unix millis, informational only (D5)
 
@@ -357,10 +442,10 @@ body when kind = bibite:
 └── bb8: string                        # the game's own Newtonsoft output — opaque to
                                        #   the mod (D4), parsed sidecar-side
 
-body when kind = corpse | pellet (M6):
+body when kind = corpse | pellet (M7):
 ├── mass, material, decayState
 
-body when kind = egg (M6): shape TBD — open research
+body when kind = egg (M7): shape TBD — open research
 ```
 
 A `genomeHash` is a hash of a **canonical genome projection** — genes, nodes and synapses
@@ -401,13 +486,13 @@ BibitePayload
 graph LR
     S["bb8-schema"] --> D["sidecar core"]
     subgraph SP["multiverse-sidecar process"]
-        D --> C["species-catalog<br/>module (M6)"]
+        D --> C["species-catalog<br/>module (M7)"]
     end
     S --> C
     M["bibites-mod"] ---|"Contract A<br/>(localhost WS)"| D
-    D ---|"Contract B via relay<br/>(M2–M4)"| R["multiverse-relay"]
+    D ---|"Contract B via relay<br/>(M2–M5)"| R["multiverse-relay"]
     R --- D2["other sidecars"]
-    D -.-|"Contract B direct<br/>(M5)"| D2
+    D -.-|"Contract B direct<br/>(M6)"| D2
     R -->|"envelope + annex<br/>(M3)"| A["multiverse-archive"]
     A -.->|"genome fetch<br/>by hash"| D
     S --> A
@@ -433,8 +518,14 @@ Vertical slices, riskiest first — not component-by-component. `bb8-schema` is 
 standalone first step: its real shape is discovered in M1 and hardens through M2–M3.
 
 **Renumbered 2026-08-03 (D9).** M3 lost its public half to a new M4 — public release —
-and everything after it shifted by one: direct P2P is now M5, ecosystem completeness M6.
-Older documents that say "M4" for libp2p or "M5" for the catalog predate this change.
+and everything after it shifted by one: direct P2P became M5, ecosystem completeness M6.
+
+**Renumbered again 2026-08-05 (D16).** The overnight run and its harvest bought a second
+shift: M4 is now **Operations**, public release is **M5**, direct P2P is **M6**, and
+ecosystem completeness with the catalog is **M7**. Older documents that say "M4" for the
+public release, "M5" for libp2p or "M6" for the catalog predate this change — including
+`contracts/contract-a.md` §12–§14 and `contracts/contract-b-m3.md` §13, which the
+implementation wave corrects.
 
 ### M1 — In-game round trip (the de-risking spike) — **COMPLETE**
 One game instance, no sidecar, no network. A dev command in the mod: serialize a live
@@ -491,7 +582,7 @@ parents and living children, so the stale-reference trap is proven, not just imp
 
 The first milestone with a genuinely remote peer, and the first with a topology. The relay
 runs on the owner's main machine; the owner's second computer joins over the LAN (D9). No
-VPS, no strangers, no public exposure — those are M4.
+VPS, no strangers, no public exposure — those are M5.
 
 Three things arrive together:
 
@@ -505,7 +596,7 @@ Three things arrive together:
   and export capture in the band *outside* the square (see D10).
 - **The lineage annex and `multiverse-archive`** (D11). Every envelope carries parent
   entity IDs and parent genome hashes; a new service beside the relay records every
-  envelope and fetches genomes it has not seen. This is the seed of M6's catalog.
+  envelope and fetches genomes it has not seen. This is the seed of M7's catalog.
 
 Also in M3: handshake and compatibility enforcement across two real installs; a shared
 token on the Contract B upgrade now that the wire leaves the loopback; admission control;
@@ -547,24 +638,70 @@ byte-equal, counted **exactly once** ring-wide. Natural migration is already flo
 the LAN: the far world exported seven organisms on its own in the ~12 minutes the ring was
 live before the test began, so phase 3 never had to wait. **The rig was left running as a
 living deployment.** Full result in `m3_considerations.md`, *Exit Test → Result*.
+**What the living deployment then taught, and why M4 exists.** The rig ran unattended for
+about 12.5 hours and stopped with its host on 2026-08-04T14:13Z. T0 and T1 captured it
+(`e2e/baselines/20260804T013927Z/baseline-report.md`,
+`e2e/baselines/20260805T230730Z/t1-report.md`). The migration layer held perfectly —
+22 595 hops, exactly-once, one hop still in flight — and the three worlds evolved as **one
+coupled population**, which is the result the ring was built to produce. Everything around
+that layer failed: the worlds were never saved and 97% of their state is gone, a two-hour
+outage on one slot stopped the current for every peer behind it, and every surviving series
+came out of BepInEx logs that the next game launch overwrites. Those three failures are
+D14, D12 and D15.
 
-### M4 — Public release — **NEXT**
-The public half of the old M3, moved out intact by D9 — and the current milestone now that
-M3 closed on 2026-08-03. The scope below is unchanged. A hosted relay on a VPS; TLS and
-authentication for public exposure; capacity and abuse limits; packaging so a player
-installs the mod and the sidecar without a build toolchain; ring insertion under strangers
-joining and leaving.
+### M4 — Operations: resilience, topology, observability — **NEXT**
+**Defined 2026-08-05 by D12–D16. Full plan: `m4_considerations.md`.** Still a LAN
+milestone: no VPS, no strangers, no public exposure. M4 makes the rig something that can be
+run, rather than something that has to be watched.
+
+Four things arrive together:
+
+- **A map that heals and grows** (D12). A dark slot is routed around, not waited on; a
+  returning peer or a brand-new instance splices in **between two live slots**. The
+  journal learns a handoff state, because re-routing an orphaned hop is safe only under a
+  proof of non-delivery, and holding is the answer whenever custody may have moved (D2).
+- **The grid, in the abstractions** (D13). Plural export edges, per-lane edge state,
+  coordinate addressing and per-axis route-around land now, before M5 makes the wire
+  public. The vertical lanes ship behind a flag that is off, so M4's shipped behaviour is
+  still the ring. **Whether the live grid waits is the open call for the owner.**
+- **Hard-stop recovery** (D14). Periodic world saves and a save on quit, a scripted
+  single-instance recovery procedure, and a rig-wide resume test that delivers the
+  organism which has been in flight in slot 1's journal since 2026-08-04. No
+  sleep-prevention work of any kind.
+- **The operator surface** (D15). Population on the ring view, durable metrics outside the
+  BepInEx logs, an archive-served live status page and a `ringstat` command, log
+  preservation at shutdown, a slot handover command, a join kit, and entry-edge crowding
+  measured before it is treated.
+
+**Exit test:** one slot is hard-stopped mid-flow and the ring heals around it while the
+current keeps running; the dead slot splices back in between two live slots; a brand-new
+instance splices into a live ring; the 2026-08-04 in-flight organism arrives; a
+kill-and-reload proves the periodic saves by coming back with fresh state instead of stale
+state; and the status page shows all of it. Full conditions in `m4_considerations.md`.
+
+### M5 — Public release
+The public half of the old M3, moved out intact by D9 and pushed out once more by D16. The
+scope is unchanged. A hosted relay on a VPS; TLS and authentication for public exposure;
+capacity and abuse limits; packaging so a player installs the mod and the sidecar without a
+build toolchain; insertion and route-around under strangers joining and leaving. M4's join
+kit is this milestone's starting point, and M4's wire shapes are the ones it publishes.
 **Exit test:** a small community playtest — a handful of strangers' sims exchanging
 organisms for days without operator intervention.
 
-### M5 — Direct P2P
+### M6 — Direct P2P
 libp2p transport behind unchanged Contract B shapes; NAT traversal; peer discovery;
-gossip topology; lease-based ring-slot claims. The relay degrades to bootstrap +
+gossip topology; lease-based slot claims. The relay degrades to bootstrap +
 relay-of-last-resort.
 
-### M6 — Ecosystem completeness
+### M7 — Ecosystem completeness
 Corpse and pellet payloads for biomass continuity (§6.4); egg-handling research;
 species-catalog module, and its reconciliation with M3's archive (D6, D11).
+
+**Unscheduled, and needing the owner's call:** the **live grid** (D13) — the vertical lanes
+switched on, the mod's second capture band in production, and a rig large enough to prove a
+two-axis current. It is not in M4 because a 2×2 grid is degenerate in both axes and an
+honest proof wants six to nine instances. See `m4_considerations.md`, *Design calls for the
+owner*.
 
 ---
 
@@ -572,12 +709,14 @@ species-catalog module, and its reconciliation with M3's archive (D6, D11).
 
 | Component | What we know (from research doc) | What we need to figure out |
 |---|---|---|
-| `bb8-schema` | JSON structure, node layout, synapse rules, gene array, weight polymorphism, validation constraints. From `m1_findings.md`: the game's `.bb8` top-level keys (`transform`, `rb2d`, `genes`, `body`, `clock`, `brain`, `version`, `desc`) and the fact that a `.bb8` carries full live state while a `.bb8template` does not; genes are keyed by enum **name**, so gene reordering is safe and only additions/removals need conversion; **the `Utility.Version` alpha quirk** — a 4-argument `new Version(0,6,3,3)` binds to the alpha overload and means `0.6.3a3`, *not* `0.6.3.3`, and `V3` sorts before `Alpha`, so `bb8-schema` must reproduce that ordering | Version differences between game updates; cross-version conversion (EinsteinEditor prior art); the exact byte shape of community-tool `.bb8` dialects; whether Newtonsoft honours `[NonSerialized]` on `NEATBrain.Node.NIn/NOut` in the shipped DLL; corpse/pellet/egg payload shapes (M6). **New with D11:** the canonical **genome projection** behind `genomeHash` — which keys it covers, how it is ordered and normalized so two peers hash one genome identically, and whether a mutated child must hash differently from its parent for the lineage graph to be useful |
-| `bibites-mod` | BepInEx/Harmony setup, export/import patterns, threading constraints, the Constance-Mod overwrite technique (now only needed for the egg-hatch fallback). From `m1_findings.md`: exact signatures in `BibitesAssembly.dll`; spawn/restore API (`SaveSystem.LoadBibiteOrEggFromData`, public, no mutation, ID-preserving); serialize API (`SaveSystem.SerializeBibite`/`SaveBibite`); live-attribute access is public except `InternalClock` (covered by public `SerializationHelper.DeserializeObject`, so no mod-side reflection); no ID registry exists — IDs are random int32; clean removal is raw `Object.Destroy` after de-listing from `BibiteTracker`; patch targets (`BibiteBody.FixedUpdate()`, `EggHatching.Hatch()`). **Confirmed in-game 2026-08-02** (`m1_findings.md`, *Runtime results*): the round trip is byte-exact, the ID survives, and the world save that follows succeeds; `GameManager.StartGame(path)` loads a named world headlessly, and `SaveSystem.CreateSave` must be driven by hand because the public `SaveGame` wrapper swallows save exceptions inside a coroutine. **Two game instances do run at once on one machine** — verified 2026-08-02: both processes persisted, and BepInEx gave the second instance `BepInEx/LogOutput.log.1` because the first holds a lock on `LogOutput.log`, so neither log is truncated | ~~Re-linking parent/child references after respawn: unproven against a linked organism~~ — **closed in M2** (2026-08-02/03): a real family migration fired the stale-reference trap, the mod cleared the stale `BibiteID`, a landing parent reported `relinkedParents=1`, and both worlds saved. Still open: migration order is child-then-parent, because `BibiteGenes.SaveState` drops a child's parentage once the parent GameObject is gone (M3). **Void-avoidance suppression is answered** (`m2_findings.md` §1.5): a Harmony prefix/postfix pair on `BibitePropulsion.UpdateOrgan` toggling the private static `avoidVoid` gives per-edge scoping with no persisted trace — but the setting ships off, so the real M2 question is the **lure**, not the suppression. **Per-instance mod config is answered**: environment variables named in `WSLENV`, since both instances share one plugin DLL and one BepInEx config directory. ~~Whether `WorldObjectsSpawner.bibiteHolder`'s transform is the identity~~ — **answered 2026-08-02** (`m2_findings.md` §4.3): the holder sits at `(0, 0, −0.01)` with zero rotation and unit scale, so the payload's `transform` key is world space in `x` and `y`. **New with D10:** does the vanilla wrap coexist with the border strips — no false migration, no interference; and does export capture reach an organism already **outside** the square, in the band between the strip line and the wrap radius (2000–4000 at `S = 2000`)? **New with D11:** the cost of serializing up to two living parents at export time, on the main thread, inside `FixedUpdate`. The mod ships opaque blobs and never hashes them — D4 forbids it to parse a genome (`m3_considerations.md` Risk 8) |
-| `multiverse-sidecar` | Custody chain and journal semantics (D2); admission-control levers. Contract A reconnection semantics are now settled in `contracts/contract-a.md` §6–§8: the mod is stateless and reconnects with jittered backoff, the sidecar replays every un-ACKed `MIGRATE_IN` in journal order, both sides dedup on `migrationId`, and a changed `sessionId` triggers custody reassertion | Journal format and crash recovery (durability rule is fixed: flush before `MIGRATE_OUT_ACK`); go-libp2p maturity (M5); lease design and churn healing for ring-slot claims (M5); how a sidecar serves a genome by hash for a migration it has already tombstoned (D11) |
-| `multiverse-relay` | Star routing and single-arbiter slot assignment are well-trodden. ~~Who operates it~~ — **answered for M3 by D9:** the owner's main machine. ~~Grid pairing of `{x, y}` sectors~~ — **retired by D8:** the ring gives each peer one east neighbour, and the pairing question disappears with the grid | **The ring insertion protocol** (D8): where a new peer is inserted, whether the owner chooses the slot or the relay does, how the east-neighbour map is published and re-published, and what a slot reservation costs when a peer never comes back. **Who operates a public relay** (and later the bootstrap nodes), plus capacity and abuse limits — now M4 |
-| `multiverse-archive` | Migration is the moment a genome crosses a machine boundary (D11); content-addressing is the same technique `species-catalog` will need | **How it sees every envelope**: a copy forwarded by the relay, or the archive joining the ring as a slot-less peer — the first adds a rule to a deliberately dumb relay (D1), the second adds a peer that owns no sector. **The fetch protocol**: `GENOME_REQUEST`/`GENOME_RESPONSE` shape, who answers when the source peer is offline, and what the archive does with a hash nobody can serve. Storage growth, and the query surface. Whether M6's catalog seeds from it or supersedes it (D6) |
-| `species-catalog` | Community already shares `.bb8` on GitHub/Steam Workshop; content-addressing makes sense | Storage limits, search/index strategy, replication policy (all M6) |
-| **The LAN rig (M3, D9)** | Two game instances run side by side on one machine (M2); `game.sh` starts, stops and tails each one; per-instance configuration travels in environment variables named in `WSLENV`; the dev machine is WSL driving a Windows game install (`dev_environment.md`) | **LAN reachability**: which host the second machine dials, whether a Windows Firewall rule is needed for the relay port, and hostname vs static IP. **The second machine's install path**: it has no WSL, no .NET SDK and no Go toolchain, so the mod DLL, BepInEx, the sidecar binary and the sidecar's configuration must arrive as artifacts, and the environment variables must be set without `WSLENV`. **Test drive**: whether `e2e/` can steer a game on the far machine at all, or whether that end of the M3 exit test is operator-driven. **Drift**: two wall clocks and two game/mod versions instead of one |
-| **Contract A** | **Fully specified in `contracts/contract-a.md` (2026-08-02):** envelope with a `protocol` version field, all nine message schemas with field tables and examples, the edge-position formula, connection/reconnection and replay semantics, heartbeat cadence and stop behaviour, both NACK error taxonomies, WebSocket close codes, and the tunables table | Nothing blocking M2. Deferred: authentication — Contract A stays on the loopback even in M3, because the mod and its sidecar always share a machine (D9), so a bearer token can wait for M4. Confirm the three design calls flagged in §12 — unsolicited `MIGRATE_OUT_ACK` as custody reassertion, normalized rather than absolute entry coordinates, and `entityId` as the mod's durable dedup key. **M3 amendments:** narrow `EDGE_STATUS` to the single export edge and state that the entry edge is passive (D8); carry the lineage annex on `MIGRATE_OUT` (D11) |
-| **Contract B** | Migration payloads = envelope + opaque body; ACK gated on the receiving mod's `MIGRATE_IN_ACK` | Protobuf vs JSON framing; encryption (a shared token over the LAN in M3, TLS once the relay is public in M4, libp2p secure channels in M5); protocol versioning. **M3 amendments:** `SECTOR_CLAIM`/`SECTOR_GRANT` become ring claims that also name the east neighbour, the envelope gains the annex, and `GENOME_REQUEST`/`GENOME_RESPONSE` join the catalogue (D8, D11) |
+| `bb8-schema` | JSON structure, node layout, synapse rules, gene array, weight polymorphism, validation constraints. From `m1_findings.md`: the game's `.bb8` top-level keys (`transform`, `rb2d`, `genes`, `body`, `clock`, `brain`, `version`, `desc`) and the fact that a `.bb8` carries full live state while a `.bb8template` does not; genes are keyed by enum **name**, so gene reordering is safe and only additions/removals need conversion; **the `Utility.Version` alpha quirk** — a 4-argument `new Version(0,6,3,3)` binds to the alpha overload and means `0.6.3a3`, *not* `0.6.3.3`, and `V3` sorts before `Alpha`, so `bb8-schema` must reproduce that ordering | Version differences between game updates; cross-version conversion (EinsteinEditor prior art); the exact byte shape of community-tool `.bb8` dialects; whether Newtonsoft honours `[NonSerialized]` on `NEATBrain.Node.NIn/NOut` in the shipped DLL; corpse/pellet/egg payload shapes (M7). **New with D11:** the canonical **genome projection** behind `genomeHash` — which keys it covers, how it is ordered and normalized so two peers hash one genome identically, and whether a mutated child must hash differently from its parent for the lineage graph to be useful |
+| `bibites-mod` | BepInEx/Harmony setup, export/import patterns, threading constraints, the Constance-Mod overwrite technique (now only needed for the egg-hatch fallback). From `m1_findings.md`: exact signatures in `BibitesAssembly.dll`; spawn/restore API (`SaveSystem.LoadBibiteOrEggFromData`, public, no mutation, ID-preserving); serialize API (`SaveSystem.SerializeBibite`/`SaveBibite`); live-attribute access is public except `InternalClock` (covered by public `SerializationHelper.DeserializeObject`, so no mod-side reflection); no ID registry exists — IDs are random int32; clean removal is raw `Object.Destroy` after de-listing from `BibiteTracker`; patch targets (`BibiteBody.FixedUpdate()`, `EggHatching.Hatch()`). **Confirmed in-game 2026-08-02** (`m1_findings.md`, *Runtime results*): the round trip is byte-exact, the ID survives, and the world save that follows succeeds; `GameManager.StartGame(path)` loads a named world headlessly, and `SaveSystem.CreateSave` must be driven by hand because the public `SaveGame` wrapper swallows save exceptions inside a coroutine. **Two game instances do run at once on one machine** — verified 2026-08-02: both processes persisted, and BepInEx gave the second instance `BepInEx/LogOutput.log.1` because the first holds a lock on `LogOutput.log`, so neither log is truncated | ~~Re-linking parent/child references after respawn: unproven against a linked organism~~ — **closed in M2** (2026-08-02/03): a real family migration fired the stale-reference trap, the mod cleared the stale `BibiteID`, a landing parent reported `relinkedParents=1`, and both worlds saved. Still open: migration order is child-then-parent, because `BibiteGenes.SaveState` drops a child's parentage once the parent GameObject is gone (M3). **Void-avoidance suppression is answered** (`m2_findings.md` §1.5): a Harmony prefix/postfix pair on `BibitePropulsion.UpdateOrgan` toggling the private static `avoidVoid` gives per-edge scoping with no persisted trace — but the setting ships off, so the real M2 question is the **lure**, not the suppression. **Per-instance mod config is answered**: environment variables named in `WSLENV`, since both instances share one plugin DLL and one BepInEx config directory. ~~Whether `WorldObjectsSpawner.bibiteHolder`'s transform is the identity~~ — **answered 2026-08-02** (`m2_findings.md` §4.3): the holder sits at `(0, 0, −0.01)` with zero rotation and unit scale, so the payload's `transform` key is world space in `x` and `y`. **New with D10:** does the vanilla wrap coexist with the border strips — no false migration, no interference; and does export capture reach an organism already **outside** the square, in the band between the strip line and the wrap radius (2000–4000 at `S = 2000`)? **New with D11:** the cost of serializing up to two living parents at export time, on the main thread, inside `FixedUpdate`. The mod ships opaque blobs and never hashes them — D4 forbids it to parse a genome (`m3_considerations.md` Risk 8) **New with D13:** the **corner rule** — an organism inside both capture bands with both velocity components outward must pick one export edge, and nothing in the ring's geometry answers that. **New with D14:** what a periodic `SaveSystem.CreateSave` costs a running sim, at what world size, and whether a save can be driven without a visible stall at 20×. **New with D15:** **why organisms crowd the entry edge** — the owner saw a mass on the west border after the overnight run, and the candidates are an arrival rate near the local carrying capacity (about 21 arrivals per sim-hour into a world of about 22), arrivals concentrated in one transverse band because `exitPosition` clusters at the source, no pellet zone under the arrival band, and the shaded band outside the square holding westward walkers before the wrap fires at 4000. Measure first (D15). |
+| `multiverse-sidecar` | Custody chain and journal semantics (D2); admission-control levers. Contract A reconnection semantics are now settled in `contracts/contract-a.md` §6–§8: the mod is stateless and reconnects with jittered backoff, the sidecar replays every un-ACKed `MIGRATE_IN` in journal order, both sides dedup on `migrationId`, and a changed `sessionId` triggers custody reassertion | Journal format and crash recovery (durability rule is fixed: flush before `MIGRATE_OUT_ACK`); go-libp2p maturity (M6); lease design and churn healing for slot claims (M6); how a sidecar serves a genome by hash for a migration it has already tombstoned (D11) **New with D12:** **re-route versus hold for an orphaned journal hop** — the proposed rule is re-route only under a relay proof of non-delivery and hold otherwise, and what needs settling is the exact set of relay answers that count as proof, whether a peer-specific `MIGRATION_NACK` (overloaded, size mismatch) is such a proof, and what an operator may do with an entry held forever. **New with D14:** journal replay and custody reassertion against a world that reloaded from a save *older* than the journal — the organism is delivered by custody, not by the save, and the two views of the same world then disagree. |
+| `multiverse-relay` | Star routing and single-arbiter slot assignment are well-trodden. ~~Who operates it~~ — **answered for M3 by D9:** the owner's main machine. ~~Grid pairing of `{x, y}` sectors~~ — **retired by D8:** the ring gives each peer one east neighbour, and the pairing question disappears with the grid | **The ring insertion protocol** (D8): where a new peer is inserted, whether the owner chooses the slot or the relay does, how the east-neighbour map is published and re-published, and what a slot reservation costs when a peer never comes back. **Who operates a public relay** (and later the bootstrap nodes), plus capacity and abuse limits — now M5. **New with D12:** the **2-D and healing insertion protocol** — how a peer names where it splices in, who arbitrates a contested position, how the effective-neighbour map is recomputed and republished without a storm, and what the relay must answer so a sender can prove a frame was never forwarded. **New with D13:** how a coordinate map grows — fill a hole, or extend an axis and create a row of holes — and whether a ragged grid is ever legal. **New with D15:** slot handover, and what it must refuse. |
+| `multiverse-archive` | Migration is the moment a genome crosses a machine boundary (D11); content-addressing is the same technique `species-catalog` will need | **How it sees every envelope**: a copy forwarded by the relay, or the archive joining the ring as a slot-less peer — the first adds a rule to a deliberately dumb relay (D1), the second adds a peer that owns no sector. **The fetch protocol**: `GENOME_REQUEST`/`GENOME_RESPONSE` shape, who answers when the source peer is offline, and what the archive does with a hash nobody can serve. Storage growth, and the query surface. Whether M7's catalog seeds from it or supersedes it (D6). **New with D15:** the live status page and the durable metrics — what the archive can serve from envelopes alone, what it needs the sidecars to report, and how a self-contained HTML page stays honest about a peer it cannot see. |
+| `species-catalog` | Community already shares `.bb8` on GitHub/Steam Workshop; content-addressing makes sense | Storage limits, search/index strategy, replication policy (all M7) |
+| **The LAN rig (M3, D9)** | Two game instances run side by side on one machine (M2); `game.sh` starts, stops and tails each one; per-instance configuration travels in environment variables named in `WSLENV`; the dev machine is WSL driving a Windows game install (`dev_environment.md`) | **LAN reachability**: which host the second machine dials, whether a Windows Firewall rule is needed for the relay port, and hostname vs static IP. **The second machine's install path**: it has no WSL, no .NET SDK and no Go toolchain, so the mod DLL, BepInEx, the sidecar binary and the sidecar's configuration must arrive as artifacts, and the environment variables must be set without `WSLENV`. **Test drive**: whether `e2e/` can steer a game on the far machine at all, or whether that end of the M3 exit test is operator-driven. **Drift**: two wall clocks and two game/mod versions instead of one **New with D14–D15 (the rig as a deployment):** the rig now has to survive its own operator. Open: the save cadence that costs the least sim time; how a save rotation avoids a half-written zip; how the far end saves and preserves logs without a drive path (M3's answer was "observe only", and a save is not an observation); where the durable metrics live so a harvest needs no BepInEx log; and how a fourth or fifth instance is added to a machine that already runs three. |
+| **The portal (M4, pending research)** | Nothing settled yet. A concurrent research pass is writing `m4_portal_findings.md`, and it is the input for M4's portal work item. | **Everything.** Do not schedule construction against this item until the findings land. Read `m4_portal_findings.md` first, then decide whether the portal is an M4 deliverable, a candidate mitigation for entry-edge crowding (D15), or a revival of D3's parked gateway towers. |
+| **The map (D12, D13)** | The ring is proven across two machines and 22 595 hops. A slot number is an address, a coordinate is a position, and the two are now separate concepts. The ring is the one-row case of the grid. | **2-D insertion**: what "between two live slots" means when the map has two axes, whether a newcomer fills a hole or extends an axis, and who chooses. **Route-around on a grid**: skipping along one axis while the other lane is healthy, and what an export does when a whole row or column is dark. **Degenerate shapes**: 2×2 is degenerate in both axes exactly as a 2-slot ring is, so what is the smallest honest grid, and can two machines host it. **The organism's view**: an organism that is routed around a slot never sees that world, so a bypass is not free — it is a shorter cycle. |
+| **Contract A** | **Fully specified in `contracts/contract-a.md` (2026-08-02):** envelope with a `protocol` version field, all nine message schemas with field tables and examples, the edge-position formula, connection/reconnection and replay semantics, heartbeat cadence and stop behaviour, both NACK error taxonomies, WebSocket close codes, and the tunables table | Nothing blocking M2. Deferred: authentication — Contract A stays on the loopback even in M3, because the mod and its sidecar always share a machine (D9), so a bearer token can wait for M4. Confirm the three design calls flagged in §12 — unsolicited `MIGRATE_OUT_ACK` as custody reassertion, normalized rather than absolute entry coordinates, and `entityId` as the mod's durable dedup key. **M3 amendments:** narrow `EDGE_STATUS` to the single export edge and state that the entry edge is passive (D8); carry the lineage annex on `MIGRATE_OUT` (D11) **M4 amendments (D13–D15):** `exportEdge` becomes `exportEdges` and `EDGE_STATUS.edges` carries one entry per export edge, which is a **breaking** change and the reason it lands before the wire goes public; `borderEdges` becomes all four edges; the entry-position rule gains the spread-versus-mirror question (D15); a bearer token still waits, now for M5. Contract debt A5 stays moot even under two export edges, because a `MIGRATE_OUT_NACK` is correlated on `migrationId`, never on an edge. |
+| **Contract B** | Migration payloads = envelope + opaque body; ACK gated on the receiving mod's `MIGRATE_IN_ACK` | Protobuf vs JSON framing; encryption (a shared token over the LAN in M3, TLS once the relay is public in M5, libp2p secure channels in M6); protocol versioning. **M3 amendments:** `SECTOR_CLAIM`/`SECTOR_GRANT` become ring claims that also name the east neighbour, the envelope gains the annex, and `GENOME_REQUEST`/`GENOME_RESPONSE` join the catalogue (D8, D11) **M4 amendments (D12, D13, D15):** a grant names the **effective** neighbour per export edge and the slots it skipped; `PEER_STATUS` keeps the structural order and gains population per slot; a claim carries an advisory insertion position and, once the grid is live, coordinates; the relay gains an explicit non-delivery answer that a sender may treat as proof. |
