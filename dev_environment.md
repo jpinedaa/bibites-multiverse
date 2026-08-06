@@ -740,6 +740,13 @@ host, and the false negative reads exactly like a blocked port (see Gotchas).
 The page is **read-only by design** (D15, `m4_considerations.md` *Scope*), so LAN exposure
 adds no write surface. It is still a LAN-only step, and M5 owns public exposure.
 
+The page is now a **visual map** — an SVG grid of the worlds with population drawn as dots,
+lanes drawn as arrows (wrap-arounds split at the map edge, bypasses curved over the world they
+skip), pulses animating each lane at its measured hop rate, and a glossary that explains every
+term to a reader who did not build the system. It serves a second endpoint,
+`/api/history?hours=&buckets=`, which downsamples `metrics.jsonl` into per-world population
+sparklines; `/api/status` gained `recentHops` per lane and `flowWindowMs`.
+
 ## Gotchas
 
 - **Target `netstandard2.1`**, not 2.0 — Unity 6 assemblies reference netstandard 2.1
