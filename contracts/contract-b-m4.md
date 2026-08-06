@@ -153,7 +153,7 @@ the answer for a rig that wants the north lane to survive a kill.
 |---|---|
 | Protocol | WebSocket (RFC 6455) over plain HTTP. TLS is **M5** (D9, D16). |
 | URL | `ws://{relay-host}:{port}/contract-b/v3` |
-| Default port | `8790` |
+| Default port | `8795` (moved from M3's `8790` — see *The M4 port plan* below) |
 | Bind address | The relay binds a LAN-reachable address, **not** loopback. The operator opens the Windows Firewall rule for the port and records the host name in `dev_environment.md`. |
 | Roles | The **relay is the server**. Every sidecar and the archive are **clients** and do all the dialling. |
 | Frame type | Text frames. One JSON object per frame. No batching. |
@@ -167,6 +167,35 @@ the answer for a rig that wants the north lane to survive a kill.
 **MUST** keep serving `/contract-b/v2` and **MUST** close every connection on it immediately
 with `4000`, so an M3 sidecar gets the defined loud error instead of a bare HTTP 404. The
 same rule, and the same reason, as `contract-a.md` §15, A23.
+
+### The M4 port plan
+
+**The relay and the archive move out of the Contract A range, and the slots keep it.**
+`contract-a.md` §10 gives the six-slot M4 rig the loopback range `8787`–`8792`, one Contract
+A port per slot. M3's relay default `8790` is **slot 4's** port and M3's archive status-page
+default `8791` is **slot 5's**, so on a six-slot rig both defaults collided with the range
+they have to avoid — and `ringstat` inherited the second collision, because it defaults to
+the archive's URL.
+
+| Component | Port | Bind |
+|---|---|---|
+| Contract A, slots 1–6 | `8787`, `8788`, `8789`, `8790`, `8791`, `8792` | loopback only, by contract (`contract-a.md` §2) |
+| Relay, Contract B | **`8795`** | `127.0.0.1` for a local rehearsal, `0.0.0.0` for the LAN |
+| Archive status page and JSON | **`8796`** | loopback only. It is a **read** surface (§10.1) and M4 exposes nothing new |
+
+These are the compiled defaults of `multiverse-relay`, `multiverse-sidecar`,
+`multiverse-archive` and `ringstat` as of the M4 pre-flight, so a rig that passes no port
+flags gets this layout. `--listen` / `MULTIVERSE_RELAY_LISTEN`, `--http` /
+`MULTIVERSE_ARCHIVE_HTTP` and `MULTIVERSE_ARCHIVE_URL` still override each one.
+
+**The alternative was five-digit slot ports**, which is what the M3 rig did for slot 3
+(`18789`). Moving two components is a smaller change than moving six, and it keeps
+`contract-a.md` §10's range as written.
+
+**The far end dials the new port too.** A second computer set up against M3's `8790` will
+not connect: the operator passes `-RelayPort 8795`, or takes a rebuilt bundle. The firewall
+rule and the WSL portproxy on the relay's machine both name the port and both have to move
+with it (`dev_environment.md`, *Owner steps*).
 
 ### 3.1 The LAN token
 
@@ -1751,9 +1780,13 @@ unchanged from M2 and M3 in its first three rows, with M4's bounded hold as the 
 
 A bounce re-delivers the organism to the origin's own mod as a Contract A `MIGRATE_IN` with
 `bounceBack: true`, **on the edge it left from** — the origin's own `exitEdge`, `"E"` or
-`"N"`, not a passive entry edge. The organism therefore lands inside its own capture band,
-moving outward, and only the entry-immunity window stops it re-exporting on the next tick;
-`contract-a.md` §14 A11 and §15 A19 make that window REQUIRED for exactly this reason.
+`"N"`, not a passive entry edge. It lands `entryMargin` **inside** that edge's capture band
+rather than in it, because `contract-a.md` §4.3 insets and clamps every spawn coordinate
+(§15 A28) — but it lands there still **moving outward**, because velocity is copied and
+never mirrored, so it re-enters the band under its own power within a few ticks. The
+entry-immunity window is what stops the round trip from resolving as a second export, and
+`contract-a.md` §14 A11, §15 A19 and §15 A28 make that window REQUIRED for exactly this
+reason.
 
 **The mirror-image rule protects the destination.** When the destination mod answers
 `MIGRATE_IN_NACK` with a **permanent** code after the payload was already journaled, the
@@ -1922,7 +1955,8 @@ those two sections carry fields that no routing decision reads.
 
 | Name | Default | Owner | Meaning |
 |---|---|---|---|
-| `relayPort` | `8790` | both | The relay's listen port. Opened in the Windows Firewall on the relay's machine. |
+| `relayPort` | `8795` | both | The relay's listen port. Opened in the Windows Firewall on the relay's machine. **Moved from M3's `8790` in M4**, which is slot 4's Contract A port on a six-slot rig — see *The M4 port plan* (§3). |
+| `archiveHTTPPort` | `8796` | archive | The status page and its JSON endpoint, loopback only (§10.1). **New in M4.** Moved off `8791`, which is slot 5's Contract A port. `ringstat` defaults to the same address. |
 | `relayPingIntervalMs` | `5000` | relay | Application-level `PING` cadence. |
 | `peerTimeoutMs` | `15000` | relay | Silence before a peer is dropped and its slot goes `live: false`. |
 | `relayBackoffMinMs` | `1000` | client | Reconnect floor. |

@@ -126,9 +126,42 @@ last_timescale() {
   printf '%s (Time.timeScale=%s)\n' "$(field targetTimeScale "$line")" "$(field 'Time.timeScale' "$line")"
 }
 
-# The cumulative [M2-CROSSING] counters: the mod's own measure of how much
-# traffic reached and crossed the export edge since this game started.
-last_crossing() { grep_log "$1" '\[M2-CROSSING\]' | tail -n 1 | tr -d '\r'; }
+# [M2-CROSSING] IS ONE LINE PER EXPORT EDGE PER SIMULATED MINUTE, and every
+# reader here has to say which edge it means.
+#
+# The `edge=` field is not new — M3's line already carried it — but M3 declared
+# ONE export edge, so one window produced one line and `tail -n 1` was "the"
+# sample. Under the grid a window produces one line per declared export edge,
+# each line's counters are THAT EDGE'S, and the line carries no cross-edge
+# total at all. Two things broke here, and both are fixed below:
+#
+#   * `tail -n 1` returned whichever edge happened to be emitted last and
+#     reported it as the world's figure;
+#   * a population series built from every line yielded N identical samples per
+#     simulated minute, so a fixed-length tail covered 1/N of the time it
+#     claimed and the sample count was inflated N-fold.
+
+# crossing_edges <slot> — the export edges this log actually reports, in
+# first-seen order. Read from the log rather than assumed, so a slot that
+# exports on one axis and a slot that exports on two both read correctly.
+crossing_edges() {
+  grep_log "$1" '\[M2-CROSSING\]' | tr -d '\r' \
+    | sed -n 's/.*edge=\([NSEW]\).*/\1/p' | awk '!seen[$0]++'
+}
+
+# last_crossing_edge <slot> <edge> — the newest window for ONE edge.
+last_crossing_edge() {
+  grep_log "$1" "\[M2-CROSSING\] edge=$2 " | tail -n 1 | tr -d '\r'
+}
+
+# last_crossing <slot> — the newest window for EVERY export edge, one per line.
+# Summing them is a deliberate act the caller makes; this returns the facts.
+last_crossing() {
+  local slot="$1" e
+  for e in $(crossing_edges "$slot"); do
+    last_crossing_edge "$slot" "$e"
+  done
+}
 
 # Whether the overnight run can restart a world under itself.
 #
@@ -343,14 +376,23 @@ for e in sorted(entities):
 PY
   head -n 12 "$dir/archive-summary.txt" >&2
 
-  # ---- the mod's own crossing counters, per local game
+  # ---- the mod's own crossing counters, per local game, PER EXPORT EDGE
   step "crossing counters"
   : > "$dir/crossing.txt"
   for s in $LOCAL_SLOTS; do
-    local c
-    c="$(last_crossing "$s")"
-    printf 'slot%s %s\n' "$s" "${c:-<no [M2-CROSSING] line yet>}" >> "$dir/crossing.txt"
-    note "slot $s: ${c:-none}"
+    local edges e c any=0
+    edges="$(crossing_edges "$s")"
+    for e in $edges; do
+      c="$(last_crossing_edge "$s" "$e")"
+      [ -n "$c" ] || continue
+      any=1
+      printf 'slot%s %s\n' "$s" "$c" >> "$dir/crossing.txt"
+      note "slot $s edge $e: $c"
+    done
+    if [ "$any" = 0 ]; then
+      printf 'slot%s <no [M2-CROSSING] line yet>\n' "$s" >> "$dir/crossing.txt"
+      note "slot $s: no [M2-CROSSING] line yet"
+    fi
   done
 
   # ---- the population TREND, not just the instant.
@@ -360,21 +402,33 @@ PY
   # already logs the population once per simulated minute, so the series is free
   # and it is what stops a T1 population delta being read as a trend when it is
   # noise.
+  # `population=` is the WORLD's population and is repeated identically on every
+  # edge's line in a window, so the series has to be read through ONE edge. Read
+  # it through any other way and `n=240` covers 240/N simulated minutes while
+  # claiming 240.
   step "population trend"
   : > "$dir/population-trend.txt"
   for s in $LOCAL_SLOTS; do
+    local edge
+    edge="$(crossing_edges "$s" | head -n 1)"
+    if [ -z "$edge" ]; then
+      printf 'slot%s <no [M2-CROSSING] line yet>\n' "$s" >> "$dir/population-trend.txt"
+      note "slot $s: no [M2-CROSSING] line yet"
+      continue
+    fi
     {
-      printf 'slot%s simMinute:population (one sample per simulated minute)\n' "$s"
-      grep_log "$s" '\[M2-CROSSING\]' | tr -d '\r' \
+      printf 'slot%s simMinute:population (one sample per simulated minute, counted through edge %s)\n' \
+        "$s" "$edge"
+      grep_log "$s" "\[M2-CROSSING\] edge=$edge " | tr -d '\r' \
         | sed -n 's/.*simMinute=\([0-9]*\).*population=\([0-9]*\).*/\1:\2/p' \
         | tail -n 240 | paste -sd' ' -
     } >> "$dir/population-trend.txt"
     local stats
-    stats="$(grep_log "$s" '\[M2-CROSSING\]' | tr -d '\r' \
+    stats="$(grep_log "$s" "\[M2-CROSSING\] edge=$edge " | tr -d '\r' \
       | sed -n 's/.*population=\([0-9]*\).*/\1/p' | tail -n 240 \
       | awk 'NR==1{mn=$1;mx=$1} {t+=$1; if($1<mn)mn=$1; if($1>mx)mx=$1} END{if(NR)printf "n=%d min=%d max=%d mean=%.1f", NR, mn, mx, t/NR}')"
-    printf 'slot%s summary %s\n' "$s" "$stats" >> "$dir/population-trend.txt"
-    note "slot $s population over the last ${stats:-?} sim minutes"
+    printf 'slot%s summary %s (edge %s)\n' "$s" "$stats" "$edge" >> "$dir/population-trend.txt"
+    note "slot $s population over the last ${stats:-?} sim minutes, through edge $edge"
   done
 
   # ---- time scale, sim time, and the BepInEx log identity of each game
@@ -482,13 +536,17 @@ write_report() {
     printf '```\n\n'
 
     printf '### The mod'\''s own crossing counters\n\n'
-    printf 'Cumulative since each game started (`[M2-CROSSING]`, `CrossingStats.cs`):\n\n```\n'
+    printf 'Cumulative since each game started (`[M2-CROSSING]`, `CrossingStats.cs`).\n'
+    printf '**One line per export edge**, and each line'\''s counters are that edge'\''s alone —\n'
+    printf 'the line carries no cross-edge total, so summing is the reader'\''s deliberate act:\n\n```\n'
     cat "$dir/crossing.txt"
     printf '```\n\n'
 
     printf '### Population trend — read this before reading the population delta\n\n'
     printf 'The population above is ONE SAMPLE of an oscillating system. `CrossingStats` logs the\n'
-    printf 'population once per simulated minute, and over the recent window it moves like this:\n\n```\n'
+    printf 'population once per simulated minute PER EXPORT EDGE, so the series below is read\n'
+    printf 'through one edge — the same number, counted once. Over the recent window it moves\n'
+    printf 'like this:\n\n```\n'
     grep ' summary ' "$dir/population-trend.txt"
     printf '```\n\n'
     printf 'A T1 population that differs from T0 by less than that min-to-max range is noise, not\n'

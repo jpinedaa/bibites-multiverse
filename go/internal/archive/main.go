@@ -36,7 +36,9 @@ func runMain(args []string, stderr io.Writer) int {
 		"this subscriber's identity on the ring")
 	dataDir := fs.String("data-dir", env("MULTIVERSE_ARCHIVE_DATA_DIR", "multiverse-archive-data"),
 		"directory for migrations.jsonl, metrics.jsonl and the content-addressed genome store")
-	httpListen := fs.String("http", env("MULTIVERSE_ARCHIVE_HTTP", "127.0.0.1:8791"),
+	// 8796, not 8791: contract-a.md §10 gives the six-slot rig 8787-8792, and
+	// 8791 is slot 5's Contract A port (contract-b-m4.md §3, §12).
+	httpListen := fs.String("http", env("MULTIVERSE_ARCHIVE_HTTP", "127.0.0.1:8796"),
 		"bind address for the live status page and its JSON endpoint; empty disables it")
 	metricsInterval := fs.Duration("metrics-interval", time.Minute,
 		"how often a PEER_STATUS sample is appended to metrics.jsonl")

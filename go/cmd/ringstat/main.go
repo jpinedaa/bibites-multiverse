@@ -19,7 +19,9 @@ import (
 )
 
 func main() {
-	url := flag.String("url", env("MULTIVERSE_ARCHIVE_URL", "http://127.0.0.1:8791"),
+	// Tracks the archive's own --http default (8796), which moved out of the
+	// six-slot Contract A range 8787-8792 for M4.
+	url := flag.String("url", env("MULTIVERSE_ARCHIVE_URL", "http://127.0.0.1:8796"),
 		"the archive's status endpoint")
 	metrics := flag.String("metrics", "",
 		"read the newest sample from this metrics.jsonl instead of asking the archive")

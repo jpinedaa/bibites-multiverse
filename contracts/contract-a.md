@@ -13,13 +13,16 @@ This set **does** change the wire — additively — so the protocol identifier 
 `contract-a/1.1` (§3.1, §14 A16). Affected body text carries an `(amended — §14, Ax)` or
 `(added — §14, Ax)` marker, and **§14 wins over the body and over §13 wherever they
 disagree.**
-**Amended:** 2026-08-05, amendment set `contract-a/2.0 + A18–A25` (§15), from the ratified
+**Amended:** 2026-08-05, amendment set `contract-a/2.0 + A18–A28` (§15), from the ratified
 decisions D12–D16 and the work order in `m4_considerations.md`, *Contract Changes Needed*.
 This set is the first **breaking** change to Contract A: `exportEdge` is replaced by
 `exportEdges`, which is a field removal and a type change, so §3.1's own rule forces a
 **major** bump to `contract-a/2.0` and the URL path moves to `/contract-a/v2` (§15, A23).
-Affected body text carries an `(amended — §15, Ax)` or `(added — §15, Ax)` marker, and
-**§15 wins over the body, over §14 and over §13 wherever they disagree.**
+A18–A25 were written from the design, A26–A27 from the mod implementation, and **A28 from
+the M4 pre-flight pass** — all three of the later batches are clarifying, so the identifier
+stays at `contract-a/2.0`. Affected body text carries an `(amended — §15, Ax)` or
+`(added — §15, Ax)` marker, and **§15 wins over the body, over §14 and over §13 wherever
+they disagree.**
 **Status:** implementation-ready for M4. Derived from the ratified decisions D1–D16 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, the world-geometry and
 entry-position research in `m2_findings.md`, the ring, containment and lineage designs in
@@ -248,14 +251,30 @@ Rules:
 
   | Entry edge | Fixed coordinate of the spawn | Free coordinate | When it happens |
   |---|---|---|---|
-  | `W` | `x = −S + W + margin` | `y = 2S · position − S` | Ordinary traffic off the east lane |
-  | `S` | `y = −S + W + margin` | `x = 2S · position − S` | Ordinary traffic off the north lane |
-  | `E` | `x = +S − W − margin` | `y = 2S · position − S` | A bounce-back of an east export |
-  | `N` | `y = +S − W − margin` | `x = 2S · position − S` | A bounce-back of a north export |
+  | `W` | `x = −S + inset` | `y = clamp(2S · position − S)` | Ordinary traffic off the east lane |
+  | `S` | `y = −S + inset` | `x = clamp(2S · position − S)` | Ordinary traffic off the north lane |
+  | `E` | `x = +S − inset` | `y = clamp(2S · position − S)` | A bounce-back of an east export |
+  | `N` | `y = +S − inset` | `x = clamp(2S · position − S)` | A bounce-back of a north export |
 
-  `margin` is `entryMargin` (§10). The inset is what keeps an arrival off the strip
-  line; a bounce-back still lands **inside** its own capture band, which is why the
-  entry-immunity window is REQUIRED (§5.7 step 6, §14 A11).
+  `margin` is `entryMargin` (§10) and `inset` is `W + margin`. **The free coordinate is
+  clamped to `[−(S − inset), +(S − inset)]` — the same inset the fixed coordinate takes**
+  (added — §15, A28). Without that clamp a `position` near `0` or `1` would put a corner
+  arrival inside the strip of the two edges perpendicular to its entry edge; with it, an
+  arrival is inset from **every** edge, not only the one it came through.
+
+  Two properties follow from the inset, and both are guarantees rather than accidents
+  (amended — §15, A28):
+
+  - **No arrival of any kind lands inside a capture band.** A band begins at `S − W`
+    (§4.3.1), and every spawn coordinate — fixed and free, on either axis — is at most
+    `S − W − margin` from the origin, with `margin ≥ 5` world units (§10). This holds for
+    a bounce-back on its own export edge and for both axes of an ordinary arrival.
+  - **The entry-immunity window is still REQUIRED, and the geometry is not a substitute
+    for it.** The inset buys one tick, not a policy. A bounce-back arrives moving outward
+    by construction (§5.7, `contract-b-m4.md` §9.4) and reaches `S − W` under its own
+    power within a few `FixedUpdate`s, and an ordinary arrival near a corner can do the
+    same on the other axis. The window is what keeps the spawn and the next export two
+    separable events instead of one (§5.7 step 6, §14 A11).
 
 > **Note — a refinement of the one-line description in `system_decomposition.md`.**
 > Contract C describes `MIGRATE_IN` as carrying "entry coords". This specification sends
@@ -999,21 +1018,25 @@ Processing order:
 6. Start the entry-immunity window keyed on `entityId`.
 7. Reply `MIGRATE_IN_ACK`, or `MIGRATE_IN_NACK` on any failure.
 
-Step 6 is **REQUIRED under the ring, not optional** (amended — §14, A11). The one-way lanes
-already make an immediate re-export geometrically impossible for ordinary traffic — an
-arrival lands in the west entry strip and the capture band is on the east side — but a
-**bounce-back** lands inside the capture band it left from, moving outward. Without the
-immunity window it re-exports on the next tick.
+Step 6 is **REQUIRED under the ring, not optional** (amended — §14, A11). §4.3's inset
+guarantees that **no arrival of any kind spawns inside a capture band** — every spawn
+coordinate is at least `margin` inside the band's inner boundary `S − W`, on both axes,
+including a bounce-back on its own export edge (amended — §15, A28). That guarantee buys
+one tick, and one tick only. It is not what makes an immediate re-export impossible, and
+the window is not redundant beside it.
 
-**The grid adds a second case, and the same window covers it** (added — §15, A19). The two
-axes are independent, so an ordinary arrival can land inside the *other* axis's capture band:
-an organism entering through `W` at `entryPosition ≥ (S − W + margin) / 2S` lands in the
-north band, and if it is also travelling north it satisfies §4.3.1 immediately. That is not a
-defect — it is a real north crossing by an organism that arrived near a corner — but it
-**MUST NOT** happen in the arrival tick, because an export in the same tick as a spawn makes
-one hop indistinguishable from two. The immunity window is what separates them: when it
-expires the organism is judged on where it actually is, like any other organism. The mod
-**MUST** key the window on `entityId` and apply it to **both** bands.
+**What the window is actually for** (amended — §15, A28). A **bounce-back** comes home
+through the edge it left by, still carrying the velocity it left with, so it is moving
+**outward** from a standing start `margin` inside the band — it re-enters that band under
+its own power within a few `FixedUpdate`s, and a mod that spawns and exports across two
+adjacent ticks makes one hop indistinguishable from two. **The grid adds a second case,
+and the same window covers it** (added — §15, A19): the two axes are independent, so an
+ordinary arrival that lands near a corner sits just inside the *other* axis's band and
+crosses it the moment it travels that way. Neither case is a defect — a corner arrival that
+swims north is a real north crossing — but neither may resolve in the arrival tick or in
+the ticks immediately after it. The window is what separates the spawn from the export:
+when it expires the organism is judged on where it actually is, like any other organism.
+The mod **MUST** key the window on `entityId` and apply it to **both** bands.
 
 A `null` return from `LoadBibiteOrEggFromData` is the normal failure signal — the method
 swallows every exception (`m1_findings.md` §1.2). Reply `DESERIALIZE_FAILED`.
@@ -1915,7 +1938,7 @@ different doors: it **exports through its east edge** into its one east neighbou
 | The entry edge | **Always accepts.** It is never listed, never opened, never closed, and it has no capture band (§4.3.1). |
 | `edges[].reason` | Gains the value `"peer_mod_absent"`: the east neighbour's sidecar is live but has no mod, so it cannot spawn anything. |
 | `MIGRATE_IN.entryEdge` | `"W"` for ring traffic; the sim's own `exportEdge` for a bounce-back. Both are declared, so §13 A3's inbound `EDGE_CLOSED` rule accepts both. |
-| Entry immunity | REQUIRED, not optional. Geometry stops an ordinary re-export; only the immunity window stops a bounce-back from re-exporting on the next tick. |
+| Entry immunity | REQUIRED, not optional. Geometry keeps an ordinary arrival away from the band it would export through; only the immunity window stops a bounce-back, which lands inset but still moving outward, from re-entering its own band and exporting again (amended — §15, A28). |
 
 The ripple is one-way, like the lanes: when a peer dies, its **west** neighbour loses its
 export target and closes its export edge; its east neighbour simply receives nothing and is
@@ -2124,7 +2147,7 @@ not implement a token that no milestone asked for.
 
 Decisions D12–D16 were ratified on 2026-08-05 and redefined M4, and the owner signed the
 design off the same day (`system_decomposition.md`; `m4_considerations.md`, *Owner
-Sign-Offs*). **Ten amendments, A18 to A27, in two batches.** The first eight were written from
+Sign-Offs*). **Eleven amendments, A18 to A28, in three batches.** The first eight were written from
 the design and carry the four items that document's *Contract Changes Needed* table assigns to
 Contract A — items 9, 10, 11 and 15 — plus the four consequences that fall out of them: the
 major version bump (item 12), the milestone renumbering (item 13), one optional observability
@@ -2148,6 +2171,15 @@ mod already implements more generally than §4.3.2 stated it; A27 writes down a 
 document left entirely unspecified, which is the more dangerous of the two gaps because
 nothing in it was wrong — there was simply nothing there. `contract-b-m4.md` §14 carries the
 matching set for the other wire, B4 to B7, and none of the seven interacts with another.
+
+**A28 was folded in on 2026-08-05 by the M4 pre-flight pass**, and it is the third kind of
+gap again: not a missing rule and not a narrow one, but **a stated geometry that the mod does
+not produce**. `BorderGeometry.EntryPoint` clamps the free coordinate as well as insetting the
+fixed one, which §4.3 never said — and three sentences across both contracts had reasoned from
+the unclamped formula to conclusions that are arithmetically unreachable. A28 states the
+clamp, states the guarantee it buys, and re-derives the entry-immunity window's justification
+from the ticks *after* the spawn rather than from the spawn itself. Clarifying, like A26 and
+A27: no field, no enum, no default, no implementation change.
 
 > ### Why an amendment set and not a successor document
 >
@@ -2240,12 +2272,15 @@ which §4.3 gave only for `W`, needs all four cases.
    lane exports through the open one. This is not an optimization: without it a corner is a
    trap whenever one axis is dark, and the T1 run measured what a trap at an edge costs.
 4. **The entry point on all four edges** (§4.3): inset the fixed coordinate by `W + margin`
-   inward, take the free coordinate from §4.3's inverse table. `entryMargin` is named in §10
-   for the first time, because the formula now has four callers instead of one.
+   inward, take the free coordinate from §4.3's inverse table, and clamp that free
+   coordinate by the same inset (amended — §15, A28). `entryMargin` is named in §10 for the
+   first time, because the formula now has four callers instead of one.
 5. **Entry immunity covers both bands**, keyed on `entityId`. It was REQUIRED for the
    bounce-back case (§14, A11) and it is now REQUIRED for a second, ordinary case: an arrival
-   through `W` near a corner can land inside the north band immediately, and an export in the
-   arrival tick would make one hop look like two.
+   through `W` near a corner lands just inside the north band's inner boundary and crosses it
+   the moment it travels north, and an export in the arrival tick — or in the two after it —
+   would make one hop look like two (amended — §15, A28: the clamp means the arrival lands
+   *near* that boundary, never *past* it).
 
 **Why the larger outward component, and why no epsilon.** The rule has to be a *function* —
 two mods reading the same organism must produce the same edge, or the same world exports the
@@ -2522,3 +2557,53 @@ one edge glowing while the other is dark is reading the topology correctly.
 conforming sidecar can neither observe nor influence any of it. It is recorded here because
 Contract A is where the edge model lives, and an unspecified behaviour on a specified model is
 this document's gap to close.
+
+### A28 — The entry point clamps the free coordinate too, so no arrival lands in a capture band (§4.3, §5.7, §14 A11, §15 A19)
+
+*Folded in from the mod implementation, 2026-08-05, by the M4 pre-flight pass. The code wins:
+`BorderGeometry.EntryPoint` already does this, and this document described a geometry the mod
+does not produce.*
+
+**The gap, and it is arithmetic.** §4.3 inset the **fixed** coordinate of a spawn by
+`W + margin` and took the **free** coordinate straight from the inverse table, unbounded
+inside `[−S, +S]`. Three sentences elsewhere then reasoned about what that geometry produces,
+and all three are unreachable under the mod's actual formula:
+
+| Claim, before this amendment | Why it cannot happen |
+|---|---|
+| §4.3: "a bounce-back still lands **inside** its own capture band" | A bounce-back on `E` spawns at `x = S − W − margin`. The band starts at `x = S − W`. `margin ≥ 5`, so the spawn is strictly inside the band's inner boundary, never past it. |
+| §5.7: an arrival through `W` "at `entryPosition ≥ (S − W + margin) / 2S` lands in the north band" | Two errors at once. The stated threshold inverts to `y ≥ (S − W + margin)/2 − S`, roughly the middle of the world, not the band. And the real threshold, `position ≥ 1 − W/2S`, is unreachable anyway: the free coordinate is **clamped** to `S − W − margin`. |
+| `contract-b-m4.md` §9.4: "The organism therefore lands inside its own capture band" | The same bounce-back arithmetic as the first row. |
+
+**Resolution — state what the code does, and re-derive the rule that depended on it.**
+
+1. **The clamp is normative.** `EntryPoint(edge, position)` computes
+   `free = 2S · clamp01(position) − S`, then clamps `free` to `[−(S − inset), +(S − inset)]`
+   with `inset = W + entryMargin`, and only then places the fixed coordinate at
+   `±(S − inset)`. §4.3's table carries this. The mod owns the whole computation; the
+   sidecar still never converts a normalized position and still needs to know none of it.
+2. **Why the clamp exists**, and it is not the immunity window's reason: a `position` near
+   `0` or `1` is a corner arrival, and without the clamp it would spawn inside the strip of
+   the two edges perpendicular to its entry edge — which is a real defect on a grid, where
+   those perpendicular edges carry bands.
+3. **The guarantee, stated as a guarantee.** Every spawn coordinate, fixed and free, on both
+   axes, is at most `S − W − margin` from the origin. A capture band begins at `S − W`
+   (§4.3.1). **Therefore no arrival of any kind — ordinary, either axis, or a bounce-back on
+   its own export edge — is inside a capture band at the instant it spawns.**
+4. **The entry-immunity window keeps its REQUIRED status, on the correct justification.**
+   The guarantee is about one instant, and the window is about the ticks after it. A
+   bounce-back arrives with its original velocity, which by construction points **outward**
+   through the edge it left by, so it re-enters that band under its own power within a few
+   `FixedUpdate`s; a corner arrival sits just inside the other axis's boundary and crosses it
+   as soon as it travels that way. Without the window a spawn and an export land in adjacent
+   ticks and one hop is indistinguishable from two. **The window is what separates the two
+   events; the inset is what guarantees they are not the same event.**
+
+**What does not change.** No field, no enum, no message, no default — `contract-a/2.0` is
+unchanged and no implementation moves. `entryMargin` keeps its `max(5, 0.5·W)` default and
+`entryImmunitySeconds` keeps its 5 simulated seconds. This is a documentation correction plus
+one previously-undocumented line of geometry.
+
+**Enforced by:** the mod, in `BorderGeometry.EntryPoint`. The sidecar cannot observe it,
+which is precisely why it had to be written down: a second mod implementation reading §4.3
+before this amendment would have produced a different world out of the same `MIGRATE_IN`.

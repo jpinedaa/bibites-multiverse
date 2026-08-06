@@ -1142,6 +1142,58 @@ func TestUnusableConfigUpdateClosesWith4003(t *testing.T) {
 	}
 }
 
+// TestEmptyOrMissingExportEdgesClosesWith4003 pins contract-a.md §15 A18 on
+// BOTH of its unusable shapes.
+//
+// A18 made exportEdges REQUIRED with at least one member and REMOVED §14 A11's
+// fallback, which let a single-entry borderEdges supply the value. CONFIG_UPDATE
+// has no NACK channel (§9.3, §13 A8), so the only answer is a close, and
+// contract-a.md §3.2 makes that close 4003.
+//
+// The two shapes are different frames on the wire — `"exportEdges": null` from a
+// mod that stopped sending the field, and `"exportEdges": []` from one that
+// computed an empty set — and only the first was covered. An implementation that
+// reads them through different branches is exactly the one that answers one of
+// them by falling back to borderEdges, so both frames below name a borderEdges
+// the retired fallback would have accepted.
+func TestEmptyOrMissingExportEdgesClosesWith4003(t *testing.T) {
+	g := newGrid(t, 2, gridOptions{layout: layoutRow(2), noMods: true})
+	size, width := 2000.0, 60.0
+	cases := []struct {
+		name  string
+		edges any
+	}{
+		{"field absent", nil},
+		{"empty array", []string{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			body := map[string]any{
+				"sessionId": wire.NewUUID(), "reason": "connect",
+				"gameVersion": "0.6.3.1", "modVersion": "0.2.0",
+				"simulationSize": size, "borderWidth": width,
+				// Exactly one export-capable edge: the shape the RETIRED
+				// fallback resolved. If it ever comes back, this frame is
+				// accepted and this test fails.
+				"borderEdges": []string{contracta.EdgeE, contracta.EdgeW},
+			}
+			if c.edges != nil {
+				body["exportEdges"] = c.edges
+			}
+			frame, err := wire.Encode(wire.ProtocolA, contracta.TypeConfigUpdate,
+				time.Now().UnixMilli(), body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bad := dialRawMod(t, g.node(1).side.URL())
+			bad.write(frame)
+			if code := bad.waitClosed(5 * time.Second); code != contracta.CloseMalformedFrame {
+				t.Fatalf("close code = %d, want %d (MALFORMED_FRAME)", code, contracta.CloseMalformedFrame)
+			}
+		})
+	}
+}
+
 // TestUnknownMigrationIDOnMigrateInAckIsIgnored covers §13 amendment A8.
 func TestUnknownMigrationIDOnMigrateInAckIsIgnored(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})

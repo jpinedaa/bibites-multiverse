@@ -196,8 +196,9 @@ peer that will not join. That is the failure to expect, and it is why this list 
 | `/contract-a/v1` | **`/contract-a/v2`** | **Nothing to change.** No script hardcodes a Contract A path — the sidecar's `--listen` and the mod's `MULTIVERSE_SIDECAR_PORT` carry it, and both sides already agree. |
 | `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N`** | `e2e/run-m3.sh` and `farend/setup-farend.ps1`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. |
 | the relay's `ring.json` key `"ring"` | **`"slots"`**, with `width`, `height`, `col`, `row` | `e2e/run-m3-lan.sh` (`ring_order()`) and `e2e/baseline.sh`. **This is the silent one.** `"ring"` is a read-only migration path: an M4 relay reads an M3 file once and never writes that key again. Both readers work today against the committed M3 `ring.json` and start returning empty the first time an M4 relay saves. |
-| nothing | the archive's **`--http`** flag, and **`ringstat`** | No script mentions either. The archive is started without `--http`, so it binds the default `127.0.0.1:8791` — which is slot 5's Contract A port on a six-slot rig. `baseline.sh` reads the archive only through the filesystem, so the whole M4 observability surface — map shape, effective lanes, bypasses, custody/paced/held depths, hold-timeout bounces — is absent from the baseline capture. |
-| `grep '[M2-CROSSING]' \| tail -n 1` | a filter on **`edge=`** | `e2e/baseline.sh`, in both `last_crossing()` and the population trend. See *Reading the logs* below: one window now emits one line **per export edge**. |
+| nothing | the archive's **`--http`** flag, and **`ringstat`** | No script mentions either. The archive is started without `--http`, so it binds its compiled default — `127.0.0.1:8796` since the M4 port plan, `127.0.0.1:8791` before it. `baseline.sh` reads the archive only through the filesystem, so the whole M4 observability surface — map shape, effective lanes, bypasses, custody/paced/held depths, hold-timeout bounces — is absent from the baseline capture. |
+| relay `8790`, archive `8791` | relay **`8795`**, archive **`8796`** | The Go defaults already moved (`contractb.DefaultRelayPort`, the archive's `--http`, `ringstat`'s `--url`). Still to change: `RELAY_PORT` in `e2e/run-m3.sh`, `$RelayPort` in `farend/setup-farend.ps1`, and the firewall rule and portproxy in *Owner steps*. See *The M4 port plan* below — the old defaults are slot 4's and slot 5's Contract A ports on a six-slot rig. |
+| `grep '[M2-CROSSING]' \| tail -n 1` | a filter on **`edge=`** | `e2e/baseline.sh`, in both `last_crossing()` and the population trend. **Fixed 2026-08-05** in the M4 pre-flight: both now key on `edge=`. See *Reading the logs* below — one window emits one line **per export edge**. |
 
 **`--reserve-slot` did not change, and a report saying otherwise is wrong.** The relay's flag
 is `--reserve-slot <peerId>[@<col>,<row>]`, and the coordinate suffix is **optional** — a bare
@@ -376,21 +377,24 @@ Start the rig in dependency order — the relay first, then the archive, then th
 sidecars, then the three game instances:
 
 ```sh
-bin/relay   --listen 127.0.0.1:8790 --data-dir ./e2e/relay-data \
+bin/relay   --listen 127.0.0.1:8795 --data-dir ./e2e/relay-data \
             --token-file ~/.multiverse-token
-bin/archive --relay ws://127.0.0.1:8790/contract-b/v3 --peer-id archive-main \
+bin/archive --relay ws://127.0.0.1:8795/contract-b/v3 --peer-id archive-main \
             --data-dir ./e2e/archive-data --token-file ~/.multiverse-token \
-            --http 127.0.0.1:8791
-bin/sidecar --listen 127.0.0.1:8787 --relay ws://127.0.0.1:8790/contract-b/v3 \
+            --http 127.0.0.1:8796
+bin/sidecar --listen 127.0.0.1:8787 --relay ws://127.0.0.1:8795/contract-b/v3 \
             --peer-id slot-1 --position 0,0 \
             --data-dir ./e2e/data/slot-1 --token-file ~/.multiverse-token
-bin/sidecar --listen 127.0.0.1:8788 --relay ws://127.0.0.1:8790/contract-b/v3 \
+bin/sidecar --listen 127.0.0.1:8788 --relay ws://127.0.0.1:8795/contract-b/v3 \
             --peer-id slot-2 --position 1,0 \
             --data-dir ./e2e/data/slot-2 --token-file ~/.multiverse-token
-bin/sidecar --listen 127.0.0.1:18789 --relay ws://127.0.0.1:8790/contract-b/v3 \
+bin/sidecar --listen 127.0.0.1:8789 --relay ws://127.0.0.1:8795/contract-b/v3 \
             --peer-id slot-3 --position 2,0 \
             --data-dir ./e2e/data/slot-3 --token-file ~/.multiverse-token
 ```
+
+Both of those port numbers are now the compiled defaults, so the two flags above are
+redundant and are written out only to make the layout explicit. See *The M4 port plan*.
 
 Four things about that invocation are load-bearing:
 
@@ -412,7 +416,7 @@ Four things about that invocation are load-bearing:
   and leaves the old one reserved forever.
 
 `--listen` is loopback-only by contract and refuses a wildcard address. The relay's
-`--listen` does not: M3 binds it LAN-reachable (`0.0.0.0:8790` by default). Every flag also
+`--listen` does not: it binds LAN-reachable (`0.0.0.0:8795` by default). Every flag also
 reads an environment variable — `MULTIVERSE_LISTEN`, `MULTIVERSE_RELAY`,
 `MULTIVERSE_PEER_ID`, `MULTIVERSE_DATA_DIR`, `MULTIVERSE_SLOT`, `MULTIVERSE_TOKEN_FILE`,
 `MULTIVERSE_LOG_LEVEL`, and `MULTIVERSE_RELAY_LISTEN` / `MULTIVERSE_RELAY_DATA_DIR` /
@@ -525,7 +529,7 @@ prints the four usual causes and does not start the game.
 ### Owner steps: making the relay reachable (elevated, on this machine)
 
 WSL2 here runs in **NAT mode**, and `.wslconfig` sets that deliberately: `networkingMode=mirrored`
-breaks Docker Desktop port publishing on this host. A relay on `0.0.0.0:8790` inside WSL is
+breaks Docker Desktop port publishing on this host. A relay on `0.0.0.0:8795` inside WSL is
 therefore reachable from Windows but **not from the LAN** until Windows forwards the port into
 the VM. Both commands below need an elevated PowerShell and both are **owner steps**;
 `e2e/run-m3-lan.sh lanhost` prints them with the current addresses filled in.
@@ -534,13 +538,18 @@ the VM. Both commands below need an elevated PowerShell and both are **owner ste
 # once. -Profile Any, NOT Private: an Ethernet NIC classified "Public" silently ignores a
 # Private-only rule, and the far end just reports the relay unreachable. See Gotchas.
 New-NetFirewallRule -DisplayName "Bibites Multiverse relay" -Direction Inbound `
-  -Action Allow -Protocol TCP -LocalPort 8790 -Profile Any
+  -Action Allow -Protocol TCP -LocalPort 8795 -Profile Any
 
 # after every WSL restart: the WSL address changes
-netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0
-netsh interface portproxy add v4tov4 listenport=8790 listenaddress=0.0.0.0 `
-  connectport=8790 connectaddress=<the WSL address from `lanhost`>
+netsh interface portproxy delete v4tov4 listenport=8795 listenaddress=0.0.0.0
+netsh interface portproxy add v4tov4 listenport=8795 listenaddress=0.0.0.0 `
+  connectport=8795 connectaddress=<the WSL address from `lanhost`>
 ```
+
+**The port is `8795` from M4 on, not `8790`** (*The M4 port plan*, in Gotchas). An M3-era
+firewall rule and portproxy for `8790` are still there and are now pointing at nothing; the
+old rule can stay, and a stale portproxy on `8790` is harmless but misleading. Delete it:
+`netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0`.
 
 **Relay LAN host: `192.168.1.227`.** Confirmed 2026-08-03 by the far end itself: the second
 computer ran `setup-farend.ps1 -RelayHost 192.168.1.227`, was granted slot 2, and the relay
@@ -548,7 +557,7 @@ reported `ringSize=3`. Give the same value to `setup-farend.ps1 -RelayHost`. It 
 machine's Windows IPv4 addresses; `lanhost` lists the candidates, and the home-LAN one is
 normally `192.168.x.x` or `10.x.x.x`, never a `172.x` hypervisor address.
 
-**The address alone is not enough — the portproxy behind it must exist.** `192.168.1.227:8790`
+**The address alone is not enough — the portproxy behind it must exist.** `192.168.1.227:8795`
 only reaches the relay while the `netsh` portproxy above points at the *current* WSL address,
 and that address changes on every WSL restart. Re-run `e2e/run-m3-lan.sh lanhost` after a
 restart and re-add the portproxy with the value it prints; the LAN host itself does not change,
@@ -607,7 +616,7 @@ so this line stays correct even when the far end suddenly cannot connect.
   build-tagged Windows no-op (NTFS journals that metadata itself). Found by running the
   cross-compiled sidecar on this machine, not on the second computer.
 - **From a Windows process, WSL services answer on `localhost`, not on `127.0.0.1`.** WSL2's
-  localhost forwarding resolved `ws://localhost:8790` into the VM, while `ws://127.0.0.1:8790`
+  localhost forwarding resolved `ws://localhost:<relayPort>` into the VM, while `ws://127.0.0.1:<relayPort>`
   got `connectex: No connection could be made`. It matters only for a cross-boundary test on
   this machine; the second computer dials a LAN address either way.
 - **`Start-Process` from a WSL `powershell.exe` call keeps the interop pipe open.** The
@@ -631,34 +640,41 @@ so this line stays correct even when the far end suddenly cannot connect.
   spawn. **Any E2E rig, script or auto-test that loads a world must wait on the same
   flag** — sleeping for a fixed number of seconds is not a substitute, because the build
   time scales with the sprite set.
-- **The M3 rig binds four ports:** `8790` (relay, Contract B — bound on `127.0.0.1` for a
-  local rehearsal, on `0.0.0.0` for the LAN), and `8787`, `8788`, `18789` (the Contract A
-  loopback ports of slots 1, 2 and 3). They are fixed defaults shared by every rig in this
-  checkout, so **only one rig can run at a time** — a second one, or a second agent
-  working in this repo, silently attaches to or fights over the first one's processes.
-  Check with `ss -ltn | grep -E '878[78]|8790|18789'` before starting, and give a throwaway
+- **Only one rig can run at a time.** Every rig in this checkout uses the same fixed
+  defaults, so a second rig — or a second agent working in this repo — silently attaches to
+  or fights over the first one's processes. Check the whole plan with
+  `ss -ltn | grep -E ':(878[7-9]|879[0-6]|18789) '` before starting, and give a throwaway
   smoke test high ports (`--listen 127.0.0.1:0` writes the resolved address to
-  `<data-dir>/listen.addr`). The M2 rig used `8787`/`8788`/`8790` and collides head-on. On
-  the LAN rig only `8787`, `18789` and `8790` are local; the far end's `8787` is on its own
-  machine.
-- **The M4 six-slot rig collides with its own defaults, on two ports. Plan the ports before
-  building it.** `contract-a.md` §10 gives the six slots the Contract A range `8787`–`8792`.
-  The relay's default listen port is **`8790`**, which is **slot 4's** port. The archive's
-  default status-page bind is **`127.0.0.1:8791`**, which is **slot 5's**. Both defaults sit
-  inside the range they have to avoid, and `ringstat` defaults to the archive's URL, so the
-  collision moves with it. Nothing in the repo uses `8795` — a report that mentions it is
-  describing a workaround somebody ran by hand, not a checked-in default. The M3 rig dodged
-  the same problem differently: it gave slot 3 the five-digit port `18789`. **Pick one of the
-  two dodges and write it down** — move the relay and the archive out of the way with
-  `--listen` / `MULTIVERSE_RELAY_LISTEN` and `--http`, or give the slots five-digit ports.
-  Do not leave it to the defaults; the symptom is a sidecar that cannot bind, or worse, a
-  game that connects to the relay.
+  `<data-dir>/listen.addr`). The historical rigs collide head-on with the current one: M2
+  used `8787`/`8788`/`8790`, and M3 used `8787`/`8788`/`18789` plus the relay on `8790`.
+- **The M4 port plan — settled 2026-08-05, and these are now the compiled defaults.** The
+  six-slot rig has to fit inside `contract-a.md` §10's Contract A range `8787`–`8792`
+  without the relay or the archive standing on one of those six ports, which is exactly what
+  M3's defaults did: relay `8790` is slot 4's port and archive `8791` is slot 5's, and
+  `ringstat` inherited the second collision because it defaults to the archive's URL. **The
+  decision: move the two components, keep the six slots.**
+
+  | Component | Port | Bind |
+  |---|---|---|
+  | Contract A, slots 1–6 | `8787` `8788` `8789` `8790` `8791` `8792` | loopback only, by contract |
+  | Relay, Contract B | **`8795`** | `127.0.0.1` local, `0.0.0.0` for the LAN |
+  | Archive status page + `/api/status` | **`8796`** | loopback only |
+
+  `go/internal/contractb.DefaultRelayPort`, the archive's `--http` default and `ringstat`'s
+  `--url` default all carry these numbers, so a rig that passes no port flags gets this
+  layout. `contract-b-m4.md` §3, *The M4 port plan*, is the normative statement.
+
+  **Three things move with the relay port and are easy to forget:** the Windows Firewall
+  rule, the WSL portproxy (both in *Owner steps* below), and the far end's
+  `setup-farend.ps1 -RelayPort`, which still defaults to `8790` in the committed bundle. A
+  far end set up against the old default connects to nothing and looks like a peer that will
+  not join.
 - **`kill $!` does not kill a program launched in the background *inside* a compound
   command.** In `( … & )`, or in `cmd1 && cmd2 &`, `$!` is the pid of the **subshell**; the
   real program is its child and outlives the kill. A relay started that way survived its own
-  cleanup and kept holding `8790`, so the next rig start failed on an address already in use
+  cleanup and kept holding the relay port, so the next rig start failed on an address already in use
   while nothing in the script's process table looked wrong. Kill by port
-  (`ss -ltnp | grep 8790`) or by pattern (`pkill -f 'bin/relay'`), and check the port is free
+  (`ss -ltnp | grep 8795`) or by pattern (`pkill -f 'bin/relay'`), and check the port is free
   before starting a rig — do not trust a recorded `$!`.
 - **A Windows Firewall rule scoped to the Private profile does nothing on a network Windows
   has classified `Public`.** This is what blocked the first LAN attempt: the relay, the port
@@ -670,7 +686,7 @@ so this line stays correct even when the far end suddenly cannot connect.
   *Owner steps* above now uses it.
 - **Never test LAN reachability with `curl` from WSL to this host's own LAN address.** WSL2
   here is NAT'd and has no hairpin route back to the Windows host it runs on, so
-  `curl http://<this machine's LAN IP>:8790` fails from WSL even when the firewall rule, the
+  `curl http://<this machine's LAN IP>:8795` fails from WSL even when the firewall rule, the
   port proxy and the relay are all healthy. It is a false negative that reads exactly like a
   blocked port, and it costs an hour of chasing the firewall. Test from a Windows PowerShell
   on this machine, or from the second computer — never from WSL.

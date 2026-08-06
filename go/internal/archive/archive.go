@@ -64,7 +64,7 @@ type Config struct {
 	TickInterval      time.Duration
 
 	// HTTPListen is the status page's bind address, "" for no page. The rig
-	// uses 127.0.0.1:8791; a test uses 127.0.0.1:0.
+	// uses 127.0.0.1:8796; a test uses 127.0.0.1:0.
 	HTTPListen string
 	// StatsStale is §10.1's honesty threshold: a stats block older than this
 	// renders as UNKNOWN rather than as state.

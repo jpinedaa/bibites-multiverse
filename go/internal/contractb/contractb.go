@@ -181,7 +181,12 @@ const (
 
 // Tunable defaults (contract-b-m4.md §12).
 const (
-	DefaultRelayPort = 8790
+	// DefaultRelayPort moved from 8790 to 8795 for the M4 port plan
+	// (contract-b-m4.md §3, §12). contract-a.md §10 gives the six-slot rig the
+	// Contract A range 8787-8792, and 8790 is slot 4's port: the relay's own
+	// default sat inside the range it has to avoid. 8795 and the archive's 8796
+	// are the two ports outside it.
+	DefaultRelayPort = 8795
 	// ContractBPath moved with the major (§3). The relay MUST keep serving
 	// RetiredContractBPath and MUST close every connection on it immediately
 	// with 4000.

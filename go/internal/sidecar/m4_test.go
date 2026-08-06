@@ -7,6 +7,7 @@ package sidecar
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -395,6 +396,121 @@ func TestBurstArrivesPacedNotAllAtOnce(t *testing.T) {
 	}
 	if aStats.HeldDepth == nil || *aStats.HeldDepth != 0 {
 		t.Fatalf("heldDepth = %v against a live destination", aStats.HeldDepth)
+	}
+}
+
+// logSpy captures one component's slog output so a test can assert on the
+// BRANCH IT TOOK. It is used where the rule under test is a decision NOT to
+// send: the only other evidence is an absence, and an absence is also what a
+// slow rig produces. It tees into the test log so a failure is still readable.
+type logSpy struct {
+	mu    sync.Mutex
+	inner io.Writer
+	lines []string
+}
+
+func newLogSpy(t *testing.T) *logSpy {
+	return &logSpy{inner: newTestWriter(t)}
+}
+
+func (s *logSpy) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	s.lines = append(s.lines, string(p))
+	s.mu.Unlock()
+	return s.inner.Write(p)
+}
+
+func (s *logSpy) count(substr string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, line := range s.lines {
+		if strings.Contains(line, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *logSpy) logger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(s, &slog.HandlerOptions{Level: slog.LevelInfo}))
+}
+
+// TestJournaledDuplicateIsNotReAcked pins §14 B6, and it pins the NARROW half of
+// it: a duplicate MIGRATION_PAYLOAD that hits an entry which is JOURNALED BUT NOT
+// TOMBSTONED is answered with NOTHING.
+//
+// Why this rule needs a test of its own. "A dedup hit is answered MIGRATION_ACK
+// immediately" is the natural sentence to write, this document used to carry it
+// in §6.6, and it is a silent organism-loss bug: an early ACK releases the
+// SENDER'S custody before the delivery it claims. The first copy is still in the
+// receiver's journal waiting for its mod, and if the receiver dies there, both
+// sides have let go of the same organism and nothing logs anything. §6.7 puts
+// the custody transfer at the receiving mod's SPAWN, and only a tombstone proves
+// that spawn happened.
+//
+// Arrival pacing (contract-a.md §15 A20) is what makes this worth pinning rather
+// than reasoning about: "journaled but not yet delivered" used to last
+// microseconds and now lasts minutes of simulated time by design.
+//
+// The rig: the destination's world is stopped, so the payload is journaled and
+// never delivered, and the sender's forward retry supplies the duplicates.
+func TestJournaledDuplicateIsNotReAcked(t *testing.T) {
+	spy := newLogSpy(t)
+	g := newGrid(t, 2, gridOptions{
+		layout:    layoutRow(2),
+		heartbeat: 100 * time.Millisecond,
+		tune: func(i int, c *Config) {
+			if i == 1 {
+				c.Logger = spy.logger()
+			}
+		},
+	})
+	a, b := g.node(0), g.node(1)
+
+	b.mod.setPaused(true)
+	time.Sleep(200 * time.Millisecond)
+
+	id := a.mod.migrateOut(testEntityID, contracta.EdgeE, 0.5)
+	waitFor(t, 10*time.Second, "slot 2 to journal the payload", func() bool {
+		return custodyOf(b.side, id) != "absent"
+	})
+	// Two duplicates, so this is the steady state and not one lucky ordering.
+	waitFor(t, 15*time.Second, "at least two duplicate MIGRATION_PAYLOADs to arrive", func() bool {
+		return spy.count("duplicate MIGRATION_PAYLOAD") >= 2
+	})
+
+	if reAcked := spy.count("reAcked=true"); reAcked != 0 {
+		t.Fatalf("the receiver re-ACKed %d duplicate(s) against a journaled, un-delivered "+
+			"entry; B6 answers those with NOTHING", reAcked)
+	}
+	// The decisive assertion is on the SENDER. An ACK is only observable by what
+	// it does, and what it does is release custody.
+	if got := custodyOf(a.side, id); got != "out/in_flight" {
+		t.Fatalf("the sender's custody is %q, want out/in_flight; a duplicate against a "+
+			"journaled entry must not release it", got)
+	}
+	if h := handoffOf(a.side, id); h != journal.HandoffSent {
+		t.Fatalf("the sender's handoff is %q, want %q", h, journal.HandoffSent)
+	}
+	if got := b.world.spawnCount(id); got != 0 {
+		t.Fatalf("the stopped world spawned the organism %d time(s)", got)
+	}
+	// Nothing bounced: the destination is LIVE, only slow (Risk 9, §9.3).
+	if st := a.side.Stats(); st.BouncedTimeoutTotal != nil && *st.BouncedTimeoutTotal != 0 {
+		t.Fatalf("the sender bounced %d entr(y|ies) against a live destination",
+			*st.BouncedTimeoutTotal)
+	}
+
+	// B6's stated cost of the narrow rule is zero, and this is what that means:
+	// the sender's own retry lands right back in the same branch, and the spawn
+	// releases it with no further action from either side.
+	b.mod.setPaused(false)
+	waitFor(t, 20*time.Second, "the delivery to complete once the world runs again", func() bool {
+		return custodyOf(a.side, id) == "out/done" && custodyOf(b.side, id) == "in/done"
+	})
+	if got := b.world.spawnCount(id); got != 1 {
+		t.Fatalf("the organism spawned %d times, want exactly 1", got)
 	}
 }
 
