@@ -1,15 +1,21 @@
 <#
 .SYNOPSIS
-    Install the Bibites Multiverse far end - ring slot 2 - on a Windows machine
-    with no development tools.
+    Install the Bibites Multiverse far end - map slot 6, position (2,1) - on a
+    Windows machine with no development tools.
 
 .DESCRIPTION
     Runs on Windows PowerShell 5.1. It finds the Steam copy of The Bibites,
     checks that the game is the exact version this bundle was built against,
     installs BepInEx and the plugin, stores the shared LAN token in a file only
-    you can read, and writes start-slot2.ps1 and stop-slot2.ps1 beside itself.
+    you can read, and writes start-slot6.ps1 and stop-slot6.ps1 beside itself.
 
     It does not need administrator rights. It never starts the game.
+
+    THIS MACHINE IS A FULL MEMBER OF THE MAP, not a spare. M4 runs a 3x2 grid of
+    six worlds. The main machine runs five of them; BepInEx there hands out five
+    log files and a sixth game on that machine never runs its plugin at all. The
+    sixth world therefore lives here, where BepInEx is unused and the game gets
+    its own log. It exports EAST and NORTH like every other slot.
 
 .PARAMETER RelayHost
     The name or the IP address of the main machine, which runs the relay.
@@ -19,18 +25,22 @@
     machine. The token is copied into this machine's own protected file.
 
 .EXAMPLE
-    .\setup-farend.ps1 -RelayHost 192.168.1.20 -TokenFile .\token.txt
+    .\setup-farend.ps1 -RelayHost 192.168.1.227 -TokenFile .\token.txt
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$RelayHost,
     [Parameter(Mandatory = $true)][string]$TokenFile,
     [string]$GameDir = '',
-    [int]$RelayPort = 8790,
+    [int]$RelayPort = 8795,
     [int]$SidecarPort = 8787,
-    [int]$Slot = 2,
-    [string]$World = 'M3-Slot2',
-    [string]$PeerId = 'slot-2'
+    [int]$Slot = 6,
+    [string]$Position = '2,1',
+    [string]$ExportEdges = 'E,N',
+    [string]$World = 'M4-Slot6',
+    [string]$PeerId = 'slot-6',
+    [int]$SaveMinutes = 10,
+    [int]$SaveKeep = 6
 )
 
 $ErrorActionPreference = 'Stop'
@@ -116,6 +126,32 @@ function Find-GameDir {
     return ''
 }
 
+# ---------------------------------------------------------------- 0. the map
+
+# The position has to parse here, not on the wire: --position <col>,<row> is an
+# advisory the relay arbitrates, and a malformed one is silently ignored, which
+# reads as "the relay put me somewhere else for no reason".
+if ($Position -notmatch '^\s*\d+\s*,\s*\d+\s*$') {
+    Stop-Setup "-Position must be '<col>,<row>', for example '2,1'. It is '$Position'."
+}
+$Position = $Position -replace '\s', ''
+
+# contract-a.md §15 A18: the edge list is comma-separated, and an edge declared
+# with its opposite clears the whole set and disables the client with one error
+# line in the BepInEx log. Catch it here instead.
+$edgeList = @($ExportEdges -split '[,; \t]+' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
+foreach ($e in $edgeList) {
+    if ($e -notin @('E', 'N', 'W', 'S')) { Stop-Setup "-ExportEdges holds '$e'. Use E, N, W or S." }
+}
+if (($edgeList | Select-Object -Unique).Count -ne $edgeList.Count) {
+    Stop-Setup "-ExportEdges repeats an edge: '$ExportEdges'."
+}
+if (($edgeList -contains 'E' -and $edgeList -contains 'W') -or
+    ($edgeList -contains 'N' -and $edgeList -contains 'S')) {
+    Stop-Setup "-ExportEdges declares an edge together with its opposite: '$ExportEdges'."
+}
+$ExportEdges = [string]::Join(',', $edgeList)
+
 # ---------------------------------------------------------------- 1. the game
 
 Step "1 of 6 - find The Bibites"
@@ -154,7 +190,7 @@ if ($got -ne $AssemblySha256) {
     Say "Two ways forward:"
     Say " 1. Let Steam update the game on the MAIN machine as well. Re-sync the"
     Say "    references there (bibites-mod/sync-game-refs.sh), rebuild the bundle"
-    Say "    (farend/make-farend-bundle.sh) and copy the new bundle here."
+    Say "    (farend/make-farend-bundle.sh) and take the new bundle here."
     Say " 2. Or put this machine back on game version $GameVersion."
     Stop-Setup "the game version does not match; nothing was installed."
 }
@@ -215,8 +251,8 @@ $tokenPath = Join-Path $DataRoot 'token.txt'
 Remove-Item -Path $tokenPath -Force -ErrorAction SilentlyContinue
 Set-Content -Path $tokenPath -Value $token -Encoding ASCII
 
-# Only this account may read it. The token is the whole of M3's authentication:
-# anybody on the LAN who has it can join the ring. A new FileSecurity carries
+# Only this account may read it. The token is the whole of M4's authentication:
+# anybody on the LAN who has it can join the map. A new FileSecurity carries
 # only the permission list, so this touches no other part of the file's
 # security and needs no administrator rights.
 $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -234,13 +270,25 @@ try {
 
 # ---------------------------------------------------------------- 6. the scripts
 
-Step "6 of 6 - write start-slot2.ps1 and stop-slot2.ps1"
+$startName = "start-slot$Slot.ps1"
+$stopName  = "stop-slot$Slot.ps1"
+Step "6 of 6 - write $startName and $stopName"
 
-$relayUrl   = "ws://${RelayHost}:$RelayPort/contract-b/v2"
+$relayUrl   = "ws://${RelayHost}:$RelayPort/contract-b/v3"
 $sidecarExe = Join-Path $Here 'multiverse-sidecar.exe'
 
 $startBody = @'
-# Generated by setup-farend.ps1. Start ring slot 2: the sidecar first, then the game.
+# Generated by setup-farend.ps1. Start map slot @@SLOT@@ at position @@POSITION@@:
+# the sidecar first, then the game.
+#
+#   .\@@STARTNAME@@             the sidecar, then the game
+#   .\@@STARTNAME@@ -GameOnly   the game only, against a sidecar that is already
+#                               running. This is the wake half of the main
+#                               machine's arrival-pacing test: the sidecar keeps
+#                               the journal and its custody while the world is
+#                               away, so the backlog is there to drain.
+[CmdletBinding()]
+param([switch]$GameOnly)
 $ErrorActionPreference = 'Stop'
 
 $GameDir     = '@@GAMEDIR@@'
@@ -249,53 +297,92 @@ $RelayUrl    = '@@RELAYURL@@'
 $SidecarExe  = '@@SIDECAREXE@@'
 $PeerId      = '@@PEERID@@'
 $Slot        = '@@SLOT@@'
+$Position    = '@@POSITION@@'
+$ExportEdges = '@@EXPORTEDGES@@'
 $SidecarPort = '@@SIDECARPORT@@'
 $World       = '@@WORLD@@'
+$SaveMinutes = '@@SAVEMINUTES@@'
+$SaveKeep    = '@@SAVEKEEP@@'
 
-$dataDir   = Join-Path $DataRoot 'data-slot-2'
+$dataDir   = Join-Path $DataRoot 'data-slot-@@SLOT@@'
 $logDir    = Join-Path $DataRoot 'logs'
 $tokenFile = Join-Path $DataRoot 'token.txt'
-$log       = Join-Path $logDir 'sidecar-slot2.log'
-$cmdDir    = Join-Path $env:TEMP 'bibites-m3'
+$log       = Join-Path $logDir 'sidecar-slot@@SLOT@@.log'
+$cmdDir    = Join-Path $env:TEMP 'bibites-m4'
 New-Item -ItemType Directory -Force -Path $dataDir, $logDir, $cmdDir | Out-Null
 
 # The mod reads its whole configuration from the environment of the game
 # process. A Windows process inherits it from this script, so there is nothing
 # like WSLENV to declare here.
-$env:MULTIVERSE_EXPORT_EDGE  = 'E'
+#
+# MULTIVERSE_EXPORT_EDGES is the M4 plural name. Both lanes of this slot wrap:
+# a 3x2 map is a torus, so every slot declares both axes and the sidecar decides
+# from the relay's map which of them EDGE_STATUS actually opens.
+$env:MULTIVERSE_EXPORT_EDGES = $ExportEdges
 $env:MULTIVERSE_RING_SLOT    = $Slot
 $env:MULTIVERSE_SIDECAR_PORT = $SidecarPort
 $env:MULTIVERSE_WORLD        = $World
-$env:MULTIVERSE_CMD_FILE     = Join-Path $cmdDir 'cmd-2.txt'
+$env:MULTIVERSE_CMD_FILE     = Join-Path $cmdDir 'cmd-@@SLOT@@.txt'
+# The periodic save is mod configuration, so it is set HERE and nowhere else.
+# The main machine cannot save this world and never tries: it only reads the
+# receipt, which rides every HEARTBEAT and reaches the status page.
+$env:MULTIVERSE_SAVE_MINUTES = $SaveMinutes
+$env:MULTIVERSE_SAVE_KEEP    = $SaveKeep
+$env:MULTIVERSE_SAVE_ON_QUIT = 'true'
+$env:MULTIVERSE_PORTAL       = 'true'
+$env:MULTIVERSE_PORTAL_FLOURISHES = 'true'
 
 $sidecarPidFile = Join-Path $DataRoot 'sidecar.pid'
 $gamePidFile    = Join-Path $DataRoot 'game.pid'
+
+if ($GameOnly) {
+    if (-not (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue)) {
+        Write-Host "-GameOnly needs the sidecar already running. It is not." -ForegroundColor Red
+        Write-Host "Run .\@@STARTNAME@@ with no switch."
+        exit 1
+    }
+    if (Get-Process -Name 'The Bibites' -ErrorAction SilentlyContinue) {
+        Write-Host "The game is already running."
+        exit 1
+    }
+    $game = Start-Process -FilePath (Join-Path $GameDir 'The Bibites.exe') -PassThru -WorkingDirectory $GameDir
+    Set-Content -Path $gamePidFile -Value $game.Id -Encoding ASCII
+    Write-Host "game started (pid $($game.Id)) against the running sidecar; it loads '$World' by itself."
+    Write-Host "The sidecar replays every organism it took custody of while the world was away."
+    exit 0
+}
+
 if (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue) {
-    Write-Host "A sidecar is already running. Run .\stop-slot2.ps1 first."
+    Write-Host "A sidecar is already running. Run .\@@STOPNAME@@ first,"
+    Write-Host "or .\@@STARTNAME@@ -GameOnly to start only the game."
     exit 1
 }
 
 Remove-Item -Path $log, "$log.out" -ErrorAction SilentlyContinue
+# --position is ADVISORY (contract-b-m4.md §7.2). The main machine also reserves
+# this peerId at the same coordinate before the relay serves, so the map forms in
+# any start order and this flag only matters on a relay that has no reservation.
 $sidecarArgs = @(
     '--listen',     "127.0.0.1:$SidecarPort",
     '--relay',      $RelayUrl,
     '--peer-id',    $PeerId,
+    '--position',   $Position,
     '--data-dir',   $dataDir,
     '--token-file', $tokenFile
 )
 $sidecar = Start-Process -FilePath $SidecarExe -PassThru -WindowStyle Hidden -WorkingDirectory $DataRoot -ArgumentList $sidecarArgs -RedirectStandardError $log -RedirectStandardOutput "$log.out"
 Set-Content -Path $sidecarPidFile -Value $sidecar.Id -Encoding ASCII
 Write-Host "sidecar started (pid $($sidecar.Id)) -> $RelayUrl"
-Write-Host "waiting for the relay to grant ring slot $Slot ..."
+Write-Host "waiting for the relay to grant slot $Slot at position $Position ..."
 
 $deadline = (Get-Date).AddSeconds(60)
 $granted  = $null
 $refused  = $null
 while ((Get-Date) -lt $deadline) {
     if (Test-Path $log) {
-        $granted = Select-String -Path $log -Pattern 'ring slot granted' -SimpleMatch | Select-Object -Last 1
+        $granted = Select-String -Path $log -Pattern 'contract B: slot granted' -SimpleMatch | Select-Object -Last 1
         if ($granted) { break }
-        $refused = Select-String -Path $log -Pattern 'ring claim refused' -SimpleMatch | Select-Object -Last 1
+        $refused = Select-String -Path $log -Pattern 'placement claim refused', 'HTTP 401' | Select-Object -Last 1
         if ($refused) { break }
     }
     if ($sidecar.HasExited) { break }
@@ -304,34 +391,46 @@ while ((Get-Date) -lt $deadline) {
 
 if ($granted) {
     Write-Host ""
-    Write-Host "RING SLOT GRANTED:" -ForegroundColor Green
+    Write-Host "SLOT GRANTED:" -ForegroundColor Green
     Write-Host "  $($granted.Line)"
 } else {
     Write-Host ""
-    Write-Host "The relay did not grant a ring slot." -ForegroundColor Red
+    Write-Host "The relay did not grant a slot." -ForegroundColor Red
     if ($refused) { Write-Host "  $($refused.Line)" }
     if (Test-Path $log) { Get-Content -Path $log -Tail 20 | ForEach-Object { Write-Host "  $_" } }
     Write-Host ""
     Write-Host "  The four usual causes, in order:"
-    Write-Host "   1. The firewall on the main machine blocks TCP 8790."
+    Write-Host "   1. The firewall or the port forward on the main machine does not carry TCP @@RELAYPORT@@."
+    Write-Host "      M4 moved the relay from 8790 to @@RELAYPORT@@, and both rules had to move with it."
     Write-Host "   2. $RelayUrl names the wrong machine, or the relay is not running."
-    Write-Host "   3. The token here does not match the token on the main machine (401)."
-    Write-Host "   4. The game version here does not match the ring (version_incompatible)."
+    Write-Host "   3. The token here does not match the token on the main machine (HTTP 401)."
+    Write-Host "   4. The game version here does not match the map (version_incompatible)."
     Write-Host ""
-    Write-Host "  The game was NOT started. Run .\stop-slot2.ps1, then try again."
+    Write-Host "  The game was NOT started. Run .\@@STOPNAME@@, then try again."
     exit 1
 }
 
 $game = Start-Process -FilePath (Join-Path $GameDir 'The Bibites.exe') -PassThru -WorkingDirectory $GameDir
 Set-Content -Path $gamePidFile -Value $game.Id -Encoding ASCII
 Write-Host ""
-Write-Host "game started (pid $($game.Id)); it loads the world '$World' by itself."
+Write-Host "game started (pid $($game.Id)); it loads the world '$World' by itself,"
+Write-Host "and seeds it on the first start. It saves itself every $SaveMinutes minutes."
 Write-Host "logs: $log  and  $GameDir\BepInEx\LogOutput.log"
-Write-Host "Leave both running. Run .\stop-slot2.ps1 when the test is over."
+Write-Host "Leave both running. Run .\@@STOPNAME@@ when the test is over."
 '@
 
 $stopBody = @'
-# Generated by setup-farend.ps1. Stop ring slot 2: the game first, then the sidecar.
+# Generated by setup-farend.ps1. Stop map slot @@SLOT@@: the game first, then the
+# sidecar.
+#
+#   .\@@STOPNAME@@             the game and the sidecar
+#   .\@@STOPNAME@@ -GameOnly   the game only. The sidecar stays up, keeps its
+#                              relay session and keeps taking custody of arrivals
+#                              into its journal. This is the dark half of the main
+#                              machine's arrival-pacing test; wake it with
+#                              .\@@STARTNAME@@ -GameOnly.
+[CmdletBinding()]
+param([switch]$GameOnly)
 $ErrorActionPreference = 'SilentlyContinue'
 
 $DataRoot = '@@DATAROOT@@'
@@ -348,40 +447,62 @@ function Stop-Recorded {
     }
 }
 
-Stop-Recorded (Join-Path $DataRoot 'game.pid')    'the game'
-Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'the sidecar'
-
-# Anything an earlier run left behind.
+Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game'
 Stop-Process -Name 'The Bibites' -Force
+Start-Sleep -Seconds 1
+
+if ($GameOnly) {
+    $sc = @(Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue)
+    Write-Host ("the world is down; sidecar processes still running: {0} (want 1)" -f $sc.Count)
+    Write-Host "The sidecar keeps its slot and its journal. Arrivals accumulate there and"
+    Write-Host "are delivered, paced, when the world comes back."
+    exit 0
+}
+
+Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'the sidecar'
 Stop-Process -Name 'multiverse-sidecar' -Force
 Start-Sleep -Seconds 1
 
 $left = @(Get-Process -Name 'The Bibites', 'multiverse-sidecar' -ErrorAction SilentlyContinue)
-Write-Host ("slot 2 processes still running: {0} (want 0)" -f $left.Count)
-Write-Host "The journal in $DataRoot\data-slot-2 is kept. Do not delete it: it is this"
+Write-Host ("slot @@SLOT@@ processes still running: {0} (want 0)" -f $left.Count)
+Write-Host "The journal in $DataRoot\data-slot-@@SLOT@@ is kept. Do not delete it: it is this"
 Write-Host "machine's record of every organism it is holding."
 '@
 
-$startPath = Join-Path $Here 'start-slot2.ps1'
-$stopPath  = Join-Path $Here 'stop-slot2.ps1'
+$startPath = Join-Path $Here $startName
+$stopPath  = Join-Path $Here $stopName
 
-$start = $startBody.Replace('@@GAMEDIR@@',     $GameDir).
-                    Replace('@@DATAROOT@@',    $DataRoot).
-                    Replace('@@RELAYURL@@',    $relayUrl).
-                    Replace('@@SIDECAREXE@@',  $sidecarExe).
-                    Replace('@@PEERID@@',      $PeerId).
-                    Replace('@@SLOT@@',        [string]$Slot).
-                    Replace('@@SIDECARPORT@@', [string]$SidecarPort).
-                    Replace('@@WORLD@@',       $World)
-Set-Content -Path $startPath -Value $start -Encoding ASCII
-Set-Content -Path $stopPath  -Value $stopBody.Replace('@@DATAROOT@@', $DataRoot) -Encoding ASCII
+function Expand-Template {
+    param([string]$Body)
+    return $Body.Replace('@@GAMEDIR@@',     $GameDir).
+                 Replace('@@DATAROOT@@',    $DataRoot).
+                 Replace('@@RELAYURL@@',    $relayUrl).
+                 Replace('@@RELAYPORT@@',   [string]$RelayPort).
+                 Replace('@@SIDECAREXE@@',  $sidecarExe).
+                 Replace('@@PEERID@@',      $PeerId).
+                 Replace('@@SLOT@@',        [string]$Slot).
+                 Replace('@@POSITION@@',    $Position).
+                 Replace('@@EXPORTEDGES@@', $ExportEdges).
+                 Replace('@@SIDECARPORT@@', [string]$SidecarPort).
+                 Replace('@@WORLD@@',       $World).
+                 Replace('@@SAVEMINUTES@@', [string]$SaveMinutes).
+                 Replace('@@SAVEKEEP@@',    [string]$SaveKeep).
+                 Replace('@@STARTNAME@@',   $startName).
+                 Replace('@@STOPNAME@@',    $stopName)
+}
+
+Set-Content -Path $startPath -Value (Expand-Template $startBody) -Encoding ASCII
+Set-Content -Path $stopPath  -Value (Expand-Template $stopBody)  -Encoding ASCII
 Say "wrote $startPath"
 Say "wrote $stopPath"
 
 Write-Host ""
 Write-Host "Setup is complete." -ForegroundColor Green
-Say "relay      : $relayUrl"
-Say "ring slot  : $Slot   world: $World   sidecar port: $SidecarPort"
-Say "data       : $DataRoot"
+Say "relay        : $relayUrl"
+Say "slot         : $Slot   position: $Position   peer id: $PeerId"
+Say "world        : $World   export edges: $ExportEdges"
+Say "sidecar port : $SidecarPort (loopback on this machine only)"
+Say "saves        : every $SaveMinutes minutes, keeping $SaveKeep backups"
+Say "data         : $DataRoot"
 Write-Host ""
-Say "Next: run  .\start-slot2.ps1"
+Say "Next: run  .\$startName"

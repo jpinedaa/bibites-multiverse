@@ -2,6 +2,11 @@
 # Build farend/dist/farend-bundle.zip: everything the second computer needs, and
 # nothing it cannot use.
 #
+# Under M4 the second computer is map SLOT 6, at position (2,1) — a real world
+# with a real game, not a spare. The bundle is what makes it one, so a stale zip
+# is a stale member of the map: rebuild and commit it whenever the plugin, the
+# sidecar binary, setup-farend.ps1 or the $AssemblySha256 pin changes.
+#
 # The bundle holds four artifacts and two scripts:
 #
 #   setup-farend.ps1        install: find the game, check its version, install
