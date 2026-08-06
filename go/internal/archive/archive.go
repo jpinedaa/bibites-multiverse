@@ -158,6 +158,14 @@ type Archive struct {
 	pending     map[string]*fetch
 	sentWindow  map[string]*rateWindow
 	closed      bool
+
+	// The history strip's cache. It is deliberately NOT under mu: building a
+	// history reads a file, and nothing that reads a file may hold the lock the
+	// migration path takes (Risk 4).
+	historyMu  sync.Mutex
+	historyKey string
+	historyAt  time.Time
+	historyVal History
 }
 
 type rateWindow struct {

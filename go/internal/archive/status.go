@@ -48,6 +48,9 @@ type Status struct {
 	Totals      Totals               `json:"totals"`
 	Gaps        int                  `json:"genomeGaps"`
 	Records     int                  `json:"ledgerRecords"`
+	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
+	// over. A rate with no window on it is not a measurement.
+	FlowWindowMs int64 `json:"flowWindowMs"`
 }
 
 // SlotView is one reserved slot as the page renders it.
@@ -97,7 +100,14 @@ type LaneView struct {
 	// PerMinute is the rate over the last flowWindow.
 	Migrations int     `json:"migrations"`
 	PerMinute  float64 `json:"perMinute"`
-	LastAtMs   int64   `json:"lastAtMs,omitempty"`
+	// RecentHops is how many of those envelopes landed inside flowWindow. It is
+	// the number the map animates: a viewer needs a per-lane rate to pace the
+	// pulses, and the alternative — shipping the ledger to the browser and
+	// letting it count — would put the migration record on the wire for a
+	// picture. Migrations is cumulative and monotonic, so a reader that polls
+	// can also difference it to see a hop ARRIVE.
+	RecentHops int   `json:"recentHops"`
+	LastAtMs   int64 `json:"lastAtMs,omitempty"`
 }
 
 // Totals are the map-wide numbers, each of which is a SUM OF KNOWN VALUES only.
@@ -152,6 +162,12 @@ func (l *lane) perMinute(nowMs int64) float64 {
 	return float64(len(l.recent)) / flowWindow.Minutes()
 }
 
+// recentHops is how many envelopes are still inside flowWindow.
+func (l *lane) recentHops(nowMs int64) int {
+	l.trim(nowMs)
+	return len(l.recent)
+}
+
 // StatusView builds the whole operator view. It holds the archive's lock for the
 // duration and touches nothing on the migration path.
 func (a *Archive) StatusView() Status {
@@ -174,6 +190,7 @@ func (a *Archive) StatusView() Status {
 		Lanes:          []LaneView{},
 		Gaps:           len(a.pending),
 		Records:        a.recordCount,
+		FlowWindowMs:   flowWindow.Milliseconds(),
 	}
 	if out.HaveStatus {
 		out.StatusAgeMs = now.Sub(a.statusAt).Milliseconds()
@@ -271,6 +288,7 @@ func (a *Archive) StatusView() Status {
 			if l, ok := a.lanes[lanePair{si.Slot, lv.ToSlot}]; ok {
 				lv.Migrations = l.total
 				lv.PerMinute = l.perMinute(nowMs)
+				lv.RecentHops = l.recentHops(nowMs)
 				lv.LastAtMs = l.lastAt
 			}
 			out.Lanes = append(out.Lanes, lv)
