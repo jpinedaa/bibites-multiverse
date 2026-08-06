@@ -1745,6 +1745,16 @@ all() {
   phase10
 }
 
+# run-m4-lan.sh sources this file for the M4 topology and every helper the LAN
+# does not change — the map readers, the status-page accessors, the per-slot
+# facts, the hop observer, the phases that are entirely local. M4_LIB=1 stops the
+# dispatch below so that a source is a library load and not a command.
+#
+# It is the same guard run-m3.sh carries for run-m3-lan.sh, and the same reason.
+if [ "${M4_LIB:-0}" = 1 ]; then
+  return 0
+fi
+
 case "${1:-status}" in
   build)      build ;;
   reserve)    reserve ;;

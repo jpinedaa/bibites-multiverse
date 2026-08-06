@@ -12,8 +12,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
 | Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.0`**, amended in place; §15 is the M4 set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.0`**; §14 is its reconciliation set), `genome-hash.md` (the canonical genome projection, unchanged by M4). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
-| Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rig modernization* |
-| Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The bundle itself lands in `farend/dist/`, which is **gitignored**: it holds binaries and a downloaded BepInEx release |
+| Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), **`run-m4-lan.sh` = the same map with slot 6 on the second computer** (the M4 exit-test rig; it sources `run-m4.sh` with `M4_LIB=1`), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rigs* |
+| Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
 | Shared LAN token — **never in the repo** | `~/.multiverse-token`, mode `600`. See *The LAN token* below |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
@@ -182,22 +182,107 @@ sectors, `contract-b/1`, `MULTIVERSE_SECTOR`, `--sector A`, `/contract-b/v1` —
 those reach the current binaries. Read it for its phase structure and its evidence, not as a
 runnable rig; `run-m3.sh` is the one that runs.
 
-### The M4 rig modernization
+### The M4 rigs — `run-m4.sh` and `run-m4-lan.sh`
 
-**There is no `e2e/run-m4.sh`, and the M3 scripts speak a wire the binaries retired.** M4
-bumped both majors (`contract-a/2.0`, `contract-b/3.0`) and moved both paths. A relay and a
-sidecar still *serve* the old paths and then close the connection with an explanation, so a
-stale script does not fail with a socket error — it connects, gets closed, and looks like a
-peer that will not join. That is the failure to expect, and it is why this list exists.
+`e2e/run-m4.sh` is the **local rehearsal**: a 3×2 map of six slots on this machine, five of
+them real games and the sixth driven by `bin/fakemod` because BepInEx hands out five log
+files (*The five-instance ceiling*, in Gotchas). Every phase is separately invokable on a
+healthy rig.
+
+```sh
+e2e/run-m4.sh reserve    # pre-place the map: slot-1..slot-6 at (0,0)..(2,1)
+e2e/run-m4.sh arm        # copy e2e/data/slot-1 — the T1 journal — into the M4 rig
+e2e/run-m4.sh seed       # create (or evolve) M4-Slot1..M4-Slot5
+e2e/run-m4.sh up         # relay → archive → sidecars 1..6 → games 1..5 + fakemod
+e2e/run-m4.sh phase1     # the grid forms: 3×2, per-edge EDGE_STATUS, status page
+e2e/run-m4.sh phase2     # two-axis migration out of slot 1: east to 2, north to 4
+e2e/run-m4.sh phase3     # the resume test: the 2026-08-04 stranded organism delivers
+e2e/run-m4.sh phase4     # kill slot 5 mid-column, then splice it back in
+e2e/run-m4.sh phase5     # a NEW seventh peer splices into a live map
+e2e/run-m4.sh phase6     # burst pacing: dark slot 2, accumulate, wake, assert the pacing
+e2e/run-m4.sh phase7     # bounce-after-hold, against a short configured holdTimeoutMs
+e2e/run-m4.sh phase8     # periodic saves: [M4-SAVE] on interval, rotation on disk
+e2e/run-m4.sh phase9     # portals on screen, plus a flourish
+e2e/run-m4.sh phase10    # error sweep, teardown, exactly-once census
+e2e/run-m4.sh all        # build, reserve, arm, seed, up, phase1..10
+```
+
+`e2e/run-m4-lan.sh` is **the same map with slot 6 on the second computer**, and it is the
+exit-test rig. It sources `run-m4.sh` with `M4_LIB=1` — which sources `run-m3.sh` with
+`M3_LIB=1` — so it inherits the M4 topology, the map readers, the status-page accessors,
+`hop`, the seeding and the teardown, and replaces only what the LAN changes.
+
+```sh
+e2e/run-m4-lan.sh lanhost    # the relay's LAN address + the elevated owner commands
+e2e/run-m4-lan.sh reserve    # pre-place ALL SIX slots, including slot-6@2,1 for the far end
+e2e/run-m4-lan.sh seed       # M4-Slot1..M4-Slot5 here; the far end seeds M4-Slot6 itself
+e2e/run-m4-lan.sh up         # relay (0.0.0.0) → archive → sidecars 1..5 → games 1..5
+e2e/run-m4-lan.sh phase1     # the grid forms across two machines; the far slot reports for duty
+e2e/run-m4-lan.sh phase2     # forced hops INTO the far slot on BOTH axes, read from the archive
+e2e/run-m4-lan.sh phase3     # the return current: NATURAL hops OUT of the far slot, both axes
+e2e/run-m4-lan.sh phase4     # kill-and-heal on LOCAL slot 5; the healed east lane crosses the LAN
+e2e/run-m4-lan.sh phase5     # burst pacing, dam on a LOCAL slot (run-m4.sh phase 6, unchanged)
+e2e/run-m4-lan.sh phase5far  # the same test against the FAR slot — two owner commands, then observed
+e2e/run-m4-lan.sh phase6     # periodic saves: five worlds on disk here, the sixth via HEARTBEAT.lastSave
+e2e/run-m4-lan.sh phase7     # portals: the local evidence, and what only a person can say
+e2e/run-m4-lan.sh phase8     # exactly-once, error sweep, teardown of THIS machine only
+e2e/run-m4-lan.sh all        # up, phase1..8 (phase5far is excluded: it blocks on a person)
+```
+
+Six things about it are load-bearing:
+
+- **The far slot is slot 6, at (2,1), and the choice is forced by the map.** It was already
+  the rehearsal's synthetic slot, so every "read this from somewhere else" branch carries
+  over unchanged. It keeps the **resume test** local (slot 1 → slot 2, and the T1 journal is
+  the only copy of that input) and the **kill-and-heal test** local (a hard kill is a command
+  to a process, and the far end takes no commands). It has both lanes, because a 3×2 map is
+  a torus — (2,1) exports east to slot 4 and north to slot 3, and receives from slot 5 and
+  slot 3. And killing slot 5 leaves row 1 as {4, 6}, so **phase 4's healed east lane runs
+  across the network**, which is a stronger test than the rehearsal's, not a weaker one.
+- **Five real games here plus one real game there is six real worlds and no synthetic peer.**
+  This is the honest 3×2 map `m4_considerations.md`'s exit test asks for, in its "5+1 across
+  the two machines" form. `bin/fakemod` is not started at all.
+- **The far end is never driven** (D9, `m3_considerations.md` Risk 6, `m4_considerations.md`
+  Risk 7). Slot 6's existence comes from the relay's map; its liveness from the EDGE_STATUS
+  ripple; every hop through it from the archive; and its population, custody depth, paced
+  depth, simulated time and last save from the status page. **Under M4 the ripple is sharper
+  than M3's**: with the far end down, slot 5's east lane *bypasses* the hole to slot 4 and
+  slot 3's north lane *closes* `no_peer` (column 2 is {3, 6}, and §2.1 has nothing to
+  re-pair to); the instant it joins, slot 5's east lane moves to slot 6 and slot 3's north
+  lane opens. Two independent local witnesses to a remote world's health.
+- **It uses its own relay data dir**, `e2e/relay-data-m4-lan/`, and its own journals, logs
+  and command-file directory. `run-m4.sh phase5` splices a seventh peer into
+  `e2e/relay-data-m4/ring.json` and leaves that map **4×2**; a reservation is idempotent and
+  never shrinks a map, so sharing it would start the LAN rig on a map that fails its own
+  first assertion.
+- **`phase5far` is the only phase that needs a person**, and it needs exactly two commands on
+  the second computer: `.\stop-slot6.ps1 -GameOnly` and `.\start-slot6.ps1 -GameOnly`. The
+  `-GameOnly` switches exist for this: the world goes away while **the sidecar keeps running**,
+  so the burst accumulates in the far journal and drains, paced, when the world returns. The
+  rig sends nothing — it prints the command and polls `modConnected` on the status page. The
+  automatable `phase5` proves the same rule with a local dam, so `phase5far` is confirmation
+  and never the only evidence.
+- **Three of the rehearsal's phases are not re-run, and the script says why.** The resume
+  test is local by construction. The seventh-peer splice needs a mod-less sidecar on this
+  machine and the relay is the only arbiter. The bounded hold (`run-m4.sh phase7`) needs the
+  destination killed in the window between the forward and the acknowledgement, which is two
+  commands to the destination — and the destination is now a computer this rig will not
+  command.
+
+**The M3 scripts still speak a wire the binaries retired.** M4 bumped both majors
+(`contract-a/2.0`, `contract-b/3.0`) and moved both paths. A relay and a sidecar still
+*serve* the old paths and then close the connection with an explanation, so a stale script
+does not fail with a socket error — it connects, gets closed, and looks like a peer that
+will not join. That is the failure to expect, and it is why this list exists.
 
 | What the scripts speak | What M4 speaks | Where |
 |---|---|---|
-| `/contract-b/v2` | **`/contract-b/v3`** | `e2e/run-m3.sh` (`RELAY_URL`), and it is **sourced as a library** by `run-m3-lan.sh` and `baseline.sh`, so this one line reaches all three. Also `e2e/run-m3-lan.sh` (the operator note) and `farend/setup-farend.ps1`. `e2e/run-m2.sh` still says `/contract-b/v1`, two majors back. |
+| `/contract-b/v2` | **`/contract-b/v3`** | `e2e/run-m3.sh` (`RELAY_URL`), and it is **sourced as a library** by `run-m3-lan.sh` and `baseline.sh`, so this one line reaches all three. Also `e2e/run-m3-lan.sh` (the operator note). `e2e/run-m2.sh` still says `/contract-b/v1`, two majors back. **`farend/setup-farend.ps1` is done** — it builds `/contract-b/v3`. |
 | `/contract-a/v1` | **`/contract-a/v2`** | **Nothing to change.** No script hardcodes a Contract A path — the sidecar's `--listen` and the mod's `MULTIVERSE_SIDECAR_PORT` carry it, and both sides already agree. |
-| `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N`** | `e2e/run-m3.sh` and `farend/setup-farend.ps1`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. |
+| `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N`** | `e2e/run-m3.sh`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. **`farend/setup-farend.ps1` is done**: its generated `start-slot6.ps1` sets the plural name, and it rejects an edge set that would silently disable the client. |
 | the relay's `ring.json` key `"ring"` | **`"slots"`**, with `width`, `height`, `col`, `row` | `e2e/run-m3-lan.sh` (`ring_order()`) and `e2e/baseline.sh`. **This is the silent one.** `"ring"` is a read-only migration path: an M4 relay reads an M3 file once and never writes that key again. Both readers work today against the committed M3 `ring.json` and start returning empty the first time an M4 relay saves. |
 | nothing | the archive's **`--http`** flag, and **`ringstat`** | No script mentions either. The archive is started without `--http`, so it binds its compiled default — `127.0.0.1:8796` since the M4 port plan, `127.0.0.1:8791` before it. `baseline.sh` reads the archive only through the filesystem, so the whole M4 observability surface — map shape, effective lanes, bypasses, custody/paced/held depths, hold-timeout bounces — is absent from the baseline capture. |
-| relay `8790`, archive `8791` | relay **`8795`**, archive **`8796`** | The Go defaults already moved (`contractb.DefaultRelayPort`, the archive's `--http`, `ringstat`'s `--url`). Still to change: `RELAY_PORT` in `e2e/run-m3.sh`, `$RelayPort` in `farend/setup-farend.ps1`, and the firewall rule and portproxy in *Owner steps*. See *The M4 port plan* below — the old defaults are slot 4's and slot 5's Contract A ports on a six-slot rig. |
+| relay `8790`, archive `8791` | relay **`8795`**, archive **`8796`** | The Go defaults already moved (`contractb.DefaultRelayPort`, the archive's `--http`, `ringstat`'s `--url`), and so has `$RelayPort` in `farend/setup-farend.ps1`. Still to change: `RELAY_PORT` in `e2e/run-m3.sh`, and **the firewall rule and the portproxy, which are owner steps** (below). See *The M4 port plan* — the old defaults are slot 4's and slot 5's Contract A ports on a six-slot rig. |
 | `grep '[M2-CROSSING]' \| tail -n 1` | a filter on **`edge=`** | `e2e/baseline.sh`, in both `last_crossing()` and the population trend. **Fixed 2026-08-05** in the M4 pre-flight: both now key on `edge=`. See *Reading the logs* below — one window emits one line **per export edge**. |
 
 **`--reserve-slot` did not change, and a report saying otherwise is wrong.** The relay's flag
@@ -495,61 +580,112 @@ farend/make-farend-bundle.sh      # -> farend/dist/farend-bundle.zip
 ```
 
 The bundle holds `setup-farend.ps1`, `README.md`, a **fresh** `BibitesMultiverse.dll` (it runs
-`deploy.sh`), `multiverse-sidecar.exe` (cross-compiled), and the pinned BepInEx 5.4.23.3 zip
-(downloaded once into the gitignored `farend/dist/cache/`, SHA-256 verified). The script
-refuses to build when `setup-farend.ps1`'s pinned `$AssemblySha256` no longer equals
+`deploy.sh`), `multiverse-sidecar.exe` (cross-compiled `GOOS=windows CGO_ENABLED=0` from
+`go/`), and the pinned BepInEx 5.4.23.3 zip (downloaded once into the gitignored
+`farend/dist/cache/`, SHA-256 verified). The script refuses to build when
+`setup-farend.ps1`'s pinned `$AssemblySha256` no longer equals
 `bibites-mod/libs/BibitesAssembly.dll` — that pin **is** the version gate on the far end, and a
-stale one would let two different game builds into one ring.
+stale one would let two different game builds into one map.
 
 **The repo distributes the bundle.** `farend/dist/farend-bundle.zip` is tracked as of
 `8463b72`, so the second computer clones the private GitHub repo and takes the zip out of the
 checkout instead of receiving a hand-copied file. Only two things still travel by hand:
 `~/.multiverse-token` (as `token.txt`) and the relay's LAN address — **neither belongs in the
-repo**. Re-run `make-farend-bundle.sh` and commit the new zip whenever the plugin, the sidecar
-binary or the `$AssemblySha256` pin changes; a stale committed bundle is a stale far end.
+repo**. **Re-run `make-farend-bundle.sh` and commit the new zip** whenever the plugin, the
+sidecar binary, `setup-farend.ps1`, `farend/README.md` or the `$AssemblySha256` pin changes;
+a stale committed bundle is a stale member of the map, and under M4 that is a missing sixth
+world rather than a spare.
+
+### M4: the far end is slot 6, at position (2,1)
+
+Under M3 the second computer was ring slot 2 of three. Under M4 it is **slot 6 of a 3×2
+map**, and it is a full member: a real world, a real simulation, real periodic saves and real
+portals, exporting **east and north** and receiving from the west and the south. It is not a
+spare and it is not synthetic — `bin/fakemod` exists only for the local rehearsal, which
+cannot run a sixth game (*The five-instance ceiling*, in Gotchas). `e2e/run-m4-lan.sh`'s
+header carries the full argument for slot 6 rather than any other; the short form is that it
+keeps the resume test and the kill-and-heal test on this machine and still puts the healed
+lane of phase 4 across the network.
 
 With the zip in hand, its operator runs two commands, and `farend/README.md` is the whole of
 their instructions:
 
 ```powershell
-.\setup-farend.ps1 -RelayHost <relay LAN address> -TokenFile .\token.txt
-.\start-slot2.ps1
+.\setup-farend.ps1 -RelayHost 192.168.1.227 -TokenFile .\token.txt
+.\start-slot6.ps1
 ```
 
 `setup-farend.ps1` finds Steam's copy of the game (registry, the usual folders, and every
 extra library in `libraryfolders.vdf`), verifies `BibitesAssembly.dll` against the pin,
+validates `-Position` and `-ExportEdges` before anything can silently disable the client,
 installs BepInEx if it is absent, copies the plugin, writes the token to
 `%LOCALAPPDATA%\BibitesMultiverse\token.txt` with a user-only ACL, and generates
-`start-slot2.ps1` and `stop-slot2.ps1`. `start-slot2.ps1` sets `MULTIVERSE_EXPORT_EDGE=E`,
-`MULTIVERSE_RING_SLOT=2`, `MULTIVERSE_SIDECAR_PORT=8787`, `MULTIVERSE_WORLD=M3-Slot2` and
-`MULTIVERSE_CMD_FILE` natively — there is no `WSLENV` on that machine — starts the sidecar,
-**waits for `ring slot granted` in its log**, and only then starts the game. A failure to join
-prints the four usual causes and does not start the game.
+`start-slot6.ps1` and `stop-slot6.ps1`. Its M4 defaults are `-RelayPort 8795`, `-Slot 6`,
+`-Position '2,1'`, `-PeerId slot-6`, `-World M4-Slot6`, `-ExportEdges 'E,N'` and
+`-SidecarPort 8787` (loopback on that machine, where nothing competes for it).
+
+`start-slot6.ps1` sets the mod's whole configuration natively — there is no `WSLENV` on that
+machine — starts the sidecar with `--position 2,1`, **waits for `contract B: slot granted` in
+its log**, and only then starts the game. A failure to join prints the four usual causes,
+names TCP 8795, and does not start the game.
+
+| Variable it sets | Value | Why it belongs there and not here |
+|---|---|---|
+| `MULTIVERSE_EXPORT_EDGES` | `E,N` | The M4 plural name. Both lanes wrap: a 3×2 map is a torus, so every slot declares both axes and the sidecar decides from the relay's map which of them `EDGE_STATUS` opens. |
+| `MULTIVERSE_RING_SLOT` | `6` | The advisory label. The sidecar closes `4001` if it disagrees with the granted slot, which turns a mis-wired far end into one second of diagnosis. |
+| `MULTIVERSE_SIDECAR_PORT` | `8787` | Contract A is loopback-only, on that machine's loopback. |
+| `MULTIVERSE_WORLD` | `M4-Slot6` | The mod seeds it on the first start. This machine never creates it. |
+| `MULTIVERSE_CMD_FILE` | `%TEMP%\bibites-m4\cmd-6.txt` | Local to that machine, and used only by its own operator (`F10` also works). |
+| `MULTIVERSE_SAVE_MINUTES` / `_KEEP` / `_ON_QUIT` | `10` / `6` / `true` | **The periodic save is mod configuration, so it is set there and nowhere else.** This machine never asks for a save and never schedules one (`contract-a.md` §5.2). What crosses the network is a **receipt** — `HEARTBEAT.lastSave` — which reaches the status page and is the only wire path an operator surface has to a remote world's save state. |
+| `MULTIVERSE_PORTAL` / `_FLOURISHES` | `true` / `true` | The far screen is the only place slot 6's strips and rings can be seen. |
+
+**The `-GameOnly` switches are for the arrival-pacing test, and nothing else.**
+`.\stop-slot6.ps1 -GameOnly` stops the world and **leaves the sidecar running**, so it keeps
+its slot, its relay session and its journal, and goes on taking custody of arrivals while the
+world is away. `.\start-slot6.ps1 -GameOnly` brings the world back against that sidecar. That
+is the only way an undriven far end can play the dark half of `run-m4-lan.sh phase5far`: the
+rig prints the command, waits for `modConnected` to flip on the status page, and observes.
+A full `stop-slot6.ps1` would take the sidecar too, the lane would close, and there would be
+nothing to accumulate.
 
 ### Owner steps: making the relay reachable (elevated, on this machine)
 
 WSL2 here runs in **NAT mode**, and `.wslconfig` sets that deliberately: `networkingMode=mirrored`
 breaks Docker Desktop port publishing on this host. A relay on `0.0.0.0:8795` inside WSL is
 therefore reachable from Windows but **not from the LAN** until Windows forwards the port into
-the VM. Both commands below need an elevated PowerShell and both are **owner steps**;
-`e2e/run-m3-lan.sh lanhost` prints them with the current addresses filled in.
+the VM. All three commands below need an elevated PowerShell and all three are **owner
+steps**; `e2e/run-m4-lan.sh lanhost` prints them with the current addresses, the current
+portproxy table and the recorded LAN host already filled in.
 
 ```powershell
-# once. -Profile Any, NOT Private: an Ethernet NIC classified "Public" silently ignores a
-# Private-only rule, and the far end just reports the relay unreachable. See Gotchas.
-New-NetFirewallRule -DisplayName "Bibites Multiverse relay" -Direction Inbound `
+# 1. FIRST, AND IT BLOCKS THE RIG: delete the M3-era portproxy on 8790. Under the M4
+#    port plan 8790 is SLOT 4'S Contract A port, and this proxy listens on 0.0.0.0.
+netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0
+
+# 2. once. -Profile Any, NOT Private: an Ethernet NIC classified "Public" silently ignores a
+#    Private-only rule, and the far end just reports the relay unreachable. See Gotchas.
+New-NetFirewallRule -DisplayName "Bibites Multiverse relay 8795" -Direction Inbound `
   -Action Allow -Protocol TCP -LocalPort 8795 -Profile Any
 
-# after every WSL restart: the WSL address changes
+# 3. after every WSL restart: the WSL address changes
 netsh interface portproxy delete v4tov4 listenport=8795 listenaddress=0.0.0.0
 netsh interface portproxy add v4tov4 listenport=8795 listenaddress=0.0.0.0 `
   connectport=8795 connectaddress=<the WSL address from `lanhost`>
 ```
 
-**The port is `8795` from M4 on, not `8790`** (*The M4 port plan*, in Gotchas). An M3-era
-firewall rule and portproxy for `8790` are still there and are now pointing at nothing; the
-old rule can stay, and a stale portproxy on `8790` is harmless but misleading. Delete it:
-`netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0`.
+**The port is `8795` from M4 on, not `8790`** (*The M4 port plan*, in Gotchas). The M3-era
+firewall rule for 8790 can stay; it opens a port nothing serves. **The M3-era portproxy on
+8790 cannot stay, and step 1 is not optional**: `run-m4.sh up` and `run-m4-lan.sh up` both
+read the Windows listener table first and **refuse to start** while any Windows process — a
+portproxy included — holds a Contract A port. Until it is deleted, the only way past is the
+five-digit dodge, `SLOT_PORT_BASE=18787`, which moves all six slots to `18787`–`18792`.
+
+**Measured 2026-08-06:** that proxy is `0.0.0.0:8790 -> 172.24.110.174:8790`, and
+`172.24.110.174` is the WSL VM's *current* address — so today it happens to forward slot 4's
+traffic back into WSL and mostly works. That is luck, not correctness: the WSL address changes
+on every restart, after which the same proxy silently swallows slot 4's Contract A connection
+and the map forms one slot short with the reason `peer_mod_absent`, which reads like a mod
+bug. Delete it.
 
 **Relay LAN host: `192.168.1.227`.** Confirmed 2026-08-03 by the far end itself: the second
 computer ran `setup-farend.ps1 -RelayHost 192.168.1.227`, was granted slot 2, and the relay
@@ -559,7 +695,7 @@ normally `192.168.x.x` or `10.x.x.x`, never a `172.x` hypervisor address.
 
 **The address alone is not enough — the portproxy behind it must exist.** `192.168.1.227:8795`
 only reaches the relay while the `netsh` portproxy above points at the *current* WSL address,
-and that address changes on every WSL restart. Re-run `e2e/run-m3-lan.sh lanhost` after a
+and that address changes on every WSL restart. Re-run `e2e/run-m4-lan.sh lanhost` after a
 restart and re-add the portproxy with the value it prints; the LAN host itself does not change,
 so this line stays correct even when the far end suddenly cannot connect.
 
@@ -656,16 +792,22 @@ so this line stays correct even when the far end suddenly cannot connect.
   and 208 s of CPU while the other five were at ~590 MB and ~1200 s and had seeded their
   worlds; freeing one log file made that same instance seed in forty seconds and left the
   instance that gave up the file idle in its place. So five real games is the ceiling on
-  this install, and `e2e/run-m4.sh` drives its sixth slot with `bin/fakemod` instead. The
-  LAN phase does not hit this at all: the second computer has its own BepInEx.
+  this install, and `e2e/run-m4.sh` drives its sixth slot with `bin/fakemod` instead. **The
+  LAN rig does not hit this at all**: the second computer has its own BepInEx, so
+  `e2e/run-m4-lan.sh` runs five real games here and one real game there — six real worlds,
+  no synthetic peer. That is the reason slot 6 is the slot that moves.
 - **A stale `netsh portproxy` steals a Contract A port from Windows processes only.** The
-  M3 LAN rig left `0.0.0.0:8790 -> <a dead WSL address>:8790` behind. It listens on
-  `0.0.0.0`, so it shadows `127.0.0.1:8790` for **Windows** processes while WSL keeps its
-  own. The sidecar binds 8790 inside WSL and reports success; the game dials it from
-  Windows and gets *"An existing connection was forcibly closed by the remote host"* six
+  M3 LAN rig left `0.0.0.0:8790 -> <a WSL address>:8790` behind, and under the M4 port plan
+  8790 is **slot 4's** Contract A port. It listens on `0.0.0.0`, so it shadows
+  `127.0.0.1:8790` for **Windows** processes while WSL keeps its own. When the recorded
+  address is stale the sidecar binds 8790 inside WSL and reports success, the game dials it
+  from Windows and gets *"An existing connection was forcibly closed by the remote host"* six
   times, and the map forms one slot short with the reason `peer_mod_absent` — which reads
-  like a mod bug. `e2e/run-m4.sh up` checks the Windows listener table before it starts
-  anything. **TODO-owner**, in an elevated PowerShell:
+  like a mod bug and is a network artifact. **When it happens to be current it works, which
+  is worse**: measured 2026-08-06 the proxy points at `172.24.110.174`, the live WSL address,
+  so slot 4 works today and breaks at the next WSL restart. `e2e/run-m4.sh up` and
+  `e2e/run-m4-lan.sh up` both check the Windows listener table and refuse to start.
+  **TODO-owner**, in an elevated PowerShell:
   `netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0`. Until
   then, `SLOT_PORT_BASE=18787 e2e/run-m4.sh up`.
 - **The M4 port plan — settled 2026-08-05, and these are now the compiled defaults.** The
@@ -686,10 +828,11 @@ so this line stays correct even when the far end suddenly cannot connect.
   layout. `contract-b-m4.md` §3, *The M4 port plan*, is the normative statement.
 
   **Three things move with the relay port and are easy to forget:** the Windows Firewall
-  rule, the WSL portproxy (both in *Owner steps* below), and the far end's
-  `setup-farend.ps1 -RelayPort`, which still defaults to `8790` in the committed bundle. A
-  far end set up against the old default connects to nothing and looks like a peer that will
-  not join.
+  rule and the WSL portproxy (both in *Owner steps* above), and the far end's
+  `setup-farend.ps1 -RelayPort`. The bundle is now on `8795`; a far end still set up against
+  the old default connects to nothing and looks like a peer that will not join, so a second
+  computer prepared before 2026-08-06 has to re-run `setup-farend.ps1` from the current
+  bundle.
 - **`kill $!` does not kill a program launched in the background *inside* a compound
   command.** In `( … & )`, or in `cmd1 && cmd2 &`, `$!` is the pid of the **subshell**; the
   real program is its child and outlives the kill. A relay started that way survived its own
@@ -714,9 +857,10 @@ so this line stays correct even when the far end suddenly cannot connect.
 - **The archive ledger is cumulative, so an archive assertion needs a lower time bound.**
   `migrations.jsonl` keeps every hop of every earlier run, so "wait until a `slot 2 -> slot 3`
   record exists" succeeded instantly against an hour-old record and reported a crossing that
-  had not happened yet. Every wait in `run-m3-lan.sh` is filtered by an RFC 3339 mark taken
-  when the wait starts; the header line begins with that timestamp, so a string compare is
-  the whole filter.
+  had not happened yet. Every wait in `run-m3-lan.sh` and `run-m4-lan.sh` is filtered by an
+  RFC 3339 mark taken when the wait starts; the header line begins with that timestamp, so a
+  string compare is the whole filter. It matters more on the LAN rigs than anywhere else,
+  because the archive is the *only* witness to a hop that lands on the other computer.
 - **Reconnect bugs only appear in a real restart under a live game.** The M2 exit test
   found a leaked send loop in the mod's WebSocket transport that no per-side test suite
   could reach: `Task.WhenAny` left the losing loop alive, it parked on a semaphore shared

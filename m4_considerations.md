@@ -802,10 +802,17 @@ An absent stat renders as `unknown`, and `statsAsOfMs` ages every block.
 - The rig measurement of Risk 1, before WP8 depends on it
 - Per-instance log names, environment variables and far-end scripts, for six slots
 
-**Status: OPEN.** No `e2e/run-m4.sh` exists. The M3 scripts still speak the retired wire, and
-`dev_environment.md`, *The M4 rig modernization*, lists every line to change. WP6 also owns
-the save-stall re-measure that WP4 left open, and the rehearsal and LAN phases the exit test
-depends on.
+**Status: the rigs exist; the LAN run has not happened yet.** `e2e/run-m4.sh` is the local
+rehearsal — a 3×2 map of six slots, five real games and `bin/fakemod` for the sixth, because
+BepInEx caps this install at five log files and an instance with no log file never runs the
+mod at all. `e2e/run-m4-lan.sh` is the exit-test rig: the same map with **slot 6 on the second
+computer**, which retires the synthetic peer and makes the shape an honest 5+1. The far-end
+bundle is on `contract-b/v3`, port `8795`, `MULTIVERSE_EXPORT_EDGES=E,N` and slot 6 at (2,1).
+`dev_environment.md`, *The M4 rigs*, carries both command lists and the reasoning for the slot
+choice. WP6 also owns the save-stall re-measure that WP4 left open.
+
+**What is still open here:** the LAN run itself, which needs the owner's elevated networking
+steps on this machine and one setup pass on the second computer.
 
 ### WP7 — The portal
 
@@ -851,8 +858,15 @@ Build the test on `e2e/run-m3-lan.sh`. The ring form-up, the command file and th
 checks all carry over. The rig grows to six instances, so the harness starts and stops
 each slot by number.
 
-**Status: OPEN.** It depends on WP6, which is open. Part 2 changed on 2026-08-05 — see the
-amendment under *Exit Test*, Part 2.
+**Status: the rig is built and the run is pending.** `e2e/run-m4-lan.sh` is that test — five
+real games here, slot 6 real on the second computer, and the far end never driven. Its phases
+map onto the parts below: phase 1 to Part 1's form-up, phases 2 and 3 to the two-axis current
+(phase 3 waits for a **natural** crossing out of the far world, because nothing here may force
+one), phase 4 to Parts 2 and 3, phase 5 and phase5far to Part 5, phase 6 to Part 7's save
+half, phase 7 to Part 8, and phase 8 to Parts 9 and 10. Part 4 (a brand-new instance) and the
+bounded-hold case are proven by `run-m4.sh` phases 5 and 7 instead, and `run-m4-lan.sh`'s
+header states why neither can be re-proven against a machine the rig refuses to command.
+Part 2 changed on 2026-08-05 — see the amendment under *Exit Test*, Part 2.
 
 ## Exit Test
 
@@ -1072,10 +1086,12 @@ call below is settled. The sections named beside each one carry the result.
 Updated 2026-08-05, after WP1 to WP5 and WP7 landed. Every remaining step needs a running
 game, which is what makes WP6 the gate.
 
-1. **Modernize the rig, and build `e2e/run-m4.sh`** (WP6). It is the only open dependency of
-   every step below. `dev_environment.md`, *The M4 rig modernization*, lists each line.
-   Fix the port plan first: the relay default `8790` and the archive default `8791` both sit
-   inside the six-slot Contract A range `8787`–`8792`.
+1. **Done** (WP6). The port plan moved the relay to `8795` and the archive to `8796`,
+   `e2e/run-m4.sh` rehearsed the six-slot map locally, and `e2e/run-m4-lan.sh` plus the
+   refreshed `farend/` bundle carry it across the two machines. `dev_environment.md`,
+   *The M4 rigs*, is the entry point. **The one owner step left is networking**: delete the
+   stale `8790` portproxy, open TCP `8795`, and forward it into WSL — `run-m4-lan.sh lanhost`
+   prints all three with live values.
 2. **Measure the rig at six instances** (Risk 1), before WP8 depends on it.
 3. **Re-measure the save stall at six instances** (Risk 3), against the 2 000 ms budget. The
    budget check ships and logs `event=BUDGET_EXCEEDED`. Only the contention is unmeasured.

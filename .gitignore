@@ -30,3 +30,13 @@ e2e/logs-m4/
 e2e/relay-data-m4/
 e2e/archive-data-m4/
 e2e/run-m4/
+
+# The M4 LAN rig's runtime state. Slot 6 runs on the second computer, so only five
+# journals are ever here. It gets its OWN relay data dir rather than sharing the
+# rehearsal's: run-m4.sh phase 5 spliced a seventh peer into e2e/relay-data-m4/
+# and left that map 4x2, and a reservation never shrinks a map.
+e2e/data-m4-lan/
+e2e/logs-m4-lan/
+e2e/relay-data-m4-lan/
+e2e/archive-data-m4-lan/
+e2e/run-m4-lan/
