@@ -125,6 +125,15 @@ type fakeModOptions struct {
 	// is a string, an entry that is an array), and a test that could only send
 	// well-typed censuses could not reach a single row of it (§17, A35).
 	censusRaw string
+	// settingsRaw, when set, is spliced into every CONFIG_UPDATE's data object
+	// as raw JSON — the five OPTIONAL fields of contract-a.md §19, A42. It is
+	// RAW for the same reason censusRaw is: A42's strip rule is mostly about
+	// shapes no Go type can express (a `migrationExclude` that is a number, a
+	// `saveMinutes` that is a string, an entry that is an object), and a test
+	// that could only send well-typed settings could not reach a single row of
+	// it. An empty string sends NO settings field at all, which is what a mod
+	// older than contract-a/2.3 does.
+	settingsRaw string
 }
 
 // fakeMod is an in-process WebSocket client that speaks Contract A exactly as
@@ -156,11 +165,16 @@ type fakeMod struct {
 	// censusRaw is the JSON fragment spliced into every HEARTBEAT. Mutable, so
 	// a test can watch a world start reporting a census, change it, and stop.
 	censusRaw string
-	ackMode   ackMode
-	world     *fakeWorld
-	hbStop    chan struct{}
-	hbStopped bool
-	wg        sync.WaitGroup
+	// settingsRaw is the JSON fragment spliced into every CONFIG_UPDATE.
+	// Mutable, so a test can re-handshake with `reason: "settings_changed"` —
+	// which is the channel §19 A42 names for a setting that ever becomes
+	// mutable, and which already exists.
+	settingsRaw string
+	ackMode     ackMode
+	world       *fakeWorld
+	hbStop      chan struct{}
+	hbStopped   bool
+	wg          sync.WaitGroup
 }
 
 func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
@@ -215,7 +229,7 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 		t: t, opts: opts, ws: ws, ctx: ctx, cancel: cancel,
 		edges: map[string]contracta.EdgeState{}, ackMode: opts.ackMode, world: opts.world,
 		simStep: opts.simStep, closeCode: -1, hbStop: make(chan struct{}),
-		censusRaw: opts.censusRaw,
+		censusRaw: opts.censusRaw, settingsRaw: opts.settingsRaw,
 	}
 	m.wg.Add(1)
 	go m.readLoop()
@@ -408,7 +422,7 @@ func (m *fakeMod) sendConfigUpdate(reason string) {
 	m.t.Helper()
 	simSize := m.opts.simSize
 	borderWidth := m.opts.borderWidth
-	m.sendFrame(contracta.TypeConfigUpdate, contracta.ConfigUpdate{
+	cfg := contracta.ConfigUpdate{
 		SessionID:      m.world.sessionID,
 		Reason:         reason,
 		GameVersion:    m.opts.gameVersion,
@@ -419,7 +433,36 @@ func (m *fakeMod) sendConfigUpdate(reason string) {
 		BorderWidth:    &borderWidth,
 		RingSlot:       m.opts.ringSlot,
 		WorldName:      "M4-Slot",
-	})
+	}
+	m.mu.Lock()
+	settings := m.settingsRaw
+	m.mu.Unlock()
+	if settings == "" {
+		m.sendFrame(contracta.TypeConfigUpdate, cfg)
+		return
+	}
+	// The settings go on as RAW BYTES, so a test can send a shape no Go type
+	// can hold. Everything else on the frame is built normally.
+	body, err := json.Marshal(cfg)
+	if err != nil {
+		m.t.Errorf("fake mod: encode CONFIG_UPDATE: %v", err)
+		return
+	}
+	spliced := append(append([]byte{}, body[:len(body)-1]...), ',')
+	spliced = append(spliced, settings...)
+	spliced = append(spliced, '}')
+	m.sendFrame(contracta.TypeConfigUpdate, json.RawMessage(spliced))
+}
+
+// setSettings changes what rides the next CONFIG_UPDATE and re-handshakes with
+// the reason §5.1's enum has carried since M2 for exactly this. It is the whole
+// mechanism §19 A42 points at for a setting that ever becomes mutable at
+// runtime: no new field, no new message, no new cadence.
+func (m *fakeMod) setSettings(raw string) {
+	m.mu.Lock()
+	m.settingsRaw = raw
+	m.mu.Unlock()
+	m.sendConfigUpdate("settings_changed")
 }
 
 func (m *fakeMod) heartbeatLoop(interval time.Duration) {

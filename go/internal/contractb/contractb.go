@@ -326,6 +326,14 @@ type (
 	TruncatedFlag = wire.TruncatedFlag
 )
 
+// ExcludeList is `migrationExclude`, copied verbatim from the mod's handshake
+// (contract-a.md §5.1, §19 A42; §6.3.1, §19 B18). Same shape, same rules, one
+// validator — and that validator lives on the OTHER wire, where the list enters
+// the system. THE ABSENT/EMPTY DISTINCTION IS THE WHOLE POINT OF THE TYPE: nil
+// is a world that has not said, and a present empty list is a world that has
+// said its exclusion policy is off.
+type ExcludeList = wire.ExcludeList
+
 // SpeciesCensusMax is §12's shared bound, the same constant contract-a.md §10
 // names. It is what keeps a stats block — and the six-slot PEER_STATUS that
 // republishes six of them — bounded, and no party on this wire may raise it
@@ -390,6 +398,58 @@ type PeerStats struct {
 	// ignored when Species is absent.
 	Truncated TruncatedFlag `json:"truncated,omitempty"`
 
+	// ---------------------------------------------- what this world was TOLD to do
+	//
+	// The seven fields of §19, B18. Everything above answers "what is this world
+	// doing"; these answer "what was it configured to do", and each is the CAUSE
+	// behind a number the operator surface already shows: the exclusion list
+	// beside the census that holds the excluded species and the lane that never
+	// carries it, saveMinutes beside lastSave, contractAVersion beside whichever
+	// field group that mod is too old to send.
+	//
+	// ABSENCE IS UNKNOWN IN EVERY CASE — no mod connected, a peer whose build
+	// predates this amendment, or a mod older than contract-a/2.3 — and A READER
+	// MUST NOT SUBSTITUTE A DEFAULT. One substitution is called out by name
+	// because it is the tempting one: saveMinutes must never render as 10, which
+	// is what the mod ships with, because a page that does it claims a world is
+	// being saved when its timer may be off (§10.1, §19 B19).
+	//
+	// THEY ARE READ-ONLY AND ONE-WAY. There is no path by which any of them
+	// travels back toward a mod; the sidecar never sends a CONFIG_UPDATE, so
+	// there is no code path to extend (contract-a.md §19, A43).
+
+	// ModVersion is CONFIG_UPDATE.modVersion, which this wire's sidecar has held
+	// since M2 and never forwarded. IT IS NOT A CAPABILITY STATEMENT: what a mod
+	// can do is ContractAVersion plus, field by field, presence. A reader that
+	// gates a rendering on a version STRING rather than on a field's presence is
+	// doing the arithmetic §3.1 forbids, with a looser number.
+	ModVersion string `json:"modVersion,omitempty"`
+	// ContractAVersion is the `protocol` identifier on that mod's frames — the
+	// SESSION'S OWN, never the sidecar's build. Those differ on exactly the rig
+	// this field exists to describe, and publishing the wrong one would make
+	// every "unknown" on the page explain itself incorrectly.
+	ContractAVersion string `json:"contractAVersion,omitempty"`
+	// MigrationExclude is CONFIG_UPDATE.migrationExclude, copied VERBATIM and in
+	// the mod's own order. Entries are A34-NORMALIZED because that lane matches,
+	// while Species above is RAW because that lane labels — both rules live on
+	// this one block and no party may apply either to the other's field. A
+	// consumer asking whether an excluded species is in the census normalizes
+	// THE CENSUS COPY FOR THE COMPARISON ONLY, and rewrites neither.
+	//
+	// nil is unknown; a present list with no entries is the policy switched OFF.
+	MigrationExclude *ExcludeList `json:"migrationExclude,omitempty"`
+	// SaveMinutes is wall-clock minutes between that world's periodic saves. 0 IS
+	// A READING, NOT A GAP — the save timer is off — exactly as TimeScale 0 is a
+	// stopped world, and a reader that folds the two together loses the one fact
+	// that explains an absent LastSave.
+	SaveMinutes *float64 `json:"saveMinutes,omitempty"`
+	SaveKeep    *int     `json:"saveKeep,omitempty"`
+	SaveOnQuit  *bool    `json:"saveOnQuit,omitempty"`
+	// WorldWrapping is D10's containment fact for that world, reported by the mod
+	// and never written by it. false is a reading and a loud one: it names a
+	// world that is not containing its own organisms.
+	WorldWrapping *bool `json:"worldWrapping,omitempty"`
+
 	// unknown is every key of the block this build does not have a field for,
 	// kept as it arrived and re-emitted on the way out. It is §16 B11's one
 	// SHOULD, "for the next field after this one": a relay that re-encodes a
@@ -409,6 +469,9 @@ var knownStatKeys = []string{
 	"bouncedTimeoutTotal", "simulatedTime", "timeScale",
 	"inboundRatePerSimMinute", "inboundRateBurst",
 	"lastSave", "species", "truncated",
+	// §19, B18.
+	"modVersion", "contractAVersion", "migrationExclude",
+	"saveMinutes", "saveKeep", "saveOnQuit", "worldWrapping",
 }
 
 // UnmarshalJSON decodes the block and REMEMBERS WHAT IT DID NOT UNDERSTAND

@@ -113,6 +113,31 @@ type SlotView struct {
 	// SpeciesTruncated says the 32 most abundant species are named and the rest
 	// is UNREPORTED. The page must say so rather than present the list as whole.
 	SpeciesTruncated bool `json:"speciesTruncated,omitempty"`
+
+	// WHAT THIS WORLD WAS TOLD TO DO (contract-b-m4.md §19, B18 and B19).
+	// Carried through UNTOUCHED — the archive's whole obligation here is to
+	// render an absent value as unknown and to never send one back — and each
+	// of them sits beside the number it explains: the exclusion list beside the
+	// census that holds the excluded species, SaveMinutes beside LastSave,
+	// ContractAVersion beside whichever field group that mod is too old to send.
+	ModVersion       string `json:"modVersion,omitempty"`
+	ContractAVersion string `json:"contractAVersion,omitempty"`
+	// MigrationExcludeKnown is the ABSENT/EMPTY distinction made explicit for a
+	// JSON reader, for the same reason SpeciesKnown is: a JS client cannot tell
+	// an omitted array from an empty one once it has parsed. false means UNKNOWN
+	// — no list on the block, or a block too old to be state — and true with an
+	// empty MigrationExclude is the stronger, different fact that the origin
+	// mod has the exclusion policy switched OFF.
+	MigrationExcludeKnown bool     `json:"migrationExcludeKnown"`
+	MigrationExclude      []string `json:"migrationExclude,omitempty"`
+	// SaveMinutes of 0 is a save timer that is OFF, and it is the explanation
+	// for a world with no LastSave. IT MUST NEVER RENDER AS 10, which is what
+	// the mod ships with: that would claim a world is being saved when its timer
+	// may be off, the most expensive wrong number this page could print.
+	SaveMinutes   *float64 `json:"saveMinutes,omitempty"`
+	SaveKeep      *int     `json:"saveKeep,omitempty"`
+	SaveOnQuit    *bool    `json:"saveOnQuit,omitempty"`
+	WorldWrapping *bool    `json:"worldWrapping,omitempty"`
 }
 
 // LaneView is one derived effective lane, with the flow the ledger measured on
@@ -288,6 +313,25 @@ func (a *Archive) StatusView() Status {
 						si.Stats.Species.Entries...)
 					v.SpeciesTruncated = bool(si.Stats.Truncated)
 				}
+				// The settings age with the rest of the block for the same
+				// reason the census does: one stats block carries one
+				// statsAsOfMs, and a fresh exclusion list beside a stale
+				// population from the same frame would be two ages under one
+				// timestamp. Absent stays absent all the way here — nothing
+				// below fills one in, and there is no default in this chain to
+				// fill one in FROM, which is why no configuration can produce a
+				// wrong setting on the page (§19, B19).
+				v.ModVersion = si.Stats.ModVersion
+				v.ContractAVersion = si.Stats.ContractAVersion
+				if si.Stats.MigrationExclude != nil {
+					v.MigrationExcludeKnown = true
+					v.MigrationExclude = append([]string{},
+						si.Stats.MigrationExclude.Names...)
+				}
+				v.SaveMinutes = si.Stats.SaveMinutes
+				v.SaveKeep = si.Stats.SaveKeep
+				v.SaveOnQuit = si.Stats.SaveOnQuit
+				v.WorldWrapping = si.Stats.WorldWrapping
 			}
 		}
 		if !v.StatsKnown {

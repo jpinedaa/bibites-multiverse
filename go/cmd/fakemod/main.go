@@ -40,6 +40,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -99,6 +101,9 @@ type fakeMod struct {
 	// report exactly what it was told to report, and nil rather than [] when it
 	// was told nothing (contract-a.md §17, A35).
 	census *wire.Census
+	// settings are the five OPTIONAL fields of §19 A42, sent on every handshake
+	// and never on a heartbeat. Absent stays absent, per field.
+	settings contracta.Settings
 
 	conn *wsutil.Conn
 
@@ -151,6 +156,23 @@ func run(args []string) int {
 			"a mod older than contract-a/2.2 does and reads as UNKNOWN on the page; '[]' is the "+
 			"different, stronger statement that this world has nothing alive. Names are sent "+
 			"RAW, edge whitespace and all, because that is what this field carries (§17, A36)")
+	// The five settings of contract-a.md §19, A42. They ride the HANDSHAKE, not
+	// the heartbeat, because a setting is static per session, and every one of
+	// them is OPTIONAL: an unset flag sends NO field at all, which is what a mod
+	// older than contract-a/2.3 does and what the page must read as unknown.
+	excludeCSV := fs.String("migration-exclude", "",
+		"the species this peer never exports, comma-separated, as contract-a.md §19 A42's "+
+			"migrationExclude — full A34-normalized names, e.g. 'Basic bibite'. Unset sends NO "+
+			"field, which reads as UNKNOWN; '-' sends an empty array, which is the different and "+
+			"stronger statement that the exclusion policy is OFF")
+	saveMinutes := fs.Float64("save-minutes", -1,
+		"wall-clock minutes between this peer's periodic saves. Negative sends no field "+
+			"(unknown); 0 is a READING, not an absence — the save timer is off, which is the "+
+			"explanation for a world that never reports a lastSave")
+	saveKeep := fs.Int("save-keep", -1, "rotated saves kept beside the live one; negative sends no field")
+	saveOnQuit := fs.String("save-on-quit", "", "true or false; empty sends no field (unknown)")
+	worldWrapping := fs.String("world-wrapping", "",
+		"true or false; empty sends no field. D10's containment fact, reported and never written")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -205,13 +227,21 @@ func run(args []string) int {
 		census = carried
 	}
 
+	// Parsed ONCE, here, for the same reason the census is: a typo is a startup
+	// error rather than a field silently stripped on every reconnect.
+	settings, err := parseSettings(*excludeCSV, *saveMinutes, *saveKeep, *saveOnQuit, *worldWrapping)
+	if err != nil {
+		log.Error("fakemod: bad settings flag", "err", err)
+		return 1
+	}
+
 	m := &fakeMod{
 		log: log, sessionID: wire.NewUUID(), simSize: *simSize, timeScale: *timeScale,
 		edgesOut: out, edgesAll: all, ringSlot: *ringSlot,
 		statePath: *statePath, holdFor: *holdFor, ackDelay: *ackDelay,
 		openEdges: map[string]bool{}, holding: map[string]*held{},
 		byEntity: map[int32]string{}, inFlight: map[string]*held{},
-		census: census,
+		census: census, settings: settings,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -227,6 +257,57 @@ func run(args []string) int {
 		}
 	}
 	return 0
+}
+
+// parseSettings turns the five flags into contract-a.md §19 A42's settings.
+// ABSENT STAYS ABSENT throughout: a flag that was not given produces no field,
+// which is exactly what a mod that predates §19 sends and what the page must
+// render as unknown rather than as a value.
+func parseSettings(excludeCSV string, saveMinutes float64, saveKeep int,
+	saveOnQuit, worldWrapping string) (contracta.Settings, error) {
+
+	var s contracta.Settings
+	switch {
+	case excludeCSV == "":
+		// No field. Unknown.
+	case excludeCSV == "-":
+		// A PRESENT EMPTY ARRAY: the exclusion policy is off, which is a
+		// stronger and different statement than absence.
+		s.MigrationExclude = &wire.ExcludeList{Names: []string{}}
+	default:
+		names := []string{}
+		for _, n := range strings.Split(excludeCSV, ",") {
+			// The A34-normalized form, because this is the MATCHING lane: what
+			// travels is the exact string the policy compares against.
+			if norm := wire.NormalizeSpeciesName(n); norm != "" {
+				names = append(names, norm)
+			}
+		}
+		s.MigrationExclude = &wire.ExcludeList{Names: names}
+	}
+	if saveMinutes >= 0 {
+		v := saveMinutes
+		s.SaveMinutes = &v
+	}
+	if saveKeep >= 0 {
+		v := saveKeep
+		s.SaveKeep = &v
+	}
+	if saveOnQuit != "" {
+		v, err := strconv.ParseBool(saveOnQuit)
+		if err != nil {
+			return s, fmt.Errorf("--save-on-quit %q is not a boolean", saveOnQuit)
+		}
+		s.SaveOnQuit = &v
+	}
+	if worldWrapping != "" {
+		v, err := strconv.ParseBool(worldWrapping)
+		if err != nil {
+			return s, fmt.Errorf("--world-wrapping %q is not a boolean", worldWrapping)
+		}
+		s.WorldWrapping = &v
+	}
+	return s, nil
 }
 
 func add(list *[]string, seen map[string]bool, e string) {
@@ -292,6 +373,9 @@ func (m *fakeMod) session(ctx context.Context, url string, borderWidth float64, 
 		slot := m.ringSlot
 		cfg.RingSlot = &slot
 	}
+	// §19, A42: the settings ride the handshake, once per connection, because
+	// they do not change while a world runs.
+	cfg.SetSettings(m.settings)
 	if err := m.send(contracta.TypeConfigUpdate, cfg); err != nil {
 		return err
 	}

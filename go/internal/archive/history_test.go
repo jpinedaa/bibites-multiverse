@@ -513,8 +513,17 @@ func TestPageDrawsSpeciesGroupedCreatures(t *testing.T) {
 
 	// The creature glyph: ONE definition, drawn by reference. A per-organism
 	// path would be a few hundred kilobytes of DOM for six worlds.
-	if !strings.Contains(page, `'<g id="bib">'`) {
+	//
+	// It is defined in the DOCUMENT rather than inside the map's SVG, and that
+	// moved when the species tab needed the same glyph: the map's SVG is thrown
+	// away and rebuilt whenever the map's shape changes, so a definition living
+	// inside it is one the other tabs cannot reference.
+	if !strings.Contains(page, `<g id="bib">`) {
 		t.Fatal("the page has no bibite glyph definition")
+	}
+	if !strings.Contains(page, `<svg class="glyphdefs"`) {
+		t.Fatal("the creature glyph is not defined for the whole document; a tab other than " +
+			"the map cannot draw a species that only exists inside the map's own SVG")
 	}
 	if strings.Count(page, `<path d="M 4.5 -1.26`) != 1 {
 		t.Fatal("the creature body is not defined exactly once")

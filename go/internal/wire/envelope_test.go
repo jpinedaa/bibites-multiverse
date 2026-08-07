@@ -9,9 +9,9 @@ import (
 )
 
 func TestDecodeAcceptsTheContractExample(t *testing.T) {
-	// contract-a.md §3's example, verbatim at contract-a/2.2 (§17, A37).
+	// contract-a.md §3's example, verbatim at contract-a/2.3 (§19, A44).
 	raw := []byte(`{
-	  "protocol": "contract-a/2.2",
+	  "protocol": "contract-a/2.3",
 	  "type": "MIGRATE_OUT",
 	  "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
 	  "sentAt": 1785693600123,
@@ -77,7 +77,7 @@ func TestCheckProtocolComparesMajorOnly(t *testing.T) {
 	// CONSTRUCTION, and the census simply reads as unknown on the older one
 	// (§17, A37). THE MINOR IS A CAPABILITY STATEMENT, NOT A NEGOTIATION.
 	for _, got := range []string{"contract-a/2", "contract-a/2.0", "contract-a/2.1",
-		"contract-a/2.2", "contract-a/2.7"} {
+		"contract-a/2.2", "contract-a/2.3", "contract-a/2.7"} {
 		if err := CheckProtocol(got, ProtocolA); err != nil {
 			t.Fatalf("CheckProtocol(%q): %v", got, err)
 		}

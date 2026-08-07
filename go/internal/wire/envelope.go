@@ -56,9 +56,25 @@ import (
 // declared set since A26. A four-edge mod is legal against a contract-a/2.2
 // sidecar TODAY, with no code change, so a 2.3 would be a lie in the one
 // direction that matters: it would imply 2.2 cannot do this.
+// THE WORLD SETTINGS MOVE BOTH, AND IT IS THE FIRST TIME SINCE M4's OPENING
+// THAT BOTH MOVE TOGETHER (contract-a.md §19 A44, contract-b-m4.md §19 B19).
+// Contract A gains five OPTIONAL fields on `CONFIG_UPDATE` — `migrationExclude`,
+// `saveMinutes`, `saveKeep`, `saveOnQuit`, `worldWrapping` — and Contract B's
+// stats block gains those five plus the two version strings the sidecar has
+// always held and never published, `modVersion` and `contractAVersion`. Seven
+// additive OPTIONAL fields, no removal, no type change, no message type, enum,
+// close code or NACK code touched: MINOR on both, and the paths stay at
+// /contract-a/v2 and /contract-b/v3.
+//
+// The detection rule is unchanged and is still the reason a mixed rig degrades
+// to "unknown" and never to a wrong number: a receiver detects a setting BY THE
+// PRESENCE OF THE FIELD, never by arithmetic on the minor and never by the
+// minor a peer claims. A sidecar that speaks 2.3 against a mod that speaks 2.2
+// publishes no settings and says so — `contractAVersion` is what makes that
+// unknown self-explaining.
 const (
-	ProtocolA = "contract-a/2.2"
-	ProtocolB = "contract-b/3.4"
+	ProtocolA = "contract-a/2.3"
+	ProtocolB = "contract-b/3.5"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).

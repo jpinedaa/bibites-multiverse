@@ -89,6 +89,33 @@ type modSession struct {
 	// log an operator scrolls past is the same as no log at all. A CHANGED
 	// defect logs again, and so does the same defect on a new session.
 	censusWarn string
+
+	// contractAVersion is the `protocol` identifier THIS MOD'S FRAMES CARRY —
+	// the session's own, never this sidecar's build (contract-b-m4.md §19, B18).
+	// The two differ on exactly the rig this field exists to describe: a 2.3
+	// sidecar beside a 2.2 mod publishes no settings, and this is what turns
+	// that unknown from a puzzle into a fact.
+	contractAVersion string
+
+	// settings are the five OPTIONAL fields of §19 A42, after that section's
+	// strip rule, from the LAST CONFIG_UPDATE this session sent.
+	//
+	// They are STATIC PER SESSION by construction: they ride the handshake
+	// rather than the heartbeat because a setting describes what a world was
+	// told to do and does not change while it runs. A mod that ever makes one
+	// mutable already has its channel — a CONFIG_UPDATE with
+	// reason "settings_changed" — and this field is simply overwritten by it.
+	//
+	// Unlike the census this IS sticky within a session, and the asymmetry is
+	// deliberate: a census is a measurement whose absence from one beat means
+	// "not measured now", while a setting absent from a re-sent handshake means
+	// the mod stopped publishing it. Both keep nil as unknown; only the cadence
+	// differs (§19, A42: "static per session").
+	settings contracta.Settings
+	// settingsWarn is the last set of strip reasons logged, for the same reason
+	// censusWarn exists: a mod with a permanently broken settings row says so
+	// once, not once per reconnect loop.
+	settingsWarn string
 }
 
 // serveRetiredContractA implements contract-a.md §15 A23: an M3 mod dials
@@ -215,6 +242,13 @@ func (s *Sidecar) handleModFrame(sess *modSession, frame []byte) bool {
 
 	s.mu.Lock()
 	handshaked := sess.handshaked
+	// The NEGOTIATED contract-a version is what this peer actually sent, on
+	// every frame, and never what this build supports (contract-b-m4.md §19,
+	// B18). It is read here rather than only on the handshake so a mod that
+	// changed its own identifier mid-session is reported as what it is now.
+	if env.Protocol != "" {
+		sess.contractAVersion = env.Protocol
+	}
 	s.mu.Unlock()
 
 	if !handshaked && env.Type != contracta.TypeConfigUpdate {
@@ -268,6 +302,13 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 		return false
 	}
 
+	// §19, A42: the five settings are VALIDATED BUT NEVER FATAL. Parsing happens
+	// here, after every close-worthy check above has passed, and it cannot fail
+	// — Settings() strips what it cannot use and reports why. A settings row
+	// must never end a session that is carrying organisms, and this is the
+	// handshake, so closing on one would cost the whole session.
+	settings, settingsWhy := cfg.Settings()
+
 	s.mu.Lock()
 	first := !sess.handshaked
 	if !first && !wire.SameUUID(cfg.SessionID, sess.sessionID) {
@@ -283,6 +324,16 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 	sess.exportEdges = exportEdges
 	sess.ringSlot = cfg.RingSlot
 	sess.worldName = cfg.WorldName
+	// COPY, NEVER AUTHOR (§19, B18). What reaches the relay is what this mod
+	// said, field for field. This sidecar does not compute, default, repair,
+	// re-normalize or infer any of the five, exactly as it does not author a
+	// census — and in particular it MUST NOT refuse, filter or pre-empt a
+	// MIGRATE_OUT because the organism's species is on the published list. That
+	// is the mod's test, at the mod's capture band (§18, A39; §19, A42).
+	sess.settings = settings
+	settingsFresh := strings.Join(settingsWhy, "; ")
+	logSettingsWarn := settingsFresh != "" && settingsFresh != sess.settingsWarn
+	sess.settingsWarn = settingsFresh
 	sess.lastHeartbeat = s.now()
 
 	if mismatch := s.slotMismatchLocked(sess); mismatch != "" {
@@ -307,12 +358,58 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 	s.replayInboundLocked()
 	s.mu.Unlock()
 
+	if logSettingsWarn {
+		// One line per DEFECT, not one per handshake: a mod that reconnects in a
+		// loop with the same broken settings row says so once.
+		s.log.Warn("contract A: stripped part of a CONFIG_UPDATE settings row; "+
+			"the handshake was processed without it", "reason", settingsFresh)
+	}
 	s.log.Info("contract A: handshake", "sessionId", cfg.SessionID, "reason", cfg.Reason,
 		"gameVersion", cfg.GameVersion, "modVersion", cfg.ModVersion,
+		"contractAVersion", env.Protocol,
 		"simulationSize", sess.simSize, "borderEdges", sess.borderEdges,
-		"exportEdges", sess.exportEdges, "ringSlot", derefIntPtr(cfg.RingSlot), "world", cfg.WorldName)
+		"exportEdges", sess.exportEdges, "ringSlot", derefIntPtr(cfg.RingSlot), "world", cfg.WorldName,
+		"migrationExclude", describeExclude(settings.MigrationExclude),
+		"saveMinutes", describeFloat(settings.SaveMinutes),
+		"saveKeep", describeInt(settings.SaveKeep),
+		"saveOnQuit", describeBool(settings.SaveOnQuit),
+		"worldWrapping", describeBool(settings.WorldWrapping))
 	s.refreshClaim()
 	return true
+}
+
+// The four describe helpers exist so a log line can say UNKNOWN out loud. "0"
+// and "unknown" are different answers about a save timer, and a log that prints
+// the zero value for both is the same defect the page is forbidden to have.
+func describeExclude(l *wire.ExcludeList) string {
+	if l == nil {
+		return "unknown"
+	}
+	if len(l.Names) == 0 {
+		return "[] (policy off)"
+	}
+	return "[" + strings.Join(l.Names, ", ") + "]"
+}
+
+func describeFloat(v *float64) string {
+	if v == nil {
+		return "unknown"
+	}
+	return strconv.FormatFloat(*v, 'g', -1, 64)
+}
+
+func describeInt(v *int) string {
+	if v == nil {
+		return "unknown"
+	}
+	return strconv.Itoa(*v)
+}
+
+func describeBool(v *bool) string {
+	if v == nil {
+		return "unknown"
+	}
+	return strconv.FormatBool(*v)
 }
 
 // slotMismatchLocked implements the advisory CONFIG_UPDATE.ringSlot check of

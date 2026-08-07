@@ -7,9 +7,11 @@
 package contracta
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"multiverse/internal/wire"
@@ -293,6 +295,164 @@ type ConfigUpdate struct {
 	// disagreement with the slot the sidecar holds closes with 4001.
 	RingSlot  *int   `json:"ringSlot,omitempty"`
 	WorldName string `json:"worldName,omitempty"`
+
+	// THE FIVE SETTINGS OF §19, A42, AND THEY ARE RAW ON PURPOSE.
+	//
+	// Every other field on this message is typed, because a bad value there is a
+	// close 4003 and the type system is how that is enforced. These five are the
+	// third named exception to §9.3: a malformed one is STRIPPED and the
+	// handshake proceeds, because a field nobody decides anything on must never
+	// be able to end a session that is carrying organisms.
+	//
+	// json.RawMessage is how that rule is made STRUCTURALLY true rather than
+	// remembered: a raw field cannot fail the enclosing decode whatever a mod
+	// puts in it, so there is no path on which `"saveMinutes": "soon"` reaches
+	// Validate at all. Settings() is the one place they are parsed, checked and
+	// dropped, and it returns reasons instead of an error for the same reason.
+	MigrationExclude json.RawMessage `json:"migrationExclude,omitempty"`
+	SaveMinutes      json.RawMessage `json:"saveMinutes,omitempty"`
+	SaveKeep         json.RawMessage `json:"saveKeep,omitempty"`
+	SaveOnQuit       json.RawMessage `json:"saveOnQuit,omitempty"`
+	WorldWrapping    json.RawMessage `json:"worldWrapping,omitempty"`
+}
+
+// Settings is the parsed form of §19 A42's five fields: what a world was told
+// to do, as opposed to every other fact this system carries, which is what a
+// world is doing.
+//
+// EVERY FIELD IS A POINTER AND nil IS UNKNOWN, with two readings that are
+// emphatically not gaps: SaveMinutes of 0 is a save timer that is OFF, and a
+// non-nil MigrationExclude with no entries is an exclusion policy that is OFF.
+// A reader that folds either into absence loses the one fact that explains an
+// absent `lastSave` or a quiet lane (§19, A42; contract-b-m4.md §19, B18).
+//
+// NOTHING IN THIS SYSTEM ACTS ON ANY OF THEM. They take no part in validation,
+// admission control, pacing, custody, dedup, edge state, the S check or
+// liveness, and there is no path by which one travels back toward a mod: they
+// are a REPORT, and a control surface is a separate design rather than an
+// extension of these (§19, A43).
+type Settings struct {
+	MigrationExclude *wire.ExcludeList
+	SaveMinutes      *float64
+	SaveKeep         *int
+	SaveOnQuit       *bool
+	WorldWrapping    *bool
+}
+
+// Settings parses the five settings fields, STRIPS WHAT FAILS AND KEEPS THE
+// REST, and returns one line per rule that fired. It never returns an error and
+// there is deliberately no way for it to: see the field comments above.
+//
+// A bad ENTRY costs that entry; a `migrationExclude` that is not an array costs
+// the field; a `saveMinutes` that is not a number costs that number. None of
+// them costs the handshake, and the handshake is the whole session (§19, A42).
+func (c *ConfigUpdate) Settings() (Settings, []string) {
+	var out Settings
+	var why []string
+
+	if len(c.MigrationExclude) > 0 && !isJSONNull(c.MigrationExclude) {
+		var list wire.ExcludeList
+		// ExcludeList.UnmarshalJSON is permissive and records rather than
+		// returns; CarryExclude is what reads what it recorded.
+		_ = json.Unmarshal(c.MigrationExclude, &list)
+		carried, reasons := wire.CarryExclude(&list)
+		out.MigrationExclude = carried
+		why = append(why, reasons...)
+	}
+	if v, reason := lenientFloat("saveMinutes", c.SaveMinutes); reason != "" {
+		why = append(why, reason)
+	} else if v != nil {
+		// A NEGATIVE interval is not a reading of anything — 0 already means
+		// "off" — so it is stripped rather than published as a duration nobody
+		// could act on.
+		if *v < 0 {
+			why = append(why, "saveMinutes is negative")
+		} else {
+			out.SaveMinutes = v
+		}
+	}
+	if v, reason := lenientFloat("saveKeep", c.SaveKeep); reason != "" {
+		why = append(why, reason)
+	} else if v != nil {
+		if *v != math.Trunc(*v) || *v < 0 {
+			why = append(why, "saveKeep is not a non-negative whole number")
+		} else {
+			n := int(*v)
+			out.SaveKeep = &n
+		}
+	}
+	if v, reason := lenientBool("saveOnQuit", c.SaveOnQuit); reason != "" {
+		why = append(why, reason)
+	} else {
+		out.SaveOnQuit = v
+	}
+	if v, reason := lenientBool("worldWrapping", c.WorldWrapping); reason != "" {
+		why = append(why, reason)
+	} else {
+		out.WorldWrapping = v
+	}
+	return out, why
+}
+
+// SetSettings fills the five raw fields from a parsed Settings. It is the
+// SENDING half — the fake mod and the tests use it — and it is the only place
+// in Go that writes these fields, because the real sender is a C# plugin.
+func (c *ConfigUpdate) SetSettings(s Settings) {
+	c.MigrationExclude, c.SaveMinutes = nil, nil
+	c.SaveKeep, c.SaveOnQuit, c.WorldWrapping = nil, nil, nil
+	if s.MigrationExclude != nil {
+		b, err := json.Marshal(s.MigrationExclude)
+		if err == nil {
+			c.MigrationExclude = b
+		}
+	}
+	if s.SaveMinutes != nil {
+		c.SaveMinutes = mustRaw(*s.SaveMinutes)
+	}
+	if s.SaveKeep != nil {
+		c.SaveKeep = mustRaw(*s.SaveKeep)
+	}
+	if s.SaveOnQuit != nil {
+		c.SaveOnQuit = mustRaw(*s.SaveOnQuit)
+	}
+	if s.WorldWrapping != nil {
+		c.WorldWrapping = mustRaw(*s.WorldWrapping)
+	}
+}
+
+func mustRaw(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+func isJSONNull(b json.RawMessage) bool { return string(bytes.TrimSpace(b)) == "null" }
+
+func lenientFloat(field string, raw json.RawMessage) (*float64, string) {
+	if len(raw) == 0 || isJSONNull(raw) {
+		return nil, ""
+	}
+	var v float64
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, field + " is not a number"
+	}
+	if !wire.Finite(v) {
+		return nil, field + " is not a finite number"
+	}
+	return &v, ""
+}
+
+func lenientBool(field string, raw json.RawMessage) (*bool, string) {
+	if len(raw) == 0 || isJSONNull(raw) {
+		return nil, ""
+	}
+	var v bool
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, field + " is not a boolean"
+	}
+	return &v, ""
 }
 
 // ResolveExportEdges validates CONFIG_UPDATE.exportEdges under §15, A18: an

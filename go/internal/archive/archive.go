@@ -158,11 +158,18 @@ type Archive struct {
 	// carry it.
 	hops          []Hop
 	hopsTruncated bool
-	recordCount   int
-	seen          map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
-	pending       map[string]*fetch
-	sentWindow    map[string]*rateWindow
-	closed        bool
+	// species is the LEDGER AGGREGATE behind the species tab: crossings, first
+	// and last sighting, distinct genomes and recent lanes, per species. It is
+	// built once during the replay below and maintained by onMigration, because
+	// the ledger is half a million lines and growing and a per-poll scan of it
+	// would make the cost of watching grow with the age of the record. See
+	// species.go.
+	species     *speciesLedger
+	recordCount int
+	seen        map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
+	pending     map[string]*fetch
+	sentWindow  map[string]*rateWindow
+	closed      bool
 
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
@@ -171,6 +178,10 @@ type Archive struct {
 	historyKey string
 	historyAt  time.Time
 	historyVal History
+	// The species detail's sparkline cache, kept apart from the strip's for the
+	// same reason and bounded in entries as well as in age: a reader clicking
+	// through species must not re-read the sample file per click.
+	speciesHistory speciesHistoryCache
 }
 
 type rateWindow struct {
@@ -203,6 +214,7 @@ func New(cfg Config) (*Archive, error) {
 		seen:       map[string]bool{},
 		pending:    map[string]*fetch{},
 		sentWindow: map[string]*rateWindow{},
+		species:    newSpeciesLedger(),
 	}
 	// Replay what is already recorded, so a restart neither duplicates a record
 	// nor forgets a gap. "Keep the hash forever" (§10): a hash with no genome
@@ -228,6 +240,12 @@ func New(cfg Config) (*Archive, error) {
 		// The lane counters are rebuilt from the ledger, so a restart does not
 		// reset the flow the operator was reading.
 		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.ExitEdge, rec.RecordedAt)
+		// And so is the species aggregate, ON THIS ONE PASS. It is the whole
+		// reason the species tab can answer "how often has this species ever
+		// crossed" without reading the ledger again: the replay the archive
+		// already performs at startup is the only full scan there is, and every
+		// later answer is a map lookup (species.go, rule 1).
+		a.observeSpeciesLocked(rec)
 		if rec.Lineage == nil {
 			continue
 		}
@@ -599,6 +617,13 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 		// the page, exactly as it never reaches the ledger.
 		Species: species,
 	})
+	// The same envelope, kept a THIRD way for a third question, and it costs one
+	// map lookup. The lane counter answers HOW FAST, the feed answers WHO JUST
+	// NOW, and the aggregate answers HOW OFTEN, EVER — the one question that
+	// would otherwise need the whole ledger read back per poll. It folds the
+	// record the archive has just written, so the live path and the startup
+	// replay pass identical input to identical code.
+	a.observeSpeciesLocked(rec)
 	for _, h := range hashesOf(rec) {
 		a.trackLocked(h, p.SourcePeer, p.MigrationID, p.EntityID, now)
 	}

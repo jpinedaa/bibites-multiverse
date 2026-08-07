@@ -1189,8 +1189,59 @@ func (s *Sidecar) statsLocked() contractb.PeerStats {
 			st.Species = s.mod.census.Clone()
 			st.Truncated = contractb.TruncatedFlag(s.mod.censusTruncated)
 		}
+
+		// THE SEVEN SETTINGS AND VERSION FIELDS OF §19, B18.
+		//
+		// Two of them this sidecar has held since M2 and never published:
+		// modVersion, and the contract-a identifier THIS MOD'S SESSION IS
+		// SPEAKING. The second is not this build's wire.ProtocolA — a sidecar
+		// MUST publish what the peer actually sent, because those differ on
+		// exactly the rig this field exists to describe, and a slot reporting
+		// contract-a/2.2 has no settings BECAUSE its mod cannot send any.
+		//
+		// The other five are COPIED, NEVER AUTHORED, exactly as the census is:
+		// this sidecar does not default, repair, re-normalize or infer one, and
+		// an absent one stays absent all the way to the page, where it renders
+		// unknown rather than the value the mod happens to ship with.
+		st.ModVersion = s.mod.modVersion
+		st.ContractAVersion = s.mod.contractAVersion
+		// Clone: the decoded handshake is transient and this block outlives it.
+		// nil stays nil (unknown); a present empty list stays present (the
+		// exclusion policy is off), and those are different facts.
+		st.MigrationExclude = s.mod.settings.MigrationExclude.Clone()
+		st.SaveMinutes = copyFloat(s.mod.settings.SaveMinutes)
+		st.SaveKeep = copyInt(s.mod.settings.SaveKeep)
+		st.SaveOnQuit = copyBool(s.mod.settings.SaveOnQuit)
+		st.WorldWrapping = copyBool(s.mod.settings.WorldWrapping)
 	}
 	return st
+}
+
+// The three copy helpers keep a pointer into the session's own state out of a
+// block that is about to be encoded on another goroutine. nil stays nil, which
+// is the whole distinction these fields carry.
+func copyFloat(v *float64) *float64 {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
+}
+
+func copyInt(v *int) *int {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
+}
+
+func copyBool(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
 }
 
 // pacedDepthLocked is the number of inbound entries waiting on the delivery

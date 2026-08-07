@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"multiverse/internal/wire"
 )
 
 // The status page is SELF-CONTAINED HTML with inline JS and SVG that polls two
@@ -47,6 +49,41 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(feed)
+	})
+	// The species index rides its OWN endpoint for the same reason the hop feed
+	// does (§17, B14): /api/status is what MetricsLog.Append serializes verbatim
+	// into the durable sample file once a minute, and the ledger annotations
+	// here — crossings ever, distinct genomes, recent lanes — are DERIVED from a
+	// file that already holds every one of those facts. Writing them into a
+	// second file forever would be the same mistake twice.
+	//
+	// It is also why the ALIVE UNION is computed here rather than on the page:
+	// the union is cheap, but joining it to the ledger is not something a
+	// browser can do at all without being handed the ledger, and one join in one
+	// place is what stops the terminal tool and the page disagreeing about which
+	// species are endemic.
+	mux.HandleFunc("/api/species", func(w http.ResponseWriter, r *http.Request) {
+		view := a.SpeciesIndexView()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(view)
+	})
+	mux.HandleFunc("/api/species/history", func(w http.ResponseWriter, r *http.Request) {
+		key, ok := speciesKeyParam(r)
+		if !ok {
+			http.Error(w, `{"error":"key is missing or too long"}`, http.StatusBadRequest)
+			return
+		}
+		window, buckets := historyParams(r)
+		h, err := a.SpeciesHistoryView(key, window, buckets)
+		if err != nil {
+			http.Error(w, `{"error":"history unavailable"}`, http.StatusInternalServerError)
+			a.log.Warn("archive: species history read failed", "err", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(h)
 	})
 	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
 		window, buckets := historyParams(r)
@@ -107,6 +144,27 @@ func historyParams(r *http.Request) (time.Duration, int) {
 	return window, buckets
 }
 
+// maxSpeciesKeyBytes bounds ?key=. Two 64-byte halves and a joining space is
+// 129 (contract-a.md §19, A42); the slack above it is for a caller that passed
+// a raw spelling with whitespace this end normalizes away.
+const maxSpeciesKeyBytes = 200
+
+// speciesKeyParam reads ?key= and NORMALIZES IT — the one place a caller's
+// spelling is repaired, and only because the key is a comparison key and never
+// a label. A page that already holds the normalized key sends it back
+// unchanged; a human typing a raw name into the URL still gets an answer.
+func speciesKeyParam(r *http.Request) (string, bool) {
+	raw := r.URL.Query().Get("key")
+	if raw == "" || len(raw) > maxSpeciesKeyBytes {
+		return "", false
+	}
+	key := wire.NormalizeSpeciesName(raw)
+	if key == "" {
+		return "", false
+	}
+	return key, true
+}
+
 func (a *Archive) serveHTTP() {
 	if a.httpSrv == nil {
 		return
@@ -144,8 +202,91 @@ h1{font-size:15px;margin:0;letter-spacing:.08em;text-transform:uppercase;white-s
    min-width:auto, and one wide child then pushes the whole page sideways. The
    map and the tables scroll INSIDE their own box; the body never does. */
 main{padding:18px;display:grid;gap:18px;grid-template-columns:minmax(0,1fr)}
+.panel{display:grid;gap:18px;grid-template-columns:minmax(0,1fr);min-width:0}
+.panel[hidden]{display:none}
 section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;
 min-width:0;overflow:hidden}
+
+/* ---- the tab bar ----
+   Three views over ONE poll. It is sticky under the header because the header
+   carries the numbers that are true on every tab, and it scrolls sideways
+   rather than wrapping so a narrow phone gets three full-width tap targets
+   instead of two lines of half-height ones. */
+.tabs{position:sticky;top:0;z-index:19;display:flex;gap:0;background:var(--bg);
+border-bottom:1px solid var(--line);overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tabs .tab{flex:1 1 0;min-width:104px;font:inherit;font-size:12px;letter-spacing:.12em;
+text-transform:uppercase;color:var(--dim);background:none;border:0;border-bottom:2px solid transparent;
+padding:12px 14px;cursor:pointer;white-space:nowrap}
+.tabs .tab:hover{color:var(--text)}
+.tabs .tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--lane)}
+.tabs .tab .sub{display:block;font-size:10px;letter-spacing:.04em;text-transform:none;
+color:var(--dim);margin-top:2px}
+/* On a phone the three tap targets matter and the subtitles do not: keeping
+   them turns a clean bar into a sideways-scrolling one. */
+@media (max-width:560px){.tabs .tab .sub{display:none}.tabs .tab{padding:13px 8px}}
+
+/* ---- the species index ---- */
+.spctl{display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.spctl input,.spctl select{font:inherit;font-size:12px;color:var(--text);background:var(--cell);
+border:1px solid var(--line);border-radius:4px;padding:5px 8px;min-width:0}
+.spctl input{flex:1 1 200px;max-width:340px}
+.spctl label{font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center}
+table#sptab{min-width:760px}
+tr.sprow{cursor:pointer}
+tr.sprow:hover td{background:rgba(90,169,230,.08)}
+tr.sprow.open td{background:rgba(90,169,230,.13)}
+td.spname{white-space:nowrap;min-width:230px}
+/* pre, not nowrap, on the NAME ITSELF: HTML collapses a run of spaces, and a
+   doubled space inside a species name is the exact thing contract-a.md §17 A36
+   says the page must print as the owning world holds it. It is not a
+   curiosity — a measured 13% of the rig's names carry stray whitespace. */
+td.spname .nm{font-weight:700;white-space:pre}
+td.spname .alt{color:var(--dim);font-size:11px;margin-left:6px;white-space:pre}
+.chip.exl{white-space:pre-wrap}
+.spglyph{width:15px;height:12px;vertical-align:-2px;margin-right:5px}
+.badge{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+border:1px solid var(--line);border-radius:9px;padding:0 7px;margin-left:6px;vertical-align:1px;
+white-space:nowrap}
+.badge.exc{color:var(--warn);border-color:var(--warn)}
+.badge.every{color:var(--live);border-color:var(--live)}
+.badge.endem{color:var(--lane);border-color:var(--lane)}
+.chip{display:inline-block;font-size:11px;background:var(--cell);border:1px solid var(--line);
+border-radius:4px;padding:1px 6px;margin:0 5px 3px 0;white-space:nowrap}
+.chip b{font-variant-numeric:tabular-nums}
+.chip.egg{color:var(--dim)}
+.chip.exl{color:var(--warn);border-color:var(--warn);white-space:normal;word-break:break-word}
+td.spwhere{white-space:normal;min-width:190px}
+tr.spdet>td{background:var(--cell);white-space:normal;padding:10px 12px}
+/* The detail lives inside a table with a 760px floor, so on a phone it would
+   otherwise sit off the right-hand edge of a box the reader has to scroll. It
+   sticks to the left of that scroll instead and takes the viewport's width, so
+   opening a row on a phone shows the detail rather than hiding it. */
+tr.spdet>td>div{position:sticky;left:0;max-width:calc(100vw - 72px)}
+.detgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr))}
+.detbox{border-left:2px solid var(--line);padding-left:10px;min-width:0}
+.detbox h3{margin:0 0 5px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
+font-weight:400}
+.detbox .big{font-size:19px;font-variant-numeric:tabular-nums}
+.detline{font-size:11.5px;color:var(--dim);margin:2px 0}
+.detline b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
+.detnote{font-size:11px;color:var(--dim);margin-top:8px;font-style:italic}
+
+/* ---- the settings cards ---- */
+.cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))}
+.card{border:1px solid var(--line);border-radius:5px;background:var(--cell);padding:10px 12px;
+min-width:0;overflow:hidden}
+.cardhd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px;flex-wrap:wrap}
+.cardhd .slot{font-size:15px;font-weight:700}
+.cardhd .peer{color:var(--dim);font-size:11px}
+.cardsub{font-size:11px;color:var(--dim);margin:6px 0 3px;letter-spacing:.08em;text-transform:uppercase}
+.card .kv{border-bottom:1px dotted var(--line)}
+.card .kv .u{color:var(--warn);font-style:italic}
+.card .exl{margin-top:4px}
+/* The shared creature definition lives in a zero-sized SVG at the top of the
+   document rather than inside the map, because THREE tabs draw it now and the
+   map's SVG is thrown away and rebuilt whenever the map's shape changes. */
+.glyphdefs{position:absolute;width:0;height:0;overflow:hidden}
 h2{font-size:12px;margin:0 0 10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
 display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;min-width:0}
 h2 .note{text-transform:none;letter-spacing:0;font-size:11px}
@@ -330,15 +471,35 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
 </style>
 </head>
 <body>
+<!-- One creature, defined once for the whole document and drawn by reference by
+     every tab: a teardrop body with a mouth notch bitten out of the nose and an
+     eye. It faces EAST, which is the way organisms travel. The body sets no
+     fill, so each <use> colours it by species; the eye sets its own, so it
+     reads on every hue. -->
+<svg class="glyphdefs" aria-hidden="true" focusable="false"><defs>
+<g id="bib">
+<path d="M 4.5 -1.26 L 2.16 0 L 4.5 1.26 C 4.14 3.06, 1.98 4.14, -0.54 4.14 C -3.24 4.14, -5.58 2.16, -6.66 0 C -5.58 -2.16, -3.24 -4.14, -0.54 -4.14 C 1.98 -4.14, 4.14 -3.06, 4.5 -1.26 Z"/>
+<circle class="bibeye" cx="1.5" cy="-1.85" r="1"/>
+</g>
+</defs></svg>
 <header>
-  <h1>multiverse map</h1>
+  <h1>multiverse</h1>
   <span class="hdr muted" id="shape">&hellip;</span>
   <span class="hdr muted"><span class="term" data-t="population">population</span> <b id="hpop">&mdash;</b></span>
   <span class="hdr muted"><span class="term" data-t="migration">migrations</span> <b id="hmig">&mdash;</b></span>
   <span class="hdr muted" id="link"></span>
   <span class="hdr muted" id="age"></span>
 </header>
+<nav class="tabs" id="tabs" role="tablist" aria-label="views">
+  <button type="button" class="tab" role="tab" data-tab="map" aria-selected="true">map
+    <span class="sub">worlds, lanes, crossings</span></button>
+  <button type="button" class="tab" role="tab" data-tab="species" aria-selected="false">species
+    <span class="sub">what is alive, and where</span></button>
+  <button type="button" class="tab" role="tab" data-tab="settings" aria-selected="false">settings
+    <span class="sub">what each world was told to do</span></button>
+</nav>
 <main>
+<div class="panel" id="p-map" role="tabpanel">
   <section>
     <h2>the map
       <span class="legend">
@@ -396,6 +557,51 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
     <tbody></tbody></table></div></section>
 
   <section><h2>totals</h2><div id="totals"></div></section>
+</div>
+
+<div class="panel" id="p-species" role="tabpanel" hidden>
+  <section>
+    <h2><span class="term" data-t="alive">species alive right now</span>
+      <span class="note muted">every species any world is
+        <span class="term" data-t="census">reporting</span> in its census, joined across the
+        map &mdash; a species that used to live here and does not now is not on this list, and
+        what has <span class="term" data-t="crossings">crossed</span> is an annotation on a row
+        the census put there, never a row of its own</span></h2>
+    <div class="spctl">
+      <input id="spq" type="search" autocomplete="off" spellcheck="false"
+             placeholder="search a species…" aria-label="search species">
+      <label for="spsort">sort
+        <select id="spsort">
+          <option value="pop">population</option>
+          <option value="crossings">crossings</option>
+          <option value="name">name</option>
+        </select>
+      </label>
+      <span class="muted" id="spcount"></span>
+    </div>
+    <div class="tw"><table id="sptab"><thead><tr>
+      <th><span class="term" data-t="species">species</span></th>
+      <th class="num"><span class="term" data-t="population">alive</span></th>
+      <th><span class="term" data-t="world">worlds</span></th>
+      <th class="num"><span class="term" data-t="egg">eggs</span></th>
+      <th class="num"><span class="term" data-t="crossings">crossings</span></th>
+      <th>last</th>
+      <th>first seen</th></tr></thead>
+    <tbody id="spbody"></tbody></table></div>
+  </section>
+</div>
+
+<div class="panel" id="p-settings" role="tabpanel" hidden>
+  <section>
+    <h2><span class="term" data-t="settings">what each world was told to do</span>
+      <span class="note muted"><b>Read-only.</b> This page renders what each world reports
+        about its own configuration and offers no way to change any of it; a control surface
+        is separate, later work. A field no world has told us shows
+        <span class="unknown">?</span> &mdash;
+        <span class="term" data-t="unknown">never</span> the value the game ships with.</span></h2>
+    <div class="cards" id="setcards"><span class="muted">loading&hellip;</span></div>
+  </section>
+</div>
 
   <section><details class="gloss" id="glossbox">
     <summary>What am I looking at?</summary>
@@ -414,10 +620,16 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   <span class="term" data-t="exactlyonce">exactly-once</span> promise. The
   <span class="term" data-t="rawname">species names</span> are printed exactly as the world that
   owns them holds them, spacing and all, and nothing here tidies one. Rates are measured over a
-  short <span class="term" data-t="flow">flow window</span>, not over all time. JSON:
+  short <span class="term" data-t="flow">flow window</span>, not over all time. The
+  <span class="term" data-t="settings">settings</span> a world reports are
+  <span class="term" data-t="readonly">read-only</span> here: this page changes nothing, anywhere.
+  The three views share one poll and each has a link of its own &mdash;
+  <code>#map</code>, <code>#species</code>, <code>#settings</code>. JSON:
   <code>/api/status</code> (live), <code>/api/hops</code> (the last minute of crossings,
-  bounded in time and in count, and kept out of the durable sample file on purpose)
-  and <code>/api/history</code> (downsampled, <code>?hours=</code>, <code>?buckets=</code>).
+  bounded in time and in count, and kept out of the durable sample file on purpose),
+  <code>/api/species</code> (what is alive, joined to the crossing record),
+  <code>/api/species/history?key=</code> and <code>/api/history</code> (downsampled,
+  <code>?hours=</code>, <code>?buckets=</code>).
   <div class="motion" id="motion">
     <span class="term" data-t="motion">motion</span>
     <button type="button" class="mbtn" data-m="auto">auto</button>
@@ -473,14 +685,33 @@ var G = {
  envelope:["envelope","One message carrying one creature between two worlds. The counts here are the envelopes this archive was copied on."],
  epoch:["epoch","A counter the relay bumps every time the map itself changes. If it jumps, a world joined, left or moved."],
  genomegap:["genome gap","A genome the archive knows exists — it has the fingerprint — but has not managed to fetch a copy of yet. It keeps the fingerprint forever, so it can still fetch it tomorrow."],
- flow:["flow window","The per-minute rates on this page are measured over the last few minutes, not over all time, so they describe what is happening now."]
+ flow:["flow window","The per-minute rates on this page are measured over the last few minutes, not over all time, so they describe what is happening now."],
+ alive:["alive right now","The species list is built from what the worlds are reporting THIS SECOND, and from nothing else. A kind that lived here yesterday and died out is not on it, however many times it crossed a lane while it was here. That is a deliberate refusal: a list built from crossings would be a list of travellers and their ancestors, which is a different thing from a list of residents and reads as though extinct kinds were still alive."],
+ crossings:["crossings","How many times this archive has recorded a creature of this species walking from one world into another, since the archive started keeping records. It is a count of TRIPS, not of creatures: one restless creature crossing ten times counts ten. A species with no crossings is not a species that never moves — it may simply have arisen after the last time anything of its kind travelled."],
+ endemic:["endemic","This species lives in exactly one world. It may have been born there and never left, or it may be the last holdout of something that used to be everywhere — the crossing count beside it is the hint. Endemic is not a warning; most new species start this way."],
+ everywhere:["everywhere","This species is alive in every world that is currently reporting a census. It only claims that when at least two worlds are reporting: with one world answering, 'everywhere' and 'endemic' are the same sentence, and saying both would dress a single world's list up as a finding about the map."],
+ excluded:["never exported","This species is on at least one world's exclusion list, which means that world never lets one of them out through a lane. It explains something otherwise baffling: a world can be full of a kind that never appears on any road out of it. The rule belongs to that world alone and is applied inside its own game — no other world, and nothing on this page, enforces or can enforce it. A species can be excluded by one world and travel freely from another."],
+ speciesgenomes:["distinct genomes","How many genuinely different genetic makeups of this species have crossed a lane. Two creatures of one species are rarely identical; this counts the distinct ones the archive has fingerprints for. A big number beside a small population means a kind that is changing fast."],
+ parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. It is shown and nothing more — there is no family tree here, because the register that gives a species its parent lives inside one copy of the game and only that copy can read it."],
+ settings:["settings","What a world was TOLD to do, as opposed to what it is doing. Everything else on this page is a measurement or a receipt; these are the knobs behind them — how often it saves, which species it refuses to export, whether its edges wrap. They are the reason a number elsewhere looks the way it does, and they are read-only here on purpose."],
+ readonly:["read-only","This page shows settings and changes none of them. Changing another machine's world from a web page is a much bigger thing than showing one — it needs a login, a rule about who may change what, an answer for what happens when two people change the same thing at once, and a record of who changed it — and none of that is a small extension of showing a value. It is deliberately left for later."],
+ savepolicy:["save policy","Three numbers that together answer 'what happens to this world if its machine stops'. How many minutes between saves — where 0 means the timer is OFF, which is a real setting and not a missing one, and is the explanation for a world that never shows a save. How many old saves it keeps beside the live one. And whether it saves when the game is closed."],
+ savekeep:["saves kept","How many previous saves this world keeps on disk beside the current one. They rotate: the newest pushes the oldest out. It is the difference between being able to go back one step after something goes wrong and being able to go back several."],
+ worldwrap:["world wrapping","Whether that world's own edges join up, so a creature walking off one side reappears on the other instead of piling up against a wall. This system needs it on: the whole map is a doughnut and a world that does not contain its own creatures leaks them into a corner. The world reports this setting and nothing here ever changes it, which is exactly why it is worth showing — it is how you check, from another machine, that nobody turned it off."],
+ modversion:["mod version","The version of the small plugin running inside that copy of the game. It is a label, not a promise: what a world can actually report is decided field by field, by whether the field arrives. Use it to tell two machines apart, not to predict what one of them can do."],
+ contractaversion:["protocol version","Which version of the language the game plugin and its helper program are speaking. It is the single most useful thing on this page for reading a gap: when a world shows '?' where its neighbours show a number, this says whether that world's plugin is simply too old to have anything to say."],
+ simsize:["world size","How big that world is, as its own game reports it — the distance from the middle to an edge. Worlds of different sizes are wired together happily; it only means a creature crosses a small one faster."],
+ exportedges:["export edges","The sides of a world that have a capture band running on them: the sides a creature can leave by. Every side can receive an arrival; these are the ones that can send. Which of them actually has a road to somewhere is the map's business, not the world's."]
 };
 
 (function buildGlossary(){
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
-    "bypass","migration","hopfeed","envelope","population","species","census","egg","unclassed",
-    "rawname","speed","pace","custody","custodyDepth","pacedDepth","held","bounce",
-    "lastSave","unknown","exactlyonce","relay","archive","epoch","genomegap","flow"];
+    "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
+    "rawname","endemic","everywhere","excluded","crossings","speciesgenomes","parentspecies",
+    "speed","pace","custody","custodyDepth","pacedDepth","held","bounce",
+    "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
+    "contractaversion","simsize","exportedges",
+    "unknown","exactlyonce","relay","archive","epoch","genomegap","flow"];
   var h = "";
   for (var i=0;i<keys.length;i++){
     var g = G[keys[i]];
@@ -762,17 +993,12 @@ function buildMap(d){
     + '<defs>'
     + marker("mOpen","var(--lane)") + marker("mBypass","var(--warn)")
     + marker("mClosed","var(--dark)")
-    // One creature, defined once and drawn by reference up to 420 times: a
-    // teardrop body with a mouth notch bitten out of the nose and an eye. It
-    // faces EAST, which is the way organisms travel. The body sets no fill, so
-    // each <use> colours it by species; the eye sets its own, so it reads on
-    // every hue.
-    + '<g id="bib">'
-    + '<path d="M 4.5 -1.26 L 2.16 0 L 4.5 1.26 '
-    + 'C 4.14 3.06, 1.98 4.14, -0.54 4.14 C -3.24 4.14, -5.58 2.16, -6.66 0 '
-    + 'C -5.58 -2.16, -3.24 -4.14, -0.54 -4.14 C 1.98 -4.14, 4.14 -3.06, 4.5 -1.26 Z"/>'
-    + '<circle class="bibeye" cx="1.5" cy="-1.85" r="1"/>'
-    + '</g>'
+    // The creature itself is NOT defined here. It is defined once for the whole
+    // document, in the zero-sized SVG at the top of the body, and drawn by
+    // reference up to 420 times here and again on the species tab. It moved out
+    // of this string when the second tab needed it: this SVG is thrown away and
+    // rebuilt whenever the map's shape changes, and a definition that vanishes
+    // with it is a definition the other tabs cannot rely on.
     + '</defs>';
 
   // Which way is north, before a reader has to work it out from the arrows.
@@ -1306,7 +1532,438 @@ function buildHopGlyph(name, toSlot){
   g.appendChild(ttl);
   return g;
 }
+
+/* ------------------------------------------------------------ the SPECIES tab
+   Everything below draws names — species names from six censuses, and, on the
+   settings cards, the entries of six exclusion lists. An exclusion entry is the
+   same class of text as a census name and arrives on the same unauthenticated
+   stats block (contract-b-m4.md §13 item 7, §19 B18), so it is handled inside
+   this fence for exactly the same reason, and by the same means: NOTHING HERE
+   ASSIGNS MARKUP. Every element is created, every string lands as a text node.
+
+   The consequence is that these two views build their whole DOM by hand rather
+   than by templating a string, which is more code and is the point: the safe
+   path is the only path, so one careless concatenation cannot appear later. */
+
+var SPX = null, spOpenKey = null, spQuery = "", spSort = "pop", spHist = {};
+
+/* One creature glyph at label size, in this species' own colour — the same
+   definition the map draws, so a species reads the same on both tabs. */
+function speciesGlyph(colour){
+  var svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("class", "spglyph");
+  svg.setAttribute("viewBox", "-8 -5 16 10");
+  svg.setAttribute("aria-hidden", "true");
+  var u = document.createElementNS(SVGNS, "use");
+  u.setAttribute("href", "#bib");
+  if (colour) u.style.fill = colour; else u.setAttribute("class", "bib unclassed");
+  svg.appendChild(u);
+  return svg;
+}
+
+function el(tag, cls, text){
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = String(text);
+  return e;
+}
+
+/* A term-marked element, built rather than templated so it can carry a name
+   beside it without either becoming markup. */
+function termEl(tag, term, text){
+  var e = el(tag, "term", text);
+  e.setAttribute("data-t", term);
+  return e;
+}
+
+function spBadge(cls, text, term){
+  var b = el("span", "badge " + cls, text);
+  if (term) b.setAttribute("data-t", term);
+  return b;
+}
+
+/* An unknown, in the page's own voice: "?" in the warning colour. §10.1's rule
+   has no exception on this tab either. */
+function unkEl(text){ return el("span", "unknown", text == null ? "?" : text); }
+
+function spMatches(row, q){
+  if (!q) return true;
+  if (row.key.toLowerCase().indexOf(q) >= 0) return true;
+  if (String(row.name).toLowerCase().indexOf(q) >= 0) return true;
+  var alt = row.spellings || [];
+  for (var i=0;i<alt.length;i++) if (String(alt[i]).toLowerCase().indexOf(q) >= 0) return true;
+  return false;
+}
+
+function spSorted(list){
+  var out = list.slice(0);
+  out.sort(function(a,b){
+    if (spSort === "name") return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
+    if (spSort === "crossings"){
+      if (b.crossings !== a.crossings) return b.crossings - a.crossings;
+      return b.population - a.population;
+    }
+    if (b.population !== a.population) return b.population - a.population;
+    return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
+  });
+  return out;
+}
+
+/* renderSpecies paints the whole index. It rebuilds the body every poll, which
+   is affordable because the list is bounded by the census that produced it —
+   at most 32 species a world — and which keeps the expanded row's own numbers
+   as fresh as the row above it. */
+function renderSpecies(x){
+  SPX = x;
+  var body = document.getElementById("spbody");
+  if (!body) return;
+  while (body.firstChild) body.removeChild(body.firstChild);
+
+  var count = document.getElementById("spcount");
+  if (count){
+    while (count.firstChild) count.removeChild(count.firstChild);
+    if (!x || !x.haveStatus){
+      count.appendChild(unkEl("the relay has broadcast no map yet"));
+    } else {
+      count.appendChild(document.createTextNode(
+        x.species.length + " alive across " + x.reportingSlots + " reporting world(s)"));
+      if (x.censuslessSlots > 0){
+        count.appendChild(document.createTextNode(" · "));
+        count.appendChild(unkEl(x.censuslessSlots + " world(s) report no census"));
+      }
+      if (x.truncatedSlots > 0){
+        count.appendChild(document.createTextNode(" · "));
+        count.appendChild(unkEl(x.truncatedSlots + " census(es) capped at 32; the rest is unreported"));
+      }
+    }
+  }
+  if (!x || !x.species || !x.species.length){
+    var tr0 = el("tr"), td0 = el("td", "muted",
+      (x && x.haveStatus) ? "no world is reporting a species right now" : "waiting for the map");
+    td0.setAttribute("colspan", "7");
+    tr0.appendChild(td0); body.appendChild(tr0);
+    return;
+  }
+
+  var list = spSorted(x.species), shown = 0;
+  for (var i=0;i<list.length;i++){
+    var row = list[i];
+    if (!spMatches(row, spQuery)) continue;
+    shown++;
+    body.appendChild(speciesRow(row));
+    if (spOpenKey === row.key) body.appendChild(speciesDetail(row));
+  }
+  if (!shown){
+    var tr1 = el("tr"), td1 = el("td", "muted", "no species matches that search");
+    td1.setAttribute("colspan", "7");
+    tr1.appendChild(td1); body.appendChild(tr1);
+  }
+}
+
+function speciesRow(row){
+  var tr = el("tr", "sprow" + (spOpenKey === row.key ? " open" : ""));
+  tr.setAttribute("data-k", row.key);
+
+  var name = el("td", "spname");
+  var colour = speciesColor(row.key);
+  var sw = el("i", "sw");
+  sw.style.background = colour;
+  name.appendChild(sw);
+  name.appendChild(speciesGlyph(colour));
+  // THE RAW SPELLING, as the reporting world holds it (contract-a.md §17 A36).
+  name.appendChild(el("span", "nm", row.name));
+  var alt = row.spellings || [];
+  if (alt.length){
+    // A second spelling of one species is a real difference between two worlds,
+    // not noise to be tidied away, so every one of them is shown.
+    name.appendChild(el("span", "alt", "also spelt " + alt.join(" / ")));
+  }
+  if (row.excluded){
+    name.appendChild(spBadge("exc",
+      "never exported" + (row.excludedBy && row.excludedBy.length
+        ? " by S" + row.excludedBy.join(", S") : ""), "excluded"));
+  }
+  if (row.everywhere) name.appendChild(spBadge("every", "everywhere", "everywhere"));
+  if (row.endemic) name.appendChild(spBadge("endem", "endemic", "endemic"));
+  tr.appendChild(name);
+
+  tr.appendChild(el("td", "num", row.population));
+
+  var where = el("td", "spwhere");
+  var worlds = row.worlds || [];
+  for (var i=0;i<worlds.length;i++){
+    var c = el("span", "chip");
+    c.appendChild(document.createTextNode("S" + worlds[i].slot + ":"));
+    c.appendChild(el("b", null, worlds[i].bibites));
+    if (worlds[i].eggs) c.appendChild(el("span", "egg", " +" + worlds[i].eggs + "e"));
+    where.appendChild(c);
+  }
+  tr.appendChild(where);
+
+  tr.appendChild(el("td", "num", row.eggs));
+  tr.appendChild(el("td", "num", row.crossings));
+
+  var last = el("td");
+  if (row.lastAgeMs == null) last.appendChild(unkEl("never here"));
+  else last.appendChild(document.createTextNode(ms(row.lastAgeMs) + " ago"));
+  tr.appendChild(last);
+
+  var first = el("td");
+  if (!row.firstMs) first.appendChild(unkEl("—"));
+  else first.appendChild(document.createTextNode(ms(Date.now() - row.firstMs) + " ago"));
+  tr.appendChild(first);
+  return tr;
+}
+
+/* The detail row. Everything in it comes from the ledger aggregate the index
+   already carried, except the sparklines, which are fetched once per species
+   and cached: the sample file is read on the server, downsampled there, and
+   arrives as buckets — the page never sees the file and never counts a census
+   itself. */
+function speciesDetail(row){
+  var tr = el("tr", "spdet"), td = el("td");
+  td.setAttribute("colspan", "7");
+  // ONE wrapper, because the sticky rule that keeps this readable on a phone
+  // hangs off it: the table it sits in has a 760px floor and scrolls sideways,
+  // and a detail pinned to the left of that scroll is a detail a phone reader
+  // can actually see.
+  var wrap = el("div", "detwrap");
+  td.appendChild(wrap);
+
+  var grid = el("div", "detgrid");
+
+  var b1 = el("div", "detbox");
+  b1.appendChild(termEl("h3", "speciesgenomes", "distinct genomes"));
+  b1.appendChild(el("div", "big", row.genomes + (row.genomesAtLeast ? "+" : "")));
+  b1.appendChild(el("div", "detline", "different genetic makeups of this species " +
+    "that have crossed a lane"));
+  grid.appendChild(b1);
+
+  var b2 = el("div", "detbox");
+  b2.appendChild(termEl("h3", "parentspecies", "parent species"));
+  if (row.parent){
+    var p = el("div", "detline");
+    p.appendChild(el("b", null, row.parent));
+    b2.appendChild(p);
+    b2.appendChild(el("div", "detline", "as the world that named it reported at the time — " +
+      "shown, never resolved"));
+  } else {
+    var pu = el("div", "detline");
+    pu.appendChild(unkEl("none recorded"));
+    b2.appendChild(pu);
+    b2.appendChild(el("div", "detline",
+      "no crossing of this species has carried a parent name"));
+  }
+  grid.appendChild(b2);
+
+  var b3 = el("div", "detbox");
+  b3.appendChild(termEl("h3", "crossings", "recent crossings"));
+  var rec = row.recent || [];
+  if (!rec.length){
+    var ru = el("div", "detline");
+    ru.appendChild(unkEl("none recorded"));
+    b3.appendChild(ru);
+  } else {
+    for (var i=0;i<rec.length;i++){
+      var line = el("div", "detline");
+      line.appendChild(el("b", null, "S" + rec[i].fromSlot +
+        (rec[i].exitEdge ? " " + rec[i].exitEdge : "") + " → S" + rec[i].toSlot));
+      line.appendChild(document.createTextNode("  " + ms(rec[i].ageMs) + " ago"));
+      b3.appendChild(line);
+    }
+    b3.appendChild(el("div", "detline",
+      "the newest " + rec.length + " of " + row.crossings + " — a sample, not the whole"));
+  }
+  grid.appendChild(b3);
+  wrap.appendChild(grid);
+
+  var sparks = el("div", "sparks");
+  sparks.setAttribute("id", "spspark");
+  var h = spHist[row.key];
+  if (h) fillSpeciesSparks(sparks, h);
+  else sparks.appendChild(el("span", "muted", "loading this species' history…"));
+  wrap.appendChild(sparks);
+
+  var note = el("div", "detnote");
+  note.appendChild(document.createTextNode(
+    "population of this species per world, from the archive's own sample file. " +
+    "A gap in a line is a world that reported no census in that bucket — unknown, never a zero — " +
+    "and a flat zero is a world that reported and held none. " + speciesHistoryReach(h)));
+  wrap.appendChild(note);
+  tr.appendChild(td);
+  return tr;
+}
+
+/* ----------------------------------------------------------- the SETTINGS tab
+   One card per world. Every value is what that world reported about its own
+   configuration, and an absent one renders "?" — NEVER the value the game ships
+   with, which for saveMinutes would claim a world is being saved when its timer
+   may be off (contract-b-m4.md §19, B19). */
+function setKV(card, term, label, valueNode){
+  var row = el("div", "kv");
+  row.appendChild(term ? termEl("span", term, label) : el("span", "muted", label));
+  var v = el("span");
+  v.appendChild(valueNode);
+  row.appendChild(v);
+  card.appendChild(row);
+}
+
+function txt(s){ return document.createTextNode(String(s)); }
+
+function fmtBool(v, yes, no){
+  if (v == null) return unkEl();
+  return txt(v ? yes : no);
+}
+
+function renderSettings(d){
+  var host = document.getElementById("setcards");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  if (!d || !d.slots || !d.slots.length){
+    host.appendChild(el("span", "muted", "no slots reserved yet"));
+    return;
+  }
+  for (var i=0;i<d.slots.length;i++) host.appendChild(settingsCard(d.slots[i]));
+}
+
+function settingsCard(v){
+  var card = el("div", "card");
+
+  var hd = el("div", "cardhd");
+  var left = el("span");
+  left.appendChild(el("span", "slot", "slot " + v.slot));
+  left.appendChild(txt(" "));
+  // A peer id is another peer's chosen string; it is a text node here for the
+  // same reason a species name is.
+  left.appendChild(el("span", "peer", v.peerId));
+  hd.appendChild(left);
+  var state = el("span", v.live ? (v.modConnected ? "ok" : "bad") : "bad",
+    v.live ? (v.modConnected ? "live" : "no game") : "dark " + ms(v.darkForMs));
+  hd.appendChild(state);
+  card.appendChild(hd);
+
+  if (!v.statsKnown){
+    // §10.1 rule 3: a block older than the freshness rule is history, not state,
+    // and settings age with the block that carried them.
+    var gap = el("div", "detline");
+    gap.appendChild(unkEl("this world has reported nothing" +
+      (v.statsAgeMs ? " for " + ms(v.statsAgeMs) : "") + " — every setting below is unknown"));
+    card.appendChild(gap);
+  }
+
+  card.appendChild(el("div", "cardsub", "identity"));
+  setKV(card, "modversion", "mod version", v.modVersion ? txt(v.modVersion) : unkEl());
+  setKV(card, "contractaversion", "protocol", v.contractAVersion ? txt(v.contractAVersion) : unkEl());
+  setKV(card, null, "game version", v.gameVersion ? txt(v.gameVersion) : unkEl());
+  setKV(card, "simsize", "world size", v.simulationSize ? txt(v.simulationSize) : unkEl());
+  var edges = el("span");
+  if (v.exportEdges && v.exportEdges.length) edges.appendChild(txt(v.exportEdges.join(" ")));
+  else edges.appendChild(unkEl("none declared"));
+  setKV(card, "exportedges", "export edges", edges);
+
+  card.appendChild(el("div", "cardsub", "running"));
+  var sp = speedText(v);
+  setKV(card, "speed", "speed", sp === "×?" ? unkEl("×?") : txt(sp));
+  var dep = paceDepthText(v), cap = paceRateText(v), pace = el("span");
+  pace.appendChild(dep === "?" ? unkEl() : txt(dep));
+  pace.appendChild(txt(" queued / cap "));
+  pace.appendChild(cap === "?" ? unkEl() : txt(cap));
+  setKV(card, "pace", "arrivals", pace);
+  setKV(card, null, "burst", (v.statsKnown && v.inboundRateBurst != null)
+    ? txt(fmtScale(v.inboundRateBurst)) : unkEl());
+  setKV(card, "population", "population", (v.statsKnown && v.population != null)
+    ? txt(v.population) : unkEl());
+  setKV(card, "egg", "eggs", (v.statsKnown && v.eggCount != null) ? txt(v.eggCount) : unkEl());
+
+  card.appendChild(el("div", "cardsub", "if the machine stops"));
+  var save = el("span");
+  if (v.saveMinutes == null) save.appendChild(unkEl());
+  else if (v.saveMinutes === 0){
+    // 0 IS A READING AND A LOUD ONE: the save timer is off, and it is the
+    // explanation for a world that never shows a save receipt.
+    save.appendChild(el("span", "bad", "OFF"));
+  } else save.appendChild(txt("every " + fmtScale(v.saveMinutes) + " min"));
+  setKV(card, "savepolicy", "saves", save);
+  setKV(card, "savekeep", "saves kept", v.saveKeep == null ? unkEl() : txt(v.saveKeep));
+  setKV(card, null, "saves on quit", fmtBool(v.saveOnQuit, "yes", "no"));
+  setKV(card, "lastSave", "last save", (v.statsKnown && v.lastSave)
+    ? txt(ms(v.lastSaveAgeMs) + " ago") : unkEl("none yet"));
+  var wrap = el("span");
+  if (v.worldWrapping == null) wrap.appendChild(unkEl());
+  else if (v.worldWrapping) wrap.appendChild(txt("on"));
+  else wrap.appendChild(el("span", "bad", "OFF — this world is not containing its own creatures"));
+  setKV(card, "worldwrap", "world wrapping", wrap);
+
+  card.appendChild(el("div", "cardsub", "never exported"));
+  var exl = el("div", "exl");
+  if (!v.migrationExcludeKnown){
+    exl.appendChild(unkEl("this world has not told us"));
+  } else if (!v.migrationExclude || !v.migrationExclude.length){
+    // A PRESENT EMPTY LIST is a stronger, different statement than absence: the
+    // policy is switched off, and this world exports every species it holds.
+    exl.appendChild(el("span", "muted", "nothing — the exclusion policy is off"));
+  } else {
+    for (var i=0;i<v.migrationExclude.length;i++){
+      // Another world's configured name, chosen by whoever set that world up.
+      exl.appendChild(el("span", "chip exl", v.migrationExclude[i]));
+    }
+  }
+  card.appendChild(exl);
+  return card;
+}
 /* ============================= SPECIES CENSUS — END ======================== */
+
+/* speciesHistoryReach and fillSpeciesSparks are the ONLY parts of the species
+   detail that live outside the fence, and they are outside it because they
+   build markup strings — which is exactly why NEITHER OF THEM IS EVER HANDED A
+   NAME. What they draw is slot numbers, counts and SVG paths; the species they
+   describe is identified to them by nothing at all, because the caller has
+   already fetched the right series. */
+/* HOW SHORT IS SHORT, SAID OUT LOUD. This record began when this archive did,
+   which on the running rig is days rather than months, and a 24-hour chart with
+   two hours of data in it looks exactly like a species that arrived two hours
+   ago. The sentence below is what stops a reader drawing that conclusion.
+
+   It is an UPPER BOUND and it says so: what is known is which BUCKET the oldest
+   sample fell in, not where in that bucket it sat, so the honest statement is
+   "no further back than", never a precise age this data cannot support. */
+function speciesHistoryReach(H){
+  if (!H) return "";
+  if (!H.samples) return "No sample covers this window at all yet — this record began when the "
+    + "archive did, and a chart with nothing on it is a short record, not an absent species.";
+  for (var i=0;i<H.total.length;i++){
+    if (H.total[i].n > 0){
+      var from = Date.now() - H.total[i].tMs;
+      return "The sampled record reaches back no further than " + ms(from)
+        + " — earlier buckets are empty because nothing was recorded then, not because "
+        + "nothing happened.";
+    }
+  }
+  return "";
+}
+
+function fillSpeciesSparks(box, H){
+  if (!H || !H.slots || !H.slots.length){
+    box.innerHTML = '<span class="muted">no per-world history for this species yet</span>';
+    return;
+  }
+  var span = Math.round((H.toMs - H.fromMs)/3600000);
+  var spanTxt = span >= 1 ? span+"h" : Math.round((H.toMs-H.fromMs)/60000)+"m";
+  var max = Math.max(1, H.max), h = "", i;
+  var totMax = 1;
+  for (i=0;i<H.total.length;i++) if (H.total[i].v != null && H.total[i].v > totMax) totMax = H.total[i].v;
+  var totLast = null;
+  for (i=H.total.length-1;i>=0;i--) if (H.total[i].v != null){ totLast = H.total[i].v; break; }
+  h += sparkCard(t("population","whole map"), "this species, every world summed, "+spanTxt,
+    totLast==null ? '<span class="unknown">unknown</span>' : totLast, H.total, totMax, {wide:true});
+  for (i=0;i<H.slots.length;i++){
+    var s = H.slots[i];
+    var dead = s.points.length ? s.points[s.points.length-1].dark : false;
+    h += sparkCard(t("slot","slot "+s.slot), (s.peerId||"")+" · "+spanTxt,
+      s.last==null ? '<span class="unknown">unknown</span>' : s.last, s.points, max, {dead:dead});
+  }
+  box.innerHTML = h;
+}
 
 /* Per-poll paint: only the things that actually change. Rebuilding the SVG every
    two seconds would restart every animation, and the flow would never be seen. */
@@ -1660,8 +2317,121 @@ function censusless(d){
   return n;
 }
 
-/* ------------------------------------------------------------------- polling */
+/* ------------------------------------------------------------ tabs and polling
+   THREE VIEWS OVER ONE POLL. The status endpoint is fetched once every two
+   seconds whatever tab is open, because the header's numbers are true on all
+   three and because a second timer per tab would ask the archive for the same
+   frame three times. What varies is only what is DRAWN from it: the map paints
+   an SVG, the settings tab paints six cards, and the species tab hangs one
+   extra request off the same tick because its ledger annotations cannot be
+   derived from the status frame at all.
+
+   The two map-only feeds — the hop feed and the history strip — are gated on
+   the map being visible. A hidden panel has no laid-out geometry to animate
+   along, and a crossing drawn into a box nobody is looking at is work spent to
+   be invisible; the seen-set is re-primed on the way back so a tab switch never
+   replays the last minute as though it were happening now.
+
+   THE TAB IS IN THE URL HASH, which is what makes "#species" a link somebody
+   can send and a reload land where the reader was. */
+var TABS = ["map","species","settings"], TAB = "map", lastStatus = null;
+
+function tabFromHash(){
+  var h = (location.hash || "").replace(/^#/, "");
+  return TABS.indexOf(h) >= 0 ? h : "map";
+}
+
+function showTab(name, push){
+  if (TABS.indexOf(name) < 0) name = "map";
+  TAB = name;
+  hideTip();
+  var i;
+  for (i=0;i<TABS.length;i++){
+    var p = document.getElementById("p-"+TABS[i]);
+    if (p) p.hidden = (TABS[i] !== name);
+  }
+  var bs = document.querySelectorAll("#tabs .tab");
+  for (i=0;i<bs.length;i++){
+    bs[i].setAttribute("aria-selected",
+      bs[i].getAttribute("data-tab") === name ? "true" : "false");
+  }
+  document.title = "multiverse " + name;
+  if (name === "map"){
+    // An SVG in a hidden panel has no geometry to measure — getTotalLength on
+    // its lane paths is what every label position and every hop animation is
+    // built from — so the map is REBUILT when it comes back into view rather
+    // than painted into a box nothing has laid out.
+    mapSig = "";
+    hopsPrimed = false;
+  }
+  if (lastStatus) render(lastStatus);
+  if (name === "species"){ if (SPX) renderSpecies(SPX); tickSpecies(); }
+  if (name === "map") tickHistory();
+  if (push && location.hash !== "#"+name) location.hash = "#"+name;
+}
+
+(function wireTabs(){
+  var bar = document.getElementById("tabs");
+  if (bar) bar.addEventListener("click", function(ev){
+    var b = ev.target.closest ? ev.target.closest(".tab") : null;
+    if (b) showTab(b.getAttribute("data-tab"), true);
+  });
+  window.addEventListener("hashchange", function(){
+    var want = tabFromHash();
+    if (want !== TAB) showTab(want, false);
+  });
+})();
+
+/* The species tab's own controls. A click on a row opens its detail; a click on
+   a term inside that row is a tooltip and nothing else, or every badge would
+   collapse the row it explains. */
+function openSpecies(key){
+  spOpenKey = (spOpenKey === key) ? null : key;
+  if (spOpenKey) loadSpeciesHistory(spOpenKey);
+  if (SPX) renderSpecies(SPX);
+}
+
+async function loadSpeciesHistory(key){
+  var cached = spHist[key];
+  if (cached && (Date.now() - cached.at) < 60000) return;
+  try {
+    var r = await fetch("api/species/history?key=" + encodeURIComponent(key)
+      + "&hours=24&buckets=60", {cache:"no-store"});
+    var H = await r.json();
+    H.at = Date.now();
+    spHist[key] = H;
+  } catch(e){
+    spHist[key] = {at: Date.now(), slots: [], total: [], samples: 0, fromMs: 0, toMs: 0};
+  }
+  if (spOpenKey === key && SPX) renderSpecies(SPX);
+}
+
+(function wireSpecies(){
+  var body = document.getElementById("spbody");
+  if (body) body.addEventListener("click", function(ev){
+    if (ev.target.closest && ev.target.closest("[data-t],[data-s]")) return;
+    var tr = ev.target.closest ? ev.target.closest("tr.sprow") : null;
+    if (tr) openSpecies(tr.getAttribute("data-k"));
+  });
+  var q = document.getElementById("spq");
+  if (q) q.addEventListener("input", function(){
+    spQuery = q.value.toLowerCase();
+    if (SPX) renderSpecies(SPX);
+  });
+  var s = document.getElementById("spsort");
+  if (s) s.addEventListener("change", function(){
+    spSort = s.value;
+    if (SPX) renderSpecies(SPX);
+  });
+})();
+
 function render(d){
+  renderHeader(d);
+  if (TAB === "map") renderMap(d);
+  else if (TAB === "settings") renderSettings(d);
+}
+
+function renderHeader(d){
   $("#shape").innerHTML = d.haveStatus
     ? d.map.width+"×"+d.map.height+"  ·  "+d.slotCount+" "+t("slot","slots")+"  ·  "
       + d.holes.length+" "+t("hole","hole(s)")+"  ·  "+t("epoch","epoch")+" "+d.epoch
@@ -1680,7 +2450,9 @@ function render(d){
     age.innerHTML = '<span class="unknown">state '+ms(d.statusAgeMs)
       + " old — STALE, treat every number as unknown</span>";
   } else { age.innerHTML = '<span class="muted">state '+ms(d.statusAgeMs)+" old</span>"; }
+}
 
+function renderMap(d){
   // The cross-world join is rebuilt from every poll, before anything draws, so
   // "also in slot 5" is exactly as fresh as the map beside it. SP goes with it:
   // a species that left a world must not keep a tooltip.
@@ -1760,9 +2532,31 @@ function render(d){
 async function tick(){
   try {
     var r = await fetch("api/status", {cache:"no-store"});
-    render(await r.json());
+    lastStatus = await r.json();
+    render(lastStatus);
   } catch(e){
     $("#link").innerHTML = '<span class="bad">status endpoint unreachable</span>';
+  }
+  // The species index rides the SAME cycle rather than a timer of its own, and
+  // it is only asked for while its tab is open: its ledger annotations are
+  // derived from a file the browser must never be handed, so they cost the
+  // archive a little work and are worth nothing to a tab nobody is looking at.
+  if (TAB === "species") await tickSpecies();
+}
+
+async function tickSpecies(){
+  try {
+    var r = await fetch("api/species", {cache:"no-store"});
+    renderSpecies(await r.json());
+  } catch(e){
+    var body = document.getElementById("spbody");
+    if (body && !body.firstChild){
+      var tr = document.createElement("tr"), td = document.createElement("td");
+      td.className = "bad";
+      td.setAttribute("colspan", "7");
+      td.textContent = "species endpoint unreachable";
+      tr.appendChild(td); body.appendChild(tr);
+    }
   }
 }
 /* The hop feed is polled SEPARATELY from the status view, which is the shape of
@@ -1772,6 +2566,10 @@ async function tick(){
    whose hop endpoint fails keeps its map and every number on it, and falls back
    to flashing the destination cell when the migration counters move. */
 async function tickHops(){
+  // Map-only: the glyphs travel the map's own lane paths, and a hidden panel
+  // has none to travel. hopsPrimed is reset on the way back in, so returning to
+  // the map never replays the last minute as if it were happening now.
+  if (TAB !== "map") return;
   try {
     var r = await fetch("api/hops", {cache:"no-store"});
     onHops(await r.json());
@@ -1781,6 +2579,7 @@ async function tickHops(){
   }
 }
 async function tickHistory(){
+  if (TAB !== "map") return;
   try {
     var r = await fetch("api/history?hours=24&buckets=120", {cache:"no-store"});
     renderHistory(await r.json());
@@ -1874,6 +2673,7 @@ function setMotionPref(v){
   applyMotion();
 })();
 
+showTab(tabFromHash(), false);
 tick(); setInterval(tick, 2000);
 // Faster than the status poll: the feed is bounded at 60 seconds, and a hop
 // should set off close to when it happened rather than up to two seconds late.
