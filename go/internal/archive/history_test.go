@@ -295,6 +295,35 @@ func TestHistoryEndpoint(t *testing.T) {
 	}
 }
 
+// TestPageAndFeedsAreNeverCached pins the other way a reader can be looking at
+// a map that is quietly wrong: a browser holding a copy of the page from before
+// a feature existed. Every surface here is a live reading of a running system,
+// and none of the four may be served from a cache.
+func TestPageAndFeedsAreNeverCached(t *testing.T) {
+	a, err := New(Config{DataDir: t.TempDir(), PeerID: "archive-test", RelayURL: "ws://test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+
+	for _, path := range []string{"/", "/api/status", "/api/hops", "/api/history"} {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		cc := resp.Header.Get("Cache-Control")
+		_ = resp.Body.Close()
+		// no-store, not merely no-cache: an operator surface that a browser may
+		// keep on disk is one an operator may be shown after the fact.
+		if !strings.Contains(cc, "no-store") {
+			t.Fatalf("GET %s served Cache-Control %q; a stale copy of this page shows a "+
+				"map that is not the one running", path, cc)
+		}
+	}
+}
+
 // TestLaneRecentHops covers the number the map animates. RecentHops counts only
 // what is inside flowWindow, so a lane that carried a thousand organisms
 // yesterday and none today animates at a standstill — and Migrations stays
@@ -662,8 +691,91 @@ func TestPageAnimatesTheSpeciesGlyphOnAHop(t *testing.T) {
 		t.Fatal("the poll-differencing hot pulse is not suppressed while the hop feed is " +
 			"live; one organism would be drawn twice")
 	}
-	// prefers-reduced-motion turns the whole thing off rather than slowing it.
-	if !strings.Contains(page, "if (!reduced){ tickHops(); setInterval(tickHops, 1500); }") {
-		t.Fatal("the hop feed is polled even under prefers-reduced-motion")
+	// The feed is polled UNCONDITIONALLY. It used to be gated on
+	// prefers-reduced-motion, which meant a reader whose system asks for less
+	// motion was never told a crossing happened at all — see
+	// TestReducedMotionDegradesRatherThanSuppresses.
+	if !strings.Contains(page, "tickHops(); setInterval(tickHops, 1500);") {
+		t.Fatal("the hop feed is not polled on a timer")
+	}
+	if strings.Contains(page, "if (!reduced){ tickHops()") {
+		t.Fatal("the hop feed is gated on reduced motion again; motion changes how a " +
+			"crossing is drawn, never whether the page knows one happened")
+	}
+}
+
+// TestReducedMotionDegradesRatherThanSuppresses pins the rule the first version
+// of the hop animation got wrong, and got wrong INVISIBLY.
+//
+// prefers-reduced-motion used to skip the hop poll and the frame loop outright,
+// so on a machine reporting reduce — which on Windows is the ordinary
+// "Animation effects: off", nothing to do with this page — the map drew, the
+// numbers moved, and no crossing was ever shown or explained. A reader had no
+// way to tell a quiet multiverse from a suppressed one.
+//
+// The rule is now DEGRADE, NEVER SUPPRESS, and it has two halves a Go test can
+// assert structurally: a still form of the same event, and a switch that beats
+// the media query in BOTH directions.
+func TestReducedMotionDegradesRatherThanSuppresses(t *testing.T) {
+	page := statusPageHTML
+
+	// Half one: the still arrival exists, is bounded like the travelling form,
+	// and is chosen from onHops rather than the hop being dropped.
+	for _, want := range []string{"function stillHop", "HOPSTILLMS", "HOPSTILLMAX",
+		"if (reduced){ stillHop(", ".hopstill{animation:hopstill"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the reduced-motion fallback is missing %q; a crossing that is not "+
+				"animated must still be SHOWN, not dropped", want)
+		}
+	}
+	// It lands where the travelling glyph would have ended — the far end of the
+	// lane's own path — so both forms agree about where a crossing arrives, and
+	// a bypass or a wrap is not guessed at from cell coordinates.
+	if !strings.Contains(page, "a.tracks[a.tracks.length-1]") {
+		t.Fatal("the still arrival does not read the end of the lane path")
+	}
+	// And it is the SAME glyph, in the same species colour, with the same
+	// escaping: it goes through buildHopGlyph inside the fence.
+	if !strings.Contains(page, "var g = buildHopGlyph(name, to);") {
+		t.Fatal("the still arrival builds its own glyph instead of the fenced one")
+	}
+	// The arrival flash is a pure opacity fade and is deliberately NOT suppressed
+	// under reduced motion any more: with travel off it is half the signal.
+	if strings.Contains(page, "@media (prefers-reduced-motion:reduce){.cell.hit") {
+		t.Fatal("the arrival flash is suppressed under reduced motion again; it is an " +
+			"opacity fade with no movement in it, and it is what says a creature landed")
+	}
+
+	// Half two: the switch. Three states, in the page, persisted, and read back
+	// on load — a media query is a guess about a person and has to be beatable.
+	for _, want := range []string{`id="motion"`, `data-m="auto"`, `data-m="on"`, `data-m="off"`,
+		"function applyMotion", "function setMotionPref", "function readMotionPref",
+		"localStorage.setItem(MOTIONKEY", "localStorage.getItem(MOTIONKEY"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the motion switch is missing %q", want)
+		}
+	}
+	// It overrides the query BOTH ways: off forces reduced on a system that never
+	// asked, on animates on a system that did.
+	if !strings.Contains(page,
+		`reduced = (motionPref === "off") || (motionPref === "auto" && mqReduced);`) {
+		t.Fatal("the motion switch does not override prefers-reduced-motion in both directions")
+	}
+	// Switching it at runtime must actually start and stop the loop, and sweep
+	// the dots that would otherwise stall mid-lane with no loop to move them.
+	for _, want := range []string{"cancelAnimationFrame(rafId)", "function killPulses",
+		"rafId = requestAnimationFrame(frame)"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the motion switch does not take effect live: missing %q", want)
+		}
+	}
+	// The system setting can change under an open page.
+	if !strings.Contains(page, `mq.addEventListener("change"`) {
+		t.Fatal("a change to the system reduced-motion setting does not reach the open page")
+	}
+	// And the page SAYS which way it went. The whole defect was that it did not.
+	if !strings.Contains(page, `id="motionwhy"`) ||
+		!strings.Contains(page, "your system asks for reduced motion") {
+		t.Fatal("the page never tells a reader why crossings are not travelling")
 	}
 }

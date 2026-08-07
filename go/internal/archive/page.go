@@ -172,6 +172,11 @@ h2 .note{text-transform:none;letter-spacing:0;font-size:11px}
 .cell.live .statelbl,.cell.live .statedot{fill:var(--live)}
 .cell.dark .statelbl,.cell.dark .statedot{fill:var(--dark)}
 .cell.hole .statelbl,.cell.hole .statedot{fill:var(--hole)}
+/* The arrival flash. It is a PURE OPACITY FADE — nothing moves, nothing is
+   scaled, nothing slides — so it is deliberately kept when the page is told to
+   reduce motion. With travel switched off it is half of what tells a reader a
+   creature landed here, and suppressing it (which this page used to do) bought
+   nothing a person asking for less motion actually wanted. */
 .cellhit{fill:none;stroke:var(--pulse);stroke-width:3;opacity:0;pointer-events:none}
 .cell.hit .cellhit{animation:hit .8s ease-out}
 @keyframes hit{0%{opacity:.95}100%{opacity:0}}
@@ -216,6 +221,12 @@ g.lg:hover .lane{stroke-width:4}
 .hopbib{stroke:var(--hot);stroke-width:.9;filter:drop-shadow(0 0 5px rgba(255,255,255,.55))}
 .hopbib.neutral{fill:var(--dim)}
 .hopring{fill:none;stroke:var(--hot);stroke-width:1.1;opacity:.5}
+/* The SAME event under reduced motion. The glyph is placed where a travelling
+   one would have ended — the far end of the lane, at the edge of the world it
+   reached — and it fades there. It never travels, so there is no movement to
+   object to, and the crossing is still shown rather than silently dropped. */
+.hopstill{animation:hopstill 1.1s ease-out forwards}
+@keyframes hopstill{0%{opacity:0}16%{opacity:1}60%{opacity:1}100%{opacity:0}}
 .axis{fill:var(--dim);font-size:11px}
 
 /* ---- legend ---- */
@@ -299,8 +310,18 @@ grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
 text-transform:uppercase;margin-bottom:3px}
 .glossitem span{color:var(--dim);font-size:12px;line-height:1.6}
 footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid var(--line)}
+
+/* ---- the motion switch ----
+   Small, and in the footer rather than the header, because it is a preference
+   and not a reading. It is still a CONTROL: the pressed state has to be legible
+   at a glance, or a reader cannot tell which of the three is in force. */
+.motion{margin-top:10px;display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
+.motion .mbtn{font:inherit;font-size:11px;color:var(--dim);background:var(--cell);
+border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
+.motion .mbtn:hover{color:var(--text);border-color:var(--dim)}
+.motion .mbtn[aria-pressed="true"]{color:var(--bg);background:var(--lane);border-color:var(--lane)}
+.motion .mwhy{font-size:11px;color:var(--dim)}
 @media (max-width:640px){main{padding:10px;gap:10px}section{padding:10px}header{padding:10px}}
-@media (prefers-reduced-motion:reduce){.cell.hit .cellhit{animation:none}}
 </style>
 </head>
 <body>
@@ -389,6 +410,13 @@ footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid va
   <code>/api/status</code> (live), <code>/api/hops</code> (the last minute of crossings,
   bounded in time and in count, and kept out of the durable sample file on purpose)
   and <code>/api/history</code> (downsampled, <code>?hours=</code>, <code>?buckets=</code>).
+  <div class="motion" id="motion">
+    <span class="term" data-t="motion">motion</span>
+    <button type="button" class="mbtn" data-m="auto">auto</button>
+    <button type="button" class="mbtn" data-m="on">on</button>
+    <button type="button" class="mbtn" data-m="off">off</button>
+    <span class="mwhy" id="motionwhy"></span>
+  </div>
 </footer>
 <div id="tip"></div>
 <script>
@@ -420,6 +448,7 @@ var G = {
  bounce:["bounce","A migration that gave up and returned to the world it started in. It is a thing you get told about, never a silent repair."],
  migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map a lane's steady stream of small dots is its measured rate; when a hop actually happens, that creature itself — drawn in its own species' colour — sets off along the lane and travels to the far world."],
  hopfeed:["hops just now","The last minute of crossings, kept in memory and nowhere else. It is a record of who CROSSED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census, and these come from the migrations the archive was copied on. Never add the two together. A hop whose message carried no species name travels as a plain grey creature — unknown, never guessed."],
+ motion:["motion","Whether a crossing TRAVELS across this map or simply appears where it landed. On 'auto' the page follows your system's reduce-motion setting — Windows calls it 'Animation effects' and macOS calls it 'Reduce motion' — and a great many machines have that switched off for reasons that have nothing to do with this page. Either way a crossing is still drawn and still counted: with motion reduced, the creature appears for a moment at the world it reached, in its own species colour, and fades. 'on' and 'off' override the system setting in both directions, and this browser remembers which you chose."],
  lastSave:["last save","Every world saves itself to disk every few minutes and sends back a receipt — when it saved, how big the file was, how long it took. This is the age of the newest receipt from that world."],
  population:["population","How many living creatures the world holds, as its own game reported it. Each little creature drawn inside a cell is one of them."],
  species:["species","A kind of creature, with a two-part name like 'Cyanea velox'. Every creature in a cell is drawn in its species' colour, and the same species is the same colour in every world, so you can see a kind spreading across the map. Hover one to see how many there are and where else it lives."],
@@ -1278,11 +1307,18 @@ function paintMap(d){
     // it had before D19, which is what B14 requires of a page that cannot render
     // the feed.
     var was = prevMig[key];
-    if (was != null && l.migrations > was && a && !reduced && !hopFeedOK){
-      var extra = Math.min(4, l.migrations - was);
-      for (var e=0;e<extra;e++) fireHot(a, e*130);
-      if (a.gap > 0) a.next = Math.max(a.next, performance.now() + a.gap*extra);
-      flashCell(l.toSlot);
+    if (was != null && l.migrations > was && a && !hopFeedOK){
+      if (reduced){
+        // There is no frame loop to walk a pulse down the lane, so a hot pulse
+        // spawned here would sit off-screen forever. The destination flash is a
+        // pure fade and still says a creature landed.
+        flashCell(l.toSlot);
+      } else {
+        var extra = Math.min(4, l.migrations - was);
+        for (var e=0;e<extra;e++) fireHot(a, e*130);
+        if (a.gap > 0) a.next = Math.max(a.next, performance.now() + a.gap*extra);
+        flashCell(l.toSlot);
+      }
     }
     prevMig[key] = l.migrations;
   }
@@ -1320,8 +1356,15 @@ function flashCell(slot){
      must not put hundreds of creatures on the map: at most HOPMAX travel at
      once, they launch on a stagger, the pending queue is capped at HOPQMAX and
      the rest are simply not drawn. The feed is a sample of what is happening,
-     never an obligation to draw all of it. */
+     never an obligation to draw all of it.
+
+   REDUCED MOTION DEGRADES THIS, IT DOES NOT DELETE IT. See stillHop: the same
+   creature in the same colour is shown arriving, it just does not walk there. */
 var HOPMS = 1700, HOPMAX = 12, HOPSTAGGER = 130, HOPQMAX = 40, HOPSEENMAX = 800;
+/* The reduced-motion form is bounded on the same axes: how long one stays up,
+   and how many may be up at once. A burst must not stack forty glyphs on one
+   cell edge either. */
+var HOPSTILLMS = 1100, HOPSTILLMAX = 8, hopStills = 0;
 
 /* A bounded seen-set. A migrationId is animated once, ever, and the feed
    re-serves the same 60 seconds on every poll — so without this the same
@@ -1347,13 +1390,18 @@ function onHops(f){
   for (i=0;i<list.length;i++){
     var hp = list[i];
     if (hopMarkSeen(hp.migrationId)) continue;
-    if (reduced || hopQ.length >= HOPQMAX) continue;
     // Lanes are keyed fromSlot+edge, which is what makes the two directions of a
     // pair two things to animate. A hop whose lane is closed or not drawn — it
     // crossed, then the map changed — is dropped rather than guessed onto
     // another arrow.
     var a = animFor(hp.fromSlot + hp.exitEdge);
     if (!a) continue;
+    // Reduced motion takes the OTHER form of the same event, and takes it here
+    // rather than by dropping the hop on the floor. The queue and its cap belong
+    // to the travelling form alone: a still glyph is placed at once and has its
+    // own bound.
+    if (reduced){ stillHop(a, hopName(hp), hp.toSlot); continue; }
+    if (hopQ.length >= HOPQMAX) continue;
     hopQ.push({a:a, name:hopName(hp), to:hp.toSlot});
   }
 }
@@ -1374,6 +1422,35 @@ function launchHop(q){
   // Speed is set from the WHOLE lane's length, so every hop takes about HOPMS
   // whatever the lane's length — a short hop and a long wrap read as one event.
   hopsLive.push({el:g, a:q.a, ti:0, dist:0, speed:q.a.total/HOPMS, to:q.to});
+}
+
+/* stillHop is the reduced-motion arrival, and it is the whole of this fix's
+   first half. It puts the glyph exactly where a travelling one would have
+   ENDED — the last point of that lane's own path, at the edge of the world it
+   reached — so the two forms agree about where a crossing lands, and then lets
+   CSS fade it. No travel, no rotation, and no frame loop is needed to run it.
+
+   Reading the endpoint off the lane path rather than off the cell geometry is
+   deliberate: a bypass and a wrap end somewhere a cell's own coordinates do not
+   predict, and the arrow the reader is looking at is the authority for where
+   its traffic arrives. */
+function stillHop(a, name, to){
+  if (!hopLayer || hopStills >= HOPSTILLMAX) return;
+  var tr = a.tracks.length ? a.tracks[a.tracks.length-1] : null;
+  if (!tr) return;
+  var pt = tr.el.getPointAtLength(tr.len);
+  var g = buildHopGlyph(name, to);
+  g.setAttribute("class", "hopg hopstill");
+  g.setAttribute("transform", "translate("+pt.x.toFixed(1)+","+pt.y.toFixed(1)+")");
+  hopLayer.appendChild(g);
+  hopStills++;
+  setTimeout(function(){
+    hopStills--;
+    if (g.parentNode) g.parentNode.removeChild(g);
+  }, HOPSTILLMS);
+  // The destination cell says so too, with the same fade the travelling form
+  // fires on arrival.
+  flashCell(to);
 }
 
 /* stepHops advances every travelling glyph one frame, along the same track list
@@ -1665,13 +1742,112 @@ async function tickHistory(){
   }
 }
 
-try { reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch(e){}
+/* ------------------------------------------------------ motion, and its switch
+   This page had ONE rule for prefers-reduced-motion and it was the wrong one:
+   it never polled the hop feed and never started the frame loop, so a reader
+   whose system asks for reduced motion saw no crossings at all — no travelling
+   creature, no pulse, not even an arrival flash — and was told nothing about
+   why. On Windows the setting behind that query is "Animation effects", which
+   is off on a great many machines for reasons that have nothing to do with this
+   page, and the failure was invisible: the map still drew, the numbers still
+   moved, and the traffic simply never appeared.
+
+   The rule now is DEGRADE, NEVER SUPPRESS. Reduced motion stops the TRAVEL —
+   the frame loop, the ambient flow dots, the glyph walking its lane — and keeps
+   the FACT: the arriving creature appears at the end of the lane it came down,
+   in its own species colour, and fades (stillHop). Nothing moves; nothing is
+   hidden.
+
+   And it is OVERRIDABLE IN BOTH DIRECTIONS, because a media query is a guess
+   about a person and this one is wrong often. The three-way choice is kept in
+   this browser and beats the query either way: auto follows the system, on
+   animates regardless, off stops the travel on a system that never asked. */
+var MOTIONKEY = "multiverse.motion", motionPref = "auto", mqReduced = false;
+
+function readMotionPref(){
+  try {
+    var v = localStorage.getItem(MOTIONKEY);
+    if (v === "auto" || v === "on" || v === "off") return v;
+  } catch(e){}
+  return "auto";
+}
+
+/* killPulses sweeps the ambient flow dots. Without the frame loop they would
+   never advance and never be removed, so turning motion off has to clear them
+   rather than leave a row of stalled dots on every lane. */
+function killPulses(){
+  for (var i=0;i<anim.length;i++){
+    var a = anim[i];
+    for (var j=0;j<a.pulses.length;j++){
+      var el = a.pulses[j].el;
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }
+    a.pulses = [];
+  }
+}
+
+/* applyMotion is the ONE place the effective answer is computed, and it is
+   idempotent: it is called at startup, on every press of the switch, and when
+   the system setting itself changes under a page that is already open. */
+function applyMotion(){
+  reduced = (motionPref === "off") || (motionPref === "auto" && mqReduced);
+  var bs = document.querySelectorAll("#motion .mbtn");
+  for (var i=0;i<bs.length;i++){
+    bs[i].setAttribute("aria-pressed",
+      bs[i].getAttribute("data-m") === motionPref ? "true" : "false");
+  }
+  // It SAYS which way it went and why, so the reader who wondered where the
+  // creatures went has the answer on the page instead of in a settings dialog.
+  var why = $("#motionwhy");
+  if (why){
+    why.textContent = reduced
+      ? (motionPref === "auto"
+          ? "your system asks for reduced motion — a crossing appears at the world it reached instead of travelling there"
+          : "a crossing appears at the world it reached instead of travelling there")
+      : (mqReduced
+          ? "animating anyway, over the reduced-motion setting your system reports"
+          : "creatures travel their lane as they cross");
+  }
+  if (reduced){
+    if (rafId){ cancelAnimationFrame(rafId); rafId = 0; }
+    killHops();
+    killPulses();
+  } else if (!rafId){
+    lastTs = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+}
+
+function setMotionPref(v){
+  motionPref = v;
+  try { localStorage.setItem(MOTIONKEY, v); } catch(e){}
+  applyMotion();
+}
+
+(function wireMotion(){
+  var box = document.getElementById("motion");
+  if (box) box.addEventListener("click", function(ev){
+    var b = ev.target.closest ? ev.target.closest(".mbtn") : null;
+    if (b) setMotionPref(b.getAttribute("data-m"));
+  });
+  try {
+    var mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    mqReduced = !!mq.matches;
+    if (mq.addEventListener){
+      mq.addEventListener("change", function(e){ mqReduced = !!e.matches; applyMotion(); });
+    }
+  } catch(e){}
+  motionPref = readMotionPref();
+  applyMotion();
+})();
+
 tick(); setInterval(tick, 2000);
 // Faster than the status poll: the feed is bounded at 60 seconds, and a hop
 // should set off close to when it happened rather than up to two seconds late.
-if (!reduced){ tickHops(); setInterval(tickHops, 1500); }
+// It is polled WHATEVER the motion setting is: reduced motion changes how a
+// crossing is DRAWN, never whether this page knows one happened.
+tickHops(); setInterval(tickHops, 1500);
 tickHistory(); setInterval(tickHistory, 60000);
-if (!reduced) rafId = requestAnimationFrame(frame);
 </script>
 </body>
 </html>
