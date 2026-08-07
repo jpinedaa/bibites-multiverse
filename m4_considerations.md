@@ -737,7 +737,7 @@ are clarifying. Neither version moves.
 `species` block on two Contract A messages and one Contract B message, nothing removed and no
 type changed, so **both minors moved and neither major did**: `contract-a.md` §16 carries
 A30 to A33 at **`contract-a/2.1`**, `contract-b-m4.md` §15 carries B9 and B10 at
-**`contract-b/3.1`**. Those are the current wires. The rollout to the living deployment on
+**`contract-b/3.1`**. The rollout to the living deployment on
 2026-08-07 left the far end on the previous minor on purpose and it kept working, which is
 the compatibility rule demonstrated rather than asserted.
 
@@ -747,8 +747,20 @@ organisms were migrating with no species block at all. `contract-a.md` §16 **A3
 *exporting* mod normalize each half's whitespace before it validates — trim the edges, collapse
 internal runs to one U+0020 — and makes the importer compare on the normalized form so a
 repaired name still matches the raw-form species a destination world grew for itself.
-**No version moved**: A34 adds no field and relaxes no rule, so both wires stay at
+**No version moved**: A34 adds no field and relaxes no rule, so both wires stayed at
 `contract-a/2.1` and `contract-b/3.1`, and no sidecar, relay or archive changed.
+
+**Both wires have moved twice more since, and this document is not the record of it.** The
+species census took both minors to `contract-a/2.2` and `contract-b/3.2`
+(`contract-a.md` §17 A35–A37, `contract-b-m4.md` §16 B11–B12), and **D17's two-way lanes**
+took Contract B alone to **`contract-b/3.3`** (`contract-b-m4.md` §17 B13–B15) while Contract
+A stayed at **`contract-a/2.2`** — its fields have accepted four export edges since A18, so
+§18's A41 finds no bump to make. **The contracts are the authority on the current wire; this
+section is the M4 work-order history.** Two of the same wave's decisions land outside the wire
+entirely: D18's migration exclusion is mod-local policy (`contract-a.md` §18 A39), and D19's
+hop animation is archive-and-page only (`contract-b-m4.md` §17 B14). The third, **D20**,
+raises `inboundRatePerSimMinute` from 2.0 to 12.0 — see Risk 9 below, whose answer is
+unchanged and whose numbers are not.
 
 ### WP2 — The relay: healing, insertion and handover
 
@@ -1240,5 +1252,7 @@ steps below carry the milestone's remainder into the living deployment and into 
 4. **Run `phase5far` once, when a person is at the second computer.** It confirms the pacing
    rule across the LAN. Phase 5 already proves the rule locally, so this is confirmation.
 5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.
-6. **Open M5** (public release). The join kit is its starting point, and `contract-a/2.1`
-   plus `contract-b/3.1` are the wire shapes it publishes.
+6. **Open M5** (public release). The join kit is its starting point, and the wire shapes it
+   publishes are whatever the contracts say at the time — **`contract-a/2.2` plus
+   `contract-b/3.3` as of 2026-08-07**, after the census and D17's two-way lanes. Read the
+   contracts for the current pair rather than this line.

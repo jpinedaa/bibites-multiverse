@@ -29,15 +29,20 @@
     Peer D ──►│ (spatial router) │                    └── Peer D ──┘
               └──────────────────┘             (relay degrades to bootstrap)
 
-   The wiring is a star; the *map* is a ring (D8). Each peer exports through its
-   east edge into its one east neighbour and receives through its west edge —
-   B → C → D → B, one way round. `multiverse-archive` (D11) sits beside the relay
-   from M3 and records every envelope that crosses it.
+   The wiring is a star; the *map* is a grid (D8, D13). `multiverse-archive` (D11)
+   sits beside the relay from M3 and records every envelope that crosses it.
 
    From M4 the map heals and grows (D12): a dark slot is routed around rather than
    waited on, and a peer splices in between two live slots. D13 generalizes the map
-   again — the ring is the one-row case of a one-way grid, and M4 runs the vertical
-   lanes live on a 3×2 map.
+   again — the ring is the one-row case of the grid, and M4 runs the vertical lanes
+   live on a 3×2 map.
+
+   D17 makes every lane two-way (2026-08-07). Each of a peer's four edges is BOTH
+   an export edge and an entry edge: a west export routes to the west neighbour,
+   who receives it on its east edge, and the same holds per axis in both
+   directions. The permanent one-way current of D8 is gone; what replaces it is a
+   live border on all four sides, held safe by the arrival inset, the
+   entry-immunity window and the outward-velocity capture test.
 ```
 
 ---
@@ -65,6 +70,10 @@ Recorded so divergences are deliberate, not accidental. Section references (§) 
 | **D14** | **Hard-stop recovery is a first-class feature, and a world save is part of it.** Any single instance may crash or hard-stop and must recover cleanly: the world reloads from its last periodic save, the sidecar replays its journal, and custody reassertion handles the resurrection. **No work goes into preventing sleep or crashes.** | T1 is the argument. The overnight run was *safe* and still lost the worlds: 22 595 hops held exactly-once, no organism was lost, and about **97% of the simulated world state was discarded**, because the rig turns the game's autosave off — a scene reload under a live rig is the worse failure — and then never sent a save of its own. Custody protects organisms in flight; nothing protected the organisms at home. Recovery is also the cheaper half: the rig runs on a desktop the owner uses, so hard stops are normal input, not incidents. | The mod owns a periodic save on a wall-clock timer, a save on quit, and a rotation so one bad save cannot destroy the last good one. Save cost is measured against the sim before the cadence is fixed. The journal replay and custody reassertion of `contract-a.md` §7.4–§7.5 become **tested** paths instead of believed ones. `e2e/data/slot-1/journal` still holds one real in-flight hop from 2026-08-04 — migration `9d6db335-b1ae-433e-a44a-bb2109912913`, entity `2004967003`, slot 1 → slot 2 — and delivering it is M4's resume test. Those journals must not be deleted. |
 | **D15** | **Operations and observability are milestone work, not a side effect.** M4 buys the operator surface: population on the Contract B ring view, durable metrics outside the BepInEx logs, an archive-served live HTML status page and a `ringstat` terminal command, log preservation at shutdown, a slot handover command, and a join kit. It also **instruments the entry edge**, where the owner observed a mass of organisms on the west border after the overnight run. | T1 produced every one of its findings from 147 MB of BepInEx logs that BepInEx overwrites on the next game launch, and its best series — population and edge pressure per simulated minute — existed nowhere else. An operator who cannot see the ring cannot run it, and M5 puts strangers on it. **The entry-edge cause was named by the owner on 2026-08-05, and it retires the measure-first argument:** the sleeping machine **dammed the flow**. Queued custody deliveries plus the west neighbour's contained export pile released together the moment the slot woke, and the entry edge took the whole dam at once. The mechanism is a burst, not a steady rate, so the fix is a rate limit rather than a different arrival position. | `HEARTBEAT` already carries population on Contract A; Contract B carries it to the relay so the ring view has it without reading a log. The archive gains a read-only HTML surface beside its query surface, because it already subscribes to every envelope and already runs beside the relay. M4 ships a **delivery rate limit**: the sidecar paces `MIGRATE_IN` delivery out of its journal at a configurable maximum spawn rate per sim-time unit, so every burst — sleep recovery, an edge reopening, a future mass migration — trickles in instead of flooding. The crowding metric ships beside it, because it is cheap and because it is how the pacing is verified. **Arrival-position spreading stays parked**: it trades D3's one-continuous-world illusion for a flatter histogram, and the dam, not the position, was the problem. |
 | **D16** | **Milestone renumbering.** M4 becomes **Operations: resilience, topology, observability**. Public release moves to **M5**, direct P2P to **M6**, and ecosystem completeness with the species catalog to **M7**. | D12 to D15 are one coherent risk set — a ring that survives its own operators — and they are prerequisites for a public ring rather than parts of it. Shipping a public relay on a topology that stops at the first dark peer, with a rig that loses a night of worlds and an operator surface made of perishable log files, exports all three defects to strangers. | Every "M4" that meant public release, every "M5" that meant libp2p and every "M6" that meant the catalog shifts by one. This document is corrected throughout. The contracts are **not**: `contracts/contract-b-m3.md` §13 and `contracts/contract-a.md` §12–§14 say "M4" where they now mean M5, and the implementation wave corrects them. |
+| **D17** | **Two-way lanes.** Every lane becomes bidirectional. Each of a peer's four edges is **both an export edge and an entry edge**: a `W` export routes to the west neighbour, who receives it on its `E` edge; an `S` export routes south and is received on `N`; and so on per axis in both directions. **This supersedes D8's one-way rule** — "out and in are different doors" is retired, and with it the guarantee that an organism only comes home by traversing the whole cycle. **D8's stable-slot rules survive untouched:** a slot is still a routing address bound to a peer identity, still never reused, still never renumbered, and an offline peer still keeps its slot and its position. | One-way lanes bought no-boomerang with a permanent current. The price was that **half of every world's border is dead geometry**: an organism that walks west is not a migrant, and D10's wrap teleports it to the antipode — which a player reads as a wall inside a world that is supposed to be continuous. The three protections M4 already ships turn out to be sufficient on their own, and each is now load-bearing rather than belt-and-braces: an arrival is inset past **every** capture band on **both** axes (`contract-a.md` §4.3, §15 A28), the entry-immunity window keeps the spawn and the next export two separable events, and the outward-velocity test means an **ordinary arrival — which by construction arrives travelling inward — is never in the band of the edge it landed behind**. What one-way lanes prevented *instantaneously*, those three prevent instantaneously. What one-way lanes prevented *over a whole traverse* — a round trip — is exactly the property being given up on purpose: a world's neighbour is now a place an organism can visit and return from, which is what a map of worlds should mean. | `EDGE_STATUS` carries **four** entries, one per edge, each with its own neighbour-liveness state; the four open and close independently. Relay routing gains the reverse direction per axis, and route-around applies symmetrically — `effective(W)` and `effective(S)` are the same walk with the step negated. Capture bands run on all four edges, so the band overlap of the corner rule now exists at **all four corners** (never with two opposite edges: `E` and `W` are mutually exclusive while `S > W`). Bounce-back semantics are **unchanged** — an organism bounces home through the edge it left by, and that edge is now also a normal entry edge, which is fine: a bounce-back arrives moving *outward*, inset past the band, and the immunity window covers the ticks it takes to reach the band line, exactly as it already did for `E` and `N`. **D10's wrap loses most of its duty** and keeps the rest: it now contains only excluded species (D18), organisms whose relevant lane is closed, and organisms still inside the immunity window. **On an axis of length 2 the forward and reverse lanes name the same peer** (§2.1's degenerate case, now doubled), so the 3×2 rig's columns become two-lane pairs and hop rate on that axis rises disproportionately — which D20 has to absorb. Contract A takes **no version bump**; Contract B takes a **minor** to `contract-b/3.3`. |
+| **D18** | **Migration exclusion policy.** The mod gains a **local** policy: species named on an exclusion list **never export**. The capture test skips them, and each excluded organism is logged **once per organism per session** so the line is evidence without being a cost. Config is `MULTIVERSE_MIGRATION_EXCLUDE`, comma-separated **full** species names matched on **A34-normalized** forms, defaulting to **`Basic bibite`** by the owner's call. | Two-way lanes make every border live, and the founder species is the one population that should not ride them. `Basic bibite` is the seed stock every world starts with: it is not an evolutionary result, so moving it between worlds mixes nothing — it spreads one starting genome across the map and competes for the arrival budget with the migrants that do carry information. Keeping it home also gives every world a stable resident baseline against which the immigrant species are legible on the census. The policy is **local and export-side only** because that is the only place it can be cheap: one set lookup inside a test that already runs every `FixedUpdate` on every organism. | **No wire change of any kind** — no field, no enum, no version, and no sidecar, relay or archive behaviour. The asymmetry it creates is a **documented feature, not a defect**: an excluded species accumulates where it is born and never appears in the migration ledger, while the census and the live page keep showing it **normally**, so "who lives here" and "who crossed" now legitimately disagree and a reader must not reconcile them. **D10's wrap becomes load-bearing again** — an excluded organism in an outward band is contained by the wrap and by nothing else, which is why the wrap stays on. The list is per-world, so a world that does not exclude a species may still **send** it to one that does; exclusion never refuses an arrival. Matching on the A34-normalized form is what makes the list work at all, because about 2% of the game's generated name halves carry an edge space. |
+| **D19** | **Live hop animation.** When a migration lands, the live map animates the **species glyph** — the coloured bibite silhouette the census view already draws — travelling along that lane's arrow in near-real time. The archive gains a **recent-hops feed**: lane, species names and timestamp for roughly the last 60 seconds, bounded by both time and count, served beside `/api/status` and polled on the page's existing 2-second cycle. The client animates the glyph between polls, arrival-triggered and brighter than the ambient pulses. | The map already pulses per lane at a rate derived from `recentHops`, but **a pulse is anonymous** — it says traffic is flowing and nothing about what is flowing. The census gave every species a colour and a shape, and the ledger already carries a species block on every `MIGRATION_PAYLOAD`, so both halves of "which species is crossing which lane, right now" were already inside the archive and only the join was missing. It is also the cheapest possible verification of the two decisions above: two-way lanes show as glyphs travelling **both ways along one arrow**, and the exclusion shows as a species that is everywhere in the census and never on a lane. | Archive-internal and page-only. **No wire change**, and `contract-b-m4.md` §10.1's rules are the ones it already has to obey rather than new ones: the feed is built from envelope copies the archive already records, so "one source, no polling" is untouched; a hop whose envelope carried no species block animates the **neutral glyph**, never a guessed name; and the feed is **history — what crossed — never abundance** (D11, B12), so it may not be summed into a population. The bound is not optional: `Status` is serialized verbatim into `metrics.jsonl` once a minute, so an unbounded array on that struct would land in a durable file every minute forever. |
+| **D20** | **The delivery rate limit rises**, from `inboundRatePerSimMinute` **2.0 to 12.0**, with `inboundRateBurst` **5 to 15**. It also **becomes a real knob** — a flag and an environment variable — which it has never been: it is a compiled Go constant today, reachable only by editing source. | **2.0 was reasoned, not guessed, and D13 spent the reasoning.** T1 measured 0.4 arrivals per simulated minute into slot 1, and *five times the measured natural rate* was the margin chosen so that ordinary traffic is never held back (`contract-a.md` §7.5). Then the grid gave every slot a **second** inbound lane and doubled the map. Thirty-five hours of the living deployment now measure a **median of 1.19 and a p95 of 2.21** arrivals per simulated minute per slot — **12% of all slot-samples above a limit whose entire purpose is to be above them**. Slots 3 and 4 sit above it 20% and 26% of the time, and slot 4's paced backlog has been pinned at `inboundQueueMax` for a quarter of the run. §7.5's own diagnostic names this exactly: *a depth that never falls names a limit set too low*. D17 then doubles the inbound surface again. | **12.0 is five times the projected median under two-way lanes** — the same rule that produced 2.0, applied to the topology that ships. It is also where the measured curve flattens: at 12.0 only 0.3% of projected samples are throttled, and that residue is genuine dam events (a far-end dropout at 18.5 arrivals per simulated minute), which is precisely what the limit exists for. The dam is still spread — a 900-organism backlog takes 75 simulated minutes to drain instead of arriving in one breath — and the A29 livelock defences are untouched, because the mod's ingest ceiling of 4 applications per `FixedUpdate` is three orders of magnitude above 12 per simulated minute. The knob is the other half: `holdTimeoutMs` set the precedent in M4 by gaining `--hold-timeout` for exactly this reason, and a tunable an operator cannot retune from the metric that measures it is not a tunable. |
 
 The project owner ratified D1 (relay-first), D2 (at-most-once custody), and D3
 (edges-over-towers) on 2026-08-02; they are settled, not provisional.
@@ -105,6 +114,30 @@ recommendations. The four calls, recorded in the rows above and worked through i
 4. **The save budget is 2 seconds** (D14). A periodic save stalls the simulation by no
    more than that, which makes the simple synchronous save the shipped design and gives
    the save-timer work item a bar to pass.
+
+The owner ratified D17 (two-way lanes), D18 (migration exclusion), D19 (live hop animation)
+and D20 (the pacing raise) on **2026-08-07**, against the living M4 deployment rather than
+against a plan. They ship together in one implementation wave, and they are one idea seen
+four ways: **make the whole map live, and then make it legible.** D17 opens the four edges,
+D18 decides who is allowed through them, D20 sizes the pipe they feed, and D19 is how an
+operator sees all three working. Where an older passage disagrees with D17–D20, the new rows
+win.
+
+**D17 supersedes D8's one-way rule explicitly, and only that rule.** D8 stated three things
+and the new row keeps two of them:
+
+| D8 said | Under D17 |
+|---|---|
+| **Every instance exports through its east edge and receives through its west edge.** Out and in are different doors, so a returning organism must traverse the whole neighbouring world — no boomerang at the shared edge. | **Superseded.** Every edge is both a door out and a door in. A round trip through one neighbour is now legal and intended. The *instantaneous* no-re-export guarantee survives, but it is now carried by the arrival inset, the entry-immunity window and the outward-velocity capture test rather than by the geometry. |
+| **A sector is a ring slot, and a slot belongs to a peer identity, not a connection.** An offline peer keeps its slot, a new peer inserts, the map never reshuffles. | **Survives unchanged.** Addresses are still never reused and never renumbered; positions still move and addresses still do not (D12, D13). |
+| **The `{x, y}` grid is retired.** | **Long since reversed by D13**, and D17 changes nothing about it: the map is a rectangle addressed by slot and positioned by coordinate. |
+
+D13's own reasoning is where the supersession bites hardest, and it is worth stating rather
+than quietly overwriting. D13 argued that one current mixes genes along one cycle and two
+currents mix them across a torus, so an organism comes home only after a whole number of both
+circuits. **That property is now gone on purpose.** The exchange is a border that is live on
+all four sides instead of half of one, and — with D18 holding the founder stock in place — a
+map where the thing that travels is the thing that evolved.
 
 ---
 
@@ -147,7 +180,13 @@ no `bb8-schema` (D4).
   **export edge (east)** and the **passive entry edge (west)** from M3 (D8). From M4 the
   mod declares **`exportEdges`, plural**, and carries a second capture band and a second
   passive entry edge for the north/south axis (D13). The vertical pair is **live** in M4,
-  with the corner rule deciding which edge claims an organism inside both bands
+  with the corner rule deciding which edge claims an organism inside both bands.
+  **From D17 the mod declares all four**: every edge runs a capture band and every edge
+  also accepts arrivals, so there is no passive edge left and the corner rule arbitrates
+  at all four corners
+- **The migration exclusion list** (D18) — `MULTIVERSE_MIGRATION_EXCLUDE`, default
+  `Basic bibite`. A species on the list is skipped by the capture test and logged once per
+  organism per session. Local policy, matched on the A34-normalized name, never on the wire
 - **Periodic world save and save-on-quit** (D14). A wall-clock timer drives the game's own
   `SaveSystem.CreateSave` by hand — the public `SaveGame` wrapper swallows exceptions
   inside a coroutine (`m1_findings.md`) — with a rotation of the last N saves, and one
@@ -212,7 +251,9 @@ the sidecar's job.
   when the timeout expires (D2, as amended)
 - Routing: the export edge → the ring's next slot east (D8). From M4 that target is the
   **effective** east neighbour: the next *deliverable* slot, with dark slots bypassed
-  (D12), and one target per export edge, east and north, on the live grid (D13). The mod
+  (D12), and one target per export edge, east and north, on the live grid (D13). From D17
+  there are **four** targets, one per edge, and the west and south walks are the east and
+  north walks with the step negated — route-around is symmetric. The mod
   never sees any of this — route-around and the grid are invisible on Contract A
 - Payload validation via `bb8-schema` — nothing invalid ever reaches a mod, in
   either direction
@@ -233,7 +274,10 @@ the sidecar's job.
 - **Arrival pacing** (D15): `MIGRATE_IN` leaves the journal at a configurable maximum
   spawn rate per sim-time unit. The sidecar is the right place for it because the journal
   is where a burst accumulates — a woken slot drains its own backlog and its neighbour's
-  released export pile through the same gate, and the mod sees an ordinary arrival stream
+  released export pile through the same gate, and the mod sees an ordinary arrival stream.
+  **D20 raises the rate to 12.0 per simulated minute and makes it a real knob**: the grid
+  and then two-way lanes overran a limit that was sized from a one-lane ring, so the
+  limit had begun throttling ordinary traffic instead of only spreading dams
 
 **Owns — M2–M5 (relay transport):**
 - Relay client connection (TLS from M5; a shared token over the LAN from M3)
@@ -307,6 +351,13 @@ forwarder, and a forwarder that indexes genomes is not dumb any more.
   self-contained HTML view of the whole ring — slots, liveness, effective lanes,
   populations, per-lane flow and custody depth — with no new component and no rule added
   to the relay. `ringstat` reads the same data from the terminal
+- **From D19: the recent-hops feed and the animated species glyph.** The archive already
+  sees every `MIGRATION_PAYLOAD` with its species block, so it keeps a bounded, in-memory
+  ring of the last ~60 seconds of hops — lane, species names, timestamp — and serves it
+  beside `/api/status`. The page polls it on the 2-second cycle it already runs and
+  animates the census glyph along the lane arrow between polls. Bounded by time **and**
+  count, because the status view is written verbatim into the durable metrics file once a
+  minute. A hop with no species block animates the neutral glyph, never a guessed one
 
 **Known limit, by construction:** a database built from migrations holds migrants and
 their ancestors — never the resident population of a peer. Periodic census uploads would
@@ -371,7 +422,9 @@ EDGE_STATUS        Whether the export edge is open for migration — drives the 
                    accepts), so this message narrows to the export edge (D8). From M4
                    it carries one entry per export edge — one on a one-row map, two on
                    the live grid (D13) — and a lane that re-pairs around a dark slot
-                   never closes it at all (D12)
+                   never closes it at all (D12). From D17 it carries all four, one
+                   per edge, each with its own neighbour state. A closed edge stops
+                   EXPORTS through it and never stops ARRIVALS on it
 ```
 
 > [!IMPORTANT]
@@ -483,7 +536,9 @@ MigrationEnvelope
 ├── exitEdge: enum(N, S, E, W)         # which border it crossed. Always E on a
 │                                      #   one-row map; E or N on the live grid
 │                                      #   (D13), with the entry edge the opposite
-│                                      #   one and always passive
+│                                      #   one and always passive. From D17 any of
+│                                      #   the four, and the opposite edge is an
+│                                      #   ordinary export edge of the receiver
 ├── exitPosition: float                # 0..1 along that edge — receiver mirrors it
 │                                      #   into entry coordinates. Mirroring stays:
 │                                      #   crowding is answered by pacing delivery,
@@ -771,7 +826,13 @@ The public half of the old M3, moved out intact by D9 and pushed out once more b
 scope is unchanged. A hosted relay on a VPS; TLS and authentication for public exposure;
 capacity and abuse limits; packaging so a player installs the mod and the sidecar without a
 build toolchain; insertion and route-around under strangers joining and leaving. M4's join
-kit is this milestone's starting point, and M4's wire shapes are the ones it publishes.
+kit is this milestone's starting point, and M4's wire shapes **as amended** are the ones it
+publishes: `contract-a/2.2` (§16 species identity, §17 the census, §18 two-way lanes — which
+adds no field and moves no version) and `contract-b/3.3` (§15 the species block, §16 the
+census, §17 the reverse lanes). Everything ratified after the M4 exit test — species
+identity, the census, and D17–D20 — lands in the **living deployment** between the two
+milestones rather than in a milestone of its own, because the rig is running and each change
+is verified against it.
 **Exit test:** a small community playtest — a handful of strangers' sims exchanging
 organisms for days without operator intervention.
 

@@ -1,6 +1,6 @@
 # Contract B — M4 (Sidecar ↔ Relay ↔ Sidecar ↔ Archive)
 
-**Version:** `contract-b/3.2`
+**Version:** `contract-b/3.3`
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3), **B6** the
@@ -25,9 +25,20 @@ field, so §4's own test answers with a **minor** bump to `contract-b/3.2`. Cont
 matching set is `contract-a.md` §17, A35–A37. Affected body text carries an
 `(amended — §16, Bx)` or `(added — §16, Bx)` marker, and **§16 wins over the body and over
 §14 and §15 wherever they disagree.**
+**Amended:** 2026-08-07, amendment set `contract-b/3.3 + B13–B15` (**§17**), from the owner's
+ratification of **D17 two-way lanes, D19 the live hop animation and D20 the pacing raise**.
+Every lane becomes bidirectional: `SECTOR_GRANT.neighbours` gains the `"W"` and `"S"` keys and
+§8's walk runs in both directions per axis, which is where the real work of a two-way map
+lives — `contract-a.md` §18 takes **no** version bump, because its fields have accepted four
+edges since A18. Two new keys in an existing enum-keyed map are additive, so §4's own test
+answers with a **minor** bump to `contract-b/3.3`. Contract A's matching set is
+`contract-a.md` §18, A38–A41. Affected body text carries an `(amended — §17, Bx)` or
+`(added — §17, Bx)` marker, and **§17 wins over the body and over §14, §15 and §16 wherever
+they disagree.**
 **Status:** implementation-ready for M4. Written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
-`m4_considerations.md`, *Contract Changes Needed*.
+`m4_considerations.md`, *Contract Changes Needed*. Extended by D17–D20, ratified 2026-08-07
+against the living deployment.
 **Supersedes:** `contracts/contract-b-m3.md`, in full. That document is the historical
 record of the M3 ring and is **not** current guidance.
 **Companion documents:** `contracts/contract-a.md` (`contract-a/2.2`, mod ↔ sidecar) and
@@ -99,18 +110,26 @@ M4 runs one **rectangular map** of slots. The M3 ring is the one-row case of it,
 M3 rule survives as the height-1 specialization (D13).
 
 ```
-   row 1:  ┌──► (0,1) ──► (1,1) ──► (2,1) ──┐
-           └───────── east wrap ────────────┘
-              ▲          ▲          ▲          north lanes wrap back to row 0
-              │          │          │
-   row 0:  ┌──► (0,0) ──► (1,0) ──► (2,0) ──┐
-           └───────── east wrap ────────────┘
+   row 1:  ┌──◄► (0,1) ◄──► (1,1) ◄──► (2,1) ◄─┐
+           └────────── east/west wrap ─────────┘
+               ▲▼          ▲▼          ▲▼        north/south lanes wrap
+               ││          ││          ││        between row 1 and row 0
+   row 0:  ┌──◄► (0,0) ◄──► (1,0) ◄──► (2,0) ◄─┐
+           └────────── east/west wrap ─────────┘
 
    The M4 target rig: a 3×2 map, six instances, two machines.
    Row 0 holds slots 1–3, row 1 holds slots 4–6.
-   Each peer exports east and north. Each peer receives west and south.
-   No lane returns to its own source.
+   Under D17 every peer exports AND receives on all four edges.
+   A lane still never returns to its own source: each walk visits every
+   OTHER position on its axis and stops.
 ```
+
+**Two-way lanes (D17, 2026-08-07).** Every lane above is bidirectional (amended — §17, B13).
+A peer's `W` export routes to the first deliverable slot **west** along its row, which
+receives it on its `E` edge; `S` routes down the column and is received on `N`. The four
+lanes are independent and each closes on its own. **On an axis of length 2 the forward and
+reverse walks name the same slot** — on this rig every column does, so slots 1 and 4 are a
+two-lane pair. That is arithmetic, not a defect (§2.1).
 
 | Term | Definition |
 |---|---|
@@ -120,6 +139,7 @@ M3 rule survives as the height-1 specialization (D13).
 | **hole** | A position inside the rectangle with no reservation. A hole and a dark slot look identical to a router, which is why route-around is what makes a map with holes viable (D12). |
 | **east lane** | From a position to the next **deliverable** slot east along its **row**, wrapping at the row's end. |
 | **north lane** | From a position to the next **deliverable** slot north along its **column**, wrapping at the column's top. |
+| **west lane**, **south lane** | The same two walks with the step **negated** (added — §17, B13). West runs along the row, south along the column, each wrapping at the other end. Nothing else about them differs: same deliverability filter, same skip list, same "visit every other position once and stop". |
 | **effective neighbour** | The slot a lane actually points at, after skipping holes and undeliverable slots (§8). Published in `SECTOR_GRANT`. |
 | **structural order** | The registry in row-major order — `row` ascending, then `col` ascending. Published in `PEER_STATUS`. It is the shape; the effective lanes are the effect. |
 | **slot reservation** | The binding of a slot **and its position** to a `peerId`. It survives disconnection, restart and reinstall, and **it does not expire** (D8). Only an operator releases or hands it over (§7.5). |
@@ -134,9 +154,16 @@ Five properties follow, and every rule in this document depends on them:
 - **Addresses never move; positions may.** A splice that inserts a column shifts the columns
   after it, so peers get new coordinates and new neighbours. No slot number changes, no
   journal entry is invalidated, and no organism in flight is affected (§7.3).
-- **Out and in are different doors, per axis.** An organism that leaves through the east edge
+- ~~**Out and in are different doors, per axis.** An organism that leaves through the east edge
   cannot come back through it; it must travel the whole row. The same holds for the column.
-  There is no boomerang at a shared edge and no ping-pong to time out.
+  There is no boomerang at a shared edge and no ping-pong to time out.~~
+  **Superseded — §17, B13 (D17).** Every edge is now both doors. A round trip through one
+  neighbour is legal and intended. **Nothing in this document depended on the retired
+  property**, and that is worth checking rather than asserting: routing is on `destSlot`,
+  custody is on `migrationId`, dedup is on `migrationId`, the hold clock runs on destination
+  darkness, and `exitEdge` is carried for the record and read by no routing decision. The
+  *instantaneous* no-re-export guarantee moves to `contract-a.md` §4.3.1 and §18 A38, where
+  the geometry that enforces it lives.
 - **A dark slot no longer stops the current.** Its lane re-pairs to the next deliverable slot
   and the flow continues (D12). This is the property M3 lacked, and T1 measured what its
   absence costs: two hours of one dark slot raised square crossings about nine times at its
@@ -163,6 +190,25 @@ slot in row 1 leaves its column partner with an open **east** lane (its row stil
 slots, two of them deliverable) and a closed **north** lane. That is route-around working
 correctly against a degenerate axis, not route-around failing — and it is why a taller map is
 the answer for a rig that wants the north lane to survive a kill.
+
+**Under two-way lanes a degenerate axis behaves the same way and costs twice as much**
+(added — §17, B13). Two facts compose, and both are arithmetic:
+
+- **The forward and reverse walks name the same slot.** On an axis of length 2, one step
+  forward and one step back are the same position mod 2. So a peer's `N` and `S` neighbours
+  are one peer, and it exports to that peer on two lanes at once. On the 3×2 rig this is
+  true of every column.
+- **They therefore also close together.** Killing the column partner closes **both** `N` and
+  `S` with `no_peer`. The table's row for `w×2` — *one hop is already a return trip* — now
+  understates it: on a two-way axis of length 2 the pair is a shuttle, and an organism can
+  cross and re-cross between exactly two worlds.
+
+**The traffic consequence is the one to plan for.** A two-lane pair carries roughly twice the
+hops of a one-way lane between the same two worlds, and it is the rig's *columns* that are
+degenerate. An operator should expect column traffic to rise disproportionately against row
+traffic on this map, and `contract-a.md` §18 A40 sizes the delivery rate limit with that
+included. A **3×3** map is what makes both axes honest under two-way lanes, exactly as 3×2
+made one axis honest under one-way ones.
 
 ---
 
@@ -264,7 +310,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -309,6 +355,18 @@ model — §6.3.1 asks for the first (added — §16, B11) — and a peer that d
 simply omits them. Every one of those paths renders as **unknown** on the page (§10.1), and
 none of them renders as a wrong census. No message type, enum, code, custody rule or routing
 input changes.
+
+**The reverse lanes are the third, and it is a minor for the third time** (added — §17, B15):
+`SECTOR_GRANT.neighbours` gains the `"W"` and `"S"` keys (§6.4), which is **additive data in
+an existing map keyed by an enum whose four values have been legal since M2** — no field is
+removed, no type changes, no enum value is added or removed. The identifier moves to
+**`contract-b/3.3`**. The degradation is the property that settles it: a `contract-b/3.2`
+**relay** never computes the reverse walks, so a two-way sidecar receives no `W` or `S` key,
+those two edges close with `no_peer` (§8), and the map runs exactly as it does today; a
+`contract-b/3.2` **sidecar** ignores keys it did not declare (§6.4) and does the same. **Both
+directions degrade to the one-way map, and neither loses an organism or misroutes one.** That
+`MIGRATION_PAYLOAD.exitEdge` may now hold `"W"` or `"S"` is the same "existing enum value"
+line the table above already ruled on for `"N"`.
 
 Timestamps are informational (D5). `messageId` is for log correlation only; `migrationId` is
 the one idempotency key in the system (`contract-a.md` §7.1).
@@ -442,7 +500,7 @@ The **first frame on every connection**. Any other first frame closes with `4003
 |---|---|---|---|
 | `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). |
 | `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). |
-| `protocolVersion` | string | yes | `"contract-b/3.2"` (amended — §16, B12; `"contract-b/3.1"` before it, §15 B10). A different **major** closes with `4000`. |
+| `protocolVersion` | string | yes | `"contract-b/3.3"` (amended — §17, B15; `"contract-b/3.2"` before it, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. |
 | `gameVersion` | string | yes | The game version behind this sidecar, from the mod's `CONFIG_UPDATE`. Empty while no mod is connected, and always empty for an archive. |
 | `sidecarVersion` | string | yes | Informational. The archive sends its own version here. |
 | `simulationSize` | float | no | `S`, when a mod has already reported one. |
@@ -461,14 +519,14 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
   "data": {
     "peerId": "peer-lan-slot5",
     "role": "peer",
-    "protocolVersion": "contract-b/3.2",
+    "protocolVersion": "contract-b/3.3",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0",
     "simulationSize": 2000.0
@@ -481,7 +539,7 @@ independently updated installs, so this is the failure most likely to waste an e
 | Field | Type | Required | Semantics |
 |---|---|---|---|
 | `relayVersion` | string | yes | Informational. |
-| `protocolVersion` | string | yes | `"contract-b/3.2"` (amended — §16, B12; `"contract-b/3.1"` before it, §15 B10). |
+| `protocolVersion` | string | yes | `"contract-b/3.3"` (amended — §17, B15; `"contract-b/3.2"` before it, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
 | `relaySessionId` | `uuid` | yes | **New in M4.** Minted once at relay start, constant for the life of the relay process. It is the scope of the forwarding record (§5.2), and a sidecar **MUST** persist it against every journal entry it hands over while this connection is live (§9.2). |
 | `assignedSlot` | number (int) | no | The slot this `peerId` already holds, when the relay remembers one. Absent for a first-time peer and always absent for an archive. |
 | `assignedPosition` | object `{col,row}` | no | Its position. Present exactly when `assignedSlot` is. |
@@ -491,13 +549,13 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
   "data": {
     "relayVersion": "0.4.0",
-    "protocolVersion": "contract-b/3.2",
+    "protocolVersion": "contract-b/3.3",
     "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
     "assignedSlot": 5,
     "assignedPosition": { "col": 1, "row": 1 },
@@ -535,7 +593,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -583,7 +641,7 @@ Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -667,7 +725,7 @@ edge**. Together they are the entire topology a sidecar needs (D8, D12, D13).
 | `map` | object `{width,height}` | yes | The rectangle after this grant. |
 | `slotCount` | number (int) | yes | Reserved slots after this grant. |
 | `reason` | string enum | yes | `"granted"` (a new slot was placed), `"reclaimed"` (the reservation for this `peerId` was still held), `"updated"` (a repeat claim), `"repositioned"` (same slot, new coordinate, because the map grew), `"handover"` (this peer inherited a slot by operator command — §7.5), `"role_has_no_slot"`, `"protocol_mismatch"`, `"version_incompatible"`. |
-| `neighbours` | object | no | Present when `granted` is `true`. Keyed by **export edge**: `"E"`, `"N"`. **A key is absent when that axis has no deliverable target**, and its absence is what closes that export edge with `no_peer` (§8). |
+| `neighbours` | object | no | Present when `granted` is `true`. Keyed by **export edge**: `"E"`, `"N"` — and, under two-way lanes, also `"W"` and `"S"` (amended — §17, B13). **A key is absent when that edge has no deliverable target**, and its absence is what closes that export edge with `no_peer` (§8). The relay emits a key for **every edge the sidecar declared** in `SECTOR_CLAIM.exportEdges` and finds a target for, and for no other; a sidecar **MUST** ignore a key for an edge it did not declare, and **MUST NOT** treat an absent key as an error. |
 | `neighbours.<edge>.slot` | number (int) | yes | The **effective** target: the first deliverable slot along that axis. |
 | `neighbours.<edge>.peerId` | string | yes | The identity reserved to that slot. |
 | `neighbours.<edge>.position` | object `{col,row}` | yes | Its coordinate. Informational for the sidecar; useful in a log line that has to be read by a human looking at a map. |
@@ -687,7 +745,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -731,6 +789,36 @@ and re-paired to slot 6 **without closing**, and its north lane — which wraps 
 to row 0 in its own column — never noticed. Compare it with slot 2, whose column holds only
 slot 5 besides itself: that peer's grant carries **no `"N"` key at all**, and its north edge
 closes with `no_peer` (§2.1).
+
+The same grant to the same peer once it declares all four edges (added — §17, B13). Its `W`
+walk goes the other way along row 1 — `(2,1)` first, then `(1,1)` — so it reaches slot 6
+**without skipping anything**, while the `E` walk had to step over dead slot 5. Its `S` key is
+slot 1, the same peer its `N` key names, because the column has height 2:
+
+```json
+    "neighbours": {
+      "E": { "slot": 6, "peerId": "peer-main-slot6", "position": { "col": 2, "row": 1 },
+             "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
+             "simulationSize": 2000.0,
+             "skipped": [ { "slot": 5, "position": { "col": 1, "row": 1 },
+                            "reason": "peer_offline" } ] },
+      "N": { "slot": 1, "peerId": "peer-main-slot1", "position": { "col": 0, "row": 0 },
+             "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
+             "simulationSize": 2000.0, "skipped": [] },
+      "W": { "slot": 6, "peerId": "peer-main-slot6", "position": { "col": 2, "row": 1 },
+             "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
+             "simulationSize": 2000.0, "skipped": [] },
+      "S": { "slot": 1, "peerId": "peer-main-slot1", "position": { "col": 0, "row": 0 },
+             "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
+             "simulationSize": 2000.0, "skipped": [] }
+    }
+```
+
+Two properties of that frame are worth naming because they look like mistakes and are not.
+**`E` and `W` can name the same slot with different skip lists** — the two walks meet the same
+peer from opposite directions, and the skip list describes the walk, not the target. **`N` and
+`S` name the same slot with identical skip lists** — that is §2.1's degenerate axis, and on
+this rig every column has it.
 
 ### 6.5 `PEER_STATUS` — relay → client
 
@@ -785,7 +873,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -1009,7 +1097,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -1056,7 +1144,7 @@ geometry and the species block are untouched, and **only `destSlot` changed** �
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -1135,7 +1223,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1207,7 +1295,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1231,7 +1319,7 @@ simply cannot speak for the period before it started, so it says `false` and the
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -1274,7 +1362,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -1320,7 +1408,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -1359,7 +1447,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/3.2",
+  "protocol": "contract-b/3.3",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -1669,11 +1757,29 @@ The walk, per export edge, over the positions of `PEER_STATUS`:
 ```
 effective(E) = first deliverable slot at (col+1, row), (col+2, row), … mod width
 effective(N) = first deliverable slot at (col, row+1), (col, row+2), … mod height
+
+                                                     added — §17, B13 (D17):
+effective(W) = first deliverable slot at (col−1, row), (col−2, row), … mod width
+effective(S) = first deliverable slot at (col, row−1), (col, row−2), … mod height
 ```
 
 Each walk visits every other position on its axis exactly once and then stops. The relay
 performs it and publishes the result in `SECTOR_GRANT.neighbours` (§6.4); a sidecar uses the
 grant, and any client may reproduce the walk from `PEER_STATUS` for display (§6.5).
+
+**The two new walks are the two old walks with the step negated, and that is the whole of
+D17 on this wire** (added — §17, B13). Everything else composes for free and is stated so no
+implementer re-derives it:
+
+| Property | Under two-way lanes |
+|---|---|
+| `deliverable()` | **Identical.** The same six conditions, including `slot ≠ me`, filter all four walks. |
+| Skip lists | **Per walk, not per axis.** `E` and `W` traverse the same row and can produce different `skipped` lists, because they meet the dark slots in a different order and stop at the first live one. |
+| Termination | Every walk still visits `length − 1` other positions and stops, so an axis of length 1 has no candidates in either direction and both edges close with `no_peer`. |
+| Axis of length 2 | `effective(E)` and `effective(W)` name the **same** slot, because ±1 mod 2 are the same position (§2.1). Both close together. |
+| The close mapping | The table below is **unchanged and applies per edge**, not per axis. A closed `W` reports the aggregate of the `W` walk's own skip list. |
+| The ripple | **Unchanged in mechanism, doubled in reach.** A slot going dark is still announced backwards along every lane that pointed at it — there are now up to four such lanes per neighbour instead of two. |
+| `PEER_STATUS` | **Unchanged.** It publishes the structural row-major order and the relay's registry facts; the lanes have always been derived from it, and two more derivations need no new field. |
 
 | Condition, evaluated in order, **per export edge** | `EDGE_STATUS` entry for that edge |
 |---|---|
@@ -1718,9 +1824,20 @@ lane that pointed at it:
 - every peer whose effective neighbour **was** that slot re-targets and **keeps its export
   edge open** — it gets a fresh `SECTOR_GRANT` and, if the edge state changed at all, a fresh
   `EDGE_STATUS` with a `skipped` entry behind it;
-- the dark slot's own **east and north** neighbours are unaffected and are told nothing; they
-  simply receive nothing from it;
+- ~~the dark slot's own **east and north** neighbours are unaffected and are told nothing; they
+  simply receive nothing from it;~~ **Superseded — §17, B13.** Under two-way lanes every
+  neighbour of a dark slot both pointed at it and was pointed at by it, so **the ripple is
+  symmetric**: the peers that used to be told nothing are now in the first bullet like
+  everyone else. The rule is unchanged in mechanism — *announce backwards along each lane
+  that pointed at it* — and the set it applies to has grown to every lane;
 - the dark slot's reservation stays in the map, `live: false`, with `darkSinceMs` set.
+
+**What that costs, and why it needs no new coalescing** (added — §17, B13). One liveness flip
+now re-grants up to twice as many peers. `statusCoalesceMs` (250) already bounds the burst —
+it spaces both `PEER_STATUS` broadcasts and per-peer grants, and always sends the last frame
+of a burst — and a grant is re-sent only when its **content** changes (§6.4), which a lane
+that did not re-target does not. The existing mechanism absorbs this; it is named here so
+nobody adds a second one.
 
 A sidecar that loses its **mod** publishes `modConnected: false` on its next `SECTOR_CLAIM`,
 and the relay's `PEER_STATUS` carries it to everyone pointed at it, which re-pairs their lanes
@@ -2030,6 +2147,7 @@ specify it. **Its inputs are**, and three rules keep them honest (Risk 4):
 | Unknown is a value | A field absent from `stats`, a slot with no `stats` at all, a `statsAsOfMs` older than `statsStaleMs` (30 000) — every one of them renders as **unknown**, never as zero and never as the last value seen without its age. A slot that reports nothing is unknown, not empty. **An honest gap beats a confident zero.** |
 | The census is a stat, and every rule above applies to it (added — §16, B12) | `stats.species` (§6.3.1) is what the page's species view is built from. Absent renders as **unknown species** — never as "no species", never as an empty list, never as zero. A present `[]` is the different, stronger fact and the page may say so: a reporting world with nothing alive in it. A `truncated: true` census names the 32 most abundant species and the page **MUST** say the rest is unreported rather than presenting it as the whole list. And it ages like everything else in the block: past `statsStaleMs` it is history, not state. |
 | Two species facts, two sources, and only one of them is abundance (added — §16, B12) | The **census** says what lives in a world **now** and arrives on `PEER_STATUS`. The archive's **ledger** of `MIGRATION_PAYLOAD.species` (§10) says what **crossed**, and when. The page's species view comes from the census alone: a migration ledger holds migrants and their ancestors, never a resident population (D11), so answering "which species live in slot 4" from it produces a plausible-looking wrong number. A page that shows both **MUST** label which question each answers, and **MUST NOT** join them on a name without normalizing the census copy for the comparison only (`contract-a.md` §17, A36). |
+| The recent-hops feed is ledger, and it animates rather than counts (added — §17, B14) | The page may show **which species crossed which lane, just now**, as a bounded feed of the last ~60 seconds drawn from the `MIGRATION_PAYLOAD` copies the archive already records. It is B12's third row exercised — *history, labelled as history* — and every rule above binds it: a hop whose envelope carried **no** species block renders as the **neutral glyph**, never a guessed name and never omitted; the feed is **never summed**, into a census or into anything else; and it must be bounded in **both** time and count, because the status view is serialized verbatim into the durable metrics file once a minute. |
 
 **What changed here, and what did not** (amended — §16, B12). §15's B10 stated that the
 species names the archive records are **not an input to this page in M4**, and that the
@@ -2045,6 +2163,14 @@ each bounce a hold timeout caused, the last save of each world, and the paced jo
 **and, since §16, which species live in each world and in what numbers**. Every one of those
 is a field of §6.5 or §6.3.1, or is derived from them by §8 — which is why those two sections
 carry fields that no routing decision reads.
+
+**Since §17 it also asks the page to show the lanes moving** (added — §17, B14). When a
+migration lands, the map animates that species' glyph along the lane's arrow. The inputs are
+not new — the archive has recorded a species block on every migration since §15's B10, and it
+has counted per-lane hops since M4 — and no wire field is added. What is new is the join, and
+it is the cheapest verification the operator surface has ever had: **two-way lanes look like
+glyphs travelling both ways along one arrow, and an excluded species (`contract-a.md` §18,
+A39) looks like a species that is everywhere in the census and never on a lane.**
 
 ---
 
@@ -2168,6 +2294,27 @@ The **delivery rate limit** is a Contract A tunable, because it paces a Contract
 `inboundRatePerSimMinute`, `inboundRateBurst` and `pacingIdleGraceMs` are in
 `contract-a.md` §10. It is named here because its backpressure is this wire's `OVERLOADED`
 and its side effects are this wire's hold clock.
+
+**It was raised on 2026-08-07, and this wire is why it had to be** (added — §17, B13). The
+values are now `inboundRatePerSimMinute` **12.0** (from 2.0) and `inboundRateBurst` **15**
+(from 5), with a new `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` knob;
+`contract-a.md` §18 A40 carries the derivation and the measurements. The reason it belongs in
+this document's tunable table and not only in that one: **the limit was sized against a
+one-row ring where a slot had one inbound lane, and every topology decision since has been
+made here.** §2's grid gave each slot a second inbound lane, §17's B13 gives it four, and
+§2.1's degenerate axes make the columns of a 3×2 map carry two lanes to the same peer. Thirty-five
+hours of the living deployment measured a median offered load of 1.19 arrivals per simulated
+minute per slot against a 2.0 ceiling — 12% of samples over it, and three of six slots holding
+a paced backlog pinned at `inboundQueueMax` — which is `contract-a.md` §7.5's own definition
+of a limit set too low. **A topology change on this wire is a pacing change on the other one**,
+and the next map that grows an axis should re-check this number before it ships, not after.
+
+| Interaction with this wire | Effect of the raise |
+|---|---|
+| `OVERLOADED` backpressure (§6.6, §6.8) | **Less often, not differently.** `inboundQueueMax` (64) is unchanged; a faster drain means the queue reaches it more rarely. Every rule about the refusal, the proof it constitutes, and the re-route it triggers is untouched. |
+| The hold clock (§9.3, Risk 9) | **Unchanged, and slightly safer.** The clock already runs only while the destination is **dark**, so a paced backlog at a live peer never accrued hold time. A shorter backlog shortens the window in which a slow peer *looks* like a silent one at all. |
+| `forwardRetryMs` / `forwardRetryMaxMs` (§14, B8) | Unchanged. A live destination that is draining faster answers sooner, so the doubling backoff climbs less often. |
+| `maxReroutes` (§9.2) | Unchanged. Fewer `OVERLOADED` refusals means fewer re-routes consumed by congestion rather than by darkness. |
 
 **There is no answering-side timeout for `GENOME_REQUEST`, and its absence is deliberate.**
 §6.9 says the answering sidecar must reply "within `genomeRequestTimeoutMs`", which reads
@@ -2633,3 +2780,151 @@ the same standard §10.1 already holds every other stat to.
 **Enforced by:** the archive, for rendering the census under §10.1 and for keeping its
 migration ledger out of every abundance claim; both wire ends, for sending
 `"contract-b/3.2"` and comparing only the major.
+
+---
+
+## 17. Two-way lanes and the hop feed (`contract-b/3.3`, 2026-08-07)
+
+The owner ratified **D17 (two-way lanes)**, **D18 (migration exclusion)**, **D19 (live hop
+animation)** and **D20 (the pacing raise)** on 2026-08-07, against the running M4 deployment
+(`system_decomposition.md`). `contract-a.md` §18 carries the mod-and-sidecar half: every
+declared edge becomes both an export edge and an entry edge, with **no change to that wire at
+all**, because its fields have accepted four edges since A18 and its corner rule since A26.
+
+**This wire is where the change is real.** A two-way map is a *routing* fact, and routing is
+this document's job: the relay has to compute two more effective-neighbour walks and name them
+in the grant. **Three amendments, B13 to B15**, continuing the `B` series for the reason §14
+gives — the namespace is the wire's, not the file's. B13 adds the reverse lanes; B14 records
+the hop feed the page animates; B15 applies §4's version test.
+
+**This set changes the wire, additively**: two new keys in one existing object, keyed by an
+enum whose four values have been legal since M2. No message type, no field removal, no type
+change, no enum value added or removed, no new NACK code, and no change to custody, dedup,
+the hold, the fan-out, hashing or admission control. §4's test therefore answers **minor**,
+and the identifier moves to `contract-b/3.3` (B15). The style follows §14, §15 and §16: the
+gap or change, the resolution, and **which side enforces it**.
+
+### B13 — The grant names four effective neighbours, and the walk runs in both directions (§2, §2.1, §6.4, §8, §12)
+
+**Change.** §8's walk produced one effective neighbour per **export** edge, and D13 made that
+two. D17 makes every edge an export edge, so the walk runs four times: east and north as
+before, plus **west and south, which are the same two walks with the step negated**.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The walks | `effective(W)` = first deliverable slot at `(col−1, row), (col−2, row), …` mod width. `effective(S)` = the same down the column. §8 carries both. |
+| `deliverable()` | **Unchanged**, all six conditions, including `slot ≠ me`. One filter, four walks. |
+| `SECTOR_GRANT.neighbours` | Gains the `"W"` and `"S"` keys, with the identical sub-object every other key carries. A key is present when that edge has a deliverable target and **absent** when it does not, which is what closes it with `no_peer` — unchanged from §6.4. |
+| Which keys the relay emits | One per edge the sidecar **declared** in `SECTOR_CLAIM.exportEdges` and found a target for. The relay never invents an edge the sidecar did not declare, so a two-edge sidecar's grant is byte-identical to today's. |
+| Which keys a sidecar reads | Those it declared. It **MUST** ignore a key for an undeclared edge and **MUST NOT** treat an absent key as an error — the same forward-compatible rule `contract-a.md` §5.4 applies to `EDGE_STATUS`. |
+| Skip lists | **Per walk.** `E` and `W` traverse one row from opposite ends, meet its dark slots in a different order, and stop at the first live one, so their `skipped` lists routinely differ even when they name the same target. |
+| The close mapping (§8) | **Unchanged and per edge.** A closed `W` reports the aggregate of the `W` walk's own skip list, by the same six-row table. |
+| The ripple (§8) | **Symmetric now.** Every neighbour of a dark slot both pointed at it and was pointed at by it, so the "told nothing" case is gone. Mechanism unchanged; the set it applies to doubled. `statusCoalesceMs` already bounds the burst. |
+| `PEER_STATUS` | **Not touched.** It publishes the registry and the structural row-major order; lanes have always been *derived* from it, and two more derivations need no field. Any client can reproduce all four walks for display, exactly as §10.1 requires it to for two. |
+| `MIGRATION_PAYLOAD.exitEdge` | May now be `"W"` or `"S"`. Existing enum value, carried for the record. **The relay has never routed on it** — routing is on `destSlot` — so nothing in §5 changes. |
+
+**What did not change, checked rather than asserted.** D17 retires §2's *out and in are
+different doors*, and the honest question is what depended on it. The answer is **nothing on
+this wire**, and each load-bearing mechanism keys on something else:
+
+| Mechanism | Keys on | Affected? |
+|---|---|---|
+| Routing (§5) | `destSlot` | No. The relay reads an address, never an edge. |
+| Custody and dedup (§5.1, §6.6, §9.1) | `migrationId` | No. |
+| The non-delivery proof (§5.2) | the forwarding record for a `migrationId` | No. |
+| The bounded hold (§9.3) | destination **darkness**, accrued | No. |
+| Bounce-back (§9.4) | the origin's own `exitEdge`, returned home | No — and `contract-a.md` §18 A38 confirms the mod's side: a bounce arrives moving outward, inset past the band, covered by the immunity window, exactly as it already was on `E` and `N`. |
+| Re-route (§9.2) | `maxReroutes`, the proof, the lane | No, except that a re-route now has up to four lanes to choose from instead of two. |
+
+The one thing that genuinely changes is **traffic**, and §2.1 says where: on an axis of length
+2 the forward and reverse walks name the same slot, so the columns of a 3×2 map become
+two-lane pairs. That is why D20's pacing raise ships in the same wave (§12,
+`contract-a.md` §18 A40), and why **3×3 is the map that makes both axes honest** under two-way
+lanes.
+
+**Enforced by:** the **relay**, for the two new walks, for emitting only declared keys, and for
+the symmetric ripple; the **sidecar**, for declaring its edges, for reading only the keys it
+declared, and for mapping each to its own `EDGE_STATUS` entry (§8); the **archive and any
+client**, for reproducing four walks instead of two when it renders the map (§10.1).
+
+### B14 — The archive keeps a bounded feed of recent hops, and the page animates the species glyph (§10, §10.1, §15 B10, §16 B12)
+
+*D19. Archive-internal and page-only. **No wire field, no message, no relay behaviour.***
+
+**Change.** The archive already records a `species` block against every migration (§10, B10)
+and already counts per-lane hops (§10.1). It now also keeps a **bounded, in-memory feed of
+recent hops** — lane, species names, timestamp — and serves it beside the status view, so the
+page can animate that species' glyph travelling along the lane's arrow.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Source | The `MIGRATION_PAYLOAD` copies the archive already receives as a subscriber (§5.1). **§10.1's first rule is unchanged and unweakened**: one source, no polling, and nothing on the migration path ever waits for a reader. |
+| Bounded twice | By **time** (~60 s) **and** by **count**. Both, not either. The status view is serialized verbatim into the durable metrics file once a minute, so an unbounded array would be written to disk every minute forever. |
+| It is ledger, not census | The feed answers *what crossed*, and B12's rules apply unchanged: it is labelled as history, it is **never summed** into an abundance claim, and it is not joined to the census without normalizing for the comparison only (`contract-a.md` §16 A34 versus §17 A36). |
+| An absent species block | Renders as the **neutral glyph** — never a guessed name, never omitted, never "unknown" as a species *value*. That is §10.1's unknown rule applied to a new view rather than bent for it. |
+| Names are still untrusted text | §13 item 7's escaping obligation applies, and it applies to a name that now reaches a **new** part of the page. A census name and a ledger name are equally untrusted. |
+| Not a wire feature | No sidecar, relay or peer learns that the feed exists. A page that cannot render it degrades to the ambient per-lane pulse it already had. |
+
+**Why this needs saying in a wire contract at all.** Because §10.1 is the section whose entire
+job is to state what the page may claim, and B12 had to be written precisely because a
+previous sentence there went stale when the page grew a species view. The same trap is open
+here: a feed of species names moving along lanes is the most abundance-looking thing the page
+has ever shown, and it is **not abundance**. A database built from migrations holds migrants
+and their ancestors, never a resident population (D11). The glyph on the lane says *this one
+crossed*; the glyphs in the cell say *these live here*; and they are two different facts from
+two different sources that happen to be drawn with the same shape.
+
+**Enforced by:** the **archive**, for bounding the feed and keeping it out of every abundance
+claim; the **page**, for the neutral glyph, the labelling and the escaping.
+
+### B15 — The identifier moves to `contract-b/3.3` (§4, §6.4, §12)
+
+**Change.** §4 and `contract-a.md` §3.1: additive changes raise the **minor**; field removal,
+type changes and enum-value removal require a **major**.
+
+**Resolution.** Apply the test, item by item:
+
+| Change to Contract B | Kind | Needs a major? |
+|---|---|---|
+| `SECTOR_GRANT.neighbours` gains `"W"` and `"S"` keys | additive data in an existing enum-keyed map | no |
+| `MIGRATION_PAYLOAD.exitEdge` may be `"W"` or `"S"` | **existing** enum value — the enum has held four since M2 | no |
+| §8 gains two walks; §2 and §2.1 gain the reverse lanes | routing computation, no wire shape | no |
+| §8's ripple becomes symmetric | relay behaviour on existing frames | no |
+| §10.1 gains the recent-hops rule (B14) | a page-input rule, off the wire entirely | no |
+| §12 names the raised pacing defaults | defaults owned by `contract-a.md` §10 | no |
+| Message catalogue, enums, codes, custody, dedup, routing inputs, fan-out, hashing, the hold | **all unchanged** | no |
+
+The identifier is **`contract-b/3.3`**. Every `contract-b/3.x` peer stays compatible with every
+other, because compatibility is on the major and the minor is never a rejection reason (§4,
+`contract-a.md` §3.1).
+
+**What a mixed rig does, honestly. Every degradation lands on the one-way map, and none lands
+on a lost or misrouted organism:**
+
+1. A `contract-b/3.2` **relay** with a two-way sidecar never computes the reverse walks, so no
+   `W` or `S` key reaches the grant. Those two edges close with `no_peer` (§8), the mod is told
+   so by `EDGE_STATUS`, and the map runs exactly as it does today. **The sidecar needs no
+   special case**: an absent key has always been how an edge closes.
+2. A `contract-b/3.3` **relay** with a `contract-b/3.2` sidecar receives an `exportEdges` of
+   two, emits two keys, and the peer is a two-edge world on a two-way map. Legal: it receives
+   from all four sides and exports to two.
+3. A **mod** older than the two-way build declares two edges and produces the same result
+   through its own sidecar, with no frame on this wire differing at all.
+4. **`exitEdge: "W"` reaching a `contract-b/3.2` relay routes correctly**, because the relay
+   routes on `destSlot` and has never read `exitEdge`. An older **archive** records the value
+   verbatim, as it records every edge value.
+
+**The version is doing real work this time, and it is worth naming the contrast.**
+`contract-a.md` §18 A41 takes **no** bump, because a four-edge mod is already legal against a
+`contract-a/2.2` sidecar and claiming otherwise would be false. Here the opposite holds: a
+two-way map **cannot** work against a relay that does not compute the reverse walks, and the
+minor is the honest statement of which relays do. A peer detects the capability the way §3.1
+requires — **by the presence of the `W` and `S` keys in its grant, never by arithmetic on the
+minor.**
+
+**Enforced by:** both wire ends, for sending `"contract-b/3.3"` and comparing only the major;
+the relay, for being the side whose capability the minor describes.

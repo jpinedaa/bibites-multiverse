@@ -40,15 +40,24 @@ is deliberately **not** §16's: names travel as the game issued them, raw, and A
 normalization does **not** apply to them (§17, A36). Affected body text carries an
 `(amended — §17, Ax)` or `(added — §17, Ax)` marker, and **§17 wins over the body and over
 §13, §14, §15 and §16 wherever they disagree.**
-**Status:** implementation-ready for M4. Derived from the ratified decisions D1–D16 in
+**Amended:** 2026-08-07, amendment set `contract-a/2.2 + A38–A41` (§18), from the owner's
+ratification of **D17 two-way lanes, D18 migration exclusion and D20 the pacing raise**. This
+set is the largest topology change since D8 and **does not change the wire at all**: every
+declared edge becomes both an export edge and an entry edge, which the fields have accepted
+since A18 and the corner rule since A26, so §3.1's own test answers **no bump** and the
+identifier stays `contract-a/2.2` (§18, A41). The reverse lanes are Contract B's work and take
+a minor there. Affected body text carries an `(amended — §18, Ax)` or `(added — §18, Ax)`
+marker, and **§18 wins over the body and over §13, §14, §15, §16 and §17 wherever they
+disagree.**
+**Status:** implementation-ready for M4. Derived from the ratified decisions D1–D20 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, the world-geometry and
 entry-position research in `m2_findings.md`, the ring, containment and lineage designs in
 `m3_considerations.md`, and the grid, healing, recovery and operations designs in
 `m4_considerations.md`.
-**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.2`, sidecar ↔ relay ↔
+**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.3`, sidecar ↔ relay ↔
 sidecar ↔ archive) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged by M4, by §16 —
-`genes.speciesID` is excluded from the canonical projection, §4.3 there — and by §17, which
-adds no payload field and hashes nothing).
+`genes.speciesID` is excluded from the canonical projection, §4.3 there — by §17, which
+adds no payload field and hashes nothing, and by §18, which adds no field at all).
 
 This document is the complete interface between `bibites-mod` (C#, in-process with The
 Bibites) and `multiverse-sidecar` (Go, a separate process on the same machine). It is
@@ -214,19 +223,28 @@ frame. It is answered with the matching NACK, and the connection stays open. See
 The opposite-edge function, which the **sidecar** owns, is
 `N↔S`, `E↔W`.
 
-Under the grid (D13) a sim uses **all four** values (amended — §15, A18):
+Under the grid (D13) a sim uses **all four** values (amended — §15, A18), and under two-way
+lanes (D17) each of the four is **both roles at once** (amended — §18, A38):
 
-| Value | Role under the grid | Role under the ring (M3) |
-|---|---|---|
-| `"E"` | export edge, east lane | export edge |
-| `"N"` | export edge, north lane | unused |
-| `"W"` | passive entry edge, receives the east lane | passive entry edge |
-| `"S"` | passive entry edge, receives the north lane | unused |
+| Value | Role under two-way lanes (D17) | Role under the one-way grid (M4) | Role under the ring (M3) |
+|---|---|---|---|
+| `"E"` | export edge **and** entry edge; the east lane out, the west lane in | export edge, east lane | export edge |
+| `"N"` | export edge **and** entry edge; the north lane out, the south lane in | export edge, north lane | unused |
+| `"W"` | export edge **and** entry edge; the west lane out, the east lane in | passive entry edge, receives the east lane | passive entry edge |
+| `"S"` | export edge **and** entry edge; the south lane out, the north lane in | passive entry edge, receives the north lane | unused |
 
-The opposite-edge function is what pairs them: an organism that leaves through `E` arrives
-through `W`, and one that leaves through `N` arrives through `S`. A map of one row is the
-ring, and there `"N"` and `"S"` are declared but never carry traffic — the north lane has no
-neighbour and its `EDGE_STATUS` entry stays closed with `no_peer`.
+The opposite-edge function is what pairs them, and it is unchanged: an organism that leaves
+through `E` arrives through `W`, one that leaves through `N` arrives through `S`, **and one
+that leaves through `W` arrives through `E`**. A map of one row is the ring, and there `"N"`
+and `"S"` are declared but never carry traffic — neither north nor south lane has a
+neighbour and both `EDGE_STATUS` entries stay closed with `no_peer`.
+
+**There is no passive edge any more** (amended — §18, A38). §14's A11 and §15's A18 both
+described an edge that only ever receives; D17 retires that category. What survives from A11
+is the rule that matters — **an arrival is never refused because of edge state** — and it is
+now stated the other way round: an edge's `open` flag governs **exports through it and
+nothing else**, so a closed export edge still accepts every organism the sidecar delivers to
+it (§5.4, §5.7).
 
 M3's note stands for the two values it did not use, and now applies to nothing: all four
 values were kept in the enum because removing one would be a major bump, and the grid needed
@@ -271,10 +289,14 @@ Rules:
 
   | Entry edge | Fixed coordinate of the spawn | Free coordinate | When it happens |
   |---|---|---|---|
-  | `W` | `x = −S + inset` | `y = clamp(2S · position − S)` | Ordinary traffic off the east lane |
-  | `S` | `y = −S + inset` | `x = clamp(2S · position − S)` | Ordinary traffic off the north lane |
-  | `E` | `x = +S − inset` | `y = clamp(2S · position − S)` | A bounce-back of an east export |
-  | `N` | `y = +S − inset` | `x = clamp(2S · position − S)` | A bounce-back of a north export |
+  | `W` | `x = −S + inset` | `y = clamp(2S · position − S)` | Ordinary traffic off the east lane, **or a bounce-back of a west export** (amended — §18, A38) |
+  | `S` | `y = −S + inset` | `x = clamp(2S · position − S)` | Ordinary traffic off the north lane, **or a bounce-back of a south export** |
+  | `E` | `x = +S − inset` | `y = clamp(2S · position − S)` | A bounce-back of an east export, **or ordinary traffic off the west lane** |
+  | `N` | `y = +S − inset` | `x = clamp(2S · position − S)` | A bounce-back of a north export, **or ordinary traffic off the south lane** |
+
+  The formula did not change and neither did the geometry: **every row of that table was
+  already reachable**, because A19 gave a bounce-back an entry point on each export edge.
+  D17 only adds the second cause to each row (amended — §18, A38).
 
   `margin` is `entryMargin` (§10) and `inset` is `W + margin`. **The free coordinate is
   clamped to `[−(S − inset), +(S − inset)]` — the same inset the fixed coordinate takes**
@@ -312,29 +334,38 @@ where M2's rule no longer captures it — and the wrap then teleports it to the 
 which a player reads as a defect in the mod (`m3_considerations.md`, Risk 2).
 
 A capture band is therefore **half-open and outward-unbounded**. There is **one band per
-declared export edge** (amended — §15, A19) — `E` and `N` under the grid, `E` alone under a
-one-row map:
+declared export edge** (amended — §15, A19) — `E` and `N` under the one-way grid, `E` alone
+under a one-row map, and **all four under two-way lanes** (amended — §18, A38).
+
+**The band is one projection, not one rule per edge** (amended — §18, A38). It is stated with
+the same outward normal `n(e)` that §4.3.2 already uses, which is why adding two edges adds no
+new geometry:
 
 ```
-inBand(organism, E)  ⇔  x ≥ S − W          the band starts at the strip line
-                     ∧  velocity.x > 0     and it must be leaving
+n(E) = (1,0)    n(N) = (0,1)    n(W) = (−1,0)   n(S) = (0,−1)
 
-inBand(organism, N)  ⇔  y ≥ S − W          the same rule, on the other axis
-                     ∧  velocity.y > 0
+inBand(organism, e)  ⇔  p · n(e) ≥ S − W       the band starts at the strip line
+                     ∧  v · n(e) > 0           and it must be leaving
 
 capture(organism)    ⇔  ∃ e ∈ exportEdges : inBand(organism, e) ∧ open(e)
                      ∧  not already in flight
                      ∧  entry immunity has expired
+                     ∧  not excluded by local policy   (added — §18, A39)
 ```
+
+Written out, `inBand(o, E)` is `x ≥ S − W ∧ velocity.x > 0` and `inBand(o, W)` is
+`x ≤ −(S − W) ∧ velocity.x < 0` — the same band, mirrored. The two forms are identical for
+`E` and `N`, which is why a mod that already implements A26's `outward()` has the whole rule.
 
 | Rule | Value |
 |---|---|
-| Inner boundary | `x = S − W` on `E`, `y = S − W` on `N`, with `W` = `borderWidth` |
+| Inner boundary | `p · n(e) = S − W`, with `W` = `borderWidth`. That is `x = S − W` on `E`, `y = S − W` on `N`, `x = −(S − W)` on `W`, `y = −(S − W)` on `S` |
 | Outer boundary | **none.** The band runs from the strip line outward, past `S`, past the wrap radius, to any coordinate |
-| Direction test | `velocity.x > 0` on `E`, `velocity.y > 0` on `N`. **REQUIRED everywhere in the band, not only outside the square** |
+| Direction test | `v · n(e) > 0`. **REQUIRED everywhere in the band, not only outside the square** |
 | Test cadence | Every `FixedUpdate`, on every live organism. **Never** on a slower timer |
 | Which edge | Exactly one, chosen by §4.3.2. An organism **MUST NOT** produce two `MIGRATE_OUT`s |
-| Which edges exist | The members of `CONFIG_UPDATE.exportEdges` (§5.1). An entry edge never has a band |
+| Which edges exist | The members of `CONFIG_UPDATE.exportEdges` (§5.1). Under D17 that is all four |
+| Opposite edges never overlap | `inBand(o, E)` and `inBand(o, W)` cannot both hold while `S > W`, and the same for `N`/`S`. So `capture` has at most **two** candidates and they are always on different axes — a corner, never a contradiction (added — §18, A38) |
 
 Three consequences, all load-bearing:
 
@@ -351,21 +382,51 @@ Three consequences, all load-bearing:
   **MUST** still reject an unclamped value, because a valid sender always clamps. Neither
   rule changed — the band is what makes them matter.
 
-The entry edges `W` and `S` have **no capture band at all** (amended — §15, A19). They are
+~~The entry edges `W` and `S` have **no capture band at all** (amended — §15, A19). They are
 passive: an organism that walks west or south out of the square is not a migrant, and the
-wrap returns it (D10, §14 A11, D13).
+wrap returns it (D10, §14 A11, D13).~~ **Superseded — §18, A38.** Under two-way lanes every
+declared edge has a band, so an organism that walks west or south out of the square **is** a
+migrant. Nothing else in this section changes: the same projection, the same direction test,
+the same cadence, the same clamp.
+
+**What the wrap still contains, and why D10 stays on** (amended — §18, A38). With a band on
+every edge the wrap loses most of its former duty, and keeping it is no longer belt-and-braces
+— it is the only thing standing behind four cases:
+
+- an organism of a species on the **migration exclusion list** (§18, A39), which is never
+  captured on any edge;
+- an organism in a band whose edge is **closed**, which is not a candidate (§4.3.2);
+- an organism still inside its **entry-immunity window**;
+- an organism **already in flight**, awaiting its `MIGRATE_OUT_ACK`.
+
+Each of those walks out of the square exactly as an organism did on `W` and `S` before D17,
+and the wrap is what returns it. An operator should expect the square-crossing series to fall
+sharply and **not** to reach zero, and the residue is the four cases above rather than a
+defect.
 
 > **OPEN — the direction test has no magnitude floor** (§12 item 7). `velocity.x > 0` is a
 > strict comparison against zero and nothing more, so an organism that is loitering in the
 > band and merely jittering eastward on one `FixedUpdate` exports. That is **not** a defect
 > and this specification does **not** add a floor in M3: any floor is a second tunable, it
 > has to be expressed in `S` to survive a different `SimulationSize`, and a floor set wrong
-> turns a legitimate slow crossing into an organism pinned against the edge forever. The
+> turns a legitimate slow crossing into an organism pinned against the edge forever. ~~The
 > one-way ring also makes the failure mode cheap — a jitter export moves the organism
-> forward, never back, so it cannot ping-pong (Risk 3). Revisit only if it turns out to be
+> forward, never back, so it cannot ping-pong (Risk 3).~~ Revisit only if it turns out to be
 > operationally noisy: the evidence would be a band population that churns across the ring
 > without any of them travelling anywhere, and the fix would be a floor on the **outward
 > component over several ticks**, not on one sample.
+>
+> **The cheapness argument is withdrawn — §18, A38.** It rested on the one-way lane, and
+> D17 removed it. A jitter export still moves an organism in the direction it jittered, so
+> there is no *instantaneous* ping-pong; but an organism that crosses east, turns around and
+> crosses back west is now a legal round trip, and one loitering on a shared border can
+> oscillate across it. Each crossing still costs a full traverse of the arrival inset
+> (`W + margin`) plus the entry-immunity window, so the oscillation is bounded in rate rather
+> than free — but it is no longer impossible, and the item is **reopened at its original
+> priority rather than closed**. The evidence to watch for is unchanged and now cheap to
+> collect: D19's hop feed shows a species crossing one lane in both directions in quick
+> succession, which is exactly the signature. The fix, if it is ever needed, is still the
+> multi-tick outward component and still not a floor on one sample.
 
 ### 4.3.2 The corner rule — which edge claims an organism in two bands (added — §15, A19; generalized — §15, A26)
 
@@ -374,6 +435,16 @@ there with both velocity components outward is in both bands at once, and someth
 choose. Nothing in the geometry answers it, so the contract does: **two mods that answer
 differently produce two different maps out of one world** (`m4_considerations.md`,
 Question 6).
+
+**Under two-way lanes the overlap exists at all four corners, and this rule needs no change
+to cover them** (amended — §18, A38). That is the point of A26, and it is worth stating that
+the verification was done rather than assumed: the rule below is already written for an
+arbitrary declared set, `n(e)` below already defines `n(W)` and `n(S)`, the canonical order
+below is already `E, N, W, S`, and §4.3.1's band is the same projection. **Not one line of
+the rule changes.** What changes is only which corners it fires in — all four instead of one —
+and §4.3.1's new row bounds the candidate count: opposite edges are mutually exclusive, so a
+corner still offers exactly two candidates on two different axes, exactly as the north-east
+corner did.
 
 The rule, evaluated **in this order**, every `FixedUpdate`, for one organism. It is stated
 for an arbitrary declared set, because the mod implements it that way and a rule written only
@@ -889,15 +960,31 @@ edge (amended — §14, A11; §15, A18).
 
 `EDGE_STATUS` is **full state, not a delta**. Under the grid it carries **one entry for each
 edge in the mod's declared `exportEdges`** — two under D13, one on a mod that declares one
-(amended — §15, A18). The entry edges stay passive: they always accept an inbound organism
-and never appear here.
+(amended — §15, A18), **four under D17** (amended — §18, A38). ~~The entry edges stay passive:
+they always accept an inbound organism and never appear here.~~
+
+**Every edge appears here now, and an entry on this frame still governs exports only**
+(amended — §18, A38). This is the one sentence in this section that a two-way implementation
+can get catastrophically wrong, so it is stated as a rule rather than left as an implication:
+
+> **`open: false` closes an edge to `MIGRATE_OUT`. It does NOT close it to `MIGRATE_IN`.**
+> A mod **MUST** spawn every organism the sidecar delivers, at the `entryEdge` the frame
+> names, whatever that edge's current `open` value is. A sidecar **MUST NOT** withhold,
+> delay or NACK a delivery because the destination edge is closed for export.
+
+The reason is custody, not symmetry. An edge closes because *this* peer has nowhere to export
+on that axis; an arrival on that edge is an organism another peer already gave up custody of
+(D2). Refusing it would destroy an organism to enforce a routing fact about a different
+direction. A19's bounce-back has always relied on this — a bounce comes home through an
+export edge that is very often closed, which is *why* it bounced — and A11's "the entry edge
+always accepts" is the same rule, restated now that the passive category is gone.
 
 | Field | JSON type | Required | Semantics |
 |---|---|---|---|
 | `epoch` | number (int64) | yes | Strictly increasing per connection, starting at 1. The mod **MUST** ignore an `EDGE_STATUS` whose `epoch` is lower than or equal to the last one it applied. This makes the message order-independent and replay-safe. The counter resets on a new connection. **One epoch covers the whole frame**, not one edge: because the frame is full state, a change on either edge raises the same counter (amended — §15, A18). |
-| `edges` | array of object | yes | **One entry per declared export edge** (amended — §15, A18). At most one entry per `edge` value; a duplicate `edge` is a sidecar defect and the mod applies the **first** and logs one warning. An empty array closes **every** export edge and is the correct frame to send when the sidecar holds no slot. |
+| `edges` | array of object | yes | **One entry per declared export edge** (amended — §15, A18) — **four under D17** (amended — §18, A38). At most one entry per `edge` value; a duplicate `edge` is a sidecar defect and the mod applies the **first** and logs one warning. An empty array closes **every** export edge and is the correct frame to send when the sidecar holds no slot. |
 | `edges[].edge` | edge enum | yes | Which edge. **MUST** be a member of the `exportEdges` the mod declared. |
-| `edges[].open` | bool | yes | `true` means migration out of **this** edge is permitted right now. The two edges are independent: a peer with a dead row still exports north (`m4_considerations.md`, Question 6). |
+| `edges[].open` | bool | yes | `true` means migration **out of** this edge is permitted right now. It says nothing about arrivals **on** this edge, which are never gated by it (amended — §18, A38). All declared edges are independent: a peer with a dead row still exports north (`m4_considerations.md`, Question 6), and under D17 a peer whose east neighbour is dark still exports west along the same row. |
 | `edges[].reason` | string enum | yes | Why, for this edge. When `open` is `true`: `"peer_live"`. When `open` is `false`: `"no_peer"`, `"peer_mod_absent"` (added — §14, A11), `"peer_incompatible"`, `"peer_unreachable"`, `"peer_overloaded"`, `"admin_closed"`, `"sim_size_mismatch"`. Under route-around a closed edge means **no slot on that axis is deliverable**, so the reason is an aggregate: `contract-b-m4.md` §8 fixes exactly which value the sidecar picks. |
 | `edges[].peerSimulationSize` | float | no | Present when `open` is `true`. The **effective neighbour's** `S` on that edge — which may differ between the two edges, because they are different peers. The mod **MUST** compare it against its own `S` and treat that edge as closed on a mismatch, even though the sidecar already checked. Two independent checks, because a mid-run resize can race. |
 
@@ -984,6 +1071,30 @@ go, because a column of two holds no third slot to skip to (`contract-b-m4.md` �
         "open": false,
         "reason": "no_peer"
       }
+    ]
+  }
+}
+```
+
+The same peer once it declares all four edges (D17, §18 A38). Its row holds three slots, so
+both row lanes are open and point at different peers; its column holds two, so the north and
+south lanes name the **same** peer — and here that peer is gone, which closes both with
+`no_peer` because a column of two has no third slot to skip to (`contract-b-m4.md` §2.1).
+Note that this mod keeps receiving organisms on `N` and `S` while both are closed:
+
+```json
+{
+  "protocol": "contract-a/2.2",
+  "type": "EDGE_STATUS",
+  "messageId": "7a3f1d84-2c96-4b07-a5e1-38d0c6b91f27",
+  "sentAt": 1786121853812,
+  "data": {
+    "epoch": 3,
+    "edges": [
+      { "edge": "E", "open": true,  "reason": "peer_live", "peerSimulationSize": 2000.0 },
+      { "edge": "N", "open": false, "reason": "no_peer" },
+      { "edge": "W", "open": true,  "reason": "peer_live", "peerSimulationSize": 2000.0 },
+      { "edge": "S", "open": false, "reason": "no_peer" }
     ]
   }
 }
@@ -1544,7 +1655,7 @@ delivers it in one breath, and the two need different answers.
 | Rule | Statement |
 |---|---|
 | Where | **At the sidecar, never at the mod.** The journal is where a burst accumulates and the sidecar owns the journal. The mod keeps exactly one arrival path, so D8's "the mod learns nothing" is untouched. |
-| The limit | At most `inboundRatePerSimMinute` (2.0) `MIGRATE_IN` frames released per **simulated** minute of the receiving world, with a token bucket of `inboundRateBurst` (5) so ordinary traffic is never delayed. |
+| The limit | At most `inboundRatePerSimMinute` (**12.0**, raised from 2.0 — §18, A40) `MIGRATE_IN` frames released per **simulated** minute of the receiving world, with a token bucket of `inboundRateBurst` (**15**, raised from 5) so ordinary traffic is never delayed. |
 | The clock | **Simulated**, not wall-clock. The sidecar advances it from `HEARTBEAT.simulatedTime` (§5.2), which it already receives every second. A world at 20× therefore drains a dam 20× faster in wall-clock terms and at the same rate *as the world experiences it*, which is the only frame of reference the crowd lives in. |
 | A stopped clock | While `paused` is `true`, `timeScale` is `0`, or no `HEARTBEAT` has arrived for `pacingIdleGraceMs` (10 000 ms), `simulatedTime` does not advance and **nothing is released**. No tokens accrue in the dark, so a paused world does not bank a burst. |
 | Order | Pacing **MUST NOT** reorder. Journal order is journal order, at any rate. |
@@ -1558,10 +1669,22 @@ delivers it in one breath, and the two need different answers.
 
 **Where the default comes from.** T1 measured slot 1 importing 6 003 organisms across 12.56
 wall-clock hours at 20×, which is about **24 arrivals per simulated hour** — 0.4 per
-simulated minute — into a population near 22. The default of 2.0 per simulated minute is
-five times the measured natural rate, so no ordinary traffic is ever held back, and it caps a
-two-hour outage's dam (about 900 organisms) at roughly 7.5 simulated hours of trickle rather
-than one instant. Retune it from the entry-edge crowding metric, not from a guess.
+simulated minute — into a population near 22. The original default of 2.0 per simulated
+minute was five times that measured natural rate, so no ordinary traffic was ever held back,
+and it capped a two-hour outage's dam (about 900 organisms) at roughly 7.5 simulated hours of
+trickle rather than one instant. Retune it from the entry-edge crowding metric, not from a
+guess.
+
+**And it was retuned exactly that way** (amended — §18, A40). The rule above is sound and the
+measurement under it went stale: T1 ran a **one-row ring of three**, where a slot had **one**
+inbound lane. D13 gave every slot a second one and doubled the map, and D17 gives it four.
+Thirty-five hours of the living deployment measure a **median of 1.19 and a p95 of 2.21**
+arrivals per simulated minute per slot — 12% of all slot-samples above the 2.0 limit, with
+slots 3 and 4 above it 20% and 26% of the time and slot 4's paced backlog pinned at
+`inboundQueueMax` for a quarter of the run. By this section's own **Observability** row, a
+depth that never falls names a limit set too low. **The default is now 12.0**, which is five
+times the projected median under two-way lanes — the same rule, re-measured on the topology
+that ships. A20 and A40 carry the derivation.
 
 > **The pacing interacts with the sender's hold timeout, and the answer is on the other
 > wire** (Risk 9). Pacing delays `MIGRATE_IN`, which delays `MIGRATE_IN_ACK`, which delays
@@ -1736,10 +1859,11 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `inboundQueueMax` | `64` | sidecar | Un-delivered journal entries before inbound admission control kicks in. |
 | `exportRetentionSeconds` | `3600` | sidecar | Tombstone lifetime. Bounds custody reassertion (§7.4). |
 | `migrationCooldownSeconds` | `5` | mod | Simulated seconds before the same organism retries after a transient NACK, on top of `retryAfterMs`. |
-| `entryImmunitySeconds` | `5` | mod | Simulated seconds after arrival during which an organism cannot re-trigger the border strip (`m2_findings.md` §4.4). Applies to **both** capture bands (§15, A19). |
+| `entryImmunitySeconds` | `5` | mod | Simulated seconds after arrival during which an organism cannot re-trigger the border strip (`m2_findings.md` §4.4). Applies to **every** capture band, all four of them under D17 (§15, A19; §18, A38). It is load-bearing rather than defensive now: with a band on the arrival edge, it and the inset are what keep a spawn and the next export two separable events. |
+| `migrationExcludeSpecies` | `"Basic bibite"` | mod | Comma-separated full species names that **never export** (§18, A39). Matched on the §16 A34-normalized form. Set by `MULTIVERSE_MIGRATION_EXCLUDE`. Empty disables the policy. Local, never on the wire. |
 | `entryMargin` | `max(5, 0.5·W)` | mod | World units the spawn is inset **past** the strip's inner face, on top of `W` (§4.3). Named here because §4.3's entry formula now covers all four edges (added — §15, A19). |
-| `inboundRatePerSimMinute` | `2.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). |
-| `inboundRateBurst` | `5` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). |
+| `inboundRatePerSimMinute` | `12.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). **Raised from `2.0` on 2026-08-07** (§18, A40): 2.0 was five times T1's measured one-lane rate, and D13 then D17 multiplied the inbound surface past it. **It gains a knob with the raise** — `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` — because it had none. |
+| `inboundRateBurst` | `15` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). **Raised from `5` on 2026-08-07** (§18, A40): arrivals clump per lane, and four inbound lanes clump about twice as hard as two. |
 | `pacingIdleGraceMs` | `10000` | sidecar | Wall-clock silence from `HEARTBEAT` after which the pacing clock stops advancing (§7.5, §15 A20). |
 | `heartbeatDeliveryGraceMs` | `1500` | sidecar | Age of the newest `HEARTBEAT` beyond which `MIGRATE_IN` release is held — the quiet-mod gate that trips before `heartbeatTimeoutMs` does (§7.5, §8, §15 A29). |
 | `replayDelayStepMs` | `500` | sidecar | Per-generation step of the reconnect replay delay, keyed on the batch's least-delivered `attempt` (§7.5, §15 A29). |
@@ -2590,9 +2714,10 @@ at wake. M4 therefore paces delivery out of the journal.
 
 **Resolution.** §7.5 carries the full rule. In summary:
 
-- The sidecar releases at most `inboundRatePerSimMinute` (2.0) `MIGRATE_IN` frames per
+- The sidecar releases at most `inboundRatePerSimMinute` `MIGRATE_IN` frames per
   **simulated** minute of the receiving world, through a token bucket of `inboundRateBurst`
-  (5) so ordinary traffic never waits.
+  so ordinary traffic never waits. **A20 shipped 2.0 and 5; §18's A40 raises them to 12.0
+  and 15**, on the same rule and a fresher measurement — the mechanism below is unchanged.
 - The clock is the mod's own `HEARTBEAT.simulatedTime`. It does not advance while the world
   is paused, stopped or silent, and it never runs on wall time.
 - Journal order is preserved absolutely. Bounce-backs and replays go through the same gate.
@@ -3439,3 +3564,298 @@ wrong number:**
 
 **Enforced by:** both sides, symmetrically. Each sends `"contract-a/2.2"` and compares only the
 major.
+
+---
+
+## 18. Two-way lanes, migration exclusion and the pacing raise (`contract-a/2.2`, 2026-08-07)
+
+The owner ratified **D17 (two-way lanes)**, **D18 (migration exclusion)**, **D19 (live hop
+animation)** and **D20 (the pacing raise)** on 2026-08-07, against the running M4 deployment
+(`system_decomposition.md`). Three of the four reach this wire, and **not one of them changes
+its shape.**
+
+**Four amendments, A38 to A41.** A38 makes every declared edge both an export edge and an
+entry edge; A39 adds the mod's local exclusion policy; A40 raises the delivery rate limit and
+gives it the knob it never had; A41 applies §3.1's test and finds **no version move at all**.
+D19 touches this wire nowhere — it is archive-internal and page-only, and it is recorded in
+`contract-b-m4.md` §17.
+
+The section follows the pattern of §13 to §17: each amendment names the ambiguity or change,
+the resolution, and **which side enforces it**. Where an amendment contradicts the body, §13,
+§14, §15, §16 or §17, the amendment wins, and the body carries an `(amended — §18, Ax)` or
+`(added — §18, Ax)` marker at each such point.
+
+**This set is the opposite of §15's in kind.** A18 removed a field and replaced it with one of
+a different type, which forced a major. A38 removes nothing, adds nothing, and changes no type
+and no enum — it changes **which values a conformant mod puts in fields that already accept
+them**. §3.1's test therefore answers *no bump*, and A41 works that through honestly rather
+than reaching for a minor to mark the occasion.
+
+> ### Why the biggest topology change since D8 needs no version bump
+>
+> This is counter-intuitive enough to be worth stating before the amendments rather than
+> after. Two-way lanes reverse the rule that has organized the map since M3, and yet:
+>
+> - `CONFIG_UPDATE.exportEdges` has been an **array** since A18, validated as "at least one
+>   member, no duplicates, every member also in `borderEdges`" — and A18 already made
+>   `borderEdges` **all four edges**. `["E","N","W","S"]` is legal against a
+>   `contract-a/2.2` sidecar **today**, with no code change.
+> - `EDGE_STATUS.edges` has been "one entry per declared export edge" since A18. Declare
+>   four, get four.
+> - `MIGRATE_OUT.exitEdge` and `MIGRATE_IN.entryEdge` are the §4.2 enum, which has held all
+>   four values since M2 and which A18 already exercised in both directions.
+> - §4.3's entry-point table has covered **all four edges** since A19, because a bounce-back
+>   already needed an entry point on every export edge.
+> - §4.3.2's corner rule has been stated for an arbitrary declared set since **A26**, with
+>   `n(W)` and `n(S)` already defined and `E, N, W, S` already the canonical tie order.
+>
+> The wire was built wide enough for this three amendments ago, mostly by A18 and A26, and
+> partly by accident: A26 generalized the corner rule because the *mod* had implemented it
+> generally, not because anyone expected a west lane. **The real work is elsewhere** — in the
+> relay's routing, which must learn two more walks, and in `EDGE_STATUS`'s semantics, which
+> must stop meaning "the edges that only send". The first is Contract B's and takes a minor
+> there (`contract-b-m4.md` §17, B15). The second is a rule, not a field.
+
+### A38 — Every declared edge is both an export edge and an entry edge (§4.2, §4.3, §4.3.1, §4.3.2, §5.1, §5.3, §5.4, §5.7, §10)
+
+*D17. This is the topology change, and it is the one that supersedes D8's one-way rule.*
+
+**Change.** D8 gave every sim one export edge and one passive entry edge; D13 gave it two of
+each. **D17 gives it four of each, and they are the same four.** A `W` export routes to the
+west neighbour, which receives it on its `E` edge; an `S` export routes south and is received
+on `N`. "Out and in are different doors" is retired.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| `CONFIG_UPDATE.exportEdges` | Unchanged in shape and validation. Under D17 a conformant mod declares `["E", "N", "W", "S"]`. A mod that declares fewer is still conformant — the field declares **geometry**, "I run a capture band on these edges", and never topology. |
+| `CONFIG_UPDATE.borderEdges` | Unchanged: all four, since A18. It still means "the edges on which this mod will accept an inbound organism", and under D17 it is equal to `exportEdges` rather than a superset of it. |
+| Capture bands | One per declared edge, **all four** (§4.3.1). Stated as one projection `p · n(e) ≥ S − W ∧ v · n(e) > 0` rather than as four rules, which is the form A26 already made the mod use. |
+| The corner rule | **Not one line changes** (§4.3.2, A26). It fires at all four corners instead of one. Opposite edges are mutually exclusive while `S > W`, so a corner still offers exactly two candidates, always on different axes. |
+| `EDGE_STATUS` | One entry per declared edge — four. Full state, one `epoch`, applied atomically, a declared edge with no entry is closed. All unchanged from A18 except the count. |
+| **`open` governs exports only** | An `open: false` edge refuses `MIGRATE_OUT` **through** it and never refuses `MIGRATE_IN` **on** it. Stated as a MUST in §5.4. |
+| `MIGRATE_OUT.exitEdge` | Any member of the declared set. All four values now occur. |
+| `MIGRATE_IN.entryEdge` | The **opposite** of the sender's `exitEdge` for ordinary traffic, and the origin's own exit edge for a bounce-back — both unchanged, and both now reaching all four values from both causes. |
+| Bounce-back | **Semantically unchanged.** An organism bounces home through the edge it left by. That edge is now also a normal entry edge, and that is fine: see below. |
+| Velocity and heading | Still copied, never mirrored (§4.4). A west hop is a translation along `x` exactly as an east hop is. Neither axis mirrors and the two never swap. |
+
+**Why the anti-boomerang protections are sufficient, and why they are now load-bearing.**
+This is the part that has to be right, because the geometry no longer helps. Three mechanisms
+already in this document do the whole job, and each one covers a different case:
+
+1. **The outward-velocity test covers ordinary traffic.** An arrival off the east lane enters
+   through `W` travelling **east** — velocity is copied, and the exporter captured it moving
+   outward on `E`. So `v · n(W) < 0`, and it is **not in the `W` band** no matter where it is.
+   An ordinary arrival can never re-export through the edge it landed on. This is not a
+   window or a margin; it is arithmetic, and it holds on the first tick.
+2. **The arrival inset covers the geometry.** A28 already guarantees that no arrival of any
+   kind lands inside a capture band, on **either** axis, because the spawn is inset by
+   `W + margin` on the fixed coordinate and clamped by the same inset on the free one. That
+   guarantee was written for four entry edges and needs no extension.
+3. **The entry-immunity window covers the bounce-back.** A bounce-back is the one case that
+   arrives moving *outward* — by construction (§5.7, `contract-b-m4.md` §9.4) — so it reaches
+   the band line under its own power within a few `FixedUpdate`s. `entryImmunitySeconds` is
+   what keeps the spawn and the next export two separable events. **This case is not new.**
+   `E` and `N` have been export edges with bands since A19, and a bounce-back has been
+   landing on them ever since; D17 adds two more edges to a situation the mod already
+   handles.
+
+**So a bounce-back onto a normal entry edge is fine, explicitly.** Before D17, a bounce came
+home through an edge that exported and did not receive; now that edge also receives. Nothing
+about the bounce changes — same inset, same immunity window, same outward velocity, same
+`entryEdge` value. The only difference is that ordinary traffic may arrive on that edge too,
+and ordinary traffic arrives moving inward, so the two populations are separated by rule 1.
+
+**What is genuinely given up, stated plainly.** D8 guaranteed that an organism could only come
+home by traversing the whole cycle. **That guarantee is gone, and deliberately.** A round trip
+through one neighbour is now legal: cross east, turn around, cross back west. What survives is
+the *instantaneous* guarantee — no organism re-exports through the edge it just arrived on —
+and that is what the three mechanisms above deliver. Two consequences follow that an operator
+should expect rather than diagnose:
+
+- **On an axis of length 2 the forward and reverse lanes name the same peer**
+  (`contract-b-m4.md` §2.1). On the 3×2 rig every column is such an axis, so slots 1 and 4
+  become a two-lane pair, and traffic on that axis rises disproportionately. A40 has to
+  absorb it.
+- **§4.3.1's jitter-export note loses its cheapness argument.** It rested on the one-way lane
+  and is withdrawn there; the item is reopened at its original priority rather than closed.
+
+**What D10's wrap still does.** With a band on every edge, the wrap no longer catches
+"organisms that walked out the passive side" — there is no passive side. It catches exactly
+four things, listed in §4.3.1: an excluded species (A39), an organism whose edge is closed,
+one still inside its immunity window, and one already in flight. The wrap **stays on**, and it
+is more load-bearing than before rather than less, because A39 routes a whole species into it.
+
+**Enforced by:** the **mod**, for declaring all four edges, running four bands, arbitrating
+four corners, and spawning every delivery regardless of edge state; the **sidecar**, for
+producing four `EDGE_STATUS` entries, for never gating a delivery on an export edge's state,
+and for carrying the declared set to the relay (`contract-b-m4.md` §6.3); the **relay**, for
+the two new walks (`contract-b-m4.md` §17, B13).
+
+### A39 — The mod may refuse to export a named species, and that is a local policy (§4.3.1, §5.3, §10, §11.2, §16 A34)
+
+*D18. No wire change of any kind. It is written down anyway, because the asymmetry it creates
+is visible on the operator surface and a reader who has not been told will file it as a bug.*
+
+**Change.** The mod gains a **migration exclusion list**: species named on it are never
+captured and therefore never export. §4.3.1's `capture` predicate gains one conjunct,
+`not excluded by local policy`.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Where it is evaluated | Inside the capture test, every `FixedUpdate`, as a set lookup. It is a **skip**, not a refusal: no `MIGRATE_OUT` is sent, so there is no NACK, no journal entry, no custody question and nothing to correlate. |
+| What it matches | The organism's **full** species name — both halves joined by one U+0020 — compared against the configured list. |
+| How it matches | On the **§16 A34-normalized form**, on both sides of the comparison. This is not optional: the game issues an edge space in about 2% of generated name halves, so a raw comparison would silently fail to exclude `Basic  bibite`. A34's rule is reused exactly — trim, then collapse internal whitespace runs to one U+0020 — **for the comparison only**. Nothing is rewritten, and the local `Species` record is untouched. |
+| Configuration | `MULTIVERSE_MIGRATION_EXCLUDE`, comma-separated full names. Default `"Basic bibite"`. An empty value disables the policy. Named in §10 as `migrationExcludeSpecies`. |
+| Logging | **Once per organism per session.** Not once per tick and not once per band entry: an excluded organism loiters in a band for its whole life, and a per-tick line would be the most expensive log in the system. One line, keyed on `entityId`, is evidence that the policy fired without being a cost. |
+| An organism with no species | Never excluded. A missing or malformed species block means the mod cannot name it, and a policy that cannot identify its subject **MUST NOT** guess — the same rule §16 A32 applies to import. |
+| Export-side only | Exclusion never refuses an **arrival**. A world that does not exclude a species may still send it to one that does, and the receiving mod spawns it normally. There is no wire field for this and there is deliberately not going to be one: it is a local decision about a local population, and putting it on the wire would make one world's policy another world's obligation. |
+| Not a census filter | The census (§17, A35) reports what **lives** in the world, and an excluded species lives there like any other. The mod **MUST NOT** omit it, and the page **MUST NOT** hide it. |
+
+**The asymmetry is a documented feature, not a defect.** An excluded species accumulates where
+it is born, never appears in the archive's migration ledger, and shows on the census like
+everything else. So "who lives here" and "who crossed" now legitimately disagree, and **a
+reader must not reconcile them.** `contract-b-m4.md` §10.1 already forbids the join that would
+produce a wrong number — the ledger has never been abundance — and D18 simply makes the gap
+wide enough to notice. On the default list, `Basic bibite` is a large resident population in
+every world and zero percent of every lane's traffic. That is the intended picture: the seed
+stock stays home and what travels is what evolved.
+
+**Why in the mod and not in the sidecar.** The sidecar could refuse a `MIGRATE_OUT` with a
+NACK and the effect would look similar. It would be worse in three ways: the organism would
+have been serialized, its parent blobs collected and hashed, and the frame sent, all to be
+thrown away; the mod would have to handle a permanent NACK class that means "never try this
+organism again"; and the sidecar would need a species rule, which §16 A30 spent an entire
+amendment set keeping out of it. The capture test already reads the species for the block it
+attaches, so the lookup is free where it is.
+
+**Enforced by:** the **mod**, alone. No sidecar, relay or archive behaviour changes, and none
+of them learns that the policy exists.
+
+### A40 — The delivery rate limit rises to 12.0 per simulated minute, and gains the knob it never had (§7.5, §10, §15 A20)
+
+*D20. A default change and a new flag. No field, no message, no version.*
+
+**The answer to "where did 2.0 come from", because the honest answer changes what to do about
+it.** It was **reasoned, not arbitrary**, and the reasoning is in §7.5 under *Where the
+default comes from*: T1 measured slot 1 importing 6 003 organisms across 12.56 wall-clock
+hours at 20×, which is 0.4 arrivals per simulated minute, and 2.0 is **five times the measured
+natural rate** — margin enough that ordinary traffic is never held back, while still capping a
+two-hour dam at hours of trickle instead of one instant. The constant landed in commit
+`823a70f` with the rest of M4's arrival pacing, and it has never had a flag or an environment
+variable: it is a compiled Go constant, reachable only by editing source.
+
+**What went wrong is not the reasoning. It is that D13 spent the margin and nobody re-measured.**
+T1 ran a **one-row ring of three**, where a slot had exactly **one** inbound lane. D13 gave
+every slot a second one and doubled the map to six. The margin was 5×; the load went up about
+6×.
+
+**The measurement, from 35 hours of the living deployment** (1 714 samples of the archive's
+`metrics.jsonl`, per-slot inbound lane rate divided by that slot's own measured `timeScale`,
+paused samples excluded):
+
+| Offered inbound load, arrivals per **simulated** minute | Value |
+|---|---|
+| Median, per slot | **1.19** |
+| p90 / p95 / p99 | 2.05 / **2.21** / 2.61 |
+| Share of all slot-samples **above the 2.0 limit** | **12%** |
+| Slots 3 and 4 specifically | above the limit **20%** and **26%** of the time |
+| Slot 4's paced backlog at `inboundQueueMax` (64) | **25%** of all samples; slot 6, **43%** |
+| Against T1's 0.40 | **3.0× the rate the default was sized from** |
+
+§7.5's own **Observability** row is the verdict: *a depth that never falls names a limit set
+too low.* Three of six slots have a backlog that does not fall. The limit stopped spreading
+dams and started throttling steady traffic, which is the one thing A20 promised it would never
+do.
+
+**Resolution.**
+
+| Knob | Was | Becomes | Why this number |
+|---|---|---|---|
+| `inboundRatePerSimMinute` | `2.0` | **`12.0`** | **Five times the projected median under two-way lanes** — A20's own rule, applied to the topology that ships. D17 roughly doubles per-slot inbound surface from two lanes to four, taking the measured 1.19 median to ~2.4, and 5 × 2.4 = 12. |
+| `inboundRateBurst` | `5` | **`15`** | The bucket exists so a *clump* is never delayed, and clumping is set by organism behaviour per lane. Four inbound lanes clump about twice as hard as two, and the bucket should hold a comparable slice of simulated time. |
+| The knob itself | none | `--inbound-rate`, `MULTIVERSE_INBOUND_RATE` | `holdTimeoutMs` set this precedent in M4 for exactly this reason. A tunable an operator cannot retune from the metric that measures it is not a tunable, and this one has now needed retuning twice. |
+
+**Why 12 and not 6, and why not 30.** The measured curve answers both. Projecting the observed
+distribution through D17's doubling and sweeping the limit, the share of samples that would be
+throttled falls 57% → 12.5% → 0.6% → 0.4% → 0.3% at limits of 2, 4, 6, 8 and 12. **The curve
+flattens at about 6 and is flat by 12**, and the residue above it is not steady traffic at all:
+it is genuine dam events, the largest being a far-end dropout at 18.5 arrivals per simulated
+minute. So 6 would work and 12 buys the margin the rule asks for, while anything much above 12
+only shortens the spreading of the dams the limit exists for. **The dam is still spread**: a
+900-organism backlog takes 75 simulated minutes to drain at 12.0, not one breath.
+
+**Three things this does not do, checked rather than assumed:**
+
+- **It does not re-open the A29 livelock.** The mod's ingest ceiling is
+  `MaxMutationsPerFixedUpdate` = 4 applications per `FixedUpdate` under an 8 ms wall-clock
+  budget. At 50 physics ticks per simulated second that ceiling is ~12 000 per simulated
+  minute — **three orders of magnitude above 12.0**. The binding constraint on arrival was
+  never the mod's ingest rate, and A29's five defences are untouched.
+- **It does not change `inboundQueueMax`.** 64 stays, and so does the upstream `OVERLOADED`
+  backpressure that turns a full queue into a re-route. Raising the drain is what stops the
+  queue filling in the first place; the cap is still there for when it does.
+- **It does not touch the mechanism.** Simulated clock, stopped clock, journal order,
+  session-scoped bucket, quiet-mod gate, replay backoff, custody — every row of §7.5's table
+  is unchanged. Only two numbers move.
+
+**Enforced by:** the sidecar. The mod's obligations are unchanged, including A25's negative
+one: never infer anything from arrival cadence.
+
+### A41 — `contract-a/2.2` is unchanged, and the path does not move (§2, §3, §3.1)
+
+**Change.** §3.1: additive fields raise the **minor**; field removal, type changes and
+enum-value removal require a **major**. A38, A39 and A40 do none of the four.
+
+**Resolution.** Apply the contract's own test, item by item:
+
+| Change to Contract A | Kind | Needs a minor? | Needs a major? |
+|---|---|---|---|
+| `exportEdges` may now contain all four members | **no change** — the array, its validation and `borderEdges` have accepted this since A18 | no | no |
+| `EDGE_STATUS.edges` may now carry four entries | **no change** — "one entry per declared export edge" since A18 | no | no |
+| `MIGRATE_OUT.exitEdge` may be `"W"` or `"S"` | existing enum value, existing validation rule | no | no |
+| `MIGRATE_IN.entryEdge` may be any of the four from either cause | existing enum value; §4.3's table has covered four edges since A19 | no | no |
+| A capture band on every declared edge (§4.3.1) | **mod-side geometry**, no wire shape | no | no |
+| `open` governs exports only (§5.4) | a rule made explicit; it is what A11 has always meant | no | no |
+| The migration exclusion policy (A39) | **local policy**, invisible to every other party | no | no |
+| `inboundRatePerSimMinute` 2.0 → 12.0, `inboundRateBurst` 5 → 15 (A40) | a §10 default value | no | no |
+| `migrationExcludeSpecies` named in §10 | a named default for a local policy | no | no |
+| Message catalogue, field tables, enums, close codes, NACK codes, custody chain | **all unchanged** | no | no |
+
+The identifier stays **`contract-a/2.2`** and the path stays **`/contract-a/v2`**. This
+follows the precedent of A26, A27, A28 and A29, all of which changed behaviour, rules or
+defaults without touching a field — and **A29 is the closest match**, because it too added
+named defaults to §10 and stated that the wire needed no bump.
+
+**Why not raise the minor anyway, to mark the occasion.** Because it would be a lie in the
+one direction that matters. §3.1 says the minor is *a capability statement, not a
+negotiation*, and that a receiver detects a feature **by the presence of its field, never by
+arithmetic on the minor**. There is no field to detect here. Worse, a `contract-a/2.3` would
+imply that `contract-a/2.2` cannot do this — and `contract-a/2.2` can: a mod declaring all
+four export edges is legal against a `contract-a/2.2` sidecar today, and that sidecar
+produces four `EDGE_STATUS` entries for it without a line changing. Marking the occasion is
+what §18's prose is for.
+
+**What a mixed rig does, and where the real gap is.** The wire degrades cleanly and the
+**topology** does not, which is worth stating precisely:
+
+1. A four-edge mod against a `contract-a/2.2` sidecar and a `contract-b/3.3` relay works
+   fully. This is the target configuration.
+2. A four-edge mod against a **`contract-b/3.2` relay** gets no `W` or `S` key in its grant,
+   so those two edges close with `no_peer` (`contract-b-m4.md` §8) and it behaves exactly
+   like a two-edge mod. **Correct, quiet, and the reason Contract B takes the minor and this
+   one does not**: the west lane's existence is a fact about the relay's routing table, and
+   that is where a peer should look for it.
+3. A **two-edge mod** on a two-way map exports east and north only, and still **receives** on
+   all four edges, because arrivals were never gated by `exportEdges` — `borderEdges` has
+   been all four since A18. It is a world organisms can enter from any side and leave from
+   two. Legal, lossless, and visible on the page as a slot with two dead lanes.
+
+**No configuration produces a lost organism, a refused arrival, or a wrong number.** That is
+the same standard §17's A37 held the census to.
+
+**Enforced by:** both sides, symmetrically. Each keeps sending `"contract-a/2.2"` and
+comparing only the major.
