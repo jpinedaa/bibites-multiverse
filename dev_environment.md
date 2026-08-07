@@ -11,7 +11,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
-| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.2`**, amended in place; §15 is the M4 set, §16 the species-identity set, §17 the species-census set and **§18 the two-way-lane set, A38–A41**), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.3`**; §14 is its reconciliation set, §15 the species-identity amendment, §16 the census amendment and **§17 the two-way-lane, hop-feed and pacing amendment, B13–B15**), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by every amendment since — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
+| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.3`**, amended in place; §15 is the M4 set, §16 the species-identity set, §17 the species-census set, §18 the two-way-lane set (A38–A41) and **§19 the world-settings set, A42–A44**), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.5`**; §14 is its reconciliation set, §15 the species-identity amendment, §16 the census amendment, §17 the two-way-lane and hop-feed amendment (B13–B15), §18 the pacing and speed readout and **§19 the world-settings readout**), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by every amendment since — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
 | Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), **`run-m4-lan.sh` = the same map with slot 6 on the second computer** (the M4 exit-test rig; it sources `run-m4.sh` with `M4_LIB=1`), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rigs* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
@@ -24,8 +24,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Component | Version |
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
-| The plugin | `0.6.0` (`MultiversePlugin.Version`) — the two-way-lane build: four-edge capture (§18 A38), the migration exclusion list (A39) and two-lane portals on all four edges. It speaks `contract-a/2.2`. The far-end bundle carries the same DLL; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | `contract-b/3.3` — two-way lane walks, `--inbound-rate`, and the `/api/hops` feed the live map animates from. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
+| The plugin | `0.6.1` (`MultiversePlugin.Version`) — the world-settings build: it publishes what it was *told to do* on the handshake (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping), on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. It speaks `contract-a/2.3`. The far-end bundle carries the same DLL; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
+| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -238,10 +238,11 @@ process it owns — see *Only one rig can run at a time* in Gotchas. `m4_conside
 *Exit Test → Result*, records the run.
 
 **Since the two-way-lane rollout of 2026-08-07 the map draws one lane per declared edge, not
-twelve.** Five upgraded slots declare all four and the far slot still declares two, so the
-status page shows **22** lanes while the far end is stale and **24** once it is current. Count
-lanes from `sum(len(slot.exportEdges))`, never against a constant — `run-m4-lan.sh phase1` was
-changed to do exactly that. Both axes wrap, so every declared edge opens.
+twelve.** A slot that declared only two edges contributed two, so the status page read **22**
+lanes while the far end was on the one-way build and **24** once it took the new one — which it
+now has: measured **24 open, no bypass** on 2026-08-07 after the settings rollout. Count lanes
+from `sum(len(slot.exportEdges))`, never against a constant — `run-m4-lan.sh phase1` was changed
+to do exactly that. Both axes wrap, so every declared edge opens.
 
 Six things about it are load-bearing:
 
@@ -291,17 +292,26 @@ Six things about it are load-bearing:
 does not fail with a socket error — it connects, gets closed, and looks like a peer that
 will not join. That is the failure to expect, and it is why this list exists.
 
-**The minors are now `contract-a/2.2` and `contract-b/3.3`** (the two-way-lane set, 2026-08-07;
-`2.2`/`3.2` were the species census, `2.1`/`3.1` the species identity, all of the same day), and
-**nothing in this table moves with them**. Contract A did **not** move for D17 — §18's A41 says
-so explicitly: every field the two-way set touches already existed and already accepted all four
-edge values, so there was nothing additive to bump. Compatibility is on the major alone: a minor
-is never a rejection reason, the URL paths did not move, and every field these sets added — the
-migration `species` block, the `HEARTBEAT` census with its `truncated` sibling, and
-`SECTOR_GRANT.neighbours`' `"W"` and `"S"` keys — is OPTIONAL on both wires. **The minor is a
-capability statement, not a negotiation:** detect a feature by the presence of its field, never
-by arithmetic on the minor. A world whose mod predates the census therefore reads **species
-unknown** on the status page — honest, and never a wrong number.
+**The minors are now `contract-a/2.3` and `contract-b/3.5`** (the world-settings set, 2026-08-07;
+`2.2`/`3.4` and `2.2`/`3.3` were the two-way lanes and the pacing readout, `2.2`/`3.2` the species
+census, `2.1`/`3.1` the species identity, all of the same day), and **nothing in this table moves
+with them**. Contract A did **not** move for D17 — §18's A41 says so explicitly: every field the
+two-way set touches already existed and already accepted all four edge values, so there was
+nothing additive to bump. It **did** move for §19, because A42 adds five genuinely new
+`CONFIG_UPDATE` fields. Compatibility is on the major alone: a minor is never a rejection reason,
+the URL paths did not move, and every field these sets added — the migration `species` block, the
+`HEARTBEAT` census with its `truncated` sibling, `SECTOR_GRANT.neighbours`' `"W"` and `"S"` keys,
+and §19's five settings — is OPTIONAL on both wires. **The minor is a capability statement, not a
+negotiation:** detect a feature by the presence of its field, never by arithmetic on the minor. A
+world whose mod predates the census therefore reads **species unknown** on the status page, and
+one whose mod predates §19 reads **`?`** in every settings cell — honest, and never a wrong
+number, and never the value the game ships with. Measured on the live map on 2026-08-07 with the
+five local worlds on `0.6.1` and slot 6 still behind: the Settings tab printed `0.6.1` /
+`contract-a/2.3` / `every 2 min` / `4` / `yes` / `on` / `Basic bibite` for slots 1–5 and
+`?` / `?` / `?` / `?` / `?` / `?` / `this world has not told us` for slot 6. **A settings row is
+validated but never fatal** — §19 makes a malformed row something the sidecar strips before the
+handshake proceeds, because closing the handshake over an observability field would cost the
+whole session.
 
 **But `contract-b/3.3` is the first minor a stale peer does not simply tolerate, and that is the
 correction to make here.** The two previous rollouts left slot 6 on the previous minor and it
@@ -317,6 +327,15 @@ lanes into it ran at ~40 hops/min against ~4–6 on every other lane, and slots 
 delivery — but a `3.3` map is **not** operationally complete until every peer is on `3.3`. The
 minor is still not a rejection reason; the incompatibility is in one field's value range, and it
 is why the far-end bundle must be re-taken with this build rather than at leisure.
+
+**That one cleared, and the difference between the two kinds of staleness is the lesson.** The
+far end took the `3.3` bundle, and on 2026-08-07 after the `3.5` rollout the live map read 24
+open lanes, no bypass, and `pacedDepth` 0 on all six slots — the ~40 hops/min bounce loop is
+gone. Slot 6 is nevertheless still behind, now on `0.6.1`/`2.3`/`3.5`, and that costs **nothing
+but readout**: its settings cells print `?` and its census still reports. A stale *value range*
+in a field both sides already exchange breaks traffic; a stale *absent optional field* only ever
+costs a number on a page. Re-take the bundle for the second, but do not confuse it with the
+first.
 
 | What the scripts speak | What M4 speaks | Where |
 |---|---|---|
@@ -410,7 +429,7 @@ side carries none** — the relay, the sidecar, the archive and `ringstat` all l
 
 | Tag | What it reports |
 |---|---|
-| `[M2]` | The general mod series: config, connection, edge state, exports. |
+| `[M2]` | The general mod series: config, connection, edge state, exports. **The world-settings set (§19 A42) has no tag of its own** — it rides the `CONFIG_UPDATE reason=connect` line, which now ends `worldWrapping=… migrationExclude=… saveMinutes=… saveKeep=… saveOnQuit=…`. That line is the one to grep to see what a world published about itself. |
 | `[M2-CROSSING]` | Per-simulated-minute crossing counters, **one line per export edge** — four of them under D17. |
 | `[M2-CMD]` | Every command-file result, the same text as `<cmdfile>.log`. |
 | `[M2-FAMILY]` | Family scans, on `MULTIVERSE_FAMILY_REPORT`. |
@@ -839,12 +858,49 @@ host, and the false negative reads exactly like a blocked port (see Gotchas).
 The page is **read-only by design** (D15, `m4_considerations.md` *Scope*), so LAN exposure
 adds no write surface. It is still a LAN-only step, and M5 owns public exposure.
 
-The page is now a **visual map** — an SVG grid of the worlds with population drawn as dots,
-lanes drawn as arrows (wrap-arounds split at the map edge, bypasses curved over the world they
-skip), pulses animating each lane at its measured hop rate, and a glossary that explains every
-term to a reader who did not build the system. It serves a second endpoint,
-`/api/history?hours=&buckets=`, which downsamples `metrics.jsonl` into per-world population
-sparklines; `/api/status` gained `recentHops` per lane and `flowWindowMs`.
+The page is **three views over one poll — Map, Species and Settings — and the tab is in the URL
+hash**, so `#species` is a link somebody can send and a reload lands where the reader was. `#map`
+(the default, and anything unrecognised) is the **visual map**: an SVG grid of the worlds with
+population drawn as dots, lanes drawn as arrows (wrap-arounds split at the map edge, bypasses
+curved over the world they skip), pulses animating each lane at its measured hop rate, and a
+glossary that explains every term to a reader who did not build the system. `#species` is **who
+is alive right now** — the union of every world's census, keyed on the §16 A34-normalized name
+and printed in each world's own spelling, annotated with what the ledger knows about it
+(crossings ever, first and last sighting, distinct genomes, recent lanes, parent species) and
+badged `everywhere` / `endemic` / `never-exported`. It is **alive-only**: a species that crossed
+a thousand lanes and is extinct everywhere is a ledger fact, not a resident. `#settings` is one
+card per world of what that world was **told to do** — mod and protocol versions, save interval,
+keep count, save-on-quit, wrapping and the exclusion list — and it is read-only, and says so.
+
+| Endpoint | What it answers |
+|---|---|
+| `/api/status` | the live frame every tab is drawn from. It gained `recentHops` per lane and `flowWindowMs` with §17, the speed and pacing readout with §18, and §19's seven per-slot fields: `modVersion`, `contractAVersion`, `migrationExclude` (with `migrationExcludeKnown`), `saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` |
+| `/api/hops` | the last minute of crossings, which the map animates |
+| **`/api/species`** | the alive union with its ledger annotations, plus `reportingSlots`, `censuslessSlots`, `truncatedSlots`, `ledgerSpecies` and `ledgerRecords`. **The join happens here, not in the browser**, so the page and `ringstat` can never disagree about which species is endemic |
+| **`/api/species/history?key=&hours=&buckets=`** | one species' per-world population over time, downsampled from `metrics.jsonl`. `key` is required and bounded: missing, empty or over-long answers **`400`** |
+| `/api/history?hours=&buckets=` | the same downsample for every world's total population — the map's sparklines |
+
+**The species aggregate costs one pass, not one per poll.** It is built during the ledger replay
+the archive already performs at startup, and maintained per new record after that, so a
+half-million-line ledger is never re-read to answer a request. Measured on 2026-08-07 against
+599,184 records (176 MB, warm page cache): the replay took **~6 s**, and the archive's settled
+RSS went from 146 MB to **170 MB**, with a transient peak near 690 MB while the pass ran. The
+same rollout widened each `metrics.jsonl` sample by **~640 bytes (+7.6 %)** — the settings block
+for five publishing worlds — on a file that samples `/api/status` verbatim.
+
+`ringstat` is the same three views in a terminal, over the same data and from the same place:
+
+```sh
+bin/ringstat                        # the map: grid, lanes, flow, custody/paced/held, last save
+bin/ringstat --species              # who is alive, joined to the crossing record
+bin/ringstat --settings             # what each world was told to do; '?' where it has not said
+bin/ringstat --watch 5s             # repeat, clearing the screen
+bin/ringstat --metrics <file>       # read the newest sample from metrics.jsonl instead
+```
+
+`--url` defaults to `http://127.0.0.1:8796` (`MULTIVERSE_ARCHIVE_URL`), `--timeout` to 5 s.
+`--species` against `--metrics` prints `n/a` in the crossing columns and says so: that half is
+derived from the ledger, and only a running archive holds it.
 
 ## Gotchas
 
@@ -870,6 +926,28 @@ sparklines; `/api/status` gained `recentHops` per lane and `flowWindowMs`.
   copy step with `Invalid argument` — Windows holds `BibitesMultiverse.dll` open. The
   `dotnet build` before it still succeeds, so the output reads like a success until the
   last line. Run `game.sh stop` first, then `deploy.sh`.
+- **The FIRST bring-up after a deploy that adds a config entry races on `dev.multiverse.bibites.cfg`,
+  and the instance that loses sits at the main menu with the client OFF.** BepInEx writes the whole
+  config file back on every *new* `Bind`, so a mod release with a new entry makes all five instances
+  rewrite the same file within seconds of each other. Two of them lose:
+  `[M2] configuration failed — the multiverse client stays off: System.IO.IOException: Sharing
+  violation on path …\BepInEx\config\dev.multiverse.bibites.cfg`. **The symptom does not look like
+  a config problem** — the game loads, BepInEx says `Chainloader startup complete`, dev commands arm,
+  and then nothing: no `[M2-WORLD]`, no `MULTIVERSE_WORLD` load, no sidecar connection, and `up`
+  blocks in `world_ready` for its full 1200 s. Measured 2026-08-07 rolling out `0.6.1`: slots 1 and 2
+  both lost, slots 3–5 were fine. **The fix is a restart, not a repair** — the file is complete after
+  the first winner writes it, so no later `Bind` saves and the race cannot recur. Stop the affected
+  instances and start them **one at a time**, with the same environment `run-m4.sh start_game` sets;
+  a running `up` picks them up where it is waiting. Check for it with
+  `grep -a 'configuration failed' "…/BepInEx/LogOutput.log"*` whenever a slot is `live` on the status
+  page with `modConnected` false.
+- **A world restarted outside the rig can come back at the wrong time scale, and the rig's own
+  `timescale` may not stick to it.** After the same restart, slots 1 and 2 reported `×100` and
+  `×58` on the status page while the three the rig started reported `×5` — the game restores its own
+  speed after the world settles, which can land after the rig's `send <slot> timescale <x>`. Re-send
+  it and confirm on `/api/status`; the command answers
+  `targetTimeScale=5.00 Time.timeScale=5.00`, and `timeScale` on the page is the **measured** speed,
+  which is why the far end reads a fluctuating non-integer.
 - **A WSL environment variable does not reach the game on its own.** `MULTIVERSE_AUTOTEST=1
   game.sh start` is silently ignored: WSL only forwards variables that `WSLENV` names.
   Use `WSLENV=MULTIVERSE_AUTOTEST MULTIVERSE_AUTOTEST=1 game.sh start`. The second hop is
