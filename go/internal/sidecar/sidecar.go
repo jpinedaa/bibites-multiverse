@@ -912,10 +912,15 @@ func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
 		Kind:        st.Entry.Kind,
 		Body:        contractb.Body{Version: st.Entry.GameVersion, BB8: st.Entry.Payload},
 		Lineage:     lineageOf(st.Entry),
-		SourcePeer:  s.cfg.PeerID,
-		SourceSlot:  st.Entry.SourceSlot,
-		DestSlot:    st.Entry.DestSlot,
-		ExitEdge:    st.Entry.Edge,
+		// COPY, NEVER AUTHOR (§6.6). The block goes out exactly as the journal
+		// holds it, which is exactly as MIGRATE_OUT delivered it. A re-forward, a
+		// re-route and a retry all reproduce the same bytes, because they all read
+		// the same journal entry.
+		Species:    st.Entry.Species,
+		SourcePeer: s.cfg.PeerID,
+		SourceSlot: st.Entry.SourceSlot,
+		DestSlot:   st.Entry.DestSlot,
+		ExitEdge:   st.Entry.Edge,
 		// contract-a.md §4.3: the sidecar copies exitPosition and never
 		// converts it. The mod owns the geometry.
 		ExitPosition: st.Entry.Position,
@@ -964,7 +969,8 @@ func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
 	s.log.Info("sidecar: forwarded MIGRATION_PAYLOAD",
 		"migrationId", st.Entry.MigrationID, "destSlot", st.Entry.DestSlot,
 		"exitEdge", st.Entry.Edge, "relaySessionId", st.RelaySessionID,
-		"reroutes", st.RerouteCount, "genomeHash", st.Entry.GenomeHash, "parents", len(st.Entry.Parents))
+		"reroutes", st.RerouteCount, "genomeHash", st.Entry.GenomeHash,
+		"parents", len(st.Entry.Parents), "species", wire.SpeciesName(st.Entry.Species))
 	s.faultPoint(FaultPostForward)
 	return true
 }
@@ -1049,11 +1055,17 @@ func (s *Sidecar) deliverLocked(st *journal.State, now time.Time) {
 	}
 	s.pace.take()
 	msg := contracta.MigrateIn{
-		MigrationID:   id,
-		EntityID:      updated.Entry.EntityID,
-		Kind:          updated.Entry.Kind,
-		GameVersion:   updated.Entry.GameVersion,
-		Payload:       updated.Entry.Payload,
+		MigrationID: id,
+		EntityID:    updated.Entry.EntityID,
+		Kind:        updated.Entry.Kind,
+		GameVersion: updated.Entry.GameVersion,
+		Payload:     updated.Entry.Payload,
+		// Handed through VERBATIM when the entry carried one, and OMITTED when it
+		// did not (contract-b-m4.md §6.6 step 7). Nothing here resolves, translates
+		// or annotates it: the registry the name resolves against lives inside the
+		// game process. A BOUNCE-BACK takes this path too, so an organism that
+		// comes home comes home under the name it left with.
+		Species:       updated.Entry.Species,
 		EntryEdge:     updated.Entry.Edge,
 		EntryPosition: updated.Entry.Position,
 		Velocity:      contracta.Vec{X: updated.Entry.VelocityX, Y: updated.Entry.VelocityY},
@@ -1066,7 +1078,7 @@ func (s *Sidecar) deliverLocked(st *journal.State, now time.Time) {
 	s.schedFor(id).nextDeliver = now.Add(s.cfg.MigrateInAckTimeout)
 	s.log.Info("sidecar: delivered MIGRATE_IN", "migrationId", id, "attempt", attempt,
 		"entryEdge", updated.Entry.Edge, "bounceBack", updated.BounceBack,
-		"pacedDepth", s.pacedDepthLocked())
+		"species", wire.SpeciesName(updated.Entry.Species), "pacedDepth", s.pacedDepthLocked())
 }
 
 func (s *Sidecar) ackUpstreamLocked(st *journal.State) {

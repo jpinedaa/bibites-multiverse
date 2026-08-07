@@ -60,7 +60,14 @@ type held struct {
 	Position    float64 `json:"entryPosition"`
 	Velocity    contracta.Vec
 	Heading     float64
-	ArrivedAt   time.Time `json:"arrivedAt"`
+	// Species is the block this arrival carried, kept so the onward hop carries
+	// the same one (contract-a.md §16, A30). A real mod re-reads it from the live
+	// Species record every hop; this program has no registry and no world, so
+	// carrying the arrival's own block verbatim is the honest analogue — and it
+	// is what lets a species name cross a synthetic peer in a LAN rig instead of
+	// dying at it.
+	Species   *contracta.Species `json:"species,omitempty"`
+	ArrivedAt time.Time          `json:"arrivedAt"`
 }
 
 type stateFile struct {
@@ -364,7 +371,7 @@ func (m *fakeMod) forwardOne() {
 	entity := pick.EntityID
 	out := contracta.MigrateOut{
 		MigrationID: migrationID, EntityID: &entity, Kind: contracta.KindBibite,
-		GameVersion: pick.GameVersion, Payload: pick.Payload,
+		GameVersion: pick.GameVersion, Payload: pick.Payload, Species: pick.Species,
 		ExitEdge: edge, ExitPosition: &pos, Velocity: &vel, Heading: &heading,
 		SimulationSize: &m.simSize, SimTick: &tick,
 	}
@@ -462,7 +469,7 @@ func (m *fakeMod) onMigrateIn(env wire.Envelope) {
 		m.holding[in.MigrationID] = &held{
 			MigrationID: in.MigrationID, EntityID: in.EntityID, Payload: in.Payload,
 			GameVersion: in.GameVersion, EntryEdge: in.EntryEdge, Position: in.EntryPosition,
-			Velocity: in.Velocity, Heading: in.Heading, ArrivedAt: time.Now(),
+			Velocity: in.Velocity, Heading: in.Heading, Species: in.Species, ArrivedAt: time.Now(),
 		}
 		m.byEntity[in.EntityID] = in.MigrationID
 		m.arrivals++

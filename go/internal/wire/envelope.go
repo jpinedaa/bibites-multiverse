@@ -21,9 +21,18 @@ import (
 
 // Protocol identifiers. The version segment is <major>.<minor>
 // (contract-a.md §14, A16); compatibility is on the major only.
+//
+// Both minors moved for the species-identity set (contract-a.md §16 A33,
+// contract-b-m4.md §15 B10): one OPTIONAL field on two Contract A messages and
+// one on a Contract B message, nothing removed and no type changed, which each
+// contract's own version test answers with a MINOR bump. The URL paths do not
+// move, and a peer on either side that still speaks the previous minor stays
+// compatible by construction — THE MINOR IS A CAPABILITY STATEMENT, NOT A
+// NEGOTIATION, and a receiver detects the feature by the presence of the
+// `species` field and never by arithmetic on the minor.
 const (
-	ProtocolA = "contract-a/2.0"
-	ProtocolB = "contract-b/3.0"
+	ProtocolA = "contract-a/2.1"
+	ProtocolB = "contract-b/3.1"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).

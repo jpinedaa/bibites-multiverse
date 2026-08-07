@@ -62,12 +62,24 @@ type Record struct {
 	Kind        string             `json:"kind,omitempty"`
 	GameVersion string             `json:"gameVersion,omitempty"`
 	Lineage     *contractb.Lineage `json:"lineage,omitempty"`
-	Timestamp   int64              `json:"timestamp,omitempty"`
-	Duplicate   bool               `json:"duplicate,omitempty"`
-	Code        string             `json:"code,omitempty"`
-	Message     string             `json:"message,omitempty"`
-	GenomeHash  string             `json:"genomeHash,omitempty"`
-	ServedBy    string             `json:"servedBy,omitempty"`
+	// Species is the species-identity block the envelope carried, recorded
+	// verbatim (contract-b-m4.md §15, B10). It is a LEDGER FACT, NEVER A
+	// RESOLUTION: the archive does not resolve, merge or rewrite a name, because
+	// species resolution happens in exactly one place in this system and it is
+	// the importing mod. ABSENT IS ABSENT — never "unknown" as a value — and
+	// dedup is unchanged, on migrationId alone.
+	//
+	// Nothing renders it in M4 and that is not a reason to skip it: the ledger
+	// could name only hashes until now, the name is the one label a human reads,
+	// and adding the field later would leave every migration before that date
+	// nameless.
+	Species    *contractb.Species `json:"species,omitempty"`
+	Timestamp  int64              `json:"timestamp,omitempty"`
+	Duplicate  bool               `json:"duplicate,omitempty"`
+	Code       string             `json:"code,omitempty"`
+	Message    string             `json:"message,omitempty"`
+	GenomeHash string             `json:"genomeHash,omitempty"`
+	ServedBy   string             `json:"servedBy,omitempty"`
 }
 
 // Ledger is the append-only record file.

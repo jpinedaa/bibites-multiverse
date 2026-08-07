@@ -524,6 +524,11 @@ type Reroute struct {
 	AtMs     int64  `json:"atMs"`
 }
 
+// Species is the OPTIONAL species-identity block of §15, B9. It is the same
+// shape and the same validator as Contract A's (contract-a.md §16, A30),
+// because this wire's ENTIRE JOB is to carry that block without touching it.
+type Species = wire.Species
+
 // MigrationPayload is MIGRATION_PAYLOAD (contract-b-m4.md §6.6): the Contract C
 // MigrationEnvelope with the lineage annex. The wire never carries a parent
 // blob — the source sidecar hashes them, caches them and strips them.
@@ -532,9 +537,19 @@ type MigrationPayload struct {
 	Kind        string  `json:"kind"`
 	Body        Body    `json:"body"`
 	Lineage     Lineage `json:"lineage"`
-	SourcePeer  string  `json:"sourcePeer"`
-	SourceSlot  int     `json:"sourceSlot"`
-	DestSlot    int     `json:"destSlot"`
+	// Species is envelope metadata beside the blob, exactly like ExitEdge (§15,
+	// B9). It is copied verbatim out of the origin mod's MIGRATE_OUT and handed
+	// verbatim to the destination mod on MIGRATE_IN. It is NOT part of the
+	// lineage annex, and deliberately: the annex holds values this wire COMPUTES
+	// under genome-hash.md, and a species name is asserted by the origin world,
+	// is not hashed, and is excluded from the canonical projection (§4.3 there).
+	// It takes no part in dedup, custody, admission control, the S check, the
+	// hold clock or a re-route, and a RE-ROUTED frame carries the same block
+	// byte for byte.
+	Species    *Species `json:"species,omitempty"`
+	SourcePeer string   `json:"sourcePeer"`
+	SourceSlot int      `json:"sourceSlot"`
+	DestSlot   int      `json:"destSlot"`
 	// ExitEdge is "E" or "N" under the grid. It is the axis the organism left
 	// by, and it is what the receiver turns into an entry edge.
 	ExitEdge     string   `json:"exitEdge"`
@@ -578,7 +593,11 @@ func (p *MigrationPayload) Validate() error {
 		return invalid("heading is not finite")
 	}
 	// The annex is never a reason to refuse an organism (§6.8), so nothing
-	// about Lineage is validated here.
+	// about Lineage is validated here. NEITHER IS SPECIES, for the stronger
+	// reason B9 gives: a malformed block is STRIPPED AND LOGGED, never NACKed,
+	// so its check cannot live in a function whose failure mode is
+	// MIGRATION_NACK / MALFORMED_MESSAGE. The receiving sidecar applies
+	// wire.CarrySpecies instead.
 	return nil
 }
 

@@ -15,6 +15,7 @@ import (
 
 	"multiverse/internal/contractb"
 	"multiverse/internal/lantoken"
+	"multiverse/internal/wire"
 )
 
 // Main is the multiverse-archive entry point. Two subcommands: the default
@@ -146,6 +147,16 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 		when := time.UnixMilli(m.RecordedAt).UTC().Format(time.RFC3339)
 		fmt.Fprintf(stdout, "%s  %s  entity %d  slot %d -> slot %d  (%s)  %s\n",
 			when, m.MigrationID, m.EntityID, m.SourceSlot, m.DestSlot, m.SourcePeer, m.Outcome)
+		if m.Species != nil {
+			// Recorded, never resolved (§15, B10). An absent block prints nothing
+			// at all, because absent is absent and not "unknown".
+			line := "    species " + wire.SpeciesName(m.Species)
+			if m.Species.ParentGenericName != "" {
+				line += "  (parent " + m.Species.ParentGenericName + " " +
+					m.Species.ParentSpecificName + ")"
+			}
+			fmt.Fprintln(stdout, line)
+		}
 		if m.Lineage == nil {
 			continue
 		}

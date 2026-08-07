@@ -9,9 +9,9 @@ import (
 )
 
 func TestDecodeAcceptsTheContractExample(t *testing.T) {
-	// contract-a.md §3's example, verbatim at contract-a/2.0 (§15, A23).
+	// contract-a.md §3's example, verbatim at contract-a/2.1 (§16, A33).
 	raw := []byte(`{
-	  "protocol": "contract-a/2.0",
+	  "protocol": "contract-a/2.1",
 	  "type": "MIGRATE_OUT",
 	  "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
 	  "sentAt": 1785693600123,

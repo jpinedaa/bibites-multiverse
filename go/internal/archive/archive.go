@@ -534,6 +534,17 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 		return true
 	}
 	lineage := p.Lineage
+	// §15 B9's opacity rule reaches the archive too: SCHEMA VALIDATION ONLY. A
+	// block that breaks the shape is stripped from the record with one log line —
+	// recording a malformed one would put a fact in the ledger that no conformant
+	// sidecar could have sent, and refusing to record the migration over a label
+	// would be worse still.
+	species, stripped := wire.CarrySpecies(p.Species)
+	if stripped != "" {
+		a.log.Warn("archive: stripping a malformed species block from a copied envelope; "+
+			"the migration is still recorded",
+			"migrationId", p.MigrationID, "sourcePeer", p.SourcePeer, "reason", stripped)
+	}
 	rec := Record{
 		Type:        RecordMigration,
 		RecordedAt:  time.Now().UnixMilli(),
@@ -545,6 +556,7 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 		Kind:        p.Kind,
 		GameVersion: p.Body.Version,
 		Lineage:     &lineage,
+		Species:     species,
 		Timestamp:   p.Timestamp,
 	}
 	if err := a.ledger.Append(rec); err != nil {
@@ -560,7 +572,7 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	}
 	a.log.Info("archive: recorded a migration", "migrationId", p.MigrationID,
 		"sourcePeer", p.SourcePeer, "sourceSlot", p.SourceSlot, "destSlot", p.DestSlot,
-		"exitEdge", p.ExitEdge, "reroute", reroute,
+		"exitEdge", p.ExitEdge, "reroute", reroute, "species", wire.SpeciesName(species),
 		"genomeHash", lineage.GenomeHash, "parents", len(lineage.Parents))
 
 	now := time.Now()

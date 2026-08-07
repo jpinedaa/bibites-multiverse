@@ -401,6 +401,18 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	}
 	hash := bb8.Hash(out.Payload)
 
+	// Still step 1, and it is the FIRST GO HOP THE BLOCK REACHES: the species
+	// block is schema-validated and nothing more (§16, A30). A block that breaks
+	// the shape is stripped, logged ONCE, and the migration proceeds without it —
+	// never a NACK, never a reason to hold an organism. Nothing here synthesizes,
+	// translates, normalizes or case-folds a name, and nothing derives one from
+	// the payload: the blob holds a world-local integer and no name at all.
+	species, stripped := wire.CarrySpecies(out.Species)
+	if stripped != "" {
+		s.log.Warn("contract A: stripping a malformed species block; the migration proceeds without it",
+			"migrationId", out.MigrationID, "entityId", entityID, "reason", stripped)
+	}
+
 	s.mu.Lock()
 	// 2 and 3. migrationId dedup against the journal.
 	//nolint:nestif // the two dedup outcomes of §5.3 steps 2 and 3
@@ -462,6 +474,7 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 		DestSlot:       destSlot,
 		GenomeHash:     genomeHash,
 		Parents:        parents,
+		Species:        species,
 		JournaledAt:    time.Now().UnixMilli(),
 	}
 	s.mu.Lock()
@@ -474,7 +487,7 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	}
 	s.log.Info("contract A: took custody", "migrationId", out.MigrationID, "entityId", entityID,
 		"exitEdge", out.ExitEdge, "destSlot", destSlot, "genomeHash", genomeHash,
-		"parents", len(parents))
+		"parents", len(parents), "species", wire.SpeciesName(species))
 
 	s.faultPoint(FaultPostJournal)
 

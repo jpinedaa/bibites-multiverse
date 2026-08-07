@@ -394,6 +394,11 @@ type ParentBlob struct {
 	GameVersion string `json:"gameVersion,omitempty"`
 }
 
+// Species is the OPTIONAL species-identity block of §16, A30 — the same shape,
+// the same rules and the same validator on both wires, so it lives in package
+// wire beside the envelope they also share.
+type Species = wire.Species
+
 // MigrateOut is MIGRATE_OUT (contract-a.md §5.3).
 type MigrateOut struct {
 	MigrationID string `json:"migrationId"`
@@ -403,13 +408,17 @@ type MigrateOut struct {
 	Payload     string `json:"payload"`
 	// Parents are the lineage inputs, in genes.parent1 then genes.parent2
 	// order (§14, A12). Nothing here may ever fail a migration.
-	Parents        []ParentBlob `json:"parents,omitempty"`
-	ExitEdge       string       `json:"exitEdge"`
-	ExitPosition   *float64     `json:"exitPosition"`
-	Velocity       *Vec         `json:"velocity"`
-	Heading        *float64     `json:"heading"`
-	SimulationSize *float64     `json:"simulationSize"`
-	SimTick        *int64       `json:"simTick"`
+	Parents []ParentBlob `json:"parents,omitempty"`
+	// Species is the migrant's species identity, read from the live Species
+	// record and never from the payload (§16, A30). OPTIONAL, and absent is
+	// ordinary. It is deliberately NOT part of Validate: see the note there.
+	Species        *Species `json:"species,omitempty"`
+	ExitEdge       string   `json:"exitEdge"`
+	ExitPosition   *float64 `json:"exitPosition"`
+	Velocity       *Vec     `json:"velocity"`
+	Heading        *float64 `json:"heading"`
+	SimulationSize *float64 `json:"simulationSize"`
+	SimTick        *int64   `json:"simTick"`
 }
 
 func (m *MigrateOut) Validate() error {
@@ -459,6 +468,13 @@ func (m *MigrateOut) Validate() error {
 	if m.SimTick == nil {
 		return invalid("simTick is missing")
 	}
+	// SPECIES IS NOT CHECKED HERE, AND THAT IS THE POINT. Every other field in
+	// this method answers a failure with MIGRATE_OUT_NACK / MALFORMED_MESSAGE.
+	// §16 A30 makes the species block the ONE NAMED EXCEPTION to that rule: a
+	// malformed one is stripped, logged once, and the migration proceeds without
+	// it. The sidecar applies wire.CarrySpecies at the receiver obligation of
+	// §5.3 step 1; putting the same check here would turn a label into a refused
+	// organism.
 	return nil
 }
 
@@ -532,18 +548,23 @@ type EdgeStatus struct {
 
 // MigrateIn is MIGRATE_IN (contract-a.md §5.7).
 type MigrateIn struct {
-	MigrationID   string  `json:"migrationId"`
-	EntityID      int32   `json:"entityId"`
-	Kind          string  `json:"kind"`
-	GameVersion   string  `json:"gameVersion"`
-	Payload       string  `json:"payload"`
-	EntryEdge     string  `json:"entryEdge"`
-	EntryPosition float64 `json:"entryPosition"`
-	Velocity      Vec     `json:"velocity"`
-	Heading       float64 `json:"heading"`
-	BounceBack    bool    `json:"bounceBack"`
-	Attempt       int     `json:"attempt"`
-	AckDeadlineMs int     `json:"ackDeadlineMs,omitempty"`
+	MigrationID string `json:"migrationId"`
+	EntityID    int32  `json:"entityId"`
+	Kind        string `json:"kind"`
+	GameVersion string `json:"gameVersion"`
+	Payload     string `json:"payload"`
+	// Species is the block the envelope carried, handed through VERBATIM (§16,
+	// A30; contract-b-m4.md §6.6 step 7). The sidecar never authors one, never
+	// resolves one, and sends none when the envelope carried none — the mod then
+	// applies the absent-block rule of A32 and removes $.genes.speciesID.
+	Species       *Species `json:"species,omitempty"`
+	EntryEdge     string   `json:"entryEdge"`
+	EntryPosition float64  `json:"entryPosition"`
+	Velocity      Vec      `json:"velocity"`
+	Heading       float64  `json:"heading"`
+	BounceBack    bool     `json:"bounceBack"`
+	Attempt       int      `json:"attempt"`
+	AckDeadlineMs int      `json:"ackDeadlineMs,omitempty"`
 }
 
 // MigrateOutAck is MIGRATE_OUT_ACK (contract-a.md §5.5). It is a custody

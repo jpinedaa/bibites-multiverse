@@ -804,7 +804,7 @@ func TestRelayDropAndRecovery(t *testing.T) {
 func TestBounceBackWhenRouteAroundHasNoAnswer(t *testing.T) {
 	relaySrv := startRelay(t)
 	dataDir := t.TempDir()
-	migrationID := seedOutboundCustody(t, dataDir)
+	migrationID := seedOutboundCustody(t, dataDir, nil)
 
 	cfg := fastConfig(t, relaySrv.url(), "peer-a")
 	cfg.DataDir = dataDir
@@ -845,7 +845,9 @@ func TestBounceBackWhenRouteAroundHasNoAnswer(t *testing.T) {
 
 // seedOutboundCustody writes the journal a killed sidecar would leave behind:
 // one outbound organism, durably in custody, never forwarded — handoff pending.
-func seedOutboundCustody(t *testing.T, dataDir string) string {
+// species rides the entry when the caller gives one, which is what lets the
+// bounce-back test prove the block comes home with the organism (§16, A30).
+func seedOutboundCustody(t *testing.T, dataDir string, species *contracta.Species) string {
 	t.Helper()
 	jr, err := journal.Open(filepath.Join(dataDir, "journal"))
 	if err != nil {
@@ -871,6 +873,7 @@ func seedOutboundCustody(t *testing.T, dataDir string) string {
 		// A slot nobody holds: the relay answers SLOT_VACANT, permanently, and
 		// with only one peer in the map there is no lane to re-route to.
 		DestSlot:    2,
+		Species:     species,
 		JournaledAt: time.Now().UnixMilli(),
 	}, false); err != nil {
 		t.Fatalf("seed journal: %v", err)

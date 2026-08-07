@@ -492,9 +492,61 @@ func (m *fakeMod) migrateOutParents(entityID int32, edge string, position float6
 	return m.migrateOutFull(wire.NewUUID(), entityID, edge, position, makePayload(entityID), parents)
 }
 
+// migrateOutSpecies ships one migration carrying the OPTIONAL species block of
+// contract-a.md §16, A30.
+func (m *fakeMod) migrateOutSpecies(entityID int32, edge string, position float64,
+	species *contracta.Species) string {
+	m.t.Helper()
+	return m.migrateOutSpeciesFull(wire.NewUUID(), entityID, edge, position,
+		makePayload(entityID), nil, species)
+}
+
 func (m *fakeMod) migrateOutFull(migrationID string, entityID int32, edge string, position float64,
 	payload string, parents []contracta.ParentBlob) string {
 	m.t.Helper()
+	return m.migrateOutSpeciesFull(migrationID, entityID, edge, position, payload, parents, nil)
+}
+
+func (m *fakeMod) migrateOutSpeciesFull(migrationID string, entityID int32, edge string,
+	position float64, payload string, parents []contracta.ParentBlob,
+	species *contracta.Species) string {
+	m.t.Helper()
+	out := m.buildMigrateOut(migrationID, entityID, edge, position, payload, parents, species)
+	m.sendFrame(contracta.TypeMigrateOut, out)
+	return migrationID
+}
+
+// migrateOutRawSpecies ships a migration whose `species` value is the RAW JSON
+// given, which is how a test reaches the shapes a Go struct cannot express: a
+// missing half, a non-string half, a lone parent field, a block that is not an
+// object at all. Every one of them must be STRIPPED, never NACKed (§16, A30).
+func (m *fakeMod) migrateOutRawSpecies(entityID int32, edge string, position float64,
+	rawSpecies string) string {
+	m.t.Helper()
+	migrationID := wire.NewUUID()
+	out := m.buildMigrateOut(migrationID, entityID, edge, position, makePayload(entityID), nil, nil)
+	body, err := json.Marshal(out)
+	if err != nil {
+		m.t.Fatalf("fake mod: marshal MIGRATE_OUT: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		m.t.Fatalf("fake mod: re-read MIGRATE_OUT: %v", err)
+	}
+	fields["species"] = json.RawMessage(rawSpecies)
+	data, err := json.Marshal(fields)
+	if err != nil {
+		m.t.Fatalf("fake mod: splice species: %v", err)
+	}
+	m.sendFrame(contracta.TypeMigrateOut, json.RawMessage(data))
+	return migrationID
+}
+
+// buildMigrateOut records the in-flight organism the way §6.3 requires — inert,
+// keeping its migrationId until the sidecar answers — and returns the frame body.
+func (m *fakeMod) buildMigrateOut(migrationID string, entityID int32, edge string,
+	position float64, payload string, parents []contracta.ParentBlob,
+	species *contracta.Species) contracta.MigrateOut {
 	m.world.put(entityID)
 	m.mu.Lock()
 	tick := m.simTick
@@ -508,6 +560,7 @@ func (m *fakeMod) migrateOutFull(migrationID string, entityID int32, edge string
 		GameVersion:    m.opts.gameVersion,
 		Payload:        payload,
 		Parents:        parents,
+		Species:        species,
 		ExitEdge:       edge,
 		ExitPosition:   &position,
 		Velocity:       &contracta.Vec{X: 6.12, Y: 0.44},
@@ -519,8 +572,7 @@ func (m *fakeMod) migrateOutFull(migrationID string, entityID int32, edge string
 	m.world.inflightOut[migrationID] = out
 	m.world.sent[migrationID] = out
 	m.world.mu.Unlock()
-	m.sendFrame(contracta.TypeMigrateOut, out)
-	return migrationID
+	return out
 }
 
 // resend repeats an identical MIGRATE_OUT, which contract-a.md §7.2 requires to

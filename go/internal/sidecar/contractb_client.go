@@ -529,6 +529,19 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 		heading = info.Heading
 	}
 
+	// Schema-validate the species block and nothing more (§6.6). This is the
+	// second and last Go hop that takes the block off a wire, and it applies the
+	// identical rule the source sidecar applied: a malformed block is stripped
+	// and logged, and the organism still crosses. A conformant sender already
+	// stripped a bad one, so a strip here names a non-conformant peer — which is
+	// exactly why the log line exists.
+	species, stripped := wire.CarrySpecies(payload.Species)
+	if stripped != "" {
+		s.log.Warn("contract B: stripping a malformed species block from an inbound envelope; "+
+			"the migration proceeds without it",
+			"migrationId", payload.MigrationID, "sourcePeer", payload.SourcePeer, "reason", stripped)
+	}
+
 	// 5. Durable journal write. Custody moves here.
 	entry := journal.Entry{
 		MigrationID: payload.MigrationID,
@@ -549,6 +562,7 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 		DestSlot:    payload.DestSlot,
 		GenomeHash:  payload.Lineage.GenomeHash,
 		Parents:     parentRefs(payload.Lineage.Parents),
+		Species:     species,
 		JournaledAt: s.now().UnixMilli(),
 	}
 	s.mu.Lock()
@@ -561,7 +575,8 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 	}
 	s.log.Info("contract B: took custody of an inbound organism",
 		"migrationId", payload.MigrationID, "entityId", entityID, "entryEdge", entryEdge,
-		"exitEdge", payload.ExitEdge, "genomeHash", payload.Lineage.GenomeHash)
+		"exitEdge", payload.ExitEdge, "genomeHash", payload.Lineage.GenomeHash,
+		"species", wire.SpeciesName(species))
 	// 7. Deliver, THROUGH THE DELIVERY RATE LIMIT, and keep replaying until the
 	// mod ACKs. Pacing sits after step 5, never before it.
 	if s.mod != nil && s.mod.handshaked {

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"multiverse/internal/wire"
 )
 
 func sampleEntry(id string) Entry {
@@ -400,5 +402,110 @@ func TestM4InFlightEntryKeepsItsRecordedHandoff(t *testing.T) {
 	st, _ := j.Get("11111111-1111-4111-8111-111111111111")
 	if st.Handoff != HandoffHeld {
 		t.Fatalf("handoff = %q, want %q — a recorded handoff always wins", st.Handoff, HandoffHeld)
+	}
+}
+
+// TestSpeciesSurvivesReplayAndNoUpdateCanTouchIt covers the durability half of
+// contract-a.md §16 A30 and contract-b-m4.md §15 B9.
+//
+// Two properties, and they are different. The first is ordinary: the block is on
+// the immutable half of the record, so it survives a restart exactly as the
+// payload does. The second is the load-bearing one — a RE-ROUTE rewrites
+// destSlot and records its evidence beside it (§9.2), and the species block must
+// come through that untouched, because a re-routed frame carries the same
+// migrationId, the same body AND THE SAME BLOCK, byte for byte. Update has no
+// species field at all, which is what makes that true by construction; this test
+// is the guard against someone adding one.
+func TestSpeciesSurvivesReplayAndNoUpdateCanTouchIt(t *testing.T) {
+	dir := t.TempDir()
+	j, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := wire.Species{
+		GenericName: "Cyanëa", SpecificName: `velox"íssima`,
+		ParentGenericName: "Cyanëa", ParentSpecificName: "prīma",
+	}
+	entry := sampleEntry("m-species")
+	seed := want
+	entry.Species = &seed
+	if _, err := j.Create(Out, entry, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// The re-route of §9.2, exactly as the sidecar writes it.
+	dest, count, from, at := 7, 1, 2, time.Now().UnixMilli()
+	proof := "relay_never_forwarded"
+	st, err := j.Apply("m-species", Update{
+		Handoff: HandoffPending, DestSlot: &dest, RerouteCount: &count,
+		RerouteFrom: &from, RerouteProof: &proof, RerouteAtMs: &at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Entry.DestSlot != 7 {
+		t.Fatalf("destSlot = %d, want the re-routed 7", st.Entry.DestSlot)
+	}
+	if st.Entry.Species == nil || *st.Entry.Species != want {
+		t.Fatalf("the re-route changed the species block: %+v", st.Entry.Species)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopen, which replays and compacts. Both paths have to carry the block.
+	j2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j2.Close()
+	got, ok := j2.Get("m-species")
+	if !ok {
+		t.Fatal("the entry did not survive the restart")
+	}
+	if got.Entry.Species == nil {
+		t.Fatal("the species block did not survive the journal round trip")
+	}
+	if *got.Entry.Species != want {
+		t.Fatalf("the species block changed across the round trip:\n got %+v\nwant %+v",
+			*got.Entry.Species, want)
+	}
+	if got.Entry.DestSlot != 7 {
+		t.Fatalf("destSlot = %d after replay, want 7", got.Entry.DestSlot)
+	}
+}
+
+// TestAnEntryWithNoSpeciesStaysThatWay: absent is absent, across a replay too.
+// It is never filled in, never defaulted, and never becomes an empty block.
+func TestAnEntryWithNoSpeciesStaysThatWay(t *testing.T) {
+	dir := t.TempDir()
+	j, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.Create(In, sampleEntry("m-plain"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, fileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "species") {
+		t.Fatalf("an entry with no species block wrote one to the log:\n%s", raw)
+	}
+	j2, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer j2.Close()
+	got, ok := j2.Get("m-plain")
+	if !ok {
+		t.Fatal("the entry did not survive")
+	}
+	if got.Entry.Species != nil {
+		t.Fatalf("an absent block was invented on replay: %+v", got.Entry.Species)
 	}
 }

@@ -126,9 +126,20 @@ type Entry struct {
 	// GenomeHash and Parents are the lineage annex. The tombstone keeps them
 	// after the payload is dropped, because the archive may ask for that genome
 	// long after the migration completed (contract-b-m4.md §6.7).
-	GenomeHash  string      `json:"genomeHash,omitempty"`
-	Parents     []ParentRef `json:"parents,omitempty"`
-	JournaledAt int64       `json:"journaledAt"`
+	GenomeHash string      `json:"genomeHash,omitempty"`
+	Parents    []ParentRef `json:"parents,omitempty"`
+	// Species is the species-identity block, journaled with the entry so it
+	// survives everything the organism survives (contract-a.md §16 A30,
+	// contract-b-m4.md §15 B9). It is journaled ONLY after the shape check that
+	// takes it off a wire, so a replayed entry needs no second one.
+	//
+	// It has to be durable for the same reason the payload is: a restart replays
+	// this entry into a MIGRATION_PAYLOAD or a MIGRATE_IN, a bounce-back replays
+	// it into the local mod, and a re-route replays it to another slot. A block
+	// held only in memory would leave the organism arriving under a different
+	// name than the one it left with, which is the failure §16 exists to close.
+	Species     *wire.Species `json:"species,omitempty"`
+	JournaledAt int64         `json:"journaledAt"`
 }
 
 // State is one migration's full durable state.
