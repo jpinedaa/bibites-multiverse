@@ -14,14 +14,18 @@
 #                           start and stop scripts
 #   README.md               the human steps
 #   multiverse-sidecar.exe  the Windows build of the sidecar
-#   BibitesMultiverse.dll   a FRESH build of the plugin (deploy.sh)
+#   BibitesMultiverse.dll   a FRESH build of the plugin (dotnet build)
 #   BepInEx_win_x64_*.zip   the pinned BepInEx release, downloaded and verified
 #
 # Nothing binary is committed. dist/ is gitignored, and the BepInEx download is
 # cached under dist/cache/.
 #
-# Stop every game before running this: deploy.sh cannot overwrite a plugin DLL
-# that a running game holds open (dev_environment.md).
+# THIS RUNS AGAINST A LIVE DEPLOYMENT. It builds the plugin and reads the result
+# out of bibites-mod/bin/Release/; it never writes into the game's plugins folder,
+# so no game has to be stopped. That is why it does not call deploy.sh: deploy.sh
+# is build PLUS the copy into BepInEx/plugins, and only the copy is what a running
+# game can block (dev_environment.md). Deploying to THIS machine's games is a
+# separate act with its own downtime — see the M4 rigs' teardown.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -64,11 +68,20 @@ mkdir -p "$REPO/bin"
 note "$(ls -l "$REPO/bin/multiverse-sidecar.exe" | awk '{print $5" bytes  "$NF}')"
 
 step "the plugin (fresh build)"
-if cd /mnt/c 2>/dev/null && /mnt/c/Windows/System32/tasklist.exe 2>/dev/null | grep -qi 'The Bibites'; then
-  echo "!! a game is running; stop it first (bibites-mod/game.sh stop all)" >&2
-  exit 1
+# Steam auto-updates stay on, so the game can move under us. deploy.sh warns about
+# a stale libs/ and this needs the same warning, because the bundle no longer goes
+# through it. The $AssemblySha256 check above compares libs/ to the far end's
+# version gate; this compares libs/ to the game actually installed here.
+GAME_MANAGED="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/The Bibites_Data/Managed/BibitesAssembly.dll"
+if [ -f "$GAME_MANAGED" ] \
+   && [ "$(sha256sum <"$GAME_MANAGED")" != "$(sha256sum <"$GAME_DLL")" ]; then
+  echo "!! WARNING: the game updated — libs/BibitesAssembly.dll is stale." >&2
+  echo "!! Run $REPO/bibites-mod/sync-game-refs.sh, then build again." >&2
+  echo >&2
 fi
-"$REPO/bibites-mod/deploy.sh"
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+dotnet build "$REPO/bibites-mod/BibitesMultiverse.csproj" -c Release -v quiet
 PLUGIN="$REPO/bibites-mod/bin/Release/BibitesMultiverse.dll"
 [ -f "$PLUGIN" ] || { echo "deploy.sh produced no $PLUGIN" >&2; exit 1; }
 note "$(ls -l "$PLUGIN" | awk '{print $5" bytes"}')  $(sha256sum "$PLUGIN" | cut -c1-16)"
