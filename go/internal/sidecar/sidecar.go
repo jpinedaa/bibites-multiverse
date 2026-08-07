@@ -1148,8 +1148,20 @@ func (s *Sidecar) statsLocked() contractb.PeerStats {
 		PacedDepth:          contractb.IntPtr(s.pacedDepthLocked()),
 		HeldDepth:           contractb.IntPtr(s.heldDepthLocked()),
 		BouncedTimeoutTotal: contractb.IntPtr(s.bouncedTimeoutTotal),
+		// The delivery rate limit this sidecar is CONFIGURED with (§18, B16).
+		// Always known, because it is this process's own setting and not a
+		// reading of anything else — and it is what makes pacedDepth readable:
+		// a queue is only deep against the cap it is queued behind. The default
+		// has moved three times, so a reader that assumes one is wrong.
+		InboundRatePerSimMinute: contractb.Float64Ptr(s.cfg.InboundRatePerSimMinute),
+		InboundRateBurst:        contractb.Float64Ptr(s.cfg.InboundRateBurst),
 	}
 	if s.mod != nil && s.mod.handshaked {
+		if s.mod.haveTimeScale {
+			// Copied from the HEARTBEAT, never computed. 0 is a world standing
+			// still, which is a reading; absent is a world that has not said.
+			st.TimeScale = contractb.Float64Ptr(s.mod.timeScale)
+		}
 		if s.mod.havePopulation {
 			st.Population = contractb.IntPtr(s.mod.population)
 		}

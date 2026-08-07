@@ -11,8 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -59,9 +61,13 @@ func RenderRingstat(w io.Writer, s Status) {
 	fmt.Fprintf(w, "archive %s (%s)   state %s old   %d ledger record(s), %d genome gap(s)\n\n",
 		s.ArchivePeerID, link, dur(s.StatusAgeMs), s.Records, s.Gaps)
 
-	fmt.Fprintf(w, "%-5s %-7s %-22s %-9s %10s %8s %6s %6s %8s %s\n",
-		"slot", "pos", "peer", "state", "population", "custody", "paced", "held", "bounced", "last save")
-	fmt.Fprintln(w, strings.Repeat("-", 108))
+	// speed is the world's own time scale and pace is queued/cap per SIMULATED
+	// minute of that world — the same two settings the map draws in every cell,
+	// so the two operator surfaces cannot disagree about them either.
+	fmt.Fprintf(w, "%-5s %-7s %-22s %-9s %6s %10s %8s %10s %6s %8s %s\n",
+		"slot", "pos", "peer", "state", "speed", "population", "custody", "pace",
+		"held", "bounced", "last save")
+	fmt.Fprintln(w, strings.Repeat("-", 120))
 	for _, v := range s.Slots {
 		state := "live"
 		if !v.Live {
@@ -76,10 +82,11 @@ func RenderRingstat(w io.Writer, s Status) {
 				save += fmt.Sprintf(" (%dms)", v.LastSave.DurationMs)
 			}
 		}
-		fmt.Fprintf(w, "%-5d %-7s %-22s %-9s %10s %8s %6s %6s %8s %s\n",
+		fmt.Fprintf(w, "%-5d %-7s %-22s %-9s %6s %10s %8s %10s %6s %8s %s\n",
 			v.Slot, fmt.Sprintf("(%d,%d)", v.Position.Col, v.Position.Row),
-			trunc(v.PeerID, 22), state,
-			opt(v.Population), opt(v.CustodyDepth), opt(v.PacedDepth), opt(v.HeldDepth),
+			trunc(v.PeerID, 22), state, speed(v.TimeScale),
+			opt(v.Population), opt(v.CustodyDepth),
+			optShort(v.PacedDepth)+"/"+scale(v.InboundRatePerSimMinute), opt(v.HeldDepth),
 			opt(v.BouncedTimeoutTotal), save)
 	}
 	if len(s.Holes) > 0 {
@@ -177,6 +184,32 @@ func opt(v *int) string {
 	}
 	return fmt.Sprintf("%d", *v)
 }
+
+// optShort is opt for a column that pairs two numbers, where "unknown" would be
+// wider than the column and less readable than the gap it marks.
+func optShort(v *int) string {
+	if v == nil {
+		return "?"
+	}
+	return fmt.Sprintf("%d", *v)
+}
+
+// scale prints a setting the way the map draws it: a whole number without a
+// decimal point, one place otherwise, and an UNPUBLISHED one as "?". Never the
+// shipped default — inboundRatePerSimMinute has been changed three times, so a
+// number filled in here would be a confident wrong answer about the one peer
+// whose build is too old to say.
+func scale(v *float64) string {
+	if v == nil {
+		return "?"
+	}
+	if *v == math.Trunc(*v) {
+		return strconv.FormatFloat(*v, 'f', 0, 64)
+	}
+	return strconv.FormatFloat(*v, 'f', 1, 64)
+}
+
+func speed(v *float64) string { return "×" + scale(v) }
 
 func dur(ms int64) string {
 	d := time.Duration(ms) * time.Millisecond

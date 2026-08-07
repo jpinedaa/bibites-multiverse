@@ -361,6 +361,23 @@ func TestBurstArrivesPacedNotAllAtOnce(t *testing.T) {
 		t.Fatalf("pacedDepth = %v, want %d — the depth waiting on the limit is the metric",
 			stats.PacedDepth, organisms)
 	}
+	// contract-b-m4.md §18, B16: the block that carries the depth now carries the
+	// cap it is queued behind and the speed of the world that drains it. A depth
+	// alone is not readable — twelve queued behind 120 a simulated minute is a
+	// blink and twelve behind 2.0 is six minutes — and the default has moved
+	// three times, so a reader that assumes one is reading a different rig.
+	if stats.InboundRatePerSimMinute == nil || *stats.InboundRatePerSimMinute != rate {
+		t.Fatalf("the stats block does not publish its configured inbound rate: %v",
+			stats.InboundRatePerSimMinute)
+	}
+	if stats.InboundRateBurst == nil || *stats.InboundRateBurst != burst {
+		t.Fatalf("the stats block does not publish its burst: %v", stats.InboundRateBurst)
+	}
+	// The world is stopped, and ×0 is a READING. Absence would mean unknown.
+	if stats.TimeScale == nil || *stats.TimeScale != 0 {
+		t.Fatalf("a stopped world published timeScale %v; 0 is a fact the operator "+
+			"surface must show, not a gap", stats.TimeScale)
+	}
 
 	// Wake it. From here every sample must satisfy the contract's own bound.
 	wakeSim := b.mod.simTimeNow()
@@ -393,6 +410,12 @@ func TestBurstArrivesPacedNotAllAtOnce(t *testing.T) {
 			t.Fatalf("migration %s spawned %d times, want exactly 1", id, got)
 		}
 	}
+	// And the speed follows the world back up, because it is copied from every
+	// heartbeat rather than latched once.
+	waitFor(t, 5*time.Second, "the woken world to publish a running time scale", func() bool {
+		st := b.side.Stats()
+		return st.TimeScale != nil && *st.TimeScale > 0
+	})
 	aStats := a.side.Stats()
 	if aStats.BouncedTimeoutTotal == nil || *aStats.BouncedTimeoutTotal != 0 {
 		t.Fatalf("the sender bounced %v entries while the destination was live; "+

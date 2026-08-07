@@ -298,3 +298,75 @@ func TestCensusIsAStatAndObeysEveryRuleForOne(t *testing.T) {
 		}
 	}
 }
+
+// TestSpeedAndPacingCarryOrStayUnknown covers contract-b-m4.md §18, B16 on the
+// archive's side of the wire, and it is §10.1 rule 3 applied to three new
+// fields: timeScale is the world's own speed, and inboundRatePerSimMinute /
+// inboundRateBurst are the cap arrivals are queued behind.
+//
+// THE UNKNOWN HALF IS THE POINT. This rig runs one peer whose build predates
+// the fields, and the shipped default it would have used has been changed three
+// times. Rendering the default in its place would be a confident wrong number
+// about the one slot nobody can check by hand.
+func TestSpeedAndPacingCarryOrStayUnknown(t *testing.T) {
+	reporting := &contractb.PeerStats{
+		Population:              contractb.IntPtr(42),
+		PacedDepth:              contractb.IntPtr(3),
+		TimeScale:               contractb.Float64Ptr(5),
+		InboundRatePerSimMinute: contractb.Float64Ptr(100),
+		InboundRateBurst:        contractb.Float64Ptr(50),
+	}
+	// A world that is standing still reports 0, and 0 is a READING: paused is a
+	// state the page must show, not a gap it must hide.
+	paused := &contractb.PeerStats{
+		Population: contractb.IntPtr(7), PacedDepth: contractb.IntPtr(0),
+		TimeScale:               contractb.Float64Ptr(0),
+		InboundRatePerSimMinute: contractb.Float64Ptr(2),
+	}
+	// The far end: an older sidecar. It publishes what it knows and omits what
+	// it has never heard of.
+	older := &contractb.PeerStats{
+		Population: contractb.IntPtr(12), PacedDepth: contractb.IntPtr(0),
+	}
+	status := contractb.PeerStatus{
+		Epoch: 3, Map: contractb.MapShape{Width: 3, Height: 1}, SlotCount: 3,
+		Slots: []contractb.SlotInfo{
+			slot(1, 0, 0, true, reporting), slot(2, 1, 0, true, paused),
+			slot(3, 2, 0, true, older),
+		},
+	}
+	view := newViewFixture(t, status, time.Second).StatusView()
+
+	v := view.Slots[0]
+	if v.TimeScale == nil || *v.TimeScale != 5 {
+		t.Fatalf("slot 1 timeScale = %v, want 5", v.TimeScale)
+	}
+	if v.InboundRatePerSimMinute == nil || *v.InboundRatePerSimMinute != 100 {
+		t.Fatalf("slot 1 inboundRatePerSimMinute = %v, want 100", v.InboundRatePerSimMinute)
+	}
+	if v.InboundRateBurst == nil || *v.InboundRateBurst != 50 {
+		t.Fatalf("slot 1 inboundRateBurst = %v, want 50", v.InboundRateBurst)
+	}
+
+	if p := view.Slots[1].TimeScale; p == nil || *p != 0 {
+		t.Fatalf("a paused world's timeScale = %v; 0 is a reading, not an absence", p)
+	}
+
+	old := view.Slots[2]
+	if !old.StatsKnown {
+		t.Fatal("the older peer's block is fresh; it must still count as known")
+	}
+	if old.TimeScale != nil || old.InboundRatePerSimMinute != nil || old.InboundRateBurst != nil {
+		t.Fatalf("a peer that published none of the new fields got values invented for it: %+v", old)
+	}
+	if old.PacedDepth == nil || *old.PacedDepth != 0 {
+		t.Fatalf("the older peer's pacedDepth was lost with the fields it does not send: %v",
+			old.PacedDepth)
+	}
+
+	// And a stale block takes all three with it, exactly as it takes population.
+	stale := newViewFixture(t, status, time.Hour).StatusView()
+	if stale.Slots[0].TimeScale != nil || stale.Slots[0].InboundRatePerSimMinute != nil {
+		t.Fatalf("a stale block still reported a speed and a cap: %+v", stale.Slots[0])
+	}
+}

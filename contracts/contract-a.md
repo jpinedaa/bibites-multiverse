@@ -1696,6 +1696,13 @@ arriving in one breath, and the hard mod-side ceiling is A29's ingest budget of 
 simulated minute, two orders above it. A dam is still spread; steady traffic is no longer
 throttled. A20 and A40 carry the derivation.
 
+**The value each sidecar actually runs with is now published**, on Contract B's peer stats
+block beside the `pacedDepth` it explains (`contract-b-m4.md` §18, B16). Three defaults in one
+day is the argument: the number in the table above is what a sidecar starts with, `--inbound-rate`
+is what it may be running instead, and a depth read against the wrong cap is not a reading.
+Nothing on **this** wire changes for it — `HEARTBEAT.timeScale`, which the same block also
+republishes, has been mandatory since `contract-a/2.0`.
+
 > **The pacing interacts with the sender's hold timeout, and the answer is on the other
 > wire** (Risk 9). Pacing delays `MIGRATE_IN`, which delays `MIGRATE_IN_ACK`, which delays
 > the `MIGRATION_ACK` the sender is waiting for — so a deep backlog at a **live** peer looks
@@ -1873,7 +1880,7 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `migrationExcludeSpecies` | `"Basic bibite"` | mod | Comma-separated full species names that **never export** (§18, A39). Matched on the §16 A34-normalized form. Set by `MULTIVERSE_MIGRATION_EXCLUDE`. Empty disables the policy. Local, never on the wire. |
 | `entryMargin` | `max(5, 0.5·W)` | mod | World units the spawn is inset **past** the strip's inner face, on top of `W` (§4.3). Named here because §4.3's entry formula now covers all four edges (added — §15, A19). |
 | `inboundRatePerSimMinute` | `100.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). **Raised from `2.0` to `12.0` and then to `100.0` on 2026-08-07** (§18, A40): 2.0 was five times T1's measured one-lane rate, D13 then D17 multiplied the inbound surface past it, and 12.0's five-times-the-median projection was made before two-way lanes ran and did not clear the residual backlog once they did. 100.0 is sized from A29's ingest ceiling instead, two orders below it. **It gains a knob with the raise** — `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` — because it had none. |
-| `inboundRateBurst` | `50` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). **Raised from `5` to `15` and then to `50` on 2026-08-07** (§18, A40): it scales with the rate but stays under `inboundQueueMax` (64), so the bucket can never release a full paced queue in one breath. |
+| `inboundRateBurst` | `50` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). **Raised from `5` to `15` and then to `50` on 2026-08-07** (§18, A40): it scales with the rate but stays under `inboundQueueMax` (64), so the bucket can never release a full paced queue in one breath. **It gains its own knob too** (`--inbound-burst` / `MULTIVERSE_INBOUND_BURST`, added — `contract-b-m4.md` §18, B16): a rate knob without a burst knob cannot be exercised, because a bucket of 50 absorbs any burst small enough to force by hand and the pacing then never runs at all. |
 | `pacingIdleGraceMs` | `10000` | sidecar | Wall-clock silence from `HEARTBEAT` after which the pacing clock stops advancing (§7.5, §15 A20). |
 | `heartbeatDeliveryGraceMs` | `1500` | sidecar | Age of the newest `HEARTBEAT` beyond which `MIGRATE_IN` release is held — the quiet-mod gate that trips before `heartbeatTimeoutMs` does (§7.5, §8, §15 A29). |
 | `replayDelayStepMs` | `500` | sidecar | Per-generation step of the reconnect replay delay, keyed on the batch's least-delivered `attempt` (§7.5, §15 A29). |

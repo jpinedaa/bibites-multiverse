@@ -131,7 +131,7 @@ const statusPageHTML = `<!doctype html>
 <style>
 :root{color-scheme:dark;--bg:#101215;--panel:#191d22;--line:#2a3038;--text:#e6e9ee;
 --dim:#8b95a3;--live:#4ec9a0;--dark:#e05561;--hole:#3a424c;--warn:#e2b93b;--lane:#5aa9e6;
---pulse:#7de3c0;--hot:#f4fffb;--cell:#14181d}
+--flash:#7de3c0;--hot:#f4fffb;--cell:#14181d}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
 font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
@@ -168,6 +168,14 @@ h2 .note{text-transform:none;letter-spacing:0;font-size:11px}
 .cell .note{fill:var(--dim);font-size:11px}
 .cell .note.warnt{fill:var(--warn)}
 .cell .note.badt{fill:var(--dark)}
+/* The two SETTINGS a cell reports, on their own line: how fast the world runs
+   and the cap on how fast organisms are let into it. They are settings rather
+   than readings, so they are drawn quieter than the population and louder than
+   nothing — and an unreported one is a warning colour, because a cap nobody
+   states is exactly the thing this page must not fill in for itself. */
+.cell .chips{fill:var(--dim);font-size:11px}
+.cell .chips .chipv{fill:var(--text)}
+.cell .chips .chipu{fill:var(--warn);font-style:italic}
 .cell .statelbl{font-size:11px;letter-spacing:.06em}
 .cell.live .statelbl,.cell.live .statedot{fill:var(--live)}
 .cell.dark .statelbl,.cell.dark .statedot{fill:var(--dark)}
@@ -177,7 +185,7 @@ h2 .note{text-transform:none;letter-spacing:0;font-size:11px}
    reduce motion. With travel switched off it is half of what tells a reader a
    creature landed here, and suppressing it (which this page used to do) bought
    nothing a person asking for less motion actually wanted. */
-.cellhit{fill:none;stroke:var(--pulse);stroke-width:3;opacity:0;pointer-events:none}
+.cellhit{fill:none;stroke:var(--flash);stroke-width:3;opacity:0;pointer-events:none}
 .cell.hit .cellhit{animation:hit .8s ease-out}
 @keyframes hit{0%{opacity:.95}100%{opacity:0}}
 
@@ -209,10 +217,8 @@ g.lg:hover .lane{stroke-width:4}
 .lanelbl.closedlbl{fill:var(--dark)}
 .edgebar{stroke:var(--hole);stroke-width:2.5;stroke-linecap:round}
 .wraplbl{font-size:10px;fill:var(--dim)}
-.pulse{fill:var(--pulse)}
-.pulse.hot{fill:var(--hot)}
 /* ---- a hop: one named creature crossing one lane, right now ----
-   The ambient pulse says how FAST a lane runs. This says WHO just crossed it,
+   The lane's own label says how FAST it runs. This says WHO just crossed it,
    and it has to win the eye against a field of 420 resident glyphs: it is
    bigger, it is stroked, and it drops a shadow the cell glyphs do not have.
    Neutral is the colour of a hop whose envelope carried no species block —
@@ -242,7 +248,6 @@ border-top-style:solid;vertical-align:middle;margin-right:5px}
 .legend i.box.live{border-color:var(--live)}
 .legend i.box.dark{border-color:var(--dark)}
 .legend i.box.hole{border-color:var(--hole);border-style:dashed}
-.legend i.dot{width:9px;height:9px;border-radius:50%;background:var(--pulse);border:0}
 .legend i.bibi{width:12px;height:9px;border:0;background:var(--dim);
 border-radius:62% 38% 38% 62%/50%}
 .legend i.bibi.unc{background:var(--hole)}
@@ -343,7 +348,6 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
         <span><i class="open"></i><span class="term" data-t="lane">lane open</span></span>
         <span><i class="bypass"></i><span class="term" data-t="bypass">bypass</span></span>
         <span><i class="closed"></i>lane closed</span>
-        <span><i class="dot"></i><span class="term" data-t="migration">a migration</span></span>
         <span><i class="bibi hopi"></i><span class="term" data-t="hopfeed">a creature crossing, just now</span></span>
         <span><span class="term" data-t="shuttle">two lanes, one each way</span></span>
         <span><span class="term" data-t="wrap">wrap-around</span></span>
@@ -371,16 +375,20 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
     <tbody></tbody></table></div></section>
 
   <section><h2><span class="term" data-t="world">worlds</span>
-    <span class="note muted">the detail behind every cell</span></h2>
+    <span class="note muted">the detail behind every cell &mdash;
+      <span class="term" data-t="speed">speed</span> is how fast that world runs,
+      <span class="term" data-t="pace">pace</span> is arrivals queued over the cap they
+      wait behind, per <em>simulated</em> minute of that world</span></h2>
     <div class="tw"><table id="worlds"><thead><tr>
       <th><span class="term" data-t="slot">slot</span></th>
       <th><span class="term" data-t="position">pos</span></th>
       <th><span class="term" data-t="peer">peer</span></th>
       <th>state</th>
+      <th class="num"><span class="term" data-t="speed">speed</span></th>
       <th class="num"><span class="term" data-t="population">pop</span></th>
       <th><span class="term" data-t="census">species</span></th>
       <th class="num"><span class="term" data-t="custodyDepth">custody</span></th>
-      <th class="num"><span class="term" data-t="pacedDepth">paced</span></th>
+      <th class="num"><span class="term" data-t="pace">pace</span></th>
       <th class="num"><span class="term" data-t="held">held</span></th>
       <th class="num"><span class="term" data-t="bounce">bounces</span></th>
       <th><span class="term" data-t="lastSave">last save</span></th>
@@ -444,9 +452,11 @@ var G = {
  custody:["custody","Exactly one side is holding a travelling creature at any instant, and it is written to disk before it is handed over. The sender keeps it until the receiver confirms the creature arrived; only then does the sender let go."],
  custodyDepth:["custody depth","How many creatures this world is holding mid-journey right now — sent but not yet confirmed, plus arrived but not yet let into the world."],
  pacedDepth:["paced depth","Arrivals are let into a world at a capped rate so a burst cannot flood it. This is how many are queued up waiting their turn. A queue that never drains means the cap is set too low."],
+ speed:["simulation speed","How fast a world is running, as the game itself reports it: ×5 means five simulated seconds pass for every real second. It is the speed control inside that copy of the game, and each world has its own — one can be racing at ×100 while its neighbour sits at ×1. A paused world reports ×0. A world at a different speed from its neighbours is not a fault; it only means the two experience the traffic between them at different rates, which is why arrivals are paced on the receiving world's OWN clock and not on the wall clock."],
+ pace:["pace","Two numbers about arrivals into this world: how many are queued waiting to be let in, and the cap they are queued behind. The cap counts per SIMULATED minute of this world — so a world at ×10 gets through its allowance ten times faster in real time, and at the same rate as the world itself experiences it. Queued 0 against any cap is a world keeping up. A queue that never drains means the cap is set too low. A world whose helper program is too old to report its cap shows a ? there: unknown, never the shipped default, which has been changed three times."],
  held:["held","A creature whose destination went dark while it was travelling. It waits, quietly retrying; if the destination stays gone long enough it is sent back where it came from rather than lost."],
  bounce:["bounce","A migration that gave up and returned to the world it started in. It is a thing you get told about, never a silent repair."],
- migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map a lane's steady stream of small dots is its measured rate; when a hop actually happens, that creature itself — drawn in its own species' colour — sets off along the lane and travels to the far world."],
+ migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map a lane carries a number — how many crossings a minute it has been measuring — and when a hop actually happens, that creature itself, drawn in its own species' colour, sets off along the lane and travels to the far world. Nothing else moves on a lane: what you see travelling is always a real creature that really crossed."],
  hopfeed:["hops just now","The last minute of crossings, kept in memory and nowhere else. It is a record of who CROSSED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census, and these come from the migrations the archive was copied on. Never add the two together. A hop whose message carried no species name travels as a plain grey creature — unknown, never guessed."],
  motion:["motion","Whether a crossing TRAVELS across this map or simply appears where it landed. On 'auto' the page follows your system's reduce-motion setting — Windows calls it 'Animation effects' and macOS calls it 'Reduce motion' — and a great many machines have that switched off for reasons that have nothing to do with this page. Either way a crossing is still drawn and still counted: with motion reduced, the creature appears for a moment at the world it reached, in its own species colour, and fades. 'on' and 'off' override the system setting in both directions, and this browser remembers which you chose."],
  lastSave:["last save","Every world saves itself to disk every few minutes and sends back a receipt — when it saved, how big the file was, how long it took. This is the age of the newest receipt from that world."],
@@ -469,7 +479,7 @@ var G = {
 (function buildGlossary(){
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
     "bypass","migration","hopfeed","envelope","population","species","census","egg","unclassed",
-    "rawname","custody","custodyDepth","pacedDepth","held","bounce",
+    "rawname","speed","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "lastSave","unknown","exactlyonce","relay","archive","epoch","genomegap","flow"];
   var h = "";
   for (var i=0;i<keys.length;i++){
@@ -554,13 +564,16 @@ function rate(v){ return (v>=10 ? v.toFixed(0) : v.toFixed(1)); }
 /* CW/CH is a cell, GX/GY the gutter a lane runs through, MG the outer margin the
    wrap lanes live in: WOUT is where a wrapping arrow stops, WBAR is the bar that
    draws the edge of the map it went through. */
-var CW=200, CH=150, GX=88, GY=80, MG=96, WOUT=40, WBAR=58;
+/* CH carries one line more than the creature field needs: the settings line
+   (speed and pace) sits between the field and the note, and neither of those two
+   may be pushed into the other. */
+var CW=200, CH=166, GX=88, GY=80, MG=96, WOUT=40, WBAR=58;
 /* The creature field inside a cell: BCOLS by BROWS glyphs on a 12 by 13 pitch,
    laid out in one group translated to the field's top-left corner. BCAP is what
    caps the drawing, never the truth: past it one glyph stands for several and
    the cell says so. */
 var BCOLS=14, BROWS=5, BCAP=BCOLS*BROWS, BPX=12, BPY=13;
-var mapSig = "", anim = [], pulseLayer = null, reduced = false, prevMig = {}, rafId = 0;
+var mapSig = "", anim = [], reduced = false, prevMig = {}, rafId = 0;
 /* The hop animation's state (§17, B14). hopLayer sits ABOVE the cells;
    everything else is bounded on purpose and the bounds are named at HOPMS. */
 var hopLayer = null, hopSeen = {}, hopSeenQ = [], hopQ = [], hopsLive = [],
@@ -575,7 +588,7 @@ var hopLayer = null, hopSeen = {}, hopSeenQ = [], hopQ = [], hopsLive = [],
      - its own state (skip lists are PER WALK — east and west cross one row from
        opposite ends and legitimately bypass different slots, so one direction
        can be a bypass while the other is direct),
-     - its own pulses and its own travelling hop glyphs.
+     - its own travelling hop glyphs.
    The forward lane of an axis (E, N) takes one rail and the reverse (W, S) the
    other, and a bypass arc bows to the same side its rail sits on, so the two
    arcs of a pair are concentric and never cross. */
@@ -814,10 +827,9 @@ function buildMap(d){
     }
     s += '</g>';
   }
-  // Pulses under the cells, hops OVER them: an ambient pulse is wallpaper and
-  // may pass behind a world, but a hop is the event the page exists to show and
-  // must never be hidden by the cell it is arriving at.
-  s += '</g><g id="pulses"></g><g id="celllayer">';
+  // Cells over the lanes, hops over the cells. A hop is the event the page
+  // exists to show and must never be hidden by the cell it is arriving at.
+  s += '</g><g id="celllayer">';
 
   for (var row = h-1; row >= 0; row--){
     for (var col = 0; col < w; col++){
@@ -853,6 +865,11 @@ function buildMap(d){
         // in it is built by paintSpecies with createElementNS, for the same
         // reason the title above is empty.
         + '<g class="bibs" id="cspec-'+v.slot+'" transform="translate('+(x+16)+','+(y+60)+')"></g>'
+        // The settings line: how fast this world runs, and the cap on how fast
+        // organisms are let into it. Empty markup filled by paintChips, which
+        // builds tspans rather than concatenating a string, for the same reason
+        // the title above is empty — one code path for the DOM, and the safe one.
+        + '<text class="chips" id="cchip-'+v.slot+'" x="'+(x+16)+'" y="'+(y+CH-27)+'"></text>'
         + '<text class="note" id="cnote-'+v.slot+'" x="'+(x+16)+'" y="'+(y+CH-11)+'"></text>'
         + '</g>';
     }
@@ -862,7 +879,6 @@ function buildMap(d){
 
   // The labels sit on the paths, which only exist once the SVG is in the DOM.
   anim = [];
-  pulseLayer = document.getElementById("pulses");
   hopLayer = document.getElementById("hops");
   // Every live hop animation refers to a path that has just been thrown away.
   killHops();
@@ -891,7 +907,7 @@ function buildMap(d){
       lab.setAttribute("x", mp.x + (vertical[kk] ? (bk ? -18 : 18) : 0));
       lab.setAttribute("y", mp.y + (vertical[kk] ? 4 : (bk ? 16 : -11)));
     }
-    if (l.open) anim.push({key:kk, tracks:tracks, total:total, rate:0, next:0, pulses:[]});
+    if (l.open) anim.push({key:kk, tracks:tracks, total:total});
   }
   mapSig = signature(d);
 }
@@ -910,14 +926,74 @@ function marker(id,color){
     + '<path d="M 0 0 L 10 5 L 0 10 z" fill="'+color+'"/></marker>';
 }
 
+/* ---------------------------------------------- the two settings a cell shows
+   SPEED is the world's own time scale, straight out of the game's heartbeat —
+   ×5 is five simulated seconds per real second, ×0 is a world standing still —
+   and it is the key to every other number on this page that is counted in
+   SIMULATED time. PACE is the arrival rate limit: how many are queued, and the
+   cap they are queued behind, per simulated minute of THIS world.
+
+   Both obey §10.1's unknown rule without exception. An older helper program
+   publishes no cap, and the cap it would have had is NOT the shipped default —
+   that default has moved three times — so it renders "?" and says so in the
+   warning colour. A confident 100 there would be a lie about a world running at
+   2.0, which is exactly the mistake this rig has already made once in a test. */
+function fmtScale(n){
+  if (n == null) return "?";
+  var r = Math.round(n*10)/10;
+  return Math.abs(r - Math.round(r)) < 0.05 ? String(Math.round(r)) : r.toFixed(1);
+}
+function speedText(v){
+  return (v.statsKnown && v.timeScale != null) ? "×"+fmtScale(v.timeScale) : "×?";
+}
+function paceRateText(v){
+  return (v.statsKnown && v.inboundRatePerSimMinute != null)
+    ? fmtScale(v.inboundRatePerSimMinute) : "?";
+}
+function paceDepthText(v){
+  return (v.statsKnown && v.pacedDepth != null) ? String(v.pacedDepth) : "?";
+}
+
+/* The cell's settings line, built as nodes so the unknown halves can carry
+   their own colour and each half its own tooltip. The unit is dropped when the
+   numbers are long enough to reach the world next door; the tooltip, the
+   glossary and the worlds table all still carry it. */
+function paintChips(v){
+  var host = document.getElementById("cchip-"+v.slot);
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  function part(cls, s, term){
+    var el = document.createElementNS(SVGNS, "tspan");
+    if (cls) el.setAttribute("class", cls);
+    if (term) el.setAttribute("data-t", term);
+    el.textContent = s;
+    host.appendChild(el);
+  }
+  var sp = speedText(v), d = paceDepthText(v), r = paceRateText(v);
+  part((sp === "×?" ? "chipu" : "chipv") + " term", sp, "speed");
+  part(null, " · ", null);
+  part("term", "pace ", "pace");
+  part(d === "?" ? "chipu" : "chipv", d, null);
+  part(null, "/", null);
+  part(r === "?" ? "chipu" : "chipv", r, null);
+  // 19 + the 8-character unit is 27, which is what fits between the cell's left
+  // inset and its right edge at this font. Past that the unit goes and the two
+  // numbers stay: a reader who has lost the unit can find it in the tooltip, the
+  // glossary and the worlds table, but a number clipped by the world next door
+  // is unreadable everywhere.
+  if ((sp + " · pace " + d + "/" + r).length <= 19) part(null, "/sim-min", null);
+}
+
 function cellTitle(v){
   var s = "slot "+v.slot+" ("+v.position.col+","+v.position.row+")  peer "+v.peerId+"\n"
     + (v.live ? (v.modConnected ? "live" : "connected, but no game attached") : "dark");
   if (!v.live && v.darkForMs != null) s += " for "+ms(v.darkForMs);
   s += "\npopulation " + (v.statsKnown && v.population!=null ? v.population : "unknown");
   if (v.statsKnown){
+    s += "\nrunning at " + speedText(v) + " real time"
+      + "\narrivals: " + paceDepthText(v) + " queued, cap " + paceRateText(v)
+      + " per simulated minute";
     s += "\ncustody "+(v.custodyDepth==null?"unknown":v.custodyDepth)
-      +", paced "+(v.pacedDepth==null?"unknown":v.pacedDepth)
       +", held "+(v.heldDepth==null?"unknown":v.heldDepth);
     if (v.lastSave) s += "\nlast save "+ms(v.lastSaveAgeMs)+" ago";
     s += "\n" + censusLines(v);
@@ -1246,6 +1322,7 @@ function paintMap(d){
     // The creature field, grouped by species, and the cell's tap text. Both are
     // built as nodes: see the fenced region above for why.
     var c = paintSpecies(v);
+    paintChips(v);
     var ct = document.getElementById("ctitle-"+v.slot);
     if (ct) ct.textContent = cellTitle(v);
     var unit = (c && c.unit) ? c.unit : 1;
@@ -1278,48 +1355,29 @@ function paintMap(d){
     note.setAttribute("class", cls);
   }
 
-  var winMin = (d.flowWindowMs || 300000) / 60000;
   for (i=0;i<d.lanes.length;i++){
     var l = d.lanes[i], key = laneKey(l);
     var lab = document.getElementById("ll-"+key);
     if (lab){
+      // The lane's rate is a NUMBER and only a number. It used to also be a
+      // stream of ambient dots walking the arrow, and that was wallpaper: it
+      // moved constantly, it said nothing the label did not say, and beside the
+      // hop glyphs — which are real, individual creatures — it invited the
+      // reader to count animation as traffic. The dots are gone; the
+      // measurement they paced is right here.
       if (!l.open) lab.textContent = "closed: "+l.reason;
       else if ((l.skipped||[]).length) lab.textContent = "bypass ×"+l.skipped.length
         + " · " + rate(l.perMinute) + "/min";
       else lab.textContent = rate(l.perMinute)+"/min";
     }
-    var a = animFor(key);
-    if (a){
-      // One pulse is one organism, and the interval between pulses is the lane's
-      // measured interval between hops. No floor that flatters a quiet lane: a
-      // lane carrying one organism a minute shows one pulse a minute.
-      var perMin = (l.recentHops!=null ? l.recentHops/winMin : l.perMinute) || 0;
-      a.rate = perMin;
-      a.gap = perMin > 0 ? Math.min(120000, Math.max(200, 60000/perMin)) : 0;
-    }
-    // A hop that ARRIVED between two polls gets its own, brighter pulse — and
-    // pushes the steady one back, so the same organism is not drawn twice.
-    //
-    // THIS IS NOW THE FALLBACK, not the main path. When /api/hops is answering,
-    // that same arrival is already travelling the lane as its own species glyph
-    // (§17, B14), and firing a hot pulse too would draw one organism twice. A
-    // page whose hop feed is unreachable degrades to exactly the ambient pulse
-    // it had before D19, which is what B14 requires of a page that cannot render
-    // the feed.
+    // POLL-DIFFERENCING IS THE FALLBACK, and it is only a fallback. When
+    // /api/hops is answering, that arrival is already travelling the lane as its
+    // own species glyph (§17, B14) and flashing the cell here too would say one
+    // crossing twice. When the feed is unreachable, this is all that is left of
+    // "something arrived" — a pure opacity fade at the destination, which needs
+    // no frame loop and is therefore the same signal under reduced motion.
     var was = prevMig[key];
-    if (was != null && l.migrations > was && a && !hopFeedOK){
-      if (reduced){
-        // There is no frame loop to walk a pulse down the lane, so a hot pulse
-        // spawned here would sit off-screen forever. The destination flash is a
-        // pure fade and still says a creature landed.
-        flashCell(l.toSlot);
-      } else {
-        var extra = Math.min(4, l.migrations - was);
-        for (var e=0;e<extra;e++) fireHot(a, e*130);
-        if (a.gap > 0) a.next = Math.max(a.next, performance.now() + a.gap*extra);
-        flashCell(l.toSlot);
-      }
-    }
+    if (was != null && l.migrations > was && !hopFeedOK) flashCell(l.toSlot);
     prevMig[key] = l.migrations;
   }
 }
@@ -1453,8 +1511,8 @@ function stillHop(a, name, to){
   flashCell(to);
 }
 
-/* stepHops advances every travelling glyph one frame, along the same track list
-   the ambient pulses walk. It ROTATES to the path's tangent, because the glyph
+/* stepHops advances every travelling glyph one frame, along its lane's own
+   track list. It ROTATES to the path's tangent, because the glyph
    faces east by construction and a west-bound creature that faces east looks
    like a drawing bug rather than a direction. */
 function stepHops(ts, dt){
@@ -1483,39 +1541,18 @@ function stepHops(ts, dt){
   }
 }
 
-function spawn(a, hot){
-  if (!pulseLayer || a.pulses.length > 7) return;
-  var c = document.createElementNS(SVGNS, "circle");
-  c.setAttribute("class", hot ? "pulse hot" : "pulse");
-  c.setAttribute("r", hot ? 6.5 : 4.2);
-  c.setAttribute("cx", -50); c.setAttribute("cy", -50);
-  pulseLayer.appendChild(c);
-  a.pulses.push({el:c, ti:0, dist:0, speed:hot?0.34:0.22});
-}
-function fireHot(a, delay){ setTimeout(function(){ spawn(a, true); }, delay); }
-
+/* THE FRAME LOOP MOVES ONE KIND OF THING, AND EVERY ONE OF THEM IS A REAL
+   CREATURE THAT REALLY CROSSED. It used to also walk an ambient dot down every
+   open lane at that lane's measured rate — decorative traffic, indistinguishable
+   at a glance from the hop glyphs beside it, and saying nothing the lane's own
+   "/min" label did not already say in a number a reader can compare. It is
+   gone. What moves on this map is evidence. */
 var lastTs = 0;
 function frame(ts){
   rafId = requestAnimationFrame(frame);
   if (document.hidden) { lastTs = ts; return; }
   var dt = lastTs ? Math.min(ts - lastTs, 80) : 16;
   lastTs = ts;
-  for (var i=0;i<anim.length;i++){
-    var a = anim[i];
-    if (a.rate > 0 && ts >= a.next){
-      spawn(a, false);
-      a.next = ts + a.gap*(0.65 + 0.7*Math.random());
-    }
-    for (var j=a.pulses.length-1;j>=0;j--){
-      var p = a.pulses[j];
-      p.dist += p.speed*dt;
-      var tr = a.tracks[p.ti];
-      while (tr && p.dist > tr.len){ p.dist -= tr.len; p.ti++; tr = a.tracks[p.ti]; }
-      if (!tr){ if (p.el.parentNode) p.el.parentNode.removeChild(p.el); a.pulses.splice(j,1); continue; }
-      var pt = tr.el.getPointAtLength(p.dist);
-      p.el.setAttribute("cx", pt.x); p.el.setAttribute("cy", pt.y);
-    }
-  }
   stepHops(ts, dt);
 }
 
@@ -1676,16 +1713,25 @@ function render(d){
           + (v.statsAgeMs? " for "+ms(v.statsAgeMs) : "")+"</span>");
     // The species cell is left EMPTY here and filled by paintSpeciesCell: this
     // string is assigned to innerHTML, and no census name may reach it.
+    // Both settings columns render every unknown half as an unknown, never as a
+    // zero and never as the shipped default: "0/?" is a world queueing nothing
+    // behind a cap nobody has told us.
+    var sp = speedText(v);
+    var speed = sp === "×?" ? '<span class="unknown">×?</span>' : sp;
+    var dep = paceDepthText(v), cap = paceRateText(v);
+    var pace = (dep === "?" ? '<span class="unknown">?</span>' : dep) + "/"
+      + (cap === "?" ? '<span class="unknown">?</span>' : cap);
     return "<tr><td>"+v.slot+"</td><td>("+v.position.col+","+v.position.row+")</td>"
       + "<td>"+esc(v.peerId)+"</td><td>"+state+"</td>"
+      + '<td class="num">'+speed+'</td>'
       + '<td class="num">'+num(v.population)+'</td>'
       + '<td class="spx" id="wsp-'+v.slot+'"></td>'
       + '<td class="num">'+num(v.custodyDepth)+'</td>'
-      + '<td class="num">'+num(v.pacedDepth)+'</td>'
+      + '<td class="num">'+pace+'</td>'
       + '<td class="num">'+num(v.heldDepth)+'</td>'
       + '<td class="num">'+num(v.bouncedTimeoutTotal)+'</td>'
       + "<td>"+save+"</td><td>"+note+"</td></tr>";
-  }).join("") || '<tr><td colspan="12" class="muted">no slots reserved yet</td></tr>';
+  }).join("") || '<tr><td colspan="13" class="muted">no slots reserved yet</td></tr>';
   for (var si=0; si<d.slots.length; si++) paintSpeciesCell(d.slots[si]);
 
   var tt = d.totals;
@@ -1723,7 +1769,8 @@ async function tick(){
    B14's decision and not an accident: /api/status is what the archive
    serializes verbatim into its durable metrics file once a minute, and a
    per-organism feed does not belong in a file that is never rewritten. A page
-   whose hop endpoint fails keeps its map, its numbers and its ambient pulses. */
+   whose hop endpoint fails keeps its map and every number on it, and falls back
+   to flashing the destination cell when the migration counters move. */
 async function tickHops(){
   try {
     var r = await fetch("api/hops", {cache:"no-store"});
@@ -1746,17 +1793,16 @@ async function tickHistory(){
    This page had ONE rule for prefers-reduced-motion and it was the wrong one:
    it never polled the hop feed and never started the frame loop, so a reader
    whose system asks for reduced motion saw no crossings at all — no travelling
-   creature, no pulse, not even an arrival flash — and was told nothing about
+   creature, not even an arrival flash — and was told nothing about
    why. On Windows the setting behind that query is "Animation effects", which
    is off on a great many machines for reasons that have nothing to do with this
    page, and the failure was invisible: the map still drew, the numbers still
    moved, and the traffic simply never appeared.
 
    The rule now is DEGRADE, NEVER SUPPRESS. Reduced motion stops the TRAVEL —
-   the frame loop, the ambient flow dots, the glyph walking its lane — and keeps
-   the FACT: the arriving creature appears at the end of the lane it came down,
-   in its own species colour, and fades (stillHop). Nothing moves; nothing is
-   hidden.
+   the frame loop and the glyph walking its lane — and keeps the FACT: the
+   arriving creature appears at the end of the lane it came down, in its own
+   species colour, and fades (stillHop). Nothing moves; nothing is hidden.
 
    And it is OVERRIDABLE IN BOTH DIRECTIONS, because a media query is a guess
    about a person and this one is wrong often. The three-way choice is kept in
@@ -1770,20 +1816,6 @@ function readMotionPref(){
     if (v === "auto" || v === "on" || v === "off") return v;
   } catch(e){}
   return "auto";
-}
-
-/* killPulses sweeps the ambient flow dots. Without the frame loop they would
-   never advance and never be removed, so turning motion off has to clear them
-   rather than leave a row of stalled dots on every lane. */
-function killPulses(){
-  for (var i=0;i<anim.length;i++){
-    var a = anim[i];
-    for (var j=0;j<a.pulses.length;j++){
-      var el = a.pulses[j].el;
-      if (el.parentNode) el.parentNode.removeChild(el);
-    }
-    a.pulses = [];
-  }
 }
 
 /* applyMotion is the ONE place the effective answer is computed, and it is
@@ -1809,9 +1841,10 @@ function applyMotion(){
           : "creatures travel their lane as they cross");
   }
   if (reduced){
+    // Without the loop a travelling glyph would stall mid-lane with nothing to
+    // move it, so switching motion off has to sweep what is already in flight.
     if (rafId){ cancelAnimationFrame(rafId); rafId = 0; }
     killHops();
-    killPulses();
   } else if (!rafId){
     lastTs = 0;
     rafId = requestAnimationFrame(frame);

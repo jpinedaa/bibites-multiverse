@@ -58,7 +58,7 @@ import (
 // direction that matters: it would imply 2.2 cannot do this.
 const (
 	ProtocolA = "contract-a/2.2"
-	ProtocolB = "contract-b/3.3"
+	ProtocolB = "contract-b/3.4"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).

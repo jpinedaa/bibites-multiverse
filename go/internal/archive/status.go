@@ -84,6 +84,17 @@ type SlotView struct {
 	LastSave            *contracta.SaveReceipt `json:"lastSave,omitempty"`
 	LastSaveAgeMs       *int64                 `json:"lastSaveAgeMs,omitempty"`
 
+	// How fast the world runs, and the cap on how fast organisms are let into it
+	// (contract-b-m4.md §18, B16). TimeScale comes from the mod's HEARTBEAT;
+	// the two pacing numbers are the sidecar's own configuration. All three are
+	// nil when the peer publishes them and this view has not heard, and nil when
+	// the peer is an older build that does not publish them at all — which is
+	// the case this rig actually runs, and the page renders it as unknown rather
+	// than as the shipped default (which has moved three times).
+	TimeScale               *float64 `json:"timeScale,omitempty"`
+	InboundRatePerSimMinute *float64 `json:"inboundRatePerSimMinute,omitempty"`
+	InboundRateBurst        *float64 `json:"inboundRateBurst,omitempty"`
+
 	// The species census (contract-b-m4.md §16, B11 and B12). SpeciesKnown is
 	// the ABSENT/EMPTY distinction made explicit for a JSON reader, because a
 	// JS client cannot tell an omitted array from an empty one once it has
@@ -119,12 +130,13 @@ type LaneView struct {
 	// PerMinute is the rate over the last flowWindow.
 	Migrations int     `json:"migrations"`
 	PerMinute  float64 `json:"perMinute"`
-	// RecentHops is how many of those envelopes landed inside flowWindow. It is
-	// the number the map animates: a viewer needs a per-lane rate to pace the
-	// pulses, and the alternative — shipping the ledger to the browser and
-	// letting it count — would put the migration record on the wire for a
-	// picture. Migrations is cumulative and monotonic, so a reader that polls
-	// can also difference it to see a hop ARRIVE.
+	// RecentHops is how many of those envelopes landed inside flowWindow: the
+	// raw count behind PerMinute, over a window a reader can see, rather than a
+	// rate they have to take on trust. The alternative — shipping the ledger to
+	// the browser and letting it count — would put the migration record on the
+	// wire for a picture. Migrations is cumulative and monotonic, so a reader
+	// that polls can also difference it to see a hop ARRIVE, which is what the
+	// page falls back to when the hop feed is unreachable.
 	RecentHops int   `json:"recentHops"`
 	LastAtMs   int64 `json:"lastAtMs,omitempty"`
 }
@@ -256,6 +268,9 @@ func (a *Archive) StatusView() Status {
 				v.HeldDepth = si.Stats.HeldDepth
 				v.BouncedTimeoutTotal = si.Stats.BouncedTimeoutTotal
 				v.SimulatedTime = si.Stats.SimulatedTime
+				v.TimeScale = si.Stats.TimeScale
+				v.InboundRatePerSimMinute = si.Stats.InboundRatePerSimMinute
+				v.InboundRateBurst = si.Stats.InboundRateBurst
 				if si.Stats.LastSave != nil {
 					save := *si.Stats.LastSave
 					v.LastSave = &save

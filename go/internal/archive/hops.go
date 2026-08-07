@@ -2,8 +2,8 @@ package archive
 
 // The recent-hops feed of contract-b-m4.md §17, B14 (D19).
 //
-// The page already draws an ambient pulse per lane, paced from LaneView's
-// RecentHops. That says HOW FAST a lane is running. It cannot say WHO just
+// The page already labels every lane with its measured rate, from LaneView's
+// PerMinute. That says HOW FAST a lane is running. It cannot say WHO just
 // crossed it, and the feed below is what does: lane, endpoints, timestamp, and
 // the species block the envelope carried, so the page can animate that species'
 // own glyph travelling the lane's arrow from one world to the next.

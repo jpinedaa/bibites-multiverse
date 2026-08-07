@@ -62,6 +62,14 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			"(contract-a.md §7.5, inboundRatePerSimMinute). 0 keeps the default "+
 			"(100.0). Raise it when metrics.jsonl shows a pacedDepth that never "+
 			"falls; lower it to spread a dam harder")
+	// The burst is the other half of the same knob, and without it --inbound-rate
+	// cannot actually be exercised: a bucket of 50 swallows any test burst small
+	// enough to force by hand, so a low rate with the shipped burst never dams
+	// and the pacing never runs at all.
+	inboundBurst := fs.Float64("inbound-burst", envFloat("MULTIVERSE_INBOUND_BURST", 0),
+		"token-bucket capacity for --inbound-rate (contract-a.md §7.5, "+
+			"inboundRateBurst), the largest clump ever released at once. 0 keeps "+
+			"the default (50.0)")
 	listInflight := fs.Bool("list-inflight", false,
 		"print the journal entries this sidecar still holds custody of, then exit "+
 			"(contract-b-m4.md §7.5). Answers what the relay cannot.")
@@ -114,11 +122,18 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			"contract default, and §9.3's accepted duplication case widens with it",
 			"holdTimeout", *holdTimeout, "default", DefaultConfig().HoldTimeout)
 	}
-	if *inboundRate > 0 {
-		cfg.InboundRatePerSimMinute = *inboundRate
-		cfg.Logger.Info("sidecar: inboundRatePerSimMinute overridden",
-			"inboundRate", *inboundRate, "default", DefaultConfig().InboundRatePerSimMinute,
-			"burst", cfg.InboundRateBurst)
+	if *inboundBurst > 0 {
+		cfg.InboundRateBurst = *inboundBurst
+	}
+	if *inboundRate > 0 || *inboundBurst > 0 {
+		if *inboundRate > 0 {
+			cfg.InboundRatePerSimMinute = *inboundRate
+		}
+		cfg.Logger.Info("sidecar: the delivery rate limit is overridden",
+			"inboundRate", cfg.InboundRatePerSimMinute,
+			"defaultRate", DefaultConfig().InboundRatePerSimMinute,
+			"burst", cfg.InboundRateBurst,
+			"defaultBurst", DefaultConfig().InboundRateBurst)
 	}
 	if *position != "" {
 		pos, err := parsePosition(*position)

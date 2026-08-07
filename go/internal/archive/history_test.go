@@ -367,8 +367,8 @@ func TestLaneRecentHops(t *testing.T) {
 		t.Fatalf("perMinute = %v, want %v — recentHops and perMinute must agree",
 			east.PerMinute, want)
 	}
-	// A lane nothing has crossed reports zero recent hops, and the map draws no
-	// pulses on it. Zero here is a measurement, not an unknown.
+	// A lane nothing has crossed reports zero recent hops, and its label says
+	// 0.0/min. Zero here is a measurement, not an unknown.
 	for _, l := range view.Lanes {
 		if l.FromSlot == 2 && l.RecentHops != 0 {
 			t.Fatalf("an untravelled lane reported %d recent hops", l.RecentHops)
@@ -395,7 +395,7 @@ func TestStatusPageIsSelfContainedAndDrawsTheMap(t *testing.T) {
 	}
 	for _, want := range []string{
 		"<svg id=", "laneGeom", "arcSeg", "marker-end", "class=\"lane ",
-		"bypass", "wrap", "pulse", "api/history", "api/status", "glosslist",
+		"bypass", "wrap", "api/history", "api/status", "glosslist",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the page is missing %q — it is meant to DRAW the map, not tabulate it", want)
@@ -685,11 +685,12 @@ func TestPageAnimatesTheSpeciesGlyphOnAHop(t *testing.T) {
 	if !strings.Contains(page, " hopfeed:[") {
 		t.Fatal("the glossary never distinguishes who CROSSED from who LIVES here")
 	}
-	// A page that cannot reach the feed degrades to the ambient pulse it had
-	// before D19, and must not double-draw when it can.
-	if !strings.Contains(page, "!hopFeedOK") {
-		t.Fatal("the poll-differencing hot pulse is not suppressed while the hop feed is " +
-			"live; one organism would be drawn twice")
+	// A page that cannot reach the feed falls back to differencing the migration
+	// counters and flashing the destination, and must not do that while the feed
+	// is answering — the same organism would be announced twice.
+	if !strings.Contains(page, "if (was != null && l.migrations > was && !hopFeedOK) flashCell(l.toSlot);") {
+		t.Fatal("the poll-differencing fallback is not gated on an unreachable hop feed; " +
+			"one organism would be drawn twice")
 	}
 	// The feed is polled UNCONDITIONALLY. It used to be gated on
 	// prefers-reduced-motion, which meant a reader whose system asks for less
@@ -762,8 +763,8 @@ func TestReducedMotionDegradesRatherThanSuppresses(t *testing.T) {
 		t.Fatal("the motion switch does not override prefers-reduced-motion in both directions")
 	}
 	// Switching it at runtime must actually start and stop the loop, and sweep
-	// the dots that would otherwise stall mid-lane with no loop to move them.
-	for _, want := range []string{"cancelAnimationFrame(rafId)", "function killPulses",
+	// the glyphs that would otherwise stall mid-lane with no loop to move them.
+	for _, want := range []string{"cancelAnimationFrame(rafId)", "function killHops",
 		"rafId = requestAnimationFrame(frame)"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the motion switch does not take effect live: missing %q", want)
@@ -777,5 +778,85 @@ func TestReducedMotionDegradesRatherThanSuppresses(t *testing.T) {
 	if !strings.Contains(page, `id="motionwhy"`) ||
 		!strings.Contains(page, "your system asks for reduced motion") {
 		t.Fatal("the page never tells a reader why crossings are not travelling")
+	}
+}
+
+// TestTheMapHasNoAmbientPulses pins a removal, which is the kind of change that
+// creeps back.
+//
+// The map used to walk a small dot down every open lane at that lane's measured
+// rate. It was wallpaper: it never named an organism, it said nothing the
+// lane's own "/min" label did not say in a number a reader can compare, and
+// once real hop glyphs travelled the same arrows (D19) it actively misled —
+// two things moving along one lane, one of them evidence and one of them
+// decoration, drawn at the same size on the same path.
+//
+// WHAT MOVES ON THIS MAP IS NOW ALWAYS A REAL CREATURE THAT REALLY CROSSED.
+func TestTheMapHasNoAmbientPulses(t *testing.T) {
+	page := statusPageHTML
+	for _, gone := range []string{
+		"pulse", "pulseLayer", `id="pulses"`, "function spawn(", "fireHot",
+		"killPulses", "a.pulses", "a.rate", "a.gap",
+	} {
+		if strings.Contains(page, gone) {
+			t.Fatalf("the ambient lane pulse is back: %q is still in the page", gone)
+		}
+	}
+	// The rate itself is NOT gone. It was never the pulse's to carry: it is a
+	// measurement, and it stays on the lane as a number.
+	if !strings.Contains(page, `lab.textContent = rate(l.perMinute)+"/min";`) {
+		t.Fatal("the lane lost its measured rate along with the dots that paced it")
+	}
+	// And the two things that DID depend on the frame loop are untouched: the
+	// travelling hop glyph and, under reduced motion, the still one.
+	for _, want := range []string{"function stepHops", "function stillHop", "function flashCell",
+		"rafId = requestAnimationFrame(frame)"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("removing the pulses took %q with them", want)
+		}
+	}
+}
+
+// TestEachWorldShowsItsSpeedAndItsPace covers contract-b-m4.md §18, B17 on the
+// page: a cell says how fast its world runs and how close its arrivals are to
+// the cap they are paced behind — and says UNKNOWN for either when the peer has
+// not published it, which is the case for any sidecar older than B16.
+func TestEachWorldShowsItsSpeedAndItsPace(t *testing.T) {
+	page := statusPageHTML
+	for _, want := range []string{
+		"function speedText", "function paceRateText", "function paceDepthText",
+		"function paintChips", "paintChips(v);", `id="cchip-`,
+		`data-t="speed"`, `data-t="pace"`, " speed:[", " pace:[",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the per-world speed and pace display is missing %q", want)
+		}
+	}
+	// UNKNOWN, NEVER THE DEFAULT. The shipped inboundRatePerSimMinute has moved
+	// three times; a page that fills one in for a peer that did not state it is
+	// lying about the only slot an operator cannot check by hand.
+	if !strings.Contains(page,
+		`return (v.statsKnown && v.inboundRatePerSimMinute != null)`) {
+		t.Fatal("the pace cap is not read straight off the stats block, or absence is not a value")
+	}
+	for _, want := range []string{`? fmtScale(v.inboundRatePerSimMinute) : "?"`, `: "×?"`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("an unpublished speed or cap does not render as unknown: missing %q", want)
+		}
+	}
+	if strings.Contains(page, "inboundRatePerSimMinute || 100") ||
+		strings.Contains(page, "|| 2.0") {
+		t.Fatal("the page defaults a pacing number it was not told")
+	}
+	// A world standing still reports ×0, and 0 is a reading. It must not be
+	// swallowed by a truthiness test on the way to the screen.
+	if !strings.Contains(page, "v.timeScale != null") {
+		t.Fatal("timeScale is tested for truthiness somewhere; a paused world reports 0 " +
+			"and ×0 is a fact, not a gap")
+	}
+	// The worlds table carries both, beside the numbers they explain.
+	if !strings.Contains(page, `<td class="num">'+speed+'</td>`) ||
+		!strings.Contains(page, `<td class="num">'+pace+'</td>`) {
+		t.Fatal("the worlds table does not carry the speed and pace columns")
 	}
 }

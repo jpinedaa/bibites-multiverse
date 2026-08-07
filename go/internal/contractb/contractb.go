@@ -356,6 +356,25 @@ type PeerStats struct {
 	BouncedTimeoutTotal *int         `json:"bouncedTimeoutTotal,omitempty"`
 	SimulatedTime       *float64     `json:"simulatedTime,omitempty"`
 	LastSave            *SaveReceipt `json:"lastSave,omitempty"`
+	// TimeScale is how fast the world is running, copied out of the last
+	// HEARTBEAT (contract-a.md §5.2) and never computed here (§18, B16). 5 means
+	// five simulated seconds per real second; 0 means the world is standing
+	// still, which is a reading and not a gap.
+	//
+	// nil is UNKNOWN — no mod, or no heartbeat yet. It is the interpretive key to
+	// every other pacing number on this block: simulatedTime advances at this
+	// rate, and inboundRatePerSimMinute is spent at it.
+	TimeScale *float64 `json:"timeScale,omitempty"`
+	// InboundRatePerSimMinute and InboundRateBurst are the delivery rate limit
+	// this sidecar is CONFIGURED with (contract-a.md §7.5, §18 A40; §18, B16).
+	// They are settings, not measurements, and they are what makes pacedDepth
+	// readable: a depth is only high or low against the cap it is queued behind.
+	//
+	// nil is UNKNOWN — a sidecar that predates B16 publishes neither, and a
+	// reader MUST render the cap as unknown rather than assume the shipped
+	// default, which has moved three times.
+	InboundRatePerSimMinute *float64 `json:"inboundRatePerSimMinute,omitempty"`
+	InboundRateBurst        *float64 `json:"inboundRateBurst,omitempty"`
 	// Species is the world's active species census, copied out of the last
 	// HEARTBEAT the sidecar received and NEVER AUTHORED HERE (§16, B11). A
 	// sidecar MUST NOT synthesize one, re-sort one, merge two entries, fill a
@@ -387,7 +406,9 @@ type PeerStats struct {
 // sends is carried through untouched.
 var knownStatKeys = []string{
 	"population", "eggCount", "custodyDepth", "pacedDepth", "heldDepth",
-	"bouncedTimeoutTotal", "simulatedTime", "lastSave", "species", "truncated",
+	"bouncedTimeoutTotal", "simulatedTime", "timeScale",
+	"inboundRatePerSimMinute", "inboundRateBurst",
+	"lastSave", "species", "truncated",
 }
 
 // UnmarshalJSON decodes the block and REMEMBERS WHAT IT DID NOT UNDERSTAND

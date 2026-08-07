@@ -42,7 +42,13 @@ type modSession struct {
 
 	lastHeartbeat time.Time
 	paused        bool
+	// timeScale is seeded at 1 so a session with no heartbeat yet reads as
+	// RUNNING rather than paused, which is what the pacer wants. haveTimeScale
+	// is what the stats block wants, and it is a different question: until a
+	// HEARTBEAT arrives the world's speed is UNKNOWN, and 1 would be a confident
+	// guess about a world that may well be at 5 or at 0.
 	timeScale     float64
+	haveTimeScale bool
 
 	// The HEARTBEAT-derived half of the peer stats block (contract-b-m4.md
 	// §6.3.1). "have" flags keep absence a value: a stat the mod has not
@@ -362,6 +368,7 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 	sess.lastHeartbeat = now
 	sess.paused = *hb.Paused
 	sess.timeScale = *hb.TimeScale
+	sess.haveTimeScale = true
 	resized := !sameSize(sess.simSize, *hb.SimulationSize)
 	sess.simSize = *hb.SimulationSize
 	// The stats block of contract-b-m4.md §6.3.1 comes from here, and so does

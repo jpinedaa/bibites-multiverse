@@ -234,9 +234,19 @@ STRANDED_ENTITY=2004967003
 STRANDED_DEST=2
 
 # Phase 7 needs to SEE the automatic bounce, and the contract default is 24
-# hours. This is the only tunable the rig moves, it moves it on one sidecar, and
-# the sidecar logs a warning when it is set.
+# hours. It moves that tunable on one sidecar, and the sidecar logs a warning
+# when it is set.
 HOLD_TIMEOUT="${HOLD_TIMEOUT:-45s}"
+
+# Phase 6 needs to SEE the delivery rate limit work, and the shipped default no
+# longer lets it: 100.0 per simulated minute with a burst of 50 swallows any
+# burst this rig can force by hand, so nothing dams and there is nothing to
+# pace. THE PHASE TESTS THE MECHANISM, NOT THE DEFAULT — it sets both halves on
+# slot 2's sidecar and asserts against these same two numbers, so the assertion
+# can never again drift from what is running. The shipped default moved twice on
+# 2026-08-07 (contract-a.md §18, A40) and this phase went on asserting 2.0/5.
+PACE_RATE="${PACE_RATE:-2.0}"
+PACE_BURST="${PACE_BURST:-5}"
 
 TIME_SCALE="${_ENV_TIME_SCALE:-5}"
 SEED_TIME_SCALE="${_ENV_SEED_TIME_SCALE:-20}"
@@ -703,6 +713,11 @@ up() {
     # Phase 7 needs one sidecar whose bounded hold expires inside a test run.
     # Slot 3 is the one, because nothing else in the rig depends on its timing.
     [ "$slot" = 3 ] && extra=(--hold-timeout "$HOLD_TIMEOUT")
+    # Phase 6 needs one sidecar whose delivery rate limit is low enough to dam a
+    # burst a person can force. Slot 2 is the one, and it is set here rather than
+    # inside the phase because the pacing clock and the journal belong to the
+    # process, not to the test.
+    [ "$slot" = 2 ] && extra=(--inbound-rate "$PACE_RATE" --inbound-burst "$PACE_BURST")
     start_sidecar "$slot" "${extra[@]}"
     wait_healthy "http://127.0.0.1:$(port_of "$slot")/healthz" || return 1
     wait_grant "$slot" "$mark" || return 1
@@ -1253,8 +1268,14 @@ phase6() {
   note "What still accumulates is what contract-b-m4.md §9.4 says accumulates: THE PEER'S"
   note "OWN INBOUND QUEUE. Custody moves at the speed of the wire and delivery moves at"
   note "the speed of the world (§7.5), so a burst lands in slot 2's journal in seconds and"
-  note "leaves it at inboundRatePerSimMinute — 2.0 per SIMULATED minute, burst 5, the"
-  note "SHIPPED defaults, which is what this asserts against (contract-a.md §15 A20)."
+  note "leaves it at inboundRatePerSimMinute — $PACE_RATE per SIMULATED minute, burst"
+  note "$PACE_BURST, SET EXPLICITLY on slot 2's sidecar with --inbound-rate/--inbound-burst."
+  note ""
+  note "THIS PHASE TESTS THE MECHANISM, NOT THE SHIPPED DEFAULT. It used to assert against"
+  note "2.0/5 because those were the defaults when it was written; they are now 100.0/50"
+  note "(contract-a.md §18, A40, raised twice on one day) and a burst of 12 would vanish"
+  note "into the bucket without ever being paced. The numbers below and the numbers on"
+  note "slot 2's command line are the same two variables, so they cannot drift apart again."
   local ok=0 n=12 i ids=() line
 
   step "slowing slot 2 to 1x, so one simulated minute is one wall minute and the rate is readable"
@@ -1298,9 +1319,10 @@ phase6() {
   send 2 timescale 1 >/dev/null 2>&1 || true
 
   step "the backlog must drain AS A STREAM, and every sample must sit under the contract's own bound"
-  # allowed(t) = burst + rate * simulatedMinutesSinceWake. Sampling the sidecar's
-  # own delivery count against slot 2's own simulated clock is the same
-  # comparison contract-a.md §7.5 defines, on the same two numbers.
+  # allowed(t) = burst + rate * simulatedMinutesSinceWake, with burst and rate
+  # read from the SAME two variables slot 2's sidecar was launched with.
+  # Sampling the sidecar's own delivery count against slot 2's own simulated
+  # clock is the comparison contract-a.md §7.5 defines, on the same two numbers.
   local t0 wake_sim delivered=0 worst=0
   t0="$(now)"
   wake_sim="$(status_get 'next((s for s in d["slots"] if s["slot"]==2), {}).get("simulatedTime",0)')"
@@ -1312,7 +1334,7 @@ phase6() {
     local sim now_pd allowed
     sim="$(status_get 'next((s for s in d["slots"] if s["slot"]==2), {}).get("simulatedTime",0)')"
     now_pd="$(status_get 'next((s for s in d["slots"] if s["slot"]==2), {}).get("pacedDepth","unknown")')"
-    allowed="$(python3 -c "print(f'{5.0 + 2.0*((float('$sim')-float('$wake_sim'))/60.0):.2f}')" 2>/dev/null)"
+    allowed="$(python3 -c "print(f'{float('$PACE_BURST') + float('$PACE_RATE')*((float('$sim')-float('$wake_sim'))/60.0):.2f}')" 2>/dev/null)"
     note "t+$(( $(now) - t0 ))s: delivered=$delivered pacedDepth=$now_pd simElapsed=$(python3 -c "print(f'{float('$sim')-float('$wake_sim'):.0f}')" 2>/dev/null)s allowedByRate=$allowed"
     if python3 -c "import sys; sys.exit(0 if $delivered > float('$allowed') + 1 else 1)" 2>/dev/null; then
       fail "$delivered deliveries after that much simulated time, over the paced ceiling of $allowed"

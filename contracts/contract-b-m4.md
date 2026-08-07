@@ -1,6 +1,6 @@
 # Contract B — M4 (Sidecar ↔ Relay ↔ Sidecar ↔ Archive)
 
-**Version:** `contract-b/3.3`
+**Version:** `contract-b/3.4`
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3), **B6** the
@@ -35,6 +35,18 @@ answers with a **minor** bump to `contract-b/3.3`. Contract A's matching set is
 `contract-a.md` §18, A38–A41. Affected body text carries an `(amended — §17, Bx)` or
 `(added — §17, Bx)` marker, and **§17 wins over the body and over §14, §15 and §16 wherever
 they disagree.**
+**Amended:** 2026-08-07, amendment set `contract-b/3.4 + B16–B17` (**§18**), from the owner's
+ratification of **the pacing and speed readout on the live map**. The **peer stats block**
+(§6.3.1) gains three OPTIONAL settings — `timeScale`, copied from the mod's `HEARTBEAT`, and
+`inboundRatePerSimMinute` / `inboundRateBurst`, which are the sidecar's own configuration —
+so the operator surface can say how fast each world runs and what cap its arrivals are queued
+behind. `pacedDepth` has been on this block since M4 and has never been readable: a depth is
+only deep against a cap, and that cap has moved three times. Three additive OPTIONAL fields,
+so §4's own test answers with a **minor** bump to `contract-b/3.4`. `contract-a.md` takes
+**no** bump — no field of that wire changes, and `HEARTBEAT.timeScale` has been mandatory
+since `contract-a/2.0`. Affected body text carries an `(amended — §18, Bx)` or
+`(added — §18, Bx)` marker, and **§18 wins over the body and over §14 to §17 wherever they
+disagree.**
 **Status:** implementation-ready for M4. Written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*. Extended by D17–D20, ratified 2026-08-07
@@ -310,7 +322,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -367,6 +379,16 @@ those two edges close with `no_peer` (§8), and the map runs exactly as it does 
 directions degrade to the one-way map, and neither loses an organism or misroutes one.** That
 `MIGRATION_PAYLOAD.exitEdge` may now hold `"W"` or `"S"` is the same "existing enum value"
 line the table above already ruled on for `"N"`.
+
+**The pacing settings are the fourth, and it is a minor for the fourth time** (added — §18,
+B17): the peer stats block gains `timeScale`, `inboundRatePerSimMinute` and
+`inboundRateBurst` (§6.3.1), all three additive and all three OPTIONAL, so the identifier
+moves to **`contract-b/3.4`**. A `contract-b/3.3` **relay** carries them for the reason §16's
+B11 wrote down in advance — it stores the block as it received it rather than re-encoding it
+from a typed model — and a peer that does not know them omits them. **Both paths render as
+unknown on the page** (§10.1), and this is the one field group where "unknown" has to beat a
+plausible substitute out loud: the shipped `inboundRatePerSimMinute` has changed three times,
+so a reader that fills in the default is not degrading, it is reporting a different rig.
 
 Timestamps are informational (D5). `messageId` is for log correlation only; `migrationId` is
 the one idempotency key in the system (`contract-a.md` §7.1).
@@ -500,7 +522,7 @@ The **first frame on every connection**. Any other first frame closes with `4003
 |---|---|---|---|
 | `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). |
 | `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). |
-| `protocolVersion` | string | yes | `"contract-b/3.3"` (amended — §17, B15; `"contract-b/3.2"` before it, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. |
+| `protocolVersion` | string | yes | `"contract-b/3.4"` (amended — §18, B17; `"contract-b/3.3"` before it, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. |
 | `gameVersion` | string | yes | The game version behind this sidecar, from the mod's `CONFIG_UPDATE`. Empty while no mod is connected, and always empty for an archive. |
 | `sidecarVersion` | string | yes | Informational. The archive sends its own version here. |
 | `simulationSize` | float | no | `S`, when a mod has already reported one. |
@@ -519,14 +541,14 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
   "data": {
     "peerId": "peer-lan-slot5",
     "role": "peer",
-    "protocolVersion": "contract-b/3.3",
+    "protocolVersion": "contract-b/3.4",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0",
     "simulationSize": 2000.0
@@ -539,7 +561,7 @@ independently updated installs, so this is the failure most likely to waste an e
 | Field | Type | Required | Semantics |
 |---|---|---|---|
 | `relayVersion` | string | yes | Informational. |
-| `protocolVersion` | string | yes | `"contract-b/3.3"` (amended — §17, B15; `"contract-b/3.2"` before it, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
+| `protocolVersion` | string | yes | `"contract-b/3.4"` (amended — §18, B17; `"contract-b/3.3"` before it, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
 | `relaySessionId` | `uuid` | yes | **New in M4.** Minted once at relay start, constant for the life of the relay process. It is the scope of the forwarding record (§5.2), and a sidecar **MUST** persist it against every journal entry it hands over while this connection is live (§9.2). |
 | `assignedSlot` | number (int) | no | The slot this `peerId` already holds, when the relay remembers one. Absent for a first-time peer and always absent for an archive. |
 | `assignedPosition` | object `{col,row}` | no | Its position. Present exactly when `assignedSlot` is. |
@@ -549,13 +571,13 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
   "data": {
     "relayVersion": "0.4.0",
-    "protocolVersion": "contract-b/3.3",
+    "protocolVersion": "contract-b/3.4",
     "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
     "assignedSlot": 5,
     "assignedPosition": { "col": 1, "row": 1 },
@@ -593,7 +615,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -641,7 +663,7 @@ Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -681,6 +703,9 @@ memory (Risk 4).
 | `heldDepth` | number (int) | no | Outbound entries in the **held** state of §9.2 — forwarded, unproven, destination dark. |
 | `bouncedTimeoutTotal` | number (int) | no | Cumulative count of entries this sidecar has bounced home because the hold timeout expired. A monotonic counter, reset only by losing the journal. **An automatic bounce is a fact the operator reads, not a silent repair** (§9.3). |
 | `simulatedTime` | float | no | The world's simulated seconds, from the last `HEARTBEAT`. It is what makes a paced rate interpretable. |
+| `timeScale` | float | no | **How fast the world is running** (added — §18, B16), copied from the last `HEARTBEAT.timeScale` (`contract-a.md` §5.2) and **never computed here**. `5` is five simulated seconds per real second; `0` is a world standing still, which is a **reading and not a gap** — a reader renders it as such and does not confuse it with absence. Absent means **unknown**: no mod is connected, or no heartbeat has arrived on this session yet. It is the interpretive key to `simulatedTime` and to the two fields below: both advance and are spent in the world's own time, not the wall's. |
+| `inboundRatePerSimMinute` | float | no | **The delivery rate limit this sidecar is configured with** (added — §18, B16), from `contract-a.md` §7.5 and its `--inbound-rate` knob (§18, A40). A **setting**, not a measurement, and the sidecar always knows its own — so absence here means the peer's build predates this field, never that it has no limit. **A reader MUST render an absent value as unknown and MUST NOT substitute the shipped default**, which has been changed three times (2.0 → 12.0 → 100.0 on 2026-08-07 alone). It is what makes `pacedDepth` readable: twelve entries queued behind 120 a simulated minute is a blink, and twelve behind 2.0 is six minutes. |
+| `inboundRateBurst` | float | no | The token-bucket capacity behind that rate (added — §18, B16), same source and same rules. It bounds the largest clump the pacer can release at once, so a `pacedDepth` that sits below it is a queue that has never actually been paced. |
 | `lastSave` | object | no | The mod's save receipt, copied verbatim from `HEARTBEAT.lastSave` (`contract-a.md` §5.2, §15 A21): `atMs`, `simulatedTime`, `population`, and the optional `name`, `bytes`, `durationMs`. |
 | `species` | array of object | no | **The world's active species census** (added — §16, B11), copied **verbatim** from the last `HEARTBEAT.species` the sidecar received (`contract-a.md` §5.2, §17 A35). One entry per species with at least one living member or egg, sorted by `bibites + eggs` descending, at most `speciesCensusMax` (32) entries. Absent means **unknown** — no mod is connected, the mod predates `contract-a/2.2`, or no heartbeat has carried one. A present `[]` means a reporting mod with nothing alive in its world, which is a different fact (§10.1). |
 | `species[].genericName` | string | yes | The genus half, **raw**: the bytes the origin world's `Species` record holds. Valid UTF-8, 1 to 64 UTF-8 bytes. Leading, trailing and doubled internal whitespace are **legal here**, and no party on this wire may trim, collapse, case-fold, normalize or re-case one. **This is deliberately not the rule `MIGRATION_PAYLOAD.species` carries** (§6.6, §15 B9): that name is a matching key the exporting mod normalizes at the source (`contract-a.md` §16, A34); this one is a display label that must read as the owning world's player sees it (`contract-a.md` §17, A36). |
@@ -745,7 +770,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -873,7 +898,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -1097,7 +1122,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -1144,7 +1169,7 @@ geometry and the species block are untouched, and **only `destSlot` changed** �
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -1223,7 +1248,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1295,7 +1320,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1319,7 +1344,7 @@ simply cannot speak for the period before it started, so it says `false` and the
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -1362,7 +1387,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -1408,7 +1433,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -1447,7 +1472,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/3.3",
+  "protocol": "contract-b/3.4",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -2147,6 +2172,7 @@ specify it. **Its inputs are**, and three rules keep them honest (Risk 4):
 | Unknown is a value | A field absent from `stats`, a slot with no `stats` at all, a `statsAsOfMs` older than `statsStaleMs` (30 000) — every one of them renders as **unknown**, never as zero and never as the last value seen without its age. A slot that reports nothing is unknown, not empty. **An honest gap beats a confident zero.** |
 | The census is a stat, and every rule above applies to it (added — §16, B12) | `stats.species` (§6.3.1) is what the page's species view is built from. Absent renders as **unknown species** — never as "no species", never as an empty list, never as zero. A present `[]` is the different, stronger fact and the page may say so: a reporting world with nothing alive in it. A `truncated: true` census names the 32 most abundant species and the page **MUST** say the rest is unreported rather than presenting it as the whole list. And it ages like everything else in the block: past `statsStaleMs` it is history, not state. |
 | Two species facts, two sources, and only one of them is abundance (added — §16, B12) | The **census** says what lives in a world **now** and arrives on `PEER_STATUS`. The archive's **ledger** of `MIGRATION_PAYLOAD.species` (§10) says what **crossed**, and when. The page's species view comes from the census alone: a migration ledger holds migrants and their ancestors, never a resident population (D11), so answering "which species live in slot 4" from it produces a plausible-looking wrong number. A page that shows both **MUST** label which question each answers, and **MUST NOT** join them on a name without normalizing the census copy for the comparison only (`contract-a.md` §17, A36). |
+| A world's speed and its pacing are settings, and unknown beats the default (added — §18, B17) | The page may show each world's `timeScale` and the `inboundRatePerSimMinute` / `pacedDepth` pair (§6.3.1), because a depth is only readable against the cap it is queued behind and a simulated-minute cap is only readable against the speed that spends it. Every rule above binds them, and **the unknown rule binds them hardest**: a peer that publishes no cap renders as **unknown**, never as the shipped default. `timeScale: 0` is the opposite case and the page **MUST** keep the two apart — a world standing still is a reading, and a world that has not said is a gap. |
 | The recent-hops feed is ledger, and it animates rather than counts (added — §17, B14) | The page may show **which species crossed which lane, just now**, as a bounded feed of the last ~60 seconds drawn from the `MIGRATION_PAYLOAD` copies the archive already records. It is B12's third row exercised — *history, labelled as history* — and every rule above binds it: a hop whose envelope carried **no** species block renders as the **neutral glyph**, never a guessed name and never omitted; the feed is **never summed**, into a census or into anything else; and it must be bounded in **both** time and count, because the status view is serialized verbatim into the durable metrics file once a minute. |
 
 **What changed here, and what did not** (amended — §16, B12). §15's B10 stated that the
@@ -2160,7 +2186,8 @@ lives. Nothing else in this section's list changes.
 The exit test asks the page for the map and its holes, each slot's liveness and population,
 each effective lane, each bypass with the time it went dark, each sidecar's custody depth,
 each bounce a hold timeout caused, the last save of each world, and the paced journal depth —
-**and, since §16, which species live in each world and in what numbers**. Every one of those
+**since §16, which species live in each world and in what numbers**, and **since §18, how
+fast each world runs and the cap its arrivals are paced behind**. Every one of those
 is a field of §6.5 or §6.3.1, or is derived from them by §8 — which is why those two sections
 carry fields that no routing decision reads.
 
@@ -2171,6 +2198,17 @@ has counted per-lane hops since M4 — and no wire field is added. What is new i
 it is the cheapest verification the operator surface has ever had: **two-way lanes look like
 glyphs travelling both ways along one arrow, and an excluded species (`contract-a.md` §18,
 A39) looks like a species that is everywhere in the census and never on a lane.**
+
+**And since §18, everything that moves on that map is evidence** (added — §18, B17). The page
+also drew an **ambient pulse** per lane — a dot walking the arrow at the lane's measured rate,
+which named no organism and said nothing the lane's own `/min` label did not say in a number a
+reader can compare. Once real hops travelled the same arrows it was worse than redundant: two
+things moving along one lane, one of them a migration this archive was copied on and one of
+them decoration, drawn at the same size on the same path. **It is removed.** The rate stays,
+as the number it always was. This is a page decision and not a wire one — no field, no
+message, no component learns of it — and it is recorded here for the same reason B14 was:
+§10.1 is where what the page may claim is written down, and "a moving glyph is a real
+crossing" is now one of those claims.
 
 ---
 
@@ -2319,6 +2357,13 @@ budget of 4 applications per `FixedUpdate` is ~12 000 per simulated minute, **tw
 it**. The burst is bounded by `inboundQueueMax` (64) rather than by the rate, so the bucket can
 never release a full paced queue in one breath. Nothing in the table below changes; the
 `OVERLOADED` path simply fires still less often.
+
+**And since the third raise, each sidecar publishes the value it is actually running with**
+(added — §18, B16): `inboundRatePerSimMinute` and `inboundRateBurst` are on the peer stats
+block of §6.3.1, beside the `pacedDepth` they explain. Two raises in one day is the argument —
+a default in a table is not what a rig runs, a `--inbound-rate` on one slot's command line is,
+and a `pacedDepth` read against the wrong cap is how a phase of this system's own exit test
+came to assert against a number that had moved underneath it twice.
 
 | Interaction with this wire | Effect of the raise |
 |---|---|
@@ -2939,3 +2984,98 @@ minor.**
 
 **Enforced by:** both wire ends, for sending `"contract-b/3.3"` and comparing only the major;
 the relay, for being the side whose capability the minor describes.
+
+---
+
+## 18. The pacing and speed readout (`contract-b/3.4`, 2026-08-07)
+
+The owner ratified **the pacing and speed readout on the live map** on 2026-08-07, against the
+running M4 deployment. It is a small amendment with one honest cause: `pacedDepth` has been on
+the peer stats block since M4 and **has never been readable**. A queue is only deep against the
+cap it is queued behind, that cap is counted in **simulated** minutes, and neither the cap nor
+the speed that spends it was ever published. In the same day D20 moved the shipped cap twice —
+2.0 to 12.0, then 12.0 to 100.0 (`contract-a.md` §18, A40) — which settles the question of
+whether a reader may assume it. It may not.
+
+**Two amendments, B16 and B17**, continuing the `B` series for the reason §14 gives. B16 puts
+the three settings on the wire; B17 states what the page does with them, records the ambient
+lane pulse's removal, and applies §4's version test.
+
+**This set changes the wire, additively**: three OPTIONAL fields on one existing object. No
+message type, no field removal, no type change, no enum value added or removed, no new NACK
+code, and no change to custody, dedup, the hold, the fan-out, hashing, routing or admission
+control. §4's test therefore answers **minor**, and the identifier moves to `contract-b/3.4`
+(B17). `contract-a.md` takes **no** bump: not one field of that wire changes, and
+`HEARTBEAT.timeScale` has been mandatory there since `contract-a/2.0`.
+
+### B16 — The stats block carries the world's speed and the sidecar's pacing settings (§6.3.1, §6.5, §6.11, §10.1)
+
+**Gap.** §6.3.1 carries `pacedDepth` — "inbound entries waiting on the delivery rate limit" —
+and, since M4, the sentence "a depth that never falls names a limit set too low". **The limit
+is not on the block.** Neither is the world's `timeScale`, which is the clock that limit is
+counted against. An operator reading `pacedDepth: 12` off the live map cannot tell a world
+that is nine seconds behind from one that is six minutes behind, and the analyses that have
+needed the number have had to divide by a `timeScale` recovered from somewhere else.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| `timeScale` | Copied **verbatim** from the last `HEARTBEAT.timeScale` (`contract-a.md` §5.2). The sidecar does not compute it, smooth it, or infer it from `simulatedTime` deltas. |
+| `0` is a reading | A stopped world reports `timeScale: 0`, and that is a **fact about the world**, not a missing value. Absent is the missing value. A reader that folds the two together loses the ability to say "this world is paused", which is the single most common reason a slot's numbers stop moving. |
+| `inboundRatePerSimMinute`, `inboundRateBurst` | The sidecar's **own configuration** (`contract-a.md` §7.5, §18 A40), published as settings. The sidecar always knows them, so a peer that omits them is a peer whose build predates this amendment — there is no third case. |
+| Never the default | A reader **MUST NOT** substitute the shipped default for an absent cap. The shipped value has been 2.0, then 12.0, then 100.0, all within the life of this deployment, and a rig runs whatever each peer was launched with. |
+| The relay | **Unchanged, and that is the point.** §16's B11 already asked a relay to store the stats block as the bytes it arrived as, "for the next field after this one". These are that field. A `contract-b/3.3` relay carries all three without knowing they exist. |
+| Not a routing input | Three more numbers copied into a broadcast the relay was already sending. Nothing routes, schedules, refuses or filters on any of them, exactly as nothing does on `population`. |
+| Size | Three floats. The block's bound is still the census (§6.3.1). |
+
+**Enforced by:** the **sidecar**, for copying `timeScale` rather than authoring it and for
+publishing the configuration it actually runs with; the **relay**, for carrying what it does
+not understand; the **archive and any client**, for rendering an absent value as unknown.
+
+### B17 — The page shows speed and pace, what moves on the map is evidence, and the version moves to `contract-b/3.4` (§4, §10.1, §12)
+
+**Change.** Three things, one of them a removal.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Speed per world | Each world's cell states its `timeScale`. A rig whose worlds run at different speeds is normal and was previously invisible: arrivals are paced on the **receiving** world's clock, so two neighbours at ×1 and ×100 experience the same lane completely differently. |
+| Pace per world | Each world states `pacedDepth` over `inboundRatePerSimMinute`, in that order, with the unit named as a **simulated** minute somewhere the reader can reach. Queued-over-cap is the pair; either half unknown renders as unknown **in place**, so a peer that publishes a depth and no cap still shows the depth. |
+| Unknown, out loud | An absent cap renders as a marked unknown — not a blank, not a zero, and above all not the default. This is §10.1's third rule with no exception carved for a number that "probably" has not changed. |
+| The ambient lane pulse is removed | The map no longer walks a decorative dot down each lane at that lane's measured rate. The rate stays as the lane's own numeric label, which is what a reader can actually compare. **What moves on the map is now always a migration the archive was copied on** (§17, B14) — travelling under motion, still-and-fading under reduced motion, and the destination cell's arrival flash either way. |
+| Still a page decision | No field, message, component or wire behaviour is added or removed by any of it. It is recorded here because §10.1 is where what the page may claim is written down, and both "this world runs at ×5" and "everything moving is real" are claims. |
+
+**Version.** Apply §4's test:
+
+| Change to Contract B | Kind | Needs a major? |
+|---|---|---|
+| Stats block gains `timeScale` | additive OPTIONAL field | no |
+| Stats block gains `inboundRatePerSimMinute`, `inboundRateBurst` | additive OPTIONAL fields | no |
+| §10.1 gains the speed-and-pace rule and the moving-glyph rule | page-input rules, off the wire | no |
+| Message catalogue, enums, codes, custody, dedup, routing inputs, fan-out, hashing, the hold | **all unchanged** | no |
+
+The identifier is **`contract-b/3.4`**. Every `contract-b/3.x` peer stays compatible with every
+other, because compatibility is on the major and the minor is never a rejection reason (§4,
+`contract-a.md` §3.1).
+
+**What a mixed rig does, honestly.** This is the state the deployment is actually in, and the
+degradation is per slot rather than per map:
+
+1. A `contract-b/3.4` **sidecar** against a `contract-b/3.3` **relay** works unchanged: the
+   relay carries the three fields it does not know (B11's SHOULD, implemented), and the archive
+   reads them off the block it receives.
+2. A `contract-b/3.3` **sidecar** — the far end, until its bundle is refreshed — publishes
+   neither cap nor speed. Its cell shows `×?` and an unknown cap beside a **known**
+   `pacedDepth`, which is exactly the honest split: the depth is real, the scale is not there.
+3. A **relay** that re-encodes the block from a typed model instead of carrying it drops all
+   three, and every slot reads unknown. That is why B11 wrote the SHOULD down before there was
+   a field that needed it.
+4. No path produces a wrong number, because there is no default anywhere in the chain to
+   produce it from.
+
+**Enforced by:** the **page and `ringstat`**, for rendering unknown rather than a default and
+for keeping `timeScale: 0` distinct from absence; the **archive**, for carrying the three
+fields through `StatusView` untouched; both wire ends, for sending `"contract-b/3.4"` and
+comparing only the major.
