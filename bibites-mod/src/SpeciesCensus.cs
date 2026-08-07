@@ -63,9 +63,10 @@ namespace BibitesMultiverse
         /// <summary>Descending by <c>bibites + eggs</c> (§17, A35). Ties fall in any order, and §5.2 says a reader must not read meaning into one.</summary>
         private static readonly Comparison<Row> ByTotalDescending = (a, b) => b.Total.CompareTo(a.Total);
 
-        /// <summary>Rate limit for the one warning shape this can emit; a per-second log line is a defect of its own.</summary>
+        /// <summary>Rate limit for both warning shapes this can emit; a per-second log line is a defect of its own.</summary>
         private const float SkipLogIntervalSeconds = 60f;
         private static float nextSkipLogRealtime;
+        private static float nextFailureLogRealtime;
 
         /// <summary>
         /// The census for this heartbeat, or <c>null</c> when this world cannot answer the question.
@@ -81,6 +82,25 @@ namespace BibitesMultiverse
         /// monotonic from here on: every hop may set it, none may clear it.
         /// </param>
         internal static JArray Build(out bool truncated)
+        {
+            // §17, A35 — **a census may never cost a heartbeat.** HEARTBEAT has no NACK channel and no
+            // strip path on this side, so an exception escaping into PumpHeartbeat would take the whole
+            // frame with it — and because it would throw again on the next Update, it would take the
+            // session with it too, on a 4004 heartbeat timeout. A display field is not worth that. Every
+            // failure lands on the same answer the menu lands on: absent, which reads as unknown.
+            try
+            {
+                return BuildUnguarded(out truncated);
+            }
+            catch (Exception e)
+            {
+                truncated = false;
+                LogFailure(e);
+                return null;
+            }
+        }
+
+        private static JArray BuildUnguarded(out bool truncated)
         {
             truncated = false;
 
@@ -228,6 +248,26 @@ namespace BibitesMultiverse
                 $"{Prefix} {skipped} active species could not go into the census this heartbeat — a name half is empty or "
                 + $"over {ContractA.MaxSpeciesNameBytes} UTF-8 bytes (§5.2). The census carries the rest with truncated=true. "
                 + $"First: {example}");
+        }
+
+        /// <summary>
+        /// The census could not be read at all. Also rate limited, for the same reason and more sharply:
+        /// whatever makes this throw will very likely make it throw on the next heartbeat too, and the
+        /// heartbeat is one a second.
+        /// </summary>
+        private static void LogFailure(Exception e)
+        {
+            float now = Time.realtimeSinceStartup;
+            if (now < nextFailureLogRealtime)
+            {
+                return;
+            }
+
+            nextFailureLogRealtime = now + SkipLogIntervalSeconds;
+            MultiversePlugin.Log.LogWarning(
+                $"{Prefix} building the species census threw — this heartbeat carries no census, and the page reads "
+                + $"this world's species as unknown rather than wrong (§17, A35). Everything else on the heartbeat is "
+                + $"unaffected. {e}");
         }
     }
 }
