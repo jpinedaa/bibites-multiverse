@@ -2,10 +2,14 @@
 
 This report expands milestone M4 of `system_decomposition.md`.
 
-**Status: SIGNED OFF.** The owner ratified decisions D12 to D16 on 2026-08-05. The owner
-signed off this design on the same day, and overrode three of its recommendations. The
-section *Owner Sign-Offs* records the four calls, and each affected section carries the
-result. M3 stays complete. M4 keeps the LAN rig and adds no public exposure.
+**Status: COMPLETE.** The LAN exit test passed on 2026-08-06, on a 3×2 map of six real
+worlds across two computers. *Exit Test → Result* records the run, phase by phase. The rig
+came back up after the test, and it runs now as the living multiverse.
+
+The owner ratified decisions D12 to D16 on 2026-08-05. The owner signed off this design on
+the same day, and overrode three of its recommendations. The section *Owner Sign-Offs*
+records the four calls, and each affected section carries the result. M3 stays complete.
+M4 kept the LAN rig and added no public exposure.
 
 ## Purpose
 
@@ -545,6 +549,12 @@ It does not prove a broken one.
 
 Take the 1×2 fallback of Question 7 only against a recorded measurement.
 
+**Measured 2026-08-06, and the answer was BepInEx, not the hardware.** Six games run
+together at about 550 MB each. BepInEx hands out five log files on this install, and an
+instance with no log file never loads the mod. Five real games is therefore the local
+ceiling, so slot 6 moved to the second computer. The map kept its 3×2 shape and the fallback
+stayed unused. `dev_environment.md`, *The five-instance ceiling*, holds the numbers.
+
 ### Risk 2 — Healing interacts with at-most-once custody
 
 Decision D2 refuses duplication. Route-around introduces a second destination for one
@@ -590,6 +600,9 @@ instances than at three (Risk 1).
 A save that breaks the 2-second budget needs a different cadence, or a save path that does
 not block the tick. It does not need a different decision. Decision D14 accepts a slower
 rig over a lost night.
+
+**Measured 2026-08-06, at five concurrent worlds: 241 ms to 538 ms.** The budget held with
+room to spare, the simple synchronous save stays, and the save lock never deferred.
 
 ### Risk 4 — The observability data path competes with the migration path
 
@@ -648,6 +661,11 @@ Mitigate it in the first runtime session. Copy the layer from a live zone render
 The second risk is the sorting order against organisms and pellets. The assembly does not
 answer it. Make the order configurable, and tune it in the same session.
 
+**Closed 2026-08-06.** Every local slot logged `event=BUILT` with its layer, its culling
+mask and its strip bounds, and every open edge showed a strip. The owner confirmed the look
+on screen, at the shipped `[M4] PortalSortingOrder = -50`. The portal renders, and it needed
+no tuning.
+
 ### Risk 9 — The rate limit interacts with the hold timeout
 
 Pacing delays each `MIGRATE_IN`. `MIGRATION_ACK` waits for the mod's `MIGRATE_IN_ACK`, so
@@ -692,9 +710,10 @@ implementation wave.
 
 Eight packages. WP1 gates the wire work. WP6 gates the exit test.
 
-**Delivery, as of 2026-08-05.** WP1 to WP5 and WP7 are done. WP6 and WP8 are open, and both
-need a running game. Each package carries its own status line below, and each open item stays
-named there.
+**Delivery: all eight packages are done, 2026-08-06.** WP1 to WP5 and WP7 landed on
+2026-08-05. WP6 and WP8 closed with the LAN exit test on 2026-08-06, and that run also
+closed the two measurements WP4 and WP7 left open. Each package carries its own status line
+below.
 
 ### WP1 — The contract amendments
 
@@ -763,16 +782,16 @@ carry every item. `--reserve-slot <peerId>[@<col>,<row>]` places a peer before i
 - The second passive entry edge, and its entry-position mapping
 - The entry-edge metrics of Question 9
 
-**Status: DONE, 2026-08-05** (`efd74a1`), with one measurement still open. `WorldSaver.cs`
-saves, verifies, rotates and prunes. `CrossingStats.cs` reports one `[M2-CROSSING]` line per
+**Status: DONE, 2026-08-05** (`efd74a1`); its last measurement closed 2026-08-06.
+`WorldSaver.cs` saves, verifies, rotates and prunes. `CrossingStats.cs` reports one `[M2-CROSSING]` line per
 export edge and one `[M4-CROWDING]` line per entry edge. `MultiverseConfig.cs` parses
 `exportEdges` and derives the entry and border sets. The corner rule runs in
 `MultiverseClient.OnBodyTick`.
 
-**Still open: the save-stall re-measure at six instances.** The mod logs `stallMs` against a
-2 000 ms budget on every save, and logs `event=BUDGET_EXCEEDED` above it. Nobody has run that
-against six concurrent instances. The save lock and its six 15-second deferrals exist for
-that contention, and they are untested at six. Measure it in WP6.
+**The save-stall re-measure is done, 2026-08-06.** Five concurrent local worlds saved on
+interval through the exit test. Every stall fell between **241 ms and 538 ms**, against the
+2 000 ms budget. Phase 6 sampled the five most recent, at about 280 ms to 440 ms. No save
+logged `event=BUDGET_EXCEEDED`, and the save lock never had to defer.
 
 ### WP5 — The archive: the status page
 
@@ -802,17 +821,20 @@ An absent stat renders as `unknown`, and `statsAsOfMs` ages every block.
 - The rig measurement of Risk 1, before WP8 depends on it
 - Per-instance log names, environment variables and far-end scripts, for six slots
 
-**Status: the rigs exist; the LAN run has not happened yet.** `e2e/run-m4.sh` is the local
-rehearsal — a 3×2 map of six slots, five real games and `bin/fakemod` for the sixth, because
-BepInEx caps this install at five log files and an instance with no log file never runs the
-mod at all. `e2e/run-m4-lan.sh` is the exit-test rig: the same map with **slot 6 on the second
+**Status: DONE, 2026-08-06.** `e2e/run-m4.sh` is the local rehearsal — a 3×2 map of six
+slots, five real games and `bin/fakemod` for the sixth, because BepInEx caps this install at
+five log files and an instance with no log file never runs the mod at all.
+`e2e/run-m4-lan.sh` is the exit-test rig: the same map with **slot 6 on the second
 computer**, which retires the synthetic peer and makes the shape an honest 5+1. The far-end
 bundle is on `contract-b/v3`, port `8795`, `MULTIVERSE_EXPORT_EDGES=E,N` and slot 6 at (2,1).
 `dev_environment.md`, *The M4 rigs*, carries both command lists and the reasoning for the slot
-choice. WP6 also owns the save-stall re-measure that WP4 left open.
+choice.
 
-**What is still open here:** the LAN run itself, which needs the owner's elevated networking
-steps on this machine and one setup pass on the second computer.
+**The LAN run happened on 2026-08-06, and it passed.** The owner ran the elevated networking
+steps here and one setup pass on the second computer. The run also produced the save-stall
+re-measure of Risk 3. The rig measurement of Risk 1 is recorded in `dev_environment.md`,
+*The five-instance ceiling*, and it moved slot 6 to the second computer. See
+*Exit Test → Result*.
 
 ### WP7 — The portal
 
@@ -834,20 +856,19 @@ Do not use immediate mode. `Shapes.Draw.*` needs a `ShapesRenderFeature` on the 
 renderer, and a mod cannot add one. Keep `ParticlesMaster` as an optional extra only: the
 game silences it when the player turns pheromone display off.
 
-**Status: BUILT, 2026-08-05** (`efd74a1`), and unproven on screen. `PortalVisual.cs` draws one
-strip per open export edge and one per declared entry edge. `MULTIVERSE_PORTAL` and
+**Status: DONE, 2026-08-05** (`efd74a1`), and **confirmed on screen 2026-08-06**.
+`PortalVisual.cs` draws one strip per open export edge, and one per declared entry edge.
+`MULTIVERSE_PORTAL` and
 `MULTIVERSE_PORTAL_FLOURISHES` gate it, both on by default. `[M4-PORTAL] event=BUILT` reports
 the layer, the culling mask, the shaders and the first strip's world bounds, which is Risk 8's
 runtime check. Entry-portal visibility is now defined in `contract-a.md` §15 A27.
 
-**Two looks are still open, and both need a running game.**
-
-1. **The sorting order.** `[M4] PortalSortingOrder` defaults to `-50` and has no environment
-   variable. Nobody has confirmed the strip draws behind the organisms and in front of the
-   background.
-2. **The zoom-legibility sweep.** Check the strip at `orthographicSize` 5, 250, 2 000 and
-   4 000. The new `camera <orthographicSize> [x] [y]` command-file verb drives that sweep from
-   a script. The sweep has not run.
+**The two looks are closed, and the owner closed them.** Exit-test phase 7 proved the
+runtime half on every local slot: each slot logged `event=BUILT`, and each open edge showed
+its strip. The owner then watched the live rig and ratified the visual result — "portals
+look great". That answers the sorting order at `[M4] PortalSortingOrder = -50`, and it
+answers the zoom legibility. **This was the last item in M4 that only a person could
+settle.**
 
 ### WP8 — The exit test
 
@@ -858,7 +879,7 @@ Build the test on `e2e/run-m3-lan.sh`. The ring form-up, the command file and th
 checks all carry over. The rig grows to six instances, so the harness starts and stops
 each slot by number.
 
-**Status: the rig is built and the run is pending.** `e2e/run-m4-lan.sh` is that test — five
+**Status: DONE, 2026-08-06. The run passed.** `e2e/run-m4-lan.sh` is that test — five
 real games here, slot 6 real on the second computer, and the far end never driven. Its phases
 map onto the parts below: phase 1 to Part 1's form-up, phases 2 and 3 to the two-axis current
 (phase 3 waits for a **natural** crossing out of the far world, because nothing here may force
@@ -876,6 +897,8 @@ peer exports east and north, and receives west and south.
 
 Attempt that shape first. Take the 1×2 fallback of Question 7 only against a recorded rig
 measurement (Risk 1). A fallback run states which parts it did not prove.
+
+**The run took the full shape, and the fallback stayed unused.** *Result* below records it.
 
 ### Part 1 — The two-axis current runs
 
@@ -1031,27 +1054,99 @@ An unknown value reads as unknown. A zero reads as a measurement.
 The test passes when no log holds an error at the end of the run. Sweep every BepInEx log,
 sidecar log, relay log and archive log.
 
+### Result — PASS, 2026-08-06
+
+`e2e/run-m4-lan.sh` ran the full 3×2 map: **six real worlds across two computers**, five
+here and slot 6 at (2,1) on the second computer. Twelve lanes carried traffic on both axes.
+No synthetic peer took part, and the rig sent no command to the second computer.
+
+**Phase 1 — the grid forms, including the far slot. PASS.** Six slots reported a 3×2 map.
+Every peer opened two export edges and two entry edges. All twelve lanes read `peer_live`.
+
+**Phase 2 — forced hops on both axes across the LAN. PASS.** Each forced organism reached
+the far world byte-equal, and the census counted each one exactly once.
+
+**Phase 3 — the far world exports on both axes with nobody driving it. PASS.** Slot 6
+crossed east and north on its own traffic. Both organisms landed exactly once.
+
+**Phase 4 — local slot 5 hard-killed mid-column. PASS.** The width axis healed **across the
+LAN**: slot 4 bypassed the dead slot and exported east to slot 6 on the second computer.
+Slot 2 closed its north lane with `no_peer`, which is the degenerate answer Contract B §2.1
+requires on a column of two. Slot 5 then spliced back in and reclaimed both its slot number
+and its position at (1,1).
+
+**Phase 5 and phase5far — arrival pacing. No LAN result, by the script's own design.**
+`run-m4-lan.sh` phase 5 runs the rehearsal's pacing test verbatim, against a local dam. It
+proves nothing the rehearsal has not proven, and `all` does not gate on it. `phase5far`
+drives that dam on the far world instead. It needs two commands typed on the second
+computer, and D9 forbids this rig to send them, so `all` excludes it. A test that blocks on
+a person is confirmation, never the only evidence.
+
+**Phase 6 — periodic saves. PASS.** The five local worlds saved on interval and stayed
+inside the budget. The sampled stalls ran about 280 ms to 440 ms against 2 000 ms, and the
+whole run stayed between 241 ms and 538 ms. The far world proved its own save through the
+`HEARTBEAT.lastSave` receipt on the wire. That receipt is the only save evidence an undriven
+peer produces.
+
+**Phase 7 — the portals. PASS.** Every local slot logged `[M4-PORTAL] event=BUILT` and
+showed a strip on each open edge, which completes Risk 8's runtime check. The owner then
+looked at the live screen and confirmed the result — "portals look great". That closes the
+last item in M4 that only a person could settle.
+
+**Phase 8 — the close-out. PASS.** Exactly-once held across both computers. The archive
+recorded every cross-machine lane. No log held an unexplained error, and the teardown of
+this machine was clean.
+
+**Three parts came from the local rehearsal, and `run-m4-lan.sh` states why.** Part 4 (a
+brand-new instance), Part 5 (paced arrivals) and Part 6 (the resume test) are proven by
+`run-m4.sh` phases 5, 6 and 3. Phase 7 of the same rehearsal proves the bounded-hold case.
+Each of the four needs a command sent to the slot under test, and the far end takes no
+commands (D9). The resume test also stays local, because `e2e/data/slot-1/journal` is the
+only copy of its input.
+
+**A harness caveat, and phase 6 found it.** Phase 6 failed on its first run, purely on
+timing. Phase 4 restarts slot 5, and a restarted world restarts its save clock with it. The
+check then ran before that world's first two-minute tick. The re-run passed with no code
+change. **Wait one save interval after any slot restart before you assert a save.**
+
+**The rig came back up, and it stays up.** The deployment now runs as the living multiverse:
+six worlds, twelve lanes and about 198 organisms at bring-up. The archive binds
+`0.0.0.0:8796` so the status page is readable from the LAN — see `dev_environment.md`,
+*Owner steps*.
+
 ## Deliverables
 
-- The wire specification, from WP1: `contract-a.md` and `contract-b` at a new major
-  version
-- A relay with lane re-pairing, insertion at a position, handover, the coordinate map and
-  the non-delivery answer
-- A sidecar with the handoff state, the re-route rule, the bounded hold and its automatic
-  bounce, `--release-inflight`, the delivery rate limit and durable metrics
-- A mod with periodic saves, save-on-quit, save rotation, plural export edges, the second
-  capture band, the corner rule and the entry-edge metrics
-- A live 3×2 map, running on both axes across the two machines
-- An archive with a live status page, and a `ringstat` command
-- A visible portal at each open edge, built to `m4_portal_findings.md`
-- A scripted single-instance recovery procedure
-- A join kit for a new instance
-- Log preservation in the start and stop scripts
-- The save-cost measurement of Risk 3, against the 2-second budget
-- The rig measurement of Risk 1, at six instances
-- The entry-edge crowding measurement of Question 9, which verifies the pacing
-- The automated M4 exit test, with its recorded result
-- An `m4_findings.md` with the research results of the milestone
+Every item is delivered, except the last one. The date beside each item is the date it
+landed.
+
+- **Done, 2026-08-05.** The wire specification, from WP1: `contract-a.md` and `contract-b`
+  at a new major version
+- **Done, 2026-08-05.** A relay with lane re-pairing, insertion at a position, handover, the
+  coordinate map and the non-delivery answer
+- **Done, 2026-08-05.** A sidecar with the handoff state, the re-route rule, the bounded hold
+  and its automatic bounce, `--release-inflight`, the delivery rate limit and durable metrics
+- **Done, 2026-08-05.** A mod with periodic saves, save-on-quit, save rotation, plural export
+  edges, the second capture band, the corner rule and the entry-edge metrics
+- **Done, 2026-08-06.** A live 3×2 map, running on both axes across the two machines. It
+  runs still, as the living deployment
+- **Done, 2026-08-05.** An archive with a live status page, and a `ringstat` command
+- **Done, 2026-08-06.** A visible portal at each open edge, built to
+  `m4_portal_findings.md`, and confirmed on screen by the owner
+- **Done, 2026-08-05.** A scripted single-instance recovery procedure
+- **Done, 2026-08-05.** A join kit for a new instance
+- **Done, 2026-08-05.** Log preservation in the start and stop scripts
+- **Done, 2026-08-06.** The save-cost measurement of Risk 3, against the 2-second budget:
+  241 ms to 538 ms at five concurrent worlds
+- **Done, 2026-08-06.** The rig measurement of Risk 1, at six instances. It found a BepInEx
+  ceiling of five log files on this install, and it put the sixth world on the second
+  computer
+- **Done, 2026-08-05.** The entry-edge crowding measurement of Question 9, which verifies
+  the pacing. `run-m4.sh` phase 6 holds it
+- **Done, 2026-08-06.** The automated M4 exit test, with its recorded result. See
+  *Exit Test → Result*
+- **Open.** An `m4_findings.md` with the research results of the milestone. This is the one
+  M4 deliverable nobody has written. The results live in this document, in the rig logs
+  under `e2e/logs-m4-lan/` and in `m4_portal_findings.md`
 
 ## Owner Sign-Offs
 
@@ -1083,21 +1178,19 @@ call below is settled. The sections named beside each one carry the result.
 
 ## Next Steps
 
-Updated 2026-08-05, after WP1 to WP5 and WP7 landed. Every remaining step needs a running
-game, which is what makes WP6 the gate.
+Updated 2026-08-06, after the exit test passed. Every work package of M4 is closed. The
+steps below carry the milestone's remainder into the living deployment and into M5.
 
-1. **Done** (WP6). The port plan moved the relay to `8795` and the archive to `8796`,
-   `e2e/run-m4.sh` rehearsed the six-slot map locally, and `e2e/run-m4-lan.sh` plus the
-   refreshed `farend/` bundle carry it across the two machines. `dev_environment.md`,
-   *The M4 rigs*, is the entry point. **The one owner step left is networking**: delete the
-   stale `8790` portproxy, open TCP `8795`, and forward it into WSL — `run-m4-lan.sh lanhost`
-   prints all three with live values.
-2. **Measure the rig at six instances** (Risk 1), before WP8 depends on it.
-3. **Re-measure the save stall at six instances** (Risk 3), against the 2 000 ms budget. The
-   budget check ships and logs `event=BUDGET_EXCEEDED`. Only the contention is unmeasured.
-4. **Settle the portal's layer, culling mask and sorting order in one runtime session**
-   (Risk 8), then sweep the zoom range with the `camera` verb.
+1. **Keep the living deployment running.** Six worlds, twelve lanes, periodic saves on the
+   rig's 2-minute interval here and the far end's 10-minute one. It is the first rig that
+   survives its own operator, and the next overnight harvest measures that claim against T1.
+2. **Re-run `run-m4-lan.sh lanhost` after every WSL restart.** The WSL address changes, and
+   the portproxy behind `8795` then points at nothing. The far world drops out of the map
+   until the owner re-adds it.
+3. **Write `m4_findings.md`.** It is the one M4 deliverable still open. The inputs are this
+   document, `e2e/logs-m4-lan/` and `m4_portal_findings.md`.
+4. **Run `phase5far` once, when a person is at the second computer.** It confirms the pacing
+   rule across the LAN. Phase 5 already proves the rule locally, so this is confirmation.
 5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.
-6. **Bring the rig back up with periodic saves.** The mod saves every 10 minutes by default.
-   The next overnight run then produces a full comparison, not a partial one.
-7. **Run the exit test** (WP8), against the amended Part 2.
+6. **Open M5** (public release). The join kit is its starting point, and `contract-a/2.0`
+   plus `contract-b/3.0` are the wire shapes it publishes.

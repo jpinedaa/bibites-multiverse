@@ -680,7 +680,7 @@ outage on one slot stopped the current for every peer behind it, and every survi
 came out of BepInEx logs that the next game launch overwrites. Those three failures are
 D14, D12 and D15.
 
-### M4 — Operations: resilience, topology, observability — **NEXT**
+### M4 — Operations: resilience, topology, observability — **COMPLETE**
 **Defined 2026-08-05 by D12–D16. Full plan: `m4_considerations.md`.** Still a LAN
 milestone: no VPS, no strangers, no public exposure. M4 makes the rig something that can be
 run, rather than something that has to be watched.
@@ -716,8 +716,15 @@ axes; a dark slot is woken against accumulated traffic and its arrivals are pace
 than instantaneous; the 2026-08-04 in-flight organism arrives; a kill-and-reload proves the
 periodic saves by coming back with fresh state instead of stale state; and the status page
 shows all of it. Full conditions in `m4_considerations.md`.
+**Passed 2026-08-06** (`e2e/run-m4-lan.sh`): **six real worlds on two computers** in a 3×2
+map, twelve lanes open, organisms migrating on both axes, and a hard-killed slot healed
+**across the LAN** before it reclaimed its own slot and position — with exactly-once held
+everywhere and the portals confirmed on screen by the owner.
+**The rig was left running as the living deployment** — six worlds, twelve lanes, ~198
+organisms at bring-up, periodic saves on. Full result in `m4_considerations.md`,
+*Exit Test → Result*.
 
-### M5 — Public release
+### M5 — Public release — **NEXT**
 The public half of the old M3, moved out intact by D9 and pushed out once more by D16. The
 scope is unchanged. A hosted relay on a VPS; TLS and authentication for public exposure;
 capacity and abuse limits; packaging so a player installs the mod and the sidecar without a

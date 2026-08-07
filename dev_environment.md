@@ -229,6 +229,12 @@ e2e/run-m4-lan.sh phase8     # exactly-once, error sweep, teardown of THIS machi
 e2e/run-m4-lan.sh all        # up, phase1..8 (phase5far is excluded: it blocks on a person)
 ```
 
+**The LAN rig passed the M4 exit test on 2026-08-06, and it is running now.** It came back
+up after the test and holds the living deployment: six worlds, twelve lanes, periodic saves
+every 2 minutes here and every 10 on the far end. Do not start another rig against it, and
+do not stop a process it owns — see *Only one rig can run at a time* in Gotchas.
+`m4_considerations.md`, *Exit Test → Result*, records the run.
+
 Six things about it are load-bearing:
 
 - **The far slot is slot 6, at (2,1), and the choice is forced by the map.** It was already
@@ -281,7 +287,7 @@ will not join. That is the failure to expect, and it is why this list exists.
 | `/contract-a/v1` | **`/contract-a/v2`** | **Nothing to change.** No script hardcodes a Contract A path — the sidecar's `--listen` and the mod's `MULTIVERSE_SIDECAR_PORT` carry it, and both sides already agree. |
 | `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N`** | `e2e/run-m3.sh`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. **`farend/setup-farend.ps1` is done**: its generated `start-slot6.ps1` sets the plural name, and it rejects an edge set that would silently disable the client. |
 | the relay's `ring.json` key `"ring"` | **`"slots"`**, with `width`, `height`, `col`, `row` | `e2e/run-m3-lan.sh` (`ring_order()`) and `e2e/baseline.sh`. **This is the silent one.** `"ring"` is a read-only migration path: an M4 relay reads an M3 file once and never writes that key again. Both readers work today against the committed M3 `ring.json` and start returning empty the first time an M4 relay saves. |
-| nothing | the archive's **`--http`** flag, and **`ringstat`** | No script mentions either. The archive is started without `--http`, so it binds its compiled default — `127.0.0.1:8796` since the M4 port plan, `127.0.0.1:8791` before it. `baseline.sh` reads the archive only through the filesystem, so the whole M4 observability surface — map shape, effective lanes, bypasses, custody/paced/held depths, hold-timeout bounces — is absent from the baseline capture. |
+| nothing | the archive's **`--http`** flag, and **`ringstat`** | No **M3** script mentions either, so the archive binds its compiled default — `127.0.0.1:8796` since the M4 port plan, `127.0.0.1:8791` before it. The M4 rigs do pass `--http`, from `ARCHIVE_HTTP` (*Owner steps*). `baseline.sh` reads the archive only through the filesystem, so the whole M4 observability surface — map shape, effective lanes, bypasses, custody/paced/held depths, hold-timeout bounces — is absent from the baseline capture. |
 | relay `8790`, archive `8791` | relay **`8795`**, archive **`8796`** | The Go defaults already moved (`contractb.DefaultRelayPort`, the archive's `--http`, `ringstat`'s `--url`), and so has `$RelayPort` in `farend/setup-farend.ps1`. Still to change: `RELAY_PORT` in `e2e/run-m3.sh`, and **the firewall rule and the portproxy, which are owner steps** (below). See *The M4 port plan* — the old defaults are slot 4's and slot 5's Contract A ports on a six-slot rig. |
 | `grep '[M2-CROSSING]' \| tail -n 1` | a filter on **`edge=`** | `e2e/baseline.sh`, in both `last_crossing()` and the population trend. **Fixed 2026-08-05** in the M4 pre-flight: both now key on `edge=`. See *Reading the logs* below — one window emits one line **per export edge**. |
 
@@ -648,7 +654,7 @@ rig prints the command, waits for `modConnected` to flip on the status page, and
 A full `stop-slot6.ps1` would take the sidecar too, the lane would close, and there would be
 nothing to accumulate.
 
-### Owner steps: making the relay reachable (elevated, on this machine)
+### Owner steps: making the relay and the status page reachable (elevated, on this machine)
 
 WSL2 here runs in **NAT mode**, and `.wslconfig` sets that deliberately: `networkingMode=mirrored`
 breaks Docker Desktop port publishing on this host. A relay on `0.0.0.0:8795` inside WSL is
@@ -698,6 +704,48 @@ only reaches the relay while the `netsh` portproxy above points at the *current*
 and that address changes on every WSL restart. Re-run `e2e/run-m4-lan.sh lanhost` after a
 restart and re-add the portproxy with the value it prints; the LAN host itself does not change,
 so this line stays correct even when the far end suddenly cannot connect.
+
+#### The status page on the LAN — the same pattern, on `8796`
+
+The archive binds `127.0.0.1:8796` by default, so the status page is invisible from every
+other machine on the LAN — including the second computer, whose operator has no other view
+of the map. **`ARCHIVE_HTTP` overrides the bind address**, and `run-m4.sh` reads it, so
+`run-m4-lan.sh` inherits it:
+
+```sh
+ARCHIVE_HTTP=0.0.0.0:8796 e2e/run-m4-lan.sh up     # the LAN binding
+e2e/run-m4-lan.sh up                               # the default, 127.0.0.1:8796
+```
+
+The Windows plumbing is the relay's plumbing with one number changed. Both commands need an
+elevated PowerShell, and both are **owner steps**:
+
+```powershell
+# once
+New-NetFirewallRule -DisplayName "Bibites Multiverse status page 8796" -Direction Inbound `
+  -Action Allow -Protocol TCP -LocalPort 8796 -Profile Any
+
+# after every WSL restart: the WSL address changes
+netsh interface portproxy delete v4tov4 listenport=8796 listenaddress=0.0.0.0
+netsh interface portproxy add v4tov4 listenport=8796 listenaddress=0.0.0.0 `
+  connectport=8796 connectaddress=<the WSL address from `lanhost`>
+```
+
+`-Profile Any` matters here for the same reason it matters on `8795`: a Private-only rule
+does nothing on a network Windows has classified `Public` (see Gotchas). The page then reads
+as `http://192.168.1.227:8796/` from any machine on the LAN. **Test it from Windows or from
+the second computer, never with `curl` from WSL** — WSL has no hairpin route back to its own
+host, and the false negative reads exactly like a blocked port (see Gotchas).
+
+The page is **read-only by design** (D15, `m4_considerations.md` *Scope*), so LAN exposure
+adds no write surface. It is still a LAN-only step, and M5 owns public exposure.
+
+The page is now a **visual map** — an SVG grid of the worlds with population drawn as dots,
+lanes drawn as arrows (wrap-arounds split at the map edge, bypasses curved over the world they
+skip), pulses animating each lane at its measured hop rate, and a glossary that explains every
+term to a reader who did not build the system. It serves a second endpoint,
+`/api/history?hours=&buckets=`, which downsamples `metrics.jsonl` into per-world population
+sparklines; `/api/status` gained `recentHops` per lane and `flowWindowMs`.
 
 ## Gotchas
 
@@ -776,9 +824,10 @@ so this line stays correct even when the far end suddenly cannot connect.
   spawn. **Any E2E rig, script or auto-test that loads a world must wait on the same
   flag** — sleeping for a fixed number of seconds is not a substitute, because the build
   time scales with the sprite set.
-- **Only one rig can run at a time.** Every rig in this checkout uses the same fixed
-  defaults, so a second rig — or a second agent working in this repo — silently attaches to
-  or fights over the first one's processes. Check the whole plan with
+- **Only one rig can run at a time, and one is running now.** `run-m4-lan.sh` holds the
+  living deployment since 2026-08-06 (*The M4 rigs*). Every rig in this checkout uses the same
+  fixed defaults, so a second rig — or a second agent working in this repo — silently attaches
+  to or fights over the first one's processes. Check the whole plan with
   `ss -ltn | grep -E ':(878[7-9]|879[0-6]|18789) '` before starting, and give a throwaway
   smoke test high ports (`--listen 127.0.0.1:0` writes the resolved address to
   `<data-dir>/listen.addr`). The historical rigs collide head-on with the current one: M2
@@ -796,6 +845,20 @@ so this line stays correct even when the far end suddenly cannot connect.
   LAN rig does not hit this at all**: the second computer has its own BepInEx, so
   `e2e/run-m4-lan.sh` runs five real games here and one real game there — six real worlds,
   no synthetic peer. That is the reason slot 6 is the slot that moves.
+- **Stop the old far-end sidecar before you unpack a new bundle.** Windows locks a running
+  `.exe`, so the copy step of `setup-farend.ps1` fails with **`Permission denied`** on
+  `multiverse-sidecar.exe` while the previous rig's sidecar is still up. It cost the M4 far-end
+  setup a confusing failure: the M3 sidecar had been running there since 2026-08-03, and
+  nothing in the error names it. Run `Stop-Process -Name multiverse-sidecar -Force` (or the old
+  rig's `.\stop-slot2.ps1`) on that machine first, then unpack. This is the far-end twin of
+  *Stop the game before you deploy* above.
+- **A PowerShell command pasted into WSL bash fails with `command not found`.** Every far-end
+  instruction is PowerShell — `.\setup-farend.ps1`, `.\start-slot6.ps1`, `Stop-Process` — and
+  so is every elevated owner step. **Type them in a PowerShell window on the machine they
+  belong to.** The far-end ones belong to the second computer, which this rig never drives
+  (D9). For a command that targets *this* machine's Windows side, the interop binary works
+  from WSL: `powershell.exe -File <script>`, with a Windows-side cwd (see the `cd /mnt/c` note
+  above). The failure is loud and harmless, and it wastes a minute every time.
 - **A stale `netsh portproxy` steals a Contract A port from Windows processes only.** The
   M3 LAN rig left `0.0.0.0:8790 -> <a WSL address>:8790` behind, and under the M4 port plan
   8790 is **slot 4's** Contract A port. It listens on `0.0.0.0`, so it shadows
@@ -821,7 +884,7 @@ so this line stays correct even when the far end suddenly cannot connect.
   |---|---|---|
   | Contract A, slots 1–6 | `8787` `8788` `8789` `8790` `8791` `8792` | loopback only, by contract |
   | Relay, Contract B | **`8795`** | `127.0.0.1` local, `0.0.0.0` for the LAN |
-  | Archive status page + `/api/status` | **`8796`** | loopback only |
+  | Archive status page + `/api/status` | **`8796`** | `127.0.0.1` by default, `0.0.0.0` through `ARCHIVE_HTTP` for LAN viewing (*Owner steps*) |
 
   `go/internal/contractb.DefaultRelayPort`, the archive's `--http` default and `ringstat`'s
   `--url` default all carry these numbers, so a rig that passes no port flags gets this
