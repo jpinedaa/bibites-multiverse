@@ -400,3 +400,140 @@ func TestStatusPageIsSelfContainedAndDrawsTheMap(t *testing.T) {
 		}
 	}
 }
+
+// speciesRegion returns the fenced part of the page's script that handles
+// census names, and fails if the fence is gone. The fence is not decoration:
+// the test below asserts a property OVER it, so deleting the markers would
+// silently delete the assertion.
+func speciesRegion(t *testing.T) string {
+	t.Helper()
+	const open = "SPECIES CENSUS — BEGIN"
+	const close = "SPECIES CENSUS — END"
+	i, j := strings.Index(statusPageHTML, open), strings.Index(statusPageHTML, close)
+	if i < 0 || j < 0 || j <= i {
+		t.Fatal("the page's species-rendering region is not fenced; the escaping rule of " +
+			"contract-b-m4.md §13 item 7 is enforced by a property over that fence")
+	}
+	return statusPageHTML[i:j]
+}
+
+// TestCensusNamesNeverBecomeMarkup is contract-b-m4.md §13 item 7, which is the
+// one rule this contract explicitly says it cannot fix for the renderer:
+//
+//	"a species name is attacker-chosen text of up to 64 bytes a slot, 32 entries
+//	 a peer, that lands in a broadcast and then in a renderer. The wire's own
+//	 answer is the shape check and the cap; the RENDERER'S answer is its own, and
+//	 a page that interpolates a name into HTML without escaping it has a defect
+//	 this contract cannot fix for it."
+//
+// A Go test cannot run the page's JavaScript, so it asserts the STRUCTURAL
+// property that makes the defect impossible instead of the behaviour: every
+// line of code that touches a census name lives inside one fenced region, and
+// THAT REGION CONTAINS NO innerHTML. Names get to the DOM through textContent
+// and createElementNS, which cannot parse markup at all, so a name like
+// `<img src=x onerror=…>` is inert by construction rather than by escaping.
+//
+// The rest of the page still builds HTML strings, and that is fine — what it
+// must never do is put a name in one. The second half of the test pins that:
+// the two places a name would naturally be interpolated (the cell's <title> and
+// the worlds table's species column) are emitted EMPTY and filled afterwards.
+func TestCensusNamesNeverBecomeMarkup(t *testing.T) {
+	region := speciesRegion(t)
+
+	if strings.Contains(region, "innerHTML") {
+		t.Fatal("the species-rendering region assigns innerHTML; a census name is " +
+			"attacker-chosen text and may only reach the DOM as a text node")
+	}
+	// It has to actually build nodes, or the rule above is satisfied vacuously.
+	for _, want := range []string{"textContent", "createElementNS", "createTextNode",
+		"setAttribute", "appendChild"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the species region never calls %s; names are meant to be BUILT, not parsed",
+				want)
+		}
+	}
+	// The two markup strings that would otherwise carry a name are emitted
+	// empty. If either ever gains one, the innerHTML that assigns it parses it.
+	for _, want := range []string{
+		`'<title id="ctitle-'+v.slot+'"></title></rect>'`,
+		`'<td class="spx" id="wsp-'+v.slot+'"></td>'`,
+	} {
+		if !strings.Contains(statusPageHTML, want) {
+			t.Fatalf("the page no longer emits %s as an EMPTY element; a census name is one "+
+				"careless concatenation away from being parsed", want)
+		}
+	}
+	// And the tooltip, which is the other place a name is displayed, sets text
+	// rather than markup — for BOTH registries, so the safe path is the only one.
+	tipFn := statusPageHTML[strings.Index(statusPageHTML, "function showTip("):]
+	tipFn = tipFn[:strings.Index(tipFn, "function hideTip(")]
+	if strings.Contains(tipFn, "innerHTML") {
+		t.Fatal("showTip assigns innerHTML; the species registry feeds it attacker-chosen text")
+	}
+	if !strings.Contains(tipFn, "tipHead.textContent") || !strings.Contains(tipFn, "tipBody.textContent") {
+		t.Fatalf("showTip does not fill the tip with textContent:\n%s", tipFn)
+	}
+}
+
+// TestPageDrawsSpeciesGroupedCreatures covers the rendering half of §16, B12
+// and §10.1's census rules: the machinery has to be there, and the three
+// answers a cell can give have to be three different answers.
+func TestPageDrawsSpeciesGroupedCreatures(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// The creature glyph: ONE definition, drawn by reference. A per-organism
+	// path would be a few hundred kilobytes of DOM for six worlds.
+	if !strings.Contains(page, `'<g id="bib">'`) {
+		t.Fatal("the page has no bibite glyph definition")
+	}
+	if strings.Count(page, `<path d="M 4.5 -1.26`) != 1 {
+		t.Fatal("the creature body is not defined exactly once")
+	}
+	if !strings.Contains(region, `"use"`) || !strings.Contains(region, `"#bib"`) {
+		t.Fatal("the cells do not draw the glyph by reference")
+	}
+	// Colour by a stable hash of the compared name, so one species is one
+	// colour in every world and across every reload, with no table to keep.
+	for _, want := range []string{"function hashStr", "function speciesColor", "hsl("} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the species colouring is missing %q", want)
+		}
+	}
+	// Normalization exists exactly once, is named for what it is, and is used
+	// for comparison only (contract-a.md §17, A36).
+	if strings.Count(region, "function normName") != 1 {
+		t.Fatal("normName is not defined exactly once; it is the ONLY place a census name " +
+			"may be whitespace-normalized, and only for a comparison")
+	}
+	if strings.Contains(region, "e.genericName = ") || strings.Contains(region, ".genericName=") {
+		t.Fatal("the renderer writes back to a census name; nothing may repair one")
+	}
+	// The cross-world join, and the second tooltip registry that shows it.
+	for _, want := range []string{"function buildCrossWorld", "XW[", "data-s", "SP[key]"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the cross-world species join is missing %q", want)
+		}
+	}
+	if !strings.Contains(page, `"[data-t],[data-s]"`) {
+		t.Fatal("the tooltip listeners do not cover the species registry, so the glyphs " +
+			"would have no tooltip and no dismissal rules")
+	}
+	// Eggs are their own mark, because a world's population count excludes them.
+	if !strings.Contains(region, `"egg"`) || !strings.Contains(page, ".egg{fill:none") {
+		t.Fatal("eggs are not drawn distinctly from creatures")
+	}
+	// §10.1's three answers, each in the page's own words.
+	for _, want := range []string{"species unknown", "rest unreported", "nothing alive",
+		"no species record"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the page never says %q; absent, truncated and empty are three different "+
+				"facts and an honest gap beats a confident zero", want)
+		}
+	}
+	// The worlds table gained a species column, and the totals say how many
+	// worlds are reporting none.
+	if !strings.Contains(page, "paintSpeciesCell") || !strings.Contains(page, "function censusless") {
+		t.Fatal("the worlds table has no species column, or the totals hide the gap")
+	}
+}

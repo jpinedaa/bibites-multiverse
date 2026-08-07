@@ -118,6 +118,13 @@ type fakeModOptions struct {
 	simStep float64
 	// lastSave, when set, rides every HEARTBEAT as the save receipt of §15 A21.
 	lastSave *contracta.SaveReceipt
+	// censusRaw, when set, is spliced into every HEARTBEAT's data object as raw
+	// JSON — `"species":[…]` and, when the test wants it, `,"truncated":true`.
+	// It is RAW rather than typed on purpose: §5.2's strip table is mostly about
+	// shapes no Go type can express (a `species` that is a number, a count that
+	// is a string, an entry that is an array), and a test that could only send
+	// well-typed censuses could not reach a single row of it (§17, A35).
+	censusRaw string
 }
 
 // fakeMod is an in-process WebSocket client that speaks Contract A exactly as
@@ -146,11 +153,14 @@ type fakeMod struct {
 	// the state contract-a.md §8's timeout and the sidecar's delivery-freshness
 	// gate both watch for.
 	hbSuppressed bool
-	ackMode      ackMode
-	world        *fakeWorld
-	hbStop       chan struct{}
-	hbStopped    bool
-	wg           sync.WaitGroup
+	// censusRaw is the JSON fragment spliced into every HEARTBEAT. Mutable, so
+	// a test can watch a world start reporting a census, change it, and stop.
+	censusRaw string
+	ackMode   ackMode
+	world     *fakeWorld
+	hbStop    chan struct{}
+	hbStopped bool
+	wg        sync.WaitGroup
 }
 
 func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
@@ -198,6 +208,7 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 		t: t, opts: opts, ws: ws, ctx: ctx, cancel: cancel,
 		edges: map[string]contracta.EdgeState{}, ackMode: opts.ackMode, world: opts.world,
 		simStep: opts.simStep, closeCode: -1, hbStop: make(chan struct{}),
+		censusRaw: opts.censusRaw,
 	}
 	m.wg.Add(1)
 	go m.readLoop()
@@ -421,6 +432,7 @@ func (m *fakeMod) heartbeatLoop(interval time.Duration) {
 				m.mu.Unlock()
 				continue
 			}
+			census := m.censusRaw
 			m.simTick++
 			tick := m.simTick
 			step := m.simStep
@@ -447,9 +459,31 @@ func (m *fakeMod) heartbeatLoop(interval time.Duration) {
 				save := *m.opts.lastSave
 				hb.LastSave = &save
 			}
-			m.sendFrame(contracta.TypeHeartbeat, hb)
+			if census == "" {
+				m.sendFrame(contracta.TypeHeartbeat, hb)
+				continue
+			}
+			// The census goes on as RAW BYTES, so a test can send a shape no Go
+			// type can hold. Everything else on the frame is built normally.
+			body, err := json.Marshal(hb)
+			if err != nil {
+				m.t.Errorf("fake mod: encode HEARTBEAT: %v", err)
+				continue
+			}
+			spliced := append(append([]byte{}, body[:len(body)-1]...), ',')
+			spliced = append(spliced, census...)
+			spliced = append(spliced, '}')
+			m.sendFrame(contracta.TypeHeartbeat, json.RawMessage(spliced))
 		}
 	}
+}
+
+// setCensus changes what rides the next HEARTBEAT. "" stops sending one at all,
+// which is the state a mod older than contract-a/2.2 is permanently in.
+func (m *fakeMod) setCensus(raw string) {
+	m.mu.Lock()
+	m.censusRaw = raw
+	m.mu.Unlock()
 }
 
 func (m *fakeMod) sendFrame(typ string, data any) {

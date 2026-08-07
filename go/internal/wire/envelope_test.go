@@ -9,9 +9,9 @@ import (
 )
 
 func TestDecodeAcceptsTheContractExample(t *testing.T) {
-	// contract-a.md §3's example, verbatim at contract-a/2.1 (§16, A33).
+	// contract-a.md §3's example, verbatim at contract-a/2.2 (§17, A37).
 	raw := []byte(`{
-	  "protocol": "contract-a/2.1",
+	  "protocol": "contract-a/2.2",
 	  "type": "MIGRATE_OUT",
 	  "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
 	  "sentAt": 1785693600123,
@@ -72,7 +72,12 @@ func TestDecodeIgnoresUnknownEnvelopeFields(t *testing.T) {
 // never a rejection reason, and M4's MAJOR bump on both wires is what stops an
 // M3 peer from ever meeting an M4 one.
 func TestCheckProtocolComparesMajorOnly(t *testing.T) {
-	for _, got := range []string{"contract-a/2", "contract-a/2.0", "contract-a/2.1", "contract-a/2.7"} {
+	// Every minor of major 2 interoperates, in both directions: a
+	// contract-a/2.1 sidecar and a contract-a/2.2 mod are compatible BY
+	// CONSTRUCTION, and the census simply reads as unknown on the older one
+	// (§17, A37). THE MINOR IS A CAPABILITY STATEMENT, NOT A NEGOTIATION.
+	for _, got := range []string{"contract-a/2", "contract-a/2.0", "contract-a/2.1",
+		"contract-a/2.2", "contract-a/2.7"} {
 		if err := CheckProtocol(got, ProtocolA); err != nil {
 			t.Fatalf("CheckProtocol(%q): %v", got, err)
 		}

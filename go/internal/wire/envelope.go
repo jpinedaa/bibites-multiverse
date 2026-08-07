@@ -30,9 +30,18 @@ import (
 // compatible by construction — THE MINOR IS A CAPABILITY STATEMENT, NOT A
 // NEGOTIATION, and a receiver detects the feature by the presence of the
 // `species` field and never by arithmetic on the minor.
+//
+// Both moved again for the species CENSUS (contract-a.md §17 A37,
+// contract-b-m4.md §16 B12): two OPTIONAL fields on one Contract A message and
+// the same two inside one Contract B block, nothing removed, no type changed,
+// no message type, enum, close code or NACK code touched — MINOR again, and the
+// paths stay at /contract-a/v2 and /contract-b/v3. The detection rule is
+// unchanged and is the reason a mixed rig degrades to "unknown" and never to a
+// wrong number: a receiver detects the census by the presence of the array,
+// never by arithmetic on the minor and never by the minor a peer claims.
 const (
-	ProtocolA = "contract-a/2.1"
-	ProtocolB = "contract-b/3.1"
+	ProtocolA = "contract-a/2.2"
+	ProtocolB = "contract-b/3.2"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).

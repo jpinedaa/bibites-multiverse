@@ -161,11 +161,25 @@ h2 .note{text-transform:none;letter-spacing:0;font-size:11px}
 .cell.live .statelbl,.cell.live .statedot{fill:var(--live)}
 .cell.dark .statelbl,.cell.dark .statedot{fill:var(--dark)}
 .cell.hole .statelbl,.cell.hole .statedot{fill:var(--hole)}
-.dot{fill:var(--live)}
-.cell.dark .dot{fill:var(--dark);opacity:.55}
 .cellhit{fill:none;stroke:var(--pulse);stroke-width:3;opacity:0;pointer-events:none}
 .cell.hit .cellhit{animation:hit .8s ease-out}
 @keyframes hit{0%{opacity:.95}100%{opacity:0}}
+
+/* ---- the creatures in a cell, grouped by species ----
+   One glyph is one creature and its colour is its species, so a cell shows what
+   lives there and not only how much. The body path takes its fill from the
+   <use> that draws it, which is how 70 creatures cost one path definition; the
+   eye sets its own so it reads on every hue. */
+.bibeye{fill:#0b0e12}
+.bibrun{cursor:help}
+.bib.neutral{fill:var(--live)}
+.cell.dark .bib.neutral{fill:var(--dark)}
+.bib.unclassed{fill:var(--hole)}
+.egg{fill:none;stroke-width:1.5}
+.egg.neutral{stroke:var(--live)}
+.cell.dark .egg.neutral{stroke:var(--dark)}
+.egg.unclassed{stroke:var(--hole)}
+.cell.dark .bibs{opacity:.6}
 
 .laneunder{fill:none;stroke:var(--panel);stroke-width:9;stroke-linecap:round}
 .lane{fill:none;stroke-width:2.4;stroke-linecap:round}
@@ -197,6 +211,11 @@ border-top-style:solid;vertical-align:middle;margin-right:5px}
 .legend i.box.dark{border-color:var(--dark)}
 .legend i.box.hole{border-color:var(--hole);border-style:dashed}
 .legend i.dot{width:9px;height:9px;border-radius:50%;background:var(--pulse);border:0}
+.legend i.bibi{width:12px;height:9px;border:0;background:var(--dim);
+border-radius:62% 38% 38% 62%/50%}
+.legend i.bibi.unc{background:var(--hole)}
+.legend i.eggi{width:9px;height:9px;border:1.5px solid var(--dim);border-radius:50%;
+background:none}
 
 /* ---- history strip ---- */
 .sparks{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
@@ -228,6 +247,11 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 .closed{color:var(--dark)}
 .open{color:var(--lane)}
 .skip{color:var(--warn);font-size:11px;white-space:normal}
+td.spx{white-space:normal;min-width:180px}
+.spitem{display:inline-block;margin-right:11px;white-space:nowrap}
+.sw{display:inline-block;width:10px;height:8px;margin-right:4px;vertical-align:middle;
+border-radius:62% 38% 38% 62%/50%}
+.spmore{color:var(--dim)}
 .kv{display:flex;justify-content:space-between;gap:8px;font-size:12px;
 border-bottom:1px solid var(--line);padding:3px 0}
 .kv span:last-child{color:var(--text);font-variant-numeric:tabular-nums}
@@ -239,7 +263,8 @@ text.term,tspan.term{text-decoration:underline dotted;cursor:help}
 border-radius:6px;padding:9px 11px;font-size:12px;line-height:1.55;color:var(--text);
 box-shadow:0 10px 28px rgba(0,0,0,.6);display:none}
 #tip b{display:block;color:var(--lane);font-size:10.5px;letter-spacing:.1em;
-text-transform:uppercase;margin-bottom:4px}
+text-transform:uppercase;margin-bottom:4px;word-break:break-word}
+#tip .tipbody{white-space:pre-line}
 details.gloss summary{cursor:pointer;color:var(--dim);font-size:12px;letter-spacing:.12em;
 text-transform:uppercase;list-style:none}
 details.gloss summary::-webkit-details-marker{display:none}
@@ -277,6 +302,9 @@ footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid va
         <span><i class="closed"></i>lane closed</span>
         <span><i class="dot"></i><span class="term" data-t="migration">a migration</span></span>
         <span><span class="term" data-t="wrap">wrap-around</span></span>
+        <span><i class="bibi"></i><span class="term" data-t="species">one creature, coloured by species</span></span>
+        <span><i class="eggi"></i><span class="term" data-t="egg">an egg</span></span>
+        <span><i class="bibi unc"></i><span class="term" data-t="unclassed">no species record</span></span>
       </span>
     </h2>
     <div class="mapwrap"><div id="mapbox"></div></div>
@@ -305,6 +333,7 @@ footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid va
       <th><span class="term" data-t="peer">peer</span></th>
       <th>state</th>
       <th class="num"><span class="term" data-t="population">pop</span></th>
+      <th><span class="term" data-t="census">species</span></th>
       <th class="num"><span class="term" data-t="custodyDepth">custody</span></th>
       <th class="num"><span class="term" data-t="pacedDepth">paced</span></th>
       <th class="num"><span class="term" data-t="held">held</span></th>
@@ -329,7 +358,9 @@ footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid va
   <span class="unknown">unknown</span> is a world that reported nothing, or reported it too long
   ago &mdash; never a zero. Every creature in transit is in exactly one side&rsquo;s
   <span class="term" data-t="custody">custody</span>, which is how the system keeps its
-  <span class="term" data-t="exactlyonce">exactly-once</span> promise. Rates are measured over a
+  <span class="term" data-t="exactlyonce">exactly-once</span> promise. The
+  <span class="term" data-t="rawname">species names</span> are printed exactly as the world that
+  owns them holds them, spacing and all, and nothing here tidies one. Rates are measured over a
   short <span class="term" data-t="flow">flow window</span>, not over all time. JSON:
   <code>/api/status</code> (live) and <code>/api/history</code> (downsampled,
   <code>?hours=</code>, <code>?buckets=</code>).
@@ -363,7 +394,12 @@ var G = {
  bounce:["bounce","A migration that gave up and returned to the world it started in. It is a thing you get told about, never a silent repair."],
  migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map each hop is a moving dot travelling along its lane."],
  lastSave:["last save","Every world saves itself to disk every few minutes and sends back a receipt — when it saved, how big the file was, how long it took. This is the age of the newest receipt from that world."],
- population:["population","How many living creatures the world holds, as its own game reported it. Each dot inside a cell is one creature."],
+ population:["population","How many living creatures the world holds, as its own game reported it. Each little creature drawn inside a cell is one of them."],
+ species:["species","A kind of creature, with a two-part name like 'Cyanea velox'. Every creature in a cell is drawn in its species' colour, and the same species is the same colour in every world, so you can see a kind spreading across the map. Hover one to see how many there are and where else it lives."],
+ census:["species census","Once a second each world lists which species are living in it and how many of each, and that list travels here with everything else it reports. It is a picture of that world right now — not a record of what has crossed between worlds, which is a different question with a different, wrong-looking answer. The list is capped at the 32 most numerous species; when a world has more, the page says so."],
+ egg:["egg","An unhatched egg, drawn as a small hollow ring beside the creatures of its species. Eggs are counted separately from creatures everywhere on this page, because a world's population count does not include them."],
+ unclassed:["no species record","Creatures the world counted but did not file under any species. It is an ordinary state, not a fault — and it is drawn in grey so the gap is visible rather than quietly rolled into whichever species happens to be nearby."],
+ rawname:["as the world spells it","A species name is copied here exactly as the owning world holds it, including stray or doubled spaces. Nothing on the way tidies one, because a tidied name is a name the player cannot find in their own game — and two spellings a world keeps apart really are two records in it."],
  unknown:["unknown","A number that is missing, or older than the freshness rule allows, is shown as unknown — never as zero. A world that has told us nothing is unknown, not empty. An honest gap beats a confident zero."],
  exactlyonce:["exactly-once","The promise the whole thing is built on: a creature is never duplicated. It is in one world, or in transit, or in the next world — never in two places at once. Very rarely one can be lost instead, and a lost creature simply reads as a natural death."],
  relay:["relay","The small server in the middle. Every world's helper connects to it and to nothing else, so there is exactly one map and one set of rules."],
@@ -376,7 +412,8 @@ var G = {
 
 (function buildGlossary(){
   var keys = ["world","slot","position","peer","lane","edge","wrap","live","dark","hole","bypass",
-    "migration","envelope","population","custody","custodyDepth","pacedDepth","held","bounce",
+    "migration","envelope","population","species","census","egg","unclassed","rawname",
+    "custody","custodyDepth","pacedDepth","held","bounce",
     "lastSave","unknown","exactlyonce","relay","archive","epoch","genomegap","flow"];
   var h = "";
   for (var i=0;i<keys.length;i++){
@@ -388,12 +425,33 @@ var G = {
 })();
 
 /* Tooltips: hover on a pointer, tap to toggle on a phone. Delegated, so terms
-   drawn later into the SVG work without being wired up one by one. */
-var tip = $("#tip"), tipFor = null;
-function showTip(el, x, y){
+   drawn later into the SVG work without being wired up one by one.
+
+   TWO registries, ONE element and ONE set of dismissal rules. G above is the
+   fixed glossary, keyed by data-t. SP below is DYNAMIC, rebuilt from every poll
+   and keyed by data-s — one entry per species run drawn on the map. A species
+   entry's text is ATTACKER-CHOOSABLE (contract-b-m4.md §13 item 7), so the tip
+   is filled by BUILDING NODES AND SETTING textContent, never by assigning
+   markup. The glossary goes down the same path: one code path cannot rot into
+   two, and the safe one is the only one. */
+var tip = $("#tip"), tipFor = null, tipBody = null, tipHead = null, SP = {};
+function tipContent(el){
+  var k = el.getAttribute("data-s");
+  if (k && SP[k]) return SP[k];
   var g = G[el.getAttribute("data-t")];
-  if (!g) return;
-  tip.innerHTML = "<b>"+esc(g[0])+"</b>"+esc(g[1]);
+  return g ? {title:g[0], body:g[1]} : null;
+}
+function showTip(el, x, y){
+  var c = tipContent(el);
+  if (!c) return;
+  if (!tipHead){
+    tipHead = document.createElement("b");
+    tipBody = document.createElement("div");
+    tipBody.className = "tipbody";
+    tip.appendChild(tipHead); tip.appendChild(tipBody);
+  }
+  tipHead.textContent = c.title;
+  tipBody.textContent = c.body;
   tip.style.display = "block";
   var w = tip.offsetWidth, h = tip.offsetHeight;
   var left = Math.min(Math.max(8, x - w/2), window.innerWidth - w - 8);
@@ -403,16 +461,17 @@ function showTip(el, x, y){
   tipFor = el;
 }
 function hideTip(){ tip.style.display = "none"; tipFor = null; }
+var TIPSEL = "[data-t],[data-s]";
 document.addEventListener("mouseover", function(e){
-  var t = e.target.closest ? e.target.closest("[data-t]") : null;
+  var t = e.target.closest ? e.target.closest(TIPSEL) : null;
   if (t) showTip(t, e.clientX, e.clientY);
 });
 document.addEventListener("mouseout", function(e){
-  var t = e.target.closest ? e.target.closest("[data-t]") : null;
+  var t = e.target.closest ? e.target.closest(TIPSEL) : null;
   if (t && t === tipFor) hideTip();
 });
 document.addEventListener("click", function(e){
-  var t = e.target.closest ? e.target.closest("[data-t]") : null;
+  var t = e.target.closest ? e.target.closest(TIPSEL) : null;
   if (!t){ hideTip(); return; }
   if (t === tipFor){ hideTip(); return; }
   showTip(t, e.clientX, e.clientY);
@@ -440,7 +499,11 @@ function rate(v){ return (v>=10 ? v.toFixed(0) : v.toFixed(1)); }
    wrap lanes live in: WOUT is where a wrapping arrow stops, WBAR is the bar that
    draws the edge of the map it went through. */
 var CW=200, CH=150, GX=88, GY=80, MG=96, WOUT=40, WBAR=58;
-var DOTCOLS=14, DOTROWS=5, DOTCAP=DOTCOLS*DOTROWS;
+/* The creature field inside a cell: BCOLS by BROWS glyphs on a 12 by 13 pitch,
+   laid out in one group translated to the field's top-left corner. BCAP is what
+   caps the drawing, never the truth: past it one glyph stands for several and
+   the cell says so. */
+var BCOLS=14, BROWS=5, BCAP=BCOLS*BROWS, BPX=12, BPY=13;
 var mapSig = "", anim = [], pulseLayer = null, reduced = false, prevMig = {}, rafId = 0;
 
 function cellX(c){ return MG + c*(CW+GX); }
@@ -551,6 +614,17 @@ function buildMap(d){
     + '<defs>'
     + marker("mOpen","var(--lane)") + marker("mBypass","var(--warn)")
     + marker("mClosed","var(--dark)")
+    // One creature, defined once and drawn by reference up to 420 times: a
+    // teardrop body with a mouth notch bitten out of the nose and an eye. It
+    // faces EAST, which is the way organisms travel. The body sets no fill, so
+    // each <use> colours it by species; the eye sets its own, so it reads on
+    // every hue.
+    + '<g id="bib">'
+    + '<path d="M 4.5 -1.26 L 2.16 0 L 4.5 1.26 '
+    + 'C 4.14 3.06, 1.98 4.14, -0.54 4.14 C -3.24 4.14, -5.58 2.16, -6.66 0 '
+    + 'C -5.58 -2.16, -3.24 -4.14, -0.54 -4.14 C 1.98 -4.14, 4.14 -3.06, 4.5 -1.26 Z"/>'
+    + '<circle class="bibeye" cx="1.5" cy="-1.85" r="1"/>'
+    + '</g>'
     + '</defs>';
 
   // Which way is north, before a reader has to work it out from the arrows.
@@ -618,9 +692,13 @@ function buildMap(d){
       }
       var state = v.live ? "live" : "dark";
       var lbl = v.live ? (v.modConnected ? "live" : "no game") : "dark";
+      // The <title> is EMPTY here and filled by paintMap with textContent. It
+      // carries species names, which are attacker-choosable text (§13 item 7),
+      // and this string becomes innerHTML — so no name may ever reach it. It is
+      // also the phone path: a tap on a cell shows exactly this.
       s += '<g class="cell '+state+'" id="c-'+v.slot+'">'
         + '<rect class="cellbg" x="'+x+'" y="'+y+'" width="'+CW+'" height="'+CH+'" rx="10">'
-        + '<title>'+esc(cellTitle(v))+'</title></rect>'
+        + '<title id="ctitle-'+v.slot+'"></title></rect>'
         + '<rect class="cellhit" x="'+(x+2)+'" y="'+(y+2)+'" width="'+(CW-4)+'" height="'+(CH-4)
         + '" rx="9"/>'
         + '<text class="slotno term" data-t="slot" x="'+(x+16)+'" y="'+(y+30)+'">slot '+v.slot+'</text>'
@@ -630,14 +708,10 @@ function buildMap(d){
         + (y+32)+'"></text>'
         + '<circle class="statedot" cx="'+(x+CW-16-7*lbl.length-9)+'" cy="'+(y+44)+'" r="3.4"/>'
         + '<text class="statelbl" text-anchor="end" x="'+(x+CW-16)+'" y="'+(y+48)+'">'+lbl+'</text>'
-        + '<g id="cdots-'+v.slot+'">';
-      for (var di=0; di<DOTCAP; di++){
-        var dx = x + 16 + (di % DOTCOLS)*12 + 5.5;
-        var dy = y + 62 + Math.floor(di / DOTCOLS)*12 + 5.5;
-        s += '<circle class="dot" id="cd-'+v.slot+'-'+di+'" cx="'+dx+'" cy="'+dy
-          + '" r="4.2" style="display:none"/>';
-      }
-      s += '</g>'
+        // The creature field is empty markup translated into place; every glyph
+        // in it is built by paintSpecies with createElementNS, for the same
+        // reason the title above is empty.
+        + '<g class="bibs" id="cspec-'+v.slot+'" transform="translate('+(x+16)+','+(y+60)+')"></g>'
         + '<text class="note" id="cnote-'+v.slot+'" x="'+(x+16)+'" y="'+(y+CH-11)+'"></text>'
         + '</g>';
     }
@@ -692,6 +766,7 @@ function cellTitle(v){
       +", paced "+(v.pacedDepth==null?"unknown":v.pacedDepth)
       +", held "+(v.heldDepth==null?"unknown":v.heldDepth);
     if (v.lastSave) s += "\nlast save "+ms(v.lastSaveAgeMs)+" ago";
+    s += "\n" + censusLines(v);
   } else {
     s += "\nthis world has reported nothing recently"
       + (v.statsAgeMs ? " (last heard "+ms(v.statsAgeMs)+" ago)" : "");
@@ -718,6 +793,251 @@ function laneTitle(l, g){
   return s;
 }
 
+/* Everything between the two SPECIES CENSUS markers below handles ATTACKER-
+   CHOOSABLE TEXT, and it is fenced off so that fact cannot be forgotten.
+
+   A census name is up to 64 bytes a peer chose, 32 entries a peer, arriving on
+   an unauthenticated stats block the relay copies verbatim into a broadcast
+   every client reads (contract-b-m4.md §13 item 7). It is NOT sanitized
+   upstream and it never will be: contract-a.md §17 A36 guarantees the opposite,
+   because a repaired label names a species the player cannot find in their own
+   game. The wire's answer is a byte count, a UTF-8 decode and a cap. THE
+   RENDERER'S ANSWER IS ITS OWN, and it is this:
+
+     NO NAME EVER BECOMES MARKUP. Names reach the DOM through textContent and
+     through createElementNS + setAttribute, and through nothing else. The
+     fenced region assigns no innerHTML at all — the page test asserts that the
+     token does not occur between the markers, which is the only form of this
+     rule a Go test can enforce — and no name is ever concatenated into one of
+     the HTML strings the rest of this file builds.
+
+   The other rule this region keeps is contract-a.md §17 A36's: NOTHING HERE
+   REPAIRS A NAME. What is drawn and what is printed is the raw spelling the
+   owning world holds. Whitespace is normalized in exactly one place, normName,
+   FOR COMPARISON ONLY — colour and cross-world presence — and the result is
+   never displayed and never written back. */
+
+/* =========================== SPECIES CENSUS — BEGIN ======================= */
+
+/* The world's own display name for a species: the two raw halves with one space
+   between them, which is the game's own Species.name. */
+function censusName(e){ return String(e.genericName) + " " + String(e.specificName); }
+
+/* normName is A34's repair — trim, collapse internal runs — applied FOR
+   COMPARISON ONLY. It answers two questions and no others: what colour is this
+   species, and which other worlds report it. It is never shown to anybody and
+   nothing is ever rewritten from it, because the same Species record legitimately
+   reads "Izus" on a migration and "Izus " on a census, and two spellings a world
+   keeps apart are two records in that world. */
+function normName(s){ return String(s).replace(/\s+/g, " ").replace(/^ | $/g, ""); }
+
+/* A stable colour per species. FNV-1a over the compared name, then a hue, so a
+   species is the same colour in every world and across every reload, with no
+   table to keep and nothing to assign. Lightness stays high enough to read on
+   the dark background at every hue. */
+function hashStr(s){
+  var h = 2166136261 >>> 0;
+  for (var i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+function speciesColor(name){
+  var h = hashStr(name);
+  return "hsl(" + (h % 360) + "," + (58 + (h >>> 9) % 22) + "%," + (56 + (h >>> 17) % 13) + "%)";
+}
+
+/* XW is the LIVE cross-world index: compared name -> the slots reporting it,
+   rebuilt from every poll so "also in slot 5" is as fresh as the map. The join
+   is done HERE, in the client, from the censuses /api/status already carries —
+   the server publishes each world's census exactly as its stats block held it
+   and derives nothing, so there is one statement of the census and the page is
+   the only thing that has an opinion about how to relate six of them. */
+var XW = {};
+function buildCrossWorld(d){
+  XW = {};
+  for (var i=0;i<d.slots.length;i++){
+    var v = d.slots[i];
+    if (!v.statsKnown || !v.speciesKnown || !v.species) continue;
+    for (var j=0;j<v.species.length;j++){
+      var k = normName(censusName(v.species[j]));
+      if (!XW[k]) XW[k] = [];
+      if (XW[k].indexOf(v.slot) < 0) XW[k].push(v.slot);
+    }
+  }
+}
+
+/* censusRuns turns one slot into the contiguous runs the cell draws, IN THE
+   CENSUS'S OWN ORDER — which is the mod's, sorted by bibites + eggs descending.
+   Nothing here re-sorts, merges or de-duplicates: two entries whose names differ
+   only in whitespace are two Species records in that world and stay two runs.
+
+   The last run is the honest slack contract-a.md §17 A35 defines: Sum bibites is
+   allowed to fall short of population, and the shortfall is organisms with no
+   Species record. It is drawn in grey rather than folded into a species, because
+   folding it in would invent an abundance the world never reported. */
+function censusRuns(v){
+  var runs = [], sumB = 0, sumE = 0;
+  var known = !!(v.statsKnown && v.speciesKnown);
+  var list = (known && v.species) ? v.species : [];
+  for (var i=0;i<list.length;i++){
+    var e = list[i], nm = censusName(e), cmp = normName(nm);
+    sumB += e.bibites; sumE += e.eggs;
+    runs.push({key:"sp"+v.slot+"-"+i, name:nm, cmp:cmp, color:speciesColor(cmp),
+               bibites:e.bibites, eggs:e.eggs});
+  }
+  var pop = (v.statsKnown && v.population != null) ? v.population : null;
+  var eggs = (v.statsKnown && v.eggCount != null) ? v.eggCount : null;
+  var unB = (known && pop != null && pop > sumB) ? pop - sumB : (known ? 0 : (pop || 0));
+  var unE = (known && eggs != null && eggs > sumE) ? eggs - sumE : (known ? 0 : (eggs || 0));
+  return {known:known, runs:runs, sumB:sumB, sumE:sumE, unB:unB, unE:unE, pop:pop, eggCount:eggs};
+}
+
+/* censusLines is the census as text, for the cell's <title> — the phone path,
+   where there is no hover and a tap has to say everything at once. It is set
+   with textContent by its caller and is never markup. */
+function censusLines(v){
+  if (!v.speciesKnown) return "species: unknown (this world reports no census)";
+  if (!v.species || !v.species.length) return "species: none — this world reports nothing alive";
+  var c = censusRuns(v), out = [];
+  out.push("species (" + c.runs.length + (v.speciesTruncated ? ", the 32 most numerous; the rest is UNREPORTED" : "") + "):");
+  for (var i=0;i<c.runs.length;i++){
+    var r = c.runs[i];
+    out.push("  " + r.name + " — " + r.bibites + " alive" + (r.eggs ? ", " + r.eggs + " egg(s)" : ""));
+  }
+  if (c.unB > 0) out.push("  (" + c.unB + " with no species record)");
+  return out.join("\n");
+}
+
+/* One species run's tooltip, registered under its data-s key. Both halves of it
+   are text: SP holds strings and showTip sets them with textContent. */
+function speciesTip(v, r, total){
+  var body = r.bibites + " alive" + (r.eggs ? " and " + r.eggs + " egg(s)" : " here")
+    + " in slot " + v.slot;
+  if (v.population != null && v.population > 0){
+    body += "\n" + Math.round(1000 * r.bibites / v.population) / 10
+      + "% of this world's population";
+  } else if (total > 0){
+    body += "\n" + Math.round(1000 * (r.bibites + r.eggs) / total) / 10 + "% of its census";
+  }
+  var where = XW[r.cmp] || [], others = [];
+  for (var i=0;i<where.length;i++) if (where[i] !== v.slot) others.push("slot " + where[i]);
+  body += "\n" + (others.length ? "also in " + others.join(", ")
+                                : "no other world reports it right now");
+  body += "\nname as this world spells it — nothing here tidies it";
+  return {title:r.name, body:body};
+}
+
+/* paintSpecies draws one cell's creature field. Every element is CREATED, never
+   parsed: no name reaches a markup string, and the only thing that carries a
+   name is a textContent or a tooltip registry entry keyed by a generated id. */
+function paintSpecies(v){
+  var host = document.getElementById("cspec-"+v.slot);
+  if (!host) return null;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  var c = censusRuns(v);
+  var total = c.sumB + c.sumE + c.unB + c.unE;
+  if (!v.statsKnown || total <= 0) return c;
+
+  // One glyph is one creature until there are more creatures than glyphs; past
+  // that, one glyph stands for several and the cell's note says how many.
+  var unit = Math.max(1, Math.ceil(total / BCAP)), left = BCAP, idx = 0;
+  function budget(n){
+    if (n <= 0) return 0;
+    var g = Math.max(1, Math.round(n / unit));
+    if (g > left) g = left;
+    left -= g;
+    return g;
+  }
+  function place(parent, kind, colour, cls){
+    var col = idx % BCOLS, row = Math.floor(idx / BCOLS);
+    idx++;
+    var cx = 6 + col*BPX, cy = 6 + row*BPY;
+    var el;
+    if (kind === "egg"){
+      el = document.createElementNS(SVGNS, "circle");
+      el.setAttribute("class", "egg" + cls);
+      el.setAttribute("cx", cx); el.setAttribute("cy", cy); el.setAttribute("r", 3);
+      if (colour) el.style.stroke = colour;
+    } else {
+      el = document.createElementNS(SVGNS, "use");
+      el.setAttribute("href", "#bib");
+      el.setAttribute("class", "bib" + cls);
+      el.setAttribute("x", cx); el.setAttribute("y", cy);
+      if (colour) el.style.fill = colour;
+    }
+    parent.appendChild(el);
+  }
+  function run(cls, colour, nBib, nEgg, key, tipObj){
+    var gb = budget(nBib), ge = budget(nEgg);
+    if (!gb && !ge) return;
+    var g = document.createElementNS(SVGNS, "g");
+    if (key){
+      g.setAttribute("class", "bibrun");
+      g.setAttribute("data-s", key);
+      SP[key] = tipObj;
+    }
+    for (var i=0;i<gb;i++) place(g, "bib", colour, cls);
+    for (var j=0;j<ge;j++) place(g, "egg", colour, cls);
+    host.appendChild(g);
+  }
+
+  if (!c.known){
+    // ABSENT CENSUS: unknown, never zero and never an empty world. The
+    // creatures are drawn exactly as they were before there was a census, in
+    // the neutral colour, and the cell's note says the species are unknown.
+    run(" neutral", null, c.unB, c.unE, "sp"+v.slot+"-unk",
+        {title:"species unknown", body:"This world reports a population but no species census — "
+         + "an older game mod, or one that does not report species yet.\nUnknown is not zero: "
+         + "these creatures are here, their kinds are not being told to us."});
+    return c;
+  }
+  for (var i=0;i<c.runs.length && left>0;i++){
+    var r = c.runs[i];
+    run("", r.color, r.bibites, r.eggs, r.key, speciesTip(v, r, c.sumB + c.sumE));
+  }
+  if (left > 0 && (c.unB > 0 || c.unE > 0)){
+    run(" unclassed", null, c.unB, c.unE, "sp"+v.slot+"-unc",
+        {title:"no species record", body:c.unB + " creature(s)"
+         + (c.unE ? " and " + c.unE + " egg(s)" : "") + " in slot " + v.slot
+         + " that the world counted but filed under no species.\nThat is an ordinary state, "
+         + "not a fault, and it is drawn grey rather than added to a species so the gap stays "
+         + "visible."});
+  }
+  c.unit = unit;
+  return c;
+}
+
+/* The species cell of the worlds table, filled the same way and for the same
+   reason: a swatch element, then the name as a text node. */
+function paintSpeciesCell(v){
+  var cell = document.getElementById("wsp-"+v.slot);
+  if (!cell) return;
+  cell.textContent = "";
+  function plain(cls, s){
+    var el = document.createElement("span");
+    if (cls) el.className = cls;
+    el.textContent = s;
+    cell.appendChild(el);
+  }
+  if (!v.statsKnown || !v.speciesKnown){ plain("unknown", "unknown"); return; }
+  if (!v.species || !v.species.length){ plain("unknown", "none alive"); return; }
+  var shown = Math.min(4, v.species.length);
+  for (var i=0;i<shown;i++){
+    var e = v.species[i], nm = censusName(e);
+    var item = document.createElement("span");
+    item.className = "spitem";
+    var sw = document.createElement("i");
+    sw.className = "sw";
+    sw.style.background = speciesColor(normName(nm));
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(nm + " ×" + (e.bibites + e.eggs)));
+    cell.appendChild(item);
+  }
+  var rest = v.species.length - shown;
+  if (rest > 0) plain("spmore", "+" + rest + " more");
+  if (v.speciesTruncated) plain("unknown", "· 32 shown, the rest unreported");
+}
+/* ============================= SPECIES CENSUS — END ======================== */
+
 /* Per-poll paint: only the things that actually change. Rebuilding the SVG every
    two seconds would restart every animation, and the flow would never be seen. */
 function paintMap(d){
@@ -729,25 +1049,33 @@ function paintMap(d){
     var n = (v.statsKnown && v.population!=null) ? v.population : null;
     if (n==null){ pop.textContent = "unknown"; pop.setAttribute("class","popnum unk"); }
     else { pop.textContent = String(n); pop.setAttribute("class","popnum"); }
-    // One dot is one organism, until there are more organisms than dots.
-    var unit = 1, shown = 0;
-    if (n != null){
-      unit = Math.max(1, Math.ceil(n / DOTCAP));
-      shown = Math.min(DOTCAP, Math.ceil(n / unit));
-    }
-    for (var di=0; di<DOTCAP; di++){
-      var c = document.getElementById("cd-"+v.slot+"-"+di);
-      if (c) c.style.display = di < shown ? "" : "none";
-    }
+    // The creature field, grouped by species, and the cell's tap text. Both are
+    // built as nodes: see the fenced region above for why.
+    var c = paintSpecies(v);
+    var ct = document.getElementById("ctitle-"+v.slot);
+    if (ct) ct.textContent = cellTitle(v);
+    var unit = (c && c.unit) ? c.unit : 1;
     var txt = "", cls = "note";
     if (!v.live && v.darkForMs != null){ txt = "dark for "+ms(v.darkForMs)+" — bypassed"; cls += " badt"; }
     else if (v.live && !v.modConnected){ txt = "no game attached"; cls += " badt"; }
     else if (!v.statsKnown){
       txt = "reported nothing" + (v.statsAgeMs ? " for "+ms(v.statsAgeMs) : ""); cls += " warnt";
+    } else if (!v.speciesKnown){
+      // §10.1: absent renders as unknown species — never "no species", never an
+      // empty list, never a zero.
+      txt = "species unknown"; cls += " warnt";
+    } else if (v.speciesTruncated){
+      // §10.1: a truncated census names the 32 most abundant and the page MUST
+      // say the rest is unreported rather than present it as the whole list.
+      txt = "32 species · rest unreported"; cls += " warnt";
+    } else if (!v.species || !v.species.length){
+      txt = "reporting: nothing alive"; cls += " warnt";
     } else if (v.lastSave){
-      txt = "saved "+ms(v.lastSaveAgeMs)+" ago";
-      if (unit > 1) txt += " · 1 dot = "+unit;
-    } else { txt = "no save receipt yet"; cls += " warnt"; }
+      txt = v.species.length+" species · saved "+ms(v.lastSaveAgeMs);
+    } else { txt = v.species.length+" species · no save yet"; cls += " warnt"; }
+    // The scale hint is the first thing to go: it is a nicety, and the line it
+    // shares is carrying a rule the page MUST state.
+    if (unit > 1 && txt.length <= 22) txt += " · 1×"+unit;
     if (v.lastRefusal){ txt = v.lastRefusal; cls = "note badt"; }
     // The cell is 200 units wide; anything longer belongs in the tooltip and the
     // table below, not spilling over the world next door.
@@ -928,6 +1256,15 @@ function renderHistory(H){
   box.innerHTML = h;
 }
 
+/* How many reserved slots have stats but no census: the honest gap, counted, so
+   an operator can see a rig go half-blind rather than discover it one cell at a
+   time. A slot with no stats at all is already counted as unknown. */
+function censusless(d){
+  var n = 0;
+  for (var i=0;i<d.slots.length;i++) if (d.slots[i].statsKnown && !d.slots[i].speciesKnown) n++;
+  return n;
+}
+
 /* ------------------------------------------------------------------- polling */
 function render(d){
   $("#shape").innerHTML = d.haveStatus
@@ -948,6 +1285,12 @@ function render(d){
     age.innerHTML = '<span class="unknown">state '+ms(d.statusAgeMs)
       + " old — STALE, treat every number as unknown</span>";
   } else { age.innerHTML = '<span class="muted">state '+ms(d.statusAgeMs)+" old</span>"; }
+
+  // The cross-world join is rebuilt from every poll, before anything draws, so
+  // "also in slot 5" is exactly as fresh as the map beside it. SP goes with it:
+  // a species that left a world must not keep a tooltip.
+  SP = {};
+  buildCrossWorld(d);
 
   if (signature(d) !== mapSig) buildMap(d);
   paintMap(d);
@@ -973,15 +1316,19 @@ function render(d){
     var note = v.lastRefusal ? '<span class="bad">'+esc(v.lastRefusal)+"</span>"
       : (v.statsKnown ? "" : '<span class="unknown">reported nothing'
           + (v.statsAgeMs? " for "+ms(v.statsAgeMs) : "")+"</span>");
+    // The species cell is left EMPTY here and filled by paintSpeciesCell: this
+    // string is assigned to innerHTML, and no census name may reach it.
     return "<tr><td>"+v.slot+"</td><td>("+v.position.col+","+v.position.row+")</td>"
       + "<td>"+esc(v.peerId)+"</td><td>"+state+"</td>"
       + '<td class="num">'+num(v.population)+'</td>'
+      + '<td class="spx" id="wsp-'+v.slot+'"></td>'
       + '<td class="num">'+num(v.custodyDepth)+'</td>'
       + '<td class="num">'+num(v.pacedDepth)+'</td>'
       + '<td class="num">'+num(v.heldDepth)+'</td>'
       + '<td class="num">'+num(v.bouncedTimeoutTotal)+'</td>'
       + "<td>"+save+"</td><td>"+note+"</td></tr>";
-  }).join("") || '<tr><td colspan="11" class="muted">no slots reserved yet</td></tr>';
+  }).join("") || '<tr><td colspan="12" class="muted">no slots reserved yet</td></tr>';
+  for (var si=0; si<d.slots.length; si++) paintSpeciesCell(d.slots[si]);
 
   var tt = d.totals;
   $("#totals").innerHTML =
@@ -993,6 +1340,12 @@ function render(d){
     + kv(t("held","held depth"), num(tt.heldDepth))
     + kv(t("bounce","bounces a hold timeout caused"), num(tt.timeoutBounces))
     + kv("worlds reporting nothing", tt.unknownSlots)
+    // Counted over the COMPARED spelling, and labelled as such: two worlds
+    // spelling one species differently would otherwise read as two.
+    + kv(t("census","species across the map"),
+         Object.keys(XW).length + ' <span class="muted">(by compared spelling)</span>')
+    + kv("worlds reporting no species", censusless(d) === 0
+         ? "0" : '<span class="unknown">'+censusless(d)+"</span>")
     + kv(t("envelope","envelopes recorded"),
          tt.migrations+"  ("+tt.perMinute.toFixed(2)+"/min over the last "
          + Math.round((d.flowWindowMs||300000)/60000)+" min)")

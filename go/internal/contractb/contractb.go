@@ -316,6 +316,22 @@ type HandshakeAck struct {
 // HEARTBEAT.lastSave (contract-a.md §5.2, §15 A21).
 type SaveReceipt = contracta.SaveReceipt
 
+// The species census, copied VERBATIM from HEARTBEAT.species (contract-a.md
+// §5.2, §17 A35; §6.3.1, §16 B11). Same shape, same types, one validator — and
+// that validator lives on the OTHER wire, where the census enters the system.
+// This wire adds no second validator; it adds a BOUND (SpeciesCensusMax).
+type (
+	Census        = wire.Census
+	CensusEntry   = wire.CensusEntry
+	TruncatedFlag = wire.TruncatedFlag
+)
+
+// SpeciesCensusMax is §12's shared bound, the same constant contract-a.md §10
+// names. It is what keeps a stats block — and the six-slot PEER_STATUS that
+// republishes six of them — bounded, and no party on this wire may raise it
+// unilaterally.
+const SpeciesCensusMax = wire.SpeciesCensusMax
+
 // PeerStats is the peer stats block of §6.3.1. One shape, three carriers: a
 // sidecar sends it on SECTOR_CLAIM and on PING, and the relay republishes the
 // latest value it holds in PEER_STATUS.
@@ -340,6 +356,90 @@ type PeerStats struct {
 	BouncedTimeoutTotal *int         `json:"bouncedTimeoutTotal,omitempty"`
 	SimulatedTime       *float64     `json:"simulatedTime,omitempty"`
 	LastSave            *SaveReceipt `json:"lastSave,omitempty"`
+	// Species is the world's active species census, copied out of the last
+	// HEARTBEAT the sidecar received and NEVER AUTHORED HERE (§16, B11). A
+	// sidecar MUST NOT synthesize one, re-sort one, merge two entries, fill a
+	// missing count, or derive one from its journal, its genome cache or the
+	// MIGRATION_PAYLOAD.species blocks that pass through it: those describe
+	// migrants, this describes a population.
+	//
+	// nil is UNKNOWN — no mod, a mod older than contract-a/2.2, or no heartbeat
+	// carrying one yet. A present census with no entries is a reporting mod with
+	// nothing alive in its world, which is a different fact (§10.1).
+	Species *Census `json:"species,omitempty"`
+	// Truncated qualifies Species and nothing else (§16, B11). Monotonic, and
+	// ignored when Species is absent.
+	Truncated TruncatedFlag `json:"truncated,omitempty"`
+
+	// unknown is every key of the block this build does not have a field for,
+	// kept as it arrived and re-emitted on the way out. It is §16 B11's one
+	// SHOULD, "for the next field after this one": a relay that re-encodes a
+	// stats block from a typed model DROPS a stat a newer sidecar sends, and a
+	// contract-b/3.1 relay is exactly why the census needed this note. Storing
+	// what it does not understand costs a map and a merge, and it means the
+	// field after the census survives a relay that predates it.
+	//
+	// Unexported: it is a transport detail, never a field any component reads.
+	unknown map[string]json.RawMessage
+}
+
+// knownStatKeys is every key PeerStats has a field for. Anything else a peer
+// sends is carried through untouched.
+var knownStatKeys = []string{
+	"population", "eggCount", "custodyDepth", "pacedDepth", "heldDepth",
+	"bouncedTimeoutTotal", "simulatedTime", "lastSave", "species", "truncated",
+}
+
+// UnmarshalJSON decodes the block and REMEMBERS WHAT IT DID NOT UNDERSTAND
+// (§6.3.1, §16 B11's SHOULD). Unknown keys are still ignored for every purpose
+// — nothing reads them, nothing routes on them — they are simply not thrown
+// away, so a hop that predates a field is not the place that field dies.
+func (p *PeerStats) UnmarshalJSON(b []byte) error {
+	type plain PeerStats
+	var v plain
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(b, &all); err != nil {
+		return err
+	}
+	for _, k := range knownStatKeys {
+		delete(all, k)
+	}
+	if len(all) == 0 {
+		all = nil
+	}
+	*p = PeerStats(v)
+	p.unknown = all
+	return nil
+}
+
+// MarshalJSON re-emits the known fields and then everything else the block
+// arrived with. A known field always wins: this carries a stranger's key, it
+// never lets one shadow a value this build computed.
+func (p PeerStats) MarshalJSON() ([]byte, error) {
+	type plain PeerStats
+	b, err := json.Marshal(plain(p))
+	if err != nil {
+		return nil, err
+	}
+	if len(p.unknown) == 0 {
+		return b, nil
+	}
+	var merged map[string]json.RawMessage
+	if err := json.Unmarshal(b, &merged); err != nil {
+		return nil, err
+	}
+	if merged == nil {
+		merged = map[string]json.RawMessage{}
+	}
+	for k, v := range p.unknown {
+		if _, taken := merged[k]; !taken {
+			merged[k] = v
+		}
+	}
+	return json.Marshal(merged)
 }
 
 // SectorClaim is SECTOR_CLAIM (contract-b-m4.md §6.3) — a placement claim. A

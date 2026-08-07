@@ -93,6 +93,12 @@ type fakeMod struct {
 	holdFor   time.Duration
 	timeScale float64
 	ackDelay  time.Duration
+	// census is the species census this peer reports on every HEARTBEAT, or nil
+	// when the operator asked for none. It is a FIXED list from a flag, not a
+	// measurement: this program has no world, so the honest thing it can do is
+	// report exactly what it was told to report, and nil rather than [] when it
+	// was told nothing (contract-a.md §17, A35).
+	census *wire.Census
 
 	conn *wsutil.Conn
 
@@ -134,6 +140,13 @@ func run(args []string) int {
 			"rig's game instances: the sidecar paces inbound delivery per simulated minute of the "+
 			"RECEIVING world (§7.5), so a synthetic peer left at 1x beside worlds at 5x throttles "+
 			"itself five times harder than they do and grows a backlog that never drains")
+	speciesJSON := fs.String("species", "",
+		"a species census to report on every HEARTBEAT, as the raw JSON array of "+
+			"contract-a.md §5.2 — e.g. '[{\"genericName\":\"Izus \",\"specificName\":"+
+			"\"copedylanus\",\"bibites\":96,\"eggs\":14}]'. Empty sends NO field, which is what "+
+			"a mod older than contract-a/2.2 does and reads as UNKNOWN on the page; '[]' is the "+
+			"different, stronger statement that this world has nothing alive. Names are sent "+
+			"RAW, edge whitespace and all, because that is what this field carries (§17, A36)")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -165,12 +178,36 @@ func run(args []string) int {
 		}
 	}
 
+	// The census is parsed ONCE, here, so a typo is a startup error instead of a
+	// silently stripped field every second for a week. Absent stays absent: an
+	// unset flag sends no `species` key at all, which is what the page must read
+	// as unknown rather than as an empty world (contract-a.md §17, A35).
+	var census *wire.Census
+	if *speciesJSON != "" {
+		var c wire.Census
+		if err := json.Unmarshal([]byte(*speciesJSON), &c); err != nil {
+			log.Error("fakemod: --species is not JSON", "err", err)
+			return 1
+		}
+		carried, _, why := wire.CarryCensus(&c, false)
+		if carried == nil {
+			log.Error("fakemod: --species is not an array of census entries", "reason", why)
+			return 1
+		}
+		if len(why) > 0 {
+			log.Error("fakemod: --species holds entries a sidecar would strip", "reasons", why)
+			return 1
+		}
+		census = carried
+	}
+
 	m := &fakeMod{
 		log: log, sessionID: wire.NewUUID(), simSize: *simSize, timeScale: *timeScale,
 		edgesOut: out, edgesAll: all, ringSlot: *ringSlot,
 		statePath: *statePath, holdFor: *holdFor, ackDelay: *ackDelay,
 		openEdges: map[string]bool{}, holding: map[string]*held{},
 		byEntity: map[int32]string{}, inFlight: map[string]*held{},
+		census: census,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -310,6 +347,7 @@ func (m *fakeMod) beat(ctx context.Context, every time.Duration) {
 			SessionID: m.sessionID, SimTick: &tick, SimulatedTime: &simTime,
 			Population: &pop, Paused: &paused, TimeScale: &scale,
 			SimulationSize: &m.simSize, InFlightOut: &inFlight,
+			Species: m.census,
 		}
 		if err := m.send(contracta.TypeHeartbeat, hb); err != nil {
 			return

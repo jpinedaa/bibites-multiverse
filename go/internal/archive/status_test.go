@@ -189,3 +189,112 @@ func TestMetricsRoundTrip(t *testing.T) {
 		t.Fatal("LastSample invented a sample from a file that does not exist")
 	}
 }
+
+// TestCensusIsAStatAndObeysEveryRuleForOne is contract-b-m4.md §16, B12's first
+// resolution: `stats.species` is what the page's species view is built from,
+// and EVERY RULE §10.1 already had applies to it rather than being bent for it.
+//
+// Four states, four different answers, and only one of them is a list:
+//
+//	ABSENT    — the block carries no census: UNKNOWN. Never "no species", never
+//	            an empty list, never a zero.
+//	EMPTY     — the block carries `[]`: the stronger, different fact, and the
+//	            page may say so.
+//	PRESENT   — the entries, in the census's own order, names untouched.
+//	STALE     — a block older than statsStaleMs is HISTORY, NOT STATE, and its
+//	            census goes back to unknown with the population beside it.
+func TestCensusIsAStatAndObeysEveryRuleForOne(t *testing.T) {
+	census := &contractb.Census{Entries: []contractb.CensusEntry{
+		// Raw, in the sender's order, with the whitespace that makes this lane
+		// different from the migration lane (contract-a.md §17, A36).
+		{GenericName: "Izus ", SpecificName: "copedylanus", Bibites: 96, Eggs: 14},
+		{GenericName: "Izus", SpecificName: "copedylanus", Bibites: 61, Eggs: 9},
+		{GenericName: " ", SpecificName: "anonymus", Bibites: 17, Eggs: 3},
+	}}
+	present := &contractb.PeerStats{
+		Population: contractb.IntPtr(200), EggCount: contractb.IntPtr(30),
+		Species: census, Truncated: true,
+	}
+	empty := &contractb.PeerStats{
+		Population: contractb.IntPtr(0), Species: &contractb.Census{},
+	}
+	absent := &contractb.PeerStats{Population: contractb.IntPtr(41), Truncated: true}
+
+	status := contractb.PeerStatus{
+		Epoch: 9, Map: contractb.MapShape{Width: 3, Height: 1}, SlotCount: 3,
+		Slots: []contractb.SlotInfo{
+			slot(1, 0, 0, true, present), slot(2, 1, 0, true, empty),
+			slot(3, 2, 0, true, absent),
+		},
+	}
+
+	view := newViewFixture(t, status, time.Second).StatusView()
+	byslot := map[int]SlotView{}
+	for _, v := range view.Slots {
+		byslot[v.Slot] = v
+	}
+
+	one := byslot[1]
+	if !one.SpeciesKnown || len(one.Species) != 3 {
+		t.Fatalf("slot 1 published %v / %+v, want a three-entry census",
+			one.SpeciesKnown, one.Species)
+	}
+	for i, want := range census.Entries {
+		if one.Species[i] != want {
+			t.Fatalf("entry %d is %+v, want %+v — the view copies, it does not repair",
+				i, one.Species[i], want)
+		}
+	}
+	if !one.SpeciesTruncated {
+		t.Fatal("slot 1 lost the truncated flag; the page MUST be able to say the rest is unreported")
+	}
+
+	two := byslot[2]
+	if !two.SpeciesKnown {
+		t.Fatal("a present `[]` read as unknown; it is the stronger fact, not the absent one")
+	}
+	if len(two.Species) != 0 {
+		t.Fatalf("a present `[]` gained entries: %+v", two.Species)
+	}
+
+	three := byslot[3]
+	if three.SpeciesKnown || three.Species != nil {
+		t.Fatalf("an absent census read as %v / %+v; absent is UNKNOWN",
+			three.SpeciesKnown, three.Species)
+	}
+	if three.SpeciesTruncated {
+		t.Fatal("truncated survived with no census to qualify; it is ignored when species is absent")
+	}
+	if three.Population == nil || *three.Population != 41 {
+		t.Fatal("the missing census cost the population; a census is not an input to anything")
+	}
+
+	// STALE. Past statsStaleMs the whole block is history, and the census ages
+	// with it — it has no clock of its own, because a fresh species list beside
+	// a stale population from the same frame is the one thing one timestamp per
+	// block exists to prevent (§16, B11).
+	stale := newViewFixture(t, status, 5*time.Minute).StatusView()
+	for _, v := range stale.Slots {
+		if v.SpeciesKnown || v.Species != nil {
+			t.Fatalf("slot %d served a census out of a stale block: %+v", v.Slot, v.Species)
+		}
+	}
+
+	// The terminal tool renders the SAME Status, so the two operator surfaces
+	// cannot disagree about which species live where — and it prints the raw
+	// spelling, doubled space and all.
+	out := &strings.Builder{}
+	RenderRingstat(out, view)
+	got := out.String()
+	for _, want := range []string{
+		"Izus  copedylanus ×96+14egg", // the trailing space, still doubled
+		"Izus copedylanus ×61+9egg",   // its whitespace twin, still a separate entry
+		"UNREPORTED",                  // slot 1 is truncated and says so
+		"none alive",                  // slot 2's present []
+		"unknown",                     // slot 3's absent census
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ringstat never printed %q:\n%s", want, got)
+		}
+	}
+}

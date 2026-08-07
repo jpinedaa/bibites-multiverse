@@ -115,6 +115,8 @@ func RenderRingstat(w io.Writer, s Status) {
 			l.FromSlot, l.Edge, to, state, l.Migrations, l.PerMinute)
 	}
 
+	renderCensus(w, s)
+
 	t := s.Totals
 	fmt.Fprintf(w, "\ntotals: %d live, %d dark, %d hole(s); population %s, custody %s, paced %s, held %s\n",
 		t.LiveSlots, t.DarkSlots, t.Holes,
@@ -126,6 +128,47 @@ func RenderRingstat(w io.Writer, s Status) {
 	fmt.Fprintf(w, "\nan unknown is a slot that reported nothing, or reported it too long ago.\n"+
 		"a zero is a measurement. the lanes are recomputed for display; the relay's\n"+
 		"SECTOR_GRANT is the authority for what a peer actually routes.\n")
+}
+
+// renderCensus is the species half of the operator surface in the terminal —
+// the same census the page draws, off the same Status, so the two tools cannot
+// disagree about which species live where (contract-b-m4.md §10.1, §16 B12).
+//
+// It obeys §10.1's rules exactly as the page does: an absent census is UNKNOWN
+// and says so, a present empty one is the different and stronger fact, a
+// truncated one says the rest is unreported, and NO NAME IS REPAIRED — the raw
+// spelling the owning world holds is what is printed, doubled spaces and all
+// (contract-a.md §17, A36).
+func renderCensus(w io.Writer, s Status) {
+	if len(s.Slots) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\n%-6s %s\n", "slot", "species (living + eggs, most numerous first, "+
+		"named exactly as the owning world spells them)")
+	fmt.Fprintln(w, strings.Repeat("-", 100))
+	for _, v := range s.Slots {
+		switch {
+		case !v.StatsKnown || !v.SpeciesKnown:
+			fmt.Fprintf(w, "%-6d unknown — this world reports no census\n", v.Slot)
+			continue
+		case len(v.Species) == 0:
+			fmt.Fprintf(w, "%-6d none alive — this world is reporting, and holds no species\n", v.Slot)
+			continue
+		}
+		parts := make([]string, 0, len(v.Species))
+		for _, e := range v.Species {
+			part := fmt.Sprintf("%s ×%d", e.GenericName+" "+e.SpecificName, e.Bibites)
+			if e.Eggs > 0 {
+				part += fmt.Sprintf("+%degg", e.Eggs)
+			}
+			parts = append(parts, part)
+		}
+		line := strings.Join(parts, ", ")
+		if v.SpeciesTruncated {
+			line += "  [32 most numerous only; the rest is UNREPORTED]"
+		}
+		fmt.Fprintf(w, "%-6d %s\n", v.Slot, line)
+	}
 }
 
 func opt(v *int) string {

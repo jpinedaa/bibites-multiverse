@@ -1147,6 +1147,20 @@ func (s *Sidecar) statsLocked() contractb.PeerStats {
 			save := *s.mod.lastSave
 			st.LastSave = &save
 		}
+		// COPY, NEVER AUTHOR (contract-b-m4.md §16, B11). The census that
+		// reaches the relay is the one the last HEARTBEAT carried, entry for
+		// entry, byte for byte, in the order the mod sorted it. This sidecar
+		// does not synthesize one, does not re-sort one, does not merge two
+		// entries, does not fill a missing count, and does not derive one from
+		// its journal, its genome cache or the migration blocks that pass
+		// through it — those describe migrants, this describes a population.
+		//
+		// Clone because the decoded frame is transient and this block outlives
+		// it. nil stays nil: absent is unknown, and unknown is a value.
+		if s.mod.census != nil {
+			st.Species = s.mod.census.Clone()
+			st.Truncated = contractb.TruncatedFlag(s.mod.censusTruncated)
+		}
 	}
 	return st
 }

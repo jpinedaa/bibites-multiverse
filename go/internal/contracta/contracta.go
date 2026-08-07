@@ -355,6 +355,17 @@ type Heartbeat struct {
 	// LastSave is OPTIONAL (§15, A21). A mod that omits it is conformant and the
 	// status page shows that world's save state as unknown.
 	LastSave *SaveReceipt `json:"lastSave,omitempty"`
+	// Species is the world's active species census (§17, A35). OPTIONAL, and
+	// ABSENT MEANS UNKNOWN rather than empty: an old mod and a mod that does not
+	// implement §17 both produce a frame with no field, and no reader can tell
+	// them apart from a world with no species. A present `[]` is the stronger
+	// statement a reporting mod makes about a world with nothing alive in it.
+	//
+	// It is deliberately NOT part of Validate: see the note there.
+	Species *Census `json:"species,omitempty"`
+	// Truncated qualifies Species and nothing else. A receiver MUST ignore it
+	// when Species is absent (§17, A35).
+	Truncated TruncatedFlag `json:"truncated,omitempty"`
 }
 
 func (h *Heartbeat) Validate() error {
@@ -379,6 +390,13 @@ func (h *Heartbeat) Validate() error {
 	if h.SimulationSize == nil || !wire.Finite(*h.SimulationSize) || *h.SimulationSize <= 0 {
 		return invalid("simulationSize is missing or not a positive finite number")
 	}
+	// THE CENSUS IS NOT CHECKED HERE, AND THAT IS THE POINT. Every other field
+	// in this method answers a failure with close 4003, because HEARTBEAT has NO
+	// NACK CHANNEL AT ALL — and §17 A35 makes the census the named exception to
+	// exactly that default: "a label is not worth a session". The sidecar
+	// applies wire.CarryCensus at the receiver obligation of §5.2, which strips
+	// what fails and processes the heartbeat as before. Putting the same check
+	// here would let a display field kill a live session.
 	return nil
 }
 
@@ -398,6 +416,19 @@ type ParentBlob struct {
 // the same rules and the same validator on both wires, so it lives in package
 // wire beside the envelope they also share.
 type Species = wire.Species
+
+// The species CENSUS of §17, A35 — a different lane with a different job and a
+// DIFFERENT NAME RULE from the block above (§17, A36). It rides HEARTBEAT and
+// then the peer stats block, so it lives in package wire too.
+type (
+	Census        = wire.Census
+	CensusEntry   = wire.CensusEntry
+	TruncatedFlag = wire.TruncatedFlag
+)
+
+// SpeciesCensusMax is §10's bound on HEARTBEAT.species, restated where the rest
+// of Contract A's tunables live.
+const SpeciesCensusMax = wire.SpeciesCensusMax
 
 // MigrateOut is MIGRATE_OUT (contract-a.md §5.3).
 type MigrateOut struct {

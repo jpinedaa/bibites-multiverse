@@ -83,6 +83,25 @@ type SlotView struct {
 	SimulatedTime       *float64               `json:"simulatedTime,omitempty"`
 	LastSave            *contracta.SaveReceipt `json:"lastSave,omitempty"`
 	LastSaveAgeMs       *int64                 `json:"lastSaveAgeMs,omitempty"`
+
+	// The species census (contract-b-m4.md §16, B11 and B12). SpeciesKnown is
+	// the ABSENT/EMPTY distinction made explicit for a JSON reader, because a
+	// JS client cannot tell an omitted array from an empty one once it has
+	// parsed: false means UNKNOWN — no census on the block, or a block too old
+	// to be state — and the page renders "species unknown", never "no species",
+	// never an empty list and never a zero. True with an empty Species is the
+	// stronger, different fact: a reporting world with nothing alive in it.
+	//
+	// The entries are carried in the census's own order, which is the mod's:
+	// sorted by bibites + eggs descending. NOTHING HERE RE-SORTS, MERGES,
+	// DE-DUPLICATES OR REPAIRS A NAME (contract-a.md §17, A36) — two entries
+	// whose names differ only in whitespace are two Species records in that
+	// world, and this view reports two.
+	SpeciesKnown bool                    `json:"speciesKnown"`
+	Species      []contractb.CensusEntry `json:"species,omitempty"`
+	// SpeciesTruncated says the 32 most abundant species are named and the rest
+	// is UNREPORTED. The page must say so rather than present the list as whole.
+	SpeciesTruncated bool `json:"speciesTruncated,omitempty"`
 }
 
 // LaneView is one derived effective lane, with the flow the ledger measured on
@@ -242,6 +261,17 @@ func (a *Archive) StatusView() Status {
 					v.LastSave = &save
 					age := nowMs - save.AtMs
 					v.LastSaveAgeMs = &age
+				}
+				// The census ages with the rest of the block and needs no clock
+				// of its own: giving it one would let the page show a fresh
+				// species list beside a stale population from the same frame
+				// (§16, B11). Absent stays absent — SpeciesKnown is only true
+				// when a census actually arrived.
+				if si.Stats.Species != nil {
+					v.SpeciesKnown = true
+					v.Species = append([]contractb.CensusEntry{},
+						si.Stats.Species.Entries...)
+					v.SpeciesTruncated = bool(si.Stats.Truncated)
 				}
 			}
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -54,6 +55,32 @@ type modSession struct {
 	// (§15, A21). A mod that omits it is conformant and the status page shows
 	// that world's save state as unknown.
 	lastSave *contracta.SaveReceipt
+
+	// census is the species census the LAST HEARTBEAT carried, after §5.2's
+	// strip table, and censusTruncated is that heartbeat's flag after the
+	// monotonic OR (§17, A35; contract-b-m4.md §16 B11).
+	//
+	// IT TRACKS THE LAST HEARTBEAT AND IT IS NOT STICKY. A census absent from
+	// this beat leaves this field nil, and the stats block then reports the
+	// census as unknown rather than repeating an older one. The census is built
+	// in the same Update as population, eggCount and simulatedTime, so one
+	// heartbeat describes one instant — and one stats block carries one
+	// statsAsOfMs. Holding a census over from an earlier beat would put a
+	// species list of one age beside a population of another under a single
+	// timestamp, which is precisely the disagreement §16 B11 keeps this on one
+	// block to avoid.
+	//
+	// nil is ABSENT/UNKNOWN. A non-nil census with no entries is the stronger,
+	// different fact: a reporting mod whose world has nothing alive in it.
+	census          *wire.Census
+	censusTruncated bool
+	// censusWarn is the last set of strip reasons this session logged, so a mod
+	// with a permanently broken census says so ONCE rather than once a second
+	// for a week. §5.2 asks for one line per rule that fires; a rule that fires
+	// on every heartbeat of a 24/7 rig is one fact, not 86 400 of them, and a
+	// log an operator scrolls past is the same as no log at all. A CHANGED
+	// defect logs again, and so does the same defect on a new session.
+	censusWarn string
 }
 
 // serveRetiredContractA implements contract-a.md §15 A23: an M3 mod dials
@@ -346,6 +373,18 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 		save := *hb.LastSave
 		sess.lastSave = &save
 	}
+	// §5.2's strip table, the ONE place it is applied. It never returns an
+	// error and it never closes: a bad entry costs that entry, a `species` that
+	// is not an array costs the field, and neither costs the heartbeat, the
+	// connection, or the liveness this heartbeat carries (§8). The log lines it
+	// produces are emitted after the lock, with the resize warning below.
+	census, truncated, stripped := wire.CarryCensus(hb.Species, bool(hb.Truncated))
+	sess.census, sess.censusTruncated = census, truncated
+	if fresh := strings.Join(stripped, "; "); fresh != sess.censusWarn {
+		sess.censusWarn = fresh
+	} else {
+		stripped = nil
+	}
 	if sess == s.mod {
 		s.pace.beat(*hb.SimulatedTime, !*hb.Paused && *hb.TimeScale > 0, now)
 	}
@@ -355,6 +394,12 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 		s.publishEdgesLocked(false)
 	}
 	s.mu.Unlock()
+	for _, why := range stripped {
+		// One line per rule that fired, and then nothing else happens: the
+		// heartbeat was processed normally, and the world whose census had to be
+		// stripped reports everything else exactly as before.
+		s.log.Warn("contract A: stripped part of a HEARTBEAT species census", "reason", why)
+	}
 	if resized {
 		s.log.Warn("contract A: mod reported a new simulationSize", "simulationSize", *hb.SimulationSize)
 		s.refreshClaim()
