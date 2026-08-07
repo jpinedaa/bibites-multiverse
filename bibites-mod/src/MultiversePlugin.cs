@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.5.2";
+        public const string Version = "0.5.3";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -24,7 +24,8 @@ namespace BibitesMultiverse
             Log.LogInfo(
                 $"{Name} {Version} loaded — {ContractA.Protocol} client, plural export edges with a capture band each " +
                 "(§4.3.1) and the corner rule (§4.3.2), lineage annex, species identity in the envelope (§16), " +
-                "wrap-on containment (D10), periodic world saves (D14) and the portal (WP7).");
+                "the active-species census on the heartbeat (§17), wrap-on containment (D10), periodic world saves " +
+                "(D14) and the portal (WP7).");
             Log.LogInfo($"Application.version = {Application.version}");
             Log.LogInfo($"Application.unityVersion = {Application.unityVersion}");
 

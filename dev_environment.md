@@ -11,7 +11,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
-| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.1`**, amended in place; §15 is the M4 set and §16 the species-identity set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.1`**; §14 is its reconciliation set and §15 the species-identity amendment), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by the species set — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
+| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.2`**, amended in place; §15 is the M4 set, §16 the species-identity set and §17 the species-census set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.2`**; §14 is its reconciliation set, §15 the species-identity amendment and §16 the census amendment), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by the species set — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
 | Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), **`run-m4-lan.sh` = the same map with slot 6 on the second computer** (the M4 exit-test rig; it sources `run-m4.sh` with `M4_LIB=1`), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rigs* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
@@ -281,14 +281,17 @@ Six things about it are load-bearing:
 does not fail with a socket error — it connects, gets closed, and looks like a peer that
 will not join. That is the failure to expect, and it is why this list exists.
 
-**The minors are now `contract-a/2.1` and `contract-b/3.1`** (the species-identity set,
-2026-08-07), and **nothing in this table moves with them**. Compatibility is on the major
-alone: a minor is never a rejection reason, the URL paths did not move, and the new `species`
-field is OPTIONAL on both wires. That is not theory — the living deployment ran the rollout
-with slot 6 left on the previous minor, and its old sidecar reconnected to the new relay and
+**The minors are now `contract-a/2.2` and `contract-b/3.2`** (the species-census set,
+2026-08-07; `2.1`/`3.1` were the species-identity set of the same day), and **nothing in this
+table moves with them**. Compatibility is on the major alone: a minor is never a rejection
+reason, the URL paths did not move, and every field either set added — the migration
+`species` block, and the `HEARTBEAT` census with its `truncated` sibling — is OPTIONAL on both
+wires. That is not theory — the living deployment has now run **two** minor rollouts with slot
+6 left on the previous minor each time, and its old sidecar reconnected to the new relay and
 kept exchanging organisms in both directions with no `4000` close. **The minor is a
-capability statement, not a negotiation:** detect the feature by the presence of the
-`species` field, never by arithmetic on the minor.
+capability statement, not a negotiation:** detect a feature by the presence of its field,
+never by arithmetic on the minor. A world whose mod predates the census therefore reads
+**species unknown** on the status page — honest, and never a wrong number.
 
 | What the scripts speak | What M4 speaks | Where |
 |---|---|---|
@@ -389,6 +392,7 @@ side carries none** — the relay, the sidecar, the archive and `ringstat` all l
 | `[M4-CROWDING]` | **M4.** Per-simulated-minute arrival crowding, **one line per entry edge**. |
 | `[M4-PORTAL]` | **M4.** `event=BUILT`, `event=SHOWN`, `event=HIDDEN`, `event=RELAYOUT`. |
 | `[M5-SPECIES]` | **The species-identity set** (`contract-a/2.1`). One `action=created\|matched\|fallback` line per import, with `migrationId`, `entityId`, `name="…"`, `localId`, `parentLinked` and `detail`; plus the export-side warning when a species name cannot go on the wire. `action=fallback` is the absent-block rule, and it is the normal reading for an arrival from a peer that predates the set. |
+| `[M5-CENSUS]` | **The species-census set** (`contract-a/2.2`). **Silent in normal operation** — the census rides every `HEARTBEAT` and logs nothing. The one line it can emit is a rate-limited warning (at most one a minute) naming active species whose name half is empty or over 64 UTF-8 bytes and therefore cannot go on the wire; the census carries the rest with `truncated=true`. A quiet `[M5-CENSUS]` is the expected state, and a sidecar line reading `stripped part of a HEARTBEAT species census` with a quiet mod log means the strip happened for a reason the mod did not see coming. |
 | `[M1-AUTOTEST]` | The M1 auto-test, including its one `RESULT:` line. |
 
 **`[M2-CROSSING]` is now several lines per window, and every parser must key on `edge=`.**

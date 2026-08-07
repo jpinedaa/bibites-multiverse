@@ -973,6 +973,29 @@ namespace BibitesMultiverse
                 data["lastSave"] = lastSave.ToJson();
             }
 
+            // §5.2, §17 A35 — the OPTIONAL species census. It is built HERE, inline, and not on a timer
+            // of its own: A35's "one sample" rule says the census and the counters above it must
+            // describe one instant, because the page reconciles Σbibites against `population` and
+            // Σeggs against `eggCount`. A cached copy refreshed on a slower clock would break that
+            // reconciliation and report a surplus this mod never had.
+            //
+            // Absent is UNKNOWN, not empty (A35). A null census — no world, one still loading — omits
+            // the field entirely, and every reader from the sidecar to the page renders that world's
+            // species as unknown. An empty array is the stronger claim: this world is reporting, and
+            // nothing is alive in it.
+            JArray census = SpeciesCensus.Build(out bool censusTruncated);
+            if (census != null)
+            {
+                data["species"] = census;
+                if (censusTruncated)
+                {
+                    // Qualifies `species` and nothing else, and it is monotonic from here: every hop may
+                    // set it, none may clear it. Omitted rather than sent as false, because absent and
+                    // false say the same thing.
+                    data["truncated"] = true;
+                }
+            }
+
             SendFrame(ContractA.Envelope(ContractA.TypeHeartbeat, data).ToString(Formatting.None));
         }
 
