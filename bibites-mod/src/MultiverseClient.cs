@@ -906,6 +906,11 @@ namespace BibitesMultiverse
         /// The declaration is about **geometry, not topology**: it says "I run a capture band on these
         /// edges". Whether an edge has a lane is the sidecar's answer in EDGE_STATUS, and the mod never
         /// learns a coordinate, a neighbour or a map shape.
+        ///
+        /// §19 A42 adds five OPTIONAL settings fields, and they are here rather than on HEARTBEAT
+        /// because a setting is static per session while a heartbeat is for what changes. They are
+        /// **read-only observability**: nothing downstream acts on one, and a control surface is a
+        /// separate design rather than a reversal of these (§19, A43).
         /// </summary>
         private void SendConfigUpdate(string reason)
         {
@@ -932,6 +937,8 @@ namespace BibitesMultiverse
                 data["worldName"] = worldName;
             }
 
+            AddSettings(data);
+
             SendFrame(ContractA.Envelope(ContractA.TypeConfigUpdate, data).ToString(Formatting.None));
             MultiversePlugin.Log.LogInfo(
                 $"{Prefix} CONFIG_UPDATE reason={reason} protocol={ContractA.Protocol} sessionId={sessionId} " +
@@ -939,7 +946,65 @@ namespace BibitesMultiverse
                 $"S={geometry.S.ToString("F2", CultureInfo.InvariantCulture)} W={geometry.W.ToString("F2", CultureInfo.InvariantCulture)} " +
                 $"borderEdges=[{ContractA.EdgeNames(config.BorderEdges)}] " +
                 $"exportEdges=[{ContractA.EdgeNames(config.ExportEdges)}] " +
-                $"worldWrapping={worldSettings.WorldWrappingOn} (reported, never written — D10)");
+                $"worldWrapping={worldSettings.WorldWrappingOn} (reported, never written — D10) " +
+                $"migrationExclude={config.Exclusion.Describe()} saveMinutes={SaveIntervalMinutes().ToString("F1", CultureInfo.InvariantCulture)} " +
+                $"saveKeep={SaveKeep()} saveOnQuit={SaveOnQuit()} (§19 A42 — read-only settings for the operator surface)");
+        }
+
+        /// <summary>
+        /// §19 A42 — the five settings fields, built from the objects the running code actually reads
+        /// rather than from the environment or the BepInEx entries. The environment beats the config
+        /// file and a bad value falls back to a default, so what an operator needs on the page is the
+        /// value that **won**: the parsed config, the exclusion list's own normalized set, and the
+        /// world saver's live numbers.
+        ///
+        /// <c>migrationExclude</c> is always emitted, including when it is empty: a present <c>[]</c>
+        /// says the policy is **off**, which is a different and stronger statement than the absence an
+        /// older mod produces. The entries are the A34-normalized full names, because this is the
+        /// **matching** lane — the exact strings <see cref="MigrationExclusion.Excludes"/> compares
+        /// against — and deliberately not §17's raw-name rule, which belongs to the census's display
+        /// lane. Nothing is sorted or repaired here; the configured order is the sender's statement.
+        ///
+        /// <c>saveMinutes</c> of 0 is a **reading**, not an absence: the save timer is off, and that is
+        /// the explanation for a world that never reports a <c>lastSave</c>.
+        /// </summary>
+        private void AddSettings(JObject data)
+        {
+            JArray excluded = new JArray();
+            IReadOnlyList<string> names = config.Exclusion.Names;
+            for (int i = 0; i < names.Count; i++)
+            {
+                excluded.Add(names[i]);
+            }
+
+            data["migrationExclude"] = excluded;
+            data["saveMinutes"] = SaveIntervalMinutes();
+            data["saveKeep"] = SaveKeep();
+            data["saveOnQuit"] = SaveOnQuit();
+
+            // D10 — snapshotted at world load by WorldSettings.Apply(), which runs before the transport
+            // starts. Reported, never written.
+            data["worldWrapping"] = worldSettings.WorldWrappingOn;
+        }
+
+        /// <summary>
+        /// D14's live interval, from the saver that owns the timer. The config value is the fallback for
+        /// the case the saver could not be created — it is what the timer *would* have been, and it is
+        /// still a truer answer than omitting the field.
+        /// </summary>
+        private float SaveIntervalMinutes()
+        {
+            return (WorldSaver.Instance != null) ? WorldSaver.Instance.IntervalMinutes : config.SaveMinutes;
+        }
+
+        private int SaveKeep()
+        {
+            return (WorldSaver.Instance != null) ? WorldSaver.Instance.Keep : config.SaveKeep;
+        }
+
+        private bool SaveOnQuit()
+        {
+            return (WorldSaver.Instance != null) ? WorldSaver.Instance.SaveOnQuit : config.SaveOnQuit;
         }
 
         /// <summary>§8 — wall-clock cadence. A paused sim, 0x and 20x all heartbeat the same.</summary>

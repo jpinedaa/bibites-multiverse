@@ -110,7 +110,7 @@ namespace BibitesMultiverse
     }
 
     /// <summary>
-    /// The wire vocabulary of contracts/contract-a.md, version contract-a/2.2: the envelope, the nine
+    /// The wire vocabulary of contracts/contract-a.md, version contract-a/2.3: the envelope, the nine
     /// message types, the close codes, the NACK taxonomy and the mod-owned tunables of §10.
     ///
     /// Nothing here touches Unity, so it is safe to call from the socket thread.
@@ -118,23 +118,25 @@ namespace BibitesMultiverse
     internal static class ContractA
     {
         /// <summary>
-        /// §3, §17 A37 — this release is **2.2**. A35 adds two OPTIONAL fields to one message
-        /// (<c>species</c> and its sibling <c>truncated</c>, on HEARTBEAT) and removes nothing, which
+        /// §3, §19 A44 — this release is **2.3**. A42 adds five OPTIONAL fields to one message — the
+        /// world's settings on CONFIG_UPDATE: <c>migrationExclude</c>, <c>saveMinutes</c>,
+        /// <c>saveKeep</c>, <c>saveOnQuit</c> and <c>worldWrapping</c> — and removes nothing, which
         /// §3.1's own test answers with a **minor** bump; the major, the message catalogue, the enums
-        /// and the close codes are all untouched, so the URL path does not move and a
-        /// <c>contract-a/2.1</c> or <c>contract-a/2.0</c> peer stays compatible by construction. The
-        /// minor is a capability statement, never a negotiation: this side detects the feature by the
-        /// **presence of the field** and never by arithmetic on the minor.
+        /// and the close codes are all untouched, so the URL path does not move and any earlier
+        /// <c>contract-a/2.x</c> peer stays compatible by construction. The minor is a capability
+        /// statement, never a negotiation: this side detects a feature by the **presence of the field**
+        /// and never by arithmetic on the minor.
         ///
-        /// 2.1 (§16, A33) added the species block to MIGRATE_OUT and MIGRATE_IN. 2.0 (§15, A23) was the
+        /// 2.2 (§17, A37) added the species census and its <c>truncated</c> flag to HEARTBEAT. 2.1
+        /// (§16, A33) added the species block to MIGRATE_OUT and MIGRATE_IN. 2.0 (§15, A23) was the
         /// first breaking change: A18 removed <c>exportEdge</c> for <c>exportEdges</c>, a field removal
-        /// and a type change together.
+        /// and a type change together. §18 (two-way lanes) took no bump at all — it added no field.
         /// </summary>
-        internal const string Protocol = "contract-a/2.2";
+        internal const string Protocol = "contract-a/2.3";
 
         internal const string ProtocolName = "contract-a";
         internal const int ProtocolMajor = 2;
-        internal const int ProtocolMinor = 2;
+        internal const int ProtocolMinor = 3;
 
         /// <summary>§3.1, §15 A23 — the path is major-scoped, so a major bump moves it. Serves every contract-a/2.x.</summary>
         internal const string UrlPath = "/contract-a/v2";

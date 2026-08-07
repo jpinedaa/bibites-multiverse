@@ -32,9 +32,16 @@ namespace BibitesMultiverse
     /// excluded population sitting in four capture bands is one dictionary probe per organism per tick —
     /// no string is built and nothing is allocated after a species is first seen.
     ///
-    /// This is export-side only and purely local: it never refuses an arrival, it is invisible to the
-    /// sidecar, the relay and the archive, and it is **not** a census filter — an excluded species lives
-    /// in this world like any other and §17's census reports it (A39, "Not a census filter").
+    /// This is export-side only and purely local: it never refuses an arrival, and it is **not** a
+    /// census filter — an excluded species lives in this world like any other and §17's census reports
+    /// it (A39, "Not a census filter").
+    ///
+    /// **Since §19 A42 the list is visible and still not actionable.** <c>CONFIG_UPDATE</c> publishes
+    /// <see cref="Names"/> so the operator surface can say why a world's lanes are quiet, and that is
+    /// all anyone downstream does with it: the sidecar carries it, the relay copies it, the page renders
+    /// it, and no mod ever sees another mod's list. A39's reason for keeping it off the wire — that a
+    /// wire field would make one world's policy another world's obligation — is preserved by the fields
+    /// being read-only, never by their absence.
     /// </summary>
     internal sealed class MigrationExclusion
     {
@@ -74,6 +81,15 @@ namespace BibitesMultiverse
 
         /// <summary>True when at least one name is configured. An empty list disables the policy (A39).</summary>
         internal bool Enabled => names.Count > 0;
+
+        /// <summary>
+        /// §19 A42 — the configured list as <c>CONFIG_UPDATE.migrationExclude</c> carries it: the
+        /// **A34-normalized** full names, in configured order, deduplicated. This is deliberately the
+        /// same set the hot path compares against and **not** the operator's typed string, so a reader
+        /// sees the comparison the policy performs rather than the request that produced it. It is
+        /// published for reading only: no other party enforces, filters or schedules on it (A43).
+        /// </summary>
+        internal IReadOnlyList<string> Names => ordered;
 
         /// <summary>Distinct organisms this session whose capture the policy stopped, as far as the log names them.</summary>
         internal long OrganismsExcluded => organismsLogged;

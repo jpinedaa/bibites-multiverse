@@ -165,7 +165,9 @@ namespace BibitesMultiverse
                 "Matched on the §16 A34-normalized form — trimmed, internal whitespace runs collapsed — " +
                 "so a name the game issued with an edge space still matches. Empty disables the policy. " +
                 "An excluded species is never captured on any edge; it still lives here, the wrap " +
-                "contains it (D10), and the census still reports it. The environment variable " +
+                "contains it (D10), and the census still reports it. The normalized list is published " +
+                "on CONFIG_UPDATE so the site can say why a world's lanes are quiet (§19 A42); it is " +
+                "read-only there and no other party acts on it. The environment variable " +
                 EnvMigrationExclude + " overrides this, including when it is set to an empty value.");
 
             ConfigEntry<int> slotEntry = config.Bind(
@@ -462,7 +464,8 @@ namespace BibitesMultiverse
                 $"debugIngest={DebugIngest}");
             MultiversePlugin.Log.LogInfo(
                 $"{MigrationExclusion.Prefix} config: migrationExcludeSpecies={Exclusion.Describe()} " +
-                $"(matched on the A34-normalized full name; export-side only, never on the wire, never a census filter)");
+                $"(matched on the A34-normalized full name; export-side only, never a census filter; " +
+                "published on CONFIG_UPDATE for reading only, and enforced here alone — §19 A42)");
             MultiversePlugin.Log.LogInfo(
                 $"[M2] config sources: {EnvExportEdges}={Show(Env(EnvExportEdges))} {EnvExportEdge}={Show(Env(EnvExportEdge))} " +
                 $"{EnvOpenEdge}={Show(Env(EnvOpenEdge))} " +
