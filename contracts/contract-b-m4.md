@@ -1,6 +1,6 @@
 # Contract B — M4 (Sidecar ↔ Relay ↔ Sidecar ↔ Archive)
 
-**Version:** `contract-b/3.4`
+**Version:** `contract-b/3.5`
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3), **B6** the
@@ -47,13 +47,24 @@ so §4's own test answers with a **minor** bump to `contract-b/3.4`. `contract-a
 since `contract-a/2.0`. Affected body text carries an `(amended — §18, Bx)` or
 `(added — §18, Bx)` marker, and **§18 wins over the body and over §14 to §17 wherever they
 disagree.**
+**Amended:** 2026-08-07, amendment set `contract-b/3.5 + B18–B19` (**§19**), from the owner's
+ratification of **the Species and Settings tabs on the site**. The **peer stats block**
+(§6.3.1) gains the five mod settings `contract-a.md` §19 puts on `CONFIG_UPDATE` — copied from
+the handshake and republished blind in `PEER_STATUS` — plus two version strings the sidecar has
+always held and never published: the peer's `modVersion` and the `contractAVersion` its mod
+session negotiated. Seven additive OPTIONAL fields, so §4's own test answers with a **minor**
+bump to `contract-b/3.5`. Contract A's matching set is `contract-a.md` §19, A42–A44. **They are
+read-only**: a control surface is owner-ratified as later work and would be a separate design,
+never an extension of these fields (`contract-a.md` §19, A43; B19). Affected body text carries
+an `(amended — §19, Bx)` or `(added — §19, Bx)` marker, and **§19 wins over the body and over
+§14 to §18 wherever they disagree.**
 **Status:** implementation-ready for M4. Written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*. Extended by D17–D20, ratified 2026-08-07
 against the living deployment.
 **Supersedes:** `contracts/contract-b-m3.md`, in full. That document is the historical
 record of the M3 ring and is **not** current guidance.
-**Companion documents:** `contracts/contract-a.md` (`contract-a/2.2`, mod ↔ sidecar) and
+**Companion documents:** `contracts/contract-a.md` (`contract-a/2.3`, mod ↔ sidecar) and
 `contracts/genome-hash.md` (`bb8-genome/1`, the canonical genome projection — **unchanged by
 M4, by the species block and by the census**, none of which is hashed, and whose one payload
 key, `genes.speciesID`, that projection already excludes: §4.3 there).
@@ -322,7 +333,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -389,6 +400,16 @@ from a typed model — and a peer that does not know them omits them. **Both pat
 unknown on the page** (§10.1), and this is the one field group where "unknown" has to beat a
 plausible substitute out loud: the shipped `inboundRatePerSimMinute` has changed three times,
 so a reader that fills in the default is not degrading, it is reporting a different rig.
+
+**The world's settings are the fifth, and it is a minor for the fifth time** (added — §19,
+B19): the peer stats block gains `modVersion`, `contractAVersion`, `migrationExclude`,
+`saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` (§6.3.1), all seven additive and
+all seven OPTIONAL, so the identifier moves to **`contract-b/3.5`**. The degradation is B16's
+exactly: a `contract-b/3.4` **relay** carries them because §16's B11 asked it to store the
+block as the bytes it arrived as, and any peer that does not know them omits them. **Every
+path renders as unknown on the page** (§10.1), and here too "unknown" must beat a plausible
+substitute out loud — a page that fills in `saveMinutes: 10` because that is the shipped
+default is describing a world whose save timer may well be off.
 
 Timestamps are informational (D5). `messageId` is for log correlation only; `migrationId` is
 the one idempotency key in the system (`contract-a.md` §7.1).
@@ -522,7 +543,7 @@ The **first frame on every connection**. Any other first frame closes with `4003
 |---|---|---|---|
 | `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). |
 | `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). |
-| `protocolVersion` | string | yes | `"contract-b/3.4"` (amended — §18, B17; `"contract-b/3.3"` before it, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. |
+| `protocolVersion` | string | yes | `"contract-b/3.5"` (amended — §19, B19; `"contract-b/3.4"` before it, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. |
 | `gameVersion` | string | yes | The game version behind this sidecar, from the mod's `CONFIG_UPDATE`. Empty while no mod is connected, and always empty for an archive. |
 | `sidecarVersion` | string | yes | Informational. The archive sends its own version here. |
 | `simulationSize` | float | no | `S`, when a mod has already reported one. |
@@ -541,14 +562,14 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
   "data": {
     "peerId": "peer-lan-slot5",
     "role": "peer",
-    "protocolVersion": "contract-b/3.4",
+    "protocolVersion": "contract-b/3.5",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0",
     "simulationSize": 2000.0
@@ -561,7 +582,7 @@ independently updated installs, so this is the failure most likely to waste an e
 | Field | Type | Required | Semantics |
 |---|---|---|---|
 | `relayVersion` | string | yes | Informational. |
-| `protocolVersion` | string | yes | `"contract-b/3.4"` (amended — §18, B17; `"contract-b/3.3"` before it, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
+| `protocolVersion` | string | yes | `"contract-b/3.5"` (amended — §19, B19; `"contract-b/3.4"` before it, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
 | `relaySessionId` | `uuid` | yes | **New in M4.** Minted once at relay start, constant for the life of the relay process. It is the scope of the forwarding record (§5.2), and a sidecar **MUST** persist it against every journal entry it hands over while this connection is live (§9.2). |
 | `assignedSlot` | number (int) | no | The slot this `peerId` already holds, when the relay remembers one. Absent for a first-time peer and always absent for an archive. |
 | `assignedPosition` | object `{col,row}` | no | Its position. Present exactly when `assignedSlot` is. |
@@ -571,13 +592,13 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
   "data": {
     "relayVersion": "0.4.0",
-    "protocolVersion": "contract-b/3.4",
+    "protocolVersion": "contract-b/3.5",
     "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
     "assignedSlot": 5,
     "assignedPosition": { "col": 1, "row": 1 },
@@ -615,7 +636,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -663,7 +684,7 @@ Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -712,6 +733,13 @@ memory (Risk 4).
 | `species[].specificName` | string | yes | The specific half. Same rules. The world's display name is `genericName + " " + specificName`. |
 | `species[].bibites` | number (int) | yes | Living members of that species in that world, `≥ 0`. Excludes eggs, so it is on the same footing as `population`. |
 | `species[].eggs` | number (int) | yes | Unhatched eggs of that species, `≥ 0`. `bibites + eggs` is the game's own `Species.count`. |
+| `modVersion` | string | no | **The plugin version behind this peer** (added — §19, B18), copied from `CONFIG_UPDATE.modVersion` (`contract-a.md` §5.1). The sidecar has held it since M2 and has never published it. Absent means **unknown** — no mod is connected, or the peer's build predates this field. It is not a capability statement and a reader **MUST NOT** infer one from it: what a mod can do is stated by `contractAVersion` and, field by field, by presence (`contract-a.md` §3.1). |
+| `contractAVersion` | string | no | **The protocol identifier the mod session is speaking** (added — §19, B18), for example `"contract-a/2.3"` — the `protocol` field of that mod's frames (`contract-a.md` §3). Absent means **unknown**, same two causes. It is what turns a missing census or a missing settings block from a puzzle into a fact: a slot reporting `contract-a/2.2` has no settings because its mod cannot send any. |
+| `migrationExclude` | array of string | no | **The species that peer's world never exports** (added — §19, B18), copied **verbatim** from `CONFIG_UPDATE.migrationExclude` (`contract-a.md` §5.1, §19 A42). Full names, both halves joined by one U+0020, in the **A34-normalized** form — trimmed, internal runs collapsed — because this is the **matching** lane and these are the exact strings the origin mod compares against. **That is deliberately not the rule `species[]` above carries**: a census name is a display label and travels raw (§16, B11). No party on this wire may normalize, re-normalize, sort, deduplicate or repair an entry. Absent means **unknown**; a present `[]` means the origin mod has the policy **off**. |
+| `saveMinutes` | float | no | **Wall-clock minutes between that world's periodic saves** (added — §19, B18), from `CONFIG_UPDATE.saveMinutes` (`contract-a.md` §19, A42). **`0` is a reading, not a gap** — the save timer is off — exactly as `timeScale: 0` is a stopped world, and a reader that folds the two together loses the one fact that explains an absent `lastSave`. Absent means unknown, and a reader **MUST NOT** substitute the shipped default. |
+| `saveKeep` | number (int) | no | Rotated saves that world keeps beside the live one (added — §19, B18), same source and same rules. |
+| `saveOnQuit` | bool | no | Whether that world saves when its game quits (added — §19, B18), same source and same rules. With the two above it is the whole answer to "what happens to this world if its machine stops". |
+| `worldWrapping` | bool | no | **D10's containment fact for that world** (added — §19, B18), from `CONFIG_UPDATE.worldWrapping` (`contract-a.md` §19, A42) — reported by the mod, never written by it. `false` is a reading and a loud one: it names a world that is not containing its own organisms. Absent means unknown. |
 | `truncated` | bool | no | **Qualifies `species` and nothing else** (added — §16, B11). `true` means the array is **not the whole census** — the mod hit the cap, or a sidecar stripped an entry or trimmed an over-long array (`contract-a.md` §5.2). Monotonic: set on the way, never cleared. Ignored when `species` is absent. |
 
 **Every field is optional, and absence is a value.** A stat the sidecar does not know is
@@ -727,7 +755,18 @@ never a routing input, a filter, an admission-control term or a scheduling term,
 population is not — and B11 adds no relay rule to it. What it adds is one **SHOULD**: a relay
 **SHOULD** store the stats block as the bytes it arrived as, rather than re-encoding it from a
 typed model, so a field a newer sidecar sends survives an older relay. It is a forward-
-compatibility habit, not a new behaviour.
+compatibility habit, not a new behaviour. **It has now paid for itself twice** (added — §19,
+B18): §18's three pacing settings were the field after the census, and §19's seven settings are
+the field after those. A relay that stores the block as bytes carried both without a line
+changing.
+
+**The settings on this block are read-only, and that is a rule rather than a description**
+(added — §19, B18). `modVersion`, `contractAVersion`, `migrationExclude`, `saveMinutes`,
+`saveKeep`, `saveOnQuit` and `worldWrapping` are what the **origin mod** reports about itself.
+No sidecar, relay, archive or page may act on one: not route, not filter, not schedule, not
+refuse, not fill in a default, and above all **not send one back**. There is no settings-write
+path in this system, and `contract-a.md` §19, A43 states why a control surface would be a
+separate design rather than a reversal of these fields.
 
 **The census is what bounds this block's size, and the cap is why** (added — §16, B11). A full
 32-entry census is about 3 KB; a typical rig world reports four to a dozen species and under
@@ -735,7 +774,11 @@ compatibility habit, not a new behaviour.
 carries one **per slot** — so a six-slot map broadcasts at most ~20 KB every
 `statsBroadcastIntervalMs`, and even a 32-slot map broadcasting full censuses stays two orders
 of magnitude inside `maxFrameBytes`. `speciesCensusMax` (`contract-a.md` §10) is the constant that
-makes that arithmetic hold, and no party on this wire may raise it unilaterally.
+makes that arithmetic hold, and no party on this wire may raise it unilaterally. **The settings
+change none of that arithmetic** (added — §19, B18): two short version strings, three numbers, a
+boolean and an exclusion list that holds one entry on the shipped default — well under 200 bytes
+beside a census measured in kilobytes, and every one of them constant for the life of a mod
+session.
 
 ### 6.4 `SECTOR_GRANT` — relay → sidecar
 
@@ -770,7 +813,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -898,7 +941,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -911,6 +954,9 @@ the two disagree the display is stale.
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731644,
         "stats": { "population": 231, "custodyDepth": 1, "pacedDepth": 0, "heldDepth": 0,
+                   "modVersion": "0.6.1", "contractAVersion": "contract-a/2.3",
+                   "migrationExclude": ["Basic bibite"], "saveMinutes": 10.0,
+                   "saveKeep": 6, "saveOnQuit": true, "worldWrapping": true,
                    "species": [
                      { "genericName": "Izus ",      "specificName": "copedylanus", "bibites": 104, "eggs": 19 },
                      { "genericName": "Cyanea",     "specificName": "velox",       "bibites":  72, "eggs": 11 },
@@ -972,6 +1018,13 @@ wire form — every one of those is an ordinary array:
 | 2, 3, 5 | Complete censuses of 7, 5 and 9 species. Slot 5's is **as stale as its population** — `statsAsOfMs` ages the whole block, and a page that greys out one number and not the other is lying about the same instant twice. |
 | 4 | `truncated: true`: that world holds more than `speciesCensusMax` species and the block names the **32 most abundant**. A page **MUST NOT** present it as the world's whole species list, and its `bibites` sum is below `population` by construction. |
 | 6 | **No `species` key at all** — that peer's mod predates `contract-a/2.2`. It renders as **unknown**, never as "no species" and never as zero, and every other stat that slot reports stays exact (§10.1). |
+
+**Only slot 1 carries settings in that frame, and that is the honest picture of a rig mid-roll**
+(added — §19, B18). Its `contractAVersion` says `contract-a/2.3`, which is *why* it has them;
+every other slot's mod is older, so its settings render as unknown while its population, census
+and depths stay exact. Slot 1's `migrationExclude` is also the explanation for a shape the page
+can otherwise only hint at: `Basic bibite` will be in that world's census and on none of its
+lanes (§10.1, §17 B14).
 
 ### 6.6 `MIGRATION_PAYLOAD` — sidecar → sidecar, forwarded
 
@@ -1122,7 +1175,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -1169,7 +1222,7 @@ geometry and the species block are untouched, and **only `destSlot` changed** �
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -1248,7 +1301,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1320,7 +1373,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1344,7 +1397,7 @@ simply cannot speak for the period before it started, so it says `false` and the
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -1387,7 +1440,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -1433,7 +1486,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -1472,7 +1525,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/3.4",
+  "protocol": "contract-b/3.5",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -2173,6 +2226,7 @@ specify it. **Its inputs are**, and three rules keep them honest (Risk 4):
 | The census is a stat, and every rule above applies to it (added — §16, B12) | `stats.species` (§6.3.1) is what the page's species view is built from. Absent renders as **unknown species** — never as "no species", never as an empty list, never as zero. A present `[]` is the different, stronger fact and the page may say so: a reporting world with nothing alive in it. A `truncated: true` census names the 32 most abundant species and the page **MUST** say the rest is unreported rather than presenting it as the whole list. And it ages like everything else in the block: past `statsStaleMs` it is history, not state. |
 | Two species facts, two sources, and only one of them is abundance (added — §16, B12) | The **census** says what lives in a world **now** and arrives on `PEER_STATUS`. The archive's **ledger** of `MIGRATION_PAYLOAD.species` (§10) says what **crossed**, and when. The page's species view comes from the census alone: a migration ledger holds migrants and their ancestors, never a resident population (D11), so answering "which species live in slot 4" from it produces a plausible-looking wrong number. A page that shows both **MUST** label which question each answers, and **MUST NOT** join them on a name without normalizing the census copy for the comparison only (`contract-a.md` §17, A36). |
 | A world's speed and its pacing are settings, and unknown beats the default (added — §18, B17) | The page may show each world's `timeScale` and the `inboundRatePerSimMinute` / `pacedDepth` pair (§6.3.1), because a depth is only readable against the cap it is queued behind and a simulated-minute cap is only readable against the speed that spends it. Every rule above binds them, and **the unknown rule binds them hardest**: a peer that publishes no cap renders as **unknown**, never as the shipped default. `timeScale: 0` is the opposite case and the page **MUST** keep the two apart — a world standing still is a reading, and a world that has not said is a gap. |
+| A world's settings are what it was told to do, they are read-only, and unknown beats the default (added — §19, B19) | The page may show each world's `modVersion`, `contractAVersion`, `migrationExclude`, `saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` (§6.3.1). They are the **cause** behind numbers the page already shows, and each has a reading the page **MUST NOT** flatten into a gap: `saveMinutes: 0` is a save timer that is **off** and is the explanation for an absent `lastSave`; a present `migrationExclude: []` is a policy that is **off**, and a populated one is why a world can be full of a species that never appears on a lane (§17, B14 names that shape); `worldWrapping: false` is a world not containing its own organisms. **Absent is unknown in every case, and the page MUST NOT substitute a shipped default** — the one it would reach for, `saveMinutes: 10`, would claim a world is being saved when its timer may be off, which is the most expensive wrong number this page could print. They are also **read-only**: the page renders them and offers no way to change one (`contract-a.md` §19, A43). |
 | The recent-hops feed is ledger, and it animates rather than counts (added — §17, B14) | The page may show **which species crossed which lane, just now**, as a bounded feed of the last ~60 seconds drawn from the `MIGRATION_PAYLOAD` copies the archive already records. It is B12's third row exercised — *history, labelled as history* — and every rule above binds it: a hop whose envelope carried **no** species block renders as the **neutral glyph**, never a guessed name and never omitted; the feed is **never summed**, into a census or into anything else; and it must be bounded in **both** time and count, because the status view is serialized verbatim into the durable metrics file once a minute. |
 
 **What changed here, and what did not** (amended — §16, B12). §15's B10 stated that the
@@ -2186,10 +2240,11 @@ lives. Nothing else in this section's list changes.
 The exit test asks the page for the map and its holes, each slot's liveness and population,
 each effective lane, each bypass with the time it went dark, each sidecar's custody depth,
 each bounce a hold timeout caused, the last save of each world, and the paced journal depth —
-**since §16, which species live in each world and in what numbers**, and **since §18, how
-fast each world runs and the cap its arrivals are paced behind**. Every one of those
-is a field of §6.5 or §6.3.1, or is derived from them by §8 — which is why those two sections
-carry fields that no routing decision reads.
+**since §16, which species live in each world and in what numbers**, **since §18, how
+fast each world runs and the cap its arrivals are paced behind**, and **since §19, what each
+world was configured to do — its mod and protocol versions, its exclusion list, its save policy
+and its wrap**. Every one of those is a field of §6.5 or §6.3.1, or is derived from them by
+§8 — which is why those two sections carry fields that no routing decision reads.
 
 **Since §17 it also asks the page to show the lanes moving** (added — §17, B14). When a
 migration lands, the map animates that species' glyph along the lane's arrow. The inputs are
@@ -2197,7 +2252,10 @@ not new — the archive has recorded a species block on every migration since §
 has counted per-lane hops since M4 — and no wire field is added. What is new is the join, and
 it is the cheapest verification the operator surface has ever had: **two-way lanes look like
 glyphs travelling both ways along one arrow, and an excluded species (`contract-a.md` §18,
-A39) looks like a species that is everywhere in the census and never on a lane.**
+A39) looks like a species that is everywhere in the census and never on a lane.** **Since §19
+the page can also say *why*** (added — §19, B19): that species is named in the same world's
+`migrationExclude`, so the shape and its cause sit on the same card instead of being an
+inference a reader has to make.
 
 **And since §18, everything that moves on that map is evidence** (added — §18, B17). The page
 also drew an **ambient pulse** per lane — a dot walking the arrow at the lane's measured rate,
@@ -2409,7 +2467,8 @@ first.
    subscriber that trusts the shared token. A public relay cannot copy every envelope to
    whoever asks, so M5 needs a subscriber authorisation rule — and the M4 stats block makes
    that sharper, because a copied `PEER_STATUS` now carries every world's population and save
-   state — and, since §16, the name of every species living in it (§6.3.1, B11).
+   state — since §16, the name of every species living in it (§6.3.1, B11), and since §19, its
+   mod version, its save policy and the species it refuses to export (§6.3.1, B18).
 5. **Release and handover are startup flags** (§7.5). If the map ever grows past what one
    operator can restart at will, both need an authenticated admin path — which is another
    reason they wait for the milestone that brings authentication.
@@ -2432,7 +2491,23 @@ first.
    **renderer's** answer is its own, and a page that interpolates a name into HTML without
    escaping it has a defect this contract cannot fix for it. Named here rather than left to be
    discovered, because raw names are exactly the field an implementer assumes has been
-   sanitized upstream — and A36 guarantees it has not.
+   sanitized upstream — and A36 guarantees it has not. **§19's settings widen it once more and
+   change the argument no further** (added — §19, B18): `migrationExclude` is another
+   attacker-choosable string array on the same path to the same renderer, and `modVersion` and
+   `contractAVersion` are two more free-text fields. Same answer — shape check on the wire,
+   escaping in the renderer — with one addition specific to these: a reader **MUST NOT** parse
+   `contractAVersion` into a capability decision, because a peer that can choose the string can
+   choose the capability it claims. Detect a feature by the presence of its field
+   (`contract-a.md` §3.1).
+8. **There is no control surface, and adding one is a design and not a field.** The operator
+   surface is read-only end to end: every field on this wire flows peer → relay → subscriber,
+   and nothing flows back toward a mod. The owner has ratified a control surface as **later
+   work** (added — §19, B19). It needs its own message, and it needs answers this contract does
+   not have yet — per-peer authentication (item 1), subscriber authorisation (item 4), an
+   authenticated admin path (item 5), ordering and idempotency for a write that races a world
+   load, and an audit trail. **Reversing `CONFIG_UPDATE` or making a stats field writable is
+   not the cheap version of that work; it is the same work with the questions skipped**
+   (`contract-a.md` §19, A43).
 
 ---
 
@@ -3079,3 +3154,119 @@ degradation is per slot rather than per map:
 for keeping `timeScale: 0` distinct from absence; the **archive**, for carrying the three
 fields through `StatusView` untouched; both wire ends, for sending `"contract-b/3.4"` and
 comparing only the major.
+
+---
+
+## 19. The world settings readout (`contract-b/3.5`, 2026-08-07)
+
+The owner ratified **the Species and Settings tabs on the site** on 2026-08-07, against the
+running M4 deployment. The species tab is already served: §16 put the census on this block and
+§10.1 states what the page may claim from it. **The settings tab has no inputs at all.**
+
+`contract-a.md` §19 puts five of them on the mod's handshake. This set carries those five the
+rest of the way, and adds two the sidecar has always held and never published: the peer's
+`modVersion` and the `contract-a` identifier its mod session is speaking.
+
+**Two amendments, B18 and B19**, continuing the `B` series for the reason §14 gives. B18 puts
+the seven fields on the wire; B19 states what the page does with them, records the read-only
+boundary, and applies §4's version test.
+
+**This set changes the wire, additively**: seven OPTIONAL fields on one existing object. No
+message type, no field removal, no type change, no enum value added or removed, no new NACK
+code, and no change to custody, dedup, the hold, the fan-out, hashing, routing or admission
+control. §4's test therefore answers **minor**, and the identifier moves to `contract-b/3.5`
+(B19). `contract-a.md` takes a **minor** of its own, to `contract-a/2.3`, because five of the
+seven are new fields on that wire (§19, A44) — the first time since §15 that both contracts
+move together.
+
+### B18 — The stats block carries the world's mod settings and versions (§6.3.1, §6.5, §6.11, §10.1)
+
+**Gap.** Every field this block has carried since M4 answers *what is this world doing* —
+population, custody depth, paced depth, held depth, simulated time, speed, the last save, the
+species alive. **Nothing answers *what was this world told to do*.** That is the missing half
+of three readings the page already shows:
+
+| The page already shows | It cannot currently say |
+|---|---|
+| A lane with no traffic | whether that world has no migrants, or whether its whole population is on an exclusion list. On the shipped default this is the **common** case: `Basic bibite` is a large resident population in every seeded world and zero percent of every lane's traffic (`contract-a.md` §18, A39). |
+| A slot with no `lastSave` | whether that world has not saved **yet**, or whether its save timer is **off**. Those have opposite consequences for a hard stop, which is the failure D14 exists for. |
+| A slot with no census, or no cap, or no speed | whether that peer's mod is too old to send one, or whether something is wrong. `contractAVersion` turns every one of those puzzles into a fact. |
+
+The last row is why the two version strings are in this set rather than a later one. This
+document has now added four field groups in three days — the species block, the census, the
+pacing settings, these — and each added a slot state that reads as "unknown" for a reason no
+reader can see. **Publishing the negotiated `contract-a` version makes "unknown" self-explaining
+for every field group, including the ones added after this amendment.**
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The five mod settings | `migrationExclude`, `saveMinutes`, `saveKeep`, `saveOnQuit`, `worldWrapping`, copied **verbatim** from the last `CONFIG_UPDATE` the sidecar received (`contract-a.md` §5.1, §19 A42). The sidecar does not author, compute, default, repair, re-normalize or infer any of them, exactly as it does not author a census (§16, B11). |
+| `modVersion` | Copied from `CONFIG_UPDATE.modVersion`, which this wire's sidecar has held since M2 and never forwarded. **Not a capability statement**: what a mod can do is `contractAVersion` plus, field by field, presence (`contract-a.md` §3.1). A reader that gates a rendering on a version *string* rather than on a field's presence is doing the arithmetic §3.1 forbids, with a looser number. |
+| `contractAVersion` | The `protocol` identifier on that mod's frames — the session's own, not the sidecar's build (`contract-a.md` §3). A sidecar **MUST** publish what the peer actually sent, never what it supports: those differ on exactly the rig this field exists to describe. |
+| Static, and cheap because of it | All seven change only when a mod reconnects or sends `reason: "settings_changed"`. The sidecar holds the last values and re-sends them with each stats block it was already sending. No new cadence, no new trigger, no new message. |
+| Absence | **Unknown**, in every case: no mod is connected, the peer's build predates this amendment, or that mod predates `contract-a/2.3`. A reader **MUST NOT** substitute a default for any of them (§10.1). |
+| The two readings that are not gaps | `saveMinutes: 0` is a save timer that is **off**, and a present `migrationExclude: []` is a policy that is **off**. Both are facts, both explain something else the page shows, and both are destroyed by a reader that folds them into absence. This is `timeScale: 0`'s rule (§18, B16) applied twice more. |
+| The two name rules stay apart | `migrationExclude` entries are **A34-normalized** (`contract-a.md` §16, A34) because that lane matches; `species[].genericName` and `.specificName` are **raw** (`contract-a.md` §17, A36) because that lane labels. Both live on this one block, and no party may apply either rule to the other's field. A consumer that wants to know whether an excluded species is in the census normalizes the **census copy for the comparison only**, and rewrites neither. |
+| The relay | **Unchanged, and for the third time that is the point.** §16's B11 asked a relay to store the stats block as the bytes it arrived as, "for the next field after this one". §18's three were that field; these seven are the next. A `contract-b/3.4` relay carries all seven without knowing they exist. |
+| Not a routing input | Seven more values copied into a broadcast the relay was already sending. Nothing routes, schedules, refuses or filters on any of them — and **the exclusion list in particular is not enforceable by any party that now sees it** (`contract-a.md` §18, A39; §19, A42). |
+| Read-only, one way | There is no path by which any of these seven travels back toward a mod. §6.3.1 states it as a rule and `contract-a.md` §19, A43 states why a control surface is a separate design rather than a reversal of this one. |
+| Size | Two short strings, three numbers, a boolean and a short array — under 200 bytes on a block whose bound is the census (§6.3.1). |
+
+**Enforced by:** the **sidecar**, for copying the mod's settings rather than authoring them and
+for publishing the peer's negotiated version rather than its own; the **relay**, for carrying
+what it does not understand; the **archive and any client**, for rendering an absent value as
+unknown and for never sending one back.
+
+### B19 — The page serves a settings view, it is read-only, and the version moves to `contract-b/3.5` (§4, §6.3.1, §10.1, §12)
+
+**Change.** Three things, and the third is a boundary rather than a feature.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Settings per world | Each world's card may state its mod version, its negotiated `contract-a` version, its exclusion list, its save policy and its wrap. §10.1's new row binds all of it. |
+| The cause beside the effect | The value of this view is that it sits next to the numbers it explains: the exclusion list beside the census that contains the excluded species and the lane that never carries it; `saveMinutes` beside `lastSave`; `contractAVersion` beside whichever field group that mod is too old to send. A settings tab rendered somewhere a reader cannot see those numbers is a list of values with nothing to answer. |
+| Unknown, out loud, and one default named | §10.1's unknown rule with no exception, and one substitution called out by name because it is the tempting one: **`saveMinutes` must never render as `10` because that is what the mod ships with.** A page that does it claims a world is being saved when its timer may be off. |
+| Read-only, and stated on the page | The view offers no control. A future control surface is owner-ratified as **later work** and is a separate design — its own message, its own authentication, its own authorization across two machines, its own ordering and its own audit trail — none of which is an extension of an OPTIONAL field on a stats block (`contract-a.md` §19, A43). |
+| Still a page decision | No field, message, component or wire behaviour is added or removed by any of it. It is recorded here because §10.1 is where what the page may claim is written down, and "this world never exports `Basic bibite`" is a claim. |
+
+**Version.** Apply §4's test:
+
+| Change to Contract B | Kind | Needs a major? |
+|---|---|---|
+| Stats block gains `modVersion`, `contractAVersion` | additive OPTIONAL fields | no |
+| Stats block gains `migrationExclude`, `saveMinutes`, `saveKeep`, `saveOnQuit`, `worldWrapping` | additive OPTIONAL fields | no |
+| §10.1 gains the settings rule | a page-input rule, off the wire | no |
+| §6.3.1 gains the read-only rule | a prohibition on behaviour that does not exist | no |
+| Message catalogue, enums, codes, custody, dedup, routing inputs, fan-out, hashing, the hold | **all unchanged** | no |
+
+The identifier is **`contract-b/3.5`**. Every `contract-b/3.x` peer stays compatible with every
+other, because compatibility is on the major and the minor is never a rejection reason (§4,
+`contract-a.md` §3.1).
+
+**What a mixed rig does, honestly.** The degradation is per slot and, for the first time, it
+**names itself**:
+
+1. A `contract-b/3.5` **sidecar** with a `contract-a/2.3` **mod** publishes all seven. This is
+   the target configuration.
+2. A `contract-b/3.5` **sidecar** with an older **mod** publishes `modVersion` and
+   `contractAVersion` — it has always had those — and no settings. The card reads *"mod 0.6.0,
+   contract-a/2.2 — settings not reported by this mod"*, which is the first unknown on this page
+   that explains itself.
+3. A `contract-b/3.4` **sidecar** publishes none of the seven, and its card reads unknown
+   throughout while its population, census, depths and pacing stay exact.
+4. A **relay** that re-encodes the block from a typed model instead of carrying it drops all
+   seven, for every slot. §16's B11 wrote that SHOULD down before there was a field that needed
+   it, and this is the third field group it has protected.
+5. No path produces a wrong setting, because there is no default anywhere in the chain to
+   produce one from — and no path produces a **changed** setting, because nothing in this system
+   writes one.
+
+**Enforced by:** the **page and `ringstat`**, for rendering unknown rather than a default, for
+keeping `saveMinutes: 0` and `migrationExclude: []` distinct from absence, and for offering no
+control; the **archive**, for carrying the seven fields through `StatusView` untouched; the
+**sidecar**, for copying rather than authoring; both wire ends, for sending
+`"contract-b/3.5"` and comparing only the major.

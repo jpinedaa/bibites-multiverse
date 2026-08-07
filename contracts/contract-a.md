@@ -1,6 +1,6 @@
 # Contract A — Mod ↔ Sidecar Wire Specification
 
-**Version:** `contract-a/2.2`
+**Version:** `contract-a/2.3`
 **Amended:** 2026-08-02, amendment set `contract-a/1 + A1–A10` (§13). Both implementations
 exist, and each side resolved an ambiguity locally before the other could see it; §13
 makes every resolution law. Each place in the body that was wrong or under-specified now
@@ -49,15 +49,29 @@ identifier stays `contract-a/2.2` (§18, A41). The reverse lanes are Contract B'
 a minor there. Affected body text carries an `(amended — §18, Ax)` or `(added — §18, Ax)`
 marker, and **§18 wins over the body and over §13, §14, §15, §16 and §17 wherever they
 disagree.**
+**Amended:** 2026-08-07, amendment set `contract-a/2.3 + A42–A44` (§19), from the owner's
+ratification of **the Species and Settings tabs on the site**. The species half was already on
+this wire (§17); the settings half was not on it at all. This set **does** change the wire,
+additively: `CONFIG_UPDATE` gains five OPTIONAL fields describing what the mod was configured
+to do — `migrationExclude`, `saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` — so
+§3.1's own rule forces a **minor** bump to `contract-a/2.3` and the URL path does **not** move
+(§19, A44). They ride the **handshake** rather than the heartbeat, because a setting is static
+per session and a heartbeat is for what changes. They are **read-only observability**: a
+control surface is owner-ratified as later work and would be a separate design, never an
+extension of these fields (§19, A43). §19 narrows one sentence of §18's A39 — the exclusion
+list is now visible, though still never actionable by any other party. Affected body text
+carries an `(amended — §19, Ax)` or `(added — §19, Ax)` marker, and **§19 wins over the body
+and over §13, §14, §15, §16, §17 and §18 wherever they disagree.**
 **Status:** implementation-ready for M4. Derived from the ratified decisions D1–D20 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, the world-geometry and
 entry-position research in `m2_findings.md`, the ring, containment and lineage designs in
 `m3_considerations.md`, and the grid, healing, recovery and operations designs in
 `m4_considerations.md`.
-**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.3`, sidecar ↔ relay ↔
+**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.5`, sidecar ↔ relay ↔
 sidecar ↔ archive) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged by M4, by §16 —
 `genes.speciesID` is excluded from the canonical projection, §4.3 there — by §17, which
-adds no payload field and hashes nothing, and by §18, which adds no field at all).
+adds no payload field and hashes nothing, by §18, which adds no field at all, and by §19,
+whose five fields describe a world rather than an organism and are hashed by nobody).
 
 This document is the complete interface between `bibites-mod` (C#, in-process with The
 Bibites) and `multiverse-sidecar` (Go, a separate process on the same machine). It is
@@ -94,7 +108,7 @@ A20, A21):
 | **D13** — the grid (M4) | The mod declares **`exportEdges`, plural** — `["E", "N"]` — and `borderEdges` becomes all four edges. `EDGE_STATUS` carries **one entry per declared export edge**, each with its own state. A second capture band runs on the north edge, a second passive entry edge runs on the south, and the **corner rule** decides which edge claims an organism inside both bands (§15, A18, A19). The mod still learns no topology: it never sees a coordinate, a neighbour or a skipped slot. |
 | **D12** — route around gaps, splice in anywhere (M4) | **Nothing on this wire.** Route-around, insertion, the effective-neighbour walk and the re-route rule are Contract B's, and the mod sees only an open or closed export edge (`contract-b-m4.md` §8, §9). This is the property that keeps the mod free of topology, and M4 does not break it (§15, A25). |
 | **D14** — hard-stop recovery (M4) | The mod owns a periodic world save, a save on quit and a save rotation. The wire carries one **optional** save receipt on `HEARTBEAT`, so the operator surface can name the last save of a world on another machine (§15, A21). Replay and custody reassertion (§7.4, §7.5) become tested paths rather than believed ones. |
-| **D15** — operations and observability (M4) | The sidecar **paces** inbound delivery out of its journal at a maximum spawn rate per unit of **simulated** time. Pacing changes *when* an organism arrives, never *whether* it arrives, and it adds no field to this wire (§15, A20). The entry-position rule keeps mirroring `exitPosition`; arrival-position spreading is parked (§15, A25). **Extended by §17:** the operator surface also names *which* species live in each world, and that census rides on `HEARTBEAT` beside the save receipt — one more OPTIONAL observability field the mod reports and no routing decision reads (§17, A35). |
+| **D15** — operations and observability (M4) | The sidecar **paces** inbound delivery out of its journal at a maximum spawn rate per unit of **simulated** time. Pacing changes *when* an organism arrives, never *whether* it arrives, and it adds no field to this wire (§15, A20). The entry-position rule keeps mirroring `exitPosition`; arrival-position spreading is parked (§15, A25). **Extended by §17:** the operator surface also names *which* species live in each world, and that census rides on `HEARTBEAT` beside the save receipt — one more OPTIONAL observability field the mod reports and no routing decision reads (§17, A35). **Extended again by §19:** it also names *what each world was configured to do* — the exclusion list, the save policy and the wrap — and those ride the **handshake**, because a setting is static per session and a heartbeat is for what changes (§19, A42). Every one of the three is read-only: none of them is a control surface and none of them is the beginning of one (§19, A43). |
 
 ---
 
@@ -150,7 +164,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_OUT",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -160,7 +174,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 | Field | JSON type | Required | Semantics |
 |---|---|---|---|
-| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.2"` (amended — §17, A37; `"contract-a/2.1"` before it, §16 A33, and `"contract-a/2.0"` before that, §15 A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
+| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.3"` (amended — §19, A44; `"contract-a/2.2"` before it, §17 A37, `"contract-a/2.1"` before that, §16 A33, and `"contract-a/2.0"` before that, §15 A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
 | `type` | string | yes | The message discriminator. One of the nine names in §5. Uppercase, `A–Z` and `_` only. |
 | `messageId` | string | yes | UUID v4, lowercase, hyphenated, 36 characters. Unique per frame. Used **only** for log correlation. It is **not** an idempotency key. |
 | `sentAt` | number (int64) | yes | Unix milliseconds on the sender's wall clock. Informational only (D5). No side compares it against its own clock to make a decision. |
@@ -183,7 +197,8 @@ Every frame, in both directions, is a JSON object with exactly this shape:
   of its field, never by arithmetic on the minor. The minor exists so a log line and a
   bug report say which shape was on the wire.
 - The URL path stays major-scoped: `/contract-a/v2` serves every `contract-a/2.x` — including
-  `contract-a/2.1` (amended — §16, A33) and `contract-a/2.2` (amended — §17, A37) — exactly as `/contract-a/v1` served every
+  `contract-a/2.1` (amended — §16, A33), `contract-a/2.2` (amended — §17, A37) and
+  `contract-a/2.3` (amended — §19, A44) — exactly as `/contract-a/v1` served every
   `contract-a/1.x` (amended — §15, A23). A **major** bump
   therefore moves the path, and the retired path is kept alive only to answer with close
   `4000` (§2).
@@ -588,6 +603,11 @@ any other first frame as malformed and close with `4003`.
 | `ringSlot` | number (int) | no | The mod's configured slot number, from its environment. Advisory, `≥ 1`. When present and it disagrees with the slot the sidecar holds, the sidecar **MUST** close with `4001`. This catches a mis-wired rig in one second instead of one hour (added — §14, A14). **It keeps its name and its meaning under the grid** (amended — §15, A25): a slot number is the routing address on both maps, and the mod is **never** told its coordinate. There is no `position` field here and there will not be one — a position is topology, and topology is the sidecar's (D8, D13). |
 | ~~`sector`~~ | object `{x:int, y:int}` | no | **Retired** (amended — §14, A14). D8 retires the `{x, y}` grid. A `contract-a/1.1` mod **MUST NOT** send it; a `contract-a/1.1` sidecar **MUST** ignore it if an older mod does, and **MUST NOT** close on it. Replaced by `ringSlot`. |
 | `worldName` | string | no | Cosmetic. Often empty for a world the game itself saved. Never used as an identifier. |
+| `migrationExclude` | array of string | no | **The species this world never exports** (added — §19, A42) — the configured migration exclusion list of §18, A39, published so the operator surface can say why a world's lanes are quiet. Each entry is a **full** name, both halves joined by one U+0020, in its **§16 A34-normalized** form: trimmed, internal whitespace runs collapsed. It is normalized because this is the **matching** lane — these are the exact strings the mod compares against — and that is deliberately **not** §17's raw-name rule for the census display lane (A36). A present `[]` says the policy is **off**; absent says **unknown**. It is a statement about this world and never an obligation on any other (§19, A42, A43). |
+| `saveMinutes` | number | no | **Wall-clock minutes between periodic world saves** (added — §19, A42), D14's timer, §10's `saveMinutes`. `0` is a **reading, not an absence**: the timer is off. Absent is the absence. |
+| `saveKeep` | number (int) | no | How many rotated saves this world keeps beside the live one (added — §19, A42), §10's `saveKeep`. |
+| `saveOnQuit` | bool | no | Whether this world saves when the application quits (added — §19, A42), §10's `saveOnQuit`. |
+| `worldWrapping` | bool | no | **D10's containment fact** (added — §19, A42): the game's `worldWrapping` setting as the mod read it at world load. **Reported, never written** — D10 forbids the mod to disable it, and this field is how an operator confirms that from another machine rather than from a log file on it. |
 
 **Receiver obligations.** On the handshake frame the sidecar validates `gameVersion`, then
 `ringSlot`, then `exportEdges ⊆ borderEdges` with at least one member and no duplicate, then
@@ -600,9 +620,17 @@ The sidecar also **MUST** forward the declared `exportEdges` to the relay on its
 `SECTOR_CLAIM` (`contract-b-m4.md` §6.3), because the relay computes one effective
 neighbour per export edge and cannot do that for an edge it has not been told about.
 
+**The five settings fields are validated but never fatal** (added — §19, A42). The sidecar
+checks each one's shape, **strips what fails**, keeps the rest, and **MUST NOT** close on any
+of them — the third named exception to §9.3, and the second on a frame with no NACK channel.
+Stripping one costs a row on a page; closing on one costs the session, and this is the
+handshake. None of the five takes any part in validation, admission control, routing, pacing,
+custody or the `S` check. The sidecar carries what survives to the relay in its peer stats
+(`contract-b-m4.md` §6.3.1, §19 B18) and interprets none of it.
+
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "CONFIG_UPDATE",
   "messageId": "1c2fbe80-5a17-4a2b-9a20-3d54f1b7e001",
   "sentAt": 1785693598004,
@@ -616,7 +644,12 @@ neighbour per export edge and cannot do that for an edge it has not been told ab
     "exportEdges": ["E", "N"],
     "borderWidth": 60.0,
     "ringSlot": 5,
-    "worldName": "M4-Slot5"
+    "worldName": "M4-Slot5",
+    "migrationExclude": ["Basic bibite"],
+    "saveMinutes": 10.0,
+    "saveKeep": 6,
+    "saveOnQuit": true,
+    "worldWrapping": true
   }
 }
 ```
@@ -696,7 +729,7 @@ is conformant and simply reads as unknown — an honest gap, never a zero.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "HEARTBEAT",
   "messageId": "6b0a3f1d-3c4e-4a91-b7f2-51c8a0d33e42",
   "sentAt": 1785693600000,
@@ -860,7 +893,7 @@ species travels when that parent migrates, and not before.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_OUT",
   "messageId": "d3a11c9e-77b4-4b2f-8e5c-0a91f4d6b210",
   "sentAt": 1785693600123,
@@ -913,7 +946,7 @@ are unchanged.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_OUT",
   "messageId": "f4b83c17-0d95-4a6e-b721-8c50a9f3e264",
   "sentAt": 1785693600123,
@@ -1022,7 +1055,7 @@ Both lanes open, which is the ordinary state of a peer on a live grid:
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "EDGE_STATUS",
   "messageId": "5e18b2c0-4a6d-4f88-9c31-b0e75a2d4413",
   "sentAt": 1785693598041,
@@ -1053,7 +1086,7 @@ go, because a column of two holds no third slot to skip to (`contract-b-m4.md` �
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "EDGE_STATUS",
   "messageId": "b41c7d29-6e05-4f3a-8d17-92c0be5a4f38",
   "sentAt": 1785693731660,
@@ -1084,7 +1117,7 @@ Note that this mod keeps receiving organisms on `N` and `S` while both are close
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "EDGE_STATUS",
   "messageId": "7a3f1d84-2c96-4b07-a5e1-38d0c6b91f27",
   "sentAt": 1786121853812,
@@ -1138,7 +1171,7 @@ There is no acknowledgement of an acknowledgement. The chain stops here.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_OUT_ACK",
   "messageId": "a0c47f21-6b19-4d05-93ae-1c8f2b6e5507",
   "sentAt": 1785693600141,
@@ -1173,7 +1206,7 @@ the strip forever.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_OUT_NACK",
   "messageId": "cf51d7a3-882b-4e14-a0d6-33b9c4e17708",
   "sentAt": 1785693600138,
@@ -1347,7 +1380,7 @@ swallows every exception (`m1_findings.md` §1.2). Reply `DESERIALIZE_FAILED`.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_IN",
   "messageId": "7f2b91d6-0e34-4c7a-b158-9a03e6c2f411",
   "sentAt": 1785693600187,
@@ -1381,7 +1414,7 @@ copied, so it arrives still travelling north (added — §15, A18):
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_IN",
   "messageId": "0a5e83b1-9c47-4d20-b6f8-31e70c9a5d42",
   "sentAt": 1785693612044,
@@ -1436,7 +1469,7 @@ later replay of the same `migrationId` is answered without a second delivery.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_IN_ACK",
   "messageId": "34ab7c05-1d92-4e60-8b47-c1f0d5a29316",
   "sentAt": 1785693600231,
@@ -1483,7 +1516,7 @@ the one failure mode D2 accepts, but it is never the first choice.
 
 ```json
 {
-  "protocol": "contract-a/2.2",
+  "protocol": "contract-a/2.3",
   "type": "MIGRATE_IN_NACK",
   "messageId": "e91d4f3b-7c60-4a25-91b8-40d7e2ca6b19",
   "sentAt": 1785693600244,
@@ -1842,7 +1875,7 @@ it is a mod defect either way.
 | Unknown `type` | Ignore, log one warning, keep the connection |
 | Unknown field inside `data` | Ignore silently |
 | A `data` field fails validation on a type that **has** a NACK (`MIGRATE_OUT`, `MIGRATE_IN`) | The matching NACK with `MALFORMED_MESSAGE`, keep the connection. **One named exception:** a malformed `species` block is stripped and the frame proceeds without it (amended — §16, A30) |
-| A `data` field fails validation on a type with **no** NACK channel (`CONFIG_UPDATE`, `HEARTBEAT`, `MIGRATE_IN_ACK`, `MIGRATE_IN_NACK`) | Close `4003` (amended — §13, A8). **One named exception:** a malformed `HEARTBEAT.species` census is stripped — the entry, or the whole field — and the heartbeat is processed without it (amended — §17, A35) |
+| A `data` field fails validation on a type with **no** NACK channel (`CONFIG_UPDATE`, `HEARTBEAT`, `MIGRATE_IN_ACK`, `MIGRATE_IN_NACK`) | Close `4003` (amended — §13, A8). **Two named exceptions:** a malformed `HEARTBEAT.species` census is stripped — the entry, or the whole field — and the heartbeat is processed without it (amended — §17, A35); and a malformed `CONFIG_UPDATE` settings field — `migrationExclude`, `saveMinutes`, `saveKeep`, `saveOnQuit`, `worldWrapping` — is stripped and the handshake proceeds without it (amended — §19, A42). Both exceptions are for **observability** fields, and both exist for the same reason: a field nobody decides anything on must never be able to end a session |
 | A well-formed `MIGRATE_IN_ACK` / `MIGRATE_IN_NACK` naming an unknown `migrationId` | Log one warning and ignore. Not a close — it is a late reply after a purge or a restart (amended — §13, A8) |
 | A `MIGRATE_IN` with no usable `migrationId` | Log one error and drop the frame. No NACK, no close (amended — §13, A2) |
 | Frame over `maxFrameBytes` | Close `1009` or `4003` |
@@ -1877,7 +1910,10 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `exportRetentionSeconds` | `3600` | sidecar | Tombstone lifetime. Bounds custody reassertion (§7.4). |
 | `migrationCooldownSeconds` | `5` | mod | Simulated seconds before the same organism retries after a transient NACK, on top of `retryAfterMs`. |
 | `entryImmunitySeconds` | `5` | mod | Simulated seconds after arrival during which an organism cannot re-trigger the border strip (`m2_findings.md` §4.4). Applies to **every** capture band, all four of them under D17 (§15, A19; §18, A38). It is load-bearing rather than defensive now: with a band on the arrival edge, it and the inset are what keep a spawn and the next export two separable events. |
-| `migrationExcludeSpecies` | `"Basic bibite"` | mod | Comma-separated full species names that **never export** (§18, A39). Matched on the §16 A34-normalized form. Set by `MULTIVERSE_MIGRATION_EXCLUDE`. Empty disables the policy. Local, never on the wire. |
+| `migrationExcludeSpecies` | `"Basic bibite"` | mod | Comma-separated full species names that **never export** (§18, A39). Matched on the §16 A34-normalized form. Set by `MULTIVERSE_MIGRATION_EXCLUDE`. Empty disables the policy. **Local, and published as `CONFIG_UPDATE.migrationExclude` for reading only** (amended — §19, A42): the policy is still enforced by this mod alone, and no other party may act on the list it now sees. |
+| `saveMinutes` | `10` | mod | Wall-clock minutes between periodic world saves (D14). `0` turns the timer off. Set by `MULTIVERSE_SAVE_MINUTES`. Named here because it is now on the wire as `CONFIG_UPDATE.saveMinutes` (added — §19, A42). |
+| `saveKeep` | `6` | mod | Rotated saves kept beside the live one (D14). Set by `MULTIVERSE_SAVE_KEEP`. On the wire as `CONFIG_UPDATE.saveKeep` (added — §19, A42). |
+| `saveOnQuit` | `true` | mod | Save the loaded world when the application quits (D14) — T1 lost 12 hours to its absence. Set by `MULTIVERSE_SAVE_ON_QUIT`. On the wire as `CONFIG_UPDATE.saveOnQuit` (added — §19, A42). |
 | `entryMargin` | `max(5, 0.5·W)` | mod | World units the spawn is inset **past** the strip's inner face, on top of `W` (§4.3). Named here because §4.3's entry formula now covers all four edges (added — §15, A19). |
 | `inboundRatePerSimMinute` | `100.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). **Raised from `2.0` to `12.0` and then to `100.0` on 2026-08-07** (§18, A40): 2.0 was five times T1's measured one-lane rate, D13 then D17 multiplied the inbound surface past it, and 12.0's five-times-the-median projection was made before two-way lanes ran and did not clear the residual backlog once they did. 100.0 is sized from A29's ingest ceiling instead, two orders below it. **It gains a knob with the raise** — `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` — because it had none. |
 | `inboundRateBurst` | `50` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). **Raised from `5` to `15` and then to `50` on 2026-08-07** (§18, A40): it scales with the rate but stays under `inboundQueueMax` (64), so the bucket can never release a full paced queue in one breath. **It gains its own knob too** (`--inbound-burst` / `MULTIVERSE_INBOUND_BURST`, added — `contract-b-m4.md` §18, B16): a rate knob without a burst knob cannot be exercised, because a bucket of 50 absorbs any burst small enough to force by hand and the pacing then never runs at all. |
@@ -2031,6 +2067,20 @@ These notes are non-normative. They exist so the two sides do not have to negoti
   **different** strings from it — normalized there, raw here — and a shared helper that
   normalizes for both is the single most likely way to get this wrong. Keep the two reads
   separate and name them for what they are.
+- **Build the settings block once, at handshake time, from the config the mod is actually
+  running with** (added — §19, A42). Not from the environment variables and not from the
+  BepInEx entries: the environment beats the config file, a bad value falls back to a default,
+  and what an operator needs on the page is the value that **won**. Read it from the same
+  objects the running code reads — the parsed config, the exclusion list's own normalized set,
+  the world saver's live interval — so a page that says "saves every 10 minutes" is quoting
+  the timer rather than the request. `CONFIG_UPDATE` is not periodic (§5.1), so this costs
+  nothing per frame; a re-read on every handshake is the whole budget.
+- **Publish the exclusion list normalized, and the census raw, from the same policy object**
+  (added — §19, A42). The list is already normalized at configure time, because that is the
+  form the hot path compares against — publish *that* set, not the operator's typed string.
+  It is §11.2's previous bullet in the other direction, and the two are not in tension: the
+  census is a label, the list is a comparison, and each is published in the form of its own
+  lane.
 
 ---
 
@@ -2092,6 +2142,16 @@ These notes are non-normative. They exist so the two sides do not have to negoti
    startup refusal in the sidecar, which knows the map; M4 does not add it, and a
    misconfigured slot is therefore diagnosed from a stream of NACKs rather than from one
    startup error.
+10. **There is no control surface, and §19's settings are not one** (added — §19, A43).
+    `CONFIG_UPDATE` now reports five values an operator would plausibly want to change, in a
+    message whose `reason` enum already says `"settings_changed"`. It stays **mod → sidecar**,
+    and every one of the five is read-only (§5.1, §19 A43). The owner has ratified a control
+    surface as **later work**; it is a separate design and needs answers this contract does not
+    have — item 1's authentication first of all, then authorization across two machines where
+    D9 keeps the far one undriven, ordering and idempotency for a write that races a world
+    load, what a write means when its target mod is disconnected, and an audit trail. Open,
+    with the boundary written down, because the cheap-looking version of this work is to make
+    one of these fields writable and that is the same work with the questions skipped.
 
 ---
 
@@ -2852,9 +2912,10 @@ are incompatible **by design**, and both sides say so loudly rather than misread
 
 **Enforced by:** both, symmetrically. Each side sends `"contract-a/2.0"` and compares only
 the major. The sidecar additionally owns the retired path and its `4000`.
-**The version string moved on with §16, A33 and again with §17, A37** — each side now sends
-`"contract-a/2.2"` — and everything else in this amendment stands, including the path and the
-`4000` on `v1`: a minor bump moves no path (amended — §16, A33; §17, A37).
+**The version string moved on with §16, A33, again with §17, A37 and again with §19, A44** —
+each side now sends `"contract-a/2.3"` — and everything else in this amendment stands,
+including the path and the `4000` on `v1`: a minor bump moves no path (amended — §16, A33;
+§17, A37; §19, A44).
 
 ### A24 — D16's renumbering: the "M4" that meant public release is M5 (§4.5, §12 item 1, §14 A17)
 
@@ -3729,7 +3790,8 @@ captured and therefore never export. §4.3.1's `capture` predicate gains one con
 | Configuration | `MULTIVERSE_MIGRATION_EXCLUDE`, comma-separated full names. Default `"Basic bibite"`. An empty value disables the policy. Named in §10 as `migrationExcludeSpecies`. |
 | Logging | **Once per organism per session.** Not once per tick and not once per band entry: an excluded organism loiters in a band for its whole life, and a per-tick line would be the most expensive log in the system. One line, keyed on `entityId`, is evidence that the policy fired without being a cost. |
 | An organism with no species | Never excluded. A missing or malformed species block means the mod cannot name it, and a policy that cannot identify its subject **MUST NOT** guess — the same rule §16 A32 applies to import. |
-| Export-side only | Exclusion never refuses an **arrival**. A world that does not exclude a species may still send it to one that does, and the receiving mod spawns it normally. There is no wire field for this and there is deliberately not going to be one: it is a local decision about a local population, and putting it on the wire would make one world's policy another world's obligation. |
+| Export-side only | Exclusion never refuses an **arrival**. A world that does not exclude a species may still send it to one that does, and the receiving mod spawns it normally. It is a local decision about a local population, and no other party may act on it. |
+| Visible, and still not actionable | **Amended — §19, A42.** A39 said there was no wire field for the list "and there is deliberately not going to be one". `CONFIG_UPDATE.migrationExclude` is now that field, and the sentence A39 was protecting survives intact: what it forbade was a field that would *make one world's policy another world's obligation*, and the published list is **read-only observability** — the sidecar strips it if malformed and carries it, the relay copies it, the archive renders it, and **no mod ever sees another mod's list**. The policy is still enforced by the owning mod alone, on its own population, at its own capture test. What changed is that an operator can now read why a world's lanes are quiet without opening a log on the machine that runs it (§19, A42, A43). |
 | Not a census filter | The census (§17, A35) reports what **lives** in the world, and an excluded species lives there like any other. The mod **MUST NOT** omit it, and the page **MUST NOT** hide it. |
 
 **The asymmetry is a documented feature, not a defect.** An excluded species accumulates where
@@ -3749,8 +3811,10 @@ organism again"; and the sidecar would need a species rule, which §16 A30 spent
 amendment set keeping out of it. The capture test already reads the species for the block it
 attaches, so the lookup is free where it is.
 
-**Enforced by:** the **mod**, alone. No sidecar, relay or archive behaviour changes, and none
-of them learns that the policy exists.
+**Enforced by:** the **mod**, alone. No sidecar, relay or archive behaviour changes. They do
+now **learn** that the policy exists — §19's A42 publishes the list on `CONFIG_UPDATE` so the
+operator surface can name it — but learning is all they do with it: not one of them enforces,
+filters, refuses or schedules on a name in that array (amended — §19, A42).
 
 ### A40 — The delivery rate limit rises, and gains the knob it never had (§7.5, §10, §15 A20)
 
@@ -3860,7 +3924,7 @@ enum-value removal require a **major**. A38, A39 and A40 do none of the four.
 | `MIGRATE_IN.entryEdge` may be any of the four from either cause | existing enum value; §4.3's table has covered four edges since A19 | no | no |
 | A capture band on every declared edge (§4.3.1) | **mod-side geometry**, no wire shape | no | no |
 | `open` governs exports only (§5.4) | a rule made explicit; it is what A11 has always meant | no | no |
-| The migration exclusion policy (A39) | **local policy**, invisible to every other party | no | no |
+| The migration exclusion policy (A39) | **local policy**, invisible to every other party (**amended — §19, A42**: the list is now *visible* to every other party and still actionable by none, which is why §19 takes a minor and this set did not) | no | no |
 | `inboundRatePerSimMinute` 2.0 → 12.0 → 100.0, `inboundRateBurst` 5 → 15 → 50 (A40) | a §10 default value | no | no |
 | `migrationExcludeSpecies` named in §10 | a named default for a local policy | no | no |
 | Message catalogue, field tables, enums, close codes, NACK codes, custody chain | **all unchanged** | no | no |
@@ -3873,11 +3937,13 @@ named defaults to §10 and stated that the wire needed no bump.
 **Why not raise the minor anyway, to mark the occasion.** Because it would be a lie in the
 one direction that matters. §3.1 says the minor is *a capability statement, not a
 negotiation*, and that a receiver detects a feature **by the presence of its field, never by
-arithmetic on the minor**. There is no field to detect here. Worse, a `contract-a/2.3` would
-imply that `contract-a/2.2` cannot do this — and `contract-a/2.2` can: a mod declaring all
-four export edges is legal against a `contract-a/2.2` sidecar today, and that sidecar
-produces four `EDGE_STATUS` entries for it without a line changing. Marking the occasion is
-what §18's prose is for.
+arithmetic on the minor**. There is no field to detect here. Worse, spending a minor on this
+set would have implied that `contract-a/2.2` cannot do it — and `contract-a/2.2` can: a mod
+declaring all four export edges is legal against a `contract-a/2.2` sidecar today, and that
+sidecar produces four `EDGE_STATUS` entries for it without a line changing. Marking the
+occasion is what §18's prose is for. **§19 later took `contract-a/2.3` for a different set,
+and by the opposite test** (added — §19, A44): it adds five fields a receiver detects by
+presence, which is exactly the case the minor exists to record.
 
 **What a mixed rig does, and where the real gap is.** The wire degrades cleanly and the
 **topology** does not, which is worth stating precisely:
@@ -3899,3 +3965,185 @@ the same standard §17's A37 held the census to.
 
 **Enforced by:** both sides, symmetrically. Each keeps sending `"contract-a/2.2"` and
 comparing only the major.
+
+---
+
+## 19. World settings on the wire (`contract-a/2.3`, 2026-08-07)
+
+The owner ratified **the Species and Settings tabs on the site** on 2026-08-07, against the
+running M4 deployment. The species half is already here — §17 put the census on `HEARTBEAT`
+and `contract-b-m4.md` §16 carried it to the page. **The settings half is not on this wire at
+all**, and this set puts it there.
+
+**Three amendments, A42 to A44.** A42 puts five OPTIONAL fields on `CONFIG_UPDATE`; A43 states
+what they are for and, more usefully, what they are **not** the start of; A44 applies §3.1's
+version test. `contract-b-m4.md` §19, B18 and B19, carry the matching set for the other wire.
+
+**This set changes the wire, and it is additive.** Five OPTIONAL fields on one existing
+message, in one direction. No removal, no type change, no enum change, no new message type, no
+new NACK code, no new close code, and no change to custody, dedup, pacing, geometry or
+routing — so §3.1's own rule answers with a **minor** bump. The identifier is
+`contract-a/2.3`, the URL path stays `/contract-a/v2`, and a peer that speaks any earlier
+`contract-a/2.x` stays compatible by construction (A44). Three defaults already owned by the
+mod are named in §10 for the first time (`saveMinutes`, `saveKeep`, `saveOnQuit`), because a
+value on the wire needs a row there.
+
+**One earlier rule is narrowed, and it is named here rather than left to be discovered.** §18's
+A39 wrote that the exclusion list would never have a wire field. A42 gives it one. The reason
+A39 gave — *putting it on the wire would make one world's policy another world's obligation* —
+is exactly the property A43 preserves, and the amended row in A39 says so at the point a reader
+meets it.
+
+### Why the handshake and not the heartbeat
+
+§17 chose `HEARTBEAT` for the census and A21 chose it for the save receipt, so choosing the
+other frame here needs a reason. The reason is that these are a different kind of fact:
+
+| | `HEARTBEAT.species[]`, `HEARTBEAT.lastSave` | `CONFIG_UPDATE` settings (§19) |
+|---|---|---|
+| What it is | A **measurement** or a **receipt**. It describes what the world is doing. | A **setting**. It describes what the world was told to do. |
+| How often it changes | Every second, and every save. | Never, within a session. |
+| Right cadence | Once per `heartbeatIntervalMs`, because the answer is different each time. | Once per connection, because the answer is the same every time. |
+| What the wrong frame costs | — | A per-second frame repeating five unchanged values 3 600 times an hour, on every session, to say nothing new. |
+| The trigger already exists | — | §5.1's `reason` enum has carried `"settings_changed"` since M2, and the sidecar already re-validates and re-answers on a later `CONFIG_UPDATE`. |
+| What absence means | Unknown (§17, A35; §15, A21). | Unknown, identically. |
+
+A mod that ever makes one of these five mutable at runtime therefore already has its channel:
+send a `CONFIG_UPDATE` with `reason: "settings_changed"`. Nothing in this set requires that,
+and today's mod reads all five once, at load.
+
+### A42 — `CONFIG_UPDATE` carries the mod's observable settings (§1 D15, §5.1, §9.3, §10, §11.2, §18 A39)
+
+**The gap.** Every fact the operator surface holds about a world today is a **measurement** —
+population, custody depth, paced depth, simulated time — or a **receipt**: the last save, the
+species alive right now. **Nothing says what the world was configured to do.** That gap is not
+cosmetic, because a setting is what makes a measurement readable, and the same argument §18's
+B16 made for `pacedDepth` applies three more times over:
+
+- A world whose lanes carry nothing is either a world with no migrants or a world whose whole
+  population is on its exclusion list, and the page cannot currently tell those apart. Under
+  the shipped default that is not a corner case: `Basic bibite` is a large resident population
+  in every seeded world and **zero percent** of every lane's traffic (§18, A39), so the most
+  common quiet lane on the rig has a cause that is invisible.
+- A world with no `lastSave` is either a world that has not saved yet or a world whose save
+  timer is **off**, and those have opposite consequences for a hard stop — which is the failure
+  D14 exists for, and the one T1 actually paid twelve hours to.
+- A world whose organisms never leave might be a world whose wrap was turned off, which D10
+  forbids the mod to do and which nothing downstream can currently check.
+
+Each answer is one value the mod already holds, at a cadence of once per connection.
+
+**Change.** `CONFIG_UPDATE` gains five OPTIONAL fields. §5.1 carries the field table, the strip
+rule and the worked example.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Shape | `migrationExclude: [string]`, `saveMinutes: number`, `saveKeep: int`, `saveOnQuit: bool`, `worldWrapping: bool`. Flat, beside the fields already there. No nesting and no `settings` object: §5.1 **is** the settings message, and a wrapper would only add a second absence to reason about. |
+| `migrationExclude` — what travels | The configured exclusion list of §18, A39, as **full** names: both halves joined by one U+0020. Each entry `1` to `129` UTF-8 bytes — §16's 64-byte half twice, plus the joining space — and an entry that is empty or only whitespace **MUST NOT** be sent, because it is not a name the policy can ever match. |
+| `migrationExclude` — the name rule, and it is §16's | **A34-normalized**, on the way out: trimmed, internal whitespace runs collapsed to one U+0020. This is the **matching** lane, so the published strings are the exact strings the mod compares an organism's normalized full name against — a reader sees the comparison the policy performs, not the string an operator typed. **A34 applies here and A36 does not**, and the two are not in tension: §17's table already states the rule, that a name is normalized when it is a key and raw when it is a label. A published list in raw form would describe a match the mod never attempts. |
+| `migrationExclude` — the two absences | A present `[]` means the policy is **off** — an operator set `MULTIVERSE_MIGRATION_EXCLUDE` to an empty value, which §18 A39 defines as disabling it. **Absent means unknown**: an older mod, or a mod that does not implement §19. The page renders those differently, exactly as it does for the census (§17, A35). |
+| `migrationExclude` — order | The configured order, deduplicated, as the mod holds it. It carries no meaning and **nothing downstream re-sorts** — the same rule the census's order gets (§17, A35), for the same reason: the array's order is the sender's own statement. |
+| `saveMinutes` | Wall-clock minutes between periodic saves. **`0` is a reading**: the timer is off. It is the same distinction `timeScale: 0` carries (`contract-b-m4.md` §18, B16) and it has to survive every hop, because "off" and "unknown" are the two answers an operator most needs to tell apart here. |
+| `saveKeep`, `saveOnQuit` | The other two halves of the same policy. They are published with `saveMinutes` rather than instead of it because the three answer one question together — *what happens to this world if the machine stops* — and any one alone answers it wrongly. |
+| `worldWrapping` | The game's `worldWrapping` setting as the mod read it at world load. **Reported, never written** (D10) — the mod is forbidden to disable it, and this is the field that lets that be checked from somewhere other than the log file on the machine in question. |
+| Static per session | All five are read once, at load, and do not change while a world runs. They therefore ride the handshake; if one ever becomes mutable, `reason: "settings_changed"` is already the trigger and needs no new field. |
+| Malformed | **Stripped, never fatal** (§5.1, §9.3). A bad **entry** costs that entry; a `migrationExclude` that is not an array costs the field; a `saveMinutes` that is not a number costs that number. None of them costs the handshake, and the handshake is the whole session. This is the third named exception to §9.3 and the second on a frame with no NACK channel — written down for the same reason §17's was: the default answer there is close `4003`, and applying the default here would let a settings row kill a live rig at reconnect. |
+| Not an input to anything | None of the five takes any part in validation, admission control, pacing, custody, dedup, edge state, the `S` check or liveness. The sidecar **MUST NOT** derive behaviour from any of them — in particular it **MUST NOT** refuse, filter or pre-empt a `MIGRATE_OUT` because the organism's species is on the published list. That is the mod's test, at the mod's capture band, and §18 A39's *why in the mod and not in the sidecar* is unchanged. |
+| Size | Five fields on a frame sent once per connection. The list is a handful of short strings; the rig's default is one. There is no cap because there is no cadence to bound — but the same 8 MiB frame limit applies as to everything else (§10). |
+
+**What this does not publish, and why.** The mod holds more configuration than this, and the
+test applied to each was *would an observer of another machine's world be able to act on
+knowing it, or misread the world without it*:
+
+| Not published | Why |
+|---|---|
+| `portal`, `portalFlourishes`, `portalSortingOrder`, `portalEntryWidth` | **Local rendering.** They change what the player at that machine sees and nothing an observer can see. A page showing them would be describing a window nobody watching the page is looking through. |
+| `debugIngest` | An internal log verbosity switch. It changes what a log file on that machine contains, and that is a thing an operator reads by going to the log. |
+| `port`, the sidecar URL | The sidecar is the receiver. It cannot learn its own port from the peer that dialled it, and no third party has any use for a loopback port on another machine. |
+| `worldToLoad` | A save name on somebody else's filesystem. `worldName` already carries the cosmetic identity (§5.1), and a path is the one thing on this list that is closer to leaking than to publishing. |
+| `simulationSize`, `borderWidth`, `exportEdges`, `ringSlot` | **Already on the wire** (§5.1) since M2, M3 and M4, and already republished to the page — `contract-b-m4.md` §6.5 carries `gameVersion`, `simulationSize` and `exportEdges` per slot. Publishing them twice would create two copies to get out of step. |
+
+**Enforced by:** the **mod**, for publishing the settings it is actually running with rather
+than the ones it was asked for, and for publishing the exclusion list in the normalized form
+its own hot path compares against; the **sidecar**, for validating shapes, stripping what
+fails, never closing on any of them, and carrying the rest to the stats block untouched
+(`contract-b-m4.md` §19, B18).
+
+### A43 — These are read-only, and a control surface is not an extension of them (§1, §5.1, §12)
+
+*No wire change. It is a boundary, written down at the moment the wire first carries something
+that looks like a knob.*
+
+**The risk.** Four of these five fields name a value an operator would plausibly want to
+change, and they arrive in a message called `CONFIG_UPDATE` whose `reason` enum already
+contains `"settings_changed"`. The shortest path from here to a control surface is to make one
+of them writable — a sidecar sending a `CONFIG_UPDATE` back, a page posting a new
+`migrationExclude` — and it would look like a small extension of work already done. **It is
+not**, and this amendment exists so nobody has to reconstruct why.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Direction | `CONFIG_UPDATE` is **mod → sidecar** and stays that way (§5). There is no sidecar → mod settings message, and §19 does not create the beginning of one. |
+| What these five fields are | A **report**. The mod states what it was configured to do. Every party downstream renders it and no party acts on it. |
+| The one-way rule | A sidecar, relay, archive or page **MUST NOT** treat any of these fields as a request, a default to fill in, a value to echo back, or an input to any decision. A reader that cannot see a field renders **unknown** (§10.1 there) — it does not substitute the shipped default, which is the rule `contract-b-m4.md` §18 B16 already had to write down for a cap that moved three times in a day. |
+| A control surface is a separate design | The owner has ratified a control surface as **later work**. When it is designed it needs its own answers to questions these fields do not raise: authentication, which §12 item 1 still lists as open on this contract; authorization, since a rig spans two machines and D9 keeps the far one undriven; idempotency and ordering for a write that races a world load; what happens to a write whose target mod is disconnected; and an audit trail, because a setting that changed itself is the worst thing to find in an incident. **None of those is answered by an OPTIONAL field on a handshake**, and reusing these fields would mean answering them by accident. |
+| Why it is cheap to keep separate | Nothing in A42 has to be undone to add a control surface later. A new message type is additive under §3.1 and costs a minor; a reversed `CONFIG_UPDATE` would be a semantic change to an existing message with an installed base, which is the expensive kind. The read path staying read-only is what keeps the write path cheap. |
+| The exclusion list in particular | Publishing it is **not** a step toward remote-editing it, and §18 A39's reasoning is why: a species that must not leave world 4 is a fact about world 4's population. Making it settable from elsewhere would put one operator's opinion into another world's capture test, which is the thing A39 refused when it was only a wire field being proposed. |
+
+**Enforced by:** every party, negatively — the discipline is that nobody writes the code this
+amendment describes. The sidecar carries the strongest form of it: it never sends a
+`CONFIG_UPDATE`, so there is no code path to extend.
+
+### A44 — `contract-a/2.3` is a minor bump, and the path does not move (§2, §3, §3.1)
+
+**Change.** §3.1: additive fields raise the **minor**; field removal, type changes and
+enum-value removal require a **major**. A42 adds five optional fields to one message and
+removes nothing.
+
+**Resolution.** Apply the contract's own test, item by item:
+
+| Change to Contract A | Kind | Needs a major? |
+|---|---|---|
+| `CONFIG_UPDATE.migrationExclude` added | additive OPTIONAL field | no |
+| `CONFIG_UPDATE.saveMinutes`, `saveKeep`, `saveOnQuit` added | additive OPTIONAL fields | no |
+| `CONFIG_UPDATE.worldWrapping` added | additive OPTIONAL field | no |
+| The settings strip rule (§5.1, §9.3) | receiver behaviour on new fields, no wire shape | no |
+| The normalized-name rule for `migrationExclude` | a constraint on a new field only; §16's and §17's fields are untouched | no |
+| §18 A39's "no wire field" sentence narrowed | a **prohibition** lifted for observability, not a field changed; A39's mechanism is untouched | no |
+| `saveMinutes`, `saveKeep`, `saveOnQuit` named in §10 | named defaults for new fields | no |
+| A43's read-only rule | a boundary on future work, not a wire shape | no |
+| Message catalogue, enums, close codes, NACK codes, geometry, custody, pacing | **all unchanged** | no |
+
+The identifier is **`contract-a/2.3`**. By §3.1 the URL path is major-scoped, so it stays
+**`/contract-a/v2`**, and `/contract-a/v1` keeps answering with close `4000` exactly as A23
+left it. **The minor is a capability statement, not a negotiation** — a receiver detects this
+feature by the presence of `migrationExclude` or `saveMinutes` on a `CONFIG_UPDATE`, never by
+arithmetic on the minor, and never by the minor a peer claims.
+
+**Why this one takes a minor and §18 did not.** A41 declined a bump because there was **no
+field to detect** — two-way lanes changed which values went into fields that already existed.
+Here there are five new fields and a receiver detects each by its presence, which is precisely
+the case §3.1 says the minor exists to record.
+
+**What a mixed rig does, honestly. Every degradation lands on "unknown", and none lands on a
+wrong number:**
+
+1. A `contract-a/2.2` **sidecar** with a `contract-a/2.3` mod ignores the five unknown fields
+   (§3.1). No settings reach the stats block, the page renders that world's settings as
+   unknown, and its population, census, custody depth and save receipt stay exact.
+2. A `contract-a/2.3` **sidecar** with a `contract-a/2.2` mod receives no settings, carries
+   none, and produces the same unknown. Neither side may reject the other over a minor, and
+   **this is the state the running deployment is in while the far end's bundle is stale.**
+3. A mod that implements §19 but runs with the policy disabled publishes `[]`, and the page
+   says "no exclusions" rather than "unknown". That is a stronger and different statement, and
+   it is available only from a reporting mod.
+4. **No configuration produces a wrong setting on the page**, because there is no default
+   anywhere in the chain to produce one from. An absent `saveMinutes` renders unknown; it never
+   renders `10`.
+
+**Enforced by:** both sides, symmetrically. Each sends `"contract-a/2.3"` and compares only the
+major.
