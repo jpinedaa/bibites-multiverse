@@ -614,10 +614,62 @@ namespace BibitesMultiverse
         // ---- §5.3, §5.7, §16 A30 — the OPTIONAL species block ----------------------------------
 
         /// <summary>
+        /// §16 A34 — the exporting mod's whitespace normalization, and the **only** place in the system
+        /// allowed to alter a name. Trim leading and trailing whitespace, and collapse every internal
+        /// whitespace run to a single U+0020. Applied at the source, before validation.
+        ///
+        /// It exists because the game's own name generator issues names the wire rule then refuses:
+        /// about 2% of generated halves carry an edge space, which shows up as a doubled space in
+        /// <c>Species.name</c> ("Izus  copedylanus") or a trailing one ("Banagellus polatus "). Before
+        /// A34 those organisms migrated with **no** species block at all — conformant and lossy.
+        ///
+        /// The wire rule itself does not move: a name on the wire still carries no edge whitespace, and
+        /// no sidecar, relay or archive may normalize one (A30's opacity rule). Normalization happens
+        /// here, at the source, or nowhere.
+        ///
+        /// Returns the same instance when nothing changed, so the caller can compare by reference or by
+        /// value to tell whether a name was repaired.
+        /// </summary>
+        internal static string NormalizeSpeciesWhitespace(string value)
+        {
+            if (value == null)
+            {
+                return null;
+            }
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder(value.Length);
+            bool pendingSpace = false;
+
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (char.IsWhiteSpace(c))
+                {
+                    // Leading whitespace is dropped (builder still empty); an internal run becomes one
+                    // U+0020, flushed only once a non-space follows; a trailing run is never flushed.
+                    pendingSpace = builder.Length > 0;
+                    continue;
+                }
+
+                if (pendingSpace)
+                {
+                    builder.Append(' ');
+                    pendingSpace = false;
+                }
+
+                builder.Append(c);
+            }
+
+            string normalized = builder.ToString();
+            return string.Equals(normalized, value, StringComparison.Ordinal) ? value : normalized;
+        }
+
+        /// <summary>
         /// §5.3 — one half of a species name: non-empty, at most <see cref="MaxSpeciesNameBytes"/>
-        /// UTF-8 bytes, and with no leading or trailing whitespace. The value is never repaired: the
-        /// caller drops the whole block instead, because half a name is not a weaker identity, it is a
-        /// different one (§5.7).
+        /// UTF-8 bytes, and with no leading or trailing whitespace. The value is never repaired *here*:
+        /// the caller drops the whole block instead, because half a name is not a weaker identity, it is
+        /// a different one (§5.7). Repair belongs to the exporter, which runs
+        /// <see cref="NormalizeSpeciesWhitespace"/> before it validates (§16, A34).
         /// </summary>
         internal static bool IsValidSpeciesNameHalf(string value, out string problem)
         {

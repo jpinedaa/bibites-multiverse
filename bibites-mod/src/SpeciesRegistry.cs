@@ -93,9 +93,15 @@ namespace BibitesMultiverse
         /// The source is <c>BibiteGenes.species</c>, the **live record**, read on the main thread in the
         /// same FixedUpdate as the migrant's own serialization. A null record is a normal state — a
         /// restored organism has one only once <c>ResumeBody</c> has run <c>CheckNewSpecies</c>
-        /// (<c>BibiteBody.cs:477-480</c>) — and an omitted block is valid, never an error. The names are
-        /// copied verbatim: the importer's match is a byte comparison, so any tidying on this side is a
-        /// silent mismatch on the other.
+        /// (<c>BibiteBody.cs:477-480</c>) — and an omitted block is valid, never an error.
+        ///
+        /// **The halves are whitespace-normalized here and nowhere else** (§16, A34): trimmed at the
+        /// edges, internal runs collapsed to one U+0020, before validation. The game's generator issues
+        /// an edge space in about 2% of halves, which the wire rule refuses; before A34 every one of
+        /// those organisms travelled with no block at all. Normalizing at the source is what keeps the
+        /// wire rule intact — no sidecar, relay or archive may repair a name (A30's opacity rule) — and
+        /// the importer closes the other half of the loop by comparing on normalized forms (A34), so a
+        /// normalized arrival still finds a raw-form local species instead of founding a twin.
         /// </summary>
         internal static JObject BlockForExport(BibiteGenes genes, int entityId, out string summary)
         {
@@ -109,9 +115,18 @@ namespace BibitesMultiverse
 
             SpeciesIdentity identity = new SpeciesIdentity
             {
-                GenericName = species.genericName,
-                SpecificName = species.specificName
+                GenericName = ContractA.NormalizeSpeciesWhitespace(species.genericName),
+                SpecificName = ContractA.NormalizeSpeciesWhitespace(species.specificName)
             };
+
+            // One grepable line whenever A34 actually repaired something, so the rollout can be shown to
+            // carry names that used to be dropped. Silent when the name was already conformant.
+            if (!string.Equals(identity.Name, species.name, StringComparison.Ordinal))
+            {
+                MultiversePlugin.Log.LogInfo(
+                    $"{Prefix} entity={entityId}: species name normalized for the wire (§16, A34): " +
+                    $"raw=\"{species.name}\" -> \"{identity.Name}\".");
+            }
 
             // §5.3 — the parent pair travels exactly when Species.parentSpecies is non-null, and exactly
             // one generation travels: a grandparent never does. A parent whose own name would break the
@@ -120,11 +135,14 @@ namespace BibitesMultiverse
             Species parent = species.parentSpecies;
             if (parent != null)
             {
-                if (ContractA.IsValidSpeciesNameHalf(parent.genericName, out string parentProblem)
-                    && ContractA.IsValidSpeciesNameHalf(parent.specificName, out parentProblem))
+                string parentGeneric = ContractA.NormalizeSpeciesWhitespace(parent.genericName);
+                string parentSpecific = ContractA.NormalizeSpeciesWhitespace(parent.specificName);
+
+                if (ContractA.IsValidSpeciesNameHalf(parentGeneric, out string parentProblem)
+                    && ContractA.IsValidSpeciesNameHalf(parentSpecific, out parentProblem))
                 {
-                    identity.ParentGenericName = parent.genericName;
-                    identity.ParentSpecificName = parent.specificName;
+                    identity.ParentGenericName = parentGeneric;
+                    identity.ParentSpecificName = parentSpecific;
                 }
                 else
                 {
@@ -154,8 +172,11 @@ namespace BibitesMultiverse
 
         /// <summary>
         /// Resolve one arriving name against this world's own registry, on the Unity main thread and
-        /// **before** the restore. Exact, ordinal, case-sensitive equality against <c>Species.name</c>,
-        /// over the full <c>recordedSpecies</c> list and not the active subset.
+        /// **before** the restore. Ordinal, case-sensitive equality against <c>Species.name</c>, over
+        /// the full <c>recordedSpecies</c> list and not the active subset, **compared on the
+        /// whitespace-normalized form of both sides** (§16, A34) — a normalized arrival has to find the
+        /// raw-form local species it names, or the import founds a whitespace twin of it. Only the
+        /// comparison is normalized; no stored name is ever rewritten.
         ///
         /// An exact name match **is** the same species (A31). That accepts a rare false merge — the
         /// game's name generator only checks uniqueness within one world — and the owner accepts it:
@@ -187,13 +208,19 @@ namespace BibitesMultiverse
                     cacheTick = simTick;
                 }
 
-                if (cache.TryGetValue(result.name, out Species remembered) && remembered != null)
+                // §16 A34 — the cache is keyed on the normalized form, so the raw and normalized
+                // spellings of one name share a slot instead of racing each other to create it.
+                string cacheKey = ContractA.NormalizeSpeciesWhitespace(result.name);
+
+                if (cache.TryGetValue(cacheKey, out Species remembered) && remembered != null)
                 {
                     result.resolved = true;
                     result.localId = remembered.speciesID;
                     result.action = ActionMatched;
                     result.parentLinked = remembered.parentSpecies != null;
-                    result.detail = "from the per-tick cache";
+                    result.detail = string.Equals(remembered.name, result.name, StringComparison.Ordinal)
+                        ? "from the per-tick cache"
+                        : "from the per-tick cache, under the raw local form '" + remembered.name + "'";
                     return result;
                 }
 
@@ -204,39 +231,47 @@ namespace BibitesMultiverse
                     return result;
                 }
 
-                Species match = FindByName(manager, result.name, out int matches);
+                Species match = FindByName(manager, result.name, out int matches, out bool exactForm);
                 if (match != null)
                 {
                     if (matches > 1)
                     {
-                        // The game's own generator name-checks against recordedSpecies before it issues a
-                        // name, so this should not exist. Taking the first in recordedSpecies order is
-                        // here to be deterministic, not because it is expected (§5.7 step 3(a)).
+                        // Two shapes of surprise, and they are worth telling apart. A true byte-identical
+                        // duplicate should not exist — the game's own generator name-checks against
+                        // recordedSpecies before it issues a name. A normalized-equal pair is the
+                        // whitespace twin A34 exists to stop being created; a world that already holds
+                        // one keeps it, and every arrival now lands on one of the two, deterministically.
                         MultiversePlugin.Log.LogWarning(
-                            $"{Prefix} '{result.name}' matches {matches} records in recordedSpecies — taking the first " +
-                            $"(localId={match.speciesID}). A within-world duplicate name is a game-side surprise.");
+                            $"{Prefix} '{result.name}' matches {matches} records in recordedSpecies once whitespace is " +
+                            $"normalized — taking the first (localId={match.speciesID}, stored name '{match.name}'). " +
+                            "A within-world duplicate name is a game-side surprise; a whitespace twin is pre-A34 history.");
                     }
 
                     Reactivate(manager, match);
-                    cache[result.name] = match;
+                    cache[cacheKey] = match;
 
                     result.resolved = true;
                     result.localId = match.speciesID;
                     result.action = ActionMatched;
                     result.parentLinked = match.parentSpecies != null;
-                    result.detail = "already recorded in this world";
+                    result.detail = exactForm
+                        ? "already recorded in this world"
+                        : "already recorded in this world under the raw form '" + match.name +
+                          "' — matched on the normalized form (§16, A34)";
                     return result;
                 }
 
                 // §5.7 step 3(a), no match: create one, under the named parent when this world has it.
+                // The parent lookup runs through the same normalized comparison, so a local parent held
+                // in its raw form is still found.
                 Species parent = null;
                 if (identity.HasParent)
                 {
-                    parent = FindByName(manager, identity.ParentName, out int _);
+                    parent = FindByName(manager, identity.ParentName, out int _, out bool _);
                 }
 
                 Species fresh = CreateLocal(manager, identity, parent);
-                cache[result.name] = fresh;
+                cache[cacheKey] = fresh;
 
                 result.resolved = true;
                 result.localId = fresh.speciesID;
@@ -395,32 +430,66 @@ namespace BibitesMultiverse
         // ---- the game's own registration, reproduced -------------------------------------------
 
         /// <summary>
-        /// Exact, ordinal, case-sensitive match against <c>Species.name</c> over the whole
+        /// Ordinal, case-sensitive match against <c>Species.name</c> over the whole
         /// <c>recordedSpecies</c> list — the same predicate <c>FindSpeciesFromTemplate</c> uses
-        /// (<c>GlobalLineageManager.cs:273</c>), with the match count so a duplicate can be reported.
+        /// (<c>GlobalLineageManager.cs:273</c>) — **compared on the whitespace-normalized form of both
+        /// sides** (§16, A34).
+        ///
+        /// The normalization is for the comparison and nothing else: the stored
+        /// <c>Species.name</c> is never touched, and neither is the arriving one. It has to work this
+        /// way because a destination registry is full of **raw** names its own evolution produced
+        /// ("Izus  copedylanus", with the doubled space), while the wire now carries the normalized form
+        /// of the same name. A raw comparison would miss and the importer would found a second species
+        /// differing from the first only in whitespace — a twin that reads identically in every UI.
+        ///
+        /// A byte-for-byte match still wins when one exists, so a world holding both forms resolves to
+        /// the one that was actually asked for. <paramref name="exactForm"/> reports which happened, and
+        /// <paramref name="matches"/> counts every normalized-equal candidate so a duplicate can be
+        /// reported.
         /// </summary>
-        private static Species FindByName(GlobalLineageManager manager, string name, out int matches)
+        private static Species FindByName(GlobalLineageManager manager, string name, out int matches, out bool exactForm)
         {
             matches = 0;
-            Species first = null;
+            exactForm = false;
+
+            Species firstExact = null;
+            Species firstNormalized = null;
+            string target = ContractA.NormalizeSpeciesWhitespace(name);
 
             List<Species> recorded = manager.recordedSpecies;
             for (int i = 0; i < recorded.Count; i++)
             {
                 Species candidate = recorded[i];
-                if (candidate == null || !string.Equals(candidate.name, name, StringComparison.Ordinal))
+                if (candidate == null || candidate.name == null)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(ContractA.NormalizeSpeciesWhitespace(candidate.name), target, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
                 matches++;
-                if (first == null)
+
+                if (firstNormalized == null)
                 {
-                    first = candidate;
+                    firstNormalized = candidate;
+                }
+
+                if (firstExact == null && string.Equals(candidate.name, name, StringComparison.Ordinal))
+                {
+                    firstExact = candidate;
                 }
             }
 
-            return first;
+            if (firstExact != null)
+            {
+                exactForm = true;
+                return firstExact;
+            }
+
+            return firstNormalized;
         }
 
         /// <summary>

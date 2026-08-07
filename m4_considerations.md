@@ -741,6 +741,15 @@ A30 to A33 at **`contract-a/2.1`**, `contract-b-m4.md` §15 carries B9 and B10 a
 2026-08-07 left the far end on the previous minor on purpose and it kept working, which is
 the compatibility rule demonstrated rather than asserted.
 
+**Amended once more the same day, for the names the game itself will not spell cleanly**:
+about 2% of generated name halves carry an edge space, which the wire rule refuses, so those
+organisms were migrating with no species block at all. `contract-a.md` §16 **A34** makes the
+*exporting* mod normalize each half's whitespace before it validates — trim the edges, collapse
+internal runs to one U+0020 — and makes the importer compare on the normalized form so a
+repaired name still matches the raw-form species a destination world grew for itself.
+**No version moved**: A34 adds no field and relaxes no rule, so both wires stay at
+`contract-a/2.1` and `contract-b/3.1`, and no sidecar, relay or archive changed.
+
 ### WP2 — The relay: healing, insertion and handover
 
 **Depends on:** WP1.

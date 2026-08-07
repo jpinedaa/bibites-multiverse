@@ -638,7 +638,7 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
 | `parents[].payload` | string | no | The parent's own opaque bb8 blob, from `SaveSystem.SerializeBibite`, subject to the same rules as `payload` (§4.6). **Absent means the parent is gone** — `BibiteGenes` drops the parentage once the parent GameObject is destroyed, so this is normal and is recorded as a gap, never as an error. |
 | `parents[].gameVersion` | string | no | The version that produced `parents[].payload`. Absent means "the same as the migrant's `gameVersion`", which is always true in practice because both were serialized in the same tick. |
 | `species` | object | no | **The migrant's species identity** (added — §16, A30). Read from the live organism's own `Species` record — `BibiteGenes.species` — never from the payload, which carries only a world-local integer. Absent when the organism has no species record, and absent from a mod that does not implement §16 at all; both are conformant, and §5.7's absent-block rule states exactly what the importer then does. |
-| `species.genericName` | string | yes | The genus half of the name, byte for byte as the source world holds it (`Species.genericName`). REQUIRED when `species` is present. Non-empty, at most **64 UTF-8 bytes**, no leading or trailing whitespace. |
+| `species.genericName` | string | yes | The genus half of the name, as the source world holds it (`Species.genericName`), **with its whitespace normalized by the exporting mod** — trimmed at the edges, internal runs collapsed to one U+0020 — before the rules below are applied (amended — §16, A34; "byte for byte" before it). REQUIRED when `species` is present. Non-empty, at most **64 UTF-8 bytes**, no leading or trailing whitespace. |
 | `species.specificName` | string | yes | The specific half (`Species.specificName`). Same rules. The name the importer matches on is `genericName + " " + specificName`, assembled with exactly one U+0020 — the game's own `Species.name` (`Species.cs:85`). |
 | `species.parentGenericName` | string | no | The genus half of the **immediate parent species'** name, taken from `Species.parentSpecies` when the migrant's species has one. Same string rules. |
 | `species.parentSpecificName` | string | no | The specific half of the same name. **The two parent fields are all-or-nothing** — both present or both absent — and a block carrying exactly one of them is malformed (§16, A30). Exactly **one** generation travels: a grandparent never does, and the importer needs none, because a chain rebuilds one link at a time as its members migrate. |
@@ -711,9 +711,12 @@ the main thread (`m3_considerations.md`, Risk 8).
 - fill `parentGenericName` and `parentSpecificName` from `Species.parentSpecies` when that
   reference is non-null, and omit **both** when it is null. A root species has no parent and
   travels without one;
-- copy the names verbatim: no trimming, no case folding, no Unicode normalization, no
-  re-generation. The importer's match is a byte comparison (§5.7), so any tidying on this side
-  is a silent mismatch on the other;
+- **normalize each half's whitespace, and nothing else** (amended — §16, A34): trim the edges,
+  collapse internal whitespace runs to one U+0020, then validate. No case folding, no Unicode
+  normalization, no re-generation, and no change to the source world's own `Species` record.
+  The game issues an edge space in about 2% of halves, and this is the one place in the system
+  allowed to repair one — the importer's match is normalized on both sides (§5.7), so a name
+  repaired here still finds a raw-form local species there;
 - send the block on **every** hop, not only the first. It is read from the live record each
   time, so an organism that speciated between hops carries its new name on the next one.
 
@@ -1083,15 +1086,20 @@ Processing order:
 
    **(a) Resolve.** When a `species` block is present, assemble
    `name = genericName + " " + specificName` and look it up in the local
-   `GlobalLineageManager.recordedSpecies` by **exact, ordinal, case-sensitive** string
-   equality against `Species.name`. The registry searched is the full recorded one, not the
-   active subset.
+   `GlobalLineageManager.recordedSpecies` by **ordinal, case-sensitive** string equality
+   against `Species.name`, **comparing the whitespace-normalized form of both sides**
+   (amended — §16, A34; an exact byte comparison before it). The registry searched is the full
+   recorded one, not the active subset. Only the comparison is normalized: no stored
+   `Species.name` is rewritten, and a **byte-for-byte match wins whenever one exists**. This is
+   what lets a normalized arrival find the raw-form species its own world generated — a local
+   `Izus  copedylanus` is the same species as an arriving `Izus copedylanus`, and matching them
+   is the difference between a merge and a whitespace twin.
 
    | Outcome | What the mod does |
    |---|---|
-   | Exactly one match | That local species is the answer. If it is not in `activeSpecies` it is re-activated, exactly as `GlobalLineageManager.FindSpeciesFromTemplate` re-activates one (`GlobalLineageManager.cs:277-300`). **A migrant reviving a locally extinct species of the same name is the correct outcome**, not the defect §16 closes: the name is the same species, and the species genuinely came back. |
-   | More than one match | Take the **first** in `recordedSpecies` order and log one warning. The game's own generator name-checks against `recordedSpecies` before it issues a name (`SpeciesNameGenerator.RandomUnusedGenus` / `RandomUnusedSpecific`), so a within-world duplicate should not exist; this branch is here to be deterministic, not because it is expected. |
-   | No match | **Create** one local species whose `name` is exactly `name`, with both halves taken from the block and **never** re-generated — the game's `Species(BibiteBody, parent)` constructor calls `GenerateNewName()`, and a mod that lets it stand has thrown the identity away. When the block carries a parent name **and** a local species matches that name exactly, the new species is created as that species' **child** and inserted after it in the registry, the way `CreateNewSpecies(bibite, parentSpecies)` does (`GlobalLineageManager.cs:317-339`). Otherwise it is created as a **root**. |
+   | Exactly one match | That local species is the answer. If it is not in `activeSpecies` it is re-activated, exactly as `GlobalLineageManager.FindSpeciesFromTemplate` re-activates one (`GlobalLineageManager.cs:277-300`). **A migrant reviving a locally extinct species of the same name is the correct outcome**, not the defect §16 closes: the name is the same species, and the species genuinely came back. The log line names the stored spelling when it differs from the arriving one (§16, A34). |
+   | More than one match | Take the **first** in `recordedSpecies` order and log one warning. The game's own generator name-checks against `recordedSpecies` before it issues a name (`SpeciesNameGenerator.RandomUnusedGenus` / `RandomUnusedSpecific`), so a within-world duplicate should not exist; this branch is here to be deterministic, not because it is expected. Since A34 the count is over normalized-equal records, so a whitespace twin created before A34 shows up here instead of staying silent. |
+   | No match | **Create** one local species whose `name` is exactly `name`, with both halves taken from the block and **never** re-generated — the game's `Species(BibiteBody, parent)` constructor calls `GenerateNewName()`, and a mod that lets it stand has thrown the identity away. When the block carries a parent name **and** a local species matches that name under the same comparison this step just used (§16, A34), the new species is created as that species' **child** and inserted after it in the registry, the way `CreateNewSpecies(bibite, parentSpecies)` does (`GlobalLineageManager.cs:317-339`). Otherwise it is created as a **root**. |
 
    **(b) Rewrite `$.genes.speciesID`** in the payload JSON to the resolved or created
    species' own **local** id — a JSON integer; `Species.speciesID` is an `int64`
@@ -2857,10 +2865,13 @@ a composition of correct parts, so the defence had to be composed too.
 
 The owner ratified **Option A — species identity travels in the migration envelope** on
 2026-08-07, from the decompiled-source research into how the game binds a restored organism to
-a species. **Four amendments, A30 to A33.** A30 puts one OPTIONAL block on two messages; A31
+a species. **Five amendments, A30 to A34.** A30 puts one OPTIONAL block on two messages; A31
 states what the importing mod does with it, before the restore; A32 states what an import
 *without* it does instead, and makes that the floor for every import; A33 applies §3.1's
-version test.
+version test. **A34 was added on the same day, after the rollout**: the game generates names
+the wire rule refuses, so the exporting mod repairs their whitespace at the source, and the
+importer matches on the repaired form. A34 changes no field and no wire shape, so the
+identifier stays `contract-a/2.1`.
 
 The section follows the pattern of §13, §14 and §15. Each amendment names the gap or the
 change, the resolution, and **which side enforces it** — the side whose code makes the rule
@@ -2922,7 +2933,7 @@ it. Nothing between the two interprets it.
 |---|---|
 | Shape | `{ "genericName": string, "specificName": string, "parentGenericName"?: string, "parentSpecificName"?: string }`. Four fields, no nesting, no id of any kind. |
 | The source | The **live `Species` record**, `BibiteGenes.species`, read on the main thread in the same `FixedUpdate` as the migrant's serialization. Never the payload: `$.genes.speciesID` is a counter value, and there is no name in the blob to read. |
-| The name | `genericName + " " + specificName`, one U+0020, which is the game's own `Species.name` (`Species.cs:85`). Both halves are REQUIRED when the block is present, non-empty, at most 64 UTF-8 bytes, untrimmed and unfolded. |
+| The name | `genericName + " " + specificName`, one U+0020, which is the game's own `Species.name` (`Species.cs:85`). Both halves are REQUIRED when the block is present, non-empty, at most 64 UTF-8 bytes, and **whitespace-normalized by the exporting mod before validation** (amended — §16, A34; "untrimmed and unfolded" before it). Case and Unicode form are still untouched by every side. |
 | The parent pair | **All-or-nothing.** Both parent fields or neither; one alone is a malformed block. Present exactly when `Species.parentSpecies` is non-null at the source. |
 | The depth | **One generation.** A grandparent never travels, and no field exists for one. |
 | Optionality | An absent block is **valid** — an organism with a null species record, or a mod that does not implement §16 at all. §5.7's absent-block rule (A32) covers it. |
@@ -2958,8 +2969,11 @@ registry by name, creating one when the name is new, and rewrites `$.genes.speci
 payload to the **local** id before calling `LoadBibiteOrEggFromData`. §5.7 step 3 states the
 mechanism in full.
 
-**The policy, stated as policy so nobody has to infer it: an exact name match is the same
-species.** Two organisms whose worlds spell the name identically join one local species. This
+**The policy, stated as policy so nobody has to infer it: a name match is the same species.**
+Two organisms whose worlds spell the name identically join one local species. The comparison
+was byte-for-byte when A31 was written and is **whitespace-normalized on both sides** since
+A34 — the identity rule is unchanged, only the spelling of "identically" is (amended — §16,
+A34). This
 accepts a rare **false merge** — the game draws both halves of a name from one shared
 `latinNames` list and only checks uniqueness *within* a world
 (`SpeciesNameGenerator.RandomUnusedGenus` / `RandomUnusedSpecific`), so two worlds
@@ -3064,3 +3078,85 @@ feature by the presence of the `species` field and never by arithmetic on the mi
 
 **Enforced by:** both sides, symmetrically. Each sends `"contract-a/2.1"` and compares only the
 major.
+
+### A34 — The exporting mod normalizes a name's whitespace, at the source, before it validates (§5.3, §5.7, §16 A30, §16 A31)
+
+**The gap, found in the first hours of the §16 rollout.** A30 requires each half to carry no
+leading or trailing whitespace, and both the mod and the sidecar enforce it by dropping the
+whole block. **The game's own name generator does not honour that rule.** Both halves are drawn
+from one shared `latinNames` list (`SpeciesNameGenerator.RandomUnusedGenus` /
+`RandomUnusedSpecific`), and about **2%** of the halves it issues carry an edge space. It
+surfaces in `Species.name` as a doubled space — `Izus  copedylanus`, `Alvaradus  powerus` — or
+as a trailing one — `Banagellus polatus `. Under A30 alone every organism of such a species
+migrated with **no block at all**, and the log said so once per organism: conformant, and lossy
+in exactly the population §16 exists to name.
+
+**Change.** The **exporting mod** normalizes each name half before it validates it. Nothing
+else in the system may.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| What normalization is | Trim leading and trailing whitespace from the half, then collapse every remaining internal whitespace run to a **single U+0020**. "Whitespace" is any character the platform calls whitespace, so a tab or a non-breaking run becomes one ordinary space. |
+| Who does it | **The exporting mod, and only the exporting mod.** The rule is stated as a place, not just an operation: normalization happens at the source or it does not happen. |
+| When | **Before validation**, so the normalized half is what A30's non-empty, 64-byte and no-edge-whitespace rules are applied to, and what goes on the wire. |
+| What it applies to | All four halves — the migrant's pair and the parent pair — each normalized independently. The assembled `Species.name` therefore carries exactly one U+0020 between the halves, which is what it always claimed to. |
+| What it does not repair | A half that is **only** whitespace normalizes to empty, fails A30's non-empty rule, and the block is dropped exactly as before. A name with no characters in it is not a name. |
+| What it does not touch | Case, Unicode normal form, punctuation, and **the source world's own `Species` record**. The local registry keeps the name the game generated; only the copy on the wire is repaired. |
+| The wire rule | **Unchanged, word for word.** A name on the wire still carries no leading or trailing whitespace, and A30's opacity rule still binds every sidecar, relay and archive: they validate, they strip a bad block, they log it, and they **MUST NOT** synthesize, translate, trim, case-fold, normalize or reorder a name. A34 gives the mod one obligation; it grants nobody else a permission. |
+
+**The import side moves with it, and this is the half that is easy to get wrong.** A
+destination registry is already full of **raw** names — its own evolution generated
+`Izus  copedylanus`, doubled space and all, long before any migration arrived. The wire now
+carries `Izus copedylanus`. A byte comparison misses, A31's create branch runs, and the world
+gains a **second species differing from the first only in whitespace**: a twin that reads
+identically in every UI the player ever sees, which is a new instance of the exact defect §16
+was built to close.
+
+So A31's lookup compares **normalized form against normalized form**:
+
+| Rule | Statement |
+|---|---|
+| What is normalized | The incoming assembled name, and each `Species.name` it is compared against — **for the comparison only**. |
+| What is stored | Nothing changes. The local `Species.name` keeps its raw spelling, and a species this import **creates** is created from the incoming block's halves exactly as A31 already says. The importer repairs no registry. |
+| Which record wins | A byte-for-byte match, when one exists. Only when none does is a normalized-equal record used. A world that somehow holds both spellings resolves to the one that was actually asked for. |
+| More than one | Unchanged from A31: take the **first** in `recordedSpecies` order and log one warning. The count is now over normalized-equal records, so a pre-A34 whitespace twin is visible in that line rather than silent. |
+| The parent lookup | The same comparison, for the same reason: a local parent held in its raw form must still be found, or the arrival is created as a root beside a parent that is right there. |
+| The log | The one `[M5-SPECIES]` line per import says which form matched — a raw-form hit names the stored spelling — so a normalized match is evidence in the log and not an inference. |
+
+**Why normalize at the source and not at the destination.** Both would make the match succeed.
+Only one keeps a single answer to "what is this species called": if each destination repaired
+what it received, the same organism would be filed under a name that depends on which world it
+landed in, and the sidecars — which validate the rule — would be validating a string nobody
+promises anything about. The source owns the name because the source owns the `Species` record
+the name was read from. This is also why the *comparison* on the import side is explicitly not
+normalization of anything: it repairs no data and leaves no trace.
+
+**Why not relax the wire rule instead.** Allowing edge whitespace through would push the whole
+problem into every consumer — the sidecar's validator, the archive's ledger, and every future
+renderer would each have to decide whether `Banagellus polatus ` and `Banagellus polatus` are
+one species, and they would not all decide the same way. One repair at one place beats an
+ambiguity at every place. The rule that a name on the wire is clean is worth keeping precisely
+because so much downstream code takes it literally.
+
+**Why this does not need a version bump.** Apply §3.1's own test, which raises the minor for
+**additive fields**:
+
+| Change to Contract A | Kind | Needs a bump? |
+|---|---|---|
+| Whitespace normalization before export validation | mod-internal behaviour, no wire shape | no |
+| Normalized comparison in the import resolver | mod-internal behaviour, no wire shape | no |
+| Field set, types, message catalogue, enums, close codes, NACK codes, tunables | **all unchanged** | no |
+| The shape rules a name on the wire must satisfy | **unchanged** — A34 makes more names satisfy them, and relaxes none | no |
+
+The identifier stays **`contract-a/2.1`** and the path stays `/contract-a/v2`. A mod on either
+side of A34 interoperates with one on the other: a pre-A34 sender emits fewer blocks, which
+its peer answers with A32's floor, and a pre-A34 *receiver* handed a normalized name matches it
+byte for byte whenever its own registry holds the clean spelling. The one behaviour A34 cannot
+give an old receiver is the raw-form match, and that is a missed merge — the pre-§16 outcome —
+never a wrong one.
+
+**Enforced by:** the mod, at both ends and asymmetrically. The **exporting** mod normalizes;
+the **importing** mod compares on the normalized form. No sidecar, relay or archive changes,
+and none may: A30's opacity rule is what makes the source's repair the only one.
