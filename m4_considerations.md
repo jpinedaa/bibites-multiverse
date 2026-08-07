@@ -733,6 +733,14 @@ Write WP1 before any code. M2 and M3 both paid for the alternative.
 are now law: `contract-a.md` §15 A26 and A27, and `contract-b-m4.md` §14 B4 to B7. All six
 are clarifying. Neither version moves.
 
+**Amended again 2026-08-07, for species identity in the envelope** (`18954a6`). One OPTIONAL
+`species` block on two Contract A messages and one Contract B message, nothing removed and no
+type changed, so **both minors moved and neither major did**: `contract-a.md` §16 carries
+A30 to A33 at **`contract-a/2.1`**, `contract-b-m4.md` §15 carries B9 and B10 at
+**`contract-b/3.1`**. Those are the current wires. The rollout to the living deployment on
+2026-08-07 left the far end on the previous minor on purpose and it kept working, which is
+the compatibility rule demonstrated rather than asserted.
+
 ### WP2 — The relay: healing, insertion and handover
 
 **Depends on:** WP1.
@@ -1192,5 +1200,5 @@ steps below carry the milestone's remainder into the living deployment and into 
 4. **Run `phase5far` once, when a person is at the second computer.** It confirms the pacing
    rule across the LAN. Phase 5 already proves the rule locally, so this is confirmation.
 5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.
-6. **Open M5** (public release). The join kit is its starting point, and `contract-a/2.0`
-   plus `contract-b/3.0` are the wire shapes it publishes.
+6. **Open M5** (public release). The join kit is its starting point, and `contract-a/2.1`
+   plus `contract-b/3.1` are the wire shapes it publishes.

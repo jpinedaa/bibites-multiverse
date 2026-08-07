@@ -11,7 +11,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
-| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.0`**, amended in place; §15 is the M4 set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.0`**; §14 is its reconciliation set), `genome-hash.md` (the canonical genome projection, unchanged by M4). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
+| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.1`**, amended in place; §15 is the M4 set and §16 the species-identity set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.1`**; §14 is its reconciliation set and §15 the species-identity amendment), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by the species set — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
 | Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), **`run-m4-lan.sh` = the same map with slot 6 on the second computer** (the M4 exit-test rig; it sources `run-m4.sh` with `M4_LIB=1`), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rigs* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
@@ -275,11 +275,20 @@ Six things about it are load-bearing:
   commands to the destination — and the destination is now a computer this rig will not
   command.
 
-**The M3 scripts still speak a wire the binaries retired.** M4 bumped both majors
-(`contract-a/2.0`, `contract-b/3.0`) and moved both paths. A relay and a sidecar still
+**The M3 scripts still speak a wire the binaries retired.** M4 bumped both majors — to
+`contract-a/2` and `contract-b/3` — and moved both paths. A relay and a sidecar still
 *serve* the old paths and then close the connection with an explanation, so a stale script
 does not fail with a socket error — it connects, gets closed, and looks like a peer that
 will not join. That is the failure to expect, and it is why this list exists.
+
+**The minors are now `contract-a/2.1` and `contract-b/3.1`** (the species-identity set,
+2026-08-07), and **nothing in this table moves with them**. Compatibility is on the major
+alone: a minor is never a rejection reason, the URL paths did not move, and the new `species`
+field is OPTIONAL on both wires. That is not theory — the living deployment ran the rollout
+with slot 6 left on the previous minor, and its old sidecar reconnected to the new relay and
+kept exchanging organisms in both directions with no `4000` close. **The minor is a
+capability statement, not a negotiation:** detect the feature by the presence of the
+`species` field, never by arithmetic on the minor.
 
 | What the scripts speak | What M4 speaks | Where |
 |---|---|---|
@@ -379,6 +388,7 @@ side carries none** — the relay, the sidecar, the archive and `ringstat` all l
 | `[M4-SAVE]` | **M4.** `event=SAVED`, `event=FAILED`, `event=BUDGET_EXCEEDED`, plus the armed line and each deferral. |
 | `[M4-CROWDING]` | **M4.** Per-simulated-minute arrival crowding, **one line per entry edge**. |
 | `[M4-PORTAL]` | **M4.** `event=BUILT`, `event=SHOWN`, `event=HIDDEN`, `event=RELAYOUT`. |
+| `[M5-SPECIES]` | **The species-identity set** (`contract-a/2.1`). One `action=created\|matched\|fallback` line per import, with `migrationId`, `entityId`, `name="…"`, `localId`, `parentLinked` and `detail`; plus the export-side warning when a species name cannot go on the wire. `action=fallback` is the absent-block rule, and it is the normal reading for an arrival from a peer that predates the set. |
 | `[M1-AUTOTEST]` | The M1 auto-test, including its one `RESULT:` line. |
 
 **`[M2-CROSSING]` is now several lines per window, and every parser must key on `edge=`.**
@@ -581,17 +591,25 @@ The second computer has no development environment (`m3_considerations.md` Risk 
 made here:
 
 ```sh
-bibites-mod/game.sh stop all      # deploy.sh cannot overwrite a DLL a running game holds
 farend/make-farend-bundle.sh      # -> farend/dist/farend-bundle.zip
 ```
 
-The bundle holds `setup-farend.ps1`, `README.md`, a **fresh** `BibitesMultiverse.dll` (it runs
-`deploy.sh`), `multiverse-sidecar.exe` (cross-compiled `GOOS=windows CGO_ENABLED=0` from
+**It runs against a live deployment; no game has to be stopped.** The bundle *builds* the
+plugin (`dotnet build`) and reads the result out of `bibites-mod/bin/Release/` — it never
+writes into `BepInEx/plugins/`, and the copy into that folder is the only step a running game
+can block. That is why it calls `dotnet build` rather than `deploy.sh`, which is build **plus**
+that copy. Deploying to *this* machine's games is a separate act with its own downtime: quit
+the games, `bibites-mod/deploy.sh`, bring the rig back up.
+
+The bundle holds `setup-farend.ps1`, `README.md`, a **fresh** `BibitesMultiverse.dll`,
+`multiverse-sidecar.exe` (cross-compiled `GOOS=windows CGO_ENABLED=0` from
 `go/`), and the pinned BepInEx 5.4.23.3 zip (downloaded once into the gitignored
 `farend/dist/cache/`, SHA-256 verified). The script refuses to build when
 `setup-farend.ps1`'s pinned `$AssemblySha256` no longer equals
 `bibites-mod/libs/BibitesAssembly.dll` — that pin **is** the version gate on the far end, and a
-stale one would let two different game builds into one map.
+stale one would let two different game builds into one map. It also warns, without stopping,
+when `libs/` no longer matches the game installed here — the check `deploy.sh` used to make on
+its behalf.
 
 **The repo distributes the bundle.** `farend/dist/farend-bundle.zip` is tracked as of
 `8463b72`, so the second computer clones the private GitHub repo and takes the zip out of the
