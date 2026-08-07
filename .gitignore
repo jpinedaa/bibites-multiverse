@@ -40,3 +40,7 @@ e2e/logs-m4-lan/
 e2e/relay-data-m4-lan/
 e2e/archive-data-m4-lan/
 e2e/run-m4-lan/
+
+# The species-guard regression check's evidence: BepInEx log copies from the three
+# throwaway instances species-guard-check.sh runs.
+e2e/logs-m5-guard/

@@ -102,7 +102,8 @@ namespace BibitesMultiverse
                 $"hotkey={ForceExportHotkey} familyReport={FamilyReportSeconds:F0}s. " +
                 "Verbs: export <family|any|id> [edge], place <family|any|id> <x> <y> [vx] [vy], " +
                 "edge <open|closed> [E|N|W|S|all], camera <size> [x] [y], flourish <export|entry> [x] [y], " +
-                "census, count <id>, family, save [name], timescale <x>, autosave <on|off>, quit.");
+                "census, count <id>, family, save [name], timescale <x>, autosave <on|off>, " +
+                "speciesaudit [repair], speciespoison [clean], quit.");
         }
 
         /// <summary>
@@ -275,6 +276,14 @@ namespace BibitesMultiverse
 
                 case "timescale":
                     TimeScale(token, argument);
+                    break;
+
+                case "speciesaudit":
+                    SpeciesAudit(token, argument);
+                    break;
+
+                case "speciespoison":
+                    SpeciesPoison(token, argument);
                     break;
 
                 case "autosave":
@@ -745,6 +754,47 @@ namespace BibitesMultiverse
             bool alive = body != null && FamilyScan.IsAlive(body);
             Report(token, true, $"entityId={entityId} present={(body != null ? 1 : 0)} alive={(alive ? 1 : 0)} " +
                 $"population={GameBridge.LivingPopulation()}");
+        }
+
+        /// <summary>
+        /// <c>speciesaudit [repair]</c> — the operational read of the game's species-history counter
+        /// defect (<see cref="SpeciesHistoryGuard"/>). <c>wouldOverrun</c> above zero means the next
+        /// world save would throw <c>IndexOutOfRangeException</c> in
+        /// <c>LogLikeSpeciesDataArray.SavePointToArrays</c> if the guard were not armed; with the guard
+        /// armed it is the count the guard is about to correct.
+        /// </summary>
+        private void SpeciesAudit(string token, string argument)
+        {
+            bool repair = string.Equals((argument ?? string.Empty).Trim(), "repair", StringComparison.OrdinalIgnoreCase);
+
+            if (GlobalLineageManager.Instance == null)
+            {
+                Report(token, false, "no world is loaded (GlobalLineageManager.Instance is null)");
+                return;
+            }
+
+            SpeciesHistoryGuard.Audit audit = SpeciesHistoryGuard.Scan(repair);
+            Report(token, true,
+                $"guard={(SpeciesHistoryGuard.Enabled ? "ON" : "OFF")} recorded={audit.recorded} " +
+                $"wouldOverrun={audit.wouldOverrun} inconsistent={audit.inconsistent} repaired={audit.repaired} " +
+                $"sessionArraysRepaired={SpeciesHistoryGuard.RepairedArrays} worst={audit.worst}");
+        }
+
+        /// <summary>
+        /// <c>speciespoison [clean]</c> — the regression check. It drives one throwaway species'
+        /// history into the exact state the 2026-08-06/07 save failures were in, so the failure can be
+        /// produced on demand instead of waited for. Follow it with <c>save</c>:
+        ///
+        /// * with <c>MULTIVERSE_SPECIES_GUARD=0</c> the save throws, with the incident's stack;
+        /// * with the guard at its default the save succeeds and the world on disk is complete.
+        ///
+        /// <c>speciespoison clean</c> takes the test species out again.
+        /// </summary>
+        private void SpeciesPoison(string token, string argument)
+        {
+            bool clean = string.Equals((argument ?? string.Empty).Trim(), "clean", StringComparison.OrdinalIgnoreCase);
+            string detail = SpeciesHistoryGuard.Poison(clean, out bool ok);
+            Report(token, ok, detail);
         }
 
         private IEnumerator Save(string token, string argument)

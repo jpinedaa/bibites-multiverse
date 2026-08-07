@@ -155,6 +155,18 @@ no `bb8-schema` (D4).
   reloads the scene under a live rig, which is the worse failure (D14). **Budget, signed
   off 2026-08-05: a save stalls the sim by at most 2 seconds**, which is what makes the
   simple synchronous save acceptable and gives the save timer a test bar
+- **The species-history guard** (`[M5-HISTORY]`, mod 0.5.2) — a guard for a **game-side**
+  defect, not a mod bug. `Utility.LogLikePresenceArray` describes a species' live history
+  window both as apparition/disappearance indices and as a running `ushort` count, and
+  `SaveStateBin` sizes its buffers from the count while filling them from the indices. The
+  count underflows to 65535 when the disappearance front reaches a scale that never held a
+  living point, then wraps back to 0 when the species is repopulated — and from then on
+  **every world save throws** `IndexOutOfRangeException` in `SavePointToArrays`. Migration
+  traffic makes that extinction-and-return cycle routine. A Harmony prefix on
+  `GlobalLineageManager.BytesSpace` and `.SaveStateBin` recomputes the count to the window
+  the save loop will actually walk, which is what the game's own
+  `RefreshPresentsFromIndices` computes during a prune merge. No-op on a healthy array;
+  `speciesaudit` reports it and `e2e/species-guard-check.sh` proves both directions
 - **Edge instrumentation** (D15): the existing `[M2-CROSSING]` series gains entry-edge
   occupancy and an arrival histogram along the entry edge — now the verification that the
   sidecar's arrival pacing works, rather than a measurement taken before a decision

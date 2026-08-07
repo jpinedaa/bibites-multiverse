@@ -810,6 +810,37 @@ interval through the exit test. Every stall fell between **241 ms and 538 ms**, 
 2 000 ms budget. Phase 6 sampled the five most recent, at about 280 ms to 440 ms. No save
 logged `event=BUDGET_EXCEEDED`, and the save lock never had to defer.
 
+**A game-side defect stopped two worlds saving at all — guarded 2026-08-07** (`SpeciesHistoryGuard.cs`,
+mod **0.5.2**). Slot 5 lost 27 consecutive periodic saves on 2026-08-06 and slot 4 lost 19 plus
+the save on quit on 2026-08-07, every one of them
+`IndexOutOfRangeException` in `Utility.LogLikeSpeciesDataArray.SavePointToArrays`, under
+`GlobalLineageManager.SaveStateBin`. **It is not our bug**: the same stack, from the same call
+sites, is in the slot-5 log under mod **0.4.0**, which has no species block, no
+`SpeciesRegistry` and no `CreateLocal`. The cause is in
+`Utility/LogLikePresenceArray.cs`, which describes a species' live history window twice —
+as four apparition/disappearance indices, and as the running `nPresentAtScale[]` count —
+and lets the two drift. `SaveStateBin` sizes its temporary arrays from the count (line 138)
+and fills them from the indices (lines 140-160), so a count that reads low overruns the
+arrays. The count goes low because `nPresentAtScale[i]--` at line 80 fires without its
+paired `++` at line 86 whenever the disappearance front reaches a scale that has never held
+a living point: `0 - 1` on a `ushort` is 65535, saves keep working (over-sized) and the
+species also stops being prunable, and then the species is repopulated, the `++` wraps 65535
+back to 0, and every save from that moment throws. **What the multiverse supplies is the
+traffic** — arrivals that empty a species when they migrate on and later repopulate it, on
+hundreds of species per world instead of a handful.
+
+The guard is a Harmony prefix on `GlobalLineageManager.BytesSpace` **and** `.SaveStateBin`
+(both, because `SaveableBinStack` sizes the whole buffer from the first and then hands the
+second a slice) that recomputes `nPresentAtScale` to exactly the window the save loop will
+walk. That is the same quantity the game's own `RefreshPresentsFromIndices` computes during a
+prune merge, so the value written is the game's; unlike that method the guard leaves
+`nDataAtScale` alone, because that field steers `Push`'s cascade. On a healthy array it is a
+no-op. `e2e/species-guard-check.sh` is the regression check: with
+`MULTIVERSE_SPECIES_GUARD=0` the dev-channel `speciespoison` verb reproduces the incident's
+stack on demand, and with the guard at its default the same poison saves cleanly and the
+world reloads. **Fourteen of the 124 species in a live slot-1 world were already carrying a
+drifted counter** when the guard was first run against it, which is how routine the drift is.
+
 ### WP5 — The archive: the status page
 
 **Depends on:** WP1, WP3.

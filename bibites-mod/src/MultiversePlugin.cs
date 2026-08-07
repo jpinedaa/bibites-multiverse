@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.5.1";
+        public const string Version = "0.5.2";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -32,6 +32,11 @@ namespace BibitesMultiverse
             Log.LogInfo($"Round-trip dev command armed — press {RoundTripCommand.Hotkey} inside a running simulation.");
 
             MultiverseConfig config = ReadConfig();
+
+            // Armed before anything can save. Like the saver below it is deliberately NOT gated on the
+            // multiverse client: the defect it guards is the game's own, it stops a world saving at
+            // all, and a world is worth saving whether or not this instance is wired into a map.
+            SpeciesHistoryGuard.Apply(Guid);
 
             // The saver is created **before** the client, because the client hands it the "a MIGRATE_IN
             // is waiting" gate of Risk 3 at Initialize time and AddComponent runs Awake immediately.
