@@ -36,6 +36,13 @@ namespace BibitesMultiverse
         private readonly Dictionary<int, double> immunityUntilSimTime = new Dictionary<int, double>();
 
         /// <summary>
+        /// §5.7 step 3(a), §16 A31 — this world's own species registry, seen by name. It holds the
+        /// per-tick resolve cache, so it is one instance for the life of the importer and it is cleared
+        /// with everything else on a world unload.
+        /// </summary>
+        private readonly SpeciesRegistry species = new SpeciesRegistry();
+
+        /// <summary>
         /// C2 (§7.3, §7.4) — the world identity the ledger above belongs to. <see cref="OnHandshake"/>
         /// clears the ledger only when this changes, which is exactly when §7.4 custody reassertion wants
         /// it gone.
@@ -51,6 +58,7 @@ namespace BibitesMultiverse
         {
             seenMigrations.Clear();
             immunityUntilSimTime.Clear();
+            species.Clear();
             ledgerSessionId = null;
         }
 
@@ -224,18 +232,45 @@ namespace BibitesMultiverse
                 return;
             }
 
-            // ---- rewrite, restore, re-assert, re-link ------------------------------------------
+            // ---- resolve the species, rewrite, restore, re-assert, re-link ---------------------
             BorderGeometry geometry = client.Geometry;
             Vector2 entryPoint = geometry.EntryPoint(entryEdge, entryPosition);
             Vector2 velocity = new Vector2(velocityX, velocityY);
 
+            // §5.7 step 3(a), §16 A30/A31/A32 — all of this is before the restore and on the main
+            // thread, because BibiteGenes.LoadState binds gene.species from the blob it is handed
+            // (BibiteGenes.cs:581-583) and nothing after that call can correct the binding without
+            // moving a live organism between two Species records.
+            //
+            // A malformed block is treated as **absent**: it is logged once as a sidecar defect — the
+            // sidecar was supposed to have stripped it (§5.3) — and never NACKed. Half a name is not a
+            // weaker identity, it is a different one.
+            SpeciesBlockState blockState = ContractA.ReadSpecies(data, out SpeciesIdentity identity, out string speciesProblem);
+            if (blockState == SpeciesBlockState.Malformed)
+            {
+                MultiversePlugin.Log.LogWarning(
+                    $"{SpeciesRegistry.Prefix} migrationId={migrationId} entityId={entityId} — the species block is malformed " +
+                    $"({speciesProblem}). That is a sidecar defect: §5.3 says a bad block is stripped before it is forwarded. " +
+                    "Treating it as absent (§5.7).");
+                identity = null;
+            }
+
+            SpeciesRegistry.Resolution resolution = species.Resolve(identity, client.SimTick);
+            SpeciesRegistry.LogResolution(migrationId, entityId, resolution);
+
             string rewritten;
             try
             {
-                rewritten = Rewrite(payload, entryPoint, velocity, heading);
+                rewritten = Rewrite(payload, entryPoint, velocity, heading, resolution.resolved, resolution.localId, out string speciesEffect);
+                if (client.Config.DebugIngest)
+                {
+                    MultiversePlugin.Log.LogInfo(
+                        $"{SpeciesRegistry.Prefix} migrationId={migrationId} entityId={entityId} payloadRewrite={speciesEffect}");
+                }
             }
             catch (Exception e)
             {
+                species.Rollback(ref resolution);
                 Nack(migrationId, entityId, ContractA.NackDeserializeFailed, ContractA.ClassPermanent,
                     "the payload has no rewritable transform/rb2d block: " + e.Message, 0);
                 return;
@@ -273,6 +308,7 @@ namespace BibitesMultiverse
 
             if (spawned == null)
             {
+                species.Rollback(ref resolution);
                 Nack(migrationId, entityId, ContractA.NackDeserializeFailed, ContractA.ClassPermanent, "LoadBibiteOrEggFromData returned null", 0);
                 return;
             }
@@ -281,9 +317,15 @@ namespace BibitesMultiverse
             if (body == null)
             {
                 UnityEngine.Object.Destroy(spawned);
+                species.Rollback(ref resolution);
                 Nack(migrationId, entityId, ContractA.NackDeserializeFailed, ContractA.ClassPermanent, "the restored GameObject has no BibiteBody", 0);
                 return;
             }
+
+            // §5.7 step 3(a) — the organism is standing, so a species this import created can take its
+            // genome. Until this runs the new record holds a placeholder template; after it, the record
+            // is the one the game would have built for the same organism, minus the generated name.
+            species.AdoptTemplate(ref resolution, body);
 
             // §5.7 step 4 — re-assert in the same frame. The Rigidbody2D wins over the transform on
             // the next tick, and the bibiteHolder parent transform is not proven to be the identity
@@ -327,11 +369,17 @@ namespace BibitesMultiverse
             client.NoteArrival(immunityKey, entryEdge, entryPosition);
 
             Vector2 finalPosition = body.transform.position;
+
+            // §16 A31/A32 — what the game's own deserializer actually bound. With a block this is the
+            // resolved name; without one it is whatever CheckNewSpecies chose by genetic distance, which
+            // is the honest local answer and is only reachable because the foreign id was removed.
+            string boundSpecies = (body.gene != null && body.gene.species != null) ? body.gene.species.name : "<none>";
+
             PortalVisual.Flash(finalPosition, export: false);
             MultiversePlugin.Log.LogInfo(
                 $"[M2] migrationId={migrationId} entityId={restoredId} phase=SPAWNED edge={ContractA.EdgeName(entryEdge)} " +
                 $"pos=({finalPosition.x:F2},{finalPosition.y:F2}) vel=({velocity.x:F2},{velocity.y:F2}) heading={heading:F2} " +
-                $"relinkedParents={counts.parents} relinkedChildren={counts.children} " +
+                $"relinkedParents={counts.parents} relinkedChildren={counts.children} species=\"{boundSpecies}\" " +
                 $"immunity={ContractA.EntryImmunitySeconds:F0}s population={GameBridge.LivingPopulation()}");
 
             if (restoredId != entityId)
@@ -344,12 +392,53 @@ namespace BibitesMultiverse
         }
 
         /// <summary>
-        /// §5.7 step 3 — the eight position numbers, and nothing else. The blob is opaque (D4): it is
-        /// parsed with Newtonsoft.Json.Linq only, never deserialized into a typed model.
+        /// §5.7 step 3(b) and 3(c) — the eight position numbers and <c>$.genes.speciesID</c>, and nothing
+        /// else. The blob is opaque (D4): it is parsed with Newtonsoft.Json.Linq only, never deserialized
+        /// into a typed model, and both rewrites address a **named path** and write it. Neither reads a
+        /// value back: the incoming <c>speciesID</c> is a foreign world's counter and there is nothing in
+        /// it to learn (§4.6, §16 A31).
+        ///
+        /// <paramref name="hasLocalSpecies"/> false is the **absent-block rule**, and it is the floor for
+        /// every import (§16, A32): the key is **removed**, not set to a sentinel.
+        /// <c>BibiteGenes.LoadState</c> guards its registry lookup with
+        /// <c>if (state["speciesID"] != null)</c>, so an absent key skips the lookup, leaves
+        /// <c>gene.species</c> null, and lets <c>ResumeBody</c> → <c>CheckNewSpecies</c> classify the
+        /// arrival by the game's own genetic distance. Any integer would be a claim that could come true:
+        /// ids are minted from a monotonic counter, so an id chosen to be absent today is an id some
+        /// later local species is issued.
         /// </summary>
-        internal static string Rewrite(string payload, Vector2 position, Vector2 velocity, float heading)
+        internal static string Rewrite(
+            string payload,
+            Vector2 position,
+            Vector2 velocity,
+            float heading,
+            bool hasLocalSpecies,
+            long localSpeciesId,
+            out string speciesEffect)
         {
             JObject json = JObject.Parse(payload);
+
+            if (json["genes"] is JObject genes)
+            {
+                if (hasLocalSpecies)
+                {
+                    // A JSON integer: Species.speciesID is an int64 (Species.cs:22).
+                    genes["speciesID"] = localSpeciesId;
+                    speciesEffect = "speciesID=" + localSpeciesId.ToString(CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    bool had = genes.Remove("speciesID");
+                    speciesEffect = had ? "speciesID removed" : "speciesID absent already";
+                }
+            }
+            else
+            {
+                // No $.genes object at all — there is no foreign id to carry and nothing to write. The
+                // restore will fail on its own account (LoadState throws without genes data) and surface
+                // as DESERIALIZE_FAILED, which is the right answer for a payload in that state.
+                speciesEffect = "no $.genes object";
+            }
 
             JToken transform = json["transform"];
             if (!(transform is JObject) || !(transform["position"] is JArray positionArray) || positionArray.Count < 2)

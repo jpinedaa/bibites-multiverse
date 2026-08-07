@@ -15,7 +15,102 @@ namespace BibitesMultiverse
     }
 
     /// <summary>
-    /// The wire vocabulary of contracts/contract-a.md, version contract-a/2.0: the envelope, the nine
+    /// The OPTIONAL <c>species</c> block of contract-a.md §5.3 and §5.7 (added — §16, A30): the
+    /// migrant's species **name**, and its immediate parent species' name when there is one. Four
+    /// strings, no nesting, and no id of any kind — an id is world-local by construction
+    /// (<c>Species.speciesMaxID</c>), which is the whole defect §16 closes.
+    ///
+    /// This is pure wire data and it never touches Unity. The names are only ever read from the live
+    /// <c>Species</c> record on the sending side and compared byte for byte on the receiving one, so
+    /// nothing here trims, folds, normalizes or re-generates a name (§5.3).
+    /// </summary>
+    internal sealed class SpeciesIdentity
+    {
+        internal string GenericName;
+        internal string SpecificName;
+        internal string ParentGenericName;
+        internal string ParentSpecificName;
+
+        /// <summary>§5.3 — the two parent fields are **all-or-nothing**: both or neither.</summary>
+        internal bool HasParent => ParentGenericName != null && ParentSpecificName != null;
+
+        /// <summary>
+        /// The game's own <c>Species.name</c> (<c>Species.cs:85</c>): the two halves joined by exactly
+        /// one U+0020. This is the string the importer matches on, ordinal and case-sensitive.
+        /// </summary>
+        internal string Name => GenericName + " " + SpecificName;
+
+        /// <summary>The same assembly for the parent pair, or null when there is no parent.</summary>
+        internal string ParentName => HasParent ? ParentGenericName + " " + ParentSpecificName : null;
+
+        /// <summary>
+        /// §5.3's shape rules, which are the same in both directions: both halves REQUIRED, non-empty,
+        /// at most <see cref="ContractA.MaxSpeciesNameBytes"/> UTF-8 bytes, no leading or trailing
+        /// whitespace; the parent pair all-or-nothing and under the same string rules.
+        /// </summary>
+        internal bool Validate(out string problem)
+        {
+            if (!ContractA.IsValidSpeciesNameHalf(GenericName, out problem))
+            {
+                problem = "genericName " + problem;
+                return false;
+            }
+
+            if (!ContractA.IsValidSpeciesNameHalf(SpecificName, out problem))
+            {
+                problem = "specificName " + problem;
+                return false;
+            }
+
+            if ((ParentGenericName == null) != (ParentSpecificName == null))
+            {
+                problem = "the parent pair is all-or-nothing and exactly one half is present";
+                return false;
+            }
+
+            if (HasParent)
+            {
+                if (!ContractA.IsValidSpeciesNameHalf(ParentGenericName, out problem))
+                {
+                    problem = "parentGenericName " + problem;
+                    return false;
+                }
+
+                if (!ContractA.IsValidSpeciesNameHalf(ParentSpecificName, out problem))
+                {
+                    problem = "parentSpecificName " + problem;
+                    return false;
+                }
+            }
+
+            problem = null;
+            return true;
+        }
+
+        public override string ToString()
+        {
+            return HasParent ? Name + "<-" + ParentName : Name;
+        }
+    }
+
+    /// <summary>What the <c>species</c> block on one MIGRATE_IN turned out to be (§5.7, §16 A30/A32).</summary>
+    internal enum SpeciesBlockState
+    {
+        /// <summary>No <c>species</c> key at all. **Valid**, and the absent-block rule covers it.</summary>
+        Absent,
+
+        /// <summary>A block that satisfies every shape rule of §5.3.</summary>
+        Present,
+
+        /// <summary>
+        /// A block that breaks one. Treated as absent, logged once as a sidecar defect (the sidecar was
+        /// supposed to have stripped it, §5.3), and **never** a NACK (§9.2, §16 A32).
+        /// </summary>
+        Malformed
+    }
+
+    /// <summary>
+    /// The wire vocabulary of contracts/contract-a.md, version contract-a/2.1: the envelope, the nine
     /// message types, the close codes, the NACK taxonomy and the mod-owned tunables of §10.
     ///
     /// Nothing here touches Unity, so it is safe to call from the socket thread.
@@ -23,17 +118,21 @@ namespace BibitesMultiverse
     internal static class ContractA
     {
         /// <summary>
-        /// §3, §15 A23 — this release is **2.0**, and it is the first breaking change to Contract A.
-        /// A18 removes <c>exportEdge</c> and replaces it with <c>exportEdges</c>, an array: a field
-        /// removal **and** a type change, which §3.1's own rule answers with a major bump. There is no
-        /// singular fallback — a contract-a/1.x peer is rejected at the version check (close 4000)
-        /// long before a field-level fallback could matter.
+        /// §3, §16 A33 — this release is **2.1**. A30 adds two OPTIONAL fields (<c>species</c> on
+        /// MIGRATE_OUT and on MIGRATE_IN) and removes nothing, which §3.1's own test answers with a
+        /// **minor** bump; the major, the message catalogue, the enums and the close codes are all
+        /// untouched, so the URL path does not move and a <c>contract-a/2.0</c> peer stays compatible
+        /// by construction. The minor is a capability statement, never a negotiation: this side detects
+        /// the feature by the **presence of the field** and never by arithmetic on the minor.
+        ///
+        /// 2.0 (§15, A23) was the first breaking change: A18 removed <c>exportEdge</c> for
+        /// <c>exportEdges</c>, a field removal and a type change together.
         /// </summary>
-        internal const string Protocol = "contract-a/2.0";
+        internal const string Protocol = "contract-a/2.1";
 
         internal const string ProtocolName = "contract-a";
         internal const int ProtocolMajor = 2;
-        internal const int ProtocolMinor = 0;
+        internal const int ProtocolMinor = 1;
 
         /// <summary>§3.1, §15 A23 — the path is major-scoped, so a major bump moves it. Serves every contract-a/2.x.</summary>
         internal const string UrlPath = "/contract-a/v2";
@@ -75,6 +174,13 @@ namespace BibitesMultiverse
 
         /// <summary>§10, §14 A12 — a bibite has at most two parents.</summary>
         internal const int MaxParentBlobs = 2;
+
+        /// <summary>
+        /// §5.3, §16 A30 — the maximum size of **one half** of a species name, in UTF-8 bytes. It is a
+        /// shape rule of the block, not a licence to shorten a name: a half that is over is a malformed
+        /// block, and a malformed block is dropped whole, never truncated (§5.7).
+        /// </summary>
+        internal const int MaxSpeciesNameBytes = 64;
 
         /// <summary>
         /// §10, §14 A12 — envelope, escaping and JSON overhead the mod reserves under
@@ -503,6 +609,155 @@ namespace BibitesMultiverse
         internal static bool IsFinite(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        // ---- §5.3, §5.7, §16 A30 — the OPTIONAL species block ----------------------------------
+
+        /// <summary>
+        /// §5.3 — one half of a species name: non-empty, at most <see cref="MaxSpeciesNameBytes"/>
+        /// UTF-8 bytes, and with no leading or trailing whitespace. The value is never repaired: the
+        /// caller drops the whole block instead, because half a name is not a weaker identity, it is a
+        /// different one (§5.7).
+        /// </summary>
+        internal static bool IsValidSpeciesNameHalf(string value, out string problem)
+        {
+            if (value == null)
+            {
+                problem = "is missing";
+                return false;
+            }
+
+            if (value.Length == 0)
+            {
+                problem = "is empty";
+                return false;
+            }
+
+            if (char.IsWhiteSpace(value[0]) || char.IsWhiteSpace(value[value.Length - 1]))
+            {
+                problem = "has leading or trailing whitespace";
+                return false;
+            }
+
+            int bytes = System.Text.Encoding.UTF8.GetByteCount(value);
+            if (bytes > MaxSpeciesNameBytes)
+            {
+                problem = "is " + bytes.ToString(CultureInfo.InvariantCulture) + " UTF-8 bytes, over the "
+                    + MaxSpeciesNameBytes.ToString(CultureInfo.InvariantCulture) + "-byte limit";
+                return false;
+            }
+
+            problem = null;
+            return true;
+        }
+
+        /// <summary>
+        /// §5.3 sender side — the block as it goes on the wire, or null when there is nothing valid to
+        /// send. Never a NACK and never a reason to hold an organism: the caller logs
+        /// <paramref name="problem"/> once and sends the migration without the block, which the
+        /// receiver answers with the absent-block rule (§16, A32).
+        /// </summary>
+        internal static JObject SpeciesBlock(SpeciesIdentity identity, out string problem)
+        {
+            problem = null;
+            if (identity == null)
+            {
+                return null;
+            }
+
+            if (!identity.Validate(out problem))
+            {
+                return null;
+            }
+
+            JObject block = new JObject
+            {
+                ["genericName"] = identity.GenericName,
+                ["specificName"] = identity.SpecificName
+            };
+
+            if (identity.HasParent)
+            {
+                block["parentGenericName"] = identity.ParentGenericName;
+                block["parentSpecificName"] = identity.ParentSpecificName;
+            }
+
+            return block;
+        }
+
+        /// <summary>
+        /// §5.7 receiver side — read the OPTIONAL block off a MIGRATE_IN. Three outcomes and no fourth:
+        /// absent (valid), present and well shaped, or malformed. A malformed block is **never**
+        /// partially applied and never NACKed (§9.2, §16 A32); the caller logs it and takes the
+        /// absent-block rule. Unknown members inside the block are ignored silently (§9.3).
+        /// </summary>
+        internal static SpeciesBlockState ReadSpecies(JObject data, out SpeciesIdentity identity, out string problem)
+        {
+            identity = null;
+            problem = null;
+
+            JToken token = data["species"];
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return SpeciesBlockState.Absent;
+            }
+
+            if (!(token is JObject block))
+            {
+                problem = "'species' is present but is not a JSON object";
+                return SpeciesBlockState.Malformed;
+            }
+
+            if (!TryString(block, "genericName", out string genericName))
+            {
+                problem = "'species.genericName' is missing or is not a string";
+                return SpeciesBlockState.Malformed;
+            }
+
+            if (!TryString(block, "specificName", out string specificName))
+            {
+                problem = "'species.specificName' is missing or is not a string";
+                return SpeciesBlockState.Malformed;
+            }
+
+            JToken parentGenericToken = block["parentGenericName"];
+            JToken parentSpecificToken = block["parentSpecificName"];
+            bool hasParentGeneric = parentGenericToken != null && parentGenericToken.Type != JTokenType.Null;
+            bool hasParentSpecific = parentSpecificToken != null && parentSpecificToken.Type != JTokenType.Null;
+
+            if (hasParentGeneric != hasParentSpecific)
+            {
+                problem = "the parent pair is all-or-nothing (§5.3) and this block carries exactly one half";
+                return SpeciesBlockState.Malformed;
+            }
+
+            string parentGenericName = null;
+            string parentSpecificName = null;
+            if (hasParentGeneric)
+            {
+                if (!TryString(block, "parentGenericName", out parentGenericName)
+                    || !TryString(block, "parentSpecificName", out parentSpecificName))
+                {
+                    problem = "'species.parentGenericName' / 'species.parentSpecificName' are present but are not both strings";
+                    return SpeciesBlockState.Malformed;
+                }
+            }
+
+            SpeciesIdentity candidate = new SpeciesIdentity
+            {
+                GenericName = genericName,
+                SpecificName = specificName,
+                ParentGenericName = parentGenericName,
+                ParentSpecificName = parentSpecificName
+            };
+
+            if (!candidate.Validate(out problem))
+            {
+                return SpeciesBlockState.Malformed;
+            }
+
+            identity = candidate;
+            return SpeciesBlockState.Present;
         }
 
         /// <summary>

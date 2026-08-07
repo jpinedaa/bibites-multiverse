@@ -188,6 +188,12 @@ namespace BibitesMultiverse
             // migrant's own serialization and shipped opaque. The mod never hashes them (D4).
             LineageCollector.Result parents = lineage.Collect(body, entityId, payloadBytes, client.SimTick, Application.version);
 
+            // §5.3, §16 A30 — the species block, read from the migrant's **live** Species record in this
+            // same FixedUpdate. It is sent on every hop, not only the first: the record is re-read each
+            // time, so an organism that speciated between hops carries its new name on the next one. A
+            // null record and an unsendable name both produce no block, and both are valid (§16, A32).
+            JObject speciesBlock = SpeciesRegistry.BlockForExport(body.gene, entityId, out string speciesSummary);
+
             string migrationId = ContractA.NewUuid();
 
             // §4.3, §14 A13 — the clamp is load-bearing now that the band reaches outside the square:
@@ -213,6 +219,11 @@ namespace BibitesMultiverse
             if (parents.parents != null)
             {
                 data["parents"] = parents.parents;
+            }
+
+            if (speciesBlock != null)
+            {
+                data["species"] = speciesBlock;
             }
 
             // Inert before the frame goes out (§6.3): it cannot eat, breed, be eaten, move or be
@@ -243,7 +254,7 @@ namespace BibitesMultiverse
                 $"pos=({position.x:F2},{position.y:F2}) vel=({velocity.x:F2},{velocity.y:F2}) heading={heading:F2} " +
                 $"outsideSquare={geometry.Beyond(edge, position)} " +
                 $"payloadBytes={payloadBytes} payloadSha256={ContractA.Sha256Hex(payload)} " +
-                $"parents=[{parents.summary}] frameBytes={frameBytes} S={geometry.S:F1}");
+                $"parents=[{parents.summary}] species=[{speciesSummary}] frameBytes={frameBytes} S={geometry.S:F1}");
 
             // m3_considerations.md WP4 / Risk 8: the annex costs up to two extra serializations on the
             // Unity main thread, in the same tick as the migrant's own. Measure it, do not assume it.
