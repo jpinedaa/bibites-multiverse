@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.5.3";
+        public const string Version = "0.6.0";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -22,10 +22,11 @@ namespace BibitesMultiverse
         {
             Log = Logger;
             Log.LogInfo(
-                $"{Name} {Version} loaded — {ContractA.Protocol} client, plural export edges with a capture band each " +
-                "(§4.3.1) and the corner rule (§4.3.2), lineage annex, species identity in the envelope (§16), " +
-                "the active-species census on the heartbeat (§17), wrap-on containment (D10), periodic world saves " +
-                "(D14) and the portal (WP7).");
+                $"{Name} {Version} loaded — {ContractA.Protocol} client, two-way lanes (D17, §18 A38): all four edges " +
+                "declared by default, a capture band on each (§4.3.1) and the corner rule at all four corners (§4.3.2). " +
+                "Plus the migration exclusion list (D18, §18 A39), the lineage annex, species identity in the envelope " +
+                "(§16), the active-species census on the heartbeat (§17), wrap-on containment (D10), periodic world " +
+                "saves (D14) and the two-lane portal (WP7).");
             Log.LogInfo($"Application.version = {Application.version}");
             Log.LogInfo($"Application.unityVersion = {Application.unityVersion}");
 
@@ -129,9 +130,10 @@ namespace BibitesMultiverse
             if (!config.Enabled)
             {
                 Log.LogInfo(
-                    $"[M2] no export edge is configured ({MultiverseConfig.EnvExportEdges}, {MultiverseConfig.EnvExportEdge}, " +
-                    $"{MultiverseConfig.EnvOpenEdge} or [M4] ExportEdges) — the Contract A client, the capture bands, the " +
-                    "crossing counters and the portal all stay off. The periodic world save is unaffected.");
+                    $"[M2] the export edges are set to 'none' ({MultiverseConfig.EnvExportEdges}, " +
+                    $"{MultiverseConfig.EnvExportEdge}, {MultiverseConfig.EnvOpenEdge} or [M4] ExportEdges) — the Contract A " +
+                    "client, the capture bands, the crossing counters and the portal all stay off. Unset the variable to get " +
+                    "D17's default of all four edges. The periodic world save is unaffected.");
                 return;
             }
 

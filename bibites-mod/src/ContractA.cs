@@ -435,21 +435,11 @@ namespace BibitesMultiverse
             return edge.ToString();
         }
 
-        /// <summary>
-        /// §4.2 — N↔S, E↔W. Under the ring (D8) this is what turns the configured **export** edge
-        /// into the passive **entry** edge: export east, receive west.
-        /// </summary>
-        internal static Edge OppositeEdge(Edge edge)
-        {
-            switch (edge)
-            {
-                case Edge.N: return Edge.S;
-                case Edge.S: return Edge.N;
-                case Edge.E: return Edge.W;
-                case Edge.W: return Edge.E;
-                default: return Edge.None;
-            }
-        }
+        // §4.2's opposite-edge function used to live here, and it is gone with the caller that needed
+        // it: the mod derived its *passive* entry edges from its export edges, and D17 retired that
+        // category (§18, A38). The pairing rule itself is unchanged and still on the wire — an organism
+        // that leaves through `E` arrives through `W`, one that leaves through `W` arrives through `E` —
+        // but it is the sidecar that applies it, and this mod never computed an entryEdge.
 
         /// <summary>
         /// The order two edges are declared and evaluated in: `E`, `N`, `W`, `S`.
@@ -471,6 +461,13 @@ namespace BibitesMultiverse
                 default: return 4;
             }
         }
+
+        /// <summary>
+        /// Every edge, already in <see cref="EdgeRank"/> order. It is both the whole of
+        /// <c>borderEdges</c> (§5.1, §15 A18) and, under two-way lanes, the default <c>exportEdges</c>
+        /// (§18, A38). Never mutated: the two lists it seeds are copies.
+        /// </summary>
+        internal static readonly Edge[] AllEdges = { Edge.E, Edge.N, Edge.W, Edge.S };
 
         /// <summary>A comma-joined edge list for a log line or a message: <c>E,N</c>.</summary>
         internal static string EdgeNames(System.Collections.Generic.IList<Edge> edges)

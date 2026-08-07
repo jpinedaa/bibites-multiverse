@@ -22,7 +22,9 @@ namespace BibitesMultiverse
     /// hours and both piles released together at wake. M4 pays for a delivery rate limit at the
     /// sidecar, and **this is the only proof that a burst arrived as a stream**. Per simulated minute,
     /// per entry edge: the live count inside that edge's quarter of the map, the arrivals in the
-    /// window, and an eight-bucket histogram of where along the edge they landed.
+    /// window, and an eight-bucket histogram of where along the edge they landed. The entry series runs
+    /// over <c>borderEdges</c> — **all four**, always (§5.1, §15 A18, §18 A38) — because an arrival was
+    /// never gated by the export set, so any edge can be the crowded one.
     ///
     /// Both series come out of one dictionary and one pass over the organisms the Harmony postfix
     /// already visits. The quarter count is maintained on **transitions**, so the per-organism per-tick
@@ -126,9 +128,9 @@ namespace BibitesMultiverse
                 }
             }
 
-            for (int i = 0; i < config.EntryEdges.Count; i++)
+            for (int i = 0; i < config.BorderEdges.Count; i++)
             {
-                Edge edge = config.EntryEdges[i];
+                Edge edge = config.BorderEdges[i];
                 if (geometry.InEntryQuarter(edge, position))
                 {
                     inQuarter |= 1 << (int)edge;
@@ -165,9 +167,9 @@ namespace BibitesMultiverse
                 }
             }
 
-            for (int i = 0; i < config.EntryEdges.Count; i++)
+            for (int i = 0; i < config.BorderEdges.Count; i++)
             {
-                int slot = (int)config.EntryEdges[i];
+                int slot = (int)config.BorderEdges[i];
                 int bit = 1 << slot;
                 bool nowIn = (inQuarter & bit) != 0;
                 bool wasIn = previous.seen && (previous.inQuarter & bit) != 0;
@@ -250,7 +252,7 @@ namespace BibitesMultiverse
                 windowCrossings[slot] = 0;
             }
 
-            foreach (Edge edge in config.EntryEdges)
+            foreach (Edge edge in config.BorderEdges)
             {
                 int slot = (int)edge;
                 double cumulativeArrivals = (elapsedMinutes > 0.0) ? totalArrivals[slot] / elapsedMinutes : 0.0;

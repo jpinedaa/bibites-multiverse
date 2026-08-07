@@ -13,11 +13,12 @@ namespace BibitesMultiverse
     ///
     /// The WSL to Windows hop needs WSLENV to name each variable; see dev_environment.md.
     ///
-    /// **The grid (D13, contract-a.md §15 A18).** A sim declares a **set** of export edges —
-    /// <c>["E", "N"]</c> under the grid — and receives on the opposite edge of each. The entry edges
-    /// are derived, and they are passive: always accepting, never opened or closed, and with no
-    /// capture band at all (§4.3.1). <c>borderEdges</c> is the union, and under the grid it is all
-    /// four values.
+    /// **Two-way lanes (D17, contract-a.md §18 A38).** Every declared edge is **both** an export edge
+    /// and an entry edge. A conformant mod declares all four — <c>["E", "N", "W", "S"]</c> — and that
+    /// is now the default: <see cref="EnvExportEdges"/> is only needed to declare a **subset**, or the
+    /// literal <c>none</c> to keep the client off. <c>borderEdges</c> is always all four (§5.1, A18):
+    /// arrivals were never gated by <c>exportEdges</c>, so a mod that runs two bands still receives on
+    /// all four edges (§18, A41, case 3). There is no passive edge any more.
     ///
     /// Declaring an edge is a statement about **geometry, not topology**: it means "I run a capture
     /// band here". Whether that edge has a lane is the sidecar's answer in <c>EDGE_STATUS</c>. A mod
@@ -25,7 +26,10 @@ namespace BibitesMultiverse
     /// </summary>
     internal class MultiverseConfig
     {
-        /// <summary>§5.1, §15 A18 — the edges this sim exports through. "E,N" under the grid.</summary>
+        /// <summary>
+        /// §5.1, §15 A18, §18 A38 — the edges this sim exports through. Unset means **all four**
+        /// (D17). A subset such as "E,N" is still honoured, and "none" turns the client off.
+        /// </summary>
         internal const string EnvExportEdges = "MULTIVERSE_EXPORT_EDGES";
 
         /// <summary>M3's singular name. Read when <see cref="EnvExportEdges"/> is unset.</summary>
@@ -60,6 +64,13 @@ namespace BibitesMultiverse
         /// <summary>C3 (Slot-6 livelock) — opt-in verbose per-MIGRATE_IN logging and the payload SHA-256.</summary>
         internal const string EnvDebugIngest = "MULTIVERSE_DEBUG_INGEST";
 
+        /// <summary>
+        /// D18, §18 A39 — comma-separated full species names that never export. Default
+        /// <c>"Basic bibite"</c>; an **explicitly empty** value disables the policy, so this variable is
+        /// read on presence rather than on emptiness.
+        /// </summary>
+        internal const string EnvMigrationExclude = "MULTIVERSE_MIGRATION_EXCLUDE";
+
         /// <summary>Fraction of the half-extent S used for the border strip when nothing overrides it.</summary>
         internal const float DefaultWidthFactor = 0.02f;
 
@@ -74,11 +85,15 @@ namespace BibitesMultiverse
         /// <summary>§5.1 <c>exportEdges</c> — the edges MIGRATE_OUT may use, in ContractA.EdgeRank order.</summary>
         internal readonly List<Edge> ExportEdges = new List<Edge>();
 
-        /// <summary>The passive entry edges — the opposite of each export edge. They always accept.</summary>
-        internal readonly List<Edge> EntryEdges = new List<Edge>();
-
-        /// <summary>§5.1 <c>borderEdges</c> — every edge that accepts an inbound organism. All four under the grid.</summary>
+        /// <summary>
+        /// §5.1 <c>borderEdges</c> — every edge that accepts an inbound organism. **Always all four**
+        /// (§15 A18, §18 A38): an arrival is never gated by <c>exportEdges</c>, and under D17 every
+        /// declared export edge is one of these too.
+        /// </summary>
         internal readonly List<Edge> BorderEdges = new List<Edge>();
+
+        /// <summary>D18, §18 A39 — the species that never export. Empty when the policy is off.</summary>
+        internal readonly MigrationExclusion Exclusion = new MigrationExclusion();
 
         internal int Port = ContractA.DefaultPort;
         internal bool HasRingSlot;
@@ -102,7 +117,10 @@ namespace BibitesMultiverse
         /// </summary>
         internal bool DebugIngest;
 
-        /// <summary>Entry-strip depth for the portal, in world units. 0 derives it from W + entryMargin.</summary>
+        /// <summary>
+        /// Depth of the portal's arrival lane, measured inward from the capture band's inner face.
+        /// 0 derives it from <c>entryMargin</c>, which puts the lane's inner face on the arrival plane.
+        /// </summary>
         internal float PortalEntryWidth;
 
         internal string Url => "ws://127.0.0.1:" + Port.ToString(CultureInfo.InvariantCulture) + ContractA.UrlPath;
@@ -132,10 +150,23 @@ namespace BibitesMultiverse
                 "M4",
                 "ExportEdges",
                 string.Empty,
-                "The map edges this instance exports through, comma separated: 'E,N' under the grid (D13). " +
-                "The opposite of each becomes a passive entry edge. Empty disables the multiverse client " +
-                "entirely. The environment variable " + EnvExportEdges + " overrides this, and " +
+                "The map edges this instance exports through, comma separated. Empty means all four — " +
+                "'E,N,W,S' — which is what a conformant mod declares under two-way lanes (D17, " +
+                "contract-a.md §18 A38): every edge runs a capture band and every edge accepts arrivals. " +
+                "Name a subset to run fewer bands; 'none' turns the multiverse client off entirely. " +
+                "The environment variable " + EnvExportEdges + " overrides this, and " +
                 EnvExportEdge + " / " + EnvOpenEdge + " are still read as a single-edge form.");
+
+            ConfigEntry<string> excludeEntry = config.Bind(
+                "M4",
+                "MigrationExcludeSpecies",
+                MigrationExclusion.DefaultNames,
+                "Comma-separated full species names that never export (D18, contract-a.md §18 A39). " +
+                "Matched on the §16 A34-normalized form — trimmed, internal whitespace runs collapsed — " +
+                "so a name the game issued with an edge space still matches. Empty disables the policy. " +
+                "An excluded species is never captured on any edge; it still lives here, the wrap " +
+                "contains it (D10), and the census still reports it. The environment variable " +
+                EnvMigrationExclude + " overrides this, including when it is set to an empty value.");
 
             ConfigEntry<int> slotEntry = config.Bind(
                 "M3",
@@ -188,8 +219,9 @@ namespace BibitesMultiverse
                 "M4",
                 "Portal",
                 true,
-                "Draw a portal strip on every open export edge and on every entry edge while the sidecar " +
-                "is connected (WP7, m4_portal_findings.md). The environment variable " + EnvPortal +
+                "Draw the portal: a capture lane on every open export edge, and an arrival lane on every " +
+                "border edge while the sidecar is connected — two lanes on every edge under two-way " +
+                "lanes (WP7, m4_portal_findings.md, D17). The environment variable " + EnvPortal +
                 " overrides this.");
 
             ConfigEntry<bool> flourishEntry = config.Bind(
@@ -211,8 +243,10 @@ namespace BibitesMultiverse
                 "M4",
                 "PortalEntryWidth",
                 0f,
-                "Depth of the entry-edge portal strip in world units. 0 derives it from W + entryMargin, " +
-                "which is exactly where an arriving organism is placed (contract-a.md §4.3).");
+                "Depth of the arrival lane of the portal, in world units, measured **inward from the " +
+                "capture band's inner face** (D17: every edge now draws both lanes). 0 derives it from " +
+                "entryMargin, which puts the lane's inner face exactly where an arriving organism is " +
+                "placed — W + entryMargin from the map edge (contract-a.md §4.3).");
 
             ConfigEntry<bool> debugIngestEntry = config.Bind(
                 "M4",
@@ -228,6 +262,11 @@ namespace BibitesMultiverse
 
             string edgeText = Prefer(Prefer(Prefer(Env(EnvExportEdges), Env(EnvExportEdge)), Env(EnvOpenEdge)), edgeEntry.Value);
             result.ParseExportEdges(edgeText);
+
+            // §18 A39 — read on **presence**, not on emptiness: an explicitly empty value is how an
+            // operator disables the policy, and Prefer would read that as "unset" and restore the default.
+            string excludeText = Env(EnvMigrationExclude) ?? excludeEntry.Value;
+            result.Exclusion.Configure(excludeText);
 
             string portText = Prefer(Env(EnvPort), string.Empty);
             if (!string.IsNullOrEmpty(portText))
@@ -302,8 +341,17 @@ namespace BibitesMultiverse
         /// <summary>
         /// §5.1 — the array **MUST** hold at least one entry and **MUST NOT** hold a duplicate, and
         /// every member of <c>exportEdges</c> **MUST** also be a member of <c>borderEdges</c>. The last
-        /// rule is structural here: <c>borderEdges</c> is built as the union of the export set and its
-        /// opposites, so it cannot disagree.
+        /// rule is structural here: <c>borderEdges</c> is always all four (§15 A18, §18 A38), so no
+        /// declared subset can disagree with it.
+        ///
+        /// **Two rules changed under D17** (§18, A38):
+        ///
+        /// * an absent or empty value now means **all four edges**, not "off". A conformant mod
+        ///   declares all four, and the literal <c>none</c> (or a value naming no edge at all) is the
+        ///   off switch;
+        /// * <c>E</c> with <c>W</c>, and <c>N</c> with <c>S</c>, are **legal together**. Before D17 an
+        ///   edge was a capture band or a passive entry and never both, so the pair was rejected. There
+        ///   is no passive edge any more: every declared edge is both roles at once.
         ///
         /// The set is canonicalized into <see cref="ContractA.EdgeRank"/> order, which is what makes
         /// the corner rule's "E takes the tie" fall out of "the first declared edge keeps the win".
@@ -311,22 +359,47 @@ namespace BibitesMultiverse
         private void ParseExportEdges(string text)
         {
             ExportEdges.Clear();
-            EntryEdges.Clear();
             BorderEdges.Clear();
             Enabled = false;
 
-            if (string.IsNullOrEmpty(text))
+            // §5.1, §18 A38 — borderEdges is all four whatever the export set is. An arrival has never
+            // been gated by exportEdges, so a two-band mod on a two-way map still receives on four
+            // edges (§18, A41 case 3). It is filled even when the client stays off, so a log line about
+            // a disabled client still shows what it would have declared.
+            BorderEdges.AddRange(ContractA.AllEdges);
+
+            string trimmed = (text ?? string.Empty).Trim();
+            if (trimmed.Length == 0)
             {
+                // D17's default. Nothing configured means the whole perimeter, not silence.
+                ExportEdges.AddRange(ContractA.AllEdges);
+                Enabled = true;
                 return;
             }
 
-            string[] parts = text.Split(new[] { ',', ';', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (IsWord(trimmed, "none") || IsWord(trimmed, "off"))
+            {
+                MultiversePlugin.Log.LogInfo(
+                    $"[M2] config: export edges are '{trimmed}' — the multiverse client stays off by request. " +
+                    "Unset the variable to get D17's default of all four edges.");
+                return;
+            }
+
+            if (IsWord(trimmed, "all") || IsWord(trimmed, "*"))
+            {
+                ExportEdges.AddRange(ContractA.AllEdges);
+                Enabled = true;
+                return;
+            }
+
+            string[] parts = trimmed.Split(new[] { ',', ';', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (string part in parts)
             {
                 if (!ContractA.TryParseEdge(part, out Edge edge))
                 {
                     MultiversePlugin.Log.LogError(
-                        $"[M2] config: '{part}' is not a valid edge (expected N, S, E or W) — the multiverse client stays off.");
+                        $"[M2] config: '{part}' is not a valid edge (expected N, S, E, W, 'all' or 'none') — the multiverse " +
+                        "client stays off.");
                     ExportEdges.Clear();
                     return;
                 }
@@ -345,38 +418,38 @@ namespace BibitesMultiverse
 
             ExportEdges.Sort((a, b) => ContractA.EdgeRank(a).CompareTo(ContractA.EdgeRank(b)));
 
-            foreach (Edge edge in ExportEdges)
+            if (ExportEdges.Count == 0)
             {
-                Edge opposite = ContractA.OppositeEdge(edge);
-                if (ExportEdges.Contains(opposite))
-                {
-                    MultiversePlugin.Log.LogError(
-                        $"[M2] config: {ContractA.EdgeName(edge)} and {ContractA.EdgeName(opposite)} are both declared as export " +
-                        "edges, so one edge would have to be a capture band and a passive entry at the same time. That is not a " +
-                        "map shape this contract has — the multiverse client stays off.");
-                    ExportEdges.Clear();
-                    EntryEdges.Clear();
-                    return;
-                }
-
-                EntryEdges.Add(opposite);
+                // A value made only of separators is the older way of clearing the setting, and it still
+                // clears it — with no error, exactly as it always has.
+                MultiversePlugin.Log.LogInfo(
+                    $"[M2] config: export edges '{trimmed}' name no edge — the multiverse client stays off.");
+                return;
             }
 
-            EntryEdges.Sort((a, b) => ContractA.EdgeRank(a).CompareTo(ContractA.EdgeRank(b)));
+            if (ExportEdges.Count < ContractA.AllEdges.Length)
+            {
+                MultiversePlugin.Log.LogWarning(
+                    $"[M2] config: this instance declares {ExportEdges.Count} of the 4 export edges " +
+                    $"([{ContractA.EdgeNames(ExportEdges)}]). Under two-way lanes a conformant mod declares all four " +
+                    "(contract-a.md §18, A38); the undeclared edges still accept arrivals but can never export, which " +
+                    "shows on the page as a slot with dead lanes. Unset " + EnvExportEdges + " to declare all four.");
+            }
 
-            BorderEdges.AddRange(ExportEdges);
-            BorderEdges.AddRange(EntryEdges);
-            BorderEdges.Sort((a, b) => ContractA.EdgeRank(a).CompareTo(ContractA.EdgeRank(b)));
+            Enabled = true;
+        }
 
-            Enabled = ExportEdges.Count > 0;
+        private static bool IsWord(string text, string word)
+        {
+            return string.Equals(text, word, StringComparison.OrdinalIgnoreCase);
         }
 
         internal void LogSummary()
         {
             MultiversePlugin.Log.LogInfo(
                 $"[M2] config: enabled={Enabled} exportEdges=[{ContractA.EdgeNames(ExportEdges)}] " +
-                $"entryEdges=[{ContractA.EdgeNames(EntryEdges)}] (passive) " +
-                $"borderEdges=[{ContractA.EdgeNames(BorderEdges)}] " +
+                $"borderEdges=[{ContractA.EdgeNames(BorderEdges)}] (always all four: a declared edge both exports and " +
+                "receives, and an undeclared one still receives — D17) " +
                 $"ringSlot={(HasRingSlot ? RingSlot.ToString(CultureInfo.InvariantCulture) : "<omitted>")} " +
                 $"port={Port} url={Url} " +
                 $"borderWidth={(BorderWidthOverride > 0f ? BorderWidthOverride.ToString("F2", CultureInfo.InvariantCulture) : $"{DefaultWidthFactor}*S (min {MinimumWidth})")} " +
@@ -385,8 +458,11 @@ namespace BibitesMultiverse
                 $"[M4] config: saveMinutes={SaveMinutes.ToString("F1", CultureInfo.InvariantCulture)} saveKeep={SaveKeep} " +
                 $"saveOnQuit={SaveOnQuit} portal={Portal} portalFlourishes={PortalFlourishes} " +
                 $"portalSortingOrder={PortalSortingOrder} " +
-                $"portalEntryWidth={(PortalEntryWidth > 0f ? PortalEntryWidth.ToString("F1", CultureInfo.InvariantCulture) : "W+entryMargin")} " +
+                $"portalEntryWidth={(PortalEntryWidth > 0f ? PortalEntryWidth.ToString("F1", CultureInfo.InvariantCulture) : "entryMargin")} " +
                 $"debugIngest={DebugIngest}");
+            MultiversePlugin.Log.LogInfo(
+                $"{MigrationExclusion.Prefix} config: migrationExcludeSpecies={Exclusion.Describe()} " +
+                $"(matched on the A34-normalized full name; export-side only, never on the wire, never a census filter)");
             MultiversePlugin.Log.LogInfo(
                 $"[M2] config sources: {EnvExportEdges}={Show(Env(EnvExportEdges))} {EnvExportEdge}={Show(Env(EnvExportEdge))} " +
                 $"{EnvOpenEdge}={Show(Env(EnvOpenEdge))} " +
@@ -395,6 +471,7 @@ namespace BibitesMultiverse
                 $"{EnvSaveMinutes}={Show(Env(EnvSaveMinutes))} {EnvSaveKeep}={Show(Env(EnvSaveKeep))} " +
                 $"{EnvSaveOnQuit}={Show(Env(EnvSaveOnQuit))} {EnvPortal}={Show(Env(EnvPortal))} " +
                 $"{EnvPortalFlourishes}={Show(Env(EnvPortalFlourishes))} " +
+                $"{EnvMigrationExclude}={Show(Env(EnvMigrationExclude))} " +
                 "(environment beats the BepInEx config; WSLENV must name each variable)");
         }
 

@@ -290,17 +290,25 @@ namespace BibitesMultiverse
             crossing.Reset();
             containment.Reset();
 
+            // §18 A39 — "once per organism per session", and a world load is a new session: new entity
+            // ids, and new Species records for the memoized verdicts to key on.
+            config.Exclusion.Reset();
+
             geometry.Subscribe();
             worldSettings.LogBoundarySettings(geometry.S);
             worldSettings.LogBibiteHolderTransform();
             worldSettings.Apply();
-            Containment.LogSetup(geometry, config.ExportEdges, config.EntryEdges);
+            Containment.LogSetup(geometry, config.ExportEdges, config.BorderEdges);
             portal?.OnWorldLoaded();
 
             MultiversePlugin.Log.LogInfo(
+                $"{MigrationExclusion.Prefix} migration exclusion list: {config.Exclusion.Describe()} — " +
+                "a named species is never captured on any edge (§18, A39). It still lives here, the wrap contains it " +
+                "(D10), and the census still reports it.");
+
+            MultiversePlugin.Log.LogInfo(
                 $"{Prefix} world loaded — sessionId={sessionId} exportEdges=[{ContractA.EdgeNames(config.ExportEdges)}] " +
-                $"entryEdges=[{ContractA.EdgeNames(config.EntryEdges)}](passive) " +
-                $"borderEdges=[{ContractA.EdgeNames(config.BorderEdges)}] " +
+                $"borderEdges=[{ContractA.EdgeNames(config.BorderEdges)}] (a declared edge both exports and receives — D17) " +
                 $"S={geometry.S.ToString("F2", CultureInfo.InvariantCulture)} W={geometry.W.ToString("F2", CultureInfo.InvariantCulture)} " +
                 $"entryInset={(geometry.W + geometry.EntryMargin).ToString("F2", CultureInfo.InvariantCulture)} " +
                 $"population={GameBridge.LivingPopulation()}. Dialling {config.Url}.");
@@ -339,6 +347,8 @@ namespace BibitesMultiverse
             MultiversePlugin.Log.LogInfo(
                 $"{CrossingStats.Prefix} session summary: totalStripEntries={crossing.TotalStripEntries} " +
                 $"totalCrossings={crossing.TotalCrossings}");
+
+            MultiversePlugin.Log.LogInfo($"{MigrationExclusion.Prefix} session summary: {config.Exclusion.Summary()}");
 
             if (portal != null)
             {
@@ -663,10 +673,15 @@ namespace BibitesMultiverse
         // ---- EDGE_STATUS (§5.4, §14 A11) -----------------------------------------------------------
 
         /// <summary>
-        /// Full state, not a delta, and under the grid it carries **one entry for each declared export
-        /// edge** (§15, A18). The entry edges never appear here: they are passive, they always accept an
-        /// inbound organism, and they have no capture band at all (§4.3.1). An empty <c>edges</c> array
-        /// closes **every** export edge and is the correct frame when the sidecar holds no slot.
+        /// Full state, not a delta, and it carries **one entry for each declared export edge** (§15,
+        /// A18) — **four under two-way lanes** (§18, A38). An empty <c>edges</c> array closes **every**
+        /// export edge and is the correct frame when the sidecar holds no slot.
+        ///
+        /// **An entry governs exports through that edge and nothing else** (§18, A38). <c>open: false</c>
+        /// refuses a <c>MIGRATE_OUT</c> and never refuses a <c>MIGRATE_IN</c>: the mod spawns every
+        /// organism the sidecar delivers, at the <c>entryEdge</c> the frame names, whatever that edge's
+        /// current state is (§5.4, §5.7). Refusing an arrival would destroy an organism another peer has
+        /// already given up custody of, to enforce a routing fact about the other direction.
         ///
         /// Three rules, all of which follow from "full state":
         ///
@@ -786,7 +801,7 @@ namespace BibitesMultiverse
             MultiversePlugin.Log.LogInfo(
                 $"{Prefix} EDGE_STATUS epoch={epoch} entries={edges.Count} applied={applied} ignored={ignored} " +
                 $"before=[{before}] after=[{next.Describe(config.ExportEdges)}] " +
-                $"(entryEdges [{ContractA.EdgeNames(config.EntryEdges)}] are passive and never appear here)");
+                "(open governs exports through an edge and never arrivals on it — §18, A38)");
 
             if (applied < config.ExportEdges.Count)
             {
@@ -1032,17 +1047,27 @@ namespace BibitesMultiverse
         /// of BibiteBody.FixedUpdate imply is re-applied here, because a postfix runs on every return
         /// path (m2_findings.md §(b)).
         ///
-        /// The capture rule is contract-a.md §4.3.1 and §4.3.2, and every clause is load-bearing:
+        /// The capture rule is contract-a.md §4.3.1 and §4.3.2, and every clause is load-bearing. It is
+        /// **one projection, not one rule per edge** (§18, A38), which is why all four edges cost no new
+        /// geometry:
         ///
         /// <code>
-        /// inBand(o, E)  ⇔  x ≥ S − W  ∧  velocity.x > 0
-        /// inBand(o, N)  ⇔  y ≥ S − W  ∧  velocity.y > 0
+        /// n(E) = (1,0)   n(N) = (0,1)   n(W) = (−1,0)   n(S) = (0,−1)
+        ///
+        /// inBand(o, e)  ⇔  p · n(e) ≥ S − W  ∧  v · n(e) > 0
+        ///                  — that is x ≥ S − W ∧ vx > 0 on E, and x ≤ −(S − W) ∧ vx < 0 on W
         ///
         /// candidates    =  { e ∈ exportEdges : inBand(o, e) ∧ open(e) }
         /// |candidates| = 0 → no export this tick
         /// |candidates| = 1 → that edge
-        /// |candidates| = 2 → "E" when velocity.x ≥ velocity.y, otherwise "N"
+        /// |candidates| ≥ 2 → the largest outward(v, e); the earlier edge of E, N, W, S on a tie
+        ///
+        /// capture(o)    ⇔  ∃e ∈ candidates  ∧  not in flight  ∧  immunity expired
+        ///                  ∧  not excluded by local policy            (§18, A39)
         /// </code>
+        ///
+        /// Opposite edges are mutually exclusive while `S > W`, so even with four bands a corner offers
+        /// exactly **two** candidates and they are always on different axes (§4.3.1, §18 A38).
         ///
         /// The band is half-open and **outward-unbounded**: it starts at the strip line and runs past
         /// `S`, past the wrap radius, to any coordinate — because a fast organism clears the whole strip
@@ -1066,8 +1091,15 @@ namespace BibitesMultiverse
         /// E, N, W, S — so <c>outward > best</c> keeps `E` on an exact tie with no separate branch, which
         /// is §4.3.2's rule and its deliberate absence of an epsilon.
         ///
-        /// The entry edges are not tested at all: they are passive, and an organism that walks out
-        /// through one is not a migrant — the vanilla wrap returns it (D10, §14 A11, §15 A19).
+        /// **There is no passive edge to skip any more** (§18, A38). Every declared edge runs a band, so
+        /// an organism that walks west or south out of the square **is** a migrant. What still leaves the
+        /// square and is returned by the wrap is the four cases §4.3.1 lists: an excluded species (A39),
+        /// an organism whose edge is closed, one inside its immunity window, and one already in flight.
+        ///
+        /// An ordinary arrival cannot boomerang, and it is arithmetic rather than a window: velocity is
+        /// copied and never mirrored (§4.4), so an organism captured moving outward on `E` arrives on `W`
+        /// still moving east — and <c>outward(v, W) = −vx &lt; 0</c> fails the direction test on the edge
+        /// it landed behind, on the first tick and everywhere in that band.
         /// </summary>
         internal void OnBodyTick(BibiteBody body)
         {
@@ -1122,6 +1154,16 @@ namespace BibitesMultiverse
             }
 
             if (exporter.IsBlocked(entityId, geometry, position))
+            {
+                return;
+            }
+
+            // §4.3.1's last conjunct, added by §18 A39. It sits here, before the Rigidbody2D fetch and
+            // long before the freeze and the serialization, because it is a **skip and not a refusal**:
+            // an organism the policy stops must never pay for SerializeBibite, the parent blobs or the
+            // frame. The verdict is memoized per species, so an excluded population loitering in four
+            // bands costs one dictionary probe per organism per tick.
+            if (config.Exclusion.Excludes(body, entityId))
             {
                 return;
             }
@@ -1189,6 +1231,7 @@ namespace BibitesMultiverse
             containment.Forget(entityId);
             importer.Forget(entityId);
             exporter.Forget(entityId);
+            config.Exclusion.Forget(entityId);
         }
 
         internal void NoteArrival(int entityId, Edge entryEdge, float entryPosition)
@@ -1197,6 +1240,7 @@ namespace BibitesMultiverse
             crossing.NoteArrival(entryEdge, entryPosition);
             containment.Forget(entityId);
             exporter.Forget(entityId);
+            config.Exclusion.Forget(entityId);
         }
 
         /// <summary>
@@ -1204,11 +1248,17 @@ namespace BibitesMultiverse
         /// export (<see cref="DevCommands"/>) uses it so a second hop is not silently swallowed by the
         /// guards that exist to stop *natural* ping-pong. It relaxes no rule of the pipeline itself:
         /// the strip test, the outward-velocity test and the whole custody flow still run.
+        ///
+        /// It also exempts the organism from the migration exclusion list (§18, A39), for the same
+        /// reason and with the same scope: the default list names the species every seeded world is
+        /// full of, so without the exemption the rig could not force a hop at all. A39's policy is
+        /// about *natural* capture, and a dev-channel teleport is not one.
         /// </summary>
         internal void ClearMigrationBlocks(int entityId)
         {
             importer.Forget(entityId);
             exporter.Forget(entityId);
+            config.Exclusion.AllowOnce(entityId);
 
             // A rig teleport is not a wrap. Drop the tracked position too, or the next tick reports the
             // jump as a [M3-D10] WRAP event and the containment evidence becomes unreadable.

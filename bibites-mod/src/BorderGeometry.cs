@@ -151,6 +151,12 @@ namespace BibitesMultiverse
         /// rule then let the vanilla wrap teleport it to the antipode, which a player reads as a
         /// defect in the mod (m3_considerations.md Risk 2, contract-a.md §14 A13).
         ///
+        /// **One projection, not one rule per edge** (§18, A38). The contract states the band as
+        /// <c>p · n(e) ≥ S − W</c> with the outward normals <c>n(E) = (1,0)</c>, <c>n(N) = (0,1)</c>,
+        /// <c>n(W) = (−1,0)</c>, <c>n(S) = (0,−1)</c>. Written out that is <c>x ≥ S − W</c> on `E` and
+        /// <c>x ≤ −(S − W)</c> on `W` — the same band, mirrored — which is exactly what the
+        /// <c>positiveSide</c> branch below computes, and why two-way lanes add no new geometry.
+        ///
         /// The other half of the trigger is the outward-velocity test, and it is what separates an
         /// export from a wrap: a wrapped organism arrives in the outer band on the **far** side and
         /// travels inward, so it fails that test. The caller applies it — see
@@ -172,6 +178,15 @@ namespace BibitesMultiverse
         /// (m3_considerations.md Risk 1). It is REQUIRED everywhere in the band, not only outside the
         /// square, and it is a strict comparison against zero with no magnitude floor
         /// (contract-a.md §12, open item 7).
+        ///
+        /// The dot product is what makes the sign convention hold on `W` and `S` without a second rule:
+        /// <c>outward(v, W) = −vx</c>, so "leaving through the west edge" is <c>vx &lt; 0</c>, and
+        /// <c>outward(v, S) = −vy</c> likewise. That is also the whole anti-boomerang argument under
+        /// two-way lanes (§18, A38, rule 1): velocity is copied and never mirrored (§4.4), so an
+        /// organism captured on `E` with <c>vx &gt; 0</c> arrives on `W` still moving east, and
+        /// <c>outward(v, W) &lt; 0</c> keeps it out of the `W` band on the first tick and everywhere in
+        /// it. Only a bounce-back arrives moving outward, by construction, and the entry-immunity
+        /// window is what covers that case.
         /// </summary>
         internal static float OutwardComponent(Edge edge, Vector2 velocity)
         {

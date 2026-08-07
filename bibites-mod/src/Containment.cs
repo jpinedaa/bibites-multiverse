@@ -12,7 +12,12 @@ namespace BibitesMultiverse
     /// (m3_considerations.md Risks 1 and 2; contract-a.md §4.3.1, §14 A13).
     ///
     /// D10 keeps <c>worldWrapping</c> ON and makes the vanilla wrap the containment mechanism for
-    /// every edge no strip guards. That puts two rules on the same organisms:
+    /// everything a capture band does not take. **Under two-way lanes that is no longer "the edges with
+    /// no strip"** — every edge has one (§18, A38) — but the four cases §4.3.1 lists: an organism of an
+    /// excluded species (A39), one whose edge is closed, one still inside its entry-immunity window, and
+    /// one already in flight. The wrap is more load-bearing than before, not less, and the
+    /// square-crossing series should fall sharply without reaching zero. That puts two rules on the same
+    /// organisms:
     ///
     /// * the **wrap** teleports at <c>r − bodyLength ≥ 1.5·S + 1000</c>, keeping velocity and
     ///   rotation (m2_findings.md §3, BibitePropulsion.cs:240-242);
@@ -68,7 +73,7 @@ namespace BibitesMultiverse
         /// One line at world load: the settings the containment claim rests on, and the two radii it
         /// says do not compete. Read-only — under D10 the mod never writes <c>worldWrapping</c>.
         /// </summary>
-        internal static void LogSetup(BorderGeometry geometry, IList<Edge> exportEdges, IList<Edge> entryEdges)
+        internal static void LogSetup(BorderGeometry geometry, IList<Edge> exportEdges, IList<Edge> borderEdges)
         {
             string wrapping = "<unreadable>";
             string shade = "<unreadable>";
@@ -90,8 +95,8 @@ namespace BibitesMultiverse
                 $"shadeOutsideOfBounds={shade} shadeAvoidance={shadeAvoidance} " +
                 $"S={geometry.S.ToString("F1", CultureInfo.InvariantCulture)} " +
                 $"W={geometry.W.ToString("F1", CultureInfo.InvariantCulture)} " +
-                $"exportEdges=[{ContractA.EdgeNames(exportEdges)}] " +
-                $"entryEdges=[{ContractA.EdgeNames(entryEdges)}](passive, no capture band) " +
+                $"exportEdges=[{ContractA.EdgeNames(exportEdges)}](one capture band each) " +
+                $"borderEdges=[{ContractA.EdgeNames(borderEdges)}](every one of them accepts an arrival) " +
                 $"bandInner=[{BandInnerBoundaries(geometry, exportEdges)}] " +
                 $"bandOuter=none wrapRadius={geometry.WrapRadius.ToString("F1", CultureInfo.InvariantCulture)}");
 

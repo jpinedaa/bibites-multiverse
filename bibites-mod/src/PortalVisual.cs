@@ -30,10 +30,27 @@ namespace BibitesMultiverse
     /// `BandInnerBoundary` — and it re-lays out from the live `SimulationSize` callback. A portal that
     /// showed a band the exporter does not use would be worse than no portal.
     ///
-    /// **What decides whether a strip is drawn.** An export edge's strip is visible exactly while that
-    /// edge is open (`EDGE_STATUS`, or the dev override). An entry edge is passive and always accepts,
-    /// so its strip is visible exactly while the sidecar connection is up — which is the honest
-    /// statement, because nothing can arrive through it while the mod is disconnected.
+    /// **Two lanes per edge, because every edge now carries both flows** (D17, `contract-a.md` §18
+    /// A38). An edge is no longer one role: it exports *and* receives, so one strip per edge cannot say
+    /// what the edge does, and two strips stacked on the same world coordinates would only be two
+    /// additive rectangles fighting and two chevron lines exactly coincident. The border is therefore
+    /// **tiled**, not overlapped:
+    ///
+    /// * the **outer lane**, `[S − W, S]`, is the real capture band — cyan, chevrons running one way
+    ///   along the rim, its line on the map edge itself. Organisms leave from here;
+    /// * the **inner lane**, `[S − W − margin, S − W]`, is the arrival inset — amber, chevrons running
+    ///   the other way, its line on the arrival plane, which is exactly where
+    ///   <see cref="BorderGeometry.EntryPoint"/> puts an arriving organism.
+    ///
+    /// Nothing overlaps, both lanes are visible at every zoom, and the two chevron flows read as one
+    /// two-way lane rather than as a contradiction. It is also still true to the mechanic: each lane is
+    /// drawn from the same numbers the pipeline uses, and the boundary between them is the band line an
+    /// arrival must cross under its own power before it can be captured.
+    ///
+    /// **What decides whether a lane is drawn.** The capture lane is visible exactly while that edge is
+    /// open for export (`EDGE_STATUS`, or the dev override). The arrival lane is visible exactly while
+    /// the sidecar connection is up, because an arrival is never gated by edge state (§18, A38: `open`
+    /// governs exports only) but nothing can arrive at all while the mod is disconnected.
     ///
     /// Risk 8 is the reason for the one loud line at build time: layers live in prefabs, not in the
     /// assembly, so nothing static settles whether the camera draws layer 0. The mitigation is to copy
@@ -46,10 +63,10 @@ namespace BibitesMultiverse
     {
         internal const string Prefix = "[M4-PORTAL]";
 
-        /// <summary>Export cyan. Deliberately not a vanilla colour: a portal is not a vanilla concept.</summary>
+        /// <summary>Capture-lane cyan. Deliberately not a vanilla colour: a portal is not a vanilla concept.</summary>
         private static readonly Color ExportColour = new Color(0.25f, 0.90f, 1.00f, 1f);
 
-        /// <summary>Entry amber.</summary>
+        /// <summary>Arrival-lane amber.</summary>
         private static readonly Color EntryColour = new Color(1.00f, 0.65f, 0.20f, 1f);
 
         private const float FillAlpha = 0.55f;
@@ -220,7 +237,7 @@ namespace BibitesMultiverse
                     strip.lineObject.SetActive(show);
                     MultiversePlugin.Log.LogInfo(
                         $"{Prefix} event={(show ? "SHOWN" : "HIDDEN")} edge={ContractA.EdgeName(strip.edge)} " +
-                        $"role={(strip.export ? "export" : "entry")}");
+                        $"lane={(strip.export ? "capture" : "arrival")}");
                 }
 
                 if (!show)
@@ -229,8 +246,9 @@ namespace BibitesMultiverse
                 }
 
                 // The chevrons run **along** the rim, counter-clockwise as the line is oriented, and the
-                // sign of the flow is what separates the two roles: outward-bound on an export edge,
-                // inward-bound on an entry edge (m4_portal_findings.md §3.2 item 1).
+                // sign of the flow is what separates the two lanes of one edge: the capture lane runs one
+                // way, the arrival lane the other (m4_portal_findings.md §3.2 item 1). Under D17 both are
+                // drawn on every edge, which is the point — a two-way lane looks like two-way traffic.
                 strip.line.DashOffset = (strip.export ? 1f : -1f) * DashSpeed * now;
             }
 
@@ -271,12 +289,15 @@ namespace BibitesMultiverse
             root.transform.position = Vector3.zero;
             root.layer = layer;
 
+            // Two lanes on every edge that has both roles, and only the lane an edge actually has when
+            // it does not: an undeclared export edge still receives, so it gets an arrival lane and no
+            // capture lane (§18, A38, A41 case 3).
             foreach (Edge edge in config.ExportEdges)
             {
                 strips.Add(BuildStrip(edge, export: true));
             }
 
-            foreach (Edge edge in config.EntryEdges)
+            foreach (Edge edge in config.BorderEdges)
             {
                 strips.Add(BuildStrip(edge, export: false));
             }
@@ -303,7 +324,8 @@ namespace BibitesMultiverse
                 $"shaderDiscAdditive={Found("Shapes/Disc Additive")} " +
                 $"sortingOrder={config.PortalSortingOrder} flourishes={config.PortalFlourishes} " +
                 $"S={geometry.S.ToString("F1", CultureInfo.InvariantCulture)} W={geometry.W.ToString("F1", CultureInfo.InvariantCulture)} " +
-                $"exportEdges=[{ContractA.EdgeNames(config.ExportEdges)}] entryEdges=[{ContractA.EdgeNames(config.EntryEdges)}] " +
+                $"captureLanes=[{ContractA.EdgeNames(config.ExportEdges)}] arrivalLanes=[{ContractA.EdgeNames(config.BorderEdges)}] " +
+                $"entryDepth={EntryDepth().ToString("F1", CultureInfo.InvariantCulture)} " +
                 $"firstStripWorldBounds={bounds}");
 
             if (!drawn)
@@ -378,7 +400,11 @@ namespace BibitesMultiverse
 
             Strip strip = new Strip { edge = edge, export = export };
 
-            strip.fillObject = new GameObject("MultiversePortal_" + ContractA.EdgeName(edge) + "_fill");
+            // The role is in the name because an edge now carries two lanes, and two GameObjects called
+            // MultiversePortal_E_fill would be unreadable in the hierarchy.
+            string label = ContractA.EdgeName(edge) + (export ? "_capture" : "_arrival");
+
+            strip.fillObject = new GameObject("MultiversePortal_" + label + "_fill");
             strip.fillObject.transform.SetParent(root.transform, worldPositionStays: false);
             strip.fillObject.layer = layer;
             strip.fill = strip.fillObject.AddComponent<Rectangle>();
@@ -394,7 +420,7 @@ namespace BibitesMultiverse
             strip.fill.SortingOrder = config.PortalSortingOrder;
             strip.fill.Culling = ShapeCulling.SimpleGlobal;
 
-            strip.lineObject = new GameObject("MultiversePortal_" + ContractA.EdgeName(edge) + "_line");
+            strip.lineObject = new GameObject("MultiversePortal_" + label + "_line");
             strip.lineObject.transform.SetParent(root.transform, worldPositionStays: false);
             strip.lineObject.layer = layer;
             strip.line = strip.lineObject.AddComponent<Line>();
@@ -428,66 +454,82 @@ namespace BibitesMultiverse
         }
 
         /// <summary>
-        /// The strip is the real capture band on an export edge — `BandInnerBoundary(edge)` to the map
-        /// edge — and the real arrival inset on an entry edge, which is where `EntryPoint` places an
-        /// organism. The gradient runs from transparent at the inner face to opaque at the map edge, so
-        /// the rift reads as a hole in the world rather than as a painted line.
+        /// One lane of one edge, laid out from the same numbers the pipeline uses. The capture lane runs
+        /// from `BandInnerBoundary(edge)` to the map edge; the arrival lane runs inward from that same
+        /// band line, so its inner face lands on the arrival plane `S − (W + entryMargin)` — exactly
+        /// where <see cref="BorderGeometry.EntryPoint"/> puts an organism. The two tile the border and
+        /// never overlap.
+        ///
+        /// The gradient runs from transparent at the lane's inner face to opaque at its outer face, so
+        /// the rift reads as a hole in the world rather than as a painted line, and the chevron line
+        /// sits on the face that means something: the map edge for a capture lane, the arrival plane for
+        /// an arrival lane.
         /// </summary>
         private void Layout(Strip strip)
         {
             float s = geometry.S;
-            float depth = strip.export ? geometry.W : EntryDepth();
-            if (depth <= 0f)
-            {
-                depth = geometry.W;
-            }
+            float w = geometry.W;
+
+            // Magnitudes first — the sign is the edge's side, and applying it once keeps W and S honest
+            // on the negative edges instead of mirroring the whole layout by hand.
+            float laneOuter = strip.export ? s : Mathf.Max(0f, s - w);
+            float depth = strip.export ? w : EntryDepth();
+            depth = Mathf.Clamp(depth, 1f, Mathf.Max(1f, laneOuter));
+            float laneInner = laneOuter - depth;
 
             bool positiveSide = strip.edge == Edge.N || strip.edge == Edge.E;
             bool horizontalEdge = strip.edge == Edge.N || strip.edge == Edge.S;
-            float outer = positiveSide ? s : -s;
-            float centreFixed = positiveSide ? s - 0.5f * depth : -s + 0.5f * depth;
+            float sign = positiveSide ? 1f : -1f;
+            float centreFixed = sign * (laneOuter - 0.5f * depth);
+
+            // The chevron line marks the face that carries the lane's meaning.
+            float lineFixed = sign * (strip.export ? laneOuter : laneInner);
 
             if (horizontalEdge)
             {
                 strip.fillObject.transform.position = new Vector3(0f, centreFixed, 0f);
                 strip.fill.Width = 2f * s;
                 strip.fill.Height = depth;
-                strip.fill.FillLinearStart = new Vector3(0f, positiveSide ? -0.5f * depth : 0.5f * depth, 0f);
-                strip.fill.FillLinearEnd = new Vector3(0f, positiveSide ? 0.5f * depth : -0.5f * depth, 0f);
+                strip.fill.FillLinearStart = new Vector3(0f, -sign * 0.5f * depth, 0f);
+                strip.fill.FillLinearEnd = new Vector3(0f, sign * 0.5f * depth, 0f);
             }
             else
             {
                 strip.fillObject.transform.position = new Vector3(centreFixed, 0f, 0f);
                 strip.fill.Width = depth;
                 strip.fill.Height = 2f * s;
-                strip.fill.FillLinearStart = new Vector3(positiveSide ? -0.5f * depth : 0.5f * depth, 0f, 0f);
-                strip.fill.FillLinearEnd = new Vector3(positiveSide ? 0.5f * depth : -0.5f * depth, 0f, 0f);
+                strip.fill.FillLinearStart = new Vector3(-sign * 0.5f * depth, 0f, 0f);
+                strip.fill.FillLinearEnd = new Vector3(sign * 0.5f * depth, 0f, 0f);
             }
 
-            // The line sits on the map edge itself, and every edge is oriented counter-clockwise so the
-            // chevron flow of one role is visibly the opposite of the other's.
+            // Every edge is oriented counter-clockwise, so the chevron flow of one lane is visibly the
+            // opposite of the other's on the same edge.
             strip.lineObject.transform.position = Vector3.zero;
             switch (strip.edge)
             {
                 case Edge.E:
-                    strip.line.Start = new Vector3(outer, -s, 0f);
-                    strip.line.End = new Vector3(outer, s, 0f);
+                    strip.line.Start = new Vector3(lineFixed, -s, 0f);
+                    strip.line.End = new Vector3(lineFixed, s, 0f);
                     break;
                 case Edge.N:
-                    strip.line.Start = new Vector3(s, outer, 0f);
-                    strip.line.End = new Vector3(-s, outer, 0f);
+                    strip.line.Start = new Vector3(s, lineFixed, 0f);
+                    strip.line.End = new Vector3(-s, lineFixed, 0f);
                     break;
                 case Edge.W:
-                    strip.line.Start = new Vector3(outer, s, 0f);
-                    strip.line.End = new Vector3(outer, -s, 0f);
+                    strip.line.Start = new Vector3(lineFixed, s, 0f);
+                    strip.line.End = new Vector3(lineFixed, -s, 0f);
                     break;
                 default:
-                    strip.line.Start = new Vector3(-s, outer, 0f);
-                    strip.line.End = new Vector3(s, outer, 0f);
+                    strip.line.Start = new Vector3(-s, lineFixed, 0f);
+                    strip.line.End = new Vector3(s, lineFixed, 0f);
                     break;
             }
         }
 
+        /// <summary>
+        /// The arrival lane's depth, measured inward from the capture band's inner face. Derived from
+        /// <c>entryMargin</c>, which puts the lane's inner face on the arrival plane.
+        /// </summary>
         private float EntryDepth()
         {
             if (config.PortalEntryWidth > 0f)
@@ -495,7 +537,7 @@ namespace BibitesMultiverse
                 return config.PortalEntryWidth;
             }
 
-            return geometry.W + geometry.EntryMargin;
+            return geometry.EntryMargin;
         }
 
         private void Teardown()
