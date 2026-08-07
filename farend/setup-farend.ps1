@@ -15,7 +15,10 @@
     six worlds. The main machine runs five of them; BepInEx there hands out five
     log files and a sixth game on that machine never runs its plugin at all. The
     sixth world therefore lives here, where BepInEx is unused and the game gets
-    its own log. It exports EAST and NORTH like every other slot.
+    its own log. It exports on ALL FOUR EDGES like every other slot: under D17
+    two-way lanes every declared edge is both an export edge and an entry edge
+    (contract-a.md §18 A38), and a 3x2 map is a torus, so all four have a
+    neighbour.
 
 .PARAMETER RelayHost
     The name or the IP address of the main machine, which runs the relay.
@@ -36,7 +39,7 @@ param(
     [int]$SidecarPort = 8787,
     [int]$Slot = 6,
     [string]$Position = '2,1',
-    [string]$ExportEdges = 'E,N',
+    [string]$ExportEdges = 'E,N,W,S',
     [string]$World = 'M4-Slot6',
     [string]$PeerId = 'slot-6',
     [int]$SaveMinutes = 10,
@@ -136,19 +139,24 @@ if ($Position -notmatch '^\s*\d+\s*,\s*\d+\s*$') {
 }
 $Position = $Position -replace '\s', ''
 
-# contract-a.md §15 A18: the edge list is comma-separated, and an edge declared
-# with its opposite clears the whole set and disables the client with one error
-# line in the BepInEx log. Catch it here instead.
+# contract-a.md §15 A18: the edge list is comma-separated, at least one member,
+# no duplicates. Catch a typo here rather than in the BepInEx log, where a bad
+# set clears the whole list and disables the client with one error line.
+#
+# THE OPPOSITE-EDGE REFUSAL IS GONE (contract-a.md §18 A38, D17 two-way lanes).
+# It rested on the one-way lane, where an edge was a capture band or a passive
+# entry and never both, so 'E,W' was a contradiction. Every declared edge is now
+# BOTH an export edge and an entry edge, and the conformant declaration is all
+# four - which the old rule would have refused outright. Do not put it back.
 $edgeList = @($ExportEdges -split '[,; \t]+' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
+if ($edgeList.Count -eq 0) {
+    Stop-Setup "-ExportEdges names no edge. Use E, N, W or S, comma separated - normally 'E,N,W,S'."
+}
 foreach ($e in $edgeList) {
     if ($e -notin @('E', 'N', 'W', 'S')) { Stop-Setup "-ExportEdges holds '$e'. Use E, N, W or S." }
 }
 if (($edgeList | Select-Object -Unique).Count -ne $edgeList.Count) {
     Stop-Setup "-ExportEdges repeats an edge: '$ExportEdges'."
-}
-if (($edgeList -contains 'E' -and $edgeList -contains 'W') -or
-    ($edgeList -contains 'N' -and $edgeList -contains 'S')) {
-    Stop-Setup "-ExportEdges declares an edge together with its opposite: '$ExportEdges'."
 }
 $ExportEdges = [string]::Join(',', $edgeList)
 
@@ -315,9 +323,12 @@ New-Item -ItemType Directory -Force -Path $dataDir, $logDir, $cmdDir | Out-Null
 # process. A Windows process inherits it from this script, so there is nothing
 # like WSLENV to declare here.
 #
-# MULTIVERSE_EXPORT_EDGES is the M4 plural name. Both lanes of this slot wrap:
-# a 3x2 map is a torus, so every slot declares both axes and the sidecar decides
-# from the relay's map which of them EDGE_STATUS actually opens.
+# MULTIVERSE_EXPORT_EDGES is the M4 plural name. All four lanes of this slot
+# wrap: a 3x2 map is a torus, so every slot declares all four edges and the
+# sidecar decides from the relay's map which of them EDGE_STATUS actually opens.
+# Under D17 each declared edge is both an export edge and an entry edge
+# (contract-a.md §18 A38). The mod's own default is all four when this is unset;
+# it is set anyway, so the value this setup was run with is what the world uses.
 $env:MULTIVERSE_EXPORT_EDGES = $ExportEdges
 $env:MULTIVERSE_RING_SLOT    = $Slot
 $env:MULTIVERSE_SIDECAR_PORT = $SidecarPort

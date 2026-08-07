@@ -44,17 +44,31 @@
 # is (0,0). There is no interior/perimeter distinction to derive an export set
 # from.
 #
-# So every one of the six games gets MULTIVERSE_EXPORT_EDGES="E,N", and that is
-# the honest answer rather than a convenience. What differs between slots is not
-# what they DECLARE but what EDGE_STATUS OPENS, and the sidecar decides that from
-# the map the relay published — never the mod, which learns no topology at all
-# (D8, contract-a.md §15 A25). §2.1 makes the same point from the degenerate end:
-# on a w×1 ring "the north edge is DECLARED BY THE MOD and stays closed with
-# no_peer for the life of the map".
+# TWO-WAY LANES (D17, contract-a.md §18 A38) make that argument reach all four
+# edges. Every declared edge is now BOTH an export edge and an entry edge — "out
+# and in are different doors" is retired — so a conformant mod declares all four
+# and the torus gives every one of them a neighbour. So every one of the six
+# games gets MULTIVERSE_EXPORT_EDGES="E,N,W,S", and that is the honest answer
+# rather than a convenience. What differs between slots is not what they DECLARE
+# but what EDGE_STATUS OPENS, and the sidecar decides that from the map the relay
+# published — never the mod, which learns no topology at all (contract-a.md §15
+# A25). §2.1 makes the same point from the degenerate end: on a w×1 ring "the
+# north edge is DECLARED BY THE MOD and stays closed with no_peer for the life of
+# the map" — and its SOUTH edge closes the same way.
+#
+# THE VARIABLE STAYS EXPLICIT even though the mod's own default is now all four
+# (contract-a.md §18 A41, case 3: an unset MULTIVERSE_EXPORT_EDGES means all four
+# rather than "off"). The rig states the geometry it is testing, so a future
+# change to the mod's default cannot silently move what this rig measures.
 #
 # The one place the sets legitimately differ is a peer spliced into a NEW column
-# (phase 5): it too declares E,N, and its north lane closes no_peer because its
-# column holds one slot. Again: same declaration, different EDGE_STATUS.
+# (phase 5): it too declares all four, and its north AND south lanes close
+# no_peer because its column holds one slot. Again: same declaration, different
+# EDGE_STATUS. On an axis of length 2 the forward and reverse lanes name the SAME
+# peer (contract-b-m4.md §2.1, A38): on this 3x2 map every COLUMN is such an
+# axis, so slots 1 and 4 are a two-lane pair and traffic on that axis rises
+# disproportionately. That is expected, not a defect — A40's raised inbound rate
+# is what absorbs it.
 #
 # ==============================================================================
 # FIVE REAL GAMES, ONE SYNTHETIC PEER — AND THE MEASUREMENT THAT FORCED IT
@@ -186,8 +200,11 @@ FAKE_SLOT=6
 # makes it a hole to every router (§2).
 SPLICE_SLOT=7
 
-# Both axes wrap, so every peer declares both edges. See the header.
-EXPORT_EDGES="E,N"
+# Both axes wrap and every declared edge is now both an export and an entry edge
+# (D17, contract-a.md §18 A38), so every peer declares all four. See the header
+# for why this is set explicitly rather than left to the mod's own all-four
+# default.
+EXPORT_EDGES="E,N,W,S"
 EXPORT_EDGE=E   # run-m3.sh helpers that still read the singular
 
 RELAY_PORT="${_ENV_RELAY_PORT:-8795}"
@@ -815,11 +832,17 @@ observe_hop() {
   line="$(wait_file "$(sclog_of "$to")" "took custody of an inbound organism.*migrationId=$mid" 120)" || return 1
   note "sidecar $to: $line"
   # §6.6: the entry edge is DERIVED as the opposite of the sender's exitEdge.
-  case "$edge" in E) want_entry=W ;; N) want_entry=S ;; esac
+  # ALL FOUR EDGES EXPORT under two-way lanes (§18, A38), so all four opposites
+  # are reachable here. The entry edge is no longer "the passive one": it is a
+  # capture band in its own right, and rule 1 of A38 — copied outward velocity —
+  # is what stops the arrival re-exporting straight back out of it.
+  case "$edge" in E) want_entry=W ;; N) want_entry=S ;; W) want_entry=E ;; S) want_entry=N ;;
+    *) fail "observe_hop cannot check exit edge '$edge'"; return 1 ;;
+  esac
   local got_entry; got_entry="$(field entryEdge "$line")"
   [ "$got_entry" = "$want_entry" ] \
-    || { fail "the $edge hop arrived on entry edge $got_entry, want the passive $want_entry"; return 1; }
-  note "the $edge hop arrives through the passive $want_entry edge"
+    || { fail "the $edge hop arrived on entry edge $got_entry, want the opposite edge $want_entry"; return 1; }
+  note "the $edge hop arrives through the opposite edge, $want_entry"
 
   if has_log "$to"; then
     line="$(wait_log "$to" "migrationId=$mid .*phase=MIGRATE_IN_RECEIVED" 180 "$mark_to")" || return 1

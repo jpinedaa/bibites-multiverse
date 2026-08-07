@@ -4,9 +4,10 @@ This bundle puts one Bibites world on a second Windows computer. That world is
 **slot 6** of the multiverse map, in the top-right corner of a 3×2 grid. The main
 computer runs the other five worlds, the relay and the archive.
 
-Your world is a full member of the map, not a spare. It exports **east** and
-**north**, and it receives from the west and from the south. Organisms leave your
-world and arrive in it while it runs.
+Your world is a full member of the map, not a spare. Every one of its four edges
+is a door that works **both ways**: it exports east, north, west and south, and
+it receives on all four as well. Organisms leave your world and arrive in it
+while it runs, on every side.
 
 You do not need Visual Studio, .NET, Go or WSL on this computer. You need Steam,
 The Bibites, and Windows PowerShell 5.1, which every Windows 10 and 11 has.
@@ -101,13 +102,20 @@ Logs live in `%LOCALAPPDATA%\BibitesMultiverse\logs` (the sidecar) and in
 Two things in the game log are worth a look while the test runs, and both are
 for your eyes only — the main computer cannot see this screen:
 
-- `[M4-PORTAL]` lines, and the portal strips themselves. Each open edge draws
-  one. Yours are on the east and the north edges, with entry strips on the west
-  and the south.
+- `[M4-PORTAL]` lines, and the portal strips themselves. **All four edges draw
+  two lanes each**: an outer cyan capture lane, where an organism leaves, and an
+  inner amber arrival lane, where one comes in. Both appear on every edge,
+  because every edge now works both ways.
 - `[M4-SAVE] event=SAVED` lines. The world saves itself every 10 minutes.
 
-You can force one organism east with the `F10` key in the game. Nothing requires
+You can force one organism out with the `F10` key in the game. Nothing requires
 it; organisms cross on their own.
+
+One species stays home on purpose. `Basic bibite` — the stock the worlds were
+seeded with — never leaves, on any edge. It still lives in your world and it is
+still counted on the map's species view; it just does not travel, so the
+organisms that cross are the ones evolution actually produced. `[M4-D18]` lines
+in the game log are that policy at work, and they are not errors.
 
 ## What the bundle installs, and where
 

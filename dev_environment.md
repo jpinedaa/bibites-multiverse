@@ -11,7 +11,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
-| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.2`**, amended in place; §15 is the M4 set, §16 the species-identity set and §17 the species-census set), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.2`**; §14 is its reconciliation set, §15 the species-identity amendment and §16 the census amendment), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by the species set — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
+| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.2`**, amended in place; §15 is the M4 set, §16 the species-identity set, §17 the species-census set and **§18 the two-way-lane set, A38–A41**), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.3`**; §14 is its reconciliation set, §15 the species-identity amendment, §16 the census amendment and **§17 the two-way-lane, hop-feed and pacing amendment, B13–B15**), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by every amendment since — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
 | Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), **`run-m4-lan.sh` = the same map with slot 6 on the second computer** (the M4 exit-test rig; it sources `run-m4.sh` with `M4_LIB=1`), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rigs* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
@@ -24,6 +24,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Component | Version |
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
+| The plugin | `0.6.0` (`MultiversePlugin.Version`) — the two-way-lane build: four-edge capture (§18 A38), the migration exclusion list (A39) and two-lane portals on all four edges. It speaks `contract-a/2.2`. The far-end bundle carries the same DLL; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
+| The Go side | `contract-b/3.3` — two-way lane walks, `--inbound-rate`, and the `/api/hops` feed the live map animates from. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -230,10 +232,16 @@ e2e/run-m4-lan.sh all        # up, phase1..8 (phase5far is excluded: it blocks o
 ```
 
 **The LAN rig passed the M4 exit test on 2026-08-06, and it is running now.** It came back
-up after the test and holds the living deployment: six worlds, twelve lanes, periodic saves
-every 2 minutes here and every 10 on the far end. Do not start another rig against it, and
-do not stop a process it owns — see *Only one rig can run at a time* in Gotchas.
-`m4_considerations.md`, *Exit Test → Result*, records the run.
+up after the test and holds the living deployment: six worlds, periodic saves every 2 minutes
+here and every 10 on the far end. Do not start another rig against it, and do not stop a
+process it owns — see *Only one rig can run at a time* in Gotchas. `m4_considerations.md`,
+*Exit Test → Result*, records the run.
+
+**Since the two-way-lane rollout of 2026-08-07 the map draws one lane per declared edge, not
+twelve.** Five upgraded slots declare all four and the far slot still declares two, so the
+status page shows **22** lanes while the far end is stale and **24** once it is current. Count
+lanes from `sum(len(slot.exportEdges))`, never against a constant — `run-m4-lan.sh phase1` was
+changed to do exactly that. Both axes wrap, so every declared edge opens.
 
 Six things about it are load-bearing:
 
@@ -241,9 +249,11 @@ Six things about it are load-bearing:
   the rehearsal's synthetic slot, so every "read this from somewhere else" branch carries
   over unchanged. It keeps the **resume test** local (slot 1 → slot 2, and the T1 journal is
   the only copy of that input) and the **kill-and-heal test** local (a hard kill is a command
-  to a process, and the far end takes no commands). It has both lanes, because a 3×2 map is
-  a torus — (2,1) exports east to slot 4 and north to slot 3, and receives from slot 5 and
-  slot 3. And killing slot 5 leaves row 1 as {4, 6}, so **phase 4's healed east lane runs
+  to a process, and the far end takes no commands). It has every lane, because a 3×2 map is
+  a torus — under D17 (2,1) exports east to slot 4, north to slot 3, west to slot 4 and south
+  to slot 3, and receives on all four. (On a 3×2 map every column has length 2, so the north
+  and south lanes of any slot name the **same** peer; that is A38's stated consequence, not a
+  routing bug.) And killing slot 5 leaves row 1 as {4, 6}, so **phase 4's healed east lane runs
   across the network**, which is a stronger test than the rehearsal's, not a weaker one.
 - **Five real games here plus one real game there is six real worlds and no synthetic peer.**
   This is the honest 3×2 map `m4_considerations.md`'s exit test asks for, in its "5+1 across
@@ -281,23 +291,38 @@ Six things about it are load-bearing:
 does not fail with a socket error — it connects, gets closed, and looks like a peer that
 will not join. That is the failure to expect, and it is why this list exists.
 
-**The minors are now `contract-a/2.2` and `contract-b/3.2`** (the species-census set,
-2026-08-07; `2.1`/`3.1` were the species-identity set of the same day), and **nothing in this
-table moves with them**. Compatibility is on the major alone: a minor is never a rejection
-reason, the URL paths did not move, and every field either set added — the migration
-`species` block, and the `HEARTBEAT` census with its `truncated` sibling — is OPTIONAL on both
-wires. That is not theory — the living deployment has now run **two** minor rollouts with slot
-6 left on the previous minor each time, and its old sidecar reconnected to the new relay and
-kept exchanging organisms in both directions with no `4000` close. **The minor is a
-capability statement, not a negotiation:** detect a feature by the presence of its field,
-never by arithmetic on the minor. A world whose mod predates the census therefore reads
-**species unknown** on the status page — honest, and never a wrong number.
+**The minors are now `contract-a/2.2` and `contract-b/3.3`** (the two-way-lane set, 2026-08-07;
+`2.2`/`3.2` were the species census, `2.1`/`3.1` the species identity, all of the same day), and
+**nothing in this table moves with them**. Contract A did **not** move for D17 — §18's A41 says
+so explicitly: every field the two-way set touches already existed and already accepted all four
+edge values, so there was nothing additive to bump. Compatibility is on the major alone: a minor
+is never a rejection reason, the URL paths did not move, and every field these sets added — the
+migration `species` block, the `HEARTBEAT` census with its `truncated` sibling, and
+`SECTOR_GRANT.neighbours`' `"W"` and `"S"` keys — is OPTIONAL on both wires. **The minor is a
+capability statement, not a negotiation:** detect a feature by the presence of its field, never
+by arithmetic on the minor. A world whose mod predates the census therefore reads **species
+unknown** on the status page — honest, and never a wrong number.
+
+**But `contract-b/3.3` is the first minor a stale peer does not simply tolerate, and that is the
+correction to make here.** The two previous rollouts left slot 6 on the previous minor and it
+kept exchanging organisms in both directions with no `4000` close, which is where the paragraph
+above came from. `3.3` breaks that streak on one point: a pre-`3.3` **sidecar** validates
+`MIGRATION_PAYLOAD.exitEdge` against `E`/`N` and answers anything else with a **permanent**
+`MALFORMED_MESSAGE` NACK — `exitEdge "W" is not E/N; the grid exports east and north`. So an
+upgraded neighbour's west and south exports to that peer are refused, bounced home by §9.4, and
+re-exported, which pins the exporter's paced queue at `inboundQueueMax` and makes it answer its
+own senders with `OVERLOADED`. Measured on the live map on 2026-08-07 with slot 6 stale: the two
+lanes into it ran at ~40 hops/min against ~4–6 on every other lane, and slots 3 and 4 sat at
+`pacedDepth` 63–65 while every other slot drained to 0. Nothing is lost — a bounce-back is a
+delivery — but a `3.3` map is **not** operationally complete until every peer is on `3.3`. The
+minor is still not a rejection reason; the incompatibility is in one field's value range, and it
+is why the far-end bundle must be re-taken with this build rather than at leisure.
 
 | What the scripts speak | What M4 speaks | Where |
 |---|---|---|
 | `/contract-b/v2` | **`/contract-b/v3`** | `e2e/run-m3.sh` (`RELAY_URL`), and it is **sourced as a library** by `run-m3-lan.sh` and `baseline.sh`, so this one line reaches all three. Also `e2e/run-m3-lan.sh` (the operator note). `e2e/run-m2.sh` still says `/contract-b/v1`, two majors back. **`farend/setup-farend.ps1` is done** — it builds `/contract-b/v3`. |
 | `/contract-a/v1` | **`/contract-a/v2`** | **Nothing to change.** No script hardcodes a Contract A path — the sidecar's `--listen` and the mod's `MULTIVERSE_SIDECAR_PORT` carry it, and both sides already agree. |
-| `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N`** | `e2e/run-m3.sh`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. **`farend/setup-farend.ps1` is done**: its generated `start-slot6.ps1` sets the plural name, and it rejects an edge set that would silently disable the client. |
+| `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N,W,S`** | `e2e/run-m3.sh`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. **`farend/setup-farend.ps1` is done**: its generated `start-slot6.ps1` sets the plural name, its `-ExportEdges` default is all four, and it rejects a token that is not an edge or an edge repeated. It no longer rejects an edge declared with its opposite — that refusal rested on the one-way lane and D17 retired it (§18 A38). |
 | the relay's `ring.json` key `"ring"` | **`"slots"`**, with `width`, `height`, `col`, `row` | `e2e/run-m3-lan.sh` (`ring_order()`) and `e2e/baseline.sh`. **This is the silent one.** `"ring"` is a read-only migration path: an M4 relay reads an M3 file once and never writes that key again. Both readers work today against the committed M3 `ring.json` and start returning empty the first time an M4 relay saves. |
 | nothing | the archive's **`--http`** flag, and **`ringstat`** | No **M3** script mentions either, so the archive binds its compiled default — `127.0.0.1:8796` since the M4 port plan, `127.0.0.1:8791` before it. The M4 rigs do pass `--http`, from `ARCHIVE_HTTP` (*Owner steps*). `baseline.sh` reads the archive only through the filesystem, so the whole M4 observability surface — map shape, effective lanes, bypasses, custody/paced/held depths, hold-timeout bounces — is absent from the baseline capture. |
 | relay `8790`, archive `8791` | relay **`8795`**, archive **`8796`** | The Go defaults already moved (`contractb.DefaultRelayPort`, the archive's `--http`, `ringstat`'s `--url`), and so has `$RelayPort` in `farend/setup-farend.ps1`. Still to change: `RELAY_PORT` in `e2e/run-m3.sh`, and **the firewall rule and the portproxy, which are owner steps** (below). See *The M4 port plan* — the old defaults are slot 4's and slot 5's Contract A ports on a six-slot rig. |
@@ -315,7 +340,8 @@ Name every one of them in `WSLENV` or WSL forwards none (see Gotchas).
 
 | Variable | Meaning |
 |---|---|
-| `MULTIVERSE_EXPORT_EDGES` | **M4.** The edges this sim exports through, as a list — `E,N` under the grid (`contract-a.md` §15 A18). Separators are comma, semicolon, space or tab; each token is trimmed and upper-cased. The **opposite** of each becomes a passive entry edge, and the union of both sets becomes `borderEdges`. Unset **disables the multiverse client entirely**. |
+| `MULTIVERSE_EXPORT_EDGES` | **M4.** The edges this sim exports through, as a list — **`E,N,W,S` under the grid** (`contract-a.md` §15 A18, §18 A38). Separators are comma, semicolon, space or tab; each token is trimmed and upper-cased. **Every declared edge is both an export edge and an entry edge**, so `borderEdges` equals this set rather than being a superset of it, and there is no passive edge any more. **Unset now means all four**, not "off" (§18 A41 case 3); the literal `none`, or a value naming no edge at all, is what turns the client off. Set it only to declare a **subset** — or, as the M4 rigs do, to state the geometry explicitly so a change to the default cannot move what a rig measures. |
+| `MULTIVERSE_MIGRATION_EXCLUDE` | **The two-way-lane set (D18, §18 A39).** Comma-separated full species names that **never export**, matched on the §16 A34-normalized form. Default `"Basic bibite"` — the seed stock stays home, so the organisms that travel are the ones evolution produced. Set to an **empty value** to disable the policy. It is **local and export-side only**: never on the wire, never a census filter, and never a refusal of an arrival. An excluded organism is simply not a capture candidate on any edge, so D10's wrap returns it — which is why the square-crossing series rises with this policy on rather than falling. One `[M4-D18]` line per distinct organism, capped at 4096 names per session. |
 | `MULTIVERSE_EXPORT_EDGE` | **The M3 singular name, still read, and it takes a list too** — it is the same parser behind a different name. Kept so an M3 script keeps working. |
 | `MULTIVERSE_OPEN_EDGE` | M2's name for the same thing. Also still read. |
 | `MULTIVERSE_RING_SLOT` | The advisory ring slot, an integer `≥ 1`. It is a **label**, not a routing input: the sidecar closes `4001` when it disagrees with the slot the relay granted, which turns a mis-wired rig into one second of diagnosis. **Replaces `MULTIVERSE_SECTOR`, which no longer reaches the mod at all** — D8 retired the `{x, y}` grid (`contract-a.md` §14 A14). |
@@ -338,11 +364,14 @@ two are ignored — and note that the mod's `[M2] config sources:` line still ec
 which reads as if the others applied. They did not.
 
 **A rejected edge set disables the client silently, and that is the one trap here.** An
-unparseable token, a duplicate edge, or an edge declared together with its opposite
-(`E,W`) all clear the set and leave the client off. Each of those three logs an error. A
-value that is only separators — `MULTIVERSE_EXPORT_EDGES=","` — clears it with **no** error,
-and the only symptom is the generic "no export edge is configured" line. Check that line
-before chasing a sidecar that never sees a mod.
+unparseable token or a duplicate edge clears the set and leaves the client off, and each logs
+an error. **`E,W` is no longer one of them** — an edge with its opposite was a contradiction
+only while an edge was a capture band or a passive entry and never both, and §18's A38 retired
+that; all four together is now the *conformant* declaration. A value that is only separators —
+`MULTIVERSE_EXPORT_EDGES=","` — clears it with **no** error, and the only symptom is the
+generic "no export edge is configured" line. Check that line before chasing a sidecar that
+never sees a mod. Note that an **unset** variable is no longer this failure: it is the
+all-four default.
 
 Two knobs have **no** environment variable and are BepInEx config entries only:
 `[M4] PortalSortingOrder` (default `-50`) and `[M4] PortalEntryWidth` (default `0`, which
@@ -382,7 +411,7 @@ side carries none** — the relay, the sidecar, the archive and `ringstat` all l
 | Tag | What it reports |
 |---|---|
 | `[M2]` | The general mod series: config, connection, edge state, exports. |
-| `[M2-CROSSING]` | Per-simulated-minute crossing counters, **one line per export edge**. |
+| `[M2-CROSSING]` | Per-simulated-minute crossing counters, **one line per export edge** — four of them under D17. |
 | `[M2-CMD]` | Every command-file result, the same text as `<cmdfile>.log`. |
 | `[M2-FAMILY]` | Family scans, on `MULTIVERSE_FAMILY_REPORT`. |
 | `[M2-WORLD]` | World load and seed. |
@@ -390,7 +419,8 @@ side carries none** — the relay, the sidecar, the archive and `ringstat` all l
 | `[M3-LINEAGE]` | The parent-blob collector. |
 | `[M4-SAVE]` | **M4.** `event=SAVED`, `event=FAILED`, `event=BUDGET_EXCEEDED`, plus the armed line and each deferral. |
 | `[M4-CROWDING]` | **M4.** Per-simulated-minute arrival crowding, **one line per entry edge**. |
-| `[M4-PORTAL]` | **M4.** `event=BUILT`, `event=SHOWN`, `event=HIDDEN`, `event=RELAYOUT`. |
+| `[M4-PORTAL]` | **M4.** `event=BUILT`, `event=SHOWN`, `event=HIDDEN`, `event=RELAYOUT`. Under D17 every edge draws **two** lanes — an outer cyan capture lane and an inner amber arrival lane — so a healthy world shows eight `event=SHOWN` lines, `edge=E\|N\|W\|S` × `lane=capture\|arrival`. |
+| `[M4-D18]` | **The two-way-lane set (D18, `contract-a.md` §18 A39).** The migration exclusion list. One `config:` line at startup naming the list, one `event=EXCLUDED` line per **distinct** organism whose capture the policy stopped (capped at 4096 per session, then one summary), and a `session summary:` line. These are **not errors and not a defect**: an excluded organism stays in its world, D10's wrap contains it, and §17's census still reports it. The reading to expect on the default list is a steady trickle of `species="Basic bibite"` on every slot, and **zero** `Basic bibite` in `/api/hops`. |
 | `[M5-SPECIES]` | **The species-identity set** (`contract-a/2.1`). One `action=created\|matched\|fallback` line per import, with `migrationId`, `entityId`, `name="…"`, `localId`, `parentLinked` and `detail`; plus the export-side warning when a species name cannot go on the wire. `action=fallback` is the absent-block rule, and it is the normal reading for an arrival from a peer that predates the set. |
 | `[M5-CENSUS]` | **The species-census set** (`contract-a/2.2`). **Silent in normal operation** — the census rides every `HEARTBEAT` and logs nothing. The one line it can emit is a rate-limited warning (at most one a minute) naming active species whose name half is empty or over 64 UTF-8 bytes and therefore cannot go on the wire; the census carries the rest with `truncated=true`. A quiet `[M5-CENSUS]` is the expected state, and a sidecar line reading `stripped part of a HEARTBEAT species census` with a quiet mod log means the strip happened for a reason the mod did not see coming. |
 | `[M1-AUTOTEST]` | The M1 auto-test, including its one `RESULT:` line. |
@@ -410,7 +440,29 @@ consequences, and both have already bitten `e2e/baseline.sh`:
 
 Filter to one edge for a world-level series, or sum across edges deliberately. The full
 field order is `edge simMinute stripEntries crossings totalStripEntries totalCrossings
-cumulativeStripEntriesPerSimMin population S W simTick`.
+cumulativeStripEntriesPerSimMin population S W simTick`. Note that `total*` is
+**session-cumulative**, so a rate compared across a restart has to be built from the
+per-window `stripEntries`/`crossings` fields and never from a difference of the totals.
+
+**The `crossings` series went UP with D17, not down, and that is worth writing here because
+`contract-a.md` §4.3.1 predicts the opposite.** The prediction — "the square-crossing series
+should fall sharply and not reach zero" — is sound for A38 read alone: a band on every edge
+captures organisms that used to walk out through `W` and `S`. Measured on the live map on
+2026-08-07, over matched 60-simulated-minute windows either side of the rollout, the `E`+`N`
+rate on the three slots not distorted by a stale peer went from 0.52/0.48/0.47 per simulated
+minute to 1.07/0.90/0.50, and the four-edge total is roughly double the old two-edge one. Two
+causes, and neither is a defect:
+
+- **A39 is the larger one.** D18 puts `Basic bibite` — 30–56% of every world's population — on
+  the exclusion list, and an excluded organism is never a capture candidate on any edge. It
+  therefore walks past the square edge and is counted as a crossing where it used to be counted
+  as an export. §4.3.1 lists the exclusion list first among the four residue cases; it just did
+  not anticipate the residue being half the population.
+- **A stale `contract-b` peer inflates the two lanes pointing at it** (see *The minors*), because
+  every refused export bounces home moving outward and crosses on the way. That part clears when
+  the far end takes the current bundle.
+
+So read `crossings` against the exclusion list before reading it as a containment failure.
 
 `[M4-CROWDING]` mirrors it on the **entry** side, one line per entry edge per simulated
 minute, and carries `inQuarter`, `quarterShare`, `arrivals`, `arrivalsPerSimMin` and an
@@ -520,6 +572,19 @@ Four things about that invocation are load-bearing:
   same data dir reclaims the same slot. A reinstall with a fresh data dir takes a *new* slot
   and leaves the old one reserved forever.
 
+**`--inbound-rate` / `MULTIVERSE_INBOUND_RATE` is the delivery-pacing lever** (the two-way-lane
+set, `contract-a.md` §18 A40). It sets `inboundRatePerSimMinute`: the maximum `MIGRATE_IN`
+frames released per **simulated** minute of the receiving world, with a token bucket of
+`inboundRateBurst` so ordinary traffic is never delayed. The default rose from `2.0`/`5` to
+**`12.0`/`15`** with D17, because D13 and then D17 multiplied the inbound surface past the old
+number, and the raise is what made the knob exist at all — before it, the rate was a compiled
+constant. `0` or an unparseable value keeps the default. **Reach for it last.** A `pacedDepth`
+that will not fall is usually a story about the traffic rather than the rate: the map-wide
+symptom of a stale `contract-b` peer (above) looks exactly like an under-set rate, and raising
+the rate there only pumps a bounce loop faster. Read `pacedDepth` per slot on `/api/status`
+first, then the `bounceBack=true` share of that slot's `delivered MIGRATE_IN` lines, and only
+then the rate.
+
 `--listen` is loopback-only by contract and refuses a wildcard address. The relay's
 `--listen` does not: it binds LAN-reachable (`0.0.0.0:8795` by default). Every flag also
 reads an environment variable — `MULTIVERSE_LISTEN`, `MULTIVERSE_RELAY`,
@@ -628,7 +693,7 @@ world rather than a spare.
 
 Under M3 the second computer was ring slot 2 of three. Under M4 it is **slot 6 of a 3×2
 map**, and it is a full member: a real world, a real simulation, real periodic saves and real
-portals, exporting **east and north** and receiving from the west and the south. It is not a
+portals, exporting on **all four edges** and receiving on all four (§18 A38). It is not a
 spare and it is not synthetic — `bin/fakemod` exists only for the local rehearsal, which
 cannot run a sixth game (*The five-instance ceiling*, in Gotchas). `e2e/run-m4-lan.sh`'s
 header carries the full argument for slot 6 rather than any other; the short form is that it
@@ -649,8 +714,17 @@ validates `-Position` and `-ExportEdges` before anything can silently disable th
 installs BepInEx if it is absent, copies the plugin, writes the token to
 `%LOCALAPPDATA%\BibitesMultiverse\token.txt` with a user-only ACL, and generates
 `start-slot6.ps1` and `stop-slot6.ps1`. Its M4 defaults are `-RelayPort 8795`, `-Slot 6`,
-`-Position '2,1'`, `-PeerId slot-6`, `-World M4-Slot6`, `-ExportEdges 'E,N'` and
-`-SidecarPort 8787` (loopback on that machine, where nothing competes for it).
+`-Position '2,1'`, `-PeerId slot-6`, `-World M4-Slot6`, **`-ExportEdges 'E,N,W,S'`** and
+`-SidecarPort 8787` (loopback on that machine, where nothing competes for it). The
+`-ExportEdges` validation still refuses a token that is not an edge and an edge repeated; the
+old refusal of an edge declared **with its opposite** is gone, because all four together is
+now the conformant declaration (§18 A38).
+
+**Re-taking the bundle is not optional after a `contract-b` minor.** The bundle carries the
+plugin *and* `multiverse-sidecar.exe`, and a stale sidecar is what refuses an upgraded
+neighbour's west and south exports — see *The minors* for the measured symptom. Rebuild with
+`farend/make-farend-bundle.sh` (it builds both fresh) **after** `bibites-mod/deploy.sh`, so the
+DLL in the zip is the one this machine is running.
 
 `start-slot6.ps1` sets the mod's whole configuration natively — there is no `WSLENV` on that
 machine — starts the sidecar with `--position 2,1`, **waits for `contract B: slot granted` in
@@ -659,7 +733,7 @@ names TCP 8795, and does not start the game.
 
 | Variable it sets | Value | Why it belongs there and not here |
 |---|---|---|
-| `MULTIVERSE_EXPORT_EDGES` | `E,N` | The M4 plural name. Both lanes wrap: a 3×2 map is a torus, so every slot declares both axes and the sidecar decides from the relay's map which of them `EDGE_STATUS` opens. |
+| `MULTIVERSE_EXPORT_EDGES` | `E,N,W,S` | The M4 plural name, and `setup-farend.ps1`'s `-ExportEdges` default. All four lanes wrap: a 3×2 map is a torus, so every slot declares all four axes and the sidecar decides from the relay's map which of them `EDGE_STATUS` opens. Under D17 each declared edge is both an export edge and an entry edge (`contract-a.md` §18 A38). |
 | `MULTIVERSE_RING_SLOT` | `6` | The advisory label. The sidecar closes `4001` if it disagrees with the granted slot, which turns a mis-wired far end into one second of diagnosis. |
 | `MULTIVERSE_SIDECAR_PORT` | `8787` | Contract A is loopback-only, on that machine's loopback. |
 | `MULTIVERSE_WORLD` | `M4-Slot6` | The mod seeds it on the first start. This machine never creates it. |

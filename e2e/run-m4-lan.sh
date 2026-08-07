@@ -196,6 +196,15 @@ LOGGED_SLOTS="$SLOTS"
 # from the rehearsal falls through to the real one.
 FAKE_SLOT=0
 
+# TWO-WAY LANES, STATED HERE TOO (D17, contract-a.md §18 A38). run-m4.sh already
+# sets this and the source carries it; it is repeated because the geometry this
+# rig drives is a property of THIS rig, and an unconditional assignment after the
+# source is the file's own idiom for a name it will not let drift. The mod's own
+# default is now all four as well (§18 A41, case 3) — declaring it anyway is what
+# keeps a future change to that default from silently moving what is measured.
+# The far end declares its own set; see farend/setup-farend.ps1 -ExportEdges.
+EXPORT_EDGES="E,N,W,S"
+
 REMOTE_SLOT=6
 REMOTE_PEER="$(peer_of "$REMOTE_SLOT")"
 REMOTE_POS="$(pos_of "$REMOTE_SLOT")"
@@ -777,17 +786,20 @@ lan_phase1() {
   note "slot 5: $line"
 
   # PER-EDGE EDGE_STATUS: one entry per declared export edge (contract-a.md §15
-  # A18). Every slot declares E,N because a 3x2 map is a torus and the declaration
-  # is geometry, not topology — see run-m4.sh's header.
+  # A18), and under two-way lanes that is FOUR (§18, A38). Every slot declares all
+  # four because a 3x2 map is a torus and the declaration is geometry, not
+  # topology — see run-m4.sh's header. Every one of the four opens here: both axes
+  # wrap, so no local slot has a dark side.
   step "per-edge EDGE_STATUS on every local slot"
   for slot in $LOGGED_SLOTS; do
     line="$(grep_log "$slot" '\[M2\] EDGE_STATUS epoch=' | tail -n 1)"
     if [ -z "$line" ]; then fail "slot $slot never applied an EDGE_STATUS"; ok=1; continue; fi
     note "slot $slot: $line"
-    case "$line" in *"E:open"*) ;; *) fail "slot $slot's east edge is not open"; ok=1 ;; esac
-    case "$line" in *"N:open"*) ;; *) fail "slot $slot's north edge is not open"; ok=1 ;; esac
-    case "$line" in *"entries=2"*) ;;
-      *) fail "slot $slot's EDGE_STATUS did not carry two entries — one per declared export edge"; ok=1 ;;
+    for e in E N W S; do
+      case "$line" in *"$e:open"*) ;; *) fail "slot $slot's $e edge is not open"; ok=1 ;; esac
+    done
+    case "$line" in *"entries=4"*) ;;
+      *) fail "slot $slot's EDGE_STATUS did not carry four entries — one per declared export edge"; ok=1 ;;
     esac
   done
 
@@ -810,7 +822,16 @@ lan_phase1() {
     [ "$pshape" = "3x2" ] || { fail "the status page reports map $pshape"; ok=1; }
     [ "$pslots" = "6" ]   || { fail "the status page reports $pslots slots"; ok=1; }
     [ "$plive" = "6" ]    || { fail "the status page reports $plive live slots"; ok=1; }
-    [ "$popen" = "12" ]   || { fail "the status page reports $popen open lanes, want 12 (six slots x two axes)"; ok=1; }
+    # ONE LANE PER DECLARED EDGE PER SLOT (§10.1, §17 B13), so the count is DERIVED
+    # from what the slots declare and never a constant. Under two-way lanes six
+    # four-edge slots give 24; a slot still on a pre-D17 mod declares two and the
+    # page draws it with two dead lanes rather than inventing them — which is the
+    # legal mixed case during a rollout, and the reason this is not `-eq 24`.
+    local pdecl
+    pdecl="$(status_get 'sum(len(s.get("exportEdges") or []) for s in d["slots"])')"
+    note "declared export edges across the map: $pdecl (one lane each; all wrap, so all open)"
+    [ "$planes" = "$pdecl" ] || { fail "the status page draws $planes lanes for $pdecl declared edges"; ok=1; }
+    [ "$popen" = "$pdecl" ]  || { fail "the status page reports $popen open lanes, want $pdecl — both axes wrap, so no declared edge is dark"; ok=1; }
     step "and what it knows about the far world, which is everything §6.3.1 puts on the wire"
     note "slot $REMOTE_SLOT: peer=$(remote_stat peerId) live=$(remote_stat live) modConnected=$(remote_stat modConnected)"
     note "slot $REMOTE_SLOT: population=$(remote_stat population) simulatedTime=$(remote_stat simulatedTime) simulationSize=$(remote_stat simulationSize)"
@@ -1379,6 +1400,10 @@ case "${1:-status}" in
   journal)    python3 "$E2E/journal.py" summary $(for s in $SLOTS; do [ -f "$(journal_of "$s")" ] && journal_of "$s"; done) ;;
   archive)    shift; archive_list "$@" ;;
   send)       shift; send "$@" ;;
+  # hop <from> <to> <edge> <selector> — one forced export, observed end to end
+  # through both logs and both sidecars. Exposed because a two-way map has four
+  # directions to prove and the phases only drive some of them.
+  hop)        shift; hop "$@" ;;
   count)      shift; count_everywhere "$@" >/dev/null ;;
   all)        lan_all ;;
   *)
