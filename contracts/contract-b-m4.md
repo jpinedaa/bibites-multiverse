@@ -1,20 +1,29 @@
 # Contract B — M4 (Sidecar ↔ Relay ↔ Sidecar ↔ Archive)
 
-**Version:** `contract-b/3.0`
+**Version:** `contract-b/3.1`
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3), **B6** the
 narrowing of the duplicate re-ACK to a tombstone (§6.6, §6.7), **B7** the fan-out of the
 relay's own non-delivery answers and the NACK dedup key (§5.1). All four are clarifying; the
 version does not move. Contract A's matching set is `contract-a.md` §15, A26 and A27.
+**Amended:** 2026-08-07, amendment set `contract-b/3.1 + B9–B10` (**§15**), from the owner's
+ratification of **Option A — species identity travels in the migration envelope**.
+`MIGRATION_PAYLOAD` gains one OPTIONAL `species` object, carried opaquely end to end and
+recorded by the archive; the relay and both sidecars validate its shape and interpret nothing.
+That is an additive field, so §4's own test answers with a **minor** bump to `contract-b/3.1`.
+Contract A's matching set is `contract-a.md` §16, A30–A33. Affected body text carries an
+`(amended — §15, Bx)` or `(added — §15, Bx)` marker, and **§15 wins over the body and over
+§14 wherever they disagree.**
 **Status:** implementation-ready for M4. Written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*.
 **Supersedes:** `contracts/contract-b-m3.md`, in full. That document is the historical
 record of the M3 ring and is **not** current guidance.
-**Companion documents:** `contracts/contract-a.md` (`contract-a/2.0`, mod ↔ sidecar) and
+**Companion documents:** `contracts/contract-a.md` (`contract-a/2.1`, mod ↔ sidecar) and
 `contracts/genome-hash.md` (`bb8-genome/1`, the canonical genome projection — **unchanged by
-M4**).
+M4 and unchanged by the species block**, which is not hashed and whose one payload key,
+`genes.speciesID`, that projection already excludes: §4.3 there).
 
 > ### Why a successor document and not an amendment
 >
@@ -245,7 +254,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -275,6 +284,13 @@ twice over:
 A `contract-b/2` sidecar and a `contract-b/3` relay are incompatible by design and say so
 with close `4000` instead of misrouting an organism.
 
+**The species block is the one change since, and it is a minor** (added — §15, B10):
+`MIGRATION_PAYLOAD.species` is an additive OPTIONAL field, so the identifier moves to
+**`contract-b/3.1`** and every `contract-b/3.x` peer stays compatible with every other. A relay
+or sidecar that does not know the field ignores it (§4, `contract-a.md` §3.1) and the
+destination mod falls back to `contract-a.md` §16, A32 — quiet, defined degradation, never a
+rejection.
+
 Timestamps are informational (D5). `messageId` is for log correlation only; `migrationId` is
 the one idempotency key in the system (`contract-a.md` §7.1).
 
@@ -293,9 +309,11 @@ Every routable frame also carries `sourcePeer`. The relay **MUST** check it agai
 sending connection's own peer id and **MUST** close with `4003` when they disagree. It
 **MUST NOT** rewrite it, so the frame can be forwarded byte for byte.
 
-The relay **MUST NOT** decode `data.body.bb8`, **MUST NOT** decode `data.lineage`, and
-**MUST NOT** validate a payload (D4 — that is `bb8-schema`'s job, sidecar-side, at both
-ends). It forwards the original frame bytes unchanged.
+The relay **MUST NOT** decode `data.body.bb8`, **MUST NOT** decode `data.lineage`,
+**MUST NOT** read `data.species` (added — §15, B9), and **MUST NOT** validate a payload
+(D4 — that is `bb8-schema`'s job, sidecar-side, at both ends). It forwards the original frame
+bytes unchanged. A species name is **never** a routing input, a filter, or an admission-control
+term: the relay routes on `destSlot` and `destPeer`, and on nothing else.
 
 **Routing is on the slot, not on the peer, and not on the position.** `destSlot` is an
 address: if the peer holding that slot changed identity since the sender journaled the
@@ -405,7 +423,7 @@ The **first frame on every connection**. Any other first frame closes with `4003
 |---|---|---|---|
 | `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). |
 | `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). |
-| `protocolVersion` | string | yes | `"contract-b/3.0"`. A different **major** closes with `4000`. |
+| `protocolVersion` | string | yes | `"contract-b/3.1"` (amended — §15, B10). A different **major** closes with `4000`. |
 | `gameVersion` | string | yes | The game version behind this sidecar, from the mod's `CONFIG_UPDATE`. Empty while no mod is connected, and always empty for an archive. |
 | `sidecarVersion` | string | yes | Informational. The archive sends its own version here. |
 | `simulationSize` | float | no | `S`, when a mod has already reported one. |
@@ -424,14 +442,14 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
   "data": {
     "peerId": "peer-lan-slot5",
     "role": "peer",
-    "protocolVersion": "contract-b/3.0",
+    "protocolVersion": "contract-b/3.1",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0",
     "simulationSize": 2000.0
@@ -444,7 +462,7 @@ independently updated installs, so this is the failure most likely to waste an e
 | Field | Type | Required | Semantics |
 |---|---|---|---|
 | `relayVersion` | string | yes | Informational. |
-| `protocolVersion` | string | yes | `"contract-b/3.0"`. |
+| `protocolVersion` | string | yes | `"contract-b/3.1"` (amended — §15, B10). |
 | `relaySessionId` | `uuid` | yes | **New in M4.** Minted once at relay start, constant for the life of the relay process. It is the scope of the forwarding record (§5.2), and a sidecar **MUST** persist it against every journal entry it hands over while this connection is live (§9.2). |
 | `assignedSlot` | number (int) | no | The slot this `peerId` already holds, when the relay remembers one. Absent for a first-time peer and always absent for an archive. |
 | `assignedPosition` | object `{col,row}` | no | Its position. Present exactly when `assignedSlot` is. |
@@ -454,13 +472,13 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
   "data": {
     "relayVersion": "0.4.0",
-    "protocolVersion": "contract-b/3.0",
+    "protocolVersion": "contract-b/3.1",
     "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
     "assignedSlot": 5,
     "assignedPosition": { "col": 1, "row": 1 },
@@ -498,7 +516,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -533,7 +551,7 @@ Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -610,7 +628,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -708,7 +726,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -778,6 +796,11 @@ The Contract C `MigrationEnvelope`, carried in `data`, with the lineage annex (D
 | `lineage.parents[].entityId` | `entityId` | yes | The parent's id, from the migrant's genes. Signed int32, often negative. |
 | `lineage.parents[].genomeHash` | string | no | The parent's genome hash. **Absent means a gap** — the parent genome was not available to hash. |
 | `lineage.parents[].gapReason` | string enum | no | Present exactly when `genomeHash` is absent: `"parent_gone"` (no blob was shipped — the usual case), `"blob_invalid"` (`bb8-schema` could not hash it), `"blob_dropped_for_size"` (the mod trimmed it to fit the frame). **`"blob_dropped_for_size"` is still unreachable** — see below. |
+| `species` | object | no | **The migrant's species identity, opaque to this wire** (added — §15, B9). Copied verbatim out of the origin mod's `MIGRATE_OUT.species` (`contract-a.md` §5.3, §16 A30) and handed verbatim to the destination mod on `MIGRATE_IN`. Absent is valid and ordinary: an organism with no species record, a mod that does not implement `contract-a/2.1`, or a block a schema check stripped. |
+| `species.genericName` | string | yes | The genus half of the species name. REQUIRED when `species` is present. Non-empty, at most **64 UTF-8 bytes**, carried byte for byte — no trimming, no case folding, no normalization. |
+| `species.specificName` | string | yes | The specific half. Same rules. The destination mod matches on `genericName + " " + specificName` with exactly one U+0020 between them (`contract-a.md` §5.7 step 3). |
+| `species.parentGenericName` | string | no | The genus half of the **immediate parent species'** name, when the origin's species had a parent. |
+| `species.parentSpecificName` | string | no | The specific half of it. **All-or-nothing with the field above**: both present or both absent. Only one generation travels. |
 | `sourcePeer` | string | yes | Origin peer id. The relay verifies it. |
 | `sourceSlot` | number (int) | yes | The origin's slot. |
 | `destSlot` | number (int) | yes | The origin's **effective neighbour on `exitEdge`** at the moment the migration was journaled, or the slot a re-route redirected it to (§9.2). The relay routes on this and on nothing else. |
@@ -813,6 +836,25 @@ receiver already knows everything it needs.
 (`contract-a.md` §14, A12); the source sidecar hashes them, caches them under their hashes,
 and **strips them here**. A genome travels a second time only in answer to a
 `GENOME_REQUEST` (§6.9).
+
+**The `species` block is carried, validated for shape, and never interpreted** (added — §15,
+B9). Six rules, and they are the whole of this wire's involvement:
+
+| Rule | Statement |
+|---|---|
+| Copy, never author | The source sidecar copies the block out of `MIGRATE_OUT` unchanged. It **MUST NOT** synthesize one, fill a missing half, infer a parent, or derive anything from `body.bb8` — the payload holds a world-local integer and no name at all (`contract-a.md` §16). |
+| Schema validation only | Both sidecars check the shape stated above and nothing more. A **malformed** block — a missing half, a lone parent field, a non-string, an over-long name — is **stripped, logged once, and the migration proceeds without it**. It is never a `MIGRATION_NACK` reason, never a validation failure, and never a reason to hold an organism (`contract-a.md` §9.1). |
+| Opaque to routing | It takes no part in dedup, custody, admission control, the `S` check, the genome hash, the forwarding record, the hold clock, or a re-route. A **re-routed** frame carries the same block byte for byte, exactly as it carries the same `migrationId` and the same body. |
+| The relay reads nothing | §5's list now names `data.species`. A relay that filtered or routed on a species name would be a relay with an opinion about biology. |
+| Delivered verbatim | The receiving sidecar hands the block through to its mod on Contract A `MIGRATE_IN` (step 7 below) with every byte intact. It **MUST NOT** resolve, translate, or annotate it: the registry the name resolves against lives inside the game process, and only the mod can see it. |
+| Recorded | The archive records it against the migration (§10, added — §15, B10). That is the only place on this wire a species name is *used* for anything, and it is off the migration path by construction. |
+
+**Why a top-level field and not part of `lineage`.** The annex is the genome graph: hashes,
+parents, gaps, all of it computed by the sidecar under `genome-hash.md`. A species name is
+neither computed here nor hashed here — it is metadata the origin *world* asserts, the way
+`exitEdge` is geometry the origin world asserts. Putting an uncomputed, unverifiable string
+inside the annex would invite an implementer to treat it as a derived value and to
+reconcile it against a hash that deliberately excludes it (`genome-hash.md` §4.3).
 
 **Contract debt — the sidecar can only emit two of the three `gapReason` values.** A parent
 the mod dropped for frame size arrives on Contract A as an `entityId` with no `payload`,
@@ -859,6 +901,8 @@ The receiving sidecar **MUST**, in this order:
    (§10). A cache write failure is logged and never fails the migration.
 7. Deliver it to its mod as Contract A `MIGRATE_IN`, **through the delivery rate limit**
    (`contract-a.md` §7.5, §15 A20), replaying until the mod ACKs (`contract-a.md` §7.5).
+   **Copy `species` through unchanged when the envelope carried one** (added — §15, B9); when
+   it did not, send none, and the mod applies its absent-block rule (`contract-a.md` §16, A32).
    Pacing sits **after** step 5, never before it: custody is taken at the speed of the wire
    and released at the speed of the world.
 
@@ -885,7 +929,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -906,6 +950,12 @@ argument.
         { "entityId": 204418833, "gapReason": "parent_gone" }
       ]
     },
+    "species": {
+      "genericName": "Cyanea",
+      "specificName": "velox",
+      "parentGenericName": "Cyanea",
+      "parentSpecificName": "prima"
+    },
     "sourcePeer": "peer-lan-slot4",
     "sourceSlot": 4,
     "destSlot": 5,
@@ -921,12 +971,12 @@ argument.
 
 The same organism, re-routed after slot 5 went dark and the relay proved it had never
 forwarded the frame. The `migrationId` is the same, the payload is byte-identical, the exit
-geometry is untouched, and **only `destSlot` changed** — plus the `reroute` block that says
-so:
+geometry and the species block are untouched, and **only `destSlot` changed** — plus the
+`reroute` block that says so:
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -941,6 +991,12 @@ so:
           "genomeHash": "bb8-genome/1:sha256:43ea8315112301799622f3ab8906c2882e528502bc35424a209cd67bfdaec207" },
         { "entityId": 204418833, "gapReason": "parent_gone" }
       ]
+    },
+    "species": {
+      "genericName": "Cyanea",
+      "specificName": "velox",
+      "parentGenericName": "Cyanea",
+      "parentSpecificName": "prima"
     },
     "sourcePeer": "peer-lan-slot4",
     "sourceSlot": 4,
@@ -999,7 +1055,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1071,7 +1127,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1095,7 +1151,7 @@ simply cannot speak for the period before it started, so it says `false` and the
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -1138,7 +1194,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -1184,7 +1240,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -1223,7 +1279,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/3.0",
+  "protocol": "contract-b/3.1",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -1787,8 +1843,8 @@ A bounce re-delivers the organism to the origin's own mod as a Contract A `MIGRA
 `bounceBack: true`, **on the edge it left from** — the origin's own `exitEdge`, `"E"` or
 `"N"`, not a passive entry edge. It lands `entryMargin` **inside** that edge's capture band
 rather than in it, because `contract-a.md` §4.3 insets and clamps every spawn coordinate
-(§15 A28) — but it lands there still **moving outward**, because velocity is copied and
-never mirrored, so it re-enters the band under its own power within a few ticks. The
+(`contract-a.md` §15 A28) — but it lands there still **moving outward**, because velocity is
+copied and never mirrored, so it re-enters the band under its own power within a few ticks. The
 entry-immunity window is what stops the round trip from resolving as a second export, and
 `contract-a.md` §14 A11, §15 A19 and §15 A28 make that window REQUIRED for exactly this
 reason.
@@ -1851,6 +1907,19 @@ characters of the digest. It survives a restart. Entries expire after
 | Verify | Recompute the hash of every fetched blob (§6.10). |
 | Report | The gap report lists every hash no peer has served, with its first-seen time and attempt count. It is the archive's honest statement of what it does not have. |
 
+**Species names on the record** (added — §15, B10). The archive records the `species` block of
+§6.6 against the migration it arrived on, and that is the only place on this wire a species
+name is used for anything.
+
+| Rule | Statement |
+|---|---|
+| Recorded verbatim | Both names, and the parent pair when present, stored byte for byte as they arrived. The archive **MUST NOT** trim, case-fold, normalize or re-case a name; the destination mod's match is a byte comparison (`contract-a.md` §5.7), and a ledger that tidied its copy would stop describing what actually happened. |
+| A ledger fact, not a resolution | The block says what the **origin world** called this migrant at the moment it left. It is not a claim about the destination, and the archive **MUST NOT** resolve a name against any world's registry, merge two records because their names match, or rewrite an earlier record when a later envelope disagrees. Species resolution happens in exactly one place in this system, and it is the importing mod. |
+| Absent is absent | A migration with no block records **no species** — never `"unknown"` as a value, never an empty string standing in for one. That is §10.1's unknown rule applied to a new field. |
+| Dedup unchanged | A `MIGRATION_PAYLOAD` still deduplicates on `migrationId` alone (§5.1). The block is part of the record that key names, never part of the key. |
+| The win | Before this the ledger could name only hashes, so "which species crossed, and when" was a question the archive held the data to answer and not the labels. It now travels on every hop that carries a block. |
+| Not an M4 page input | The status page **MAY** use these names later. It does not in M4, and §10.1 gains no input from this amendment. |
+
 **The known limit, restated because it is load-bearing** (D11): a database built from
 migrations holds migrants and their ancestors, never the resident population of a peer.
 Census uploads would close the gap and are not M4.
@@ -1866,6 +1935,10 @@ specify it. **Its inputs are**, and three rules keep them honest (Risk 4):
 | One source, no polling | Everything the page shows about the map comes from the `PEER_STATUS` broadcasts the archive already receives as a subscriber (§5.1, §6.5), plus the envelope copies it already records. The page **MUST NOT** connect to a sidecar, read another component's files, or ask the relay for anything. Nothing on the migration path may ever wait for a reader. |
 | Derived, and marked as derived | The effective lanes and the bypasses are **recomputed** by the walk of §8 from `PEER_STATUS`. They are the same computation the relay performs, on the same inputs, and they are for display: the relay's `SECTOR_GRANT` remains the authority for a peer's actual routing. |
 | Unknown is a value | A field absent from `stats`, a slot with no `stats` at all, a `statsAsOfMs` older than `statsStaleMs` (30 000) — every one of them renders as **unknown**, never as zero and never as the last value seen without its age. A slot that reports nothing is unknown, not empty. **An honest gap beats a confident zero.** |
+
+**The species names the archive now records are not an input to this page in M4**
+(added — §15, B10). They are recorded for the ledger; a rendering may follow, and this
+document specifies none. Nothing in the list below changes.
 
 The exit test asks the page for the map and its holes, each slot's liveness and population,
 each effective lane, each bypass with the time it went dark, each sidecar's custody depth,
@@ -2159,9 +2232,9 @@ drop its own entry. If the receiver then dies before the spawn, **both** sides h
 the organism. That is a loss the chain exists to prevent, and it is a loss with no signal:
 nobody logs anything.
 
-**Pacing is what turns this from a race into a window.** Arrival pacing (`contract-a.md` §7.5,
-§15 A20) makes "journaled but not yet delivered" a **long-lived** state — minutes of simulated
-time, by design. In M3 that state lasted microseconds and the unconditional re-ACK was a
+**Pacing is what turns this from a race into a window.** Arrival pacing (`contract-a.md`
+§7.5 and §15 A20) makes "journaled but not yet delivered" a **long-lived** state — minutes of
+simulated time, by design. In M3 that state lasted microseconds and the unconditional re-ACK was a
 theoretical defect; under M4 it is a wide, ordinary, everyday window. **This amendment records
 a live defect found and fixed in the M4 implementation**, not a hypothetical one.
 
@@ -2251,3 +2324,93 @@ changes. One default is added to §12.
 **Enforced by:** the receiving sidecar, for the decode order; the sending sidecar, for the
 backoff. The relay carries no part of it — it forwards retries as dumbly as ever, which is
 why the sender had to learn restraint.
+
+---
+
+## 15. Species-identity amendment (`contract-b/3.1`, 2026-08-07)
+
+The owner ratified **Option A — species identity travels in the migration envelope** on
+2026-08-07. A `.bb8` payload carries only `genes.speciesID`, a per-world counter value that
+means nothing in another world, and the destination's deserializer looks it up in its **own**
+registry anyway — so a migrant silently joins an unrelated local species on a collision, and
+founds an unprunable orphan-root species on a miss. `contract-a.md` §16 states the defect in
+full and carries the whole design; **this wire's entire job is to carry the answer without
+touching it.**
+
+**Two amendments, B9 and B10**, continuing the `B` series for the reason §14 gives — the
+namespace is the wire's, not the file's. B9 puts the block on `MIGRATION_PAYLOAD` and states
+the opacity rule; B10 records it in the archive and applies §4's version test.
+
+**This set changes the wire, additively**: one OPTIONAL field on one message. No message type,
+no enum value, no removal, no type change, no new tunable, no new NACK code, and no change to
+routing, custody, dedup, pacing, hashing or the hold. §4's test therefore answers **minor**,
+and the identifier moves to `contract-b/3.1` (B10). The style follows §14 and
+`contract-a.md` §13–§16: the gap or change, the resolution, and **which side enforces it**.
+
+### B9 — `MIGRATION_PAYLOAD` carries an OPTIONAL species block, opaque end to end (§5, §5.1, §6.6)
+
+**Change.** The envelope gains `species`: `{ genericName, specificName, parentGenericName?,
+parentSpecificName? }`, copied out of the origin mod's Contract A `MIGRATE_OUT.species`
+(`contract-a.md` §5.3) and handed to the destination mod on `MIGRATE_IN` (`contract-a.md`
+§5.7). §6.6 carries the field table and the six rules; this amendment states why they are
+what they are.
+
+**Resolution — the block is envelope metadata beside the blob, exactly like `exitEdge`.**
+
+| Question | Answer |
+|---|---|
+| Who may read it? | The origin mod, which writes it, and the destination mod, which resolves it against its own registry. **Nobody in between.** |
+| What do the sidecars do? | Validate its shape and carry it. A malformed block is **stripped and logged**, never NACKed — refusing an organism over a label is the trade `contract-a.md` §9.1 refuses to make. |
+| What does the relay do? | Nothing. §5's prohibition list now names `data.species` beside `data.body.bb8` and `data.lineage`. A species name is never a routing input, a filter or an admission-control term. |
+| Does the fan-out change? | **No.** §5.1 already copies every routed frame byte-identically, so a subscriber receives the block without a new rule. |
+| Does a re-route change it? | **No.** A re-routed frame keeps the same `migrationId`, the same body and the same block; only `destSlot` and the `reroute` annotation move (§6.6, §9.2). |
+| Is it in the annex? | **No, and deliberately.** `lineage` holds values this wire *computes* under `genome-hash.md`. A species name is asserted by the origin world, is not hashed, and is excluded from the canonical projection (`genome-hash.md` §4.3) — so the rewrite the destination mod performs on `genes.speciesID` cannot invalidate a hash this wire already computed. Nesting an unverifiable string among computed ones invites an implementer to reconcile it against a hash that was built to ignore it. |
+
+**Why this is D4-consistent and not a widening of it.** D4 keeps the *body* opaque. This block
+is not the body — it never came out of the body, and it never goes back into it on this wire.
+The one place a name touches a payload is inside a game process, where the destination mod
+rewrites `$.genes.speciesID` before restoring (`contract-a.md` §16, A31), and that is a mod
+rule in a mod's own contract. Nothing on Contract B parses one more byte than it did before.
+
+**Enforced by:** the source sidecar, for copying without authoring; both sidecars, for
+shape-validate-and-strip; the relay, for reading nothing; the receiving sidecar, for handing
+the block through verbatim.
+
+### B10 — The archive records the block, and the version moves to `contract-b/3.1` (§4, §10, §10.1, §12)
+
+**Change.** The archive stores the `species` block against the migration record, and §4's
+version test is applied to the field B9 added.
+
+**Resolution, the recording half.** §10 carries the rules: recorded verbatim; a **ledger fact,
+never a resolution** — the archive does not resolve, merge or rewrite names, because species
+resolution happens in exactly one place in this system and it is the importing mod; absent is
+absent, never `"unknown"` as a value; and dedup is unchanged, on `migrationId` alone. §10.1
+gains **no** page input in M4: a rendering may follow and this document specifies none.
+
+**Why record it at all, given no page reads it.** The archive's whole purpose is that
+migration is where a genome crosses a machine boundary (D11), and until now the ledger could
+name only hashes. The name its origin world used is the one label a human reads, and it is
+free here — the envelope already passes through. Recording it now means the history exists
+when something wants to render it; adding it later would leave every migration before that
+date nameless.
+
+**Resolution, the version half.** Apply §4's test:
+
+| Change to Contract B | Kind | Needs a major? |
+|---|---|---|
+| `MIGRATION_PAYLOAD.species` added | additive OPTIONAL field | no |
+| Relay prohibition list names one more field | a restriction restated, no shape | no |
+| Archive records a field it already receives | off-wire behaviour | no |
+| Message catalogue, enums, codes, tunables, custody rules | **all unchanged** | no |
+
+The identifier is **`contract-b/3.1`**. Every `contract-b/3.x` peer stays compatible with every
+other, because compatibility is on the major and the minor is never a rejection reason (§4,
+`contract-a.md` §3.1). The two old-peer cases are **not** the same, and the difference is
+worth stating: a `contract-b/3.0` **relay** is transparent to this change — it forwards frame
+bytes and decodes nothing (§5), so the block crosses it intact — while a `contract-b/3.0`
+**sidecar** at either end drops the field on decode, and the destination mod then applies its
+absent-block rule (`contract-a.md` §16, A32), which is defined, quiet, and still better than
+the behaviour §16 replaces. **No default in §12 changes and none is added.**
+
+**Enforced by:** the archive, for the recording and for not interpreting it; both wire ends,
+for sending `"contract-b/3.1"` and comparing only the major.

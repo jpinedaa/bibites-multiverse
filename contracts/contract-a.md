@@ -1,6 +1,6 @@
 # Contract A — Mod ↔ Sidecar Wire Specification
 
-**Version:** `contract-a/2.0`
+**Version:** `contract-a/2.1`
 **Amended:** 2026-08-02, amendment set `contract-a/1 + A1–A10` (§13). Both implementations
 exist, and each side resolved an ambiguity locally before the other could see it; §13
 makes every resolution law. Each place in the body that was wrong or under-specified now
@@ -23,13 +23,22 @@ the M4 pre-flight pass** — all three of the later batches are clarifying, so t
 stays at `contract-a/2.0`. Affected body text carries an `(amended — §15, Ax)` or
 `(added — §15, Ax)` marker, and **§15 wins over the body, over §14 and over §13 wherever
 they disagree.**
+**Amended:** 2026-08-07, amendment set `contract-a/2.1 + A30–A33` (§16), from the owner's
+ratification of **Option A — species identity travels in the migration envelope**. This set
+**does** change the wire, additively: `MIGRATE_OUT` and `MIGRATE_IN` each gain one OPTIONAL
+`species` object, so §3.1's own rule forces a **minor** bump to `contract-a/2.1` and the URL
+path does **not** move (§16, A33). The behavioural half — resolve the species by name and
+rewrite `genes.speciesID` before the restore — is entirely mod-internal. Affected body text
+carries an `(amended — §16, Ax)` or `(added — §16, Ax)` marker, and **§16 wins over the body
+and over §13, §14 and §15 wherever they disagree.**
 **Status:** implementation-ready for M4. Derived from the ratified decisions D1–D16 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, the world-geometry and
 entry-position research in `m2_findings.md`, the ring, containment and lineage designs in
 `m3_considerations.md`, and the grid, healing, recovery and operations designs in
 `m4_considerations.md`.
-**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.0`, sidecar ↔ relay ↔
-sidecar ↔ archive) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged by M4).
+**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.1`, sidecar ↔ relay ↔
+sidecar ↔ archive) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged by M4 and
+unchanged by §16 — `genes.speciesID` is excluded from the canonical projection, §4.3 there).
 
 This document is the complete interface between `bibites-mod` (C#, in-process with The
 Bibites) and `multiverse-sidecar` (Go, a separate process on the same machine). It is
@@ -56,7 +65,7 @@ A20, A21):
 | Decision | What it forces on this contract |
 |---|---|
 | **D2** — durable custody, at-most-once | `migrationId` is the idempotency key. `MIGRATE_OUT_ACK` is emitted only after a durable journal write. Both sides deduplicate. Loss is preferred over duplication. **Amended by M4:** at-most-once carries exactly one bounded exception, and it lives entirely on Contract B — an orphaned outbound entry is held while its destination is dark and bounces home at the timeout (`contract-b-m4.md` §9). Nothing on this wire changes: a bounce is still an ordinary `MIGRATE_IN` with `bounceBack: true` (§15, A25). |
-| **D4** — the bb8 body is opaque to the mod | The organism payload travels as a **JSON string**, not a nested object, plus a `gameVersion` tag. The mod never parses it. All structural validation is sidecar-side, in `bb8-schema`, in both directions. |
+| **D4** — the bb8 body is opaque to the mod | The organism payload travels as a **JSON string**, not a nested object, plus a `gameVersion` tag. All structural validation is sidecar-side, in `bb8-schema`, in both directions. **The mod never parses it for meaning** and never deserializes it into a typed model. On import it rewrites a fixed, named set of JSON paths — the eight position numbers, and now `$.genes.speciesID` — and reads nothing else out of the blob (amended — §16, A31). |
 | **D3** — map-edge borders | The mod reports `exitEdge` + `exitPosition` + `velocity` + `heading`. It never reports a destination. The sidecar reports `entryEdge` + `entryPosition`; it never reports absolute world coordinates. |
 | **D5** — no global clock | Every timestamp in this contract is informational. No side makes a correctness decision from another side's clock. |
 | **D7** — Go sidecar | The sidecar is the WebSocket **server**. The mod is the **client**. A player starts one static binary; the game finds it. |
@@ -122,7 +131,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_OUT",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -132,7 +141,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 | Field | JSON type | Required | Semantics |
 |---|---|---|---|
-| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.0"` (amended — §15, A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
+| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.1"` (amended — §16, A33; `"contract-a/2.0"` before it, §15 A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
 | `type` | string | yes | The message discriminator. One of the nine names in §5. Uppercase, `A–Z` and `_` only. |
 | `messageId` | string | yes | UUID v4, lowercase, hyphenated, 36 characters. Unique per frame. Used **only** for log correlation. It is **not** an idempotency key. |
 | `sentAt` | number (int64) | yes | Unix milliseconds on the sender's wall clock. Informational only (D5). No side compares it against its own clock to make a decision. |
@@ -154,8 +163,9 @@ Every frame, in both directions, is a JSON object with exactly this shape:
   a field that a lower minor did not define; a receiver detects a feature by the presence
   of its field, never by arithmetic on the minor. The minor exists so a log line and a
   bug report say which shape was on the wire.
-- The URL path stays major-scoped: `/contract-a/v2` serves every `contract-a/2.x`, exactly
-  as `/contract-a/v1` served every `contract-a/1.x` (amended — §15, A23). A **major** bump
+- The URL path stays major-scoped: `/contract-a/v2` serves every `contract-a/2.x` — including
+  `contract-a/2.1` (amended — §16, A33) — exactly as `/contract-a/v1` served every
+  `contract-a/1.x` (amended — §15, A23). A **major** bump
   therefore moves the path, and the retired path is kept alive only to answer with close
   `4000` (§2).
 - Both sides **MUST** ignore unknown fields inside `data` and inside the envelope. This
@@ -445,6 +455,12 @@ consumed by `SaveSystem.LoadBibiteOrEggFromData` (`m1_findings.md` §1, §2).
 - `gameVersion` travels beside it in the same message. The sidecar uses the pair to pick a
   `bb8-schema` dialect. It **MUST NOT** trust the `version` key inside the blob over the
   `gameVersion` field beside it; the field is authoritative.
+- The importing mod performs two **keyed rewrites** on this string before it restores it, and
+  they are the only writes any mod makes into a blob: the eight position numbers, and
+  `$.genes.speciesID` (§5.7 step 3, added — §16, A31). Both address a fixed path by name, both
+  are writes, and neither reads a value back or infers anything from the blob's shape — which
+  is what keeps D4 intact. Anything beyond a named path is parsing, and parsing is the
+  sidecar's.
 
 In the examples below, `{ ... }` inside a payload string marks elided content. It is not
 literal.
@@ -505,7 +521,7 @@ neighbour per export edge and cannot do that for an edge it has not been told ab
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "CONFIG_UPDATE",
   "messageId": "1c2fbe80-5a17-4a2b-9a20-3d54f1b7e001",
   "sentAt": 1785693598004,
@@ -569,7 +585,7 @@ is conformant and simply reads as unknown — an honest gap, never a zero.
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "HEARTBEAT",
   "messageId": "6b0a3f1d-3c4e-4a91-b7f2-51c8a0d33e42",
   "sentAt": 1785693600000,
@@ -621,6 +637,11 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
 | `parents[].entityId` | `entityId` | yes | The parent's `BibiteBody.id.id`, read from the **live `BibiteGenes` component** of the migrant — never from the migrant's serialized payload (amended — §14, A12). `0` is the game's "unassigned" sentinel and such an entry **MUST** be omitted entirely. |
 | `parents[].payload` | string | no | The parent's own opaque bb8 blob, from `SaveSystem.SerializeBibite`, subject to the same rules as `payload` (§4.6). **Absent means the parent is gone** — `BibiteGenes` drops the parentage once the parent GameObject is destroyed, so this is normal and is recorded as a gap, never as an error. |
 | `parents[].gameVersion` | string | no | The version that produced `parents[].payload`. Absent means "the same as the migrant's `gameVersion`", which is always true in practice because both were serialized in the same tick. |
+| `species` | object | no | **The migrant's species identity** (added — §16, A30). Read from the live organism's own `Species` record — `BibiteGenes.species` — never from the payload, which carries only a world-local integer. Absent when the organism has no species record, and absent from a mod that does not implement §16 at all; both are conformant, and §5.7's absent-block rule states exactly what the importer then does. |
+| `species.genericName` | string | yes | The genus half of the name, byte for byte as the source world holds it (`Species.genericName`). REQUIRED when `species` is present. Non-empty, at most **64 UTF-8 bytes**, no leading or trailing whitespace. |
+| `species.specificName` | string | yes | The specific half (`Species.specificName`). Same rules. The name the importer matches on is `genericName + " " + specificName`, assembled with exactly one U+0020 — the game's own `Species.name` (`Species.cs:85`). |
+| `species.parentGenericName` | string | no | The genus half of the **immediate parent species'** name, taken from `Species.parentSpecies` when the migrant's species has one. Same string rules. |
+| `species.parentSpecificName` | string | no | The specific half of the same name. **The two parent fields are all-or-nothing** — both present or both absent — and a block carrying exactly one of them is malformed (§16, A30). Exactly **one** generation travels: a grandparent never does, and the importer needs none, because a chain rebuilds one link at a time as its members migrate. |
 | `exitEdge` | edge enum | yes | Which of the mod's own edges the organism crossed. **MUST** be a member of the `exportEdges` the mod declared, and **MUST** be the edge §4.3.2 chose (amended — §15, A18). `"E"` or `"N"` under the grid. The mod **MUST** record it against its own in-flight record: it is what makes a `MIGRATE_OUT_NACK` with no `edge` field unambiguous under two export edges (§9.1, §15 A22). |
 | `exitPosition` | float | yes | `[0,1]` along that edge, by the formula in §4.3. |
 | `velocity` | object `{x,y}` | yes | World velocity at the moment of capture (§4.4). |
@@ -631,7 +652,12 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
 **Receiver obligations, in this order.** The sidecar **MUST**:
 
 1. Validate the frame's fields, then validate `payload` with `bb8-schema` against
-   `gameVersion`. On failure reply `MIGRATE_OUT_NACK` / `INVALID_PAYLOAD`.
+   `gameVersion`. On failure reply `MIGRATE_OUT_NACK` / `INVALID_PAYLOAD`. **The `species`
+   block is schema-validated and nothing more** (added — §16, A30): a block that breaks the
+   shape rules above is **stripped, logged once, and the migration proceeds without it** —
+   never a NACK, and never a reason to hold an organism. The sidecar reads no meaning out of
+   the two names it carries, and it **MUST NOT** synthesize, translate, normalize or
+   case-fold them.
 2. Check `migrationId` against the journal. If an entry already exists **with the same
    payload hash**, reply `MIGRATE_OUT_ACK` immediately and journal nothing. This is what
    makes a retry after a lost ACK safe.
@@ -673,9 +699,31 @@ An implementation **SHOULD** cache the serialized blob by entity ID **within one
 brood of siblings crossing together would otherwise serialize the same mother repeatedly on
 the main thread (`m3_considerations.md`, Risk 8).
 
+**Sender obligations for `species`** (added — §16, A30). The mod **MUST**:
+
+- read the two names from the migrant's **live `Species` record**, `BibiteGenes.species`, on
+  the main thread in the same `FixedUpdate` as the migrant's own serialization. The payload's
+  `$.genes.speciesID` is a world-local counter value and says nothing a receiver can use, so
+  it is **never** the source of this block;
+- omit the whole block when `BibiteGenes.species` is `null`. A null record is a normal state —
+  `ResumeBody` fills it through `CheckNewSpecies` after a restore (`BibiteBody.cs:477-480`) —
+  and an omitted block is valid, never an error;
+- fill `parentGenericName` and `parentSpecificName` from `Species.parentSpecies` when that
+  reference is non-null, and omit **both** when it is null. A root species has no parent and
+  travels without one;
+- copy the names verbatim: no trimming, no case folding, no Unicode normalization, no
+  re-generation. The importer's match is a byte comparison (§5.7), so any tidying on this side
+  is a silent mismatch on the other;
+- send the block on **every** hop, not only the first. It is read from the live record each
+  time, so an organism that speciated between hops carries its new name on the next one.
+
+The mod **MUST NOT** send a species block for a parent in `parents[]`, and there is no field
+for one. The annex is about genomes and this block is about the migrant's own name; a parent's
+species travels when that parent migrates, and not before.
+
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_OUT",
   "messageId": "d3a11c9e-77b4-4b2f-8e5c-0a91f4d6b210",
   "sentAt": 1785693600123,
@@ -693,6 +741,12 @@ the main thread (`m3_considerations.md`, Risk 8).
       },
       { "entityId": 204418833 }
     ],
+    "species": {
+      "genericName": "Cyanea",
+      "specificName": "velox",
+      "parentGenericName": "Cyanea",
+      "parentSpecificName": "prima"
+    },
     "exitEdge": "E",
     "exitPosition": 1.0,
     "velocity": { "x": 61.2, "y": 4.4 },
@@ -717,12 +771,12 @@ earlier, at `x = 2380.4, y = 2015.7` with `vx = 61.2, vy = 88.9`, sits in both b
 past `S − W = 1940` on both axes and both components are outward. §4.3.2 compares the two
 and `vy > vx`, so the export is **north** and `exitPosition` is computed along `x`:
 `(2380.4 + 2000) / 4000 = 1.095`, clamped to `1.0`. Only the four routing fields differ from
-the frame above; `payload`, `parents`, `velocity`, `heading` and `simulationSize` are
-unchanged.
+the frame above; `payload`, `parents`, `species`, `velocity`, `heading` and `simulationSize`
+are unchanged.
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_OUT",
   "messageId": "f4b83c17-0d95-4a6e-b721-8c50a9f3e264",
   "sentAt": 1785693600123,
@@ -733,6 +787,12 @@ unchanged.
     "gameVersion": "0.6.3.1",
     "payload": "{\"transform\":{ ... },\"rb2d\":{ ... },\"genes\":{ ... },\"body\":{\"id\":-843827577, ... },\"clock\":{ ... },\"brain\":{ ... },\"version\":\"0.6.3.1\"}",
     "parents": [],
+    "species": {
+      "genericName": "Cyanea",
+      "specificName": "velox",
+      "parentGenericName": "Cyanea",
+      "parentSpecificName": "prima"
+    },
     "exitEdge": "N",
     "exitPosition": 1.0,
     "velocity": { "x": 61.2, "y": 88.9 },
@@ -809,7 +869,7 @@ Both lanes open, which is the ordinary state of a peer on a live grid:
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "EDGE_STATUS",
   "messageId": "5e18b2c0-4a6d-4f88-9c31-b0e75a2d4413",
   "sentAt": 1785693598041,
@@ -840,7 +900,7 @@ go, because a column of two holds no third slot to skip to (`contract-b-m4.md` �
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "EDGE_STATUS",
   "messageId": "b41c7d29-6e05-4f3a-8d17-92c0be5a4f38",
   "sentAt": 1785693731660,
@@ -901,7 +961,7 @@ There is no acknowledgement of an acknowledgement. The chain stops here.
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_OUT_ACK",
   "messageId": "a0c47f21-6b19-4d05-93ae-1c8f2b6e5507",
   "sentAt": 1785693600141,
@@ -936,7 +996,7 @@ the strip forever.
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_OUT_NACK",
   "messageId": "cf51d7a3-882b-4e14-a0d6-33b9c4e17708",
   "sentAt": 1785693600138,
@@ -981,6 +1041,7 @@ something to infer anything from.
 | `kind` | string enum | yes | `"bibite"` in M2 and M3. Unknown kind → `MIGRATE_IN_NACK` / `KIND_UNSUPPORTED`. |
 | `gameVersion` | string | yes | The version the blob is valid for, after any sidecar-side conversion. The mod compares it against `Application.version`. |
 | `payload` | string | yes | The opaque bb8 blob (§4.6), already validated by `bb8-schema`. |
+| `species` | object | no | **The migrant's species identity, as its origin world named it** (added — §16, A30). Same four fields, same rules and the same all-or-nothing parent pair as `MIGRATE_OUT` (§5.3); the sidecar copies it out of the envelope unchanged (`contract-b-m4.md` §6.6) and never authors one. Absent means the sender did not carry one — a legacy mod, an organism with no species record, or a block the schema check stripped — and step 3's **absent-block rule** covers all three identically. |
 | `entryEdge` | edge enum | yes | The edge of the **receiving** sim the organism enters through. The sidecar computes it; the mod does not derive it. Under the grid it is the **opposite of the sender's `exitEdge`** — `"W"` for traffic off an east lane, `"S"` for traffic off a north lane — and, for a bounce-back, the **origin's own exit edge**, because a bounce-back comes home through the door it left by (amended — §15, A18; §14, A11; `contract-b-m4.md` §6.6, §9). All four values therefore appear here in M4. |
 | `entryPosition` | float | yes | `[0,1]` along `entryEdge`, by §4.3. In M2 the sidecar copies `exitPosition` unchanged. |
 | `velocity` | object `{x,y}` | yes | Copied, never mirrored (§4.4). |
@@ -1014,9 +1075,32 @@ Processing order:
    nothing.
 2. Compute the world entry point from `entryEdge`, `entryPosition`, its own `S`, its own
    strip width and inset margin (§4.3, `m2_findings.md` §(c)).
-3. Rewrite the eight position numbers in the payload JSON — `$.transform.position[0]`,
-   `$.transform.position[1]`, `$.transform.rotation`, `$.rb2d.px`, `$.rb2d.py`,
-   `$.rb2d.vx`, `$.rb2d.vy`, `$.rb2d.r` — then call
+3. **Resolve the species, rewrite the payload, then restore.** All three on the Unity main
+   thread, and all three **before** the game's own deserializer runs: `BibiteGenes.LoadState`
+   binds the species from the blob it is handed (`BibiteGenes.cs:581-583`), and nothing after
+   the call can correct that without moving a live organism between species
+   (added — §16, A31).
+
+   **(a) Resolve.** When a `species` block is present, assemble
+   `name = genericName + " " + specificName` and look it up in the local
+   `GlobalLineageManager.recordedSpecies` by **exact, ordinal, case-sensitive** string
+   equality against `Species.name`. The registry searched is the full recorded one, not the
+   active subset.
+
+   | Outcome | What the mod does |
+   |---|---|
+   | Exactly one match | That local species is the answer. If it is not in `activeSpecies` it is re-activated, exactly as `GlobalLineageManager.FindSpeciesFromTemplate` re-activates one (`GlobalLineageManager.cs:277-300`). **A migrant reviving a locally extinct species of the same name is the correct outcome**, not the defect §16 closes: the name is the same species, and the species genuinely came back. |
+   | More than one match | Take the **first** in `recordedSpecies` order and log one warning. The game's own generator name-checks against `recordedSpecies` before it issues a name (`SpeciesNameGenerator.RandomUnusedGenus` / `RandomUnusedSpecific`), so a within-world duplicate should not exist; this branch is here to be deterministic, not because it is expected. |
+   | No match | **Create** one local species whose `name` is exactly `name`, with both halves taken from the block and **never** re-generated — the game's `Species(BibiteBody, parent)` constructor calls `GenerateNewName()`, and a mod that lets it stand has thrown the identity away. When the block carries a parent name **and** a local species matches that name exactly, the new species is created as that species' **child** and inserted after it in the registry, the way `CreateNewSpecies(bibite, parentSpecies)` does (`GlobalLineageManager.cs:317-339`). Otherwise it is created as a **root**. |
+
+   **(b) Rewrite `$.genes.speciesID`** in the payload JSON to the resolved or created
+   species' own **local** id — a JSON integer; `Species.speciesID` is an `int64`
+   (`Species.cs:22`). With no `species` block, **remove the key** instead: the absent-block
+   rule below.
+
+   **(c) Rewrite the eight position numbers** in the payload JSON —
+   `$.transform.position[0]`, `$.transform.position[1]`, `$.transform.rotation`,
+   `$.rb2d.px`, `$.rb2d.py`, `$.rb2d.vx`, `$.rb2d.vy`, `$.rb2d.r` — then call
    `SaveSystem.instance.LoadBibiteOrEggFromData(json, true, null, null)`.
 4. **In the same frame**, re-assert `transform.position`, `transform.rotation`,
    `rb.position`, `rb.linearVelocity` and `rb.rotation` directly. The `Rigidbody2D` wins
@@ -1026,6 +1110,35 @@ Processing order:
    `SaveSystem.cs:748-782` (`m1_findings.md` §4.3).
 6. Start the entry-immunity window keyed on `entityId`.
 7. Reply `MIGRATE_IN_ACK`, or `MIGRATE_IN_NACK` on any failure.
+
+**The absent-block rule, and it is the floor for every import** (added — §16, A32). A
+`MIGRATE_IN` **without** a `species` block is valid — an old mod, an organism whose
+`BibiteGenes.species` was null, or a block the sidecar's schema check stripped (§5.3) all
+produce exactly the same frame, and the mod treats all three identically. The importing mod
+**MUST remove `$.genes.speciesID` from the payload** before it restores. Removal, not a
+substituted id: `BibiteGenes.LoadState` guards the lookup with `if (state["speciesID"] !=
+null)` (`BibiteGenes.cs:581-583`), so an absent key skips the registry lookup entirely and
+leaves `gene.species` null, and `ResumeBody` then classifies the arrival by the game's own
+genetic distance through `CheckNewSpecies` (`BibiteBody.cs:477-480`). That is the game's
+honest answer to "which local species is this organism", and it is available only when the
+foreign integer is gone.
+
+**No import path retains a raw foreign `speciesID`.** With a block, step 3(b) overwrites the
+key with a local id; without one, this rule deletes it. There is no third branch, and a mod
+that forwards the origin's integer into `LoadState` is defective — that integer is a
+world-local counter value (`Species.speciesMaxID`, `Species.cs:19`) and the only thing it can
+do in another world is collide.
+
+**A block that arrives malformed is treated as absent.** A `species` object that breaks
+§5.3's shape rules — a missing half, one parent field without the other, a non-string, a name
+over 64 UTF-8 bytes — **MUST NOT** be partially applied. The mod ignores it whole, logs one
+line naming it a sidecar defect (the sidecar was supposed to have stripped it, §5.3), and
+takes the absent-block rule. Half a name is not a weaker identity; it is a different one.
+
+**A failure to resolve or create is never a NACK.** If step 3(a) cannot produce a species —
+the registry is unavailable, the create throws — the mod falls back to the absent-block rule,
+logs one warning, and restores the organism anyway. Custody outranks bookkeeping: a name is
+recoverable on the next hop, an organism refused at the door is not.
 
 Step 6 is **REQUIRED under the ring, not optional** (amended — §14, A11). §4.3's inset
 guarantees that **no arrival of any kind spawns inside a capture band** — every spawn
@@ -1052,7 +1165,7 @@ swallows every exception (`m1_findings.md` §1.2). Reply `DESERIALIZE_FAILED`.
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_IN",
   "messageId": "7f2b91d6-0e34-4c7a-b158-9a03e6c2f411",
   "sentAt": 1785693600187,
@@ -1062,6 +1175,12 @@ swallows every exception (`m1_findings.md` §1.2). Reply `DESERIALIZE_FAILED`.
     "kind": "bibite",
     "gameVersion": "0.6.3.1",
     "payload": "{\"transform\":{\"position\":[2000.0,412.77],\"rotation\":274.11,\"scale\":0.9312},\"rb2d\":{\"px\":2000.0,\"py\":412.77,\"vx\":6.12,\"vy\":0.44,\"r\":274.11},\"genes\":{ ... },\"body\":{\"id\":-843827577, ... },\"clock\":{ ... },\"brain\":{ ... },\"version\":\"0.6.3.1\"}",
+    "species": {
+      "genericName": "Cyanea",
+      "specificName": "velox",
+      "parentGenericName": "Cyanea",
+      "parentSpecificName": "prima"
+    },
     "entryEdge": "W",
     "entryPosition": 0.6031925,
     "velocity": { "x": 6.12, "y": 0.44 },
@@ -1080,7 +1199,7 @@ copied, so it arrives still travelling north (added — §15, A18):
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_IN",
   "messageId": "0a5e83b1-9c47-4d20-b6f8-31e70c9a5d42",
   "sentAt": 1785693612044,
@@ -1090,6 +1209,12 @@ copied, so it arrives still travelling north (added — §15, A18):
     "kind": "bibite",
     "gameVersion": "0.6.3.1",
     "payload": "{\"transform\":{ ... },\"rb2d\":{ ... },\"genes\":{ ... },\"body\":{\"id\":-843827577, ... },\"clock\":{ ... },\"brain\":{ ... },\"version\":\"0.6.3.1\"}",
+    "species": {
+      "genericName": "Cyanea",
+      "specificName": "velox",
+      "parentGenericName": "Cyanea",
+      "parentSpecificName": "prima"
+    },
     "entryEdge": "S",
     "entryPosition": 0.297,
     "velocity": { "x": 61.2, "y": 88.9 },
@@ -1129,7 +1254,7 @@ later replay of the same `migrationId` is answered without a second delivery.
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_IN_ACK",
   "messageId": "34ab7c05-1d92-4e60-8b47-c1f0d5a29316",
   "sentAt": 1785693600231,
@@ -1176,7 +1301,7 @@ the one failure mode D2 accepts, but it is never the first choice.
 
 ```json
 {
-  "protocol": "contract-a/2.0",
+  "protocol": "contract-a/2.1",
   "type": "MIGRATE_IN_NACK",
   "messageId": "e91d4f3b-7c60-4a25-91b8-40d7e2ca6b19",
   "sentAt": 1785693600244,
@@ -1469,6 +1594,13 @@ is best-effort by construction: a missing, oversized, malformed or unhashable pa
 is recorded as a gap and the migration proceeds. `INVALID_PAYLOAD` refers to the migrant's
 own `payload` and to nothing else.
 
+**Nor by `species`** (added — §16, A30). The block is optional, and a block that fails its
+shape rules is **stripped** and forwarded without — logged once, never NACKed (§5.3). This is
+a deliberate departure from §9.3's default answer for a `data` field that fails validation,
+and the reason is the same asymmetry the annex rests on: refusing an organism over a label
+trades a live migrant for a cosmetic, and the label is recoverable on the organism's next hop
+while the organism is not.
+
 ### 9.2 `MIGRATE_IN_NACK` codes (mod → sidecar)
 
 | Code | Class | Cause | Required sidecar reaction |
@@ -1483,6 +1615,13 @@ own `payload` and to nothing else.
 | `MALFORMED_MESSAGE` | permanent | The `data` object failed field validation. A sidecar defect. | Do not re-deliver. Hold for an operator. Log loudly. |
 | `SHUTTING_DOWN` | transient | The game is unloading the world or quitting. | Keep custody. Re-deliver after the next handshake. |
 
+**No code in this table is ever caused by the `species` block** (added — §16, A32). An absent
+block is valid and takes the absent-block rule; a resolve or create that fails falls back to
+the same rule and the organism still spawns (§5.7). The one way species handling can reach
+this table is a **defective rewrite**: a step 3(b) that produces invalid JSON breaks the
+restore and surfaces as `DESERIALIZE_FAILED`, exactly as a botched position rewrite would, and
+it is a mod defect either way.
+
 ### 9.3 What is a NACK and what is a close
 
 | Situation | Answer |
@@ -1491,7 +1630,7 @@ own `payload` and to nothing else.
 | Unsupported `protocol` major version | Close `4000` |
 | Unknown `type` | Ignore, log one warning, keep the connection |
 | Unknown field inside `data` | Ignore silently |
-| A `data` field fails validation on a type that **has** a NACK (`MIGRATE_OUT`, `MIGRATE_IN`) | The matching NACK with `MALFORMED_MESSAGE`, keep the connection |
+| A `data` field fails validation on a type that **has** a NACK (`MIGRATE_OUT`, `MIGRATE_IN`) | The matching NACK with `MALFORMED_MESSAGE`, keep the connection. **One named exception:** a malformed `species` block is stripped and the frame proceeds without it (amended — §16, A30) |
 | A `data` field fails validation on a type with **no** NACK channel (`CONFIG_UPDATE`, `HEARTBEAT`, `MIGRATE_IN_ACK`, `MIGRATE_IN_NACK`) | Close `4003` (amended — §13, A8) |
 | A well-formed `MIGRATE_IN_ACK` / `MIGRATE_IN_NACK` naming an unknown `migrationId` | Log one warning and ignore. Not a close — it is a late reply after a purge or a restart (amended — §13, A8) |
 | A `MIGRATE_IN` with no usable `migrationId` | Log one error and drop the frame. No NACK, no close (amended — §13, A2) |
@@ -1603,9 +1742,18 @@ These notes are non-normative. They exist so the two sides do not have to negoti
   coherent.
 - **Never block the main thread on I/O.** No synchronous connect, no `.Result`, no
   `.Wait()`. A 5-second DNS or connect stall is a 5-second frozen simulation.
-- **Parse the payload with `Newtonsoft.Json.Linq` only for the eight position numbers.**
-  Use `JObject.Parse` / `ToString()`. Do not deserialize it into a typed model — that
-  would re-introduce the C# schema D4 removed.
+- **Parse the payload with `Newtonsoft.Json.Linq` only for the eight position numbers and
+  `$.genes.speciesID`** (amended — §16, A31). Use `JObject.Parse` / `ToString()`. Do not
+  deserialize it into a typed model — that would re-introduce the C# schema D4 removed. The
+  species key is a **write or a removal**, never a read: the incoming value is a foreign
+  world's counter and there is nothing in it to learn.
+- **Do the species resolve before `LoadBibiteOrEggFromData`, on the main thread, and cache the
+  result per name for the tick** (added — §16, A31). `GlobalLineageManager.recordedSpecies` is
+  a `List<Species>` and the match is a linear scan, so a burst of arrivals from one species
+  would otherwise rescan the registry once per organism inside one `FixedUpdate` — the same
+  shape as the sibling-serialization cost §5.3 caches away. The cache is per tick: a create in
+  this tick must be visible to the next arrival in it, and nothing may hold a `Species`
+  reference across ticks.
 - **Subscribe, never snapshot, for `SimulationSize`.** Use
   `ScenarioIndependentSettings.Instance.SimulationSize.Subscribe(...)`. A cached `S`
   silently relocates the border strip when the value changes mid-run
@@ -2463,6 +2611,9 @@ are incompatible **by design**, and both sides say so loudly rather than misread
 
 **Enforced by:** both, symmetrically. Each side sends `"contract-a/2.0"` and compares only
 the major. The sidecar additionally owns the retired path and its `4000`.
+**The version string moved on with §16, A33** — each side now sends `"contract-a/2.1"` — and
+everything else in this amendment stands, including the path and the `4000` on `v1`: a minor
+bump moves no path (amended — §16, A33).
 
 ### A24 — D16's renumbering: the "M4" that meant public release is M5 (§4.5, §12 item 1, §14 A17)
 
@@ -2699,3 +2850,217 @@ simulated time and still never reorders, and the spawn is still the proof of del
 
 **Enforced by:** both sides, each for its own half — which is the point. The livelock was
 a composition of correct parts, so the defence had to be composed too.
+
+---
+
+## 16. Species-identity amendments (`contract-a/2.1`, 2026-08-07)
+
+The owner ratified **Option A — species identity travels in the migration envelope** on
+2026-08-07, from the decompiled-source research into how the game binds a restored organism to
+a species. **Four amendments, A30 to A33.** A30 puts one OPTIONAL block on two messages; A31
+states what the importing mod does with it, before the restore; A32 states what an import
+*without* it does instead, and makes that the floor for every import; A33 applies §3.1's
+version test.
+
+The section follows the pattern of §13, §14 and §15. Each amendment names the gap or the
+change, the resolution, and **which side enforces it** — the side whose code makes the rule
+true, and which therefore has to change if the rule changes. Where an amendment contradicts
+the body or an earlier set, the amendment wins, and the body carries an `(amended — §16, Ax)`
+or `(added — §16, Ax)` marker at that point.
+
+**This set changes the wire, and it is additive.** Two OPTIONAL fields, no removal, no type
+change, no enum change, and the nine message types are untouched — so §3.1's own rule answers
+with a **minor** bump. The identifier is `contract-a/2.1`, the URL path stays
+`/contract-a/v2`, and a peer on either side that speaks `contract-a/2.0` stays compatible by
+construction (A33). `contract-b-m4.md` §15, B9 and B10, carry the matching set for the other
+wire.
+
+**Enforcement sits on the mod, at both ends**, and that is unusual enough to say once up
+front. The sidecar, the relay and the archive carry the block, validate its shape, record it,
+and never read a meaning out of it — it is envelope metadata beside the blob, exactly like
+`exitEdge`, and D4's boundary is where it always was. Every decision in this set — what to
+send, what a name means, which local species an arrival joins — is taken inside a game process
+by the mod that owns that world's registry, because that registry is the only place the
+question has an answer.
+
+### The defect this set closes
+
+A `.bb8` payload carries exactly one thing about species: `genes.speciesID`, drawn from the
+**world-local** counter `Species.speciesMaxID` (`Species.cs:19, 89`). The name is not in the
+payload at all — it is `genericName + " " + specificName` on the `Species` record in the
+source world's `GlobalLineageManager.recordedSpecies` (`Species.cs:85`), and a world's
+registry is its own. So the integer that crosses means nothing at the destination, and
+`BibiteGenes.LoadState` looks it up **in the local registry anyway**
+(`BibiteGenes.cs:581-583`):
+
+| The incoming id, at the destination | What the game does | What it produces |
+|---|---|---|
+| **Collides** with a local `speciesID` | The organism silently joins that local species. **No genetic check runs on this path.** | A migrant filed under an unrelated species — and a locally extinct species revived by an organism that has nothing to do with it. |
+| **Misses**, and the migrant is genetically near a local species | `gene.species` stays null, and `ResumeBody` → `CheckNewSpecies` joins the nearest active species inside `usedSpeciesSpan` (`BibiteBody.cs:477-480`, `GlobalLineageManager.cs:189-203`) | The best answer available without a name, and the one A32 makes the floor. |
+| **Misses**, and the migrant is genetically far | `CheckNewSpecies` creates a species with a fresh **random** local name and no parent | An orphan **root**. `absoluteKeep` is true for any parentless species (`Species.cs:71-77`), so pruning can never remove it. |
+
+About **85% of every rig world's species tree is orphan roots of the third kind** — and of the
+two failures, the **first** is the worse one: an orphan root is uninformative, while a
+collision is silently *wrong*, and no log line marks either.
+
+Note what already exists and is not reachable from the restore path. The game has a
+find-by-name-else-create resolver — `GlobalLineageManager.FindSpeciesFromTemplate`
+(`:267-306`) — which matches `s.name == template.speciesName` and creates on a miss. It serves
+the **template** path, the editor and the spawn menu, and a live restore never reaches it. A31
+is that resolver, run where the restore can see it, on a name the wire now carries.
+
+### A30 — `MIGRATE_OUT` and `MIGRATE_IN` carry an OPTIONAL species block (§5.3, §5.7, §9.1, §9.2, §9.3)
+
+**Change.** Both messages gain one OPTIONAL object, `species`, carrying the migrant's species
+**name** and, when there is one, its immediate parent species' name. `MIGRATE_OUT` is where
+the mod reads it out of the live world; `MIGRATE_IN` is where the destination mod is handed
+it. Nothing between the two interprets it.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Shape | `{ "genericName": string, "specificName": string, "parentGenericName"?: string, "parentSpecificName"?: string }`. Four fields, no nesting, no id of any kind. |
+| The source | The **live `Species` record**, `BibiteGenes.species`, read on the main thread in the same `FixedUpdate` as the migrant's serialization. Never the payload: `$.genes.speciesID` is a counter value, and there is no name in the blob to read. |
+| The name | `genericName + " " + specificName`, one U+0020, which is the game's own `Species.name` (`Species.cs:85`). Both halves are REQUIRED when the block is present, non-empty, at most 64 UTF-8 bytes, untrimmed and unfolded. |
+| The parent pair | **All-or-nothing.** Both parent fields or neither; one alone is a malformed block. Present exactly when `Species.parentSpecies` is non-null at the source. |
+| The depth | **One generation.** A grandparent never travels, and no field exists for one. |
+| Optionality | An absent block is **valid** — an organism with a null species record, or a mod that does not implement §16 at all. §5.7's absent-block rule (A32) covers it. |
+| Malformed | **Dropped whole, never fatal, and never partially applied** (§5.3, §5.7, §9.1, §9.3). On `MIGRATE_OUT` the sidecar strips a block that breaks these rules, logs one line, and forwards the migration without it; on `MIGRATE_IN` the mod treats one as absent and logs it as a sidecar defect. This is the one named exception to §9.3's "a `data` field fails validation → `MALFORMED_MESSAGE`". |
+| Opacity | Sidecar, relay and archive perform **schema validation only**. They **MUST NOT** synthesize, translate, trim, case-fold, normalize or reorder a name, and they **MUST NOT** route, filter or admission-control on one (`contract-b-m4.md` §15, B9). |
+
+**Why names and not an id.** An id is world-local by construction — that is the whole defect.
+Any cross-world identifier would have to be minted and agreed somewhere, which means a
+registry, an allocator and a consensus problem; and the game already has a global namespace
+for species that players read, argue about and screenshot. The name is the identifier the
+domain actually uses.
+
+**Why one generation and not the chain.** The importer can only link under a parent that
+exists **locally**. A deeper ancestor that is not in the local registry cannot be linked to
+anything, and creating it would fabricate a species record no organism in that world ever
+occupied — inventing tree nodes to hold a tree. One link is what the destination can honestly
+use, and a chain rebuilds itself one link at a time as its members migrate.
+
+**Why it is optional rather than REQUIRED.** Three states produce a frame with no block — an
+old mod, an organism whose `BibiteGenes.species` is null, and a block the schema check
+stripped — and an importer cannot tell them apart, so making the field REQUIRED would buy no
+information and would turn each of those states into a refused organism. A32 gives all three
+the same, defined, better-than-today behaviour instead.
+
+**Enforced by:** the mod for reading and writing the block; the sidecar for validating its
+shape, stripping a bad one, and carrying a good one without interpretation.
+
+### A31 — The importing mod resolves by name and rewrites `genes.speciesID` before the restore (§1 D4, §4.6, §5.7, §11.2)
+
+**Change.** The destination mod no longer lets a foreign integer reach the game's
+deserializer. With a `species` block in hand it resolves the species against its **own**
+registry by name, creating one when the name is new, and rewrites `$.genes.speciesID` in the
+payload to the **local** id before calling `LoadBibiteOrEggFromData`. §5.7 step 3 states the
+mechanism in full.
+
+**The policy, stated as policy so nobody has to infer it: an exact name match is the same
+species.** Two organisms whose worlds spell the name identically join one local species. This
+accepts a rare **false merge** — the game draws both halves of a name from one shared
+`latinNames` list and only checks uniqueness *within* a world
+(`SpeciesNameGenerator.RandomUnusedGenus` / `RandomUnusedSpecific`), so two worlds
+occasionally issue the same name to unrelated lineages; the observed rate is **1 to 4 names
+per world pair**. The owner accepts it, and the reasoning is a comparison, not a hope: the
+alternative to a name is genetic distance measured across worlds, which needs a threshold that
+is meaningful across two independently drifting populations — a much larger and much less
+honest guess than a name collision at that rate. A false merge also stays visible: the merged
+species' genetic spread widens where a true one's does not.
+
+**Why before the restore and not after.** `BibiteGenes.LoadState` binds `gene.species` from
+the blob it is handed, in the middle of the game's own deserializer
+(`BibiteGenes.cs:581-583`). Correcting the binding afterwards means moving a live organism
+between two `Species` records — `RemoveFromSpecies` here, `AddToSpecies` there, plus the
+counters and the events that hang off both — for every arrival. Rewriting one number in a JSON
+string before the call makes the game's own deserializer produce the right answer the first
+time, and leaves exactly one code path for a bound species instead of two.
+
+**Why this does not breach D4.** The mod addresses a **named path** and writes it. It does not
+parse the blob for meaning, does not deserialize it into a typed model, and reads nothing back
+out of it — the incoming value is a foreign counter and there is nothing in it to learn. This
+is the same class of operation as the eight position numbers §5.7 step 3 has rewritten since
+M2, and §1's D4 row and §4.6 now say so rather than implying a purity the contract never had.
+The genome hash is unaffected: `genes.speciesID` is excluded from the canonical projection
+(`genome-hash.md` §4.3), so the rewrite cannot invalidate a `lineage.genomeHash` the source
+sidecar already computed.
+
+**What this structurally eliminates.** On every import that carries the block, the
+ID-collision row of the table above **cannot occur**: the id `LoadState` reads is a local id
+the mod just resolved or created, so the lookup either finds the intended species or the mod
+created it a moment earlier. The silent misfiling is not made rarer — it is made unreachable.
+
+**What it does not eliminate, stated plainly.** A migrant whose species is new to this world
+and whose parent species is not local still becomes a **root**, and a root is still
+unprunable. What changes is the count and the label: **one** root per species per world, named
+the same as it is named everywhere else, instead of one freshly-random-named root per arrival.
+The 85% figure is a population of duplicates, and this is what collapses it.
+
+**Enforced by:** the mod, entirely, at the destination. No sidecar can observe the resolve, and
+no sidecar may attempt it — the registry is in the game process.
+
+### A32 — The absent-block rule: no import path keeps a foreign `speciesID` (§5.7, §9.2)
+
+**Change.** A `MIGRATE_IN` with no `species` block is valid and always will be, so the
+importer needs a defined behaviour for it. It is **not** "restore as before": restoring as
+before is what feeds a foreign counter value into a local lookup.
+
+**Resolution.** The importing mod **MUST remove `$.genes.speciesID` from the payload** before
+it restores. Removal, specifically — not a substituted id, not a sentinel, not a value chosen
+to be absent locally:
+
+| Why removal, and not a neutral id | Statement |
+|---|---|
+| The game's own guard | `BibiteGenes.LoadState` runs its lookup under `if (state["speciesID"] != null)` (`BibiteGenes.cs:581-583`). An absent key skips the lookup and leaves `gene.species` null, which is exactly the state the classifier expects. |
+| What then runs | `ResumeBody` calls `CheckNewSpecies` (`BibiteBody.cs:477-480`), and the game classifies the arrival by its **own genetic distance** — nearest active species inside `usedSpeciesSpan`, else a new species. That is the game's honest answer, and it is only available once the foreign integer is gone. |
+| Why not an "absent" id | Any integer is a claim that could come true. A world mints species ids from a monotonic counter (`Species.speciesMaxID`), so an id chosen to be absent today is an id some later local species is issued — and the defect returns silently, in a world that has been running long enough to reach it. |
+
+**The invariant this creates, and it is the one to remember: no import path retains a raw
+foreign `speciesID`.** With a block, A31 overwrites the key with a local id. Without one, this
+rule deletes it. There is no third branch. A mod that hands the origin's integer to
+`LoadState` is defective under `contract-a/2.1`, whatever its version claims.
+
+**Failure falls this way too.** A resolve or create that throws falls back to this rule and the
+organism still spawns (§5.7, §9.2). Custody outranks bookkeeping: a name is recoverable on the
+next hop; an organism refused at the door is not.
+
+**Enforced by:** the mod, at the destination. It is also the only part of this set an old
+sender can trigger, which is why it is written as a floor rather than as a fallback.
+
+### A33 — `contract-a/2.1` is a minor bump, and the path does not move (§2, §3, §3.1)
+
+**Change.** §3.1: additive fields raise the **minor**; field removal, type changes and
+enum-value removal require a **major**. A30 adds two optional fields and removes nothing.
+
+**Resolution.** Apply the contract's own test, item by item:
+
+| Change to Contract A | Kind | Needs a major? |
+|---|---|---|
+| `MIGRATE_OUT.species` added | additive OPTIONAL field | no |
+| `MIGRATE_IN.species` added | additive OPTIONAL field | no |
+| Pre-restore resolve, and the `$.genes.speciesID` rewrite | mod-internal behaviour, no wire shape | no |
+| The absent-block rule | mod-internal behaviour, no wire shape | no |
+| Message catalogue, enums, close codes, NACK codes, tunables | **all unchanged** | no |
+
+The identifier is **`contract-a/2.1`**. By §3.1 the URL path is major-scoped, so it stays
+**`/contract-a/v2`**, and `/contract-a/v1` keeps answering with close `4000` exactly as A23
+left it. **The minor is a capability statement, not a negotiation** — a receiver detects this
+feature by the presence of the `species` field and never by arithmetic on the minor.
+
+**What a mixed rig does, honestly:**
+
+1. A `contract-a/2.0` **sidecar** between two `contract-a/2.1` mods ignores the unknown field
+   (§3.1) and forwards a frame without it. The destination mod sees no block and applies A32's
+   floor. The degradation is quiet, defined and still better than pre-§16 behaviour.
+2. A `contract-a/2.1` **sidecar** and a `contract-a/2.0` mod interoperate unchanged: the mod
+   sends no block and ignores the one it is sent. Neither side may reject the other over a
+   minor.
+3. A **pre-A32 mod at the destination** is the one place a foreign `speciesID` can still reach
+   `LoadState`, and no rule on this wire can prevent it — it is an old build's behaviour, not a
+   supported configuration. The rig upgrades in one step, as it did at A23, and for the same
+   reason: every binary in it is the owner's.
+
+**Enforced by:** both sides, symmetrically. Each sends `"contract-a/2.1"` and compares only the
+major.
