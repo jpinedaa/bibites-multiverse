@@ -1,6 +1,6 @@
 # Contract B — M4 (Sidecar ↔ Relay ↔ Sidecar ↔ Archive)
 
-**Version:** `contract-b/3.1`
+**Version:** `contract-b/3.2`
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3), **B6** the
@@ -15,15 +15,25 @@ That is an additive field, so §4's own test answers with a **minor** bump to `c
 Contract A's matching set is `contract-a.md` §16, A30–A33. Affected body text carries an
 `(amended — §15, Bx)` or `(added — §15, Bx)` marker, and **§15 wins over the body and over
 §14 wherever they disagree.**
+**Amended:** 2026-08-07, amendment set `contract-b/3.2 + B11–B12` (**§16**), from the owner's
+ratification of **the species census on the live map**. The **peer stats block** (§6.3.1)
+gains the same `species` array `contract-a.md` §17 puts on `HEARTBEAT`, copied verbatim from
+the last heartbeat and republished blind in `PEER_STATUS`; and §10.1's rule that the archive's
+species names are not a page input is **amended**, because the page now renders a species view
+— from the census in `PEER_STATUS`, never from the migration ledger. That is an additive
+field, so §4's own test answers with a **minor** bump to `contract-b/3.2`. Contract A's
+matching set is `contract-a.md` §17, A35–A37. Affected body text carries an
+`(amended — §16, Bx)` or `(added — §16, Bx)` marker, and **§16 wins over the body and over
+§14 and §15 wherever they disagree.**
 **Status:** implementation-ready for M4. Written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*.
 **Supersedes:** `contracts/contract-b-m3.md`, in full. That document is the historical
 record of the M3 ring and is **not** current guidance.
-**Companion documents:** `contracts/contract-a.md` (`contract-a/2.1`, mod ↔ sidecar) and
+**Companion documents:** `contracts/contract-a.md` (`contract-a/2.2`, mod ↔ sidecar) and
 `contracts/genome-hash.md` (`bb8-genome/1`, the canonical genome projection — **unchanged by
-M4 and unchanged by the species block**, which is not hashed and whose one payload key,
-`genes.speciesID`, that projection already excludes: §4.3 there).
+M4, by the species block and by the census**, none of which is hashed, and whose one payload
+key, `genes.speciesID`, that projection already excludes: §4.3 there).
 
 > ### Why a successor document and not an amendment
 >
@@ -254,7 +264,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -290,6 +300,15 @@ with close `4000` instead of misrouting an organism.
 or sidecar that does not know the field ignores it (§4, `contract-a.md` §3.1) and the
 destination mod falls back to `contract-a.md` §16, A32 — quiet, defined degradation, never a
 rejection.
+
+**The species census is the second, and it is a minor for the same reason** (added — §16,
+B12): the peer stats block gains `species` and `truncated` (§6.3.1), both additive and both
+OPTIONAL, so the identifier moves to **`contract-b/3.2`**. A `contract-b/3.1` relay carries
+them if it stores the block as it received it, and drops them if it re-encodes from a typed
+model — §6.3.1 asks for the first (added — §16, B11) — and a peer that does not know them
+simply omits them. Every one of those paths renders as **unknown** on the page (§10.1), and
+none of them renders as a wrong census. No message type, enum, code, custody rule or routing
+input changes.
 
 Timestamps are informational (D5). `messageId` is for log correlation only; `migrationId` is
 the one idempotency key in the system (`contract-a.md` §7.1).
@@ -423,7 +442,7 @@ The **first frame on every connection**. Any other first frame closes with `4003
 |---|---|---|---|
 | `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). |
 | `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). |
-| `protocolVersion` | string | yes | `"contract-b/3.1"` (amended — §15, B10). A different **major** closes with `4000`. |
+| `protocolVersion` | string | yes | `"contract-b/3.2"` (amended — §16, B12; `"contract-b/3.1"` before it, §15 B10). A different **major** closes with `4000`. |
 | `gameVersion` | string | yes | The game version behind this sidecar, from the mod's `CONFIG_UPDATE`. Empty while no mod is connected, and always empty for an archive. |
 | `sidecarVersion` | string | yes | Informational. The archive sends its own version here. |
 | `simulationSize` | float | no | `S`, when a mod has already reported one. |
@@ -442,14 +461,14 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
   "data": {
     "peerId": "peer-lan-slot5",
     "role": "peer",
-    "protocolVersion": "contract-b/3.1",
+    "protocolVersion": "contract-b/3.2",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0",
     "simulationSize": 2000.0
@@ -462,7 +481,7 @@ independently updated installs, so this is the failure most likely to waste an e
 | Field | Type | Required | Semantics |
 |---|---|---|---|
 | `relayVersion` | string | yes | Informational. |
-| `protocolVersion` | string | yes | `"contract-b/3.1"` (amended — §15, B10). |
+| `protocolVersion` | string | yes | `"contract-b/3.2"` (amended — §16, B12; `"contract-b/3.1"` before it, §15 B10). |
 | `relaySessionId` | `uuid` | yes | **New in M4.** Minted once at relay start, constant for the life of the relay process. It is the scope of the forwarding record (§5.2), and a sidecar **MUST** persist it against every journal entry it hands over while this connection is live (§9.2). |
 | `assignedSlot` | number (int) | no | The slot this `peerId` already holds, when the relay remembers one. Absent for a first-time peer and always absent for an archive. |
 | `assignedPosition` | object `{col,row}` | no | Its position. Present exactly when `assignedSlot` is. |
@@ -472,13 +491,13 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
   "data": {
     "relayVersion": "0.4.0",
-    "protocolVersion": "contract-b/3.1",
+    "protocolVersion": "contract-b/3.2",
     "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
     "assignedSlot": 5,
     "assignedPosition": { "col": 1, "row": 1 },
@@ -516,7 +535,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -540,18 +559,31 @@ world in the map and nothing useful to do about it.
         "name": "M4-Slot5-20260805T2058Z.zip",
         "bytes": 41533892,
         "durationMs": 730
-      }
+      },
+      "species": [
+        { "genericName": "Izus ",      "specificName": "copedylanus", "bibites": 96, "eggs": 14 },
+        { "genericName": "Cyanea",     "specificName": "velox",       "bibites": 61, "eggs":  9 },
+        { "genericName": "Alvaradus",  "specificName": "powerus",     "bibites": 38, "eggs": 11 },
+        { "genericName": "Banagellus", "specificName": "polatus ",    "bibites": 17, "eggs":  3 }
+      ]
     }
   }
 }
 ```
+
+That census is the one `contract-a.md` §5.2's `HEARTBEAT` example carries, copied byte for
+byte (added — §16, B11). **`"Izus "` and `"polatus "` keep their trailing spaces here**: that
+world's registry holds `Izus  copedylanus` with a doubled space and its player sees it that
+way, and a sidecar that tidied the copy would be reporting a world that does not exist. The
+same species travelling on a `MIGRATION_PAYLOAD` would carry `"Izus"`, normalized at the
+source — two lanes, two rules, one `Species` record (§6.6, `contract-a.md` §17, A36).
 
 A brand-new instance asking to extend a full 3×2 map into a fourth column — the exit test's
 Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -562,10 +594,17 @@ Part 4, in one frame:
     "borderEdges": ["E", "N", "W", "S"],
     "gameVersion": "0.6.3.1",
     "modConnected": true,
-    "stats": { "population": 0, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0 }
+    "stats": { "population": 0, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+               "species": [] }
   }
 }
 ```
+
+**`"species": []` there is a statement, and it is not the same as omitting the field**
+(added — §16, B11). That instance has a mod, the mod speaks `contract-a/2.2`, and it is
+reporting that nothing is alive in its world yet. Omitting the field would have said *unknown*
+— no mod, an older mod, or no heartbeat yet — and the status page renders the two
+differently (§10.1).
 
 ### 6.3.1 The peer stats block
 
@@ -585,6 +624,12 @@ memory (Risk 4).
 | `bouncedTimeoutTotal` | number (int) | no | Cumulative count of entries this sidecar has bounced home because the hold timeout expired. A monotonic counter, reset only by losing the journal. **An automatic bounce is a fact the operator reads, not a silent repair** (§9.3). |
 | `simulatedTime` | float | no | The world's simulated seconds, from the last `HEARTBEAT`. It is what makes a paced rate interpretable. |
 | `lastSave` | object | no | The mod's save receipt, copied verbatim from `HEARTBEAT.lastSave` (`contract-a.md` §5.2, §15 A21): `atMs`, `simulatedTime`, `population`, and the optional `name`, `bytes`, `durationMs`. |
+| `species` | array of object | no | **The world's active species census** (added — §16, B11), copied **verbatim** from the last `HEARTBEAT.species` the sidecar received (`contract-a.md` §5.2, §17 A35). One entry per species with at least one living member or egg, sorted by `bibites + eggs` descending, at most `speciesCensusMax` (32) entries. Absent means **unknown** — no mod is connected, the mod predates `contract-a/2.2`, or no heartbeat has carried one. A present `[]` means a reporting mod with nothing alive in its world, which is a different fact (§10.1). |
+| `species[].genericName` | string | yes | The genus half, **raw**: the bytes the origin world's `Species` record holds. Valid UTF-8, 1 to 64 UTF-8 bytes. Leading, trailing and doubled internal whitespace are **legal here**, and no party on this wire may trim, collapse, case-fold, normalize or re-case one. **This is deliberately not the rule `MIGRATION_PAYLOAD.species` carries** (§6.6, §15 B9): that name is a matching key the exporting mod normalizes at the source (`contract-a.md` §16, A34); this one is a display label that must read as the owning world's player sees it (`contract-a.md` §17, A36). |
+| `species[].specificName` | string | yes | The specific half. Same rules. The world's display name is `genericName + " " + specificName`. |
+| `species[].bibites` | number (int) | yes | Living members of that species in that world, `≥ 0`. Excludes eggs, so it is on the same footing as `population`. |
+| `species[].eggs` | number (int) | yes | Unhatched eggs of that species, `≥ 0`. `bibites + eggs` is the game's own `Species.count`. |
+| `truncated` | bool | no | **Qualifies `species` and nothing else** (added — §16, B11). `true` means the array is **not the whole census** — the mod hit the cap, or a sidecar stripped an entry or trimmed an over-long array (`contract-a.md` §5.2). Monotonic: set on the way, never cleared. Ignored when `species` is absent. |
 
 **Every field is optional, and absence is a value.** A stat the sidecar does not know is
 omitted, never defaulted. The status page renders an omitted field as **unknown**, which is
@@ -594,6 +639,20 @@ confident zero.
 **The relay does not interpret any of it.** It stores the last block per peer with the time
 it arrived, republishes it, and never routes, schedules, refuses or filters on a stat. D1's
 dumb relay survives: this is one more field copied into a broadcast it was already sending.
+**That sentence already covers the census in full** (added — §16, B11) — a species name is
+never a routing input, a filter, an admission-control term or a scheduling term, exactly as a
+population is not — and B11 adds no relay rule to it. What it adds is one **SHOULD**: a relay
+**SHOULD** store the stats block as the bytes it arrived as, rather than re-encoding it from a
+typed model, so a field a newer sidecar sends survives an older relay. It is a forward-
+compatibility habit, not a new behaviour.
+
+**The census is what bounds this block's size, and the cap is why** (added — §16, B11). A full
+32-entry census is about 3 KB; a typical rig world reports four to a dozen species and under
+1 KB. A stats-bearing `PING` carries one, at `statsIntervalMs` (5 s), and a `PEER_STATUS`
+carries one **per slot** — so a six-slot map broadcasts at most ~20 KB every
+`statsBroadcastIntervalMs`, and even a 32-slot map broadcasting full censuses stays two orders
+of magnitude inside `maxFrameBytes`. `speciesCensusMax` (`contract-a.md` §10) is the constant that
+makes that arithmetic hold, and no party on this wire may raise it unilaterally.
 
 ### 6.4 `SECTOR_GRANT` — relay → sidecar
 
@@ -628,7 +687,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -726,7 +785,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -738,28 +797,38 @@ the two disagree the display is stale.
       { "slot": 1, "position": { "col": 0, "row": 0 }, "peerId": "peer-main-slot1",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731644,
-        "stats": { "population": 231, "custodyDepth": 1, "pacedDepth": 0, "heldDepth": 0 },
+        "stats": { "population": 231, "custodyDepth": 1, "pacedDepth": 0, "heldDepth": 0,
+                   "species": [
+                     { "genericName": "Izus ",      "specificName": "copedylanus", "bibites": 104, "eggs": 19 },
+                     { "genericName": "Cyanea",     "specificName": "velox",       "bibites":  72, "eggs": 11 },
+                     { "genericName": "Alvaradus",  "specificName": "powerus",     "bibites":  41, "eggs":  6 },
+                     { "genericName": "Banagellus", "specificName": "polatus ",    "bibites":  14, "eggs":  2 }
+                   ] },
         "statsAsOfMs": 1785693731644 },
       { "slot": 2, "position": { "col": 1, "row": 0 }, "peerId": "peer-main-slot2",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731641,
-        "stats": { "population": 208, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0 },
+        "stats": { "population": 208, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+                   "species": [ ... 7 entries, elided ... ] },
         "statsAsOfMs": 1785693731641 },
       { "slot": 3, "position": { "col": 2, "row": 0 }, "peerId": "peer-main-slot3",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731639,
-        "stats": { "population": 197, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0 },
+        "stats": { "population": 197, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+                   "species": [ ... 5 entries, elided ... ] },
         "statsAsOfMs": 1785693731639 },
       { "slot": 4, "position": { "col": 0, "row": 1 }, "peerId": "peer-lan-slot4",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731630,
-        "stats": { "population": 244, "custodyDepth": 3, "pacedDepth": 11, "heldDepth": 2 },
+        "stats": { "population": 244, "custodyDepth": 3, "pacedDepth": 11, "heldDepth": 2,
+                   "species": [ ... 32 entries, elided ... ], "truncated": true },
         "statsAsOfMs": 1785693731630 },
       { "slot": 5, "position": { "col": 1, "row": 1 }, "peerId": "peer-lan-slot5",
         "live": false, "modConnected": false, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693719004,
         "darkSinceMs": 1785693719004,
-        "stats": { "population": 226, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0 },
+        "stats": { "population": 226, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+                   "species": [ ... 9 entries, elided ... ] },
         "statsAsOfMs": 1785693718991 },
       { "slot": 6, "position": { "col": 2, "row": 1 }, "peerId": "peer-main-slot6",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
@@ -779,6 +848,17 @@ re-paired around it — slot 4 now exports east to slot 6 — and its **column p
 no north lane at all**, because a column of two holds nobody else to skip to (§2.1). Slot 5's
 own stats are 13 seconds stale and `statsAsOfMs` says so; a reader that renders that
 population as current is reporting a world that is no longer running.
+
+**The censuses in that frame carry four different statements, and a page has to tell them
+apart** (added — §16, B11). `[ ... n entries, elided ... ]` is this document's elision, not a
+wire form — every one of those is an ordinary array:
+
+| Slot | What its census says |
+|---|---|
+| 1 | A complete census. Its four `bibites` counts sum to `231`, which is exactly its `population`: every organism in that world has a `Species` record. `"Izus "` keeps its trailing space, because that world's registry does. |
+| 2, 3, 5 | Complete censuses of 7, 5 and 9 species. Slot 5's is **as stale as its population** — `statsAsOfMs` ages the whole block, and a page that greys out one number and not the other is lying about the same instant twice. |
+| 4 | `truncated: true`: that world holds more than `speciesCensusMax` species and the block names the **32 most abundant**. A page **MUST NOT** present it as the world's whole species list, and its `bibites` sum is below `population` by construction. |
+| 6 | **No `species` key at all** — that peer's mod predates `contract-a/2.2`. It renders as **unknown**, never as "no species" and never as zero, and every other stat that slot reports stays exact (§10.1). |
 
 ### 6.6 `MIGRATION_PAYLOAD` — sidecar → sidecar, forwarded
 
@@ -929,7 +1009,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -976,7 +1056,7 @@ geometry and the species block are untouched, and **only `destSlot` changed** �
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -1055,7 +1135,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1127,7 +1207,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1151,7 +1231,7 @@ simply cannot speak for the period before it started, so it says `false` and the
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -1194,7 +1274,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -1240,7 +1320,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -1279,7 +1359,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/3.1",
+  "protocol": "contract-b/3.2",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -1298,11 +1378,24 @@ number at all.
         "simulatedTime": 119303.50,
         "population": 211,
         "durationMs": 730
-      }
+      },
+      "species": [
+        { "genericName": "Izus ",      "specificName": "copedylanus", "bibites": 96, "eggs": 14 },
+        { "genericName": "Cyanea",     "specificName": "velox",       "bibites": 61, "eggs":  9 },
+        { "genericName": "Alvaradus",  "specificName": "powerus",     "bibites": 38, "eggs": 11 },
+        { "genericName": "Banagellus", "specificName": "polatus ",    "bibites": 17, "eggs":  3 }
+      ]
     }
   }
 }
 ```
+
+**This is the frame the census actually rides on** (added — §16, B11), for the same reason
+`population` does: a `SECTOR_CLAIM` is sent on change, so a map view fed only by claims would
+name the species a world held when it last resized. The block is the one the sidecar last
+received on `HEARTBEAT`, copied verbatim — the sidecar re-sorts nothing, merges nothing,
+renames nothing and drops nothing that passed its Contract A shape check
+(`contract-a.md` §5.2).
 
 ---
 
@@ -1918,7 +2011,7 @@ name is used for anything.
 | Absent is absent | A migration with no block records **no species** — never `"unknown"` as a value, never an empty string standing in for one. That is §10.1's unknown rule applied to a new field. |
 | Dedup unchanged | A `MIGRATION_PAYLOAD` still deduplicates on `migrationId` alone (§5.1). The block is part of the record that key names, never part of the key. |
 | The win | Before this the ledger could name only hashes, so "which species crossed, and when" was a question the archive held the data to answer and not the labels. It now travels on every hop that carries a block. |
-| Not an M4 page input | The status page **MAY** use these names later. It does not in M4, and §10.1 gains no input from this amendment. |
+| Not the page's species view | **Amended — §16, B12.** The page *does* render species now, and **not from here**: its species view is the live census in `stats.species` (§6.3.1), which describes who lives in a world. This ledger describes who **crossed**, and it remains **not an input to any abundance claim** — a database built from migrations holds migrants and their ancestors, never a resident population (D11, below). The two also spell a name differently on purpose: the ledger's copy is normalized at the source (`contract-a.md` §16, A34) and the census's is raw (`contract-a.md` §17, A36), so a consumer that joins them normalizes **for the comparison only** and rewrites neither. |
 
 **The known limit, restated because it is load-bearing** (D11): a database built from
 migrations holds migrants and their ancestors, never the resident population of a peer.
@@ -1935,16 +2028,23 @@ specify it. **Its inputs are**, and three rules keep them honest (Risk 4):
 | One source, no polling | Everything the page shows about the map comes from the `PEER_STATUS` broadcasts the archive already receives as a subscriber (§5.1, §6.5), plus the envelope copies it already records. The page **MUST NOT** connect to a sidecar, read another component's files, or ask the relay for anything. Nothing on the migration path may ever wait for a reader. |
 | Derived, and marked as derived | The effective lanes and the bypasses are **recomputed** by the walk of §8 from `PEER_STATUS`. They are the same computation the relay performs, on the same inputs, and they are for display: the relay's `SECTOR_GRANT` remains the authority for a peer's actual routing. |
 | Unknown is a value | A field absent from `stats`, a slot with no `stats` at all, a `statsAsOfMs` older than `statsStaleMs` (30 000) — every one of them renders as **unknown**, never as zero and never as the last value seen without its age. A slot that reports nothing is unknown, not empty. **An honest gap beats a confident zero.** |
+| The census is a stat, and every rule above applies to it (added — §16, B12) | `stats.species` (§6.3.1) is what the page's species view is built from. Absent renders as **unknown species** — never as "no species", never as an empty list, never as zero. A present `[]` is the different, stronger fact and the page may say so: a reporting world with nothing alive in it. A `truncated: true` census names the 32 most abundant species and the page **MUST** say the rest is unreported rather than presenting it as the whole list. And it ages like everything else in the block: past `statsStaleMs` it is history, not state. |
+| Two species facts, two sources, and only one of them is abundance (added — §16, B12) | The **census** says what lives in a world **now** and arrives on `PEER_STATUS`. The archive's **ledger** of `MIGRATION_PAYLOAD.species` (§10) says what **crossed**, and when. The page's species view comes from the census alone: a migration ledger holds migrants and their ancestors, never a resident population (D11), so answering "which species live in slot 4" from it produces a plausible-looking wrong number. A page that shows both **MUST** label which question each answers, and **MUST NOT** join them on a name without normalizing the census copy for the comparison only (`contract-a.md` §17, A36). |
 
-**The species names the archive now records are not an input to this page in M4**
-(added — §15, B10). They are recorded for the ledger; a rendering may follow, and this
-document specifies none. Nothing in the list below changes.
+**What changed here, and what did not** (amended — §16, B12). §15's B10 stated that the
+species names the archive records are **not an input to this page in M4**, and that the
+rendering it anticipated was unspecified. **The rendering has arrived, and it does not come
+from the ledger.** The page's species view is the live census in `stats.species`, which
+travels the same path as `population` and obeys every rule in the table above. The ledger's
+names stay exactly where B10 put them: a record of what crossed, never a source for what
+lives. Nothing else in this section's list changes.
 
 The exit test asks the page for the map and its holes, each slot's liveness and population,
 each effective lane, each bypass with the time it went dark, each sidecar's custody depth,
-each bounce a hold timeout caused, the last save of each world, and the paced journal depth.
-Every one of those is a field of §6.5 or §6.3.1, or is derived from them by §8 — which is why
-those two sections carry fields that no routing decision reads.
+each bounce a hold timeout caused, the last save of each world, and the paced journal depth —
+**and, since §16, which species live in each world and in what numbers**. Every one of those
+is a field of §6.5 or §6.3.1, or is derived from them by §8 — which is why those two sections
+carry fields that no routing decision reads.
 
 ---
 
@@ -2055,6 +2155,7 @@ those two sections carry fields that no routing decision reads.
 | `forwardRecordRetentionSeconds` | `172800` | relay | **New in M4.** How long the relay remembers a forwarded `migrationId`, in memory, for the `neverForwarded` proof — 48 hours, twice the default hold (§5.2). |
 | `inboundQueueMax` | `64` | sidecar | Shared with `contract-a.md` §10. Also the ceiling a paced backlog hits, which is what turns pacing into upstream backpressure (`contract-a.md` §7.5). |
 | `exportRetentionSeconds` | `3600` | sidecar | Tombstone lifetime. Shared with `contract-a.md` §10. |
+| `speciesCensusMax` | `32` | both | **New after M4** (added — §16, B11). Shared with `contract-a.md` §10. Upper bound on `stats.species` entries. A block that arrives with more is trimmed to the first 32 with one warning and `truncated: true`, never a refusal and never a close — the same answer `contract-a.md` §5.2 gives on the other wire. It is what bounds a `PEER_STATUS` broadcast carrying one census per slot (§6.3.1). |
 | `maxFrameBytes` | `8388608` | both | Shared with `contract-a.md` §10. |
 | `maxPayloadBytes` | `4194304` | both | Shared with `contract-a.md` §10. Applies to `body.bb8` and to a `GENOME_RESPONSE` body. |
 | `archiveQueueMax` | `1024` | relay | Copied frames buffered per subscriber before the oldest is dropped (§5.1). |
@@ -2105,7 +2206,7 @@ first.
    subscriber that trusts the shared token. A public relay cannot copy every envelope to
    whoever asks, so M5 needs a subscriber authorisation rule — and the M4 stats block makes
    that sharper, because a copied `PEER_STATUS` now carries every world's population and save
-   state.
+   state — and, since §16, the name of every species living in it (§6.3.1, B11).
 5. **Release and handover are startup flags** (§7.5). If the map ever grows past what one
    operator can restart at will, both need an authenticated admin path — which is another
    reason they wait for the milestone that brings authentication.
@@ -2121,7 +2222,14 @@ first.
 7. **A stats block is unauthenticated telemetry from a peer.** The relay copies it verbatim
    into a broadcast every client reads. On a LAN of the owner's own machines that is fine; on
    a public relay a peer could report any population it liked, and the status page would show
-   it. M5's per-peer credentials are the precondition for trusting any of it.
+   it. M5's per-peer credentials are the precondition for trusting any of it. **The census
+   widens the surface without changing the argument** (§16, B11): a species name is
+   attacker-chosen text of up to 64 bytes a slot, 32 entries a peer, that lands in a broadcast
+   and then in a renderer. The wire's own answer is the shape check and the cap; the
+   **renderer's** answer is its own, and a page that interpolates a name into HTML without
+   escaping it has a defect this contract cannot fix for it. Named here rather than left to be
+   discovered, because raw names are exactly the field an implementer assumes has been
+   sanitized upstream — and A36 guarantees it has not.
 
 ---
 
@@ -2387,6 +2495,9 @@ never a resolution** — the archive does not resolve, merge or rewrite names, b
 resolution happens in exactly one place in this system and it is the importing mod; absent is
 absent, never `"unknown"` as a value; and dedup is unchanged, on `migrationId` alone. §10.1
 gains **no** page input in M4: a rendering may follow and this document specifies none.
+*(Superseded in part — §16, B12: the rendering arrived on 2026-08-07, and it reads the live
+census in `stats.species`, not this ledger. Every other sentence in B10 stands, including this
+one's substance — the ledger is still not an input to any abundance claim.)*
 
 **Why record it at all, given no page reads it.** The archive's whole purpose is that
 migration is where a genome crosses a machine boundary (D11), and until now the ledger could
@@ -2415,3 +2526,110 @@ the behaviour §16 replaces. **No default in §12 changes and none is added.**
 
 **Enforced by:** the archive, for the recording and for not interpreting it; both wire ends,
 for sending `"contract-b/3.1"` and comparing only the major.
+
+---
+
+## 16. Species-census amendment (`contract-b/3.2`, 2026-08-07)
+
+The owner ratified **the species census on the live map** on 2026-08-07. `contract-a.md` §17
+carries the design: the mod reports its world's active species on every `HEARTBEAT`, as a
+**display** census — raw names, two counts per species, sorted, capped at 32. **This wire's
+job is to get that census to the operator surface without touching it**, which is the job it
+already does for `population`, `lastSave` and every other stat.
+
+**Two amendments, B11 and B12**, continuing the `B` series for the reason §14 gives — the
+namespace is the wire's, not the file's. B11 puts the census in the peer stats block; B12
+amends §10.1, which until now said the archive's species names were not a page input, and
+applies §4's version test.
+
+**This set changes the wire, additively**: two OPTIONAL fields inside one existing block, on
+the three carriers that block already has. No message type, no enum value, no removal, no type
+change, no new NACK code, and no change to routing, custody, dedup, pacing, hashing, the hold
+or the fan-out. One shared default is named in §12. §4's test therefore answers **minor**, and
+the identifier moves to `contract-b/3.2` (B12). The style follows §14, §15 and
+`contract-a.md` §13–§17: the gap or change, the resolution, and **which side enforces it**.
+
+### B11 — The peer stats block carries the species census, copied and republished blind (§6.3.1, §6.5, §6.11, §12, §13)
+
+**Change.** The stats block of §6.3.1 gains `species` — the array `contract-a.md` §5.2 defines,
+`{ genericName, specificName, bibites, eggs }` per entry — and the `truncated` boolean that
+qualifies it. Both OPTIONAL. The block's three carriers are unchanged: a sidecar sends it on
+`SECTOR_CLAIM` (§6.3) and on `PING` (§6.11), and the relay republishes the latest it holds in
+`PEER_STATUS` (§6.5).
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Copy, never author | The sidecar copies the census out of the last `HEARTBEAT` it received. It **MUST NOT** synthesize one, re-sort one, merge two entries, fill a missing count, or derive a census from anything else it holds — not from its journal, not from its genome cache, not from the `MIGRATION_PAYLOAD.species` blocks that pass through it. Those describe migrants; this describes a population. |
+| Validated once, on the other wire | The shape rules and the strip rules live in `contract-a.md` §5.2, where the census enters the system: a malformed **entry** is stripped and `truncated` is set, a malformed **field** is dropped whole, and neither is ever a NACK or a close. What reaches this wire has already passed that check, so this wire adds no second validator — it adds a **bound**: an over-long array is trimmed to `speciesCensusMax` with `truncated: true` (§12). |
+| Raw names, and no party here may repair one | Each half is carried byte for byte, edge whitespace and all. **No sidecar, relay, archive or page may trim, collapse, case-fold, normalize or re-case a census name** — the reason is `contract-a.md` §17, A36's, and it is the opposite of §15 B9's lane on purpose. |
+| The relay's rule is already written | §6.3.1's *"the relay does not interpret any of it"* and §6.11's *"it never routes, refuses, schedules or filters on a stat"* cover the census exactly as they cover `population`. The relay stores the block, stamps `statsAsOfMs`, and republishes. **B11 adds no relay behaviour**, and a relay that treated a species name as a routing, filtering or admission-control term would be violating a rule this document has had since M4, not a new one. |
+| One **SHOULD**, for the next field after this one | A relay **SHOULD** store the stats block as the bytes it arrived as rather than re-encoding it from a typed model, so a stat a newer sidecar sends survives an older relay. `contract-b/3.1` relays that re-encode simply drop the census, which degrades to unknown (B12) — correct, and avoidable next time. |
+| Absence is a value, and there are two of them | An absent `species` means **unknown**: no mod, a mod older than `contract-a/2.2`, or no heartbeat carrying one yet. A present `[]` means a reporting mod with nothing alive. §10.1 renders them differently; §6.3's two claim examples show both, and §6.5's broadcast shows an absent one beside four present ones. |
+| Staleness is inherited, not re-invented | `statsAsOfMs` already ages the whole block (§6.5), and `statsStaleMs` (30 000) already decides when it stops being state (§10.1). A census needs no clock of its own, and giving it one would let a page show a fresh species list beside a stale population from the same frame. |
+| Bounded by construction | `speciesCensusMax` (32) caps the array, ~3 KB caps a full census, and a six-slot `PEER_STATUS` therefore grows by at most ~20 KB (§6.3.1). The cap is a wire constant shared with `contract-a.md` §10, not a display preference, and it is what keeps this addition free of a new backpressure question. |
+
+**Why the stats block and not a new message or a new subscription.** The block exists to
+describe six worlds — two of them on a machine the archive cannot read a file from — without
+anything reading anything else's memory (§6.3.1, Risk 4). "Which species live there" is that
+same question with a different noun. A second channel would need its own cadence, its own
+staleness stamp and its own place in the fan-out, and it would let a page show a species list
+that disagrees with the population printed beside it because the two arrived in different
+frames. One block, one timestamp, one truth.
+
+**What this does not touch.** `MIGRATION_PAYLOAD` is unchanged — the census does not ride on a
+migration and the migration block does not ride on a stat. The two carry species names for
+different reasons, under different name rules, on different cadences, and §15 B9's six rules
+are unaffected in every particular.
+
+**Enforced by:** the sidecar, for copying the last census without authoring, re-sorting or
+repairing it; the relay, for republishing it as blindly as it republishes a population — a
+rule §6.3.1 already states; the archive and its page, for rendering it under §10.1 and for
+escaping it as untrusted text (§13 item 7).
+
+### B12 — The page renders the census, the ledger is still not abundance, and the version moves to `contract-b/3.2` (§4, §10, §10.1, §12)
+
+**The contradiction this closes, stated plainly.** §15's B10 wrote into §10.1 that *"the
+species names the archive now records are not an input to this page in M4"*, and into §10 the
+row *"Not an M4 page input"*. Both sentences were true when they were written and one of them
+is now false: **the page has a species view.** Leaving them would put this document in
+conflict with the running system in the one section whose entire job is to say what the page
+may claim.
+
+**Resolution, the rendering half.** The page's species view comes from `stats.species` in
+`PEER_STATUS` (§6.3.1, B11), and from nothing else. §10.1 gains two rules — the census obeys
+every existing one, and the census and the ledger answer different questions — and §10's row
+is amended to say which of the two is abundance.
+
+| Question | Answer |
+|---|---|
+| Where does the page's species view come from? | The **census**, in the stats block of every `PEER_STATUS` the archive already receives as a subscriber. §10.1's first rule is unchanged and unweakened: one source, no polling, and nothing on the migration path ever waits for a reader. |
+| Is the archive's ledger of `MIGRATION_PAYLOAD.species` an input? | **No, and B10's substance stands.** The ledger records what **crossed**. A database built from migrations holds migrants and their ancestors, never the resident population of a peer (D11), so an abundance claim drawn from it would be a plausible-looking wrong number. |
+| May the page show ledger names at all? | Yes — as what they are: which species crossed which lane, and when. Labelled as history, never as population, and never summed into a census. |
+| May the page join the two? | Only with care, and the care is named: the ledger's copy is **normalized at the source** (`contract-a.md` §16, A34) and the census's is **raw** (`contract-a.md` §17, A36), so the same species can legitimately appear as `Izus` and `Izus `. Normalize **for the comparison only**, rewrite neither, and say which side a displayed spelling came from. |
+| What does the page do with a missing census? | **Unknown.** Never zero, never an empty list, never the last census seen without its age. That is §10.1's own rule, applied to a new field rather than bent for it. |
+
+**Resolution, the version half.** Apply §4's test:
+
+| Change to Contract B | Kind | Needs a major? |
+|---|---|---|
+| `stats.species` added | additive OPTIONAL field | no |
+| `stats.truncated` added | additive OPTIONAL field | no |
+| `speciesCensusMax` named in §12 | a shared default for a new field | no |
+| §10.1 gains two rules; §10's B10 row is amended | page-input rules, off the wire entirely | no |
+| Message catalogue, enums, codes, custody, routing, fan-out, hashing | **all unchanged** | no |
+
+The identifier is **`contract-b/3.2`**. Every `contract-b/3.x` peer stays compatible with every
+other, because compatibility is on the major and the minor is never a rejection reason (§4,
+`contract-a.md` §3.1). The old-peer cases differ, and the difference is worth stating: a
+`contract-b/3.1` **relay** that stores the stats block as received carries the census intact
+and needs no change at all, while one that re-encodes from a typed model drops it; a
+`contract-b/3.1` **sidecar** never sends one; and a mod older than `contract-a/2.2` produces
+none to send. **All three degrade to the same place — unknown — and none of them produces a
+census that is wrong.** That is the property the whole design is arranged around, and it is
+the same standard §10.1 already holds every other stat to.
+
+**Enforced by:** the archive, for rendering the census under §10.1 and for keeping its
+migration ledger out of every abundance claim; both wire ends, for sending
+`"contract-b/3.2"` and comparing only the major.

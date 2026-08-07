@@ -1,6 +1,6 @@
 # Contract A — Mod ↔ Sidecar Wire Specification
 
-**Version:** `contract-a/2.1`
+**Version:** `contract-a/2.2`
 **Amended:** 2026-08-02, amendment set `contract-a/1 + A1–A10` (§13). Both implementations
 exist, and each side resolved an ambiguity locally before the other could see it; §13
 makes every resolution law. Each place in the body that was wrong or under-specified now
@@ -31,14 +31,24 @@ path does **not** move (§16, A33). The behavioural half — resolve the species
 rewrite `genes.speciesID` before the restore — is entirely mod-internal. Affected body text
 carries an `(amended — §16, Ax)` or `(added — §16, Ax)` marker, and **§16 wins over the body
 and over §13, §14 and §15 wherever they disagree.**
+**Amended:** 2026-08-07, amendment set `contract-a/2.2 + A35–A37` (§17), from the owner's
+ratification of **the species census on the live map**. This set **does** change the wire,
+additively: `HEARTBEAT` gains one OPTIONAL `species` array and the OPTIONAL `truncated`
+boolean that qualifies it, so §3.1's own rule forces a **minor** bump to `contract-a/2.2` and
+the URL path does **not** move (§17, A37). The census is a **display** lane and its name rule
+is deliberately **not** §16's: names travel as the game issued them, raw, and A34's
+normalization does **not** apply to them (§17, A36). Affected body text carries an
+`(amended — §17, Ax)` or `(added — §17, Ax)` marker, and **§17 wins over the body and over
+§13, §14, §15 and §16 wherever they disagree.**
 **Status:** implementation-ready for M4. Derived from the ratified decisions D1–D16 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, the world-geometry and
 entry-position research in `m2_findings.md`, the ring, containment and lineage designs in
 `m3_considerations.md`, and the grid, healing, recovery and operations designs in
 `m4_considerations.md`.
-**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.1`, sidecar ↔ relay ↔
-sidecar ↔ archive) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged by M4 and
-unchanged by §16 — `genes.speciesID` is excluded from the canonical projection, §4.3 there).
+**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.2`, sidecar ↔ relay ↔
+sidecar ↔ archive) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged by M4, by §16 —
+`genes.speciesID` is excluded from the canonical projection, §4.3 there — and by §17, which
+adds no payload field and hashes nothing).
 
 This document is the complete interface between `bibites-mod` (C#, in-process with The
 Bibites) and `multiverse-sidecar` (Go, a separate process on the same machine). It is
@@ -75,7 +85,7 @@ A20, A21):
 | **D13** — the grid (M4) | The mod declares **`exportEdges`, plural** — `["E", "N"]` — and `borderEdges` becomes all four edges. `EDGE_STATUS` carries **one entry per declared export edge**, each with its own state. A second capture band runs on the north edge, a second passive entry edge runs on the south, and the **corner rule** decides which edge claims an organism inside both bands (§15, A18, A19). The mod still learns no topology: it never sees a coordinate, a neighbour or a skipped slot. |
 | **D12** — route around gaps, splice in anywhere (M4) | **Nothing on this wire.** Route-around, insertion, the effective-neighbour walk and the re-route rule are Contract B's, and the mod sees only an open or closed export edge (`contract-b-m4.md` §8, §9). This is the property that keeps the mod free of topology, and M4 does not break it (§15, A25). |
 | **D14** — hard-stop recovery (M4) | The mod owns a periodic world save, a save on quit and a save rotation. The wire carries one **optional** save receipt on `HEARTBEAT`, so the operator surface can name the last save of a world on another machine (§15, A21). Replay and custody reassertion (§7.4, §7.5) become tested paths rather than believed ones. |
-| **D15** — operations and observability (M4) | The sidecar **paces** inbound delivery out of its journal at a maximum spawn rate per unit of **simulated** time. Pacing changes *when* an organism arrives, never *whether* it arrives, and it adds no field to this wire (§15, A20). The entry-position rule keeps mirroring `exitPosition`; arrival-position spreading is parked (§15, A25). |
+| **D15** — operations and observability (M4) | The sidecar **paces** inbound delivery out of its journal at a maximum spawn rate per unit of **simulated** time. Pacing changes *when* an organism arrives, never *whether* it arrives, and it adds no field to this wire (§15, A20). The entry-position rule keeps mirroring `exitPosition`; arrival-position spreading is parked (§15, A25). **Extended by §17:** the operator surface also names *which* species live in each world, and that census rides on `HEARTBEAT` beside the save receipt — one more OPTIONAL observability field the mod reports and no routing decision reads (§17, A35). |
 
 ---
 
@@ -131,7 +141,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_OUT",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -141,7 +151,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 | Field | JSON type | Required | Semantics |
 |---|---|---|---|
-| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.1"` (amended — §16, A33; `"contract-a/2.0"` before it, §15 A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
+| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.2"` (amended — §17, A37; `"contract-a/2.1"` before it, §16 A33, and `"contract-a/2.0"` before that, §15 A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
 | `type` | string | yes | The message discriminator. One of the nine names in §5. Uppercase, `A–Z` and `_` only. |
 | `messageId` | string | yes | UUID v4, lowercase, hyphenated, 36 characters. Unique per frame. Used **only** for log correlation. It is **not** an idempotency key. |
 | `sentAt` | number (int64) | yes | Unix milliseconds on the sender's wall clock. Informational only (D5). No side compares it against its own clock to make a decision. |
@@ -164,7 +174,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
   of its field, never by arithmetic on the minor. The minor exists so a log line and a
   bug report say which shape was on the wire.
 - The URL path stays major-scoped: `/contract-a/v2` serves every `contract-a/2.x` — including
-  `contract-a/2.1` (amended — §16, A33) — exactly as `/contract-a/v1` served every
+  `contract-a/2.1` (amended — §16, A33) and `contract-a/2.2` (amended — §17, A37) — exactly as `/contract-a/v1` served every
   `contract-a/1.x` (amended — §15, A23). A **major** bump
   therefore moves the path, and the retired path is kept alive only to answer with close
   `4000` (§2).
@@ -521,7 +531,7 @@ neighbour per export edge and cannot do that for an edge it has not been told ab
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "CONFIG_UPDATE",
   "messageId": "1c2fbe80-5a17-4a2b-9a20-3d54f1b7e001",
   "sentAt": 1785693598004,
@@ -572,9 +582,39 @@ timer that does not depend on the simulation. A paused sim still heartbeats. See
 | `lastSave.name` | string | no | The save's file name, for the operator who has to find it. |
 | `lastSave.bytes` | number (int64) | no | Its size on disk. A collapsing byte count is the cheapest early warning of a broken save path. |
 | `lastSave.durationMs` | number (int) | no | How long the save stalled the simulation. The owner's budget is **2000 ms** (D14), and this is the field that proves it at six instances. |
+| `species` | array of object | no | **The world's active species census** (added — §17, A35). One entry per species that has at least one living member or one egg in this world **at the moment this heartbeat was built**, sorted by `bibites + eggs` **descending**, at most `speciesCensusMax` (32) entries. It is a **display** census, not a matching key, and its names are therefore raw (§17, A36). **Absent means unknown**, not empty: an old mod, or a mod that does not implement §17. A present `[]` is a different and stronger statement — a mod that is reporting, from a world with no living species at all. The distinction is the whole reason the field is OPTIONAL rather than defaulted (`contract-b-m4.md` §10.1). |
+| `species[].genericName` | string | yes | The genus half, **exactly as this world holds it** (`Species.genericName`) — raw bytes, copied out of the live `Species` record with **no trimming, no whitespace collapsing, no case folding and no Unicode normalization**. §16's A34 normalization applies to the migration lane and **MUST NOT** be applied here (§17, A36). Valid UTF-8, **1 to 64 UTF-8 bytes**. Leading, trailing and doubled internal whitespace are **legal on this field** and are exactly what a faithful census carries. |
+| `species[].specificName` | string | yes | The specific half (`Species.specificName`). Same rules. The world's own display name is `genericName + " " + specificName`, the game's `Species.name` (`Species.cs:85`) — which is why a half carrying an edge space shows up in-game as a doubled space, and why the census must not repair it. |
+| `species[].bibites` | number (int) | yes | Living members of that species in this world: `Species.bibites.Count` (`Species.cs:58`). `≥ 0`. **Excludes eggs**, so it is on the same footing as `population`. |
+| `species[].eggs` | number (int) | yes | Unhatched eggs of that species: `Species.eggs.Count` (`Species.cs:61`). `≥ 0`. `bibites + eggs` is the game's own `Species.count` (`Species.cs:81`); the two halves travel separately so a reader can reconcile each against the counter it belongs to, and `population` counts no eggs. |
+| `truncated` | bool | no | **Qualifies `species` and nothing else** (added — §17, A35). `true` means **this array is not the whole census** — the mod cut it at `speciesCensusMax`, or the sidecar stripped an entry or trimmed an over-long array (§17, A35). Absent or `false` means the array is complete as of this heartbeat. It is **monotonic**: it may be set on the way, never cleared. A receiver **MUST** ignore it when `species` is absent. |
 
 **Receiver obligations.** The sidecar records the arrival time and the counters. It sends
 nothing back.
+
+**The census is validated by stripping, never by closing** (added — §17, A35). `HEARTBEAT` has
+no NACK channel, so §9.3's default answer for a bad `data` field is close `4003` — and that
+answer is **wrong for this field**, because a label is not worth a session. The sidecar
+applies exactly these three rules and no others:
+
+| What is wrong | What the sidecar does |
+|---|---|
+| One **entry** breaks its shape — not an object; a name missing, not a string, empty, over 64 UTF-8 bytes, or not valid UTF-8; a count missing, not a number, not an integer, or negative | Strip **that entry**, keep the rest of the census, set `truncated: true`, and log one line. The heartbeat is otherwise processed normally. |
+| The **field** breaks its shape — `species` present and not an array | Strip **the whole field**, log one line, and process the heartbeat without a census. A `truncated` that is not a boolean is dropped on its own and read as absent. |
+| The array holds more than `speciesCensusMax` entries | Keep the **first** `speciesCensusMax` — the array is sorted descending, so those are the largest — set `truncated: true`, and log one line. It is a mod defect, and it is logged as one. |
+
+**Never a NACK, never a close, and never an error up the stack.** A malformed census cannot
+fail a heartbeat, cannot affect liveness (§8), cannot delay a delivery, and cannot reach a
+caller as an error. A world whose census the sidecar had to strip is a world that reports
+everything else exactly as before.
+
+`species` exists for one reason: the operator surface names **which** species live in each
+world, on the same page that already names how many organisms do (`contract-b-m4.md` §10.1).
+It reaches that page the same way `population` and `lastSave` do — the sidecar copies the last
+census it received into the peer stats block, and the relay republishes it
+(`contract-b-m4.md` §6.3.1, §16 B11). Like `lastSave`, it is OPTIONAL, so a mod that omits it
+is conformant and simply reads as unknown — an honest gap, never a zero and never an empty
+world.
 
 `lastSave` is the only wire path the operator surface has to a world's save state, and that
 is why it exists (added — §15, A21). The archive serves the status page from the relay's
@@ -585,7 +625,7 @@ is conformant and simply reads as unknown — an honest gap, never a zero.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "HEARTBEAT",
   "messageId": "6b0a3f1d-3c4e-4a91-b7f2-51c8a0d33e42",
   "sentAt": 1785693600000,
@@ -607,10 +647,33 @@ is conformant and simply reads as unknown — an honest gap, never a zero.
       "name": "M4-Slot5-20260805T2058Z.zip",
       "bytes": 41533892,
       "durationMs": 730
-    }
+    },
+    "species": [
+      { "genericName": "Izus ",      "specificName": "copedylanus", "bibites": 96, "eggs": 14 },
+      { "genericName": "Cyanea",     "specificName": "velox",       "bibites": 61, "eggs":  9 },
+      { "genericName": "Alvaradus",  "specificName": "powerus",     "bibites": 38, "eggs": 11 },
+      { "genericName": "Banagellus", "specificName": "polatus ",    "bibites": 17, "eggs":  3 }
+    ]
   }
 }
 ```
+
+Three things in that census are deliberate and every implementer has to read them the same
+way (added — §17, A35, A36):
+
+- **`"Izus "` carries a trailing space and `"polatus "` carries one too, and both are correct
+  on this wire.** That world's registry really does hold `Izus  copedylanus` with a doubled
+  space, and its players really do see it (§16, A34 measured the generator that produces
+  them). The migration lane repairs such a half at the source because a name there is a
+  matching key; **this lane must not, because a name here is a label** (§17, A36).
+- **The array is sorted by `bibites + eggs` descending** — `110, 70, 49, 20` — and `truncated`
+  is absent, so this is the world's whole census.
+- **The counts reconcile, and the shortfall is honest.** `eggs` sums to `37`, which is exactly
+  `eggCount`. `bibites` sums to `212` against `population: 214`: two organisms in that world
+  have no `Species` record at all, which is an ordinary state (§16, A30) and **never an
+  error**. A reader **MUST** treat `Σ bibites ≤ population` and `Σ eggs ≤ eggCount` as the
+  contract, and a shortfall as unclassified organisms — not as a defect and not as a reason to
+  distrust the census.
 
 ---
 
@@ -726,7 +789,7 @@ species travels when that parent migrates, and not before.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_OUT",
   "messageId": "d3a11c9e-77b4-4b2f-8e5c-0a91f4d6b210",
   "sentAt": 1785693600123,
@@ -779,7 +842,7 @@ are unchanged.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_OUT",
   "messageId": "f4b83c17-0d95-4a6e-b721-8c50a9f3e264",
   "sentAt": 1785693600123,
@@ -872,7 +935,7 @@ Both lanes open, which is the ordinary state of a peer on a live grid:
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "EDGE_STATUS",
   "messageId": "5e18b2c0-4a6d-4f88-9c31-b0e75a2d4413",
   "sentAt": 1785693598041,
@@ -903,7 +966,7 @@ go, because a column of two holds no third slot to skip to (`contract-b-m4.md` �
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "EDGE_STATUS",
   "messageId": "b41c7d29-6e05-4f3a-8d17-92c0be5a4f38",
   "sentAt": 1785693731660,
@@ -964,7 +1027,7 @@ There is no acknowledgement of an acknowledgement. The chain stops here.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_OUT_ACK",
   "messageId": "a0c47f21-6b19-4d05-93ae-1c8f2b6e5507",
   "sentAt": 1785693600141,
@@ -999,7 +1062,7 @@ the strip forever.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_OUT_NACK",
   "messageId": "cf51d7a3-882b-4e14-a0d6-33b9c4e17708",
   "sentAt": 1785693600138,
@@ -1173,7 +1236,7 @@ swallows every exception (`m1_findings.md` §1.2). Reply `DESERIALIZE_FAILED`.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_IN",
   "messageId": "7f2b91d6-0e34-4c7a-b158-9a03e6c2f411",
   "sentAt": 1785693600187,
@@ -1207,7 +1270,7 @@ copied, so it arrives still travelling north (added — §15, A18):
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_IN",
   "messageId": "0a5e83b1-9c47-4d20-b6f8-31e70c9a5d42",
   "sentAt": 1785693612044,
@@ -1262,7 +1325,7 @@ later replay of the same `migrationId` is answered without a second delivery.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_IN_ACK",
   "messageId": "34ab7c05-1d92-4e60-8b47-c1f0d5a29316",
   "sentAt": 1785693600231,
@@ -1309,7 +1372,7 @@ the one failure mode D2 accepts, but it is never the first choice.
 
 ```json
 {
-  "protocol": "contract-a/2.1",
+  "protocol": "contract-a/2.2",
   "type": "MIGRATE_IN_NACK",
   "messageId": "e91d4f3b-7c60-4a25-91b8-40d7e2ca6b19",
   "sentAt": 1785693600244,
@@ -1639,7 +1702,7 @@ it is a mod defect either way.
 | Unknown `type` | Ignore, log one warning, keep the connection |
 | Unknown field inside `data` | Ignore silently |
 | A `data` field fails validation on a type that **has** a NACK (`MIGRATE_OUT`, `MIGRATE_IN`) | The matching NACK with `MALFORMED_MESSAGE`, keep the connection. **One named exception:** a malformed `species` block is stripped and the frame proceeds without it (amended — §16, A30) |
-| A `data` field fails validation on a type with **no** NACK channel (`CONFIG_UPDATE`, `HEARTBEAT`, `MIGRATE_IN_ACK`, `MIGRATE_IN_NACK`) | Close `4003` (amended — §13, A8) |
+| A `data` field fails validation on a type with **no** NACK channel (`CONFIG_UPDATE`, `HEARTBEAT`, `MIGRATE_IN_ACK`, `MIGRATE_IN_NACK`) | Close `4003` (amended — §13, A8). **One named exception:** a malformed `HEARTBEAT.species` census is stripped — the entry, or the whole field — and the heartbeat is processed without it (amended — §17, A35) |
 | A well-formed `MIGRATE_IN_ACK` / `MIGRATE_IN_NACK` naming an unknown `migrationId` | Log one warning and ignore. Not a close — it is a late reply after a purge or a restart (amended — §13, A8) |
 | A `MIGRATE_IN` with no usable `migrationId` | Log one error and drop the frame. No NACK, no close (amended — §13, A2) |
 | Frame over `maxFrameBytes` | Close `1009` or `4003` |
@@ -1668,6 +1731,7 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `maxFrameBytes` | `8388608` | both | 8 MiB WebSocket frame limit. |
 | `maxPayloadBytes` | `4194304` | both | 4 MiB limit on the `payload` string, in UTF-8 bytes. Applies to `parents[].payload` individually as well (§14, A12). |
 | `maxParentBlobs` | `2` | both | Upper bound on `parents` entries. A bibite has at most two parents; a longer array is truncated by the sidecar with one warning, never a NACK (§14, A12). |
+| `speciesCensusMax` | `32` | both | Upper bound on `HEARTBEAT.species` entries (§5.2, §17 A35). The mod cuts its census here, largest first, and sets `truncated`; a longer array is trimmed by the sidecar with one warning and the same flag, never a NACK and never a close. It is a **wire bound, not a display preference**: it is what keeps a stats block — and the `PEER_STATUS` broadcast that republishes six of them — bounded (`contract-b-m4.md` §6.3.1). |
 | `frameHeadroomBytes` | `65536` | mod | Envelope, escaping and JSON overhead the mod reserves under `maxFrameBytes` when it decides whether a parent blob still fits (§5.3, §14 A12). |
 | `inboundQueueMax` | `64` | sidecar | Un-delivered journal entries before inbound admission control kicks in. |
 | `exportRetentionSeconds` | `3600` | sidecar | Tombstone lifetime. Bounds custody reassertion (§7.4). |
@@ -1733,6 +1797,14 @@ These notes are non-normative. They exist so the two sides do not have to negoti
 - **Pacing is a release gate, not a queue.** Keep the journal as the queue and gate the
   *send*. A second in-memory queue in front of the socket duplicates the ordering problem and
   loses the paced entries on a restart.
+- **Decode the census defensively, into `[]json.RawMessage` or a struct with pointer fields**
+  (added — §17, A35). A per-entry decode failure must strip that entry and continue, so decode
+  the array element by element rather than in one `json.Unmarshal` into `[]SpeciesCount` that
+  fails whole. Nothing about a census may return an error to the heartbeat handler: no path
+  from this field reaches a close, a NACK or a caller's `err`. **Validate the name as bytes:**
+  `utf8.ValidString(s)`, `len(s) >= 1 && len(s) <= 64` on the **byte** length, and **no**
+  `strings.TrimSpace` — trimming here is a contract violation, not a tidy-up (§17, A36).
+  Carry the block onward as the bytes you received (`contract-b-m4.md` §6.3.1).
 
 ### 11.2 For the C# implementer (`bibites-mod`)
 
@@ -1799,6 +1871,25 @@ These notes are non-normative. They exist so the two sides do not have to negoti
 - **One in-flight record per organism, and it holds the edge** (§9.1, §15 A22). The record
   is what turns an edgeless `MIGRATE_OUT_NACK` into "close the north lane", and closing both
   lanes because one NACK arrived is a real and easy bug.
+- **Build the census in `Update`, from the species registry, and never from the organism
+  list** (added — §17, A35). `GlobalLineageManager.Instance.activeSpecies`
+  (`GlobalLineageManager.cs:23`) is the candidate set, and each entry already holds its own
+  counts: `Species.bibites.Count` and `Species.eggs.Count` (`Species.cs:58, 61`), which
+  `Species.count` merely sums (`:81`). So one heartbeat costs one pass over a few hundred
+  species and no pass over the population at all. It runs in `Update` beside the rest of the
+  heartbeat (§13, A4) and **never** in `FixedUpdate` — the A29 livelock is what a per-tick
+  scan turns into.
+- **Filter on `count ≥ 1` yourself; do not trust `activeSpecies` membership** (added — §17,
+  A35). The game prunes that list with `activeSpecies.RemoveAll(s => s.count < 1)` on its own
+  periodic pass (`GlobalLineageManager.cs:64, 90`), so between passes it can hold a species
+  with nothing alive in it. §5.2 says *active*, and the cheap test for active is the entry's
+  own two counts.
+- **Copy the two name halves; do not touch them** (added — §17, A36). No `Trim()`, no
+  `Regex.Replace` on whitespace, no `ToLowerInvariant`, no `string.Normalize()`. The migration
+  block (§5.3) and the census (§5.2) read the **same** `Species` record and must produce
+  **different** strings from it — normalized there, raw here — and a shared helper that
+  normalizes for both is the single most likely way to get this wrong. Keep the two reads
+  separate and name them for what they are.
 
 ---
 
@@ -2619,9 +2710,9 @@ are incompatible **by design**, and both sides say so loudly rather than misread
 
 **Enforced by:** both, symmetrically. Each side sends `"contract-a/2.0"` and compares only
 the major. The sidecar additionally owns the retired path and its `4000`.
-**The version string moved on with §16, A33** — each side now sends `"contract-a/2.1"` — and
-everything else in this amendment stands, including the path and the `4000` on `v1`: a minor
-bump moves no path (amended — §16, A33).
+**The version string moved on with §16, A33 and again with §17, A37** — each side now sends
+`"contract-a/2.2"` — and everything else in this amendment stands, including the path and the
+`4000` on `v1`: a minor bump moves no path (amended — §16, A33; §17, A37).
 
 ### A24 — D16's renumbering: the "M4" that meant public release is M5 (§4.5, §12 item 1, §14 A17)
 
@@ -3160,3 +3251,191 @@ never a wrong one.
 **Enforced by:** the mod, at both ends and asymmetrically. The **exporting** mod normalizes;
 the **importing** mod compares on the normalized form. No sidecar, relay or archive changes,
 and none may: A30's opacity rule is what makes the source's repair the only one.
+
+---
+
+## 17. Species-census amendments (`contract-a/2.2`, 2026-08-07)
+
+The owner ratified **the species census on the live map** on 2026-08-07, from a measured
+investigation of the running rig. **Three amendments, A35 to A37.** A35 puts one OPTIONAL
+array on one message; A36 states the name rule that array carries and why it is deliberately
+**not** §16's; A37 applies §3.1's version test.
+
+The section follows the pattern of §13, §14, §15 and §16. Each amendment names the gap or the
+change, the resolution, and **which side enforces it** — the side whose code makes the rule
+true, and which therefore has to change if the rule changes. Where an amendment contradicts
+the body or an earlier set, the amendment wins, and the body carries an `(amended — §17, Ax)`
+or `(added — §17, Ax)` marker at that point.
+
+**This set changes the wire, and it is additive.** One OPTIONAL array and the OPTIONAL boolean
+that qualifies it, on one existing message, in one direction. No removal, no type change, no
+enum change, no new message type, no new NACK code, no new close code, and no change to
+custody, dedup, pacing or geometry — so §3.1's own rule answers with a **minor** bump. The
+identifier is `contract-a/2.2`, the URL path stays `/contract-a/v2`, and a peer that speaks
+`contract-a/2.1` or `contract-a/2.0` stays compatible by construction (A37). One default is
+added to §10 (`speciesCensusMax`). `contract-b-m4.md` §16, B11 and B12, carry the matching set
+for the other wire.
+
+**Enforcement is split the ordinary way, and only the ordinary way.** The mod builds the
+census, because the species registry lives in the game process and nowhere else. The sidecar
+validates its shape, strips what fails, and carries the rest — the same relationship it has to
+`lastSave` (§15, A21) and to the `species` block on a migration (§16, A30). Nothing between
+the mod and the page reads a name for meaning.
+
+### What the census is, and why it is not the §16 block
+
+§16 already puts a species name on this wire, and the two are **different lanes with different
+jobs**. Reading either rule onto the other produces a real defect, so the difference is stated
+once, here, in full:
+
+| | `MIGRATE_OUT.species` / `MIGRATE_IN.species` (§16) | `HEARTBEAT.species[]` (§17) |
+|---|---|---|
+| What it is | A **matching key**. The destination mod resolves it against its own registry and files an organism under the result (§16, A31). | A **display census**. It is read by a human on a status page and by nothing else (`contract-b-m4.md` §10.1). |
+| What it describes | **One migrant**, at the moment it left. | **A whole world**, at the moment the heartbeat was built. |
+| Shape | One object, four string fields, two of them optional. | An array of `{ genericName, specificName, bibites, eggs }`, sorted, capped, with one boolean beside it. |
+| Names | **Whitespace-normalized by the exporting mod, before validation** (§16, A34): trimmed, internal runs collapsed to one U+0020. | **Raw.** Copied out of the `Species` record byte for byte, with no repair of any kind (A36). |
+| Why that name rule | The key has to match a *foreign* registry that holds the clean spelling, and a whitespace twin is a silent mis-merge. | The label has to match what the *owning* world's player sees in their own game, and a repaired label names a species nobody can find. |
+| Cost of the wrong rule | A merge that should have happened does not. | A world is misreported, or silently loses a quarter of its population from the page (A36). |
+| Who may interpret it | The destination mod, once. | **Nobody.** It is rendered, and that is all. |
+| Cadence | Once per migration. | Once per `heartbeatIntervalMs`, per world. |
+| Failure mode | Malformed block stripped, organism still crosses (§16, A30). | Malformed entry stripped, heartbeat still counts (A35). |
+
+The one thing the two lanes share is the failure philosophy, and it is the same sentence in
+both directions: **a label is never worth an organism, a session, or a heartbeat.**
+
+### A35 — `HEARTBEAT` carries an OPTIONAL species census (§1 D15, §5.2, §8, §9.3, §10, §11.1, §11.2)
+
+**The gap.** D15 gave the operator surface a page that describes six worlds without reading
+any world's files (`contract-b-m4.md` §10.1), and every number on it arrives as a stat: how
+many organisms live in a world, how deep its journal is, when it last saved. **What lives
+there is not on it.** The archive holds species names — §16's block made every migration carry
+one, and `contract-b-m4.md` §15, B10 records them — but a migration ledger holds *migrants and
+their ancestors, never
+the resident population of a peer* (`contract-b-m4.md` §10, D11). Asking the ledger which
+species live in slot 4 gets an answer about which species have *crossed into* slot 4, which is
+a different question with a plausible-looking answer — the worst kind of wrong number to put
+on a page.
+
+The population is already on the wire, once per second, from the only process that can see it.
+The census belongs in the same frame, for the same reason and by the same path.
+
+**Change.** `HEARTBEAT` gains two OPTIONAL fields: `species`, an array, and `truncated`, the
+boolean that qualifies it. §5.2 carries the field table, the strip rules and the worked
+example.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| Shape | `species: [{ "genericName": string, "specificName": string, "bibites": int, "eggs": int }]`, plus a sibling `truncated: bool`. No nesting, no id of any kind, and **no species id in particular** — `Species.speciesID` is a world-local counter (§16) and putting one here would invite exactly the cross-world reading §16 exists to forbid. |
+| Which species | The **active** ones: every species with `bibites + eggs ≥ 1` in this world at the moment the heartbeat was built. `GlobalLineageManager.activeSpecies` is the candidate set, and the mod applies the `≥ 1` test itself because that list is pruned on the game's own schedule, not on the heartbeat's (`GlobalLineageManager.cs:23, 64, 90`). |
+| The counts | `bibites` is `Species.bibites.Count`, `eggs` is `Species.eggs.Count`, and their sum is the game's own `Species.count` (`Species.cs:58, 61, 81`). **Two fields and not one sum**, because the page reconciles them against two different counters: `population` counts organisms and excludes eggs, `eggCount` counts eggs. A single total would be reconcilable against neither. |
+| The reconciliation, and its honest slack | `Σ bibites ≤ population` and `Σ eggs ≤ eggCount`, both as of the same heartbeat. Equality is the normal case; a **shortfall** means organisms with no `Species` record, which is an ordinary state (§16, A30). A reader **MUST NOT** treat a shortfall as an error, and **MUST NOT** rescale a census to close it. |
+| One sample | The census is built in the **same `Update`** as `population`, `eggCount` and `simulatedTime`, so the numbers in one heartbeat describe one instant. A mod that samples the census on a slower timer and repeats a stale copy breaks the reconciliation above and **MUST NOT**. |
+| Order | Sorted by `bibites + eggs`, **descending**. Ties may fall in any order and a reader **MUST NOT** read meaning into a tie. **Nothing downstream re-sorts** — the array's order is the census's own statement, and a page that wants another order sorts its own copy for display. |
+| The cap | `speciesCensusMax` = **32** entries (§10). The mod keeps the **largest** and drops the tail, which is why the sort is a sender obligation and not a display preference. |
+| `truncated` | Means exactly one thing: **this array is not the whole census**. The mod sets it when it applies the cap; the sidecar sets it when it strips an entry or trims an over-long array. **Monotonic** — set on the way, never cleared — and meaningless without `species`, so a receiver ignores it when the array is absent. |
+| Absent | **Unknown, not empty.** An old mod and a mod that does not implement §17 both produce a frame with no field, and no reader can tell them apart from a world with no species — so the page renders unknown (`contract-b-m4.md` §10.1). A present `[]` is the stronger statement a reporting mod makes about a world that really has nothing alive in it. |
+| Malformed | **Stripped, never fatal** (§5.2, §9.3). A bad **entry** costs that entry; a `species` that is not an array costs the field; neither costs the heartbeat, the connection or the liveness that heartbeat carries (§8). This is the second named exception to §9.3, and the first one on a message with **no NACK channel at all** — which is precisely why it has to be written down: the default answer there is close `4003`, and applying the default to a census would let a display field kill a live session. |
+| Not an input to anything | The census takes no part in admission control, pacing, custody, dedup, edge state, the `S` check or liveness. It is telemetry, on a frame that already carries telemetry. |
+
+**Why `HEARTBEAT` and not a new message.** The cadence already exists, the frame is already
+sent from the only process that can answer the question, its receiver already forwards its
+contents to the operator surface (`contract-b-m4.md` §6.3.1), and a tenth message type would
+need its own trigger, its own timeout and its own place in §9.3's table. A21 made exactly this
+choice for the save receipt and it has held.
+
+**What it costs, because a per-second field has to be costed.** A full census of 32 entries is
+about 3 KB of JSON; a typical rig world reports four to a dozen species and under 1 KB. That
+rides a loopback socket once per second, and it reaches the LAN only through the stats block,
+at `statsIntervalMs` (5 s) rather than every second (`contract-b-m4.md` §6.11). The build is
+one pass over a few hundred `Species` records with `O(1)` counts on each — no pass over the
+population — in `Update`, never in `FixedUpdate` (§11.2). **The cap is what bounds all three
+of those**, which is why it is a wire constant in §10 and not a display preference.
+
+**Enforced by:** the mod, for building an accurate census, sorting it, capping it and sampling
+it with the counters beside it; the sidecar, for stripping what fails its shape rules, setting
+`truncated` when it strips, and carrying the rest to the stats block without touching it.
+
+### A36 — The census carries names raw, and A34 does not apply to it (§5.2, §16 A30, §16 A34)
+
+**The gap, and it is a trap rather than an omission.** A34 taught this contract that game
+species names carry stray whitespace, and it answered with a rule: the exporting mod trims and
+collapses each half before it validates. That rule is correct **for the lane it was written
+for**, and applying it here — which is the obvious thing to do, since both fields hold a
+species name read from the same `Species` record — is wrong twice over.
+
+**The measurement that decided it.** A sweep of the rig's registries found **about 13% of the
+species names standing in a world's registry** carry stray whitespace: an edge space on a
+half, an internal run, or both. That is not the same denominator as A34's figure — A34
+measured **2% of the halves the generator issues**, while a registry accumulates every name a
+world has ever recorded — and the two are measurements of one generator at different
+denominators, not two claims in conflict. What made the decision was the second number: in one
+sampled world the affected species accounted for **27% of the living population**, because
+abundance and spelling are unrelated and the most numerous species happened to carry a doubled
+space.
+
+**Change.** The census carries each name half **exactly as the world holds it**. No trimming,
+no whitespace collapsing, no case folding, no Unicode normalization, by any party.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| What travels | The bytes of `Species.genericName` and `Species.specificName`, copied. Leading, trailing and doubled internal whitespace are **legal on this field**, and are the point of it. |
+| The only constraints | Valid **UTF-8**; each half **1 to 64 UTF-8 bytes**; `bibites` and `eggs` non-negative integers. A half that is empty fails — a name with no bytes is not a name — and a half that is *only* whitespace **passes**, because that is a name the world is genuinely displaying. |
+| Who may repair one | **Nobody.** Not the mod, not the sidecar, not the relay, not the archive, not the page. §16's A30 opacity rule already binds every party between the two mods; A36 extends the same prohibition to the **exporting** mod, which A34 obliges to repair the *other* lane. |
+| Why the export mod repairs one lane and not the other | The two strings answer two questions. `MIGRATE_OUT.species` answers *"which species is this, in your registry?"* — a question asked of a foreign world, where the clean form is what matches (§16, A34). `HEARTBEAT.species[]` answers *"what is this world showing its player?"* — a question about this world, where the raw form is the only true answer. |
+| What a repaired census would cost | Both available repairs are wrong, and the census exists because they are. **Dropping** a name that fails A30's clean-name rule — the answer §16 gives — silently removes the world's most abundant species from the page: 27% of one measured world's population, gone, with a log line nobody reads. **Normalizing** it prints `Izus copedylanus` for a species the player's own game calls `Izus  copedylanus`, and merges two registry records the world genuinely holds apart (§16, A34 names that twin) — a page inventing a merge no world performed. |
+| The two lanes may disagree, on purpose | The same species can appear as `"Izus"` on a migration and `"Izus "` on a census, from the same `Species` record, in the same second. **That is conformant.** A consumer that wants to join the archive's ledger to the census **MUST** normalize the census copy **for the comparison only**, exactly as A34's import resolver does, and **MUST NOT** rewrite either record. |
+| Sorting and merging | The census is **not** deduplicated by name at any point. Two entries whose names differ only in whitespace are two `Species` records in that world, and the census reports two — which is also the cheapest way an operator ever sees a pre-A34 whitespace twin. |
+
+**Why the constraint list is short.** Everything on it is checkable without an opinion: a byte
+count, a UTF-8 decode, a sign. Every rule that needs an opinion about what a name *should*
+look like belongs to the lane that has to match one, and that lane is §16's. This is what lets
+a Go sidecar and a C# mod agree on the validity of a census without agreeing on anything about
+language.
+
+**Enforced by:** the mod, for reading the halves without touching them; the sidecar, for
+validating them as bytes and carrying them as bytes. The prohibition binds every party after
+the mod, and `contract-b-m4.md` §16, B11 restates it for the wire that carries it onward.
+
+### A37 — `contract-a/2.2` is a minor bump, and the path does not move (§2, §3, §3.1)
+
+**Change.** §3.1: additive fields raise the **minor**; field removal, type changes and
+enum-value removal require a **major**. A35 adds two optional fields to one message and
+removes nothing.
+
+**Resolution.** Apply the contract's own test, item by item:
+
+| Change to Contract A | Kind | Needs a major? |
+|---|---|---|
+| `HEARTBEAT.species` added | additive OPTIONAL field | no |
+| `HEARTBEAT.truncated` added | additive OPTIONAL field | no |
+| The census strip rules (§5.2, §9.3) | receiver behaviour on a new field, no wire shape | no |
+| The raw-name rule (A36) | a constraint on a new field only; §16's fields are untouched | no |
+| `speciesCensusMax` added to §10 | a named default for a new field | no |
+| Message catalogue, enums, close codes, NACK codes, geometry, custody | **all unchanged** | no |
+
+The identifier is **`contract-a/2.2`**. By §3.1 the URL path is major-scoped, so it stays
+**`/contract-a/v2`**, and `/contract-a/v1` keeps answering with close `4000` exactly as A23
+left it. **The minor is a capability statement, not a negotiation** — a receiver detects this
+feature by the presence of the `species` array on a `HEARTBEAT`, never by arithmetic on the
+minor, and never by the minor a peer claims.
+
+**What a mixed rig does, honestly. Every degradation lands on "unknown", and none lands on a
+wrong number:**
+
+1. A `contract-a/2.1` **sidecar** with a `contract-a/2.2` mod ignores the unknown field
+   (§3.1). No census reaches the stats block, and the page renders that world's species as
+   unknown while its population, custody depth and save receipt stay exact.
+2. A `contract-a/2.2` **sidecar** with a `contract-a/2.1` mod receives no census, carries
+   none, and produces the same unknown. Neither side may reject the other over a minor.
+3. **No configuration produces a census that is wrong**, and that is the property this design
+   is built around: a missing field is unknown, a stripped entry sets `truncated`, and a
+   shortfall against `population` is defined slack. There is no path on which a reader sees a
+   confident number that is not true — which is the same standard `contract-b-m4.md` §10.1
+   already holds every other stat to.
+
+**Enforced by:** both sides, symmetrically. Each sends `"contract-a/2.2"` and compares only the
+major.
