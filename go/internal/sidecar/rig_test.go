@@ -213,9 +213,9 @@ func fastConfig(t *testing.T, relayURL, peerID string) Config {
 	cfg.BounceTimeout = 700 * time.Millisecond
 	cfg.StatsInterval = 200 * time.Millisecond
 	cfg.TickInterval = 40 * time.Millisecond
-	// The pacing default is 12.0 per SIMULATED minute since §18 A40 — five times
-	// the projected median under two-way lanes, and meant to be invisible to
-	// ordinary traffic. A test rig moves in seconds, so even the raised default
+	// The pacing default is 100.0 per SIMULATED minute since §18 A40's second
+	// raise — sized two orders below A29's ingest ceiling, and meant to be
+	// invisible to ordinary traffic. A test rig moves in seconds, so even that
 	// would gate every test on the burst; the burst is what "ordinary traffic is
 	// never delayed" means, and the tests that assert PACING set the rate
 	// themselves.

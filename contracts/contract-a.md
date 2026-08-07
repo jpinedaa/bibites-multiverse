@@ -1655,7 +1655,7 @@ delivers it in one breath, and the two need different answers.
 | Rule | Statement |
 |---|---|
 | Where | **At the sidecar, never at the mod.** The journal is where a burst accumulates and the sidecar owns the journal. The mod keeps exactly one arrival path, so D8's "the mod learns nothing" is untouched. |
-| The limit | At most `inboundRatePerSimMinute` (**12.0**, raised from 2.0 — §18, A40) `MIGRATE_IN` frames released per **simulated** minute of the receiving world, with a token bucket of `inboundRateBurst` (**15**, raised from 5) so ordinary traffic is never delayed. |
+| The limit | At most `inboundRatePerSimMinute` (**100.0**, raised from 2.0 then 12.0 — §18, A40) `MIGRATE_IN` frames released per **simulated** minute of the receiving world, with a token bucket of `inboundRateBurst` (**50**, raised from 5 then 15) so ordinary traffic is never delayed. |
 | The clock | **Simulated**, not wall-clock. The sidecar advances it from `HEARTBEAT.simulatedTime` (§5.2), which it already receives every second. A world at 20× therefore drains a dam 20× faster in wall-clock terms and at the same rate *as the world experiences it*, which is the only frame of reference the crowd lives in. |
 | A stopped clock | While `paused` is `true`, `timeScale` is `0`, or no `HEARTBEAT` has arrived for `pacingIdleGraceMs` (10 000 ms), `simulatedTime` does not advance and **nothing is released**. No tokens accrue in the dark, so a paused world does not bank a burst. |
 | Order | Pacing **MUST NOT** reorder. Journal order is journal order, at any rate. |
@@ -1682,9 +1682,19 @@ Thirty-five hours of the living deployment measure a **median of 1.19 and a p95 
 arrivals per simulated minute per slot — 12% of all slot-samples above the 2.0 limit, with
 slots 3 and 4 above it 20% and 26% of the time and slot 4's paced backlog pinned at
 `inboundQueueMax` for a quarter of the run. By this section's own **Observability** row, a
-depth that never falls names a limit set too low. **The default is now 12.0**, which is five
-times the projected median under two-way lanes — the same rule, re-measured on the topology
-that ships. A20 and A40 carry the derivation.
+depth that never falls names a limit set too low. A40 first set **12.0**, five times the
+*projected* median under two-way lanes — the same rule, re-projected onto the topology that
+ships.
+
+**It was retuned once more, the same day, and this time off the rule** (amended — §18, A40).
+12.0 was projected before two-way lanes ran. They ran, and the residual paced backlog did not
+clear: slot 3 held a `pacedDepth` of 16 under a 12.0 limit after the two-way rollout, which is
+this row's verdict a second time. The owner raised the default to **100.0** with a burst of
+**50** on 2026-08-07. 100.0 is not five times any median — it stops sizing the limit from
+projected offered load and sizes it from the ceiling instead: pacing exists to stop a dam
+arriving in one breath, and the hard mod-side ceiling is A29's ingest budget of ~12 000 per
+simulated minute, two orders above it. A dam is still spread; steady traffic is no longer
+throttled. A20 and A40 carry the derivation.
 
 > **The pacing interacts with the sender's hold timeout, and the answer is on the other
 > wire** (Risk 9). Pacing delays `MIGRATE_IN`, which delays `MIGRATE_IN_ACK`, which delays
@@ -1862,8 +1872,8 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `entryImmunitySeconds` | `5` | mod | Simulated seconds after arrival during which an organism cannot re-trigger the border strip (`m2_findings.md` §4.4). Applies to **every** capture band, all four of them under D17 (§15, A19; §18, A38). It is load-bearing rather than defensive now: with a band on the arrival edge, it and the inset are what keep a spawn and the next export two separable events. |
 | `migrationExcludeSpecies` | `"Basic bibite"` | mod | Comma-separated full species names that **never export** (§18, A39). Matched on the §16 A34-normalized form. Set by `MULTIVERSE_MIGRATION_EXCLUDE`. Empty disables the policy. Local, never on the wire. |
 | `entryMargin` | `max(5, 0.5·W)` | mod | World units the spawn is inset **past** the strip's inner face, on top of `W` (§4.3). Named here because §4.3's entry formula now covers all four edges (added — §15, A19). |
-| `inboundRatePerSimMinute` | `12.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). **Raised from `2.0` on 2026-08-07** (§18, A40): 2.0 was five times T1's measured one-lane rate, and D13 then D17 multiplied the inbound surface past it. **It gains a knob with the raise** — `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` — because it had none. |
-| `inboundRateBurst` | `15` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). **Raised from `5` on 2026-08-07** (§18, A40): arrivals clump per lane, and four inbound lanes clump about twice as hard as two. |
+| `inboundRatePerSimMinute` | `100.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). **Raised from `2.0` to `12.0` and then to `100.0` on 2026-08-07** (§18, A40): 2.0 was five times T1's measured one-lane rate, D13 then D17 multiplied the inbound surface past it, and 12.0's five-times-the-median projection was made before two-way lanes ran and did not clear the residual backlog once they did. 100.0 is sized from A29's ingest ceiling instead, two orders below it. **It gains a knob with the raise** — `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` — because it had none. |
+| `inboundRateBurst` | `50` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). **Raised from `5` to `15` and then to `50` on 2026-08-07** (§18, A40): it scales with the rate but stays under `inboundQueueMax` (64), so the bucket can never release a full paced queue in one breath. |
 | `pacingIdleGraceMs` | `10000` | sidecar | Wall-clock silence from `HEARTBEAT` after which the pacing clock stops advancing (§7.5, §15 A20). |
 | `heartbeatDeliveryGraceMs` | `1500` | sidecar | Age of the newest `HEARTBEAT` beyond which `MIGRATE_IN` release is held — the quiet-mod gate that trips before `heartbeatTimeoutMs` does (§7.5, §8, §15 A29). |
 | `replayDelayStepMs` | `500` | sidecar | Per-generation step of the reconnect replay delay, keyed on the batch's least-delivered `attempt` (§7.5, §15 A29). |
@@ -2717,7 +2727,7 @@ at wake. M4 therefore paces delivery out of the journal.
 - The sidecar releases at most `inboundRatePerSimMinute` `MIGRATE_IN` frames per
   **simulated** minute of the receiving world, through a token bucket of `inboundRateBurst`
   so ordinary traffic never waits. **A20 shipped 2.0 and 5; §18's A40 raises them to 12.0
-  and 15**, on the same rule and a fresher measurement — the mechanism below is unchanged.
+  and 15, then to 100.0 and 50** — the mechanism below is unchanged by either raise.
 - The clock is the mod's own `HEARTBEAT.simulatedTime`. It does not advance while the world
   is paused, stopped or silent, and it never runs on wall time.
 - Journal order is preserved absolutely. Bounce-backs and replays go through the same gate.
@@ -3735,7 +3745,7 @@ attaches, so the lookup is free where it is.
 **Enforced by:** the **mod**, alone. No sidecar, relay or archive behaviour changes, and none
 of them learns that the policy exists.
 
-### A40 — The delivery rate limit rises to 12.0 per simulated minute, and gains the knob it never had (§7.5, §10, §15 A20)
+### A40 — The delivery rate limit rises, and gains the knob it never had (§7.5, §10, §15 A20)
 
 *D20. A default change and a new flag. No field, no message, no version.*
 
@@ -3779,7 +3789,29 @@ do.
 | `inboundRateBurst` | `5` | **`15`** | The bucket exists so a *clump* is never delayed, and clumping is set by organism behaviour per lane. Four inbound lanes clump about twice as hard as two, and the bucket should hold a comparable slice of simulated time. |
 | The knob itself | none | `--inbound-rate`, `MULTIVERSE_INBOUND_RATE` | `holdTimeoutMs` set this precedent in M4 for exactly this reason. A tunable an operator cannot retune from the metric that measures it is not a tunable, and this one has now needed retuning twice. |
 
-**Why 12 and not 6, and why not 30.** The measured curve answers both. Projecting the observed
+**And it needed retuning a third time, the same day** (signed off by the owner, 2026-08-07).
+The `12.0` row above is a **projection**: 12.0 is five times a two-way median of ~2.4 that was
+itself extrapolated from one-way measurements, because two-way lanes had not run yet. They ran
+that afternoon, and the projection was low — with the raised limit already deployed, slot 3
+still held a `pacedDepth` of **16** that did not clear. §7.5's Observability row does not care
+how the number was derived: a depth that never falls names a limit set too low, and it had now
+named two of them.
+
+| Knob | Was | Becomes | Why this number |
+|---|---|---|---|
+| `inboundRatePerSimMinute` | `12.0` | **`100.0`** | **Sized from the ceiling, not from a median.** Two projections in a row came in under the real offered load, so the third stops projecting. What pacing actually has to guarantee is that a dam does not arrive in one breath, and what actually bounds arrival is A29's ingest budget — 4 applications per `FixedUpdate`, ~12 000 per simulated minute. 100.0 is **two orders below that ceiling** and comfortably above any load the map has produced or is projected to produce, so it throttles residual queueing away without approaching the constraint that matters. |
+| `inboundRateBurst` | `15` | **`50`** | Scales with the rate, and is bounded by `inboundQueueMax` (64) rather than by the rate: a burst at or above the queue's own capacity could release a **full** paced queue instantaneously, which is the one behaviour pacing exists to prevent. At 50 the worst-case instantaneous clump costs ~13 `FixedUpdate`s of A29's ingest budget — about a quarter of a real second. |
+
+**What this does and does not give up.** It gives up the "five times the measured median" rule
+that produced 2.0 and 12.0; that rule assumed the median could be measured or projected ahead
+of the topology, and twice it could not. It keeps everything the rule was protecting: the dam
+is still spread, because a 900-organism backlog still takes **9 simulated minutes** to drain
+rather than arriving at once; `inboundQueueMax` and its upstream `OVERLOADED` backpressure are
+still the cap for when the queue does fill; and the A29 headroom below is **wider in relative
+terms than any bound the limit has ever needed** — 120× rather than 1000×, still two orders.
+Every row of §7.5's mechanism table is untouched by this raise as by the last one.
+
+**Why 12 and not 6, and why not 30** (the reasoning that produced the superseded `12.0`). The measured curve answers both. Projecting the observed
 distribution through D17's doubling and sweeping the limit, the share of samples that would be
 throttled falls 57% → 12.5% → 0.6% → 0.4% → 0.3% at limits of 2, 4, 6, 8 and 12. **The curve
 flattens at about 6 and is flat by 12**, and the residue above it is not steady traffic at all:
@@ -3793,8 +3825,9 @@ only shortens the spreading of the dams the limit exists for. **The dam is still
 - **It does not re-open the A29 livelock.** The mod's ingest ceiling is
   `MaxMutationsPerFixedUpdate` = 4 applications per `FixedUpdate` under an 8 ms wall-clock
   budget. At 50 physics ticks per simulated second that ceiling is ~12 000 per simulated
-  minute — **three orders of magnitude above 12.0**. The binding constraint on arrival was
-  never the mod's ingest rate, and A29's five defences are untouched.
+  minute — three orders of magnitude above 12.0, and **two orders above the 100.0 that
+  superseded it**. The binding constraint on arrival was never the mod's ingest rate, and
+  A29's five defences are untouched.
 - **It does not change `inboundQueueMax`.** 64 stays, and so does the upstream `OVERLOADED`
   backpressure that turns a full queue into a re-route. Raising the drain is what stops the
   queue filling in the first place; the cap is still there for when it does.
@@ -3821,7 +3854,7 @@ enum-value removal require a **major**. A38, A39 and A40 do none of the four.
 | A capture band on every declared edge (§4.3.1) | **mod-side geometry**, no wire shape | no | no |
 | `open` governs exports only (§5.4) | a rule made explicit; it is what A11 has always meant | no | no |
 | The migration exclusion policy (A39) | **local policy**, invisible to every other party | no | no |
-| `inboundRatePerSimMinute` 2.0 → 12.0, `inboundRateBurst` 5 → 15 (A40) | a §10 default value | no | no |
+| `inboundRatePerSimMinute` 2.0 → 12.0 → 100.0, `inboundRateBurst` 5 → 15 → 50 (A40) | a §10 default value | no | no |
 | `migrationExcludeSpecies` named in §10 | a named default for a local policy | no | no |
 | Message catalogue, field tables, enums, close codes, NACK codes, custody chain | **all unchanged** | no | no |
 

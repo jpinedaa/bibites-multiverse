@@ -55,12 +55,12 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			"destination is dark and this sidecar can see it")
 	// inboundRatePerSimMinute was a compiled Go constant with no flag and no
 	// environment variable, reachable only by editing source — and it has now
-	// needed retuning twice (contract-a.md §18, A40). A tunable an operator
+	// needed retuning three times (contract-a.md §18, A40). A tunable an operator
 	// cannot retune from the metric that measures it is not a tunable.
 	inboundRate := fs.Float64("inbound-rate", envFloat("MULTIVERSE_INBOUND_RATE", 0),
 		"MIGRATE_IN deliveries released per SIMULATED minute of this world "+
 			"(contract-a.md §7.5, inboundRatePerSimMinute). 0 keeps the default "+
-			"(12.0). Raise it when metrics.jsonl shows a pacedDepth that never "+
+			"(100.0). Raise it when metrics.jsonl shows a pacedDepth that never "+
 			"falls; lower it to spread a dam harder")
 	listInflight := fs.Bool("list-inflight", false,
 		"print the journal entries this sidecar still holds custody of, then exit "+

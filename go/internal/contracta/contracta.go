@@ -217,22 +217,34 @@ const (
 	// on three of six slots that never fell. §7.5's own observability rule — a
 	// depth that never falls names a limit set too low — is what condemned it.
 	//
-	// 12.0 is A20's own rule re-applied to the topology that ships: five times the
-	// projected median once D17 doubles the inbound surface (1.19 -> ~2.4). The
-	// dam is still spread — a 900-organism backlog drains over 75 simulated
-	// minutes, not one breath — and inboundQueueMax and the OVERLOADED
-	// backpressure behind it are untouched.
+	// A40 then set 12.0, five times a PROJECTED two-way median of ~2.4. The
+	// projection was made before two-way lanes ran. They now run, and the living
+	// deployment still carries a residual paced backlog under 12.0 (slot 3 held a
+	// pacedDepth of 16 after the two-way rollout), so the same observability rule
+	// condemns 12.0 for the same reason it condemned 2.0. The owner raised the
+	// default to 100.0 on 2026-08-07.
+	//
+	// 100.0 gives up on sizing the limit from a projected median and sizes it from
+	// the ceiling instead: pacing exists to stop a dam arriving in one breath, and
+	// the hard mod-side ceiling is A29's ingest budget of 4 applications per
+	// FixedUpdate, ~12 000 per simulated minute. 100.0 sits two orders below that,
+	// so it still spreads a dam — a 900-organism backlog takes 9 simulated minutes
+	// rather than one instant — while no longer throttling steady traffic.
+	// inboundQueueMax and the OVERLOADED backpressure behind it are untouched.
 	//
 	// The rate is a DEFAULT and no longer only a constant: --inbound-rate and
 	// MULTIVERSE_INBOUND_RATE override it (§18, A40), because a tunable an
 	// operator cannot retune from the metric that measures it is not a tunable,
-	// and this one has now needed retuning twice.
-	InboundRatePerSimMinute = 12.0
-	// InboundRateBurst is the token-bucket capacity, raised from 5 with the rate
-	// (§18, A40): the bucket exists so a CLUMP is never delayed, clumping is set
-	// by organism behaviour per lane, and four inbound lanes clump about twice as
-	// hard as two.
-	InboundRateBurst  = 15.0
+	// and this one has now needed retuning three times.
+	InboundRatePerSimMinute = 100.0
+	// InboundRateBurst is the token-bucket capacity, raised from 15 with the rate:
+	// the bucket exists so a CLUMP is never delayed, and it bounds the largest
+	// clump the pacer can ever release at once. 50 scales with the rate but stays
+	// under inboundQueueMax (64), so the bucket can never release a full paced
+	// queue in one breath, and its worst case costs ~13 FixedUpdates of A29's
+	// 4-applications-per-frame ingest budget — about a quarter of a real second,
+	// two orders below the ~12 000/simulated-minute mod-side ceiling.
+	InboundRateBurst  = 50.0
 	PacingIdleGraceMs = 10000
 	PacingIdleGrace   = PacingIdleGraceMs * time.Millisecond
 )

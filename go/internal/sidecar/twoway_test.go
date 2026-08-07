@@ -267,23 +267,35 @@ func TestClosedEdgeStillAcceptsInbound(t *testing.T) {
 }
 
 // TestInboundRateKnob covers contract-a.md §18, A40: the delivery rate limit
-// rises to 12.0 per simulated minute with a burst of 15, and it GAINS THE KNOB
-// IT NEVER HAD — a compiled Go constant reachable only by editing source is not
-// a tunable, and this one has now needed retuning twice.
+// rises off the value A20 sized from one-way lanes, and it GAINS THE KNOB IT
+// NEVER HAD — a compiled Go constant reachable only by editing source is not a
+// tunable, and this one has now needed retuning three times.
+//
+// The default is 100.0 with a burst of 50, raised from A40's 12.0/15 by the
+// owner on 2026-08-07: A40's 12.0 was five times a PROJECTED two-way median,
+// and the running two-way deployment still carried a residual paced backlog
+// under it. 100.0 is sized from the ceiling instead of from a median — two
+// orders below A29's ~12 000 per simulated minute ingest budget.
 //
 // It pins the default, the flag and the environment variable, and it pins that
 // the Config path a test rig uses still overrides all three.
 func TestInboundRateKnob(t *testing.T) {
 	d := DefaultConfig()
-	if d.InboundRatePerSimMinute != 12.0 {
-		t.Fatalf("inboundRatePerSimMinute defaults to %v, want 12.0 — five times the "+
-			"projected median under two-way lanes (§18, A40)", d.InboundRatePerSimMinute)
+	if d.InboundRatePerSimMinute != 100.0 {
+		t.Fatalf("inboundRatePerSimMinute defaults to %v, want 100.0 — two orders below "+
+			"A29's ingest ceiling (§18, A40)", d.InboundRatePerSimMinute)
 	}
-	if d.InboundRateBurst != 15.0 {
-		t.Fatalf("inboundRateBurst defaults to %v, want 15 — four inbound lanes clump about "+
-			"twice as hard as two", d.InboundRateBurst)
+	if d.InboundRateBurst != 50.0 {
+		t.Fatalf("inboundRateBurst defaults to %v, want 50 — scaled with the rate but "+
+			"under inboundQueueMax, so a full paced queue never releases in one breath",
+			d.InboundRateBurst)
 	}
-	if contracta.InboundRatePerSimMinute != 12.0 || contracta.InboundRateBurst != 15.0 {
+	if d.InboundRateBurst >= contracta.InboundQueueMax {
+		t.Fatalf("inboundRateBurst %v is not under inboundQueueMax %v; the bucket could "+
+			"release a full paced queue in one breath",
+			d.InboundRateBurst, contracta.InboundQueueMax)
+	}
+	if contracta.InboundRatePerSimMinute != 100.0 || contracta.InboundRateBurst != 50.0 {
 		t.Fatalf("the contract package still names %v/%v",
 			contracta.InboundRatePerSimMinute, contracta.InboundRateBurst)
 	}
@@ -303,12 +315,12 @@ func TestInboundRateKnob(t *testing.T) {
 	}
 	// A value that does not parse is IGNORED rather than fatal: a typo in a
 	// service-manager unit must not stop a world joining the map.
-	t.Setenv("MULTIVERSE_INBOUND_RATE", "twelve")
-	if got := parseInboundRate(t, nil); got != 12.0 {
+	t.Setenv("MULTIVERSE_INBOUND_RATE", "a hundred")
+	if got := parseInboundRate(t, nil); got != 100.0 {
 		t.Fatalf("an unparseable MULTIVERSE_INBOUND_RATE produced %v, want the default", got)
 	}
 	t.Setenv("MULTIVERSE_INBOUND_RATE", "-4")
-	if got := parseInboundRate(t, nil); got != 12.0 {
+	if got := parseInboundRate(t, nil); got != 100.0 {
 		t.Fatalf("a negative MULTIVERSE_INBOUND_RATE produced %v, want the default", got)
 	}
 

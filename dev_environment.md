@@ -576,9 +576,12 @@ Four things about that invocation are load-bearing:
 set, `contract-a.md` §18 A40). It sets `inboundRatePerSimMinute`: the maximum `MIGRATE_IN`
 frames released per **simulated** minute of the receiving world, with a token bucket of
 `inboundRateBurst` so ordinary traffic is never delayed. The default rose from `2.0`/`5` to
-**`12.0`/`15`** with D17, because D13 and then D17 multiplied the inbound surface past the old
+`12.0`/`15` with D17, because D13 and then D17 multiplied the inbound surface past the old
 number, and the raise is what made the knob exist at all — before it, the rate was a compiled
-constant. `0` or an unparseable value keeps the default. **Reach for it last.** A `pacedDepth`
+constant. It rose again the same day, to **`100.0`/`50`**, once two-way lanes actually ran and
+the residual `pacedDepth` did not clear under `12.0`; `100.0` is sized two orders below A29's
+mod-side ingest ceiling rather than from a projected median. `0` or an unparseable value keeps
+the default. **Reach for it last.** A `pacedDepth`
 that will not fall is usually a story about the traffic rather than the rate: the map-wide
 symptom of a stale `contract-b` peer (above) looks exactly like an under-set rate, and raising
 the rate there only pumps a bounce loop faster. Read `pacedDepth` per slot on `/api/status`

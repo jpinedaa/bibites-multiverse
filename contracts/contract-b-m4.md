@@ -2295,19 +2295,30 @@ The **delivery rate limit** is a Contract A tunable, because it paces a Contract
 `contract-a.md` §10. It is named here because its backpressure is this wire's `OVERLOADED`
 and its side effects are this wire's hold clock.
 
-**It was raised on 2026-08-07, and this wire is why it had to be** (added — §17, B13). The
-values are now `inboundRatePerSimMinute` **12.0** (from 2.0) and `inboundRateBurst` **15**
-(from 5), with a new `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` knob;
-`contract-a.md` §18 A40 carries the derivation and the measurements. The reason it belongs in
-this document's tunable table and not only in that one: **the limit was sized against a
-one-row ring where a slot had one inbound lane, and every topology decision since has been
-made here.** §2's grid gave each slot a second inbound lane, §17's B13 gives it four, and
-§2.1's degenerate axes make the columns of a 3×2 map carry two lanes to the same peer. Thirty-five
-hours of the living deployment measured a median offered load of 1.19 arrivals per simulated
-minute per slot against a 2.0 ceiling — 12% of samples over it, and three of six slots holding
-a paced backlog pinned at `inboundQueueMax` — which is `contract-a.md` §7.5's own definition
-of a limit set too low. **A topology change on this wire is a pacing change on the other one**,
-and the next map that grows an axis should re-check this number before it ships, not after.
+**It was raised twice on 2026-08-07, and this wire is why it had to be** (added — §17, B13).
+The values are now `inboundRatePerSimMinute` **100.0** (from 2.0, via 12.0) and
+`inboundRateBurst` **50** (from 5, via 15), with a new `--inbound-rate` /
+`MULTIVERSE_INBOUND_RATE` knob; `contract-a.md` §18 A40 carries the derivation and the
+measurements. The reason it belongs in this document's tunable table and not only in that one:
+**the limit was sized against a one-row ring where a slot had one inbound lane, and every
+topology decision since has been made here.** §2's grid gave each slot a second inbound lane,
+§17's B13 gives it four, and §2.1's degenerate axes make the columns of a 3×2 map carry two
+lanes to the same peer. Thirty-five hours of the living deployment measured a median offered
+load of 1.19 arrivals per simulated minute per slot against a 2.0 ceiling — 12% of samples
+over it, and three of six slots holding a paced backlog pinned at `inboundQueueMax` — which is
+`contract-a.md` §7.5's own definition of a limit set too low. **A topology change on this wire
+is a pacing change on the other one**, and the next map that grows an axis should re-check this
+number before it ships, not after.
+
+**The second raise is the evidence for that sentence.** 12.0 was derived from a *projection* of
+two-way traffic, written before B13's reverse lanes ran. Once they ran, the residual paced
+backlog did not clear — slot 3 held a `pacedDepth` of 16 under the raised limit — so the owner
+raised the default again to **100.0/50** the same day (signed off 2026-08-07). 100.0 abandons
+"five times the median" and sizes the limit from the mod-side ceiling instead: A29's ingest
+budget of 4 applications per `FixedUpdate` is ~12 000 per simulated minute, **two orders above
+it**. The burst is bounded by `inboundQueueMax` (64) rather than by the rate, so the bucket can
+never release a full paced queue in one breath. Nothing in the table below changes; the
+`OVERLOADED` path simply fires still less often.
 
 | Interaction with this wire | Effect of the raise |
 |---|---|
