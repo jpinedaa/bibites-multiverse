@@ -29,10 +29,12 @@ type modSession struct {
 	modVersion  string
 	simSize     float64
 	borderWidth float64
-	// borderEdges are the edges the mod will accept an inbound organism on —
-	// all four under the grid. exportEdges are the edges it runs a capture band
-	// on: different doors, one entry per export edge in EDGE_STATUS
-	// (contract-a.md §15, A18).
+	// borderEdges are the edges the mod will accept an inbound organism on — all
+	// four since A18. exportEdges are the edges it runs a capture band on, one
+	// entry each in EDGE_STATUS. Under D17 the two sets are EQUAL rather than one
+	// being a superset of the other: every declared edge is both an export edge
+	// and an entry edge, and "out and in are different doors" is retired
+	// (contract-a.md §15 A18, §18 A38).
 	borderEdges []string
 	exportEdges []string
 	ringSlot    *int
@@ -431,11 +433,13 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 			"kind "+out.Kind+" is not supported in M2", 0)
 		return true
 	}
-	if out.ExitEdge != contracta.EdgeE && out.ExitEdge != contracta.EdgeN {
-		// §15 A18: exitEdge is always a member of the declared exportEdges, and
-		// the grid exports east and north.
+	if !contracta.ValidEdge(out.ExitEdge) {
+		// §15 A18: exitEdge is always a member of the declared exportEdges. Under
+		// D17 (§18, A38) all four values occur, so this is an ENUM check and
+		// nothing more — whether THIS mod may leave by THIS edge is
+		// exportOpenLocked's question, decided against the set the mod declared.
 		s.nackOut(sess, out.MigrationID, entityID, contracta.OutEdgeClosed,
-			"exitEdge "+out.ExitEdge+" is not an export edge under the grid", 0)
+			"exitEdge "+out.ExitEdge+" is not one of E, N, W, S", 0)
 		return true
 	}
 	if err := bb8.Validate(out.GameVersion, out.Payload); err != nil {

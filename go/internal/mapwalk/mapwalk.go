@@ -61,22 +61,36 @@ func SameSize(a, b float64) bool {
 //
 //	effective(E) = first deliverable slot at (col+1,row), (col+2,row), ... mod width
 //	effective(N) = first deliverable slot at (col,row+1), (col,row+2), ... mod height
+//	effective(W) = first deliverable slot at (col-1,row), (col-2,row), ... mod width
+//	effective(S) = first deliverable slot at (col,row-1), (col,row-2), ... mod height
 //
-// It visits every OTHER position on the axis exactly once and then stops, so a
-// peer never exports to itself. An axis of length 1 has no candidates at all,
-// and an EMPTY skip list with no target is what §8 turns into no_peer.
+// The reverse pair is the forward pair with the step negated (§17, B13) and
+// nothing else about it differs: same Deliverable filter, same "visit every
+// OTHER position on the axis exactly once and stop", same empty-skip-list-means
+// -no_peer. THE SKIP LIST IS PER WALK: E and W cross one row from opposite ends
+// and legitimately report different bypasses.
+//
+// This is the same computation relay.Grid.Effective performs, on the inputs
+// PEER_STATUS carries, and the two MUST agree. It is duplicated rather than
+// shared because the relay walks its reservation set and a client walks a
+// broadcast frame.
 func Walk(status contractb.PeerStatus, me contractb.SlotInfo, edge string) (contractb.SlotInfo, []contractb.Skip, bool) {
 	skipped := []contractb.Skip{}
-	length, north := status.Map.Width, false
-	if edge == contracta.EdgeN {
-		length, north = status.Map.Height, true
+	vertical := contracta.Vertical(edge)
+	length := status.Map.Width
+	if vertical {
+		length = status.Map.Height
+	}
+	delta := 1
+	if contracta.Reverse(edge) {
+		delta = -1
 	}
 	for step := 1; step < length; step++ {
 		pos := me.Position
-		if north {
-			pos.Row = (me.Position.Row + step) % status.Map.Height
+		if vertical {
+			pos.Row = wrapIndex(me.Position.Row+delta*step, status.Map.Height)
 		} else {
-			pos.Col = (me.Position.Col + step) % status.Map.Width
+			pos.Col = wrapIndex(me.Position.Col+delta*step, status.Map.Width)
 		}
 		cand, reserved := At(status, pos)
 		if !reserved {
@@ -91,6 +105,15 @@ func Walk(status contractb.PeerStatus, me contractb.SlotInfo, edge string) (cont
 		return cand, skipped, true
 	}
 	return contractb.SlotInfo{}, skipped, false
+}
+
+// wrapIndex is the torus. Go's % keeps the sign of the dividend, so a reverse
+// walk off column 0 would address column -1 without it.
+func wrapIndex(i, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return ((i % n) + n) % n
 }
 
 // At finds the slot reserved at a position, if any. A position inside the

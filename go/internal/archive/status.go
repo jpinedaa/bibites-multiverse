@@ -300,9 +300,16 @@ func (a *Archive) StatusView() Status {
 			}
 		}
 
-		// Rule 2: the lanes are DERIVED, by §8's walk, from this very frame.
-		for _, edge := range []string{contracta.EdgeE, contracta.EdgeN} {
+		// Rule 2: the lanes are DERIVED, by §8's walk, from this very frame — and
+		// under two-way lanes there are FOUR walks per slot, not two (§17, B13).
+		// The archive reproduces them itself rather than reading them off a grant,
+		// because a subscriber gets no grant; §10.1 requires exactly this and B13
+		// names the archive as one of the parties that must now run four.
+		for _, edge := range contracta.CanonicalEdges() {
 			if !declares(si.ExportEdges, edge) {
+				// A slot that declared two edges is a two-edge world on a two-way
+				// map: it receives from all four sides and exports to two, and the
+				// page draws it with two dead lanes rather than inventing them.
 				continue
 			}
 			lv := LaneView{Edge: edge, FromSlot: si.Slot, Skipped: []contractb.Skip{}}
@@ -315,12 +322,7 @@ func (a *Archive) StatusView() Status {
 			} else {
 				lv.Reason = mapwalk.EdgeReason(skipped)
 			}
-			if l, ok := a.lanes[lanePair{si.Slot, lv.ToSlot}]; ok {
-				lv.Migrations = l.total
-				lv.PerMinute = l.perMinute(nowMs)
-				lv.RecentHops = l.recentHops(nowMs)
-				lv.LastAtMs = l.lastAt
-			}
+			a.fillFlowLocked(&lv, si.Slot, edge, nowMs)
 			out.Lanes = append(out.Lanes, lv)
 		}
 		out.Slots = append(out.Slots, v)
@@ -354,7 +356,43 @@ func (a *Archive) StatusView() Status {
 	return out
 }
 
-type lanePair struct{ from, to int }
+// lanePair keys the flow counters. The EDGE is part of the key because a
+// directed lane is what carries a flow, and two-way lanes made (from, to)
+// ambiguous: on an axis of length 2 the forward and reverse lanes join the same
+// two worlds (§17, B13). Records written before D17 carry edge "".
+type lanePair struct {
+	from, to int
+	edge     string
+}
+
+// fillFlowLocked puts one directed lane's measured flow onto its view.
+//
+// It also carries the pre-D17 ledger forward, which is the one place the new
+// key has to answer for the old one. A record written before the edge was
+// recorded sits under edge "", and it can be re-attributed EXACTLY because the
+// only export edges that existed then were E and N — and E and N can never
+// resolve to the same target, since (col+1,row) and (col,row+1) are different
+// positions and no slot occupies two of them. So a legacy bucket belongs to at
+// most one of the four lanes drawn today, and adding it double-counts nothing.
+// W and S never have one.
+func (a *Archive) fillFlowLocked(lv *LaneView, from int, edge string, nowMs int64) {
+	keys := []lanePair{{from: from, to: lv.ToSlot, edge: edge}}
+	if edge == contracta.EdgeE || edge == contracta.EdgeN {
+		keys = append(keys, lanePair{from: from, to: lv.ToSlot, edge: ""})
+	}
+	for _, k := range keys {
+		l, ok := a.lanes[k]
+		if !ok {
+			continue
+		}
+		lv.Migrations += l.total
+		lv.PerMinute += l.perMinute(nowMs)
+		lv.RecentHops += l.recentHops(nowMs)
+		if l.lastAt > lv.LastAtMs {
+			lv.LastAtMs = l.lastAt
+		}
+	}
+}
 
 func declares(edges []string, edge string) bool {
 	for _, e := range edges {

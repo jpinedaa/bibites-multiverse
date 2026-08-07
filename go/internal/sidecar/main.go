@@ -53,6 +53,15 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"accrued dark time before a held entry bounces home by itself (contract-b-m4.md §9.3, "+
 			"holdTimeoutMs). 0 keeps the 24-hour default. The clock runs only while the "+
 			"destination is dark and this sidecar can see it")
+	// inboundRatePerSimMinute was a compiled Go constant with no flag and no
+	// environment variable, reachable only by editing source — and it has now
+	// needed retuning twice (contract-a.md §18, A40). A tunable an operator
+	// cannot retune from the metric that measures it is not a tunable.
+	inboundRate := fs.Float64("inbound-rate", envFloat("MULTIVERSE_INBOUND_RATE", 0),
+		"MIGRATE_IN deliveries released per SIMULATED minute of this world "+
+			"(contract-a.md §7.5, inboundRatePerSimMinute). 0 keeps the default "+
+			"(12.0). Raise it when metrics.jsonl shows a pacedDepth that never "+
+			"falls; lower it to spread a dam harder")
 	listInflight := fs.Bool("list-inflight", false,
 		"print the journal entries this sidecar still holds custody of, then exit "+
 			"(contract-b-m4.md §7.5). Answers what the relay cannot.")
@@ -104,6 +113,12 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		logger.Warn("sidecar: holdTimeoutMs overridden; a held entry bounces home sooner than the "+
 			"contract default, and §9.3's accepted duplication case widens with it",
 			"holdTimeout", *holdTimeout, "default", DefaultConfig().HoldTimeout)
+	}
+	if *inboundRate > 0 {
+		cfg.InboundRatePerSimMinute = *inboundRate
+		cfg.Logger.Info("sidecar: inboundRatePerSimMinute overridden",
+			"inboundRate", *inboundRate, "default", DefaultConfig().InboundRatePerSimMinute,
+			"burst", cfg.InboundRateBurst)
 	}
 	if *position != "" {
 		pos, err := parsePosition(*position)
@@ -243,6 +258,19 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 	if v := os.Getenv(name); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
+		}
+	}
+	return fallback
+}
+
+// envFloat reads a float knob from the environment. A value that does not parse
+// is IGNORED rather than fatal, for the same reason envDuration ignores one: a
+// typo in a service-manager unit must not stop a world joining the map, and the
+// startup log line names the value actually in force.
+func envFloat(name string, fallback float64) float64 {
+	if v := os.Getenv(name); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
+			return f
 		}
 	}
 	return fallback

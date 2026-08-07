@@ -39,9 +39,26 @@ import (
 // unchanged and is the reason a mixed rig degrades to "unknown" and never to a
 // wrong number: a receiver detects the census by the presence of the array,
 // never by arithmetic on the minor and never by the minor a peer claims.
+// TWO-WAY LANES MOVE ONE OF THEM AND NOT THE OTHER, and the asymmetry is the
+// point (contract-a.md §18 A41, contract-b-m4.md §17 B15).
+//
+// Contract B takes a minor: `SECTOR_GRANT.neighbours` gains the "W" and "S"
+// keys, which is additive data in an existing enum-keyed map, and a two-way map
+// genuinely CANNOT work against a relay that does not compute the reverse
+// walks. The minor is the honest statement of which relays do, and a peer
+// detects the capability the way §3.1 requires — by the presence of the W and S
+// keys in its grant, never by arithmetic on the minor.
+//
+// Contract A takes NOTHING. `exportEdges` has been an array validated against
+// all four borderEdges since A18, `EDGE_STATUS.edges` has been "one entry per
+// declared export edge" since A18, the exitEdge/entryEdge enum has held four
+// values since M2, and §4.3.2's corner rule has been stated for an arbitrary
+// declared set since A26. A four-edge mod is legal against a contract-a/2.2
+// sidecar TODAY, with no code change, so a 2.3 would be a lie in the one
+// direction that matters: it would imply 2.2 cannot do this.
 const (
 	ProtocolA = "contract-a/2.2"
-	ProtocolB = "contract-b/3.2"
+	ProtocolB = "contract-b/3.3"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).

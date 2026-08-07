@@ -447,24 +447,31 @@ func TestWrongLANTokenIsRejected(t *testing.T) {
 // absent exportEdge — A18 removed outright: "a compatibility path that only an
 // already-rejected peer can take is dead code that reads like a supported
 // configuration".
+// Under D17 (contract-a.md §18, A38) a conformant mod declares FOUR, and the
+// count is the whole of A38 on this wire: no field changed, no type changed,
+// no enum moved — only which values a conformant mod puts in a field that has
+// accepted them since A18.
 func TestEdgeStatusCarriesOneEntryPerExportEdge(t *testing.T) {
 	g := newGrid(t, 6, gridOptions{layout: layout3x2()})
 
 	st := g.node(0).mod.lastEdgeStatus()
-	if len(st.Edges) != 2 {
+	if len(st.Edges) != 4 {
 		t.Fatalf("EDGE_STATUS carried %d entries, want one per declared export edge", len(st.Edges))
 	}
 	seen := map[string]bool{}
 	for _, e := range st.Edges {
 		seen[e.Edge] = true
 	}
-	if !seen[contracta.EdgeE] || !seen[contracta.EdgeN] {
-		t.Fatalf("EDGE_STATUS reported edges %+v, want E and N", st.Edges)
+	for _, want := range contracta.CanonicalEdges() {
+		if !seen[want] {
+			t.Fatalf("EDGE_STATUS reported edges %+v, want all four", st.Edges)
+		}
 	}
-	// The two edges open and close independently, and on a full 3x2 both are
+	// Each edge opens and closes independently, and on a full 3x2 all four are
 	// open.
-	g.node(0).mod.waitEdge(contracta.EdgeE, true, 10*time.Second)
-	g.node(0).mod.waitEdge(contracta.EdgeN, true, 10*time.Second)
+	for _, edge := range contracta.CanonicalEdges() {
+		g.node(0).mod.waitEdge(edge, true, 10*time.Second)
+	}
 
 	// A18 removed the fallback: a CONFIG_UPDATE with NO exportEdges is
 	// unusable, and CONFIG_UPDATE has no NACK channel, so the only answer is a
@@ -918,9 +925,17 @@ func TestEdgeClosedNack(t *testing.T) {
 
 // TestNonExportEdgeIsRefused covers contract-a.md §15 A18: the sidecar MUST NOT
 // open an edge the mod did not declare, whatever borderEdges says. W and S are
-// declared border edges here and still cannot be exported through.
+// declared BORDER edges here and still cannot be exported through.
+//
+// Under D17 that rule is unchanged and its subject is now the interesting case
+// §18 A41 calls a mixed rig: a TWO-EDGE mod on a two-way map. It exports east
+// and north only, and it still RECEIVES on all four, because arrivals were
+// never gated by exportEdges. Legal, lossless, and visible on the page as a
+// slot with two dead lanes — so this test pins the declaration explicitly
+// rather than riding the rig's four-edge default.
 func TestNonExportEdgeIsRefused(t *testing.T) {
-	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
+	g := newGrid(t, 2, gridOptions{layout: layoutRow(2),
+		exportEdges: []string{contracta.EdgeE, contracta.EdgeN}})
 	for _, edge := range []string{contracta.EdgeW, contracta.EdgeS} {
 		g.node(0).mod.migrateOut(testEntityID, edge, 0.4)
 		nack := decodeAs[contracta.MigrateOutNack](t,

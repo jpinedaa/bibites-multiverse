@@ -329,7 +329,7 @@ func describeLanes(n map[string]*contractb.Neighbour) string {
 		return "none (every export edge is closed)"
 	}
 	parts := make([]string, 0, len(n))
-	for _, edge := range []string{contracta.EdgeE, contracta.EdgeN} {
+	for _, edge := range contracta.CanonicalEdges() {
 		lane, ok := n[edge]
 		if !ok || lane == nil {
 			continue
@@ -499,8 +499,16 @@ func (s *Sidecar) onMigrationPayload(env wire.Envelope) bool {
 	s.mu.Unlock()
 
 	// The entry edge is DERIVED, never carried: sending it would let a sender
-	// dictate a receiver's geometry (§11 item 7). Under the grid it is the
-	// opposite of the sender's exitEdge — W off an east lane, S off a north one.
+	// dictate a receiver's geometry (§11 item 7). It is the opposite of the
+	// sender's exitEdge — W off an east lane, S off a north one, and under D17
+	// also E off a WEST lane and N off a SOUTH one (contract-a.md §18, A38).
+	//
+	// NOTHING HERE CONSULTS THE LOCAL EDGE STATE, and that is §5.4's MUST rather
+	// than an oversight: `open: false` refuses MIGRATE_OUT *through* an edge and
+	// NEVER refuses MIGRATE_IN *on* it. A world whose east lane closed because its
+	// row went dark still accepts every arrival that reaches it, and a world that
+	// declared no export edges at all still receives on all four — borderEdges has
+	// been all four since A18.
 	entryEdge := contracta.EdgeW
 	if opp, ok := contracta.Opposite(payload.ExitEdge); ok {
 		entryEdge = opp

@@ -73,13 +73,24 @@ type Record struct {
 	// could name only hashes until now, the name is the one label a human reads,
 	// and adding the field later would leave every migration before that date
 	// nameless.
-	Species    *contractb.Species `json:"species,omitempty"`
-	Timestamp  int64              `json:"timestamp,omitempty"`
-	Duplicate  bool               `json:"duplicate,omitempty"`
-	Code       string             `json:"code,omitempty"`
-	Message    string             `json:"message,omitempty"`
-	GenomeHash string             `json:"genomeHash,omitempty"`
-	ServedBy   string             `json:"servedBy,omitempty"`
+	Species *contractb.Species `json:"species,omitempty"`
+	// ExitEdge is the edge the organism left its own world by (added with the
+	// two-way lanes of contract-b-m4.md §17, B13). It is recorded for the same
+	// reason Species is: the ledger describes what happened, and under D17 the
+	// pair (sourceSlot, destSlot) NO LONGER NAMES ONE LANE — on an axis of
+	// length 2 the forward and reverse lanes join the same two worlds, and the
+	// 3x2 rig's every column is such an axis. Without this field the two lanes
+	// of a shuttle are one number.
+	//
+	// A record written before this field existed has "" here. That is honest and
+	// it is handled at display time rather than guessed at: see StatusView.
+	ExitEdge   string `json:"exitEdge,omitempty"`
+	Timestamp  int64  `json:"timestamp,omitempty"`
+	Duplicate  bool   `json:"duplicate,omitempty"`
+	Code       string `json:"code,omitempty"`
+	Message    string `json:"message,omitempty"`
+	GenomeHash string `json:"genomeHash,omitempty"`
+	ServedBy   string `json:"servedBy,omitempty"`
 }
 
 // Ledger is the append-only record file.

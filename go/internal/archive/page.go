@@ -37,6 +37,17 @@ func (a *Archive) httpHandler() http.Handler {
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(view)
 	})
+	// The recent-hops feed rides its OWN endpoint and is deliberately absent from
+	// /api/status (§17, B14). /api/status is what MetricsLog.Append serializes
+	// verbatim into the durable sample file once a minute; a per-organism feed
+	// hung off it would be written to disk forever, beside a ledger that already
+	// holds every one of those hops. See hops.go.
+	mux.HandleFunc("/api/hops", func(w http.ResponseWriter, r *http.Request) {
+		feed := a.HopFeedView()
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(feed)
+	})
 	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
 		window, buckets := historyParams(r)
 		h, err := a.HistoryView(window, buckets)
@@ -195,6 +206,16 @@ g.lg:hover .lane{stroke-width:4}
 .wraplbl{font-size:10px;fill:var(--dim)}
 .pulse{fill:var(--pulse)}
 .pulse.hot{fill:var(--hot)}
+/* ---- a hop: one named creature crossing one lane, right now ----
+   The ambient pulse says how FAST a lane runs. This says WHO just crossed it,
+   and it has to win the eye against a field of 420 resident glyphs: it is
+   bigger, it is stroked, and it drops a shadow the cell glyphs do not have.
+   Neutral is the colour of a hop whose envelope carried no species block —
+   never a guessed name, and never omitted. */
+.hopg{pointer-events:none}
+.hopbib{stroke:var(--hot);stroke-width:.9;filter:drop-shadow(0 0 5px rgba(255,255,255,.55))}
+.hopbib.neutral{fill:var(--dim)}
+.hopring{fill:none;stroke:var(--hot);stroke-width:1.1;opacity:.5}
 .axis{fill:var(--dim);font-size:11px}
 
 /* ---- legend ---- */
@@ -214,6 +235,7 @@ border-top-style:solid;vertical-align:middle;margin-right:5px}
 .legend i.bibi{width:12px;height:9px;border:0;background:var(--dim);
 border-radius:62% 38% 38% 62%/50%}
 .legend i.bibi.unc{background:var(--hole)}
+.legend i.bibi.hopi{background:var(--hot);box-shadow:0 0 5px rgba(255,255,255,.55)}
 .legend i.eggi{width:9px;height:9px;border:1.5px solid var(--dim);border-radius:50%;
 background:none}
 
@@ -301,6 +323,8 @@ footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid va
         <span><i class="bypass"></i><span class="term" data-t="bypass">bypass</span></span>
         <span><i class="closed"></i>lane closed</span>
         <span><i class="dot"></i><span class="term" data-t="migration">a migration</span></span>
+        <span><i class="bibi hopi"></i><span class="term" data-t="hopfeed">a creature crossing, just now</span></span>
+        <span><span class="term" data-t="shuttle">two lanes, one each way</span></span>
         <span><span class="term" data-t="wrap">wrap-around</span></span>
         <span><i class="bibi"></i><span class="term" data-t="species">one creature, coloured by species</span></span>
         <span><i class="eggi"></i><span class="term" data-t="egg">an egg</span></span>
@@ -362,8 +386,9 @@ footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid va
   <span class="term" data-t="rawname">species names</span> are printed exactly as the world that
   owns them holds them, spacing and all, and nothing here tidies one. Rates are measured over a
   short <span class="term" data-t="flow">flow window</span>, not over all time. JSON:
-  <code>/api/status</code> (live) and <code>/api/history</code> (downsampled,
-  <code>?hours=</code>, <code>?buckets=</code>).
+  <code>/api/status</code> (live), <code>/api/hops</code> (the last minute of crossings,
+  bounded in time and in count, and kept out of the durable sample file on purpose)
+  and <code>/api/history</code> (downsampled, <code>?hours=</code>, <code>?buckets=</code>).
 </footer>
 <div id="tip"></div>
 <script>
@@ -380,8 +405,9 @@ var G = {
  slot:["slot","A world's permanent seat on the grid. Slot 3 is always slot 3: it can be moved to a different square, and it can go offline for a day, and it is still slot 3 when it comes back."],
  position:["position","Where a seat sits on the map, written (column, row). Column 0 is the far left and row 0 is the bottom row."],
  peer:["peer","The name the little helper program beside each world answers to on the network — 'slot-4', for instance. One peer per world; the worlds never talk to each other directly."],
- lane:["lane","A one-way road from one world to the next. Creatures only ever travel east and north, so the west and south sides of a world are where arrivals come in, never where they leave."],
- edge:["edge","The side of a world a creature leaves by. E is east, to the right. N is north, upwards. Those two are the only exits."],
+ lane:["lane","A road from one world to the next, with a direction. Every side of a world is now both an exit and a door: a creature can leave east and another can arrive from the east on the same side at the same time. So each pair of neighbours is joined by TWO lanes drawn side by side, one arrow each way, and each of the two carries its own traffic and can be open while the other is not."],
+ edge:["edge","The side of a world a creature leaves by, and also the side arrivals come in on. E is east (right), N is north (up), W is west (left), S is south (down). All four are exits and all four are doors."],
+ shuttle:["two-lane pair","When an axis has only two worlds on it, going one way and going the other way land you in the same place — so both lanes of that axis join the same two worlds, and they carry roughly twice the traffic of a single lane. On this map every COLUMN is like that. It also means one death closes both: if the world above you is also the world below you, losing it closes north and south together."],
  wrap:["wrap-around","The map is a doughnut, not a sheet of paper. Walk east off the right-hand column and you arrive in the left-hand one; walk north off the top row and you arrive at the bottom. Nothing ever falls off an edge. On the map those lanes are drawn leaving one side and re-entering the opposite side, with the map edge marked."],
  live:["live","This world is connected right now: it can send creatures and it can receive them."],
  dark:["dark","This world is not connected right now — the game is closed, the machine is off, or the network dropped. Its seat stays on the map, and the worlds pointing at it reach past it instead."],
@@ -392,7 +418,8 @@ var G = {
  pacedDepth:["paced depth","Arrivals are let into a world at a capped rate so a burst cannot flood it. This is how many are queued up waiting their turn. A queue that never drains means the cap is set too low."],
  held:["held","A creature whose destination went dark while it was travelling. It waits, quietly retrying; if the destination stays gone long enough it is sent back where it came from rather than lost."],
  bounce:["bounce","A migration that gave up and returned to the world it started in. It is a thing you get told about, never a silent repair."],
- migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map each hop is a moving dot travelling along its lane."],
+ migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map a lane's steady stream of small dots is its measured rate; when a hop actually happens, that creature itself — drawn in its own species' colour — sets off along the lane and travels to the far world."],
+ hopfeed:["hops just now","The last minute of crossings, kept in memory and nowhere else. It is a record of who CROSSED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census, and these come from the migrations the archive was copied on. Never add the two together. A hop whose message carried no species name travels as a plain grey creature — unknown, never guessed."],
  lastSave:["last save","Every world saves itself to disk every few minutes and sends back a receipt — when it saved, how big the file was, how long it took. This is the age of the newest receipt from that world."],
  population:["population","How many living creatures the world holds, as its own game reported it. Each little creature drawn inside a cell is one of them."],
  species:["species","A kind of creature, with a two-part name like 'Cyanea velox'. Every creature in a cell is drawn in its species' colour, and the same species is the same colour in every world, so you can see a kind spreading across the map. Hover one to see how many there are and where else it lives."],
@@ -411,9 +438,9 @@ var G = {
 };
 
 (function buildGlossary(){
-  var keys = ["world","slot","position","peer","lane","edge","wrap","live","dark","hole","bypass",
-    "migration","envelope","population","species","census","egg","unclassed","rawname",
-    "custody","custodyDepth","pacedDepth","held","bounce",
+  var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
+    "bypass","migration","hopfeed","envelope","population","species","census","egg","unclassed",
+    "rawname","custody","custodyDepth","pacedDepth","held","bounce",
     "lastSave","unknown","exactlyonce","relay","archive","epoch","genomegap","flow"];
   var h = "";
   for (var i=0;i<keys.length;i++){
@@ -505,11 +532,39 @@ var CW=200, CH=150, GX=88, GY=80, MG=96, WOUT=40, WBAR=58;
    the cell says so. */
 var BCOLS=14, BROWS=5, BCAP=BCOLS*BROWS, BPX=12, BPY=13;
 var mapSig = "", anim = [], pulseLayer = null, reduced = false, prevMig = {}, rafId = 0;
+/* The hop animation's state (§17, B14). hopLayer sits ABOVE the cells;
+   everything else is bounded on purpose and the bounds are named at HOPMS. */
+var hopLayer = null, hopSeen = {}, hopSeenQ = [], hopQ = [], hopsLive = [],
+    nextHopAt = 0, hopsPrimed = false, hopFeedOK = false;
 
+/* LSEP is how far a DIRECTED lane sits off its axis centreline.
+   Two-way lanes (D17) put two arrows in every gutter, and the choice made here
+   is TWO SEPARATE DIRECTED ARROWS ON PARALLEL RAILS rather than one line with a
+   head at each end. On the 3x2 rig that is 12 lane pairs = 24 directions, and a
+   double-headed line cannot carry any of the three things a direction owns:
+     - its own rate label (the two directions of a pair carry different flows),
+     - its own state (skip lists are PER WALK — east and west cross one row from
+       opposite ends and legitimately bypass different slots, so one direction
+       can be a bypass while the other is direct),
+     - its own pulses and its own travelling hop glyphs.
+   The forward lane of an axis (E, N) takes one rail and the reverse (W, S) the
+   other, and a bypass arc bows to the same side its rail sits on, so the two
+   arcs of a pair are concentric and never cross. */
+var LSEP = 13;
 function cellX(c){ return MG + c*(CW+GX); }
 function cellY(r,h){ return MG + (h-1-r)*(CH+GY); }
+/* laneY/laneX are the centreline; laneOff pushes one direction off it. */
 function laneY(r,h){ return cellY(r,h) + CH*0.58; }
 function laneX(c){ return cellX(c) + CW*0.5; }
+/* A horizontal bypass bows UP (-y) and a vertical one bows RIGHT (+x), which is
+   what the one-way map already did. The FORWARD lane of each axis takes the rail
+   on the bow's side and the taller bow with it; the reverse lane takes the other
+   rail and the shorter bow, so the two arcs of a pair nest instead of crossing. */
+function laneOff(edge){
+  var bowSide = (edge === "E" || edge === "W") ? -LSEP : LSEP;
+  return (edge === "E" || edge === "N") ? bowSide : -bowSide;
+}
+function laneBow(edge){ return (edge === "E" || edge === "N") ? 2*LSEP : 0; }
 
 function signature(d){
   var s = d.map.width+"x"+d.map.height+"|"+(d.haveStatus?1:0)+"|";
@@ -529,65 +584,116 @@ function signature(d){
 /* One lane's geometry. Everything the drawing needs is derived here, from the
    walk the server already did: how many positions were skipped, and whether the
    path crosses the map edge. */
+/* Four edges, two axes, two directions per axis. The reverse pair is the
+   forward pair with the step negated (contract-b-m4.md §17, B13), and the
+   drawing mirrors that exactly: same wrap handling, same bypass bow, same
+   arrowhead, read backwards along the axis. */
 function laneGeom(l, d, byslot){
   var from = byslot[l.fromSlot];
   if (!from) return null;
   var w = d.map.width, h = d.map.height;
-  var north = (l.edge === "N");
+  var e = l.edge;
+  var vert = (e === "N" || e === "S");
+  var back = (e === "W" || e === "S");
+  var off = laneOff(e), bow = laneBow(e);
   var steps = (l.skipped ? l.skipped.length : 0) + 1;
   var c = from.position.col, r = from.position.row;
   var segs = [];
   if (!l.open){
     // A closed lane is a stub with no destination: it goes nowhere, and it says
-    // so rather than pointing at a world it cannot reach.
+    // so rather than pointing at a world it cannot reach. It leaves by its own
+    // side of the cell, so a closed W stub and an open E lane are never confused.
     var sx, sy, ex, ey;
-    if (north){ sx = laneX(c); sy = cellY(r,h); ex = sx; ey = sy - 46; }
-    else { sx = cellX(c)+CW; sy = laneY(r,h); ex = sx + 46; ey = sy; }
+    if (vert){
+      sx = laneX(c) + off; ex = sx;
+      sy = back ? cellY(r,h) + CH : cellY(r,h);
+      ey = back ? sy + 46 : sy - 46;
+    } else {
+      sy = laneY(r,h) + off; ey = sy;
+      sx = back ? cellX(c) : cellX(c) + CW;
+      ex = back ? sx - 46 : sx + 46;
+    }
     return {state:"closed", segs:[{d:"M "+sx+" "+sy+" L "+ex+" "+ey, head:false}],
-            stopAt:{x:ex,y:ey}, wrap:false, steps:steps, vertical:north, edgeAt:null};
+            stopAt:{x:ex,y:ey}, wrap:false, steps:steps, vertical:vert, back:back,
+            edgeAt:null};
   }
   var to = byslot[l.toSlot];
   if (!to) return null;
   var state = steps > 1 ? "bypass" : "open";
   var tc = to.position.col, tr = to.position.row;
-  if (north){
-    var wrapN = (r + steps) >= h;
-    var x = laneX(c);
-    if (!wrapN){
-      segs.push(arcSeg(x, cellY(r,h), x, cellY(tr,h)+CH, steps-1, true));
-      return {state:state, segs:segs, wrap:false, steps:steps, vertical:true, edgeAt:null};
-    }
-    // The torus: it leaves through the top of the map and comes back in at the
-    // bottom. Two segments, each with its own arrowhead, and a bar on the edge
-    // it passed through — so the reader can see it did not stop.
+  if (vert){
+    var x = laneX(c) + off;
     var topY = cellY(h-1,h), botY = cellY(0,h) + CH;
-    segs.push(arcSeg(x, cellY(r,h), x, topY - WOUT, (h-1-r), true));
-    segs.push(arcSeg(x, botY + WOUT, x, cellY(tr,h)+CH, tr, true));
-    return {state:state, segs:segs, wrap:true, steps:steps, vertical:true,
-            edgeAt:[{x:x, y:topY - WBAR, horiz:true, lbl:"to slot "+l.toSlot, dy:-12},
-                    {x:x, y:botY + WBAR, horiz:true, lbl:"from slot "+l.fromSlot, dy:16}]};
+    if (!back){
+      // NORTH: out of the top of the cell, up the column, in at the bottom of
+      // the target.
+      if ((r + steps) < h){
+        segs.push(arcSeg(x, cellY(r,h), x, cellY(tr,h)+CH, steps-1, true, bow));
+        return {state:state, segs:segs, wrap:false, steps:steps, vertical:true,
+                back:back, edgeAt:null};
+      }
+      // The torus: it leaves through the top of the map and comes back in at
+      // the bottom. Two segments, each with its own arrowhead, and a bar on the
+      // edge it passed through — so the reader can see it did not stop.
+      segs.push(arcSeg(x, cellY(r,h), x, topY - WOUT, (h-1-r), true, bow));
+      segs.push(arcSeg(x, botY + WOUT, x, cellY(tr,h)+CH, tr, true, bow));
+      return {state:state, segs:segs, wrap:true, steps:steps, vertical:true, back:back,
+              edgeAt:[{x:x, y:topY - WBAR, horiz:true, lbl:"to slot "+l.toSlot, dy:-12},
+                      {x:x, y:botY + WBAR, horiz:true, lbl:"from slot "+l.fromSlot, dy:16}]};
+    }
+    // SOUTH: the same walk with the step negated. Out of the BOTTOM, down the
+    // column, in at the TOP of the target, and it wraps through the bottom edge.
+    if ((r - steps) >= 0){
+      segs.push(arcSeg(x, cellY(r,h)+CH, x, cellY(tr,h), steps-1, true, bow));
+      return {state:state, segs:segs, wrap:false, steps:steps, vertical:true,
+              back:back, edgeAt:null};
+    }
+    segs.push(arcSeg(x, cellY(r,h)+CH, x, botY + WOUT, r, true, bow));
+    segs.push(arcSeg(x, topY - WOUT, x, cellY(tr,h), (h-1-tr), true, bow));
+    // The reverse direction's wrap labels are pushed one line further out. Both
+    // directions of a column cross the SAME map edge, and a 13-unit rail offset
+    // is not enough to keep two "to slot N" strings off each other.
+    return {state:state, segs:segs, wrap:true, steps:steps, vertical:true, back:back,
+            edgeAt:[{x:x, y:botY + WBAR, horiz:true, lbl:"to slot "+l.toSlot, dy:30},
+                    {x:x, y:topY - WBAR, horiz:true, lbl:"from slot "+l.fromSlot, dy:-26}]};
   }
-  var wrapE = (c + steps) >= w;
-  var y = laneY(r,h);
-  if (!wrapE){
-    segs.push(arcSeg(cellX(c)+CW, y, cellX(tc), y, steps-1, false));
-    return {state:state, segs:segs, wrap:false, steps:steps, vertical:false, edgeAt:null};
-  }
+  var y = laneY(r,h) + off;
   var rightX = cellX(w-1) + CW, leftX = cellX(0);
-  segs.push(arcSeg(cellX(c)+CW, y, rightX + WOUT, y, (w-1-c), false));
-  segs.push(arcSeg(leftX - WOUT, y, cellX(tc), y, tc, false));
-  // Below the line: the rate label sits above it, and the two must not collide.
-  return {state:state, segs:segs, wrap:true, steps:steps, vertical:false,
-          edgeAt:[{x:rightX + WBAR, y:y, horiz:false, lbl:"to slot "+l.toSlot, dy:26},
-                  {x:leftX - WBAR, y:y, horiz:false, lbl:"from slot "+l.fromSlot, dy:26}]};
+  if (!back){
+    // EAST.
+    if ((c + steps) < w){
+      segs.push(arcSeg(cellX(c)+CW, y, cellX(tc), y, steps-1, false, bow));
+      return {state:state, segs:segs, wrap:false, steps:steps, vertical:false,
+              back:back, edgeAt:null};
+    }
+    segs.push(arcSeg(cellX(c)+CW, y, rightX + WOUT, y, (w-1-c), false, bow));
+    segs.push(arcSeg(leftX - WOUT, y, cellX(tc), y, tc, false, bow));
+    // Below the line: the rate label sits above it, and the two must not collide.
+    return {state:state, segs:segs, wrap:true, steps:steps, vertical:false, back:back,
+            edgeAt:[{x:rightX + WBAR, y:y, horiz:false, lbl:"to slot "+l.toSlot, dy:26},
+                    {x:leftX - WBAR, y:y, horiz:false, lbl:"from slot "+l.fromSlot, dy:26}]};
+  }
+  // WEST: out of the LEFT of the cell, along the row, in at the RIGHT of the
+  // target, wrapping through the left edge of the map.
+  if ((c - steps) >= 0){
+    segs.push(arcSeg(cellX(c), y, cellX(tc)+CW, y, steps-1, false, bow));
+    return {state:state, segs:segs, wrap:false, steps:steps, vertical:false,
+            back:back, edgeAt:null};
+  }
+  segs.push(arcSeg(cellX(c), y, leftX - WOUT, y, c, false, bow));
+  segs.push(arcSeg(rightX + WOUT, y, cellX(tc)+CW, y, (w-1-tc), false, bow));
+  return {state:state, segs:segs, wrap:true, steps:steps, vertical:false, back:back,
+          edgeAt:[{x:leftX - WBAR, y:y, horiz:false, lbl:"to slot "+l.toSlot, dy:26},
+                  {x:rightX + WBAR, y:y, horiz:false, lbl:"from slot "+l.fromSlot, dy:26}]};
 }
 
 /* arcSeg draws one segment of a lane. It BOWS when the segment has to pass over
    cells, which is exactly the bypass — the single thing a table cannot show. A
-   segment that passes over nothing is a straight arrow. */
-function arcSeg(x1,y1,x2,y2,over,vertical){
+   segment that passes over nothing is a straight arrow. extra is the rail's own
+   bow allowance, which is what keeps the two arcs of a lane pair nested. */
+function arcSeg(x1,y1,x2,y2,over,vertical,extra){
   if (over < 1) return {d:"M "+x1+" "+y1+" L "+x2+" "+y2, head:true};
-  var lift = 30 + 14*(over-1);
+  var lift = (extra||0) + 30 + 14*(over-1);
   if (vertical){
     var bx = x1 + (CW*0.5 + lift);
     var cx = x1 + (bx - x1)/0.75;
@@ -631,7 +737,7 @@ function buildMap(d){
   s += '<text class="axis" x="8" y="15">north &uarr; · east &rarr;</text>';
 
   // Lanes first, cells over them: an arrow must never cover a number.
-  var vertical = {}, lstate = {};
+  var vertical = {}, lstate = {}, lback = {};
   s += '<g id="lanelayer">';
   for (var j=0;j<d.lanes.length;j++){
     var l = d.lanes[j], g = laneGeom(l, d, byslot);
@@ -666,16 +772,22 @@ function buildMap(d){
           + '" y="'+(e.y + e.dy)+'">'+esc(e.lbl)+'</text>';
       }
     }
+    // Each direction labels itself on its OWN side of the pair, or the two rate
+    // labels of a lane pair land on top of each other.
     s += '<text class="lanelbl'+(cls==="bypass"?" bypasslbl":(cls==="closed"?" closedlbl":""))
        + '" id="ll-'+esc(key)+'" x="0" y="0" text-anchor="'
-       + (g.vertical?"start":"middle")+'"></text>';
+       + (g.vertical ? (g.back?"end":"start") : "middle")+'"></text>';
     vertical[key] = !!g.vertical;
+    lback[key] = !!g.back;
     lstate[key] = g.state;
     for (k=0;k<g.segs.length;k++){
       s += '<path class="lanehit" d="'+g.segs[k].d+'"><title>'+esc(title)+'</title></path>';
     }
     s += '</g>';
   }
+  // Pulses under the cells, hops OVER them: an ambient pulse is wallpaper and
+  // may pass behind a world, but a hop is the event the page exists to show and
+  // must never be hidden by the cell it is arriving at.
   s += '</g><g id="pulses"></g><g id="celllayer">';
 
   for (var row = h-1; row >= 0; row--){
@@ -716,12 +828,15 @@ function buildMap(d){
         + '</g>';
     }
   }
-  s += '</g></svg>';
+  s += '</g><g id="hops"></g></svg>';
   $("#mapbox").innerHTML = s;
 
   // The labels sit on the paths, which only exist once the SVG is in the DOM.
   anim = [];
   pulseLayer = document.getElementById("pulses");
+  hopLayer = document.getElementById("hops");
+  // Every live hop animation refers to a path that has just been thrown away.
+  killHops();
   for (j=0;j<d.lanes.length;j++){
     l = d.lanes[j];
     var kk = laneKey(l), tracks = [], total = 0;
@@ -741,13 +856,23 @@ function buildMap(d){
       // it is labelled a third of the way along instead of at the middle.
       var frac = (lstate[kk] === "bypass" && !vertical[kk]) ? 0.33 : 0.5;
       var mp = best.el.getPointAtLength(best.len*frac);
-      // Perpendicular to the lane, or the label lands on the arrow it describes.
-      lab.setAttribute("x", mp.x + (vertical[kk] ? 22 : 0));
-      lab.setAttribute("y", mp.y + (vertical[kk] ? 4 : -11));
+      // Perpendicular to the lane, and on this DIRECTION's own side of the pair,
+      // or the label lands on the arrow it describes or on its opposite number.
+      var bk = lback[kk];
+      lab.setAttribute("x", mp.x + (vertical[kk] ? (bk ? -18 : 18) : 0));
+      lab.setAttribute("y", mp.y + (vertical[kk] ? 4 : (bk ? 16 : -11)));
     }
     if (l.open) anim.push({key:kk, tracks:tracks, total:total, rate:0, next:0, pulses:[]});
   }
   mapSig = signature(d);
+}
+
+/* The lane anim record for one directed lane, or null. Lanes are keyed
+   fromSlot+edge everywhere on this surface, which is what makes the two
+   directions of a pair two separate things to animate. */
+function animFor(key){
+  for (var i=0;i<anim.length;i++) if (anim[i].key === key) return anim[i];
+  return null;
 }
 
 function marker(id,color){
@@ -774,8 +899,10 @@ function cellTitle(v){
   return s;
 }
 
+var EDGEWORD = {E:"east", N:"north", W:"west", S:"south"};
+
 function laneTitle(l, g){
-  var s = "slot "+l.fromSlot+" "+(l.edge==="N"?"north":"east")+" lane\n";
+  var s = "slot "+l.fromSlot+" "+(EDGEWORD[l.edge]||l.edge)+" lane\n";
   if (!l.open) return s + "closed: "+l.reason + "\nnothing on this axis can be delivered to.";
   s += "carries organisms to slot "+l.toSlot;
   if (g.wrap) s += ", around the edge of the map";
@@ -1036,6 +1163,44 @@ function paintSpeciesCell(v){
   if (rest > 0) plain("spmore", "+" + rest + " more");
   if (v.speciesTruncated) plain("unknown", "· 32 shown, the rest unreported");
 }
+/* A HOP'S species name is the same untrusted text arriving on a different
+   message, and it is handled inside this fence for exactly that reason
+   (contract-b-m4.md §17, B14: "a census name and a ledger name are equally
+   untrusted"). The two functions below are the only ones that touch it.
+
+   hopName returns "" when the envelope carried NO species block, and "" is what
+   the neutral glyph is drawn from. It is never the string "unknown": unknown is
+   the absence of a name, not a name. */
+function hopName(hp){
+  var sp = hp && hp.species;
+  if (!sp || !sp.genericName || !sp.specificName) return "";
+  return censusName(sp);
+}
+
+/* buildHopGlyph creates the travelling creature. Every node is CREATED and the
+   name lands in a <title> as textContent — nothing here is parsed as markup and
+   nothing here assigns a colour from anything but a hash of the compared
+   spelling. It is drawn larger than a resident glyph, stroked and shadowed,
+   because it has to win the eye against a field of 420 of them. */
+function buildHopGlyph(name, toSlot){
+  var g = document.createElementNS(SVGNS, "g");
+  g.setAttribute("class", "hopg");
+  var ring = document.createElementNS(SVGNS, "circle");
+  ring.setAttribute("class", "hopring");
+  ring.setAttribute("r", 12);
+  g.appendChild(ring);
+  var u = document.createElementNS(SVGNS, "use");
+  u.setAttribute("href", "#bib");
+  u.setAttribute("class", name ? "hopbib" : "hopbib neutral");
+  u.setAttribute("transform", "scale(2.2)");
+  if (name) u.style.fill = speciesColor(normName(name));
+  g.appendChild(u);
+  var ttl = document.createElementNS(SVGNS, "title");
+  ttl.textContent = (name ? name : "a creature of no reported species")
+    + " — crossing to slot " + toSlot;
+  g.appendChild(ttl);
+  return g;
+}
 /* ============================= SPECIES CENSUS — END ======================== */
 
 /* Per-poll paint: only the things that actually change. Rebuilding the SVG every
@@ -1094,8 +1259,7 @@ function paintMap(d){
         + " · " + rate(l.perMinute) + "/min";
       else lab.textContent = rate(l.perMinute)+"/min";
     }
-    var a = null;
-    for (var j=0;j<anim.length;j++) if (anim[j].key === key) a = anim[j];
+    var a = animFor(key);
     if (a){
       // One pulse is one organism, and the interval between pulses is the lane's
       // measured interval between hops. No floor that flatters a quiet lane: a
@@ -1106,8 +1270,15 @@ function paintMap(d){
     }
     // A hop that ARRIVED between two polls gets its own, brighter pulse — and
     // pushes the steady one back, so the same organism is not drawn twice.
+    //
+    // THIS IS NOW THE FALLBACK, not the main path. When /api/hops is answering,
+    // that same arrival is already travelling the lane as its own species glyph
+    // (§17, B14), and firing a hot pulse too would draw one organism twice. A
+    // page whose hop feed is unreachable degrades to exactly the ambient pulse
+    // it had before D19, which is what B14 requires of a page that cannot render
+    // the feed.
     var was = prevMig[key];
-    if (was != null && l.migrations > was && a && !reduced){
+    if (was != null && l.migrations > was && a && !reduced && !hopFeedOK){
       var extra = Math.min(4, l.migrations - was);
       for (var e=0;e<extra;e++) fireHot(a, e*130);
       if (a.gap > 0) a.next = Math.max(a.next, performance.now() + a.gap*extra);
@@ -1124,6 +1295,115 @@ function flashCell(slot){
   void g.getBoundingClientRect();
   g.classList.add("hit");
   setTimeout(function(){ g.classList.remove("hit"); }, 850);
+}
+
+/* ---------------------------------------------------------- the hop animation
+   contract-b-m4.md §17, B14 (D19). /api/hops is a bounded feed of the last
+   minute of crossings — lane, endpoints, timestamp and the species block the
+   envelope carried. Every entry the page has not seen before sends THAT
+   SPECIES' OWN GLYPH down that lane, from the source world to the destination.
+
+   Four rules, three inherited and one this loop adds:
+
+     NEUTRAL WHEN UNKNOWN. An envelope with no species block travels as the grey
+     glyph. Never a guessed name, never omitted, and never "unknown" rendered as
+     though it were a species value.
+
+     NAMES ARE UNTRUSTED TEXT. The name reaches the DOM through textContent on a
+     <title> built with createElementNS and through nothing else; see the fenced
+     region above, where hopName and buildHopGlyph live for that reason.
+
+     LEDGER, NOT CENSUS. A hop glyph says "this one crossed". The glyphs inside a
+     cell say "these live here". Two facts, two sources, never summed.
+
+     AND BOUNDED, WHICH IS THIS LOOP'S OWN. A dam releasing hundreds of arrivals
+     must not put hundreds of creatures on the map: at most HOPMAX travel at
+     once, they launch on a stagger, the pending queue is capped at HOPQMAX and
+     the rest are simply not drawn. The feed is a sample of what is happening,
+     never an obligation to draw all of it. */
+var HOPMS = 1700, HOPMAX = 12, HOPSTAGGER = 130, HOPQMAX = 40, HOPSEENMAX = 800;
+
+/* A bounded seen-set. A migrationId is animated once, ever, and the feed
+   re-serves the same 60 seconds on every poll — so without this the same
+   creature would set off twice a second for a minute. */
+function hopMarkSeen(id){
+  if (!id) return true;
+  if (hopSeen[id]) return true;
+  hopSeen[id] = true;
+  hopSeenQ.push(id);
+  if (hopSeenQ.length > HOPSEENMAX) delete hopSeen[hopSeenQ.shift()];
+  return false;
+}
+
+function onHops(f){
+  var list = (f && f.hops) || [], i;
+  // The FIRST poll only PRIMES the seen-set. A page opened at 04:12 must not
+  // replay the previous minute all at once as though it were happening now.
+  if (!hopsPrimed){
+    for (i=0;i<list.length;i++) hopMarkSeen(list[i].migrationId);
+    hopsPrimed = true;
+    return;
+  }
+  for (i=0;i<list.length;i++){
+    var hp = list[i];
+    if (hopMarkSeen(hp.migrationId)) continue;
+    if (reduced || hopQ.length >= HOPQMAX) continue;
+    // Lanes are keyed fromSlot+edge, which is what makes the two directions of a
+    // pair two things to animate. A hop whose lane is closed or not drawn — it
+    // crossed, then the map changed — is dropped rather than guessed onto
+    // another arrow.
+    var a = animFor(hp.fromSlot + hp.exitEdge);
+    if (!a) continue;
+    hopQ.push({a:a, name:hopName(hp), to:hp.toSlot});
+  }
+}
+
+/* killHops drops every travelling glyph. buildMap throws the whole SVG away, so
+   every path a live hop is walking stops existing at that instant. */
+function killHops(){
+  for (var i=0;i<hopsLive.length;i++){
+    if (hopsLive[i].el.parentNode) hopsLive[i].el.parentNode.removeChild(hopsLive[i].el);
+  }
+  hopsLive = []; hopQ = [];
+}
+
+function launchHop(q){
+  if (!hopLayer) return;
+  var g = buildHopGlyph(q.name, q.to);
+  hopLayer.appendChild(g);
+  // Speed is set from the WHOLE lane's length, so every hop takes about HOPMS
+  // whatever the lane's length — a short hop and a long wrap read as one event.
+  hopsLive.push({el:g, a:q.a, ti:0, dist:0, speed:q.a.total/HOPMS, to:q.to});
+}
+
+/* stepHops advances every travelling glyph one frame, along the same track list
+   the ambient pulses walk. It ROTATES to the path's tangent, because the glyph
+   faces east by construction and a west-bound creature that faces east looks
+   like a drawing bug rather than a direction. */
+function stepHops(ts, dt){
+  if (hopQ.length && ts >= nextHopAt && hopsLive.length < HOPMAX){
+    launchHop(hopQ.shift());
+    nextHopAt = ts + HOPSTAGGER;
+  }
+  for (var i=hopsLive.length-1;i>=0;i--){
+    var q = hopsLive[i];
+    q.dist += q.speed*dt;
+    var tr = q.a.tracks[q.ti];
+    while (tr && q.dist > tr.len){ q.dist -= tr.len; q.ti++; tr = q.a.tracks[q.ti]; }
+    if (!tr){
+      if (q.el.parentNode) q.el.parentNode.removeChild(q.el);
+      hopsLive.splice(i,1);
+      // It ARRIVED. The destination cell says so, which is the same flash the
+      // poll-differencing fallback fires.
+      flashCell(q.to);
+      continue;
+    }
+    var pt = tr.el.getPointAtLength(q.dist);
+    var nx = tr.el.getPointAtLength(Math.min(q.dist + 2, tr.len));
+    var ang = Math.atan2(nx.y - pt.y, nx.x - pt.x) * 180 / Math.PI;
+    q.el.setAttribute("transform", "translate(" + pt.x.toFixed(1) + "," + pt.y.toFixed(1)
+      + ") rotate(" + ang.toFixed(1) + ")");
+  }
 }
 
 function spawn(a, hot){
@@ -1159,6 +1439,7 @@ function frame(ts){
       p.el.setAttribute("cx", pt.x); p.el.setAttribute("cy", pt.y);
     }
   }
+  stepHops(ts, dt);
 }
 
 /* ------------------------------------------------------------- the sparklines */
@@ -1361,6 +1642,20 @@ async function tick(){
     $("#link").innerHTML = '<span class="bad">status endpoint unreachable</span>';
   }
 }
+/* The hop feed is polled SEPARATELY from the status view, which is the shape of
+   B14's decision and not an accident: /api/status is what the archive
+   serializes verbatim into its durable metrics file once a minute, and a
+   per-organism feed does not belong in a file that is never rewritten. A page
+   whose hop endpoint fails keeps its map, its numbers and its ambient pulses. */
+async function tickHops(){
+  try {
+    var r = await fetch("api/hops", {cache:"no-store"});
+    onHops(await r.json());
+    hopFeedOK = true;
+  } catch(e){
+    hopFeedOK = false;
+  }
+}
 async function tickHistory(){
   try {
     var r = await fetch("api/history?hours=24&buckets=120", {cache:"no-store"});
@@ -1372,6 +1667,9 @@ async function tickHistory(){
 
 try { reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch(e){}
 tick(); setInterval(tick, 2000);
+// Faster than the status poll: the feed is bounded at 60 seconds, and a hop
+// should set off close to when it happened rather than up to two seconds late.
+if (!reduced){ tickHops(); setInterval(tickHops, 1500); }
 tickHistory(); setInterval(tickHistory, 60000);
 if (!reduced) rafId = requestAnimationFrame(frame);
 </script>

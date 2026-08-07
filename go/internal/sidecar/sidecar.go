@@ -3,10 +3,14 @@
 // decision D2 that joins them.
 //
 // M4 adds four things and nothing else. The map is two-dimensional, so the
-// sidecar runs ONE LANE PER EXPORT EDGE — east and north — and tells its mod one
-// EDGE_STATUS entry for each (contract-a.md §15, A18). Inbound delivery is
+// sidecar runs ONE LANE PER DECLARED EXPORT EDGE and tells its mod one
+// EDGE_STATUS entry for each (contract-a.md §15, A18) — FOUR of each under D17,
+// where every declared edge is both an export edge and an entry edge and an
+// `open: false` edge refuses MIGRATE_OUT through it while never refusing
+// MIGRATE_IN on it (§18, A38, §5.4). Inbound delivery is
 // PACED out of the journal in simulated minutes, because a dam released at wake
-// is what T1 measured (A20). An outbound entry carries a durable HANDOFF STATE,
+// is what T1 measured (A20, raised to 12.0 and given a knob by A40). An
+// outbound entry carries a durable HANDOFF STATE,
 // which is what lets a journaled hop be re-routed ONLY under a proof of
 // non-delivery (contract-b-m4.md §9.2). And an entry whose destination went dark
 // with no such proof runs a BOUNDED HOLD whose clock advances only while the
@@ -797,10 +801,16 @@ func (s *Sidecar) edgeStateLocked(edge string) (open bool, reason string, peerSi
 }
 
 // computeEdgesLocked builds EDGE_STATUS.edges: ONE ENTRY PER DECLARED EXPORT
-// EDGE (contract-a.md §15, A18). The two edges open and close independently — a
-// peer whose whole row went dark still exports north, and a peer alone in the
-// map closes both with no_peer. An empty array closes every edge and is the
-// correct frame when this sidecar holds no slot.
+// EDGE (contract-a.md §15, A18) — FOUR of them for a conformant D17 mod (§18,
+// A38). Each edge opens and closes independently: a peer whose whole row went
+// dark still exports north, a peer alone in the map closes all of them with
+// no_peer, and on an axis of length 2 the pair on that axis opens and closes
+// TOGETHER because both walks name the same peer. An empty array closes every
+// edge and is the correct frame when this sidecar holds no slot.
+//
+// `open` GOVERNS EXPORTS ONLY (§5.4). Nothing computed here reaches the
+// inbound delivery path, by construction: see onMigrationPayload, where an
+// arrival is journaled and delivered without ever asking what this list says.
 func (s *Sidecar) computeEdgesLocked() []contracta.EdgeState {
 	if s.mod == nil || !s.mod.handshaked || len(s.mod.exportEdges) == 0 {
 		return nil
@@ -989,7 +999,13 @@ func lineageOf(e journal.Entry) contractb.Lineage {
 // bounceLocked re-injects an outbound organism into the local sim. The journal
 // entry keeps its migrationId and flips direction, so dedup still holds end to
 // end (custody chain step 6). It comes home ON THE EDGE IT LEFT FROM — the
-// origin's own exitEdge, "E" or "N", not a passive entry edge (§9.4).
+// origin's own exitEdge, any of the four (§9.4).
+//
+// Under two-way lanes that edge is also a normal ENTRY edge, and the bounce is
+// unchanged anyway (contract-a.md §18, A38): same inset, same immunity window,
+// same outward velocity. Ordinary arrivals on that edge come in moving INWARD
+// and a bounce comes in moving OUTWARD, so the two populations are separated by
+// the mod's own outward-velocity test rather than by a rule here.
 func (s *Sidecar) bounceLocked(st *journal.State, why string, timeout bool) {
 	id := st.Entry.MigrationID
 	bounce := true

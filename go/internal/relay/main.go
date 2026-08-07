@@ -280,7 +280,10 @@ func (s *Server) describeLaneChangesLocked(b *strings.Builder, going Reservation
 			continue
 		}
 		ok := s.deliverableLocked(res)
-		for _, edge := range []string{contracta.EdgeE, contracta.EdgeN} {
+		// All four, because the ripple is symmetric under two-way lanes: a slot
+		// going dark re-targets every lane that pointed at it, and every one of its
+		// neighbours has one (§17, B13).
+		for _, edge := range contracta.CanonicalEdges() {
 			target, _, found := s.grid.Effective(res, edge, ok)
 			if !found || target.Slot != going.Slot {
 				continue

@@ -420,27 +420,47 @@ func (g *Grid) Handover(slot int, newPeerID string) (old Reservation, res Reserv
 type Deliverable func(res Reservation) string
 
 // Effective walks one export edge and returns the first deliverable slot on it,
-// with the bypass list in walk order (§8):
+// with the bypass list in walk order (§8, and §17 B13 for the reverse pair):
 //
 //	effective(E) = first deliverable slot at (col+1,row), (col+2,row), ... mod width
 //	effective(N) = first deliverable slot at (col,row+1), (col,row+2), ... mod height
+//	effective(W) = first deliverable slot at (col-1,row), (col-2,row), ... mod width
+//	effective(S) = first deliverable slot at (col,row-1), (col,row-2), ... mod height
 //
-// Each walk visits every OTHER position on its axis exactly once and then
-// stops, so a peer never exports to itself. An axis of length 1 has no
-// candidates at all, and an empty skip list with no target is what closes that
-// export edge with no_peer.
+// THE TWO REVERSE WALKS ARE THE TWO FORWARD WALKS WITH THE STEP NEGATED, and
+// that is the whole of D17's routing change. deliverable() is untouched — one
+// filter, four walks — and each walk still visits every OTHER position on its
+// axis exactly once and then stops, so a peer never exports to itself. An axis
+// of length 1 has no candidates in either direction, and an empty skip list
+// with no target is what closes that export edge with no_peer.
+//
+// Two consequences fall out of the arithmetic and are NOT defects:
+//
+//   - SKIP LISTS ARE PER WALK, NOT PER AXIS. E and W traverse the same row from
+//     opposite ends, meet its dark slots in a different order and stop at the
+//     first live one, so their skipped lists routinely differ even when they
+//     name the same target.
+//   - ON AN AXIS OF LENGTH 2 THE FORWARD AND REVERSE WALKS NAME THE SAME SLOT,
+//     because +1 and -1 are the same position mod 2. Both lanes of that shuttle
+//     open together and close together. On the 3x2 rig every COLUMN is such an
+//     axis (§2.1).
 func (g *Grid) Effective(from Reservation, edge string, ok Deliverable) (Reservation, []contractb.Skip, bool) {
 	skipped := []contractb.Skip{}
-	length, north := g.Width, false
-	if edge == contracta.EdgeN {
-		length, north = g.Height, true
+	vertical := contracta.Vertical(edge)
+	length := g.Width
+	if vertical {
+		length = g.Height
+	}
+	delta := 1
+	if contracta.Reverse(edge) {
+		delta = -1
 	}
 	for step := 1; step < length; step++ {
 		col, row := from.Col, from.Row
-		if north {
-			row = (from.Row + step) % g.Height
+		if vertical {
+			row = wrapIndex(from.Row+delta*step, g.Height)
 		} else {
-			col = (from.Col + step) % g.Width
+			col = wrapIndex(from.Col+delta*step, g.Width)
 		}
 		pos := contractb.Position{Col: col, Row: row}
 		res, reserved := g.At(col, row)
@@ -456,6 +476,17 @@ func (g *Grid) Effective(from Reservation, edge string, ok Deliverable) (Reserva
 		return res, skipped, true
 	}
 	return Reservation{}, skipped, false
+}
+
+// wrapIndex is the torus, written once so a reverse walk cannot pick up Go's
+// negative remainder. Go's % keeps the sign of the dividend, so (0-1)%3 is -1
+// and not 2, and a west lane off column 0 would address a position that does
+// not exist.
+func wrapIndex(i, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return ((i % n) + n) % n
 }
 
 func max(a, b int) int {

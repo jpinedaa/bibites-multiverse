@@ -152,12 +152,17 @@ type Archive struct {
 	statusAt time.Time
 	// lanes counts the envelopes copied on each ordered slot pair, which is what
 	// turns the ledger into a per-lane flow rate.
-	lanes       map[lanePair]*lane
-	recordCount int
-	seen        map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
-	pending     map[string]*fetch
-	sentWindow  map[string]*rateWindow
-	closed      bool
+	lanes map[lanePair]*lane
+	// hops is the bounded recent-hops feed of §17 B14. It is DELIBERATELY not a
+	// field of Status: see hops.go for why the durable metrics file must not
+	// carry it.
+	hops          []Hop
+	hopsTruncated bool
+	recordCount   int
+	seen          map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
+	pending       map[string]*fetch
+	sentWindow    map[string]*rateWindow
+	closed        bool
 
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
@@ -222,7 +227,7 @@ func New(cfg Config) (*Archive, error) {
 		}
 		// The lane counters are rebuilt from the ledger, so a restart does not
 		// reset the flow the operator was reading.
-		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.RecordedAt)
+		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.ExitEdge, rec.RecordedAt)
 		if rec.Lineage == nil {
 			continue
 		}
@@ -557,6 +562,7 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 		GameVersion: p.Body.Version,
 		Lineage:     &lineage,
 		Species:     species,
+		ExitEdge:    p.ExitEdge,
 		Timestamp:   p.Timestamp,
 	}
 	if err := a.ledger.Append(rec); err != nil {
@@ -578,7 +584,21 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	now := time.Now()
 	a.mu.Lock()
 	a.recordCount++
-	a.observeLaneLocked(p.SourceSlot, p.DestSlot, rec.RecordedAt)
+	a.observeLaneLocked(p.SourceSlot, p.DestSlot, p.ExitEdge, rec.RecordedAt)
+	// The same envelope, kept a second way for a second question. The lane
+	// counter answers HOW FAST; the feed answers WHO, just now (§17, B14). Both
+	// read the copy the archive already has, and neither asks anybody for
+	// anything.
+	a.observeHopLocked(Hop{
+		MigrationID: p.MigrationID,
+		AtMs:        rec.RecordedAt,
+		FromSlot:    p.SourceSlot,
+		ToSlot:      p.DestSlot,
+		ExitEdge:    p.ExitEdge,
+		// The STRIPPED block, not the raw one: a malformed species never reaches
+		// the page, exactly as it never reaches the ledger.
+		Species: species,
+	})
 	for _, h := range hashesOf(rec) {
 		a.trackLocked(h, p.SourcePeer, p.MigrationID, p.EntityID, now)
 	}
@@ -586,12 +606,19 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	return true
 }
 
-// observeLaneLocked counts one envelope on the ordered slot pair it crossed.
-func (a *Archive) observeLaneLocked(from, to int, atMs int64) {
+// observeLaneLocked counts one envelope on the DIRECTED lane it crossed: the
+// ordered slot pair AND the edge it left by. The edge is part of the key
+// because two-way lanes made the pair ambiguous on an axis of length 2 (§17,
+// B13) — slot 1's north lane and slot 1's south lane both end at slot 4 on the
+// 3x2 rig, and they are two lanes carrying two flows.
+//
+// An empty edge is a record written before D17. It keeps its own bucket and is
+// re-attributed at display time, where the map is known; see StatusView.
+func (a *Archive) observeLaneLocked(from, to int, edge string, atMs int64) {
 	if from == 0 && to == 0 {
 		return
 	}
-	key := lanePair{from, to}
+	key := lanePair{from: from, to: to, edge: edge}
 	l, ok := a.lanes[key]
 	if !ok {
 		l = &lane{}

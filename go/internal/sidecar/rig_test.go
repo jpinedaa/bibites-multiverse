@@ -213,11 +213,12 @@ func fastConfig(t *testing.T, relayURL, peerID string) Config {
 	cfg.BounceTimeout = 700 * time.Millisecond
 	cfg.StatsInterval = 200 * time.Millisecond
 	cfg.TickInterval = 40 * time.Millisecond
-	// The pacing default is 2.0 per SIMULATED minute, which is five times T1's
-	// measured natural rate and is meant to be invisible to ordinary traffic.
-	// A test rig moves in seconds, so the default rate would gate every test on
-	// the burst; the burst is what "ordinary traffic is never delayed" means, and
-	// the tests that assert PACING set the rate themselves.
+	// The pacing default is 12.0 per SIMULATED minute since §18 A40 — five times
+	// the projected median under two-way lanes, and meant to be invisible to
+	// ordinary traffic. A test rig moves in seconds, so even the raised default
+	// would gate every test on the burst; the burst is what "ordinary traffic is
+	// never delayed" means, and the tests that assert PACING set the rate
+	// themselves.
 	cfg.InboundRatePerSimMinute = 6000
 	cfg.InboundRateBurst = 64
 	return cfg
@@ -247,7 +248,10 @@ type node struct {
 }
 
 // grid is the standard M4 rig: one relay and a rectangle of slots, every sim
-// exporting east AND north and receiving west and south (D13).
+// declaring ALL FOUR edges and therefore both exporting and receiving on each
+// of them (D17, contract-a.md §18 A38). A test that wants D13's two-edge world
+// — still legal, and the mixed-rig case §18 A41 checks — names it in
+// gridOptions.exportEdges.
 type grid struct {
 	t     *testing.T
 	relay *testRelay

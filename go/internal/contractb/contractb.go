@@ -680,8 +680,11 @@ func (p *MigrationPayload) Validate() error {
 	if p.DestSlot < 1 {
 		return invalid("destSlot %d is not a slot", p.DestSlot)
 	}
-	if p.ExitEdge != contracta.EdgeE && p.ExitEdge != contracta.EdgeN {
-		return invalid("exitEdge %q is not E/N; the grid exports east and north", p.ExitEdge)
+	if !contracta.ValidEdge(p.ExitEdge) {
+		// All four values, since D17 (§17, B13). The relay has never ROUTED on this
+		// field — routing is on destSlot — so it is carried for the record and
+		// validated only as an enum member.
+		return invalid("exitEdge %q is not one of E, N, W, S", p.ExitEdge)
 	}
 	if !wire.Finite(p.ExitPosition) || p.ExitPosition < 0 || p.ExitPosition > 1 {
 		return invalid("exitPosition %v is outside [0,1]", p.ExitPosition)

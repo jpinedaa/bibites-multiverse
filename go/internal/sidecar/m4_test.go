@@ -85,9 +85,13 @@ func TestGridFormsFromSixOpinionFreeClaims(t *testing.T) {
 }
 
 // TestTwoAxisMigration covers §2 and §6.6: an organism leaves east and arrives
-// through the passive WEST edge, and one that leaves north arrives through the
-// passive SOUTH edge. The blob is byte-identical on both axes, and velocity and
+// through the facing WEST edge, and one that leaves north arrives through the
+// facing SOUTH edge. The blob is byte-identical on both axes, and velocity and
 // heading are copied rather than mirrored on either.
+//
+// D17 retired the word "passive" here — that edge is now an export edge too
+// (contract-a.md §18, A38) — and changed nothing else about this case. The four
+// directions are covered in twoway_test.go.
 func TestTwoAxisMigration(t *testing.T) {
 	g := newGrid(t, 6, gridOptions{layout: layout3x2()})
 	origin := g.bySlot(1) // (0,0)

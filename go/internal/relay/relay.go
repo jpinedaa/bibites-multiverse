@@ -797,10 +797,17 @@ func (s *Server) exportEdgesLocked(peerID string) []string {
 }
 
 // grantForLocked builds one peer's SECTOR_GRANT: its slot, its position, the
-// map, and ONE EFFECTIVE NEIGHBOUR PER EXPORT EDGE.
+// map, and ONE EFFECTIVE NEIGHBOUR PER EXPORT EDGE — up to FOUR of them under
+// two-way lanes (§17, B13). A key is absent when that axis has no deliverable
+// target, and its absence is what closes that export edge with no_peer (§8).
 //
-// A key is absent when that axis has no deliverable target, and its absence is
-// what closes that export edge with no_peer (§8).
+// The ripple is symmetric for free, and it is worth naming why rather than
+// adding a mechanism for it. sendGrants recomputes EVERY peer's grant on a
+// liveness change and re-sends the ones whose content moved; when each peer had
+// two lanes, a dark slot's own east and north neighbours had nothing pointing
+// at it and were told nothing. With four lanes every neighbour of a dark slot
+// both pointed at it and was pointed at by it, so they all land in the "content
+// changed" set. statusCoalesceMs already bounds the burst.
 func (s *Server) grantForLocked(res Reservation, reason string) contractb.SectorGrant {
 	pos := res.Position()
 	grant := contractb.SectorGrant{
@@ -820,11 +827,14 @@ func (s *Server) grantForLocked(res Reservation, reason string) contractb.Sector
 	}
 	grant.Neighbours = map[string]*contractb.Neighbour{}
 	for _, edge := range edges {
-		if edge != contracta.EdgeE && edge != contracta.EdgeN {
-			// The grid exports east and north. An edge the mod declared that the
-			// map has no axis for simply has no lane.
+		if !contracta.ValidEdge(edge) {
+			// Not an edge at all. Under D17 (§17, B13) every one of the four IS an
+			// export edge, so there is no longer an edge the map has no axis for.
 			continue
 		}
+		// ONLY THE EDGES THE SIDECAR DECLARED. The relay never invents a lane a
+		// peer did not ask for, which is what keeps a two-edge sidecar's grant
+		// byte-identical to what contract-b/3.2 produced for it.
 		target, skipped, found := s.grid.Effective(res, edge, ok)
 		if !found {
 			continue
@@ -995,6 +1005,13 @@ func (s *Server) broadcastPeerStatus() {
 			me.Slot = &slot
 			me.Position = &pos
 			ok := s.deliverableLocked(res)
+			// §17 B13 leaves PEER_STATUS ALONE, deliberately: it publishes the
+			// registry and the structural row-major order, and the lanes have always
+			// been DERIVED from it — a client that wants four walks runs them itself
+			// (mapwalk), which is exactly what the archive's map does. `you` stays
+			// §6.5's two-key convenience so nothing on this frame changes shape; the
+			// authority for a peer's routing is its own SECTOR_GRANT, and that now
+			// carries all four.
 			for _, edge := range []string{contracta.EdgeE, contracta.EdgeN} {
 				if target, _, found := s.grid.Effective(res, edge, ok); found {
 					n := target.Slot

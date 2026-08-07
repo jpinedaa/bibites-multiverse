@@ -181,12 +181,19 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 		opts.world = newWorld()
 	}
 	if len(opts.borderEdges) == 0 {
-		// Under the grid a sim has four doors: it EXPORTS east and north and
-		// RECEIVES west and south (D13, §15 A18).
+		// All four, since A18. It means "the edges on which this mod will accept an
+		// inbound organism", and under D17 it is EQUAL to exportEdges rather than a
+		// superset of it (contract-a.md §18, A38).
 		opts.borderEdges = []string{contracta.EdgeE, contracta.EdgeN, contracta.EdgeW, contracta.EdgeS}
 	}
 	if len(opts.exportEdges) == 0 && !opts.omitExportEdges {
-		opts.exportEdges = []string{contracta.EdgeE, contracta.EdgeN}
+		// A conformant mod under two-way lanes declares all four: every declared
+		// edge is BOTH an export edge and an entry edge, and "out and in are
+		// different doors" is retired (contract-a.md §18, A38). A test that wants
+		// the two-edge world of D13 — still legal, and the mixed-rig case §18 A41
+		// checks — names it.
+		opts.exportEdges = []string{contracta.EdgeE, contracta.EdgeN,
+			contracta.EdgeW, contracta.EdgeS}
 	}
 	if opts.simStep == 0 {
 		opts.simStep = 1

@@ -126,6 +126,21 @@ func ValidEdge(e string) bool {
 	return e == EdgeN || e == EdgeS || e == EdgeE || e == EdgeW
 }
 
+// CanonicalEdges is §4.3.2's tie order, E N W S, and it is the order every
+// four-edge iteration in this system uses so a log line, a grant and an
+// EDGE_STATUS list read the same way. Under D17 (§18, A38) a conformant mod
+// declares all four, and the two that came last — W and S — are the two the
+// map learned in contract-b/3.3.
+func CanonicalEdges() []string { return []string{EdgeE, EdgeN, EdgeW, EdgeS} }
+
+// Reverse reports whether an edge's walk runs with the step NEGATED. West and
+// south are east and north backwards, and that is the whole of D17's routing
+// change (contract-b-m4.md §17, B13).
+func Reverse(e string) bool { return e == EdgeW || e == EdgeS }
+
+// Vertical reports whether an edge runs along the COLUMN rather than the row.
+func Vertical(e string) bool { return e == EdgeN || e == EdgeS }
+
 // Opposite returns the facing edge. The sidecar owns this function
 // (contract-a.md §4.2).
 func Opposite(e string) (string, bool) {
@@ -190,13 +205,36 @@ const (
 	ContractAPath        = "/contract-a/v2"
 	RetiredContractAPath = "/contract-a/v1"
 
-	// The delivery rate limit (§7.5, §15 A20). It paces MIGRATE_IN out of the
-	// journal in SIMULATED minutes of the receiving world, so a dam released at
-	// wake becomes a trickle the world can absorb.
-	InboundRatePerSimMinute = 2.0
-	InboundRateBurst        = 5.0
-	PacingIdleGraceMs       = 10000
-	PacingIdleGrace         = PacingIdleGraceMs * time.Millisecond
+	// The delivery rate limit (§7.5, §15 A20, RAISED by §18 A40). It paces
+	// MIGRATE_IN out of the journal in SIMULATED minutes of the receiving world,
+	// so a dam released at wake becomes a trickle the world can absorb.
+	//
+	// A20 shipped 2.0 and 5, sized at five times T1's measured one-lane rate of
+	// 0.4 arrivals per simulated minute. D13 gave every slot a second inbound
+	// lane and D17 gives it four, and 35 hours of the living deployment measured
+	// the consequence: a median offered load of 1.19 per simulated minute, 12% of
+	// all slot-samples ABOVE the 2.0 limit, and a paced backlog at inboundQueueMax
+	// on three of six slots that never fell. §7.5's own observability rule — a
+	// depth that never falls names a limit set too low — is what condemned it.
+	//
+	// 12.0 is A20's own rule re-applied to the topology that ships: five times the
+	// projected median once D17 doubles the inbound surface (1.19 -> ~2.4). The
+	// dam is still spread — a 900-organism backlog drains over 75 simulated
+	// minutes, not one breath — and inboundQueueMax and the OVERLOADED
+	// backpressure behind it are untouched.
+	//
+	// The rate is a DEFAULT and no longer only a constant: --inbound-rate and
+	// MULTIVERSE_INBOUND_RATE override it (§18, A40), because a tunable an
+	// operator cannot retune from the metric that measures it is not a tunable,
+	// and this one has now needed retuning twice.
+	InboundRatePerSimMinute = 12.0
+	// InboundRateBurst is the token-bucket capacity, raised from 5 with the rate
+	// (§18, A40): the bucket exists so a CLUMP is never delayed, clumping is set
+	// by organism behaviour per lane, and four inbound lanes clump about twice as
+	// hard as two.
+	InboundRateBurst  = 15.0
+	PacingIdleGraceMs = 10000
+	PacingIdleGrace   = PacingIdleGraceMs * time.Millisecond
 )
 
 // Vec is a 2D vector in the source sim's world axes (contract-a.md §4.4).

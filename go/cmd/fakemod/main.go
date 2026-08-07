@@ -17,9 +17,9 @@
 //     lineage graph with an organism that never lived.
 //   - It is a STORE-AND-FORWARD peer. Every organism it exports is one it
 //     received: the same payload bytes, the same entity, a new migrationId,
-//     through whichever export edge EDGE_STATUS has open. Custody, dedup,
-//     lineage and exactly-once are therefore exercised for real on both of that
-//     slot's axes.
+//     through whichever export edge EDGE_STATUS has open — all four of them
+//     under D17. Custody, dedup, lineage and exactly-once are therefore
+//     exercised for real in every direction that slot can send.
 //   - It answers MIGRATE_IN with MIGRATE_IN_ACK only after it has recorded the
 //     organism, which is the same custody gate a real mod's spawn is.
 //
@@ -124,7 +124,11 @@ func run(args []string) int {
 	fs := flag.NewFlagSet("fakemod", flag.ContinueOnError)
 	url := fs.String("url", "ws://127.0.0.1:8792"+contracta.ContractAPath, "the sidecar's Contract A address")
 	ringSlot := fs.Int("ring-slot", 0, "the advisory ringSlot this peer reports; a disagreement closes 4001")
-	exportEdges := fs.String("export-edges", "E,N", "the export edges this peer declares")
+	// Four, under D17 (contract-a.md §18, A38): every declared edge is both an
+	// export edge and an entry edge, and a conformant mod declares all four. A
+	// peer that declares fewer is still conformant — the field declares GEOMETRY,
+	// "I run a capture band on these edges", and never topology.
+	exportEdges := fs.String("export-edges", "E,N,W,S", "the export edges this peer declares")
 	simSize := fs.Float64("sim-size", 2000, "S, the playable half-extent it reports")
 	borderWidth := fs.Float64("border-width", 40, "W, the strip width it reports")
 	statePath := fs.String("state-file", "", "where to write the held set, for the rig's census")

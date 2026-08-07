@@ -309,10 +309,10 @@ func TestLaneRecentHops(t *testing.T) {
 	now := time.Now().UnixMilli()
 	a.mu.Lock()
 	// Two hops long past the window, three inside it.
-	a.observeLaneLocked(1, 2, now-2*flowWindow.Milliseconds())
-	a.observeLaneLocked(1, 2, now-int64(1.5*float64(flowWindow.Milliseconds())))
+	a.observeLaneLocked(1, 2, contracta.EdgeE, now-2*flowWindow.Milliseconds())
+	a.observeLaneLocked(1, 2, contracta.EdgeE, now-int64(1.5*float64(flowWindow.Milliseconds())))
 	for i := 0; i < 3; i++ {
-		a.observeLaneLocked(1, 2, now-int64(i)*1000)
+		a.observeLaneLocked(1, 2, contracta.EdgeE, now-int64(i)*1000)
 	}
 	a.mu.Unlock()
 
@@ -535,5 +535,135 @@ func TestPageDrawsSpeciesGroupedCreatures(t *testing.T) {
 	// worlds are reporting none.
 	if !strings.Contains(page, "paintSpeciesCell") || !strings.Contains(page, "function censusless") {
 		t.Fatal("the worlds table has no species column, or the totals hide the gap")
+	}
+}
+
+// TestPageDrawsTwoWayLanes is the rendering half of contract-b-m4.md §17, B13.
+// A Go test cannot run the page's JavaScript, so it asserts that the MACHINERY
+// a two-way map needs exists and that the machinery a one-way map used is gone.
+//
+// The rendering choice being pinned here: each lane pair is drawn as TWO
+// SEPARATE DIRECTED ARROWS ON PARALLEL RAILS, not as one line with a head at
+// each end. On the 3x2 rig that is 12 pairs = 24 directions, and a double-headed
+// line cannot carry any of the three things a direction owns — its own rate
+// label, its own state (skip lists are per WALK, so one direction can be a
+// bypass while the other is direct), and its own flow.
+func TestPageDrawsTwoWayLanes(t *testing.T) {
+	page := statusPageHTML
+
+	// The rail offset and the bow allowance are what keep the two arrows of a
+	// pair apart and stop their bypass arcs crossing.
+	for _, want := range []string{"function laneOff", "function laneBow", "var LSEP"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the page has no %s; two arrows in one gutter would be drawn on top "+
+				"of each other", want)
+		}
+	}
+	// The geometry knows all four edges and both wrap directions.
+	for _, want := range []string{`e === "N" || e === "S"`, `e === "W" || e === "S"`,
+		"(c - steps) >= 0", "(r - steps) >= 0"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("laneGeom is missing %q; a west or south lane wraps through the "+
+				"OTHER edge of the map", want)
+		}
+	}
+	// Every direction names itself in a tooltip.
+	if !strings.Contains(page, "var EDGEWORD = {E:\"east\", N:\"north\", W:\"west\", S:\"south\"}") {
+		t.Fatal("the lane tooltip does not name all four directions")
+	}
+	// The retired sentence must be GONE from the glossary, not merely
+	// contradicted elsewhere: D17 supersedes "out and in are different doors",
+	// and a page that still says otherwise is teaching a reader something false.
+	for _, stale := range []string{"A one-way road", "Creatures only ever travel east and north",
+		"Those two are the only exits"} {
+		if strings.Contains(page, stale) {
+			t.Fatalf("the glossary still says %q; every edge is both an exit and a door now",
+				stale)
+		}
+	}
+	// And the two facts a reader of a two-way map has to be told: the pair, and
+	// the degenerate axis where both lanes of it name one peer.
+	if !strings.Contains(page, " shuttle:[") {
+		t.Fatal("the glossary never explains the two-lane pair of an axis of length 2, " +
+			"which is every COLUMN of the rig")
+	}
+}
+
+// TestPageAnimatesTheSpeciesGlyphOnAHop is D19 / §17 B14's rendering half. The
+// page polls the bounded hop feed and sends THAT SPECIES' OWN GLYPH down the
+// lane it crossed, and the test pins the machinery, the bounds and the
+// escaping structure that makes an attacker-chosen name inert.
+func TestPageAnimatesTheSpeciesGlyphOnAHop(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// It polls its own endpoint, not the status view. /api/status is written
+	// verbatim into the durable metrics file every minute and must stay lean.
+	if !strings.Contains(page, `fetch("api/hops"`) {
+		t.Fatal("the page never polls /api/hops")
+	}
+	// The machinery: a queue, a launcher, a per-frame step, and a teardown for
+	// when the SVG is rebuilt under a travelling glyph.
+	for _, want := range []string{"function onHops", "function launchHop", "function stepHops",
+		"function killHops", "function hopMarkSeen", "requestAnimationFrame"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the hop animation is missing %q", want)
+		}
+	}
+	// Bounded on every axis a burst can grow along: concurrent glyphs, the
+	// pending queue, the stagger between launches, and the seen-set that stops
+	// one migration animating twice.
+	for _, want := range []string{"HOPMAX", "HOPQMAX", "HOPSTAGGER", "HOPSEENMAX", "HOPMS"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the hop animation has no %s bound; a dam releasing hundreds of "+
+				"arrivals must not put hundreds of creatures on the map", want)
+		}
+	}
+	// ~1.5-2s per hop, whatever the lane's length.
+	if !strings.Contains(page, "var HOPMS = 1700") {
+		t.Fatal("the hop duration is not the ~1.7s the design calls for")
+	}
+	// It travels the LANE, and it is the same glyph the cells draw — one
+	// definition, drawn by reference — rather than a second creature drawing.
+	if !strings.Contains(page, "getPointAtLength") || !strings.Contains(page, "q.a.tracks") {
+		t.Fatal("the hop does not follow the lane path")
+	}
+	if !strings.Contains(region, "function buildHopGlyph") {
+		t.Fatal("the hop glyph is built outside the fenced species region, where the " +
+			"escaping rule is enforced by a property over the fence")
+	}
+	if !strings.Contains(region, `u.setAttribute("href", "#bib")`) {
+		t.Fatal("the hop draws its own creature instead of the shared glyph")
+	}
+	// ESCAPING: the name reaches the DOM as a text node and nothing else. The
+	// fence-wide innerHTML assertion in TestCensusNamesNeverBecomeMarkup covers
+	// buildHopGlyph too, now that it lives inside the fence; this pins the
+	// positive half.
+	if !strings.Contains(region, "ttl.textContent") {
+		t.Fatal("the hop's species name does not reach the DOM through textContent")
+	}
+	// NEUTRAL WHEN UNKNOWN: absent is absent, never a guessed name and never
+	// "unknown" rendered as if it were a species.
+	if !strings.Contains(region, "function hopName") ||
+		!strings.Contains(region, `"hopbib" : "hopbib neutral"`) {
+		t.Fatal("a hop with no species block is not drawn as the neutral glyph")
+	}
+	if !strings.Contains(page, "a creature of no reported species") {
+		t.Fatal("the page never says a hop's species is unreported")
+	}
+	// It is LEDGER, not census, and the page has to say so: the glyphs in a cell
+	// and the glyph on a lane are two facts from two sources.
+	if !strings.Contains(page, " hopfeed:[") {
+		t.Fatal("the glossary never distinguishes who CROSSED from who LIVES here")
+	}
+	// A page that cannot reach the feed degrades to the ambient pulse it had
+	// before D19, and must not double-draw when it can.
+	if !strings.Contains(page, "!hopFeedOK") {
+		t.Fatal("the poll-differencing hot pulse is not suppressed while the hop feed is " +
+			"live; one organism would be drawn twice")
+	}
+	// prefers-reduced-motion turns the whole thing off rather than slowing it.
+	if !strings.Contains(page, "if (!reduced){ tickHops(); setInterval(tickHops, 1500); }") {
+		t.Fatal("the hop feed is polled even under prefers-reduced-motion")
 	}
 }
