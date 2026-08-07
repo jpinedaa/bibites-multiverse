@@ -135,7 +135,20 @@ diagnosis ran a `fakemod` against the live sidecar; it took custody of ~10 repla
 organisms into `multiverse-farend/fakemod-diag-state.json` before it was stopped — they
 are recorded there, not lost, and can be re-injected or written off. (c) `readModLoop` now
 logs why a session's read ended — the silently swallowed read error hid the "who closed,
-and with what reason" evidence for most of an evening.
+and with what reason" evidence for most of an evening. (d) A diagnosis gotcha worth
+remembering: BepInEx on this install logs `Unable to start Unity log writer` at boot, so
+Unity-side exceptions never reach `LogOutput.log` — always check the game's own
+`Player.log` before concluding "no exceptions".
+
+**Epilogue (later that night).** The machine slept from ~21:45 to 23:32 with the rig
+running. On wake the sidecar closed the stale session (`silentFor=1h46m`), the mod
+reconnected, the replayed backlog hit the durable dedup ledger, and paced delivery
+resumed — two log lines where the pre-A29 system had produced an afternoon-long livelock.
+That is the defence set passing its first unplanned field test. Separately, the world's
+ecology paid for the incident: population fell from 220 to ~21 (the flood had wrecked the
+food web, and the pellet purge necessarily deleted most of the world's biomass reserve
+with the pile). Migrants from the neighbouring slots were already repopulating it through
+W and S — the map healing one of its own worlds, which is the point of the map.
 
 ## 5. Recovery and deployment notes
 
