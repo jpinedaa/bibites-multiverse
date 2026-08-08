@@ -988,7 +988,17 @@ post-01:07 records existed.
 | `e2e/archive-data-m4-lan/genomes/` | with **new genomes**. Content-addressed, so it tracks evolution rather than hops. The archive never sweeps it — the sidecars' own caches are capped by `genomeCacheMaxBytes`, the archive's is the record | **58 MB/h = 1.4 GB/day** |
 | `e2e/archive-data-m4-lan/migrations.jsonl` | with **traffic**. The ledger is the record of what happened and nothing may evict from it (`contract-b-m4.md` §10) | **19 MB/h = 0.45 GB/day**, at ~540 crossings/min |
 | `e2e/archive-data-m4-lan/metrics.jsonl` | with **time**, one sample per slot per `metricsInterval` | **0.7 MB/h = 0.02 GB/day** |
-| **total** | | **78 MB/h = 1.9 GB/day = ~57 GB/month** |
+| `e2e/baselines/m4-collector/` | with **time**. Not part of the deployment — it is the owner's read-only observation loop, copying five world saves and one `/api/status` sample every 5 minutes. Stop it with `kill "$(cat e2e/baselines/m4-collector/collector.pid)"` | **19 MB/h = 0.5 GB/day** |
+| **total** | | **97 MB/h = 2.3 GB/day = ~70 GB/month** |
+
+**`e2e/baselines/m4-collector/` is untracked, and that is load-bearing.** `e2e/baselines/`
+itself **is** tracked — 57 files including earlier baseline save zips — so this directory
+sits inside a tracked tree while holding 343 MB across 1,148 files and growing half a
+gigabyte a day. It is not in `.gitignore` and it is not in history, so a single
+`git add -A` would commit all of it and keep committing it. Stage specific paths in this
+repo. Whether the collector's output should be ignored outright or periodically pruned and
+its keepers committed is **an open question for the owner** — the two halves of
+`e2e/baselines/` currently disagree about what kind of thing it is.
 
 No rule in this system will ever shrink these three. At that rate the 251 GB data volume
 holds roughly **four months** of this deployment, and then somebody has to decide what the
