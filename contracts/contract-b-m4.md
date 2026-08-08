@@ -2182,6 +2182,20 @@ characters of the digest. It survives a restart. Entries expire after
 `genomeCacheRetentionDays` (30) with a least-recently-served policy, bounded by
 `genomeCacheMaxBytes` (2 GiB).
 
+**A store write is rename-into-place, and a failed one MUST clean up after itself**
+(added — §20, B20). The write lands in `<hash>.json.tmp` and is renamed over
+`<hash>.json`. On **any** error before the rename the writer MUST remove that scratch
+file, and the expiry sweep MUST also collect scratch files old enough that no live write
+can still own them — a process killed between the write and the rename cannot run its own
+cleanup, and the sweep otherwise never looks at anything but `.json`.
+
+The rule reads as housekeeping and is not. The store is content-addressed, so a failed
+write retries under the **same** name and leaves the same corpse again: on 2026-08-08 a
+full disk turned one `ENOSPC` into **15,119 zero-byte scratch files** across the
+deployment's six stores, every one an inode spent on nothing at the moment inodes and
+blocks were what the rig had run out of. The archive's own store is bounded by neither
+tunable above — it is the record, and nothing evicts from it (§20, B20).
+
 **Fetch behaviour, archive side.**
 
 | Rule | Statement |
@@ -2404,8 +2418,8 @@ its own scratch file, and the cache sweep to collect any a crash abandoned).
 A compaction never reads the file it replaces — the in-memory state map *is* the
 compacted content — so it costs one pass over the live entries and finishes in
 milliseconds. It writes `journal.log.tmp`, fsyncs it, renames it over
-`journal.log` and syncs the directory, which is the same discipline §11.1 already
-required of `Open`; a crash before the rename leaves the original whole and a
+`journal.log` and syncs the directory, which is the same discipline `contract-a.md`
+§11.1 already required of `Open`; a crash before the rename leaves the original whole and a
 crash after it leaves a journal that replays to the identical state. **Compaction
 must preserve `accruedHoldMs`** (§9.3): the hold clock is an accrual carried in
 the entry, and a rewrite that dropped it would silently reset every hold in the
@@ -3322,10 +3336,10 @@ at **`contract-b/3.5`**. A peer running the fix and a peer without it are
 indistinguishable on the wire, which is the point: this is a statement about what
 a peer does to its own disk.
 
-### B20 — A peer bounds its own journal and its own log (§10, §11.1, §12)
+### B20 — A peer bounds its own journal and its own log (§10, §12, `contract-a.md` §11.1)
 
-**Gap.** §11.1 required the journal to be durable and §12 sized its retention in
-*time*, and neither ever bounded it in *bytes*. The compaction that made the
+**Gap.** `contract-a.md` §11.1 required the journal to be durable and §12 sized its
+retention in *time*, and neither ever bounded it in *bytes*. The compaction that made the
 journal small existed only inside `Open`, so the bound was "restart the process",
 which is not a bound — a rig whose whole value is that it stays up cannot have a
 disk budget that depends on it going down. The log had less than that: it was
@@ -3335,9 +3349,9 @@ whatever the operator's shell redirect caught.
 
 | Rule | Statement |
 |---|---|
-| The journal compacts on a timer | A sidecar MUST rewrite its journal to the entries it still holds at least every `journalCompactMinutes`, not only at `Open`. The rewrite uses the same crash-safe discipline §11.1 already requires — scratch file, fsync, rename, directory sync — so a crash before the rename leaves the original whole and a crash after it leaves a journal that replays to the identical state. |
+| The journal compacts on a timer | A sidecar MUST rewrite its journal to the entries it still holds at least every `journalCompactMinutes`, not only at `Open`. The rewrite uses the same crash-safe discipline `contract-a.md` §11.1 already requires — scratch file, fsync, rename, directory sync — so a crash before the rename leaves the original whole and a crash after it leaves a journal that replays to the identical state. |
 | The accrual survives it | A compaction MUST preserve `accruedHoldMs` on every entry (§9.3). The hold clock is an accrual carried in the entry precisely so a restart can neither lose time already served nor invent time that was never served; a rewrite that dropped it would reset every hold in the rig without a single log line. |
-| The purge record stays | `PurgeExpired` still appends a durable purge record even though the next compaction would erase the tombstone anyway. §11.1 says a purge is durable, and the saving does not justify diverging from it: a purge record is one short line per tombstone that ever expires, while the growth term was the `create` record of every migration that ever ran, each carrying its payload. |
+| The purge record stays | `PurgeExpired` still appends a durable purge record even though the next compaction would erase the tombstone anyway. `contract-a.md` §11.1 makes every journal write durable before it counts and keeps tombstones out of memory-only state, and the saving does not justify carving an exception out of that: a purge record is one short line per tombstone that ever expires, while the growth term was the `create` record of every migration that ever ran, each carrying its payload. |
 | A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
 | A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
 | What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. |

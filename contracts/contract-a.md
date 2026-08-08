@@ -1959,6 +1959,23 @@ These notes are non-normative. They exist so the two sides do not have to negoti
 - **Durability before ACK.** `MIGRATE_OUT_ACK` is only correct after `f.Sync()` on the
   journal file **and** on its parent directory. An `os.Rename` without a directory sync is
   not durable across a power loss.
+- **An append is all-or-nothing, and a full disk is how you find out it was not.** Refusing
+  to ACK on a write error is necessary and it is not sufficient: `Write` can land **short**,
+  leaving part of a record in the file and returning an error. The caller then correctly
+  does not ACK, the next successful append writes a whole record straight behind the
+  fragment, and replay — which stops at the first unparsable line, because a torn line is
+  only ever supposed to be the **last** one — silently discards every record after it. On
+  2026-08-08 that cost the living deployment eight hours of custody history on all five
+  sidecars at once, with nothing visibly wrong: each process held correct state in memory
+  and kept ACKing correctly, and only a restart would have revealed that its journal
+  replayed to 01:07:40 and no further. **Truncate the file back to its pre-write length on
+  any write error**, so the failure costs that one record instead of every record behind
+  it. Report what a replay discarded behind a torn line, and log it at **error** — a
+  journal that quietly loses history is worse than one that refuses to open.
+- **Bound the journal in bytes, not only in time.** `exportRetentionSeconds` expires
+  tombstones; it does not stop the file growing. A compaction that runs only at startup is
+  not a bound for a process whose value is staying up — see `contract-b-m4.md` §20 (B20)
+  for `journalCompactMinutes` and the rest of the disk budget.
 - **Tombstones are journal entries.** Do not keep them only in memory, or §7.4 breaks on
   a sidecar restart — which is exactly one of the M2 kill tests.
 - **Bound the outbound queue.** If the mod stops reading, the writer channel must drop

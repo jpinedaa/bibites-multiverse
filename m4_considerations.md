@@ -459,7 +459,7 @@ vintage from those receipts, and that reconstruction must not depend on a log fi
 **A rig-wide resume test.** The T1 journals are on disk. They hold one real in-flight hop:
 migration `9d6db335-b1ae-433e-a44a-bb2109912913`, entity `2004967003`, slot 1 to slot 2,
 recorded 2026-08-04T14:13:14.202Z. Bring the rig up against those journals. The organism
-must arrive in slot 2. **Do not delete `e2e/data/slot-1/journal`.** That directory is the
+must arrive in slot 2. **Do not delete `e2e/data/slot-1/journal`.** *(Retired and compressed 2026-08-08: it is now `data/slot-1/journal/` inside `e2e/data.tar.zst`. Extract it back to `e2e/` before running this test — `tar --zstd -xf e2e/data.tar.zst -C e2e/`.)* That directory is the
 only copy of the test input.
 
 ### The interaction that needs care
@@ -634,6 +634,16 @@ logs, and it saved them by hand hours before the next launch.
 The stop script copies each BepInEx log to a timestamped file before any restart. The start
 script refuses to launch a game whose log has not been preserved. Durable metrics reduce
 the need for the logs, and they do not remove it.
+
+**The opposite failure arrived on 2026-08-08, and this risk had no line for it.** The
+concern here was logs that vanish too soon. What actually stopped the deployment was logs
+that never vanish at all: the Go side wrote slog to stderr, the rig caught it with a shell
+append redirect, and 3.5 GB of it — beside 3.25 GB of journal that only ever compacted at
+startup — filled the root filesystem overnight and stopped every genome write in the rig.
+Preservation and boundedness are the same question asked from two ends, and only one end
+had been asked. Both are now answered: `contract-b-m4.md` §20 (B20) gives every process a
+log it owns and rotates by size, and the journal a compaction timer. See
+`dev_environment.md`, *The disk budget*.
 
 ### Risk 7 — The far end has no drive path
 
@@ -1061,7 +1071,8 @@ The test passes when all of these conditions hold:
 ### Part 6 — The resume test
 
 15. Stop the rig. Keep every journal.
-16. Start the rig against `e2e/data/slot-1/journal` from 2026-08-04.
+16. Start the rig against `e2e/data/slot-1/journal` from 2026-08-04 — extract it first with
+    `tar --zstd -xf e2e/data.tar.zst -C e2e/` (compressed 2026-08-08).
 
 The test passes when migration `9d6db335-b1ae-433e-a44a-bb2109912913`, entity
 `2004967003`, arrives in slot 2 and exists exactly once in the map.
@@ -1161,7 +1172,8 @@ this machine was clean.
 brand-new instance), Part 5 (paced arrivals) and Part 6 (the resume test) are proven by
 `run-m4.sh` phases 5, 6 and 3. Phase 7 of the same rehearsal proves the bounded-hold case.
 Each of the four needs a command sent to the slot under test, and the far end takes no
-commands (D9). The resume test also stays local, because `e2e/data/slot-1/journal` is the
+commands (D9). The resume test also stays local, because `e2e/data/slot-1/journal` (now inside
+`e2e/data.tar.zst`) is the
 only copy of its input.
 
 **A harness caveat, and phase 6 found it.** Phase 6 failed on its first run, purely on
