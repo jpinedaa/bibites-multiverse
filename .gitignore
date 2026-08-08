@@ -48,6 +48,16 @@ e2e/run-m4-lan/
 # throwaway instances species-guard-check.sh runs.
 e2e/logs-m5-guard/
 
+# The live rig's observation loop. e2e/baselines/ is otherwise TRACKED — the
+# committed baseline captures under it are evidence of runs that finished — but
+# m4-collector/ is a running loop, not a capture: it copies five world saves and
+# one /api/status sample every 5 minutes, for as long as the deployment is up.
+# That is 0.5 GB/day, and at 2026-08-08 it already held 343 MB in 1,148 files.
+# It is excluded so no `git add -A` can turn a continuous writer into repository
+# history. Prune it and commit a keeper by explicit path if a sample is worth
+# keeping; `git add -f` is the escape hatch.
+e2e/baselines/m4-collector/
+
 # Retired rigs, parked as tar.zst in place of the directories above. A retired
 # runtime dir is still the record of a run that happened, so it is compressed
 # rather than deleted — but it is runtime state either way and never enters the
