@@ -44,3 +44,9 @@ e2e/run-m4-lan/
 # The species-guard regression check's evidence: BepInEx log copies from the three
 # throwaway instances species-guard-check.sh runs.
 e2e/logs-m5-guard/
+
+# Retired rigs, parked as tar.zst in place of the directories above. A retired
+# runtime dir is still the record of a run that happened, so it is compressed
+# rather than deleted — but it is runtime state either way and never enters the
+# repo. Restore one with `tar --zstd -xf e2e/<name>.tar.zst -C e2e/`.
+e2e/*.tar.zst

@@ -11,10 +11,12 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
-| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.3`**, amended in place; §15 is the M4 set, §16 the species-identity set, §17 the species-census set, §18 the two-way-lane set (A38–A41) and **§19 the world-settings set, A42–A44**), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.5`**; §14 is its reconciliation set, §15 the species-identity amendment, §16 the census amendment, §17 the two-way-lane and hop-feed amendment (B13–B15), §18 the pacing and speed readout and **§19 the world-settings readout**), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by every amendment since — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
+| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.3`**, amended in place; §15 is the M4 set, §16 the species-identity set, §17 the species-census set, §18 the two-way-lane set (A38–A41) and **§19 the world-settings set, A42–A44**), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/3.5`**; §14 is its reconciliation set, §15 the species-identity amendment, §16 the census amendment, §17 the two-way-lane and hop-feed amendment (B13–B15), §18 the pacing and speed readout, §19 the world-settings readout and **§20 the disk budget, B20** — the only amendment that changes no wire field), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by every amendment since — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
 | Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), **`run-m4-lan.sh` = the same map with slot 6 on the second computer** (the M4 exit-test rig; it sources `run-m4.sh` with `M4_LIB=1`), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rigs* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
-| Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data/` (the relay's `ring.json` slot reservations), `e2e/archive-data/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs/`, `e2e/run/` (pid files) |
+| Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data*/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data*/` (the relay's `ring.json` slot reservations), `e2e/archive-data*/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs*/`, `e2e/run*/` (pid files). Each rig has its own suffixed set; the M4 LAN rig's are the `-m4-lan` ones and are the **living deployment's** |
+| Retired rigs — **gitignored** | `e2e/<name>.tar.zst`. A retired runtime dir is still the record of a run that happened, so it is compressed in place rather than deleted: `e2e/data.tar.zst` (the M2/M3 journals, including the resume test's input), `e2e/logs-m3-lan.tar.zst`, `e2e/archive-data.tar.zst`, `e2e/data-m4.tar.zst`. Restore one with `tar --zstd -xf e2e/<name>.tar.zst -C e2e/` |
+| **The repo itself** | **Real location `/mnt/wsl/data/bibites-multiverse/`; `~/bibites-multiverse` is a symlink to it** (moved 2026-08-08 — see *The disk budget*). Every absolute path in every script, pid file and command line resolves through the symlink unchanged, so nothing had to be rewritten. `/mnt/wsl/data` is a separate 251 GB ext4 volume; the WSL root it left is 98 GB and shared with everything else on this machine |
 | Shared LAN token — **never in the repo** | `~/.multiverse-token`, mode `600`. See *The LAN token* below |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
 | Game user data (`Application.persistentDataPath`) | `/mnt/c/Users/<user>/AppData/LocalLow/The Bibites/The Bibites/` — holds `Savefiles/`, `Autosaves/`, `Scenarios/`, `Bibites/` |
@@ -25,7 +27,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | The plugin | `0.6.1` (`MultiversePlugin.Version`) — the world-settings build: it publishes what it was *told to do* on the handshake (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping), on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. It speaks `contract-a/2.3`. The far-end bundle carries the same DLL; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
+| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing journal appends. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -109,6 +111,8 @@ go test -race ./...                  # same, with the race detector
 gofmt -l . && go vet ./...           # both must print nothing
 
 # Static binaries for the rig: relay, sidecar and archive.
+# A running process holds its binary open, so stop a service before rebuilding
+# over it — an in-place build against a live binary fails with ETXTBSY.
 CGO_ENABLED=0 go build -o ../bin/ ./cmd/...
 
 # The sidecar for the second computer. No cgo, so it cross-compiles from here.
@@ -902,8 +906,123 @@ bin/ringstat --metrics <file>       # read the newest sample from metrics.jsonl 
 `--species` against `--metrics` prints `n/a` in the crossing columns and says so: that half is
 derived from the ledger, and only a running archive holds it.
 
+## The disk budget
+
+**The living deployment filled the root filesystem on 2026-08-08 and stopped writing
+genomes.** Nothing in the system had ever bounded what it consumed. This section is what
+that cost, what bounds it now, and what still grows forever.
+
+### What it was writing
+
+Measured on the five local sidecars, the relay and the archive, after two days up:
+
+| Producer | Before the fix | Bounded now by |
+|---|---|---|
+| Sidecar journals (5) | 445, 500, 905, 683, 720 MB — **3.25 GB**, for a live set of a few thousand tombstones | `journalCompactMinutes`, default **15 min** |
+| Sidecar and archive logs | **3.5 GB**, unrotated | `logRotateMb` x (`logKeep` + 1), default **100 MB x 6** per process |
+| Genome scratch files | 15,119 empty `*.json.tmp` left by writes that failed on the full disk | the failing write removes its own scratch file; the cache sweep collects any a crash abandoned |
+
+Together about **1.1 GB/hour**, on a 98 GB volume shared with every other project on this
+machine. The rig cannot run overnight against that.
+
+### The journal only ever shrank at startup
+
+`internal/journal` compacted at `Open` and nowhere else, so a sidecar that stayed up
+accumulated every `create` record it had ever written — payload included, up to 4 MiB
+each. `PurgeExpired` made this *worse*, not better: dropping a tombstone appends a purge
+record, so cleanup grew the file.
+
+A compaction never reads the file it replaces — the in-memory state map **is** the
+compacted content — so it costs one pass over the live entries and runs in milliseconds.
+It now runs on a timer as well, outside the sidecar's custody lock, with the same
+scratch-fsync-rename-syncdir discipline `Open` already used. `contract-b-m4.md` §20 (B20)
+is the rule; `--journal-compact-minutes` and `MULTIVERSE_JOURNAL_COMPACT_MINUTES` are the
+knobs.
+
+### The log was a shell redirect
+
+Every process wrote slog to stderr and `run-m4.sh` caught it with `>>`, which has no size.
+Each process is now **given** its log path (`--log-file`) so it can rotate it, at
+`--log-rotate-mb` keeping `--log-keep` generations. The path is the same one every helper
+in `run-m4.sh` already greps, so nothing that reads a log changed. The shell redirect
+stays, pointed at a `<name>.stderr.log`, because a Go panic goes to fd 2 and never passes
+through slog; those files stay tiny.
+
+Without `--log-file` a process still logs to stderr and bounds nothing. That is the
+default, and it is what the tests and interactive runs use.
+
+### THE EXPENSIVE PART WAS NOT THE DISK — IT WAS ONE SHORT WRITE
+
+When the volume filled, an append to each journal landed **short**: some bytes reached the
+file, the rest did not, and the call returned an error. The sidecar did the right thing
+with the error and never ACKed. But the half-record stayed in the log, and the next
+successful append wrote a whole record straight behind it — producing an unparsable line
+in the **middle** of the file. Replay stops at the first unparsable line, because a torn
+line is only ever supposed to be the last one.
+
+**All five sidecars then ran for eight hours with journals that replayed to 01:07:40 and
+no further.** Nothing looked wrong: each process held correct state in memory and kept
+ACKing correctly. Any restart in those eight hours — a crash, a deploy, a reboot — would
+have silently reverted every one of them to its 01:07 state. That is precisely the loss D2
+exists to make impossible, arriving through the one path that had no rule written for it.
+
+Two changes close it, both in `internal/journal`:
+
+- **An append is all-or-nothing.** On any write error the file is truncated back to the
+  length it had before the attempt. The caller still gets the error and still must not
+  ACK; the failure now costs that one record instead of every record behind it.
+- **A damaged journal is loud.** `Journal.Discarded()` reports the bytes replay threw away
+  behind a torn line, counting only *complete* records — an unparsable line with nothing
+  after it is the ordinary `kill -9` torn tail and cost nothing durable. The sidecar logs
+  it at **error** on startup.
+
+Recovering the running rig is in the git history of 2026-08-08: the five journals were read
+out of `/proc/<pid>/fd/` while the processes still held them, which is the only place the
+post-01:07 records existed.
+
+### What still grows forever
+
+| File | Growth | Measured |
+|---|---|---|
+| `e2e/archive-data-m4-lan/migrations.jsonl` | with **traffic**. The ledger is the record of what happened and nothing may evict from it (`contract-b-m4.md` §10) | 269 MB at 933k lines, ~5.5 GB/month at the deployment's rate |
+| `e2e/archive-data-m4-lan/genomes/` | with **new genomes**. Content-addressed, so it grows with evolution rather than with hops | 1.2 GB in two days |
+| `e2e/archive-data-m4-lan/metrics.jsonl` | with **time**, one sample per slot per `metricsInterval` | 17 MB in two days, ~250 MB/month |
+
+No rule in this system will ever shrink these three. **Sizing a disk for them is an
+operator job**, and it is why the rig now lives on the data volume rather than the WSL root.
+
+### Where the rig lives now
+
+The whole repo was moved to `/mnt/wsl/data/bibites-multiverse/` on 2026-08-08 and
+`~/bibites-multiverse` is a symlink to it. Every absolute path — in `run-m4.sh`, in the pid
+files, in the running command lines — resolves through the symlink unchanged, so this was a
+move with no rewrite. `git status` from the symlinked path is clean and git is untroubled by
+it.
+
+**`/mnt/wsl/data` must be mounted before the rig starts.** It is a separate WSL disk, and
+`/mnt/wsl` itself is a tmpfs, so when the volume is not attached the symlink **dangles**:
+every path under `~/bibites-multiverse` fails with *No such file or directory*, `git` cannot
+find the repo, and the rig cannot start at all. The symptom is unmistakable and it is not a
+rig bug. **The owner's mount setup is the fix** — there is deliberately no automation here,
+because a script that silently created the directory would put the custody journals on a
+tmpfs that a restart erases. Add it to the after-a-WSL-restart list beside re-adding the
+`netsh` portproxy:
+
+```sh
+df -h /mnt/wsl/data          # /dev/sdX, 251G — if this is missing, stop and mount it
+ls ~/bibites-multiverse/     # must list the repo, not fail
+```
+
 ## Gotchas
 
+- **The rig lives on `/mnt/wsl/data`, reached through a symlink.** `~/bibites-multiverse`
+  is a symlink to `/mnt/wsl/data/bibites-multiverse`. If that volume is not mounted the
+  symlink dangles and every path fails with *No such file or directory* — see *The disk
+  budget*, *Where the rig lives now*.
+- **A full disk does not just stop the rig, it can silently truncate a journal's history.**
+  One short write leaves an unparsable line mid-file and replay discards everything behind
+  it. Fixed 2026-08-08 (all-or-nothing appends, and `Discarded()` logged at error), but the
+  shape is worth knowing before trusting any append-only log here. See *The disk budget*.
 - **Target `netstandard2.1`**, not 2.0 — Unity 6 assemblies reference netstandard 2.1
   and the build fails with CS1705 otherwise.
 - **MSB3277 version-conflict warnings are benign** — the game's Mono runtime resolves

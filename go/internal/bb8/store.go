@@ -85,9 +85,23 @@ func (s *Store) Put(hash, version, blob string) error {
 	}
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, append(body, '\n'), 0o644); err != nil {
+		// THE SCRATCH FILE HAS TO GO, AND THE FAILURE THAT LEAVES IT IS THE ONE
+		// THAT CANNOT AFFORD IT. os.WriteFile creates before it writes, so a
+		// write that fails on a full disk leaves an empty <hash>.json.tmp
+		// behind — and the store is content-addressed, so the same genome
+		// retries under the same name and leaves the same corpse again. On
+		// 2026-08-08 that turned one ENOSPC into 15,119 zero-byte files across
+		// the rig's six genome stores, every one of them an inode spent on
+		// nothing at the moment inodes and blocks were what the rig had run out
+		// of. Removing it costs one syscall on a path already failing.
+		_ = os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, p)
+	if err := os.Rename(tmp, p); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
 }
 
 // Get returns one genome. The bool reports whether it was held.
@@ -130,6 +144,26 @@ func (s *Store) Count() int {
 	return n
 }
 
+// sweepStaleTmp removes scratch files no live Put can still own.
+func (s *Store) sweepStaleTmp() {
+	cutoff := time.Now().Add(-staleTmpAge)
+	_ = filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if info.IsDir() || filepath.Ext(path) != ".tmp" {
+			return nil
+		}
+		if info.ModTime().Before(cutoff) {
+			_ = os.Remove(path)
+		}
+		return nil
+	})
+}
+
 func (s *Store) walk(fn func(path string, info os.FileInfo) error) error {
 	return filepath.Walk(s.dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -145,9 +179,19 @@ func (s *Store) walk(fn func(path string, info os.FileInfo) error) error {
 	})
 }
 
+// staleTmpAge is how long a scratch file must have been untouched before the
+// sweep treats it as abandoned. A live Put holds s.mu for the whole
+// write-and-rename, so anything this old belongs to a process that is gone.
+const staleTmpAge = time.Hour
+
 // Sweep enforces contract-b-m4.md §12's genomeCacheRetentionDays and
 // genomeCacheMaxBytes, least-recently-served first. It returns the number of
 // entries removed.
+//
+// It also collects abandoned .tmp files. Put cleans up its own failures now,
+// but a kill between the write and the rename cannot, and walk only ever sees
+// .json — so without this a crashed process leaves a full-sized scratch file
+// that nothing in the system will ever look at again.
 func (s *Store) Sweep(retention time.Duration, maxBytes int64) (int, error) {
 	type item struct {
 		path string
@@ -163,6 +207,7 @@ func (s *Store) Sweep(retention time.Duration, maxBytes int64) (int, error) {
 	}); err != nil {
 		return 0, err
 	}
+	s.sweepStaleTmp()
 	sort.Slice(items, func(a, b int) bool { return items[a].mod.Before(items[b].mod) })
 
 	s.mu.Lock()

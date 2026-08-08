@@ -113,6 +113,14 @@ type Config struct {
 	// TickInterval drives the custody scheduler.
 	TickInterval time.Duration
 
+	// JournalCompactInterval is how often the journal is rewritten to its live
+	// entries (contract-b-m4.md §12, journalCompactMinutes). Before it existed
+	// the journal only ever shrank at startup, so a sidecar that stayed up
+	// accumulated every create record it had ever written — payload included —
+	// until the disk ran out. A compaction reads nothing and writes only the
+	// live set, so the interval trades a few milliseconds against gigabytes.
+	JournalCompactInterval time.Duration
+
 	// Fault is a test-only crash point. It is set from MULTIVERSE_FAULT and is
 	// never a flag. On reaching the named point the sidecar touches
 	// <DataDir>/fault.hit and blocks that goroutine forever, so a test can
@@ -161,6 +169,7 @@ func DefaultConfig() Config {
 		GenomeCacheRetention:    contractb.GenomeCacheRetention,
 		GenomeCacheMaxBytes:     contractb.GenomeCacheMaxBytes,
 		TickInterval:            250 * time.Millisecond,
+		JournalCompactInterval:  15 * time.Minute,
 	}
 }
 
@@ -256,5 +265,8 @@ func (c *Config) applyDefaults() {
 	}
 	if c.TickInterval <= 0 {
 		c.TickInterval = d.TickInterval
+	}
+	if c.JournalCompactInterval <= 0 {
+		c.JournalCompactInterval = d.JournalCompactInterval
 	}
 }

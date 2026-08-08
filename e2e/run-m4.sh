@@ -223,6 +223,23 @@ BEPINEX_ARCHIVE="$LOGS/bepinex"
 RUN="$E2E/run-m4"
 SHOTS="$LOGS/shots"
 
+# THE LOG IS A DISK BUDGET, NOT A SHELL REDIRECT. Until 2026-08-08 every Go
+# process wrote slog to stderr and the rig caught it with `>>`, which has no
+# size: 3.5 GB of sidecar and archive logs filled the root filesystem overnight
+# and stopped every genome write in the rig. Each process is now GIVEN its log
+# path, so it can rotate it (contract-b-m4.md §12, logRotateMb/logKeep). The
+# path is the same one every helper in this file already greps, so nothing that
+# reads a log had to change.
+#
+# The shell redirect stays, pointed at a <name>.stderr.log: a panic or a runtime
+# fault is written by the Go runtime to fd 2 and never passes through slog, so
+# something still has to catch it. Those files stay tiny.
+LOG_ROTATE_MB="${LOG_ROTATE_MB:-100}"
+LOG_KEEP="${LOG_KEEP:-5}"
+# journalCompactMinutes (contract-b-m4.md §12): how often a sidecar rewrites its
+# journal to the entries it still holds. 0 leaves the binary's 15-minute default.
+JOURNAL_COMPACT_MINUTES="${JOURNAL_COMPACT_MINUTES:-0}"
+
 # The command files live beside the M3 rig's, in their own directory.
 WIN_CMD_DIR="$WIN_TEMP\\bibites-m4"
 WSL_CMD_DIR="$(wslpath -u "$WIN_TEMP")/bibites-m4"
@@ -269,6 +286,8 @@ peer_of()    { printf 'slot-%s\n' "$1"; }
 datadir_of() { printf '%s/slot-%s\n' "$DATA" "$1"; }
 journal_of() { printf '%s/slot-%s/journal/journal.log\n' "$DATA" "$1"; }
 sclog_of()   { printf '%s/sidecar-%s.log\n' "$LOGS" "$1"; }
+# log_flags <path> — the three flags that make a process own and bound its log.
+log_flags()  { printf -- '--log-file\n%s\n--log-rotate-mb\n%s\n--log-keep\n%s\n' "$1" "$LOG_ROTATE_MB" "$LOG_KEEP"; }
 game_instance() { printf 'm4slot%s\n' "$1"; }
 cmd_file_wsl()  { printf '%s/cmd-%s.txt\n' "$WSL_CMD_DIR" "$1"; }
 cmd_file_win()  { printf '%s\\cmd-%s.txt\n' "$WIN_CMD_DIR" "$1"; }
@@ -394,21 +413,23 @@ check_slot_ports() {
 }
 
 start_relay() {
-  local pid
-  mkdir -p "$RELAY_DATA"
+  local pid lf
+  mkdir -p "$RELAY_DATA" "$LOGS"
+  mapfile -t lf < <(log_flags "$LOGS/relay.log")
   nohup "$BIN/relay" --listen "$RELAY_LISTEN" --data-dir "$RELAY_DATA" \
-    --token-file "$TOKEN_FILE" >>"$LOGS/relay.log" 2>&1 &
+    --token-file "$TOKEN_FILE" "${lf[@]}" >>"$LOGS/relay.stderr.log" 2>&1 &
   pid=$!
   record_pid relay "$pid"
   note "relay pid=$pid listen=$RELAY_LISTEN dataDir=$RELAY_DATA"
 }
 
 start_archive() {
-  local pid
-  mkdir -p "$ARCHIVE_DATA"
+  local pid lf
+  mkdir -p "$ARCHIVE_DATA" "$LOGS"
+  mapfile -t lf < <(log_flags "$LOGS/archive.log")
   nohup "$BIN/archive" --relay "$RELAY_URL" --peer-id archive-main \
     --data-dir "$ARCHIVE_DATA" --token-file "$TOKEN_FILE" --http "$ARCHIVE_HTTP" \
-    >>"$LOGS/archive.log" 2>&1 &
+    "${lf[@]}" >>"$LOGS/archive.stderr.log" 2>&1 &
   pid=$!
   record_pid archive "$pid"
   note "archive pid=$pid dataDir=$ARCHIVE_DATA http=$ARCHIVE_HTTP"
@@ -417,19 +438,24 @@ start_archive() {
 # start_sidecar <slot> [extra flags...]
 start_sidecar() {
   local slot="$1"; shift
-  local port dir peer pos pid
+  local port dir peer pos pid lf
   port="$(port_of "$slot")"; dir="$(datadir_of "$slot")"
   peer="$(peer_of "$slot")"; pos="$(pos_of "$slot")"
-  mkdir -p "$dir"
+  mkdir -p "$dir" "$LOGS"
   rm -f "$dir/fault.hit"
 
   local posflag=()
   [ -n "$pos" ] && posflag=(--position "$pos")
+  local compactflag=()
+  [ "$JOURNAL_COMPACT_MINUTES" -gt 0 ] 2>/dev/null &&
+    compactflag=(--journal-compact-minutes "$JOURNAL_COMPACT_MINUTES")
+  mapfile -t lf < <(log_flags "$(sclog_of "$slot")")
 
   nohup "$BIN/sidecar" --listen "127.0.0.1:$port" --relay "$RELAY_URL" \
     --peer-id "$peer" "${posflag[@]}" \
-    --data-dir "$dir" --token-file "$TOKEN_FILE" "$@" \
-    >>"$(sclog_of "$slot")" 2>&1 &
+    --data-dir "$dir" --token-file "$TOKEN_FILE" \
+    "${compactflag[@]}" "${lf[@]}" "$@" \
+    >>"$LOGS/sidecar-$slot.stderr.log" 2>&1 &
   pid=$!
   record_pid "sidecar-$slot" "$pid"
   note "sidecar $slot pid=$pid port=$port peer=$peer pos=${pos:-<none>} dir=$dir extra='$*'"

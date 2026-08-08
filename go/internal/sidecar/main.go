@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -18,6 +17,7 @@ import (
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
 	"multiverse/internal/lantoken"
+	"multiverse/internal/logging"
 )
 
 // Main is the multiverse-sidecar entry point, factored out of package main so
@@ -78,12 +78,27 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"<migrationId>: release one held entry by hand, then exit. Needs bounce|drop as the "+
 			"next argument (contract-b-m4.md §9.3)")
 	yes := fs.Bool("yes", false, "skip the confirmation prompt for --release-inflight")
+	// journalCompactMinutes is contract-b-m4.md §12's disk-budget tunable. Its
+	// default is 15 minutes; 0 keeps it. See internal/journal's Compact.
+	journalCompact := fs.Int("journal-compact-minutes", envInt("MULTIVERSE_JOURNAL_COMPACT_MINUTES", 0),
+		"how often the journal is rewritten to its live entries (contract-b-m4.md §12, "+
+			"journalCompactMinutes). 0 keeps the 15-minute default. Raise it on a rig with "+
+			"disk to spare; lower it on one without")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
+	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	logger := newLogger(stderr, *logLevel)
+	logger, logCloser, err := logging.New(stderr, logging.Options{
+		Level: *logLevel, File: *logFile,
+		RotateBytes: int64(*logRotateMB) << 20, Keep: *logKeep,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "sidecar: %v\n", err)
+		return 1
+	}
+	defer logCloser.Close()
 
 	if *listInflight {
 		return listInflightCommand(*dataDir, *destSlot, stdout, stderr)
@@ -121,6 +136,9 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		logger.Warn("sidecar: holdTimeoutMs overridden; a held entry bounces home sooner than the "+
 			"contract default, and §9.3's accepted duplication case widens with it",
 			"holdTimeout", *holdTimeout, "default", DefaultConfig().HoldTimeout)
+	}
+	if *journalCompact > 0 {
+		cfg.JournalCompactInterval = time.Duration(*journalCompact) * time.Minute
 	}
 	if *inboundBurst > 0 {
 		cfg.InboundRateBurst = *inboundBurst
@@ -298,19 +316,4 @@ func envInt(name string, fallback int) int {
 		}
 	}
 	return fallback
-}
-
-func newLogger(w io.Writer, level string) *slog.Logger {
-	var l slog.Level
-	switch strings.ToLower(level) {
-	case "debug":
-		l = slog.LevelDebug
-	case "warn":
-		l = slog.LevelWarn
-	case "error":
-		l = slog.LevelError
-	default:
-		l = slog.LevelInfo
-	}
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: l}))
 }

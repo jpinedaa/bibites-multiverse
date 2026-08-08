@@ -93,6 +93,7 @@ type Sidecar struct {
 	seenSessions map[string]bool
 	lastPurge    time.Time
 	lastSweep    time.Time
+	lastCompact  time.Time
 	// pace is the delivery rate limit of contract-a.md §7.5.
 	pace pacer
 	// bouncedTimeoutTotal is monotonic and reset only by losing the journal.
@@ -153,6 +154,9 @@ func New(cfg Config) (*Sidecar, error) {
 		seenSessions: map[string]bool{},
 		genomeServed: map[string]*rateWindow{},
 	}
+	// journal.Open has just compacted, so the periodic compaction's clock
+	// starts here rather than at the epoch.
+	s.lastCompact = cfg.Clock()
 	s.pace = newPacer(cfg.InboundRatePerSimMinute, cfg.InboundRateBurst)
 	// §7.4: peerId is persisted outside the journal. Losing it makes the peer a
 	// stranger that takes a second slot and strands its old one — which is why
@@ -164,6 +168,16 @@ func New(cfg Config) (*Sidecar, error) {
 	}
 	if s.cfg.PreferredPosition == nil {
 		s.cfg.PreferredPosition = s.readPosition()
+	}
+	if lost := jr.Discarded(); lost > 0 {
+		// A journal damaged before this process opened it. On 2026-08-08 this
+		// was eight hours of custody, discarded in silence by five sidecars at
+		// once, because a full disk had left a half-written record in the middle
+		// of each log. It is an error, not a warning: history that D2 promised
+		// is durable has been lost, and only an operator can judge what it held.
+		s.log.Error("sidecar: the journal was damaged and replay stopped early; "+
+			"custody history after the torn record is GONE",
+			"discardedBytes", lost, "journal", filepath.Join(cfg.DataDir, "journal"))
 	}
 	pendingOut := jr.CountPending(journal.Out)
 	pendingIn := jr.CountPending(journal.In)
@@ -390,6 +404,12 @@ func (s *Sidecar) tick(now time.Time) {
 	if sweep {
 		s.lastSweep = now
 	}
+	// The first compaction is scheduled a full interval after startup, because
+	// Open has just compacted: s.lastCompact is set at construction.
+	compact := now.Sub(s.lastCompact) >= s.cfg.JournalCompactInterval
+	if compact {
+		s.lastCompact = now
+	}
 	s.mu.Unlock()
 
 	if sweep {
@@ -399,6 +419,21 @@ func (s *Sidecar) tick(now time.Time) {
 			s.log.Warn("sidecar: genome cache sweep failed", "err", err)
 		} else if n > 0 {
 			s.log.Info("sidecar: evicted genomes from the cache", "count", n)
+		}
+	}
+
+	if compact {
+		// Outside s.mu on purpose. The journal takes its own lock and the
+		// rewrite is short, but the custody scheduler has no reason to wait on
+		// a disk write, and holding both locks across one would invent a stall
+		// where none is needed (contract-b-m4.md §12, journalCompactMinutes).
+		before, after, err := s.jr.Compact()
+		if err != nil {
+			s.log.Error("sidecar: journal compaction failed", "err", err,
+				"bytes", before)
+		} else if before != after {
+			s.log.Info("sidecar: compacted the journal", "live", s.jr.Live(),
+				"bytesBefore", before, "bytesAfter", after, "reclaimed", before-after)
 		}
 	}
 }

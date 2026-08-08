@@ -6,7 +6,8 @@
 // gets a nil error may ACK.
 //
 // Format: one JSON object per line in <dir>/journal.log, append-only, with a
-// compaction rewrite at Open. Two ops:
+// compaction rewrite at Open and, from Compact, at whatever interval the owner
+// schedules. Two ops:
 //
 //	create  the immutable half of a migration, payload included, written once
 //	status  a small state transition
@@ -14,6 +15,14 @@
 // Replay applies records in file order, so the last status wins. A torn final
 // line — the tail of a write that a kill -9 interrupted — is truncated away,
 // which is exactly the "entry was never durably journaled" case.
+//
+// THE FILE ONLY EVER SHRANK AT Open. An append-only log whose only compaction
+// runs at startup is a log that grows for as long as the process lives, and a
+// create record carries the migrant's payload — up to 4 MiB of it. On
+// 2026-08-08 five sidecars that had been up for two days held 445 MB, 500 MB,
+// 905 MB, 683 MB and 720 MB of journal for a live set of a few hundred entries,
+// and the root filesystem ran out. Compaction is now something the owner can
+// schedule, and Open's compaction is one call to the same code.
 package journal
 
 import (
@@ -235,6 +244,11 @@ var ErrNotFound = errors.New("journal: migration not found")
 // ErrDuplicate is returned when Create is called for an id that already exists.
 var ErrDuplicate = errors.New("journal: migration already journaled")
 
+// testHookPreRename runs inside compact, after the scratch file is fsynced and
+// before it is renamed into place — the one instant a crash has to be harmless.
+// It is nil everywhere except the test that SIGKILLs a process there.
+var testHookPreRename func()
+
 // Journal is the durable custody log. Every method is safe for concurrent use.
 type Journal struct {
 	mu     sync.Mutex
@@ -243,6 +257,27 @@ type Journal struct {
 	states map[string]*State
 	seq    uint64
 	closed bool
+	// discarded is how many bytes replay threw away behind a torn line. It is
+	// 0 for every healthy journal and a reason to shout for any other.
+	discarded int64
+}
+
+// Discarded reports the bytes the last replay dropped behind an unparsable
+// record. Anything but 0 means the log was damaged before this process opened
+// it and that some custody history is gone; the caller MUST log it.
+func (j *Journal) Discarded() int64 {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.discarded
+}
+
+// tailBytes is how much of the log sits at or after offset.
+func (j *Journal) tailBytes(offset int64) int64 {
+	info, err := os.Stat(j.path())
+	if err != nil || info.Size() <= offset {
+		return 0
+	}
+	return info.Size() - offset
 }
 
 // Open loads (and compacts) the journal in dir, creating dir when needed.
@@ -286,6 +321,25 @@ func (j *Journal) replay() error {
 			if jsonErr := json.Unmarshal(line, &rec); jsonErr != nil {
 				// A torn tail: the write never completed, so the entry was
 				// never durable. Drop it and everything after it.
+				//
+				// "And everything after it" is the dangerous half, and until
+				// 2026-08-08 it happened in silence. A short write on a full
+				// disk can put an unparsable line in the MIDDLE of the log, and
+				// every record behind it — hours of custody — is then discarded
+				// by a replay that reports nothing. append no longer leaves such
+				// a line, but a journal written by an older binary still can,
+				// so what is discarded is now measured and the caller is
+				// expected to say so out loud.
+				//
+				// Only COMPLETE records behind the damage count. An unparsable
+				// line with nothing after it is the ordinary torn tail of a
+				// kill -9 and cost nothing that was ever durable; a newline
+				// behind it means whole records are being thrown away.
+				lineEnd := offset + int64(len(line))
+				if err == nil {
+					lineEnd++ // readLine stripped the terminating newline
+				}
+				j.discarded = j.tailBytes(lineEnd)
 				break
 			}
 			j.apply(rec)
@@ -445,11 +499,85 @@ func (j *Journal) apply(rec record) {
 	}
 }
 
+// Compact rewrites the live journal in place, dropping every superseded record.
+//
+// It is the whole of the disk-budget fix, and it is safe to call at any moment
+// because it never reads the file it is replacing: the in-memory state map IS
+// the compacted content, so a compaction costs one pass over the live entries —
+// hundreds, not the millions of dead records on disk — and finishes in
+// milliseconds. It reports the file size before and after so a caller can log
+// what it reclaimed.
+//
+// CRASH SAFETY. The rewrite lands in journal.log.tmp, is fsynced, and is then
+// renamed over journal.log with the directory synced after it, exactly as at
+// Open. A kill at any point before the rename leaves the original journal
+// untouched and complete; a kill after it leaves the compacted journal, which
+// replays to the identical state. There is no window in which both files are
+// partial, so no crash can lose an entry.
+//
+// The append handle is reopened afterwards, because the rename replaced the
+// inode it pointed at. If that reopen fails the journal marks itself closed
+// rather than keep appending to an unlinked file: a sidecar that cannot journal
+// must stop ACKing (contract-a.md §5.3 step 5), and silently writing custody
+// records into a file with no name is the one outcome worse than an error.
+func (j *Journal) Compact() (before, after int64, err error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.closed {
+		return 0, 0, os.ErrClosed
+	}
+	before = j.size()
+	if err := j.compact(); err != nil {
+		return before, before, err
+	}
+	if j.f != nil {
+		old := j.f
+		f, err := os.OpenFile(j.path(), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+		if err != nil {
+			old.Close()
+			j.f = nil
+			j.closed = true
+			return before, j.size(), err
+		}
+		j.f = f
+		if err := old.Close(); err != nil {
+			return before, j.size(), err
+		}
+	}
+	return before, j.size(), nil
+}
+
+// size is the journal file's length, or 0 if it cannot be read. Caller holds
+// the lock.
+func (j *Journal) size() int64 {
+	info, err := os.Stat(j.path())
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// Live is the number of entries a compaction would keep.
+func (j *Journal) Live() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return len(j.states)
+}
+
 // compact rewrites the log as one create per surviving state plus its current
 // status, then renames it into place and fsyncs the directory. An os.Rename
 // without a directory sync is not durable (contract-a.md §11.1).
 func (j *Journal) compact() error {
 	tmp := j.path() + ".tmp"
+	// A failed compaction must not leave its scratch file behind. The rewrite
+	// can be megabytes, and the disk pressure this whole mechanism exists to
+	// relieve is exactly when the write fails.
+	renamed := false
+	defer func() {
+		if !renamed {
+			_ = os.Remove(tmp)
+		}
+	}()
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
@@ -497,9 +625,13 @@ func (j *Journal) compact() error {
 	if err := f.Close(); err != nil {
 		return err
 	}
+	if testHookPreRename != nil {
+		testHookPreRename()
+	}
 	if err := os.Rename(tmp, j.path()); err != nil {
 		return err
 	}
+	renamed = true
 	return syncDir(j.dir)
 }
 
@@ -520,16 +652,64 @@ func writeRecord(w *bufio.Writer, rec record) error {
 func syncDir(dir string) error { return fsutil.SyncDir(dir) }
 
 // append writes one record and flushes it to durable storage before returning.
+//
+// A FAILED APPEND MUST LEAVE NO BYTES BEHIND, AND THIS IS WHAT THE 2026-08-08
+// OUTAGE ACTUALLY COST. When the volume filled, a write landed SHORT: some of
+// the record reached the file, the rest did not, and the call returned an error.
+// The caller did the right thing with the error and never ACKed — but the
+// half-record stayed in the log, and the next successful append wrote a whole
+// record straight after it. That produced one unparsable line in the MIDDLE of
+// the file, and replay stops at the first unparsable line, because a torn line
+// is only ever supposed to be the last one.
+//
+// The five sidecars of the living deployment ran for eight hours after that with
+// journals that replayed to 01:07:40 and no further. Nothing was visibly wrong:
+// the processes held correct state in memory and kept ACKing correctly. Any
+// restart in those eight hours would have silently reverted every one of them to
+// its 01:07 state — the exact loss D2 exists to make impossible, arriving
+// through the one path nobody had written a rule for.
+//
+// So the write is made all-or-nothing: on any error the file is truncated back
+// to the length it had before the attempt. The caller still gets the error and
+// still must not ACK; what changes is that the failure costs this record only,
+// instead of every record written after it.
 func (j *Journal) append(rec record) error {
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
 	}
 	b = append(b, '\n')
-	if _, err := j.f.Write(b); err != nil {
+	before, statErr := j.openSize()
+	n, err := j.f.Write(b)
+	if err != nil {
+		if statErr == nil {
+			// Best effort: if this fails too the next Open truncates the torn
+			// tail, which is correct as long as nothing was written after it —
+			// and nothing will be, because the caller is about to see an error.
+			_ = j.f.Truncate(before)
+			_ = j.f.Sync()
+		}
 		return err
 	}
+	if n != len(b) {
+		// io.Writer permits a short write only with a non-nil error, but the
+		// cost of trusting that here is the whole log.
+		if statErr == nil {
+			_ = j.f.Truncate(before)
+			_ = j.f.Sync()
+		}
+		return fmt.Errorf("journal: short write, %d of %d bytes", n, len(b))
+	}
 	return j.f.Sync()
+}
+
+// openSize is the log's length read from the open handle rather than the path.
+func (j *Journal) openSize() (int64, error) {
+	info, err := j.f.Stat()
+	if err != nil {
+		return 0, err
+	}
+	return info.Size(), nil
 }
 
 // Create durably journals a new migration. On a nil return the caller may ACK.
@@ -655,6 +835,16 @@ func (j *Journal) ordered() []*State {
 
 // PurgeExpired drops tombstones older than retention. Tombstones must be
 // durable, so the purge is durable too (contract-a.md §11.1).
+//
+// THE PURGE RECORD STAYS, EVEN THOUGH COMPACTION WOULD ERASE THE TOMBSTONE
+// ANYWAY. Dropping the append would make a purge a memory-only act, and a crash
+// between two compactions would then resurrect every tombstone the purge had
+// removed. That is a safe direction to fail in — a resurrected tombstone only
+// suppresses a duplicate for longer — but it is not the direction §11.1 states,
+// and the saving does not justify the divergence: a purge record is one short
+// line written once per tombstone that ever expires, while the bloat compaction
+// exists to remove is the create record of every migration that ever ran, each
+// carrying its payload. Purges were never the growth term.
 func (j *Journal) PurgeExpired(retention time.Duration, now time.Time) (int, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()

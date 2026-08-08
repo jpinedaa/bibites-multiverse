@@ -20,6 +20,7 @@ import (
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
 	"multiverse/internal/lantoken"
+	"multiverse/internal/logging"
 )
 
 // Main is the multiverse-relay entry point, factored out of package main so a
@@ -48,11 +49,20 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		"<peerId>[@<col>,<row>]: reserve a slot for this peer id at startup and exit; "+
 			"repeat once per peer. Without a position the placement rules of §7.2 rule 6 apply")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
+	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	log := newLogger(stderr, *logLevel)
+	log, logCloser, err := logging.New(stderr, logging.Options{
+		Level: *logLevel, File: *logFile,
+		RotateBytes: int64(*logRotateMB) << 20, Keep: *logKeep,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "relay: %v\n", err)
+		return 1
+	}
+	defer logCloser.Close()
 
 	// There is no flag that takes the token literally: it would put the secret
 	// in every process listing (contract-b-m4.md §3.1).
@@ -360,19 +370,4 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func newLogger(w io.Writer, level string) *slog.Logger {
-	var l slog.Level
-	switch strings.ToLower(level) {
-	case "debug":
-		l = slog.LevelDebug
-	case "warn":
-		l = slog.LevelWarn
-	case "error":
-		l = slog.LevelError
-	default:
-		l = slog.LevelInfo
-	}
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: l}))
 }

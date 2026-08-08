@@ -2385,6 +2385,37 @@ crossing" is now one of those claims.
 | `genomeRequestsPerMinute` | `30` | both | Per requester, per answering peer. Enforced on both sides (§10). |
 | `genomeCacheRetentionDays` | `30` | sidecar | Genome cache lifetime, least-recently-served. |
 | `genomeCacheMaxBytes` | `2147483648` | sidecar | 2 GiB cap on `<data-dir>/genomes/`. |
+| `journalCompactMinutes` | `15` | sidecar | **New after M4** (added — §20, B20). How often the journal is rewritten to the entries it still holds. `--journal-compact-minutes`, `MULTIVERSE_JOURNAL_COMPACT_MINUTES`. |
+| `logRotateMb` | `100` | all | **New after M4** (added — §20, B20). Size at which a process rotates its own log. `--log-file` names the file, `--log-rotate-mb` the cap, and a negative value disables rotation. With no `--log-file` the process logs to stderr and bounds nothing, which is the pre-M4 behaviour and still the default. |
+| `logKeep` | `5` | all | **New after M4** (added — §20, B20). Rotated generations kept beside `--log-file`. The disk ceiling for one process is `logRotateMb × (logKeep + 1)`. |
+
+**These three are a disk budget, and the system did not have one.** Every durable
+file this contract names was append-only, and the two that had no bound at all
+were the journal and the log. The journal compacted **only at `Open`**, so a
+sidecar that stayed up accumulated every `create` record it had ever written —
+payload included, up to `maxPayloadBytes` each — and the log was a shell redirect
+with no size. On **2026-08-08** the living deployment's five local sidecars held
+445 MB, 500 MB, 905 MB, 683 MB and 720 MB of journal for a live set of a few
+hundred entries, beside 3.5 GB of log, and filled the root filesystem. Every
+genome write in the rig then failed mid-`WriteFile`, leaving 15,119 empty
+`<hash>.json.tmp` files behind (§10 now requires the failing writer to remove
+its own scratch file, and the cache sweep to collect any a crash abandoned).
+
+A compaction never reads the file it replaces — the in-memory state map *is* the
+compacted content — so it costs one pass over the live entries and finishes in
+milliseconds. It writes `journal.log.tmp`, fsyncs it, renames it over
+`journal.log` and syncs the directory, which is the same discipline §11.1 already
+required of `Open`; a crash before the rename leaves the original whole and a
+crash after it leaves a journal that replays to the identical state. **Compaction
+must preserve `accruedHoldMs`** (§9.3): the hold clock is an accrual carried in
+the entry, and a rewrite that dropped it would silently reset every hold in the
+rig.
+
+**What is still unbounded, and deliberately so:** the archive's
+`migrations.jsonl` ledger and its genome store are the record of what happened
+and nothing may evict from them (§10). They grow with traffic, not with uptime,
+and an operator has to size a disk for them. `metrics.jsonl` grows with time at
+one sample per `metricsInterval` per slot, which is small but also monotone.
 
 The **delivery rate limit** is a Contract A tunable, because it paces a Contract A message:
 `inboundRatePerSimMinute`, `inboundRateBurst` and `pacingIdleGraceMs` are in
@@ -3270,3 +3301,59 @@ keeping `saveMinutes: 0` and `migrationExclude: []` distinct from absence, and f
 control; the **archive**, for carrying the seven fields through `StatusView` untouched; the
 **sidecar**, for copying rather than authoring; both wire ends, for sending
 `"contract-b/3.5"` and comparing only the major.
+
+## 20. The disk budget (2026-08-08)
+
+The living deployment ran out of root filesystem overnight on **2026-08-08**, and
+nothing in this contract had ever said what a peer is allowed to consume. Every
+durable file it names is append-only; two of them shrank at no point a running
+process could reach. Five sidecars that had been up for two days held 445 MB,
+500 MB, 905 MB, 683 MB and 720 MB of journal for a live set of a few hundred
+entries, beside 3.5 GB of unrotated log, on a 98 GB volume shared with other
+work.
+
+**One amendment, B20**, continuing the `B` series for the reason §14 gives.
+
+**This set does not change the wire.** No message type, no field, no enum value,
+no NACK code, no change to custody, dedup, the hold, the fan-out, hashing,
+routing or admission control — and no change to what any peer sends or accepts.
+§4's test therefore answers **neither major nor minor**, and the identifier stays
+at **`contract-b/3.5`**. A peer running the fix and a peer without it are
+indistinguishable on the wire, which is the point: this is a statement about what
+a peer does to its own disk.
+
+### B20 — A peer bounds its own journal and its own log (§10, §11.1, §12)
+
+**Gap.** §11.1 required the journal to be durable and §12 sized its retention in
+*time*, and neither ever bounded it in *bytes*. The compaction that made the
+journal small existed only inside `Open`, so the bound was "restart the process",
+which is not a bound — a rig whose whole value is that it stays up cannot have a
+disk budget that depends on it going down. The log had less than that: it was
+whatever the operator's shell redirect caught.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The journal compacts on a timer | A sidecar MUST rewrite its journal to the entries it still holds at least every `journalCompactMinutes`, not only at `Open`. The rewrite uses the same crash-safe discipline §11.1 already requires — scratch file, fsync, rename, directory sync — so a crash before the rename leaves the original whole and a crash after it leaves a journal that replays to the identical state. |
+| The accrual survives it | A compaction MUST preserve `accruedHoldMs` on every entry (§9.3). The hold clock is an accrual carried in the entry precisely so a restart can neither lose time already served nor invent time that was never served; a rewrite that dropped it would reset every hold in the rig without a single log line. |
+| The purge record stays | `PurgeExpired` still appends a durable purge record even though the next compaction would erase the tombstone anyway. §11.1 says a purge is durable, and the saving does not justify diverging from it: a purge record is one short line per tombstone that ever expires, while the growth term was the `create` record of every migration that ever ran, each carrying its payload. |
+| A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
+| A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
+| What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. |
+
+**What the outage cost, as evidence for the last row.** When the volume filled,
+every genome write in the rig failed inside `os.WriteFile` — after the file
+existed and before it held anything — and left an empty `<hash>.json.tmp`
+behind. The store is content-addressed, so the same genome retried under the same
+name and left the same corpse again: **15,119 zero-byte files**, every one an
+inode spent on nothing at the moment inodes and blocks were what the rig had run
+out of. A cleanup on the error path costs one syscall on a path already failing.
+
+**Enforced by:** the **sidecar**, for scheduling the compaction outside its
+custody lock and for treating a failed reopen after the rename as a reason to
+stop journaling rather than to keep appending to an unlinked file; the
+**journal**, for the rewrite's crash safety and for carrying `accruedHoldMs`
+through it; **every process**, for bounding a log it was given the path of; the
+**genome store**, for its error path and its sweep; and the **operator**, for
+sizing a disk against a ledger that no rule in this document will ever shrink.

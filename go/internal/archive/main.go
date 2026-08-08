@@ -6,15 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"multiverse/internal/contractb"
 	"multiverse/internal/lantoken"
+	"multiverse/internal/logging"
 	"multiverse/internal/wire"
 )
 
@@ -46,11 +45,21 @@ func runMain(args []string, stderr io.Writer) int {
 	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
 		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
+	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 
-	log := newLogger(stderr, *logLevel)
+	log, logCloser, err := logging.New(stderr, logging.Options{
+		Level: *logLevel, File: *logFile,
+		RotateBytes: int64(*logRotateMB) << 20, Keep: *logKeep,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "archive: %v\n", err)
+		return 1
+	}
+	defer logCloser.Close()
+
 	token, err := lantoken.Load(*tokenFile)
 	if err != nil && !errors.Is(err, lantoken.ErrNoToken) {
 		log.Error("archive: token file is unusable", "err", err)
@@ -188,19 +197,4 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func newLogger(w io.Writer, level string) *slog.Logger {
-	var l slog.Level
-	switch strings.ToLower(level) {
-	case "debug":
-		l = slog.LevelDebug
-	case "warn":
-		l = slog.LevelWarn
-	case "error":
-		l = slog.LevelError
-	default:
-		l = slog.LevelInfo
-	}
-	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: l}))
 }
