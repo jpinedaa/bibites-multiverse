@@ -923,7 +923,8 @@ Measured on the five local sidecars, the relay and the archive, after two days u
 | Genome scratch files | 15,119 empty `*.json.tmp` left by writes that failed on the full disk | the failing write removes its own scratch file; the cache sweep collects any a crash abandoned |
 
 Together about **1.1 GB/hour**, on a 98 GB volume shared with every other project on this
-machine. The rig cannot run overnight against that.
+machine. The rig cannot run overnight against that. It is **0.30 GB/h** now, and only
+78 MB/h of that is growth nothing ever reclaims — see *What the fix measured*.
 
 ### The journal only ever shrank at startup
 
@@ -982,14 +983,32 @@ post-01:07 records existed.
 
 ### What still grows forever
 
-| File | Growth | Measured |
+| File | Growth | Measured 2026-08-08, six live slots |
 |---|---|---|
-| `e2e/archive-data-m4-lan/migrations.jsonl` | with **traffic**. The ledger is the record of what happened and nothing may evict from it (`contract-b-m4.md` §10) | 269 MB at 933k lines, ~5.5 GB/month at the deployment's rate |
-| `e2e/archive-data-m4-lan/genomes/` | with **new genomes**. Content-addressed, so it grows with evolution rather than with hops | 1.2 GB in two days |
-| `e2e/archive-data-m4-lan/metrics.jsonl` | with **time**, one sample per slot per `metricsInterval` | 17 MB in two days, ~250 MB/month |
+| `e2e/archive-data-m4-lan/genomes/` | with **new genomes**. Content-addressed, so it tracks evolution rather than hops. The archive never sweeps it — the sidecars' own caches are capped by `genomeCacheMaxBytes`, the archive's is the record | **58 MB/h = 1.4 GB/day** |
+| `e2e/archive-data-m4-lan/migrations.jsonl` | with **traffic**. The ledger is the record of what happened and nothing may evict from it (`contract-b-m4.md` §10) | **19 MB/h = 0.45 GB/day**, at ~540 crossings/min |
+| `e2e/archive-data-m4-lan/metrics.jsonl` | with **time**, one sample per slot per `metricsInterval` | **0.7 MB/h = 0.02 GB/day** |
+| **total** | | **78 MB/h = 1.9 GB/day = ~57 GB/month** |
 
-No rule in this system will ever shrink these three. **Sizing a disk for them is an
-operator job**, and it is why the rig now lives on the data volume rather than the WSL root.
+No rule in this system will ever shrink these three. At that rate the 251 GB data volume
+holds roughly **four months** of this deployment, and then somebody has to decide what the
+archive is for. **Sizing and pruning it is an operator job**, and it is why the rig now
+lives on the data volume rather than the WSL root.
+
+### What the fix measured
+
+Over a 19.5-minute window with all six slots live, immediately after the rolling restart:
+
+| | Before | After |
+|---|---|---|
+| Everything the rig writes | **~1.1 GB/h**, all of it monotone | **0.30 GB/h**, of which only 78 MB/h is monotone |
+| Sidecar journals | grew forever; 3.25 GB after two days | a **sawtooth**: ~2.5 MB after a compaction, ~40 MB before the next one. The first timer compaction reclaimed 147 MB across five sidecars in one pass |
+| Logs | grew forever; 3.5 GB after two days | 42 MB/h into files capped at `100 MB x 6` per process |
+
+The five journals went from 445/500/905/683/720 MB to **4.6/5.3/10.4/7.5/7.9 MB** on the
+restart's replay-and-compact, and the 15-minute timer has held them there since. The
+pre-fix logs were rotated aside to `*.log.1` on the first write — 1.5 GB of them, kept
+deliberately because they contain the outage.
 
 ### Where the rig lives now
 
