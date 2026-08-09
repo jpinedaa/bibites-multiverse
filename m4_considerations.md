@@ -645,6 +645,19 @@ had been asked. Both are now answered: `contract-b-m4.md` §20 (B20) gives every
 log it owns and rotates by size, and the journal a compaction timer. See
 `dev_environment.md`, *The disk budget*.
 
+**And the harder half of that fix — the all-or-nothing journal append — has now been proven
+in the field, twice.** The rule is easy to state and impossible to verify in normal running:
+a torn append is invisible until something replays the journal, which on a deployment whose
+whole value is staying up means a real restart and nothing less. The two host reboots of
+2026-08-08 and 2026-08-09 supplied exactly that. **Both bring-ups replayed all five journals
+with zero discarded bytes and zero `level=ERROR` lines** — `Journal.Discarded()` is logged at
+error precisely so a non-zero result cannot be missed, and it stayed silent. On 2026-08-09
+custody recovered inbound 0/0/37/15/12 with outbound 0 on every slot, and `pacedDepth` peaked
+at 23 on slot 3 while the replayed entries drained, then fell to 0. That is the evidence the
+2026-08-08 incident could not produce for itself: the failure it describes cost eight hours
+of history on all five sidecars while every process looked healthy, and the only observation
+that distinguishes a fixed journal from a broken one is the replay after a restart.
+
 ### Risk 7 — The far end has no drive path
 
 Decision D9's answer holds: the rig never drives the second computer. A save is not an
@@ -1181,10 +1194,14 @@ timing. Phase 4 restarts slot 5, and a restarted world restarts its save clock w
 check then ran before that world's first two-minute tick. The re-run passed with no code
 change. **Wait one save interval after any slot restart before you assert a save.**
 
-**The rig came back up, and it stays up.** The deployment now runs as the living multiverse:
-six worlds, twelve lanes and about 198 organisms at bring-up. The archive binds
-`0.0.0.0:8796` so the status page is readable from the LAN — see `dev_environment.md`,
-*Owner steps*.
+**The rig came back up, and it stays up.** The deployment ran on from here as the living
+multiverse: six worlds, twelve lanes and about 198 organisms **at that bring-up**. The archive
+binds `0.0.0.0:8796` so the status page is readable from the LAN — see `dev_environment.md`,
+*Owner steps*. Those three numbers are the 2026-08-06 state and have all moved since: D17's
+two-way lanes took the map to **24** lanes on 2026-08-07, and the deployment has since
+survived two host reboots. **`dev_environment.md`, *The living deployment*, carries the
+current reading, the reboot ritual and the open watch items**; this section stays the record
+of the exit test.
 
 ## Deliverables
 
@@ -1253,18 +1270,22 @@ call below is settled. The sections named beside each one carry the result.
 Updated 2026-08-06, after the exit test passed. Every work package of M4 is closed. The
 steps below carry the milestone's remainder into the living deployment and into M5.
 
-1. **Keep the living deployment running.** Six worlds, twelve lanes, periodic saves on the
-   rig's 2-minute interval here and the far end's 10-minute one. It is the first rig that
-   survives its own operator, and the next overnight harvest measures that claim against T1.
-2. **Re-run `run-m4-lan.sh lanhost` after every WSL restart.** The WSL address changes, and
-   the portproxy behind `8795` then points at nothing. The far world drops out of the map
-   until the owner re-adds it.
+1. **Keep the living deployment running.** Six worlds, **24** lanes since D17's two-way
+   rollout, periodic saves on the rig's 2-minute interval here and the far end's 10-minute
+   one. It is the first rig that survives its own operator — and, since 2026-08-08 and
+   2026-08-09, its own host reboots. The bring-up is a hand procedure with known traps:
+   `dev_environment.md`, *The living deployment*, holds it, along with the current reading and
+   the two open watch items (slot 1's depressed population and the `genomeGaps` backlog).
+2. **Run `run-m4-lan.sh lanhost` after every WSL restart and compare.** It is a read-only
+   check. The WSL address *can* move, and the portproxy behind `8795` then points at nothing
+   and the far world drops out of the map — but it did not move across either reboot, so
+   re-add the portproxy only when the printed address and the printed table disagree.
 3. **Write `m4_findings.md`.** It is the one M4 deliverable still open. The inputs are this
    document, `e2e/logs-m4-lan/` and `m4_portal_findings.md`.
 4. **Run `phase5far` once, when a person is at the second computer.** It confirms the pacing
    rule across the LAN. Phase 5 already proves the rule locally, so this is confirmation.
 5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.
 6. **Open M5** (public release). The join kit is its starting point, and the wire shapes it
-   publishes are whatever the contracts say at the time — **`contract-a/2.2` plus
-   `contract-b/3.3` as of 2026-08-07**, after the census and D17's two-way lanes. Read the
-   contracts for the current pair rather than this line.
+   publishes are whatever the contracts say at the time — **`contract-a/2.3` plus
+   `contract-b/3.5` as of 2026-08-07**, after the census, D17's two-way lanes and §19's world
+   settings. Read the contracts for the current pair rather than this line.

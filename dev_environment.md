@@ -237,9 +237,11 @@ e2e/run-m4-lan.sh all        # up, phase1..8 (phase5far is excluded: it blocks o
 
 **The LAN rig passed the M4 exit test on 2026-08-06, and it is running now.** It came back
 up after the test and holds the living deployment: six worlds, periodic saves every 2 minutes
-here and every 10 on the far end. Do not start another rig against it, and do not stop a
-process it owns — see *Only one rig can run at a time* in Gotchas. `m4_considerations.md`,
-*Exit Test → Result*, records the run.
+here and every 10 on the far end. It has since survived two host reboots, on 2026-08-08 and
+2026-08-09, and was brought back by hand both times. Do not start another rig against it, and
+do not stop a process it owns — see *Only one rig can run at a time* in Gotchas.
+`m4_considerations.md`, *Exit Test → Result*, records the exit-test run; **the current
+reading, the reboot ritual and the open watch items are in *The living deployment* below.**
 
 **Since the two-way-lane rollout of 2026-08-07 the map draws one lane per declared edge, not
 twelve.** A slot that declared only two edges contributed two, so the status page read **22**
@@ -312,7 +314,11 @@ one whose mod predates §19 reads **`?`** in every settings cell — honest, and
 number, and never the value the game ships with. Measured on the live map on 2026-08-07 with the
 five local worlds on `0.6.1` and slot 6 still behind: the Settings tab printed `0.6.1` /
 `contract-a/2.3` / `every 2 min` / `4` / `yes` / `on` / `Basic bibite` for slots 1–5 and
-`?` / `?` / `?` / `?` / `?` / `?` / `this world has not told us` for slot 6. **A settings row is
+`?` / `?` / `?` / `?` / `?` / `?` / `this world has not told us` for slot 6. **Slot 6 no longer
+reads `?`, and that example is the old state.** Re-read on the live map on 2026-08-09 it
+publishes a full §19 block — `0.6.1` / `contract-a/2.3` / `every 10 min` / `6` / `yes` / `on` /
+`Basic bibite` — so the far end has applied a bundle at least as new as the settings build and
+no cell on the Settings tab is unknown any more. **A settings row is
 validated but never fatal** — §19 makes a malformed row something the sidecar strips before the
 handshake proceeds, because closing the handshake over an observability field would cost the
 whole session.
@@ -330,16 +336,16 @@ lanes into it ran at ~40 hops/min against ~4–6 on every other lane, and slots 
 `pacedDepth` 63–65 while every other slot drained to 0. Nothing is lost — a bounce-back is a
 delivery — but a `3.3` map is **not** operationally complete until every peer is on `3.3`. The
 minor is still not a rejection reason; the incompatibility is in one field's value range, and it
-is why the far-end bundle must be re-taken with this build rather than at leisure.
+is why the far-end bundle had to be re-taken with that build rather than at leisure.
 
 **That one cleared, and the difference between the two kinds of staleness is the lesson.** The
 far end took the `3.3` bundle, and on 2026-08-07 after the `3.5` rollout the live map read 24
 open lanes, no bypass, and `pacedDepth` 0 on all six slots — the ~40 hops/min bounce loop is
-gone. Slot 6 is nevertheless still behind, now on `0.6.1`/`2.3`/`3.5`, and that costs **nothing
-but readout**: its settings cells print `?` and its census still reports. A stale *value range*
-in a field both sides already exchange breaks traffic; a stale *absent optional field* only ever
-costs a number on a page. Re-take the bundle for the second, but do not confuse it with the
-first.
+gone. What was left of slot 6's lag was **readout only** — its settings cells printed `?` while
+its census kept reporting — and on 2026-08-09 that cleared too: it now publishes a full §19
+settings block. A stale *value range* in a field both sides already exchange breaks traffic; a
+stale *absent optional field* only ever costs a number on a page. Re-take the bundle promptly
+for the first kind, at leisure for the second, and do not confuse them.
 
 | What the scripts speak | What M4 speaks | Where |
 |---|---|---|
@@ -635,7 +641,9 @@ m`, source peer, outcome — then the migrant's genome hash and each parent, eve
 `[held]` or `[MISSING]` by whether the archive actually has the bytes. A parent with no hash
 prints as `gap: <gapReason>`. The `[MISSING]` set **is** the gap report of
 `contract-b-m4.md` §10: the archive's honest statement of what it does not have, and the
-retry queue's input.
+retry queue's input. **`genomeGaps` on `/api/status` is a different number** — it counts the
+fetches currently outstanding, not what the ledger shows missing — and it is a standing watch
+item; see *The living deployment → Watch items*.
 
 **Releasing a ring slot.** A slot reservation never expires — that is what keeps a peer's
 place while it is offline (`contract-b-m4.md` §7.4). The escape hatch for a slot reserved by
@@ -752,6 +760,18 @@ neighbour's west and south exports — see *The minors* for the measured symptom
 `farend/make-farend-bundle.sh` (it builds both fresh) **after** `bibites-mod/deploy.sh`, so the
 DLL in the zip is the one this machine is running.
 
+**The tracked bundle is current, and it does not need re-taking.** `farend/dist/farend-bundle.zip`
+at `6899273` postdates the torn-append fix `f72dd14`
+(`git merge-base --is-ancestor f72dd14 6899273` passes), and the `multiverse-sidecar.exe` inside
+the zip carries `journal-compact-minutes`, `journalCompactMinutes`, `discardedBytes` and
+`JournalCompactInterval` — the whole §20 disk budget. **Whether the second computer has APPLIED
+it cannot be determined from here, and no observation will settle it**: §20 changed no wire
+field, so a far end with the fix and one without it are indistinguishable on Contract B
+(`contract-b-m4.md` §20 says so as a design property). Slot 6's §19 settings block proves its
+*mod* is at least the settings build and says nothing about its sidecar. Treat the far sidecar's
+§20 status as **unknown rather than stale**, and ask its operator if it matters — do not rebuild
+the bundle to answer the question, because a fresh bundle answers a different one.
+
 `start-slot6.ps1` sets the mod's whole configuration natively — there is no `WSLENV` on that
 machine — starts the sidecar with `--position 2,1`, **waits for `contract B: slot granted` in
 its log**, and only then starts the game. A failure to join prints the four usual causes,
@@ -795,25 +815,37 @@ netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0
 New-NetFirewallRule -DisplayName "Bibites Multiverse relay 8795" -Direction Inbound `
   -Action Allow -Protocol TCP -LocalPort 8795 -Profile Any
 
-# 3. after every WSL restart: the WSL address changes
+# 3. whenever the WSL address has MOVED. Check first with `lanhost`; it did not move across
+#    either the 2026-08-08 or the 2026-08-09 reboot, and re-running this blind drops the
+#    forward for as long as the two commands take.
 netsh interface portproxy delete v4tov4 listenport=8795 listenaddress=0.0.0.0
 netsh interface portproxy add v4tov4 listenport=8795 listenaddress=0.0.0.0 `
   connectport=8795 connectaddress=<the WSL address from `lanhost`>
 ```
 
+**Both survive a reboot.** The firewall rule and the portproxy are Windows state, not WSL
+state, so a host reboot leaves them in place; and the WSL address they point at is **not**
+guaranteed to change either — it stayed `172.24.110.174` across both of this deployment's
+reboots. So step 3 is conditional, and the condition is a comparison: run
+`e2e/run-m4-lan.sh lanhost`, which prints the live WSL address beside the current portproxy
+table and changes nothing, and re-add only if the two disagree. Assume it *can* move on any
+restart; do not assume it *has*.
+
 **The port is `8795` from M4 on, not `8790`** (*The M4 port plan*, in Gotchas). The M3-era
 firewall rule for 8790 can stay; it opens a port nothing serves. **The M3-era portproxy on
-8790 cannot stay, and step 1 is not optional**: `run-m4.sh up` and `run-m4-lan.sh up` both
-read the Windows listener table first and **refuse to start** while any Windows process — a
-portproxy included — holds a Contract A port. Until it is deleted, the only way past is the
-five-digit dodge, `SLOT_PORT_BASE=18787`, which moves all six slots to `18787`–`18792`.
+8790 could not stay, and step 1 is the one that removed it**: `run-m4.sh up` and
+`run-m4-lan.sh up` both read the Windows listener table first and **refuse to start** while
+any Windows process — a portproxy included — holds a Contract A port. While it existed the
+only way past was the five-digit dodge, `SLOT_PORT_BASE=18787`, which moves all six slots to
+`18787`–`18792`.
 
-**Measured 2026-08-06:** that proxy is `0.0.0.0:8790 -> 172.24.110.174:8790`, and
-`172.24.110.174` is the WSL VM's *current* address — so today it happens to forward slot 4's
-traffic back into WSL and mostly works. That is luck, not correctness: the WSL address changes
-on every restart, after which the same proxy silently swallows slot 4's Contract A connection
-and the map forms one slot short with the reason `peer_mod_absent`, which reads like a mod
-bug. Delete it.
+**It is gone, and the standing requirement is that it stays gone.** The proxy used to be
+`0.0.0.0:8790 -> 172.24.110.174:8790` (measured 2026-08-06), which by luck pointed at the
+live WSL address and so *mostly worked* — the worst possible state, because the moment the
+WSL address moves the same proxy silently swallows slot 4's Contract A connection and the map
+forms one slot short with the reason `peer_mod_absent`, which reads like a mod bug. Confirmed
+absent on 2026-08-09: `lanhost` lists only the `8795` forward and an unrelated `8765` one.
+A row for `0.0.0.0:8790` reappearing in that table is a regression, not a leftover.
 
 **Relay LAN host: `192.168.1.227`.** Confirmed 2026-08-03 by the far end itself: the second
 computer ran `setup-farend.ps1 -RelayHost 192.168.1.227`, was granted slot 2, and the relay
@@ -822,9 +854,9 @@ machine's Windows IPv4 addresses; `lanhost` lists the candidates, and the home-L
 normally `192.168.x.x` or `10.x.x.x`, never a `172.x` hypervisor address.
 
 **The address alone is not enough — the portproxy behind it must exist.** `192.168.1.227:8795`
-only reaches the relay while the `netsh` portproxy above points at the *current* WSL address,
-and that address changes on every WSL restart. Re-run `e2e/run-m4-lan.sh lanhost` after a
-restart and re-add the portproxy with the value it prints; the LAN host itself does not change,
+only reaches the relay while the `netsh` portproxy above points at the *current* WSL address.
+Re-run `e2e/run-m4-lan.sh lanhost` after a restart and compare; re-add the portproxy only if
+the address it prints differs from the one in the table. The LAN host itself does not change,
 so this line stays correct even when the far end suddenly cannot connect.
 
 #### The status page on the LAN — the same pattern, on `8796`
@@ -847,7 +879,7 @@ elevated PowerShell, and both are **owner steps**:
 New-NetFirewallRule -DisplayName "Bibites Multiverse status page 8796" -Direction Inbound `
   -Action Allow -Protocol TCP -LocalPort 8796 -Profile Any
 
-# after every WSL restart: the WSL address changes
+# only when the WSL address has moved — check with `lanhost` first, as on 8795
 netsh interface portproxy delete v4tov4 listenport=8796 listenaddress=0.0.0.0
 netsh interface portproxy add v4tov4 listenport=8796 listenaddress=0.0.0.0 `
   connectport=8796 connectaddress=<the WSL address from `lanhost`>
@@ -988,22 +1020,23 @@ post-01:07 records existed.
 | `e2e/archive-data-m4-lan/genomes/` | with **new genomes**. Content-addressed, so it tracks evolution rather than hops. The archive never sweeps it — the sidecars' own caches are capped by `genomeCacheMaxBytes`, the archive's is the record | **58 MB/h = 1.4 GB/day** |
 | `e2e/archive-data-m4-lan/migrations.jsonl` | with **traffic**. The ledger is the record of what happened and nothing may evict from it (`contract-b-m4.md` §10) | **19 MB/h = 0.45 GB/day**, at ~540 crossings/min |
 | `e2e/archive-data-m4-lan/metrics.jsonl` | with **time**, one sample per slot per `metricsInterval` | **0.7 MB/h = 0.02 GB/day** |
-| `e2e/baselines/m4-collector/` | with **time**. Not part of the deployment — it is the owner's read-only observation loop, copying five world saves and one `/api/status` sample every 5 minutes. Stop it with `kill "$(cat e2e/baselines/m4-collector/collector.pid)"` | **19 MB/h = 0.5 GB/day** |
+| `e2e/baselines/m4-collector/` | with **time**. Not part of the deployment — it is a read-only observation loop, copying five world saves and one `/api/status` sample every 5 minutes. Written and launched by the evolution-analysis session on 2026-08-07, not by hand. Stop it with `kill "$(cat e2e/baselines/m4-collector/collector.pid)"`; **every reboot kills it and nothing restarts it** — see *The living deployment* | **19 MB/h = 0.5 GB/day** |
 | **total** | | **97 MB/h = 2.3 GB/day = ~70 GB/month** |
 
-**`e2e/baselines/m4-collector/` is untracked, and that is load-bearing.** `e2e/baselines/`
+**`e2e/baselines/m4-collector/` is gitignored, and that is load-bearing.** `e2e/baselines/`
 itself **is** tracked — 57 files including earlier baseline save zips — so this directory
-sits inside a tracked tree while holding 343 MB across 1,148 files and growing half a
-gigabyte a day. It is not in `.gitignore` and it is not in history, so a single
-`git add -A` would commit all of it and keep committing it. Stage specific paths in this
-repo. Whether the collector's output should be ignored outright or periodically pruned and
-its keepers committed is **an open question for the owner** — the two halves of
-`e2e/baselines/` currently disagree about what kind of thing it is.
+sits inside a tracked tree while growing half a gigabyte a day; measured 2026-08-09T20:21Z
+it held **208 snapshots, 1,262 files, 375 MB**. It was excluded in `8cbeca6` precisely
+because a single `git add -A` would otherwise commit all of it and keep committing it;
+`git add -f` is the escape hatch for a keeper worth committing by explicit path. **Stage
+specific paths in this repo** either way. Whether the collector's output should stay ignored
+outright or be periodically pruned with its keepers committed is **an open question for the
+owner** — the two halves of `e2e/baselines/` still disagree about what kind of thing it is.
 
-No rule in this system will ever shrink these three. At that rate the 251 GB data volume
-holds roughly **four months** of this deployment, and then somebody has to decide what the
-archive is for. **Sizing and pruning it is an operator job**, and it is why the rig now
-lives on the data volume rather than the WSL root.
+No rule in this system will ever shrink the three durable files above. At 97 MB/h the
+251 GB data volume holds roughly **three months** of this deployment, and then somebody has
+to decide what the archive is for. **Sizing and pruning it is an operator job**, and it is
+why the rig now lives on the data volume rather than the WSL root.
 
 ### What the fix measured
 
@@ -1034,13 +1067,133 @@ every path under `~/bibites-multiverse` fails with *No such file or directory*, 
 find the repo, and the rig cannot start at all. The symptom is unmistakable and it is not a
 rig bug. **The owner's mount setup is the fix** — there is deliberately no automation here,
 because a script that silently created the directory would put the custody journals on a
-tmpfs that a restart erases. Add it to the after-a-WSL-restart list beside re-adding the
-`netsh` portproxy:
+tmpfs that a restart erases. It is **step 1** of the reboot ritual below, and no other step
+can run before it:
 
 ```sh
 df -h /mnt/wsl/data          # /dev/sdX, 251G — if this is missing, stop and mount it
 ls ~/bibites-multiverse/     # must list the repo, not fail
 ```
+
+## The living deployment
+
+The M4 LAN rig has carried the same six worlds since the exit test of 2026-08-06 — across a
+full-disk outage and two host reboots. This section is what it last read, how to bring it
+back after a reboot, and what is being watched.
+
+### The reading of 2026-08-09, after the second reboot
+
+Taken from `/api/status` once the map had settled. Every number is a reading, not a target;
+the cumulative ones move continuously and the point of recording them is the shape, not the
+digits.
+
+| | |
+|---|---|
+| Slots | **6/6 live and `modConnected`**, no holes, no unknown slots |
+| Populations | slot 1 **7**, slot 2 **24**, slot 3 **25**, slot 4 **22**, slot 5 **24**, slot 6 (far) **104** — **206** total |
+| Lanes | **24**, counted as `sum(len(slot.exportEdges))` over the live slots. **24 open, 0 closed, 0 bypass**, every one `reason=peer_live` |
+| Queues | `pacedDepth`, `heldDepth`, `custodyDepth` and `timeoutBounces` all **0** |
+| Traffic | **393,210** cumulative migrations at **426.4/min**; epoch **394** |
+| Errors | zero `OVERLOADED`, zero `MALFORMED_MESSAGE`, zero `bounceBack=true`, and no unexplained error line in any log |
+| Portals | **8/8** `[M4-PORTAL] event=SHOWN` per game — four edges × two lanes, which is the full D17 set |
+| Speed | ×5 on all five local worlds; the far end runs ~21–24, which is its own operator's setting and not this rig's business |
+
+**Re-read the same day at 20:21Z, and three of those lines had moved in ways worth knowing.**
+Population **243** (slot 1 **14**, slot 2 **43**, slot 3 **40**, slot 4 **34**, slot 5 **43**,
+slot 6 **69**), **431,645** migrations at **516.4/min**, epoch **6,960** — the cumulative
+counters and the epoch simply run, and a number quoted from either table is a timestamp, not a
+property. Still 24/24 `peer_live`, still no bypass, `pacedDepth` and `heldDepth` still 0
+(`custodyDepth` 1, which is one organism in flight). But **slot 2 measured ×34.7 while the
+other four still measured ×5** — the time scale drifted *hours after* a clean bring-up, not
+only across a restart, which widens the gotcha below. And the two watch items both moved; see
+*Watch items*.
+
+**The far end needed nothing.** Neither reboot took the second computer down, and slot 6
+reconnected by itself both times — at 12:07:10 on 2026-08-08 — so the map formed 24/24 with
+no bypass and no `no_peer` closure. There is no far-end step in the ritual below, and adding
+one would be a D9 violation as well as unnecessary.
+
+### Bringing it back after a reboot
+
+Proven end to end twice, on 2026-08-08 and 2026-08-09. The steps are ordered and step 1
+gates the rest.
+
+1. **Mount `/mnt/wsl/data`.** See *Where the rig lives now* above. Nothing — not `git`, not
+   the rig, not a path in a pid file — resolves while the symlink dangles.
+2. **Remove the previous run's pid files, after confirming each pid is dead.** A reboot
+   leaves seven of them in `e2e/run-m4-lan/`: `m3-relay.pid`, `m3-archive.pid` and
+   `m3-sidecar-1.pid` .. `m3-sidecar-5.pid` (the `m3-` prefix is inherited from
+   `run-m3.sh`, which is the base library — it does not mean an M3 rig ran). They do not
+   block `up`, but `status` reports the rig running when it is not and `down` would `kill -9`
+   whatever now owns that number. **Check liveness first — pid reuse across a reboot is
+   exactly the case this guards:**
+
+   ```sh
+   cd ~/bibites-multiverse/e2e/run-m4-lan
+   for f in *.pid; do p=$(cat "$f"); kill -0 "$p" 2>/dev/null && echo "ALIVE $f $p" || rm -v "$f"; done
+   ```
+
+3. **Verify the Windows plumbing read-only; do not re-run it blind.** The `8795` portproxy
+   and the firewall rule **survive a reboot** as long as the WSL address has not changed, and
+   it did not across either reboot — it stayed `172.24.110.174`. `e2e/run-m4-lan.sh lanhost`
+   prints the live WSL address beside the current portproxy table and touches nothing, so it
+   is the check. Only if the two disagree do the elevated commands in *Owner steps* apply.
+   The M3-era `8790` portproxy must **stay deleted**; `lanhost` shows the table, and a row for
+   `0.0.0.0:8790` means slot 4 is about to look like a mod bug.
+4. **Bring the rig up**, with the status page bound for the LAN:
+
+   ```sh
+   ARCHIVE_HTTP=0.0.0.0:8796 ./e2e/run-m4-lan.sh up
+   ```
+
+5. **Expect one game to come up starved of a log file**, and fix that one instance rather
+   than the rig — see *The five-instance ceiling, and the log-file starvation trap* in
+   Gotchas. It happened on both reboots.
+6. **Read the time scale of every instance, not only a restarted one** — see *A world can be
+   at the wrong time scale* in Gotchas. It needed a `send 1 timescale 5` after the
+   2026-08-08 reboot and nothing after the 2026-08-09 one, so the check is the deliverable,
+   not the correction.
+7. **Relaunch the baseline collector by hand.** Every reboot kills it and nothing restarts
+   it. It is gitignored, read-only against the deployment — it only copies the five save zips
+   and curls `/api/status` — and costs ~0.5 GB/day (*The disk budget*).
+
+   ```sh
+   cd ~/bibites-multiverse/e2e/baselines/m4-collector
+   setsid nohup ./collector.sh >> collector.log 2>&1 &
+   ```
+
+   A reboot that lands mid-cycle leaves an empty snapshot directory behind; there is one,
+   `20260808T143150Z/`, and it is harmless.
+
+### Watch items
+
+Two things are being watched on the running deployment. Neither is a defect, and neither has
+a verdict yet.
+
+- **Slot 1 is depressed, and it is the world to keep an eye on.** It fell to a population of
+  **2** in the 2026-08-08 ENOSPC incident and did not recover with its neighbours: readings
+  of 3, 10, 8 and 7 through 2026-08-09 put it inside its 6–15 recovery range but at the
+  bottom of it, while the other four local worlds held 22–25. It then read **14** at 20:21Z
+  the same day, so it *is* climbing — and it is still the smallest of the five by a factor of
+  two and a half. A small world produces few young of its own and depends on arrivals; the
+  open question is whether the lanes alone carry it back to its neighbours' range or whether
+  it settles low.
+- **`genomeGaps` is growing, and there is still no baseline that says whether it should
+  be.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the map
+  declared at `go/internal/archive/archive.go:170`): the set of genome hashes the archive has
+  asked a sidecar for and not yet received. It is a **backlog count, not an error count**,
+  and it is not the same thing as `bin/archive list --gaps`, which reports what the *ledger*
+  shows missing. Two readings on 2026-08-09 — **881 against 878,904 ledger records** after
+  the reboot, **2,467 against 959,243** at 20:21Z — so roughly 2% of new records opened a gap
+  that had not closed by the second reading. **That is a trend across two points and not a
+  verdict**: nobody knows what a healthy value looks like, because no reading was recorded
+  before 2026-08-09, and a backlog that is merely slower than the traffic looks identical to
+  one that is stuck. What makes it worth watching is the failure mode: an entry only ever
+  leaves `pending` when the genome arrives, so **a gap becomes permanent if the source
+  sidecar forgets the genome before the fetch succeeds** — the retry ladder then walks the
+  ring forever against a blob nobody holds. The next step is a series, not another single
+  reading: sample `genomeGaps` and `ledgerRecords` together over hours and see whether the
+  ratio settles.
 
 ## Gotchas
 
@@ -1088,14 +1241,27 @@ ls ~/bibites-multiverse/     # must list the repo, not fail
   instances and start them **one at a time**, with the same environment `run-m4.sh start_game` sets;
   a running `up` picks them up where it is waiting. Check for it with
   `grep -a 'configuration failed' "…/BepInEx/LogOutput.log"*` whenever a slot is `live` on the status
-  page with `modConnected` false.
-- **A world restarted outside the rig can come back at the wrong time scale, and the rig's own
-  `timescale` may not stick to it.** After the same restart, slots 1 and 2 reported `×100` and
-  `×58` on the status page while the three the rig started reported `×5` — the game restores its own
-  speed after the world settles, which can land after the rig's `send <slot> timescale <x>`. Re-send
+  page with `modConnected` false. **A `modConnected` false with no `configuration failed` anywhere
+  is the other failure with the same symptom** — the log-file starvation trap, in *The
+  five-instance ceiling* below, which has a different remedy.
+- **A world can be at the wrong time scale, and the rig's own `timescale` may not stick to
+  it. Read every instance, not only the one you touched.** The game restores its own speed
+  after the world settles, which can land after the rig's `send <slot> timescale <x>`. Re-send
   it and confirm on `/api/status`; the command answers
-  `targetTimeScale=5.00 Time.timeScale=5.00`, and `timeScale` on the page is the **measured** speed,
-  which is why the far end reads a fluctuating non-integer.
+  `targetTimeScale=5.00 Time.timeScale=5.00`, and `timeScale` on the page is the **measured**
+  speed, which is why the far end reads a fluctuating non-integer. Three measurements say the
+  scope is wider than "the instance you just restarted", and each widened it:
+  - after the 2026-08-07 config-race restart, slots 1 and 2 reported `×100` and `×58` while
+    the three the rig started reported `×5`;
+  - after the 2026-08-08 reboot, the single restarted instance (slot 1) rejoined at `×100`
+    and needed `send 1 timescale 5` — but the correction is **intermittent**, because after
+    the 2026-08-09 reboot the restarted instance came back at `×5` and none was needed;
+  - and at 20:21Z on 2026-08-09, hours into a settled map, **slot 2 measured `×34.7` while
+    the other four still measured `×5`** — no restart involved at all.
+
+  So it is not a property of a restart. Sweep all five on `/api/status` after any bring-up,
+  and again whenever a rate reading looks wrong: a world running seven times too fast inflates
+  every per-simulated-minute series it produces.
 - **A WSL environment variable does not reach the game on its own.** `MULTIVERSE_AUTOTEST=1
   game.sh start` is silently ignored: WSL only forwards variables that `WSLENV` names.
   Use `WSLENV=MULTIVERSE_AUTOTEST MULTIVERSE_AUTOTEST=1 game.sh start`. The second hop is
@@ -1157,7 +1323,8 @@ ls ~/bibites-multiverse/     # must list the repo, not fail
   smoke test high ports (`--listen 127.0.0.1:0` writes the resolved address to
   `<data-dir>/listen.addr`). The historical rigs collide head-on with the current one: M2
   used `8787`/`8788`/`8790`, and M3 used `8787`/`8788`/`18789` plus the relay on `8790`.
-- **The five-instance ceiling, measured 2026-08-06. It is BepInEx, not the hardware.**
+- **The five-instance ceiling, and the log-file starvation trap. Measured 2026-08-06, and
+  it is BepInEx, not the hardware.**
   Six game instances run together at about 550 MB each — 3.3 GB of 62 GB — at a load
   average near 2.4 on 16 cores. But BepInEx's `DiskLogListener` walks `LogOutput.log`,
   then `LogOutput.log.1` .. `.4`, and then gives up with *"Skipping log file creation"*.
@@ -1167,9 +1334,40 @@ ls ~/bibites-multiverse/     # must list the repo, not fail
   worlds; freeing one log file made that same instance seed in forty seconds and left the
   instance that gave up the file idle in its place. So five real games is the ceiling on
   this install, and `e2e/run-m4.sh` drives its sixth slot with `bin/fakemod` instead. **The
-  LAN rig does not hit this at all**: the second computer has its own BepInEx, so
-  `e2e/run-m4-lan.sh` runs five real games here and one real game there — six real worlds,
+  LAN rig does not hit this at all** as a *ceiling*: the second computer has its own BepInEx,
+  so `e2e/run-m4-lan.sh` runs five real games here and one real game there — six real worlds,
   no synthetic peer. That is the reason slot 6 is the slot that moves.
+
+  **But the same root cause bites a five-game bring-up as a starvation trap, and that is the
+  failure to expect on every reboot.** Five instances need exactly the five files BepInEx
+  hands out, and the allocation is a lock race (see *Two game instances run fine side by
+  side* above). One of them can lose it and get **no log file at all**, so the mod never
+  loads in that instance: it comes up with `modConnected=false` and `exportEdges=[]`, and its
+  neighbours' lanes bypass it with `peer_mod_absent`. **It is not slot-specific** — it
+  starved slot 1 on 2026-08-08 and slot 2 on 2026-08-09, on the two reboots this deployment
+  has had.
+
+  **Distinguishing it from the config race above is the whole diagnosis, and the tell is an
+  absence.** The config race *writes* `configuration failed` into a log; starvation writes
+  **nothing**, because there is no log to write into. On 2026-08-09 `configuration failed`
+  appeared in none of the five logs and the base `LogOutput.log` held a single 55-byte
+  `Unable to start Unity log writer` line and nothing else. The second tell is memory: the
+  starved instance sits far below its siblings — 321 MB against ~590 MB on one run, 348 MB
+  against ~700 MB on the other — because it never seeded a world.
+
+  **The remedy, proven on both reboots: restart that one instance, and only that one.**
+  A still-waiting `up` picks it up and completes normally, so nothing else has to be
+  disturbed.
+
+  ```sh
+  bibites-mod/game.sh stop slot<n>              # ONLY the starved instance
+  source e2e/run-m4-lan.sh status               # its default dispatch is read-only
+  start_game <n>                                # the rig's own launcher, so the env matches exactly
+  ```
+
+  Re-driving the rig's own `start_game` rather than `game.sh start` is the load-bearing part:
+  it is what sets `MULTIVERSE_*` and `WSLENV` to exactly what the other four got. The
+  instance takes the log name its own stop just freed and connects in under a minute.
 - **Stop the old far-end sidecar before you unpack a new bundle.** Windows locks a running
   `.exe`, so the copy step of `setup-farend.ps1` fails with **`Permission denied`** on
   `multiverse-sidecar.exe` while the previous rig's sidecar is still up. It cost the M4 far-end
@@ -1192,12 +1390,15 @@ ls ~/bibites-multiverse/     # must list the repo, not fail
   from Windows and gets *"An existing connection was forcibly closed by the remote host"* six
   times, and the map forms one slot short with the reason `peer_mod_absent` — which reads
   like a mod bug and is a network artifact. **When it happens to be current it works, which
-  is worse**: measured 2026-08-06 the proxy points at `172.24.110.174`, the live WSL address,
-  so slot 4 works today and breaks at the next WSL restart. `e2e/run-m4.sh up` and
-  `e2e/run-m4-lan.sh up` both check the Windows listener table and refuse to start.
-  **TODO-owner**, in an elevated PowerShell:
-  `netsh interface portproxy delete v4tov4 listenport=8790 listenaddress=0.0.0.0`. Until
-  then, `SLOT_PORT_BASE=18787 e2e/run-m4.sh up`.
+  is worse**: measured 2026-08-06 the proxy pointed at `172.24.110.174`, the live WSL address,
+  so slot 4 worked that day and would have broken at the next WSL restart. `e2e/run-m4.sh up`
+  and `e2e/run-m4-lan.sh up` both check the Windows listener table and refuse to start; the
+  workaround while it existed was `SLOT_PORT_BASE=18787 e2e/run-m4.sh up`.
+  **The owner deleted it, and it is confirmed absent as of 2026-08-09** —
+  `e2e/run-m4-lan.sh lanhost` prints the live portproxy table and lists only the `8795`
+  forward and an unrelated `8765` one. Keep it that way: check the table after a reboot
+  rather than re-running the delete blind, and treat a returning `0.0.0.0:8790` row as a
+  regression.
 - **The M4 port plan — settled 2026-08-05, and these are now the compiled defaults.** The
   six-slot rig has to fit inside `contract-a.md` §10's Contract A range `8787`–`8792`
   without the relay or the archive standing on one of those six ports, which is exactly what
