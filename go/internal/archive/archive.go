@@ -166,10 +166,15 @@ type Archive struct {
 	// species.go.
 	species     *speciesLedger
 	recordCount int
-	seen        map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
-	pending     map[string]*fetch
-	sentWindow  map[string]*rateWindow
-	closed      bool
+	// ledgerSkipped is how many ledger lines the startup replay could not parse
+	// and read past. It is 0 for every healthy archive, it never falls once a
+	// damaged line exists — the ledger is never rewritten — and it is the
+	// difference between recordCount and `wc -l` on the file.
+	ledgerSkipped int
+	seen          map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
+	pending       map[string]*fetch
+	sentWindow    map[string]*rateWindow
+	closed        bool
 
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
@@ -220,12 +225,35 @@ func New(cfg Config) (*Archive, error) {
 	// nor forgets a gap. "Keep the hash forever" (§10): a hash with no genome
 	// is still a lineage node, and a fetch that failed for a year can succeed
 	// tomorrow.
-	records, err := ReadLedger(cfg.DataDir)
+	records, damage, err := ReadLedger(cfg.DataDir)
 	if err != nil {
 		return nil, err
 	}
+	if n := ledger.Repaired(); n > 0 {
+		// A write the previous process never finished. Nothing durable was lost
+		// — the record was never ACKed — but an operator reading `wc -l` against
+		// the record count deserves to know the file changed at startup.
+		a.log.Warn("archive: dropped an unfinished record from the end of the ledger",
+			"bytes", n, "ledger", ledger.Path())
+	}
+	if damage.Any() {
+		// The ledger is damaged and STAYS damaged: it is append-only, so unlike
+		// the sidecar journal there is no compaction that quietly heals it. Every
+		// restart reads past the same line and every restart must say so. It is
+		// an error rather than a warning because a whole record — a crossing that
+		// happened — is missing from the archive's account of what happened.
+		a.log.Error("archive: the ledger holds line(s) that do not parse; replay SKIPPED them "+
+			"and kept every record behind them",
+			"skippedLines", damage.Lines, "skippedBytes", damage.Bytes,
+			"records", len(records), "ledger", ledger.Path())
+	}
+	if damage.TornTail > 0 {
+		a.log.Warn("archive: ignored an unfinished record at the end of the ledger",
+			"bytes", damage.TornTail, "ledger", ledger.Path())
+	}
 	now := time.Now()
 	a.recordCount = len(records)
+	a.ledgerSkipped = damage.Lines
 	for _, rec := range records {
 		if rec.MigrationID != "" {
 			// Rebuild the key the live path uses, not a lookalike. A NACK
@@ -364,11 +392,16 @@ func (a *Archive) MetricsPath() string { return a.metrics.Path() }
 // Genomes is the content-addressed store, for tests and operator tools.
 func (a *Archive) Genomes() *bb8.Store { return a.genomes }
 
-// Records replays the ledger.
-func (a *Archive) Records() ([]Record, error) { return ReadLedger(a.cfg.DataDir) }
+// Records replays the ledger. What the replay skipped is reported where it can
+// be acted on — the startup log and Status.LedgerSkipped — rather than to every
+// test and tool that only wants the records.
+func (a *Archive) Records() ([]Record, error) {
+	recs, _, err := ReadLedger(a.cfg.DataDir)
+	return recs, err
+}
 
 // List is the read path: every recorded migration joined with the genome store.
-func (a *Archive) List() ([]Migration, error) { return List(a.cfg.DataDir) }
+func (a *Archive) List() ([]Migration, LedgerDamage, error) { return List(a.cfg.DataDir) }
 
 // PendingGaps is the number of hashes no peer has served yet.
 func (a *Archive) PendingGaps() int {
@@ -979,14 +1012,18 @@ type Migration struct {
 // List replays the ledger in dir and joins each migration with the genome
 // store. It is deliberately a full replay: M3 records and reads only, and an
 // index is the first thing a query engine would need (see store.go).
-func List(dir string) ([]Migration, error) {
-	records, err := ReadLedger(dir)
+//
+// It returns what the replay skipped alongside the migrations, because a
+// listing that quietly omits a crossing is the shape of the 2026-08-08 loss:
+// the caller prints it.
+func List(dir string) ([]Migration, LedgerDamage, error) {
+	records, damage, err := ReadLedger(dir)
 	if err != nil {
-		return nil, err
+		return nil, damage, err
 	}
 	store, err := bb8.OpenStore(dir + "/genomes")
 	if err != nil {
-		return nil, err
+		return nil, damage, err
 	}
 	byID := map[string]*Migration{}
 	order := make([]*Migration, 0, len(records))
@@ -1021,5 +1058,5 @@ func List(dir string) ([]Migration, error) {
 	for _, m := range order {
 		out = append(out, *m)
 	}
-	return out, nil
+	return out, damage, nil
 }

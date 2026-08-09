@@ -346,7 +346,11 @@ forwarder, and a forwarder that indexes genomes is not dumb any more.
 
 **Owns:**
 - The migration record: one row per envelope — `migrationId`, both ring slots, both peer
-  ids, timestamp, and the lineage annex (D11)
+  ids, timestamp, and the lineage annex (D11). **From 2026-08-09 the ledger carries the
+  journal's durability rule, in the form an unrewritable file needs**: an append is
+  all-or-nothing, and replay **skips** a line it cannot parse instead of stopping at it,
+  because nothing ever compacts this file and a stop would discard more of it every hour
+  (`contract-b-m4.md` §20, B20)
 - Content-addressed genome storage (hash → genome), sharing `bb8-schema`'s canonical
   genome projection so the same genome hashes identically everywhere
 - **Fetch by hash:** when an annex names a genome the archive has never seen, it asks the

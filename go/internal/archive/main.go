@@ -119,7 +119,7 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	migrations, err := List(*dataDir)
+	migrations, damage, err := List(*dataDir)
 	if err != nil {
 		fmt.Fprintf(stderr, "archive: %v\n", err)
 		return 1
@@ -182,6 +182,20 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout,
 		"\n%d migration(s) shown, %d with an unresolved genome hash, %d whose migrant genome would not hash\n",
 		shown, gaps, unhashable)
+	// A listing that silently omits a crossing is the 2026-08-08 loss wearing a
+	// friendlier face. Replay reads past a damaged line (store.go) and this is
+	// where the read path admits to it, on stderr so a piped listing still says
+	// it and grep over the listing cannot hide it.
+	if damage.Any() {
+		fmt.Fprintf(stderr,
+			"archive: %d ledger line(s) (%d bytes) do not parse and were SKIPPED; "+
+				"every record behind them is in this listing\n", damage.Lines, damage.Bytes)
+	}
+	if damage.TornTail > 0 {
+		fmt.Fprintf(stderr,
+			"archive: the ledger ends in an unfinished %d-byte record, which was never durable and is ignored\n",
+			damage.TornTail)
+	}
 	return 0
 }
 

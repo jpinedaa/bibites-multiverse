@@ -3354,9 +3354,10 @@ whatever the operator's shell redirect caught.
 | The purge record stays | `PurgeExpired` still appends a durable purge record even though the next compaction would erase the tombstone anyway. `contract-a.md` §11.1 makes every journal write durable before it counts and keeps tombstones out of memory-only state, and the saving does not justify carving an exception out of that: a purge record is one short line per tombstone that ever expires, while the growth term was the `create` record of every migration that ever ran, each carrying its payload. |
 | A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
 | A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
+| A failed append leaves no bytes behind, and a replay says what it could not read (the ledger's half added 2026-08-09) | Every append-only file here — a sidecar's journal, the archive's `migrations.jsonl` — MUST truncate back to its pre-write length when an append fails or lands **short**, so no fragment is left for the next append to splice a whole record onto, and MUST drop an unterminated final line before appending again. A replay MUST report what it could not read rather than ending in silence. Where the file is rewritten as a matter of course — the journal, which compacts at `Open` — a replay MAY stop at the damage and report the history it discarded behind it. Where the file is **never** rewritten — the archive's ledger, whose contents nothing may evict (§10) — a replay MUST **skip** the damaged line and keep every record behind it, because the damage is permanent and stopping would make the loss grow with the file, without bound, forever. |
 | What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. |
 
-**What the outage cost, as evidence for the last row.** When the volume filled,
+**What the outage cost, as evidence for *A failed write cleans up after itself*.** When the volume filled,
 every genome write in the rig failed inside `os.WriteFile` — after the file
 existed and before it held anything — and left an empty `<hash>.json.tmp`
 behind. The store is content-addressed, so the same genome retried under the same
@@ -3368,6 +3369,8 @@ out of. A cleanup on the error path costs one syscall on a path already failing.
 custody lock and for treating a failed reopen after the rename as a reason to
 stop journaling rather than to keep appending to an unlinked file; the
 **journal**, for the rewrite's crash safety and for carrying `accruedHoldMs`
-through it; **every process**, for bounding a log it was given the path of; the
+through it; the **archive**, for the same all-or-nothing append on its ledger and
+for reading past a damaged line rather than stopping at one it can never rewrite;
+**every process**, for bounding a log it was given the path of; the
 **genome store**, for its error path and its sweep; and the **operator**, for
 sizing a disk against a ledger that no rule in this document will ever shrink.

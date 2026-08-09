@@ -658,6 +658,18 @@ at 23 on slot 3 while the replayed entries drained, then fell to 0. That is the 
 of history on all five sidecars while every process looked healthy, and the only observation
 that distinguishes a fixed journal from a broken one is the replay after a restart.
 
+**And the same two bring-ups replayed a damaged archive ledger and said nothing, which is the
+other half of the lesson.** The rule was written for `internal/journal`; the archive's
+`migrations.jsonl` is a second implementation of the same append-only discipline and it got
+neither the all-or-nothing append nor a `Discarded()` of its own. The 2026-08-08 splice is
+still in that file — 776 bytes at line 874,163 — and both reboots replayed to it and stopped,
+silently, while the status page kept counting forward in memory. It was found and closed on
+2026-08-09 (`dev_environment.md`, *The disk budget*), with a replay that **skips** the damaged
+line rather than stopping at it, because a ledger nothing ever compacts cannot be given the
+journal's remedy. **A durability rule proven in one implementation is not proven in the
+system**, and the observation that would have caught it — a replay compared against `wc -l` —
+costs one command.
+
 ### Risk 7 — The far end has no drive path
 
 Decision D9's answer holds: the rig never drives the second computer. A save is not an

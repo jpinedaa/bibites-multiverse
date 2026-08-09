@@ -522,12 +522,15 @@ on the milestone rather than merely coexisting with it.
   log history, because every peer comes back. After M5 a peer that leaves for good makes that
   the normal case, against a fetch ladder that runs from one minute to daily and a sidecar
   cache capped at 30 days and 2 GiB. See Risk 7.
-- **The archive's own durability is being brought level with the sidecar journal's.** §20's
-  all-or-nothing append rule was written for `internal/journal`, and the archive's ledger is a
-  separate implementation. Whatever state that work lands in, the point for this milestone is
-  structural: **M5 is where the archive stops being the operator's private recorder and becomes
-  a service other people depend on**, so its durability rules have to hold as firmly as the
-  sidecars'.
+- **The archive's own durability is now level with the sidecar journal's, as of 2026-08-09.**
+  §20's all-or-nothing append rule had been written for `internal/journal` only, and the
+  archive's ledger — a separate implementation — carried the same defect and the 2026-08-08
+  splice that proves it. Both halves are closed: the append truncates back, and replay skips a
+  line it cannot parse rather than stopping at it, which is the form the rule has to take for a
+  file nothing ever compacts. The point for this milestone survives the fix and is structural:
+  **M5 is where the archive stops being the operator's private recorder and becomes a service
+  other people depend on**, so every rule of this kind has to be checked in both
+  implementations rather than in the one it was written for.
 - **`m4_findings.md` is unwritten.** It is the one open M4 deliverable. Its inputs —
   `m4_considerations.md`, `e2e/logs-m4-lan/` and `m4_portal_findings.md` — are also the best
   available baseline against which a public map's behaviour will be compared, so writing it

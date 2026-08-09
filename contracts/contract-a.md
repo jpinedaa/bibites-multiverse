@@ -1971,7 +1971,12 @@ These notes are non-normative. They exist so the two sides do not have to negoti
   replayed to 01:07:40 and no further. **Truncate the file back to its pre-write length on
   any write error**, so the failure costs that one record instead of every record behind
   it. Report what a replay discarded behind a torn line, and log it at **error** — a
-  journal that quietly loses history is worse than one that refuses to open.
+  journal that quietly loses history is worse than one that refuses to open. **Stopping at
+  the damage is only defensible because `Open` compacts the journal immediately afterwards
+  and rewrites the loss away.** An append-only file that is never rewritten — the archive's
+  ledger, which had the identical defect until 2026-08-09 — must instead **skip** the line
+  and keep every record behind it, because there the damage is permanent and a stop discards
+  more of the file every hour (`contract-b-m4.md` §20).
 - **Bound the journal in bytes, not only in time.** `exportRetentionSeconds` expires
   tombstones; it does not stop the file growing. A compaction that runs only at startup is
   not a bound for a process whose value is staying up — see `contract-b-m4.md` §20 (B20)

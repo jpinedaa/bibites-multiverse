@@ -48,6 +48,13 @@ type Status struct {
 	Totals      Totals               `json:"totals"`
 	Gaps        int                  `json:"genomeGaps"`
 	Records     int                  `json:"ledgerRecords"`
+	// LedgerSkipped is how many ledger lines the startup replay could not parse
+	// and read past — a record of what happened that the archive can no longer
+	// account for. Omitted when 0, which is every healthy archive; it is here
+	// rather than only in the startup log because the ledger is append-only, so
+	// damage is PERMANENT and the operator who eventually asks why
+	// `ledgerRecords` and `wc -l` disagree is not the operator who read the log.
+	LedgerSkipped int `json:"ledgerSkippedLines,omitempty"`
 	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
 	// over. A rate with no window on it is not a measurement.
 	FlowWindowMs int64 `json:"flowWindowMs"`
@@ -246,6 +253,7 @@ func (a *Archive) StatusView() Status {
 		Lanes:          []LaneView{},
 		Gaps:           len(a.pending),
 		Records:        a.recordCount,
+		LedgerSkipped:  a.ledgerSkipped,
 		FlowWindowMs:   flowWindow.Milliseconds(),
 	}
 	if out.HaveStatus {

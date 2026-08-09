@@ -27,7 +27,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | The plugin | `0.6.1` (`MultiversePlugin.Version`) — the world-settings build: it publishes what it was *told to do* on the handshake (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping), on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. It speaks `contract-a/2.3`. The far-end bundle carries the same DLL; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing journal appends. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
+| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — the sidecar's journal since 2026-08-08, the archive's ledger since 2026-08-09. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -999,7 +999,7 @@ ACKing correctly. Any restart in those eight hours — a crash, a deploy, a rebo
 have silently reverted every one of them to its 01:07 state. That is precisely the loss D2
 exists to make impossible, arriving through the one path that had no rule written for it.
 
-Two changes close it, both in `internal/journal`:
+Two changes close it in `internal/journal`:
 
 - **An append is all-or-nothing.** On any write error the file is truncated back to the
   length it had before the attempt. The caller still gets the error and still must not
@@ -1012,6 +1012,31 @@ Two changes close it, both in `internal/journal`:
 Recovering the running rig is in the git history of 2026-08-08: the five journals were read
 out of `/proc/<pid>/fd/` while the processes still held them, which is the only place the
 post-01:07 records existed.
+
+**The archive's ledger had the same defect, and kept it a day longer.** `internal/archive`
+is a second implementation of the same append-only discipline and it got neither fix on
+2026-08-08, so `migrations.jsonl` still carries that night's splice: **776 bytes at line
+874,163**, the head of a `NACK` written at 01:21:49 joined to the tail of a record written at
+08:12:05, once the disk had room again. Replay broke there in silence, exactly as the
+journals had. Found and closed on **2026-08-09**, and the two halves are not symmetrical
+with the journal's:
+
+- **The same all-or-nothing append.** `Ledger.Append` truncates back to the pre-write length
+  on a short or failed write, and `OpenLedger` drops an unterminated final line before the
+  first append of the new process can splice itself onto it.
+- **Replay SKIPS a damaged line instead of stopping at it**, which is where the ledger
+  departs from the journal deliberately. The journal may stop and truncate because `Open`
+  compacts it from the in-memory state map immediately afterwards and loses nothing. The
+  ledger has nothing to rebuild from — it **is** the state, it is never rewritten (§10 makes
+  eviction from it illegal), and it will carry that line for the life of the deployment. So
+  it reads past it and keeps every record behind it, and what it reports is the damaged line
+  itself rather than the history behind it, because none is thrown away. It is logged at
+  **error** on startup and carried as `ledgerSkippedLines` on the status page, in the
+  `/api/status` JSON and in `ringstat`.
+
+Verified against a copy of the living ledger, 2026-08-09: **1,287,592 lines replay to
+1,287,591 records with exactly one line skipped, 776 bytes.** The old code stopped at
+**874,162** and reported nothing.
 
 ### What still grows forever
 
@@ -1167,6 +1192,16 @@ gates the rest.
    A reboot that lands mid-cycle leaves an empty snapshot directory behind; there is one,
    `20260808T143150Z/`, and it is harmless.
 
+**The next bring-up will make the archive's counters JUMP, and that is a recovery rather than
+a fault.** The running archive replayed the ledger with the pre-fix code at its own boot, so
+everything it shows — `ledgerRecords`, the lane counters, the species aggregates — is built on
+the 874,162 records that replay could reach plus what it has recorded since: **1,096,418
+against 1,293,613 lines in the file** at 23:45Z on 2026-08-09. Its in-memory state is correct
+and complete for its own run; it is the *replay* that was short. The first restart after the
+fix reads past the spliced line and recovers the ~197,000 older records this process never
+saw, so the totals rise. Before the fix that same restart would have **reverted** them to
+01:21 on 2026-08-08. See *The disk budget*.
+
 ### Watch items
 
 Two things are being watched on the running deployment. Neither is a defect, and neither has
@@ -1187,7 +1222,10 @@ a verdict yet.
   and it is not the same thing as `bin/archive list --gaps`, which reports what the *ledger*
   shows missing. Two readings on 2026-08-09 — **881 against 878,904 ledger records** after
   the reboot, **2,467 against 959,243** at 20:21Z — so roughly 2% of new records opened a gap
-  that had not closed by the second reading. Two further samples minutes apart later the same
+  that had not closed by the second reading. (Both `ledgerRecords` figures are this process's
+  own count, which the pre-fix replay started **197,195 records short of the file**; the next
+  restart raises the denominator by that much in one step, so a ratio taken across it is not a
+  series. See *Bringing it back after a reboot*.) Two further samples minutes apart later the same
   hour read **2,477** and then **2,503**, so it kept climbing on a map that was otherwise
   healthy. **That is a trend across four points and not a
   verdict**: nobody knows what a healthy value looks like, because no reading was recorded
@@ -1205,10 +1243,15 @@ a verdict yet.
   is a symlink to `/mnt/wsl/data/bibites-multiverse`. If that volume is not mounted the
   symlink dangles and every path fails with *No such file or directory* — see *The disk
   budget*, *Where the rig lives now*.
-- **A full disk does not just stop the rig, it can silently truncate a journal's history.**
-  One short write leaves an unparsable line mid-file and replay discards everything behind
-  it. Fixed 2026-08-08 (all-or-nothing appends, and `Discarded()` logged at error), but the
-  shape is worth knowing before trusting any append-only log here. See *The disk budget*.
+- **A full disk does not just stop the rig, it can silently truncate an append-only log's
+  history.** One short write leaves an unparsable line mid-file and replay discards
+  everything behind it. Fixed in the sidecar journal on 2026-08-08 (all-or-nothing appends,
+  and `Discarded()` logged at error) and in the archive's ledger on 2026-08-09 (the same
+  append rule, and a replay that *skips* the damaged line instead of stopping at it). **The
+  day between those dates is the lesson**: the rule was written for one implementation while a
+  second one, holding the record of everything that ever crossed, had the identical bug and
+  nobody looked. Know the shape before trusting any append-only log here. See *The disk
+  budget*.
 - **Target `netstandard2.1`**, not 2.0 — Unity 6 assemblies reference netstandard 2.1
   and the build fails with CS1705 otherwise.
 - **MSB3277 version-conflict warnings are benign** — the game's Mono runtime resolves

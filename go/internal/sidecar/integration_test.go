@@ -342,7 +342,7 @@ func TestArchiveRecordsAndFetchesAGenome(t *testing.T) {
 	// The ACK record is a second ledger line and it lands after the spawn, so the
 	// read path is polled rather than sampled once.
 	waitFor(t, 10*time.Second, "the read path to show the migration as delivered", func() bool {
-		list, err := arc.List()
+		list, _, err := arc.List()
 		if err != nil {
 			return false
 		}
@@ -353,9 +353,12 @@ func TestArchiveRecordsAndFetchesAGenome(t *testing.T) {
 		}
 		return false
 	})
-	migrations, err := arc.List()
+	migrations, damage, err := arc.List()
 	if err != nil {
 		t.Fatalf("archive list: %v", err)
+	}
+	if damage.Any() || damage.TornTail > 0 {
+		t.Fatalf("a ledger written by this run is damaged: %+v", damage)
 	}
 	var shown bool
 	for _, m := range migrations {
