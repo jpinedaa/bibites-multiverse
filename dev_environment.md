@@ -1105,8 +1105,10 @@ counters and the epoch simply run, and a number quoted from either table is a ti
 property. Still 24/24 `peer_live`, still no bypass, `pacedDepth` and `heldDepth` still 0
 (`custodyDepth` 1, which is one organism in flight). But **slot 2 measured ×34.7 while the
 other four still measured ×5** — the time scale drifted *hours after* a clean bring-up, not
-only across a restart, which widens the gotcha below. And the two watch items both moved; see
-*Watch items*.
+only across a restart, which widens the gotcha below. It was **corrected later the same hour**
+with the rig's own `e2e/run-m4-lan.sh send 2 timescale 5`, which answered
+`targetTimeScale=5.00 Time.timeScale=5.00` and held on the following sample with all five
+local worlds back at ×5. And the two watch items both moved; see *Watch items*.
 
 **The far end needed nothing.** Neither reboot took the second computer down, and slot 6
 reconnected by itself both times — at 12:07:10 on 2026-08-08 — so the map formed 24/24 with
@@ -1185,7 +1187,9 @@ a verdict yet.
   and it is not the same thing as `bin/archive list --gaps`, which reports what the *ledger*
   shows missing. Two readings on 2026-08-09 — **881 against 878,904 ledger records** after
   the reboot, **2,467 against 959,243** at 20:21Z — so roughly 2% of new records opened a gap
-  that had not closed by the second reading. **That is a trend across two points and not a
+  that had not closed by the second reading. Two further samples minutes apart later the same
+  hour read **2,477** and then **2,503**, so it kept climbing on a map that was otherwise
+  healthy. **That is a trend across four points and not a
   verdict**: nobody knows what a healthy value looks like, because no reading was recorded
   before 2026-08-09, and a backlog that is merely slower than the traffic looks identical to
   one that is stuck. What makes it worth watching is the failure mode: an entry only ever
@@ -1257,7 +1261,9 @@ a verdict yet.
     and needed `send 1 timescale 5` — but the correction is **intermittent**, because after
     the 2026-08-09 reboot the restarted instance came back at `×5` and none was needed;
   - and at 20:21Z on 2026-08-09, hours into a settled map, **slot 2 measured `×34.7` while
-    the other four still measured `×5`** — no restart involved at all.
+    the other four still measured `×5`** — no restart involved at all. A plain
+    `send 2 timescale 5` corrected it and it held, so the one-command remedy does not depend
+    on what caused the drift.
 
   So it is not a property of a restart. Sweep all five on `/api/status` after any bring-up,
   and again whenever a rate reading looks wrong: a world running seven times too fast inflates
