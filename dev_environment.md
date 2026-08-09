@@ -534,7 +534,9 @@ procedure, a baseline capture:
 A periodic save is deferred by 15 s, up to six times, while a `MIGRATE_IN` is queued or while
 another instance holds the lock; after six it saves anyway and warns. The save on quit ignores
 the lock. Every outcome is one `[M4-SAVE]` line with a `stallMs` measured against the 2 000 ms
-budget of Risk 3.
+budget of Risk 3. **The living deployment breaches that budget routinely and has done since
+the exit test** — see *Watch items*; the exit test's 241–538 ms is a 2026-08-06 reading, not
+the current one.
 
 ### The LAN token
 
@@ -1122,6 +1124,7 @@ digits.
 | Errors | zero `OVERLOADED`, zero `MALFORMED_MESSAGE`, zero `bounceBack=true`, and no unexplained error line in any log |
 | Portals | **8/8** `[M4-PORTAL] event=SHOWN` per game — four edges × two lanes, which is the full D17 set |
 | Speed | ×5 on all five local worlds; the far end runs ~21–24, which is its own operator's setting and not this rig's business |
+| Saves | Every world saving on its 2-minute interval, every rotation clean, no `event=FAILED`. **Not clean against D14, though**: read over the whole run rather than at one instant, stalls span **0.47–2.69 s** and **20 of 718** saves exceeded the 2 000 ms budget. See *Watch items* |
 
 **Re-read the same day at 20:21Z, and three of those lines had moved in ways worth knowing.**
 Population **243** (slot 1 **14**, slot 2 **43**, slot 3 **40**, slot 4 **34**, slot 5 **43**,
@@ -1133,7 +1136,8 @@ other four still measured ×5** — the time scale drifted *hours after* a clean
 only across a restart, which widens the gotcha below. It was **corrected later the same hour**
 with the rig's own `e2e/run-m4-lan.sh send 2 timescale 5`, which answered
 `targetTimeScale=5.00 Time.timeScale=5.00` and held on the following sample with all five
-local worlds back at ×5. And the two watch items both moved; see *Watch items*.
+local worlds back at ×5. And both of the population and backlog watch items moved; see
+*Watch items*, which since 2026-08-09 carries a third.
 
 **The far end needed nothing.** Neither reboot took the second computer down, and slot 6
 reconnected by itself both times — at 12:07:10 on 2026-08-08 — so the map formed 24/24 with
@@ -1204,8 +1208,52 @@ saw, so the totals rise. Before the fix that same restart would have **reverted*
 
 ### Watch items
 
-Two things are being watched on the running deployment. Neither is a defect, and neither has
-a verdict yet.
+Three things are being watched on the running deployment. The first is a **measured breach of
+a bar the owner set**, and it is waiting on a decision rather than on more data. The other two
+are trends: neither is a defect, and neither has a verdict yet.
+
+- **The 2-second save-stall budget is breached routinely, and it has been since the day the
+  exit test passed.** D14 set the bar at 2 000 ms and the exit test of 2026-08-06 measured
+  241–538 ms against it (`m4_considerations.md`, Risk 3). **No generation since has held
+  it.** Across the eleven preserved `[M4-SAVE]` generations in `e2e/logs-m4-lan/bepinex/` —
+  8 087 saves, 8 072 of them periodic — `event=BUDGET_EXCEEDED` runs at **17%**, at a pooled
+  median stall of **1 327 ms** and a maximum of **5 163 ms**. The bad nights are far worse:
+  29–70% per slot through the evening of 2026-08-07, and 55–95% across the four populated
+  slots on 2026-08-08, where slot 3 breached **41 of its last 43** saves at 1 909–3 413 ms.
+  The current run reads better and not well — **20 breaches in 718 saves** since the
+  2026-08-09 bring-up, medians of 0.70 s on slot 1 to 1.38 s on slot 5, still two to four
+  times the exit test. **It is not the worlds growing**, which was the first guess and is
+  wrong: the collector's 243 five-slot snapshots put the save zips at 275–330 KB on
+  2026-08-07, near 570 KB overnight on 08-08 at peak population, and 210–320 KB now. What
+  moved is the **cost of a saved kilobyte** — 120–172 ms per 100 KB in the exit test,
+  500–620 ms on 2026-08-08, 290–370 ms now. Slot 1 settles it: its population fell from 21
+  to 7–11 and its file stayed near 220 KB while its median stall went 214 ms → 1 164 ms →
+  704 ms. Nor is the payload mostly organisms — unzip
+  any slot save and the bibites are about a fifth of it, behind `speciesData.json`
+  (~900 KB raw), `data.bin` (~150 KB) and the 400×400 `img.png` the game renders inside
+  `SaveSystem.CreateSave`. **A save costs roughly what it costs whether the world holds 7
+  organisms or 40**, so the variable is the host — five Unity instances at ×5 with 24 lanes
+  and ~500 crossings a minute — and a host reboot gives back about 40% of the cost.
+
+  **A breach under about 3 s is a logged breach and nothing more; past 3.5 s it disconnects
+  the mod.** Contract A's heartbeat timeout is 3.5 s and the stall blocks the thread that
+  sends the heartbeat, so matching every save against the sidecars' 4004 closes gives a clean
+  dose response: **0.2%** of saves under 2 s are followed by a `contract A: heartbeat timeout,
+  closing with 4004` within twelve seconds, **1.2%** at 2.5–3 s, **7.0%** at 3–3.5 s and
+  **50.8%** of the 63 saves over 3.5 s. The mod reconnects in about a second and the sidecar's
+  quiet-mod gate holds `MIGRATE_IN` until heartbeats resume, so each one costs a session churn
+  and a short delivery pause rather than an organism. Nothing else has been observed: no save
+  has logged `event=FAILED` since the species-history guard shipped, and the deferral ladder
+  has never run past 5 of 6. **The far end is the control and it is not in this discussion at
+  all**: one game on its own host, saving a comparable 354 KB world in 924 ms, on the mod's
+  own shipped cadence of `saveMinutes=10 saveKeep=6`. The five local worlds run `2` and `4`
+  because `run-m4.sh:270-271` overrides those defaults — an exit-test setting, chosen so a
+  test window would contain several saves, that nobody revisited when the rig became a
+  deployment. Risk 3 already names the escalation — a save that breaks the budget "needs a
+  different cadence, or a save path that does not block the tick" — and D14 accepts a slower
+  rig over a lost night. **Which of those the owner wants is the open question, and nothing
+  should be retuned before that answer**, because the mod says so on every breach line: *do
+  not lower the bar*.
 
 - **Slot 1 is depressed, and it is the world to keep an eye on.** It fell to a population of
   **2** in the 2026-08-08 ENOSPC incident and did not recover with its neighbours: readings
@@ -1215,6 +1263,7 @@ a verdict yet.
   two and a half. A small world produces few young of its own and depends on arrivals; the
   open question is whether the lanes alone carry it back to its neighbours' range or whether
   it settles low.
+
 - **`genomeGaps` is growing, and there is still no baseline that says whether it should
   be.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the map
   declared at `go/internal/archive/archive.go:170`): the set of genome hashes the archive has
