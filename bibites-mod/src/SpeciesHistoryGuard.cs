@@ -188,7 +188,17 @@ namespace BibitesMultiverse
             // better than turning a guard into the thing that breaks the save.
             try
             {
-                RepairAll(__instance);
+                // The repair is a span of binMs on the [M4-SAVE] line, not a separate phase; the
+                // bracket is here rather than a patch because patching a Harmony prefix is a knot.
+                SavePhases.GuardEnter();
+                try
+                {
+                    RepairAll(__instance);
+                }
+                finally
+                {
+                    SavePhases.GuardExit();
+                }
             }
             catch (Exception e)
             {

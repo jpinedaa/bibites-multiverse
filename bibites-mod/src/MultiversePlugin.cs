@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.6.2";
+        public const string Version = "0.6.3";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -40,6 +40,11 @@ namespace BibitesMultiverse
             // multiverse client: the defect it guards is the game's own, it stops a world saving at
             // all, and a world is worth saving whether or not this instance is wired into a map.
             SpeciesHistoryGuard.Apply(Guid);
+
+            // The save-stall decomposition, armed next to the guard because it times the same call and
+            // one of its spans is the guard. Measurement only: it patches nothing that changes what a
+            // save does, and if a span will not resolve every phase reads 0 and the save is unaffected.
+            SavePhases.Apply(Guid);
 
             // Also the game's own behaviour rather than the multiverse's, and also armed before a world
             // loads: the minimum-FPS servo starts governing the moment TimeKeeper does, so a later hook

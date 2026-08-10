@@ -314,10 +314,16 @@ namespace BibitesMultiverse
 
             Stopwatch total = Stopwatch.StartNew();
             long writeMs;
+            long verifyMs = 0;
             string failure = Write(partialPath, out writeMs);
             if (failure == null)
             {
+                // Verify re-opens the archive and reads its central directory, which carries one
+                // record per bibite and per egg — so it is the one part of the stall that grows with
+                // population, and it was the unlabelled remainder of stallMs until now.
+                long verifyStart = total.ElapsedMilliseconds;
                 failure = Verify(partialPath);
+                verifyMs = total.ElapsedMilliseconds - verifyStart;
             }
 
             long rotateStart = total.ElapsedMilliseconds;
@@ -366,7 +372,8 @@ namespace BibitesMultiverse
             bool withinBudget = stallMs <= StallBudgetMs;
             MultiversePlugin.Log.LogInfo(
                 $"{Prefix} event=SAVED why={why} n={SaveCount} world='{world}' path='{finalPath}' " +
-                $"stallMs={stallMs} writeMs={writeMs} rotateMs={rotateMs} budgetMs={StallBudgetMs} withinBudget={withinBudget} " +
+                $"stallMs={stallMs} writeMs={writeMs} verifyMs={verifyMs} rotateMs={rotateMs} " +
+                $"{SavePhases.Fields()} budgetMs={StallBudgetMs} withinBudget={withinBudget} " +
                 $"bytes={bytes} population={population} eggs={eggs} " +
                 $"simulatedTime={simulatedTime.ToString("F2", CultureInfo.InvariantCulture)} " +
                 $"rotatedTo={(rotated ?? "<none>")} pruned={pruned} keep={Keep}");
@@ -403,6 +410,10 @@ namespace BibitesMultiverse
             {
                 return "could not reach SaveSystem.CreateSave by reflection: " + e.Message;
             }
+
+            // Zero the phase accumulators here, not in Save(), so a reading can only ever describe the
+            // CreateSave drive loop the same stopwatch measures.
+            SavePhases.Reset();
 
             Stopwatch clock = Stopwatch.StartNew();
             try
