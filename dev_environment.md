@@ -74,9 +74,11 @@ seeds, saves and quits with nothing drawn and nobody watching. Windows reports
 `MainWindowHandle=0` for that process and gives it **no `GPU Engine` counter instances at
 all** — not idle ones, none — where a visual instance held ~24% of the GPU; CPU fell from
 1.50 to 1.10 cores, and a headless instance sitting at the menu is ~390 MB. The far end
-takes the same two flags through `start-slot6.ps1 -Headless`, and slot 6 has run that way
-since (*The living deployment*). Exactly one thing is lost, and it is not the simulation —
-see *A headless world's save thumbnail is blank* in Gotchas.
+takes the same two flags through `start-slot6.ps1 -Headless`, and slot 6 ran that way from
+2026-08-09 23:15Z to 2026-08-10 00:58Z and is drawn again since — the flip is proven in both
+directions and belongs to a start, not to the installation (*The living deployment*). Exactly
+one thing is lost, and it is not the simulation — see *A headless world's save thumbnail is
+blank* in Gotchas.
 
 ### The reference DLL set
 
@@ -819,10 +821,12 @@ nothing to accumulate.
 **`-Headless` goes with either start form**, and it adds Unity's `-batchmode -nographics` to
 the game launch and nothing else: the same world, the same saves, the same portals, drawn
 nowhere. Leaving the switch off the next start brings the picture back, so it is a property
-of a run and not of the installation. Slot 6 has run headless since 2026-08-09 (*The living
-deployment*). `start-slot6.ps1` is **generated** by `setup-farend.ps1`, so a far end installed
-before 2026-08-09 has a start script without the switch, and takes it only from a re-run of
-the installer out of the current bundle — or from the same edit by hand.
+of a run and not of the installation — and slot 6 has now been taken through it both ways,
+headless at 2026-08-09 23:15Z and drawn again at 2026-08-10 00:58Z, ~90 s of world downtime
+each way with the sidecar up throughout and a time-scale re-send needed after every one of
+them (*The living deployment*). `start-slot6.ps1` is **generated** by `setup-farend.ps1`, so a
+far end installed before 2026-08-09 has a start script without the switch, and takes it only
+from a re-run of the installer out of the current bundle — or from the same edit by hand.
 
 ### Owner steps: making the relay and the status page reachable (elevated, on this machine)
 
@@ -1170,25 +1174,36 @@ reconnected by itself both times — at 12:07:10 on 2026-08-08 — so the map fo
 no bypass and no `no_peer` closure. There is no far-end step in the ritual below, and adding
 one would be a D9 violation as well as unnecessary.
 
-### Slot 6 runs headless, since 2026-08-09
+### Slot 6's headless window, 2026-08-09 23:15Z to 2026-08-10 00:58Z
 
-The second computer's game now runs under `-batchmode -nographics`. The switch was a save, a
-quit that took 13 s and exited clean, and `.\start-slot6.ps1 -GameOnly -Headless` against the
-sidecar that never went down. **It is the same world**: `simulatedTime` runs continuously
-across the restart, and the sidecar held its slot, its relay session and its custody
-throughout, so the map never saw a hole. Nothing on the status page distinguishes a headless
-slot from a drawn one, which is the point.
+**The mode belongs to a start, and it has now been flipped both ways.** The second computer's
+game ran under `-batchmode -nographics` for that 1 h 43 m and has been drawn again since. Each
+flip is the same two moves — a clean quit, whose save-on-quit writes the world out, then
+`.\start-slot6.ps1 -GameOnly` with or without `-Headless` — and each costs about **90 s of
+world downtime** and nothing else. Going headless quit in 13 s; coming back quit in 3 s and
+left `M4-Slot6-20260810T005739Z.zip` behind. **It is the same world across both**:
+`simulatedTime` and the population run continuously through each restart, and the sidecar held
+its slot, its relay session and its custody throughout, so the map never saw a hole. Nothing
+on the status page distinguishes a headless slot from a drawn one, which is the point.
 
-Two things came out of the first hours. The periodic save is **faster** with nothing to
+Two things came out of the headless hours. The periodic save is **faster** with nothing to
 draw — one 2 485 ms warm-up sample, the only breach of Risk 3's 2 000 ms budget, and then
 672 ms steady against 1 093–1 535 ms in visual mode. And the sidecar's custody replay burst
 briefly outran its send buffer: one transient `1011: outbound queue full` disconnect,
 reconnected clean, no organism lost — the backlog draining as designed rather than a fault.
 
-**The restart reset the runtime time scale**: slot 6 came back at ×1 and was set to ×6.5 on
-that machine. Headless has nothing to do with that — the switch is a restart, so it inherits
-the gotcha whole and adds nothing to it (*A world can be at the wrong time scale*, in
-Gotchas).
+**The return trip added two facts and no surprises.** The window handle and the `GPU Engine`
+counters come back with the picture — ~60–80% of that machine's 3d engine for the process,
+where headless had no counter instances at all — so the process-level evidence is symmetric in
+both directions. And the replay burst threw the **same** single `1011: outbound queue full`
+and healed itself again, which makes that a property of a backlog draining after any world
+absence, not of either mode.
+
+**Every one of these restarts resets the runtime time scale.** Slot 6 came back at ×1 the
+first time and was set to ×6.5; the second time a `timescale 6.5` sent mid-settle answered
+`Time.timeScale=3.32`, and the documented re-send took it to 6.50. Headless has nothing to do
+with that — a flip is a restart, so it inherits the gotcha whole and adds nothing to it (*A
+world can be at the wrong time scale*, in Gotchas).
 
 ### Bringing it back after a reboot
 
