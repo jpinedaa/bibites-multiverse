@@ -62,6 +62,17 @@ extension of these fields (§19, A43). §19 narrows one sentence of §18's A39 �
 list is now visible, though still never actionable by any other party. Affected body text
 carries an `(amended — §19, Ax)` or `(added — §19, Ax)` marker, and **§19 wins over the body
 and over §13, §14, §15, §16, §17 and §18 wherever they disagree.**
+**Amended:** 2026-08-10, amendment set `contract-a/2.3 + A45–A46` (§20), from the owner's
+ratification of **a longer allowed disconnect time and a longer interval between saves**. This
+set changes **one §10 default and nothing else**: `heartbeatTimeoutMs` rises from `3500` to
+`13000`, because the mod composes its heartbeat on the Unity main thread and D14's periodic
+world save blocks that thread — so a long save *is* heartbeat silence, and the living deployment
+turned 3.5 s into a routine `4004`. No field, type, enum, message or close code changes, so
+§3.1's own test answers **no bump** and the identifier stays `contract-a/2.3` (§20, A46),
+following §18 A40's precedent exactly. The save-interval half never reached this wire: §10 has
+always defaulted `saveMinutes` to `10` and named the mod as its owner, and what changed is that
+the rig stopped overriding it. Affected body text carries an `(amended — §20, Ax)` marker, and
+**§20 wins over the body and over §13 to §19 wherever they disagree.**
 **Status:** implementation-ready for M4. Derived from the ratified decisions D1–D20 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, the world-geometry and
 entry-position research in `m2_findings.md`, the ring, containment and lineage designs in
@@ -150,7 +161,7 @@ message — it terminates the session.
 | `4001` | `SLOT_MISMATCH` | sidecar | `CONFIG_UPDATE.ringSlot` disagrees with the slot the sidecar holds. A mis-wired rig. The mod **MUST NOT** reconnect automatically. Named `SECTOR_MISMATCH` in M2, over the retired `{x, y}` sector; the code and the behaviour are unchanged (amended — §14, A14). |
 | `4002` | `GAME_VERSION_UNSUPPORTED` | sidecar | `bb8-schema` has no support for `CONFIG_UPDATE.gameVersion`. The mod **MUST NOT** reconnect automatically. |
 | `4003` | `MALFORMED_FRAME` | either | A frame was not valid JSON, or the envelope was missing a REQUIRED field. The mod reconnects with backoff. |
-| `4004` | `HEARTBEAT_TIMEOUT` | sidecar | No `HEARTBEAT` within `heartbeatTimeoutMs`. See §8. The mod reconnects with backoff. |
+| `4004` | `HEARTBEAT_TIMEOUT` | sidecar | No `HEARTBEAT` within `heartbeatTimeoutMs`. See §8. The mod reconnects with backoff. **It is also the code for the transport half of §8's table** — no pong within `wsPongTimeoutMs` — because the reaction is identical and a mod must never have to tell them apart (stated — §20, A45). **A diagnosis does have to**, and the sidecar's own log is where: the heartbeat path logs a `silentFor`, the pong path logs an `err`. |
 | `4005` | `SHUTTING_DOWN` | either | The sender is draining. The mod reconnects with backoff. |
 | `4006` | `REPLACED` | sidecar | A newer mod connection took over. The old connection **MUST NOT** reconnect. |
 
@@ -1751,8 +1762,16 @@ republishes, has been mandatory since `contract-a/2.0`.
 
 | Direction | Mechanism | Interval | Timeout |
 |---|---|---|---|
-| mod → sidecar | `HEARTBEAT` message | `heartbeatIntervalMs` = 1000 ms wall clock | `heartbeatTimeoutMs` = 3500 ms |
+| mod → sidecar | `HEARTBEAT` message | `heartbeatIntervalMs` = 1000 ms wall clock | `heartbeatTimeoutMs` = 13000 ms (raised from 3500 — §20, A45) |
 | sidecar → mod | WebSocket ping / pong frames | `wsPingIntervalMs` = 15000 ms | `wsPongTimeoutMs` = 10000 ms |
+
+**The two rows measure two different threads, and that is the point** (added — §20, A45). The
+`HEARTBEAT` is composed where the mod's control logic runs — the Unity main thread (§11.2, §13
+A4) — so it reports that the *simulation* is answering. The ping/pong is answered by the socket
+layer on the mod's transport thread, so it reports that the *process* is reachable. A blocking
+world save stops the first and not the second, which is why the first deadline is the one A45
+raised: 13 000 ms is sized to contain a save (§20, A45), and 3 500 ms declared a healthy world
+dead several times an hour.
 
 The mod's heartbeat timer runs on wall-clock time, not simulated time. A paused sim, a
 `0×` time scale and a 20× time scale all produce the same heartbeat cadence.
@@ -1763,7 +1782,16 @@ The mod's heartbeat timer runs on wall-clock time, not simulated time. A paused 
 `heartbeatTimeoutMs` runs. A mod that recovers inside the window resumes delivery and
 nothing else happens; a mod that does not still gets the `4004` below, on schedule. What
 this removes is the third outcome the slot-6 livelock exposed: a sidecar force-feeding
-deliveries into a stalling main thread for the whole 3.5 s and then replaying all of them.
+deliveries into a stalling main thread for the whole countdown and then replaying all of them.
+
+**Four deadlines govern a quiet mod, and the order they fire in is the design** (added — §20,
+A45): `heartbeatDeliveryGraceMs` (1 500) holds delivery, `pacingIdleGraceMs` (10 000) stops the
+pacing clock, `heartbeatTimeoutMs` (13 000) closes with `4004`, and `wsPingIntervalMs` (15 000)
+is the transport's own cadence behind all three. Every gap is load-bearing: the hold must trip
+first or a stalling mod is flooded (§15, A29), and the close must stay under the ping or the
+informative `4004` is not the one an operator reads. A45 raised the third and moved nothing
+else, which inverted the middle pair — the pacing clock now stops *before* the close rather than
+after it, and both branches release nothing, so the behaviour is unchanged.
 
 **When heartbeats stop**, the sidecar **MUST**, in this order:
 
@@ -1891,7 +1919,7 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 |---|---|---|---|
 | `port` | `8787` | both | The sidecar's listen port and the mod's connect port. The M3 rig used `8787`–`8789` for slots 1 to 3; the M4 rig runs six instances, so it uses `8787` to `8792` for slots 1 to 6 (amended — §15, A18). |
 | `heartbeatIntervalMs` | `1000` | mod | Wall-clock heartbeat cadence. |
-| `heartbeatTimeoutMs` | `3500` | sidecar | Three missed heartbeats plus slack. |
+| `heartbeatTimeoutMs` | `13000` | sidecar | Twelve missed heartbeats plus slack. **Raised from `3500` — three missed heartbeats plus slack — on 2026-08-10** (§20, A45): the heartbeat is composed on the Unity main thread and a blocking world save stops it, so 3 500 ms declared a healthy world dead on 50.8% of the saves that overran it, against a measured save maximum of 9 427 ms. 13 000 clears that by 3 573 ms and stays under `wsPingIntervalMs` so the app-level detector always fires first. **It gains a knob with the raise** — `--heartbeat-timeout` / `MULTIVERSE_HEARTBEAT_TIMEOUT` — because it had none and the tail it is sized from moves with the regime. |
 | `wsPingIntervalMs` | `15000` | sidecar | WebSocket ping cadence. |
 | `wsPongTimeoutMs` | `10000` | sidecar | Pong deadline. |
 | `migrateOutTimeoutMs` | `5000` | mod | How long the mod waits for an ACK/NACK before it stops waiting — the organism stays inert either way (§6.3). |
@@ -1918,7 +1946,7 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `inboundRatePerSimMinute` | `100.0` | sidecar | Maximum `MIGRATE_IN` deliveries released per **simulated** minute of the receiving world (§7.5, §15 A20). **Raised from `2.0` to `12.0` and then to `100.0` on 2026-08-07** (§18, A40): 2.0 was five times T1's measured one-lane rate, D13 then D17 multiplied the inbound surface past it, and 12.0's five-times-the-median projection was made before two-way lanes ran and did not clear the residual backlog once they did. 100.0 is sized from A29's ingest ceiling instead, two orders below it. **It gains a knob with the raise** — `--inbound-rate` / `MULTIVERSE_INBOUND_RATE` — because it had none. |
 | `inboundRateBurst` | `50` | sidecar | Token-bucket capacity for that rate, so ordinary traffic is never delayed (§7.5, §15 A20). **Raised from `5` to `15` and then to `50` on 2026-08-07** (§18, A40): it scales with the rate but stays under `inboundQueueMax` (64), so the bucket can never release a full paced queue in one breath. **It gains its own knob too** (`--inbound-burst` / `MULTIVERSE_INBOUND_BURST`, added — `contract-b-m4.md` §18, B16): a rate knob without a burst knob cannot be exercised, because a bucket of 50 absorbs any burst small enough to force by hand and the pacing then never runs at all. |
 | `pacingIdleGraceMs` | `10000` | sidecar | Wall-clock silence from `HEARTBEAT` after which the pacing clock stops advancing (§7.5, §15 A20). |
-| `heartbeatDeliveryGraceMs` | `1500` | sidecar | Age of the newest `HEARTBEAT` beyond which `MIGRATE_IN` release is held — the quiet-mod gate that trips before `heartbeatTimeoutMs` does (§7.5, §8, §15 A29). |
+| `heartbeatDeliveryGraceMs` | `1500` | sidecar | Age of the newest `HEARTBEAT` beyond which `MIGRATE_IN` release is held — the quiet-mod gate that trips before `heartbeatTimeoutMs` does (§7.5, §8, §15 A29). **It did not move with A45's raise, deliberately** (§20): its whole value is tripping long before the close, and it is what makes the longer tolerance lossless rather than a longer flood. |
 | `replayDelayStepMs` | `500` | sidecar | Per-generation step of the reconnect replay delay, keyed on the batch's least-delivered `attempt` (§7.5, §15 A29). |
 | `replayDelayCapMs` | `5000` | sidecar | Ceiling of that delay (§7.5, §15 A29). |
 
@@ -3152,6 +3180,11 @@ the cycle, and all five together are why it cannot re-form:
    arrangement — `pacingIdleGraceMs` (10 s) far beyond `heartbeatTimeoutMs` (3.5 s) —
    meant the pause branch could never win the race against the close: the sidecar
    force-fed a dying connection right up to the `4004`. It delays, never drops.
+   (**Amended — §20, A45:** `heartbeatTimeoutMs` is now 13 s, so that pair has inverted and
+   the pacer's idle grace trips *before* the close on a long stall. It changes nothing here —
+   both branches release nothing, and this gate still trips first, at 1.5 s. What A45 did
+   change is how much this defence now carries: the window it holds arrivals across is the
+   full thirteen seconds, and holding them is the cheaper half of that trade.)
    **Enforced by: the sidecar.**
 4. **The session-scoped bucket and the escalating replay delay** (§7.5). The pacing bucket
    is no longer reset on every socket connect — a same-session reconnect is the same world
@@ -3169,8 +3202,10 @@ its whole queue in one tick, or wipes its ledger on reconnect, satisfies every p
 sentence of this document and still livelocks exactly as slot 6 did. Rules 3 and 4 are
 sidecar-law with named defaults in §10 (`heartbeatDeliveryGraceMs`, `replayDelayStepMs`,
 `replayDelayCapMs`). None of the five changes a message, a field, an enum or the custody
-chain: `4004` still closes at 3500 ms, replay is still unconditional, pacing still runs on
-simulated time and still never reorders, and the spawn is still the proof of delivery.
+chain: `4004` still closes at 3500 ms (**amended — §20, A45**: at 13000 ms since 2026-08-10 —
+A29 did not move the deadline, and A45 moved only the deadline), replay is still unconditional,
+pacing still runs on simulated time and still never reorders, and the spawn is still the proof
+of delivery.
 
 **Enforced by:** both sides, each for its own half — which is the point. The livelock was
 a composition of correct parts, so the defence had to be composed too.
@@ -4169,3 +4204,185 @@ wrong number:**
 
 **Enforced by:** both sides, symmetrically. Each sends `"contract-a/2.3"` and compares only the
 major.
+
+---
+
+## 20. The heartbeat timeout rises (`contract-a/2.3`, 2026-08-10)
+
+The owner ratified **a longer allowed disconnect time, alongside a longer interval between
+saves**, on 2026-08-10, against the running M4 deployment. Only the first half reaches this
+wire; the save interval was never this document's to set — §10 already gives `saveMinutes` a
+default of `10` and names the mod as its owner, and what changed there is that
+`e2e/run-m4-lan.sh` stopped overriding it.
+
+**Two amendments, A45 and A46.** A45 raises `heartbeatTimeoutMs` from `3500` to `13000` and
+gives it the knob it never had; A46 applies §3.1's version test and finds **no version move at
+all**. `contract-b-m4.md` needs no matching set: nothing about a slot's liveness *shape*
+changes on that wire, only how long a slot may be silent before this side publishes
+`modConnected: false`.
+
+**This set changes one §10 default and nothing else.** No field, no message, no enum, no close
+code, no NACK code, no change to custody, dedup, pacing, geometry or routing — so §3.1's own
+test answers *no bump*, exactly as it did for §18's A40, which is this set's closest precedent
+in both kind and reasoning (A46).
+
+> ### Why a liveness deadline had the wrong number for as long as a save timer has existed
+>
+> `3500` has been in this document since `contract-a/1`, and it was right for two milestones
+> because nothing on the mod's main thread ever blocked for seconds at a time. D14's periodic
+> save shipped on 2026-08-06 and made it wrong the same day; the deployment took four days to
+> say so out loud, which is what a watch item is for.
+>
+> `3500` was derived from the interval: three missed heartbeats plus slack, which is the right
+> shape for a deadline that answers *is the mod's process alive*. What it never accounted for is
+> that on this mod the heartbeat is composed on the **Unity main thread** (§11.2; §13 A4 made
+> that a rule: `Update` carries control), and D14's periodic world save runs **on that same
+> thread, synchronously** — `WorldSaver.cs:68-73` records why a coroutine save was rejected. So
+> a save is not merely *slow*; for its whole duration it **is** heartbeat silence, and it is
+> silence from a mod that is perfectly healthy and will resume.
+>
+> The two facts were both written down and never multiplied together. §8 assumed silence meant
+> absence; D14 assumed a save was a throughput cost. The deployment did the multiplication:
+> **50.8% of saves over 3.5 s were followed by a `4004` within twelve seconds**, against 0.2%
+> of saves under 2 s (`dev_environment.md`, *Watch items*).
+>
+> A29 is why this was a churn rather than an incident, and it is also why the fix is a number
+> rather than a mechanism. Every one of its five defences held: custody was never released,
+> `timeoutBounces` stayed 0 across thirteen hours, the quiet-mod gate held arrivals instead of
+> force-feeding them, and the mod reconnected in about a second. The deployment was **paying a
+> session churn, an edge-close broadcast and a replay** to detect an absence that was not there.
+
+### A45 — `heartbeatTimeoutMs` rises to 13 000, because a world save is heartbeat silence (§7.5, §8, §10, §15 A29)
+
+*A default change and a new flag. No field, no message, no version.*
+
+**The evidence, from the living deployment.** The five local worlds save on a timer and the
+save blocks the thread that heartbeats, so every save is a race against `heartbeatTimeoutMs`.
+Thirteen hours at ×100 measured 1 801 saves across five worlds
+(`e2e/logs-m4-lan/bepinex/*.minfps.*`):
+
+| Reading | Value |
+|---|---|
+| `event=BUDGET_EXCEEDED` against D14's 2 000 ms budget | **13.9%** of saves |
+| Per-slot median stall | 686 / 1 530 / 1 699 / 1 474 / 1 345 ms |
+| Per-slot **maximum** stall | 4 311 / 5 386 / 5 870 / 9 115 / **9 427** ms |
+| Saves followed by `contract A: heartbeat timeout, closing with 4004` within 12 s | **0.2%** under 2 s, **1.2%** at 2.5–3 s, **7.0%** at 3–3.5 s, **50.8%** over 3.5 s |
+| Cost of the churn | one session per event; `timeoutBounces` **0**, `event=FAILED` **0**, populations grew |
+
+**Resolution.**
+
+| Knob | Was | Becomes | Why this number |
+|---|---|---|---|
+| `heartbeatTimeoutMs` | `3500` | **`13000`** | **Sized from the measured save tail, then bounded by the deadline above it.** It clears the worst save ever logged here — 9 427 ms — by **3 573 ms**, which is more slack than the entire retired timeout and a **38%** margin on the worst case. It stays strictly under `wsPingIntervalMs` (15 000), so the application-layer detector always fires before the transport one. And it keeps §8's arithmetic intact: twelve missed heartbeats plus a beat of slack. |
+| The knob itself | none | `--heartbeat-timeout`, `MULTIVERSE_HEARTBEAT_TIMEOUT` | A40's rule, applied to a value it fits better than the one it was written for: *a tunable an operator cannot retune from the metric that measures it is not a tunable.* The metric here is the `[M4-SAVE]` stall distribution, and it has moved with **every** regime change this rig has made — 120–172 ms per 100 KB in the exit test, 300–389 at ×5 drawn, 538–665 in the first hour of headless ×100, 414–461 once the worlds grew into it. A deadline sized from a moving tail must be reachable without a rebuild. `0` keeps the default. |
+
+**Why 13 000 and not 12 000, and not 15 000.** The floor is set by the tail and the ceiling by
+the next deadline up, and 12 000 and 15 000 each fail one of them.
+
+- **12 000** clears 9 427 ms by 2 573 ms — a **27%** margin — and the tail it is being measured
+  against is not stationary. The 9 427 is a single sample from one generation of one regime, and
+  the *per-kilobyte* cost of a save has roughly doubled once already, on a change (headless at
+  ×100) that was expected to make it cheaper. A margin thinner than a third of the worst case
+  buys the next regime change the same bug back.
+- **15 000** collides with `wsPingIntervalMs`. Both liveness paths close with the **same code**,
+  `4004` (§2.1; the sidecar's `modPinger` uses it for a pong timeout too), so a timeout that can
+  be reached in the same instant as a ping makes an operator's `4004` ambiguous — and only the
+  heartbeat path logs a `silentFor`, which is the field the dose response above was matched on.
+  Keeping the app-level deadline strictly under the transport's cadence keeps the informative
+  close the one that fires.
+- **13 000** sits between them, is a whole number of heartbeat intervals, and leaves the
+  transport's worst case (`wsPingIntervalMs` + `wsPongTimeoutMs` = 25 000) nearly twice as far
+  out as the deadline that should always win.
+
+**What this is bought with, stated as a cost and not as a footnote.** A dead mod is now detected
+**later, by the same amount**: up to 13 000 ms plus one monitor tick — the sidecar polls at
+`heartbeatTimeoutMs / 4`, so worst case ≈ 16.25 s, against ≈ 4.4 s before. For that whole window
+the sidecar publishes `modConnected: true`, this world stays in every other peer's deliverable
+set, and §8's five obligations do not run: no edge closes, no lane re-pairs around it, and
+inbound organisms keep arriving. **What holds them is A29's quiet-mod gate**, which trips at
+`heartbeatDeliveryGraceMs` (1 500 ms) and is untouched by this raise. So the arrivals sit in the
+journal, in order, with custody taken and nothing released, bounded by `inboundQueueMax` (64)
+and then by upstream `OVERLOADED` backpressure. **Holding is lossless; the `4004` it replaces
+was not free.** That is the whole trade: an absent mod's neighbours wait about twelve seconds
+longer to learn it is absent, and in exchange a *present* mod stops being declared absent
+several times an hour.
+
+**One deadline pair inverts, and it is safe.** A29's defence 3 was written against
+`pacingIdleGraceMs` (10 000) sitting *beyond* `heartbeatTimeoutMs` (3 500), so the pacer's idle
+branch could never trip during a stall. At 13 000 it can, and it now trips **first** on a stall
+past ten seconds. Nothing changes: both branches release nothing, and the quiet-mod gate has
+already held delivery since 1 500 ms. The ordering that matters is unchanged and is now
+**1 500 → 10 000 → 13 000 → 15 000** — hold delivery, stop the pacing clock, close the session,
+ping the transport. A29's rule 3 carries an `(amended — §20, A45)` marker at the sentence that
+named the old pair.
+
+**What was checked and deliberately not changed:**
+
+- **`heartbeatDeliveryGraceMs` stays 1 500.** It is the *early* gate, and its whole value is
+  tripping long before the close. Raising it with the timeout would re-create exactly the
+  force-feeding A29 removed.
+- **`wsPingIntervalMs` and `wsPongTimeoutMs` stay 15 000 / 10 000.** The transport half is
+  answered off the mod's socket thread — the mod's WebSocket runs on a background task
+  (`WebSocketTransport.cs` `RunAsync`) and the framing layer pongs without the main thread — so
+  a main-thread stall has never been a pong failure and does not become one. This is also why
+  raising the *application-layer* deadline is the change that works: the two halves of §8's
+  table measure different threads, on purpose.
+- **The mod side needs nothing.** `heartbeatTimeoutMs` is sidecar-owned (§10) and the mod has no
+  matching constant: `HeartbeatIntervalMs`, `ReconnectBackoffMinMs`/`MaxMs` and
+  `StableSessionMs` are all independent of it, and a mod that keeps sending at 1 000 ms is
+  conformant against either value. **No mod version moves for this amendment.**
+- **`replayDelayStepMs`/`replayDelayCapMs` stay 500 / 5 000.** They are keyed on the batch's
+  delivery generation, not on the timeout, and a raise that produces *fewer* generations only
+  makes them milder.
+- **D14's 2 000 ms save budget is NOT moved.** It is a different bar, measuring a different
+  thing — how long a world freezes — and the mod still logs `event=BUDGET_EXCEEDED` on every
+  breach. This amendment stops a breach costing a session; it does not license one. The
+  mod's own line on every breach still stands: *do not lower the bar.*
+
+**Enforced by:** the sidecar. The mod's obligations are unchanged in both directions — it still
+sends at `heartbeatIntervalMs`, and it still may not infer anything from how long it is allowed
+to be quiet.
+
+### A46 — `contract-a/2.3` is unchanged, and the path does not move (§2, §3, §3.1)
+
+**Change.** §3.1: additive fields raise the **minor**; field removal, type changes and
+enum-value removal require a **major**. A45 does none of the four.
+
+**Resolution.** Apply the contract's own test, item by item:
+
+| Change to Contract A | Kind | Needs a minor? | Needs a major? |
+|---|---|---|---|
+| `heartbeatTimeoutMs` 3500 → 13000 (A45) | a §10 default value | no | no |
+| `--heartbeat-timeout` / `MULTIVERSE_HEARTBEAT_TIMEOUT` | a sidecar-local operator knob, invisible on the wire | no | no |
+| The 1 500 → 10 000 → 13 000 → 15 000 deadline order | a stated relationship between existing defaults | no | no |
+| §2.1's `4004` row naming the pong path too | **a rule made explicit**, not changed: `modPinger` has closed with `4004` since M2 and the mod's reaction was always the same one | no | no |
+| A29 rule 3's superseded sentence | a rationale corrected where it named the old pair | no | no |
+| Message catalogue, field tables, enums, close codes, NACK codes, custody chain, pacing | **all unchanged** | no | no |
+
+The identifier stays **`contract-a/2.3`** and the path stays **`/contract-a/v2`**. This is
+**A40's case exactly** — a §10 default that the deployment measured wrong and that gains its
+first knob with the correction — and A41's reasoning applies unchanged: there is **no field to
+detect**, so spending a minor here would state that `contract-a/2.3` cannot do this, and
+`contract-a/2.3` can. A mod that goes quiet for four seconds is legal against a
+`contract-a/2.3` sidecar today; whether that sidecar closes the socket is the sidecar's local
+policy, expressed in its own default and now in its own flag.
+
+**What a mixed rig does.** This one is worth stating because the running deployment **is** a
+mixed rig for as long as one sidecar has not restarted:
+
+1. A sidecar on `13000` with any `contract-a/2.x` mod: the target configuration. The mod sends
+   heartbeats at its own cadence and never learns the deadline.
+2. A sidecar still on `3500` beside sidecars on `13000` — the state of every rolling restart —
+   is **correct and merely less tolerant**. Each sidecar owns the liveness of exactly one mod,
+   on its own loopback socket; nothing about that judgement is shared, compared, or published
+   as a number. The slot on the old value goes on taking a `4004` per long save and recovering
+   from it, which is the behaviour of the last four days.
+3. The far end (slot 6) on the old value is the same case, and it is quieter still: its saves
+   run 567–924 ms, an order of magnitude under either deadline.
+
+**No configuration produces a lost organism, a refused arrival, or a wrong number** — the
+standard A37 and A41 held their sets to. A `4004` avoided and a `4004` taken differ only in
+whether a session churns; custody, dedup and the journal are the same on both paths (§8, §7.4).
+
+**Enforced by:** both sides, symmetrically. Each keeps sending `"contract-a/2.3"` and comparing
+only the major.
