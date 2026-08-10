@@ -2204,6 +2204,7 @@ tunable above — it is the record, and nothing evicts from it (§20, B20).
 | Ask the source first | The envelope's `sourcePeer` hashed the blob and cached it, so it is the peer most likely to have it. |
 | Then ask around | On `unknown_hash`, try other live peers in structural order, one at a time. |
 | Rate limit | At most `genomeRequestsPerMinute` (30) requests from one requester to one peer. The answering sidecar enforces the same limit and answers `rate_limited` above it. |
+| Pace it, and bound the pass (added — §21, B21) | The rate above is **not** a budget. One pass of the queue examines at most `genomeScanPerTick` gaps, round-robin over a stable order and resumed where the last pass stopped; releases the requester's own lock every `genomeScanChunkSize` gaps, so its read loop is never starved; and sends at most `genomeRequestsPerTick` requests, carrying at most `genomeInFlightPerPeer` unanswered to any one peer. **None of it changes when a gap is retried** — see §21 for the incident that made a 64,736-entry backlog cost 7,789 ledger records. |
 | Retry schedule | 1 minute, 5 minutes, 30 minutes, 6 hours, then daily. Reset the ladder when the map's membership changes — a peer that just came back may hold what nobody had. |
 | Keep the hash forever | A hash with no genome is a permanent, useful record: it is still a lineage-graph node, and a fetch that failed for a year can succeed tomorrow. |
 | Verify | Recompute the hash of every fetched blob (§6.10). |
@@ -2396,7 +2397,11 @@ crossing" is now one of those claims.
 | `maxPayloadBytes` | `4194304` | both | Shared with `contract-a.md` §10. Applies to `body.bb8` and to a `GENOME_RESPONSE` body. |
 | `archiveQueueMax` | `1024` | relay | Copied frames buffered per subscriber before the oldest is dropped (§5.1). |
 | `genomeRequestTimeoutMs` | `15000` | requester | How long a requester waits for a `GENOME_RESPONSE` before it counts the attempt as failed. **Requester-side only, and deliberately the only entry** — see the note below. |
-| `genomeRequestsPerMinute` | `30` | both | Per requester, per answering peer. Enforced on both sides (§10). |
+| `genomeRequestsPerMinute` | `30` | both | Per requester, per answering peer. Enforced on both sides (§10). **It is a RATE and it is not a burst bound, nor a bound on the work of one pass** — see `genomeScanPerTick` below and §21, B21. |
+| `genomeScanPerTick` | `2048` | requester | **New after M4** (added — §21, B21). How many pending gaps one pass of the fetch queue may examine, walked round-robin over a stable order and resumed where the last pass stopped. It bounds the WORK of a pass, so the cost of a pass stops growing with the backlog. |
+| `genomeScanChunkSize` | `256` | requester | **New after M4** (added — §21, B21). How many gaps may be examined under one acquisition of the requester's own lock. It is the yield: it bounds how long the requester's read loop can be kept from the socket, whatever the backlog. |
+| `genomeRequestsPerTick` | `8` | requester | **New after M4** (added — §21, B21). How many `GENOME_REQUEST`s one pass may put on the wire. It bounds the BURST. Set far above what `genomeRequestsPerMinute` can sustain, so it never lowers the fetch rate. |
+| `genomeInFlightPerPeer` | `8` | requester | **New after M4** (added — §21, B21). Unanswered `GENOME_REQUEST`s one requester may be carrying to one peer at any instant, independent of the rate. At `genomeRequestTimeoutMs` it still admits more than `genomeRequestsPerMinute` permits, so it too never binds before the rate does. |
 | `genomeCacheRetentionDays` | `30` | sidecar | Genome cache lifetime, least-recently-served. |
 | `genomeCacheMaxBytes` | `2147483648` | sidecar | 2 GiB cap on `<data-dir>/genomes/`. |
 | `journalCompactMinutes` | `15` | sidecar | **New after M4** (added — §20, B20). How often the journal is rewritten to the entries it still holds. `--journal-compact-minutes`, `MULTIVERSE_JOURNAL_COMPACT_MINUTES`. |
@@ -3388,3 +3393,84 @@ for reading past a damaged line rather than stopping at one it can never rewrite
 **every process**, for bounding a log it was given the path of; the
 **genome store**, for its error path and its sweep; and the **operator**, for
 sizing a disk against a ledger that no rule in this document will ever shrink.
+
+## 21. The fetch queue's own bounds (2026-08-10)
+
+On the evening of **2026-08-10** the living deployment's archive spent thirty minutes
+unable to hold a relay session: **26 drops and 26 reconnects between 20:22:52Z and
+20:52:23Z**, absent for 12% of that span, and **7,789 crossings** — 23% of everything that
+crossed while it ran — are permanently missing from the ledger as a result. Nothing was
+wrong with the wire, the map or the traffic: `timeoutBounces` stayed 0, no sidecar dropped,
+no mod took a `4004`, and 24 of 24 lanes read `peer_live` throughout. What was wrong was
+that §10 gave the genome fetcher a **rate** and never gave it a **budget**.
+
+`genomeRequestsPerMinute` bounds how many requests one requester may send one peer per
+minute. It says nothing about how much work a single pass of the queue may do, and nothing
+about how many of that minute's requests may leave at once. At a backlog of 64,736 gaps —
+which the ×100 regime reaches in a day, because the crossing rate no longer falls low enough
+for the queue to drain — both of those unstated numbers were the whole problem. The archive's
+pass walked all 64,736 entries under the one lock its frame handler also needs, `stat`ing the
+genome store once per entry: **0.3 to 1.0 s of held lock per one-second pass**, measured, and
+more under host load. Its read loop was admitted about once per pass instead of the ~30
+frames a second the relay was copying to it, the relay's per-subscriber outbound queue filled
+in about four seconds, and **the relay closed the session with `1011 "outbound queue full"`**.
+The resubscribe changed nothing about the backlog, so it happened again, and again.
+
+**One amendment, B21**, continuing the `B` series for the reason §14 gives.
+
+**This set does not change the wire.** No message type, no field, no enum value, no NACK
+code, no change to custody, dedup, the hold, the fan-out, hashing, routing or admission
+control — and no change to what any peer sends or accepts. A requester running the bound
+still never exceeds `genomeRequestsPerMinute` to any peer, still asks the source first and
+then the ring in structural order, and still retries on §10's ladder at the same moments;
+it merely spreads the same requests over the minute instead of emptying the allowance into
+one millisecond. §4's test therefore answers **neither major nor minor**, and the identifier
+stays at **`contract-b/3.5`**. This is a statement about what a requester does to its own
+read loop.
+
+### B21 — A rate is not a budget: the fetch queue bounds its own work, its burst and its concurrency (§10)
+
+**Gap.** §10's *Fetch behaviour, archive side* table named a rate limit, a retry ladder and
+"keep the hash forever", and between them they describe a queue that may grow without bound
+while the cost of one pass over it grows with its size. Nothing in this document said that a
+requester must not spend an unbounded amount of time in one pass, must not hold its own lock
+across the whole of one, or must not put a whole rate window on the wire in one burst. On a
+small backlog none of that is visible: with 60 gaps the pass is free, and the flat zeros of
+2026-08-07 hid the shape completely. **The rule was missing for as long as the queue was
+small, which is exactly how long nobody could have measured it.**
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| A pass is bounded in work, not in backlog | A requester MUST examine at most `genomeScanPerTick` pending gaps in one pass of its fetch queue. The cost of a pass is then a property of the requester and not of how far behind it is, which is the only form in which that cost is bounded at all. |
+| The whole backlog is still visited, and in a fixed order | The walk MUST be round-robin over a **stable** order and MUST resume where the previous pass stopped, so a full cycle takes `ceil(len(pending)/genomeScanPerTick)` passes and **no gap can be starved**. A budgeted walk over a hash map is not enough: map iteration order is unspecified, and a bounded prefix of a random order leaves a hash unexamined for an unbounded number of passes. |
+| A pass MUST yield, and this is the rule the incident is about | A requester MUST NOT hold, across a whole pass, any lock that its own read loop or heartbeat needs. It MUST release and retake that lock at least every `genomeScanChunkSize` gaps. **A subscriber that stops reading is indistinguishable from a subscriber that is gone**, and the relay will treat it as one: the peer's outbound queue fills and the relay closes the session (§5.1, `archiveQueueMax`; `contract-a.md` §11.1's "close rather than grow without limit"). Risk 4 says nothing on the migration path may wait for a reader — it does not say the reader may stop reading. |
+| The burst is bounded independently of the rate | A requester MUST send at most `genomeRequestsPerTick` `GENOME_REQUEST`s in one pass. `genomeRequestsPerMinute` admits a whole window's worth the instant the window opens; a pass over a large backlog therefore emptied the allowance for **every** peer inside a few milliseconds and then sent nothing for the rest of the minute. The same requests, spread, cost the same rate and no burst. |
+| Concurrency is bounded independently of the rate | A requester MUST NOT carry more than `genomeInFlightPerPeer` unanswered requests to one peer. Both new bounds are sized **above** what `genomeRequestsPerMinute` can sustain, so neither ever lowers the fetch rate; they bound the shape of the traffic, not its volume. |
+| A resubscribe inherits no in-flight requests, and no ladder change either | A request sent on a session that has ended can never be answered, so on a new session a requester MUST forget its per-peer in-flight **accounting** — otherwise a flap leaves the new session's concurrency budget already spent and the fetch stalls for a whole `genomeRequestTimeoutMs`. It MUST NOT touch anything else: attempts, `nextAt` and the request deadline stay exactly as they were, so **the ladder retries at the moment it always would have**. That is the line this amendment does not cross — it changes how many gaps are asked per pass and never when a gap is due. |
+| A timeout falls due on time, not when the cursor comes round | Because the walk is now round-robin and budgeted, a requester MUST reap expired requests from the set of outstanding ones rather than only when the walk reaches that entry. That set is bounded by `genomeInFlightPerPeer` per peer, so the reap costs the same at 60 gaps and at 60,000 — and `genomeRequestTimeoutMs` keeps meaning what §10 says it means. |
+| A send failure ends the pass | When a send fails, a requester MUST stop the pass rather than walk on. Continuing put nothing on the wire and logged one failure per remaining entry: 231 lines in one instance of this incident, which is noise on exactly the log an operator is reading to understand a flap. |
+
+**What it measured.** The archive's fix was deployed to the living deployment at
+**21:08:50Z**, 89 seconds of replay, and read as follows against the same hour before it:
+
+| | Before | After |
+|---|---|---|
+| Requests in the widest one-second window | **180**, inside 33–176 ms | **8** |
+| Fetch rate achieved | ~175/min | ~175/min — unchanged, because the rate cap still binds |
+| Longest gap in the recorded-migration stream | **6.5 s** | no session-ending gap; zero drops |
+| Archive process CPU, steady state | **~100%** of a core | **8.1%** |
+| Relay sessions lost in 30 minutes | **26** | **0** |
+
+**The CPU line is the one to read twice.** 64,736 `stat` calls a second is a whole core spent
+on a question the requester had already answered — a hash is in `pending` precisely because
+the store does not hold it — and the read loop was queued behind every one of them. The
+bound did not make the fetcher slower; it stopped it doing 97% of a pass's work for nothing.
+
+**Enforced by:** the **archive**, as the only requester in M4, for the round-robin cursor,
+the chunked lock, the per-pass and per-peer bounds and the session-scoped in-flight
+accounting; the **relay**, unchanged, for going on closing a subscriber that stops reading,
+which is the behaviour that made this visible rather than silent; and the **operator**, for
+reading `genomeGaps` as a queue whose *magnitude* now has consequences and not only as a
+number on a page.
