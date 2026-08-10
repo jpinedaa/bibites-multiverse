@@ -800,7 +800,8 @@ came out of BepInEx logs that the next game launch overwrites. Those three failu
 D14, D12 and D15.
 
 ### M4 — Operations: resilience, topology, observability — **COMPLETE**
-**Defined 2026-08-05 by D12–D16. Full plan: `m4_considerations.md`.** Still a LAN
+**Defined 2026-08-05 by D12–D16. Full plan: `m4_considerations.md`. Findings:
+`m4_findings.md`.** Still a LAN
 milestone: no VPS, no strangers, no public exposure. M4 makes the rig something that can be
 run, rather than something that has to be watched.
 

@@ -1234,8 +1234,7 @@ of the exit test.
 
 ## Deliverables
 
-Every item is delivered, except the last one. The date beside each item is the date it
-landed.
+Every item is delivered. The date beside each item is the date it landed.
 
 - **Done, 2026-08-05.** The wire specification, from WP1: `contract-a.md` and `contract-b`
   at a new major version
@@ -1262,9 +1261,9 @@ landed.
   the pacing. `run-m4.sh` phase 6 holds it
 - **Done, 2026-08-06.** The automated M4 exit test, with its recorded result. See
   *Exit Test → Result*
-- **Open.** An `m4_findings.md` with the research results of the milestone. This is the one
-  M4 deliverable nobody has written. The results live in this document, in the rig logs
-  under `e2e/logs-m4-lan/` and in `m4_portal_findings.md`
+- **Done, 2026-08-10.** `m4_findings.md`, the milestone's findings record. It was written last, and
+  it is the better for it: most of what M4 taught came from the four days the rig ran **after** the
+  exit test, not from the test
 
 ## Owner Sign-Offs
 
@@ -1311,8 +1310,12 @@ steps below carry the milestone's remainder into the living deployment and into 
    check. The WSL address *can* move, and the portproxy behind `8795` then points at nothing
    and the far world drops out of the map — but it did not move across either reboot, so
    re-add the portproxy only when the printed address and the printed table disagree.
-3. **Write `m4_findings.md`.** It is the one M4 deliverable still open. The inputs are this
-   document, `e2e/logs-m4-lan/` and `m4_portal_findings.md`.
+3. **Write `m4_findings.md`.** **DONE, 2026-08-10: `m4_findings.md`** is the milestone's findings
+   record. It consolidates what M4 taught — the grid as built against the grid as designed, arrival
+   pacing, the living deployment's own findings (ENOSPC, the torn append in both implementations,
+   the disk budget, the reboot ritual), the save-stall and speed arcs, the species sets, the far
+   end, and the game-engine results that transfer — and it references this document, the contracts
+   and `dev_environment.md` rather than restating them.
 4. **Run `phase5far` once, when a person is at the second computer.** It confirms the pacing
    rule across the LAN. Phase 5 already proves the rule locally, so this is confirmation.
 5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.

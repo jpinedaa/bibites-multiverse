@@ -496,8 +496,9 @@ Proposed, and each piece is small:
 
 ## Inherited threads
 
-M5 does not start from a clean rig. Seven threads are open at the boundary, and each one bears
-on the milestone rather than merely coexisting with it.
+M5 does not start from a clean rig. Seven threads cross the boundary — most still open, two now
+closed and carried for what they settled — and each one bears on the milestone rather than merely
+coexisting with it.
 
 - **The save-stall budget is being missed today, on M4's own signed-off bar.** The owner set
   2 000 ms (D14, M4 Risk 3), the exit test measured 241–538 ms, and the deliverable is recorded
@@ -543,10 +544,14 @@ on the milestone rather than merely coexisting with it.
   **M5 is where the archive stops being the operator's private recorder and becomes a service
   other people depend on**, so every rule of this kind has to be checked in both
   implementations rather than in the one it was written for.
-- **`m4_findings.md` is unwritten.** It is the one open M4 deliverable. Its inputs —
-  `m4_considerations.md`, `e2e/logs-m4-lan/` and `m4_portal_findings.md` — are also the best
-  available baseline against which a public map's behaviour will be compared, so writing it
-  before the playtest is worth more than writing it after.
+- ~~**`m4_findings.md` is unwritten.**~~ **Written 2026-08-10**, and it closes the last M4
+  deliverable. It is the baseline this milestone's public map will be compared against, and two of
+  its results bear directly on the threads above: the save stall is **evolutionary history, not the
+  host** (cost tracks the uncompressed payload, `lineageMs` is 53% of a save), so a package default
+  audited today is a default that expires; and the arrival-pacing limit had to be resized twice
+  because it was sized from *measured offered load* rather than from a ceiling — which is the same
+  mistake a public map would make with capacity limits. Read its *What transfers forward* against
+  this milestone's scope.
 - **`phase5far` has never been run.** Cross-LAN pacing is confirmed locally and never across
   the link, because the run needs two commands typed at the second computer and D9 forbids the
   rig to send them. M5 makes that permanent: after M5 *every* peer is a peer the rig cannot
@@ -1117,8 +1122,8 @@ test and before M5 — and the work they belong to is already in the living depl
 
 1. **Get Decisions 1, 2 and 9 ratified.** WP1 cannot start without the first, and the other
    two change what WP1 writes.
-2. **Write `m4_findings.md`.** It is M4's one open deliverable and it is also the baseline a
-   public map will be compared against. It gets harder to write every week the rig runs.
+2. **Write `m4_findings.md`.** **DONE, 2026-08-10.** M4 has no open deliverable left, and the
+   baseline a public map will be compared against now exists in one place.
 3. **Keep the living deployment running, and treat it as M5's first participant.** Every
    upgrade the milestone ships has to move it, and it is the only peer whose behaviour before
    and after is fully observable.
