@@ -790,7 +790,10 @@ field, so a far end with the fix and one without it are indistinguishable on Con
 (`contract-b-m4.md` §20 says so as a design property). Slot 6's §19 settings block proves its
 *mod* is at least the settings build and says nothing about its sidecar. Treat the far sidecar's
 §20 status as **unknown rather than stale**, and ask its operator if it matters — do not rebuild
-the bundle to answer the question, because a fresh bundle answers a different one.
+the bundle to answer the question, because a fresh bundle answers a different one. The
+archive-ledger fix `e68550b` of the same evening does not re-open the question either: its code
+is `go/internal/archive/*` plus one sidecar *test* file, the archive runs on this machine only,
+and the 2026-08-09 rebuild — cut before that commit merged — is not made stale by it.
 
 `start-slot6.ps1` sets the mod's whole configuration natively — there is no `WSLENV` on that
 machine — starts the sidecar with `--position 2,1`, **waits for `contract B: slot granted` in
@@ -1131,8 +1134,8 @@ ls ~/bibites-multiverse/     # must list the repo, not fail
 ## The living deployment
 
 The M4 LAN rig has carried the same six worlds since the exit test of 2026-08-06 — across a
-full-disk outage and two host reboots. This section is what it last read, how to bring it
-back after a reboot, and what is being watched.
+full-disk outage, two host reboots and one far-end restart. This section is what it last read,
+how to bring it back after a reboot, and what is being watched.
 
 ### The reading of 2026-08-09, after the second reboot
 
@@ -1157,8 +1160,8 @@ Population **243** (slot 1 **14**, slot 2 **43**, slot 3 **40**, slot 4 **34**, 
 slot 6 **69**), **431,645** migrations at **516.4/min**, epoch **6,960** — the cumulative
 counters and the epoch simply run, and a number quoted from either table is a timestamp, not a
 property. Still 24/24 `peer_live`, still no bypass, `pacedDepth` and `heldDepth` still 0
-(`custodyDepth` 1, which is one organism in flight). But **slot 2 measured ×34.7 while the
-other four still measured ×5** — the time scale drifted *hours after* a clean bring-up, not
+(`custodyDepth` 1, which is one organism in flight). But **slot 2 reported ×34.7 while the
+other four still reported ×5** — the time scale drifted *hours after* a clean bring-up, not
 only across a restart, which widens the gotcha below. It was **corrected later the same hour**
 with the rig's own `e2e/run-m4-lan.sh send 2 timescale 5`, which answered
 `targetTimeScale=5.00 Time.timeScale=5.00` and held on the following sample with all five
@@ -1189,6 +1192,53 @@ reconnected clean, no organism lost — the backlog draining as designed rather 
 that machine. Headless has nothing to do with that — the switch is a restart, so it inherits
 the gotcha whole and adds nothing to it (*A world can be at the wrong time scale*, in
 Gotchas).
+**What the wire saw of that switch, from this side.** Slot 6's mod went quiet at **23:14:43Z**
+and was back at **23:15:23Z** — 41 seconds over the whole window, of which the quit itself took
+13 — claiming `simulationSize=2000` and `exportEdges [E N W S]` again. **Only the mod
+bounced.** The far *sidecar* never left the relay — `relay.log` has no `client connected` and no
+`client gone` in that whole hour, only placement claims — so the slot reservation, the
+Contract B session and that machine's journal were never in question, and the map read the
+outage the ordinary way: a mod-absent flap drops slot 6's four export lanes off the list and
+closes the ones into it with `peer_mod_absent`, which is exactly what an earlier flap looks
+like in the 21:59:53Z collector sample (20 lanes, `custodyDepth` 3, `pacedDepth` 3). **Nothing
+was re-sent and nothing bounced.** Across the 23:00Z hour the five local sidecars logged 10,230
+`MIGRATION_PAYLOAD` forwards, every one at `reroutes=0`, and **zero** `bounceBack=true`, **zero**
+`duplicate=true`, **zero** `OVERLOADED` and **zero** `MALFORMED_MESSAGE`. Three organisms
+crossed into slot 6's sidecar after its mod went quiet; the quiet-mod gate held them and the
+world took them when heartbeats resumed. The dedup path was therefore **never exercised** —
+there was no duplicate to catch, which is the M4 defences reading correctly rather than a hole
+in the evidence — and slot 6's first post-restart save receipt reached the page by 23:25Z.
+
+**Read again at 00:47Z on 2026-08-10.** 6/6 live and `modConnected`, **24/24** `peer_live` with
+no bypass, `pacedDepth`, `heldDepth` and `timeoutBounces` 0 and `custodyDepth` flickering 0–1 as
+organisms cross. Population **176** (slot 1 **8**, slot 2 **27**, slot 3 **31**, slot 4 **33**,
+slot 5 **29**, slot 6 **48**), **516,633** migrations at **251.4/min**, epoch **26,656**,
+`genomeGaps` **600** against `ledgerRecords` **1,129,222**. Slot 6's §19 block is complete and
+unchanged — `0.6.1`, `contract-a/2.3`, `saveMinutes=10`, `saveKeep=6`, save-on-quit, world
+wrapping, `migrationExclude=[Basic bibite]` — and its save receipt is flowing: `M4-Slot6.zip`,
+380,069 bytes in **567 ms**.
+
+**The speed change is the rig's business only through the crossing rate.** The five local
+worlds still report ×5, and against the simulated clock they advance 4.94–5.00× per wall
+second. Slot 6 reported a fluctuating **17–54** across the 34 collector samples between the
+reboot and 22:00Z — the `~21–24` in the table is one point on that curve, not a property — and
+the post-switch **×6.5** is a target its host nearly holds, at 5.84 simulated seconds per wall
+second. What speed the second computer runs at is still its own operator's business; what is this rig's
+business is that the crossing rate fell with it, from **~500/min** at 20:21Z to **230–305/min**
+over the ten collector samples since. That is why the third watch item drained, and it is the
+cleanest demonstration yet of the mechanism that item names.
+
+**A local world churned in the same hour and the save budget does not explain it.** Slot 4's mod
+went silent past Contract A's 3.5 s heartbeat timeout **ten times between 23:43:04Z and
+23:46:20Z** — ten `4004` closes with `silentFor` pinned at 3.50–4.23 s, each followed by a
+reconnect 0.3 to 14 s later, settling on generation 11 at 23:46:36Z, and no local
+mod has churned since. **Its game never restarted** — `[M4-SAVE] armed` appears once in that
+instance's whole log and the periodic counter runs unbroken through the burst — and **no save
+was long enough to be the cause**: the three saves spanning the window stalled 1.67–1.82 s, well
+inside the 3.5 s the dose response in *Watch items* needs. The map absorbed it the same way it
+absorbed the far end: 20 lanes and two `peer_mod_absent` closures at 23:45:29Z, back to 24/24 at
+×5 by 23:51:03Z, `timeoutBounces` still 0 for the whole run. Nothing was lost, but the trigger is
+**unexplained**, and it is the first burst of this shape with no save behind it.
 
 ### Bringing it back after a reboot
 
@@ -1250,7 +1300,13 @@ against 1,293,613 lines in the file** at 23:45Z on 2026-08-09. Its in-memory sta
 and complete for its own run; it is the *replay* that was short. The first restart after the
 fix reads past the spliced line and recovers the ~197,000 older records this process never
 saw, so the totals rise. Before the fix that same restart would have **reverted** them to
-01:21 on 2026-08-08. See *The disk budget*.
+01:21 on 2026-08-08. See *The disk budget*. One caveat on the arithmetic: the jump will read
+**larger** than the recovery alone, because the live `ledgerRecords` counter only increments
+on migration, ACK and NACK records — a `GENOME` append (`archive.go`, `RecordGenome`) is
+counted at boot replay but never during the run, and `GENOME` is ~11% of ledger lines. The
+gap between the counter and `wc -l` therefore widens ~53 lines a minute on its own, replay
+after replay, and a shortfall computed from those two figures conflates the skipped-line
+loss with this counting artifact. Sizing from the file, not the counter, is the safe habit.
 
 ### Watch items
 
@@ -1289,12 +1345,17 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   closing with 4004` within twelve seconds, **1.2%** at 2.5–3 s, **7.0%** at 3–3.5 s and
   **50.8%** of the 63 saves over 3.5 s. The mod reconnects in about a second and the sidecar's
   quiet-mod gate holds `MIGRATE_IN` until heartbeats resume, so each one costs a session churn
-  and a short delivery pause rather than an organism. Nothing else has been observed: no save
+  and a short delivery pause rather than an organism. **The dose response does not run the
+  other way**: slot 4 took ten `4004` closes in three minutes at 23:43Z on 2026-08-09 with no
+  save over 1.82 s behind it (*The reading of 2026-08-09, after the second reboot*), so a stall
+  explains some churn and
+  is not the only thing that causes it. Nothing else has been observed on the save path: no save
   has logged `event=FAILED` since the species-history guard shipped, and the deferral ladder
   has never run past 5 of 6. **The far end is the control and it is not in this discussion at
-  all**: one game on its own host, saving a comparable 354 KB world in 924 ms, on the mod's
-  own shipped cadence of `saveMinutes=10 saveKeep=6`. The five local worlds run `2` and `4`
-  because `run-m4.sh:270-271` overrides those defaults — an exit-test setting, chosen so a
+  all**: one game on its own host, saving a comparable 354 KB world in 924 ms — and 380 KB in
+  **567 ms** at 00:47Z on 2026-08-10, after its own restart — on the mod's own shipped cadence
+  of `saveMinutes=10 saveKeep=6`. The five local worlds run `2` and `4` because
+  `run-m4.sh:270-271` overrides those defaults — an exit-test setting, chosen so a
   test window would contain several saves, that nobody revisited when the rig became a
   deployment. Risk 3 already names the escalation — a save that breaks the budget "needs a
   different cadence, or a save path that does not block the tick" — and D14 accepts a slower
@@ -1333,7 +1394,9 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   - **2026-08-09:** 855 when the collector came back after the reboot at 18:51Z, climbing to
     **2,714** at 22:05Z on 400–520 crossings a minute, then a **monotone drain** to **1,110**
     by 23:56Z as the rate fell to 140–340 — while `ledgerRecords` went on growing by about 500
-    lines a minute through the entire drain. A leak does not drain against traffic.
+    lines a minute through the entire drain. A leak does not drain against traffic. The drain
+    then carried straight through the far-end restart to **552** by 00:52Z on 2026-08-10, ten
+    more unbroken samples at 230–305 crossings a minute, which is the confirming case.
 
   **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
   `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**
@@ -1427,16 +1490,24 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   it. Read every instance, not only the one you touched.** The game restores its own speed
   after the world settles, which can land after the rig's `send <slot> timescale <x>`. Re-send
   it and confirm on `/api/status`; the command answers
-  `targetTimeScale=5.00 Time.timeScale=5.00`, and `timeScale` on the page is the **measured**
-  speed, which is why the far end reads a fluctuating non-integer. Three measurements say the
-  scope is wider than "the instance you just restarted", and each widened it:
+  `targetTimeScale=5.00 Time.timeScale=5.00`. **`timeScale` on the page is the speed the game
+  is *applying*, not one this rig measured** — the mod copies `Time.timeScale` into the
+  heartbeat (`MultiverseClient.cs:1040`) and `contract-a.md` calls it *the effective time
+  scale*. The game's own governor is what makes it move: `TimeController.CheckMinFPS` clamps
+  the engine scale into `[min(0.1, target), target]` whenever the frame rate misses
+  `minimumFPS`, so a world that keeps up reports its target exactly and a host that cannot
+  reports the fluctuating non-integer it was throttled to. Neither figure is the achieved rate,
+  because `UpdateTimeScale` also pins `Time.maximumDeltaTime` to one fixed step: at 00:47Z on
+  2026-08-10 the five local worlds reported `5` and advanced 4.94–5.00× per wall second, while
+  slot 6 reported `6.5` and advanced 5.84×. Three measurements say the scope is wider than
+  "the instance you just restarted", and each widened it:
   - after the 2026-08-07 config-race restart, slots 1 and 2 reported `×100` and `×58` while
     the three the rig started reported `×5`;
   - after the 2026-08-08 reboot, the single restarted instance (slot 1) rejoined at `×100`
     and needed `send 1 timescale 5` — but the correction is **intermittent**, because after
     the 2026-08-09 reboot the restarted instance came back at `×5` and none was needed;
-  - and at 20:21Z on 2026-08-09, hours into a settled map, **slot 2 measured `×34.7` while
-    the other four still measured `×5`** — no restart involved at all. A plain
+  - and at 20:21Z on 2026-08-09, hours into a settled map, **slot 2 reported `×34.7` while
+    the other four still reported `×5`** — no restart involved at all. A plain
     `send 2 timescale 5` corrected it and it held, so the one-command remedy does not depend
     on what caused the drift.
 
