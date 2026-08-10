@@ -1574,11 +1574,22 @@ sample and drained by the next one.
 
 ### The evening's two session storms, 2026-08-10 18:39Z and 20:22Z
 
-Two Contract B churn episodes ran on the same evening. **Neither lost an organism**
-(`timeoutBounces` 0 throughout both, no `bounceBack=true`, no `MALFORMED_MESSAGE`), and **neither
-was a save.** They are recorded separately because the first is the residual-churn question in
-*Watch items* finally showing itself at scale, and the second is what a 60,000-entry `genomeGaps`
-backlog now costs on a reconnect.
+Two Contract B churn episodes ran on the same evening, and a third was then produced on purpose.
+**None lost an organism** (`timeoutBounces` 0 throughout, no `bounceBack=true`, no
+`MALFORMED_MESSAGE`), and **none was a save.** They are recorded together and read separately
+because they are different animals.
+
+- **The 18:39Z storm** is the residual-churn question in *Watch items* finally showing itself at
+  scale: a host that stopped scheduling anything. It was correlation only — until the evening's
+  own verification load reproduced it at 21:25Z, which is recorded under it and **promotes it to
+  a reproduction**.
+- **The 20:22Z flap** was **a defect in the archive**: a fetch queue that walked its whole
+  64,000-entry backlog under its own lock every second and starved its own read loop, so the relay
+  closed it for not reading. **Root-caused, fixed and deployed the same evening** as
+  `contract-b-m4.md` §21, B21. It cost the ledger **9,641 crossings** and cost the map nothing.
+  Read it as the worked example of a subscriber that is present and not reading, because that state
+  is invisible in every log until the relay gives up on it — and it is losing records the whole
+  time.
 
 **18:39:52Z to 18:59:10Z — nineteen minutes in which the host could not keep any peer alive.**
 This is the largest churn episode the deployment has logged, and it reached *past* the mods to
@@ -1630,37 +1641,155 @@ since) fits host starvation and fits nothing else on offer. **The operational re
 measuring this deployment hard enough perturbs it**, and a churn burst with no long save behind it
 should be dated against what else the box was doing before it is called a defect.
 
-**20:22:52Z to 20:26:40Z — the archive alone, six times, and the genome backlog is the engine.**
-`archive-main` dropped and reconnected six times in under four minutes, `reservationKept=false`
-every time. **No sidecar dropped, no mod took a `4004`, and the map stayed 24/24 `peer_live`.**
-The cycle is visible end to end in `archive.log`: the session ends with
-`failed to read: … read: connection reset by peer`, the archive resubscribes, and within two
-seconds `pumpFetches` walks its **63,000-entry `pending` map** and fires its whole per-peer
-allowance at once — hundreds of `archive: asking for a genome by hash` lines inside a few
-milliseconds — after which every further send fails with
-`type=GENOME_REQUEST err="wsutil: connection closed"` until the next reconnect. The
-`GenomeRequestsPerMinute` = 30 per-peer cap (*`genomeGaps` is a fetch queue*) bounds the
-**rate** and does nothing about the **burst**, because `allowSendLocked` admits a fresh window's
-worth in one pass of the map.
+**A controlled reproduction of the 18:39Z storm, 21:25:21Z to 21:31:11Z — and this time the load
+was known, because it was mine.** Verifying the §21 archive fix below meant running `go test ./...`
+(the sidecar package alone is 56 s of concurrent tests) and two passes that each read 500 MB of the
+ledger, on the same box as five Unity worlds at ×100. That produced the 18:39Z signature, at one
+tenth the scale and with **no save behind any of it**:
 
-**It has not settled, and that is the part to carry forward.** A lull after 20:26:40Z looked like a
-recovery — `epoch` climbed 56 → 554 over eight minutes, which is a stable session — and then it
-resumed harder. As of **20:42Z** the count since 20:22Z is **16 `client gone` and 14 reconnects in
-two clusters** (six over 20:22–20:26Z, ten over 20:38–20:41Z, five of them inside one minute), with
-the archive **disconnected for 11% of that nineteen-minute span** and the second cluster more
-intense than the first. Only two of the sixteen were relay-side `peer silent` drops; the rest the
-archive closed on itself. **Do not read a quiet `epoch` as resolution** — a low `epoch` on the
-status page during this is a resubscription counter that keeps restarting, and it is the symptom,
-not the reassurance.
+| | 18:39Z storm, 19 min | 21:25Z reproduction, 6 min |
+|---|---|---|
+| sidecar `client gone` (all `reservationKept=true`) | 30 | **7** — slot 3 ×4, slot 5 ×2, slot 4 ×1 |
+| relay-side `peer silent, dropping` | 26 | **1** |
+| mod `4004` closes, and their `silentFor` | 15, at 13.40–24.41 s | **3**, at **14.80 / 15.89 / 18.20 s** — all past the 13 s deadline |
+| `wsutil: outbound queue full` on a forward | 5 | **6**, on slot 3 and slot 5 |
+| `bounceBack=true` / `timeoutBounces` / `heldDepth` | 0 / 0 / 0 | **0 / 0 / 0** |
+| the far end | never noticed | **never noticed** |
 
-**What it costs, and what it does not.** It costs exactly what the 19:08Z restart cost, recurring:
-§5.1 means a subscriber that is absent changes nothing about a migration, so the traffic runs
-untouched and only the **record** has the gap — the crossings during each disconnect are never
-copied to the ledger. **It costs the map nothing**: zero sidecar `client gone` and zero `4004` since
-19:00Z, 24/24 `peer_live`, `pacedDepth` and `heldDepth` 0, `timeoutBounces` 0 in every sample
-through both clusters. **This is a new cost of a large backlog, not a new fault**, but it is an
-**open** one — it belongs to the `genomeGaps` item rather than to the save stall, and unlike the
-18:39Z storm it had not stopped when this reading was taken.
+**This promotes the reading above from correlation to reproduction.** The 18:39Z paragraph could
+only say the shape "fits host starvation and fits nothing else on offer"; a known, dated,
+self-inflicted load now produces the same shape on demand — common-mode across local peers, absent
+on the far host, `silentFor` well past a deadline that no save came near, and gone as soon as the
+load stopped. **The 24 `OVERLOADED` NACKs in the window are not part of the finding**: they are
+`class=transient` with `handoff=sent` and the sender keeps custody, and slots 4 and 5 have logged
+602 and 1,011 of them across the whole run. **Nothing was lost** — every reservation kept, every
+lane back to `peer_live`, `custodyDepth` down from 311 to 5 within five minutes.
+
+**Two operational rules come out of it.** First, `go test ./...` and a full-ledger read are
+**production load on this host**, and a churn episode dated to one of them is not a deployment
+fault; batch the heavy analysis, or accept the churn and say so in the record. **`nice -n 19 go
+test -p 1 ./...` is the cheap mitigation and it was measured**: the same suite re-run that way
+twelve minutes later, on a rig at 1,018 crossings a minute, produced **zero** peer drops of any
+kind. Serialising the packages and yielding to the Unity threads costs about 20 s of wall clock and
+buys the whole episode back. Second, and this is
+what makes the reproduction lucky rather than merely embarrassing: **`archive-main` took zero drops
+through all of it**, which is a harder test of the §21 fix than the quiet window it was supposed to
+get. The pre-fix archive could not hold a session at a *healthy* 1,378 crossings a minute; the
+fixed one held one through the host starvation that dropped three sidecars seven times.
+
+**20:22:52Z to 20:52:23Z — the archive alone, twenty-six times, and the genome backlog is the
+engine. ROOT-CAUSED AND FIXED THE SAME EVENING; the paragraphs below are the closed account and
+they correct the first reading in place.** `archive-main` dropped and reconnected **26 times in
+thirty minutes**, `reservationKept=false` every time. **No sidecar dropped, no mod took a `4004`,
+and the map stayed 24/24 `peer_live`.**
+
+**Why the session died, and it is not the burst.** The first reading blamed the burst of
+`GENOME_REQUEST`s each resubscribe fired, and the burst is real — **180 requests inside 33 to
+176 ms**, which is `genomeRequestsPerMinute` (30) times the six peers, spent in one pass, because
+`allowSendLocked` opens a fresh one-minute window per peer and then admits the whole of it at
+once. **It is not what killed the session.** Two things say so. The bursts are ~68 s apart and
+the session deaths are not aligned with them; and 180 frames never came near the archive's own
+256-frame outbound queue. What killed it is the **walk**, not what the walk sends:
+
+- `pumpFetches` walked the **whole** `pending` map on every one-second tick, holding `a.mu` —
+  the same lock `handle()` needs for `PING`, `PEER_STATUS` and every recorded migration — and
+  calling the genome store's `Has` on every entry. **`Has` is an `os.Stat`.** At the 64,736-entry
+  backlog that is 64,736 stat calls a second: **284 ms to 1.02 s measured** against this store on
+  an otherwise quiet box, and more under the load of five Unity worlds at ×100.
+- With the walk restarting every second, the read loop was admitted about **once per pass**
+  instead of the ~30 frames a second the relay was copying to it. `archive.log` shows the
+  starvation directly as gaps in the `recorded a migration` stream: **48 gaps over 1 s in nine
+  minutes, quantised at roughly one-second multiples, the longest 6.5 s.**
+- The relay's per-peer outbound queue is **128 frames** (`wsutil.New(ws, 128)` in `relay.go`).
+  At ~46 frames a second — one `MIGRATION_PAYLOAD` and one `MIGRATION_ACK` per crossing at the
+  1,336–1,378/min the rate hit at 20:14Z and 20:19Z, the evening's two highest samples — a
+  **~2.8-second** stall fills it, and `wsutil.Send` then closes rather than growing without limit.
+  **So the relay killed the session, and it said so:** `archive.log` carries
+  `relay session ended … received close frame: status = StatusInternalError and reason =
+  "outbound queue full"`. The `read: connection reset by peer` and `unexpected EOF` endings are
+  the same close arriving as a reset.
+- The resubscribe changed nothing about the backlog, so the walk resumed and the queue filled
+  again. **That is the whole loop**, and it is self-sustaining without any help from the burst.
+
+**Two claims in the first reading were wrong and are corrected here.** "The rest the archive
+closed on itself" — **no**: only 2 of the drops were relay-side `peer silent`, and the other 24
+were the relay closing the archive with **1011**, which the archive received. The archive closed
+nothing. And the `send failed … GENOME_REQUEST err="wsutil: connection closed"` runs — 231 of them
+in one instance — are not a cause either: they are the pump walking on through a dead connection,
+logging one line per remaining entry. **A quiet `epoch` was still not resolution**: that part
+stands, and the flap did stop on its own at **20:52:23Z** after sixteen minutes of stability at a
+comparable crossing rate, which is the marginality of the mechanism showing rather than a
+recovery. It would have returned at the next resubscribe with the backlog still there.
+
+**Why 20:22Z.** Two curves reached their extremes together for the first time. The walk's cost
+grows with `genomeGaps`, which had climbed to ~63,000 — the 19:08Z replay stepped it 56,658 →
+60,675 in one jump (*The archive's ledger recovery*) and the ×100 regime added the rest. The
+queue-fill deadline **shrinks** with the crossing rate, and 20:14Z and 20:19Z are the two highest
+`perMinute` samples of the evening. At ~63,000 entries and ~1,378/min the pass cost and the
+2.8-second deadline finally met. Nothing about that is a threshold to remember — it is a
+**marginal** mechanism, sensitive to host load, and it is the same sensitivity the 18:39Z storm
+above records. The fix removes the marginality rather than moving the margin.
+
+**The fix: `contract-b-m4.md` §21, B21 — a rate is not a budget.** A `contract-b` amendment that
+**does not move the version** (`contract-b/3.5` stands; nothing on the wire changes and a bounded
+requester still never exceeds `genomeRequestsPerMinute`), on the §20 precedent. Four bounds, all
+of them on the pump and **none on the retry ladder** — `genomeScanPerTick` 2048 examined per pass,
+walked **round-robin over a stable order** and resumed where the last pass stopped so no gap is
+starved; `genomeScanChunkSize` 256 per acquisition of `a.mu`, which is the yield that keeps the
+read loop fed; `genomeRequestsPerTick` 8; `genomeInFlightPerPeer` 8. A resubscribe now forgets its
+per-peer in-flight **accounting** and nothing else, and an expired request is reaped from the
+small outstanding set rather than when the cursor next passes it, so `genomeRequestTimeoutMs` and
+the 1m/5m/30m/6h/daily ladder fall due at exactly the moments they always did.
+
+**What it measured, deployed to the living deployment at 21:08:50Z** (89 s of replay,
+`skippedLines=1`, counters continued from the file, `epoch` restarted from 1 — the ordinary shape
+of every archive restart, see *Bringing it back after a reboot*):
+
+| | Before | After |
+|---|---|---|
+| Requests in the widest one-second window | **180**, inside 33–176 ms | **8** |
+| Fetch rate achieved | ~175/min | ~175/min — unchanged, the rate cap still binds |
+| Longest starvation gap in `recorded a migration` | **6.5 s** | none that ends a session |
+| Archive process CPU, steady state | **~100%** of a core | **8.1%** |
+| Relay sessions lost | **26** in 30 min | **0** in the first 24 min, `epoch` monotone past 1,750, at a rate that reached **1,221/min** — including six minutes of host starvation that dropped three sidecars seven times (*A controlled reproduction of the 18:39Z storm*) |
+| Crossings the ledger is missing | **7,789** of 33,730 | **0** of **14,437** over the twelve minutes after it |
+
+**The CPU line is the one to read twice.** A whole core was going on 64,736 `stat` calls a second
+asking a question the pump had already answered — a hash is in `pending` precisely because the
+store does not hold it — and the read loop was queued behind every one of them. The bound did not
+slow the fetcher down; it stopped it doing 97% of a pass for nothing.
+
+**What it cost, and this is the exact number.** §5.1 means a subscriber that is absent changes
+nothing about a migration, so the traffic ran untouched and only the **record** has the gap.
+Matched crossing by crossing — every `migrationId` the five sidecars forwarded or took inbound
+custody of, against the `MIGRATION` records the ledger actually holds — the flap of 20:22:35Z to
+20:52:26Z cost **7,789 crossings, 23.1% of the 33,730 that crossed inside it**, and the 89-second
+restart that fixed it cost a further **1,852 of 1,879**. **The incident's total ledger loss is
+9,641 crossings**, and they are permanent: the ledger is append-only and nothing replays a
+migration nobody recorded.
+
+**The ledger cost is about twice the disconnected time, and that is the lesson in the number.**
+The archive was absent for **12.1%** of the flap's span by the relay's own lifecycle lines, and
+lost **23.1%** of the crossings. The difference is the starvation: **3,441** of the lost crossings
+were copied by the relay in the ten seconds *before* a drop, into a queue the archive had already
+stopped reading, and discarded when the relay closed it. **A subscriber that has stopped reading
+is already losing records before anything in any log says it is gone.** Counting absent windows
+therefore *understates* a starvation incident, and the crossing-by-crossing match is the method
+to use — it is exact, and it validates itself: **0 of 17,249** crossings are missing in the twelve
+minutes before the flap, **0 of 17,947** in the sixteen-minute lull, and **0 of 14,437** in the
+twelve minutes after the fix. **This is now the way to cost any archive absence on this rig**:
+join the sidecars' `sidecar: forwarded MIGRATION_PAYLOAD` and `contract B: took custody of an
+inbound organism` lines by `migrationId` — the first set is every crossing the five local worlds
+sourced, and what the second holds and the first does not is slot 6's — then ask the ledger which
+of those `migrationId`s it has. Its own zeros either side of the window are the proof that the
+count is a count.
+
+**It cost the map nothing**, through the flap and through the fix: zero sidecar `client gone`,
+zero `4004` since 19:00Z on any slot but one (slot 4, once, before the fix), 24/24 `peer_live`,
+`pacedDepth` and `heldDepth` 0, `timeoutBounces` 0, and zero `OVERLOADED`, `MALFORMED_MESSAGE` or
+`bounceBack=true` in every sample throughout. **This was a new cost of a large backlog and it is
+now closed.** The backlog itself is not — it goes on growing, and it belongs to the `genomeGaps`
+watch item.
 
 **What both storms change about reading `custodyDepth`, because it is the number an operator will
 notice first.** At the ×100 crossing rate the healthy band is no longer the 0–6 of the ×5 era.
@@ -1672,6 +1801,16 @@ polls twenty seconds apart — because at this rate the map always has organisms
 The two readings that meant something both had company — **345 with `heldDepth` 17 and only 20 lanes**
 in the storm, and **106 with `pacedDepth` 52** at 18:06Z when slot 6 sat at `timeScale` 0 and its
 sidecar held what it could not deliver. Both drained by the next sample.
+
+**A third excursion, at 21:25–21:32Z, is the one with a known cause, and its company was churn
+rather than a queue.** `custodyDepth` ran **121 → 183 → 311** over four minutes, spread evenly
+across all six slots, with `pacedDepth` 0–3, `heldDepth` 0 and `timeoutBounces` 0 — so by the rule
+above it was not the *custody* number that meant anything. The company was elsewhere in the same
+window, and it is the 18:39Z storm's signature again: see *A controlled reproduction of the 18:39Z
+storm* under that item. `custodyDepth` drained **311 → 244 → 218 → 176 → 99 → 21 → 5** over the
+five minutes after the load stopped. **So `custodyDepth` at ×100 is a host-load gauge as much as a
+traffic one**, and the two lessons compose: read its company, and if the company is peer churn
+rather than a queue depth, ask what the box was doing.
 
 ### The archive's ledger recovery, 2026-08-10 19:08Z
 
@@ -1721,12 +1860,17 @@ shortfall computed from the two of them is not a loss.**
 56,662 → 60,639, because the recovered records brought their own unfetched hashes with them.
 Before `e68550b` this same restart would have **reverted** all of it to 01:21 on 2026-08-08.
 
-**What it cost.** The archive was down **100 seconds** — 19:08:42Z to 19:10:22Z — of which ~93 s
-was the replay itself (peak RSS ~5.2 GB; see *The status page on the LAN*). The map was
-unwatched for that minute and a half, and roughly **1,600–2,300 crossings** at the prevailing
-960–1,400/min were never copied to the archive and are therefore absent from the ledger. That is
-§5.1 working: a subscriber that is absent changes nothing about a migration, so the traffic ran
-untouched and only the *record* has the gap. The `epoch` the page shows restarted from 1 and was
+**What it cost, measured exactly.** The archive was down **100 seconds** — 19:08:42Z to 19:10:22Z
+— of which ~93 s was the replay itself (peak RSS ~5.2 GB; see *The status page on the LAN*). The
+map was unwatched for that minute and a half, and **1,940 crossings** were never copied to the
+archive and are therefore absent from the ledger. That is §5.1 working: a subscriber that is
+absent changes nothing about a migration, so the traffic ran untouched and only the *record* has
+the gap. **The number is a count, not an estimate, and it replaces the "roughly 1,600–2,300 at the
+prevailing 960–1,400/min" first written here** — every `migrationId` the five sidecars forwarded
+or took inbound custody of in the window, matched against the `MIGRATION` records the ledger
+holds. The method is worth knowing because it is exact and self-validating (0 missing in the nine
+minutes before and the ten after), and it is the one *The evening's two session storms* uses; the
+arithmetic estimate was right, and only a count can prove a loss. The `epoch` the page shows restarted from 1 and was
 back in the hundreds within minutes, which is resubscription and not a new map (*The five local
 worlds run headless*).
 
@@ -1833,8 +1977,11 @@ accrue. **The first evidence is in, as of 2026-08-10 20:20Z, and it points the r
 being a rate yet**: no save has cost a session since the raise, and every `4004` logged since is
 attributable to something that is not a save. It also grew a fourth sub-question that is no longer
 about saves at all — see *What to watch now* under that item. The second is a trend with no verdict
-yet. The third **has its verdict** — the reading is understood, it is not a defect, and it stays on
-this list because M5 changes what it will mean.
+yet, and it **grew a defect and lost it again on 2026-08-10**: the magnitude of the `genomeGaps`
+backlog cost the archive twenty-six relay sessions and the ledger 9,641 records, that half is
+root-caused, fixed and closed (`contract-b-m4.md` §21, B21), and what stays on this list is the
+growth of the queue itself. The third **has its verdict** — the reading is understood, it is not a
+defect, and it stays on this list because M5 changes what it will mean.
 
 - **The 2-second save-stall budget is breached routinely, and it has been since the day the
   exit test passed.** D14 set the bar at 2 000 ms and the exit test of 2026-08-06 measured
@@ -2256,12 +2403,14 @@ this list because M5 changes what it will mean.
   `simulatedTime` rather than wall clock is the way to separate those, and nothing has done that yet.
 
 - **`genomeGaps` is a fetch queue, its healthy value is 0, and what it counts is
-  throughput.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the
-  map declared at `go/internal/archive/archive.go:170`): the set of genome hashes the archive
+  throughput.** The field is `len(a.pending)` (`go/internal/archive/status.go`, over the
+  map declared in `go/internal/archive/archive.go`): the set of genome hashes the archive
   has asked a sidecar for and not yet received. It is a **backlog count, not an error count**,
   and it is not the same thing as `bin/archive list --gaps`, which reports what the *ledger*
   shows missing. An entry is created only for a hash the store does not already hold
-  (`archive.go:766`) and leaves only when the genome arrives.
+  (`trackLocked`) and leaves only when the genome arrives. Since §21, B21 the map has a
+  **companion round-robin order** (`pendingOrder`) that the pump walks a bounded slice of per
+  tick; `genomeGaps` still counts the map, so the number on the page is unchanged.
 
   **The baseline exists, and it is zero.** The gitignored collector has curled `/api/status`
   every ~5.5 minutes since 2026-08-07 (`e2e/baselines/m4-collector/`), and that series is the
@@ -2306,31 +2455,52 @@ this list because M5 changes what it will mean.
     restart**, which is the replay bringing its own unfetched hashes with it, exactly as *The
     archive's ledger recovery* records. The rate never fell near the ~340/min drain threshold at any
     point, so the test this item wants still has not come round.
-    **The new cost is a reconnect.** At 20:22Z the archive's relay session flapped **six times in
-    under four minutes**, and the engine is this queue: on each resubscription `pumpFetches` walks
-    all ~63,000 `pending` entries and spends its whole per-peer allowance in one pass, hundreds of
-    `GENOME_REQUEST`s inside a few milliseconds, until the connection is reset and it starts over
-    (*The evening's two session storms*). `GenomeRequestsPerMinute` = 30 bounds the **rate** and not
-    the **burst** — `allowSendLocked` (`archive.go:905`) opens a fresh one-minute window per peer and
-    then admits 30 immediately, and the map iteration in `pumpFetches` has no pacing of its own.
-    **It was still running at 20:42Z** — 16 drops and 14 reconnects since 20:22Z, the archive away for
-    11% of that span, the second cluster worse than the first — and it costs the map nothing while
-    costing the **ledger** every crossing that lands while the archive is away. This is the first time
-    the backlog's *magnitude* has had a consequence beyond the number on the page, and it will get
-    easier to trigger as the queue grows. **Read this against Risk 7 too**: M5's permanent entries
-    make the queue monotone, and a monotone queue makes every archive reconnect more expensive than
-    the last. **It is the one thing this sweep found still open at the end of it.**
+    **The magnitude cost a session, twenty-six of them, and that half is CLOSED.** From 20:22:52Z
+    to 20:52:23Z the archive could not hold a relay session, and the engine was this queue — but not
+    in the way it was first written here, and the correction matters because it is the difference
+    between a pacing problem and a starvation one. `pumpFetches` walked **all** ~64,000 `pending`
+    entries on every one-second tick, holding the archive's own `mu` — the lock its frame handler
+    needs — and calling the genome store's `Has`, which is an **`os.Stat`**, on each. That is
+    284 ms–1.02 s of held lock per second measured, so the read loop was admitted about once per
+    pass, the **relay's** 128-frame outbound queue to the archive filled in ~2.8 s at the
+    1,378/min the rate had reached, and the relay closed the session with **1011 "outbound queue
+    full"**. The burst is real and was **not** the killer: `GenomeRequestsPerMinute` = 30 bounds the
+    **rate** and not the **burst** — `allowSendLocked` opens a fresh one-minute window per peer and
+    then admits 30 immediately — so one pass fired **180 requests in 33–176 ms**, but 180 frames
+    never troubled the archive's own 256-frame queue and the bursts do not line up with the session
+    deaths. It cost the **ledger 9,641 crossings** and the map nothing. The fix is
+    `contract-b-m4.md` **§21, B21**, deployed 21:08:50Z: the pass is bounded at
+    `genomeScanPerTick` = 2048 entries walked round-robin over a stable order, the lock is released
+    every `genomeScanChunkSize` = 256, and the **burst bound** is `genomeRequestsPerTick` = 8 with
+    `genomeInFlightPerPeer` = 8 — none of which moves the retry ladder. Archive CPU fell from a full
+    core to **8.1%** and the flap ended. Full account in *The evening's two session storms*.
+    **What stays open is the backlog, not the flap.** The queue goes on growing, no drain window has
+    come round, and the cost of carrying it is now bounded rather than absent. **Read this against
+    Risk 7**: M5's permanent entries make the queue monotone, and §21's bounds are what stop a
+    monotone queue making each archive reconnect more expensive than the last.
 
   **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
   `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**
-  (`go/internal/contractb/contractb.go:230`, enforced by `allowSendLocked` at
-  `go/internal/archive/archive.go:899`), so the ladder is bounded near **180 fetches a
+  (`go/internal/contractb/contractb.go`, enforced by `allowSendLocked` in
+  `go/internal/archive/archive.go`), so the ladder is bounded near **180 fetches a
   minute** across six peers. Only a crossing carrying a hash the store does not already hold
   costs a fetch, which is why the *crossing* rate that meets that ceiling is about twice it:
   on this rig the backlog grows above roughly **400** migrations a minute and drains below
   roughly **340**. Under the ceiling the field reads 0; over it, `pending` **is** the queue,
   and it is worked off at the same cap when the current slows. The number to read is
   therefore the *direction* against the current rate, not the magnitude.
+
+  **A rate is not a budget, and since 2026-08-10 there are three more bounds beside it**
+  (`contract-b-m4.md` §21, B21). The rate cap says nothing about how much work one pass over
+  the queue may do or how many of a minute's requests may leave at once, and at 64,000 entries
+  both of those cost the archive its relay session twenty-six times. So: `genomeScanPerTick`
+  = **2048** entries examined per pass, round-robin over a stable order and resumed where the
+  last pass stopped; `genomeScanChunkSize` = **256** per acquisition of the archive's lock, so
+  the read loop is never starved; **`genomeRequestsPerTick` = 8, which is the burst bound**;
+  and `genomeInFlightPerPeer` = **8**. All four sit above what the 30-per-minute rate can
+  sustain, so **the achieved fetch rate is unchanged at ~175/min** — what changed is that it
+  arrives 8 a second instead of 180 in one 50 ms window. **None of them moves the retry
+  ladder.** The rate is still the number that decides whether the backlog grows.
 
   **The two spot readings that opened this item sit on that curve** — **881 against 878,904
   ledger records** after the reboot is the collector's 855 at 18:51Z, and **2,467 against
