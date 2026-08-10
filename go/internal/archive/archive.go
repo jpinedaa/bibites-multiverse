@@ -63,6 +63,23 @@ type Config struct {
 	RequestsPerMinute int
 	TickInterval      time.Duration
 
+	// The bounds of §21, B21, all of them on the pump and none of them on the
+	// ladder. RequestsPerMinute above is a rate; these bound the WORK and the
+	// BURST of one pass, which is what a 64,000-entry backlog turned into a
+	// self-sustaining session flap on 2026-08-10. The fourth, the chunk size the
+	// lock is released on, is contractb.GenomeScanChunk and is not tunable here.
+	//
+	// ScanPerTick is how many pending entries one pump examines. The walk is
+	// round-robin over a stable order and resumes where the last one stopped, so
+	// every entry is still visited and nothing is skipped — a full cycle simply
+	// takes len(pending)/ScanPerTick ticks instead of one.
+	ScanPerTick int
+	// MaxRequestsPerTick is how many GENOME_REQUESTs one pump may issue.
+	MaxRequestsPerTick int
+	// MaxInFlightPerPeer is how many requests may be outstanding to one peer at
+	// once, independent of the rate.
+	MaxInFlightPerPeer int
+
 	// HTTPListen is the status page's bind address, "" for no page. The rig
 	// uses 127.0.0.1:8796; a test uses 127.0.0.1:0.
 	HTTPListen string
@@ -102,6 +119,15 @@ func (c *Config) applyDefaults() {
 	if c.TickInterval <= 0 {
 		c.TickInterval = time.Second
 	}
+	if c.ScanPerTick <= 0 {
+		c.ScanPerTick = contractb.GenomeScanPerTick
+	}
+	if c.MaxRequestsPerTick <= 0 {
+		c.MaxRequestsPerTick = contractb.GenomeRequestsPerTick
+	}
+	if c.MaxInFlightPerPeer <= 0 {
+		c.MaxInFlightPerPeer = contractb.GenomeInFlightPerPeer
+	}
 	if c.StatsStale <= 0 {
 		c.StatsStale = contractb.StatsStale
 	}
@@ -125,6 +151,14 @@ type fetch struct {
 	// inFlight is the requestId of an unanswered GENOME_REQUEST.
 	inFlight string
 	deadline time.Time
+	// inFlightPeer and inFlightGen carry the per-peer concurrency accounting of
+	// §21, B21. The generation is the relay session the request left on: a
+	// session that ended can never answer, so its outstanding requests must not
+	// go on occupying a live session's in-flight budget. Only the ACCOUNTING is
+	// reset that way — inFlight, deadline, attempts and nextAt are untouched, so
+	// the ladder retries at exactly the moment it always did.
+	inFlightPeer string
+	inFlightGen  int64
 }
 
 // Archive is the subscriber.
@@ -177,8 +211,28 @@ type Archive struct {
 	ledgerSkipped int
 	seen          map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
 	pending       map[string]*fetch
-	sentWindow    map[string]*rateWindow
-	closed        bool
+	// pendingOrder is the stable round-robin order pumpFetches walks, and
+	// pendingHead is how far this cycle has got. Go's map iteration is random, so
+	// a bounded walk over the map alone could starve a hash indefinitely; a FIFO
+	// that pops from the front and pushes the still-pending entry back gives
+	// every gap its turn in a fixed number of ticks. Stale hashes — ones the map
+	// no longer holds because the genome arrived — are dropped as they are popped
+	// and the consumed prefix is reclaimed in one copy when it is half the slice.
+	pendingOrder []string
+	pendingHead  int
+	sentWindow   map[string]*rateWindow
+	// inFlight counts unanswered GENOME_REQUESTs per peer for the current relay
+	// session (sessionGen). It is emptied when a session starts, because nothing
+	// sent on a dead session will ever be answered.
+	inFlight map[string]int
+	// outstanding is every fetch with an unanswered request, so a timeout is
+	// reaped on the tick it falls due rather than whenever the round-robin
+	// cursor next passes that entry. It is bounded by MaxInFlightPerPeer per
+	// peer plus whatever a just-ended session left behind, and those age out at
+	// their own deadlines.
+	outstanding map[string]*fetch
+	sessionGen  int64
+	closed      bool
 
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
@@ -214,17 +268,19 @@ func New(cfg Config) (*Archive, error) {
 		return nil, err
 	}
 	a := &Archive{
-		cfg:        cfg,
-		log:        cfg.Logger.With("archive", cfg.PeerID),
-		ledger:     ledger,
-		genomes:    genomes,
-		metrics:    metrics,
-		lanes:      map[lanePair]*lane{},
-		simRates:   map[int]*achievedRate{},
-		seen:       map[string]bool{},
-		pending:    map[string]*fetch{},
-		sentWindow: map[string]*rateWindow{},
-		species:    newSpeciesLedger(),
+		cfg:         cfg,
+		log:         cfg.Logger.With("archive", cfg.PeerID),
+		ledger:      ledger,
+		genomes:     genomes,
+		metrics:     metrics,
+		lanes:       map[lanePair]*lane{},
+		simRates:    map[int]*achievedRate{},
+		seen:        map[string]bool{},
+		pending:     map[string]*fetch{},
+		sentWindow:  map[string]*rateWindow{},
+		inFlight:    map[string]int{},
+		outstanding: map[string]*fetch{},
+		species:     newSpeciesLedger(),
 	}
 	// Replay what is already recorded, so a restart neither duplicates a record
 	// nor forgets a gap. "Keep the hash forever" (§10): a hash with no genome
@@ -493,6 +549,13 @@ func (a *Archive) session() error {
 	a.conn = conn
 	a.ready = true
 	a.peerEpoch = 0
+	// §21, B21: a new session inherits no in-flight requests. Anything sent on
+	// the session that just ended can never be answered, so holding its
+	// concurrency slots would throttle this one for a whole request timeout.
+	// Only the accounting resets — every fetch's own inFlight, deadline and
+	// nextAt are left exactly as they were, so no gap's retry moves.
+	a.sessionGen++
+	a.inFlight = map[string]int{}
 	// §6.1: gameVersion is always empty for an archive, and it never holds a
 	// slot, so it never sends SECTOR_CLAIM either.
 	ok := a.sendLocked(contractb.TypeHandshake, contractb.Handshake{
@@ -787,6 +850,7 @@ func (a *Archive) trackLocked(hash, sourcePeer, migrationID string, entityID int
 		nextAt:      now.Add(a.cfg.FirstAttemptDelay),
 		asked:       map[string]bool{},
 	}
+	a.pendingOrder = append(a.pendingOrder, hash)
 }
 
 func (a *Archive) tickLoop() {
@@ -805,23 +869,79 @@ func (a *Archive) tickLoop() {
 // pumpFetches issues at most one outstanding GENOME_REQUEST per hash, asking
 // the envelope's sourcePeer first because that sidecar hashed and cached the
 // blob, then the other live peers in ring order, one at a time (§10).
+//
+// IT IS BOUNDED IN WORK AND IN BURST, AND THAT IS §21, B21. Before that bound
+// existed the pump walked the WHOLE pending map on every tick, under the one
+// lock the read loop also needs, calling the genome store's Has — an os.Stat —
+// on every entry. At the 64,736-entry backlog of 2026-08-10 that was ~0.3-1.0 s
+// of held lock per one-second tick: the read loop was admitted about once per
+// pass, the relay's 128-frame outbound queue to the archive filled in about four
+// seconds, and the relay closed the session with 1011 "outbound queue full".
+// The resubscribe changed nothing about the backlog, so it happened again — 26
+// drops in 30 minutes, and 7,789 crossings the ledger will never hold.
+//
+// Nothing here changes WHEN a gap is retried. The ladder lives in nextAt and
+// retryDelay and is untouched; what is bounded is how much of the backlog one
+// tick may examine and how many requests it may put on the wire.
 func (a *Archive) pumpFetches(now time.Time) {
+	// Never examine more entries than there are: a small backlog is walked
+	// exactly once per tick, which is what it always was.
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if !a.ready {
-		return
+	a.reapExpiredLocked(now)
+	total := len(a.pending)
+	a.mu.Unlock()
+	if total > a.cfg.ScanPerTick {
+		total = a.cfg.ScanPerTick
 	}
-	for hash, f := range a.pending {
+	scanned, issued := 0, 0
+	for scanned < total && issued < a.cfg.MaxRequestsPerTick {
+		budget := total - scanned
+		if budget > contractb.GenomeScanChunk {
+			budget = contractb.GenomeScanChunk
+		}
+		s, i, more := a.pumpChunk(now, budget, a.cfg.MaxRequestsPerTick-issued)
+		scanned += s
+		issued += i
+		if !more {
+			return
+		}
+	}
+}
+
+// pumpChunk examines at most scanBudget entries under ONE acquisition of the
+// archive's lock and returns what it did and whether the caller should come
+// back for more. The chunk is the yield: whatever the size of the backlog, the
+// read loop waits at most one chunk for the lock, so the heartbeat is answered
+// and the relay's queue drains while the pump is still working.
+func (a *Archive) pumpChunk(now time.Time, scanBudget, sendBudget int) (scanned, issued int, more bool) {
+	a.mu.Lock()
+	// LIFO: compact under the lock, then release it.
+	defer a.mu.Unlock()
+	defer a.compactPendingOrderLocked()
+	if !a.ready {
+		return 0, 0, false
+	}
+	for scanned < scanBudget && issued < sendBudget {
+		hash, ok := a.nextPendingLocked()
+		if !ok {
+			// Nothing left in the backlog to examine.
+			return scanned, issued, false
+		}
+		scanned++
+		f := a.pending[hash]
 		if a.genomes.Has(hash) {
+			// Resolved by some other path: retire it and do NOT push it back.
+			a.clearInFlightLocked(f)
 			delete(a.pending, hash)
 			continue
 		}
+		a.pendingOrder = append(a.pendingOrder, hash)
 		if f.inFlight != "" {
 			if now.Before(f.deadline) {
 				continue
 			}
 			// genomeRequestTimeoutMs elapsed: the attempt failed.
-			f.inFlight = ""
+			a.clearInFlightLocked(f)
 			f.nextAt = now.Add(a.retryDelay(f.attempts))
 			continue
 		}
@@ -842,6 +962,9 @@ func (a *Archive) pumpFetches(now time.Time) {
 				"attempts", f.attempts, "retryIn", a.retryDelay(f.attempts).String())
 			continue
 		}
+		if a.inFlight[target] >= a.cfg.MaxInFlightPerPeer {
+			continue
+		}
 		if !a.allowSendLocked(target, now) {
 			continue
 		}
@@ -856,15 +979,89 @@ func (a *Archive) pumpFetches(now time.Time) {
 			},
 		}
 		if !a.sendLocked(contractb.TypeGenomeRequest, req) {
-			continue
+			// The session is going or gone. Walking on would log one failure per
+			// entry and put nothing on the wire; the next session's pump picks up
+			// from the same place in the cycle.
+			return scanned, issued, false
 		}
+		issued++
 		f.inFlight = req.RequestID
 		f.deadline = now.Add(contractb.GenomeRequestTimeout)
+		f.inFlightPeer = target
+		f.inFlightGen = a.sessionGen
+		a.inFlight[target]++
+		a.outstanding[hash] = f
 		f.asked[target] = true
 		f.attempts++
 		a.log.Info("archive: asking for a genome by hash",
 			"genomeHash", hash, "peer", target, "attempt", f.attempts)
 	}
+	return scanned, issued, true
+}
+
+// nextPendingLocked pops the next hash in round-robin order, dropping entries
+// the map no longer holds as it passes them. An entry that is still a gap is
+// pushed back by the caller, so the cursor can only run off the end when there
+// is nothing live left — which is the one case ok is false.
+func (a *Archive) nextPendingLocked() (string, bool) {
+	for a.pendingHead < len(a.pendingOrder) {
+		hash := a.pendingOrder[a.pendingHead]
+		a.pendingHead++
+		if _, live := a.pending[hash]; live {
+			return hash, true
+		}
+	}
+	return "", false
+}
+
+// compactPendingOrderLocked reclaims the consumed prefix, once per pass over
+// the backlog rather than per entry, so the ring costs O(1) amortised and never
+// grows without bound behind the cursor.
+func (a *Archive) compactPendingOrderLocked() {
+	if a.pendingHead == 0 {
+		return
+	}
+	if a.pendingHead < len(a.pendingOrder) && (a.pendingHead < 1024 || a.pendingHead*2 < len(a.pendingOrder)) {
+		return
+	}
+	a.pendingOrder = append(a.pendingOrder[:0], a.pendingOrder[a.pendingHead:]...)
+	a.pendingHead = 0
+}
+
+// reapExpiredLocked retires every request whose genomeRequestTimeoutMs has
+// elapsed. It walks only the outstanding set, which is bounded by the in-flight
+// cap, so it costs the same whether the backlog is 60 gaps or 60,000 — and it
+// keeps the timeout falling due at exactly the moment it always did, instead of
+// waiting for the round-robin cursor to come back round to that entry.
+func (a *Archive) reapExpiredLocked(now time.Time) {
+	for _, f := range a.outstanding {
+		if f.inFlight == "" || now.Before(f.deadline) {
+			continue
+		}
+		// genomeRequestTimeoutMs elapsed: the attempt failed.
+		a.clearInFlightLocked(f)
+		f.nextAt = now.Add(a.retryDelay(f.attempts))
+	}
+}
+
+// clearInFlightLocked forgets one outstanding request and gives the peer its
+// concurrency slot back. A request from an ended session was already forgotten
+// when that session's accounting was dropped, so it does not decrement twice.
+func (a *Archive) clearInFlightLocked(f *fetch) {
+	if f.inFlight == "" {
+		return
+	}
+	if f.inFlightPeer != "" && f.inFlightGen == a.sessionGen {
+		if n := a.inFlight[f.inFlightPeer]; n > 1 {
+			a.inFlight[f.inFlightPeer] = n - 1
+		} else {
+			delete(a.inFlight, f.inFlightPeer)
+		}
+	}
+	delete(a.outstanding, f.hash)
+	f.inFlight = ""
+	f.inFlightPeer = ""
+	f.inFlightGen = 0
 }
 
 func (a *Archive) retryDelay(attempts int) time.Duration {
@@ -930,7 +1127,7 @@ func (a *Archive) onGenomeResponse(env wire.Envelope) bool {
 	a.mu.Lock()
 	f := a.pending[resp.GenomeHash]
 	if f != nil {
-		f.inFlight = ""
+		a.clearInFlightLocked(f)
 	}
 	a.mu.Unlock()
 

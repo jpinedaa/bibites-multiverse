@@ -230,6 +230,30 @@ const (
 	GenomeRequestsPerMinute = 30
 	GenomeCacheRetention    = 30 * 24 * time.Hour
 	GenomeCacheMaxBytes     = int64(2147483648)
+
+	// The four bounds of §21, B21. genomeRequestsPerMinute above is a RATE and
+	// says nothing about how much work one pass of the backlog may do, nor how
+	// many requests it may put on the wire at once. On a large backlog that is
+	// the difference between a paced fetcher and a requester that starves its
+	// own read loop.
+	//
+	// GenomeScanPerTick bounds how many pending entries one pump examines. The
+	// walk is round-robin and resumes where it stopped, so the whole backlog is
+	// still visited; it is visited over several ticks instead of one.
+	GenomeScanPerTick = 2048
+	// GenomeScanChunk bounds how many entries are examined under one acquisition
+	// of the requester's lock. It is the yield: the read loop can never wait
+	// longer than one chunk, whatever the backlog.
+	GenomeScanChunk = 256
+	// GenomeRequestsPerTick bounds the BURST — how many GENOME_REQUESTs one pump
+	// may put on the wire. It sits far above what genomeRequestsPerMinute allows
+	// to be sustained, so it never lowers the fetch rate; it only stops a minute's
+	// whole allowance leaving in one pass.
+	GenomeRequestsPerTick = 8
+	// GenomeInFlightPerPeer bounds concurrent unanswered requests to one peer,
+	// independent of the rate. At GenomeRequestTimeout it still admits more than
+	// genomeRequestsPerMinute permits, so it too never binds before the rate does.
+	GenomeInFlightPerPeer = 8
 )
 
 // ErrInvalid marks a data-level validation failure.
