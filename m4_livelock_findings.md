@@ -60,7 +60,7 @@ are why it cannot re-form. No wire message, field or enum changed.
 | 1 | mod | Ingest budget: ≤4 spawns / ~8 ms per `FixedUpdate`, ≥1 always; ≤16 frames / ~2 ms parsed per `Update`; strictly in order; `pendingIn` counts the whole deferred backlog | `MultiverseClient.cs` `ApplyMutations`/`DrainTransport`; contract-a §5.7, §5.2 (A29) |
 | 2 | mod | The `migrationId` ledger survives socket reconnects; cleared only on `sessionId` change. A replayed handled delivery is an O(1) `duplicate:true` ACK even if the organism died | `MigrationImporter.cs` `OnHandshake`; contract-a §7.3 (A29) |
 | 3 | mod | Hot-path SHA-256 and per-organism log chatter gated behind `MULTIVERSE_DEBUG_INGEST`; one line per ingest at info level | `MigrationImporter.cs`, `OrganismLinks.cs` |
-| 4 | sidecar | Quiet-mod gate: `MIGRATE_IN` release held while the newest `HEARTBEAT` is older than `heartbeatDeliveryGraceMs` (1500 ms) — trips before the 3.5 s close, so a stalling mod is paused into, not flooded | `sidecar.go` `deliverLocked`; contract-a §7.5, §8 (A29) |
+| 4 | sidecar | Quiet-mod gate: `MIGRATE_IN` release held while the newest `HEARTBEAT` is older than `heartbeatDeliveryGraceMs` (1500 ms) — trips before the close, so a stalling mod is paused into, not flooded. (The close was 3.5 s here; 13 s since `contract-a.md` §20 A45, which makes this gate carry the whole window) | `sidecar.go` `deliverLocked`; contract-a §7.5, §8 (A29) |
 | 5 | sidecar | Pacing bucket resets only on a new `sessionId`, never on a same-session socket reconnect | `contracta_server.go`; contract-a §7.5 (A29) |
 | 6 | sidecar | Replay batch waits `min((minAttempt−1)·500 ms, 5 s)` — one order-preserving delay, escalating per generation | `contracta_server.go` `replayInboundLocked`; contract-a §7.5 (A29) |
 | 7 | sidecar | Dedup precedes the decode: `migrationId` extracted with a minimal parse, journal lookup, *then* (new ids only) the full decode | `contractb_client.go` `onMigrationPayload`; contract-b §6.6 (B8) |
@@ -79,6 +79,14 @@ Deliberately **not** done, and why:
   replay cost is the durable ledger, not weaker custody.
 - **`4004` still closes at 3500 ms.** With defence 1 the heartbeat survives any burst, so
   the timeout is finally what it was always meant to be: a dead-mod detector.
+
+  **Superseded on 2026-08-10, and by this document's own argument.** The deadline is now
+  13 000 ms (`contract-a.md` §20, A45). Defence 1 does make the heartbeat survive any *ingest*
+  burst, and it did — no livelock has re-formed. What this list did not consider is the other
+  thing that occupies the same thread: **D14's periodic world save**, which blocks it for
+  0.6–9.4 s on the living deployment and is therefore heartbeat silence from a healthy mod. So
+  3 500 ms was never yet the dead-mod detector this line claims; it became one at 13 000 ms.
+  The sentence stands as the intent, and the number in it is history.
 
 ## 4. Verification
 

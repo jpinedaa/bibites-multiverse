@@ -267,6 +267,20 @@ PACE_BURST="${PACE_BURST:-5}"
 
 TIME_SCALE="${_ENV_TIME_SCALE:-5}"
 SEED_TIME_SCALE="${_ENV_SEED_TIME_SCALE:-20}"
+
+# THE REHEARSAL KEEPS 2 AND 4, AND THE VARIABLES STAY EXPLICIT. The mod ships 10
+# and 6 (contract-a.md §10, MultiverseConfig.cs), and the living deployment ran
+# these two instead only because this file overrode them and nobody revisited it —
+# the owner corrected that on 2026-08-10 and run-m4-lan.sh now assigns the shipped
+# pair (dev_environment.md, *Watch items*).
+#
+# This file does not follow, for the reason it has always named: phase 8 asserts
+# the rotation layout — a live save, at most $SAVE_KEEP timestamped backups, no
+# partial left behind — and a rig phase that can only see a save it waited for
+# needs a cadence short enough to contain several inside one run. Deleting these
+# two lines would move what this rig MEASURES, silently, by inheriting whatever a
+# later default becomes. The number is a test fixture here and a deployment
+# setting there, and the two are allowed to differ as long as both say so.
 SAVE_MINUTES="${SAVE_MINUTES:-2}"
 SAVE_KEEP="${SAVE_KEEP:-4}"
 
@@ -1568,7 +1582,9 @@ phase7() {
 
 phase8() {
   step "PHASE 8 — periodic saves: [M4-SAVE] on interval in every logged game, rotation on disk"
-  note "MULTIVERSE_SAVE_MINUTES=$SAVE_MINUTES simulated minutes, MULTIVERSE_SAVE_KEEP=$SAVE_KEEP."
+  # Wall-clock, not simulated: WorldSaver schedules on Time.realtimeSinceStartup
+  # (contract-a.md §10), so the interval does not shrink when TIME_SCALE rises.
+  note "MULTIVERSE_SAVE_MINUTES=$SAVE_MINUTES wall-clock minutes, MULTIVERSE_SAVE_KEEP=$SAVE_KEEP."
   local ok=0 slot line
 
   step "the save receipts"

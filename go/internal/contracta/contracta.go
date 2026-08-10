@@ -178,9 +178,26 @@ const (
 
 // Tunable defaults (contract-a.md §10).
 const (
-	DefaultPort              = 8787
-	HeartbeatIntervalMs      = 1000
-	HeartbeatTimeoutMs       = 3500
+	DefaultPort         = 8787
+	HeartbeatIntervalMs = 1000
+	// HeartbeatTimeoutMs was 3500 — three missed heartbeats plus slack — and the
+	// living deployment turned that into a routine disconnect (§20, A45). The
+	// heartbeat is composed on the Unity main thread (§11.2, §13 A4) and a
+	// periodic world save blocks that thread, so a long save IS heartbeat
+	// silence: 50.8% of saves over 3.5 s were followed by a 4004 within twelve
+	// seconds, and thirteen hours at x100 measured per-slot save maxima of
+	// 4 311 / 5 386 / 5 870 / 9 115 / 9 427 ms. 13 000 clears the worst of those
+	// by 3 573 ms, stays strictly under WSPingIntervalMs so the app-level
+	// detector always fires before the transport one, and keeps §8's own
+	// arithmetic: twelve missed heartbeats plus a second of slack.
+	//
+	// The cost is paid by a mod that is genuinely gone: it now keeps
+	// modConnected true for up to this long plus one monitor tick
+	// (HeartbeatTimeout/4), and the quiet-mod gate holds its arrivals in the
+	// journal for that window instead of closing the edges. Holding is lossless
+	// and bounded by InboundQueueMax; the 4004 it replaces costs a session
+	// churn, an edge-close broadcast and a replay (§8, §15 A29).
+	HeartbeatTimeoutMs       = 13000
 	WSPingIntervalMs         = 15000
 	WSPongTimeoutMs          = 10000
 	MigrateInAckTimeoutMs    = 10000
