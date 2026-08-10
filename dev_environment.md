@@ -73,9 +73,13 @@ file is a lock race (see Gotchas).
 seeds, saves and quits with nothing drawn and nobody watching. Windows reports
 `MainWindowHandle=0` for that process and gives it **no `GPU Engine` counter instances at
 all** — not idle ones, none — where a visual instance held ~24% of the GPU; CPU fell from
-1.50 to 1.10 cores, and a headless instance sitting at the menu is ~390 MB. The far end
-takes the same two flags through `start-slot6.ps1 -Headless`, and slot 6 has run that way
-since (*The living deployment*). Exactly one thing is lost, and it is not the simulation —
+1.50 to 1.10 cores, and a headless instance sitting at the menu is ~390 MB. **A headless
+instance holding a live world is barely larger** — the five local worlds measured 403–466 MB
+each right after the 2026-08-10 switch, against the 1.27–2.07 GB the same five held drawn.
+The far end takes the same two flags through `start-slot6.ps1 -Headless`, and the five local
+worlds take them from `e2e/run-m4-lan.sh`, which exports `BIBITES_EXTRA_ARGS` for every game
+it starts: **all six worlds have run headless since 2026-08-10** (*The living deployment*).
+Exactly one thing is lost, and it is not the simulation —
 see *A headless world's save thumbnail is blank* in Gotchas.
 
 ### The reference DLL set
@@ -251,7 +255,8 @@ e2e/run-m4-lan.sh all        # up, phase1..8 (phase5far is excluded: it blocks o
 
 **The LAN rig passed the M4 exit test on 2026-08-06, and it is running now.** It came back
 up after the test and holds the living deployment: six worlds, periodic saves every 2 minutes
-here and every 10 on the far end. It has since survived two host reboots, on 2026-08-08 and
+here and every 10 on the far end, **all six headless and the five local ones targeting ×100
+since 2026-08-10**. It has since survived two host reboots, on 2026-08-08 and
 2026-08-09, and was brought back by hand both times. Do not start another rig against it, and
 do not stop a process it owns — see *Only one rig can run at a time* in Gotchas.
 `m4_considerations.md`, *Exit Test → Result*, records the exit-test run; **the current
@@ -1240,6 +1245,80 @@ absorbed the far end: 20 lanes and two `peer_mod_absent` closures at 23:45:29Z, 
 ×5 by 23:51:03Z, `timeoutBounces` still 0 for the whole run. Nothing was lost, but the trigger is
 **unexplained**, and it is the first burst of this shape with no save behind it.
 
+### All six worlds run headless, and the five local ones target ×100, since 2026-08-10
+
+The owner's decision, taken after the far end proved the pattern: switch the five local games
+to `-batchmode -nographics` and raise their time-scale target from ×5 to ×100. It is a
+**game-process-only** change — no sidecar, relay, archive or collector was stopped — and both
+halves now live in `e2e/run-m4-lan.sh`, so a bring-up reproduces the regime without a
+command-line flag (*Bringing it back after a reboot*, step 4). The rehearsal `run-m4.sh` is
+untouched at ×5 and drawn.
+
+**The rollout, one slot at a time between 01:23Z and 01:30Z on 2026-08-10.** For each slot:
+`send <n> quit`, wait for the process, then the rig's own `start_game <n>` with
+`BIBITES_EXTRA_ARGS` exported, then `send <n> timescale 100`.
+
+| Slot | Quit | Mod back after | Log file | First save headless |
+|---|---|---|---|---|
+| 1 | 3 s | 16 s | `LogOutput.log.1`, the one it freed | 609 ms / 110 KB |
+| 2 | 5 s | 12 s | `LogOutput.log` | 1 846 ms / 231 KB |
+| 3 | 4 s | 15 s | `LogOutput.log.2` | 2 093 ms / 266 KB |
+| 4 | 4 s | 12 s | `LogOutput.log.3` | 1 910 ms / 226 KB |
+| 5 | 4 s | 12 s | `LogOutput.log.4` | 1 373 ms / 210 KB |
+
+Every instance took back **the log file its own stop had just freed**, so the starvation trap
+never fired — which is what one-at-a-time buys. **Only the mod bounced, five times over**:
+`relay.log` records no `client connected` and no `client gone` for any local peer in the whole
+window, and each sidecar logged exactly **one** `4004` heartbeat close, its own game's. The map
+never dropped below 24 lanes long enough for a collector sample to see it, and `timeoutBounces`
+is still 0.
+
+**A local quit is 3–5 s, not the far end's 13, and its receipt may not survive the exit.**
+Slots 2, 3 and 4 logged `[M4-SAVE] event=SAVED why=quit`; **slots 1 and 5 did not, and slot 1's
+save demonstrably happened anyway** — `M4-Slot1-20260810T012349Z.zip` and a `M4-Slot1.zip`
+written at 01:23:49Z, both inside a quit window whose last periodic save was 01:22:41Z.
+BepInEx's disk listener loses whatever is still buffered when the process goes, and a 3-second
+quit is short enough to lose the last line. So on a fast quit **the zip on disk is the evidence,
+not the log line** — check it there before the `keep=4` prune reaches it, which is what happened
+to slot 5's. Do not read a missing `why=quit` line as a missing save.
+
+**×100 does not hold, and this is the interesting result.** Over 16 collector-grade samples
+between 01:36Z and 01:49Z, with `timeScale` read off `/api/status` and the achieved rate
+measured against each world's own `simulatedTime`:
+
+| Slot | Applied (`timeScale`) | Achieved per wall second |
+|---|---|---|
+| 1 | 45–100, median **100** | 27–68, median **42** |
+| 2 | 11–36, median 18 | 4.6–12, median **6.6** |
+| 3 | 13–61, median 25 | 6.1–18, median **9.4** |
+| 4 | 22–44, median 30 | 7.8–15, median **11** |
+| 5 | 16–81, median 28 | 8.6–25, median **11** |
+| 6 (far) | 9–72, median 43 | 4.3–24, median 16 |
+
+Only slot 1 — 5 to 10 organisms — reports its target, and even it achieves under half of it.
+`TimeController.CheckMinFPS` clamps the other four hard, and `Time.maximumDeltaTime` takes
+another cut on top (*A world can be at the wrong time scale*, in Gotchas). **What actually
+changed is the aggregate**: the five local worlds advanced **63–124 simulated seconds per wall
+second together, median 80**, against **24** at ×5 drawn — a real 3–5× on the whole map, not
+the 20× the target names. Headless bought the GPU and about a gigabyte of RAM per instance
+(403–466 MB against 1.27–2.07 GB); ×100 spent the CPU that bought.
+
+**The far end is off ×6.5 on its own account.** Slot 6 reported 78–90 as the local rollout
+began and 9–72 through the hour after it, achieving 4–26. That is still its operator's business and
+no part of this change; it is recorded because the ×6.5 in the section above is now history.
+
+**Crossings roughly doubled, and the queues did not move at all.** The status page's own
+`perMinute` read **345–367** in the samples before the rollout and **603–781** after it; an
+independent migration-delta measurement over the same windows gives 573/min before and
+603–993, median 734, after. Across that second window: 6/6 live and `modConnected`, **24/24 lanes `peer_live` with no
+bypass**, `pacedDepth` 0, `heldDepth` 0, `timeoutBounces` 0, `custodyDepth` 0–6, and **zero**
+`OVERLOADED`, `MALFORMED_MESSAGE` or `level=ERROR` on the Go side. Population held its range:
+**186–242** total against 212–236 before, with slot 1 still the small one at 2–22.
+
+**Two watch items moved.** `genomeGaps` climbed exactly as its mechanism predicts for a
+doubled crossing rate, and the save stall moved the other way from the hope — worse, not
+better. Both are written up in *Watch items*; neither was retuned.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09. The steps are ordered and step 1
@@ -1273,13 +1352,25 @@ gates the rest.
    ARCHIVE_HTTP=0.0.0.0:8796 ./e2e/run-m4-lan.sh up
    ```
 
+   **That one command now reproduces the whole regime, and the command line does not carry
+   it.** `run-m4-lan.sh` exports `BIBITES_EXTRA_ARGS='-batchmode -nographics'` and assigns
+   `TIME_SCALE=100` unconditionally after it sources the rehearsal (the file's own
+   capture-before-source idiom), so every game `start_game` launches is headless and the last
+   act of `up` is `send <n> timescale 100` on all five. Both are still environment overrides:
+   `TIME_SCALE=5 …` brings the old speed back, and `BIBITES_EXTRA_ARGS= …` — empty, which is
+   why that default uses `-` and not `:-` — brings the windows back. `run-m4.sh` is untouched
+   and the rehearsal still runs drawn at ×5.
+
 5. **Expect one game to come up starved of a log file**, and fix that one instance rather
    than the rig — see *The five-instance ceiling, and the log-file starvation trap* in
    Gotchas. It happened on both reboots.
 6. **Read the time scale of every instance, not only a restarted one** — see *A world can be
    at the wrong time scale* in Gotchas. It needed a `send 1 timescale 5` after the
    2026-08-08 reboot and nothing after the 2026-08-09 one, so the check is the deliverable,
-   not the correction.
+   not the correction. **The target for a local world is now ×100** and the correction is
+   `e2e/run-m4-lan.sh send <n> timescale 100`; the far end's speed is still its own operator's.
+   Read the *achieved* rate too, not only the reported one — at ×100 the two are far apart,
+   and the gotcha says what that means.
 7. **Relaunch the baseline collector by hand.** Every reboot kills it and nothing restarts
    it. It is gitignored, read-only against the deployment — it only copies the five save zips
    and curls `/api/status` — and costs ~0.5 GB/day (*The disk budget*).
@@ -1335,8 +1426,33 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   any slot save and the bibites are about a fifth of it, behind `speciesData.json`
   (~900 KB raw), `data.bin` (~150 KB) and the 400×400 `img.png` the game renders inside
   `SaveSystem.CreateSave`. **A save costs roughly what it costs whether the world holds 7
-  organisms or 40**, so the variable is the host — five Unity instances at ×5 with 24 lanes
-  and ~500 crossings a minute — and a host reboot gives back about 40% of the cost.
+  organisms or 40**, so the variable is the host — five Unity instances driving 24 lanes and
+  several hundred crossings a minute — and a host reboot gives back about 40% of the cost.
+
+  **The 2026-08-10 headless-at-×100 switch is the cleanest evidence yet that the host is the
+  variable, and it moved the wrong way.** Both changes landed together on the same five worlds
+  within seven minutes, so this is one before/after on one host. Against 993 drawn saves at ×5
+  in the generations preserved as `…headless.*` in `e2e/logs-m4-lan/bepinex/`, and 51 headless
+  saves at the ×100 target in the hour after:
+
+  | Slot | Drawn ×5 — median stall / ms per 100 KB / breaches | Headless ×100 — median stall / ms per 100 KB / breaches |
+  |---|---|---|
+  | 1 | 722 ms / 300 / 0 of 198 | 862 ms / 665 / 0 of 13 |
+  | 2 | 1 099 ms / 314 / 3 of 196 | 1 799 ms / 538 / 4 of 10 |
+  | 3 | 1 327 ms / 362 / 11 of 199 | 1 939 ms / 644 / 4 of 9 |
+  | 4 | 1 189 ms / 346 / 1 of 200 | 1 582 ms / 635 / 1 of 9 |
+  | 5 | 1 390 ms / 389 / 16 of 200 | 1 607 ms / 609 / 1 of 10 |
+
+  **The cost of a saved kilobyte roughly doubled** — 300–389 ms per 100 KB to 538–665 — and the
+  pooled breach rate went **3.1% → 20%**. Two corrections to the naive reading. First, the
+  headless zips are ~75 KB *smaller* than the drawn ones of the same world, because the
+  thumbnail is now a flat 3 666-byte `img.png` (*A headless world's save thumbnail is blank*),
+  so the per-kilobyte figure understates nothing and the raw stalls understate the change.
+  Second, **headless is not what did this** — the far end's 672 ms is one headless world on its
+  own host, and slot 1's stall barely moved while its file halved. What did it is five
+  simulations asking for ×100 on sixteen cores: the tick is CPU-starved and the save rides the
+  tick. If the owner wants the budget back, the ×100 target is now a lever on it alongside the
+  cadence.
 
   **A breach under about 3 s is a logged breach and nothing more; past 3.5 s it disconnects
   the mod.** Contract A's heartbeat timeout is 3.5 s and the stall blocks the thread that
@@ -1370,7 +1486,15 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   the same day, so it *is* climbing — and it is still the smallest of the five by a factor of
   two and a half. A small world produces few young of its own and depends on arrivals; the
   open question is whether the lanes alone carry it back to its neighbours' range or whether
-  it settles low.
+  it settles low. **The ×100 switch made it the fast one and did not make it the big one.**
+  It was 18 an hour before, dropped to 1–3 in the minutes when it alone ran at ×100 among four
+  worlds still at ×5 — it exported into them 20× faster than they exported back, and the log
+  shows 98 `MIGRATE_OUT_SENT` against 0 arrivals in that first minute — and then oscillated
+  **2–22** once all five were switched. That range is its old one sampled far more finely:
+  ×100 compresses a population cycle into a minute of wall clock, so a single low reading now
+  means much less than it did. Being the smallest is also why it is the only world that
+  *reports* its ×100 target (*All six worlds run headless, and the five local ones target ×100,
+  since 2026-08-10*); the four bigger ones are clamped.
 
 - **`genomeGaps` is a fetch queue, its healthy value is 0, and what it counts is
   throughput.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the
@@ -1397,6 +1521,14 @@ not a defect, and it stays on this list because M5 changes what it will mean.
     lines a minute through the entire drain. A leak does not drain against traffic. The drain
     then carried straight through the far-end restart to **552** by 00:52Z on 2026-08-10, ten
     more unbroken samples at 230–305 crossings a minute, which is the confirming case.
+  - **2026-08-10, from 01:19Z: the ×100 switch is the loaded case this item predicts, and it
+    behaved like one.** `genomeGaps` read **291** at 345 crossings a minute just before the
+    rollout and climbed to **1,071** by 01:55Z, with the rate settled at 603–781/min — above
+    the ~400/min growth threshold for the whole window. `ledgerRecords` grew from 1,145,694 to
+    1,200,972 across the same half hour and nothing else moved: 24/24 lanes, all queues 0, no
+    errors. **A climb under a doubled current is the mechanism, not a fault** — and the regime
+    now sits above the threshold most of the time, so expect a standing backlog rather than the
+    flat zeros of 2026-08-07.
 
   **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
   `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**
@@ -1430,7 +1562,9 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   against a fetch ladder that runs from one minute to daily and a sidecar cache capped at 30
   days and 2 GiB. `m5_considerations.md` **Risk 7** carries that case and its mitigations. On
   this rig, watch the direction: a backlog that does not drain when the crossing rate falls
-  below ~340/min is the reading that would mean something new.
+  below ~340/min is the reading that would mean something new. Since the ×100 switch that test
+  comes round less often, so take it when it does — a lull, a restart, or a deliberate
+  `send <n> timescale 5` on one world.
 
 ## Gotchas
 
@@ -1489,8 +1623,11 @@ not a defect, and it stays on this list because M5 changes what it will mean.
 - **A world can be at the wrong time scale, and the rig's own `timescale` may not stick to
   it. Read every instance, not only the one you touched.** The game restores its own speed
   after the world settles, which can land after the rig's `send <slot> timescale <x>`. Re-send
-  it and confirm on `/api/status`; the command answers
-  `targetTimeScale=5.00 Time.timeScale=5.00`. **`timeScale` on the page is the speed the game
+  it and confirm on `/api/status`; the command echoes both halves, as
+  `targetTimeScale=100.00 Time.timeScale=100.00`. **The target for the five local worlds is
+  ×100 since 2026-08-10** (*The living deployment*), so that is the number a correction sends;
+  the readings below that say `×5` are the record of when the target was ×5, not stale advice.
+  **`timeScale` on the page is the speed the game
   is *applying*, not one this rig measured** — the mod copies `Time.timeScale` into the
   heartbeat (`MultiverseClient.cs:1040`) and `contract-a.md` calls it *the effective time
   scale*. The game's own governor is what makes it move: `TimeController.CheckMinFPS` clamps
@@ -1499,7 +1636,13 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   reports the fluctuating non-integer it was throttled to. Neither figure is the achieved rate,
   because `UpdateTimeScale` also pins `Time.maximumDeltaTime` to one fixed step: at 00:47Z on
   2026-08-10 the five local worlds reported `5` and advanced 4.94–5.00× per wall second, while
-  slot 6 reported `6.5` and advanced 5.84×. Three measurements say the scope is wider than
+  slot 6 reported `6.5` and advanced 5.84×. **At a target the host cannot meet the two figures
+  come apart completely, and the gap is where the news is.** Under the ×100 switch the same
+  evening, over 16 samples: slot 1 (5–10 organisms) reported its `100` and advanced 27–68×,
+  while slots 2–5 (20–60 organisms each) reported a fluctuating 11–81 and advanced 4.6–25×.
+  **So a target is an ask, an applied `timeScale` is what the governor allowed, and only
+  `Δ simulatedTime / Δ wall` is what happened** — take the third before believing a rate.
+  Three measurements say the scope of the *drift* is wider than
   "the instance you just restarted", and each widened it:
   - after the 2026-08-07 config-race restart, slots 1 and 2 reported `×100` and `×58` while
     the three the rig started reported `×5`;
@@ -1522,15 +1665,26 @@ not a defect, and it stays on this list because M5 changes what it will mean.
 - **Unity's own errors never reach `LogOutput.log`.** BepInEx ships
   `[Logging.Disk] WriteUnityLog = false`, and on this install the chainloader also reports
   `Unable to start Unity log writer` at startup. An in-game `NullReferenceException`
-  therefore leaves no trace in the BepInEx log. The mod subscribes to
-  `Application.logMessageReceived` and forwards errors itself — keep that, or in-game
-  failures go silent.
+  therefore leaves no trace in the BepInEx log. The mod does subscribe to
+  `Application.logMessageReceived` and forward errors itself — **but only under the
+  auto-test**: the handler is `AutoTest.Awake` (`AutoTest.cs:71`), and that component is
+  added only when `[M1] AutoTest` or `MULTIVERSE_AUTOTEST` armed it
+  (`MultiversePlugin.cs:174`). **On the living deployment nothing forwards them, so in-game
+  Unity failures are silent** — confirmed 2026-08-10, when five headless worlds wrote a flat
+  thumbnail into every save, which is the `RenderTexture.Create failed` signature, and not one
+  Unity error line reached any of the five logs. A rig that needs to see Unity's own errors
+  has to subscribe outside `AutoTest`.
 - **A headless world's save thumbnail is blank, and the error saying so cannot reach the
   BepInEx log.** Under `-batchmode -nographics` `SaveSystem.CreateSave` still calls
   `SceneScreenShotHandler.SaveScreenshotToZip`, and the `RenderTexture.GetTemporary(400, 400,
   24, ARGB32)` at `ScreenShotHandler.cs:117` fails with Unity's own `RenderTexture.Create
-  failed` — which is invisible on disk for the reason above, and surfaces only through the
-  mod's `Application.logMessageReceived` forwarder. **The save itself is whole.**
+  failed` — which is invisible on disk for the reason above, and reaches a log **only under
+  the auto-test**, whose forwarder is the only subscriber (see the gotcha above). On the
+  deployment there is no line at all, so **the tell is the file, not the log**: `img.png` is
+  **3,666 bytes** in every headless save and ~**79 KB** in the drawn one it replaced — measured
+  across `M4-Slot3`'s own rotation set on either side of the 2026-08-10 switch. That also makes
+  a headless save ~75 KB smaller than the drawn save of the same world, which is worth knowing
+  before comparing save sizes across the switch. **The save itself is whole.**
   `ReadPixels` against the failed target does not throw, so the 400×400 `img.png` is written
   flat rather than not at all, and every other entry — `scene.bb8scene` and `data.bin` ahead
   of it, the bibites, the eggs and the templates behind it — is written normally; confirmed
