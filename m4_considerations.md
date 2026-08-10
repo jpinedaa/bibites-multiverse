@@ -658,6 +658,18 @@ at 23 on slot 3 while the replayed entries drained, then fell to 0. That is the 
 of history on all five sidecars while every process looked healthy, and the only observation
 that distinguishes a fixed journal from a broken one is the replay after a restart.
 
+**And the same two bring-ups replayed a damaged archive ledger and said nothing, which is the
+other half of the lesson.** The rule was written for `internal/journal`; the archive's
+`migrations.jsonl` is a second implementation of the same append-only discipline and it got
+neither the all-or-nothing append nor a `Discarded()` of its own. The 2026-08-08 splice is
+still in that file — 776 bytes at line 874,163 — and both reboots replayed to it and stopped,
+silently, while the status page kept counting forward in memory. It was found and closed on
+2026-08-09 (`dev_environment.md`, *The disk budget*), with a replay that **skips** the damaged
+line rather than stopping at it, because a ledger nothing ever compacts cannot be given the
+journal's remedy. **A durability rule proven in one implementation is not proven in the
+system**, and the observation that would have caught it — a replay compared against `wc -l` —
+costs one command.
+
 ### Risk 7 — The far end has no drive path
 
 Decision D9's answer holds: the rig never drives the second computer. A save is not an
@@ -1275,7 +1287,9 @@ steps below carry the milestone's remainder into the living deployment and into 
    one. It is the first rig that survives its own operator — and, since 2026-08-08 and
    2026-08-09, its own host reboots. The bring-up is a hand procedure with known traps:
    `dev_environment.md`, *The living deployment*, holds it, along with the current reading and
-   the two open watch items (slot 1's depressed population and the `genomeGaps` backlog).
+   the three watch items (the save-stall breach of Risk 3's budget, slot 1's depressed
+   population, and the `genomeGaps` backlog — which now has its answer: the healthy value is
+   zero, and the count is fetch throughput rather than a leak).
 2. **Run `run-m4-lan.sh lanhost` after every WSL restart and compare.** It is a read-only
    check. The WSL address *can* move, and the portproxy behind `8795` then points at nothing
    and the far world drops out of the map — but it did not move across either reboot, so
@@ -1285,7 +1299,10 @@ steps below carry the milestone's remainder into the living deployment and into 
 4. **Run `phase5far` once, when a person is at the second computer.** It confirms the pacing
    rule across the LAN. Phase 5 already proves the rule locally, so this is confirmation.
 5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.
-6. **Open M5** (public release). The join kit is its starting point, and the wire shapes it
-   publishes are whatever the contracts say at the time — **`contract-a/2.3` plus
-   `contract-b/3.5` as of 2026-08-07**, after the census, D17's two-way lanes and §19's world
-   settings. Read the contracts for the current pair rather than this line.
+6. **Open M5** (public release). **DONE, 2026-08-09: `m5_considerations.md`** is the design
+   pass that opens it, and it is PROPOSED — nine owner decisions are open and nothing in it
+   is ratified, starting with the one that gates its first work package. The join kit is its
+   starting point, and the wire shapes it publishes are whatever the contracts say at the
+   time — **`contract-a/2.3` plus `contract-b/3.5` as of 2026-08-07**, after the census, D17's
+   two-way lanes and §19's world settings. Read the contracts for the current pair rather
+   than this line.

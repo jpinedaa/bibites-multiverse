@@ -84,8 +84,14 @@ func RenderRingstat(w io.Writer, s Status) {
 	if !s.RelayConnected {
 		link = "RELAY LINK DOWN"
 	}
-	fmt.Fprintf(w, "archive %s (%s)   state %s old   %d ledger record(s), %d genome gap(s)\n\n",
+	fmt.Fprintf(w, "archive %s (%s)   state %s old   %d ledger record(s), %d genome gap(s)\n",
 		s.ArchivePeerID, link, dur(s.StatusAgeMs), s.Records, s.Gaps)
+	// Only for a damaged ledger, and then on its own line, because it is the one
+	// thing on this screen that says the record of what happened is incomplete.
+	if s.LedgerSkipped > 0 {
+		fmt.Fprintf(w, "LEDGER DAMAGE: %d line(s) unreadable and skipped on replay\n", s.LedgerSkipped)
+	}
+	fmt.Fprintln(w)
 
 	// speed is the world's own time scale and pace is queued/cap per SIMULATED
 	// minute of that world — the same two settings the map draws in every cell,

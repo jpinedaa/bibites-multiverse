@@ -2526,7 +2526,13 @@ function renderMap(d){
          tt.migrations+"  ("+tt.perMinute.toFixed(2)+"/min over the last "
          + Math.round((d.flowWindowMs||300000)/60000)+" min)")
     + kv(t("genomegap","genome gaps"), d.genomeGaps)
-    + kv("ledger records", d.ledgerRecords);
+    + kv("ledger records", d.ledgerRecords)
+    // Absent unless the ledger is damaged, which is permanent when it happens:
+    // the count is the difference between this row and wc -l on the file.
+    + (d.ledgerSkippedLines
+         ? kv("ledger lines unreadable and skipped",
+              '<span class="bad">'+d.ledgerSkippedLines+"</span>")
+         : "");
 }
 
 async function tick(){

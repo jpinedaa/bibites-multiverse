@@ -27,7 +27,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | The plugin | `0.6.1` (`MultiversePlugin.Version`) — the world-settings build: it publishes what it was *told to do* on the handshake (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping), on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. It speaks `contract-a/2.3`. The far-end bundle carries the same DLL; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing journal appends. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
+| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — the sidecar's journal since 2026-08-08, the archive's ledger since 2026-08-09. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -548,7 +548,9 @@ procedure, a baseline capture:
 A periodic save is deferred by 15 s, up to six times, while a `MIGRATE_IN` is queued or while
 another instance holds the lock; after six it saves anyway and warns. The save on quit ignores
 the lock. Every outcome is one `[M4-SAVE]` line with a `stallMs` measured against the 2 000 ms
-budget of Risk 3.
+budget of Risk 3. **The living deployment breaches that budget routinely and has done since
+the exit test** — see *Watch items*; the exit test's 241–538 ms is a 2026-08-06 reading, not
+the current one.
 
 ### The LAN token
 
@@ -1025,7 +1027,7 @@ ACKing correctly. Any restart in those eight hours — a crash, a deploy, a rebo
 have silently reverted every one of them to its 01:07 state. That is precisely the loss D2
 exists to make impossible, arriving through the one path that had no rule written for it.
 
-Two changes close it, both in `internal/journal`:
+Two changes close it in `internal/journal`:
 
 - **An append is all-or-nothing.** On any write error the file is truncated back to the
   length it had before the attempt. The caller still gets the error and still must not
@@ -1038,6 +1040,31 @@ Two changes close it, both in `internal/journal`:
 Recovering the running rig is in the git history of 2026-08-08: the five journals were read
 out of `/proc/<pid>/fd/` while the processes still held them, which is the only place the
 post-01:07 records existed.
+
+**The archive's ledger had the same defect, and kept it a day longer.** `internal/archive`
+is a second implementation of the same append-only discipline and it got neither fix on
+2026-08-08, so `migrations.jsonl` still carries that night's splice: **776 bytes at line
+874,163**, the head of a `NACK` written at 01:21:49 joined to the tail of a record written at
+08:12:05, once the disk had room again. Replay broke there in silence, exactly as the
+journals had. Found and closed on **2026-08-09**, and the two halves are not symmetrical
+with the journal's:
+
+- **The same all-or-nothing append.** `Ledger.Append` truncates back to the pre-write length
+  on a short or failed write, and `OpenLedger` drops an unterminated final line before the
+  first append of the new process can splice itself onto it.
+- **Replay SKIPS a damaged line instead of stopping at it**, which is where the ledger
+  departs from the journal deliberately. The journal may stop and truncate because `Open`
+  compacts it from the in-memory state map immediately afterwards and loses nothing. The
+  ledger has nothing to rebuild from — it **is** the state, it is never rewritten (§10 makes
+  eviction from it illegal), and it will carry that line for the life of the deployment. So
+  it reads past it and keeps every record behind it, and what it reports is the damaged line
+  itself rather than the history behind it, because none is thrown away. It is logged at
+  **error** on startup and carried as `ledgerSkippedLines` on the status page, in the
+  `/api/status` JSON and in `ringstat`.
+
+Verified against a copy of the living ledger, 2026-08-09: **1,287,592 lines replay to
+1,287,591 records with exactly one line skipped, 776 bytes.** The old code stopped at
+**874,162** and reported nothing.
 
 ### What still grows forever
 
@@ -1123,6 +1150,7 @@ digits.
 | Errors | zero `OVERLOADED`, zero `MALFORMED_MESSAGE`, zero `bounceBack=true`, and no unexplained error line in any log |
 | Portals | **8/8** `[M4-PORTAL] event=SHOWN` per game — four edges × two lanes, which is the full D17 set |
 | Speed | ×5 on all five local worlds; the far end runs ~21–24, which is its own operator's setting and not this rig's business |
+| Saves | Every world saving on its 2-minute interval, every rotation clean, no `event=FAILED`. **Not clean against D14, though**: read over the whole run rather than at one instant, stalls span **0.47–2.69 s** and **20 of 718** saves exceeded the 2 000 ms budget. See *Watch items* |
 
 **Re-read the same day at 20:21Z, and three of those lines had moved in ways worth knowing.**
 Population **243** (slot 1 **14**, slot 2 **43**, slot 3 **40**, slot 4 **34**, slot 5 **43**,
@@ -1134,7 +1162,8 @@ other four still measured ×5** — the time scale drifted *hours after* a clean
 only across a restart, which widens the gotcha below. It was **corrected later the same hour**
 with the rig's own `e2e/run-m4-lan.sh send 2 timescale 5`, which answered
 `targetTimeScale=5.00 Time.timeScale=5.00` and held on the following sample with all five
-local worlds back at ×5. And the two watch items both moved; see *Watch items*.
+local worlds back at ×5. And both of the population and backlog watch items moved; see
+*Watch items*, which since 2026-08-09 carries a third.
 
 **The far end needed nothing.** Neither reboot took the second computer down, and slot 6
 reconnected by itself both times — at 12:07:10 on 2026-08-08 — so the map formed 24/24 with
@@ -1213,10 +1242,65 @@ gates the rest.
    A reboot that lands mid-cycle leaves an empty snapshot directory behind; there is one,
    `20260808T143150Z/`, and it is harmless.
 
+**The next bring-up will make the archive's counters JUMP, and that is a recovery rather than
+a fault.** The running archive replayed the ledger with the pre-fix code at its own boot, so
+everything it shows — `ledgerRecords`, the lane counters, the species aggregates — is built on
+the 874,162 records that replay could reach plus what it has recorded since: **1,096,418
+against 1,293,613 lines in the file** at 23:45Z on 2026-08-09. Its in-memory state is correct
+and complete for its own run; it is the *replay* that was short. The first restart after the
+fix reads past the spliced line and recovers the ~197,000 older records this process never
+saw, so the totals rise. Before the fix that same restart would have **reverted** them to
+01:21 on 2026-08-08. See *The disk budget*.
+
 ### Watch items
 
-Two things are being watched on the running deployment. Neither is a defect, and neither has
-a verdict yet.
+Three things are being watched on the running deployment. The first is a **measured breach of
+a bar the owner set**, and it is waiting on a decision rather than on more data. The second is
+a trend with no verdict yet. The third **has its verdict** — the reading is understood, it is
+not a defect, and it stays on this list because M5 changes what it will mean.
+
+- **The 2-second save-stall budget is breached routinely, and it has been since the day the
+  exit test passed.** D14 set the bar at 2 000 ms and the exit test of 2026-08-06 measured
+  241–538 ms against it (`m4_considerations.md`, Risk 3). **No generation since has held
+  it.** Across the eleven preserved `[M4-SAVE]` generations in `e2e/logs-m4-lan/bepinex/` —
+  8 087 saves, 8 072 of them periodic — `event=BUDGET_EXCEEDED` runs at **17%**, at a pooled
+  median stall of **1 327 ms** and a maximum of **5 163 ms**. The bad nights are far worse:
+  29–70% per slot through the evening of 2026-08-07, and 55–95% across the four populated
+  slots on 2026-08-08, where slot 3 breached **41 of its last 43** saves at 1 909–3 413 ms.
+  The current run reads better and not well — **20 breaches in 718 saves** since the
+  2026-08-09 bring-up, medians of 0.70 s on slot 1 to 1.38 s on slot 5, still two to four
+  times the exit test. **It is not the worlds growing**, which was the first guess and is
+  wrong: the collector's 243 five-slot snapshots put the save zips at 275–330 KB on
+  2026-08-07, near 570 KB overnight on 08-08 at peak population, and 210–320 KB now. What
+  moved is the **cost of a saved kilobyte** — 120–172 ms per 100 KB in the exit test,
+  500–620 ms on 2026-08-08, 290–370 ms now. Slot 1 settles it: its population fell from 21
+  to 7–11 and its file stayed near 220 KB while its median stall went 214 ms → 1 164 ms →
+  704 ms. Nor is the payload mostly organisms — unzip
+  any slot save and the bibites are about a fifth of it, behind `speciesData.json`
+  (~900 KB raw), `data.bin` (~150 KB) and the 400×400 `img.png` the game renders inside
+  `SaveSystem.CreateSave`. **A save costs roughly what it costs whether the world holds 7
+  organisms or 40**, so the variable is the host — five Unity instances at ×5 with 24 lanes
+  and ~500 crossings a minute — and a host reboot gives back about 40% of the cost.
+
+  **A breach under about 3 s is a logged breach and nothing more; past 3.5 s it disconnects
+  the mod.** Contract A's heartbeat timeout is 3.5 s and the stall blocks the thread that
+  sends the heartbeat, so matching every save against the sidecars' 4004 closes gives a clean
+  dose response: **0.2%** of saves under 2 s are followed by a `contract A: heartbeat timeout,
+  closing with 4004` within twelve seconds, **1.2%** at 2.5–3 s, **7.0%** at 3–3.5 s and
+  **50.8%** of the 63 saves over 3.5 s. The mod reconnects in about a second and the sidecar's
+  quiet-mod gate holds `MIGRATE_IN` until heartbeats resume, so each one costs a session churn
+  and a short delivery pause rather than an organism. Nothing else has been observed: no save
+  has logged `event=FAILED` since the species-history guard shipped, and the deferral ladder
+  has never run past 5 of 6. **The far end is the control and it is not in this discussion at
+  all**: one game on its own host, saving a comparable 354 KB world in 924 ms, on the mod's
+  own shipped cadence of `saveMinutes=10 saveKeep=6`. The five local worlds run `2` and `4`
+  because `run-m4.sh:270-271` overrides those defaults — an exit-test setting, chosen so a
+  test window would contain several saves, that nobody revisited when the rig became a
+  deployment. Risk 3 already names the escalation — a save that breaks the budget "needs a
+  different cadence, or a save path that does not block the tick" — and D14 accepts a slower
+  rig over a lost night. **Which of those the owner wants is the open question, and nothing
+  should be retuned before that answer**, because the mod says so on every breach line: *do
+  not lower the bar*.
 
 - **Slot 1 is depressed, and it is the world to keep an eye on.** It fell to a population of
   **2** in the 2026-08-08 ENOSPC incident and did not recover with its neighbours: readings
@@ -1226,24 +1310,64 @@ a verdict yet.
   two and a half. A small world produces few young of its own and depends on arrivals; the
   open question is whether the lanes alone carry it back to its neighbours' range or whether
   it settles low.
-- **`genomeGaps` is growing, and there is still no baseline that says whether it should
-  be.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the map
-  declared at `go/internal/archive/archive.go:170`): the set of genome hashes the archive has
-  asked a sidecar for and not yet received. It is a **backlog count, not an error count**,
+
+- **`genomeGaps` is a fetch queue, its healthy value is 0, and what it counts is
+  throughput.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the
+  map declared at `go/internal/archive/archive.go:170`): the set of genome hashes the archive
+  has asked a sidecar for and not yet received. It is a **backlog count, not an error count**,
   and it is not the same thing as `bin/archive list --gaps`, which reports what the *ledger*
-  shows missing. Two readings on 2026-08-09 — **881 against 878,904 ledger records** after
-  the reboot, **2,467 against 959,243** at 20:21Z — so roughly 2% of new records opened a gap
-  that had not closed by the second reading. Two further samples minutes apart later the same
-  hour read **2,477** and then **2,503**, so it kept climbing on a map that was otherwise
-  healthy. **That is a trend across four points and not a
-  verdict**: nobody knows what a healthy value looks like, because no reading was recorded
-  before 2026-08-09, and a backlog that is merely slower than the traffic looks identical to
-  one that is stuck. What makes it worth watching is the failure mode: an entry only ever
-  leaves `pending` when the genome arrives, so **a gap becomes permanent if the source
-  sidecar forgets the genome before the fetch succeeds** — the retry ladder then walks the
-  ring forever against a blob nobody holds. The next step is a series, not another single
-  reading: sample `genomeGaps` and `ledgerRecords` together over hours and see whether the
-  ratio settles.
+  shows missing. An entry is created only for a hash the store does not already hold
+  (`archive.go:766`) and leaves only when the genome arrives.
+
+  **The baseline exists, and it is zero.** The gitignored collector has curled `/api/status`
+  every ~5.5 minutes since 2026-08-07 (`e2e/baselines/m4-collector/`), and that series is the
+  one this item used to ask for:
+
+  - **2026-08-07, 14:07Z to 19:13Z:** `genomeGaps` reads **0 to 2** for five unbroken hours,
+    across 56 samples, while crossings stay under 200 a minute throughout — mostly 130–190.
+    That is the healthy shape, and it is flat zero.
+  - **19:19Z the same day:** the crossing rate more than doubled, to 454/min, and the backlog
+    left zero in that same sample — 22, then 44, 88, 152, and 1,071 by 21:00Z.
+  - **2026-08-08:** the same rise and the same recovery, peaking at **3,334** at 12:26Z and
+    already down to 2,939 two hours later.
+  - **2026-08-09:** 855 when the collector came back after the reboot at 18:51Z, climbing to
+    **2,714** at 22:05Z on 400–520 crossings a minute, then a **monotone drain** to **1,110**
+    by 23:56Z as the rate fell to 140–340 — while `ledgerRecords` went on growing by about 500
+    lines a minute through the entire drain. A leak does not drain against traffic.
+
+  **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
+  `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**
+  (`go/internal/contractb/contractb.go:230`, enforced by `allowSendLocked` at
+  `go/internal/archive/archive.go:899`), so the ladder is bounded near **180 fetches a
+  minute** across six peers. Only a crossing carrying a hash the store does not already hold
+  costs a fetch, which is why the *crossing* rate that meets that ceiling is about twice it:
+  on this rig the backlog grows above roughly **400** migrations a minute and drains below
+  roughly **340**. Under the ceiling the field reads 0; over it, `pending` **is** the queue,
+  and it is worked off at the same cap when the current slows. The number to read is
+  therefore the *direction* against the current rate, not the magnitude.
+
+  **The two spot readings that opened this item sit on that curve** — **881 against 878,904
+  ledger records** after the reboot is the collector's 855 at 18:51Z, and **2,467 against
+  959,243** at 20:21Z is its 2,473 at 20:19Z. (Both `ledgerRecords` figures are this process's
+  own count, which the pre-fix replay started **197,195 records short of the file**; the next
+  restart raises the denominator by that much in one step, so a ratio taken across it is not a
+  series. See *Bringing it back after a reboot*.) The two further samples minutes apart later
+  the same hour, **2,477** and **2,503**, are the same rising limb; the peak came at 22:05Z
+  and the drain followed it.
+
+  **Exactly one hash has ever run out of peers.** `archive: no peer has served this genome` —
+  the §10 gap report, logged when every live peer has been asked in one round and none served
+  it — appears **once** in the whole log history (`e2e/logs-m4-lan/archive.log`,
+  2026-08-08T14:14Z, `attempts=6`, `retryIn=24h`, one hash). The reason is that every peer on
+  this rig comes back, so the ladder always eventually finds a holder.
+
+  **It stays a watch item because M5 changes the ending, not the rate.** An entry leaves
+  `pending` only when the genome arrives, so **a gap becomes permanent if the peer that holds
+  the blob is gone for good** — and after M5 a departed stranger makes that the normal case,
+  against a fetch ladder that runs from one minute to daily and a sidecar cache capped at 30
+  days and 2 GiB. `m5_considerations.md` **Risk 7** carries that case and its mitigations. On
+  this rig, watch the direction: a backlog that does not drain when the crossing rate falls
+  below ~340/min is the reading that would mean something new.
 
 ## Gotchas
 
@@ -1251,10 +1375,15 @@ a verdict yet.
   is a symlink to `/mnt/wsl/data/bibites-multiverse`. If that volume is not mounted the
   symlink dangles and every path fails with *No such file or directory* — see *The disk
   budget*, *Where the rig lives now*.
-- **A full disk does not just stop the rig, it can silently truncate a journal's history.**
-  One short write leaves an unparsable line mid-file and replay discards everything behind
-  it. Fixed 2026-08-08 (all-or-nothing appends, and `Discarded()` logged at error), but the
-  shape is worth knowing before trusting any append-only log here. See *The disk budget*.
+- **A full disk does not just stop the rig, it can silently truncate an append-only log's
+  history.** One short write leaves an unparsable line mid-file and replay discards
+  everything behind it. Fixed in the sidecar journal on 2026-08-08 (all-or-nothing appends,
+  and `Discarded()` logged at error) and in the archive's ledger on 2026-08-09 (the same
+  append rule, and a replay that *skips* the damaged line instead of stopping at it). **The
+  day between those dates is the lesson**: the rule was written for one implementation while a
+  second one, holding the record of everything that ever crossed, had the identical bug and
+  nobody looked. Know the shape before trusting any append-only log here. See *The disk
+  budget*.
 - **Target `netstandard2.1`**, not 2.0 — Unity 6 assemblies reference netstandard 2.1
   and the build fails with CS1705 otherwise.
 - **MSB3277 version-conflict warnings are benign** — the game's Mono runtime resolves

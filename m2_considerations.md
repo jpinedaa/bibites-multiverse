@@ -44,6 +44,13 @@ Out of scope:
 - The synthetic pheromone beacon (M3, and only after a measured baseline)
 - More than two sectors, and more than one open edge per sim
 
+**Five of those milestone numbers predate the renumberings**, and the items themselves are
+unchanged. D9 (2026-08-03) moved public exposure out of M3 into a milestone of its own and
+D16 (2026-08-05) shifted everything behind it, so read: a hosted relay and unknown peers
+**M5**, NAT traversal and libp2p **M6**, `species-catalog` and the corpse, pellet and egg
+payloads **M7**. The beacon is not one of them — it stayed parked where it was.
+`system_decomposition.md` is the current numbering; this list is the M2 record.
+
 ## Risks
 
 ### Risk 1 — The crossing rate. The stated premise was wrong. CLOSED.
