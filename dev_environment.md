@@ -26,7 +26,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Component | Version |
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
-| The plugin | `0.6.2` (`MultiversePlugin.Version`) — the **headless-speed build**: `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping) on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals, **plus `MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device** (*A world can be at the wrong time scale*, in Gotchas). It still speaks `contract-a/2.3`: `0.6.2` adds, removes and moves **no wire field**, so the minor did not budge and a peer on `0.6.1` is not stale in any operational sense — it simply still has the servo armed, which on the far end is its own operator's business. Measured on the live map 2026-08-10: the five local slots publish `0.6.2` and slot 6 publishes `0.6.1`, and nothing about the map reads differently for it. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
+| The plugin | `0.6.3` (`MultiversePlugin.Version`) — the **save-phase build**: `0.6.2`'s headless-speed work (`MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device — *A world can be at the wrong time scale*, in Gotchas) and `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping) on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals, **plus `SavePhases`, which times `SaveSystem.CreateSave` from the inside and puts the decomposition on every `[M4-SAVE]` line** (*Watch items*, first item). `SavePhases` is measurement only — it patches nothing that changes what a save does, and a span it cannot resolve reads `0` rather than failing the save. It still speaks `contract-a/2.3`: neither `0.6.2` nor `0.6.3` adds, removes or moves **any wire field**, so the minor did not budge and a peer on an older build is not stale in any operational sense. Measured on the live map 2026-08-10: the five local slots publish `0.6.3` and slot 6 publishes `0.6.2`, and nothing about the map reads differently for it. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
 | The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — the sidecar's journal since 2026-08-08, the archive's ledger since 2026-08-09. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
@@ -557,8 +557,10 @@ A periodic save is deferred by 15 s, up to six times, while a `MIGRATE_IN` is qu
 another instance holds the lock; after six it saves anyway and warns. The save on quit ignores
 the lock. Every outcome is one `[M4-SAVE]` line with a `stallMs` measured against the 2 000 ms
 budget of Risk 3. **The living deployment breaches that budget routinely and has done since
-the exit test** — see *Watch items*; the exit test's 241–538 ms is a 2026-08-06 reading, not
-the current one.
+the exit test** — see *Watch items*; the exit test's 241–538 ms is a 2026-08-06 reading of a
+world that was **seconds old**, and the answer to why it no longer reads that way is in the same
+place. Since `0.6.3` the same line also carries `verifyMs` and the four `SavePhases` fields, so
+the stall is no longer one number.
 
 ### The LAN token
 
@@ -784,12 +786,15 @@ neighbour's west and south exports — see *The minors* for the measured symptom
 `farend/make-farend-bundle.sh` (it builds both fresh) **after** `bibites-mod/deploy.sh`, so the
 DLL in the zip is the one this machine is running.
 
-**The tracked bundle is current. It was rebuilt twice on 2026-08-10** — once at `c4a7b51` for
-the `0.6.2` plugin (the minimum-FPS disarm, which matters on a far end that also runs headless),
-and again after `contract-a.md` §20 A45 raised `heartbeatTimeoutMs` to 13 000, because that
-number lives in the **sidecar** and the zip's rule is that it carries what this machine runs. The
-second rebuild changed only `multiverse-sidecar.exe`; the plugin DLL is byte-identical to the one
-deployed here, and to the one in the first zip. Before those two, the 2026-08-09 rebuild carried
+**The tracked bundle is current. It was rebuilt three times on 2026-08-10** — at `c4a7b51` for
+the `0.6.2` plugin (the minimum-FPS disarm, which matters on a far end that also runs headless);
+again after `contract-a.md` §20 A45 raised `heartbeatTimeoutMs` to 13 000, because that
+number lives in the **sidecar** and the zip's rule is that it carries what this machine runs; and
+a third time for the `0.6.3` plugin, the save-phase timers (*Watch items*, first item). The
+second rebuild changed only `multiverse-sidecar.exe` and the third only the DLL; after each one
+the plugin in the zip is byte-identical to the one deployed here. **The far end is free to ignore
+`0.6.3`** — it adds no wire field, and phase timers on a world that saves in 567–924 ms measure a
+question that world does not have. Before those three, the 2026-08-09 rebuild carried
 the `-Headless` start template, and the one before it at `6899273` already postdated the
 torn-append fix `f72dd14` (`git merge-base --is-ancestor f72dd14 6899273` passes), so the exe has
 carried `journal-compact-minutes`, `journalCompactMinutes`, `discardedBytes` and
@@ -1587,18 +1592,21 @@ mean.
   slots on 2026-08-08, where slot 3 breached **41 of its last 43** saves at 1 909–3 413 ms.
   The current run reads better and not well — **20 breaches in 718 saves** since the
   2026-08-09 bring-up, medians of 0.70 s on slot 1 to 1.38 s on slot 5, still two to four
-  times the exit test. **It is not the worlds growing**, which was the first guess and is
-  wrong: the collector's 243 five-slot snapshots put the save zips at 275–330 KB on
+  times the exit test. **It is not the worlds growing** — not in the sense of population, which
+  was the first guess: the collector's 243 five-slot snapshots put the save zips at 275–330 KB on
   2026-08-07, near 570 KB overnight on 08-08 at peak population, and 210–320 KB now. What
   moved is the **cost of a saved kilobyte** — 120–172 ms per 100 KB in the exit test,
-  500–620 ms on 2026-08-08, 290–370 ms now. Slot 1 settles it: its population fell from 21
+  500–620 ms on 2026-08-08, 290–370 ms now. Slot 1 sharpens it: its population fell from 21
   to 7–11 and its file stayed near 220 KB while its median stall went 214 ms → 1 164 ms →
   704 ms. Nor is the payload mostly organisms — unzip
   any slot save and the bibites are about a fifth of it, behind `speciesData.json`
   (~900 KB raw), `data.bin` (~150 KB) and the 400×400 `img.png` the game renders inside
   `SaveSystem.CreateSave`. **A save costs roughly what it costs whether the world holds 7
-  organisms or 40**, so the variable is the host — five Unity instances driving 24 lanes and
-  several hundred crossings a minute — and a host reboot gives back about 40% of the cost.
+  organisms or 40.** For four days that was read as "so the variable is the host", and it is
+  **mostly wrong** — the worlds *were* growing, in the one dimension nobody was measuring, and
+  "per saved kilobyte" is normalised by the *compressed* size, which is exactly the number that
+  hides it. See *The answer*, below; the paragraphs between here and there are the record of how
+  the reading was arrived at, and they are left as they were measured.
 
   **The 2026-08-10 headless-at-×100 switch is the cleanest evidence yet that the host is the
   variable, and it moved the wrong way.** Both changes landed together on the same five worlds
@@ -1615,15 +1623,21 @@ mean.
   | 5 | 1 390 ms / 389 / 16 of 200 | 1 607 ms / 609 / 1 of 10 |
 
   **The cost of a saved kilobyte roughly doubled** — 300–389 ms per 100 KB to 538–665 — and the
-  pooled breach rate went **3.1% → 20%**. Two corrections to the naive reading. First, the
-  headless zips are ~75 KB *smaller* than the drawn ones of the same world, because the
-  thumbnail is now a flat 3 666-byte `img.png` (*A headless world's save thumbnail is blank*),
-  so the per-kilobyte figure understates nothing and the raw stalls understate the change.
-  Second, **headless is not what did this** — the far end's 672 ms is one headless world on its
-  own host, and slot 1's stall barely moved while its file halved. What did it is five
-  simulations asking for ×100 on sixteen cores: the tick is CPU-starved and the save rides the
-  tick. If the owner wants the budget back, the ×100 target is now a lever on it alongside the
-  cadence.
+  pooled breach rate went **3.1% → 20%**. Two corrections were made to the naive reading at the
+  time, and **the first of them is itself wrong; it is corrected in place here, 2026-08-10,
+  because leaving it would leave a sign error in the file.** It said: the headless zips are
+  ~75 KB *smaller* than the drawn ones of the same world, because the thumbnail is now a flat
+  3 666-byte `img.png` (*A headless world's save thumbnail is blank*), so the per-kilobyte figure
+  understates nothing. **It overstates, by about 22%.** The dropped `img.png` is an
+  already-compressed PNG: it passed through the zip at ~1:1, so it was ~75 KB of the *compressed*
+  file and only ~75 KB of a ~1.6 MB *uncompressed* payload. Removing it shrinks the denominator
+  of "ms per 100 KB" by a quarter and the work by 5%, and the ratio rises for free. Measured
+  against the uncompressed payload the switch moved the cost per byte **not at all** — 795 ms per
+  raw MB in the drawn hour before, 800 in the headless hour after. The second correction stands
+  as written: **headless is not what did this** — the far end's 672 ms is one headless world on
+  its own host, and slot 1's stall barely moved while its file halved. What is left of the
+  apparent doubling after the 22% metric artifact is taken out is small, and the ×100 target is a
+  weaker lever on the stall than this table made it look.
 
   **A full thirteen hours of ×100 confirmed it and made it worse than the first hour suggested.**
   Across the five preserved generations of that run — **1,801 saves**, in
@@ -1701,6 +1715,136 @@ mean.
   §20 A45 says so explicitly, because the mod's own line on every breach still stands: *do not
   lower the bar*.
 
+  **The answer, 2026-08-10: a save costs what its UNCOMPRESSED payload costs, and that payload
+  grows with a world's evolutionary history while the zip it produces does not.** The whole
+  preserved record was re-read for this — **10,946 `[M4-SAVE] event=SAVED` lines** across every
+  generation in `e2e/logs-m4-lan/bepinex/` plus the live logs, joined to the collector's
+  **2,160 five-slot snapshots** by exact zip size, which puts each save's stall next to the
+  *contents* of the file it wrote. Three findings, in the order they fall out.
+
+  **1. The metric was the trap.** `writeMs` is proportional to the payload's **uncompressed**
+  byte total with an intercept of about zero — fitted per hour across all five slots it lands at
+  **620–1 580 ms per raw MB** (R² 0.2–0.87 per hour), and no fixed cost worth naming. `SaveSystem.CreateSave`
+  deflates every entry at `CompressionLevel.Optimal` through the no-level `CreateEntry` overload
+  (`SaveSystem.cs:306,312`), so CPU tracks the bytes going *in*. `bytes=` on the `[M4-SAVE]` line
+  is the bytes coming *out*. Dividing one by the other measures the payload's **compressibility**,
+  and that is what moved.
+
+  **2. What grew is `speciesData.json`, and it is not organisms.** It is
+  `GlobalLineageManager.recordedSpecies` — every species the world has ever recorded, not the
+  living ones — serialised by `SerializationHelper.SerializeGeneralObject` into one Newtonsoft
+  `JObject` **per brain node and per synapse**, through an uncached `GetFields` per object and an
+  `Enum.Parse` per gene per species (`GlobalLineageManager.cs:352`, `BibiteTemplate.cs:268-298`).
+  Its cost is `recordedSpecies × (nodes + synapses + NGene)` and is **independent of population**,
+  which is exactly why a save costs the same with 7 organisms as with 40. Measured across the
+  save files (`speciesData.json` parsed out of 725 collector snapshots):
+
+  | World | `speciesData.json` raw | `data.bin` | of the raw payload |
+  |---|---|---|---|
+  | `M1-AutoTest.zip`, a fresh world | **5 KB** | 1 KB | 2% of 0.27 MB |
+  | `M3-Slot1.zip`, two days old | 44 KB | 36 KB | 14% of 0.58 MB |
+  | `M4-Slot1.zip`, 2026-08-10 | **677 KB** | 159 KB | **84%** of 0.97 MB |
+  | `M4-Slot2.zip`, 2026-08-10 | **960 KB** | 150 KB | 43% of 2.51 MB |
+
+  Those two entries deflate about **13:1** (969 KB → 74 KB, measured), so 830 KB of new work adds
+  ~65 KB to the zip. The raw-to-zip ratio of a save is therefore a **clock on the world's age** —
+  **2.4** for a fresh one, **3.2** for `M3-Slot1` after two days, **5.4–7.0** across the five
+  local worlds now — and that ratio *is* the "cost per saved kilobyte" curve, upside down. Slot 1
+  is the proof rather than the puzzle: same
+  population (15 → 18), same file (147 KB → 192 KB), **5.8× the write time** (171 ms → 988 ms) —
+  because its uncompressed payload went 0.36 MB → 0.99 MB while its zip did not.
+
+  **And it is not species *count* that is still growing — it is brains.** Parsing the JSON out of
+  725 snapshots: `nextSpeciesID` (species ever created) ran 2 162 → 4 832 over 2026-08-07 to
+  08-10, while `recordedSpecies` — what actually gets serialised — stayed flat at **84–178** per
+  world. `SpeciesTreeCleanup` is already discarding about **97%** of what the lanes create. What
+  grew instead is the size of each kept species' brain: synapses per species went **12.6 → 23.0**
+  in three days, nodes per species 50.3 → 53.2. That matters for the levers below: pruning harder
+  attacks a term that is already pruned, and **the term that is compounding is evolution itself**.
+
+  **3. The split, honestly.** Fitting `writeMs` against brain elements and bytes together —
+  **0.07–0.12 ms per (node + synapse)** and **740–1 180 ms per raw MB** of everything else, per
+  regime, from 2,088 saves joined to their own snapshot — accounts
+  for most of slot 1's 5.8×, and leaves a residual. Of the change from the exit test to now, in
+  log terms: **~60% is the payload growing, ~40% is a genuine per-byte slowdown of the host.**
+  The residual is real and it is *not* monotone — it is common-mode across all five worlds hour by
+  hour (the five slots move together at the same wall-clock times, which is what made "the host"
+  the natural first reading), it is **not reset by a game restart**, and it *is* partly reset by a
+  host reboot: 926 → 620 ms per raw MB in the four hours after the 2026-08-09 reboot, then a slow
+  climb back to ~850 over the next twenty hours. That is where the "a reboot gives back 40%"
+  observation actually lives. **Two things it is not**: it is not save concurrency between the
+  five instances (de-trended, a save with three neighbours saving within ±10 s costs 0.99× one
+  with none, across 10,946 saves), and it is not host simulation demand (the log-log correlation
+  against Σ time-scale × population is **−0.26**, the wrong sign).
+
+  **What this makes actionable — the owner's call, not this file's.** Nothing here is a defect and
+  nothing was changed to chase it. But the shape of the cost is now known, and it names its own
+  levers: the cadence, already taken, and the only one that scales with the whole cost;
+  `SpeciesPrunePointLimit` — the game setting that decides which extinct species
+  `SpeciesTreeCleanup` may drop, default **2** — which the measurement above says is a **weak**
+  lever, because 97% is already being dropped; and Risk 3's unspent escalation, a save path that
+  does not block the tick, which is the only one that touches the *stall* rather than the cost.
+  What it also means is that **the stall will keep growing on its own**, because brains only get
+  bigger — so a budget set against a young world is a budget that expires, and D14's 2 000 ms was
+  set against worlds that were seconds old.
+
+  **The instrument, mod `0.6.3`, deployed 2026-08-10 17:33Z.** `writeMs` was one opaque number
+  covering the whole of `CreateSave`, which is why every hypothesis above argued over the same
+  undivided total. `SavePhases` (`bibites-mod/src/SavePhases.cs`) Harmony-times four spans from
+  the inside and every `[M4-SAVE] event=SAVED` line now carries them, plus `verifyMs`, which was
+  previously the unlabelled remainder of `stallMs`:
+
+  | Field | What it times | Read it for |
+  |---|---|---|
+  | `lineageMs` | `GlobalLineageManager.SaveState()` — building the whole `speciesData.json` tree | finding 2, from the inside. Pure CPU and allocation; no file is touched |
+  | `binMs` | `BytesSpace()` ×2 + `SaveStateBin()` — the `data.bin` lineage block | the other history-shaped term |
+  | `guardMs` | `SpeciesHistoryGuard`'s repair, **inside `binMs`** — subtract it to price the game's own bin work | what the guard costs. It runs **three** times per save, not twice: `SaveableBinStack` asks `BytesSpace` twice and then `SaveStateBin` |
+  | `shotMs` | `SaveScreenshotToZip`, exclusive of the `img.png` archive write | what a blank headless thumbnail costs — the `Texture2D`, the `Apply` and the PNG encode all still run |
+  | `zipMs` / `zipN` | every `WriteJObjectToArchive` / `WriteFileToArchive` call, and how many | string materialisation + deflate + write — the disk-and-deflate share, as against the CPU-and-reflection share above it |
+  | `verifyMs` | the mod's own `Verify` — re-opens the zip and reads its central directory | the one part of the stall that scales with population, one record per bibite and per egg |
+
+  `writeMs − (lineageMs + binMs + shotMs + zipMs)` is the remainder of `CreateSave`: settings, one
+  JObject per bibite, egg, pellet and pheromone, and `AddTemplatesToArchive`'s `File.ReadAllText`
+  + `JObject.Parse` **per scenario template per save**. All of it is measurement — `SavePhases`
+  changes nothing about what a save does, and a span it cannot resolve logs one `[M4-PHASE]` error
+  and reads `0` thereafter, which a real save can never do because `zipMs` cannot be zero.
+  **The rollout was the `0.6.2` shape** — a mod deploy locks the DLL, so all five games go down at
+  once — and took **110 seconds** end to end at 17:33Z: quit five, `deploy.sh`, then `start_game`
+  one at a time with readiness read off `/api/status` rather than a log file, and `timescale 100`
+  sent twice per slot. All five came back on `0.6.3` at a clean ×100. **The custody burst was not
+  sampled at its peak** — the first reading is two minutes after the last slot came up, at 1–12,
+  and eight minutes after at 1–7 — with `pacedDepth`, `heldDepth` and `timeoutBounces` 0 at both,
+  and no `4004` in any local sidecar log. Slot 6 was not touched, and still publishes `0.6.2`.
+
+  **The first reading confirms finding 2 from the inside and kills three of the four named
+  suspects.** Fifteen instrumented saves, 17:43Z–18:09Z. **Read only `n≥2`**: the first save of a
+  process carries the JIT of the whole path, and it is not small — `shotMs` reads **483–585 ms on
+  `n=1` and 8–14 ms from `n=2` onwards**, which is a warm-up artifact and a trap set for anyone
+  who reads a save taken minutes after a bring-up. Across the ten warm saves:
+
+  | Phase | Median ms | Share of `writeMs` | Range across the five worlds |
+  |---|---|---|---|
+  | **`lineageMs`** | **977** | **58%** | 660 / 932 / 1 034 / 948 / 1 177 |
+  | remainder (bibites, eggs, pellets, templates) | 438 | 26% | 156 → 1 118, tracking population 10 → 82 |
+  | `zipMs` | 166 | 10% | 83 → 304 |
+  | `verifyMs` | 22 | 1% | 17–33 |
+  | `shotMs` | 10 | 1% | 8–14 |
+  | `binMs` | 1 | 0% | 0–2 |
+  | `guardMs` | 0 | 0% | 0–1 |
+
+  **`speciesData.json` is the save.** `lineageMs` is the largest phase in every world, and it is
+  the *flattest* — 660 to 1 177 ms while populations run 10 to 82 and zips run 149 to 809 KB.
+  Slot 1 is the whole argument in one line: **10 organisms, a 149 KB file, an 873 ms stall, of
+  which 676 ms is building the species history**. Three of the four candidates this item carried
+  are now measured and closed: **the screenshot is 1%** (the headless thumbnail is wasteful and
+  it is not expensive — ~10 ms, see *A headless world's save thumbnail is blank*), **the
+  species-history guard is 0–1 ms** (its three passes per save cost nothing worth naming), and
+  **`data.bin` is 0–2 ms** despite being 150 KB, because it is `Buffer.BlockCopy` into one
+  pre-sized array rather than reflection. The fourth — managed-heap/GC state with process uptime —
+  is not settled, but it is now **bounded to where it can hide**: `zipMs` is a tenth of the cost,
+  so the residual host multiplier is CPU and allocation, not disk. `lineageMs` and the remainder
+  are both reflection-and-JObject churn, and both are where to look next.
+
   **What to watch now, in this order.**
 
   1. **Do the `4004`s stop?** The proof is a `[M4-SAVE]` stall over 3.5 s with **no**
@@ -1710,14 +1854,19 @@ mean.
      such save — slot 2 at 4 207 ms, and it cost nothing** (*The five local worlds save every ten
      minutes…*, above, which also accounts for the four `4004`s the rollout itself produced). One
      is an existence proof, not a rate; read the next generation before calling it.
-  2. **Does the stall itself move?** It should not — a save costs about what it costs — but the
-     cadence changes the host's load pattern, and every prediction made about this stall so far
-     has been wrong in the direction of worse. Compare medians and ms per 100 KB against the
-     `*.minfps.*` generation's 686–1 699 ms and 414–461.
-  3. **The 2-second budget is still breached, and that is still why this item is open.** The bar
-     was not moved. What changed is that breaching it now costs only the throughput D14 priced,
-     not a session as well. Risk 3's remaining escalation — *a save path that does not block the
-     tick* — stays available and unspent.
+  2. **Does `lineageMs` climb over a full generation?** The first reading already has it at 58%
+     of `writeMs` and flat against population; the question the next generation answers is its
+     *slope*, because that is the term predicted to compound. Read it against `simulatedTime`,
+     not against wall clock or population. Two rules for anyone reading these numbers: **skip
+     every `n=1`** (JIT — `shotMs` is 50× too high on it), and **compare per raw MB, never per zip
+     kilobyte** — the old `ms per 100 KB` figures (`*.minfps.*` at 414–461) are comparable only
+     within a drawn-or-headless-matched set, and that trap is what the previous reading fell into.
+  3. **The 2-second budget is still breached, and that is still why this item is open — and it
+     will get worse on its own.** The bar was not moved. What changed is that breaching it now
+     costs only the throughput D14 priced, not a session as well. But `recordedSpecies` and its
+     brains only accumulate, so *The answer* predicts the stall keeps climbing at unchanged
+     population and unchanged file size. Risk 3's remaining escalation — *a save path that does not
+     block the tick* — stays available and unspent, and it is now the escalation that scales.
   4. **The residual churn.** The 23:43Z slot-4 episode had no long save behind it, so some
      `4004` closes come from somewhere else. With the save-shaped ones gone, whatever is left is
      finally separable, and reading it is the next diagnosis rather than this one.
@@ -1988,6 +2137,18 @@ mean.
   a bad thumbnail in any case, because it asks only whether `scene.bb8scene` exists; what
   actually guards the file is its try/catch and the partial-then-rotate write. Read the line
   as cosmetic. The only casualty is the picture the game draws beside the save's name.
+  **Headless does not make the thumbnail free, and it does bend every per-kilobyte
+  measurement** (added 2026-08-10). `GetTemporary` returns a non-null `RenderTexture` whose GPU
+  allocation failed, so `cam.Render()` is a no-op — but the `new Texture2D(400, 400, ARGB32)`,
+  the `Apply()`, the `EncodeToPNG` and the deflate of the result all still run on the CPU
+  (`ScreenShotHandler.cs:120-174`). **Measured with `shotMs` on 2026-08-10, that waste is ~10 ms
+  a save** — real, and 1% of the stall, so the blank thumbnail is a cosmetic defect and not a
+  performance one. (On the **first** save of a process it reads 483–585 ms; that is JIT of the
+  encode path, not the encode.) What headless removes is not work but **75 KB of *incompressible* bytes**: an already-deflated
+  PNG passes through the zip at ~1:1, so dropping it takes ~75 KB off the compressed file while
+  taking only ~75 KB off a ~1.6 MB uncompressed payload. Any statistic normalised by the **zip**
+  size — "ms per 100 KB" — therefore jumps about **22%** across the switch for no change in work
+  at all. Normalise by the uncompressed total instead; see *Watch items*, first item.
 - **`LogOutput.log` is overwritten on every launch** (`[Logging.Disk] AppendLog = false`).
   Copy it before restarting the game if you still need the previous run.
 - **Two game instances run fine side by side, and get separate logs — but which log is a

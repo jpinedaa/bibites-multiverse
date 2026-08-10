@@ -605,8 +605,14 @@ rig over a lost night.
 room to spare, the simple synchronous save stays, and the save lock never deferred.
 
 **And no generation since has held it.** The living deployment has breached the 2-second bar
-routinely since the day this measurement passed — the whole series, and why it is not the worlds
-growing, is the first watch item in `dev_environment.md`, *The living deployment → Watch items*.
+routinely since the day this measurement passed. The whole series is the first watch item in
+`dev_environment.md`, *The living deployment → Watch items*, and so is the answer, found
+2026-08-10: **the worlds were growing — in recorded species and brain size, not in population —
+and the save cost tracks the payload's UNCOMPRESSED size, which those two inflate while the zip
+stays flat.** "Record the duration against the population and the world size", above, names the
+two variables that turned out not to matter. 241–538 ms was a reading of worlds **seconds old**;
+the same worlds now carry a `speciesData.json` that grew from 5 KB to 0.7–1.0 MB. The bar was not
+missed by drift — it was set on a world that no longer exists, and it will keep receding.
 This risk's own escalation sentence is the one that got answered: **the owner chose the cadence,
 on 2026-08-10.** The five local worlds now run the mod's shipped `saveMinutes=10 saveKeep=6`
 instead of the rig's exit-test `2`/`4`, and `contract-a.md` §20 A45 raised the Contract A
