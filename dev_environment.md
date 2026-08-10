@@ -1817,24 +1817,28 @@ mean.
   and no `4004` in any local sidecar log. Slot 6 was not touched, and still publishes `0.6.2`.
 
   **The first reading confirms finding 2 from the inside and kills three of the four named
-  suspects.** Twenty instrumented saves, 17:43Z–18:19Z. **Read only `n≥2`**: the first save of a
+  suspects.** Twenty-six instrumented saves, 17:43Z–18:36Z. **Read only `n≥2`**: the first save of a
   process carries the JIT of the whole path, and it is not small — `shotMs` reads **483–585 ms on
   `n=1` and 8–14 ms from `n=2` onwards**, which is a warm-up artifact and a trap set for anyone
-  who reads a save taken minutes after a bring-up. Across the fifteen warm saves, with the
+  who reads a save taken minutes after a bring-up. Across the twenty-one warm saves, with the
   per-world medians in the last column:
 
   | Phase | Median ms | Share of `writeMs` | Per world (slots 1–5) |
   |---|---|---|---|
-  | **`lineageMs`** | **994** | **55%** | 643 / 985 / 1 041 / 960 / 1 200 |
-  | remainder (bibites, eggs, pellets, templates) | 496 | 27% | 219 / 919 / 1 165 / 539 / 496, tracking population 11 → 84 |
-  | `zipMs` | 208 | 11% | 78 / 269 / 289 / 208 / 211 |
-  | `verifyMs` | 23 | 1% | 17–33 |
-  | `shotMs` | 10 | 1% | 8–14 |
+  | **`lineageMs`** | **994** | **53%** | 653 / 976 / 1 136 / 1 028 / 1 228 |
+  | remainder (bibites, eggs, pellets, templates) | 527 | 28% | 169 / 934 / 1 331 / 533 / 598, tracking population 10 → 85 |
+  | `zipMs` | 211 | 11% | 78 / 270 / 365 / 224 / 213 |
+  | `verifyMs` | 24 | 1% | 17–33 |
+  | `shotMs` | 10 | 1% | 8–14, one 30 |
   | `binMs` | 1 | 0% | 0–2 |
   | `guardMs` | 0 | 0% | 0–1 |
 
+  **The reading is stable.** Recomputed at ten, fifteen and twenty-one warm saves the `lineageMs`
+  median held at 977 / 994 / 994 ms and its share at 58 / 55 / 53% — the shares drift only because
+  the populations grew through the window, which is the remainder's term and not this one.
+
   **`speciesData.json` is the save.** `lineageMs` is the largest phase in every world, and it is
-  the *flattest* — 643 to 1 200 ms while populations run 11 to 84 and zips run 149 to 809 KB.
+  the *flattest* — 653 to 1 228 ms while populations run 10 to 85 and zips run 149 to 809 KB.
   Slot 1 is the whole argument in one line: **10 organisms, a 149 KB file, an 873 ms stall, of
   which 676 ms is building the species history**. Three of the four candidates this item carried
   are now measured and closed: **the screenshot is 1%** (the headless thumbnail is wasteful and
@@ -1855,13 +1859,18 @@ mean.
      such save — slot 2 at 4 207 ms, and it cost nothing** (*The five local worlds save every ten
      minutes…*, above, which also accounts for the four `4004`s the rollout itself produced). One
      is an existence proof, not a rate; read the next generation before calling it.
-  2. **Does `lineageMs` climb over a full generation?** The first reading already has it at 58%
+  2. **Does `lineageMs` climb over a full generation?** The first reading already has it at ~53%
      of `writeMs` and flat against population; the question the next generation answers is its
-     *slope*, because that is the term predicted to compound. Read it against `simulatedTime`,
-     not against wall clock or population. Two rules for anyone reading these numbers: **skip
-     every `n=1`** (JIT — `shotMs` is 50× too high on it), and **compare per raw MB, never per zip
-     kilobyte** — the old `ms per 100 KB` figures (`*.minfps.*` at 414–461) are comparable only
-     within a drawn-or-headless-matched set, and that trap is what the previous reading fell into.
+     *slope*, because that is the term predicted to compound. **The first 53 minutes cannot answer
+     it and should not be read as if they did**: pooled by save ordinal the warm medians go
+     994 → 936 → 1 106 → 1 096 ms, which is noise, and per world three of five trend up (slot 5
+     1 099 → 1 531, slot 3 1 026 → 1 232, slot 4 960 → 1 096), slot 2 is flat and slot 1 wobbles.
+     Five saves per world across 0.2 simulated days is not a slope. Read it against
+     `simulatedTime`, not against wall clock or population. Two rules for anyone reading these
+     numbers: **skip every `n=1`** (JIT — `shotMs` is 50× too high on it), and **compare per raw
+     MB, never per zip kilobyte** — the old `ms per 100 KB` figures (`*.minfps.*` at 414–461) are
+     comparable only within a drawn-or-headless-matched set, and that trap is what the previous
+     reading fell into.
   3. **The 2-second budget is still breached, and that is still why this item is open — and it
      will get worse on its own.** The bar was not moved. What changed is that breaching it now
      costs only the throughput D14 priced, not a session as well. But `recordedSpecies` and its
