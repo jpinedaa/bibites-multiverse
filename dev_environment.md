@@ -792,9 +792,11 @@ again after `contract-a.md` §20 A45 raised `heartbeatTimeoutMs` to 13 000, beca
 number lives in the **sidecar** and the zip's rule is that it carries what this machine runs; and
 a third time for the `0.6.3` plugin, the save-phase timers (*Watch items*, first item). The
 second rebuild changed only `multiverse-sidecar.exe` and the third only the DLL; after each one
-the plugin in the zip is byte-identical to the one deployed here. **The far end is free to ignore
+the plugin in the zip is byte-identical to the one deployed here. **Two of the three therefore carry
+the same mod version and different sidecars, which is a trap when reading a far end's `modVersion` —
+the pairing is tabulated below.** **The far end is free to ignore
 `0.6.3`** — it adds no wire field, and phase timers on a world that saves in 567–924 ms measure a
-question that world does not have. Before those three, the 2026-08-09 rebuild carried
+question that world does not have. It **did** take one of these bundles, at 17:16Z on 2026-08-10. Before those three, the 2026-08-09 rebuild carried
 the `-Headless` start template, and the one before it at `6899273` already postdated the
 torn-append fix `f72dd14` (`git merge-base --is-ancestor f72dd14 6899273` passes), so the exe has
 carried `journal-compact-minutes`, `journalCompactMinutes`, `discardedBytes` and
@@ -802,23 +804,54 @@ carried `journal-compact-minutes`, `journalCompactMinutes`, `discardedBytes` and
 `--heartbeat-timeout`.
 
 **Whether the second computer has APPLIED any of it cannot be determined from here, and no
-observation will settle it.** Neither the disk-budget work nor A45 changed a wire field, so a far
-end with them and one without are indistinguishable on Contract B (`contract-b-m4.md` §20 says so
-as a design property, and `contract-a.md` §20 A46 says it again for the timeout). Slot 6's §19
-settings block proves its *mod* is at least the settings build and says nothing about its
-sidecar. Treat the far sidecar's status as **unknown rather than stale**, ask its operator if it
-matters, and do not rebuild the bundle to answer the question — a fresh bundle answers a
-different one. The archive-ledger fix `e68550b` does not re-open it either: its code is
+observation will settle *which build* it applied.** Neither the disk-budget work nor A45 changed a
+wire field, so a far end with them and one without are indistinguishable on Contract B
+(`contract-b-m4.md` §20 says so as a design property, and `contract-a.md` §20 A46 says it again for
+the timeout). Slot 6's §19 settings block proves its *mod* is at least the settings build and says
+nothing about its sidecar. The archive-ledger fix `e68550b` does not re-open it either: its code is
 `go/internal/archive/*` plus one sidecar *test* file, and the archive runs on this machine only.
 
-**A far end still on the 3 500 ms timeout is benign, and this is the case to be precise about.**
+**But WHETHER the installer ran is observable, and on 2026-08-10 it was observed.** `relay.log`
+records slot 6's sidecar leaving the relay at **17:16:21Z** (`reservationKept=true`) and a new one
+connecting at **17:17:26Z** and reclaiming slot 6 with `reason=reclaimed`. A mod-only bounce cannot
+produce that pair — the 2026-08-09 headless flip moved the mod for 41 seconds and logged *only*
+placement claims — so a `client gone`/`client connected`/`reason=reclaimed` sequence on slot 6 is
+the signature of `setup-farend.ps1` having run and replaced `multiverse-sidecar.exe`. **That is the
+check to make**, and it is cheap: `grep 'peer=slot-6' relay.log | grep 'client '`. Details in
+*Slot 6 took the refreshed bundle*.
+
+**What it does not tell you is the value, and `modVersion` cannot close the gap — this is the trap.**
+Mod `0.6.2` shipped in **two** consecutive bundles with **different** sidecars:
+
+| Bundle | Committed | Mod in it | `HeartbeatTimeoutMs` in it |
+|---|---|---|---|
+| `c4a7b51` | 2026-08-10 15:05Z | `0.6.2` | **3 500** |
+| `0290f6b` | 2026-08-10 16:30Z | `0.6.2` | **13 000** |
+| `04f22ee` | 2026-08-10 18:13Z | `0.6.3` | 13 000 |
+
+Slot 6 publishes `0.6.2`, so "the mod version moved, therefore it took the bundle carrying the
+raise" **does not follow**. What narrows it is the clock, not the wire: it ran the installer at
+17:16Z, by which time `c4a7b51` had been superseded for 46 minutes, so the far sidecar is on 13 000
+ms **if the operator fetched the bundle when they applied it**. Treat that as *probable by
+provenance and unverified by observation* — and note that this ambiguity is a direct consequence of
+A46 declining a version bump for a §10 default. `contractAVersion` reads `contract-a/2.3` on all six
+slots and is designed not to discriminate here.
+**The natural experiment that would settle it has not occurred**: slot 6's mod has not gone silent
+since 17:17:51Z, so no `silentFor` has ever been produced on that host to read. A `peer_mod_absent`
+closure after ~3.5 s of slot-6 mod silence would prove 3 500; the lanes staying open through 4–12 s
+of it would prove 13 000. Watch for it; do not manufacture it, and do not rebuild the bundle to
+answer the question — a fresh bundle answers a different one.
+
+**And on either value the far end is benign, which is why none of the above is urgent.**
 The timeout is **per-sidecar and per-mod**: each sidecar judges the liveness of the one mod on
 its own loopback socket, and that judgement is never compared with another peer's or published as
-a number. So the old value costs slot 6 exactly what it has always cost it — its own mod's
+a number. So the old value would cost slot 6 exactly what it has always cost it — its own mod's
 occasional `4004` and reconnect — and costs this side nothing. It also costs slot 6 close to
-nothing in practice: **its saves run 567–924 ms**, an order of magnitude inside either deadline,
-because it is one world on its own host. The raise is worth taking there when its operator next
-re-runs `setup-farend.ps1` out of the bundle, and it is not worth a phone call.
+nothing in practice: **its saves run 567–924 ms, and 875 ms for a 582 KB world at 20:18Z on
+2026-08-10**, an order of magnitude inside either deadline, because it is one world on its own
+host. **The far host is also the control for this machine's own troubles**: through the nineteen
+minutes of 18:39Z in which every local peer churned, slot 6 logged nothing at all (*The evening's
+two session storms*).
 
 `start-slot6.ps1` sets the mod's whole configuration natively — there is no `WSLENV` on that
 machine — starts the sidecar with `--position 2,1`, **waits for `contract B: slot granted` in
@@ -1501,11 +1534,144 @@ connection beside it never noticed.
 **Everything else held for the whole window.** 24/24 lanes `peer_live` with no bypass in every
 sample, `pacedDepth` and `heldDepth` 0, `bouncedTimeoutTotal` 0 on all six slots, no
 `level=ERROR` anywhere on the Go side, `genomeGaps` flat at ≈46 200–46 700 against
-`ledgerRecords` climbing 2 915 260 → 3 003 379, and the far end untouched — `relay.log` records
-its last `client connected` on 2026-08-09. The local aggregate reads **48 simulated seconds per
+`ledgerRecords` climbing 2 915 260 → 3 003 379, and the far end untouched — as of that window
+`relay.log` recorded its last `client connected` on 2026-08-09. **That check no longer reads that
+way**: the far end took the refreshed bundle at 17:16Z the same day, so re-running it now returns
+2026-08-10 (*Slot 6 took the refreshed bundle*). The local aggregate reads **48 simulated seconds per
 wall second** over a 60-second sample with all five reporting an applied `timeScale` of 100,
 which is the thirteen-hour figure rather than the 74 measured at smaller populations right after
 the servo came off; the worlds are bigger now (*A world can be at the wrong time scale*).
+
+### Slot 6 took the refreshed bundle, 2026-08-10 17:16Z
+
+**The far end re-ran `setup-farend.ps1`, and for the first time the relay log shows it.** Slot 6's
+mod published `modConnected=false simulationSize=0 exportEdges=[]` at **17:16:20Z**, its
+**sidecar** left the relay one second later at **17:16:21Z** with `reservationKept=true`, a new
+sidecar connected at **17:17:26Z** and reclaimed slot 6 at (2,1) with `reason=reclaimed`, and the
+new mod was up at **17:17:51Z** claiming `simulationSize=2000` and `exportEdges [E N W S]`. Total
+outage **91 seconds**, and the map absorbed it the ordinary way.
+
+**That `client gone`/`client connected` pair is the whole finding, because a mod-only bounce never
+produces one.** The 2026-08-09 headless flip is the control: it moved slot 6's mod for 41 seconds
+and `relay.log` recorded *only placement claims* through the entire window (*Slot 6's headless
+window*). A Contract B session ending and a slot being **reclaimed** is the signature of the
+sidecar *process* being replaced — the same signature the five local sidecars made during their own
+rolling restart. So this is not an inference from a version number: the far sidecar binary was
+swapped, which is what `setup-farend.ps1` does (it installs the plugin DLL *and*
+`multiverse-sidecar.exe`, and regenerates `start-slot6.ps1`).
+
+**It is the same world.** `simulatedTime` runs continuously across the gap — 5,305,464 s at
+16:03Z to 5,315,625 s at 17:21Z — and slot 6's §19 block is unchanged apart from the version:
+`contract-a/2.3`, `saveMinutes=10`, `saveKeep=6`, save-on-quit, world wrapping,
+`migrationExclude=[Basic bibite]`. Its save receipt still flows, at **875 ms for 582 KB**.
+
+**`modVersion` moved `0.6.1` → `0.6.2`, and that does NOT identify which bundle it took** — see
+*The far end — the second computer* for why, and for what is and is not settled about its
+heartbeat timeout as a result. Its time scale is its own operator's business as ever; it now asks
+for **100** and achieves 4–26, and it has been observed at `timeScale` **0** for one collector
+sample (18:06Z), which is what put `custodyDepth` 106 and `pacedDepth` 52 on the map in that
+sample and drained by the next one.
+
+### The evening's two session storms, 2026-08-10 18:39Z and 20:22Z
+
+Two Contract B churn episodes ran on the same evening. **Neither lost an organism**
+(`timeoutBounces` 0 throughout both, no `bounceBack=true`, no `MALFORMED_MESSAGE`), and **neither
+was a save.** They are recorded separately because the first is the residual-churn question in
+*Watch items* finally showing itself at scale, and the second is what a 60,000-entry `genomeGaps`
+backlog now costs on a reconnect.
+
+**18:39:52Z to 18:59:10Z — nineteen minutes in which the host could not keep any peer alive.**
+This is the largest churn episode the deployment has logged, and it reached *past* the mods to
+the Go processes:
+
+| Peer | `peer silent, dropping` | `client gone` | reconnects | `reservationKept=true` |
+|---|---|---|---|---|
+| slot 1 | 6 | 6 | 6 | 6 |
+| slot 2 | 5 | 5 | 5 | 5 |
+| slot 3 | 4 | 5 | 5 | 5 |
+| slot 4 | 5 | 8 | 8 | 8 |
+| slot 5 | 6 | 6 | 6 | 6 |
+| **five sidecars** | **26** | **30** | **30** | **30** |
+| `archive-main` | 2 | 14 | 14 | 0 (a subscriber holds no slot) |
+| slot 6 (far) | **0** | **0** | **0** | — |
+
+**A sidecar being dropped for silence is the new information.** `relay: peer silent, dropping` is
+the relay's own Contract B liveness judgement, and a sidecar has almost nothing to do but answer
+it — so thirty of them in nineteen minutes says the *host* stopped scheduling Go processes on a
+loopback socket, not that anything in the rig misbehaved. Alongside them the five mods took **15
+`4004` closes with `silentFor` of 13.40 to 24.41 s**, every one of them **past the new 13 s
+deadline**, and five `wsutil: outbound queue full` forward failures (four on slot 4, one on
+slot 3).
+
+**No save is behind any of it.** The eight periodic saves inside the window stalled **1 146 to
+3 006 ms** — an ordinary reading for this regime — and the nearest own-slot save to each of the
+fifteen `4004`s is 38 to 294 seconds away. A mod that goes silent for 22 seconds without a save
+running is not the save path; it is the thread not being scheduled at all.
+
+**Every reservation was kept, and the map healed itself.** The one collector sample that caught
+the storm, at **18:45:05Z**, reads `liveSlots` **5**, **20** lanes, `custodyDepth` **345**,
+`pacedDepth` 7, `heldDepth` 17 and `perMinute` down to **511.8** from ~1,100; the next sample at
+18:50:39Z is back to 6/6, 24 lanes and `custodyDepth` 28, and by 18:56Z `perMinute` is 1,144
+again. `timeoutBounces` never left 0.
+
+**The far end is the control and it never noticed.** Slot 6 has exactly **two** relay-lifecycle
+events in the whole of 2026-08-10 — the 17:16Z bundle swap above — so the storm was bounded to
+this machine, which is the strongest evidence available that its cause is this host's load and not
+the map, the relay or the wire.
+
+**What it correlates with, stated as correlation.** The window opens 93 seconds after commit
+`c1ad688` (18:38:19Z), whose measurement re-read **10,946 `[M4-SAVE]` lines across ~3.5 GB of
+archived BepInEx logs joined to 725 collector snapshots** — on the same host that was running five
+Unity processes at an applied ×100, the relay, the archive and five sidecars. Thirty minutes later
+the archive's 5.2 GB replay ran (*The archive's ledger recovery*). **No process accounting was
+kept, so this cannot be promoted to cause** — but the shape (common-mode across every local peer,
+absent on the far host, ending as abruptly as it began, and not recurring in the far hotter hours
+since) fits host starvation and fits nothing else on offer. **The operational reading is that
+measuring this deployment hard enough perturbs it**, and a churn burst with no long save behind it
+should be dated against what else the box was doing before it is called a defect.
+
+**20:22:52Z to 20:26:40Z — the archive alone, six times, and the genome backlog is the engine.**
+`archive-main` dropped and reconnected six times in under four minutes, `reservationKept=false`
+every time. **No sidecar dropped, no mod took a `4004`, and the map stayed 24/24 `peer_live`.**
+The cycle is visible end to end in `archive.log`: the session ends with
+`failed to read: … read: connection reset by peer`, the archive resubscribes, and within two
+seconds `pumpFetches` walks its **63,000-entry `pending` map** and fires its whole per-peer
+allowance at once — hundreds of `archive: asking for a genome by hash` lines inside a few
+milliseconds — after which every further send fails with
+`type=GENOME_REQUEST err="wsutil: connection closed"` until the next reconnect. The
+`GenomeRequestsPerMinute` = 30 per-peer cap (*`genomeGaps` is a fetch queue*) bounds the
+**rate** and does nothing about the **burst**, because `allowSendLocked` admits a fresh window's
+worth in one pass of the map.
+
+**It has not settled, and that is the part to carry forward.** A lull after 20:26:40Z looked like a
+recovery — `epoch` climbed 56 → 554 over eight minutes, which is a stable session — and then it
+resumed harder. As of **20:42Z** the count since 20:22Z is **16 `client gone` and 14 reconnects in
+two clusters** (six over 20:22–20:26Z, ten over 20:38–20:41Z, five of them inside one minute), with
+the archive **disconnected for 11% of that nineteen-minute span** and the second cluster more
+intense than the first. Only two of the sixteen were relay-side `peer silent` drops; the rest the
+archive closed on itself. **Do not read a quiet `epoch` as resolution** — a low `epoch` on the
+status page during this is a resubscription counter that keeps restarting, and it is the symptom,
+not the reassurance.
+
+**What it costs, and what it does not.** It costs exactly what the 19:08Z restart cost, recurring:
+§5.1 means a subscriber that is absent changes nothing about a migration, so the traffic runs
+untouched and only the **record** has the gap — the crossings during each disconnect are never
+copied to the ledger. **It costs the map nothing**: zero sidecar `client gone` and zero `4004` since
+19:00Z, 24/24 `peer_live`, `pacedDepth` and `heldDepth` 0, `timeoutBounces` 0 in every sample
+through both clusters. **This is a new cost of a large backlog, not a new fault**, but it is an
+**open** one — it belongs to the `genomeGaps` item rather than to the save stall, and unlike the
+18:39Z storm it had not stopped when this reading was taken.
+
+**What both storms change about reading `custodyDepth`, because it is the number an operator will
+notice first.** At the ×100 crossing rate the healthy band is no longer the 0–6 of the ×5 era.
+Over 31 collector samples and six live polls on the evening of 2026-08-10 it read **4–52 with a
+median near 15**, moving that far inside **two minutes** — 18 → 52 → 21 → 29 → 24 → 18 across six
+polls twenty seconds apart — because at this rate the map always has organisms in flight.
+**Read the direction and the company it keeps, not the magnitude**: `custodyDepth` 26 beside
+`pacedDepth` 0, `heldDepth` 0, `timeoutBounces` 0 and 24/24 `peer_live` is one ordinary sample.
+The two readings that meant something both had company — **345 with `heldDepth` 17 and only 20 lanes**
+in the storm, and **106 with `pacedDepth` 52** at 18:06Z when slot 6 sat at `timeScale` 0 and its
+sidecar held what it could not deliver. Both drained by the next sample.
 
 ### The archive's ledger recovery, 2026-08-10 19:08Z
 
@@ -1663,9 +1829,12 @@ append (`archive.go`, `RecordGenome`) is counted at boot replay and never during
 Three things are being watched on the running deployment. The first is a **measured breach of
 a bar the owner set**; the owner's decision on it **landed on 2026-08-10**, so what it now
 waits on is whether the change works — which is evidence, and evidence takes a generation to
-accrue. The second is a trend with no verdict yet. The third **has its verdict** — the reading
-is understood, it is not a defect, and it stays on this list because M5 changes what it will
-mean.
+accrue. **The first evidence is in, as of 2026-08-10 20:20Z, and it points the right way without
+being a rate yet**: no save has cost a session since the raise, and every `4004` logged since is
+attributable to something that is not a save. It also grew a fourth sub-question that is no longer
+about saves at all — see *What to watch now* under that item. The second is a trend with no verdict
+yet. The third **has its verdict** — the reading is understood, it is not a defect, and it stays on
+this list because M5 changes what it will mean.
 
 - **The 2-second save-stall budget is breached routinely, and it has been since the day the
   exit test passed.** D14 set the bar at 2 000 ms and the exit test of 2026-08-06 measured
@@ -1933,17 +2102,48 @@ mean.
   pre-sized array rather than reflection. The fourth — managed-heap/GC state with process uptime —
   is not settled, but it is now **bounded to where it can hide**: `zipMs` is a tenth of the cost,
   so the residual host multiplier is CPU and allocation, not disk. `lineageMs` and the remainder
-  are both reflection-and-JObject churn, and both are where to look next.
+  are both reflection-and-JObject churn, and both are where to look next. **That last inference is
+  wrong and is corrected under item 2 below** — it argues from a phase's *share*, and the 2 h 47 m
+  reading of 20:20Z catches an excursion that took `zipMs` with it at ×1.37. The bound is the whole
+  process, not a phase.
 
   **What to watch now, in this order.**
 
-  1. **Do the `4004`s stop?** The proof is a `[M4-SAVE]` stall over 3.5 s with **no**
-     `contract A: heartbeat timeout` behind it in `e2e/logs-m4-lan/sidecar-*.log`. A stall over
-     **13 s** would still take one, and none has ever been measured. At ten-minute spacing the
-     proof accrues over a generation, not over a watch window. **The first 46 minutes gave one
-     such save — slot 2 at 4 207 ms, and it cost nothing** (*The five local worlds save every ten
-     minutes…*, above, which also accounts for the four `4004`s the rollout itself produced). One
-     is an existence proof, not a rate; read the next generation before calling it.
+  1. **Do the `4004`s stop? — read 2026-08-10 20:20Z: no save has cost a session since the raise,
+     and the sample is still too thin to call it a rate.** The proof is a `[M4-SAVE]` stall over
+     3.5 s with **no** `contract A: heartbeat timeout` behind it in
+     `e2e/logs-m4-lan/sidecar-*.log`. Across the **76 instrumented periodic saves** of 17:43Z to
+     20:20Z — every save of the current five game processes, which all started at 17:33Z — plus the
+     13 already recorded at 15:40Z–16:26Z:
+
+     | | |
+     |---|---|
+     | Saves observed since the raise | **89** (76 instrumented + 13 earlier) |
+     | Of them over the retired 3 500 ms | **3** — slot 2 at 4 207 ms (15:52Z), slot 3 at 3 686 ms (17:45Z), slot 5 at 3 613 ms (19:22Z) |
+     | `4004` closes attributable to any of those three | **0** — nothing within ±60 s on the save's own slot |
+     | Saves over the new 13 000 ms | **0**, and nothing near it |
+     | Worst stall in the 76 | **3 686 ms**, against the 9 427 ms this deadline was sized from |
+
+     **So `M`=3 and `K`=0.** That is the right sign and it is not yet a rate: the 13-hour generation
+     that produced the problem had 63 saves over 3.5 s and this one has three, because **the tail
+     collapsed**. Per slot all 76 saves read medians **1 048 / 2 162 / 2 804 / 1 984 / 2 513 ms**
+     with maxima 1 876 / 3 021 / 3 686 / 2 869 / 3 613 — so against the `*.minfps.*` generation the
+     **medians rose** (686/1 530/1 699/1 474/1 345) while the **maxima fell by a factor of three**
+     (4 311/5 386/5 870/9 427/9 115). The ten-minute cadence did not make the typical save cheaper —
+     the worlds are bigger, and *The answer* says why — but it removed the multi-second outliers that
+     the old deadline turned into disconnections. **43 of 76 (57%) still breach D14's 2 000 ms**, which
+     is item 3.
+     **What the raise has not bought is a quiet log**: 21 `4004` closes have been logged since
+     15:39Z, and **every one of them is attributed elsewhere** — three to the sidecar rollout itself,
+     three to the `0.6.3` deploy's own quits at 17:33Z, and **fifteen to the host-starvation storm of
+     18:39Z–18:59Z**, whose `silentFor` ran 13.40–24.41 s with no save over 3 006 ms anywhere near it
+     (*The evening's two session storms*). That storm is item 4, not this item.
+     **A gap in the evidence, and it is permanent.** 16:26Z to 17:43Z — roughly 33 saves — cannot be
+     read: the `0.6.3` deploy restarted the games without archiving the BepInEx logs first, and
+     BepInEx truncates `LogOutput.log` on launch. The newest generation in
+     `e2e/logs-m4-lan/bepinex/` is still `…minfps.20260810-1058*`. **Run `archive_bepinex_logs`
+     before any mod deploy**, or that deploy destroys the `[M4-SAVE]` history it is being deployed to
+     measure.
   2. **Does `lineageMs` climb over a full generation?** The first reading already has it at ~53%
      of `writeMs` and flat against population; the question the next generation answers is its
      *slope*, because that is the term predicted to compound. **The first 53 minutes cannot answer
@@ -1956,15 +2156,75 @@ mean.
      MB, never per zip kilobyte** — the old `ms per 100 KB` figures (`*.minfps.*` at 414–461) are
      comparable only within a drawn-or-headless-matched set, and that trap is what the previous
      reading fell into.
+
+     **Re-read on 2 h 47 m at 2026-08-10 20:20Z — 69 warm saves joined to their own collector
+     snapshot. The window still refuses the slope, and now it says why.** Normalised per raw MB and
+     binned by wall clock, with all five slots in every bin:
+
+     | 20-min bin | `lineageMs` | remainder | `zipMs` | `verifyMs` | `writeMs` | `lineage`+rem share |
+     |---|---|---|---|---|---|---|
+     | 17:40 | 416 | 299 | 93 | 10 | **811** | 88% |
+     | 18:00 | 496 | 232 | 85 | 11 | 831 | 88% |
+     | 18:20 | 486 | 251 | 106 | 11 | 838 | 88% |
+     | 18:40 | 457 | 301 | 98 | 11 | 918 | 82% |
+     | 19:00 | 518 | 240 | 97 | 13 | 878 | 86% |
+     | 19:20 | **791** | **349** | **123** | 16 | **1 267** | 90% |
+     | 19:40 | 632 | 336 | 113 | 14 | 1 099 | 88% |
+     | 20:00 | 630 | 262 | 111 | 14 | 1 015 | 88% |
+
+     **Three things fall out, and the third is the useful one.**
+
+     **The residual does not live in `lineageMs`.** The 19:20Z excursion multiplies *every* phase by
+     about the same factor — `lineageMs` ×1.64, the remainder ×1.41, `zipMs` ×1.37, `verifyMs` ×1.53,
+     `writeMs` ×1.54 against the 17:40+18:00 baseline — and `lineage`+remainder holds **82–90% of
+     `writeMs` in every bin** across the whole 2 h 47 m. The shares do not move; the whole save
+     scales. **This corrects the bound in the paragraph above**: "`zipMs` is a tenth of the cost, so
+     the residual is CPU and allocation, not disk" was an argument from *share*, and a share cannot
+     make that case — when an excursion actually arrived it took the deflate-and-write phase with it
+     at ×1.37. What the residual is bounded to is **the whole process**, not a phase of it.
+
+     **The slope cannot be attributed, and the reason is design, not sample size.** All five games
+     started at 17:33Z, so **process uptime and host wall-clock are the same variable in this
+     sample** — cost against save ordinal gives r = +0.51 and against wall seconds r = +0.52, which
+     is one measurement reported twice. Worse for the aging hypothesis: the series is **not a ramp**.
+     It is flat at 811–838 for the first hour, steps to a 1 267 peak at 19:20Z, then **decays** to
+     1 015. Heap fragmentation does not undo itself, so a decaying excursion is evidence *against*
+     process aging. **Separating the two needs staggered game restarts**, which no rollout has ever
+     used — every one takes all five down together or walks them in seven minutes.
+
+     **What it is not: concurrent load.** Against the concurrent crossing rate, over a window where
+     the rig ran **741 to 1 417 migrations a minute**, r = **+0.11** — nothing. Against population,
+     r = **−0.005**, which re-confirms *The answer*'s central claim from a third direction. So the
+     rig running hot is **not** what makes a save expensive.
+
+     **What the excursion does line up with is the host, and the host is now crowded.** The 19:20Z
+     peak is the 10–30 minutes after the archive's 5.2 GB replay (*The archive's ledger recovery*),
+     and it follows the 18:39Z starvation storm. Read-only process facts taken at 20:20Z: the five
+     games hold WorkingSet **1 954–2 450 MB** each — against the **403–466 MB** measured when they
+     went headless at 01:30Z — and have burned **10 315–13 971 s of CPU in 9 960 s of wall clock**,
+     which is 1.04–1.40 cores each and **~5.9 cores across the five**. Beside them on the same box:
+     the archive at 1.25 GB, the relay at 344 MB, and ~6 GB of editor, node and agent processes doing
+     the measuring. **The "40% host residual" has a candidate that is not the game at all**, and it
+     is the reason the next reading of this term should record what else the box was running.
   3. **The 2-second budget is still breached, and that is still why this item is open — and it
      will get worse on its own.** The bar was not moved. What changed is that breaching it now
      costs only the throughput D14 priced, not a session as well. But `recordedSpecies` and its
      brains only accumulate, so *The answer* predicts the stall keeps climbing at unchanged
      population and unchanged file size. Risk 3's remaining escalation — *a save path that does not
      block the tick* — stays available and unspent, and it is now the escalation that scales.
-  4. **The residual churn.** The 23:43Z slot-4 episode had no long save behind it, so some
-     `4004` closes come from somewhere else. With the save-shaped ones gone, whatever is left is
-     finally separable, and reading it is the next diagnosis rather than this one.
+  4. **The residual churn — and as of 2026-08-10 18:39Z it is no longer a footnote.** The 23:43Z
+     slot-4 episode had no long save behind it, so some `4004` closes come from somewhere else. With
+     the save-shaped ones gone, whatever is left became separable — and the first thing it did was
+     produce **every one of the 21 `4004` closes logged since the raise**, none of them a save.
+     **The 18:39Z–18:59Z storm is the same mechanism at five times the scale**, and it settles one
+     thing the 23:43Z episode could not: it dropped **thirty Contract B sidecar sessions** for
+     silence as well as fifteen mod sessions, and a Go sidecar on a loopback socket has no save path,
+     no Unity main thread and no species history. **So the residual churn is not a mod problem and
+     never was** — it is this host failing to schedule its processes, and it is bounded to this host
+     because slot 6 logged nothing (*The evening's two session storms*). That makes the next
+     diagnosis a **host** one: record contemporaneous load, not more mod instrumentation. The
+     13 s deadline is doing its job here in the only way it can — it did not prevent these closes and
+     was never going to, and `timeoutBounces` stayed 0 through all of them.
 
 - **Slot 1 is depressed, and it is the world to keep an eye on.** It fell to a population of
   **2** in the 2026-08-08 ENOSPC incident and did not recover with its neighbours: readings
@@ -1982,6 +2242,18 @@ mean.
   means much less than it did. Being the smallest is also why it is the only world that
   *reports* its ×100 target (*The five local worlds run headless and target ×100,
   since 2026-08-10*); the four bigger ones are clamped.
+
+  **Read again over 2026-08-10 17:30Z–20:20Z, 33 collector samples: it oscillates 4–23, median 13,
+  and that is the same band as the first hour's.** Seven of the 33 samples sit at 4–9 and four sit at
+  17–23, so a spot reading of 4 and a spot reading of 23 are both ordinary and neither is a trend —
+  which is the point already made above, now with a longer series behind it. It has not climbed to
+  its neighbours' range: slots 2–5 read 41–63 at 20:18Z against slot 1's 17, so it is still
+  the smallest by a factor of three to four. **What has changed is that the question is getting
+  harder to answer, not that the answer arrived** — at an achieved 25–32× against its neighbours'
+  6–10× (its populations stay small, so `CheckMinFPS` never clamps it) slot 1 lives several times
+  more simulated time per wall second than the worlds feeding it, so its low readings are a fast
+  world waiting on slow neighbours as much as a small world waiting on arrivals. Reading it against
+  `simulatedTime` rather than wall clock is the way to separate those, and nothing has done that yet.
 
 - **`genomeGaps` is a fetch queue, its healthy value is 0, and what it counts is
   throughput.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the
@@ -2026,6 +2298,28 @@ mean.
     change is the M5 arithmetic**: a queue that sits near 50,000 entries is a very different thing
     to inherit when a departed stranger can make an entry permanent, so read Risk 7 against this
     number rather than against the 2,714 the item was opened on.
+  - **2026-08-10 evening: still the same curve, still no drain window, and the backlog has now
+    started to cost something other than its own size.** Over 17:32Z to 20:20Z, 31 collector samples
+    at a crossing rate of **806–1,417/min**, `genomeGaps` climbed **49,461 → 62,850** and read
+    **63,996** on a live poll at 20:31Z; `ledgerRecords` climbed past **3,889,000** across the same
+    span. The one step in the series is not growth: **56,658 → 60,675 across the 19:08Z archive
+    restart**, which is the replay bringing its own unfetched hashes with it, exactly as *The
+    archive's ledger recovery* records. The rate never fell near the ~340/min drain threshold at any
+    point, so the test this item wants still has not come round.
+    **The new cost is a reconnect.** At 20:22Z the archive's relay session flapped **six times in
+    under four minutes**, and the engine is this queue: on each resubscription `pumpFetches` walks
+    all ~63,000 `pending` entries and spends its whole per-peer allowance in one pass, hundreds of
+    `GENOME_REQUEST`s inside a few milliseconds, until the connection is reset and it starts over
+    (*The evening's two session storms*). `GenomeRequestsPerMinute` = 30 bounds the **rate** and not
+    the **burst** — `allowSendLocked` (`archive.go:905`) opens a fresh one-minute window per peer and
+    then admits 30 immediately, and the map iteration in `pumpFetches` has no pacing of its own.
+    **It was still running at 20:42Z** — 16 drops and 14 reconnects since 20:22Z, the archive away for
+    11% of that span, the second cluster worse than the first — and it costs the map nothing while
+    costing the **ledger** every crossing that lands while the archive is away. This is the first time
+    the backlog's *magnitude* has had a consequence beyond the number on the page, and it will get
+    easier to trigger as the queue grows. **Read this against Risk 7 too**: M5's permanent entries
+    make the queue monotone, and a monotone queue makes every archive reconnect more expensive than
+    the last. **It is the one thing this sweep found still open at the end of it.**
 
   **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
   `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**
