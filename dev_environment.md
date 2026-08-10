@@ -1817,23 +1817,24 @@ mean.
   and no `4004` in any local sidecar log. Slot 6 was not touched, and still publishes `0.6.2`.
 
   **The first reading confirms finding 2 from the inside and kills three of the four named
-  suspects.** Fifteen instrumented saves, 17:43Z–18:09Z. **Read only `n≥2`**: the first save of a
+  suspects.** Twenty instrumented saves, 17:43Z–18:19Z. **Read only `n≥2`**: the first save of a
   process carries the JIT of the whole path, and it is not small — `shotMs` reads **483–585 ms on
   `n=1` and 8–14 ms from `n=2` onwards**, which is a warm-up artifact and a trap set for anyone
-  who reads a save taken minutes after a bring-up. Across the ten warm saves:
+  who reads a save taken minutes after a bring-up. Across the fifteen warm saves, with the
+  per-world medians in the last column:
 
-  | Phase | Median ms | Share of `writeMs` | Range across the five worlds |
+  | Phase | Median ms | Share of `writeMs` | Per world (slots 1–5) |
   |---|---|---|---|
-  | **`lineageMs`** | **977** | **58%** | 660 / 932 / 1 034 / 948 / 1 177 |
-  | remainder (bibites, eggs, pellets, templates) | 438 | 26% | 156 → 1 118, tracking population 10 → 82 |
-  | `zipMs` | 166 | 10% | 83 → 304 |
-  | `verifyMs` | 22 | 1% | 17–33 |
+  | **`lineageMs`** | **994** | **55%** | 643 / 985 / 1 041 / 960 / 1 200 |
+  | remainder (bibites, eggs, pellets, templates) | 496 | 27% | 219 / 919 / 1 165 / 539 / 496, tracking population 11 → 84 |
+  | `zipMs` | 208 | 11% | 78 / 269 / 289 / 208 / 211 |
+  | `verifyMs` | 23 | 1% | 17–33 |
   | `shotMs` | 10 | 1% | 8–14 |
   | `binMs` | 1 | 0% | 0–2 |
   | `guardMs` | 0 | 0% | 0–1 |
 
   **`speciesData.json` is the save.** `lineageMs` is the largest phase in every world, and it is
-  the *flattest* — 660 to 1 177 ms while populations run 10 to 82 and zips run 149 to 809 KB.
+  the *flattest* — 643 to 1 200 ms while populations run 11 to 84 and zips run 149 to 809 KB.
   Slot 1 is the whole argument in one line: **10 organisms, a 149 KB file, an 873 ms stall, of
   which 676 ms is building the species history**. Three of the four candidates this item carried
   are now measured and closed: **the screenshot is 1%** (the headless thumbnail is wasteful and
