@@ -27,7 +27,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | The plugin | `0.6.3` (`MultiversePlugin.Version`) — the **save-phase build**: `0.6.2`'s headless-speed work (`MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device — *A world can be at the wrong time scale*, in Gotchas) and `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping) on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals, **plus `SavePhases`, which times `SaveSystem.CreateSave` from the inside and puts the decomposition on every `[M4-SAVE]` line** (*Watch items*, first item). `SavePhases` is measurement only — it patches nothing that changes what a save does, and a span it cannot resolve reads `0` rather than failing the save. It still speaks `contract-a/2.3`: neither `0.6.2` nor `0.6.3` adds, removes or moves **any wire field**, so the minor did not budge and a peer on an older build is not stale in any operational sense. Measured on the live map 2026-08-10: the five local slots publish `0.6.3` and slot 6 publishes `0.6.2`, and nothing about the map reads differently for it. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — the sidecar's journal since 2026-08-08, the archive's ledger since 2026-08-09. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
+| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — the sidecar's journal since 2026-08-08, the archive's ledger since 2026-08-09. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Since 2026-08-10 it also **measures** each world's achieved time scale and shows it beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas) — a §10.1 derivation from fields `PEER_STATUS` already carried, so that one moves no identifier either. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -956,9 +956,18 @@ The page is **three views over one poll — Map, Species and Settings — and th
 hash**, so `#species` is a link somebody can send and a reload lands where the reader was. `#map`
 (the default, and anything unrecognised) is the **visual map**: an SVG grid of the worlds with
 population drawn as dots, lanes drawn as arrows (wrap-arounds split at the map edge, bypasses
-curved over the world they skip), pulses animating each lane at its measured hop rate, and a
-glossary that explains every term to a reader who did not build the system. `#species` is **who
-is alive right now** — the union of every world's census, keyed on the §16 A34-normalized name
+curved over the world they skip), each lane labelled with its measured hop rate, and a glossary
+that explains every term to a reader who did not build the system. **The only thing that moves
+along a lane is a real crossing** — the ambient pulse that used to walk every arrow was removed
+once real hops travelled the same path (§10.1), so a glyph in motion is always an organism this
+archive was copied on. **Each cell's speed chip carries two numbers, `×100 → ~×12`** — what the
+game reports *applying*, then what the archive *measured* it delivering — and on this deployment
+they are nowhere near each other. The second half is drawn only once it has been measured, so a
+cell showing `×100` alone is an archive that has just started or a world that has just come
+back, never a claim that the two agree; the tooltip, the world card and `ringstat`'s `speed→got`
+column say the same thing at more length. Read the gap, not the target: *A world can be at the
+wrong time scale* in Gotchas is what it means. `#species` is **who is alive right now** — the
+union of every world's census, keyed on the §16 A34-normalized name
 and printed in each world's own spelling, annotated with what the ledger knows about it
 (crossings ever, first and last sighting, distinct genomes, recent lanes, parent species) and
 badged `everywhere` / `endemic` / `never-exported`. It is **alive-only**: a species that crossed
@@ -968,7 +977,7 @@ keep count, save-on-quit, wrapping and the exclusion list — and it is read-onl
 
 | Endpoint | What it answers |
 |---|---|
-| `/api/status` | the live frame every tab is drawn from. It gained `recentHops` per lane and `flowWindowMs` with §17, the speed and pacing readout with §18, and §19's seven per-slot fields: `modVersion`, `contractAVersion`, `migrationExclude` (with `migrationExcludeKnown`), `saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` |
+| `/api/status` | the live frame every tab is drawn from. It gained `recentHops` per lane and `flowWindowMs` with §17, the speed and pacing readout with §18, §19's seven per-slot fields — `modVersion`, `contractAVersion`, `migrationExclude` (with `migrationExcludeKnown`), `saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` — and, since **2026-08-10**, the **measured** speed: `achievedTimeScale` and `achievedSpanMs` per slot beside the applied `timeScale`, with `achievedWindowMs` at the top. **No wire field was added for it** — it is Δ `simulatedTime` / Δ `statsAsOfMs` over the last minute, both of which `PEER_STATUS` has always carried, so it is §10.1 rule 2's *derived, and marked as derived* and nothing on the wire moved. Absent means the archive has not watched that world for long enough yet, which is not the same fact as a peer refusing to say |
 | `/api/hops` | the last minute of crossings, which the map animates |
 | **`/api/species`** | the alive union with its ledger annotations, plus `reportingSlots`, `censuslessSlots`, `truncatedSlots`, `ledgerSpecies` and `ledgerRecords`. **The join happens here, not in the browser**, so the page and `ringstat` can never disagree about which species is endemic |
 | **`/api/species/history?key=&hours=&buckets=`** | one species' per-world population over time, downsampled from `metrics.jsonl`. `key` is required and bounded: missing, empty or over-long answers **`400`** |
@@ -978,9 +987,19 @@ keep count, save-on-quit, wrapping and the exclusion list — and it is read-onl
 the archive already performs at startup, and maintained per new record after that, so a
 half-million-line ledger is never re-read to answer a request. Measured on 2026-08-07 against
 599,184 records (176 MB, warm page cache): the replay took **~6 s**, and the archive's settled
-RSS went from 146 MB to **170 MB**, with a transient peak near 690 MB while the pass ran. The
-same rollout widened each `metrics.jsonl` sample by **~640 bytes (+7.6 %)** — the settings block
-for five publishing worlds — on a file that samples `/api/status` verbatim.
+RSS went from 146 MB to **170 MB**, with a transient peak near 690 MB while the pass ran. That
+rollout widened each `metrics.jsonl` sample by **~640 bytes (+7.6 %)** — the settings block for
+five publishing worlds — and the achieved-speed readout added **~393 bytes (+2.7 %)** on
+2026-08-10, on a file that samples `/api/status` verbatim.
+
+**But the pass is the cost of a restart, and it grows with the ledger.** Re-measured on
+2026-08-10 against **3,700,672 records (1.22 GB)**: the replay took **~93 s** with a transient
+peak RSS near **5.2 GB**, and **the archive serves nothing until it finishes** — it binds `8796`
+after the replay, not before. So restarting the archive now costs about **100 seconds with no
+status page**, and the same 100 seconds of crossings are **never copied to it**: a subscriber
+that is absent changes nothing about a migration (§5.1), which is exactly why they are absent
+from the record rather than delayed in it. At the growth in *The disk budget* this figure only
+goes up. Plan an archive restart; do not treat it as free.
 
 `ringstat` is the same three views in a terminal, over the same data and from the same place:
 
@@ -1094,7 +1113,10 @@ with the journal's:
 
 Verified against a copy of the living ledger, 2026-08-09: **1,287,592 lines replay to
 1,287,591 records with exactly one line skipped, 776 bytes.** The old code stopped at
-**874,162** and reported nothing.
+**874,162** and reported nothing. **Proven on the deployment itself on 2026-08-10**, on the
+first restart after the fix: the same one line and the same 776 bytes, 3,700,672 records kept,
+188,006 of them recovered from behind the splice — see *The archive's ledger recovery* in *The
+living deployment*, which also has the reconciliation against `wc -l`.
 
 ### What still grows forever
 
@@ -1485,6 +1507,70 @@ wall second** over a 60-second sample with all five reporting an applied `timeSc
 which is the thirteen-hour figure rather than the 74 measured at smaller populations right after
 the servo came off; the worlds are bigger now (*A world can be at the wrong time scale*).
 
+### The archive's ledger recovery, 2026-08-10 19:08Z
+
+**The skip-and-recover replay of `e68550b` ran against the living ledger for the first time, and
+it did exactly what it was written to do.** The archive was restarted on its own — no game, no
+sidecar, no relay, no collector was stopped — to pick up the achieved-speed readout, and that
+restart was also the first boot of the repaired code against the splice of 2026-08-08. It
+reported the damage and kept everything behind it:
+
+```
+level=ERROR msg="archive: the ledger holds line(s) that do not parse; replay SKIPPED them
+and kept every record behind them" skippedLines=1 skippedBytes=776 records=3700672
+```
+
+**One line, 776 bytes** — the same splice measured offline on 2026-08-09 (*The disk budget*),
+now confirmed against the file the deployment is actually writing. `ledgerSkippedLines` is
+non-zero on the page and in `ringstat` for the first time; it will stay 1 for the life of this
+ledger, which is the point of carrying it.
+
+**The counters jumped, and the arithmetic closes exactly.** `ledgerRecords` went
+**3,342,560 → 3,703,832** across the restart, `+361,272`. Against the file:
+
+| | |
+|---|---|
+| `wc -l` at 19:07Z, before the stop | 3,696,781 |
+| the old process's `ledgerRecords` | 3,342,560 |
+| its shortfall against its own file | **354,221** |
+| lines appended before it stopped | 3,892 |
+| records the new replay reached | 3,700,672 — **plus the 1 skipped line, that is the whole file** |
+| recorded live since the restart | 3,160 |
+
+`354,221 + 3,892 − 1 + 3,160 = 361,272`. Nothing is unaccounted for.
+
+**And the shortfall splits the way the caveat said it would.** The ledger holds **268,895**
+`GENOME` lines, of which **166,214** were appended during the old process's 22-hour run — and a
+`GENOME` append is counted at boot replay and never by the live counter, so those 166,214 are
+pure counting artifact. The genuine recovery — records behind the spliced line that the pre-fix
+boot never reached — is therefore `354,221 − 166,214 − 1 =` **188,006**, and the one damaged
+line is permanently lost. The **~197,000** predicted on 2026-08-09 was the conflated figure the
+caveat warned about; it read ~9,200 high because that many `GENOME` lines had already
+accumulated when it was computed. **The counter and `wc -l` answer different questions, and a
+shortfall computed from the two of them is not a loss.**
+
+**Everything downstream came back full, not reverted.** All 24 lane counters rose (map total
+1,622,953 → 1,708,450 envelopes, the recovered older migrations); the species aggregate holds
+**1,727** ledger species with sightings reaching back to 2026-08-07T05:14Z; `genomeGaps` rose
+56,662 → 60,639, because the recovered records brought their own unfetched hashes with them.
+Before `e68550b` this same restart would have **reverted** all of it to 01:21 on 2026-08-08.
+
+**What it cost.** The archive was down **100 seconds** — 19:08:42Z to 19:10:22Z — of which ~93 s
+was the replay itself (peak RSS ~5.2 GB; see *The status page on the LAN*). The map was
+unwatched for that minute and a half, and roughly **1,600–2,300 crossings** at the prevailing
+960–1,400/min were never copied to the archive and are therefore absent from the ledger. That is
+§5.1 working: a subscriber that is absent changes nothing about a migration, so the traffic ran
+untouched and only the *record* has the gap. The `epoch` the page shows restarted from 1 and was
+back in the hundreds within minutes, which is resubscription and not a new map (*The five local
+worlds run headless*).
+
+**Nothing else moved.** `relay.log` shows exactly one `client gone` for `archive-main`
+(`reservationKept=false` — a subscriber holds no slot) and one `client connected` 100 s later,
+and no other peer line in the window. All five sidecars and the relay kept their original
+process ids; 24/24 lanes stayed `peer_live` with `pacedDepth`, `heldDepth` and `timeoutBounces`
+0 throughout; and the five sidecar logs recorded zero `OVERLOADED`, zero `MALFORMED_MESSAGE` and
+zero `bounceBack=true` across the restart. The far end never noticed.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09. The steps are ordered and step 1
@@ -1531,9 +1617,10 @@ gates the rest.
    (*Watch items*, *The decision*).
 
    **Check the four on the page, not in the script.** `/api/status` publishes `saveMinutes` and
-   `saveKeep` per slot (§19 A42) beside `timeScale`, so one read confirms the whole regime: five
-   local slots at `10`/`6` and `timeScale 100`, slot 6 at whatever its own operator set. A slot
-   reporting `2`/`4` came up from a stale environment and needs its game restarted, not the rig.
+   `saveKeep` per slot (§19 A42) beside `timeScale` — and, since 2026-08-10, `achievedTimeScale`
+   beside that — so one read confirms the whole regime: five local slots at `10`/`6` and
+   `timeScale 100`, slot 6 at whatever its own operator set. A slot reporting `2`/`4` came up
+   from a stale environment and needs its game restarted, not the rig.
 
 5. **Expect one game to come up starved of a log file**, and fix that one instance rather
    than the rig — see *The five-instance ceiling, and the log-file starvation trap* in
@@ -1544,7 +1631,9 @@ gates the rest.
    not the correction. **The target for a local world is now ×100** and the correction is
    `e2e/run-m4-lan.sh send <n> timescale 100`; the far end's speed is still its own operator's.
    Read the *achieved* rate too, not only the reported one — at ×100 the two are far apart,
-   and the gotcha says what that means.
+   and the gotcha says what that means. **Since 2026-08-10 the page reads it for you**, as the
+   second half of each cell's speed chip; it appears about ten seconds after the archive has a
+   world to watch, so give it a poll or two before reading a fresh bring-up.
 7. **Relaunch the baseline collector by hand.** Every reboot kills it and nothing restarts
    it. It is gitignored, read-only against the deployment — it only copies the five save zips
    and curls `/api/status` — and costs ~0.5 GB/day (*The disk budget*).
@@ -1557,21 +1646,17 @@ gates the rest.
    A reboot that lands mid-cycle leaves an empty snapshot directory behind; there is one,
    `20260808T143150Z/`, and it is harmless.
 
-**The next bring-up will make the archive's counters JUMP, and that is a recovery rather than
-a fault.** The running archive replayed the ledger with the pre-fix code at its own boot, so
-everything it shows — `ledgerRecords`, the lane counters, the species aggregates — is built on
-the 874,162 records that replay could reach plus what it has recorded since: **1,096,418
-against 1,293,613 lines in the file** at 23:45Z on 2026-08-09. Its in-memory state is correct
-and complete for its own run; it is the *replay* that was short. The first restart after the
-fix reads past the spliced line and recovers the ~197,000 older records this process never
-saw, so the totals rise. Before the fix that same restart would have **reverted** them to
-01:21 on 2026-08-08. See *The disk budget*. One caveat on the arithmetic: the jump will read
-**larger** than the recovery alone, because the live `ledgerRecords` counter only increments
-on migration, ACK and NACK records — a `GENOME` append (`archive.go`, `RecordGenome`) is
-counted at boot replay but never during the run, and `GENOME` is ~11% of ledger lines. The
-gap between the counter and `wc -l` therefore widens ~53 lines a minute on its own, replay
-after replay, and a shortfall computed from those two figures conflates the skipped-line
-loss with this counting artifact. Sizing from the file, not the counter, is the safe habit.
+**The archive's counters jumped once, on 2026-08-10, and they will not jump again** — the
+recovery has happened and every later replay reads the same records. See *The archive's ledger
+recovery* above for what it cost and what it proved. Two things from it stay true of every
+bring-up from here: the replay is now **~93 s of no status page**, so `up` reaches
+`archive subscribed` about a minute and a half after it starts the archive rather than
+instantly — **its wait was 60 s and would have failed a healthy bring-up**, so it is 300 s
+since 2026-08-10 and wants raising again as the ledger grows; and `ledgerRecords` still runs
+**below** `wc -l` and drifts further every hour,
+because the live counter only increments on migration, ACK and NACK records while a `GENOME`
+append (`archive.go`, `RecordGenome`) is counted at boot replay and never during the run.
+**Sizing the ledger from the file, not the counter, is the safe habit.**
 
 ### Watch items
 
@@ -2042,7 +2127,15 @@ mean.
   **`timeScale` on the page is the speed the game
   is *applying*, not one this rig measured** — the mod copies `Time.timeScale` into the
   heartbeat (`MultiverseClient.cs:1040`) and `contract-a.md` calls it *the effective time
-  scale*. The game's own governor is what makes it move: `TimeController.CheckMinFPS` clamps
+  scale*. **Until 2026-08-10 that was the only figure the page had, and it was silent about the
+  gap. It now shows both**, per world, as `×100 → ~×12`: the applied scale, then the achieved
+  rate the archive measures over the last minute (`achievedTimeScale` on `/api/status`, the
+  `speed→got` column in `ringstat`). Everything below still holds — it is *why* the second
+  number exists — but "read the achieved rate too" is no longer a separate step an operator has
+  to remember to take. The archive computes it from `Δ simulatedTime / Δ statsAsOfMs` on the
+  `PEER_STATUS` blocks it already receives; **the paragraphs below that read a rate off a
+  stopwatch are the record of how it was measured before the page did it.**
+  The game's own governor is what makes it move: `TimeController.CheckMinFPS` clamps
   the engine scale into `[min(0.1, target), target]` whenever the frame rate misses
   `minimumFPS`, so a world that keeps up reports its target exactly and a host that cannot
   reports the fluctuating non-integer it was throttled to. Neither figure is the achieved rate,
@@ -2068,7 +2161,9 @@ mean.
 
   So it is not a property of a restart. Sweep all five on `/api/status` after any bring-up,
   and again whenever a rate reading looks wrong: a world running seven times too fast inflates
-  every per-simulated-minute series it produces.
+  every per-simulated-minute series it produces. **The sweep is now one glance at the map** —
+  six cells, each with both numbers on it — and a drifted world shows up as an applied scale
+  that disagrees with its neighbours', which is the same signal it always was.
 
   **The governor is a servo, not a floor, and it still runs with nothing on screen. `0.6.2`
   disarms it headless.** `CheckMinFPS` is called from `TimeKeeper` on every update, and its gate

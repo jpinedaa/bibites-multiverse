@@ -153,6 +153,10 @@ type Archive struct {
 	// lanes counts the envelopes copied on each ordered slot pair, which is what
 	// turns the ledger into a per-lane flow rate.
 	lanes map[lanePair]*lane
+	// simRates is the sliding window of (statsAsOfMs, simulatedTime) pairs per
+	// slot behind achievedTimeScale — how fast each world's clock ACTUALLY ran,
+	// as against the timeScale it reports applying. See achieved.go.
+	simRates map[int]*achievedRate
 	// hops is the bounded recent-hops feed of §17 B14. It is DELIBERATELY not a
 	// field of Status: see hops.go for why the durable metrics file must not
 	// carry it.
@@ -216,6 +220,7 @@ func New(cfg Config) (*Archive, error) {
 		genomes:    genomes,
 		metrics:    metrics,
 		lanes:      map[lanePair]*lane{},
+		simRates:   map[int]*achievedRate{},
 		seen:       map[string]bool{},
 		pending:    map[string]*fetch{},
 		sentWindow: map[string]*rateWindow{},
@@ -543,6 +548,7 @@ func (a *Archive) handle(conn *wsutil.Conn, frame []byte) bool {
 				a.peerEpoch = status.Epoch
 				a.status = status
 				a.statusAt = time.Now()
+				a.observeSimRatesLocked(status)
 			}
 			a.mu.Unlock()
 		}

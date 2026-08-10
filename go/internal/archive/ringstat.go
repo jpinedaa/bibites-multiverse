@@ -93,13 +93,15 @@ func RenderRingstat(w io.Writer, s Status) {
 	}
 	fmt.Fprintln(w)
 
-	// speed is the world's own time scale and pace is queued/cap per SIMULATED
-	// minute of that world — the same two settings the map draws in every cell,
-	// so the two operator surfaces cannot disagree about them either.
-	fmt.Fprintf(w, "%-5s %-7s %-22s %-9s %6s %10s %8s %10s %6s %8s %s\n",
-		"slot", "pos", "peer", "state", "speed", "population", "custody", "pace",
-		"held", "bounced", "last save")
-	fmt.Fprintln(w, strings.Repeat("-", 120))
+	// speed is the world's time scale — what the game reports applying, then
+	// after the arrow what the archive measured it delivering over the last
+	// achievedWindowMs — and pace is queued/cap per SIMULATED minute of that
+	// world. They are the same cells the map draws, so the two operator
+	// surfaces cannot disagree about them either.
+	fmt.Fprintf(w, "%-5s %-7s %-22s %-9s %s %10s %8s %10s %6s %8s %s\n",
+		"slot", "pos", "peer", "state", padCell("speed→got", 13),
+		"population", "custody", "pace", "held", "bounced", "last save")
+	fmt.Fprintln(w, strings.Repeat("-", 128))
 	for _, v := range s.Slots {
 		state := "live"
 		if !v.Live {
@@ -114,9 +116,9 @@ func RenderRingstat(w io.Writer, s Status) {
 				save += fmt.Sprintf(" (%dms)", v.LastSave.DurationMs)
 			}
 		}
-		fmt.Fprintf(w, "%-5d %-7s %-22s %-9s %6s %10s %8s %10s %6s %8s %s\n",
+		fmt.Fprintf(w, "%-5d %-7s %-22s %-9s %s %10s %8s %10s %6s %8s %s\n",
 			v.Slot, fmt.Sprintf("(%d,%d)", v.Position.Col, v.Position.Row),
-			trunc(v.PeerID, 22), state, speed(v.TimeScale),
+			trunc(v.PeerID, 22), state, padCell(speedPair(v), 13),
 			opt(v.Population), opt(v.CustodyDepth),
 			optShort(v.PacedDepth)+"/"+scale(v.InboundRatePerSimMinute), opt(v.HeldDepth),
 			opt(v.BouncedTimeoutTotal), save)
@@ -492,6 +494,29 @@ func scale(v *float64) string {
 }
 
 func speed(v *float64) string { return "×" + scale(v) }
+
+// speedPair is the map's speed cell as one string: the scale the game reports
+// APPLYING, and after the arrow the rate the archive MEASURED it delivering.
+// The measured half is omitted rather than shown as "?" — the archive not
+// having watched long enough yet is a different thing from a peer refusing to
+// say, and only the second deserves the warning glyph.
+func speedPair(v SlotView) string {
+	s := speed(v.TimeScale)
+	if v.AchievedTimeScale != nil {
+		s += "→~" + speed(v.AchievedTimeScale)
+	}
+	return s
+}
+
+// padCell pads to n DISPLAY columns rather than n bytes, which is what fmt's
+// width counts. "×" and "→" are two and three bytes, so the speed column — the
+// only one carrying either — cannot be aligned with a plain %-Ns.
+func padCell(s string, n int) string {
+	if w := len([]rune(s)); w < n {
+		return s + strings.Repeat(" ", n-w)
+	}
+	return s
+}
 
 func dur(ms int64) string {
 	d := time.Duration(ms) * time.Millisecond

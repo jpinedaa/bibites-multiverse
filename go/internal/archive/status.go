@@ -58,6 +58,10 @@ type Status struct {
 	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
 	// over. A rate with no window on it is not a measurement.
 	FlowWindowMs int64 `json:"flowWindowMs"`
+	// AchievedWindowMs is the longest span SlotView.AchievedTimeScale looks
+	// back over. Each slot also reports the span its own reading actually used,
+	// which is shorter while a window is still filling.
+	AchievedWindowMs int64 `json:"achievedWindowMs"`
 }
 
 // SlotView is one reserved slot as the page renders it.
@@ -101,6 +105,25 @@ type SlotView struct {
 	TimeScale               *float64 `json:"timeScale,omitempty"`
 	InboundRatePerSimMinute *float64 `json:"inboundRatePerSimMinute,omitempty"`
 	InboundRateBurst        *float64 `json:"inboundRateBurst,omitempty"`
+
+	// AchievedTimeScale is what this world's clock ACTUALLY did — simulated
+	// seconds per wall second, measured by the archive over AchievedSpanMs from
+	// the (statsAsOfMs, simulatedTime) pairs it already receives. TimeScale
+	// beside it is what the game reports APPLYING, and the two are different
+	// questions: at a target the host cannot meet a world reports a clean 100
+	// and advances 5. Neither is derived from the other and neither replaces
+	// the other, which is why both are here.
+	//
+	// It is DERIVED (§10.1 rule 2) and it obeys rule 3 without exception: nil
+	// whenever the archive has not watched two comparable samples ten seconds
+	// apart inside the last minute — at startup, across a mod-quiet gap, or
+	// after a seat changed worlds. The page then shows the applied value ALONE.
+	// See achieved.go for every guard and its reason.
+	AchievedTimeScale *float64 `json:"achievedTimeScale,omitempty"`
+	// AchievedSpanMs is the span AchievedTimeScale was measured over. A rate
+	// with no window on it is not a measurement — the same rule FlowWindowMs
+	// exists for. It is present exactly when AchievedTimeScale is.
+	AchievedSpanMs int64 `json:"achievedSpanMs,omitempty"`
 
 	// The species census (contract-b-m4.md §16, B11 and B12). SpeciesKnown is
 	// the ABSENT/EMPTY distinction made explicit for a JSON reader, because a
@@ -255,6 +278,8 @@ func (a *Archive) StatusView() Status {
 		Records:        a.recordCount,
 		LedgerSkipped:  a.ledgerSkipped,
 		FlowWindowMs:   flowWindow.Milliseconds(),
+
+		AchievedWindowMs: achievedWindow.Milliseconds(),
 	}
 	if out.HaveStatus {
 		out.StatusAgeMs = now.Sub(a.statusAt).Milliseconds()
@@ -302,6 +327,16 @@ func (a *Archive) StatusView() Status {
 				v.BouncedTimeoutTotal = si.Stats.BouncedTimeoutTotal
 				v.SimulatedTime = si.Stats.SimulatedTime
 				v.TimeScale = si.Stats.TimeScale
+				// The measured rate ages with the block that carries the
+				// applied one: a fresh measurement beside a stale timeScale
+				// would be two ages under one timestamp, which is the same
+				// mistake the census and the settings are kept out of.
+				if r := a.simRates[si.Slot]; r != nil {
+					if achieved, span, ok := r.rate(nowMs); ok {
+						v.AchievedTimeScale = &achieved
+						v.AchievedSpanMs = span
+					}
+				}
 				v.InboundRatePerSimMinute = si.Stats.InboundRatePerSimMinute
 				v.InboundRateBurst = si.Stats.InboundRateBurst
 				if si.Stats.LastSave != nil {

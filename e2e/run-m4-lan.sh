@@ -518,7 +518,14 @@ lan_up() {
   wait_healthy "http://127.0.0.1:$RELAY_PORT/healthz" || return 1
   note "the second computer dials ws://<this machine>:$RELAY_PORT/contract-b/v3"
   start_archive
-  wait_file "$LOGS/archive.log" 'archive: subscribed to the relay' 60 >/dev/null || return 1
+  # THE ARCHIVE REPLAYS THE WHOLE LEDGER BEFORE IT BINDS ANYTHING, and that wait
+  # grows with the record. It was seconds when this line was written and it is
+  # ~93 s at 3.7M records / 1.22 GB (measured 2026-08-10, dev_environment.md
+  # *The archive's ledger recovery*), so the old 60 s would now fail a healthy
+  # bring-up. 300 s is ~3x today's replay; raise it again rather than believing
+  # a timeout here, and size it from the ledger.
+  note "waiting for the archive to replay $(du -h "$ARCHIVE_DATA/migrations.jsonl" 2>/dev/null | cut -f1) of ledger; it serves nothing until it finishes"
+  wait_file "$LOGS/archive.log" 'archive: subscribed to the relay' 300 >/dev/null || return 1
   note "archive subscribed; status page on $ARCHIVE_URL"
 
   local slot mark

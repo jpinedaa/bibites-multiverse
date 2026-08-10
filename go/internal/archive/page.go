@@ -537,7 +537,9 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
 
   <section><h2><span class="term" data-t="world">worlds</span>
     <span class="note muted">the detail behind every cell &mdash;
-      <span class="term" data-t="speed">speed</span> is how fast that world runs,
+      <span class="term" data-t="speed">speed</span> is how fast that world says it is
+      running and, after the arrow,
+      <span class="term" data-t="achieved">how fast it actually ran</span>;
       <span class="term" data-t="pace">pace</span> is arrivals queued over the cap they
       wait behind, per <em>simulated</em> minute of that world</span></h2>
     <div class="tw"><table id="worlds"><thead><tr>
@@ -545,7 +547,9 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
       <th><span class="term" data-t="position">pos</span></th>
       <th><span class="term" data-t="peer">peer</span></th>
       <th>state</th>
-      <th class="num"><span class="term" data-t="speed">speed</span></th>
+      <th class="num"><span class="term" data-t="speed">speed</span>
+        <span class="muted">&rarr;</span>
+        <span class="term" data-t="achieved">got</span></th>
       <th class="num"><span class="term" data-t="population">pop</span></th>
       <th><span class="term" data-t="census">species</span></th>
       <th class="num"><span class="term" data-t="custodyDepth">custody</span></th>
@@ -664,7 +668,8 @@ var G = {
  custody:["custody","Exactly one side is holding a travelling creature at any instant, and it is written to disk before it is handed over. The sender keeps it until the receiver confirms the creature arrived; only then does the sender let go."],
  custodyDepth:["custody depth","How many creatures this world is holding mid-journey right now — sent but not yet confirmed, plus arrived but not yet let into the world."],
  pacedDepth:["paced depth","Arrivals are let into a world at a capped rate so a burst cannot flood it. This is how many are queued up waiting their turn. A queue that never drains means the cap is set too low."],
- speed:["simulation speed","How fast a world is running, as the game itself reports it: ×5 means five simulated seconds pass for every real second. It is the speed control inside that copy of the game, and each world has its own — one can be racing at ×100 while its neighbour sits at ×1. A paused world reports ×0. A world at a different speed from its neighbours is not a fault; it only means the two experience the traffic between them at different rates, which is why arrivals are paced on the receiving world's OWN clock and not on the wall clock."],
+ speed:["simulation speed","How fast a world is running, as the game itself reports it: ×5 means the game is set to pass five simulated seconds for every real second. It is the speed control inside that copy of the game, and each world has its own — one can be asking for ×100 while its neighbour sits at ×1. A paused world reports ×0. A world at a different speed from its neighbours is not a fault; it only means the two experience the traffic between them at different rates, which is why arrivals are paced on the receiving world's OWN clock and not on the wall clock. This is what the game is TRYING to do; the number after the arrow is what it managed."],
+ achieved:["speed actually delivered","The second half of a cell's speed, written ×100 → ~×12: the world is set to run a hundred times real time and is really running about twelve. This one is not reported by anybody — it is measured here, by watching that world's own clock against the wall clock for the last minute, so it is the only figure on this page that says what a world genuinely did. A machine can only run so many worlds so fast: each drawing of the screen advances the simulation by one small step, so however high the speed is set, the real rate is capped by how fast that computer can draw. Setting ×100 on a machine that can deliver ×12 buys nothing, and before this number existed the page said ×100 and looked healthy. The two agreeing means a world is keeping up. It shows nothing at all until it has watched long enough to be sure — just after this program starts, or just after a world comes back — because a rate measured over two seconds would jump about and mean nothing."],
  pace:["pace","Two numbers about arrivals into this world: how many are queued waiting to be let in, and the cap they are queued behind. The cap counts per SIMULATED minute of this world — so a world at ×10 gets through its allowance ten times faster in real time, and at the same rate as the world itself experiences it. Queued 0 against any cap is a world keeping up. A queue that never drains means the cap is set too low. A world whose helper program is too old to report its cap shows a ? there: unknown, never the shipped default, which has been changed three times."],
  held:["held","A creature whose destination went dark while it was travelling. It waits, quietly retrying; if the destination stays gone long enough it is sent back where it came from rather than lost."],
  bounce:["bounce","A migration that gave up and returned to the world it started in. It is a thing you get told about, never a silent repair."],
@@ -708,7 +713,7 @@ var G = {
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
     "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
     "rawname","endemic","everywhere","excluded","crossings","speciesgenomes","parentspecies",
-    "speed","pace","custody","custodyDepth","pacedDepth","held","bounce",
+    "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges",
     "unknown","exactlyonce","relay","archive","epoch","genomegap","flow"];
@@ -1153,17 +1158,28 @@ function marker(id,color){
 }
 
 /* ---------------------------------------------- the two settings a cell shows
-   SPEED is the world's own time scale, straight out of the game's heartbeat —
-   ×5 is five simulated seconds per real second, ×0 is a world standing still —
-   and it is the key to every other number on this page that is counted in
-   SIMULATED time. PACE is the arrival rate limit: how many are queued, and the
-   cap they are queued behind, per simulated minute of THIS world.
+   SPEED is the world's own time scale, and it is TWO numbers because it has
+   always been two questions. The APPLIED scale is straight out of the game's
+   heartbeat — ×5 is the game saying it is running five simulated seconds per
+   real second, ×0 is a world standing still. The ACHIEVED rate is what its
+   clock actually produced, measured here by the archive over the last minute.
+   They agree on a host that is keeping up and come apart completely on one that
+   is not: every world on this rig reports ×100 and several deliver ×5, because
+   a frame can only advance one simulation tick however high the number is set.
+   Written "×100 → ~×12": asked of it, then delivered.
 
-   Both obey §10.1's unknown rule without exception. An older helper program
-   publishes no cap, and the cap it would have had is NOT the shipped default —
-   that default has moved three times — so it renders "?" and says so in the
-   warning colour. A confident 100 there would be a lie about a world running at
-   2.0, which is exactly the mistake this rig has already made once in a test. */
+   PACE is the arrival rate limit: how many are queued, and the cap they are
+   queued behind, per simulated minute of THIS world.
+
+   All three obey §10.1's unknown rule without exception. An older helper
+   program publishes no cap, and the cap it would have had is NOT the shipped
+   default — that default has moved three times — so it renders "?" and says so
+   in the warning colour. A confident 100 there would be a lie about a world
+   running at 2.0, which is exactly the mistake this rig has already made once
+   in a test. The achieved rate is the same rule in its quieter form: until the
+   archive has watched a world for long enough to measure it, the cell shows the
+   applied value ALONE rather than a first guess that would move under the
+   reader. */
 function fmtScale(n){
   if (n == null) return "?";
   var r = Math.round(n*10)/10;
@@ -1171,6 +1187,14 @@ function fmtScale(n){
 }
 function speedText(v){
   return (v.statsKnown && v.timeScale != null) ? "×"+fmtScale(v.timeScale) : "×?";
+}
+/* The measured half, or null — which every caller renders as "nothing here",
+   never as a "?" beside the applied value. An unknown cap is a peer refusing to
+   say; an unmeasured rate is this archive not having looked long enough yet,
+   and dressing the second up as the first would cry wolf on every restart. */
+function achievedText(v){
+  return (v.statsKnown && v.achievedTimeScale != null)
+    ? "~×"+fmtScale(v.achievedTimeScale) : null;
 }
 function paceRateText(v){
   return (v.statsKnown && v.inboundRatePerSimMinute != null)
@@ -1195,8 +1219,14 @@ function paintChips(v){
     el.textContent = s;
     host.appendChild(el);
   }
-  var sp = speedText(v), d = paceDepthText(v), r = paceRateText(v);
+  var sp = speedText(v), ac = achievedText(v), d = paceDepthText(v), r = paceRateText(v);
   part((sp === "×?" ? "chipu" : "chipv") + " term", sp, "speed");
+  // The arrow is drawn in the line's own dim colour and the two scales in the
+  // value colour, so what reads as a pair is the pair: asked for, then got.
+  if (ac){
+    part(null, " → ", null);
+    part("chipv term", ac, "achieved");
+  }
   part(null, " · ", null);
   part("term", "pace ", "pace");
   part(d === "?" ? "chipu" : "chipv", d, null);
@@ -1206,8 +1236,13 @@ function paintChips(v){
   // inset and its right edge at this font. Past that the unit goes and the two
   // numbers stay: a reader who has lost the unit can find it in the tooltip, the
   // glossary and the worlds table, but a number clipped by the world next door
-  // is unreadable everywhere.
-  if ((sp + " · pace " + d + "/" + r).length <= 19) part(null, "/sim-min", null);
+  // is unreadable everywhere. The measured rate spends that budget too — it is
+  // why a cell showing both scales drops the unit — and it is worth it: the unit
+  // is written in three other places and the gap between the two scales is
+  // written nowhere else on this map.
+  if ((sp + (ac ? " → " + ac : "") + " · pace " + d + "/" + r).length <= 19) {
+    part(null, "/sim-min", null);
+  }
 }
 
 function cellTitle(v){
@@ -1216,7 +1251,11 @@ function cellTitle(v){
   if (!v.live && v.darkForMs != null) s += " for "+ms(v.darkForMs);
   s += "\npopulation " + (v.statsKnown && v.population!=null ? v.population : "unknown");
   if (v.statsKnown){
-    s += "\nrunning at " + speedText(v) + " real time"
+    var acT = achievedText(v);
+    s += "\nspeed: the game reports " + speedText(v) + " real time"
+      + (acT ? ", and is measured delivering " + acT + " over the last "
+               + ms(v.achievedSpanMs)
+             : "; the delivered rate is not measured yet")
       + "\narrivals: " + paceDepthText(v) + " queued, cap " + paceRateText(v)
       + " per simulated minute";
     s += "\ncustody "+(v.custodyDepth==null?"unknown":v.custodyDepth)
@@ -1862,8 +1901,18 @@ function settingsCard(v){
   setKV(card, "exportedges", "export edges", edges);
 
   card.appendChild(el("div", "cardsub", "running"));
-  var sp = speedText(v);
-  setKV(card, "speed", "speed", sp === "×?" ? unkEl("×?") : txt(sp));
+  // Both halves of the speed, and the span behind the measured one, because the
+  // card is where a reader comes to find out whether a number is trustworthy.
+  var sp = speedText(v), ac = achievedText(v), spv = el("span");
+  spv.appendChild(sp === "×?" ? unkEl("×?") : txt(sp));
+  if (ac){
+    spv.appendChild(txt(" → "));
+    spv.appendChild(txt(ac));
+    spv.appendChild(el("span", "muted", " measured over " + ms(v.achievedSpanMs)));
+  } else if (v.statsKnown){
+    spv.appendChild(el("span", "muted", " — delivered rate not measured yet"));
+  }
+  setKV(card, "speed", "speed", spv);
   var dep = paceDepthText(v), cap = paceRateText(v), pace = el("span");
   pace.appendChild(dep === "?" ? unkEl() : txt(dep));
   pace.appendChild(txt(" queued / cap "));
@@ -2488,8 +2537,12 @@ function renderMap(d){
     // Both settings columns render every unknown half as an unknown, never as a
     // zero and never as the shipped default: "0/?" is a world queueing nothing
     // behind a cap nobody has told us.
-    var sp = speedText(v);
-    var speed = sp === "×?" ? '<span class="unknown">×?</span>' : sp;
+    // Both scales in one column, as on the map: the applied one the game
+    // reports and the rate this archive measured. Both are numbers built here,
+    // so neither can carry attacker-chosen text into this innerHTML.
+    var sp = speedText(v), ac = achievedText(v);
+    var speed = (sp === "×?" ? '<span class="unknown">×?</span>' : sp)
+      + (ac ? ' <span class="muted">→</span> ' + ac : "");
     var dep = paceDepthText(v), cap = paceRateText(v);
     var pace = (dep === "?" ? '<span class="unknown">?</span>' : dep) + "/"
       + (cap === "?" ? '<span class="unknown">?</span>' : cap);
