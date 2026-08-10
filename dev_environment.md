@@ -26,7 +26,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Component | Version |
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
-| The plugin | `0.6.1` (`MultiversePlugin.Version`) — the world-settings build: it publishes what it was *told to do* on the handshake (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping), on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. It speaks `contract-a/2.3`. The far-end bundle carries the same DLL; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
+| The plugin | `0.6.2` (`MultiversePlugin.Version`) — the **headless-speed build**: `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping) on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals, **plus `MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device** (*A world can be at the wrong time scale*, in Gotchas). It still speaks `contract-a/2.3`: `0.6.2` adds, removes and moves **no wire field**, so the minor did not budge and a peer on `0.6.1` is not stale in any operational sense — it simply still has the servo armed, which on the far end is its own operator's business. Measured on the live map 2026-08-10: the five local slots publish `0.6.2` and slot 6 publishes `0.6.1`, and nothing about the map reads differently for it. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
 | The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — the sidecar's journal since 2026-08-08, the archive's ledger since 2026-08-09. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
@@ -403,6 +403,7 @@ Name every one of them in `WSLENV` or WSL forwards none (see Gotchas).
 | `MULTIVERSE_PORTAL` | **M4.** Draw the portal strips. Default `true`. `false` never creates the component, so no strip of either kind appears. |
 | `MULTIVERSE_PORTAL_FLOURISHES` | **M4.** Draw the arrival and departure rings. Default `true`. It does **not** gate the strips. |
 | `MULTIVERSE_FAMILY_REPORT` | Seconds between `[M2-FAMILY]` reports. Default `0`, off. |
+| `MULTIVERSE_MIN_FPS` | **0.6.2.** What to do about the game's minimum-FPS servo. `auto` (the default, and what unset means) disarms it when the process has no graphics device and leaves it alone otherwise; `off` never touches it; `0` disarms it even in a drawn instance. It is the one knob here with **no BepInEx config entry**, deliberately — a new `Bind` makes all five instances rewrite `dev.multiverse.bibites.cfg` at once and two of them lose that race (*The FIRST bring-up after a deploy…*, in Gotchas), and this knob was not worth that. It never writes `UserSettings.minimumFPS`, so the owner's own setting is untouched. See *A world can be at the wrong time scale*. |
 | `MULTIVERSE_AUTOTEST` | Arms the M1 auto-test. It **ORs** with the `[M1] AutoTest` config entry rather than overriding it. |
 
 **Three names reach the same field, and the first non-empty one wins outright:**
@@ -1319,6 +1320,37 @@ bypass**, `pacedDepth` 0, `heldDepth` 0, `timeoutBounces` 0, `custodyDepth` 0–
 doubled crossing rate, and the save stall moved the other way from the hope — worse, not
 better. Both are written up in *Watch items*; neither was retuned.
 
+**Thirteen hours later the regime had settled, and the readings are bigger than the first
+hour's.** At 14:42Z, after running unattended since 01:30Z: 6/6 live, **24/24 `peer_live`, no
+bypass**, `pacedDepth` and `heldDepth` 0, `timeoutBounces` 0. Population **360** — slot 1 **15**,
+slot 2 **60**, slot 3 **80**, slot 4 **49**, slot 5 **42**, slot 6 **114** — so the worlds grew
+under the faster clock rather than thinning out, and slot 6 grew most. **1,366,165** cumulative
+migrations (≈812,000 crossings in thirteen hours, ≈1,040/min), `ledgerRecords` **2,824,211**, and
+`genomeGaps` **≈46,000**. Achieved rates fell as the populations rose: the local aggregate read
+**48** simulated seconds per wall second over 12:04Z–14:07Z against the **80** measured in the
+first hour, because a bigger world costs more per tick.
+
+**Then the minimum-FPS servo came off, in the same regime and by the same method.** `0.6.2`
+disarms the game's own frame-rate governor in a process with no graphics device, which is what
+was holding four of the five worlds at an applied 13–19 while they were asked for 100. The
+rollout was the same shape as the time-scale one with one difference that matters: **a mod deploy
+locks the plugin DLL, so all five games have to be down at once** rather than one at a time.
+Both passes (14:39Z and 14:57Z — the second only to bump the version so the page can name the
+build) went: quit all five, `deploy.sh`, then `start_game` one at a time with a log-file check, a
+world-ready wait, a mod-connect wait and `timescale 100`. All five came back inside **100
+seconds**, none starved of a log file, `relay.log` shows no local sidecar leaving, and every slot
+now publishes `modVersion 0.6.2` and a clean `timeScale 100`. The result — a local aggregate of
+**74** against the servo's 48 — is in *A world can be at the wrong time scale*, in Gotchas, with
+the caveats.
+
+**Three costs came with it, and none is settled.** The five-at-once outage produced a **custody
+replay burst** on the way back — `custodyDepth` 55 and `pacedDepth` 14 at its peak — which
+**drained to 0 within about four minutes** with `timeoutBounces` still 0 and nothing lost, the
+same shape the far end's switch showed. The **archive's own relay session dropped and reconnected**
+at 14:39:29Z, five seconds apart, while its process stayed up: harmless, but it resets the
+`epoch` the page shows, so an epoch that suddenly reads in the hundreds after a bring-up is a
+resubscription and not a new map. And the **save stall got worse again** — see *Watch items*.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09. The steps are ordered and step 1
@@ -1454,6 +1486,28 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   tick. If the owner wants the budget back, the ×100 target is now a lever on it alongside the
   cadence.
 
+  **A full thirteen hours of ×100 confirmed it and made it worse than the first hour suggested.**
+  Across the five preserved generations of that run — **1,801 saves**, in
+  `e2e/logs-m4-lan/bepinex/*.minfps.*` — `event=BUDGET_EXCEEDED` runs at **13.9%**, and the
+  maxima are the new information: **4 311 ms** on slot 1, **5 386** on slot 2, **5 870** on slot 3,
+  **9 115** on slot 5 and **9 427** on slot 4. Per slot the medians are 686 / 1 530 / 1 699 /
+  1 474 / 1 345 ms at breach rates of 0 / 17 / 28 / 16 / 9%, and the cost of a saved kilobyte sits
+  at **414–461 ms per 100 KB** — better than the first hour's 538–665 because the worlds grew and
+  the fixed part of a save amortises, and still worse than the 300–389 of ×5 drawn. **Nine seconds
+  is two and a half times the heartbeat timeout**, so those saves are mod disconnections by
+  construction, and the dose response below says half of everything over 3.5 s takes one. The
+  worlds absorbed it — `timeoutBounces` 0 for the whole thirteen hours, no `event=FAILED`, and the
+  populations *grew* — so this is still a logged breach and a session churn rather than a loss.
+  It is also now the strongest argument in the file for answering Risk 3's open question, because
+  the ×100 regime is where D14's bar stops being missed narrowly.
+
+  **Taking the minimum-FPS servo off did not help the stall and may have cost a little.** In the
+  first fifteen minutes of `0.6.2` the five slots read medians of 820 / 1 771 / 1 664 / 2 952 /
+  1 956 ms, with fifteen `4004` closes across the five sidecars — of which five are the deploy's
+  own quits. That is 4 to 7 saves per slot, taken minutes after a world reload, against a host
+  now running about 1.5× more simulation per wall second: too few and too early to be a verdict,
+  and pointed the wrong way. **Re-read it over a full generation before drawing one.**
+
   **A breach under about 3 s is a logged breach and nothing more; past 3.5 s it disconnects
   the mod.** Contract A's heartbeat timeout is 3.5 s and the stall blocks the thread that
   sends the heartbeat, so matching every save against the sidecars' 4004 closes gives a clean
@@ -1529,6 +1583,16 @@ not a defect, and it stays on this list because M5 changes what it will mean.
     errors. **A climb under a doubled current is the mechanism, not a fault** — and the regime
     now sits above the threshold most of the time, so expect a standing backlog rather than the
     flat zeros of 2026-08-07.
+  - **2026-08-10, thirteen hours later: `≈46,000` against `ledgerRecords` 2,824,211**, on a
+    crossing rate holding a median **949/min**. That is an order of magnitude past any earlier
+    reading and it is still the same curve — the rate never dropped under ~340/min for long
+    enough to drain, because at ×100 it no longer does. **The magnitude is not the finding; the
+    absence of a drain window is.** Nothing else moved with it: 24/24 lanes, `pacedDepth` and
+    `heldDepth` 0, `timeoutBounces` 0, one `no peer has served this genome` line in all of
+    history, and `ledgerRecords` more than doubling across the same span. **What this reading does
+    change is the M5 arithmetic**: a queue that sits near 50,000 entries is a very different thing
+    to inherit when a departed stranger can make an entry permanent, so read Risk 7 against this
+    number rather than against the 2,714 the item was opened on.
 
   **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
   `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**
@@ -1657,6 +1721,49 @@ not a defect, and it stays on this list because M5 changes what it will mean.
   So it is not a property of a restart. Sweep all five on `/api/status` after any bring-up,
   and again whenever a rate reading looks wrong: a world running seven times too fast inflates
   every per-simulated-minute series it produces.
+
+  **The governor is a servo, not a floor, and it still runs with nothing on screen. `0.6.2`
+  disarms it headless.** `CheckMinFPS` is called from `TimeKeeper` on every update, and its gate
+  is `Application.isFocused || !UserSettings.ignoreMinOnUnfocus.val`. `ignoreMinOnUnfocus` ships
+  **`false`**, so the second term is always `true` and a windowless process — which is never
+  focused — is governed exactly like a visible one. `minimumFPS` ships **15**, and the servo
+  drives `engineTimeScale` toward whatever value holds the frame rate there, which is why five
+  headless worlds asked for ×100 and reported 11–81. **It was costing real simulation, not just
+  a tidy number.** Measured on the living deployment 2026-08-10 against the two hours
+  immediately before the change, at comparable populations:
+
+  | Slot | Servo armed: applied / achieved | Disarmed: applied / achieved |
+  |---|---|---|
+  | 1 | 79 / **25.7** | 100 / **45.5** |
+  | 2 | 14 / **4.9** | 100 / **7.0** |
+  | 3 | 13 / **4.6** | 100 / **7.3** |
+  | 4 | 16 / **6.0** | 100 / **6.6** |
+  | 5 | 19 / **6.4** | 100 / **7.6** |
+
+  Local aggregate went **48 → 74** simulated seconds per wall second. Populations drifted lower
+  across the two windows, so some of that is the worlds and not the patch; slot 4 at an
+  identical population still gained ~10%, and the direction is the same on every slot. The
+  mechanism is not simply "the clamp was the ceiling" — achieved was *below* the clamped
+  `engineTimeScale` on slots 2–5 both before and after, so the frame rate was already binding.
+  The leading explanation is the servo's own cost: it called `SetValue` on nearly every update,
+  and each call runs `UpdateTimeScale` and its subscribers. `MinFpsGovernor` writes only when
+  the value actually changes.
+
+  **`MULTIVERSE_MIN_FPS=off` puts the servo back**, and `0` disarms it in a drawn instance too.
+  The patch never writes `UserSettings.minimumFPS`, on purpose: `IntUserSetting.val` is backed by
+  `PlayerPrefs`, which is **one store shared by every instance on the machine and persisted
+  across runs**, so setting it would silently change the owner's own setting for their next drawn
+  session. (`MinimumFPS` has never been written on this machine — the key is absent from
+  `HKCU\Software\The Bibites\The Bibites`, so the live value is the built-in 15.)
+
+  **`Time.maximumDeltaTime` is the ceiling underneath the servo, and nothing here lifts it.**
+  `UpdateTimeScale` pins it to `Time.fixedDeltaTime`, which is `1 / simTPS` — `simTPS` defaults
+  to **30** (`ScenarioIndependentSettings`, range 5–100, "not recommended below 20"). One frame
+  therefore advances at most one simulation tick, so **the achieved rate cannot exceed
+  `fps / simTPS`** however high the target goes. That is why slot 1 reported a clean ×100 and
+  advanced 45×, and why asking for more than the host can render buys nothing. The honest levers
+  on throughput are the per-tick cost (population, brain TPS) and `simTPS` itself — not the
+  time-scale target.
 - **A WSL environment variable does not reach the game on its own.** `MULTIVERSE_AUTOTEST=1
   game.sh start` is silently ignored: WSL only forwards variables that `WSLENV` names.
   Use `WSLENV=MULTIVERSE_AUTOTEST MULTIVERSE_AUTOTEST=1 game.sh start`. The second hop is
