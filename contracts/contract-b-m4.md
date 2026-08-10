@@ -2496,6 +2496,14 @@ first.
 
 ## 13. Open items for M5
 
+**Every item below is now placed.** `m5_considerations.md` (2026-08-09) opens the milestone
+and carries each one into a scope line, a work package, a contract change or an owner
+decision; its *Scope* section cites this list item by item, and its *Contract Changes Needed*
+table names the section of this document each amendment lands in. That document is **PROPOSED
+and ratifies nothing here**: no rule in this section changes, no field moves, and
+`contract-b/3.5` stands. §13 remains the authoritative statement of what is open; the other
+document says where it goes.
+
 1. **No TLS, and one shared token** (§3.1). The wire is plain HTTP on a LAN, so a genome, a
    peer id and the token itself are readable in transit, and any token holder can present any
    `peerId`. M5 brings TLS and per-peer credentials together, because splitting them produces
@@ -2525,7 +2533,13 @@ first.
    process cannot know. The fix, if this ever hurts, is a **receipt**: the relay
    acknowledging each forward to the sender, which turns the sender's own journal into the
    evidence and costs one frame per migration. M4 does not buy that, because a relay restart
-   is rare and `--release-inflight` is one command.
+   is rare and `--release-inflight` is one command. **The receipt is proposed for promotion in
+   M5** (`m5_considerations.md`, Design Question 2 and Contract Change 6): both halves of that
+   last sentence are properties of a relay on the owner's own desk, and a hosted one has
+   deploys, certificate rotation, kernel updates and a supervisor, while `--release-inflight`
+   is typed on the sender's machine — which after M5 is usually a stranger's. The condition
+   set here is unchanged; what changes is that the venue meets it. A proposal, not an
+   amendment: nothing in this item is normative yet.
 7. **A stats block is unauthenticated telemetry from a peer.** The relay copies it verbatim
    into a broadcast every client reads. On a LAN of the owner's own machines that is fine; on
    a public relay a peer could report any population it liked, and the status page would show

@@ -79,6 +79,12 @@ Also out of scope:
 - The pheromone beacon and the gateway towers. Both stay parked (D3)
 - A write interface on the archive. M3 records and reads only
 
+**The milestone numbers in the two lists above predate D16**, which renumbered on 2026-08-05
+and shifted every milestone behind M3 by one. The items are unchanged; read the five items D9
+moved as **M5 — Public release**, libp2p and direct peer-to-peer transport as **M6**, and
+`species-catalog` and the corpse, pellet and egg payloads as **M7**.
+`system_decomposition.md` is the current numbering; this document is the M3 record.
+
 ## Risks
 
 ### Risk 1 — The wrap and the strips act on the same organisms. (D10, test a)
@@ -600,4 +606,5 @@ and step 8 with the passing exit test above. What M3 leaves behind is short.
 2. Keep the rig alive. Watch the eastward current over days, not minutes.
 3. Repeat the two remote kills of Part 3 when the operator of the second computer is free.
 4. Open M4, public release. Decision D9 moved that scope out of M3 intact, and
-   `system_decomposition.md` holds it.
+   `system_decomposition.md` holds it. **D16 renumbered it to M5**, which opened on
+   2026-08-09 with `m5_considerations.md`; the M4 that ran in between was operations.

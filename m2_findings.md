@@ -459,8 +459,8 @@ What *does* happen further out, in order of radius, all inside
 - **Corpses never wrap and never steer.** `BibiteBody.FixedUpdate` returns at `:585-589`
   (`if (dead) { CorpseUpdate(); return; }`) before `organs.ForEach(...UpdateOrgan())`
   at `:613-616`. A dead body drifting outward will sail past `1.5·S + 1000` and keep
-  going forever. Relevant to M5's corpse migration, and a reason not to reuse the
-  live-organism border logic for corpses.
+  going forever. Relevant to M5's corpse migration — **M7** after the renumberings of D9
+  and D16 — and a reason not to reuse the live-organism border logic for corpses.
 - **World wrapping was treated as a latent M2 hazard.** If the mod's border strip ever
   fails to capture an organism (paused sim, peer down, `EDGE_STATUS` closed), the organism
   keeps going and eventually teleports to the antipode. That reads to a player as a
@@ -590,7 +590,7 @@ heading east; that is the "one continuous world" illusion D3 is buying
 
 ---
 
-## 5. PELLETS AND CORPSES (M5 groundwork)
+## 5. PELLETS AND CORPSES (M5 groundwork — **M7** after the renumberings of D9 and D16)
 
 There is **one** pellet class for both food types: `SimulationScripts/MatterPellet.cs:12`
 `public class MatterPellet : MonoBehaviour, ISaveable`, distinguished at runtime by
@@ -615,9 +615,9 @@ ordinary `SerializeBibite` path (`SaveSystem.cs:190-199`) and predators find it 
 `FieldOfView.seenCorpses` (`FieldOfView.cs:20`, filled at `:266-269` from a physics
 overlap, not from a registry). Its only distinct behaviour is `CorpseUpdate()`
 (`BibiteBody.cs:628-635`), reached by the early return at `BibiteBody.cs:585-589`.
-**For M5 this is good news**: a corpse is already covered by the M1 organism round trip
-verbatim — same `SerializeBibite`, same `LoadBibiteOrEggFromData`, with `dead: true` in
-the body payload — while pellets need a new, much smaller payload built on
+**For M5 — now M7 — this is good news**: a corpse is already covered by the M1 organism
+round trip verbatim — same `SerializeBibite`, same `LoadBibiteOrEggFromData`, with
+`dead: true` in the body payload — while pellets need a new, much smaller payload built on
 `MatterPellet.SaveState()` plus a zone-assignment decision on arrival.
 
 ---

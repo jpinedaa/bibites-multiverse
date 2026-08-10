@@ -30,7 +30,7 @@ Out of scope:
 - Void-avoidance suppression (M2)
 - The sidecar, Contract A, and all network code (M2)
 - Thread-safe queues (M1 runs fully on the main thread; M2 adds the queue)
-- Corpses, pellets, and eggs (M5)
+- Corpses, pellets, and eggs (M5 as written; **M7** after the renumberings of D9 and D16)
 
 ## Risks
 

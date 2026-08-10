@@ -19,7 +19,7 @@
 > | `MIGRATION_PAYLOAD` carries `sourceSector` / `destSector` strings (§5.6) | Integer `sourceSlot` / `destSlot`, `exitEdge` always `"E"`, plus the D11 lineage annex | `contract-b-m3.md` §6.6 |
 > | No authentication; loopback only (§2, §10 item 1) | A shared bearer token on the WebSocket upgrade, because the wire leaves the loopback (D9) | `contract-b-m3.md` §3.1 |
 > | Nine message types (§5) | Twelve — `GENOME_REQUEST` and `GENOME_RESPONSE` are new (D11) | `contract-b-m3.md` §6.9, §6.10 |
-> | **§10 item 3: "M3 generalises to an `{x, y}` grid"** | **Wrong, and superseded.** D8 **retires** the `{x, y}` grid and keeps it on record only as a far-future extension. M3 is the ring. The same item's milestone labels also predate D9's renumbering: direct P2P is now **M5** and ecosystem completeness **M6**, with a new **M4 — Public release** in between | `system_decomposition.md` D8, D9; `m3_considerations.md` |
+> | **§10 item 3: "M3 generalises to an `{x, y}` grid"** | **Wrong, and superseded.** D8 **retires** the `{x, y}` grid and keeps it on record only as a far-future extension. M3 is the ring. The same item's milestone labels predate **two** renumberings, D9's and then D16's: direct P2P is now **M6** and ecosystem completeness **M7**, with **M4 — Operations** and **M5 — Public release** in between | `system_decomposition.md` D8, D9, D16; `m3_considerations.md` |
 >
 > Three resolutions written here — the `entityId`/`heading` authority order, the two accepted
 > shapes of `$.body.id`, and the persisted slot file — carry into M3 unchanged and are

@@ -1209,8 +1209,9 @@ saw, so the totals rise. Before the fix that same restart would have **reverted*
 ### Watch items
 
 Three things are being watched on the running deployment. The first is a **measured breach of
-a bar the owner set**, and it is waiting on a decision rather than on more data. The other two
-are trends: neither is a defect, and neither has a verdict yet.
+a bar the owner set**, and it is waiting on a decision rather than on more data. The second is
+a trend with no verdict yet. The third **has its verdict** — the reading is understood, it is
+not a defect, and it stays on this list because M5 changes what it will mean.
 
 - **The 2-second save-stall budget is breached routinely, and it has been since the day the
   exit test passed.** D14 set the bar at 2 000 ms and the exit test of 2026-08-06 measured
@@ -1264,27 +1265,63 @@ are trends: neither is a defect, and neither has a verdict yet.
   open question is whether the lanes alone carry it back to its neighbours' range or whether
   it settles low.
 
-- **`genomeGaps` is growing, and there is still no baseline that says whether it should
-  be.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the map
-  declared at `go/internal/archive/archive.go:170`): the set of genome hashes the archive has
-  asked a sidecar for and not yet received. It is a **backlog count, not an error count**,
+- **`genomeGaps` is a fetch queue, its healthy value is 0, and what it counts is
+  throughput.** The field is `len(a.pending)` (`go/internal/archive/status.go:247`, over the
+  map declared at `go/internal/archive/archive.go:170`): the set of genome hashes the archive
+  has asked a sidecar for and not yet received. It is a **backlog count, not an error count**,
   and it is not the same thing as `bin/archive list --gaps`, which reports what the *ledger*
-  shows missing. Two readings on 2026-08-09 — **881 against 878,904 ledger records** after
-  the reboot, **2,467 against 959,243** at 20:21Z — so roughly 2% of new records opened a gap
-  that had not closed by the second reading. (Both `ledgerRecords` figures are this process's
+  shows missing. An entry is created only for a hash the store does not already hold
+  (`archive.go:766`) and leaves only when the genome arrives.
+
+  **The baseline exists, and it is zero.** The gitignored collector has curled `/api/status`
+  every ~5.5 minutes since 2026-08-07 (`e2e/baselines/m4-collector/`), and that series is the
+  one this item used to ask for:
+
+  - **2026-08-07, 14:07Z to 19:13Z:** `genomeGaps` reads **0 to 2** for five unbroken hours,
+    across 56 samples, while crossings stay under 200 a minute throughout — mostly 130–190.
+    That is the healthy shape, and it is flat zero.
+  - **19:19Z the same day:** the crossing rate more than doubled, to 454/min, and the backlog
+    left zero in that same sample — 22, then 44, 88, 152, and 1,071 by 21:00Z.
+  - **2026-08-08:** the same rise and the same recovery, peaking at **3,334** at 12:26Z and
+    already down to 2,939 two hours later.
+  - **2026-08-09:** 855 when the collector came back after the reboot at 18:51Z, climbing to
+    **2,714** at 22:05Z on 400–520 crossings a minute, then a **monotone drain** to **1,110**
+    by 23:56Z as the rate fell to 140–340 — while `ledgerRecords` went on growing by about 500
+    lines a minute through the entire drain. A leak does not drain against traffic.
+
+  **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
+  `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**
+  (`go/internal/contractb/contractb.go:230`, enforced by `allowSendLocked` at
+  `go/internal/archive/archive.go:899`), so the ladder is bounded near **180 fetches a
+  minute** across six peers. Only a crossing carrying a hash the store does not already hold
+  costs a fetch, which is why the *crossing* rate that meets that ceiling is about twice it:
+  on this rig the backlog grows above roughly **400** migrations a minute and drains below
+  roughly **340**. Under the ceiling the field reads 0; over it, `pending` **is** the queue,
+  and it is worked off at the same cap when the current slows. The number to read is
+  therefore the *direction* against the current rate, not the magnitude.
+
+  **The two spot readings that opened this item sit on that curve** — **881 against 878,904
+  ledger records** after the reboot is the collector's 855 at 18:51Z, and **2,467 against
+  959,243** at 20:21Z is its 2,473 at 20:19Z. (Both `ledgerRecords` figures are this process's
   own count, which the pre-fix replay started **197,195 records short of the file**; the next
   restart raises the denominator by that much in one step, so a ratio taken across it is not a
-  series. See *Bringing it back after a reboot*.) Two further samples minutes apart later the same
-  hour read **2,477** and then **2,503**, so it kept climbing on a map that was otherwise
-  healthy. **That is a trend across four points and not a
-  verdict**: nobody knows what a healthy value looks like, because no reading was recorded
-  before 2026-08-09, and a backlog that is merely slower than the traffic looks identical to
-  one that is stuck. What makes it worth watching is the failure mode: an entry only ever
-  leaves `pending` when the genome arrives, so **a gap becomes permanent if the source
-  sidecar forgets the genome before the fetch succeeds** — the retry ladder then walks the
-  ring forever against a blob nobody holds. The next step is a series, not another single
-  reading: sample `genomeGaps` and `ledgerRecords` together over hours and see whether the
-  ratio settles.
+  series. See *Bringing it back after a reboot*.) The two further samples minutes apart later
+  the same hour, **2,477** and **2,503**, are the same rising limb; the peak came at 22:05Z
+  and the drain followed it.
+
+  **Exactly one hash has ever run out of peers.** `archive: no peer has served this genome` —
+  the §10 gap report, logged when every live peer has been asked in one round and none served
+  it — appears **once** in the whole log history (`e2e/logs-m4-lan/archive.log`,
+  2026-08-08T14:14Z, `attempts=6`, `retryIn=24h`, one hash). The reason is that every peer on
+  this rig comes back, so the ladder always eventually finds a holder.
+
+  **It stays a watch item because M5 changes the ending, not the rate.** An entry leaves
+  `pending` only when the genome arrives, so **a gap becomes permanent if the peer that holds
+  the blob is gone for good** — and after M5 a departed stranger makes that the normal case,
+  against a fetch ladder that runs from one minute to daily and a sidecar cache capped at 30
+  days and 2 GiB. `m5_considerations.md` **Risk 7** carries that case and its mitigations. On
+  this rig, watch the direction: a backlog that does not drain when the crossing rate falls
+  below ~340/min is the reading that would mean something new.
 
 ## Gotchas
 

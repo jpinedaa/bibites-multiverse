@@ -501,8 +501,8 @@ on the milestone rather than merely coexisting with it.
 
 - **The save-stall budget is being missed today, on M4's own signed-off bar.** The owner set
   2 000 ms (D14, M4 Risk 3), the exit test measured 241–538 ms, and the deliverable is recorded
-  as passed. The living deployment's logs disagree, and the breach is being written up
-  separately as a watch item in `dev_environment.md`. **This document does not restate that
+  as passed. The living deployment's logs disagree, and the breach is written up separately as
+  a watch item in `dev_environment.md`, *The living deployment → Watch items*. **This document does not restate that
   analysis and should not be read as a second opinion on it.** What M5 owes is the
   consequence: M4 Risk 3 named the escalation — *"a different cadence, or a save path that does
   not block the tick"* — and M5 is the milestone in which the cadence stops being the
@@ -517,7 +517,7 @@ on the milestone rather than merely coexisting with it.
 - **`genomeGaps` changes character when peers leave forever.** The backlog is throughput-limited
   rather than leaky — the collector's series shows long stretches at zero, a rise that tracks
   the crossing rate and a monotone drain when traffic falls — and `dev_environment.md`'s watch
-  item is where that reading lives and is being revised. The M5 change is not the rate but the
+  item now holds that reading and its resolution. The M5 change is not the rate but the
   ending: today "the source sidecar forgot the genome" has exactly one instance in the entire
   log history, because every peer comes back. After M5 a peer that leaves for good makes that
   the normal case, against a fetch ladder that runs from one minute to daily and a sidecar
