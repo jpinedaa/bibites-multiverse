@@ -351,7 +351,7 @@ defaults:**
 | `--insecure-no-token` | The relay refuses to start with no token unless this flag is passed, and then logs one loud warning per connection (§3.1) | The flag is documented as test-rig-only and nothing enforces that. A public build should make it impossible, or make it impossible to miss |
 | The archive's HTTP bind | Compiled default `127.0.0.1:8796` (`go/internal/archive/main.go`, the `--http` flag); the rig passes `ARCHIVE_HTTP=0.0.0.0:8796` and the runbook says to | The compiled default is right and the *habit* is in the bring-up instructions. A hoster copies the runbook, not the source |
 | `MULTIVERSE_MIGRATION_EXCLUDE` | Defaults to `Basic bibite` (`MigrationExclusion.cs:55`), read on presence, so an explicitly empty value disables the policy | D18 chose that default to keep founder stock off the lanes. A stranger who sets the variable empty floods a public map with seed genomes, and the census will show it as normal |
-| `MULTIVERSE_SAVE_*` | `SaveMinutes` 10, `SaveKeep` 6, `SaveOnQuit` true (`MultiverseConfig.cs:80-81`, `104-106`) | Six retained saves of a world is a footprint on a disk the player did not budget, and the save interval is also the stall cadence — see Risk 3 |
+| `MULTIVERSE_SAVE_*` | `SaveMinutes` 10, `SaveKeep` 6, `SaveOnQuit` true (`MultiverseConfig.cs:80-81`, `104-106`) | Six retained saves of a world is a footprint on a disk the player did not budget, and the save interval is also the stall cadence — see Risk 3. **These three are now what the owner's own deployment runs** (2026-08-10): the rig's `2`/`4` override is gone, so the audit and the rig finally measure the same numbers |
 
 ## Design Question 5 — Version compatibility, and a fleet the owner cannot reach
 
@@ -508,6 +508,18 @@ on the milestone rather than merely coexisting with it.
   not block the tick"* — and M5 is the milestone in which the cadence stops being the
   operator's to choose, because it ships as a package default on machines nobody here can
   retune. See Risk 3.
+
+  **The owner took the first half of that escalation on 2026-08-10, and it changes what M5
+  inherits — not the risk, but the baseline.** The five local worlds now run the mod's own
+  shipped `saveMinutes=10 saveKeep=6` (the rig had been overriding them with an exit-test 2 and
+  4), and `contract-a.md` §20 A45 raised `heartbeatTimeoutMs` from 3 500 to 13 000 so a blocking
+  save stops costing a Contract A session. **Two consequences for this milestone.** First, the
+  cadence M5 must audit is now the *package default*, not a rig setting — DQ4 is auditing the
+  number a stranger will actually get, which is what Risk 3 asked for. Second, the deadline is
+  no longer a hidden constraint on it: a package that saves a small world in 300 ms was never
+  near 3 500 ms either, but M5's own defaults audit can now reason about the save budget without
+  also reasoning about the disconnect. **The 2 000 ms bar itself was not moved**, and the
+  remaining escalation — *a save path that does not block the tick* — is still unspent.
 - **Time scale is report-only on the wire.** `contract-b-m4.md` §18 carries `timeScale` as a
   measured reading copied from `HEARTBEAT` and *never computed*, and there is no message that
   sets it. On the LAN the remedy is one dev command — `run-m4-lan.sh send 2 timescale 5`, which
@@ -586,6 +598,19 @@ in the package (DQ4's defaults audit); measure the stall at the population and w
 new player actually runs, which is far smaller than this rig's; and take M4 Risk 3's named
 escalation only if those two are not enough. Note that `WorldSaver.cs:68-73` already records
 why a coroutine save was rejected, so "just make it async" is not an available answer.
+
+**The rig now runs the same cadence a stranger will get** (2026-08-10): the owner dropped the
+rig's `saveMinutes=2 saveKeep=4` override, so the five local worlds are on the shipped `10`/`6`.
+That is a **better** position for this risk than the one it was written in — every stall this rig
+measures from now on is a stall at the package's own interval, on a world far bigger than a new
+player's, which is the conservative direction. It does **not** retire the risk: the freeze a
+stranger sees is one ten-minute-spaced 300 ms hitch rather than this rig's multi-second one, and
+whether that reads as a bug is still a first-impression question rather than a measurement.
+
+**One thing that did move is off this risk's plate.** A blocking save used to cost a Contract A
+`4004` as well as a freeze, because the heartbeat rides the thread the save blocks; `contract-a.md`
+§20 A45 raised `heartbeatTimeoutMs` to 13 000 and that half is now closed for every mod on the
+wire, packaged or not. What M5 inherits is the freeze, not the disconnect.
 
 The live breach is a watch item elsewhere and its resolution belongs there. What M5 must not
 do is ship the current defaults to strangers on the strength of a measurement taken on a

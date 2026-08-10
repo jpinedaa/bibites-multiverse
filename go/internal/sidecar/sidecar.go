@@ -1084,11 +1084,16 @@ func (s *Sidecar) deliverLocked(st *journal.State, now time.Time) {
 		return
 	}
 	// Hold delivery into a mod that has gone quiet at the application layer. The
-	// pacer's own idle grace (pacingIdleGraceMs, 10 s) is LONGER than the 3.5 s
-	// heartbeat timeout, so during a stall the socket is closed with 4004 before
-	// that branch can trip — which left this function releasing MIGRATE_IN frames
-	// right up to the close, into a mod whose main thread was already drowning.
-	// Gate on heartbeat freshness instead: a mod whose last app-level HEARTBEAT
+	// pacer's own idle grace (pacingIdleGraceMs, 10 s) used to be LONGER than the
+	// 3.5 s heartbeat timeout, so during a stall the socket was closed with 4004
+	// before that branch could trip — which left this function releasing
+	// MIGRATE_IN frames right up to the close, into a mod whose main thread was
+	// already drowning. §20 A45 raised the timeout to 13 s and so inverted that
+	// pair: the idle grace now trips first on a stall past ten seconds. Nothing
+	// here changes, because both branches release nothing and this one trips at
+	// 1.5 s regardless — the gate below is still what makes a stalling mod paused
+	// into rather than flooded into.
+	// Gate on heartbeat freshness: a mod whose last app-level HEARTBEAT
 	// is older than heartbeatDeliveryGraceMs (~1.5x the interval) is not keeping
 	// up, so the entry stays scheduled and delivers when heartbeats resume. This
 	// changes WHEN, not WHETHER (§7.5); the token is spent only after the journal

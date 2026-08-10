@@ -21,8 +21,13 @@ const (
 	// defaultHeartbeatDeliveryGrace is ~1.5x the 1000 ms heartbeat interval
 	// (contract-a.md §8). A mod silent for longer than this at the application
 	// layer is not keeping up, so inbound delivery is HELD until heartbeats
-	// resume — the pacer's own idle grace (10 s) is longer than the 3.5 s
-	// heartbeat timeout and so never trips during a stall (contract-a.md §7.5).
+	// resume. It is the FIRST of the three quiet-mod deadlines and that ordering
+	// is the point: 1.5 s holds delivery, the pacer's idle grace (10 s) stops the
+	// pacing clock, and only then does heartbeatTimeoutMs (13 s since §20 A45,
+	// 3.5 s before it) close with 4004. The raise moved the pacer's grace from
+	// after the close to before it, which changes nothing this gate does — both
+	// branches release nothing — and it is why this value did not move with it
+	// (contract-a.md §7.5, §8, §20 A45).
 	defaultHeartbeatDeliveryGrace = 1500 * time.Millisecond
 	// defaultForwardRetryMax caps the exponential backoff a re-forward to a LIVE
 	// destination climbs to: 5 s, 10 s, 20 s, 40 s, then this. It bounds the

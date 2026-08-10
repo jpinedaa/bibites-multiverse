@@ -70,6 +70,17 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"token-bucket capacity for --inbound-rate (contract-a.md §7.5, "+
 			"inboundRateBurst), the largest clump ever released at once. 0 keeps "+
 			"the default (50.0)")
+	// heartbeatTimeoutMs was a compiled constant with no knob, and §20 A45 raised
+	// it from 3500 to 13000 because a periodic world save blocks the thread that
+	// sends the heartbeat. The number is sized from a save-stall tail that has
+	// moved with every regime change this rig has made, so A40's rule applies:
+	// a tunable an operator cannot retune from the metric that measures it is not
+	// a tunable.
+	heartbeatTimeout := fs.Duration("heartbeat-timeout", envDuration("MULTIVERSE_HEARTBEAT_TIMEOUT", 0),
+		"HEARTBEAT silence before this sidecar closes Contract A with 4004 "+
+			"(contract-a.md §8, heartbeatTimeoutMs). 0 keeps the 13-second default. "+
+			"Raise it when [M4-SAVE] stalls approach it; lower it to detect a dead "+
+			"mod sooner, at the cost of a 4004 for every save that overruns")
 	listInflight := fs.Bool("list-inflight", false,
 		"print the journal entries this sidecar still holds custody of, then exit "+
 			"(contract-b-m4.md §7.5). Answers what the relay cannot.")
@@ -136,6 +147,13 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		logger.Warn("sidecar: holdTimeoutMs overridden; a held entry bounces home sooner than the "+
 			"contract default, and §9.3's accepted duplication case widens with it",
 			"holdTimeout", *holdTimeout, "default", DefaultConfig().HoldTimeout)
+	}
+	if *heartbeatTimeout > 0 {
+		cfg.HeartbeatTimeout = *heartbeatTimeout
+		logger.Warn("sidecar: heartbeatTimeoutMs overridden; a save stall longer than this "+
+			"still closes with 4004, and a dead mod is detected at this deadline instead "+
+			"of the contract's",
+			"heartbeatTimeout", *heartbeatTimeout, "default", DefaultConfig().HeartbeatTimeout)
 	}
 	if *journalCompact > 0 {
 		cfg.JournalCompactInterval = time.Duration(*journalCompact) * time.Minute

@@ -604,6 +604,17 @@ rig over a lost night.
 **Measured 2026-08-06, at five concurrent worlds: 241 ms to 538 ms.** The budget held with
 room to spare, the simple synchronous save stays, and the save lock never deferred.
 
+**And no generation since has held it.** The living deployment has breached the 2-second bar
+routinely since the day this measurement passed — the whole series, and why it is not the worlds
+growing, is the first watch item in `dev_environment.md`, *The living deployment → Watch items*.
+This risk's own escalation sentence is the one that got answered: **the owner chose the cadence,
+on 2026-08-10.** The five local worlds now run the mod's shipped `saveMinutes=10 saveKeep=6`
+instead of the rig's exit-test `2`/`4`, and `contract-a.md` §20 A45 raised the Contract A
+heartbeat timeout from 3 500 ms to 13 000 ms — because a save blocks the thread that heartbeats,
+which is a cost this risk did not name and the deployment found. **The 2-second budget was not
+moved**, and the other half of the escalation — *a save path that does not block the tick* — was
+not spent. Read this risk's number as the bar and the watch item as the record.
+
 ### Risk 4 — The observability data path competes with the migration path
 
 The status page, the metrics and `ringstat` all read state that the migration path owns. A

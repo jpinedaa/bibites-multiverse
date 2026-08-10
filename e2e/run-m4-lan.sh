@@ -178,6 +178,8 @@ set -uo pipefail
 # UNCONDITIONALLY after it.
 _ENV_LAN_RELAY_LISTEN="${RELAY_LISTEN:-}"
 _ENV_LAN_TIME_SCALE="${TIME_SCALE:-}"
+_ENV_LAN_SAVE_MINUTES="${SAVE_MINUTES:-}"
+_ENV_LAN_SAVE_KEEP="${SAVE_KEEP:-}"
 
 M4_LIB=1
 # shellcheck source=run-m4.sh
@@ -226,6 +228,27 @@ RELAY_LISTEN="${_ENV_LAN_RELAY_LISTEN:-0.0.0.0:$RELAY_PORT}"
 # owner's, and it is the number a bring-up must restore — see dev_environment.md,
 # *The living deployment*. The rehearsal keeps x5, and the far end keeps its own.
 TIME_SCALE="${_ENV_LAN_TIME_SCALE:-100}"
+
+# THE LIVING DEPLOYMENT SAVES ON THE MOD'S OWN SHIPPED CADENCE (owner decision,
+# 2026-08-10): every ten wall-clock minutes, six kept. It is the same shape of
+# correction as the time scale above — the rehearsal's number was leaking into a
+# deployment that is not a rehearsal.
+#
+# run-m4.sh's 2 and 4 were the exit test's: a window a person would sit through
+# had to contain several saves, so the interval was cut to two minutes and the
+# retention with it. Nobody revisited that when the rig became a deployment, and
+# five worlds saving every two minutes is what put the save stall in front of the
+# heartbeat five times as often as the mod's own default would — see
+# dev_environment.md, *Watch items*. 10 and 6 are MultiverseConfig.cs's
+# DefaultSaveMinutes/DefaultSaveKeep and contract-a.md §10's rows, which is what
+# makes the far end the control this side can be read against: slot 6 has run
+# them all along. The rehearsal keeps 2 and 4 for its own stated reason.
+#
+# Both stay overridable — `SAVE_MINUTES=2 ./run-m4-lan.sh up` reproduces the old
+# cadence for a measurement — and both need the capture-before-source idiom above,
+# because run-m4.sh has already assigned them by the time this line runs.
+SAVE_MINUTES="${_ENV_LAN_SAVE_MINUTES:-10}"
+SAVE_KEEP="${_ENV_LAN_SAVE_KEEP:-6}"
 
 # -batchmode -nographics is game.sh's own knob, read in WSL, so it must be
 # EXPORTED rather than named in WSLENV — start_game runs game.sh as a child and
