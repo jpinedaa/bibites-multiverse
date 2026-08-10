@@ -295,8 +295,11 @@ $startBody = @'
 #                               machine's arrival-pacing test: the sidecar keeps
 #                               the journal and its custody while the world is
 #                               away, so the backlog is there to drain.
+#
+# -Headless goes with either form. The world runs exactly as it would; only the
+# picture is gone, and with it the need for this machine to have a screen.
 [CmdletBinding()]
-param([switch]$GameOnly)
+param([switch]$GameOnly, [switch]$Headless)
 $ErrorActionPreference = 'Stop'
 
 $GameDir     = '@@GAMEDIR@@'
@@ -346,6 +349,17 @@ $env:MULTIVERSE_PORTAL_FLOURISHES = 'true'
 $sidecarPidFile = Join-Path $DataRoot 'sidecar.pid'
 $gamePidFile    = Join-Path $DataRoot 'game.pid'
 
+# Both starts below launch the game from this one description, so the -GameOnly
+# path and the full path cannot drift apart. -batchmode and -nographics are
+# Unity's own switches, handled before the game sees them: its parser reads only
+# -steam and ignores everything else.
+$gameLaunch = @{
+    FilePath         = (Join-Path $GameDir 'The Bibites.exe')
+    WorkingDirectory = $GameDir
+    PassThru         = $true
+}
+if ($Headless) { $gameLaunch['ArgumentList'] = @('-batchmode', '-nographics') }
+
 if ($GameOnly) {
     if (-not (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue)) {
         Write-Host "-GameOnly needs the sidecar already running. It is not." -ForegroundColor Red
@@ -356,7 +370,7 @@ if ($GameOnly) {
         Write-Host "The game is already running."
         exit 1
     }
-    $game = Start-Process -FilePath (Join-Path $GameDir 'The Bibites.exe') -PassThru -WorkingDirectory $GameDir
+    $game = Start-Process @gameLaunch
     Set-Content -Path $gamePidFile -Value $game.Id -Encoding ASCII
     Write-Host "game started (pid $($game.Id)) against the running sidecar; it loads '$World' by itself."
     Write-Host "The sidecar replays every organism it took custody of while the world was away."
@@ -421,7 +435,7 @@ if ($granted) {
     exit 1
 }
 
-$game = Start-Process -FilePath (Join-Path $GameDir 'The Bibites.exe') -PassThru -WorkingDirectory $GameDir
+$game = Start-Process @gameLaunch
 Set-Content -Path $gamePidFile -Value $game.Id -Encoding ASCII
 Write-Host ""
 Write-Host "game started (pid $($game.Id)); it loads the world '$World' by itself,"

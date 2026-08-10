@@ -122,11 +122,21 @@ cmd_start() {
     return 1
   fi
 
+  # BIBITES_EXTRA_ARGS (e.g. `-batchmode -nographics`) is this script's own knob and is
+  # read here, in WSL — so it is the one per-instance setting that must NOT be named in
+  # WSLENV. That channel exists to reach the game process; this one never leaves the
+  # shell, it only shapes the command line below. A token is a bare flag, with no space
+  # and no quote in it, which is what makes one pair of single quotes each enough.
+  local extra="" tok tokens=()
+  read -r -a tokens <<<"${BIBITES_EXTRA_ARGS:-}"
+  for tok in "${tokens[@]}"; do extra+="${extra:+,}'$tok'"; done
+  [ -z "$extra" ] || extra=" -ArgumentList $extra"
+
   # Start-Process detaches the game from this shell's process tree, so the game
   # survives when the WSL command exits. -PassThru is what gives us the PID, which is
   # the only way to stop one instance without stopping the other.
   local pid
-  pid="$(ps_run "(Start-Process -FilePath '$GAME_WIN' -PassThru).Id" | tr -d '\r' | tail -n 1)"
+  pid="$(ps_run "(Start-Process -FilePath '$GAME_WIN'$extra -PassThru).Id" | tr -d '\r' | tail -n 1)"
 
   if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
     echo "Start-Process returned no usable PID: '$pid'" >&2
@@ -135,7 +145,7 @@ cmd_start() {
 
   printf '%s\n' "$pid" > "$RUN_DIR/$instance.pid"
   marker_for_env > "$RUN_DIR/$instance.marker"
-  echo "started instance='$instance' pid=$pid"
+  echo "started instance='$instance' pid=$pid${extra:+ args='$BIBITES_EXTRA_ARGS'}"
 }
 
 cmd_stop() {

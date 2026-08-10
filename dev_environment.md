@@ -52,6 +52,10 @@ bibites-mod/game.sh wait A 60   # block until it exits; fail after 60 s
 bibites-mod/game.sh stop A      # stop that instance only
 bibites-mod/game.sh stop        # stop every recorded instance, then sweep orphans by name
 
+# Headless: the sim runs, nothing renders. The flags are Unity's own; the game's parser
+# reads only -steam. game.sh reads this itself, in WSL, so it is not a WSLENV variable.
+BIBITES_EXTRA_ARGS='-batchmode -nographics' bibites-mod/game.sh start A
+
 # Run the M1 exit test with no operator, then quit. WSLENV is required — see Gotchas.
 WSLENV=MULTIVERSE_AUTOTEST MULTIVERSE_AUTOTEST=1 bibites-mod/game.sh start
 ```
@@ -63,6 +67,16 @@ kills exactly one game instead of every one by process name. And an instance is 
 its log **by content, never by start order**: `game.sh` greps both `LogOutput.log` and
 `LogOutput.log.1` for that instance's own startup marker, because which process gets which
 file is a lock race (see Gotchas).
+
+**Headless is validated, 2026-08-09.** The M1 exit test ran to `RESULT: PASS` under
+`-batchmode -nographics`: the procedural sprite atlas builds CPU-side, so the world still
+seeds, saves and quits with nothing drawn and nobody watching. Windows reports
+`MainWindowHandle=0` for that process and gives it **no `GPU Engine` counter instances at
+all** — not idle ones, none — where a visual instance held ~24% of the GPU; CPU fell from
+1.50 to 1.10 cores, and a headless instance sitting at the menu is ~390 MB. The far end
+takes the same two flags through `start-slot6.ps1 -Headless`, and slot 6 has run that way
+since (*The living deployment*). Exactly one thing is lost, and it is not the simulation —
+see *A headless world's save thumbnail is blank* in Gotchas.
 
 ### The reference DLL set
 
@@ -429,7 +443,7 @@ derives the entry strip's depth from `W` plus the entry margin).
   | `camera <orthographicSize> [x] [y]` | **M4.** Set the camera zoom, and move it when both coordinates are given. It drives `CameraManager.SetCamSize` and then fires the zoom-change events, so anything that reacts to a manual zoom reacts to this. It reports the resulting `orthographicSize`, `position` and `cullingMask`. **This is what makes the WP7 zoom-legibility sweep scriptable** — 5, 250, 2 000 and 4 000 in four commands. |
   | `flourish <export\|entry> [x] [y]` | **M4.** Fire one portal flourish ring by hand, without waiting for a migration. Anything other than `entry` in the first argument selects `export`, including a missing argument. Both coordinates are read only when both are present; otherwise the ring fires at the origin. |
   | `census`, `count <id>`, `family` | Population and lineage readouts. `count <id>` is the exactly-once check. |
-  | `save [name]`, `timescale <x>`, `autosave <on\|off>`, `quit` | World control. `save` runs the same write-verify-rotate-prune path as a periodic save. |
+  | `save [name]`, `timescale <x>`, `autosave <on\|off>`, `quit` | World control. `save` goes through `WorldSeeder.SaveWorld`, which writes and then verifies the zip holds `scene.bb8scene` — but it **overwrites `<world>.zip` in place**, and `SaveSystem.CreateSave` deletes the old file before it writes the new one. No partial, no rotation, no prune, and nothing kept of what it replaced. Only the periodic save and the save on quit rotate (*The save-file rotation layout*). |
 
 ### Reading the logs — the grepable series
 
@@ -760,11 +774,15 @@ neighbour's west and south exports — see *The minors* for the measured symptom
 `farend/make-farend-bundle.sh` (it builds both fresh) **after** `bibites-mod/deploy.sh`, so the
 DLL in the zip is the one this machine is running.
 
-**The tracked bundle is current, and it does not need re-taking.** `farend/dist/farend-bundle.zip`
-at `6899273` postdates the torn-append fix `f72dd14`
+**The tracked bundle is current, and it does not need re-taking.** It was last rebuilt
+2026-08-09, to carry the `-Headless` start template; the rebuild before it, at `6899273`,
+already postdated the torn-append fix `f72dd14`
 (`git merge-base --is-ancestor f72dd14 6899273` passes), and the `multiverse-sidecar.exe` inside
 the zip carries `journal-compact-minutes`, `journalCompactMinutes`, `discardedBytes` and
-`JournalCompactInterval` — the whole §20 disk budget. **Whether the second computer has APPLIED
+`JournalCompactInterval` — the whole §20 disk budget. **Nothing under `go/` or
+`bibites-mod/src/` changed between those two rebuilds**: the plugin DLL is byte-identical
+across them and to the one deployed here, and the two sidecar binaries differ only in the VCS
+revision and timestamp the Go toolchain stamps into them. **Whether the second computer has APPLIED
 it cannot be determined from here, and no observation will settle it**: §20 changed no wire
 field, so a far end with the fix and one without it are indistinguishable on Contract B
 (`contract-b-m4.md` §20 says so as a design property). Slot 6's §19 settings block proves its
@@ -795,6 +813,14 @@ is the only way an undriven far end can play the dark half of `run-m4-lan.sh pha
 rig prints the command, waits for `modConnected` to flip on the status page, and observes.
 A full `stop-slot6.ps1` would take the sidecar too, the lane would close, and there would be
 nothing to accumulate.
+
+**`-Headless` goes with either start form**, and it adds Unity's `-batchmode -nographics` to
+the game launch and nothing else: the same world, the same saves, the same portals, drawn
+nowhere. Leaving the switch off the next start brings the picture back, so it is a property
+of a run and not of the installation. Slot 6 has run headless since 2026-08-09 (*The living
+deployment*). `start-slot6.ps1` is **generated** by `setup-farend.ps1`, so a far end installed
+before 2026-08-09 has a start script without the switch, and takes it only from a re-run of
+the installer out of the current bundle — or from the same edit by hand.
 
 ### Owner steps: making the relay and the status page reachable (elevated, on this machine)
 
@@ -1115,6 +1141,26 @@ reconnected by itself both times — at 12:07:10 on 2026-08-08 — so the map fo
 no bypass and no `no_peer` closure. There is no far-end step in the ritual below, and adding
 one would be a D9 violation as well as unnecessary.
 
+### Slot 6 runs headless, since 2026-08-09
+
+The second computer's game now runs under `-batchmode -nographics`. The switch was a save, a
+quit that took 13 s and exited clean, and `.\start-slot6.ps1 -GameOnly -Headless` against the
+sidecar that never went down. **It is the same world**: `simulatedTime` runs continuously
+across the restart, and the sidecar held its slot, its relay session and its custody
+throughout, so the map never saw a hole. Nothing on the status page distinguishes a headless
+slot from a drawn one, which is the point.
+
+Two things came out of the first hours. The periodic save is **faster** with nothing to
+draw — one 2 485 ms warm-up sample, the only breach of Risk 3's 2 000 ms budget, and then
+672 ms steady against 1 093–1 535 ms in visual mode. And the sidecar's custody replay burst
+briefly outran its send buffer: one transient `1011: outbound queue full` disconnect,
+reconnected clean, no organism lost — the backlog draining as designed rather than a fault.
+
+**The restart reset the runtime time scale**: slot 6 came back at ×1 and was set to ×6.5 on
+that machine. Headless has nothing to do with that — the switch is a restart, so it inherits
+the gotcha whole and adds nothing to it (*A world can be at the wrong time scale*, in
+Gotchas).
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09. The steps are ordered and step 1
@@ -1279,6 +1325,19 @@ a verdict yet.
   therefore leaves no trace in the BepInEx log. The mod subscribes to
   `Application.logMessageReceived` and forwards errors itself — keep that, or in-game
   failures go silent.
+- **A headless world's save thumbnail is blank, and the error saying so cannot reach the
+  BepInEx log.** Under `-batchmode -nographics` `SaveSystem.CreateSave` still calls
+  `SceneScreenShotHandler.SaveScreenshotToZip`, and the `RenderTexture.GetTemporary(400, 400,
+  24, ARGB32)` at `ScreenShotHandler.cs:117` fails with Unity's own `RenderTexture.Create
+  failed` — which is invisible on disk for the reason above, and surfaces only through the
+  mod's `Application.logMessageReceived` forwarder. **The save itself is whole.**
+  `ReadPixels` against the failed target does not throw, so the 400×400 `img.png` is written
+  flat rather than not at all, and every other entry — `scene.bb8scene` and `data.bin` ahead
+  of it, the bibites, the eggs and the templates behind it — is written normally; confirmed
+  2026-08-09 by extracting three headless saves. `WorldSaver`'s verify would not have caught
+  a bad thumbnail in any case, because it asks only whether `scene.bb8scene` exists; what
+  actually guards the file is its try/catch and the partial-then-rotate write. Read the line
+  as cosmetic. The only casualty is the picture the game draws beside the save's name.
 - **`LogOutput.log` is overwritten on every launch** (`[Logging.Disk] AppendLog = false`).
   Copy it before restarting the game if you still need the previous run.
 - **Two game instances run fine side by side, and get separate logs — but which log is a

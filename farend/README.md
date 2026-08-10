@@ -58,7 +58,10 @@ correct version, installs BepInEx and the plugin, stores the token, and writes
 
 It starts the sidecar, waits for the relay to grant slot 6 at position (2,1),
 and then starts the game. The game loads the world `M4-Slot6` by itself, and
-seeds it on the first start. Leave both running.
+seeds it on the first start. Leave both running. Add `-Headless` and the game
+runs with no window and nothing drawn; the world itself is unchanged. The switch
+belongs to that one start, so leaving it off the next time brings the window
+back.
 
 **3. Stop.** Run this when the test is over.
 
