@@ -37,7 +37,7 @@ is what makes the map tidy rather than permanently expectant.
 | Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so no retry can ever succeed. One the relay can prove it never handed anywhere goes home at once; one that may already have reached your sidecar before you went waits out its hold first, because the point of the wait is exactly that possibility |
 | Your neighbours | Their lanes re-pair around the hole. No slot number changes and no other position moves |
 | Your world | Yours. The saves are on your disk, and the uninstall leaves your game as it found it |
-| Your credential | Stops working. There is nothing to revoke on your side |
+| Your credential | **Still authenticates until the operator drops it** — a release retires a *reservation*, not an identity. What is gone is your place: connect again and the map treats you as a newcomer, at a new slot number and wherever the ordinary placement rules put you. Your old slot number is never reused. There is nothing to revoke on your side |
 
 **Before you go, drain your journal.** Your sidecar may be holding organisms it took custody of
 and has not been able to hand on — held entries, waiting on a destination that is dark. Custody
@@ -67,7 +67,9 @@ freshly minted credential.
 | The new occupant | **Inherits nothing.** An empty journal and a different world. They are not told about the old world's organisms, because there is nothing correct they could do with them |
 | Work in flight addressed to that slot | **Arrives at whoever is there now**, because routing is on the position and not on a person. A handover rebinds a place in the map, and an organism travelling to that place arrives at its current occupant. An operator who does not want that outcome wants a release instead |
 | The old world's journal | Stays with the old world. A released or replaced world keeps two obligations: it delivers its own inbound organisms to its own game even from outside the map, and it re-routes or releases its outbound ones if it ever rejoins |
+| The two credentials | The act **mints the new identity's credential and drops the old identity's**, in one step. The new join string is printed once, in the answer the operator reads when they confirm — the single moment that secret exists anywhere but its owner's machine — and from that moment the old one authenticates nothing |
 | Timing | The relay **refuses a handover while the old world is still connected**, and says so. A live world with its place taken from under it would keep claiming, keep being refused, and keep running with nowhere to export |
+| How it is done | Two calls on the operator's side: one that returns the consequences — the slot, its position, its current identity, how long it has been dark, whose lanes change — and a second that applies them, refused if the map moved in between. **Nothing a participant sends can invoke one**; it is a separate authenticated path, not this wire |
 
 **This is the only credential recovery there is**, and it is deliberate: the alternative is an
 account system with an email and a reset flow, and the map is a hobby project that chose not to

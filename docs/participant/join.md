@@ -29,9 +29,52 @@ before it acts — but it needs a person. The cost is bounded by the thing that 
 recoverable at all: **your reservation never expires**, so the slot, the position and every
 organism addressed to it are still there when the operator gets to it.
 
-> **SLOT — WP2 (transport security).** The join string's printed form, and the exact command a
-> participant runs to apply one.
->
+### What one looks like
+
+The relay prints a block on its own console, once, and the operator hands you what is in it:
+
+```
+JOIN STRING for peer-your-world — printed ONCE. Hand it over out of band.
+  relay       wss://<relay-host>/contract-b/v4
+  peerId      peer-your-world
+  secret      <32 random bytes, hex>
+  grant       peer
+  one line    multiverse-join/1 wss://<relay-host>/contract-b/v4 peer-your-world.<secret>
+
+  This relay keeps a VERIFIER, not the secret: it cannot print this again.
+  If it is lost, the only recovery is an operator slot handover by name
+  (multiverse-relay --handover-slot <n>=<newPeerId>), which mints a fresh one.
+
+  On peer-your-world's own machine:
+      umask 077; printf '%s\n' '<secret>' > ~/.multiverse-peer-secret
+      multiverse-sidecar --relay wss://<relay-host>/contract-b/v4 \
+          --peer-id peer-your-world --credential-file ~/.multiverse-peer-secret
+```
+
+**The `one line` form is the whole of it in one string** — `multiverse-join/1`, the relay
+address, and your identity and secret joined by a dot — and it exists so that a join string can
+be carried in one message. The two halves split on the **last** dot, because an identity may
+legally contain one.
+
+**Two commands apply it**, and they are the two above: put the secret in a file only you can
+read, then start your sidecar pointing at that file. **No flag anywhere takes the secret
+literally**, on purpose — a value on a command line is in every process listing on the machine.
+It travels to the relay on the connection's own authorization header and never inside a
+message.
+
+**"It cannot print this again" is literal.** The relay stores a salted hash it cannot reverse,
+so there is nothing for an operator to look up and nothing for them to re-send. That is why
+losing it costs a handover.
+
+**The `grant` line says which role the credential is for**, and a participant's is always
+`peer`. The three grants — peer, subscribe, admin — are disjoint: a credential that holds one
+does not hold another, and presenting yours for a role it does not carry is refused rather than
+quietly downgraded.
+
+**The package may ask for the same two things somewhere else** — a settings file instead of a
+command line. What does not change is the shape: an identity, and a secret in a file only you
+can read.
+
 > **SLOT — WP6 (the package).** Where a participant puts it during install, and how they change
 > it later.
 
@@ -46,7 +89,10 @@ Four steps, and you can watch all four.
    shape, how many places are taken, the capacity limits **it is actually running with**, and
    the minimum wire version it will admit. You get all of that before you have asked for
    anything, so that you can be built to respect a ceiling rather than discover it as a
-   refusal.
+   refusal. The limits come again on every status broadcast, so a map reconfigured under you is
+   one you learn about without reconnecting. The taxonomy's §3.2 lists them and what crossing
+   each one does; **the numbers that bind you are the ones your map sends here**, not the
+   defaults printed there.
 3. **Your sidecar claims a place.**
 4. **The relay grants one**, and tells you its number and its position.
 
@@ -120,7 +166,7 @@ Three refusals happen at the door, and each has a different actor:
 
 | What you see | What it means | Who fixes it |
 |---|---|---|
-| Your credential is refused | Wrong, missing or malformed. Re-apply the join string; if it is lost, ask for a handover | **you**, then the operator |
+| Your credential is refused | Wrong, missing or malformed. Your sidecar says so once per attempt, naming the remedy, and holds its retries at the ceiling after five — a wrong secret looks like a world that never joins rather than a machine hammering the map. Re-apply the join string; if it is lost, ask for a handover | **you**, then the operator |
 | Your wire version is below the map's minimum | Your build is older than the floor this map's operator published. **Upgrade from the published release** — nobody on the relay's side can push it to you | **you** |
 | Your game version is incompatible with the map's | The map is on a different game build. Only the operator can see which build the map is on | the operator |
 

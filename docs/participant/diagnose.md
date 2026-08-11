@@ -23,7 +23,7 @@ What to read, and what a healthy reading looks like:
 | Your **queue depths** — in custody, paced, held | Small, and moving | A paced depth that never falls names a delivery rate set too low. Read it against your own configured rate, which is published beside it |
 | Your **last save** | Recent, against your own save interval | An absent save with a save interval of zero is a world with its save timer off — a reading, not a gap |
 | Your **speed** | The applied speed and the achieved speed are close | When they come apart, your machine cannot meet the speed you asked for, and **the gap is the news**. Every rate about your world is wrong by that factor |
-| Your **last refusal** | Absent | Present means the relay refused this world for a stated reason, and it is on the page rather than only in a log so that a stale world does not read as a dead one |
+| Your **last refusal** | Absent | Present means the relay refused this world for a stated reason, and it is on the page rather than only in a log so that a stale world does not read as a dead one. It names one of three things: an incompatible game version, a wire version below the map's floor, or `capacity:` and the limit that fired. **Two refusals deliberately never appear here** — a rejected credential, which reaches no slot at all, and an eviction, which has no shape of its own. An empty field is not proof that nothing was refused |
 
 > **SLOT — WP3 (the hosted deployment).** The page's address.
 >

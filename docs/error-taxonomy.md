@@ -6,11 +6,13 @@ public failure is one where the machine that suffers is not the machine at fault
 taxonomy that lists causes and stops there sends a stranger looking for a problem that is not
 on their computer (`m5_considerations.md`, DQ8).
 
-**Status: draft spine, WP7.** Every entry below is taken from the wire as WP1 published it —
-`contracts/contract-a.md` at `contract-a/2.4` and `contracts/contract-b-m4.md` at
-`contract-b/4.0`. Entries whose exact wording, value or exit code is invented by a package
-that has not landed carry a **slot**: a marked to-do with the package that owns it. A slot is
-never a blank. §9 collects them.
+**Status: WP7's spine, with WP2's and WP4's texture landed.** Every entry below is taken from
+the wire as WP1 published it — `contracts/contract-a.md` at `contract-a/2.4` and
+`contracts/contract-b-m4.md` at `contract-b/4.0` — and every wording, value and log line that
+belongs to the credential and TLS work (WP2) or to the capacity table, the admin path and the
+A49/A50 halves (WP4) is quoted from what those packages ship. Entries whose exact wording,
+value or exit code is invented by a package that has **not** landed still carry a **slot**: a
+marked to-do with the package that owns it. A slot is never a blank. §9 collects them.
 
 ## How to read an entry
 
@@ -97,7 +99,7 @@ A close ends the session; it is never a report about one message.
 | `A-4004` | Close `4004`, then a reconnect about a second later | The sidecar heard no heartbeat for 13 000 ms. **The ordinary cause is a world save**: the save blocks the same thread that composes the heartbeat | Usually none — the mod reconnects, the sidecar holds arrivals in its journal for the whole silence, and nothing is lost. If it happens on nearly every save, save less often. See `LOCAL-SAVESTALL` | **nobody** |
 | `A-4005` | Close `4005` | One side is draining — a sidecar stop, a world unload, a game quit | Wait. The mod reconnects when a world loads again | **nobody** |
 | `A-4006` | Close `4006` on the older connection | A newer mod connection took over. **This is the self-healing rule**: a crashed-and-restarted game must be able to come back | None. It is the normal shape of a game restart | **nobody** |
-| `A-4007` | Close `4007 EXPORT_EDGES_UNUSABLE`, and the mod does not reconnect. The reason names the declared set and the map's shape, e.g. `exportEdges [N,S] has no usable edge on a 3x1 map (no column axis)` | Every edge this world declared for export lies on an axis the map does not have, so **no declared edge can ever carry an organism**. A configuration error on this machine and nowhere else (`contract-a.md` §21, A50) | Set the export edges to include an edge on an axis the map has, or unset the setting entirely for the shipped default of all four edges. The sidecar's own log names it: *"Nobody else can fix this and no other peer is affected"* | **you** |
+| `A-4007` | Close `4007 EXPORT_EDGES_UNUSABLE`, and the mod does not reconnect. The reason names the declared set and the map's shape, e.g. `exportEdges [N,S] has no usable edge on a 3x1 map (no column axis)` | Every edge this world declared for export lies on an axis the map does not have, so **no declared edge can ever carry an organism**. A configuration error on this machine and nowhere else (`contract-a.md` §21, A50) | Set `MULTIVERSE_EXPORT_EDGES` to include an edge on an axis the map has — `E` or `W` where the map has no column axis, `N` or `S` where it has no row axis — or unset it entirely for the shipped default of all four edges. The sidecar's log carries the remedy and the actor in the same line: *the operator of THIS machine. Nobody else can fix this and no other peer is affected*. **The mod does not reconnect on its own**, deliberately: it would re-read the same setting and reach the same answer | **you** |
 
 **Two closes are told apart in the sidecar's log and nowhere else.** `A-4004` covers both the
 heartbeat deadline and the transport ping deadline, because the mod's reaction is identical
@@ -127,7 +129,11 @@ edge until the next edge update; a **permanent** one is about this organism or t
 **No code in this table is ever caused by the lineage annex or by a species name.** A missing,
 oversized or unhashable parent blob is recorded as a gap and the migration proceeds; a species
 block that fails its shape rules is stripped and forwarded without
-(`contract-a.md` §9.1, §14 A12, §16 A30).
+(`contract-a.md` §9.1, §14 A12, §16 A30). **A gap now says which kind it is**: a parent the game
+had already destroyed is recorded as `parent_gone`, and one the mod carried and dropped to fit
+the frame is recorded as `blob_dropped_for_size` (`contract-a.md` §21, A49). Neither is an
+error and neither refuses anything; the distinction exists so that a lineage with holes in it
+can be read as *a size ceiling doing its job* rather than as one undifferentiated absence.
 
 ### 2.4 An arrival was refused — `MIGRATE_IN_NACK`, `contract-a.md` §9.2
 
@@ -163,8 +169,8 @@ machine can become your symptom**, and every entry that has that shape says so.
 
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
-| `B-401` | HTTP **401** with `WWW-Authenticate: Bearer`; no WebSocket is created. The sidecar logs one loud error per attempt and pins its backoff after five | The relay refused this credential: missing, malformed, or wrong | Re-apply the join string. **If you have lost it, there is no software recovery** — ask the operator for a slot handover, which rebinds your reservation to a new identity with a fresh credential (`contract-b-m4.md` §22, B22, and §7.5) | **you**, then **operator** |
-| `B-429` | HTTP **429** on the upgrade | Too many simultaneous connections from this source address (default 8). It is deliberately loose — one machine legitimately runs several worlds | Run fewer worlds from this address, or ask the operator to raise the limit. The map publishes the value it is running with | **you**, then **operator** |
+| `B-401` | HTTP **401** with `WWW-Authenticate: Bearer`; no WebSocket is created. Your sidecar logs one loud error per attempt — `contract B: the relay refused THIS PEER'S CREDENTIAL with HTTP 401`, carrying the count so far, this world's peer id, the remedy and who must act — and after five in a row it holds at the maximum backoff and stops saying anything new | The relay refused this credential: missing, malformed, or wrong. **The line names this peer's own credential on purpose**: a refusal at the door is about the secret this machine presented and about nothing on the map | Re-apply the join string — the secret goes in the file `--credential-file` (or `MULTIVERSE_PEER_SECRET`) names, and never on a command line. **If you have lost it, there is no software recovery** — ask the operator for a slot handover, which rebinds your reservation to a new identity with a freshly minted credential (`contract-b-m4.md` §22, B22, and §7.5) | **you**, then **operator** |
+| `B-429` | HTTP **429** with `Retry-After: 5` and the body `too many simultaneous connections from this address`; no WebSocket is created | Too many simultaneous connections from this source address. **The only capacity limit answered with an HTTP status instead of a close code**, because it is decided before there is a WebSocket to close — the relay has the address before it has read a header. It is deliberately loose: one machine legitimately runs several worlds | Run fewer worlds from this address, or ask the operator to raise the knob. A `contract-b/4.0` relay defaults to 8; the number that binds you is the `maxConnectionsPerAddress` your map publishes — see the limit table under §3.2 | **you**, then **operator** |
 | `B-426` | HTTP **426** with `Upgrade: TLS/1.2, HTTP/1.1` | You dialled `ws://` at a relay that only takes `wss://`. It is answered with a refusal and **never a redirect**, because a redirect to a scheme you did not ask for is how a downgrade goes unnoticed | Use the `wss://` URL the join string carries | **you** |
 | `B-TLS` | The connection fails with a certificate error naming the host, the presented name and the verification failure. It retries and keeps failing | The relay's certificate could not be verified against your platform's trust store. **There is no flag that skips this and there will not be one** | Check your machine's clock and its trust store first — a wrong clock fails a valid certificate. If both are right, it is the relay's certificate and no client-side action makes it safe | **you**, then **operator** |
 
@@ -179,31 +185,39 @@ journal's destination addresses and every organism addressed to it
 
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
-| `B-1009` | Close `1009` | A frame over 8 MiB | Report it | **you** (report) |
+| `B-1009` | Close `1009` | A frame over `maxFrameBytes` (8 MiB by default). **An oversize frame is `1009` and never `4007`**: the size ceiling is a framing rule and capacity is a rate, and the two are told apart by the close code so that a client knows whether to hold its backoff | Report it | **you** (report) |
 | `B-4000` | Close `4000`, and the client does not reconnect until restarted | A different **major** contract version, or a connection on a retired path. The retired paths stay served, over TLS, precisely so this error is defined rather than a bare 404 | Install the release that speaks the map's current major | **you** |
 | `B-4003a` | Close `4003`, reason naming a malformed frame or a first frame that was not a handshake | A defect in the sidecar | Report it | **you** (report) |
-| `B-4003b` | Close `4003` `"peerId does not match the authenticated credential"` | The credential names one identity and the handshake claimed another. **This is the map's central security property working**: the peer whose identity was borrowed is not touched, not closed, and not told, because nothing happened to it | Present the identity your join string names. If you did not do this deliberately, your stored identity and your credential have drifted apart — re-apply the join string | **you** |
+| `B-4003b` | Close `4003` `"peerId does not match the authenticated credential"`, **after** the connection was accepted. Nothing appears on any slot's `lastRefusal` | The credential names one identity and the handshake claimed another. **This is the map's central security property working**: the peer whose identity was borrowed is not touched, not closed, and not told, because nothing happened to it. On the relay's side one line is written — `relay: refusing a handshake whose peerId does not match its credential`, naming the credential's peer, the claimed peer and the role, and stating that the peer whose id was claimed is not told and is not touched — and that line is the operator's whole view of it | Present the identity your join string names. If you did not do this deliberately, your stored identity and your credential have drifted apart — re-apply the join string | **you** |
 | `B-4003c` | Close `4003` naming both game versions, and `lastRefusal` appears on your slot for every other peer to see | The relay refuses a peer whose game version is incompatible with the map's. **The fourth of D22's four kept gates**, kept by the owner's call of 2026-08-11 (`contract-b-m4.md` §6.1, §22 B31) | The map is on a different game build. Only the operator can say which build the map is on and when it will converge | **operator** |
 | `B-4003d` | Close `4003` `"protocolVersion … is below this relay's minimum …"`, and the same `lastRefusal` on your slot | Your build is older than the floor this map's operator published. It is a **compatibility** control and never a security one — it stops the honest and inconveniences nobody else | Upgrade from the published release. **Nobody on the relay's side can do it for you** — the release channel pushes nothing (D25) | **you** |
 | `B-4003e` | Close `4003` naming a missing grant, e.g. `"credential for … does not carry the subscribe grant"` | You asked for a role your credential does not carry. The three grants — peer, subscribe, admin — are disjoint. Nothing appears on your slot's `lastRefusal`, because your *peer* connection was refused nothing | Connect with the role your credential carries, or ask the operator for the credential the role needs. A subscriber grant is issued deliberately and never requested on the wire | **you**, then **operator** |
 | `B-4004` | Close `4004`, then a reconnect on the backoff ladder | The relay heard nothing from this connection inside its liveness timeout. Ordinarily the network | Wait. If it repeats all day, the path between this machine and the relay is the thing to look at | **nobody**, then **you** |
 | `B-4005` | Close `4005`, then a normal reconnect | The relay is draining — a routine restart. What a routine restart looks like is part of the map's announced restart policy (D24) | Wait. Your reservation never expires and you return to your own slot and position | **nobody** |
-| `B-4005-evicted` | Close `4005`, and then the relay goes on refusing this peer | The operator evicted this peer for a stated period. **It releases nothing**: the reservation, the slot number and the position all survive, and the return is an ordinary reclaim | Contact the operator. Nothing at this machine lifts an eviction | **operator** |
+| `B-4005-evicted` | Close `4005` — **the code a draining relay sends** — and then every reconnect refused the same way: `4005` again, no `401`, and nothing on your slot's `lastRefusal`. **The only thing that separates it from a routine restart is that it does not stop** | The operator evicted this peer for a stated period. **The refusal deliberately has no shape of its own.** An eviction is a *liveness* act — the map treats an evicted peer exactly as it treats a dark one — so nothing on the wire announces one, and the absence is pinned by a test (`TestAnEvictedPeerIsToldWhatADrainingRelayTellsItAndNothingElse`) rather than left to drift. **It releases nothing**: the reservation, the slot number and the position all survive, and the return is an ordinary reclaim | Wait first — a restart looks identical and clears itself. If the refusal outlives one, contact the operator; nothing at this machine lifts an eviction. **Do not read it as a credential problem**: an evicted peer is never answered `401`, because its credential is not what is being refused | **operator** |
 | `B-4006` | Close `4006` on the older connection | A newer connection that **authenticated as the same identity** took over. On your own restart this is the normal, self-healing shape | If you did not restart anything, somebody else is using your credential. Ask the operator for a handover to a new identity with a freshly minted credential | **nobody**, or **operator** if unexplained |
-| `B-4007` | Close `4007 CAPACITY`; the reason names which published limit and its value. Two in a row and the client holds at maximum backoff | A published capacity limit was exceeded and the relay is shedding **this connection, never the map**. No other peer's traffic changes, no lane closes, and nothing in flight is dropped | Read the limits the map publishes at connect and on every status broadcast. If your peer is legitimately inside them, this is a defect worth reporting; if the map's limit is genuinely too low for honest traffic, the operator raises it — every limit is a knob | **you** (report), or **operator** |
+| `B-4007` | Close `4007 CAPACITY`, and the reason names the limit, the value it is set to and the measurement that crossed it: `maxFramesPerSecond 50 exceeded (peak 412/s over 3s)`, `maxBytesPerSecond 4194304 exceeded (peak … B/s over …)`, `maxConnectionsPerPeer 2 exceeded (3 open for this peerId)`. Your sidecar logs `contract B: the relay SHED THIS CONNECTION for capacity (close 4007)` with that reason verbatim; two in a row and it holds at maximum backoff. The same text appears on your slot's `lastRefusal` as `capacity: …`, for every other peer to see | A published capacity limit was exceeded and the relay is shedding **this connection, never the map**. No other peer's traffic changes, no lane closes, and nothing in flight is dropped. Your world goes dark like any other dark world and its neighbours route around it | Read the limits your map publishes — at connect and on every status broadcast — and bring this world under them. If your peer is legitimately inside them, this is a defect worth reporting; if the map's limit is genuinely too low for honest traffic, the operator raises it, because **every limit is a knob** | **you** (report), or **operator** |
 
-> **SLOT — WP2 (transport security).** The exact refusal text of `B-401`, the sidecar log line
-> that pairs with it, the join string's printed form, and the operator-side log line for
-> `B-4003b`. The contract fixes the behaviour and the acceptance test; the wording ships with
-> the implementation.
->
-> **SLOT — WP4 (capacity, abuse limits, admin path).** The map's actual published limit
-> values, the `4007` reason strings as emitted, and — the real gap — **what an evicted peer
-> is told**. `contract-b-m4.md` §22, B28 says an eviction closes with `4005` and refuses the
-> peer for a stated period; it does not say what that refusal looks like on the wire, so
-> `B-4005-evicted` is currently distinguishable from an ordinary drain only by the fact that
-> it does not stop. WP4 either gives the refusal a distinguishable shape or states that it
-> deliberately has none.
+**The limits, and what crossing each one does to you.** A relay speaking `contract-b/4.0`
+publishes the values **it is running with** in a `limits` object — on `HANDSHAKE_ACK` when you
+connect, and on every `PEER_STATUS` after it, beside each world's stats block rather than
+inside it. The numbers below are the defaults it ships with; **the ones your map publishes are
+the ones that bind you**, because an operator may have turned any of them.
+
+| Limit | Default | Crossing it |
+|---|---|---|
+| `maxConnectionsPerPeer` | `2` | Close `4007` on the extra connection. The second exists for the overlap while a reconnect replaces an old session (`B-4006`); a third is one world dialled twice |
+| `maxConnectionsPerAddress` | `8` | HTTP **429** on the upgrade — `B-429`. It is the one limit decided **before a WebSocket exists**, so it is answered with a status and not with a close |
+| `maxFramesPerSecond` | `50` | Close `4007` |
+| `maxFrameBytes` | `8388608` (8 MiB) | Close **`1009`** — `B-1009`, never `4007` |
+| `maxBytesPerSecond` | `4194304` (4 MiB/s) | Close `4007`. It is what stops a frame ceiling from being evaded with maximum frames |
+| `maxClaimsPerMinute` | `12` | `granted: false, reason: "rate_limited"` — `BCLAIM-rate_limited`. **The connection stays up**; a claim storm is answered rather than closed |
+| `maxGenomeRequestsPerMinute` | `30`, per requester per answering peer | `found: false, reason: "rate_limited"` — `BGEN-rate_limited`. An answer, not a refusal of the session |
+| `maxSubscribers` | `4` | Bounds how many authorised subscribers the operator may connect at once. **A participant never meets it** |
+
+**Read a reading against the ceiling it is measured on.** The limits and every world's stats
+arrive in the same broadcast for exactly that reason: a rate is only meaningful beside the cap
+it is counted against, and a limit nobody can read is a support conversation nobody can win.
 
 ### 3.3 A placement claim was refused — `contract-b-m4.md` §7.2
 
@@ -211,7 +225,7 @@ The claim is answered, the session stays up, and the sidecar keeps claiming.
 
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
-| `BCLAIM-rate_limited` | `granted: false, reason: "rate_limited"` | Too many claims in a minute. **The relay deliberately refuses rather than closes**, because a claim storm is usually a peer whose measured time scale is wandering, and a refusal it can read beats a close it must recover from | Check this world's time scale — see `LOCAL-TIMESCALE`. The claim will be granted once the storm stops | **you** |
+| `BCLAIM-rate_limited` | `granted: false, reason: "rate_limited"`, and the session stays up | More claims in a minute than `maxClaimsPerMinute` allows (12 by default; your map publishes what it runs with). **The relay deliberately refuses rather than closes**, because a claim storm is usually a peer whose measured time scale is wandering, and a refusal it can read beats a close it must recover from | Check this world's time scale — see `LOCAL-TIMESCALE`. The claim will be granted once the storm stops | **you** |
 | `BCLAIM-role_has_no_slot` | `granted: false, reason: "role_has_no_slot"` | A read-only subscriber asked for a world's slot | Connect with the peer role. A subscriber never holds a slot | **you** |
 | `BCLAIM-version_incompatible` | `granted: false, reason: "version_incompatible"`, and the refusal appears on the status broadcast | The same kept game-version gate as `B-4003c`, met at claim time instead of at connect | As `B-4003c` | **operator** |
 
@@ -249,7 +263,7 @@ than as a stuck queue.
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
 | `BGEN-unknown_hash` | `found: false, reason: "unknown_hash"` | **A normal answer, not an error.** The source may be offline, the parent may never have migrated, or the source restarted and lost its cache | None | **nobody** |
-| `BGEN-rate_limited` | `found: false, reason: "rate_limited"` | Over the per-requester, per-answering-peer genome request limit | Wait for the stated delay. The limit is a published knob | **nobody** |
+| `BGEN-rate_limited` | `found: false, reason: "rate_limited"` | Over `maxGenomeRequestsPerMinute`, which is counted per requester **per answering peer** (30 by default) | Wait for the stated delay. The limit is a published knob and is on the same `limits` object as the rest | **nobody** |
 | `BGEN-peer_offline` | `found: false, reason: "peer_offline"` | Relay-generated: the peer being asked is dark | Wait, or ask another live peer | **nobody** |
 | `BGEN-too_large` | `found: false, reason: "too_large"` | The genome exceeds the payload cap | Report it | **you** (report) |
 | `BGEN-shutting_down` | `found: false, reason: "shutting_down"` | The answering peer is draining | Wait | **nobody** |
@@ -273,7 +287,7 @@ aggregate, and `contract-b-m4.md` §8 fixes exactly which value wins.
 | `LANE-peer_unreachable` | `peer_unreachable` | **This sidecar's own relay connection is down.** Decided before the walk, so it is about this machine and not the map | Read §3.1 and §3.2 for why the connection is refused or closing | **you** |
 | `LANE-peer_overloaded` | `peer_overloaded` | Every candidate is shedding | Wait | **nobody** |
 | `LANE-admin_closed` | `admin_closed` | This edge was closed locally | Reopen it, if you closed it | **you** |
-| `LANE-A50-partial` | A warning line, once per session: an edge is declared, lies on an axis this map does not have, and will stay closed | **Legal and unchanged, and not a fault.** A set with at least one usable edge is never refused; only a set with none is (`A-4007`) | None, and the line deliberately states no remedy: the remedy would be a map that grows an axis, and that is nobody at this machine's to apply | **nobody** |
+| `LANE-A50-partial` | A warning line, **once per session and once per edge**: this edge is declared, lies on an axis this map does not have, will stay closed for the life of this map shape, and no organism is affected | **Legal and unchanged, and not a fault.** A set with at least one usable edge is never refused; only a set with none is (`A-4007`), and a map with no axis at all — a lone first world — refuses nobody | None, and the line deliberately claims no remedy: the remedy would be a map that grows an axis, and that is nobody at this machine's to apply | **nobody** |
 
 ---
 
@@ -300,12 +314,25 @@ is the participant-facing form, not a copy of the runbook.
 These are not faults. They are the escape hatches the map has always had, and a participant
 should be able to recognise one rather than debug it.
 
+**None of them is reachable from this wire.** Release, handover and eviction run over a
+separate authenticated path that no peer and no subscriber can dial, and no frame a participant
+sends invokes one. Each act takes **two calls**: the first returns a consequence report — the
+slot, its position, its peer id, how long it has been dark, whose lanes change, which positions
+become holes — and a single-use token bound to the map's current state; the second performs the
+act and is refused if the map moved underneath the token. Every act leaves one durable audit
+line. **A confirmation an operator cannot see is not a confirmation**, which is why the report
+comes first (`contract-b-m4.md` §22, B28).
+
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
-| `OPS-EVICT` | `B-4005-evicted` | The operator closed this peer and is refusing it for a stated period. It is a **liveness** act, not a placement act: the reservation, the slot number and the position all survive untouched and the return is an ordinary reclaim | Contact the operator | **operator** |
-| `OPS-RELEASE` | Migrations addressed to a slot get a permanent `BMIG-SLOT_VACANT`, and the position appears as a hole on the map | The operator released a slot. The position rejoins the map as an ordinary hole the next newcomer fills before any axis grows, and **the address stays retired forever** | None. This is the operator's answer for a position that will never be filled again | **operator** |
-| `OPS-HANDOVER` | A slot's identity changes; the new occupant starts with an empty journal | The operator rebound a reservation — slot number **and** position — to a different identity. The map does not change shape and no lane moves. **It is also the only credential recovery path there is** | None, and one thing to know: work in flight addressed to that slot **arrives at whoever is there now**, because routing is on the slot. An operator who does not want that outcome wants a release instead | **operator** |
-| `OPS-DENYLIST` | A species name from your world renders as suppressed on the map's page or in its terminal view | The operator applied a render-time deny list. **Your world is untouched** — no eviction, no wire field, no cooperation asked of your machine | Contact the operator about the string. **What cannot be promised is removal from the record**: the ledger is a thing nothing evicts from, so M5 promises removal from the view and explicitly not from the record | **operator** |
+| `OPS-EVICT` | `B-4005-evicted` | The operator closed this peer and is refusing it for a stated period. It is a **liveness** act, not a placement act: the reservation, the slot number and the position all survive untouched and the return is an ordinary reclaim. **Nothing distinguishes it on the wire from a draining relay**, by design — see `B-4005-evicted` | Contact the operator, once a routine restart has been ruled out | **operator** |
+| `OPS-RELEASE` | Migrations addressed to a slot get a permanent `BMIG-SLOT_VACANT`, and the position appears as a hole on the map | The operator released a slot. The position rejoins the map as an ordinary hole the next newcomer fills before any axis grows, and **the address stays retired forever** | None. This is the operator's answer for a position that will never be filled again. The relay cannot enumerate the journals addressed to that slot — they are on other people's machines — so the consequence report says so and names where the answer is, which is the peer | **operator** |
+| `OPS-HANDOVER` | A slot's identity changes; the new occupant starts with an empty journal. **The old identity's credential stops working at that moment** | The operator rebound a reservation — slot number **and** position — to a different identity. The map does not change shape and no lane moves. The act **mints a fresh credential for the new identity and drops the old one's**, and the new join string is printed once, in the reply to the confirming call: that is the only moment the new secret exists anywhere but its owner's machine. **It is also the only credential recovery path there is**, and the relay refuses to run one while the old world is still connected | None, and one thing to know: work in flight addressed to that slot **arrives at whoever is there now**, because routing is on the slot. An operator who does not want that outcome wants a release instead | **operator** |
+| `OPS-DENYLIST` | A species name from your world renders as suppressed on the map's page or in its terminal view | The operator applied a render-time deny list at the archive's own boundary, so the page and the terminal view suppress the same strings. **Your world is untouched** — no eviction, no wire field, no cooperation asked of your machine, and nothing your sidecar or your game has to do | Contact the operator about the string. **What cannot be promised is removal from the record**: the ledger is a thing nothing evicts from, so M5 promises removal from the view and explicitly not from the record | **operator** |
+
+**Suppression is the weaker tool and it is reached for first.** It needs no peer's cooperation
+and costs that peer nothing; an eviction takes a world off the map. The order is deliberate
+(`contract-b-m4.md` §22, B28, B30).
 
 ---
 
@@ -323,6 +350,10 @@ Written down because each one has already cost somebody an evening somewhere.
   only when the map can route something and this peer declared none of it.
 - **An organism the exclusion policy kept at home.** It stays in its world, containment holds
   it, and the census still counts it. It is a policy, not a failure.
+- **A parent with no blob in the record.** `parent_gone` is the ordinary case — the game drops a
+  parentage once the parent is destroyed — and `blob_dropped_for_size` is a size ceiling doing
+  its job on a crowded frame. Both are gaps, both are recorded as gaps, and neither refuses a
+  migration or costs an organism.
 - **A census marked truncated.** The world has more species than the wire carries; the array
   is a top slice, and the marker says so rather than pretending otherwise.
 - **An absent value on the status page.** Absence means **unknown**, and a reader must not
@@ -360,12 +391,16 @@ Every marked to-do in this document, with the package that owns it.
 |---|---|---|
 | §1 | Artifact names, the checksum command, the unblock wording, `INS-GAMEBUILD`'s refusal text, the support matrix's location, uninstall failure modes | **WP6** |
 | §2.4 | The commands that list and release a held entry, and what the release prints before it acts | **WP7**, later arc |
-| §3.1, §3.2 | `B-401`'s refusal text and its paired sidecar log line, the join string's printed form, the operator-side log line for `B-4003b` | **WP2** |
-| §3.2 | The map's published limit values, the `4007` reason strings as emitted, and **what an evicted peer is told** — the wire does not currently distinguish `B-4005-evicted` from a routine drain | **WP4** |
 | §3.2 `B-4003c` | Where the map publishes the game build it is currently on, so a refused peer can read it rather than ask | **WP3** |
 | §5 | Exact log wording for `LOCAL-CONFIGRACE`, `LOCAL-STARVATION` and `LOCAL-JOURNALTORN` as a packaged install emits them, and the participant-facing names of the save and disk settings | **WP6** |
-| §6 `OPS-*` | The operator-side confirmation reports as the admin path returns them, and the participant-visible effect of each act | **WP4** |
-| Whole document | Every refusal WP2 and WP4 invent that is not yet on the wire, and the exit codes `--diagnose` maps each entry to | **WP2**, **WP4**, **WP7** later arc |
+| Whole document | The exit codes `--diagnose` maps each entry to | **WP7**, later arc |
+
+**WP2's and WP4's slots are closed** (0393698, dc9d01f, dfbd1dc). §3.1's and §3.2's refusal
+texture, the operator-side view of an impersonation refusal, the published capacity table, the
+admin path's participant-visible effects and the A49/A50 texture are now quoted from what those
+packages ship rather than owed by them. **What a `4007` names, and what an evicted peer is
+told, are answered above** — the second by a deliberate silence rather than by a new signal,
+and that answer is pinned by a test so it cannot drift into one.
 
 **This document closes when the exit test's error sweep finds no failure that is not in it,
 with a remedy that worked** (`m5_considerations.md`, *Exit Test*, Part 6).

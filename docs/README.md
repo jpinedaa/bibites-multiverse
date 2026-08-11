@@ -39,8 +39,12 @@ Several entries carry a **slot**: a marked to-do naming the work package that fi
 > **SLOT — WP*n* (name).** What is missing, and why it cannot be written yet.
 
 **A slot is a to-do with an owner, never a blank.** They exist because this documentation spine
-was drafted against WP1's contracts while WP2 and WP4 were still being built, and half of what a
-participant will actually see is invented by those two packages. Each document collects its own
+was drafted against WP1's contracts while the packages that invent what a participant actually
+sees were still being built. **WP2's and WP4's are closed**: the credential refusals and the
+join string's printed form, the published capacity table, the admin path's participant-visible
+effects and the lineage-gap and export-edge texture are now quoted from what ships. What
+remains is owned by **WP3** (the hosted deployment), **WP6** (the package), **WP8** (the bands
+only a playtest can measure) and this package's own later arcs. Each document collects its own
 slots in a table at the end.
 
 ## Where the authority lives
