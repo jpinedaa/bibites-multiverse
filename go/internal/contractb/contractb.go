@@ -66,6 +66,14 @@ const (
 	// self-healing rule contract-a.md §2 gives the mod socket survives; the
 	// impersonation it permitted does not.
 	CloseReplaced = 4006
+	// CloseCapacity is new in contract-b/4.0 (added — §22, B24). A published
+	// limit in §3.3 was exceeded and the relay is SHEDDING THIS CONNECTION
+	// RATHER THAN THE MAP: no other peer's traffic changes, no lane closes and
+	// no migration is dropped in flight. The close reason names WHICH limit and
+	// its value, because a peer that is told only "capacity" cannot be rebuilt to
+	// fit. A client that takes two of these in a row MUST hold at
+	// relayBackoffMaxMs until an operator or a configuration change intervenes.
+	CloseCapacity = 4007
 )
 
 // The three refusal axes of §6.5's `lastRefusal` (amended — §22, B24, B25). The
@@ -82,7 +90,10 @@ const (
 	// RefusalContractVersion is B25's floor. The string carries BOTH versions so
 	// the remedy is legible without a second lookup.
 	RefusalContractVersion = "contract_version_below_minimum"
-	// RefusalCapacity is B24's, and B24 is WP4: nothing writes it yet.
+	// RefusalCapacity is B24's, and the string that follows it names the §3.3
+	// limit that fired and the value it was measured against — "capacity:
+	// maxFramesPerSecond 50 exceeded (peak 412/s)". A peer told only that it hit
+	// "capacity" cannot be rebuilt to fit one.
 	RefusalCapacity = "capacity"
 )
 
@@ -178,6 +189,11 @@ const (
 	GrantRoleHasNoSlot       = "role_has_no_slot"
 	GrantProtocolMismatch    = "protocol_mismatch"
 	GrantVersionIncompatible = "version_incompatible"
+	// GrantRateLimited is B24's one refusal that is NOT a close: this peer is
+	// over maxClaimsPerMinute (§3.3), the claim is refused and the connection
+	// stays up. A claim storm is usually a peer whose measured time scale is
+	// wandering, and a refusal it can read beats a close it must recover from.
+	GrantRateLimited = "rate_limited"
 )
 
 // Skip reasons for SECTOR_GRANT.neighbours.<edge>.skipped[] (§6.4). These are
@@ -393,12 +409,14 @@ type HandshakeAck struct {
 	// needs it, and an operator surface can say which peers are one release from
 	// being refused.
 	MinContractVersion string `json:"minContractVersion,omitempty"`
-	// Limits is B24's published capacity table, and B24 is WP4. The field is
-	// declared so the SHAPE is settled — §6.2 makes it REQUIRED and it is
-	// deliberately omitted while the table does not exist, because publishing an
-	// empty object would claim a relay running with no ceilings rather than a
-	// relay that has not shipped them yet. WP4 fills it, and every reader here
-	// already treats absence as unknown.
+	// Limits is B24's published capacity table (§3.3), and it is REQUIRED: the
+	// values THIS RELAY IS RUNNING WITH, never the shipped defaults. A peer reads
+	// it at connect and MUST respect it; a peer that cannot is a peer that will
+	// be shed with 4007. It is the relay's own configuration, so it is
+	// authoritative and it changes only when the relay restarts.
+	//
+	// omitempty survives for one reader only — a peer talking to a relay that
+	// predates B24 — and absence there reads as UNKNOWN, never as "no ceilings".
 	Limits map[string]int64 `json:"limits,omitempty"`
 }
 
@@ -753,9 +771,11 @@ type PeerStatus struct {
 	// than a policy they must be told (added — §22, B25). Absent means no
 	// minimum.
 	MinContractVersion string `json:"minContractVersion,omitempty"`
-	// Limits is B24's table, republished on every broadcast so a page can render
-	// each peer's behaviour against the ceilings it is measured on. B24 is WP4;
-	// see HandshakeAck.Limits for why the shape is here and the value is not.
+	// Limits is B24's table, republished on every broadcast for two reasons: a
+	// page fed only by broadcasts can render each peer's behaviour against the
+	// ceilings it is measured on, and a peer whose relay was reconfigured under
+	// it learns the new values without reconnecting. It is BESIDE the stats
+	// blocks and never inside one — §6.3.1 is peer-authored end to end.
 	Limits map[string]int64 `json:"limits,omitempty"`
 }
 

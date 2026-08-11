@@ -55,6 +55,10 @@ type credRelay struct {
 type credRelayOptions struct {
 	minContractVersion string
 	dataDir            string
+	// limits is §3.3's capacity table (§22, B24). A test that wants to prove a
+	// ceiling sets it far below the shipped default, because the shipped one is
+	// sized for a migration burst and a test must not have to produce one.
+	limits contractb.Limits
 	// statsBroadcast is §6.5's timer, which republishes PEER_STATUS BECAUSE
 	// STATS CHANGE WITHOUT THE REGISTRY CHANGING. A test that has to prove a
 	// peer observed NOTHING sets it out of reach, so that any frame arriving in
@@ -86,6 +90,7 @@ func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
 		DataDir:            dir,
 		Credentials:        store,
 		MinContractVersion: opts.minContractVersion,
+		Limits:             opts.limits,
 		PingInterval:       time.Second,
 		PeerTimeout:        30 * time.Second,
 		StatusCoalesce:     10 * time.Millisecond,

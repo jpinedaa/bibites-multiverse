@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // FetchStatus reads one Status from an archive's HTTP endpoint.
@@ -198,7 +199,11 @@ func renderCensus(w io.Writer, s Status) {
 		}
 		parts := make([]string, 0, len(v.Species))
 		for _, e := range v.Species {
-			part := fmt.Sprintf("%s ×%d", e.GenericName+" "+e.SpecificName, e.Bibites)
+			// NO NAME IS REPAIRED and every name is SANITIZED, and the two are
+			// different obligations: the raw spelling the owning world holds is
+			// what is printed, doubled spaces and all (contract-a.md §17, A36),
+			// with anything a terminal would execute replaced (§22, B30).
+			part := fmt.Sprintf("%s ×%d", safeTerm(e.GenericName+" "+e.SpecificName), e.Bibites)
 			if e.Eggs > 0 {
 				part += fmt.Sprintf("+%degg", e.Eggs)
 			}
@@ -259,7 +264,13 @@ func RenderSettings(w io.Writer, s Status) {
 			// absence: the exclusion policy is switched off.
 			fmt.Fprintf(w, "%-5d none — the exclusion policy is off\n", v.Slot)
 		default:
-			fmt.Fprintf(w, "%-5d %s\n", v.Slot, strings.Join(v.MigrationExclude, ", "))
+			// migrationExclude is another attacker-choosable string array on
+			// §10.1's inventory, on the same rendering surface (§22, B30).
+			names := make([]string, 0, len(v.MigrationExclude))
+			for _, n := range v.MigrationExclude {
+				names = append(names, safeTerm(n))
+			}
+			fmt.Fprintf(w, "%-5d %s\n", v.Slot, strings.Join(names, ", "))
 		}
 	}
 	fmt.Fprintf(w, "\na '?' is a world that has not published that setting — an older mod, or an\n"+
@@ -424,11 +435,14 @@ func aliveSpecies(s Status) (rows []SpeciesRow, reporting, censusless, truncated
 	return rows, reporting, censusless, truncated
 }
 
+// str prints an optional string, sanitized: modVersion, contractAVersion and
+// gameVersion are all attacker-chosen free text on §10.1's inventory, and a
+// version string is exactly the field nobody thinks to escape.
 func str(v string) string {
 	if v == "" {
 		return "?"
 	}
-	return v
+	return safeTerm(v)
 }
 
 func optShortInt(v *int) string {
@@ -532,9 +546,67 @@ func dur(ms int64) string {
 	}
 }
 
+// trunc fits a string to a column, AFTER sanitizing it. Every caller of trunc
+// is printing somebody else's chosen text, so the sanitizer belongs here rather
+// than at each call site: a new column added next year gets it for free, and
+// forgetting it is not one of the available mistakes.
 func trunc(s string, n int) string {
+	s = safeTerm(s)
 	if len(s) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	cut := n - 1
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+// safeTerm is B30's escaping obligation for THE TERMINAL, which §22 binds
+// identically to the page: "escape for the surface rendered into — HTML, an
+// HTML attribute, a URL, JSON in a script, TERMINAL ESCAPE SEQUENCES — and
+// never render one as markup. ringstat's terminal is a rendering surface with
+// its own injection story."
+//
+// A terminal's markup is the control character. A species name of up to 64
+// bytes is attacker-chosen text (§10.1's inventory), and a name carrying ESC
+// can move the cursor, repaint the screen, retitle the window or — on some
+// terminals — put text into the user's input buffer. So every C0 control, DEL,
+// every C1 control and every byte that is not valid UTF-8 becomes U+FFFD.
+//
+// IT REPLACES RATHER THAN DROPS, on purpose: a dropped byte makes two different
+// names print identically, and an operator comparing a page against a terminal
+// has to be able to see that something was there.
+func safeTerm(s string) string {
+	if s == "" {
+		return s
+	}
+	safe := true
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError {
+			safe = false
+			break
+		}
+	}
+	if safe && utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i, r := range s {
+		if r == utf8.RuneError {
+			// Either a real U+FFFD or an invalid byte; both render as the same
+			// mark, which is the honest answer for a byte nothing can display.
+			_, size := utf8.DecodeRuneInString(s[i:])
+			_ = size
+			b.WriteRune('�')
+			continue
+		}
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			b.WriteRune('�')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

@@ -31,8 +31,21 @@ import (
 // probe.
 func (a *Archive) httpHandler() http.Handler {
 	mux := http.NewServeMux()
+	// DQ7's deny list is applied HERE, at the serving boundary, and on every one
+	// of these four endpoints (§22, B30). Two properties come out of the
+	// placement and neither is incidental:
+	//
+	//	THE PAGE AND ringstat CANNOT DISAGREE. They render the same JSON, so a
+	//	name suppressed for one is suppressed for the other by construction
+	//	rather than by two lists kept in step.
+	//
+	//	THE RECORD IS UNTOUCHED. StatusView's own value is what MetricsLog
+	//	serializes and the ledger already holds what crossed. Suppression is a
+	//	fact about the view, and D11's never-evict rule is not bent by it: M5
+	//	promises removal from the view and explicitly does not promise removal
+	//	from the record.
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		view := a.StatusView()
+		view := a.deny.ApplyStatus(a.StatusView())
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		enc := json.NewEncoder(w)
@@ -45,7 +58,7 @@ func (a *Archive) httpHandler() http.Handler {
 	// hung off it would be written to disk forever, beside a ledger that already
 	// holds every one of those hops. See hops.go.
 	mux.HandleFunc("/api/hops", func(w http.ResponseWriter, r *http.Request) {
-		feed := a.HopFeedView()
+		feed := a.deny.ApplyHopFeed(a.HopFeedView())
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(feed)
@@ -63,7 +76,7 @@ func (a *Archive) httpHandler() http.Handler {
 	// place is what stops the terminal tool and the page disagreeing about which
 	// species are endemic.
 	mux.HandleFunc("/api/species", func(w http.ResponseWriter, r *http.Request) {
-		view := a.SpeciesIndexView()
+		view := a.deny.ApplySpeciesIndex(a.SpeciesIndexView())
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(view)
@@ -83,7 +96,7 @@ func (a *Archive) httpHandler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(h)
+		_ = json.NewEncoder(w).Encode(a.deny.ApplySpeciesHistory(h))
 	})
 	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
 		window, buckets := historyParams(r)

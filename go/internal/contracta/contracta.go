@@ -44,6 +44,17 @@ const (
 	CloseHeartbeatTimeout     = 4004
 	CloseShuttingDown         = 4005
 	CloseReplaced             = 4006
+	// CloseExportEdgesUnusable is EXPORT_EDGES_UNUSABLE (added — §21, A50): NO
+	// EDGE OF THE DECLARED exportEdges LIES ON AN AXIS THIS MAP HAS, on a map
+	// that has at least one axis. It is a configuration error on THIS machine —
+	// not a map state, not a peer's fault — and the mod MUST NOT reconnect
+	// automatically, because reconnecting would re-read the same environment
+	// variable and reach the same answer.
+	//
+	// The reason string names the declared set and the map's shape; the
+	// sidecar's log names the remedy AND WHO MUST ACT, which is the one thing a
+	// close code cannot say.
+	CloseExportEdgesUnusable = 4007
 )
 
 // MIGRATE_OUT_NACK codes (contract-a.md §9.1).
@@ -653,6 +664,25 @@ type ParentBlob struct {
 	EntityID    *int32 `json:"entityId"`
 	Payload     string `json:"payload,omitempty"`
 	GameVersion string `json:"gameVersion,omitempty"`
+	// BlobDroppedForSize says THIS PARENT HAD A BLOB AND THE MOD DROPPED IT TO
+	// FIT THE FRAME (added — §21, A49). It is the field that finally makes
+	// contract-b-m4.md §6.6's "blob_dropped_for_size" reachable, after two
+	// milestones in which it was defined and never emitted: a dropped blob and a
+	// dead parent both arrive as an entityId with no payload, and until now they
+	// were byte for byte the same thing.
+	//
+	// It may be true ONLY on an entry with no Payload, and ONLY for a drop under
+	// §5.3's frame-size rule — never for a dead parent, never for a serialization
+	// failure. "I had it and could not fit it" is a different fact from "I could
+	// not produce it", and a mod that conflated them would put a recoverable
+	// label on a permanent absence.
+	//
+	// It is a PLAIN BOOL and not a pointer, which is a departure from this
+	// package's absence-is-a-value habit and is deliberate. §21 A49 says absence
+	// is "no statement", and no statement and false decide IDENTICALLY: both
+	// record "parent_gone". A pointer here would model a distinction that no
+	// reader is allowed to act on.
+	BlobDroppedForSize bool `json:"blobDroppedForSize,omitempty"`
 }
 
 // Species is the OPTIONAL species-identity block of §16, A30 — the same shape,

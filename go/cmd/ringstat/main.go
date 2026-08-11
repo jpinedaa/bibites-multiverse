@@ -37,18 +37,32 @@ func main() {
 		"print the settings view: what each world was TOLD to do — its mod and protocol "+
 			"versions, its save policy, its wrap and the species it never exports. Read-only: "+
 			"this tool changes nothing, anywhere")
+	// DQ7's deny list (contract-b-m4.md §22, B30). An archive that has one
+	// applies it to the JSON this tool reads, so the ordinary path needs nothing
+	// here. It is a flag because --metrics reads the DURABLE SAMPLE FILE
+	// directly, and that file holds what the archive saw: a terminal rendering
+	// it is a rendering surface with the same obligation and no archive between
+	// it and the text.
+	denyFile := flag.String("deny-list", env("MULTIVERSE_ARCHIVE_DENY_LIST", ""),
+		"file of species names and peer:<peerId> entries this tool refuses to render, one per "+
+			"line. Only needed with --metrics: a running archive applies its own to the JSON "+
+			"served here. It suppresses THE VIEW AND NOT THE RECORD")
 	flag.Parse()
 
+	deny, err := archive.NewDenyList(*denyFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ringstat: --deny-list: %v\n", err)
+		os.Exit(1)
+	}
+
 	for {
-		var (
-			s   archive.Status
-			err error
-		)
+		var s archive.Status
 		if *metrics != "" {
 			s, err = archive.LastSample(*metrics)
 		} else {
 			s, err = archive.FetchStatus(*url, *timeout)
 		}
+		s = deny.ApplyStatus(s)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ringstat: %v\n", err)
 			if *watch <= 0 {
@@ -68,6 +82,7 @@ func main() {
 				var idx *archive.SpeciesIndex
 				if *metrics == "" {
 					if x, ferr := archive.FetchSpecies(*url, *timeout); ferr == nil {
+						x = deny.ApplySpeciesIndex(x)
 						idx = &x
 					} else {
 						fmt.Fprintf(os.Stderr,

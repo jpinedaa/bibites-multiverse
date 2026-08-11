@@ -34,6 +34,12 @@ import (
 func (s *Sidecar) relayLoop() {
 	attempt := 0
 	authFailures := 0
+	// capacitySheds is §3.2's rule for close 4007: A CLIENT THAT TAKES TWO IN A
+	// ROW MUST HOLD AT relayBackoffMaxMs until an operator or a configuration
+	// change intervenes, "because a client that is over a limit will be over it
+	// again in a second" (added — §22, B24). It is the same shape as the 401
+	// ladder one line above, for the same reason: hammering does not fix it.
+	capacitySheds := 0
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -51,8 +57,29 @@ func (s *Sidecar) relayLoop() {
 		default:
 		}
 		switch {
+		case isCapacityShed(err):
+			capacitySheds++
+			authFailures = 0
+			// The relay's close reason NAMES THE LIMIT AND ITS VALUE, so the log
+			// line carries it verbatim rather than paraphrasing: it is the only
+			// place this machine's operator can read what they are over.
+			s.log.Error("contract B: the relay SHED THIS CONNECTION for capacity (close 4007)",
+				"reason", closeReason(err), "consecutiveSheds", capacitySheds,
+				"remedy", "read the limits object on HANDSHAKE_ACK and PEER_STATUS and bring this "+
+					"peer under it, or ask the relay's operator to raise that knob and restart",
+				"whoMustAct", "this machine's operator first; the relay's operator owns the knob "+
+					"(contract-b-m4.md §3.3, §22 B24)")
+			if capacitySheds >= 2 {
+				s.log.Error("contract B: two capacity sheds in a row; holding at the backoff "+
+					"CEILING until something changes",
+					"holdMs", s.cfg.RelayBackoffMax.Milliseconds(),
+					"why", "a client that is over a limit will be over it again in a second, and "+
+						"reconnecting into the same ceiling spends the relay's capacity on the "+
+						"peer that already exceeded it (§3.2)")
+			}
 		case isUnauthorized(err):
 			authFailures++
+			capacitySheds = 0
 			// §3.1 asks the log line to name THE REMEDY AND WHO MUST ACT, because
 			// this is a refusal nobody at this end can clear.
 			s.log.Error("contract B: the relay refused THIS PEER'S CREDENTIAL with HTTP 401",
@@ -66,6 +93,7 @@ func (s *Sidecar) relayLoop() {
 			// which will keep failing, WHICH IS CORRECT. There is no client-side
 			// action that makes an unverifiable certificate safe.
 			authFailures = 0
+			capacitySheds = 0
 			s.log.Error("contract B: the relay's TLS certificate did not verify; NOT CONNECTING",
 				"relay", s.cfg.RelayURL, "err", err,
 				"remedy", "the relay operator renews or fixes the certificate, or this machine's "+
@@ -74,6 +102,7 @@ func (s *Sidecar) relayLoop() {
 					"to ws:// (contract-b-m4.md §22, B23)")
 		default:
 			authFailures = 0
+			capacitySheds = 0
 		}
 		if time.Since(started) >= contractb.StableSession {
 			// §3, contract-a.md §13 A8: the ladder resets only after a session
@@ -82,7 +111,7 @@ func (s *Sidecar) relayLoop() {
 		}
 		attempt++
 		wait := fullJitter(s.cfg.RelayBackoffMin, s.cfg.RelayBackoffMax, attempt)
-		if authFailures >= contractb.AuthFailuresBeforeCeiling {
+		if pinBackoff(authFailures, capacitySheds) {
 			wait = s.cfg.RelayBackoffMax
 		}
 		time.Sleep(wait)
@@ -93,6 +122,35 @@ func (s *Sidecar) relayLoop() {
 // status only in the dial error's text, so the string is the signal available.
 func isUnauthorized(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "401")
+}
+
+// pinBackoff is the two rules that take a reconnect off the ladder and hold it
+// at the ceiling. Both are refusals no amount of redialling clears: a credential
+// nobody at this end can mend (§3.1), and a limit this peer is over and will be
+// over again in a second (§3.2, §22 B24).
+func pinBackoff(authFailures, capacitySheds int) bool {
+	return authFailures >= contractb.AuthFailuresBeforeCeiling ||
+		capacitySheds >= capacityShedsBeforeCeiling
+}
+
+// capacityShedsBeforeCeiling is §3.2's "two 4007s in a row".
+const capacityShedsBeforeCeiling = 2
+
+// isCapacityShed recognises the relay's close 4007 (§3.2, §3.3). It is a CLOSE
+// and not an HTTP status, so unlike the 401 test it can be read exactly.
+func isCapacityShed(err error) bool {
+	return err != nil && websocket.CloseStatus(err) == contractb.CloseCapacity
+}
+
+// closeReason lifts the relay's close reason out of the error, because for a
+// capacity shed that string is the only place the limit and the measurement
+// appear on this machine.
+func closeReason(err error) string {
+	var ce websocket.CloseError
+	if errors.As(err, &ce) {
+		return ce.Reason
+	}
+	return ""
 }
 
 // isCertificateFailure recognises a TLS verification failure, so B23's refusal
@@ -356,6 +414,14 @@ func (s *Sidecar) onSectorGrant(env wire.Envelope) bool {
 	if s.mod != nil && s.mod.handshaked {
 		mismatch = s.slotMismatchLocked(s.mod)
 	}
+	// §21, A50, the map side of the join: whichever input arrives second
+	// triggers the check, and ordinarily that is this grant. refusable is FALSE
+	// here and the reason is the rule that makes the check safe — a change on
+	// the map's side never ends a running session, so what a map change can
+	// produce is the partial-case warning and nothing else.
+	if s.mod != nil {
+		s.checkExportEdgesLocked(s.mod, false)
+	}
 	mod := s.mod
 	position := s.position
 	s.publishEdgesLocked(false)
@@ -451,6 +517,12 @@ func (s *Sidecar) onPeerStatus(env wire.Envelope) bool {
 	}
 	if status.You.Position != nil {
 		s.position = *status.You.Position
+	}
+	// §21, A50: PEER_STATUS is the other frame that moves the map, and a peer
+	// that never claims still learns its shape from here. Never refusable, for
+	// the same reason the grant is not.
+	if s.mod != nil {
+		s.checkExportEdgesLocked(s.mod, false)
 	}
 	s.publishEdgesLocked(false)
 	s.mu.Unlock()

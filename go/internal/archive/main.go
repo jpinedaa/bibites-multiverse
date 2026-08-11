@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,6 +48,21 @@ func runMain(args []string, stderr io.Writer) int {
 		"file whose first line is THE SECRET HALF of this archive's credential, from the join "+
 			"string the relay operator handed over ("+peercred.SecretEnvVar+" is the "+
 			"alternative). Its credential must carry the SUBSCRIBE grant (contract-b-m4.md §5.1)")
+	// §3.3's maxGenomeRequestsPerMinute on the REQUESTING side. B24 moves the
+	// compiled constant into the published table and makes it a knob on every
+	// party that enforces it; the relay publishes the value and the archive
+	// paces itself to it (§10).
+	maxGenomeRPM := fs.Int("max-genome-requests-per-minute",
+		envInt("MULTIVERSE_MAX_GENOME_REQUESTS_PER_MINUTE", 0),
+		"GENOME_REQUESTs this archive will send per answering peer per minute (contract-b-m4.md "+
+			"§3.3, §10). 0 keeps the contract default. It is the limit a public archive is most "+
+			"likely to need to move, and it used to need a rebuild")
+	// DQ7's operator-side render deny list (§22, B30).
+	denyList := fs.String("deny-list", env("MULTIVERSE_ARCHIVE_DENY_LIST", ""),
+		"file of species names and peer:<peerId> entries this archive's PAGE AND JSON refuse to "+
+			"render, one per line, # for a comment. It suppresses THE VIEW AND NOT THE RECORD: "+
+			"the ledger goes on holding what happened, and nothing here evicts from it (D11, §10). "+
+			"The file is re-read in place, so moderating costs an edit and never a restart")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -74,17 +91,27 @@ func runMain(args []string, stderr io.Writer) int {
 	}
 
 	a, err := New(Config{
-		RelayURL:        *relayURL,
-		Secret:          secret,
-		PeerID:          *peerID,
-		DataDir:         *dataDir,
-		Logger:          log,
-		HTTPListen:      *httpListen,
-		MetricsInterval: *metricsInterval,
+		RelayURL:          *relayURL,
+		Secret:            secret,
+		PeerID:            *peerID,
+		DataDir:           *dataDir,
+		Logger:            log,
+		HTTPListen:        *httpListen,
+		MetricsInterval:   *metricsInterval,
+		RequestsPerMinute: *maxGenomeRPM,
+		DenyListFile:      *denyList,
 	})
 	if err != nil {
 		log.Error("archive: startup failed", "err", err)
 		return 1
+	}
+	if *denyList != "" {
+		log.Warn("archive: an operator-side render deny list is loaded",
+			"file", *denyList, "entries", a.deny.Len(),
+			"scope", "the status page, its JSON and ringstat",
+			"note", "this suppresses THE VIEW ONLY. The ledger and the genome store are never "+
+				"evicted from, so removal from the record is NOT promised and must not be "+
+				"promised to anybody (D11, contract-b-m4.md §10, §22 B30)")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -207,6 +234,21 @@ func held(ok bool) string {
 		return "[held]"
 	}
 	return "[MISSING]"
+}
+
+// envInt is the environment half of a §3.3 knob. An unusable value falls back
+// to the flag's own default rather than to zero, so a typo in a service unit
+// cannot silently switch a limit off.
+func envInt(name string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 func env(name, fallback string) string {

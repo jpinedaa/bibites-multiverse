@@ -43,9 +43,26 @@ type Conn struct {
 	reason   string
 }
 
-// New wraps ws and starts its writer goroutine.
+// New wraps ws and starts its writer goroutine, with the shared
+// contract-a.md §10 / contract-b-m4.md §12 frame ceiling.
 func New(ws *websocket.Conn, queue int) *Conn {
-	ws.SetReadLimit(wire.MaxFrameBytes)
+	return NewLimited(ws, queue, wire.MaxFrameBytes)
+}
+
+// NewLimited is New with maxFrameBytes as a KNOB rather than a constant
+// (contract-b-m4.md §3.3, §22 B24). The relay takes its ceiling from its own
+// published limits table; every other caller takes the shared default, because
+// the table is the relay's configuration and not a peer's.
+//
+// Over the limit the library closes the connection with 1009 TOO_BIG, which is
+// what §3.2 asks for and is deliberately NOT 4007: a frame too big is a shape
+// fault with a shape remedy, and a capacity shed is a rate fault with a rate
+// remedy.
+func NewLimited(ws *websocket.Conn, queue int, maxFrameBytes int64) *Conn {
+	if maxFrameBytes <= 0 {
+		maxFrameBytes = wire.MaxFrameBytes
+	}
+	ws.SetReadLimit(maxFrameBytes)
 	c := &Conn{
 		ws:   ws,
 		out:  make(chan []byte, queue),

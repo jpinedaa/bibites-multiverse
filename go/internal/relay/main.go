@@ -64,13 +64,68 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 			"without dropping a session")
 	tlsMin := fs.String("tls-min-version", env("MULTIVERSE_RELAY_TLS_MIN_VERSION", contractb.RelayTLSMinVersion),
 		"lowest TLS version this relay's listener accepts: 1.2 or 1.3 (§12, relayTLSMinVersion)")
+	// ---------------------------------------------------- §3.3's published table
+	//
+	// EVERY LIMIT IS A KNOB AND NONE IS A COMPILED CONSTANT (D20, §22 B24):
+	// "a tunable an operator cannot retune from the metric that measures it is
+	// not a tunable." Each one has a flag AND an environment variable, because
+	// the rig sets one way and a service unit sets the other. What the relay
+	// publishes on HANDSHAKE_ACK and PEER_STATUS is what these end up being,
+	// never the defaults in the contract's table.
+	maxConnPerPeer := fs.Int64("max-connections-per-peer",
+		envInt64("MULTIVERSE_MAX_CONNECTIONS_PER_PEER", contractb.DefaultMaxConnectionsPerPeer),
+		"simultaneous AUTHENTICATED connections per peerId (§3.3). The second is the 4006 overlap "+
+			"during a reconnect; a third is close 4007")
+	maxConnPerAddr := fs.Int64("max-connections-per-address",
+		envInt64("MULTIVERSE_MAX_CONNECTIONS_PER_ADDRESS", contractb.DefaultMaxConnectionsPerAddress),
+		"simultaneous connections per source address before the upgrade is refused with HTTP 429 "+
+			"(§3.3). Deliberately loose: one machine legitimately runs several peers")
+	maxFramesPerSecond := fs.Int64("max-frames-per-second",
+		envInt64("MULTIVERSE_MAX_FRAMES_PER_SECOND", contractb.DefaultMaxFramesPerSecond),
+		"frames of any type, per peer connection (§3.3). Sized for a migration burst, not for a "+
+			"steady rate; over it is close 4007")
+	maxFrameBytes := fs.Int64("max-frame-bytes",
+		envInt64("MULTIVERSE_MAX_FRAME_BYTES", contractb.DefaultMaxFrameBytes),
+		"largest frame this relay will read (§3.3, §12). Over it is close 1009 TOO_BIG and never "+
+			"4007: a frame too big is a shape fault, not a capacity one")
+	maxBytesPerSecond := fs.Int64("max-bytes-per-second",
+		envInt64("MULTIVERSE_MAX_BYTES_PER_SECOND", contractb.DefaultMaxBytesPerSecond),
+		"sustained inbound bytes per peer connection (§3.3). It is what stops "+
+			"--max-frames-per-second being evaded with maximum frames")
+	maxClaimsPerMinute := fs.Int64("max-claims-per-minute",
+		envInt64("MULTIVERSE_MAX_CLAIMS_PER_MINUTE", contractb.DefaultMaxClaimsPerMinute),
+		"SECTOR_CLAIM frames per peer per minute (§3.3). Above it the claim is answered "+
+			"granted:false / rate_limited and THE CONNECTION IS NOT CLOSED")
+	maxGenomeRPM := fs.Int64("max-genome-requests-per-minute",
+		envInt64("MULTIVERSE_MAX_GENOME_REQUESTS_PER_MINUTE", contractb.DefaultMaxGenomeRequestsPerMinute),
+		"GENOME_REQUESTs per requester per answering peer (§3.3, §10). The relay PUBLISHES it; the "+
+			"archive and the answering sidecar enforce it, each with its own flag")
+	maxSubscribers := fs.Int64("max-subscribers",
+		envInt64("MULTIVERSE_MAX_SUBSCRIBERS", contractb.DefaultMaxSubscribers),
+		"connected role:\"archive\" clients (§3.3). It bounds the FAN-OUT COST; B27's subscribe "+
+			"grant is what bounds the trust")
+
+	// ---------------------------------------------------- §7.5's operator acts
 	releaseSlot := fs.Int("release-slot", 0,
 		"release slot n at startup and exit, leaving its position a hole (contract-b-m4.md §7.5)")
 	handover := fs.String("handover-slot", "",
 		"<n>=<newPeerId>: rebind slot n's reservation — number and position — to another peer id, "+
 			"then exit. The old machine keeps its journal (contract-b-m4.md §7.5)")
+	evict := fs.String("evict-peer", "",
+		"<peerId>: close that peer's connection with 4005 and refuse it, then exit (§7.5, §22 B28). "+
+			"IT RELEASES NOTHING — the reservation, the slot and the position all survive — so it is "+
+			"a LIVENESS act and the map treats the peer as dark")
+	evictFor := fs.String("for", "",
+		"with --evict-peer: how long, e.g. 24h. Empty means until lifted; 0 LIFTS an eviction")
+	reason := fs.String("reason", "",
+		"with --release-slot, --handover-slot or --evict-peer: the operator's reason string, "+
+			"recorded on the act's audit line")
+	adminListen := fs.String("admin-listen", env("MULTIVERSE_RELAY_ADMIN_LISTEN", ""),
+		"host:port for B28's AUTHENTICATED ADMIN PATH, empty for none. It is a SEPARATE LISTENER "+
+			"and never the Contract B WebSocket. Loopback unless you also pass TLS; it needs a "+
+			"credential minted with --grant admin and binds nothing without one")
 	yes := fs.Bool("yes", false,
-		"skip the confirmation prompt for --release-slot and --handover-slot")
+		"skip the confirmation prompt for --release-slot, --handover-slot and --evict-peer")
 	var reserveSlots peerList
 	fs.Var(&reserveSlots, "reserve-slot",
 		"<peerId>[@<col>,<row>]: reserve a slot for this peer id at startup and exit; "+
@@ -111,6 +166,17 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		DataDir:            *dataDir,
 		InsecureNoToken:    *insecure,
 		MinContractVersion: *minContract,
+		AdvertiseURL:       joinURL(*advertise, *listen, tlsOn),
+		Limits: contractb.Limits{
+			MaxConnectionsPerPeer:      *maxConnPerPeer,
+			MaxConnectionsPerAddress:   *maxConnPerAddr,
+			MaxFramesPerSecond:         *maxFramesPerSecond,
+			MaxFrameBytes:              *maxFrameBytes,
+			MaxBytesPerSecond:          *maxBytesPerSecond,
+			MaxClaimsPerMinute:         *maxClaimsPerMinute,
+			MaxGenomeRequestsPerMinute: *maxGenomeRPM,
+			MaxSubscribers:             *maxSubscribers,
+		},
 	})
 	if err != nil {
 		log.Error("relay: startup failed", "err", err)
@@ -122,10 +188,13 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		return mintCommand(srv, *mintCredential, *grant, joinURL(*advertise, *listen, tlsOn), stdout, log)
 	}
 	if *releaseSlot > 0 {
-		return releaseCommand(srv, *releaseSlot, *yes, stdout, stderr, log)
+		return releaseCommand(srv, *releaseSlot, *yes, *reason, stdout, stderr, log)
 	}
 	if *handover != "" {
-		return handoverCommand(srv, *handover, *yes, joinURL(*advertise, *listen, tlsOn), stdout, stderr, log)
+		return handoverCommand(srv, *handover, *yes, *reason, joinURL(*advertise, *listen, tlsOn), stdout, stderr, log)
+	}
+	if *evict != "" {
+		return evictCommand(srv, *evict, *evictFor, *yes, *reason, stdout, stderr, log)
 	}
 
 	if len(reserveSlots) > 0 {
@@ -224,10 +293,28 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		"credentials", srv.Credentials().Len(), "credentialStore", srv.Credentials().Path(),
 		"minContractVersion", orNone(srv.MinContractVersion()),
 		"map", srv.MapShape(), "slots", srv.Snapshot(), "relaySessionId", srv.SessionID())
+	// The published table, said once at startup, because a limit an operator
+	// cannot read in their own log is one they will read off a peer's 4007.
+	log.Info("relay: capacity limits, as this relay is running them (contract-b-m4.md §3.3)",
+		"limits", srv.Limits().Published())
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- httpSrv.Serve(ln) }()
+
+	adminSrv, adminErr := startAdminListener(srv, *adminListen, *tlsCert, *tlsKey, *tlsMin, log)
+	if adminErr != nil {
+		log.Error("relay: the admin path could not start", "err", adminErr)
+		_ = ln.Close()
+		return 1
+	}
+	if adminSrv != nil {
+		defer func() {
+			shutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = adminSrv.Shutdown(shutCtx)
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -253,7 +340,7 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 // the peers' own machines and D2 keeps custody local, so a relay that could
 // enumerate them would be a relay that reads journals. §7.5 splits the question
 // instead, and the report says where the other half lives.
-func releaseCommand(srv *Server, slot int, yes bool, stdout, stderr io.Writer, log *slog.Logger) int {
+func releaseCommand(srv *Server, slot int, yes bool, reason string, stdout, stderr io.Writer, log *slog.Logger) int {
 	report, err := srv.consequenceOfRelease(slot)
 	if err != nil {
 		log.Error("relay: release failed", "slot", slot, "err", err)
@@ -264,11 +351,52 @@ func releaseCommand(srv *Server, slot int, yes bool, stdout, stderr io.Writer, l
 		fmt.Fprintln(stdout, "aborted; nothing changed")
 		return 1
 	}
+	peerID := ""
+	if res, ok := srv.ResOfSlot(slot); ok {
+		peerID = res.PeerID
+	}
+	// The same audit line the path writes, because §7.5's acts are the same acts
+	// whichever door they came through (§22, B28).
+	srv.AuditAct(ActReleaseSlot, "console", "n/a (physical access)", reason, slot, peerID, "")
 	if err := srv.ReleaseSlot(slot); err != nil {
 		log.Error("relay: release failed", "slot", slot, "err", err)
 		return 1
 	}
 	log.Info("relay: slot released; the number is retired and will not be reused", "slot", slot)
+	return 0
+}
+
+// evictCommand is §7.5's third act at the console. It is the WEAKER of the two
+// moderation tools by design: suppressing a name at the renderer costs the
+// suppressed world nothing and needs no cooperation, and eviction takes a world
+// off the map (B30, DQ7).
+func evictCommand(srv *Server, peerID, forSpec string, yes bool, reason string,
+	stdout, stderr io.Writer, log *slog.Logger) int {
+	d, lift, err := parseEvictionFor(forSpec)
+	if err != nil {
+		log.Error("relay: bad --for", "spec", forSpec, "err", err)
+		return 1
+	}
+	fmt.Fprint(stdout, srv.consequenceOfEviction(peerID, d, lift))
+	what := fmt.Sprintf("evict %s", peerID)
+	if lift {
+		what = fmt.Sprintf("lift the eviction of %s", peerID)
+	}
+	if !confirm(stdout, stderr, yes, what) {
+		fmt.Fprintln(stdout, "aborted; nothing changed")
+		return 1
+	}
+	until, err := srv.EvictPeer(peerID, d, lift, reason)
+	if err != nil {
+		log.Error("relay: eviction failed", "peer", peerID, "err", err)
+		return 1
+	}
+	if lift {
+		log.Info("relay: eviction lifted", "peer", peerID)
+		return 0
+	}
+	log.Info("relay: peer evicted; nothing was released and its journal stays addressable",
+		"peer", peerID, "until", evictionUntil(until))
 	return 0
 }
 
@@ -310,7 +438,7 @@ func mintCommand(srv *Server, peerID, grant, relayURL string, stdout io.Writer, 
 	return 0
 }
 
-func handoverCommand(srv *Server, spec string, yes bool, relayURL string, stdout, stderr io.Writer, log *slog.Logger) int {
+func handoverCommand(srv *Server, spec string, yes bool, reason, relayURL string, stdout, stderr io.Writer, log *slog.Logger) int {
 	slot, newPeer, err := parseHandover(spec)
 	if err != nil {
 		log.Error("relay: bad --handover-slot", "spec", spec, "err", err)
@@ -326,6 +454,11 @@ func handoverCommand(srv *Server, spec string, yes bool, relayURL string, stdout
 		fmt.Fprintln(stdout, "aborted; nothing changed")
 		return 1
 	}
+	oldPeer := ""
+	if res, ok := srv.ResOfSlot(slot); ok {
+		oldPeer = res.PeerID
+	}
+	srv.AuditAct(ActHandoverSlot, "console", "n/a (physical access)", reason, slot, oldPeer, newPeer)
 	old, now, err := srv.HandoverSlot(slot, newPeer)
 	if err != nil {
 		log.Error("relay: handover failed", "slot", slot, "err", err)
@@ -425,6 +558,130 @@ func (s *Server) consequenceOfHandover(slot int, newPeerID string) (string, erro
 	fmt.Fprintf(&b, "              on the slot. If you do not want that, you want --release-slot\n")
 	s.describeCustodySplitLocked(&b, res)
 	return b.String(), nil
+}
+
+// startAdminListener brings up B28's separate listener, or explains why it did
+// not. Three rules decide, and each of them refuses rather than degrades:
+//
+//	NOTHING BINDS WITHOUT AN ADMIN CREDENTIAL. A listener that can admit nobody
+//	is a listening port with no purpose, and on a hosted relay a port with no
+//	purpose is a port an operator has to explain. It is the same rule
+//	CheckServable applies to the peer wire, one grant along.
+//
+//	OFF LOOPBACK IT MUST BE TLS (B23). The admin path carries the acts that take
+//	a world off the map; it does not get a weaker transport rule than the wire
+//	that carries organisms.
+//
+//	IT IS NEVER THE CONTRACT B LISTENER. A separate net.Listener, a separate
+//	mux, a separate port — so that no frame of §6's catalogue can reach an act
+//	and D1's relay goes on routing frames and doing nothing else.
+func startAdminListener(srv *Server, listen, tlsCert, tlsKey, tlsMin string,
+	log *slog.Logger) (*http.Server, error) {
+	if listen == "" {
+		return nil, nil
+	}
+	admins := 0
+	for _, id := range srv.Credentials().PeerIDs() {
+		if grant, ok := srv.Credentials().GrantOf(id); ok && grant == peercred.GrantAdmin {
+			admins++
+		}
+	}
+	if admins == 0 {
+		log.Warn("relay: --admin-listen was given and NOTHING WAS BOUND, because this relay holds "+
+			"no admin credential and the path could admit nobody",
+			"listen", listen,
+			"remedy", "multiverse-relay --mint-credential <operator-id> --grant admin, then start "+
+				"again (contract-b-m4.md §22, B22, B28)")
+		return nil, nil
+	}
+	tlsOn := tlsCert != "" || tlsKey != ""
+	if !bindIsLoopback(listen) && !tlsOn {
+		return nil, fmt.Errorf(
+			"--admin-listen %s is not loopback and this relay has no TLS pair; B28 requires TLS "+
+				"for an admin path bound anywhere else. Bind 127.0.0.1 and reach it over a tunnel, "+
+				"or pass --tls-cert/--tls-key", listen)
+	}
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		return nil, fmt.Errorf("admin listen %s: %w", listen, err)
+	}
+	scheme := "http"
+	if tlsOn {
+		minVersion, err := TLSMinVersion(tlsMin)
+		if err != nil {
+			_ = ln.Close()
+			return nil, err
+		}
+		reloader, err := NewCertReloader(tlsCert, tlsKey)
+		if err != nil {
+			_ = ln.Close()
+			return nil, err
+		}
+		ln = TLSListener(ln, reloader, minVersion)
+		scheme = "https"
+	}
+	srvHTTP := &http.Server{Handler: srv.AdminHandler(), ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = srvHTTP.Serve(ln) }()
+	log.Warn("relay: the AUTHENTICATED ADMIN PATH is open",
+		"addr", ln.Addr().String(), "scheme", scheme, "adminCredentials", admins,
+		"acts", []string{ActReleaseSlot, ActHandoverSlot, ActEvictPeer},
+		"note", "every act takes TWO calls — the consequence report first, then a confirmation "+
+			"bound to the act and to ring.json's current state — and every act writes one audit "+
+			"line (contract-b-m4.md §7.5, §22 B28)")
+	return srvHTTP, nil
+}
+
+// consequenceOfEviction is §7.5's pre-act report for the third act. It says
+// what an eviction does and — just as loudly — what it does not, because the
+// two escape hatches are told apart by exactly that.
+func (s *Server) consequenceOfEviction(peerID string, d time.Duration, lift bool) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var b strings.Builder
+	if lift {
+		fmt.Fprintf(&b, "\nLIFT the eviction of %s\n", peerID)
+	} else {
+		fmt.Fprintf(&b, "\nEVICT %s\n", peerID)
+	}
+	res, reserved := s.grid.ResOfPeer(peerID)
+	if reserved {
+		s.describeSlotLocked(&b, res)
+	} else {
+		fmt.Fprintf(&b, "  peerId      %s\n", peerID)
+		fmt.Fprintf(&b, "  position    this peer holds no reservation on this map\n")
+	}
+	if lift {
+		fmt.Fprintf(&b, "  after       %s is admitted again from the moment you confirm\n", peerID)
+		fmt.Fprintf(&b, "              nothing about the map changes: an eviction released nothing,\n")
+		fmt.Fprintf(&b, "              so there is nothing to give back\n")
+		return b.String()
+	}
+	when := "until it is lifted"
+	if d > 0 {
+		when = "for " + d.String()
+	}
+	fmt.Fprintf(&b, "  after       %s is closed with 4005 and refused %s\n", peerID, when)
+	fmt.Fprintf(&b, "              IT RELEASES NOTHING: the reservation, the slot number and the\n")
+	fmt.Fprintf(&b, "              position all survive, so its return is an ordinary\n")
+	fmt.Fprintf(&b, "              reason=\"reclaimed\" and its journal stays addressable throughout\n")
+	fmt.Fprintf(&b, "              the map treats it exactly as it treats a dark peer\n")
+	fmt.Fprintf(&b, "              the peer is told what a DRAINING RELAY tells it and nothing else:\n")
+	fmt.Fprintf(&b, "              close 4005, which it cannot tell from a restart except by\n")
+	fmt.Fprintf(&b, "              persistence. That is the contract's shape, not an omission here\n")
+	fmt.Fprintf(&b, "              this eviction lives in THIS RELAY PROCESS and does not survive a restart\n")
+	if reserved {
+		s.describeLaneChangesLocked(&b, res)
+		s.describeCustodySplitLocked(&b, res)
+	}
+	return b.String()
+}
+
+// ResOfSlot is the reservation for one slot, for a console command that has to
+// name the peer an act is about before performing it.
+func (s *Server) ResOfSlot(slot int) (Reservation, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.grid.ResOfSlot(slot)
 }
 
 func (s *Server) describeSlotLocked(b *strings.Builder, res Reservation) {
@@ -530,6 +787,22 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envInt64 is the environment half of every §3.3 knob. An unparsable value
+// falls back to the default rather than to zero: a limit of zero would admit
+// nothing at all, and a typo in a service unit must not be the way a map goes
+// dark.
+func envInt64(name string, fallback int64) int64 {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 func orNone(v string) string {

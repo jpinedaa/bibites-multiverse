@@ -56,8 +56,16 @@ type Options struct {
 	// is the default and the only honest one for a map whose operator has not
 	// decided a floor.
 	MinContractVersion string
-	PingInterval       time.Duration
-	PeerTimeout        time.Duration
+	// Limits is §3.3's capacity table as this relay runs it (added — §22, B24).
+	// Any entry left at zero takes the shipped default; what the relay PUBLISHES
+	// is what it ends up running with, never the table in the contract.
+	Limits contractb.Limits
+	// AdvertiseURL is the relay URL a join string tells a peer to dial. B28's
+	// handover mints a credential over the path, so the answer has to be able to
+	// carry a usable join string rather than half of one.
+	AdvertiseURL string
+	PingInterval time.Duration
+	PeerTimeout  time.Duration
 	// ArchiveQueue is the per-subscriber copy queue (§5.1).
 	ArchiveQueue int
 	// StatusCoalesce is the minimum spacing between PEER_STATUS broadcasts and
@@ -78,12 +86,29 @@ type Server struct {
 	creds           *peercred.Store
 	insecureNoToken bool
 	minContract     string
+	limits          contractb.Limits
+	advertiseURL    string
 	pingInterval    time.Duration
 	peerTimeout     time.Duration
 	archiveQueue    int
 	statusCoalesce  time.Duration
 	statsBroadcast  time.Duration
 	forwardRetain   time.Duration
+
+	// B24's two socket counters. They are outside s.mu deliberately: an upgrade
+	// must not queue behind a PEER_STATUS broadcast, and a connection storm is
+	// exactly when the registry lock is busiest.
+	perAddress *slotCounter
+	perPeer    *slotCounter
+
+	// evictions is B28's admission ban, in memory and per relay process. It is
+	// NOT durable: an eviction is a LIVENESS act and a relay restart already
+	// drops every peer's session, so a ban that survived one would outlive the
+	// state it was reasoning about. The log line says so at the moment it is set.
+	evictions map[string]eviction
+	// adminTokens are B28's single-use confirmation tokens, each bound to an act
+	// AND to the ring state it was reported against.
+	adminTokens map[string]*adminPending
 
 	// sessionID is minted once at process start and constant for the life of it.
 	// It is the scope of the forwarding record: a relay restart is exactly the
@@ -125,6 +150,11 @@ type peerMeta struct {
 	lastRefusal  string
 	stats        *contractb.PeerStats
 	statsAsOfMs  int64
+	// claims is maxClaimsPerMinute's counter, kept HERE rather than on the
+	// connection because §3.3 scopes it per peer: this struct outlives a
+	// reconnect and a per-connection counter would hand a storming peer a fresh
+	// allowance every time it redialled.
+	claims *claimMeter
 }
 
 type peer struct {
@@ -183,6 +213,7 @@ func New(opts Options) (*Server, error) {
 				opts.MinContractVersion, wire.ProtocolB, err)
 		}
 	}
+	opts.Limits.ApplyDefaults()
 	grid, err := LoadGrid(opts.DataDir)
 	if err != nil {
 		return nil, err
@@ -192,6 +223,8 @@ func New(opts Options) (*Server, error) {
 		creds:           opts.Credentials,
 		insecureNoToken: opts.InsecureNoToken,
 		minContract:     opts.MinContractVersion,
+		limits:          opts.Limits,
+		advertiseURL:    opts.AdvertiseURL,
 		pingInterval:    opts.PingInterval,
 		peerTimeout:     opts.PeerTimeout,
 		archiveQueue:    opts.ArchiveQueue,
@@ -206,6 +239,10 @@ func New(opts Options) (*Server, error) {
 		meta:            map[string]*peerMeta{},
 		forwarded:       map[string]time.Time{},
 		inherited:       map[string]bool{},
+		perAddress:      newSlotCounter(),
+		perPeer:         newSlotCounter(),
+		evictions:       map[string]eviction{},
+		adminTokens:     map[string]*adminPending{},
 	}
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.publishLoop() }()
@@ -498,6 +535,26 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	if !s.allowPlainUpgrade(w, r) {
 		return
 	}
+	// B24, maxConnectionsPerAddress, and it is the FIRST limit because it is the
+	// only one that costs nothing to enforce: the relay has the source address
+	// before it has read a header, so the ninth socket from one machine is
+	// refused without a digest, an upgrade or a goroutine. It is the one limit
+	// answered with HTTP 429 rather than a close code, because there is no
+	// WebSocket yet to close (§3.3).
+	src := sourceKey(r)
+	n, ok := s.perAddress.acquire(src, s.limits.MaxConnectionsPerAddress)
+	defer s.perAddress.release(src)
+	if !ok {
+		w.Header().Set("Retry-After", "5")
+		http.Error(w, "too many simultaneous connections from this address",
+			http.StatusTooManyRequests)
+		s.log.Error("relay: refusing an upgrade over maxConnectionsPerAddress",
+			"remote", r.RemoteAddr, "open", n, "maxConnectionsPerAddress", s.limits.MaxConnectionsPerAddress,
+			"status", http.StatusTooManyRequests,
+			"remedy", "raise --max-connections-per-address if one machine legitimately runs this "+
+				"many peers; the rig itself runs five (contract-b-m4.md §3.3)")
+		return
+	}
 	// §3.1: the credential is checked on the HTTP UPGRADE. A missing, malformed
 	// or wrong one gets HTTP 401 with WWW-Authenticate: Bearer and NO upgrade, so
 	// there is no WebSocket and there is no close code — deliberately, because a
@@ -522,6 +579,37 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		}
 		auth = authed{peerID: peerID, grant: grant, checked: true}
 	}
+	// B24, maxConnectionsPerPeer, and it applies EXACTLY when the connection is
+	// authenticated, because §3.3 counts "simultaneous authenticated
+	// connections". Under --insecure-no-token nothing was authenticated and
+	// there is no identity to count against, which is one more thing that flag
+	// switches off and one more reason it binds loopback only.
+	//
+	// The refusal is a close and not a 429: this connection IS a WebSocket by
+	// the time the count is known to matter, and §3.2 gives capacity its own
+	// close code so a client can tell it from a credential failure.
+	if auth.checked {
+		open, within := s.perPeer.acquire(auth.peerID, s.limits.MaxConnectionsPerPeer)
+		defer s.perPeer.release(auth.peerID)
+		if !within {
+			breach := fmt.Sprintf("maxConnectionsPerPeer %d exceeded (%d open for this peerId)",
+				s.limits.MaxConnectionsPerPeer, open)
+			s.log.Error("relay: shedding a connection over maxConnectionsPerPeer",
+				"peer", auth.peerID, "open", open,
+				"maxConnectionsPerPeer", s.limits.MaxConnectionsPerPeer,
+				"remedy", "one peer runs one sidecar; the second connection is the 4006 overlap "+
+					"during a reconnect (contract-b-m4.md §3.3)")
+			s.shedUpgrade(w, r, auth.peerID, breach)
+			return
+		}
+		// B28's eviction, checked at the door for the same reason the credential
+		// is: a peer refused for its admission never reaches the registry, so
+		// nothing on the map moves when it tries.
+		if until, evicted := s.evictedUntil(auth.peerID); evicted {
+			s.closeEvicted(w, r, auth.peerID, until)
+			return
+		}
+	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionDisabled,
 		// This is coder/websocket's ORIGIN check, not a TLS one: a Contract B
@@ -532,11 +620,45 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		s.log.Warn("relay: websocket upgrade failed", "err", err)
 		return
 	}
-	s.handle(r.Context(), wsutil.New(ws, 128), auth)
+	// maxFrameBytes is a knob rather than a constant from B24 onward (§3.3).
+	// Over it the library closes 1009 TOO_BIG, which is what §3.2 asks for.
+	s.handle(r.Context(), wsutil.NewLimited(ws, 128, s.limits.MaxFrameBytes), auth)
+}
+
+// shedUpgrade turns a capacity refusal that is known before the handshake into
+// the close §3.2 defines for it. The upgrade is completed first and closed
+// immediately: a client that was refused with a bare HTTP status would learn
+// "something went wrong", and a client that reads 4007 knows to hold at
+// relayBackoffMaxMs rather than to hammer.
+func (s *Server) shedUpgrade(w http.ResponseWriter, r *http.Request, peerID, breach string) {
+	if peerID != "" {
+		s.mu.Lock()
+		if _, reserved := s.grid.ResOfPeer(peerID); reserved {
+			// §6.5: the capacity axis of lastRefusal, so an operator reading the
+			// map sees WHICH limit shed this peer rather than a slot that merely
+			// went quiet. Only a reserved slot has anywhere to write it.
+			s.metaLocked(peerID).lastRefusal = capacityRefusal(breach)
+			s.dirty = true
+		}
+		s.mu.Unlock()
+	}
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		CompressionMode:    websocket.CompressionDisabled,
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		return
+	}
+	_ = ws.Close(contractb.CloseCapacity, breach)
 }
 
 func (s *Server) handle(ctx context.Context, conn *wsutil.Conn, auth authed) {
-	p, err := s.handshake(ctx, conn, auth)
+	// B24's frame and byte meters live for exactly as long as the connection
+	// they measure, and they start counting at the HANDSHAKE: §3.3 says "frames
+	// of any type", and a peer that could spend its whole allowance before it
+	// identified itself would have found the gap rather than the ceiling.
+	meter := newConnMeter()
+	p, err := s.handshake(ctx, conn, auth, meter)
 	if err != nil {
 		s.log.Warn("relay: handshake failed", "err", err)
 		<-conn.Done()
@@ -561,6 +683,15 @@ func (s *Server) handle(ctx context.Context, conn *wsutil.Conn, auth authed) {
 			<-conn.Done()
 			return
 		}
+		// The count happens BEFORE the dispatch, on the frame's LENGTH and on
+		// nothing inside it. That ordering is what makes the limit countable at
+		// the frame level (D1): a relay that decoded first and counted second
+		// would have paid the decode it is trying to bound.
+		if breach := meter.observe(time.Now(), len(frame), s.limits); breach != "" {
+			s.shedForCapacity(p, breach)
+			<-conn.Done()
+			return
+		}
 		s.touch(p.id)
 		if !s.dispatch(p, frame) {
 			<-conn.Done()
@@ -569,14 +700,43 @@ func (s *Server) handle(ctx context.Context, conn *wsutil.Conn, auth authed) {
 	}
 }
 
+// shedForCapacity is B24's "the relay sheds the connection, never the map".
+// This peer's socket closes with 4007 and its slot's lastRefusal names the
+// limit; every other peer's traffic is untouched, no lane closes, and nothing
+// in flight is dropped. Its neighbours route around it exactly as they route
+// around any dark peer (§8).
+func (s *Server) shedForCapacity(p *peer, breach string) {
+	s.mu.Lock()
+	if p.role == contractb.RolePeer {
+		s.metaLocked(p.id).lastRefusal = capacityRefusal(breach)
+		s.dirty = true
+	}
+	s.mu.Unlock()
+	s.log.Error("relay: shedding a connection over a published capacity limit",
+		"peer", p.id, "role", p.role, "breach", breach,
+		"remedy", "the peer's own operator slows this connection down, or this relay's operator "+
+			"raises the limit and restarts; the published limits object on HANDSHAKE_ACK and "+
+			"PEER_STATUS is what a peer must be built against (contract-b-m4.md §3.3, §22 B24)")
+	p.conn.Close(contractb.CloseCapacity, breach)
+}
+
 // handshake reads the mandatory first frame and registers the client.
-func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed) (*peer, error) {
+func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, meter *connMeter) (*peer, error) {
 	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	frame, err := conn.Read(readCtx)
 	if err != nil {
 		conn.Close(contractb.CloseMalformedFrame, "no HANDSHAKE")
 		return nil, err
+	}
+	if breach := meter.observe(time.Now(), len(frame), s.limits); breach != "" {
+		// A single frame can only break the BYTE rate, and only when the
+		// operator set maxBytesPerSecond below maxFrameBytes. It is still a
+		// capacity shed and it still says which limit fired.
+		s.log.Error("relay: shedding a connection over a published capacity limit at the handshake",
+			"credentialPeer", auth.peerID, "breach", breach)
+		conn.Close(contractb.CloseCapacity, breach)
+		return nil, errors.New("relay: " + breach)
 	}
 	env, err := wire.Decode(frame)
 	if err != nil {
@@ -703,6 +863,38 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed) 
 		}
 	}
 
+	// B28's eviction again, for the one path that could not check it at the
+	// door: under --insecure-no-token nothing was authenticated, so the peerId
+	// is not known until this frame. An evicted peer gets 4005 here too.
+	if !auth.checked {
+		if until, evicted := s.evictionLocked(p.id); evicted {
+			s.mu.Unlock()
+			s.log.Warn("relay: refusing an evicted peer", "peer", p.id, "until", evictionUntil(until))
+			conn.Close(contractb.CloseShuttingDown, "this relay is not accepting this peer")
+			return nil, errors.New("relay: peer is evicted")
+		}
+	}
+
+	// B24, maxSubscribers: it bounds the FAN-OUT COST of §5.1's copy queues, and
+	// B27's grant is what bounds the trust. A subscriber already in the registry
+	// is REPLACING ITSELF (§6.1) and is not a new one, so a flapping archive
+	// never eats its own ceiling.
+	if p.role == contractb.RoleArchive {
+		if _, already := s.subscribers[p.id]; !already &&
+			int64(len(s.subscribers)) >= s.limits.MaxSubscribers {
+			open := len(s.subscribers)
+			s.mu.Unlock()
+			breach := fmt.Sprintf("maxSubscribers %d exceeded (%d already connected)",
+				s.limits.MaxSubscribers, open)
+			s.log.Error("relay: shedding a subscriber over maxSubscribers",
+				"peer", p.id, "open", open, "maxSubscribers", s.limits.MaxSubscribers,
+				"remedy", "raise --max-subscribers, or stop an archive that is no longer read; "+
+					"each subscriber costs one archiveQueueMax copy queue (contract-b-m4.md §3.3)")
+			conn.Close(contractb.CloseCapacity, breach)
+			return nil, errors.New("relay: " + breach)
+		}
+	}
+
 	registry := s.peers
 	if p.role == contractb.RoleArchive {
 		registry = s.subscribers
@@ -743,6 +935,11 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed) 
 		// B25: published at connect so a peer can say what it will need BEFORE it
 		// needs it. Absent is no minimum.
 		MinContractVersion: s.minContract,
+		// B24: the FIRST thing on this wire the relay tells a peer about the
+		// relay, and it is here rather than on a later frame because a peer that
+		// learns its ceilings after it has already exceeded them learns them from
+		// a 4007. What is published is what this relay is RUNNING with.
+		Limits: s.limits.Published(),
 	}
 	if p.role == contractb.RolePeer {
 		if res, ok := s.grid.ResOfPeer(p.id); ok {
@@ -794,6 +991,20 @@ func (s *Server) metaLocked(peerID string) *peerMeta {
 	}
 	return m
 }
+
+// claimMeterLocked is maxClaimsPerMinute's per-peer counter, created on first
+// use so a relay that has never seen a peer carries no counter for it.
+func (s *Server) claimMeterLocked(peerID string) *claimMeter {
+	m := s.metaLocked(peerID)
+	if m.claims == nil {
+		m.claims = newClaimMeter()
+	}
+	return m.claims
+}
+
+// Limits is §3.3's table as this relay is running it, for the operator console
+// and for a test that has to assert what was published.
+func (s *Server) Limits() contractb.Limits { return s.limits }
 
 func (s *Server) touch(peerID string) {
 	s.mu.Lock()
@@ -887,6 +1098,29 @@ func (s *Server) onSectorClaim(p *peer, env wire.Envelope) bool {
 	}
 
 	s.mu.Lock()
+	// B24, maxClaimsPerMinute, and it is the ONE limit in §3.3 that does not
+	// close: the claim is answered granted:false / rate_limited and the
+	// connection stays up. A claim storm is usually a peer whose measured time
+	// scale is wandering — DQ3 counted 64 claims from one slot in a day — and a
+	// refusal that peer can read beats a close it must recover from.
+	//
+	// It is checked before placement, because the point is to stop the registry
+	// work, not to do it and then complain.
+	if breach := s.claimMeterLocked(p.id).observe(time.Now(), s.limits); breach != "" {
+		s.metaLocked(p.id).lastRefusal = capacityRefusal(breach)
+		grant := contractb.SectorGrant{
+			Granted: false, Map: s.grid.Shape(), SlotCount: s.grid.Size(),
+			Reason: contractb.GrantRateLimited}
+		s.dirty = true
+		s.mu.Unlock()
+		s.log.Warn("relay: refusing a claim over maxClaimsPerMinute; the connection stays up",
+			"peer", p.id, "breach", breach,
+			"remedy", "a claim storm is usually a wandering time scale on that world, not abuse; "+
+				"read its stats block before raising --max-claims-per-minute "+
+				"(contract-b-m4.md §3.3, §6.4)")
+		s.answerClaim(p, grant)
+		return true
+	}
 	// §7.2 rule 8: a peer whose gameVersion disagrees with the map's is refused.
 	// This is the ordinary path for the check, because a sidecar usually
 	// connects before its mod and only learns a version here.
@@ -1227,6 +1461,10 @@ func (s *Server) broadcastPeerStatus() {
 	observers := len(s.subscribers)
 	shape := s.grid.Shape()
 	count := s.grid.Size()
+	// One object, built once and shared by every frame of this broadcast: the
+	// table is the relay's own configuration and cannot differ between two
+	// clients of the same relay.
+	limits := s.limits.Published()
 
 	type target struct {
 		p  *peer
@@ -1284,6 +1522,10 @@ func (s *Server) broadcastPeerStatus() {
 			// and in nothing else, which is what makes B27's boundary describable in
 			// one sentence: a subscriber gets nothing a peer does not already get.
 			MinContractVersion: s.minContract,
+			// B24: republished on every broadcast, so a page fed only by broadcasts
+			// can render each peer's behaviour against the ceilings it is measured
+			// on. BESIDE the stats blocks, never inside one (§6.3.1).
+			Limits: limits,
 		})
 	}
 }

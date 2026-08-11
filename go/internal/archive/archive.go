@@ -109,6 +109,11 @@ type Config struct {
 	// MetricsInterval is how often a PEER_STATUS sample is appended to
 	// <data-dir>/metrics.jsonl, so history survives everything (WP3, WP5).
 	MetricsInterval time.Duration
+	// DenyListFile is DQ7's operator-side render deny list (§22, B30): a file of
+	// species names and peer ids whose text this archive's surfaces refuse to
+	// render. Empty for none, which is every archive that has never needed one.
+	// It suppresses THE VIEW AND NEVER THE RECORD — see denylist.go.
+	DenyListFile string
 }
 
 func (c *Config) applyDefaults() {
@@ -195,6 +200,10 @@ type Archive struct {
 	httpLn  net.Listener
 	httpSrv *http.Server
 	metrics *MetricsLog
+	// deny is DQ7's render deny list (§22, B30). It sits on the SERVING side of
+	// this struct and nowhere near the ledger: suppression is a fact about the
+	// view, and the record goes on holding what happened.
+	deny *DenyList
 
 	mu        sync.Mutex
 	conn      *wsutil.Conn
@@ -287,12 +296,17 @@ func New(cfg Config) (*Archive, error) {
 	if err != nil {
 		return nil, err
 	}
+	deny, err := NewDenyList(cfg.DenyListFile)
+	if err != nil {
+		return nil, err
+	}
 	a := &Archive{
 		cfg:         cfg,
 		log:         cfg.Logger.With("archive", cfg.PeerID),
 		ledger:      ledger,
 		genomes:     genomes,
 		metrics:     metrics,
+		deny:        deny,
 		lanes:       map[lanePair]*lane{},
 		simRates:    map[int]*achievedRate{},
 		seen:        map[string]bool{},

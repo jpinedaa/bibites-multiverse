@@ -65,6 +65,12 @@ type modSession struct {
 	// that world's save state as unknown.
 	lastSave *contracta.SaveReceipt
 
+	// warnedEdges is A50's "once per session" bookkeeping for the PARTIAL case,
+	// keyed on edge and map shape. It exists so a world on a w×1 map says its
+	// north edge will stay closed once, rather than on every broadcast for the
+	// life of the session.
+	warnedEdges map[string]bool
+
 	// census is the species census the LAST HEARTBEAT carried, after §5.2's
 	// strip table, and censusTruncated is that heartbeat's flag after the
 	// monotonic OR (§17, A35; contract-b-m4.md §16 B11).
@@ -399,6 +405,18 @@ func (s *Sidecar) onConfigUpdate(sess *modSession, env wire.Envelope) bool {
 	if mismatch := s.slotMismatchLocked(sess); mismatch != "" {
 		s.mu.Unlock()
 		sess.conn.Close(contracta.CloseSlotMismatch, mismatch)
+		return false
+	}
+
+	// §21, A50: the declared export set against the map, at the join of the two
+	// inputs. THIS IS A CONFIG_UPDATE, so it is the one frame that may be
+	// refused — and the check re-runs on every later CONFIG_UPDATE too, because
+	// a handshake that changes exportEdges is a new declaration.
+	if reason := s.checkExportEdgesLocked(sess, true); reason != "" {
+		declared := append([]string(nil), sess.exportEdges...)
+		shape := s.mapShape
+		s.mu.Unlock()
+		s.refuseExportEdges(sess, reason, declared, shape)
 		return false
 	}
 
@@ -765,12 +783,32 @@ func (s *Sidecar) buildAnnex(out contracta.MigrateOut) (string, []journal.Parent
 		}
 		ref := journal.ParentRef{EntityID: *p.EntityID}
 		if p.Payload == "" {
-			// The usual case: BibiteGenes drops the parentage once the parent
-			// GameObject is gone. A blob the mod dropped for frame size arrives
-			// the same way and is indistinguishable from here.
+			// §21, A49: THE TWO BLOBLESS CASES ARE FINALLY DIFFERENT FACTS. A dead
+			// parent — BibiteGenes drops the parentage once the GameObject is gone
+			// — and a blob the mod dropped to fit the frame arrive identically on
+			// this wire, and until contract-a/2.4 both were recorded
+			// "parent_gone". The flag is the whole distinction, and it is the
+			// difference between "ask the machine that sent this, it had the
+			// genome" and "nobody has this genome and nobody ever will".
+			//
+			// ABSENCE IS NOT false-WITH-CONFIDENCE. Every contract-a/2.3 mod says
+			// nothing about every entry, and that reads as the "parent_gone" this
+			// sidecar has always recorded.
 			ref.GapReason = contractb.GapParentGone
+			if p.BlobDroppedForSize {
+				ref.GapReason = contractb.GapBlobDroppedForSize
+			}
 			refs = append(refs, ref)
 			continue
+		}
+		if p.BlobDroppedForSize {
+			// §21, A49: the flag may appear ONLY on an entry with no payload. A
+			// true beside a present blob is a mod defect — one warning, and the
+			// entry is treated as the ordinary blob-bearing parent it is, BECAUSE
+			// THE BLOB IS THE FACT AND THE FLAG IS THE LABEL.
+			s.log.Warn("contract A: a parent entry carries blobDroppedForSize beside a payload, "+
+				"which is a mod defect; hashing the blob and ignoring the label",
+				"migrationId", out.MigrationID, "parentEntityId", *p.EntityID)
 		}
 		version := p.GameVersion
 		if version == "" {

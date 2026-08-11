@@ -108,6 +108,16 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"how often the journal is rewritten to its live entries (contract-b-m4.md §12, "+
 			"journalCompactMinutes). 0 keeps the 15-minute default. Raise it on a rig with "+
 			"disk to spare; lower it on one without")
+	// maxGenomeRPM is §3.3's maxGenomeRequestsPerMinute on the ANSWERING side.
+	// It shipped as the compiled constant contractb.GenomeRequestsPerMinute,
+	// which is the worked example D20's knob rule was written about, and B24
+	// moves it into the published table and makes it a knob on every party that
+	// enforces it. The relay PUBLISHES the value; this side enforces it.
+	maxGenomeRPM := fs.Int("max-genome-requests-per-minute",
+		envInt("MULTIVERSE_MAX_GENOME_REQUESTS_PER_MINUTE", 0),
+		"GENOME_REQUESTs this sidecar will answer per requester per minute (contract-b-m4.md "+
+			"§3.3, §10). 0 keeps the contract default. Read the relay's published limits object "+
+			"before moving it: a peer answering below the published ceiling looks broken")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -180,6 +190,14 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	}
 	if *journalCompact > 0 {
 		cfg.JournalCompactInterval = time.Duration(*journalCompact) * time.Minute
+	}
+	if *maxGenomeRPM > 0 {
+		cfg.GenomeRequestsPerMinute = *maxGenomeRPM
+		logger.Info("sidecar: maxGenomeRequestsPerMinute overridden on the answering side",
+			"maxGenomeRequestsPerMinute", *maxGenomeRPM,
+			"default", DefaultConfig().GenomeRequestsPerMinute,
+			"note", "the relay publishes the map's value on HANDSHAKE_ACK.limits; this is what "+
+				"THIS peer will answer (contract-b-m4.md §3.3)")
 	}
 	if *inboundBurst > 0 {
 		cfg.InboundRateBurst = *inboundBurst
