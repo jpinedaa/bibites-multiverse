@@ -35,6 +35,17 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E="$(cd "$HERE/.." && pwd)"
 ROOT="$(cd "$E2E/.." && pwd)"
 
+# RELAY_BIN MUST BE A contract-b/4.0 RELAY, AND THE DEFAULT USUALLY IS NOT ONE AT
+# THE MOMENT THIS RUNS. At RUNBOOK P0.5 the crossing has not renamed anything yet
+# (that is P3), so $ROOT/bin/relay is still the OLD binary, which has no
+# --mint-credential, no --grant and no --advertise-url. Point this at the crossing
+# build instead:
+#
+#     RELAY_BIN=/mnt/wsl/data/crossing-build/relay e2e/crossing/mint-credentials.sh
+#
+# The default is kept as bin/relay because that is correct everywhere else — after
+# the crossing, and on any rig that is already at 4.0. The capability check below
+# is what makes the wrong one loud instead of silent.
 RELAY_BIN="${RELAY_BIN:-$ROOT/bin/relay}"
 RELAY_DATA="${RELAY_DATA:-$E2E/relay-data-m4-lan}"
 SECRETS_DIR="${SECRETS_DIR:-$HOME/.multiverse}"
@@ -71,6 +82,22 @@ die()  { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
 
 [ -x "$RELAY_BIN" ] || die "no relay binary at $RELAY_BIN"
 [ -d "$RELAY_DATA" ] || die "no relay data dir at $RELAY_DATA"
+
+# A PRE-4.0 RELAY FAILS EVERY MINT SILENTLY, so refuse before writing anything.
+# Measured in the 2026-08-11 window: every mint against the old binary died with
+# `flag provided but not defined: -advertise-url`, capture() discards stderr, and
+# the only symptom was seven "no join string was printed" warnings and an empty
+# peers.json. One --help probe turns that into one sentence.
+if ! "$RELAY_BIN" --help 2>&1 | grep -q -- '-mint-credential'; then
+  die "$RELAY_BIN does not understand --mint-credential, so it is a pre-4.0 relay.
+     Every mint would fail with 'flag provided but not defined' and this script
+     would report seven missing join strings instead.
+
+     At RUNBOOK P0.5, bin/relay is still the OLD binary — P3 is what renames the
+     new one over it. Point RELAY_BIN at the crossing build:
+
+         RELAY_BIN=/mnt/wsl/data/crossing-build/relay $0 ${1:-}"
+fi
 
 peer_secret_file() { printf '%s/peer-%s.secret\n' "$SECRETS_DIR" "$1"; }
 sub_secret_file()  { printf '%s/%s.secret\n' "$SECRETS_DIR" "$1"; }

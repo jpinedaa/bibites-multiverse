@@ -5,11 +5,27 @@
 relay, one archive. Everything below is literal and in dependency order, with the observable
 that gates each step and the answer to *what if it fails here*.
 
-Nothing in this directory has been run against the live rig. Every command was rehearsed on
-2026-08-11 against copies — a copy of `ring.json`, a scratch relay on port 18795, scratch data
-dirs — and the rehearsal's evidence is quoted where it settles something. The rig itself was
-untouched: it has been up throughout and `e2e/relay-data-m4-lan/ring.json` is byte-identical to
-what it was on 2026-08-06.
+**This ran. 2026-08-11, `down` 17:12:57Z to `up` 17:20:15Z — 7m18s of map-down, and the map came
+back 5/6 with slot 6 dark as designed.** Every command below was rehearsed first against copies —
+a copy of `ring.json`, a scratch relay on port 18795, scratch data dirs — and the rehearsal's
+evidence is still quoted where it settles something. What the execution *measured* is marked
+**AS EXECUTED** at the step that measured it, and two gates below were **wrong and are corrected**
+(P0.5's binary, P4's `grep`). Read this as the record of a window that happened and as the
+template for the next major, in that order.
+
+### As executed, 2026-08-11
+
+| | |
+|---|---|
+| Map down | **7m18s** — `down` 17:12:57Z, `up` returned 17:20:15Z |
+| The new relay | up **17:17:10Z**: `scheme=wss path=/contract-b/v4 retiredPaths=[/contract-b/v2 /contract-b/v3] credentials=7 minContractVersion=<none>` |
+| The archive | replay **128 s** at 6.24 M records (§9 estimated ~150 s); re-subscribed **17:19:19.040Z**, first sidecar granted **880 ms** later |
+| The ledger gap | **ZERO crossings.** Restarting the archive inside a full outage is now proven, not derived |
+| The five sidecars | all `reason=reclaimed`, own coordinates, **zero** discarded journal bytes |
+| The five games | `0.6.4`, `contract-a/2.4`, `timeScale 100` on all five |
+| The custody burst | **did not happen** — peak `custodyDepth` **4**, `pacedDepth` **0**, against the 55/14 §1 budgeted. See §1 |
+| Slot 6 | dark, reservation held, nothing named it in the new relay's log. `holdTimeoutMs` runs from 17:17:10Z |
+| What was wrong | the `down` estimate in §9 (~15 s against 90 s measured, and ~4 min cold), P0.5's default `RELAY_BIN`, P4's gate |
 
 ---
 
@@ -17,20 +33,25 @@ what it was on 2026-08-06.
 
 | | |
 |---|---|
-| **Five local worlds down** | **~5–7 minutes**, once. The phase table in §9 accounts for every second of it. |
+| **Five local worlds down** | **~5–7 minutes**, once; **AS EXECUTED 7m18s**. The phase table in §9 accounts for every second of it — and one of its terms was wrong, which is why the measured window landed at the top of the estimate rather than inside it. |
 | **Slot 6 (the far end) down** | From the moment the new relay starts until **its own operator** applies the new bundle. This machine cannot shorten that and must not try (D9). The bound that matters is **24 hours**: after that, entries this side is holding for slot 6 bounce home by themselves (`holdTimeoutMs`, §9.3), which loses nothing but widens §9.3's accepted duplication case. |
-| **The archive's permanent ledger gap** | **~0 crossings — if the archive is restarted INSIDE the outage, which is what this runbook does.** The archive is down while every sidecar is also down, so there are no crossings to miss. Restart it later, with the map live, and the same ~150 s absence costs roughly **1,600 crossings** that are never in the record. The last measured restart cost **1,940**. That is §5.1 working as designed — the traffic is untouched, only the record has the hole — and it is why the archive is restarted **exactly once** and why that once is here. |
-| **A custody replay burst on the way back** | Measured peak `custodyDepth` 55 and `pacedDepth` 14, draining to base in about four minutes with nothing lost. On this map that rides on top of a resting `custodyDepth` of 24–58 at ×100, so read it as *falling*, not as *zero*. |
-| **BepInEx log history** | Nothing, **if P1's first block is run**. `LogOutput.log` is truncated on launch. Skipping the archive step cost about 33 saves' worth of history on 2026-08-10 and that gap is permanent. |
+| **The archive's permanent ledger gap** | **AS EXECUTED: zero crossings.** The archive re-subscribed at 17:19:19.040Z and the first sidecar was granted 880 ms later, so there was no live map to miss anything from. **~0 crossings — if the archive is restarted INSIDE the outage, which is what this runbook does.** The archive is down while every sidecar is also down, so there are no crossings to miss. Restart it later, with the map live, and the same ~150 s absence costs roughly **1,600 crossings** that are never in the record. The last measured restart cost **1,940**. That is §5.1 working as designed — the traffic is untouched, only the record has the hole — and it is why the archive is restarted **exactly once** and why that once is here. |
+| **A custody replay burst on the way back** | **AS EXECUTED: none. Peak `custodyDepth` 4, `pacedDepth` 0.** The 55/14 this budgeted was measured on a **mod deploy that left the sidecars up**, so they took custody of everything their absent worlds could not accept. A full `down` takes the sidecars too, nothing accumulates anywhere, and each journal replays and flushes when its own mod attaches. **Budget the burst only when the sidecars stay up.** If they do, it drains to base in about four minutes with nothing lost, on top of a resting `custodyDepth` of 24–58 at ×100 — so read it as *falling*, not as *zero*. |
+| **BepInEx log history** | Nothing, **if P1's first block is run**. `LogOutput.log` is truncated on launch. Skipping the archive step cost about 33 saves' worth of history on 2026-08-10 and that gap is permanent. **AS EXECUTED it cost minutes and gigabytes instead**: the logs are archived **three** times in one window — P1 by hand, then again inside `lan_down`, then again inside `lan_up` — which at 6.08 GB of live logs took `e2e/logs-m4-lan/bepinex/` from 3.4 GB to **21 GB** and is most of the §9 underestimate. Retention for that directory is now a watch item in `dev_environment.md`. |
 
 ### The one arithmetic that has moved since it was written down
 
 `dev_environment.md` sizes the archive's replay at **~93 s**, measured 2026-08-10 against
 **3.7 M records / 1.22 GB**. On 2026-08-11 the ledger is **6.24 M records / 2.0 GB**. At the
 same rate that is **~150 s of replay** and ~160 s of archive process downtime. The bring-up's
-own wait was 300 s — barely 2× — and the patch in this directory raises it to 600 s, following
+own wait was 300 s — barely 2× — and the patch in this directory raises it to 600 s, which is
+what `run-m4-lan.sh` has carried since the window, following
 the rule the script already states: *size it from the ledger, and raise it rather than believe
 a timeout here.*
+
+**AS EXECUTED: 128 s**, against the ~150 s derived here — so the scaling rule is sound and
+slightly pessimistic, which is the direction to be wrong in. **Re-derive it, do not reuse it**:
+the number is a rate against a ledger that grows every hour.
 
 ---
 
@@ -73,7 +94,9 @@ document assumes these are settled.
    call and it is one flag on `start_relay`.
 3. **Decide what happens to `~/.multiverse-token`.** Nothing reads it after this window. It is
    mode 600 outside the repo, so leaving it costs nothing and deleting it removes a retired
-   secret. Not a decision this runbook should make.
+   secret. Not a decision this runbook should make. **AS EXECUTED: left in place, undecided** —
+   confirmed unreferenced by any running process, and recorded as retired in
+   `dev_environment.md`.
 4. **Decide whether the status page on `8796` matters this time.** The far end's operator has no
    other view of the map, and the rejoin is the moment they most want one. `ARCHIVE_HTTP=0.0.0.0:8796`
    binds it inside WSL — P5 does that — but the Windows firewall rule and the portproxy for
@@ -113,7 +136,10 @@ document assumes these are settled.
    exists.** So do the `--token-file` invocations under *Driving one component by hand*. They
    are correct until the window and wrong after it, which is why this runbook does not touch
    them — the document records what is running. Updating them is the first act after the
-   crossing lands.
+   crossing lands. **DONE, 2026-08-11**: that section is now *Credentials, TLS, and the retired
+   LAN token*, the hand invocations carry `--credential-file` and `wss://…/contract-b/v4`, the
+   *Versions* and *Layout* rows name the new wire, and the window itself is recorded under *The
+   living deployment*.
 9. **`e2e/run-m3.sh`, `run-m3-lan.sh` and `run-m2.sh` are left alone.** They speak retired
    wires and are the record of runs that happened. `run-m3.sh` keeps `ensure_token` and
    `TOKEN_FILE` because it still needs them; the M4 layer stops calling them.
@@ -161,6 +187,13 @@ ls -la "$HOME/.multiverse-rollback-bin" "$B"
 **Gate:** `$HOME/.multiverse-rollback-bin/{relay,sidecar,archive}` exist, the `0.6.3` DLL copy
 exists, and `ring.json` is in the timestamped backup. These are the whole of the rollback story
 for P2 and P3 and they cost seconds now.
+
+**AS EXECUTED, and one addition the window made: back up `peers.json` too.** P0.5 creates the
+relay's third durable file, so the backup taken here is of `ring.json` only — this window's is
+`~/.multiverse/backup-20260811T170259Z/`, and `peers.json` was copied into it after the mint. **Do
+both in the same directory next time.** The rollback set itself **stays on disk until slot 6 has
+rejoined and the map has run a day on the new wire**: until then the far end is the half of the
+deployment that has not crossed.
 
 `bin/` is gitignored, so a copy of it is not a repository act. The archive's data directory is
 **not** backed up and does not need to be: the ledger is append-only and carries no wire
@@ -216,8 +249,19 @@ machine to run.
 
 ```sh
 cd ~/bibites-multiverse
-ALLOW_LIVE_RELAY=1 e2e/crossing/mint-credentials.sh
+ALLOW_LIVE_RELAY=1 RELAY_BIN=/mnt/wsl/data/crossing-build/relay \
+  e2e/crossing/mint-credentials.sh
 ```
+
+**`RELAY_BIN` is not optional here, and this is the correction the execution made.** Minting is a
+`contract-b/4.0` relay command — `--mint-credential`, `--grant`, `--advertise-url` — and at this
+point in the window **`bin/relay` is still the old binary**: P3 is what renames the new one over
+it. Run it without the knob and every mint dies with `flag provided but not defined`, which the
+script used to swallow: `capture()` discards stderr, so the only symptom was seven *no join string
+was printed* warnings and an empty `peers.json`. **The script now probes the binary and refuses
+with that instruction**, so this cannot fail silently again — but the flag belongs on the command
+line, because P0.3 built the new relay to `/mnt/wsl/data/crossing-build/` precisely so that
+`bin/` could stay untouched until P3.
 
 `ALLOW_LIVE_RELAY=1` is required and is deliberate: the running **`contract-b/3.5`** relay
 never opens `peers.json` and never re-writes `ring.json`, so minting beside it is additive.
@@ -231,7 +275,8 @@ the six live claims, their numbers and their coordinates survive exactly. The pe
 **`slot-1` … `slot-6`**, which is `run-m4.sh`'s `peer_of()`; there is no `peer-lan-*` form on
 this map.
 
-The equivalent by hand, which is what the script runs:
+The equivalent by hand, which is what the script runs — with `bin/relay` standing for whatever
+`RELAY_BIN` names, which before P3 is **not** `bin/relay`:
 
 ```sh
 # the five local peers — the join string names the URL they will dial
@@ -380,11 +425,24 @@ cd ~/bibites-multiverse
 git apply --check -p1 e2e/crossing/contract-b-4.patch && git apply -p1 e2e/crossing/contract-b-4.patch
 git diff --stat
 bash -n e2e/run-m4.sh && bash -n e2e/run-m4-lan.sh && echo "both parse"
+grep -nE '^[^#]*--token-file' e2e/run-m4.sh e2e/run-m4-lan.sh || echo "no live --token-file"
 grep -c token-file e2e/run-m4.sh e2e/run-m4-lan.sh
 ```
 
-**Gate:** `e2e/run-m4.sh | 134 +++…` and `e2e/run-m4-lan.sh | 47 +++…`, both files parse, and
-`grep -c token-file` reports **0** for both.
+**Gate:** `e2e/run-m4.sh | 134 +++…` and `e2e/run-m4-lan.sh | 47 +++…`, both files parse, the
+first `grep` prints **`no live --token-file`**, and the second reports **4** and **0**.
+
+**That gate is corrected, and the old one could not have passed.** It read *`grep -c token-file`
+reports 0 for both*, which the patch itself makes impossible. In `run-m4.sh` it leaves **two
+comments** saying the shared token is gone (the header note and `start_relay`'s), **one comment**
+on `start_sidecar` explaining why `--contract-a-token-file` is deliberately *not* passed there,
+and **one real `--contract-a-token-file`** on `start_fakemod` — a different flag on a different
+contract. So `run-m4.sh` counts **4** and always would have. The
+substance being asserted is *no binary is still being handed the retired shared-token flag*, and
+that is what the first `grep` asks: a `--token-file` occurrence on a line with no `#` before it.
+`--contract-a-token-file` does not contain the string `--token-file`, so it is not a false
+positive. **AS EXECUTED: 4 and 0, with nothing live** — the window read the count, saw 4, and had
+to reason from the diff rather than from the gate, which is exactly what a gate is for.
 
 **Why the patch is applied HERE and not earlier.** It is the first step *inside* the window
 because an edited script plus the old binary is the failure the ordering exists to prevent: a
@@ -417,9 +475,9 @@ exact moment they need it to see whether their rejoin worked.
 | `ensure_credentials` | silent. It fails loudly and early if any of the TLS files or the six secrets are missing — which is the whole reason P0.4 and P0.5 come before any downtime. |
 | `check_slot_ports` | `every Contract A port 8787..8792 is free on both sides of the WSL boundary`. A failure here means a Windows listener — check for a `0.0.0.0:8790` portproxy row, which is a regression, not a leftover. |
 | map shape | `the map is already pre-placed: …`. **It must say this.** If it instead runs `reserve`, the map is not 3×2 and something is wrong with `ring.json` — stop. |
-| `start_relay` + `wait_healthy` | `relay: terminating TLS at its own front door` then `relay: listening … scheme=wss path=/contract-b/v4 … credentials=7`. **`credentials=7` is the count that proves P0.5 landed.** |
-| `start_archive` | the ledger-size note, then **~150 s of nothing**, then `archive: subscribed to the relay`. The wait is 600 s in the patched script. **The status page answers nothing during the replay — that is not a fault.** |
-| five sidecars, one at a time | per slot: `/healthz`, then `contract B: slot granted … slot=N position={Col:… Row:…} reason=reclaimed`. **`reason=reclaimed` and the peer's own coordinate, per slot.** |
+| `start_relay` + `wait_healthy` | `relay: terminating TLS at its own front door` then `relay: listening … scheme=wss path=/contract-b/v4 … credentials=7`. **`credentials=7` is the count that proves P0.5 landed.** **AS EXECUTED, 17:17:10Z:** `scheme=wss path=/contract-b/v4 retiredPaths=[/contract-b/v2 /contract-b/v3] credentials=7 minContractVersion=<none>` |
+| `start_archive` | the ledger-size note, then **~150 s of nothing**, then `archive: subscribed to the relay`. The wait is 600 s in the patched script. **The status page answers nothing during the replay — that is not a fault.** **AS EXECUTED: 128 s, subscribed 17:19:19.040Z** |
+| five sidecars, one at a time | per slot: `/healthz`, then `contract B: slot granted … slot=N position={Col:… Row:…} reason=reclaimed`. **`reason=reclaimed` and the peer's own coordinate, per slot.** **AS EXECUTED: all five, first grant 880 ms after the archive subscribed** |
 | five games, one at a time | `[M2-WORLD] world 'M4-SlotN' loaded`, then `[M2] CONFIG_UPDATE reason=connect` for each. |
 | the local lanes | every slot's east lane open, and every slot's north except slot 3's. Slot 3's north is deliberately not waited on: column 2 is {3, 6} and it closes with `no_peer` while the far end is away. |
 | the time scale | `send <n> timescale 100` on all five. |
@@ -446,7 +504,7 @@ does not assert it.
 grep -c discardedBytes e2e/logs-m4-lan/sidecar-*.log
 ```
 
-**Gate: `0` for all five.** The sidecar logs `discardedBytes` at **error** level and *only*
+**Gate: `0` for all five. AS EXECUTED: `0` for all five.** The sidecar logs `discardedBytes` at **error** level and *only*
 when a journal was damaged and replay stopped early — so any count above zero means custody
 history D2 promised is durable has been lost, and only a person can judge what it held.
 **Stop and report; do not restart anything.**
@@ -486,7 +544,9 @@ e2e/crossing/rig-check.sh --expect 5
 ```
 
 **Gate:** each send answers `targetTimeScale=100.00 Time.timeScale=100.00`, and `rig-check`
-reports all five local slots at `timeScale 100` with `10/6`. Read readiness off `/api/status`,
+reports all five local slots at `timeScale 100` with `10/6`. **AS EXECUTED the trap did not
+fire**: all five already read `timeScale 100` before the re-send, so it changed nothing. Send it
+anyway — the cost is two commands and the failure it guards against is silent. Read readiness off `/api/status`,
 never off a log line mark — a restarted game can land on a *different* BepInEx log file than
 the one it left, so a mark taken before the quit is meaningless and a `wait_log` against it
 hangs.
@@ -559,6 +619,10 @@ computer's operator's; step 5 is the only observable this side gets.
 applied anything, until the triple appears. Until it does, slot 6 is dark, the map runs 5/6 with
 a hole at (2,1), and that is the designed state and not a fault.
 
+**AS EXECUTED: the triple has not appeared.** Nothing named `slot-6` in the new relay's log at any
+point in or after the window, so as of the close of 2026-08-11 the far end has not attempted the
+new wire and its reservation is untouched. The 24 h clock started at **17:17:10Z**.
+
 **The bound on waiting is 24 hours**, and it is `holdTimeoutMs`. Entries this side has taken
 custody of and addressed to slot 6 are held while it is dark; after the accrued 24 hours they
 bounce home by themselves. Nothing is lost either way — a bounce widens §9.3's accepted
@@ -572,7 +636,10 @@ duplication case, and that is the whole cost.
 e2e/crossing/rig-check.sh --wire
 ```
 
-**The full bar, all of it:**
+**The full bar, all of it — and it is the bar for a map with six worlds on it.** Until slot 6
+rejoins, the reachable bar is P6.4's: 5/5 live and `modConnected`, 20 lanes, two `no_peer`
+closures and slot 5's east bypassing the hole. **AS EXECUTED, every local row below passed and
+the two slot-6 rows are outstanding by design.**
 
 | What | Where it is read | Expected |
 |---|---|---|
@@ -601,7 +668,8 @@ grep -ha 'contract A token' "$BEP/LogOutput.log"* | sed 's/\r$//' | sort -u
 
 **Gate:** five `0600` token files, and one `[M2] contract A token:
 MULTIVERSE_CONTRACT_A_TOKEN_FILE=\\wsl.localhost\Ubuntu\mnt\wsl\data\…\slot-N\contract-a.token`
-line per instance. The **Windows** form of the path is the point: `WSLENV`'s `/p` flag
+line per instance. **AS EXECUTED: five `0600` token files and five Windows-form lines.** The
+**Windows** form of the path is the point: `WSLENV`'s `/p` flag
 translated it on the way out. If a line reads `<unset>`, the variable did not cross the
 boundary and that slot's mod is dialling bare — it will still be refused with 401 and reconnect
 on the ladder, and the fix is to restart that one instance through `start_game`.
@@ -645,18 +713,30 @@ Measured values are marked; the rest are derived from a measurement and say from
 | Phase | What is down | Estimate | Basis |
 |---|---|---|---|
 | P0 | nothing | 15–30 min of operator time, **zero downtime** | new work; `go test` dominates |
-| P1 archive logs | nothing | ~5 s | a `cp` of five files |
-| P1 `down` | five worlds, five sidecars, archive, relay; slot 6 loses its session | ~15 s | `lan_down` sleeps 2 + 2 plus the quits |
+| P1 archive logs | nothing | **~4 min cold**, and it is not the `cp` of five files it looks like | 6.08 GB of live BepInEx logs at 24–30 MB/s of drvfs read. **AS EXECUTED it ran warm and is still the term to plan around** — see the note under this table |
+| P1 `down` | five worlds, five sidecars, archive, relay; slot 6 loses its session | ~15 s of teardown **plus a second full log archive**, so **~90 s warm and ~4 min cold** | `lan_down` sleeps 2 + 2 plus the quits — and then re-archives the BepInEx logs *inside the outage*. **AS EXECUTED: 90 s** |
 | P2 mod deploy | as above | 20–40 s | `dotnet build -c Release` warm, plus one file copy |
 | P3 `mv` binaries | as above | ~2 s | six renames within one filesystem |
 | P4 apply the patch | as above | ~5 s | `git apply` plus two `bash -n` |
 | P5 relay up | as above | ~5 s | `wait_healthy` on `https://127.0.0.1:8795/healthz` |
-| **P5 archive replay** | **as above — this is the single largest term** | **~150 s** | 93 s measured 2026-08-10 at 1.22 GB / 3.7 M records, scaled to today's 2.0 GB / 6.24 M |
+| **P5 archive replay** | **as above — this is the single largest term** | **~150 s**; **AS EXECUTED 128 s** | 93 s measured 2026-08-10 at 1.22 GB / 3.7 M records, scaled to today's 2.0 GB / 6.24 M |
+| P5 `lan_up`, before anything starts | as above | **a third full log archive: ~65 s warm, ~4 min cold** | `lan_up` archives the BepInEx logs on its way in as well as `lan_down` on its way out. **AS EXECUTED: 65 s** |
 | P5 five sidecars | five worlds still down | 25–40 s | 5 × (start + `/healthz` + grant), ~5–8 s each |
 | P5 five games | five worlds | 60–120 s | `up` sleeps 8 s between starts, then waits for `[M2-WORLD]` and `CONFIG_UPDATE` per instance |
-| **Total, map down** | | **~5–7 minutes** | sum of the above; the recorded mod-deploy-only budget is 100–110 s and the archive replay is what makes this window four times that |
-| P6 settle | nothing — the map is live | ~60 s of checks, then ~4 min of custody drain | measured burst: `custodyDepth` 55, `pacedDepth` 14, draining to base in ~4 min with nothing lost |
+| **Total, map down** | | **~5–7 minutes**; **AS EXECUTED 7m18s** | sum of the above; the recorded mod-deploy-only budget is 100–110 s and the archive replay is what makes this window four times that |
+| P6 settle | nothing — the map is live | ~60 s of checks, and **no custody drain if the sidecars went down with the games** | **AS EXECUTED: peak `custodyDepth` 4, `pacedDepth` 0.** The 55/14 burst belongs to a deploy that leaves the sidecars up — see §1 |
 | Far end | slot 6 only | **unbounded, and not this machine's to bound** | a person on another computer; the useful limit is `holdTimeoutMs` = 24 h |
+
+**The log archive is three passes, not one, and two of them are inside the outage.** This table
+first sized `down` at ~15 s, which was wrong by a factor of six: `lan_down` and `lan_up` each
+re-archive the whole BepInEx set, on top of P1's deliberate copy. At 2026-08-11's **6.08 GB** of
+live logs and **24–30 MB/s** of drvfs read that is **~4 minutes each, cold**. It cost 90 s and
+65 s in this window only because P1's own pass had already warmed the page cache — **so run P1's
+block, and run it immediately before `down`**: it is not only the guard against losing
+`[M4-SAVE]` history, it is what makes the two passes inside the outage cheap. If the logs are
+bigger next time, this term grows linearly and the archive replay stops being the largest one.
+The disk side of the same fact: three copies took `e2e/logs-m4-lan/bepinex/` from 3.4 GB to
+**21 GB**, and `/mnt/wsl/data` from 39 GB to 56 GB used with 195 GB free.
 
 ---
 
@@ -667,7 +747,7 @@ Measured values are marked; the rest are derived from a measurement and say from
 | `RUNBOOK.md` | this document | read |
 | `contract-b-4.patch` | **a ready-to-apply unified diff** against `e2e/run-m4.sh` and `e2e/run-m4-lan.sh` — not new copies of them. 161 insertions, 20 deletions, two files. Verified with `git apply --check` and with `bash -n` on the result | `git apply -p1 e2e/crossing/contract-b-4.patch`, at **P4** and not before |
 | `mint-tls.sh` | mints the CA and the relay's server certificate with the four SANs the rig actually dials, into the gitignored `e2e/tls-m4-lan/` | P0.4 |
-| `mint-credentials.sh` | mints the seven credentials against the **existing** `ring.json` and captures each secret into a `0600` file; prints only the far end's | P0.5 |
+| `mint-credentials.sh` | mints the seven credentials against the **existing** `ring.json` and captures each secret into a `0600` file; prints only the far end's. It **probes `$RELAY_BIN` for `--mint-credential` and refuses a pre-4.0 relay**, which is the P0.5 correction | P0.5, with `RELAY_BIN` pointed at the crossing build |
 | `rig-check.sh` | read-only: reads `/api/status` and says whether the map is at the bar | P0.1, P6.3, P6.4, §7 |
 
 ### Everything the patch changes, and why
