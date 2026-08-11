@@ -48,6 +48,31 @@ e2e/run-m4-lan/
 # throwaway instances species-guard-check.sh runs.
 e2e/logs-m5-guard/
 
+# The relay's TLS material for contract-b/4.0 (contract-b-m4.md §22, B23), minted
+# by e2e/crossing/mint-tls.sh. It holds the CA's PRIVATE KEY and the server's, and
+# nothing under it may ever be committed — a private key that reaches the index is
+# a key that has to be rotated, and rotating THIS CA costs a trust import on the
+# second computer that D9 forbids this machine to perform. `ca.crt` is the only
+# file in there that leaves this machine, and it travels by hand beside the
+# bundle, exactly as the token used to.
+#
+# The per-peer CREDENTIALS of §22 B22 are not here at all: like ~/.multiverse-token
+# before them, they live outside the repository, in ~/.multiverse/, one 0600 file
+# per identity. `<relay-data-dir>/peers.json` — the verifier store — is already
+# covered by the e2e/relay-data*/ rules above.
+e2e/tls-m4-lan/
+e2e/tls-*/
+
+# Key material and captured secrets wherever they land, because the rule above
+# only works while somebody remembers to put them in the right directory. There
+# is nothing of these shapes tracked in this repository and there never should be;
+# `git add -f` is the escape hatch if a fixture ever legitimately needs one.
+*.key
+*.pem
+*.p12
+*.pfx
+*.secret
+
 # The live rig's observation loop. e2e/baselines/ is otherwise TRACKED — the
 # committed baseline captures under it are evidence of runs that finished — but
 # m4-collector/ is a running loop, not a capture: it copies five world saves and

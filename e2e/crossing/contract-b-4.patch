@@ -1,0 +1,307 @@
+--- a/e2e/run-m4.sh
++++ b/e2e/run-m4.sh
+@@ -211,7 +211,74 @@
+ ARCHIVE_HTTP="${ARCHIVE_HTTP:-127.0.0.1:8796}"
+ ARCHIVE_URL="http://$ARCHIVE_HTTP"
+ RELAY_LISTEN="${_ENV_RELAY_LISTEN:-127.0.0.1:$RELAY_PORT}"
+-RELAY_URL="ws://127.0.0.1:$RELAY_PORT/contract-b/v3"
++
++# contract-b/4.0 (contract-b-m4.md §22, B22 and B23). Three things moved together
++# and not one of them is optional.
++#
++#  * THE PATH IS /contract-b/v4. v2 and v3 are retired: the relay still ANSWERS on
++#    them and closes with 4000, so a stale client reads as a peer that will not
++#    join rather than as a 404.
++#  * THE SCHEME IS wss://, FOR EVERY CLIENT INCLUDING THE LOOPBACK ONES. With
++#    --tls-cert/--tls-key the relay wraps its WHOLE net.Listener in crypto/tls
++#    (internal/relay/tls.go, TLSListener), so no plaintext listener survives on
++#    loopback for the five local sidecars and the archive to use. Measured
++#    2026-08-11: a plain HTTP GET to 127.0.0.1 on a TLS-configured relay answers
++#    `400 Client sent an HTTP request to an HTTPS server`, and NEVER the 426.
++#    B23's 426 is a different rule for a different deployment shape — it is
++#    reached only when r.TLS is nil, and it keys on the LOCAL address the
++#    connection arrived on, not on the bind string and not on the remote address.
++#  * THE SHARED TOKEN IS GONE. --token-file exists on no binary any more.
++RELAY_URL="wss://127.0.0.1:$RELAY_PORT/contract-b/v4"
++RELAY_HEALTH="https://127.0.0.1:$RELAY_PORT/healthz"
++
++# The relay's own TLS material, minted by e2e/crossing/mint-tls.sh into a
++# GITIGNORED directory. The private keys never enter the repository.
++TLS_DIR="${TLS_DIR:-$E2E/tls-m4-lan}"
++TLS_CERT="${TLS_CERT:-$TLS_DIR/relay.crt}"
++TLS_KEY="${TLS_KEY:-$TLS_DIR/relay.key}"
++TLS_CA="${TLS_CA:-$TLS_DIR/ca.crt}"
++
++# TRUSTING THIS RIG'S CA WITHOUT SUDO. A Contract B client verifies with its
++# platform's trust store and there is deliberately no flag between it and one
++# (internal/sidecar/contractb_client.go: "NO TLS CONFIGURATION IS SET HERE AND
++# NONE MAY BE"). Go's crypto/x509 reads SSL_CERT_FILE on Unix and so does curl,
++# so one exported variable trusts this CA for every process this rig starts and
++# changes nothing in /etc. Verified 2026-08-11 against the real binaries: without
++# it the sidecar logs "the relay's TLS certificate did not verify; NOT
++# CONNECTING" and never dials; with it it connects and is granted its slot.
++export SSL_CERT_FILE="${SSL_CERT_FILE:-$TLS_CA}"
++
++# Per-peer credentials (§22, B22). The SECRET half of one join string per
++# identity, one file each, mode 600, OUTSIDE the repository — the rule
++# ~/.multiverse-token already lived by. The peerId half is not a secret and comes
++# from <data-dir>/peer-id. e2e/crossing/mint-credentials.sh writes these files;
++# nothing in this rig mints, because only the relay can.
++SECRETS_DIR="${SECRETS_DIR:-$HOME/.multiverse}"
++ARCHIVE_CREDENTIAL="${ARCHIVE_CREDENTIAL:-$SECRETS_DIR/archive-main.secret}"
++cred_of() { printf '%s/peer-%s.secret\n' "$SECRETS_DIR" "$(peer_of "$1")"; }
++
++# ensure_credentials REPLACES run-m3.sh's ensure_token, which minted the shared
++# LAN token contract-b/4.0 deleted. It mints nothing: a credential is born at the
++# relay, printed once, and captured by e2e/crossing/mint-credentials.sh. All this
++# does is refuse to start a rig whose secrets are not on disk, because the
++# alternative is five sidecars on a backoff ladder against a 401.
++ensure_credentials() {
++  local missing=0 f s
++  for f in "$TLS_CERT" "$TLS_KEY" "$TLS_CA"; do
++    [ -s "$f" ] || { fail "missing TLS material: $f"; missing=1; }
++  done
++  [ -s "$ARCHIVE_CREDENTIAL" ] || { fail "missing the archive's credential: $ARCHIVE_CREDENTIAL"; missing=1; }
++  for s in $SLOTS; do
++    [ -s "$(cred_of "$s")" ] || { fail "missing slot $s's credential: $(cred_of "$s")"; missing=1; }
++  done
++  if [ "$missing" != 0 ]; then
++    fail ""
++    fail "Mint them first, in this order:"
++    fail "    e2e/crossing/mint-tls.sh"
++    fail "    e2e/crossing/mint-credentials.sh"
++    return 1
++  fi
++}
+ 
+ # A separate runtime tree: the M3 rig's data dirs are the record of a run that
+ # happened, and `arm` reads one of them.
+@@ -430,8 +497,15 @@
+   local pid lf
+   mkdir -p "$RELAY_DATA" "$LOGS"
+   mapfile -t lf < <(log_flags "$LOGS/relay.log")
++  # --token-file is GONE (§22, B22): the relay keeps VERIFIERS in
++  # <data-dir>/peers.json and no secret enters this process on a flag. TLS is the
++  # other half of the same amendment, and B23 is explicit that splitting them
++  # produces a half-secured relay that reads as secured.
++  local adv=()
++  [ -n "${RELAY_ADVERTISE_URL:-}" ] && adv=(--advertise-url "$RELAY_ADVERTISE_URL")
+   nohup "$BIN/relay" --listen "$RELAY_LISTEN" --data-dir "$RELAY_DATA" \
+-    --token-file "$TOKEN_FILE" "${lf[@]}" >>"$LOGS/relay.stderr.log" 2>&1 &
++    --tls-cert "$TLS_CERT" --tls-key "$TLS_KEY" "${adv[@]}" \
++    "${lf[@]}" >>"$LOGS/relay.stderr.log" 2>&1 &
+   pid=$!
+   record_pid relay "$pid"
+   note "relay pid=$pid listen=$RELAY_LISTEN dataDir=$RELAY_DATA"
+@@ -441,8 +515,12 @@
+   local pid lf
+   mkdir -p "$ARCHIVE_DATA" "$LOGS"
+   mapfile -t lf < <(log_flags "$LOGS/archive.log")
++  # The archive is an AUTHORISED SUBSCRIBER now (§5.1, B27), not a peer that
++  # happens to ask for role "archive": its credential carries the `subscribe`
++  # grant, which is disjoint from `peer`, so it cannot claim a slot and no peer
++  # credential can subscribe.
+   nohup "$BIN/archive" --relay "$RELAY_URL" --peer-id archive-main \
+-    --data-dir "$ARCHIVE_DATA" --token-file "$TOKEN_FILE" --http "$ARCHIVE_HTTP" \
++    --data-dir "$ARCHIVE_DATA" --credential-file "$ARCHIVE_CREDENTIAL" --http "$ARCHIVE_HTTP" \
+     "${lf[@]}" >>"$LOGS/archive.stderr.log" 2>&1 &
+   pid=$!
+   record_pid archive "$pid"
+@@ -465,9 +543,16 @@
+     compactflag=(--journal-compact-minutes "$JOURNAL_COMPACT_MINUTES")
+   mapfile -t lf < <(log_flags "$(sclog_of "$slot")")
+ 
++  # --credential-file is the SECRET half only; the peerId half is --peer-id and
++  # <data-dir>/peer-id, and the relay refuses a connection whose HANDSHAKE claims
++  # a different one (§3.1, §22 B22 — that binding is Risk 1's whole answer).
++  #
++  # --contract-a-token-file is NOT passed and must not be: it defaults to
++  # <data-dir>/contract-a.token, which the sidecar MINTS 0600 at first start, and
++  # that is the exact path start_game hands the mod (contract-a.md §21, A47).
+   nohup "$BIN/sidecar" --listen "127.0.0.1:$port" --relay "$RELAY_URL" \
+     --peer-id "$peer" "${posflag[@]}" \
+-    --data-dir "$dir" --token-file "$TOKEN_FILE" \
++    --data-dir "$dir" --credential-file "$(cred_of "$slot")" \
+     "${compactflag[@]}" "${lf[@]}" "$@" \
+     >>"$LOGS/sidecar-$slot.stderr.log" 2>&1 &
+   pid=$!
+@@ -485,7 +570,12 @@
+   # 1x beside worlds at ${TIME_SCALE}x throttles itself that many times harder
+   # and grows a backlog it can never drain — which is what happened the first
+   # time this rig ran, and it read like a lost delivery.
++  # Contract A's path does NOT move at contract-a/2.4 — the minor is not
++  # major-scoped — but the upgrade now carries a bearer token (§21, A47), and the
++  # synthetic peer is a mod for this purpose like any other. It reads the same
++  # file the sidecar minted.
+   nohup "$BIN/fakemod" --url "ws://127.0.0.1:$(port_of "$slot")/contract-a/v2" \
++    --contract-a-token-file "$(datadir_of "$slot")/contract-a.token" \
+     --ring-slot "$slot" --export-edges "$EXPORT_EDGES" --time-scale "$TIME_SCALE" \
+     --state-file "$(fakestate "$slot")" --hold "${FAKE_HOLD:-45s}" \
+     --ack-delay "${FAKE_ACK_DELAY:-0s}" \
+@@ -501,6 +591,18 @@
+   world="$(world_of "$slot")"; port="$(port_of "$slot")"
+   rm -f "$(cmd_file_wsl "$slot")" "$(cmd_file_wsl "$slot").log" "$(cmd_file_wsl "$slot").tmp"
+ 
++  # MULTIVERSE_CONTRACT_A_TOKEN_FILE IS THE ONE VARIABLE ON THIS LIST THAT NEEDS A
++  # FLAG (contract-a.md §21, A47). The mod is a WINDOWS process and the value is a
++  # path; every other variable here is an opaque string. WSLENV's `/p` translates a
++  # path on the way out, so the game reads
++  #   \\wsl.localhost\Ubuntu\mnt\wsl\data\...\slot-N\contract-a.token
++  # where this side wrote /mnt/wsl/data/.../slot-N/contract-a.token.
++  #
++  # Proven end to end 2026-08-11, through the whole chain this rig actually uses —
++  # WSL env -> powershell.exe -> Start-Process -> the grandchild — and a 0600 file
++  # under /mnt/wsl/data was read back from Windows over the \\wsl.localhost share.
++  # A `/p` on the WRONG variable would corrupt it, which is why the flag is on
++  # exactly one name.
+   MULTIVERSE_RING_SLOT="$slot" \
+   MULTIVERSE_EXPORT_EDGES="$EXPORT_EDGES" \
+   MULTIVERSE_SIDECAR_PORT="$port" \
+@@ -509,7 +611,8 @@
+   MULTIVERSE_SAVE_MINUTES="$SAVE_MINUTES" \
+   MULTIVERSE_SAVE_KEEP="$SAVE_KEEP" \
+   MULTIVERSE_FAMILY_REPORT="$FAMILY_REPORT" \
+-  WSLENV='MULTIVERSE_RING_SLOT:MULTIVERSE_EXPORT_EDGES:MULTIVERSE_SIDECAR_PORT:MULTIVERSE_WORLD:MULTIVERSE_CMD_FILE:MULTIVERSE_SAVE_MINUTES:MULTIVERSE_SAVE_KEEP:MULTIVERSE_FAMILY_REPORT' \
++  MULTIVERSE_CONTRACT_A_TOKEN_FILE="$(datadir_of "$slot")/contract-a.token" \
++  WSLENV='MULTIVERSE_RING_SLOT:MULTIVERSE_EXPORT_EDGES:MULTIVERSE_SIDECAR_PORT:MULTIVERSE_WORLD:MULTIVERSE_CMD_FILE:MULTIVERSE_SAVE_MINUTES:MULTIVERSE_SAVE_KEEP:MULTIVERSE_FAMILY_REPORT:MULTIVERSE_CONTRACT_A_TOKEN_FILE/p' \
+     "$GAME_SH" start "$(game_instance "$slot")"
+ }
+ 
+@@ -636,12 +739,21 @@
+     fail "the relay is running; --reserve-slot is a startup command. Run 'down' first."
+     return 1
+   fi
+-  ensure_token
+   mkdir -p "$RELAY_DATA"
++  # §22 B22 FOLDED ISSUANCE INTO RESERVATION, so this is no longer a command whose
++  # output may be piped into a log. --reserve-slot now MINTS a credential for a
++  # peer that has none and prints its join string ONCE on stdout; the relay keeps
++  # a verifier and cannot print it again, and the only recovery from a lost one is
++  # --handover-slot, which changes a peerId a far machine has persisted. Piping
++  # six unrecoverable secrets through `sed` into a terminal is how a map loses its
++  # own members. The capture belongs in a tool, and that tool is the only place
++  # this project mints.
+   local args=() s
+-  for s in $SLOTS; do args+=(--reserve-slot "$(peer_of "$s")@$(pos_of "$s")"); done
+-  "$BIN/relay" --data-dir "$RELAY_DATA" --token-file "$TOKEN_FILE" "${args[@]}" \
+-    2>&1 | sed 's/^/    /' >&2
++  for s in $SLOTS; do args+=("$(peer_of "$s")@$(pos_of "$s")"); done
++  MAP_PEERS="${args[*]}" RELAY_BIN="$BIN/relay" RELAY_DATA="$RELAY_DATA" \
++  SECRETS_DIR="$SECRETS_DIR" TLS_DIR="$TLS_DIR" RELAY_PORT="$RELAY_PORT" \
++  FAR_PEER="${FAR_PEER:-}" LOCAL_URL="$RELAY_URL" \
++    "$E2E/crossing/mint-credentials.sh" || return 1
+   note "map: $(map_shape)"
+   note "order: $(map_order)"
+ }
+@@ -729,7 +841,7 @@
+     return 1
+   fi
+   check_slot_ports || return 1
+-  ensure_token
++  ensure_credentials || return 1
+   "$GAME_SH" stop all >/dev/null 2>&1 || true
+   sleep 3
+   reset_bepinex_logs up
+@@ -741,7 +853,7 @@
+ 
+   step "starting the Go side: relay, archive, then six sidecars in slot order"
+   start_relay
+-  wait_healthy "http://127.0.0.1:$RELAY_PORT/healthz" || return 1
++  wait_healthy "$RELAY_HEALTH" || return 1
+   start_archive
+   wait_file "$LOGS/archive.log" 'archive: subscribed to the relay' 60 >/dev/null || return 1
+   note "archive subscribed; status page on $ARCHIVE_URL"
+--- a/e2e/run-m4-lan.sh
++++ b/e2e/run-m4-lan.sh
+@@ -220,6 +220,18 @@
+ # dialling 127.0.0.1 either way.
+ RELAY_LISTEN="${_ENV_LAN_RELAY_LISTEN:-0.0.0.0:$RELAY_PORT}"
+ 
++# THE FAR END DIALS THIS MACHINE'S WINDOWS LAN ADDRESS, and its TLS client
++# verifies the name it DIALLED — not the WSL address the portproxy forwards to.
++# 192.168.1.227 is therefore a Subject Alternative Name on the relay certificate
++# (e2e/crossing/mint-tls.sh puts it there) and the URL a join string must name.
++# The local five keep dialling wss://127.0.0.1, which is a SAN on the same
++# certificate.
++LAN_RELAY_HOST="${LAN_RELAY_HOST:-192.168.1.227}"
++RELAY_ADVERTISE_URL="${RELAY_ADVERTISE_URL:-wss://$LAN_RELAY_HOST:$RELAY_PORT/contract-b/v4}"
++# The far peer's join string is the one a PERSON has to carry. mint-credentials.sh
++# prints that one and files the other five straight into 0600 secrets.
++FAR_PEER="$REMOTE_PEER"
++
+ # THE LIVING DEPLOYMENT RUNS HEADLESS AT x100 (owner decision, 2026-08-10), and
+ # both halves of that regime belong to THIS rig rather than to the rehearsal.
+ #
+@@ -343,8 +355,11 @@
+ far_end_hint() {
+   note ""
+   note "ON THE SECOND COMPUTER (its operator, not this rig):"
+-  note "    .\\setup-farend.ps1 -RelayHost <the LAN address of THIS machine> -TokenFile .\\token.txt"
++  note "    .\\setup-farend.ps1 -RelayHost $LAN_RELAY_HOST -CaFile .\\ca.crt \`"
++  note "        -PeerSecretFile .\\peer-secret.txt"
+   note "    .\\start-slot$REMOTE_SLOT.ps1"
++  note "It needs THREE files from here now, not one: the bundle, $TLS_CA (as ca.crt),"
++  note "and the SECRET half of slot $REMOTE_SLOT's join string (as peer-secret.txt)."
+   note "It joins as peer $REMOTE_PEER, slot $REMOTE_SLOT, position $REMOTE_POS, world $REMOTE_WORLD."
+   note "Run 'e2e/run-m4-lan.sh lanhost' for that address and the elevated commands."
+   note "Nothing on this machine can start the far end, and nothing here has to."
+@@ -438,12 +453,17 @@
+     fail "the relay is running; --reserve-slot is a startup command. Run 'down' first."
+     return 1
+   fi
+-  ensure_token
+   mkdir -p "$RELAY_DATA"
++  # See run-m4.sh's reserve() for why this is a tool and not a pipe: --reserve-slot
++  # now mints and prints a join string ONCE, and slot $REMOTE_SLOT's has to reach a
++  # person rather than a log.
+   local args=() s
+-  for s in $MAP_SLOTS; do args+=(--reserve-slot "$(peer_of "$s")@$(pos_of "$s")"); done
+-  "$BIN/relay" --data-dir "$RELAY_DATA" --token-file "$TOKEN_FILE" "${args[@]}" \
+-    2>&1 | sed 's/^/    /' >&2
++  for s in $MAP_SLOTS; do args+=("$(peer_of "$s")@$(pos_of "$s")"); done
++  MAP_PEERS="${args[*]}" RELAY_BIN="$BIN/relay" RELAY_DATA="$RELAY_DATA" \
++  SECRETS_DIR="$SECRETS_DIR" TLS_DIR="$TLS_DIR" RELAY_PORT="$RELAY_PORT" \
++  FAR_PEER="$REMOTE_PEER" FAR_URL="$RELAY_ADVERTISE_URL" LOCAL_URL="$RELAY_URL" \
++  LAN_RELAY_HOST="$LAN_RELAY_HOST" \
++    "$E2E/crossing/mint-credentials.sh" || return 1
+   note "map: $(map_shape)"
+   note "order: $(map_order)"
+ }
+@@ -503,7 +523,7 @@
+   # the stale 8790 portproxy is caught, and `lanhost` prints the one command that
+   # removes it.
+   check_slot_ports || return 1
+-  ensure_token
++  ensure_credentials || return 1
+   "$GAME_SH" stop all >/dev/null 2>&1 || true
+   sleep 3
+   reset_bepinex_logs up
+@@ -515,8 +535,12 @@
+ 
+   step "starting the Go side: relay (LAN-bound), archive, then five local sidecars"
+   start_relay
+-  wait_healthy "http://127.0.0.1:$RELAY_PORT/healthz" || return 1
+-  note "the second computer dials ws://<this machine>:$RELAY_PORT/contract-b/v3"
++  wait_healthy "$RELAY_HEALTH" || return 1
++  note "the second computer dials $RELAY_ADVERTISE_URL"
++  note "and must trust $TLS_CA, imported into ITS OWN Windows trust store by"
++  note "setup-farend.ps1 -CaFile. Until it does, its sidecar logs a certificate"
++  note "failure and never dials — which from here is a dark slot $REMOTE_SLOT and"
++  note "nothing else."
+   start_archive
+   # THE ARCHIVE REPLAYS THE WHOLE LEDGER BEFORE IT BINDS ANYTHING, and that wait
+   # grows with the record. It was seconds when this line was written and it is
+@@ -525,7 +549,12 @@
+   # bring-up. 300 s is ~3x today's replay; raise it again rather than believing
+   # a timeout here, and size it from the ledger.
+   note "waiting for the archive to replay $(du -h "$ARCHIVE_DATA/migrations.jsonl" 2>/dev/null | cut -f1) of ledger; it serves nothing until it finishes"
+-  wait_file "$LOGS/archive.log" 'archive: subscribed to the relay' 300 >/dev/null || return 1
++  # 600, not 300. The ~93 s figure this wait was last sized from was measured on
++  # 2026-08-10 against 3.7M records / 1.22 GB; on 2026-08-11 the ledger is
++  # 6.2M records / 2.0 GB, which is ~150 s of replay at the same rate. 300 s was
++  # 2x headroom and is now barely that. The file's own rule stands: size it from
++  # the ledger, and raise it again rather than believing a timeout here.
++  wait_file "$LOGS/archive.log" 'archive: subscribed to the relay' 600 >/dev/null || return 1
+   note "archive subscribed; status page on $ARCHIVE_URL"
+ 
+   local slot mark
