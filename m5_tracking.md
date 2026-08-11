@@ -189,8 +189,9 @@ only fleet that rehearses `contract-b/4`. Every constraint below is on record in
 - **Build Go binaries to a scratch directory and `mv` over `bin/`.** Five running sidecars hold
   `bin/sidecar` open, so an in-place `go build -o ../bin/` fails with `ETXTBSY`. The rename is
   atomic and leaves every running process on its old inode until its own restart, which is what a
-  rolling change needs. Verify per slot by comparing `/proc/<pid>/exe`'s inode against
-  `bin/sidecar`'s.
+  rolling change needs. Verify per slot by digest — `sha256sum /proc/<pid>/exe` against
+  `sha256sum bin/<name>`, plus `readlink`'s `(deleted)` suffix for a replaced binary; an inode
+  comparison cannot work on this host (measured 2026-08-11 — `dev_environment.md` has the why).
 - **Sidecar restarts are rolling: one at a time, and the gate is zero discarded journal bytes.**
   The proven sequence per slot is `kill_pid sidecar-<n> -TERM`, wait for the process,
   `start_sidecar <n>`, `wait_healthy`, `wait_grant`. Each sidecar must come back to **its own slot
@@ -207,9 +208,10 @@ only fleet that rehearses `contract-b/4`. Every constraint below is on record in
   there**; a second send twenty seconds later takes. A restarted game can land on a *different*
   BepInEx log file than the one it left, so a line mark taken before the quit is meaningless and a
   `wait_log` against it hangs — `/api/status` is per-slot and rotation-proof.
-- **Archive restarts are expensive and permanent.** The replay is **~93 s of no status page** at
-  the current ledger size and the process is down about **100 s**, during which the crossings that
-  happen are **never copied to the ledger** — the last measured restart cost **1,940 crossings**,
+- **Archive restarts are expensive and permanent — and the cost grows with the ledger.** The
+  replay scales with ledger size (~93 s at 3.7 M records on 2026-08-10, **~150 s at 6.24 M on
+  2026-08-11**; size any budget from today's ledger, not from a recorded figure), during which
+  the status page is dark and the crossings that happen are **never copied to the ledger** — the last measured restart cost **1,940 crossings**,
   absent from the record forever. That is §5.1 working as designed: the traffic is untouched and
   only the record has the gap. **Batch the reasons to restart the archive**; never restart it to
   check something.
@@ -283,7 +285,7 @@ items*. What follows is only why each one touches this milestone.
    22–58 measured at the bar on 2026-08-11; hard-fail only on the first two) — and the five
    local slots reporting `saveMinutes 10`, `saveKeep 6` and `timeScale 100`. A slot reporting `2`/`4` came up from a stale environment and needs its game
    restarted, not the rig. If the page does not answer, check whether the archive is inside its
-   ~93 s replay before concluding anything.
+   replay before concluding anything — minutes, growing with the ledger (~150 s on 2026-08-11).
 4. **Check the memory directory is current** —
    `/home/ubuntu/.claude/projects/-mnt-wsl-data-bibites-multiverse/memory/MEMORY.md` and what it
    indexes — and update it if this document has moved past it.

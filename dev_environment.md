@@ -1075,11 +1075,21 @@ five publishing worlds — and the achieved-speed readout added **~393 bytes (+2
 **But the pass is the cost of a restart, and it grows with the ledger.** Re-measured on
 2026-08-10 against **3,700,672 records (1.22 GB)**: the replay took **~93 s** with a transient
 peak RSS near **5.2 GB**, and **the archive serves nothing until it finishes** — it binds `8796`
-after the replay, not before. So restarting the archive now costs about **100 seconds with no
-status page**, and the same 100 seconds of crossings are **never copied to it**: a subscriber
-that is absent changes nothing about a migration (§5.1), which is exactly why they are absent
-from the record rather than delayed in it. At the growth in *The disk budget* this figure only
-goes up. Plan an archive restart; do not treat it as free.
+after the replay, not before. That restart cost **100 seconds** of archive downtime end to end,
+and the crossings inside the window are **never copied to it**: a subscriber that is absent
+changes nothing about a migration (§5.1), which is exactly why they are absent from the record
+rather than delayed in it. Plan an archive restart; do not treat it as free.
+
+**Those seconds are a rate against the ledger, not a property of the archive, so every figure
+above expires.** The ledger is append-only and is never rewritten (§10 makes eviction from it
+illegal), so the replay grows exactly as the file does — about **40,000 records a second**, or
+**13 MB/s**, on this host. On **2026-08-11** the file is **6.24 M records (2.0 GB)**, 69 % more
+than the day before, which at the same rate is **~150 s of replay** and ~160 s of archive
+downtime. **Any number of seconds recorded in this document is stale the day after it is
+written.** The durable form is the rule, not the reading: size the replay from `wc -l` (or `du`)
+on today's ledger against the rate above, and size every wait, budget and outage estimate around
+it from that — never from a figure quoted here or in a script comment. See *Bringing it back
+after a reboot* for the one wait this bites first.
 
 `ringstat` is the same three views in a terminal, over the same data and from the same place:
 
@@ -1535,8 +1545,16 @@ holds across one.
 - **Rebuild the Go binaries by rename, not in place.** Five running sidecars hold `bin/sidecar`
   open, so an in-place `go build -o ../bin/` fails with `ETXTBSY` (*Workflow*). Building to a
   scratch directory and `mv`-ing over `bin/sidecar` is atomic and leaves every running process on
-  its old inode until its own restart — which is exactly what a rolling change needs. Verify per
-  slot by comparing `/proc/<pid>/exe`'s inode with `bin/sidecar`'s.
+  its old inode until its own restart — which is exactly what a rolling change needs. **Verify per
+  slot by digest, not by inode**: `sha256sum /proc/<pid>/exe` against `sha256sum bin/<name>`, plus
+  `readlink /proc/<pid>/exe`, whose **`(deleted)`** suffix is what a replaced binary looks like from
+  the outside. **An inode comparison cannot work on this host** — measured 2026-08-11,
+  `stat -c %i /proc/<pid>/exe` returns the *procfs entry's own* inode, a distinct `7xxxxxx` per pid,
+  never the target file's, so the two numbers can never match and the check says nothing. The digest
+  is read *through* the magic link, so it names the file the process is actually executing. On the
+  live rig this reads exactly as the rule predicts: the running relay is `DIFFERENT` and
+  `(deleted)`, because `bin/relay` was rebuilt after it started, and the five sidecars are `SAME`.
+  `e2e/crossing/RUNBOOK.md` **P6.2** has the loop over the pid files.
 - **A restarted game can land on a DIFFERENT BepInEx log file than the one it left**, so a line
   mark taken in `game.sh logfile` before the quit is meaningless against the file that comes
   back, and a `wait_log` against it hangs. **Read readiness off `/api/status` instead**: it is
@@ -2006,10 +2024,15 @@ gates the rest.
 **The archive's counters jumped once, on 2026-08-10, and they will not jump again** — the
 recovery has happened and every later replay reads the same records. See *The archive's ledger
 recovery* above for what it cost and what it proved. Two things from it stay true of every
-bring-up from here: the replay is now **~93 s of no status page**, so `up` reaches
-`archive subscribed` about a minute and a half after it starts the archive rather than
-instantly — **its wait was 60 s and would have failed a healthy bring-up**, so it is 300 s
-since 2026-08-10 and wants raising again as the ledger grows; and `ledgerRecords` still runs
+bring-up from here: the replay costs **minutes of no status page and more of them every day**
+— ~93 s at 2026-08-10's 3.7 M records / 1.22 GB, **~150 s at 2026-08-11's 6.24 M / 2.0 GB** —
+so `up` reaches `archive subscribed` two to three minutes after it starts the archive rather
+than instantly, and **the seconds in that sentence are stale as soon as they are written**
+(*The status page on the LAN* has the rate to compute them from). **The wait in `run-m4-lan.sh`
+is the thing this breaks first**: it was 60 s and would have failed a healthy bring-up, it has
+been 300 s since 2026-08-10, and one day of ledger growth has taken that from 3× headroom to
+2× — `e2e/crossing/RUNBOOK.md`'s patch raises it to 600 s. Size it from the ledger and raise it
+rather than believing a timeout here. The second: `ledgerRecords` still runs
 **below** `wc -l` and drifts further every hour,
 because the live counter only increments on migration, ACK and NACK records while a `GENOME`
 append (`archive.go`, `RecordGenome`) is counted at boot replay and never during the run.
@@ -2491,9 +2514,9 @@ defect, and it stays on this list because M5 changes what it will mean.
     absence of a drain window is.** Nothing else moved with it: 24/24 lanes, `pacedDepth` and
     `heldDepth` 0, `timeoutBounces` 0, one `no peer has served this genome` line in all of
     history, and `ledgerRecords` more than doubling across the same span. **What this reading does
-    change is the M5 arithmetic**: a queue that sits near 50,000 entries is a very different thing
-    to inherit when a departed stranger can make an entry permanent, so read Risk 7 against this
-    number rather than against the 2,714 the item was opened on.
+    change is the M5 arithmetic**: a queue of this size is a very different thing to inherit when a
+    departed stranger can make an entry permanent, so read Risk 7 against the **current** reading
+    below rather than against the 2,714 the item was opened on.
   - **2026-08-10 evening: still the same curve, still no drain window, and the backlog has now
     started to cost something other than its own size.** Over 17:32Z to 20:20Z, 31 collector samples
     at a crossing rate of **806–1,417/min**, `genomeGaps` climbed **49,461 → 62,850** and read
@@ -2525,6 +2548,16 @@ defect, and it stays on this list because M5 changes what it will mean.
     come round, and the cost of carrying it is now bounded rather than absent. **Read this against
     Risk 7**: M5's permanent entries make the queue monotone, and §21's bounds are what stop a
     monotone queue making each archive reconnect more expensive than the last.
+  - **2026-08-11, and this is the current reading: `116,803` to `117,418`**, against a ledger of
+    **6.24 M records**, still with §21's bounds carrying it and still with no drain window. **It
+    roughly doubled again in a day** — the ≈46,000–65,000 recorded through 2026-08-10 is one day
+    old and reads about half the live figure. **Nothing about the finding moved,
+    only the magnitude**: the queue is throughput and not a leak, the crossing rate has not sat
+    under ~340/min for long enough to drain at ×100, and the drain test this item wants still has
+    not come round. So this is the number **Risk 7** is read against — and the doubling is the
+    reason to carry the *mechanism* rather than the reading, because any figure written on this
+    line is low within a day. `ledgerSkippedLines` was re-checked in the same samples: **still
+    exactly 1**, the single 776-byte splice of 2026-08-09, with no second damaged line since.
 
   **The mechanism is a rate cap, and it is deliberate.** The archive may send at most
   `GenomeRequestsPerMinute` = **30** genome requests a minute **per peer**

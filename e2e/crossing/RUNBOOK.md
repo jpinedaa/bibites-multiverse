@@ -89,9 +89,8 @@ document assumes these are settled.
    after `bibites-mod/deploy.sh`, so the DLL in the zip is the one this machine is running. It
    is safe against a live deployment: it builds and reads out of `bibites-mod/bin/Release/` and
    never writes into `BepInEx/plugins/`. It does write `bin/multiverse-sidecar.exe`, which is a
-   Windows binary no local process holds open. **Known stale text**: its closing message still
-   says to copy the bundle "with the token file (`~/.multiverse-token`)". That is wrong at
-   `contract-b/4.0` — see item 5 — and the script needs that line corrected in a separate change.
+   Windows binary no local process holds open. Its header and closing message state the
+   three-file handover of item 5 (corrected 2026-08-11; it used to name `~/.multiverse-token`).
 5. **Carry THREE files to the second computer, not one.** By hand; nothing here may send them
    (D9).
    - `farend/dist/farend-bundle.zip` — the rebuilt bundle.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build farend/dist/farend-bundle.zip: everything the second computer needs, and
-# nothing it cannot use.
+# Build farend/dist/farend-bundle.zip: the part of the far end's handover that is
+# the same for every deployment, and nothing it cannot use.
 #
 # Under M4 the second computer is map SLOT 6, at position (2,1) — a real world
 # with a real game, not a spare. The bundle is what makes it one, so a stale zip
@@ -10,12 +10,20 @@
 # The bundle holds four artifacts and two scripts:
 #
 #   setup-farend.ps1        install: find the game, check its version, install
-#                           BepInEx and the plugin, store the token, write the
-#                           start and stop scripts
+#                           BepInEx and the plugin, trust the relay's certificate
+#                           authority, store this world's own credential, write
+#                           the start and stop scripts
 #   README.md               the human steps
 #   multiverse-sidecar.exe  the Windows build of the sidecar
 #   BibitesMultiverse.dll   a FRESH build of the plugin (dotnet build)
 #   BepInEx_win_x64_*.zip   the pinned BepInEx release, downloaded and verified
+#
+# THE ZIP IS NOT THE WHOLE HANDOVER. At contract-b/4.0 the shared token is gone,
+# so the far end needs two more files that are deliberately NOT in here: the
+# relay's certificate authority (e2e/tls-m4-lan/ca.crt — per deployment, not a
+# secret) and the secret half of slot 6's join string (printed once by the relay,
+# and a secret). setup-farend.ps1 takes them as -CaFile and -PeerSecretFile.
+# farend/README.md is the operator-facing version of the same list.
 #
 # Nothing binary is committed. dist/ is gitignored, and the BepInEx download is
 # cached under dist/cache/.
@@ -120,6 +128,16 @@ The bundle is ready:
 
   $ZIP
 
-Copy it to the second computer with the token file (~/.multiverse-token) and
-tell that machine's operator the relay host. farend/README.md is inside.
+It is ONE of THREE files the second computer needs. Carry all three by hand:
+
+  1. $ZIP
+  2. e2e/tls-m4-lan/ca.crt, as ca.crt — the relay's certificate authority.
+     Not a secret.
+  3. slot 6's join secret, as peer-secret.txt — THIS ONE IS A SECRET. The relay
+     prints it once and cannot reprint it; losing it costs a slot handover.
+
+Tell that machine's operator the relay host as well — it has to be the name the
+certificate was issued for. setup-farend.ps1 takes the two extra files as
+-CaFile and -PeerSecretFile; farend/README.md, inside the zip, walks the
+operator through all of it.
 EOF
