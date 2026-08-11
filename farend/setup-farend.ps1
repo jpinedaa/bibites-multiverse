@@ -6,8 +6,9 @@
 .DESCRIPTION
     Runs on Windows PowerShell 5.1. It finds the Steam copy of The Bibites,
     checks that the game is the exact version this bundle was built against,
-    installs BepInEx and the plugin, stores the shared LAN token in a file only
-    you can read, and writes start-slot6.ps1 and stop-slot6.ps1 beside itself.
+    installs BepInEx and the plugin, trusts the relay's certificate authority,
+    stores this world's own credential in a file only you can read, and writes
+    start-slot6.ps1 and stop-slot6.ps1 beside itself.
 
     It does not need administrator rights. It never starts the game.
 
@@ -17,23 +18,46 @@
     sixth world therefore lives here, where BepInEx is unused and the game gets
     its own log. It exports on ALL FOUR EDGES like every other slot: under D17
     two-way lanes every declared edge is both an export edge and an entry edge
-    (contract-a.md §18 A38), and a 3x2 map is a torus, so all four have a
+    (contract-a.md section 18, A38), and a 3x2 map is a torus, so all four have a
     neighbour.
 
-.PARAMETER RelayHost
-    The name or the IP address of the main machine, which runs the relay.
+    WHAT CHANGED AT contract-b/4.0, AND WHY IT NEEDS TWO FILES INSTEAD OF ONE.
+    The map used to share ONE bearer token between every machine. Any holder of
+    it could present any peerId - including one that already held a slot - and
+    evict the peer that owned it. That token is gone. Two things replace it:
 
-.PARAMETER TokenFile
-    A file whose first line is the shared LAN token, copied from the main
-    machine. The token is copied into this machine's own protected file.
+      * a PER-PEER CREDENTIAL, bound to this machine's own peerId. It is the
+        secret half of a join string the relay printed once, and it authenticates
+        THIS world and no other. -PeerSecretFile.
+      * TLS on the link to the relay. The connection is wss:// now, the client
+        verifies the certificate against this machine's own trust store, and
+        there is deliberately no switch anywhere that skips that check. So the
+        relay's certificate authority has to be trusted here. -CaFile.
+
+.PARAMETER RelayHost
+    The name or the IP address of the main machine, which runs the relay. It has
+    to be the name the certificate was issued for; the main machine's operator
+    knows which one that is.
+
+.PARAMETER CaFile
+    The relay's certificate authority, copied from the main machine as ca.crt.
+    It is not a secret. It is imported into YOUR OWN user trust store, which
+    needs no administrator rights - see the note printed at step 5.
+
+.PARAMETER PeerSecretFile
+    A file whose first line is the SECRET half of this world's join string,
+    copied from the main machine. It is this machine's identity on the map. The
+    other half - the peerId - is not a secret and is -PeerId below.
 
 .EXAMPLE
-    .\setup-farend.ps1 -RelayHost 192.168.1.227 -TokenFile .\token.txt
+    .\setup-farend.ps1 -RelayHost 192.168.1.227 -CaFile .\ca.crt `
+        -PeerSecretFile .\peer-secret.txt
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$RelayHost,
-    [Parameter(Mandatory = $true)][string]$TokenFile,
+    [Parameter(Mandatory = $true)][string]$CaFile,
+    [Parameter(Mandatory = $true)][string]$PeerSecretFile,
     [string]$GameDir = '',
     [int]$RelayPort = 8795,
     [int]$SidecarPort = 8787,
@@ -43,7 +67,8 @@ param(
     [string]$World = 'M4-Slot6',
     [string]$PeerId = 'slot-6',
     [int]$SaveMinutes = 10,
-    [int]$SaveKeep = 6
+    [int]$SaveKeep = 6,
+    [switch]$SkipCaImport
 )
 
 $ErrorActionPreference = 'Stop'
@@ -63,6 +88,11 @@ $AssemblySha256    = '12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D
 $BepInExVersion    = '5.4.23.3'
 $BepInExZipName    = 'BepInEx_win_x64_5.4.23.3.zip'
 $BepInExZipSha256  = '41A089E5B1B1F0713B331346BAF6677B1184C69EABEBF51101097954E854C749'
+
+# contract-b/4.0: the path is major-scoped, so the major moved it. The relay
+# still answers on /contract-b/v3 and closes with 4000, which is why a stale
+# bundle reads as a peer that will not join rather than as a missing page.
+$ContractBPath = '/contract-b/v4'
 
 $Here     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DataRoot = Join-Path $env:LOCALAPPDATA 'BibitesMultiverse'
@@ -139,15 +169,15 @@ if ($Position -notmatch '^\s*\d+\s*,\s*\d+\s*$') {
 }
 $Position = $Position -replace '\s', ''
 
-# contract-a.md §15 A18: the edge list is comma-separated, at least one member,
-# no duplicates. Catch a typo here rather than in the BepInEx log, where a bad
-# set clears the whole list and disables the client with one error line.
+# contract-a.md section 15 A18: the edge list is comma-separated, at least one
+# member, no duplicates. Catch a typo here rather than in the BepInEx log, where a
+# bad set clears the whole list and disables the client with one error line.
 #
-# THE OPPOSITE-EDGE REFUSAL IS GONE (contract-a.md §18 A38, D17 two-way lanes).
-# It rested on the one-way lane, where an edge was a capture band or a passive
-# entry and never both, so 'E,W' was a contradiction. Every declared edge is now
-# BOTH an export edge and an entry edge, and the conformant declaration is all
-# four - which the old rule would have refused outright. Do not put it back.
+# THE OPPOSITE-EDGE REFUSAL IS GONE (contract-a.md section 18 A38, D17 two-way
+# lanes). It rested on the one-way lane, where an edge was a capture band or a
+# passive entry and never both, so 'E,W' was a contradiction. Every declared edge
+# is now BOTH an export edge and an entry edge, and the conformant declaration is
+# all four - which the old rule would have refused outright. Do not put it back.
 $edgeList = @($ExportEdges -split '[,; \t]+' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
 if ($edgeList.Count -eq 0) {
     Stop-Setup "-ExportEdges names no edge. Use E, N, W or S, comma separated - normally 'E,N,W,S'."
@@ -162,7 +192,7 @@ $ExportEdges = [string]::Join(',', $edgeList)
 
 # ---------------------------------------------------------------- 1. the game
 
-Step "1 of 6 - find The Bibites"
+Step "1 of 7 - find The Bibites"
 # Windows keeps the plugin file open while the game runs, and the copy in step 4
 # then fails with an unreadable IOException. Stop before anything is half-done.
 if (Get-Process -Name 'The Bibites' -ErrorAction SilentlyContinue) {
@@ -179,7 +209,7 @@ if (-not (Test-Path (Join-Path $GameDir 'The Bibites.exe'))) {
 }
 Say "game directory: $GameDir"
 
-Step "2 of 6 - check the game version"
+Step "2 of 7 - check the game version"
 $assembly = Join-Path $GameDir 'The Bibites_Data\Managed\BibitesAssembly.dll'
 if (-not (Test-Path $assembly)) { Stop-Setup "The game assembly is missing: $assembly" }
 $got = Get-Sha256 $assembly
@@ -206,7 +236,7 @@ Say "BibitesAssembly.dll matches the pin: game version $GameVersion"
 
 # ---------------------------------------------------------------- 3. BepInEx
 
-Step "3 of 6 - BepInEx $BepInExVersion"
+Step "3 of 7 - BepInEx $BepInExVersion"
 $bepinexCore = Join-Path $GameDir 'BepInEx\core\BepInEx.dll'
 if (Test-Path $bepinexCore) {
     Say "BepInEx is already installed; left alone."
@@ -225,7 +255,7 @@ if (Test-Path $bepinexCore) {
 
 # ---------------------------------------------------------------- 4. the plugin
 
-Step "4 of 6 - the multiverse plugin"
+Step "4 of 7 - the multiverse plugin"
 $pluginSrc = Join-Path $Here 'BibitesMultiverse.dll'
 if (-not (Test-Path $pluginSrc)) { Stop-Setup "The bundle is incomplete: BibitesMultiverse.dll is missing." }
 $plugins = Join-Path $GameDir 'BepInEx\plugins'
@@ -236,53 +266,146 @@ Say "BibitesMultiverse.dll -> $plugins"
 $sidecarSrc = Join-Path $Here 'multiverse-sidecar.exe'
 if (-not (Test-Path $sidecarSrc)) { Stop-Setup "The bundle is incomplete: multiverse-sidecar.exe is missing." }
 
-# ---------------------------------------------------------------- 5. the token
-
-Step "5 of 6 - the shared LAN token"
-if (-not (Test-Path $TokenFile)) { Stop-Setup "No token file at $TokenFile." }
-$token = ''
-foreach ($line in (Get-Content -Path $TokenFile)) {
-    $candidate = $line.Trim()
-    if ($candidate) { $token = $candidate; break }
-}
-if ($token.Length -lt 16 -or $token.Length -gt 256) {
-    Stop-Setup "The token is $($token.Length) characters. It must be 16 to 256."
-}
-if ($token -notmatch '^[\x21-\x7e]+$') {
-    Stop-Setup "The token must be printable ASCII with no spaces."
-}
-
 New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
-$tokenPath = Join-Path $DataRoot 'token.txt'
+
+# ---------------------------------------------------------------- 5. the CA
+
+Step "5 of 7 - trust the relay's certificate authority"
+if (-not (Test-Path $CaFile)) { Stop-Setup "No CA file at $CaFile." }
+
+try {
+    $ca = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 `
+        ((Resolve-Path $CaFile).Path)
+} catch {
+    Stop-Setup "$CaFile is not a certificate this machine can read: $($_.Exception.Message)"
+}
+Say "subject    : $($ca.Subject)"
+Say "thumbprint : $($ca.Thumbprint)"
+Say "valid until: $($ca.NotAfter.ToString('u'))"
+if ($ca.NotAfter -lt (Get-Date)) {
+    Stop-Setup "That CA expired on $($ca.NotAfter.ToString('u')). Ask for a current ca.crt."
+}
+
+# A copy is kept beside the data, so a later re-run and any hand check can see
+# exactly which certificate was trusted. It is not a secret.
+$caStored = Join-Path $DataRoot 'relay-ca.crt'
+Copy-Item -Path $CaFile -Destination $caStored -Force
+
+Write-Host ""
+Say "WHAT YOU ARE AGREEING TO. This certificate authority is being added to YOUR"
+Say "OWN user trust store - Cert:\CurrentUser\Root - not the machine's. It needs no"
+Say "administrator rights and it affects no other account. While it is trusted,"
+Say "anything it signs is trusted by programs running as you. It was made by the"
+Say "main machine's operator for this one relay. Remove it whenever you like:"
+Say "    Get-ChildItem Cert:\CurrentUser\Root | Where-Object Thumbprint -eq '$($ca.Thumbprint)' | Remove-Item"
+Write-Host ""
+
+$alreadyTrusted = @(Get-ChildItem 'Cert:\CurrentUser\Root' -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Thumbprint -eq $ca.Thumbprint }).Count -gt 0
+
+if ($alreadyTrusted) {
+    Say "already trusted; nothing to import."
+} elseif ($SkipCaImport) {
+    Say "-SkipCaImport was given, so nothing was imported."
+    Say "The sidecar will refuse to connect until this CA is trusted by hand:"
+    Say "    Import-Certificate -FilePath '$caStored' -CertStoreLocation Cert:\CurrentUser\Root"
+} else {
+    $importError = ''
+    try {
+        # Windows may show a security-warning dialog for a root-store import. If
+        # one appears, it is this line, and answering Yes is the import.
+        Import-Certificate -FilePath $caStored -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+    } catch {
+        $importError = $_.Exception.Message
+    }
+    $nowTrusted = @(Get-ChildItem 'Cert:\CurrentUser\Root' -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Thumbprint -eq $ca.Thumbprint }).Count -gt 0
+    if ($nowTrusted) {
+        Say "imported into Cert:\CurrentUser\Root and read back by thumbprint."
+    } else {
+        Write-Host ""
+        Write-Host "The CA was NOT imported." -ForegroundColor Red
+        if ($importError) { Say "reason: $importError" }
+        Say "Nothing else is wrong: the plugin and the sidecar are installed. But the"
+        Say "sidecar verifies the relay's certificate with this machine's trust store"
+        Say "and will not connect until this CA is in it. There is no switch that skips"
+        Say "the check, on purpose."
+        Write-Host ""
+        Say "Import it by hand, then run .\start-slot$Slot.ps1:"
+        Say "    Import-Certificate -FilePath '$caStored' -CertStoreLocation Cert:\CurrentUser\Root"
+        Say "or, with the graphical wizard:"
+        Say "    certmgr.msc  ->  Trusted Root Certification Authorities  ->  Import"
+        Write-Host ""
+    }
+}
+
+# ---------------------------------------------------------------- 6. the credential
+
+Step "6 of 7 - this world's own credential"
+if (-not (Test-Path $PeerSecretFile)) { Stop-Setup "No credential file at $PeerSecretFile." }
+$secret = ''
+foreach ($line in (Get-Content -Path $PeerSecretFile)) {
+    $candidate = $line.Trim()
+    if ($candidate) { $secret = $candidate; break }
+}
+
+# contract-b-m4.md section 3.1: 32 to 256 bytes of printable ASCII containing no
+# ".". The dot is the separator between the peerId half and the secret half, so a
+# secret that holds one cannot be split back apart - which is why a whole join
+# string pasted into this file is refused here with a sentence that says so.
+if ($secret.Length -lt 32 -or $secret.Length -gt 256) {
+    Stop-Setup "The credential is $($secret.Length) characters. It must be 32 to 256."
+}
+if ($secret -notmatch '^[\x21-\x7e]+$') {
+    Stop-Setup "The credential must be printable ASCII with no spaces."
+}
+if ($secret.Contains('.')) {
+    Stop-Setup ("The credential holds a '.', so it is not the secret half alone. A join " +
+                "string looks like '$PeerId.<secret>' - put only the part AFTER the last " +
+                "dot in $PeerSecretFile.")
+}
+
+$credentialPath = Join-Path $DataRoot 'peer-secret.txt'
 # Written fresh every time. Re-writing over an already protected file makes the
 # permission change below need a privilege an ordinary account does not have.
-Remove-Item -Path $tokenPath -Force -ErrorAction SilentlyContinue
-Set-Content -Path $tokenPath -Value $token -Encoding ASCII
+Remove-Item -Path $credentialPath -Force -ErrorAction SilentlyContinue
+Set-Content -Path $credentialPath -Value $secret -Encoding ASCII
 
-# Only this account may read it. The token is the whole of M4's authentication:
-# anybody on the LAN who has it can join the map. A new FileSecurity carries
-# only the permission list, so this touches no other part of the file's
+# Only this account may read it. This credential is this world's identity on the
+# map: it authenticates the peerId '$PeerId' and nothing else, and it cannot be
+# reprinted - the relay keeps a verifier, not the secret. A new FileSecurity
+# carries only the permission list, so this touches no other part of the file's
 # security and needs no administrator rights.
 $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 try {
     $sec = New-Object System.Security.AccessControl.FileSecurity
     $sec.SetAccessRuleProtection($true, $false)
     $sec.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'FullControl', 'Allow')))
-    (Get-Item -Path $tokenPath).SetAccessControl($sec)
-    Say "token stored in $tokenPath, readable by $me only"
+    (Get-Item -Path $credentialPath).SetAccessControl($sec)
+    Say "credential stored in $credentialPath, readable by $me only"
 } catch {
-    Say "token stored in $tokenPath"
+    Say "credential stored in $credentialPath"
     Say "WARNING: the permissions could not be tightened: $($_.Exception.Message)"
     Say "The file is inside your own profile, which other accounts cannot read by default."
 }
+Say "It authenticates peerId '$PeerId'. If it is ever lost, the main machine's"
+Say "operator has to hand slot $Slot over to a new identity; nobody can reprint it."
 
-# ---------------------------------------------------------------- 6. the scripts
+# An installation from an older bundle left the retired shared token here. It
+# authenticates nothing now, and a stale secret on disk is a stale secret.
+$oldToken = Join-Path $DataRoot 'token.txt'
+if (Test-Path $oldToken) {
+    Remove-Item -Path $oldToken -Force -ErrorAction SilentlyContinue
+    Say "removed the retired shared token at $oldToken; contract-b/4.0 does not use it."
+}
+
+# ---------------------------------------------------------------- 7. the scripts
 
 $startName = "start-slot$Slot.ps1"
 $stopName  = "stop-slot$Slot.ps1"
-Step "6 of 6 - write $startName and $stopName"
+Step "7 of 7 - write $startName and $stopName"
 
-$relayUrl   = "ws://${RelayHost}:$RelayPort/contract-b/v3"
+$relayUrl   = "wss://${RelayHost}:$RelayPort$ContractBPath"
 $sidecarExe = Join-Path $Here 'multiverse-sidecar.exe'
 
 $startBody = @'
@@ -298,6 +421,11 @@ $startBody = @'
 #
 # -Headless goes with either form. The world runs exactly as it would; only the
 # picture is gone, and with it the need for this machine to have a screen.
+#
+# THE ORDER MATTERS MORE THAN IT USED TO. The sidecar MINTS the Contract A token
+# the game needs, into its own data directory, the first time it starts. So the
+# sidecar goes first and the game follows - which is what this script has always
+# done, and now there is a second reason for it.
 [CmdletBinding()]
 param([switch]$GameOnly, [switch]$Headless)
 $ErrorActionPreference = 'Stop'
@@ -315,11 +443,11 @@ $World       = '@@WORLD@@'
 $SaveMinutes = '@@SAVEMINUTES@@'
 $SaveKeep    = '@@SAVEKEEP@@'
 
-$dataDir   = Join-Path $DataRoot 'data-slot-@@SLOT@@'
-$logDir    = Join-Path $DataRoot 'logs'
-$tokenFile = Join-Path $DataRoot 'token.txt'
-$log       = Join-Path $logDir 'sidecar-slot@@SLOT@@.log'
-$cmdDir    = Join-Path $env:TEMP 'bibites-m4'
+$dataDir        = Join-Path $DataRoot 'data-slot-@@SLOT@@'
+$logDir         = Join-Path $DataRoot 'logs'
+$credentialFile = Join-Path $DataRoot 'peer-secret.txt'
+$log            = Join-Path $logDir 'sidecar-slot@@SLOT@@.log'
+$cmdDir         = Join-Path $env:TEMP 'bibites-m4'
 New-Item -ItemType Directory -Force -Path $dataDir, $logDir, $cmdDir | Out-Null
 
 # The mod reads its whole configuration from the environment of the game
@@ -330,13 +458,20 @@ New-Item -ItemType Directory -Force -Path $dataDir, $logDir, $cmdDir | Out-Null
 # wrap: a 3x2 map is a torus, so every slot declares all four edges and the
 # sidecar decides from the relay's map which of them EDGE_STATUS actually opens.
 # Under D17 each declared edge is both an export edge and an entry edge
-# (contract-a.md §18 A38). The mod's own default is all four when this is unset;
-# it is set anyway, so the value this setup was run with is what the world uses.
+# (contract-a.md section 18 A38). The mod's own default is all four when this is
+# unset; it is set anyway, so the value this setup was run with is what the world
+# uses.
 $env:MULTIVERSE_EXPORT_EDGES = $ExportEdges
 $env:MULTIVERSE_RING_SLOT    = $Slot
 $env:MULTIVERSE_SIDECAR_PORT = $SidecarPort
 $env:MULTIVERSE_WORLD        = $World
 $env:MULTIVERSE_CMD_FILE     = Join-Path $cmdDir 'cmd-@@SLOT@@.txt'
+# contract-a.md section 21, A47. The link between the game and the sidecar runs
+# on this machine's loopback, and it is authenticated now: the sidecar mints this
+# file at its first start, mode "readable by you only", and the game presents its
+# contents on every connection. It is NOT the relay credential - different secret,
+# different file, different wire - and the mod never writes its value to any log.
+$env:MULTIVERSE_CONTRACT_A_TOKEN_FILE = Join-Path $dataDir 'contract-a.token'
 # The periodic save is mod configuration, so it is set HERE and nowhere else.
 # The main machine cannot save this world and never tries: it only reads the
 # receipt, which rides every HEARTBEAT and reaches the status page.
@@ -382,18 +517,28 @@ if (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue) {
     Write-Host "or .\@@STARTNAME@@ -GameOnly to start only the game."
     exit 1
 }
+if (-not (Test-Path $credentialFile)) {
+    Write-Host "There is no credential at $credentialFile." -ForegroundColor Red
+    Write-Host "Run .\setup-farend.ps1 again with -PeerSecretFile."
+    exit 1
+}
 
 Remove-Item -Path $log, "$log.out" -ErrorAction SilentlyContinue
-# --position is ADVISORY (contract-b-m4.md §7.2). The main machine also reserves
-# this peerId at the same coordinate before the relay serves, so the map forms in
-# any start order and this flag only matters on a relay that has no reservation.
+# --position is ADVISORY (contract-b-m4.md section 7.2). The main machine also
+# reserves this peerId at the same coordinate before the relay serves, so the map
+# forms in any start order and this flag only matters on a relay that has no
+# reservation.
+#
+# --credential-file carries the SECRET HALF only. The peerId half is --peer-id,
+# and the relay refuses any connection whose handshake claims a different one, so
+# this credential can join as slot @@SLOT@@ and as nothing else.
 $sidecarArgs = @(
-    '--listen',     "127.0.0.1:$SidecarPort",
-    '--relay',      $RelayUrl,
-    '--peer-id',    $PeerId,
-    '--position',   $Position,
-    '--data-dir',   $dataDir,
-    '--token-file', $tokenFile
+    '--listen',          "127.0.0.1:$SidecarPort",
+    '--relay',           $RelayUrl,
+    '--peer-id',         $PeerId,
+    '--position',        $Position,
+    '--data-dir',        $dataDir,
+    '--credential-file', $credentialFile
 )
 $sidecar = Start-Process -FilePath $SidecarExe -PassThru -WindowStyle Hidden -WorkingDirectory $DataRoot -ArgumentList $sidecarArgs -RedirectStandardError $log -RedirectStandardOutput "$log.out"
 Set-Content -Path $sidecarPidFile -Value $sidecar.Id -Encoding ASCII
@@ -407,7 +552,8 @@ while ((Get-Date) -lt $deadline) {
     if (Test-Path $log) {
         $granted = Select-String -Path $log -Pattern 'contract B: slot granted' -SimpleMatch | Select-Object -Last 1
         if ($granted) { break }
-        $refused = Select-String -Path $log -Pattern 'placement claim refused', 'HTTP 401' | Select-Object -Last 1
+        $refused = Select-String -Path $log -Pattern 'placement claim refused', 'HTTP 401', 'certificate did not verify' |
+                   Select-Object -Last 1
         if ($refused) { break }
     }
     if ($sidecar.HasExited) { break }
@@ -424,12 +570,19 @@ if ($granted) {
     if ($refused) { Write-Host "  $($refused.Line)" }
     if (Test-Path $log) { Get-Content -Path $log -Tail 20 | ForEach-Object { Write-Host "  $_" } }
     Write-Host ""
-    Write-Host "  The four usual causes, in order:"
-    Write-Host "   1. The firewall or the port forward on the main machine does not carry TCP @@RELAYPORT@@."
+    Write-Host "  The five usual causes, in order:"
+    Write-Host "   1. The relay's certificate authority is not trusted on this machine. The"
+    Write-Host "      log line says 'the relay's TLS certificate did not verify'. Import it:"
+    Write-Host "        Import-Certificate -FilePath '$DataRoot\relay-ca.crt' ``"
+    Write-Host "          -CertStoreLocation Cert:\CurrentUser\Root"
+    Write-Host "   2. The firewall or the port forward on the main machine does not carry TCP @@RELAYPORT@@."
     Write-Host "      M4 moved the relay from 8790 to @@RELAYPORT@@, and both rules had to move with it."
-    Write-Host "   2. $RelayUrl names the wrong machine, or the relay is not running."
-    Write-Host "   3. The token here does not match the token on the main machine (HTTP 401)."
-    Write-Host "   4. The game version here does not match the map (version_incompatible)."
+    Write-Host "   3. $RelayUrl names the wrong machine, or the relay is not running. The name in"
+    Write-Host "      that URL also has to be one the certificate was issued for."
+    Write-Host "   4. This machine's credential is not the one the relay holds for $PeerId (HTTP 401)."
+    Write-Host "      Ask the main machine's operator for a slot handover; a join string cannot be"
+    Write-Host "      reprinted."
+    Write-Host "   5. The game version here does not match the map (version_incompatible)."
     Write-Host ""
     Write-Host "  The game was NOT started. Run .\@@STOPNAME@@, then try again."
     exit 1
@@ -524,6 +677,7 @@ Say "wrote $stopPath"
 Write-Host ""
 Write-Host "Setup is complete." -ForegroundColor Green
 Say "relay        : $relayUrl"
+Say "relay CA     : $($ca.Subject)  ($($ca.Thumbprint))"
 Say "slot         : $Slot   position: $Position   peer id: $PeerId"
 Say "world        : $World   export edges: $ExportEdges"
 Say "sidecar port : $SidecarPort (loopback on this machine only)"
