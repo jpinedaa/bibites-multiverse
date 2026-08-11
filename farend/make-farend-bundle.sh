@@ -7,7 +7,7 @@
 # is a stale member of the map: rebuild and commit it whenever the plugin, the
 # sidecar binary, setup-farend.ps1 or the $AssemblySha256 pin changes.
 #
-# The bundle holds four artifacts and two scripts:
+# The bundle holds five files — one install script, one document, three artifacts:
 #
 #   setup-farend.ps1        install: find the game, check its version, install
 #                           BepInEx and the plugin, trust the relay's certificate
@@ -25,8 +25,12 @@
 # and a secret). setup-farend.ps1 takes them as -CaFile and -PeerSecretFile.
 # farend/README.md is the operator-facing version of the same list.
 #
-# Nothing binary is committed. dist/ is gitignored, and the BepInEx download is
-# cached under dist/cache/.
+# THE ZIP ITSELF IS COMMITTED, and deliberately. farend/.gitignore says `dist/*`
+# and then `!dist/farend-bundle.zip`, so everything under dist/ is ignored EXCEPT
+# this one tracked binary: the second computer takes it out of a clone rather than
+# off a USB stick. Rebuilding it is therefore a repository act — commit the new
+# zip, in its own commit. The build scratch (dist/farend-bundle/) and the cached
+# BepInEx download (dist/cache/) stay ignored.
 #
 # THIS RUNS AGAINST A LIVE DEPLOYMENT. It builds the plugin and reads the result
 # out of bibites-mod/bin/Release/; it never writes into the game's plugins folder,
