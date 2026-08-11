@@ -220,6 +220,18 @@ MAP_SLOTS="$SLOTS $REMOTE_SLOT"
 # dialling 127.0.0.1 either way.
 RELAY_LISTEN="${_ENV_LAN_RELAY_LISTEN:-0.0.0.0:$RELAY_PORT}"
 
+# THE FAR END DIALS THIS MACHINE'S WINDOWS LAN ADDRESS, and its TLS client
+# verifies the name it DIALLED — not the WSL address the portproxy forwards to.
+# 192.168.1.227 is therefore a Subject Alternative Name on the relay certificate
+# (e2e/crossing/mint-tls.sh puts it there) and the URL a join string must name.
+# The local five keep dialling wss://127.0.0.1, which is a SAN on the same
+# certificate.
+LAN_RELAY_HOST="${LAN_RELAY_HOST:-192.168.1.227}"
+RELAY_ADVERTISE_URL="${RELAY_ADVERTISE_URL:-wss://$LAN_RELAY_HOST:$RELAY_PORT/contract-b/v4}"
+# The far peer's join string is the one a PERSON has to carry. mint-credentials.sh
+# prints that one and files the other five straight into 0600 secrets.
+FAR_PEER="$REMOTE_PEER"
+
 # THE LIVING DEPLOYMENT RUNS HEADLESS AT x100 (owner decision, 2026-08-10), and
 # both halves of that regime belong to THIS rig rather than to the rehearsal.
 #
@@ -343,8 +355,11 @@ remote_state() {
 far_end_hint() {
   note ""
   note "ON THE SECOND COMPUTER (its operator, not this rig):"
-  note "    .\\setup-farend.ps1 -RelayHost <the LAN address of THIS machine> -TokenFile .\\token.txt"
+  note "    .\\setup-farend.ps1 -RelayHost $LAN_RELAY_HOST -CaFile .\\ca.crt \`"
+  note "        -PeerSecretFile .\\peer-secret.txt"
   note "    .\\start-slot$REMOTE_SLOT.ps1"
+  note "It needs THREE files from here now, not one: the bundle, $TLS_CA (as ca.crt),"
+  note "and the SECRET half of slot $REMOTE_SLOT's join string (as peer-secret.txt)."
   note "It joins as peer $REMOTE_PEER, slot $REMOTE_SLOT, position $REMOTE_POS, world $REMOTE_WORLD."
   note "Run 'e2e/run-m4-lan.sh lanhost' for that address and the elevated commands."
   note "Nothing on this machine can start the far end, and nothing here has to."
@@ -438,12 +453,17 @@ reserve() {
     fail "the relay is running; --reserve-slot is a startup command. Run 'down' first."
     return 1
   fi
-  ensure_token
   mkdir -p "$RELAY_DATA"
+  # See run-m4.sh's reserve() for why this is a tool and not a pipe: --reserve-slot
+  # now mints and prints a join string ONCE, and slot $REMOTE_SLOT's has to reach a
+  # person rather than a log.
   local args=() s
-  for s in $MAP_SLOTS; do args+=(--reserve-slot "$(peer_of "$s")@$(pos_of "$s")"); done
-  "$BIN/relay" --data-dir "$RELAY_DATA" --token-file "$TOKEN_FILE" "${args[@]}" \
-    2>&1 | sed 's/^/    /' >&2
+  for s in $MAP_SLOTS; do args+=("$(peer_of "$s")@$(pos_of "$s")"); done
+  MAP_PEERS="${args[*]}" RELAY_BIN="$BIN/relay" RELAY_DATA="$RELAY_DATA" \
+  SECRETS_DIR="$SECRETS_DIR" TLS_DIR="$TLS_DIR" RELAY_PORT="$RELAY_PORT" \
+  FAR_PEER="$REMOTE_PEER" FAR_URL="$RELAY_ADVERTISE_URL" LOCAL_URL="$RELAY_URL" \
+  LAN_RELAY_HOST="$LAN_RELAY_HOST" \
+    "$E2E/crossing/mint-credentials.sh" || return 1
   note "map: $(map_shape)"
   note "order: $(map_order)"
 }
@@ -503,7 +523,7 @@ lan_up() {
   # the stale 8790 portproxy is caught, and `lanhost` prints the one command that
   # removes it.
   check_slot_ports || return 1
-  ensure_token
+  ensure_credentials || return 1
   "$GAME_SH" stop all >/dev/null 2>&1 || true
   sleep 3
   reset_bepinex_logs up
@@ -515,8 +535,12 @@ lan_up() {
 
   step "starting the Go side: relay (LAN-bound), archive, then five local sidecars"
   start_relay
-  wait_healthy "http://127.0.0.1:$RELAY_PORT/healthz" || return 1
-  note "the second computer dials ws://<this machine>:$RELAY_PORT/contract-b/v3"
+  wait_healthy "$RELAY_HEALTH" || return 1
+  note "the second computer dials $RELAY_ADVERTISE_URL"
+  note "and must trust $TLS_CA, imported into ITS OWN Windows trust store by"
+  note "setup-farend.ps1 -CaFile. Until it does, its sidecar logs a certificate"
+  note "failure and never dials — which from here is a dark slot $REMOTE_SLOT and"
+  note "nothing else."
   start_archive
   # THE ARCHIVE REPLAYS THE WHOLE LEDGER BEFORE IT BINDS ANYTHING, and that wait
   # grows with the record. It was seconds when this line was written and it is
@@ -525,7 +549,12 @@ lan_up() {
   # bring-up. 300 s is ~3x today's replay; raise it again rather than believing
   # a timeout here, and size it from the ledger.
   note "waiting for the archive to replay $(du -h "$ARCHIVE_DATA/migrations.jsonl" 2>/dev/null | cut -f1) of ledger; it serves nothing until it finishes"
-  wait_file "$LOGS/archive.log" 'archive: subscribed to the relay' 300 >/dev/null || return 1
+  # 600, not 300. The ~93 s figure this wait was last sized from was measured on
+  # 2026-08-10 against 3.7M records / 1.22 GB; on 2026-08-11 the ledger is
+  # 6.2M records / 2.0 GB, which is ~150 s of replay at the same rate. 300 s was
+  # 2x headroom and is now barely that. The file's own rule stands: size it from
+  # the ledger, and raise it again rather than believing a timeout here.
+  wait_file "$LOGS/archive.log" 'archive: subscribed to the relay' 600 >/dev/null || return 1
   note "archive subscribed; status page on $ARCHIVE_URL"
 
   local slot mark
