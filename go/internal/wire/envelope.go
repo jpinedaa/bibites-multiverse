@@ -72,9 +72,30 @@ import (
 // minor a peer claims. A sidecar that speaks 2.3 against a mod that speaks 2.2
 // publishes no settings and says so — `contractAVersion` is what makes that
 // unknown self-explaining.
+//
+// THE PUBLIC-RELEASE WAVE MOVES BOTH, AND IT MOVES THEM BY DIFFERENT AMOUNTS —
+// which is the whole of D21's reasoning and is worth reading once
+// (contract-b-m4.md §22 B32, contract-a.md §21 A52).
+//
+// Contract B takes a MAJOR, `contract-b/4.0`, and its path moves to
+// /contract-b/v4. One row of one table is why: §3.1's shared token is REPLACED
+// by a per-peer credential bound to the peerId, §3.2's 4006 narrows to require
+// it, and the transport becomes TLS. A changed rule with an installed base is
+// the expensive kind, and there is no field-level fallback anywhere — a
+// contract-b/3 peer cannot be made to work by presence-detecting a credential
+// field, because the RULE changed and not the shape. Everything else in §22
+// passes the additive test: one new message type, one new section, one new close
+// code, one new grant reason, and OPTIONAL fields on relay-authored frames.
+//
+// Contract A takes a MINOR, `contract-a/2.4`, and its path does NOT move. A
+// bearer token on the upgrade ADDS a check where there was none: one request
+// header below the envelope, one HTTP status on a request that never became a
+// session, one additive OPTIONAL field on parents[], one added close-code enum
+// value. Nothing is removed and no type changes. One milestone, one wave, two
+// honest answers from two documents' own rules.
 const (
-	ProtocolA = "contract-a/2.3"
-	ProtocolB = "contract-b/3.5"
+	ProtocolA = "contract-a/2.4"
+	ProtocolB = "contract-b/4.0"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).
@@ -167,6 +188,66 @@ func CheckProtocol(got, want string) error {
 		return fmt.Errorf("%w: got %q, want %q", ErrProtocolMajor, got, want)
 	}
 	return nil
+}
+
+// CompareProtocol orders two identifiers of the same family by major and then
+// by minor. It exists for exactly one caller — the relay's minimum contract
+// version of contract-b-m4.md §22, B25 — and the comment matters more than the
+// code, because this is the ONE place in this system where a version is
+// compared for anything but equality of the major.
+//
+// WHAT B25's GATE IS, AND WHAT IT IS NOT, in the same breath, because an
+// implementer who reads only the first half will assume the second:
+//
+//   - It is a COMPATIBILITY control. It keeps an HONESTLY stale peer off a map
+//     it would degrade — dev_environment.md's *The minors* is the episode that
+//     earns it, where a pre-3.3 sidecar answered an upgraded neighbour's W
+//     exports with a permanent MALFORMED_MESSAGE and two lanes ran at ~40
+//     hops/min against ~4-6 everywhere else.
+//   - It is NEVER a SECURITY control. `protocolVersion` is attacker-chosen text,
+//     exactly as §13 item 7 says `contractAVersion` is. A peer that edits one
+//     string walks through this gate. It stops the honest and inconveniences
+//     nobody else.
+//
+// It also does not touch §4's compatibility rule between PEERS: the minor is
+// still never a rejection reason there, unknown fields are still ignored, and a
+// feature is still detected by the presence of its field. The floor is an
+// ADMISSION POLICY OF ONE MAP.
+//
+// A different family is not comparable and is reported as an error rather than
+// ordered, because "contract-a/2.4 is below contract-b/4.0" is a sentence with
+// no meaning.
+func CompareProtocol(a, b string) (int, error) {
+	af, amaj, amin, ok := splitProtocol(a)
+	if !ok {
+		return 0, fmt.Errorf("%w: %q is not <family>/<major>[.<minor>]", ErrProtocolMajor, a)
+	}
+	bf, bmaj, bmin, ok := splitProtocol(b)
+	if !ok {
+		return 0, fmt.Errorf("%w: %q is not <family>/<major>[.<minor>]", ErrProtocolMajor, b)
+	}
+	if af != bf {
+		return 0, fmt.Errorf("%w: %q and %q are different families", ErrProtocolMajor, a, b)
+	}
+	amajN, err := strconv.Atoi(amaj)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %q has a non-numeric major", ErrProtocolMajor, a)
+	}
+	bmajN, err := strconv.Atoi(bmaj)
+	if err != nil {
+		return 0, fmt.Errorf("%w: %q has a non-numeric major", ErrProtocolMajor, b)
+	}
+	switch {
+	case amajN < bmajN:
+		return -1, nil
+	case amajN > bmajN:
+		return 1, nil
+	case amin < bmin:
+		return -1, nil
+	case amin > bmin:
+		return 1, nil
+	}
+	return 0, nil
 }
 
 // ProtocolMinor returns the minor version of an identifier, or 0 when it

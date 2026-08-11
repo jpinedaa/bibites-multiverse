@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"multiverse/internal/contractb"
-	"multiverse/internal/lantoken"
 	"multiverse/internal/logging"
+	"multiverse/internal/peercred"
 	"multiverse/internal/wire"
 )
 
@@ -42,8 +42,10 @@ func runMain(args []string, stderr io.Writer) int {
 		"bind address for the live status page and its JSON endpoint; empty disables it")
 	metricsInterval := fs.Duration("metrics-interval", time.Minute,
 		"how often a PEER_STATUS sample is appended to metrics.jsonl")
-	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
-		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
+	credentialFile := fs.String("credential-file", env("MULTIVERSE_CREDENTIAL_FILE", ""),
+		"file whose first line is THE SECRET HALF of this archive's credential, from the join "+
+			"string the relay operator handed over ("+peercred.SecretEnvVar+" is the "+
+			"alternative). Its credential must carry the SUBSCRIBE grant (contract-b-m4.md §5.1)")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -60,19 +62,20 @@ func runMain(args []string, stderr io.Writer) int {
 	}
 	defer logCloser.Close()
 
-	token, err := lantoken.Load(*tokenFile)
-	if err != nil && !errors.Is(err, lantoken.ErrNoToken) {
-		log.Error("archive: token file is unusable", "err", err)
+	secret, err := peercred.LoadSecret(*credentialFile)
+	if err != nil && !errors.Is(err, peercred.ErrNoSecret) {
+		log.Error("archive: the credential file is unusable", "err", err, "file", *credentialFile)
 		return 1
 	}
-	if token == "" {
-		log.Warn("archive: no LAN token configured; the relay will answer 401 unless it runs " +
-			"--insecure-no-token")
+	if secret == "" {
+		log.Warn("archive: no credential configured; the relay will answer 401 unless it runs " +
+			"--insecure-no-token. Put the SECRET half of this archive's join string in a file " +
+			"and pass --credential-file, or set " + peercred.SecretEnvVar)
 	}
 
 	a, err := New(Config{
 		RelayURL:        *relayURL,
-		Token:           token,
+		Secret:          secret,
 		PeerID:          *peerID,
 		DataDir:         *dataDir,
 		Logger:          log,

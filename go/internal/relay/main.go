@@ -19,8 +19,8 @@ import (
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
-	"multiverse/internal/lantoken"
 	"multiverse/internal/logging"
+	"multiverse/internal/peercred"
 )
 
 // Main is the multiverse-relay entry point, factored out of package main so a
@@ -33,10 +33,37 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		"host:port for the Contract B WebSocket server; M4 binds a LAN-reachable address")
 	dataDir := fs.String("data-dir", env("MULTIVERSE_RELAY_DATA_DIR", "multiverse-relay-data"),
 		"directory for ring.json, the durable map and its slot reservations")
-	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
-		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
+	// There is NO --token-file and no MULTIVERSE_TOKEN any more (§22, B22). The
+	// shared token is gone, the credentials live in <data-dir>/peers.json as
+	// verifiers, and the only way a secret enters this process is the mint
+	// command below, which prints it once and keeps a hash.
+	mintCredential := fs.String("mint-credential", "",
+		"<peerId>: mint a credential for this peer, print its join string ONCE, and exit "+
+			"(contract-b-m4.md §3.1). The relay keeps a VERIFIER and cannot print it again")
+	grant := fs.String("grant", peercred.GrantPeer,
+		"with --mint-credential: peer, subscribe or admin. The three are DISJOINT — a subscribe "+
+			"credential cannot claim a slot and a peer credential cannot subscribe (§22, B22, B27)")
+	advertise := fs.String("advertise-url", env("MULTIVERSE_RELAY_ADVERTISE_URL", ""),
+		"the URL a join string tells a peer to dial. Defaults to this relay's own scheme, "+
+			"listen address and path; set it when the relay is behind a name or a proxy")
 	insecure := fs.Bool("insecure-no-token", false,
-		"accept unauthenticated connections; for a single-machine test rig only, never on the LAN")
+		"accept unauthenticated connections; for a single-machine test rig ONLY. It also "+
+			"REFUSES TO BIND ANYTHING BUT LOOPBACK, and no document this project ships may "+
+			"instruct anyone to pass it (contract-b-m4.md §3.1)")
+	minContract := fs.String("min-contract-version", env("MULTIVERSE_MIN_CONTRACT_VERSION", ""),
+		"the lowest protocolVersion this relay admits, e.g. \"contract-b/4.0\" (§22, B25). "+
+			"UNSET MEANS NO MINIMUM and that is the default: a floor is a deployment decision. "+
+			"Raise it only AFTER the release that satisfies it is published. It is a "+
+			"COMPATIBILITY control and never a security one — the string is chosen by the peer")
+	tlsCert := fs.String("tls-cert", env("MULTIVERSE_RELAY_TLS_CERT", ""),
+		"PEM certificate chain for this relay's own TLS listener (§22, B23). With --tls-key it "+
+			"makes the relay speak wss://; without it, plain ws:// is refused with HTTP 426 on "+
+			"every non-loopback address")
+	tlsKey := fs.String("tls-key", env("MULTIVERSE_RELAY_TLS_KEY", ""),
+		"PEM private key for --tls-cert. A renewed pair is picked up by the NEXT handshake "+
+			"without dropping a session")
+	tlsMin := fs.String("tls-min-version", env("MULTIVERSE_RELAY_TLS_MIN_VERSION", contractb.RelayTLSMinVersion),
+		"lowest TLS version this relay's listener accepts: 1.2 or 1.3 (§12, relayTLSMinVersion)")
 	releaseSlot := fs.Int("release-slot", 0,
 		"release slot n at startup and exit, leaving its position a hole (contract-b-m4.md §7.5)")
 	handover := fs.String("handover-slot", "",
@@ -64,20 +91,26 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	defer logCloser.Close()
 
-	// There is no flag that takes the token literally: it would put the secret
-	// in every process listing (contract-b-m4.md §3.1).
-	token, err := lantoken.Load(*tokenFile)
-	if err != nil && !*insecure {
-		log.Error("relay: no LAN token", "err", err,
-			"hint", "set MULTIVERSE_TOKEN or pass --token-file; --insecure-no-token is test-rig only")
+	// §22 B23: --insecure-no-token MUST ALSO REFUSE TO BIND ANYTHING BUT
+	// LOOPBACK. A relay with no credential check on a reachable address is the
+	// exact shape §3.1 wrote the flag's discipline for, and the check belongs
+	// here — at the bind — rather than at the first connection, so the failure is
+	// a startup error an operator reads and not a map that quietly admits
+	// anybody.
+	if *insecure && !bindIsLoopback(*listen) {
+		log.Error("relay: --insecure-no-token refuses to bind anything but loopback",
+			"listen", *listen,
+			"remedy", "bind 127.0.0.1 for a single-machine rehearsal, or mint credentials with "+
+				"--mint-credential and drop the flag (contract-b-m4.md §3.1)")
 		return 1
 	}
 
+	tlsOn := *tlsCert != "" || *tlsKey != ""
 	srv, err := New(Options{
-		Logger:          log,
-		DataDir:         *dataDir,
-		Token:           token,
-		InsecureNoToken: *insecure,
+		Logger:             log,
+		DataDir:            *dataDir,
+		InsecureNoToken:    *insecure,
+		MinContractVersion: *minContract,
 	})
 	if err != nil {
 		log.Error("relay: startup failed", "err", err)
@@ -85,11 +118,14 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	defer srv.Close()
 
+	if *mintCredential != "" {
+		return mintCommand(srv, *mintCredential, *grant, joinURL(*advertise, *listen, tlsOn), stdout, log)
+	}
 	if *releaseSlot > 0 {
 		return releaseCommand(srv, *releaseSlot, *yes, stdout, stderr, log)
 	}
 	if *handover != "" {
-		return handoverCommand(srv, *handover, *yes, stdout, stderr, log)
+		return handoverCommand(srv, *handover, *yes, joinURL(*advertise, *listen, tlsOn), stdout, stderr, log)
 	}
 
 	if len(reserveSlots) > 0 {
@@ -111,10 +147,39 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 				log.Info("relay: this peer already holds a slot; left alone",
 					"slot", res.Slot, "position", res.Position(), "peer", res.PeerID)
 			}
+			// §3.1: THE RELAY MINTS THE SECRET AT FIRST CLAIM AND PRINTS A JOIN
+			// STRING. A reservation is the operator's claim of an identity on a
+			// peer's behalf, and it is the only claim that can come first: a peer
+			// with no credential cannot dial, so there is no trust-on-first-use path
+			// and this is where the credential has to be born.
+			if _, held := srv.Credentials().GrantOf(res.PeerID); held {
+				log.Info("relay: this peer already holds a credential; it was NOT reminted, "+
+					"because a relay keeps a verifier and cannot reprint a join string",
+					"peer", res.PeerID,
+					"hint", "if it was lost, --handover-slot rebinds the reservation to a new "+
+						"peerId with a fresh credential (§7.5)")
+				continue
+			}
+			secret, err := srv.Credentials().Mint(res.PeerID, peercred.GrantPeer)
+			if err != nil {
+				log.Error("relay: minting the credential failed", "peer", res.PeerID, "err", err)
+				return 1
+			}
+			fmt.Fprint(stdout, peercred.JoinString{
+				RelayURL: joinURL(*advertise, *listen, tlsOn),
+				PeerID:   res.PeerID, Secret: secret, Grant: peercred.GrantPeer,
+			}.Report())
 		}
 		log.Info("relay: map pre-seeded; start it again to serve",
 			"map", srv.MapShape(), "slots", srv.Snapshot())
 		return 0
+	}
+
+	// §3.1's start rule, checked at the moment it means something: a relay about
+	// to SERVE with no credential in its store can admit nobody.
+	if err := srv.CheckServable(); err != nil {
+		log.Error("relay: refusing to serve", "err", err)
+		return 1
 	}
 
 	ln, err := net.Listen("tcp", *listen)
@@ -122,8 +187,42 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		log.Error("relay: listen failed", "addr", *listen, "err", err)
 		return 1
 	}
-	log.Info("relay: listening", "addr", ln.Addr().String(), "path", contractb.ContractBPath,
-		"retiredPath", contractb.RetiredContractBPath, "dataDir", *dataDir,
+	scheme := "ws"
+	if tlsOn {
+		minVersion, err := TLSMinVersion(*tlsMin)
+		if err != nil {
+			log.Error("relay: bad --tls-min-version", "err", err)
+			_ = ln.Close()
+			return 1
+		}
+		reloader, err := NewCertReloader(*tlsCert, *tlsKey)
+		if err != nil {
+			log.Error("relay: TLS startup failed", "err", err,
+				"remedy", "--tls-cert and --tls-key must both name a readable PEM file")
+			_ = ln.Close()
+			return 1
+		}
+		ln = TLSListener(ln, reloader, minVersion)
+		scheme = "wss"
+		log.Info("relay: terminating TLS at its own front door",
+			"cert", *tlsCert, "key", *tlsKey, "minVersion", *tlsMin,
+			"rotation", "a renewed pair is picked up by the NEXT handshake; established "+
+				"sessions are untouched (contract-b-m4.md §22, B23)")
+	} else if !bindIsLoopback(*listen) {
+		// B23 again, said at startup as well as per connection, because a relay
+		// that 426s every upgrade looks from the outside exactly like a relay
+		// nobody can reach.
+		log.Error("relay: serving PLAINTEXT on a non-loopback bind; every upgrade off loopback "+
+			"will be refused with HTTP 426",
+			"listen", *listen,
+			"remedy", "pass --tls-cert/--tls-key, or front this relay with a proxy that "+
+				"terminates TLS and reaches it over loopback (contract-b-m4.md §22, B23)")
+	}
+	log.Info("relay: listening", "addr", ln.Addr().String(), "scheme", scheme,
+		"path", contractb.ContractBPath,
+		"retiredPaths", contractb.RetiredContractBPaths, "dataDir", *dataDir,
+		"credentials", srv.Credentials().Len(), "credentialStore", srv.Credentials().Path(),
+		"minContractVersion", orNone(srv.MinContractVersion()),
 		"map", srv.MapShape(), "slots", srv.Snapshot(), "relaySessionId", srv.SessionID())
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
@@ -173,7 +272,45 @@ func releaseCommand(srv *Server, slot int, yes bool, stdout, stderr io.Writer, l
 	return 0
 }
 
-func handoverCommand(srv *Server, spec string, yes bool, stdout, stderr io.Writer, log *slog.Logger) int {
+// mintCommand is §3.1's issuance, and it is the SMALLEST DESIGN THAT WORKS: the
+// relay mints a secret, prints a join string once at its own console, and keeps
+// a verifier. No accounts, no email, no password reset (DQ1).
+//
+// The cost is stated wherever the flow is, because it is real and was chosen
+// with the price in view: THERE IS NO RECOVERY PATH IN THE SOFTWARE. A stranger
+// who loses their join string loses that world's identity until an operator
+// hands the slot over by name — bounded only by the fact that the reservation
+// never expires, so the slot, the position and every journal entry addressed to
+// it are still there when the operator gets to it.
+func mintCommand(srv *Server, peerID, grant, relayURL string, stdout io.Writer, log *slog.Logger) int {
+	if !peercred.ValidGrant(grant) {
+		log.Error("relay: bad --grant", "grant", grant,
+			"want", "peer, subscribe or admin")
+		return 1
+	}
+	secret, err := srv.Credentials().Mint(peerID, grant)
+	if errors.Is(err, peercred.ErrExists) {
+		log.Error("relay: this peerId already holds a credential and it was not replaced",
+			"peer", peerID,
+			"why", "the store keeps a VERIFIER, so a join string cannot be reprinted; replacing "+
+				"one silently would strand whichever copy the peer still holds",
+			"remedy", "--handover-slot <n>=<newPeerId> rebinds the reservation to a new identity "+
+				"with a freshly minted credential (contract-b-m4.md §7.5, §22 B22)")
+		return 1
+	}
+	if err != nil {
+		log.Error("relay: minting the credential failed", "peer", peerID, "err", err)
+		return 1
+	}
+	fmt.Fprint(stdout, peercred.JoinString{
+		RelayURL: relayURL, PeerID: peerID, Secret: secret, Grant: grant,
+	}.Report())
+	log.Info("relay: minted a credential; the join string was printed once and is not recoverable",
+		"peer", peerID, "grant", grant, "store", srv.Credentials().Path())
+	return 0
+}
+
+func handoverCommand(srv *Server, spec string, yes bool, relayURL string, stdout, stderr io.Writer, log *slog.Logger) int {
 	slot, newPeer, err := parseHandover(spec)
 	if err != nil {
 		log.Error("relay: bad --handover-slot", "spec", spec, "err", err)
@@ -194,8 +331,31 @@ func handoverCommand(srv *Server, spec string, yes bool, stdout, stderr io.Write
 		log.Error("relay: handover failed", "slot", slot, "err", err)
 		return 1
 	}
+	// §22 B22: HANDOVER IS THE CREDENTIAL RECOVERY PATH, and there is no other.
+	// The new identity gets a freshly minted credential and the old one's is
+	// dropped, so an identity that gave up a slot cannot go on authenticating
+	// against a reservation it no longer holds.
+	secret, mintErr := srv.Credentials().Mint(now.PeerID, peercred.GrantPeer)
+	if errors.Is(mintErr, peercred.ErrExists) {
+		secret, mintErr = srv.Credentials().Remint(now.PeerID)
+	}
+	if mintErr != nil {
+		log.Error("relay: the slot moved but its new credential could not be minted",
+			"slot", now.Slot, "peer", now.PeerID, "err", mintErr,
+			"remedy", "mint it by hand: multiverse-relay --mint-credential "+now.PeerID)
+		return 1
+	}
+	if err := srv.Credentials().Forget(old.PeerID); err != nil {
+		log.Error("relay: the old identity's credential could not be dropped",
+			"peer", old.PeerID, "err", err)
+		return 1
+	}
+	fmt.Fprint(stdout, peercred.JoinString{
+		RelayURL: relayURL, PeerID: now.PeerID, Secret: secret, Grant: peercred.GrantPeer,
+	}.Report())
 	log.Info("relay: slot handed over; the map did not change shape and no lane moved",
-		"slot", now.Slot, "position", now.Position(), "from", old.PeerID, "to", now.PeerID)
+		"slot", now.Slot, "position", now.Position(), "from", old.PeerID, "to", now.PeerID,
+		"oldCredential", "dropped", "newCredential", "minted and printed once")
 	return 0
 }
 
@@ -370,4 +530,58 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func orNone(v string) string {
+	if v == "" {
+		return "<none>"
+	}
+	return v
+}
+
+// bindIsLoopback answers B23's carve-out and §3.1's --insecure-no-token rule
+// from the SAME test, because both rules mean the same thing by "loopback": a
+// listener no other machine can reach. A wildcard bind is not loopback even
+// though loopback can reach it — that is the whole point of the distinction.
+func bindIsLoopback(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		host = listen
+	}
+	if host == "" {
+		// ":8795" is the wildcard, spelled shortest.
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// joinURL is the URL a join string tells a peer to dial. It is the operator's
+// --advertise-url when they gave one, and otherwise this relay's own scheme,
+// bind and path — with the host left as a legible placeholder on a wildcard
+// bind, because a relay genuinely does not know which of its addresses a
+// stranger can reach.
+func joinURL(advertise, listen string, tlsOn bool) string {
+	if advertise != "" {
+		return advertise
+	}
+	scheme := "ws"
+	if tlsOn {
+		scheme = "wss"
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		host, port = listen, ""
+	}
+	if ip := net.ParseIP(host); host == "" || host == "0.0.0.0" || host == "::" ||
+		(ip != nil && ip.IsUnspecified()) {
+		host = "<relay-host>"
+	}
+	if port == "" {
+		return scheme + "://" + host + contractb.ContractBPath
+	}
+	return scheme + "://" + net.JoinHostPort(host, port) + contractb.ContractBPath
 }

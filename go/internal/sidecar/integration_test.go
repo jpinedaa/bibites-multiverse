@@ -253,7 +253,7 @@ func TestOfflineSlotKeepsItsReservationAndItsPosition(t *testing.T) {
 func TestArchiveRecordsAndFetchesAGenome(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
 	one, two := g.node(0), g.node(1)
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 
 	const livingParent int32 = -1180911975
 	const goneParent int32 = 204418833
@@ -385,7 +385,7 @@ func TestArchiveRecordsAndFetchesAGenome(t *testing.T) {
 // subscriber is answered NOT_A_MEMBER and is not forwarded.
 func TestArchiveMayNotSendMigrations(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	sub := dialSubscriber(t, g.relay.url(), testToken)
+	sub := dialSubscriber(t, g.relay.url(), g.relay)
 
 	nack := sub.sendMigrationAndWaitNack(t, 10*time.Second)
 	if nack.Code != "NOT_A_MEMBER" {
@@ -406,18 +406,28 @@ func TestArchiveMayNotSendMigrations(t *testing.T) {
 	}
 }
 
-// TestWrongLANTokenIsRejected covers §3.1: a missing or wrong token gets HTTP
-// 401 and no upgrade, so there is no WebSocket and no close code, and the peer
-// never joins the map.
-func TestWrongLANTokenIsRejected(t *testing.T) {
-	rl := startRelayToken(t, testToken)
+// TestWrongCredentialIsRejected covers §3.1 as §22 B22 rewrote it: a missing,
+// malformed or wrong credential gets HTTP 401 and no upgrade, so there is no
+// WebSocket and no close code, and the peer never joins the map.
+//
+// The end of it is the part that matters more than the 401. A refused sidecar
+// MUST NOT generate a fresh peerId to get past the refusal — that would strand
+// its slot, its journal's destSlot and every organism addressed to it — so this
+// asserts that the map gains NO reservation at all while the credential is
+// wrong, and that the peer keeps the identity it was refused under.
+func TestWrongCredentialIsRejected(t *testing.T) {
+	rl := startRelay(t)
+	good := rl.secret("peer-with-the-right-credential")
 
-	for name, token := range map[string]string{
-		"wrong token": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-		"no token":    "",
+	for name, credential := range map[string]string{
+		"wrong secret":              "peer-with-the-right-credential.ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		"no credential":             "",
+		"an unknown peer id":        "peer-nobody-minted." + good,
+		"a credential with no dot":  "peer-with-the-right-credential",
+		"somebody else's peer half": "peer-invented.0123456789abcdef0123456789abcdef",
 	} {
 		t.Run(name, func(t *testing.T) {
-			status, authenticate := probeRelay(t, rl.addr, token)
+			status, authenticate := probeRelay(t, rl.addr, credential)
 			if status != 401 {
 				t.Fatalf("HTTP status = %d, want 401", status)
 			}
@@ -427,20 +437,26 @@ func TestWrongLANTokenIsRejected(t *testing.T) {
 		})
 	}
 
-	cfg := fastConfig(t, rl.url(), "peer-with-a-bad-token")
-	cfg.Token = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	cfg := fastConfig(t, rl, "peer-with-a-bad-credential")
+	cfg.Secret = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	s := startSidecar(t, cfg)
 	dialFakeMod(t, fakeModOptions{url: s.URL(), world: newWorld(), heartbeat: 200 * time.Millisecond})
 	time.Sleep(1500 * time.Millisecond)
 	if got := s.Slot(); got != 0 {
-		t.Fatalf("a sidecar with a wrong token got slot %d", got)
+		t.Fatalf("a sidecar with a wrong credential got slot %d", got)
 	}
 	if got := len(rl.relay.Snapshot()); got != 0 {
-		t.Fatalf("the map has %d slots; an unauthenticated peer must never reserve one", got)
+		t.Fatalf("the map has %d slots; an unauthenticated peer must never reserve one, and a "+
+			"refused one must never invent an identity to get past the refusal (§3.1)", got)
+	}
+	if got := s.PeerID(); got != "peer-with-a-bad-credential" {
+		t.Fatalf("the refused sidecar is now %q; §3.1 forbids generating a fresh peerId, which "+
+			"would strand its slot and every organism addressed to it", got)
 	}
 
-	good := fastConfig(t, rl.url(), "peer-with-the-right-token")
-	goodSide := startSidecar(t, good)
+	goodCfg := fastConfig(t, rl, "peer-with-the-right-credential")
+	goodCfg.Secret = good
+	goodSide := startSidecar(t, goodCfg)
 	waitSlot(t, goodSide, 1)
 }
 
@@ -479,7 +495,7 @@ func TestEdgeStatusCarriesOneEntryPerExportEdge(t *testing.T) {
 	// A18 removed the fallback: a CONFIG_UPDATE with NO exportEdges is
 	// unusable, and CONFIG_UPDATE has no NACK channel, so the only answer is a
 	// close.
-	orphan := startSidecar(t, fastConfig(t, g.relay.url(), "peer-no-export-edges"))
+	orphan := startSidecar(t, fastConfig(t, g.relay, "peer-no-export-edges"))
 	bad := dialRawMod(t, orphan.URL())
 	size, width := 2000.0, 60.0
 	frame, err := wire.Encode(wire.ProtocolA, contracta.TypeConfigUpdate, time.Now().UnixMilli(),
@@ -497,7 +513,7 @@ func TestEdgeStatusCarriesOneEntryPerExportEdge(t *testing.T) {
 	}
 
 	// An exportEdges member that is not also a borderEdge is equally unusable.
-	orphan2 := startSidecar(t, fastConfig(t, g.relay.url(), "peer-undeclared-band"))
+	orphan2 := startSidecar(t, fastConfig(t, g.relay, "peer-undeclared-band"))
 	bad2 := dialRawMod(t, orphan2.URL())
 	frame, err = wire.Encode(wire.ProtocolA, contracta.TypeConfigUpdate, time.Now().UnixMilli(),
 		contracta.ConfigUpdate{
@@ -520,7 +536,7 @@ func TestEdgeStatusCarriesOneEntryPerExportEdge(t *testing.T) {
 // sends and MUST NOT close on it.
 func TestRetiredSectorFieldIsIgnored(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	side := startSidecar(t, fastConfig(t, g.relay.url(), "peer-with-a-retired-sector"))
+	side := startSidecar(t, fastConfig(t, g.relay, "peer-with-a-retired-sector"))
 	waitSlotAny(t, side)
 
 	old := dialRawMod(t, side.URL())
@@ -816,7 +832,7 @@ func TestBounceBackWhenRouteAroundHasNoAnswer(t *testing.T) {
 	dataDir := t.TempDir()
 	migrationID := seedOutboundCustody(t, dataDir, nil)
 
-	cfg := fastConfig(t, relaySrv.url(), "peer-a")
+	cfg := fastConfig(t, relaySrv, "peer-a")
 	cfg.DataDir = dataDir
 	sideA := startSidecar(t, cfg)
 	waitSlot(t, sideA, 1)
@@ -1333,24 +1349,29 @@ func TestRetiredContractAPathClosesWith4000(t *testing.T) {
 	}
 }
 
-// TestRetiredContractBPathClosesWith4000 covers contract-b-m4.md §3: a relay
-// MUST keep serving /contract-b/v2 and MUST close every connection on it
-// immediately with 4000, so an M3 sidecar gets the defined loud error instead
-// of a bare HTTP 404.
-func TestRetiredContractBPathClosesWith4000(t *testing.T) {
+// TestRetiredContractBPathsCloseWith4000 covers contract-b-m4.md §3 and §22 B32:
+// a relay MUST keep serving EVERY retired path — /contract-b/v2 and now
+// /contract-b/v3 — and MUST close every connection on one immediately with 4000,
+// so a sidecar left behind gets the defined loud error instead of a bare HTTP
+// 404. It is also what makes the rig's own crossing legible: an un-upgraded
+// far end gets a close it can log rather than a silence it has to diagnose.
+func TestRetiredContractBPathsCloseWith4000(t *testing.T) {
 	rl := startRelay(t)
-	sub := dialRawRelay(t, "ws://"+rl.addr+contractb.RetiredContractBPath, testToken)
-	if code := sub.waitClosed(5 * time.Second); code != contractb.CloseProtocolUnsupported {
-		t.Fatalf("close code on the retired path = %d, want %d", code, contractb.CloseProtocolUnsupported)
+	for _, path := range contractb.RetiredContractBPaths {
+		sub := dialRawRelay(t, "ws://"+rl.addr+path, rl, "peer-retired-probe")
+		if code := sub.waitClosed(5 * time.Second); code != contractb.CloseProtocolUnsupported {
+			t.Fatalf("close code on %s = %d, want %d", path, code, contractb.CloseProtocolUnsupported)
+		}
 	}
 }
 
-// TestAnM3SidecarIsRefusedOnTheCurrentPath covers §4: a contract-b/2 sidecar and
-// a contract-b/3 relay are incompatible BY DESIGN and say so with close 4000
-// rather than misrouting an organism.
-func TestAnM3SidecarIsRefusedOnTheCurrentPath(t *testing.T) {
+// TestAnOlderMajorIsRefusedOnTheCurrentPath covers §4: a sidecar on an older
+// MAJOR and this relay are incompatible BY DESIGN and say so with close 4000
+// rather than misrouting an organism. Under contract-b/4 there is no
+// field-level fallback anywhere, because the RULE changed and not the shape.
+func TestAnOlderMajorIsRefusedOnTheCurrentPath(t *testing.T) {
 	rl := startRelay(t)
-	old := dialRawRelay(t, rl.url(), testToken)
+	old := dialRawRelay(t, rl.url(), rl, "peer-old-major")
 	old.write([]byte(`{"protocol":"contract-b/2.0","type":"HANDSHAKE","messageId":"` +
 		wire.NewUUID() + `","sentAt":1,"data":{"peerId":"m3-peer","role":"peer",` +
 		`"protocolVersion":"contract-b/2.0","gameVersion":"0.6.3.1","sidecarVersion":"m3.0"}}`))

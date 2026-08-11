@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"multiverse/internal/contracta"
+	"multiverse/internal/modtoken"
+	"multiverse/internal/peercred"
 )
 
 // childSidecar is a real multiverse-sidecar process. The test binary
@@ -20,14 +22,15 @@ type childSidecar struct {
 	dir     string
 	relay   string
 	peerID  string
+	secret  string
 	cmd     *exec.Cmd
 	addr    string
 	logFile *os.File
 }
 
-func startChildSidecar(t *testing.T, dir, relayURL, peerID, fault string) *childSidecar {
+func startChildSidecar(t *testing.T, dir string, rl *testRelay, peerID, fault string) *childSidecar {
 	t.Helper()
-	c := &childSidecar{t: t, dir: dir, relay: relayURL, peerID: peerID}
+	c := &childSidecar{t: t, dir: dir, relay: rl.url(), peerID: peerID, secret: rl.secret(peerID)}
 	c.start(fault)
 	t.Cleanup(c.kill)
 	return c
@@ -50,9 +53,13 @@ func (c *childSidecar) start(fault string) {
 	cmd.Env = append(os.Environ(),
 		"MULTIVERSE_TEST_HELPER=sidecar",
 		"MULTIVERSE_TEST_ARGS="+strings.Join(args, "\x1f"),
-		// contract-b-m4.md §3.1: the token comes from the environment, never
-		// from a flag that would put it in the process listing.
-		"MULTIVERSE_TOKEN="+testToken,
+		// contract-b-m4.md §3.1: the SECRET half comes from the environment or a
+		// credential file, never from a flag that would put it in the process
+		// listing. The peerId half is not a secret and rides --peer-id.
+		peercred.SecretEnvVar+"="+c.secret,
+		// contract-a.md §21 A47: this child mints its own Contract A token into
+		// its data directory at first start, and the fake mod below reads that
+		// file — which is the real ordering a rollout has to keep.
 	)
 	if fault != "" {
 		cmd.Env = append(cmd.Env, "MULTIVERSE_FAULT="+fault)
@@ -87,6 +94,27 @@ func (c *childSidecar) start(fault string) {
 }
 
 func (c *childSidecar) url() string { return "ws://" + c.addr + contracta.ContractAPath }
+
+// contractAToken reads the token the CHILD minted for itself (contract-a.md
+// §21, A47). It is deliberately not pre-seeded: this is the one test in the
+// suite that runs a real multiverse-sidecar process, so it is the one place the
+// rollout ordering A52's migration note asks for is actually exercised — the
+// sidecar is up and the file is present BEFORE the mod dials.
+func (c *childSidecar) contractAToken() string {
+	c.t.Helper()
+	path := filepath.Join(c.dir, modtoken.DefaultFileName)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		tok, err := modtoken.Load(path)
+		if err == nil {
+			return tok
+		}
+		if time.Now().After(deadline) {
+			c.t.Fatalf("the child sidecar never minted %s: %v", path, err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
 
 func (c *childSidecar) waitFault(timeout time.Duration) {
 	c.t.Helper()
@@ -155,9 +183,9 @@ func runCrashCustody(t *testing.T, fault string) {
 	// neighbour stays in-process. The killed side claims slot 1, so it must
 	// start first — auto-placement (§7.2 rule 6) is start order on an empty map.
 	dataDir := t.TempDir()
-	childA := startChildSidecar(t, dataDir, relaySrv.url(), "peer-a", fault)
+	childA := startChildSidecar(t, dataDir, relaySrv, "peer-a", fault)
 
-	cfgB := fastConfig(t, relaySrv.url(), "peer-b")
+	cfgB := fastConfig(t, relaySrv, "peer-b")
 	cfgB.MigrateInAckTimeout = 2 * time.Second
 	sideB := startSidecar(t, cfgB)
 	waitSlot(t, sideB, 2)
@@ -167,7 +195,8 @@ func runCrashCustody(t *testing.T, fault string) {
 
 	worldA := newWorld()
 	modA := dialFakeMod(t, fakeModOptions{
-		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond})
+		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond,
+		token: childA.contractAToken()})
 	modA.waitEdge(contracta.EdgeE, true, 20*time.Second)
 	modB.waitEdge(contracta.EdgeE, true, 20*time.Second)
 
@@ -182,8 +211,11 @@ func runCrashCustody(t *testing.T, fault string) {
 	// the slot and the position are persisted there, so it reclaims slot 1 at
 	// its own coordinate (§7.4).
 	childA.start("")
+	// The restarted process REUSES the token it minted before the kill, which is
+	// what keeps a crash from costing every mod on the machine a 401 (A47).
 	modA2 := dialFakeMod(t, fakeModOptions{
-		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond})
+		url: childA.url(), world: worldA, heartbeat: 300 * time.Millisecond,
+		token: childA.contractAToken()})
 	_ = modA2
 
 	waitFor(t, 30*time.Second, "the organism to be accounted for after the crash", func() bool {

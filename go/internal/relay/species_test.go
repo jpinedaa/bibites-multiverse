@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,11 +16,34 @@ import (
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
-	"multiverse/internal/lantoken"
+	"multiverse/internal/peercred"
 	"multiverse/internal/wire"
 )
 
-const speciesTestToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+// speciesTestCreds is the credential store this file's relay runs on. Under
+// contract-b/4 there is no shared token to hand every peer, so the harness mints
+// one credential PER PEER the way an operator's console does, and dialPeer looks
+// its own up by peerId (contract-b-m4.md §22, B22).
+var speciesTestCreds struct {
+	sync.Mutex
+	store   *peercred.Store
+	secrets map[string]string
+}
+
+func speciesSecret(t *testing.T, peerID string) string {
+	t.Helper()
+	speciesTestCreds.Lock()
+	defer speciesTestCreds.Unlock()
+	if secret, ok := speciesTestCreds.secrets[peerID]; ok {
+		return secret
+	}
+	secret, err := speciesTestCreds.store.Mint(peerID, peercred.GrantPeer)
+	if err != nil {
+		t.Fatalf("mint %s: %v", peerID, err)
+	}
+	speciesTestCreds.secrets[peerID] = secret
+	return secret
+}
 
 // TestRelayNeverParsesTheSpeciesBlock is contract-b-m4.md §15, B9: §5's
 // prohibition list now names `data.species` beside `data.body.bb8` and
@@ -98,9 +122,21 @@ func payloadFrameWithSpecies(t *testing.T, sourcePeer string, sourceSlot, destSl
 
 func startTestRelay(t *testing.T) string {
 	t.Helper()
+	store, err := peercred.OpenStore("")
+	if err != nil {
+		t.Fatalf("peercred.OpenStore: %v", err)
+	}
+	speciesTestCreds.Lock()
+	speciesTestCreds.store = store
+	speciesTestCreds.secrets = map[string]string{}
+	speciesTestCreds.Unlock()
+	// A relay refuses to start on an empty store (§3.1), and every peer this file
+	// dials mints its own on the way in.
+	speciesSecret(t, "bootstrap-peer")
+
 	srv, err := New(Options{
 		Logger:         slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelWarn})),
-		Token:          speciesTestToken,
+		Credentials:    store,
 		PingInterval:   time.Second,
 		PeerTimeout:    30 * time.Second,
 		StatusCoalesce: 10 * time.Millisecond,
@@ -132,7 +168,7 @@ func dialPeer(t *testing.T, url, id string) *testPeer {
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
 	ws, _, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{
 		CompressionMode: websocket.CompressionDisabled,
-		HTTPHeader:      http.Header{"Authorization": []string{lantoken.Header(speciesTestToken)}},
+		HTTPHeader:      http.Header{"Authorization": []string{peercred.Header(id, speciesSecret(t, id))}},
 	})
 	dialCancel()
 	if err != nil {

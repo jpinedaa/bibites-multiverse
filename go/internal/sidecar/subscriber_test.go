@@ -12,7 +12,7 @@ import (
 	"github.com/coder/websocket"
 
 	"multiverse/internal/contractb"
-	"multiverse/internal/lantoken"
+	"multiverse/internal/peercred"
 	"multiverse/internal/wire"
 )
 
@@ -29,13 +29,20 @@ type subscriber struct {
 	frames []wire.Envelope
 }
 
-func dialSubscriber(t *testing.T, relayURL, token string) *subscriber {
+// dialSubscriber dials with the SUBSCRIBE grant of §22 B27. Under M4 role
+// "archive" was a self-declaration and any token holder could take it; now the
+// grant decides, and a peer credential asking for this role is refused with 4003
+// (relay/credential_test.go holds that half).
+func dialSubscriber(t *testing.T, relayURL string, rl *testRelay) *subscriber {
 	t.Helper()
+	const peerID = "archive-probe"
 	ctx, cancel := context.WithCancel(context.Background())
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
 	ws, _, err := websocket.Dial(dialCtx, relayURL, &websocket.DialOptions{
 		CompressionMode: websocket.CompressionDisabled,
-		HTTPHeader:      http.Header{"Authorization": []string{lantoken.Header(token)}},
+		HTTPHeader: http.Header{
+			"Authorization": []string{peercred.Header(peerID, rl.subscribeSecret(peerID))},
+		},
 	})
 	dialCancel()
 	if err != nil {
@@ -48,7 +55,7 @@ func dialSubscriber(t *testing.T, relayURL, token string) *subscriber {
 	t.Cleanup(func() { cancel(); _ = ws.CloseNow() })
 
 	s.send(contractb.TypeHandshake, contractb.Handshake{
-		PeerID:          "archive-probe",
+		PeerID:          peerID,
 		Role:            contractb.RoleArchive,
 		ProtocolVersion: wire.ProtocolB,
 		SidecarVersion:  "test",
@@ -162,13 +169,15 @@ func (s *subscriber) peerStatuses(t *testing.T) []contractb.PeerStatus {
 
 // dialRawRelay is a bare Contract B socket with no handshake, for the path and
 // close-code rules of §3 and §3.2.
-func dialRawRelay(t *testing.T, url, token string) *rawMod {
+func dialRawRelay(t *testing.T, url string, rl *testRelay, peerID string) *rawMod {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
 	ws, _, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{
 		CompressionMode: websocket.CompressionDisabled,
-		HTTPHeader:      http.Header{"Authorization": []string{lantoken.Header(token)}},
+		HTTPHeader: http.Header{
+			"Authorization": []string{peercred.Header(peerID, rl.secret(peerID))},
+		},
 	})
 	dialCancel()
 	if err != nil {
@@ -192,9 +201,10 @@ func dialRawRelay(t *testing.T, url, token string) *rawMod {
 }
 
 // probeRelay does the HTTP upgrade by hand so a test can read the status and
-// the WWW-Authenticate header. §3.1: a wrong token gets 401 and no upgrade, so
-// there is no WebSocket and no close code to inspect.
-func probeRelay(t *testing.T, addr, token string) (int, string) {
+// the WWW-Authenticate header. §3.1: a missing, malformed or wrong credential
+// gets 401 and no upgrade, so there is no WebSocket and no close code to
+// inspect.
+func probeRelay(t *testing.T, addr, credential string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, "http://"+addr+contractb.ContractBPath, nil)
 	if err != nil {
@@ -204,8 +214,8 @@ func probeRelay(t *testing.T, addr, token string) (int, string) {
 	req.Header.Set("Upgrade", "websocket")
 	req.Header.Set("Sec-WebSocket-Version", "13")
 	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-	if token != "" {
-		req.Header.Set("Authorization", lantoken.Header(token))
+	if credential != "" {
+		req.Header.Set("Authorization", "Bearer "+credential)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

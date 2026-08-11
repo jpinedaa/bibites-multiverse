@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
+	"multiverse/internal/modtoken"
 )
 
 // Version is reported to the relay in HANDSHAKE.
-const Version = "m4.0"
+const Version = "m5.0"
 
 // Sidecar defence-in-depth defaults. Neither is a wire value: they are the
 // sidecar's own answer to the slot-6 livelock, so they live here rather than in
@@ -40,17 +42,40 @@ const (
 // --listen, --relay, --peer-id and --data-dir; everything else has a contract
 // default and exists so tests can run the real code paths on a short clock.
 type Config struct {
-	// Listen is the Contract A bind address. contract-a.md §2 forbids
-	// binding anything but loopback, and §14 A17 keeps it unauthenticated:
-	// the mod and its sidecar always share a machine (D9).
+	// Listen is the Contract A bind address. contract-a.md §2 forbids binding
+	// anything but loopback, and §21 A47 now puts a BEARER TOKEN on the upgrade:
+	// §12 item 1 stayed open for three milestones because the wire never leaves
+	// loopback and one person owns the machine, and after M5 that machine is a
+	// stranger's.
 	Listen string
-	// RelayURL is the Contract B endpoint, ws://host:port/contract-b/v3.
+	// RelayURL is the Contract B endpoint, wss://host:port/contract-b/v4 for
+	// anything a stranger dials, ws:// only for a loopback rehearsal (§22, B23).
 	RelayURL string
-	// Token is the shared LAN bearer token of contract-b-m4.md §3.1. It goes
-	// on the HTTP upgrade and never in a frame.
-	Token string
+	// Secret is the SECRET HALF of this peer's credential (contract-b-m4.md §3.1,
+	// §22 B22). It rides the HTTP upgrade as `Bearer <peerId>.<secret>` and never
+	// appears in a frame. The peerId half is not a secret and comes from
+	// <DataDir>/peer-id.
+	Secret string
+	// ContractAToken is the token the mod must present on the Contract A upgrade
+	// (contract-a.md §21, A47). Empty and not insecure means the sidecar mints one
+	// into ContractATokenFile at first start, mode 0600.
+	ContractAToken string
+	// ContractATokenFile is `contractATokenFile` (§10). Empty defaults to
+	// <DataDir>/contract-a.token.
+	ContractATokenFile string
+	// InsecureNoContractAToken disables the Contract A check and logs one loud
+	// warning PER ACCEPTED CONNECTION. It exists for a single-machine rehearsal
+	// and for nothing else, and it is a DIFFERENT FLAG ON A DIFFERENT BINARY FOR
+	// A DIFFERENT WIRE from the relay's --insecure-no-token, named differently on
+	// purpose so a runbook cannot confuse them (A47).
+	InsecureNoContractAToken bool
 	// PeerID is this sidecar's stable identity. Slot reclaim keys on it, so it
 	// is persisted in <DataDir>/peer-id and generated once if absent (§7.4).
+	//
+	// A SIDECAR WHOSE CREDENTIAL IS REFUSED MUST NOT GENERATE A FRESH ONE (§3.1).
+	// That would strand its slot, its journal's destSlot and every organism
+	// addressed to it. It keeps its journal, keeps delivering inbound entries to
+	// its own mod, and waits for a person.
 	PeerID string
 	// DataDir holds the journal, the peer id, the remembered slot and position,
 	// and the genome cache.
@@ -188,6 +213,11 @@ func (c *Config) applyDefaults() {
 	}
 	if c.DataDir == "" {
 		c.DataDir = d.DataDir
+	}
+	if c.ContractATokenFile == "" {
+		// §10's `contractATokenFile` is <state-dir>/contract-a.token, and the
+		// sidecar's state directory is the one it already owns.
+		c.ContractATokenFile = filepath.Join(c.DataDir, modtoken.DefaultFileName)
 	}
 	if c.PeerID == "" {
 		host, err := os.Hostname()

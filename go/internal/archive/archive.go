@@ -10,9 +10,22 @@
 // genome is a gap on a record rather than a reason to delay one, and NOTHING ON
 // THE MIGRATION PATH EVER WAITS FOR A READER (Risk 4).
 //
-// M4's archive is still a recorder. It has no write interface, no query engine
-// and no authentication of its own — it is a subscriber that trusts the shared
-// token (§13 item 4).
+// UNDER contract-b/4 IT IS AN AUTHORISED SUBSCRIBER (§5.1, §22 B27). It is still
+// a recorder with no write interface and no query engine, and what changed is
+// the door: role "archive" was a SELF-DECLARATION under M4, so anyone holding
+// the one shared token could open a socket, declare themselves a subscriber and
+// receive a byte-identical copy of every envelope on the map. It now
+// authenticates as a peerId like everybody else, with a credential carrying the
+// SUBSCRIBE grant — the same mechanism as a peer's, a different permission — and
+// the grant is issued deliberately by the relay's operator, because what it
+// grants is a fairly complete profile of every participant's machine.
+//
+// THE BOUNDARY IS NOT A PRIVILEGED VIEW, and that is what makes it describable
+// in one sentence: every field this program reads is a field the relay already
+// broadcasts to every sidecar on the map. There is no subscriber-only field, no
+// private channel and no back door. The peer's own rule follows from it —
+// nothing on this wire is confidential, so a sidecar that must not publish a
+// value must not put it on the stats block (§6.3.1).
 package archive
 
 import (
@@ -31,13 +44,13 @@ import (
 
 	"multiverse/internal/bb8"
 	"multiverse/internal/contractb"
-	"multiverse/internal/lantoken"
+	"multiverse/internal/peercred"
 	"multiverse/internal/wire"
 	"multiverse/internal/wsutil"
 )
 
 // Version is reported to the relay in HANDSHAKE.sidecarVersion.
-const Version = "m4.0"
+const Version = "m5.0"
 
 // DefaultRetrySchedule is contract-b-m4.md §10's ladder: 1 minute, 5 minutes,
 // 30 minutes, 6 hours, then daily.
@@ -48,10 +61,17 @@ var DefaultRetrySchedule = []time.Duration{
 // Config is the archive's runtime configuration.
 type Config struct {
 	RelayURL string
-	Token    string
-	PeerID   string
-	DataDir  string
-	Logger   *slog.Logger
+	// Secret is the SECRET HALF of this subscriber's own credential
+	// (contract-b-m4.md §3.1, §22 B22/B27). The archive is a client of the same
+	// wire with a DIFFERENT GRANT, not a second auth system: it authenticates as
+	// a peerId like everybody else, and role "archive" requires the SUBSCRIBE
+	// grant. Under M4 role "archive" was a self-declaration and the shared token
+	// was the only gate, so anyone who could open a socket could subscribe to
+	// every envelope on the map.
+	Secret  string
+	PeerID  string
+	DataDir string
+	Logger  *slog.Logger
 
 	RelayBackoffMin time.Duration
 	RelayBackoffMax time.Duration
@@ -494,8 +514,11 @@ func (a *Archive) relayLoop() {
 		}
 		if err != nil && strings.Contains(err.Error(), "401") {
 			authFailures++
-			a.log.Error("archive: the relay rejected our LAN token with HTTP 401",
-				"consecutiveFailures", authFailures)
+			a.log.Error("archive: the relay refused THIS SUBSCRIBER'S CREDENTIAL with HTTP 401",
+				"consecutiveFailures", authFailures, "peer", a.cfg.PeerID,
+				"remedy", "re-apply this archive's join string (--credential-file or "+
+					peercred.SecretEnvVar+"); the relay operator issues the SUBSCRIBE grant "+
+					"deliberately, at its own console, and no wire message asks for one")
 		} else {
 			authFailures = 0
 		}
@@ -528,8 +551,13 @@ func jitter(min, max time.Duration, attempt int) time.Duration {
 func (a *Archive) session() error {
 	dialCtx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
 	opts := &websocket.DialOptions{CompressionMode: websocket.CompressionDisabled}
-	if a.cfg.Token != "" {
-		opts.HTTPHeader = http.Header{"Authorization": []string{lantoken.Header(a.cfg.Token)}}
+	if a.cfg.Secret != "" {
+		// §3.1: on the HTTP upgrade, bound to this subscriber's own peerId, and
+		// never in a frame. No TLS knob is set and none may be — B23 gives a client
+		// no way to skip verification, and that includes this one.
+		opts.HTTPHeader = http.Header{
+			"Authorization": []string{peercred.Header(a.cfg.PeerID, a.cfg.Secret)},
+		}
 	}
 	ws, _, err := websocket.Dial(dialCtx, a.cfg.RelayURL, opts)
 	cancel()

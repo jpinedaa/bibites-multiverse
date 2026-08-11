@@ -16,8 +16,9 @@ import (
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
-	"multiverse/internal/lantoken"
 	"multiverse/internal/logging"
+	"multiverse/internal/modtoken"
+	"multiverse/internal/peercred"
 )
 
 // Main is the multiverse-sidecar entry point, factored out of package main so
@@ -44,8 +45,20 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		"advisory splice: place me immediately after this slot on --insert-axis")
 	insertAxis := fs.String("insert-axis", "",
 		"E or N; the axis --insert-after-slot splices on. Default E")
-	tokenFile := fs.String("token-file", env("MULTIVERSE_TOKEN_FILE", ""),
-		"file whose first line is the shared LAN token; MULTIVERSE_TOKEN is the alternative")
+	// contract-b-m4.md §3.1: --credential-file or MULTIVERSE_PEER_SECRET, and NO
+	// FLAG THAT TAKES THE SECRET LITERALLY — it would put it in every process
+	// listing. The peerId half is not a secret and comes from <data-dir>/peer-id.
+	credentialFile := fs.String("credential-file", env("MULTIVERSE_CREDENTIAL_FILE", ""),
+		"file whose first line is THE SECRET HALF of this peer's credential, from the join "+
+			"string the relay operator handed over ("+peercred.SecretEnvVar+" is the "+
+			"alternative). The peerId half comes from <data-dir>/peer-id")
+	contractATokenFile := fs.String("contract-a-token-file", env(modtoken.FileEnvVar, ""),
+		"where the Contract A bearer token lives (contract-a.md §21, A47). Defaults to "+
+			"<data-dir>/"+modtoken.DefaultFileName+", minted 0600 at first start. THE MOD MUST "+
+			"READ THE SAME PATH. It is NOT the relay credential")
+	insecureContractA := fs.Bool("insecure-no-contract-a-token", envBool(modtoken.InsecureEnvVar),
+		"accept a mod connection with no bearer token, and log one loud warning per accepted "+
+			"connection. For a single-machine rehearsal and for nothing else (contract-a.md §21, A47)")
 	// holdTimeoutMs is a contract-b-m4.md §12 tunable and had no knob. Its
 	// default is 24 hours, which is a policy, not a measurement (§9.3) — and a
 	// rig that wants to SEE the automatic bounce cannot wait a day for it.
@@ -119,17 +132,19 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return releaseInflightCommand(*dataDir, *releaseInflight, action, *yes, stdout, stderr)
 	}
 
-	// contract-b-m4.md §3.1: a missing token is not fatal for a client — the
-	// relay answers 401 and the backoff ladder pins itself — but it is worth
-	// one loud line, because the alternative is a silent failure to join.
-	token, err := lantoken.Load(*tokenFile)
-	if err != nil && !errors.Is(err, lantoken.ErrNoToken) {
-		logger.Error("sidecar: token file is unusable", "err", err)
+	// contract-b-m4.md §3.1: a missing credential is not fatal for a client — the
+	// relay answers 401 and the backoff ladder pins itself — but it is worth one
+	// loud line, because the alternative is a silent failure to join.
+	secret, err := peercred.LoadSecret(*credentialFile)
+	if err != nil && !errors.Is(err, peercred.ErrNoSecret) {
+		logger.Error("sidecar: the credential file is unusable", "err", err,
+			"file", *credentialFile)
 		return 1
 	}
-	if token == "" {
-		logger.Warn("sidecar: no LAN token configured; the relay will answer 401 unless it runs " +
-			"--insecure-no-token. Set MULTIVERSE_TOKEN or pass --token-file")
+	if secret == "" {
+		logger.Warn("sidecar: no peer credential configured; the relay will answer 401 unless it " +
+			"runs --insecure-no-token. Put the SECRET half of this peer's join string in a file " +
+			"and pass --credential-file, or set " + peercred.SecretEnvVar)
 	}
 
 	cfg := DefaultConfig()
@@ -140,8 +155,16 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	cfg.PreferredSlot = *slot
 	cfg.InsertAfterSlot = *insertAfter
 	cfg.InsertAxis = *insertAxis
-	cfg.Token = token
+	cfg.Secret = secret
+	cfg.ContractATokenFile = *contractATokenFile
+	cfg.InsecureNoContractAToken = *insecureContractA
 	cfg.Logger = logger
+	if *insecureContractA {
+		logger.Warn("sidecar: --insecure-no-contract-a-token is set; ANY local process can drive " +
+			"this world's migrations and impersonate this sidecar to the mod. It exists for a " +
+			"single-machine rehearsal and no document this project ships may tell a player to " +
+			"pass it (contract-a.md §21, A47)")
+	}
 	if *holdTimeout > 0 {
 		cfg.HoldTimeout = *holdTimeout
 		logger.Warn("sidecar: holdTimeoutMs overridden; a held entry bounces home sooner than the "+
@@ -334,4 +357,15 @@ func envInt(name string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+// envBool reads an off switch from the environment. Only an explicit truthy
+// value turns one on: a security control that a typo can disable is not a
+// security control.
+func envBool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

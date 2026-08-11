@@ -221,8 +221,24 @@ const (
 	// serving RetiredContractAPath and MUST close every connection on it
 	// immediately with 4000, so an M3 mod gets the defined loud error instead of
 	// a bare HTTP 404.
+	// ContractAPath DOES NOT MOVE for contract-a/2.4 (§21, A52): the path is
+	// major-scoped, and A47's bearer token is a transport precondition below the
+	// envelope — one request header, one HTTP status on a request that never
+	// became a session. Contract B took a major in the same wave because it
+	// REPLACED a rule with an installed base; this one ADDS a check where there
+	// was none.
 	ContractAPath        = "/contract-a/v2"
 	RetiredContractAPath = "/contract-a/v1"
+
+	// AuthFailuresBeforeCeiling is `authFailuresBeforeCeiling` (§10, added — §21,
+	// A47): consecutive HTTP 401s on the upgrade after which the reconnect ladder
+	// holds at reconnectBackoffMaxMs and the client logs ONCE, naming the remedy
+	// and who must act. It exists so a misconfigured install is a quiet,
+	// diagnosable loop rather than a redial storm.
+	//
+	// The MOD owns the ladder; the sidecar owns the count in its own log, so a
+	// person reading one end can tell a wrong token from a dead process.
+	AuthFailuresBeforeCeiling = 5
 
 	// The delivery rate limit (§7.5, §15 A20, RAISED by §18 A40). It paces
 	// MIGRATE_IN out of the journal in SIMULATED minutes of the receiving world,

@@ -6,6 +6,7 @@ import (
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
+	"multiverse/internal/peercred"
 )
 
 // allDeliverable is the walk's filter with nothing filtered, so a grid test can
@@ -421,20 +422,21 @@ func TestAnM3RingLoadsAsTheHeightOneMap(t *testing.T) {
 	}
 }
 
-// TestRelayRefusesToStartWithoutAToken covers §3.1: no token configured means
-// the relay MUST refuse to start, unless --insecure-no-token is passed.
-func TestRelayRefusesToStartWithoutAToken(t *testing.T) {
-	if _, err := New(Options{}); err == nil {
-		t.Fatal("the relay started with no token and no --insecure-no-token")
-	}
-	s, err := New(Options{InsecureNoToken: true})
+// TestRelayStartsOnAStoreThatHoldsACredential is §3.1's start rule from the
+// other side: the relay refuses an empty store (credential_test.go holds that
+// half) and starts once one credential exists, because one credential is one
+// peer that can join.
+func TestRelayStartsOnAStoreThatHoldsACredential(t *testing.T) {
+	store, err := peercred.OpenStore("")
 	if err != nil {
-		t.Fatalf("--insecure-no-token should start a test rig: %v", err)
+		t.Fatalf("OpenStore: %v", err)
 	}
-	s.Close()
-	s, err = New(Options{Token: "0123456789abcdef"})
+	if _, err := store.Mint("peer-a", peercred.GrantPeer); err != nil {
+		t.Fatalf("Mint: %v", err)
+	}
+	s, err := New(Options{Credentials: store})
 	if err != nil {
-		t.Fatalf("a configured token should start: %v", err)
+		t.Fatalf("a store with a credential in it should start: %v", err)
 	}
 	if s.SessionID() == "" {
 		t.Fatal("the relay minted no relaySessionId; §5.2 needs one per process")

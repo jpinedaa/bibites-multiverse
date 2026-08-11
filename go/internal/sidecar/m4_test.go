@@ -582,7 +582,7 @@ func TestAccruedHoldClockRunsOnlyInTheDarkAndBouncesAtTheTimeout(t *testing.T) {
 			t.Fatalf("ReserveSlot: %v", err)
 		}
 	}
-	cfgA := fastConfig(t, rl.url(), "peer-a")
+	cfgA := fastConfig(t, rl, "peer-a")
 	cfgA.Clock = clock.Now
 	cfgA.HoldTimeout = holdTimeout
 	cfgA.HoldAccrualFlush = time.Millisecond // flush on any advance, so a test can read it
@@ -590,7 +590,7 @@ func TestAccruedHoldClockRunsOnlyInTheDarkAndBouncesAtTheTimeout(t *testing.T) {
 	// simulated hours would otherwise read as a silent mod. The heartbeat
 	// timeout is not what this test is about, so it is put out of reach.
 	cfgA.HeartbeatTimeout = time.Hour
-	cfgB := fastConfig(t, rl.url(), "peer-b")
+	cfgB := fastConfig(t, rl, "peer-b")
 
 	sideB := startSidecar(t, cfgB)
 	waitSlot(t, sideB, 2)
@@ -736,12 +736,12 @@ func TestALiveDestinationNeverRunsTheHoldClock(t *testing.T) {
 			t.Fatalf("ReserveSlot: %v", err)
 		}
 	}
-	cfgA := fastConfig(t, rl.url(), "peer-a")
+	cfgA := fastConfig(t, rl, "peer-a")
 	cfgA.Clock = clock.Now
 	cfgA.HoldTimeout = time.Minute
 	cfgA.HoldAccrualFlush = time.Millisecond
 	cfgA.HeartbeatTimeout = time.Hour
-	cfgB := fastConfig(t, rl.url(), "peer-b")
+	cfgB := fastConfig(t, rl, "peer-b")
 
 	sideB := startSidecar(t, cfgB)
 	waitSlot(t, sideB, 2)
@@ -806,7 +806,7 @@ func runRerouteProof(t *testing.T, matched bool) {
 	}
 	// B holds slot 2 and never starts: its slot is reserved, positioned and
 	// DARK, which is what the sender sees.
-	cfgC := fastConfig(t, rl.url(), "peer-c")
+	cfgC := fastConfig(t, rl, "peer-c")
 	sideC := startSidecar(t, cfgC)
 	waitSlot(t, sideC, 3)
 	worldC := newWorld()
@@ -821,7 +821,7 @@ func runRerouteProof(t *testing.T, matched bool) {
 		// one forwarded.
 		session = wire.NewUUID()
 	}
-	cfgA := fastConfig(t, rl.url(), "peer-a")
+	cfgA := fastConfig(t, rl, "peer-a")
 	migrationID := seedSentEntry(t, cfgA.DataDir, 2, session)
 
 	sideA := startSidecar(t, cfgA)
@@ -976,13 +976,13 @@ func TestSlotVacantIsPermanentAndProvableFromThePendingState(t *testing.T) {
 		t.Fatalf("ReleaseSlot: %v", err)
 	}
 
-	cfgC := fastConfig(t, rl.url(), "peer-c")
+	cfgC := fastConfig(t, rl, "peer-c")
 	sideC := startSidecar(t, cfgC)
 	waitSlot(t, sideC, 3)
 	worldC := newWorld()
 	dialFakeMod(t, fakeModOptions{url: sideC.URL(), world: worldC, heartbeat: 200 * time.Millisecond})
 
-	cfgA := fastConfig(t, rl.url(), "peer-a")
+	cfgA := fastConfig(t, rl, "peer-a")
 	migrationID := seedOutboundCustodyTo(t, cfgA.DataDir, 2)
 	sideA := startSidecar(t, cfgA)
 	waitSlot(t, sideA, 1)
@@ -1038,13 +1038,13 @@ func TestHandoverRebindsTheAddressAndMovesNoJournal(t *testing.T) {
 			t.Fatalf("ReserveSlot: %v", err)
 		}
 	}
-	cfgA := fastConfig(t, rl.url(), "peer-a")
+	cfgA := fastConfig(t, rl, "peer-a")
 	sideA := startSidecar(t, cfgA)
 	waitSlot(t, sideA, 1)
 	worldA := newWorld()
 	modA := dialFakeMod(t, fakeModOptions{url: sideA.URL(), world: worldA, heartbeat: 200 * time.Millisecond})
 
-	cfgOld := fastConfig(t, rl.url(), "peer-old")
+	cfgOld := fastConfig(t, rl, "peer-old")
 	sideOld := startSidecar(t, cfgOld)
 	waitSlot(t, sideOld, 2)
 	worldOld := newWorld()
@@ -1078,7 +1078,7 @@ func TestHandoverRebindsTheAddressAndMovesNoJournal(t *testing.T) {
 
 	// The new occupant starts with an EMPTY journal and a different world, and
 	// it is not told about the old peer's entries.
-	cfgNew := fastConfig(t, rl.url(), "peer-new")
+	cfgNew := fastConfig(t, rl, "peer-new")
 	sideNew := startSidecar(t, cfgNew)
 	waitSlot(t, sideNew, 2)
 	if pos := sideNew.Position(); pos.Col != 1 || pos.Row != 0 {
@@ -1120,7 +1120,7 @@ func TestHandoverRebindsTheAddressAndMovesNoJournal(t *testing.T) {
 // registry changing.
 func TestPeerStatusRepublishesPeerStats(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	sub := dialSubscriber(t, g.relay.url(), testToken)
+	sub := dialSubscriber(t, g.relay.url(), g.relay)
 	sub.wait(contractb.TypeHandshakeAck, 10*time.Second)
 
 	// Put a population in slot 1's world so a real number crosses the wire.
@@ -1189,13 +1189,13 @@ func TestHeartbeatSaveReceiptReachesPeerStatus(t *testing.T) {
 		Name: "M4-Slot1-20260805T2058Z.zip", Bytes: 41533892, DurationMs: 730,
 	}
 	rl := startRelay(t)
-	cfg := fastConfig(t, rl.url(), "peer-a")
+	cfg := fastConfig(t, rl, "peer-a")
 	side := startSidecar(t, cfg)
 	waitSlotAny(t, side)
 	dialFakeMod(t, fakeModOptions{
 		url: side.URL(), world: newWorld(), heartbeat: 100 * time.Millisecond, lastSave: receipt})
 
-	sub := dialSubscriber(t, rl.url(), testToken)
+	sub := dialSubscriber(t, rl.url(), rl)
 	sub.wait(contractb.TypeHandshakeAck, 10*time.Second)
 	waitFor(t, 15*time.Second, "the save receipt to reach PEER_STATUS", func() bool {
 		for _, st := range sub.peerStatuses(t) {
@@ -1301,7 +1301,7 @@ func TestListAndReleaseInflight(t *testing.T) {
 // sidecar and asks the relay for nothing.
 func TestStatusPageShowsTheWholeMap(t *testing.T) {
 	g := newGrid(t, 6, gridOptions{layout: layout3x2()})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	four, five := g.bySlot(4), g.bySlot(5)
 	two := g.bySlot(2)
 
@@ -1568,7 +1568,7 @@ func TestGrantReasonsNameWhatHappened(t *testing.T) {
 		_, _, err := g.relay.relay.HandoverSlot(3, "peer-inheritor")
 		return err == nil
 	})
-	cfg := fastConfig(t, g.relay.url(), "peer-inheritor")
+	cfg := fastConfig(t, g.relay, "peer-inheritor")
 	side := startSidecar(t, cfg)
 	waitSlot(t, side, 3)
 	if got := len(side.CustodySnapshot()); got != 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	"multiverse/internal/bb8"
 	"multiverse/internal/contracta"
+	"multiverse/internal/modtoken"
 	"multiverse/internal/wire"
 )
 
@@ -116,6 +118,12 @@ type fakeModOptions struct {
 	// pacing test turns down to make a simulated minute pass in a test's
 	// lifetime (contract-a.md §7.5).
 	simStep float64
+	// token is A47's bearer token on the Contract A upgrade. Empty means
+	// testContractAToken, which is what every rig in this suite configures its
+	// sidecars with; a test that wants the REFUSAL sets its own wrong value, and
+	// noToken sends no header at all.
+	token   string
+	noToken bool
 	// lastSave, when set, rides every HEARTBEAT as the save receipt of §15 A21.
 	lastSave *contracta.SaveReceipt
 	// censusRaw, when set, is spliced into every HEARTBEAT's data object as raw
@@ -213,11 +221,21 @@ func dialFakeMod(t *testing.T, opts fakeModOptions) *fakeMod {
 		opts.simStep = 1
 	}
 
+	if opts.token == "" {
+		opts.token = testContractAToken
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
-	ws, _, err := websocket.Dial(dialCtx, opts.url, &websocket.DialOptions{
-		CompressionMode: websocket.CompressionDisabled,
-	})
+	dialOpts := &websocket.DialOptions{CompressionMode: websocket.CompressionDisabled}
+	if !opts.noToken {
+		// contract-a.md §21 A47: the token rides the HTTP UPGRADE, verified before
+		// the WebSocket exists, and never in a frame.
+		dialOpts.HTTPHeader = http.Header{
+			"Authorization": []string{modtoken.Header(opts.token)},
+		}
+	}
+	ws, _, err := websocket.Dial(dialCtx, opts.url, dialOpts)
 	dialCancel()
 	if err != nil {
 		cancel()
@@ -847,6 +865,9 @@ func dialRawMod(t *testing.T, url string) *rawMod {
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
 	ws, _, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{
 		CompressionMode: websocket.CompressionDisabled,
+		HTTPHeader: http.Header{
+			"Authorization": []string{modtoken.Header(testContractAToken)},
+		},
 	})
 	dialCancel()
 	if err != nil {

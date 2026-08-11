@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -27,24 +28,36 @@ import (
 
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
-	"multiverse/internal/lantoken"
+	"multiverse/internal/peercred"
 	"multiverse/internal/wire"
 	"multiverse/internal/wsutil"
 )
 
 // Version is reported in HANDSHAKE_ACK.
-const Version = "m4.0"
+const Version = "m5.0"
 
 // Options configures a Server.
 type Options struct {
 	Logger *slog.Logger
-	// DataDir holds ring.json. Empty keeps the map in memory, which is what a
-	// test rig wants and what production must never do (§7.4).
-	DataDir         string
-	Token           string
+	// DataDir holds ring.json AND peers.json. Empty keeps both in memory, which
+	// is what a test rig wants and what production must never do (§7.4, §12
+	// credentialVerifierStore).
+	DataDir string
+	// Credentials is the §3.1 verifier store. A relay with no credential in it
+	// can admit nobody, so New refuses to start unless InsecureNoToken is set.
+	Credentials *peercred.Store
+	// InsecureNoToken accepts unauthenticated connections and logs one loud
+	// warning per accepted connection (§3.1). It exists for a single-machine test
+	// rig, it ALSO refuses to bind anything but loopback (enforced in Main), and
+	// no installer, script or document this project ships may instruct a stranger
+	// to pass it (m5_considerations.md, decision 7).
 	InsecureNoToken bool
-	PingInterval    time.Duration
-	PeerTimeout     time.Duration
+	// MinContractVersion is B25's admission floor. Empty means NO MINIMUM, which
+	// is the default and the only honest one for a map whose operator has not
+	// decided a floor.
+	MinContractVersion string
+	PingInterval       time.Duration
+	PeerTimeout        time.Duration
 	// ArchiveQueue is the per-subscriber copy queue (§5.1).
 	ArchiveQueue int
 	// StatusCoalesce is the minimum spacing between PEER_STATUS broadcasts and
@@ -62,8 +75,9 @@ type Options struct {
 // Server is the relay. The zero value is not usable; call New.
 type Server struct {
 	log             *slog.Logger
-	token           string
+	creds           *peercred.Store
 	insecureNoToken bool
+	minContract     string
 	pingInterval    time.Duration
 	peerTimeout     time.Duration
 	archiveQueue    int
@@ -156,10 +170,18 @@ func New(opts Options) (*Server, error) {
 	if opts.ForwardRecordRetention <= 0 {
 		opts.ForwardRecordRetention = contractb.ForwardRecordRetention
 	}
-	if opts.Token == "" && !opts.InsecureNoToken {
-		// §3.1: no token configured means the relay MUST refuse to start.
-		return nil, errors.New("relay: no MULTIVERSE_TOKEN and no --token-file; " +
-			"pass --insecure-no-token only for a single-machine test rig")
+	if opts.Credentials == nil {
+		store, err := peercred.OpenStore(opts.DataDir)
+		if err != nil {
+			return nil, err
+		}
+		opts.Credentials = store
+	}
+	if opts.MinContractVersion != "" {
+		if _, err := wire.CompareProtocol(wire.ProtocolB, opts.MinContractVersion); err != nil {
+			return nil, fmt.Errorf("relay: --min-contract-version %q is not comparable with %q: %w",
+				opts.MinContractVersion, wire.ProtocolB, err)
+		}
 	}
 	grid, err := LoadGrid(opts.DataDir)
 	if err != nil {
@@ -167,8 +189,9 @@ func New(opts Options) (*Server, error) {
 	}
 	s := &Server{
 		log:             opts.Logger,
-		token:           opts.Token,
+		creds:           opts.Credentials,
 		insecureNoToken: opts.InsecureNoToken,
+		minContract:     opts.MinContractVersion,
 		pingInterval:    opts.PingInterval,
 		peerTimeout:     opts.PeerTimeout,
 		archiveQueue:    opts.ArchiveQueue,
@@ -192,6 +215,33 @@ func New(opts Options) (*Server, error) {
 // SessionID is the relay's forwarding-record scope (§5.2). It is exported for
 // tests and for an operator who has to reason about a proof.
 func (s *Server) SessionID() string { return s.sessionID }
+
+// Credentials is the §3.1 verifier store, for the operator commands in Main that
+// mint a join string, remint one on a handover, and drop the identity that gave
+// a slot up. Nothing on the serving path calls it.
+func (s *Server) Credentials() *peercred.Store { return s.creds }
+
+// CheckServable is §3.1's *No credential store configured* row: THE RELAY MUST
+// REFUSE TO START, unless --insecure-no-token. A relay with an empty store can
+// admit nobody, so serving is a listener that answers 401 to every peer on the
+// map — a failure that looks like a network problem and is a configuration one.
+//
+// It is a check on SERVING rather than on construction, and that is not a
+// technicality: minting the first join string needs the same Server, and a relay
+// that could not be built before it had a credential could never be given one.
+func (s *Server) CheckServable() error {
+	if s.insecureNoToken || s.creds.Len() > 0 {
+		return nil
+	}
+	return errors.New("relay: the credential store holds no credentials, so this relay can " +
+		"admit nobody. Mint the join strings first — multiverse-relay --mint-credential " +
+		"<peerId> [--grant peer|subscribe|admin], or --reserve-slot <peerId>, which mints one " +
+		"with the reservation. --insecure-no-token is for a single-machine test rig and binds " +
+		"loopback only")
+}
+
+// MinContractVersion is B25's published floor, or "" for no minimum.
+func (s *Server) MinContractVersion() string { return s.minContract }
 
 // ReleaseSlot implements the operator escape hatch of §7.5. It is a startup
 // command, not a wire message: an operator command is a rare, deliberate,
@@ -334,10 +384,15 @@ func (s *Server) Close() {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(contractb.ContractBPath, s.serveWS)
-	// §3: a relay MUST keep serving /contract-b/v2 and MUST close every
-	// connection on it immediately with 4000, so an M3 sidecar gets the defined
-	// loud error instead of a bare HTTP 404.
-	mux.HandleFunc(contractb.RetiredContractBPath, s.serveRetired)
+	// §3, and again at §22 B32: a relay MUST keep serving EVERY retired path and
+	// MUST close every connection on one immediately with 4000, so a sidecar left
+	// behind gets the defined loud error instead of a bare HTTP 404.
+	for _, path := range contractb.RetiredContractBPaths {
+		retired := path
+		mux.HandleFunc(retired, func(w http.ResponseWriter, r *http.Request) {
+			s.serveRetired(w, r, retired)
+		})
+	}
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
@@ -345,7 +400,13 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-func (s *Server) serveRetired(w http.ResponseWriter, r *http.Request) {
+func (s *Server) serveRetired(w http.ResponseWriter, r *http.Request, path string) {
+	// A retired path is served over TLS like the live one (B23), so the same
+	// transport rule applies to it: a plaintext upgrade off loopback is refused
+	// before it becomes a socket.
+	if !s.allowPlainUpgrade(w, r) {
+		return
+	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode:    websocket.CompressionDisabled,
 		InsecureSkipVerify: true,
@@ -353,38 +414,129 @@ func (s *Server) serveRetired(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	s.log.Error("relay: refusing a connection on the retired contract-b/v2 path",
-		"remote", r.RemoteAddr, "path", contractb.RetiredContractBPath,
+	s.log.Error("relay: refusing a connection on a retired contract-b path",
+		"remote", r.RemoteAddr, "path", path,
 		"hint", "this relay speaks "+wire.ProtocolB+" on "+contractb.ContractBPath)
 	_ = ws.Close(contractb.CloseProtocolUnsupported,
-		"contract-b/v2 is retired; this relay serves "+contractb.ContractBPath)
+		path+" is retired; this relay serves "+contractb.ContractBPath)
+}
+
+// allowPlainUpgrade is B23's scheme rule, and it is the ONE place the transport
+// decides anything.
+//
+//	"Clients dial wss://. A public relay MUST refuse a plain ws:// upgrade —
+//	 HTTP 426 with Upgrade: TLS/1.2, HTTP/1.1, NOT A REDIRECT, because a redirect
+//	 to a scheme the client did not ask for is how a downgrade goes unnoticed.
+//	 Plain ws:// survives ONLY on a loopback bind for a single-machine
+//	 rehearsal."
+//
+// The test is the LOCAL address of this connection, not a flag and not a
+// configured bind string, and that choice is what makes it composable with both
+// deployment shapes §3 names. A relay that terminates its own TLS answers
+// r.TLS != nil and never reaches here. A relay behind a fronting proxy that
+// terminates for it is reached over loopback, and loopback is the carve-out. A
+// relay serving plaintext on a reachable interface is the one shape B23 refuses,
+// and it is refused per connection, so a single-machine rehearsal on the same
+// process keeps working over 127.0.0.1 while a remote peer is told exactly what
+// to do about it.
+func (s *Server) allowPlainUpgrade(w http.ResponseWriter, r *http.Request) bool {
+	if r.TLS != nil || localIsLoopback(r) {
+		return true
+	}
+	// 426 and not 301/302/307: a redirect to a scheme the client did not ask for
+	// is how a downgrade goes unnoticed.
+	w.Header().Set("Upgrade", "TLS/1.2, HTTP/1.1")
+	w.Header().Set("Connection", "Upgrade")
+	http.Error(w, "this relay is reachable off loopback and speaks TLS only; dial wss://",
+		http.StatusUpgradeRequired)
+	s.log.Error("relay: refusing a plain ws:// upgrade on a non-loopback address",
+		"remote", r.RemoteAddr, "local", localAddr(r), "status", http.StatusUpgradeRequired,
+		"remedy", "run this relay with --tls-cert/--tls-key, or put it behind a proxy that "+
+			"terminates TLS and reaches it over loopback; the client dials wss:// either way "+
+			"(contract-b-m4.md §22, B23)")
+	return false
+}
+
+func localAddr(r *http.Request) string {
+	if a, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && a != nil {
+		return a.String()
+	}
+	return ""
+}
+
+func localIsLoopback(r *http.Request) bool {
+	addr := localAddr(r)
+	if addr == "" {
+		// No local address means no listener the relay can reason about — an
+		// in-process handler under httptest, for instance. Resolve toward the safe
+		// answer for a wire rule and toward the usable one for a rehearsal: this is
+		// not a socket a stranger reached.
+		return true
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// authed is what the HTTP upgrade proved about a connection, carried into the
+// handshake where the frame that claims a peerId finally arrives.
+type authed struct {
+	// peerID is the id the CREDENTIAL named — never the one the frame claims.
+	peerID string
+	grant  string
+	// checked is false only under --insecure-no-token, where nothing was proved
+	// and the binding cannot be enforced.
+	checked bool
 }
 
 func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
-	// §3.1: the token is checked on the HTTP upgrade. A missing or wrong token
-	// gets 401 and no upgrade, so there is no WebSocket and no close code.
-	if s.insecureNoToken {
-		s.log.Warn("relay: accepting a connection with NO TOKEN CHECK; " +
-			"--insecure-no-token is for a single-machine test rig and never for the LAN")
-	} else if !lantoken.Equal(lantoken.FromRequest(r), s.token) {
-		w.Header().Set("WWW-Authenticate", "Bearer")
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		s.log.Error("relay: rejected an unauthenticated connection", "remote", r.RemoteAddr)
+	// B23 first: a wire this relay will not serve is refused before its
+	// credential is read off it.
+	if !s.allowPlainUpgrade(w, r) {
 		return
 	}
+	// §3.1: the credential is checked on the HTTP UPGRADE. A missing, malformed
+	// or wrong one gets HTTP 401 with WWW-Authenticate: Bearer and NO upgrade, so
+	// there is no WebSocket and there is no close code — deliberately, because a
+	// refusal before the upgrade is the one refusal that costs the relay nothing.
+	var auth authed
+	if s.insecureNoToken {
+		s.log.Warn("relay: accepting a connection with NO CREDENTIAL CHECK; " +
+			"--insecure-no-token is for a single-machine test rig and never for a map with peers on it")
+	} else {
+		peerID, grant, ok := s.creds.Verify(peercred.FromRequest(r))
+		if !ok {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			// The log names no peerId, because the id on a refused credential is
+			// attacker-chosen text and echoing it turns the log into a search index
+			// of guesses.
+			s.log.Error("relay: refused a connection whose credential did not verify",
+				"remote", r.RemoteAddr,
+				"remedy", "the peer's own operator re-applies its join string, or asks this "+
+					"relay's operator for a slot handover (contract-b-m4.md §3.1)")
+			return
+		}
+		auth = authed{peerID: peerID, grant: grant, checked: true}
+	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true, // LAN rig; per-peer identity and TLS are M5 (D9)
+		CompressionMode: websocket.CompressionDisabled,
+		// This is coder/websocket's ORIGIN check, not a TLS one: a Contract B
+		// client is a process, not a browser, and it sends no Origin header.
+		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		s.log.Warn("relay: websocket upgrade failed", "err", err)
 		return
 	}
-	s.handle(r.Context(), wsutil.New(ws, 128))
+	s.handle(r.Context(), wsutil.New(ws, 128), auth)
 }
 
-func (s *Server) handle(ctx context.Context, conn *wsutil.Conn) {
-	p, err := s.handshake(ctx, conn)
+func (s *Server) handle(ctx context.Context, conn *wsutil.Conn, auth authed) {
+	p, err := s.handshake(ctx, conn, auth)
 	if err != nil {
 		s.log.Warn("relay: handshake failed", "err", err)
 		<-conn.Done()
@@ -418,7 +570,7 @@ func (s *Server) handle(ctx context.Context, conn *wsutil.Conn) {
 }
 
 // handshake reads the mandatory first frame and registers the client.
-func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn) (*peer, error) {
+func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed) (*peer, error) {
 	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	frame, err := conn.Read(readCtx)
@@ -448,6 +600,46 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn) (*peer, error
 		conn.Close(contractb.CloseMalformedFrame, err.Error())
 		return nil, err
 	}
+
+	// ------------------------------------------------- §3.1's whole security property
+	//
+	// THE BINDING. The credential named a peerId on the upgrade; this frame
+	// claims one. They must be the same, and a connection where they differ is
+	// refused HERE, at the handshake, with 4003.
+	//
+	// AND THE PEER WHOSE ID WAS BORROWED OBSERVES NOTHING AT ALL: no close, no
+	// 4006, no PEER_STATUS change, no lastRefusal on its slot. That is why this
+	// check sits ahead of every line that touches s.meta, s.peers or s.dirty —
+	// the refusal must be unable to reach the map, not merely decline to publish
+	// to it. Under M4's shared token this exact sequence took a peer off the map
+	// in one frame (§3.1, §6.1; m5_considerations.md, Risk 1; D21).
+	//
+	// Writing the refusal on the borrowed slot would be worse than useless twice
+	// over: it would tell an innocent peer it had been attacked, and it would
+	// hand the attacker a confirmation surface for a guessed peerId (§6.5, B22).
+	if auth.checked && hs.PeerID != auth.peerID {
+		s.log.Error("relay: refusing a handshake whose peerId does not match its credential",
+			"credentialPeer", auth.peerID, "claimedPeer", hs.PeerID, "role", hs.Role,
+			"note", "the peer whose id was claimed is not told and is not touched")
+		conn.Close(contractb.CloseMalformedFrame, "peerId does not match the authenticated credential")
+		return nil, errors.New("relay: peerId does not match the authenticated credential")
+	}
+
+	// §5.1 B27 / §7.5 B28: THE GRANT DECIDES THE ROLE, and the three grants are
+	// disjoint. A subscribe credential cannot claim a slot and a peer credential
+	// cannot subscribe, so neither compromise becomes the other. Nothing appears
+	// on any slot's lastRefusal for this either: it is a role error on ONE
+	// connection, not a refusal of that peer (B27's worked example).
+	if auth.checked && !peercred.GrantAllowsRole(auth.grant, hs.Role) {
+		reason := "credential for " + auth.peerID + " does not carry the " +
+			grantForRole(hs.Role) + " grant"
+		s.log.Error("relay: refusing a role the credential's grant does not carry",
+			"peer", auth.peerID, "role", hs.Role, "grant", auth.grant,
+			"needs", grantForRole(hs.Role))
+		conn.Close(contractb.CloseMalformedFrame, reason)
+		return nil, errors.New("relay: " + reason)
+	}
+
 	if err := wire.CheckProtocol(hs.ProtocolVersion, wire.ProtocolB); err != nil {
 		conn.Close(contractb.CloseProtocolUnsupported, "unsupported protocolVersion")
 		return nil, err
@@ -459,15 +651,48 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn) (*peer, error
 	}
 
 	s.mu.Lock()
+	// B25's floor, and it sits BESIDE §6.1's game-version refusal rather than
+	// replacing it: two axes, two tests, and D22 is the decision that they never
+	// meet. This one is the map's MEMBERSHIP test — may this build join this map —
+	// and it is a COMPATIBILITY control and NEVER a security one, because
+	// protocolVersion is chosen by the peer that sends it and anyone who edits one
+	// string walks through it. It keeps the HONESTLY stale peer off a map it would
+	// degrade, which is the failure dev_environment.md's *The minors* records.
+	if s.minContract != "" {
+		if cmp, err := wire.CompareProtocol(hs.ProtocolVersion, s.minContract); err == nil && cmp < 0 {
+			if p.role == contractb.RolePeer {
+				s.metaLocked(p.id).lastRefusal = contractb.RefusalContractVersion + ": " +
+					hs.ProtocolVersion + " < " + s.minContract
+				s.dirty = true
+			}
+			s.mu.Unlock()
+			s.log.Error("relay: refusing a peer below this relay's minimum contract version",
+				"peer", p.id, "peerContractVersion", hs.ProtocolVersion,
+				"minContractVersion", s.minContract,
+				"remedy", "the peer's OWN operator upgrades from the published release; nobody on "+
+					"this relay's side can do it for them (D25)")
+			conn.Close(contractb.CloseMalformedFrame,
+				"protocolVersion "+hs.ProtocolVersion+" is below this relay's minimum "+s.minContract)
+			return nil, errors.New("relay: protocolVersion below the published minimum")
+		}
+	}
 	// §6.1: compatibility enforcement at connect, and it must be loud. A silent
 	// version mismatch is indistinguishable from a dead peer — under M4 both end
 	// with a lane routed around them — and M4 crosses two independently updated
 	// installs, so this is the failure most likely to waste an evening.
+	//
+	// §22 DOES NOT TOUCH THIS RULE and that is deliberate (B31). D22 makes the
+	// CONTRACT version the map's membership test and the game version a
+	// per-machine matter answered by a published support matrix, which reads like
+	// a reason to retire this paragraph — and the owner decided on 2026-08-11 not
+	// to. It is the fourth of the four kept exceptions to the game version's
+	// diagnostic-only rule, and what it costs is a map that PARTITIONS along a
+	// version boundary after a staggered game update.
 	if p.role == contractb.RolePeer {
 		if mapVersion := s.mapVersionLocked(""); mapVersion != "" && hs.GameVersion != "" &&
 			mapVersion != hs.GameVersion {
-			s.metaLocked(p.id).lastRefusal = "gameVersion " + hs.GameVersion +
-				" is incompatible with the map's " + mapVersion
+			s.metaLocked(p.id).lastRefusal = contractb.RefusalGameVersion + ": " +
+				hs.GameVersion + " != the map's " + mapVersion
 			s.dirty = true
 			s.mu.Unlock()
 			s.log.Error("relay: refusing a peer on gameVersion grounds",
@@ -483,8 +708,15 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn) (*peer, error
 		registry = s.subscribers
 	}
 	if old, ok := registry[p.id]; ok {
-		// §6.1: a newer connection with a live peer id takes over. This makes a
-		// crashed-and-restarted sidecar self-healing.
+		// §6.1: a newer connection THAT AUTHENTICATED AS this peerId takes over,
+		// which makes a crashed-and-restarted sidecar self-healing.
+		//
+		// The narrowing of §22 B22 is enforced above and not here, and it is worth
+		// saying where: p.id is the id the credential proved, because a connection
+		// whose frame disagreed with its credential never reached this line. A
+		// connection presenting somebody else's peerId therefore never reaches this
+		// rule at all — it is refused at the credential check, and the live peer is
+		// not told, because nothing happened to it.
 		old.conn.Close(contractb.CloseReplaced, "a newer connection claimed this peerId")
 	}
 	registry[p.id] = p
@@ -508,6 +740,9 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn) (*peer, error
 		Map:             s.grid.Shape(),
 		SlotCount:       s.grid.Size(),
 		ReceivedAt:      time.Now().UnixMilli(),
+		// B25: published at connect so a peer can say what it will need BEFORE it
+		// needs it. Absent is no minimum.
+		MinContractVersion: s.minContract,
 	}
 	if p.role == contractb.RolePeer {
 		if res, ok := s.grid.ResOfPeer(p.id); ok {
@@ -657,8 +892,8 @@ func (s *Server) onSectorClaim(p *peer, env wire.Envelope) bool {
 	// connects before its mod and only learns a version here.
 	if mapVersion := s.mapVersionLocked(p.id); mapVersion != "" &&
 		claim.GameVersion != "" && mapVersion != claim.GameVersion {
-		s.metaLocked(p.id).lastRefusal = "gameVersion " + claim.GameVersion +
-			" is incompatible with the map's " + mapVersion
+		s.metaLocked(p.id).lastRefusal = contractb.RefusalGameVersion + ": " +
+			claim.GameVersion + " != the map's " + mapVersion
 		grant := contractb.SectorGrant{
 			Granted: false, Map: s.grid.Shape(), SlotCount: s.grid.Size(),
 			Reason: contractb.GrantVersionIncompatible}
@@ -1041,6 +1276,14 @@ func (s *Server) broadcastPeerStatus() {
 			Slots:     slots,
 			You:       t.me,
 			Observers: observers,
+			// B25: republished on every broadcast, so an operator surface can say
+			// which peers are one release away from being refused and D25's
+			// "publish, then raise the floor" is a sequence a reader can WATCH.
+			//
+			// EVERY CLIENT GETS THE SAME FRAME. A subscriber's copy differs in `you`
+			// and in nothing else, which is what makes B27's boundary describable in
+			// one sentence: a subscriber gets nothing a peer does not already get.
+			MinContractVersion: s.minContract,
 		})
 	}
 }
@@ -1402,4 +1645,16 @@ func derefSlot(p *int) int {
 		return 0
 	}
 	return *p
+}
+
+// grantForRole names the grant a role needs, for a refusal string that states
+// the remedy rather than the symptom (§5.1, B27).
+func grantForRole(role string) string {
+	switch role {
+	case contractb.RoleArchive:
+		return peercred.GrantSubscribe
+	case contractb.RolePeer:
+		return peercred.GrantPeer
+	}
+	return role
 }

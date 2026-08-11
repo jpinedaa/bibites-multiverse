@@ -42,6 +42,7 @@ import (
 	"multiverse/internal/contractb"
 	"multiverse/internal/journal"
 	"multiverse/internal/mapwalk"
+	"multiverse/internal/modtoken"
 	"multiverse/internal/wire"
 	"multiverse/internal/wsutil"
 )
@@ -67,6 +68,11 @@ type Sidecar struct {
 	modGen    uint64
 	edgeEpoch int64
 	lastEdges []contracta.EdgeState
+	// contractAAuthFailures counts CONSECUTIVE refused upgrades on this wire
+	// (contract-a.md §21, A47). The mod owns the backoff ladder and its own
+	// ceiling; this is the sidecar's half of the same fact, so a person reading
+	// the sidecar log can tell a wrong token from a mod that never dialled.
+	contractAAuthFailures int
 
 	// Contract B state: the map. A sidecar needs its own slot, its position, and
 	// ONE EFFECTIVE NEIGHBOUR PER EXPORT EDGE (D8, D12, D13, §6.4).
@@ -136,6 +142,18 @@ func New(cfg Config) (*Sidecar, error) {
 	}
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		return nil, err
+	}
+	// contract-a.md §21 A47: the sidecar MINTS THE TOKEN AT FIRST START when the
+	// file does not exist, mode 0600, and both processes then read the same path
+	// on the same machine (D9). It happens here, before the listener binds, so
+	// the file exists before any mod can dial — which is the ordering A52's
+	// migration note asks a rollout to keep.
+	if cfg.ContractAToken == "" && !cfg.InsecureNoContractAToken {
+		tok, err := modtoken.EnsureFile(cfg.ContractATokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("sidecar: contract A token: %w", err)
+		}
+		cfg.ContractAToken = tok
 	}
 	jr, err := journal.Open(filepath.Join(cfg.DataDir, "journal"))
 	if err != nil {
@@ -235,9 +253,18 @@ func (s *Sidecar) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.tickLoop() }()
 
+	// The token file's PATH is logged and its value never is (contract-a.md §21,
+	// A47, §11.1). The path is what a person needs: A47's whole failure mode is
+	// two processes pointed at two different files, and the remedy names a path.
+	contractAAuth := s.cfg.ContractATokenFile
+	if s.cfg.InsecureNoContractAToken {
+		contractAAuth = "DISABLED by --insecure-no-contract-a-token"
+	}
 	s.log.Info("sidecar: listening", "addr", ln.Addr().String(), "path", contracta.ContractAPath,
 		"relay", s.cfg.RelayURL, "dataDir", s.cfg.DataDir, "preferredSlot", s.cfg.PreferredSlot,
-		"preferredPosition", s.cfg.PreferredPosition)
+		"preferredPosition", s.cfg.PreferredPosition,
+		"contractATokenFile", contractAAuth,
+		"relayCredential", credentialState(s.cfg.Secret))
 	return nil
 }
 
@@ -254,6 +281,15 @@ func (s *Sidecar) URL() string { return "ws://" + s.Addr() + contracta.ContractA
 
 // PeerID is this sidecar's stable identity.
 func (s *Sidecar) PeerID() string { return s.cfg.PeerID }
+
+// RelayURL is the Contract B endpoint this sidecar dials, and it never changes
+// while the process runs. That is a RULE and not an implementation detail
+// (contract-b-m4.md §3.1, §22 B23): a sidecar whose credential is refused, or
+// whose relay presents a certificate it cannot verify, MUST NOT fall back to
+// ws://, MUST NOT try another port, and MUST NOT go looking for a relay that
+// will take it. It keeps dialling exactly what it was given and waits for a
+// person.
+func (s *Sidecar) RelayURL() string { return s.cfg.RelayURL }
 
 // CustodySnapshot returns a copy of every journal state, in journal order.
 func (s *Sidecar) CustodySnapshot() []*journal.State { return s.jr.List() }
@@ -1504,4 +1540,15 @@ func (s *Sidecar) readPosition() *contractb.Position {
 func (s *Sidecar) writePosition(pos contractb.Position) {
 	_ = os.WriteFile(filepath.Join(s.cfg.DataDir, "position"),
 		[]byte(strconv.Itoa(pos.Col)+","+strconv.Itoa(pos.Row)+"\n"), 0o644)
+}
+
+// credentialState says whether a peer credential is configured WITHOUT saying
+// anything about its value. A log line that named a prefix would be a log line
+// that leaked one, and §3.1 keeps the secret off every surface but the HTTP
+// upgrade it rides.
+func credentialState(secret string) string {
+	if secret == "" {
+		return "NOT CONFIGURED — the relay will answer 401 (--credential-file)"
+	}
+	return "configured"
 }

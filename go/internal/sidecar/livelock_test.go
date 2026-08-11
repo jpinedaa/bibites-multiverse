@@ -400,13 +400,13 @@ func TestLiveDestinationReforwardBacksOff(t *testing.T) {
 			t.Fatalf("ReserveSlot: %v", err)
 		}
 	}
-	cfgA := fastConfig(t, rl.url(), "peer-a")
+	cfgA := fastConfig(t, rl, "peer-a")
 	cfgA.Clock = clock.Now
 	cfgA.HeartbeatTimeout = time.Hour // fake-clock jumps must not read as a silent mod
 	cfgA.ForwardRetry = time.Second
 	cfgA.ForwardRetryMax = 4 * time.Second
 
-	cfgB := fastConfig(t, rl.url(), "peer-b")
+	cfgB := fastConfig(t, rl, "peer-b")
 	sideB := startSidecar(t, cfgB)
 	waitSlot(t, sideB, 2)
 	modB := dialFakeMod(t, fakeModOptions{
@@ -471,7 +471,7 @@ func TestLiveDestinationReforwardBacksOff(t *testing.T) {
 func TestDedupPrecedesTheBodyDecode(t *testing.T) {
 	spy := newLogSpy(t)
 	rl := startRelay(t)
-	cfgB := fastConfig(t, rl.url(), "peer-b")
+	cfgB := fastConfig(t, rl, "peer-b")
 	cfgB.Logger = spy.logger()
 	sideB := startSidecar(t, cfgB)
 	waitSlot(t, sideB, 1)

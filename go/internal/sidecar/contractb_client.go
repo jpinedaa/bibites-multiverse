@@ -2,6 +2,8 @@ package sidecar
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"math/rand"
 	"net/http"
@@ -14,7 +16,7 @@ import (
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
 	"multiverse/internal/journal"
-	"multiverse/internal/lantoken"
+	"multiverse/internal/peercred"
 	"multiverse/internal/wire"
 	"multiverse/internal/wsutil"
 )
@@ -22,8 +24,13 @@ import (
 // relayLoop keeps a Contract B link to the relay up, reconnecting with
 // exponential backoff and full jitter (contract-b-m4.md §3).
 //
-// A run of HTTP 401s pins the backoff at the ceiling: a wrong token is an
-// operator problem and hammering the relay will not fix it (§3.1).
+// A run of HTTP 401s pins the backoff at the ceiling: A REFUSED CREDENTIAL IS AN
+// OPERATOR PROBLEM AND HAMMERING THE RELAY WILL NOT FIX IT (§3.1). What a
+// refused sidecar MUST NOT do is the more important half, and it is enforced by
+// this loop doing nothing but wait: it does not generate a fresh peerId, it does
+// not fall back to an unauthenticated connection, it does not fall back to
+// ws://, and it does not try another peer's credential. It keeps its journal,
+// keeps delivering inbound entries to its own mod, and waits for a person.
 func (s *Sidecar) relayLoop() {
 	attempt := 0
 	authFailures := 0
@@ -43,12 +50,29 @@ func (s *Sidecar) relayLoop() {
 			return
 		default:
 		}
-		if isUnauthorized(err) {
+		switch {
+		case isUnauthorized(err):
 			authFailures++
-			s.log.Error("contract B: the relay rejected our LAN token with HTTP 401",
-				"consecutiveFailures", authFailures,
-				"hint", "check MULTIVERSE_TOKEN or --token-file on both sides")
-		} else {
+			// §3.1 asks the log line to name THE REMEDY AND WHO MUST ACT, because
+			// this is a refusal nobody at this end can clear.
+			s.log.Error("contract B: the relay refused THIS PEER'S CREDENTIAL with HTTP 401",
+				"consecutiveFailures", authFailures, "peer", s.cfg.PeerID,
+				"remedy", "re-apply this peer's join string (--credential-file or "+
+					"MULTIVERSE_PEER_SECRET), or ask the RELAY OPERATOR for a slot handover",
+				"whoMustAct", "this machine's operator, then the relay's; this sidecar keeps its "+
+					"journal and keeps delivering to its own mod while it waits")
+		case isCertificateFailure(err):
+			// B23: one loud error naming the host, and the ordinary backoff ladder —
+			// which will keep failing, WHICH IS CORRECT. There is no client-side
+			// action that makes an unverifiable certificate safe.
+			authFailures = 0
+			s.log.Error("contract B: the relay's TLS certificate did not verify; NOT CONNECTING",
+				"relay", s.cfg.RelayURL, "err", err,
+				"remedy", "the relay operator renews or fixes the certificate, or this machine's "+
+					"operator installs the issuing CA in this platform's trust store",
+				"whatThisSidecarWillNotDo", "skip verification, pin a certificate, or fall back "+
+					"to ws:// (contract-b-m4.md §22, B23)")
+		default:
 			authFailures = 0
 		}
 		if time.Since(started) >= contractb.StableSession {
@@ -71,6 +95,22 @@ func isUnauthorized(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "401")
 }
 
+// isCertificateFailure recognises a TLS verification failure, so B23's refusal
+// reads as itself in the log instead of as an ordinary dial error. It is a
+// LOGGING distinction and nothing more: both paths retry on the same ladder and
+// neither one ever relaxes anything.
+func isCertificateFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	var recordErr *tls.CertificateVerificationError
+	return errors.As(err, &unknownAuthority) || errors.As(err, &hostname) ||
+		errors.As(err, &invalid) || errors.As(err, &recordErr)
+}
+
 func fullJitter(min, max time.Duration, attempt int) time.Duration {
 	ceiling := min
 	for i := 1; i < attempt && ceiling < max; i++ {
@@ -88,11 +128,28 @@ func fullJitter(min, max time.Duration, attempt int) time.Duration {
 func (s *Sidecar) relaySession() error {
 	dialCtx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 	opts := &websocket.DialOptions{CompressionMode: websocket.CompressionDisabled}
-	if s.cfg.Token != "" {
-		// §3.1: the token rides the HTTP upgrade and nothing token-related ever
-		// appears in a frame.
-		opts.HTTPHeader = http.Header{"Authorization": []string{lantoken.Header(s.cfg.Token)}}
+	if s.cfg.Secret != "" {
+		// §3.1: the credential rides the HTTP UPGRADE and nothing
+		// credential-related ever appears in a frame — not on HANDSHAKE, which is
+		// the first place an implementer reaches for, because a frame is logged,
+		// copied to subscribers and forwarded.
+		//
+		// The peerId half is this sidecar's own, resolved from <data-dir>/peer-id
+		// before the first dial, and it is the SAME id the HANDSHAKE frame carries.
+		// The relay compares them and refuses the connection when they differ, and
+		// that binding is the whole security property of §22 B22.
+		opts.HTTPHeader = http.Header{
+			"Authorization": []string{peercred.Header(s.cfg.PeerID, s.cfg.Secret)},
+		}
 	}
+	// NO TLS CONFIGURATION IS SET HERE AND NONE MAY BE (§22, B23). A client MUST
+	// verify the chain, the name and the validity window using its platform's
+	// trust store, MUST NOT proceed without verifying, MUST NOT prompt, MUST NOT
+	// offer a flag that skips verification, and MUST NOT pin as a workaround —
+	// so the dial takes Go's default transport, which does exactly that, and
+	// there is deliberately no knob between here and it. A certificate a client
+	// cannot verify is an operator problem at one end or the other, and there is
+	// no client-side action that makes it safe.
 	ws, _, err := websocket.Dial(dialCtx, s.cfg.RelayURL, opts)
 	cancel()
 	if err != nil {

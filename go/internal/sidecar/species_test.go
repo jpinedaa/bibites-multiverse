@@ -287,7 +287,7 @@ func TestBounceBackCarriesTheSpeciesHome(t *testing.T) {
 	want := awkwardSpecies()
 	migrationID := seedOutboundCustody(t, dataDir, want)
 
-	cfg := fastConfig(t, relaySrv.url(), "peer-a")
+	cfg := fastConfig(t, relaySrv, "peer-a")
 	cfg.DataDir = dataDir
 	sideA := startSidecar(t, cfg)
 	waitSlot(t, sideA, 1)
@@ -319,7 +319,7 @@ func TestBounceBackCarriesTheSpeciesHome(t *testing.T) {
 func TestArchiveRecordsTheSpeciesBlockVerbatim(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
 	a, b := g.node(0), g.node(1)
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	want := awkwardSpecies()
 
 	named := a.mod.migrateOutSpecies(testEntityID, contracta.EdgeE, 0.5, want)

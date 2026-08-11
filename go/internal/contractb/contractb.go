@@ -1,16 +1,28 @@
 // Package contractb holds Contract B exactly as contracts/contract-b-m4.md
-// specifies it (`contract-b/3.0`): sidecar -> relay -> sidecar, a rectangular
-// map of slots, a read-only archive subscriber, a JSON envelope, and an opaque
-// bb8 body.
+// specifies it (`contract-b/4.0`): sidecar -> relay -> sidecar, a rectangular
+// map of slots, a read-only AUTHORISED archive subscriber, a JSON envelope, and
+// an opaque bb8 body.
 //
-// This is a major bump from M3's contract-b/2. The ring became a grid, so a
-// reservation gained a coordinate; SECTOR_GRANT returns one effective neighbour
-// per export edge instead of one east neighbour; SECTOR_CLAIM carries an array
-// of export edges; ringSize became slotCount; MIGRATION_NACK gained the
+// contract-b/3 was a major bump from M3's contract-b/2: the ring became a grid,
+// so a reservation gained a coordinate; SECTOR_GRANT returns one effective
+// neighbour per export edge instead of one east neighbour; SECTOR_CLAIM carries
+// an array of export edges; ringSize became slotCount; MIGRATION_NACK gained the
 // non-delivery proof and two new codes, and SLOT_VACANT changed class from
-// transient to permanent. A contract-b/2 sidecar and a contract-b/3 relay are
-// incompatible by design and say so with close 4000 rather than misrouting an
-// organism (contract-b-m4.md §4).
+// transient to permanent.
+//
+// contract-b/4 is the second major, and ONE ROW OF ONE TABLE is why (§22, B32).
+// §3.1's shared token is REPLACED by a per-peer credential bound to the peerId
+// (internal/peercred), §3.2's 4006 narrows to require it, and the transport
+// becomes TLS. A changed rule with an installed base is the expensive kind.
+// Everything else in §22 passes the additive test, and the message catalogue,
+// the envelope, custody, dedup, the hold, the fan-out, hashing and the routing
+// inputs are untouched.
+//
+// A contract-b/3 sidecar and a contract-b/4 relay are incompatible BY DESIGN and
+// say so with close 4000 on a retired path rather than misrouting an organism
+// (§4). There is no field-level fallback anywhere: the RULE changed and not the
+// shape, so a compatibility path only an already-rejected peer could take would
+// be dead code that reads like a supported configuration.
 package contractb
 
 import (
@@ -47,7 +59,31 @@ const (
 	CloseMalformedFrame      = 4003
 	CloseLivenessTimeout     = 4004
 	CloseShuttingDown        = 4005
-	CloseReplaced            = 4006
+	// CloseReplaced now fires ONLY for a connection that AUTHENTICATED AS the
+	// same peerId (amended — §22, B22). The credential is what makes the rule
+	// safe: under the shared token any holder could take any peer's slot with one
+	// frame, and under §3.1 only the peer itself can replace itself. The
+	// self-healing rule contract-a.md §2 gives the mod socket survives; the
+	// impersonation it permitted does not.
+	CloseReplaced = 4006
+)
+
+// The three refusal axes of §6.5's `lastRefusal` (amended — §22, B24, B25). The
+// string names WHICH axis fired, because "this peer was refused" without the
+// axis is a support conversation rather than a remedy.
+//
+// A CREDENTIAL FAILURE NEVER APPEARS HERE (B22). A refused credential reaches no
+// slot, and writing it on the slot whose id was borrowed would tell an innocent
+// peer it had been attacked and hand an attacker a confirmation surface.
+const (
+	// RefusalGameVersion is §6.1's kept game-version gate — the fourth of the
+	// four exceptions B31 names to the game version's diagnostic-only rule.
+	RefusalGameVersion = "game_version_incompatible"
+	// RefusalContractVersion is B25's floor. The string carries BOTH versions so
+	// the remedy is legible without a second lookup.
+	RefusalContractVersion = "contract_version_below_minimum"
+	// RefusalCapacity is B24's, and B24 is WP4: nothing writes it yet.
+	RefusalCapacity = "capacity"
 )
 
 // Roles (contract-b-m4.md §6.1). A peer owns a world and a slot; an archive is
@@ -187,11 +223,20 @@ const (
 	// default sat inside the range it has to avoid. 8795 and the archive's 8796
 	// are the two ports outside it.
 	DefaultRelayPort = 8795
-	// ContractBPath moved with the major (§3). The relay MUST keep serving
-	// RetiredContractBPath and MUST close every connection on it immediately
-	// with 4000.
-	ContractBPath        = "/contract-b/v3"
-	RetiredContractBPath = "/contract-b/v2"
+	// ContractBPath moved with the major again, to /contract-b/v4
+	// (amended — §22, B32). The relay MUST keep serving EVERY retired path —
+	// RetiredContractBPaths below — and MUST close every connection on one
+	// immediately with 4000, so an older sidecar gets the defined loud error
+	// instead of a bare HTTP 404. A retired path is served over TLS like the live
+	// one (B23): a peer that cannot complete a handshake learns nothing, and the
+	// point of a retired path is that it teaches.
+	ContractBPath = "/contract-b/v4"
+
+	// RelayTLSMinVersion is `relayTLSMinVersion` (§12, added — §22, B23): the
+	// lowest TLS version the relay's OWN listener accepts. A relay behind a
+	// fronting proxy does not own this; the proxy does, and B23 says the
+	// wire-visible behaviour is what the contract specifies either way.
+	RelayTLSMinVersion = "1.2"
 
 	RelayPingInterval         = 5 * time.Second
 	PeerTimeout               = 15 * time.Second
@@ -255,6 +300,13 @@ const (
 	// genomeRequestsPerMinute permits, so it too never binds before the rate does.
 	GenomeInFlightPerPeer = 8
 )
+
+// RetiredContractBPaths is every path a relay MUST keep answering with 4000
+// (§3, and again at §22 B32). It grows with each major and never shrinks: the
+// whole value of a retired path is that a peer left behind gets a defined loud
+// close instead of a bare HTTP 404, and that value is exactly as large for the
+// path retired two majors ago.
+var RetiredContractBPaths = []string{"/contract-b/v2", "/contract-b/v3"}
 
 // ErrInvalid marks a data-level validation failure.
 var ErrInvalid = errors.New("contractb: invalid message data")
@@ -334,6 +386,20 @@ type HandshakeAck struct {
 	Map              MapShape  `json:"map"`
 	SlotCount        int       `json:"slotCount"`
 	ReceivedAt       int64     `json:"receivedAt"`
+	// MinContractVersion is the floor this relay admits (added — §22, B25).
+	// ABSENT MEANS NO MINIMUM, which is the default and the only honest one: a
+	// floor is a deployment decision, and a relay that has not made one must not
+	// enforce a guess. A peer that reads it can say what it will need before it
+	// needs it, and an operator surface can say which peers are one release from
+	// being refused.
+	MinContractVersion string `json:"minContractVersion,omitempty"`
+	// Limits is B24's published capacity table, and B24 is WP4. The field is
+	// declared so the SHAPE is settled — §6.2 makes it REQUIRED and it is
+	// deliberately omitted while the table does not exist, because publishing an
+	// empty object would claim a relay running with no ceilings rather than a
+	// relay that has not shipped them yet. WP4 fills it, and every reader here
+	// already treats absence as unknown.
+	Limits map[string]int64 `json:"limits,omitempty"`
 }
 
 // SaveReceipt is the mod's save receipt, copied verbatim from
@@ -677,7 +743,20 @@ type PeerStatus struct {
 	SlotCount int        `json:"slotCount"`
 	Slots     []SlotInfo `json:"slots"`
 	You       You        `json:"you"`
-	Observers int        `json:"observers"`
+	// Observers counts connected read-only subscribers. Each one is now
+	// INDIVIDUALLY AUTHORISED (amended — §22, B27), so this is a count of
+	// decisions an operator made rather than of sockets that knew a token.
+	Observers int `json:"observers"`
+	// MinContractVersion is republished here so an operator surface can say which
+	// peers are one release away from being refused, and so that D25's
+	// *publish, then raise the floor* is a sequence a reader can watch rather
+	// than a policy they must be told (added — §22, B25). Absent means no
+	// minimum.
+	MinContractVersion string `json:"minContractVersion,omitempty"`
+	// Limits is B24's table, republished on every broadcast so a page can render
+	// each peer's behaviour against the ceilings it is measured on. B24 is WP4;
+	// see HandshakeAck.Limits for why the shape is here and the value is not.
+	Limits map[string]int64 `json:"limits,omitempty"`
 }
 
 // Holes derives the positions inside the rectangle that no slot names (§6.5).

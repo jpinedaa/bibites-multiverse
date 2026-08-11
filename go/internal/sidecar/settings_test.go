@@ -63,7 +63,7 @@ func waitSettings(t *testing.T, arc *archive.Archive, slot int, what string,
 // field exists to describe.
 func TestWorldSettingsCrossTheRig(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	a, b := g.node(0), g.node(1)
 
 	// A reports settings from the start; B has never sent any.
@@ -201,7 +201,7 @@ func TestWorldSettingsCrossTheRig(t *testing.T) {
 // migration still crosses.
 func TestMalformedSettingsNeverCostTheSession(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	a, b := g.node(0), g.node(1)
 
 	// The FIELD strip: migrationExclude is not an array. The whole field goes
@@ -274,7 +274,7 @@ func TestMalformedSettingsNeverCostTheSession(t *testing.T) {
 // the same as delegating it (contract-a.md §18 A39, §19 A42).
 func TestSettingsAreNeverAnInputToAnything(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	a, b := g.node(0), g.node(1)
 
 	a.mod.setSettings(`"migrationExclude":["Izus copedylanus"]`)
@@ -301,7 +301,7 @@ func TestSettingsAreNeverAnInputToAnything(t *testing.T) {
 // changed for them.
 func TestSettingsSurviveTheRelayAsBytes(t *testing.T) {
 	g := newGrid(t, 1, gridOptions{layout: layoutRow(1), skipEdgeCheck: true})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	a := g.node(0)
 
 	a.mod.setSettings(rawSettings)

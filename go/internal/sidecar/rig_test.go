@@ -16,13 +16,54 @@ import (
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
 	"multiverse/internal/journal"
+	"multiverse/internal/peercred"
 	"multiverse/internal/relay"
 )
 
-// testToken is the shared LAN token every rig uses. contract-b-m4.md §3.1 wants
-// 16 to 256 bytes of printable ASCII; 32 random bytes hex-encoded is the
-// RECOMMENDED shape, and a fixed one keeps the tests reproducible.
-const testToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+// testContractAToken is the Contract A bearer token every rig in this suite
+// shares between its sidecars and their fake mods (contract-a.md §21, A47). It
+// is set explicitly rather than minted into each temp data directory so that a
+// test's fake mod can present it without reading a file the sidecar happens to
+// own — the FILE path is exercised by contractatoken_test.go, which is where
+// that rule belongs.
+const testContractAToken = "b7f3c1ab9e04d5286b1c7fa30e95d84c2"
+
+// testCreds is a rig's credential store: one credential PER PEER, minted the way
+// an operator's console mints one, because contract-b/4 has no shared token to
+// hand out (contract-b-m4.md §22, B22). A secret is minted on first ask, so a
+// test names peers and the harness follows.
+type testCreds struct {
+	mu      sync.Mutex
+	store   *peercred.Store
+	secrets map[string]string
+}
+
+func newTestCreds(t *testing.T) *testCreds {
+	t.Helper()
+	store, err := peercred.OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("peercred.OpenStore: %v", err)
+	}
+	c := &testCreds{store: store, secrets: map[string]string{}}
+	// §3.1: a relay with an empty store can admit nobody and refuses to start.
+	c.secret(t, "bootstrap-peer", peercred.GrantPeer)
+	return c
+}
+
+func (c *testCreds) secret(t *testing.T, peerID, grant string) string {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if s, ok := c.secrets[peerID]; ok {
+		return s
+	}
+	s, err := c.store.Mint(peerID, grant)
+	if err != nil {
+		t.Fatalf("mint %s: %v", peerID, err)
+	}
+	c.secrets[peerID] = s
+	return s
+}
 
 // TestMain doubles as the helper-process entry point for the crash-custody
 // test: the test binary re-executes itself as a real sidecar process so a test
@@ -113,18 +154,32 @@ type testRelay struct {
 	t       *testing.T
 	addr    string
 	dataDir string
-	token   string
+	creds   *testCreds
 	srv     *http.Server
 	ln      *trackingListener
 	relay   *relay.Server
+	// tlsCert and tlsKey turn this into a relay that terminates its own TLS
+	// (contract-b-m4.md §22, B23). Empty is a plaintext listener on 127.0.0.1,
+	// which B23 keeps for exactly this case: a single-machine rehearsal.
+	tlsCert string
+	tlsKey  string
 }
 
-func startRelay(t *testing.T) *testRelay {
-	t.Helper()
-	return startRelayToken(t, testToken)
+// secret mints (or returns) this peer's credential secret against the relay's
+// own store, so a test client authenticates exactly as a real one does.
+func (r *testRelay) secret(peerID string) string {
+	return r.creds.secret(r.t, peerID, peercred.GrantPeer)
 }
 
-func startRelayToken(t *testing.T, token string) *testRelay {
+func (r *testRelay) subscribeSecret(peerID string) string {
+	return r.creds.secret(r.t, peerID, peercred.GrantSubscribe)
+}
+
+func startRelay(t *testing.T) *testRelay { return startRelayWithTLS(t, "", "") }
+
+// startRelayWithTLS is startRelay with B23's own listener in front of it, so a
+// client test can exercise the wss:// path the shipped rig will run on.
+func startRelayWithTLS(t *testing.T, certFile, keyFile string) *testRelay {
 	t.Helper()
 	// 127.0.0.1:0 only. The rig never binds a fixed port and never touches the
 	// ports the running game owns.
@@ -132,7 +187,8 @@ func startRelayToken(t *testing.T, token string) *testRelay {
 	if err != nil {
 		t.Fatalf("relay listen: %v", err)
 	}
-	r := &testRelay{t: t, addr: ln.Addr().String(), dataDir: t.TempDir(), token: token}
+	r := &testRelay{t: t, addr: ln.Addr().String(), dataDir: t.TempDir(), creds: newTestCreds(t),
+		tlsCert: certFile, tlsKey: keyFile}
 	r.serve(ln)
 	t.Cleanup(r.kill)
 	return r
@@ -140,9 +196,9 @@ func startRelayToken(t *testing.T, token string) *testRelay {
 
 func (r *testRelay) serve(ln net.Listener) {
 	srv, err := relay.New(relay.Options{
-		Logger:  testLogger(r.t),
-		DataDir: r.dataDir,
-		Token:   r.token,
+		Logger:      testLogger(r.t),
+		DataDir:     r.dataDir,
+		Credentials: r.creds.store,
 		// The contract's own behaviour on a short clock: the coalescing window
 		// and the stats republish move, and no rule they gate does.
 		PingInterval:   200 * time.Millisecond,
@@ -156,11 +212,27 @@ func (r *testRelay) serve(ln net.Listener) {
 	r.relay = srv
 	r.srv = &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	r.ln = &trackingListener{Listener: ln}
-	tracked := r.ln
+	var tracked net.Listener = r.ln
+	if r.tlsCert != "" {
+		reloader, err := relay.NewCertReloader(r.tlsCert, r.tlsKey)
+		if err != nil {
+			r.t.Fatalf("relay: cert reloader: %v", err)
+		}
+		minVersion, err := relay.TLSMinVersion(contractb.RelayTLSMinVersion)
+		if err != nil {
+			r.t.Fatalf("relay: tls min version: %v", err)
+		}
+		tracked = relay.TLSListener(tracked, reloader, minVersion)
+	}
 	go func() { _ = r.srv.Serve(tracked) }()
 }
 
-func (r *testRelay) url() string { return "ws://" + r.addr + contractb.ContractBPath }
+func (r *testRelay) url() string {
+	if r.tlsCert != "" {
+		return "wss://" + r.addr + contractb.ContractBPath
+	}
+	return "ws://" + r.addr + contractb.ContractBPath
+}
 
 // kill drops the relay and every connection on it, the way kill -9 would: no
 // close frame, no drain.
@@ -195,13 +267,18 @@ func (r *testRelay) restart() {
 // fastConfig is the contract's own behaviour on a short clock, so the suite
 // finishes in seconds instead of a day. Only the timers move; every rule the
 // tests exercise is the shipped one.
-func fastConfig(t *testing.T, relayURL, peerID string) Config {
+func fastConfig(t *testing.T, rl *testRelay, peerID string) Config {
 	cfg := DefaultConfig()
 	cfg.Listen = "127.0.0.1:0"
-	cfg.RelayURL = relayURL
+	cfg.RelayURL = rl.url()
 	cfg.PeerID = peerID
-	cfg.Token = testToken
+	// contract-b-m4.md §22 B22: one credential per peer, minted against this
+	// relay's own store. A test that wants the REFUSAL overwrites cfg.Secret
+	// afterwards, which is the only way to get one now — there is no shared token
+	// to withhold.
+	cfg.Secret = rl.secret(peerID)
 	cfg.DataDir = t.TempDir()
+	cfg.ContractAToken = testContractAToken
 	cfg.Logger = testLogger(t)
 	cfg.HeartbeatTimeout = 1500 * time.Millisecond
 	cfg.WSPingInterval = 2 * time.Second
@@ -322,7 +399,7 @@ func (g *grid) addPeer(peerID string, at *contractb.Position, opts gridOptions) 
 	if opts.heartbeat == 0 {
 		opts.heartbeat = 200 * time.Millisecond
 	}
-	cfg := fastConfig(g.t, g.relay.url(), peerID)
+	cfg := fastConfig(g.t, g.relay, peerID)
 	cfg.PreferredPosition = at
 	if opts.tune != nil {
 		opts.tune(len(g.nodes), &cfg)
@@ -351,7 +428,7 @@ func (g *grid) node(i int) *node { return g.nodes[i] }
 // splice: "place me immediately after this slot on this axis".
 func (g *grid) addPeerWithSplice(peerID string, afterSlot int, axis string) *node {
 	g.t.Helper()
-	cfg := fastConfig(g.t, g.relay.url(), peerID)
+	cfg := fastConfig(g.t, g.relay, peerID)
 	cfg.InsertAfterSlot = afterSlot
 	cfg.InsertAxis = axis
 	nd := &node{cfg: cfg, world: newWorld()}
@@ -495,12 +572,17 @@ func journalEntry(t *testing.T, s *Sidecar, migrationID string) *journal.State {
 // startArchive brings up an in-process multiverse-archive against the rig's
 // relay, on a short retry ladder so a test does not wait a minute for the first
 // re-ask, with the status page on an ephemeral port.
-func startArchive(t *testing.T, relayURL string) *archive.Archive {
+func startArchive(t *testing.T, rl *testRelay) *archive.Archive {
 	t.Helper()
+	// §22 B27: the archive is a client of the same wire with a DIFFERENT GRANT,
+	// issued deliberately at the relay's console. There is no wire message that
+	// asks for one and none that confers one, so the harness issues it the same
+	// way an operator does.
+	const peerID = "archive-test"
 	a, err := archive.New(archive.Config{
-		RelayURL:          relayURL,
-		Token:             testToken,
-		PeerID:            "archive-test",
+		RelayURL:          rl.url(),
+		Secret:            rl.subscribeSecret(peerID),
+		PeerID:            peerID,
 		DataDir:           t.TempDir(),
 		Logger:            testLogger(t),
 		RelayBackoffMin:   30 * time.Millisecond,

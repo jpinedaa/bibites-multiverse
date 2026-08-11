@@ -379,7 +379,7 @@ func TestSidecarMainAcceptsTheInboundRateFlag(t *testing.T) {
 // hops between the same two worlds, told apart only by the edge.
 func TestHopFeedRecordsBothDirectionsThroughTheRig(t *testing.T) {
 	g := newGrid(t, 3, gridOptions{layout: layoutRow(3)})
-	arch := startArchive(t, g.relay.url())
+	arch := startArchive(t, g.relay)
 	waitFor(t, 10*time.Second, "the archive to subscribe", func() bool {
 		return arch.StatusView().RelayConnected
 	})

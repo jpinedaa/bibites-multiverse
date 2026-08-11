@@ -84,7 +84,7 @@ func waitCensus(t *testing.T, arc *archive.Archive, slot int, what string,
 // `speciesKnown` that a client cannot see is not a distinction that survives.
 func TestCensusCrossesTheRigAndAbsentIsNotEmpty(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	a, b := g.node(0), g.node(1)
 
 	// A reports a census from the start; B has never sent one.
@@ -178,7 +178,7 @@ func TestCensusCrossesTheRigAndAbsentIsNotEmpty(t *testing.T) {
 // migration still crosses.
 func TestMalformedCensusNeverCostsTheSession(t *testing.T) {
 	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	a, b := g.node(0), g.node(1)
 
 	// Row 2, the field strip: `species` is not an array. The whole field goes
@@ -234,7 +234,7 @@ func TestMalformedCensusNeverCostsTheSession(t *testing.T) {
 // is the one place that obligation is load-bearing rather than cosmetic.
 func TestOverlongCensusIsTrimmedNotRefused(t *testing.T) {
 	g := newGrid(t, 1, gridOptions{layout: layoutRow(1), skipEdgeCheck: true})
-	arc := startArchive(t, g.relay.url())
+	arc := startArchive(t, g.relay)
 	a := g.node(0)
 
 	var b strings.Builder

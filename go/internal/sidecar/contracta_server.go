@@ -14,6 +14,7 @@ import (
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
 	"multiverse/internal/journal"
+	"multiverse/internal/modtoken"
 	"multiverse/internal/wire"
 	"multiverse/internal/wsutil"
 )
@@ -123,6 +124,12 @@ type modSession struct {
 // with 4000 PROTOCOL_UNSUPPORTED. A bare HTTP 404 would be a socket error in a
 // BepInEx log and half an evening of diagnosis; 4000 is a defined close the mod
 // already handles by logging one loud error and not reconnecting.
+//
+// A47'S TOKEN DOES NOT GUARD THIS PATH, and A52 says why in as many words: the
+// sidecar owns the retired path and its 4000, which the token does not change,
+// BECAUSE A PEER THAT CANNOT COMPLETE A HANDSHAKE SHOULD STILL LEARN WHY. A 401
+// here would teach a stale mod that its token is wrong, when what is wrong is
+// its path.
 func (s *Sidecar) serveRetiredContractA(w http.ResponseWriter, r *http.Request) {
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode:    websocket.CompressionDisabled,
@@ -138,11 +145,64 @@ func (s *Sidecar) serveRetiredContractA(w http.ResponseWriter, r *http.Request) 
 		"contract-a/v1 is retired; this sidecar serves "+contracta.ContractAPath)
 }
 
+// checkContractAToken is A47, and it is the whole of §12 item 1's answer after
+// three milestones of "not yet".
+//
+// The token is verified BEFORE THE UPGRADE COMPLETES, and a bad or missing one
+// is answered with HTTP 401 and no WebSocket. There is deliberately no close
+// code for authentication: §2.1's codes are statements made INSIDE a session,
+// and a session the token did not open never started.
+//
+// It returns false when the request was already answered.
+func (s *Sidecar) checkContractAToken(w http.ResponseWriter, r *http.Request) bool {
+	if s.cfg.InsecureNoContractAToken {
+		// One loud warning PER ACCEPTED CONNECTION (A47). It exists for a
+		// single-machine rehearsal and for nothing else, and no document this
+		// project ships may instruct a player to pass it.
+		s.log.Warn("contract A: accepting a mod connection with NO TOKEN CHECK; " +
+			"--insecure-no-contract-a-token is for a single-machine rehearsal and for nothing else")
+		return true
+	}
+	// Constant-time comparison on the raw bytes, and NEITHER SIDE MAY LOG THE
+	// VALUE at any level, in whole or in prefix (A47, §11.1).
+	if modtoken.Equal(modtoken.FromRequest(r), s.cfg.ContractAToken) {
+		s.mu.Lock()
+		s.contractAAuthFailures = 0
+		s.mu.Unlock()
+		return true
+	}
+	s.mu.Lock()
+	s.contractAAuthFailures++
+	n := s.contractAAuthFailures
+	s.mu.Unlock()
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(modtoken.Refusal))
+	s.log.Error("contract A: upgrade refused, bad bearer token",
+		"from", r.RemoteAddr, "consecutiveFailures", n,
+		"ceiling", contracta.AuthFailuresBeforeCeiling,
+		"remedy", "THIS MACHINE'S OPERATOR points the mod's "+modtoken.FileEnvVar+
+			" at this sidecar's token file",
+		"tokenFile", s.cfg.ContractATokenFile,
+		"note", "nothing about custody moves while this fails: the journal is held and every "+
+			"organism already in it is safe (contract-a.md §13, A1)")
+	return false
+}
+
 func (s *Sidecar) serveContractA(w http.ResponseWriter, r *http.Request) {
+	if !s.checkContractAToken(w, r) {
+		return
+	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		// contract-a.md §2: permessage-deflate MUST NOT be negotiated.
-		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true, // loopback only; auth is the M5 item of §12 (§15, A24)
+		CompressionMode: websocket.CompressionDisabled,
+		// coder/websocket's ORIGIN check, not a TLS one. This wire is plain HTTP
+		// on loopback and §21 deliberately does not give it TLS: a loopback wire's
+		// confidentiality is the operating system's job, and terminating TLS
+		// between two processes on one machine buys a certificate problem rather
+		// than a secret (A47).
+		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		s.log.Warn("contract A: upgrade failed", "err", err)

@@ -9,9 +9,9 @@ import (
 )
 
 func TestDecodeAcceptsTheContractExample(t *testing.T) {
-	// contract-a.md §3's example, verbatim at contract-a/2.3 (§19, A44).
+	// contract-a.md §3's example, verbatim at contract-a/2.4 (§21, A52).
 	raw := []byte(`{
-	  "protocol": "contract-a/2.3",
+	  "protocol": "contract-a/2.4",
 	  "type": "MIGRATE_OUT",
 	  "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
 	  "sentAt": 1785693600123,
@@ -77,7 +77,7 @@ func TestCheckProtocolComparesMajorOnly(t *testing.T) {
 	// CONSTRUCTION, and the census simply reads as unknown on the older one
 	// (§17, A37). THE MINOR IS A CAPABILITY STATEMENT, NOT A NEGOTIATION.
 	for _, got := range []string{"contract-a/2", "contract-a/2.0", "contract-a/2.1",
-		"contract-a/2.2", "contract-a/2.3", "contract-a/2.7"} {
+		"contract-a/2.2", "contract-a/2.3", "contract-a/2.4", "contract-a/2.7"} {
 		if err := CheckProtocol(got, ProtocolA); err != nil {
 			t.Fatalf("CheckProtocol(%q): %v", got, err)
 		}
@@ -99,10 +99,16 @@ func TestCheckProtocolComparesMajorOnly(t *testing.T) {
 	if err := CheckProtocol(ProtocolB, ProtocolB); err != nil {
 		t.Fatalf("contract B against itself: %v", err)
 	}
-	// M3's contract-b/2.0 against M4's contract-b/3.0: close 4000, never a
-	// misrouted organism (contract-b-m4.md §4).
-	if err := CheckProtocol("contract-b/2.0", ProtocolB); !errors.Is(err, ErrProtocolMajor) {
-		t.Fatalf("an M3 sidecar was accepted by an M4 relay: %v", err)
+	// An older major against contract-b/4.0: close 4000, never a misrouted
+	// organism (contract-b-m4.md §4). contract-b/3 joins contract-b/2 on that
+	// list with §22 B32, and there is NO FIELD-LEVEL FALLBACK for it: the RULE
+	// changed and not the shape, so a compatibility path only an already-rejected
+	// peer could take would be dead code that reads like a supported
+	// configuration.
+	for _, old := range []string{"contract-b/2.0", "contract-b/3.0", "contract-b/3.5"} {
+		if err := CheckProtocol(old, ProtocolB); !errors.Is(err, ErrProtocolMajor) {
+			t.Fatalf("%s was accepted by a contract-b/4 relay: %v", old, err)
+		}
 	}
 	if got := ProtocolMinor("contract-a/2.1"); got != 1 {
 		t.Fatalf("ProtocolMinor = %d, want 1", got)
@@ -205,5 +211,45 @@ func TestDecodeRejectsOversizeFrames(t *testing.T) {
 	}
 	if _, err := Decode(big); !errors.Is(err, ErrMalformed) {
 		t.Fatalf("oversize frame error = %v", err)
+	}
+}
+
+// TestCompareProtocolOrdersMajorThenMinor covers the ONE comparison
+// contract-b-m4.md §22 B25 introduces, and the boundary it must not cross.
+//
+// B25's floor is an ADMISSION POLICY OF ONE MAP, so it orders versions — and
+// §4's compatibility rule between PEERS is untouched by it, so CheckProtocol
+// above still answers on the major alone. The two live side by side and mean
+// different things, which is exactly the confusion B25 asks an implementer not
+// to make.
+func TestCompareProtocolOrdersMajorThenMinor(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{
+		{"contract-b/4.0", "contract-b/4.0", 0},
+		{"contract-b/4.0", "contract-b/4.2", -1},
+		{"contract-b/4.2", "contract-b/4.0", 1},
+		{"contract-b/3.5", "contract-b/4.0", -1},
+		{"contract-b/4", "contract-b/4.0", 0},    // a missing minor is 0
+		{"contract-b/4.10", "contract-b/4.9", 1}, // NUMERIC, not lexical
+	} {
+		got, err := CompareProtocol(c.a, c.b)
+		if err != nil {
+			t.Fatalf("CompareProtocol(%q,%q): %v", c.a, c.b, err)
+		}
+		if got != c.want {
+			t.Fatalf("CompareProtocol(%q,%q) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+	// A different family is not comparable and is an ERROR rather than an order:
+	// "contract-a/2.4 is below contract-b/4.0" is a sentence with no meaning, and
+	// a relay that silently ordered it would refuse peers for a reason nobody
+	// could read.
+	if _, err := CompareProtocol("contract-a/2.4", "contract-b/4.0"); !errors.Is(err, ErrProtocolMajor) {
+		t.Fatalf("two families compared without an error: %v", err)
+	}
+	if _, err := CompareProtocol("garbage", ProtocolB); !errors.Is(err, ErrProtocolMajor) {
+		t.Fatalf("an unparsable identifier compared without an error: %v", err)
 	}
 }

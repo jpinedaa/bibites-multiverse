@@ -37,6 +37,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -49,6 +50,7 @@ import (
 	"github.com/coder/websocket"
 
 	"multiverse/internal/contracta"
+	"multiverse/internal/modtoken"
 	"multiverse/internal/wire"
 	"multiverse/internal/wsutil"
 )
@@ -104,6 +106,9 @@ type fakeMod struct {
 	// settings are the five OPTIONAL fields of §19 A42, sent on every handshake
 	// and never on a heartbeat. Absent stays absent, per field.
 	settings contracta.Settings
+	// token is A47's bearer token, read once from its configured source and put
+	// on every dial. It is never logged, at any level, in whole or in prefix.
+	token string
 
 	conn *wsutil.Conn
 
@@ -173,6 +178,15 @@ func run(args []string) int {
 	saveOnQuit := fs.String("save-on-quit", "", "true or false; empty sends no field (unknown)")
 	worldWrapping := fs.String("world-wrapping", "",
 		"true or false; empty sends no field. D10's containment fact, reported and never written")
+	// contract-a.md §21 A47: a mod sends `Authorization: Bearer <token>` on EVERY
+	// dial, reading the value from its configured source and never minting or
+	// deriving one. This program is a mod for every purpose the rig has, so it
+	// obeys the same rule — including the part where a refusal is a 401 it waits
+	// out rather than a reason to try something else.
+	tokenFile := fs.String("contract-a-token-file", "",
+		"file whose first line is the Contract A bearer token this peer presents "+
+			"(contract-a.md §21, A47). Defaults to "+modtoken.FileEnvVar+", then "+
+			modtoken.EnvVar+". It is the SIDECAR'S token file, not the relay credential")
 	logLevel := fs.String("log-level", "info", "debug, info, warn or error")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -235,13 +249,27 @@ func run(args []string) int {
 		return 1
 	}
 
+	// A missing token is not fatal here for the same reason it is not fatal in
+	// the sidecar's client: the answer is a 401 the operator can read, and a
+	// startup refusal would hide it behind a different message.
+	token, err := modtoken.Load(*tokenFile)
+	if err != nil && !errors.Is(err, modtoken.ErrNoToken) {
+		log.Error("fakemod: the contract A token file is unusable", "err", err)
+		return 1
+	}
+	if token == "" {
+		log.Warn("fakemod: no contract A token configured; the sidecar will answer 401 unless " +
+			"it runs --insecure-no-contract-a-token. Point --contract-a-token-file or " +
+			modtoken.FileEnvVar + " at the sidecar's <data-dir>/" + modtoken.DefaultFileName)
+	}
+
 	m := &fakeMod{
 		log: log, sessionID: wire.NewUUID(), simSize: *simSize, timeScale: *timeScale,
 		edgesOut: out, edgesAll: all, ringSlot: *ringSlot,
 		statePath: *statePath, holdFor: *holdFor, ackDelay: *ackDelay,
 		openEdges: map[string]bool{}, holding: map[string]*held{},
 		byEntity: map[int32]string{}, inFlight: map[string]*held{},
-		census: census, settings: settings,
+		census: census, settings: settings, token: token,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -344,11 +372,23 @@ func splitEdges(v string) []string {
 
 func (m *fakeMod) session(ctx context.Context, url string, borderWidth float64, tick time.Duration) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	ws, _, err := websocket.Dial(dialCtx, url, &websocket.DialOptions{
-		CompressionMode: websocket.CompressionDisabled,
-	})
+	opts := &websocket.DialOptions{CompressionMode: websocket.CompressionDisabled}
+	if m.token != "" {
+		// §21 A47: on the HTTP upgrade, verified before the WebSocket exists, and
+		// NEVER in a frame.
+		opts.HTTPHeader = http.Header{"Authorization": []string{modtoken.Header(m.token)}}
+	}
+	ws, _, err := websocket.Dial(dialCtx, url, opts)
 	cancel()
 	if err != nil {
+		if strings.Contains(err.Error(), "401") {
+			m.log.Error("fakemod: contract A 401 — the sidecar rejected the bearer token",
+				"url", url,
+				"remedy", "THIS MACHINE'S OPERATOR points --contract-a-token-file or "+
+					modtoken.FileEnvVar+" at the sidecar's own token file",
+				"whatThisPeerWillNotDo", "retry without the header, mint a token, or dial a "+
+					"different port looking for a sidecar that will take it")
+		}
 		return err
 	}
 	ws.SetReadLimit(wire.MaxFrameBytes)
