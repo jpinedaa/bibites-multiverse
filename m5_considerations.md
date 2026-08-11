@@ -1020,9 +1020,10 @@ change after strangers run the build costs a migration story for people the owne
 Eight packages. WP1 gates the wire work, WP2 gates WP3 and WP4, and WP8 cannot start until
 everything else has run against a synthetic map first.
 
-Nothing is started. The status lines below are placeholders for the record each package will
-carry, in the form M4's packages carry theirs. **Every decision the packages waited on is
-ratified as of 2026-08-10**, so nothing here is gated on a signature any more.
+Execution state — what is started, what each package landed, and what is safe to start next —
+lives in `m5_tracking.md`, not here; these sections stay the design. **Every decision the
+packages waited on is ratified as of 2026-08-10**, so nothing here is gated on a signature any
+more.
 
 ### WP1 — The contract amendments
 
