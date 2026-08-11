@@ -1,6 +1,6 @@
-# Contract B — M4 (Sidecar ↔ Relay ↔ Sidecar ↔ Archive)
+# Contract B — Sidecar ↔ Relay ↔ Sidecar ↔ Archive Wire Specification
 
-**Version:** `contract-b/3.5`
+**Version:** `contract-b/4.0` (amended — §22, B32; `contract-b/3.5` before it, §19 B19)
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
 default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3), **B6** the
@@ -58,16 +58,43 @@ read-only**: a control surface is owner-ratified as later work and would be a se
 never an extension of these fields (`contract-a.md` §19, A43; B19). Affected body text carries
 an `(amended — §19, Bx)` or `(added — §19, Bx)` marker, and **§19 wins over the body and over
 §14 to §18 wherever they disagree.**
-**Status:** implementation-ready for M4. Written 2026-08-05 from the ratified decisions
+**Amended:** 2026-08-11, amendment set `contract-b/4.0 + B22–B32` (**§22**), from the M5
+decisions the owner ratified on 2026-08-10 and refined on 2026-08-11 — **D21** the per-peer
+credential, **D22** layered version compatibility, **D24** the bounded hosted run
+(`system_decomposition.md`; `m5_considerations.md`, *Decisions for the Owner*). §3.1's **one
+shared token is replaced** by a per-peer credential **bound to the `peerId`**; the transport
+becomes TLS; a published capacity table arrives as §3.3; the archive becomes an **authorised**
+subscriber with a stated visibility boundary; release, handover and eviction gain an
+authenticated admin path; the relay acknowledges every forward; auto-placement gains a rule
+for a peer nobody expected; and the handshake gains a minimum **contract**-version gate that
+is a compatibility control and never a security one. Replacing a rule that has an installed
+base is not additive, so §4's own test answers with a **major** bump to **`contract-b/4.0`**,
+and the URL path moves with it to **`/contract-b/v4`** (B32). Contract A's matching set is
+`contract-a.md` **§21, A47–A52**, **authored in the same wave**, which takes that wire to the
+**minor** `contract-a/2.4` with its path unchanged at `/contract-a/v2` — one wave, two honest
+answers from two documents' own tests. Affected body text carries an `(amended — §22, Bx)` or `(added — §22, Bx)`
+marker, and **§22 wins over the body and over §14 to §21 wherever they disagree.**
+**Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
-`m4_considerations.md`, *Contract Changes Needed*. Extended by D17–D20, ratified 2026-08-07
-against the living deployment.
+`m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
+against the living deployment. **Implementation-ready for M5 since §22** (amended — §22, B32),
+written 2026-08-11 from D21–D25 and the M5 rows of `m5_considerations.md`, *Contract Changes
+Needed*, and from the work-package order in `m5_tracking.md`. **§22 is the wire M5 ships**, and
+it was written before any M5 code, which is WP1's whole reason to exist.
 **Supersedes:** `contracts/contract-b-m3.md`, in full. That document is the historical
 record of the M3 ring and is **not** current guidance.
-**Companion documents:** `contracts/contract-a.md` (`contract-a/2.3`, mod ↔ sidecar) and
-`contracts/genome-hash.md` (`bb8-genome/1`, the canonical genome projection — **unchanged by
-M4, by the species block and by the census**, none of which is hashed, and whose one payload
-key, `genes.speciesID`, that projection already excludes: §4.3 there).
+**Companion documents:** `contracts/contract-a.md` (`contract-a/2.4`, mod ↔ sidecar — the
+minor its own M5 set — **that document's §21, A47–A52** — takes for the bearer token, authored in the same wave;
+amended — §22, B32) and `contracts/genome-hash.md` (`bb8-genome/1`, the canonical genome projection —
+**unchanged by M4, by the species block, by the census and by `contract-b/4.0`**, none of
+which is hashed, and whose one payload key, `genes.speciesID`, that projection already
+excludes: §4.3 there).
+**Title and filename, which stopped agreeing at §22** (amended — §22, B32). This document was
+written as *Contract B — M4* and specified M4's wire; since `contract-b/4.0` it specifies
+**M5's**, and a title that still said *M4* would be false on its first line.
+**`contracts/contract-b-m4.md` stays the path**, because every document in this project cites
+it by that name and a rename would break citations to buy tidiness. The second box below
+applies the same three tests that split `contract-b-m3.md` off and answers *in this file*.
 
 > ### Why a successor document and not an amendment
 >
@@ -97,6 +124,31 @@ key, `genes.speciesID`, that projection already excludes: §4.3 there).
 > The rule for a reader is therefore simple: **this document is Contract B. The M3 file is
 > history.** Nothing here inherits from it silently — where a rule carried over unchanged, it
 > is restated here in full, and §11 lists everything that changed and why.
+>
+> ### And why `contract-b/4.0` was taken here rather than in a successor (added — §22, B32)
+>
+> The M5 major is the second this document has seen and the first taken **in place**. The
+> same three tests answer the other way, one by one:
+>
+> 1. **Is the file milestone-named and milestone-scoped?** The *file* is; the **document** no
+>    longer is. §22 retitles it to the interface it specifies and leaves the path alone, for
+>    Contract A's reason (§15 there): the version identifies the wire, the file identifies the
+>    interface, and every other document in this project cites this one by name.
+> 2. **Is the change structural?** No. §3.1's auth rule is **replaced**, which is what makes
+>    the version a major — and it is one row of one table. Everything else in §22 is
+>    additive: one new message (`FORWARD_RECEIPT`), one new section (§3.3), new OPTIONAL
+>    fields, new refusal *reasons* on existing codes, and rules written down where they were
+>    missing. **The message catalogue survives**, the envelope survives, custody, dedup, the
+>    hold, the fan-out, routing and hashing are untouched. Half the catalogue's semantics
+>    moved in M4; none of them moves here.
+> 3. **Is the old text still needed as it stands?** No. Unlike M3's ring, M4's wire has no
+>    exit-test record that a `contract-b/4.0` reading would falsify: the M4 record cites this
+>    file, and §14–§22 preserve every earlier identifier beside the marked body text, which is
+>    exactly how a reader who needs `contract-b/3.5` finds it.
+>
+> **A major version bump is not by itself a reason to split a file**, and this is the second
+> time this project has said so — `contract-a.md` §15's own box said it first, for
+> `contract-a/2.0`, and that document has carried three minors since without a copy.
 
 This document is written so a Go implementer building the relay, a Go implementer building
 the sidecar, and a Go implementer building the archive can each build their side without
@@ -113,17 +165,29 @@ growing to a seventh in the exit test — one relay, one archive; coordinate add
 the slot number; per-axis route-around past a dark slot or a hole; insertion between two live
 slots on either axis; slot handover; an explicit relay answer that proves non-delivery; the
 bounded hold and its automatic bounce; population and operational stats on the map view (the
-"ring view" of D15); and the shared token on the wire, carried unchanged from M3 (D9).
+"ring view" of D15); and ~~the shared token on the wire, carried unchanged from M3 (D9)~~ —
+**superseded — §22, B22**: the shared token is replaced by a per-peer credential bound to the
+`peerId`.
+
+**In scope since `contract-b/4.0`** (added — §22): the map stops being a LAN of the owner's
+own machines and becomes a **public relay strangers dial** — so TLS (B23), a per-peer
+credential (B22), a published capacity table (B24), an authorised archive with a stated
+visibility boundary (B27), an authenticated admin path (B28), a forward receipt (B26), a
+placement rule for a peer nobody expected (B29) and a minimum **contract**-version gate at the
+handshake (B25) all land here. §22 is the whole of it, and `m5_considerations.md` is where each
+one's argument lives.
 
 Nothing here caps the map at six. Six is what the rig runs (`m4_considerations.md`,
 Question 7); the rules are written for any rectangle, and §13 item 3 records what has not
-been tested at a larger one.
+been tested at a larger one — **and §22's B29 writes the rule that item asked for**, which
+churn rather than size is what stresses (added — §22, B29).
 
-Out of scope, and named so nobody builds them by accident: TLS and per-peer authentication
-(M5), capacity and abuse limits (M5), `TOPOLOGY_GOSSIP` and `PEER_EXCHANGE` (M6),
-`CATALOG_QUERY` and `CATALOG_RESPONSE` (M7), and any write interface on the archive — M4
-records and reads only (D11). **Every milestone number in that list is D16's**: public
-release is M5, direct P2P is M6, ecosystem completeness is M7.
+Out of scope, and named so nobody builds them by accident: ~~TLS and per-peer authentication
+(M5), capacity and abuse limits (M5)~~ — **both are in scope since §22** —
+`TOPOLOGY_GOSSIP` and `PEER_EXCHANGE` (M6), `CATALOG_QUERY` and `CATALOG_RESPONSE` (M7), a
+**control surface** of any kind (M6 — D23, §13 item 8), and any write interface on the archive
+— this wire records and reads only (D11). **Every milestone number in that list is D16's**:
+public release is M5, direct P2P is M6, ecosystem completeness is M7.
 
 ---
 
@@ -239,22 +303,26 @@ made one axis honest under one-way ones.
 
 | Property | Value |
 |---|---|
-| Protocol | WebSocket (RFC 6455) over plain HTTP. TLS is **M5** (D9, D16). |
-| URL | `ws://{relay-host}:{port}/contract-b/v3` |
-| Default port | `8795` (moved from M3's `8790` — see *The M4 port plan* below) |
-| Bind address | The relay binds a LAN-reachable address, **not** loopback. The operator opens the Windows Firewall rule for the port and records the host name in `dev_environment.md`. |
+| Protocol | **WebSocket (RFC 6455) over TLS** (amended — §22, B23). ~~over plain HTTP. TLS is **M5** (D9, D16)~~. Plain `ws://` is refused by a public relay and survives only for a loopback rehearsal — B23 states both. |
+| URL | **`wss://{relay-host}[:{port}]/contract-b/v4`** (amended — §22, B23, B32). ~~`ws://{relay-host}:{port}/contract-b/v3`~~ |
+| Default port | `8795` (moved from M3's `8790` — see *The M4 port plan* below). **A hosted relay behind a name defaults to `443`** (added — §22, B23), because that is the port a stranger's network lets out. |
+| Bind address | The relay binds a reachable address, **not** loopback. On the LAN rig the operator opens the Windows Firewall rule for the port and records the host name in `dev_environment.md`; **a hosted relay binds its public interface, or loopback behind a fronting proxy that terminates TLS** (added — §22, B23). |
 | Roles | The **relay is the server**. Every sidecar and the archive are **clients** and do all the dialling. |
 | Frame type | Text frames. One JSON object per frame. No batching. |
 | Encoding | UTF-8, no BOM |
 | Compression | `permessage-deflate` **MUST NOT** be negotiated |
 | Max frame size | 8 MiB (`maxFrameBytes`), same as Contract A |
-| Authentication | A **shared bearer token** on the HTTP upgrade — §3.1. Unchanged from M3. |
+| Authentication | **A per-peer credential, bound to the `peerId`**, on the HTTP upgrade — §3.1 (amended — §22, B22). ~~A **shared bearer token** … Unchanged from M3~~. |
+| Capacity | Published per-peer limits on connections, frames, claims, bytes and genome requests — §3.3 (added — §22, B24). Every one is a knob and every peer-visible one is on the stats block. |
 | Reconnect | Exponential backoff with full jitter, `relayBackoffMinMs` to `relayBackoffMaxMs`, the same rule Contract A §6.2 gives the mod. The ladder resets only after a session that stayed up for `stableSessionMs` (`contract-a.md` §13, A8). |
 
-**The path moved with the major**, from `/contract-b/v2` to `/contract-b/v3`. A relay
-**MUST** keep serving `/contract-b/v2` and **MUST** close every connection on it immediately
-with `4000`, so an M3 sidecar gets the defined loud error instead of a bare HTTP 404. The
-same rule, and the same reason, as `contract-a.md` §15, A23.
+**The path moved with the major**, from `/contract-b/v2` to `/contract-b/v3` — **and again to
+`/contract-b/v4` with `contract-b/4.0`** (amended — §22, B32). A relay **MUST** keep serving
+every retired path — `/contract-b/v2` and `/contract-b/v3` — and **MUST** close every
+connection on one immediately with `4000`, so an older sidecar gets the defined loud error
+instead of a bare HTTP 404. The same rule, and the same reason, as `contract-a.md` §15, A23.
+**A retired path is served over TLS like the live one** (added — §22, B23): a peer that cannot
+complete the handshake learns nothing, and the point of the retired path is that it teaches.
 
 ### The M4 port plan
 
@@ -285,33 +353,46 @@ not connect: the operator passes `-RelayPort 8795`, or takes a rebuilt bundle. T
 rule and the WSL portproxy on the relay's machine both name the port and both have to move
 with it (`dev_environment.md`, *Owner steps*).
 
-### 3.1 The LAN token
+### 3.1 The per-peer credential (amended — §22, B22)
 
-Unchanged from M3 in every particular. It is restated here in full because this document
-inherits nothing silently.
+**Replaced, not extended** (amended — §22, B22). ~~*The LAN token.* Unchanged from M3 in every
+particular: one bearer token for the whole map, held by all six sidecars and the archive,
+sourced from `MULTIVERSE_TOKEN` or `--token-file`, compared in constant time, and explicitly
+**not** an identity — a token holder could present any `peerId`, including one that already
+held a slot, and §3.2's `4006` rule would then evict the legitimate peer.~~ That rule is what
+`contract-b/4.0` is a **major** for (B32): it had an installed base, and replacing it is not
+additive. What follows is the whole of the new rule; this document inherits nothing silently.
 
 | Rule | Statement |
 |---|---|
-| Where | The HTTP request that opens the WebSocket carries `Authorization: Bearer <token>`. Nothing token-related appears in any frame. |
-| Who | Every client: all six sidecars and the archive. One token for the whole map. |
-| Source | The environment variable `MULTIVERSE_TOKEN`, or `--token-file <path>` which reads the first line and strips trailing whitespace. A flag that takes the token literally **MUST NOT** exist — it would put the secret in every process listing. |
-| Shape | 16 to 256 bytes of printable ASCII. The RECOMMENDED value is 32 random bytes, hex-encoded. |
-| Comparison | Constant-time (`crypto/subtle.ConstantTimeCompare`). Never `==`. |
-| Missing or wrong | The relay answers HTTP **401** with `WWW-Authenticate: Bearer` and **does not upgrade**. There is no WebSocket, so there is no close code. |
-| No token configured | The relay **MUST** refuse to start, unless `--insecure-no-token` is passed, in which case it logs one loud warning per accepted connection. The flag exists for a single-machine test rig and is never used on the LAN. |
-| Client reaction to 401 | Retry on the normal backoff ladder, and log one loud error each time. After `authFailuresBeforeCeiling` (5) consecutive 401s, hold the backoff at `relayBackoffMaxMs`: a wrong token is an operator problem and hammering the relay will not fix it. |
+| Where | The HTTP request that opens the WebSocket carries `Authorization: Bearer <peerId>.<secret>`. Nothing credential-related appears in any frame, ever — **not on `HANDSHAKE`**, which is the first place an implementer will reach for, because a frame is logged, copied to subscribers and forwarded. |
+| Who | Every client, and **each one its own**: one credential per `peerId`. The archive holds a credential of its own with a **different grant** (§5.1, B27) — the same mechanism, not a second auth system. |
+| The binding, which is the whole security property | The relay **MUST** verify that the `peerId` in the credential is the `peerId` the connection then presents on `HANDSHAKE` (§6.1), and **MUST** refuse the connection when they disagree. A valid credential for `peer-A` presented with `peerId: "peer-B"` is refused **at the handshake**, and **`peer-B` observes nothing at all**: no close, no `4006`, no `PEER_STATUS` change, no `lastRefusal` on its slot. That is the acceptance test, stated so it is testable rather than described (`m5_considerations.md`, Risk 1; D21). |
+| Source | `MULTIVERSE_PEER_SECRET`, or `--credential-file <path>` which reads the first line and strips trailing whitespace. A flag that takes the secret literally **MUST NOT** exist — it would put it in every process listing. The `peerId` half is not a secret and comes from `<data-dir>/peer-id` (§7.4) as it always has. |
+| Shape | The secret is 32 to 256 bytes of printable ASCII containing no `.`; the RECOMMENDED value is 32 random bytes, hex-encoded. The `peerId` half obeys §6.1's `peerId` rule, so the `.` separator is unambiguous: `[A-Za-z0-9._-]` allows a dot in a `peerId`, therefore the split is on the **last** `.` and never the first. |
+| Comparison | Constant-time over the secret (`crypto/subtle.ConstantTimeCompare`), never `==`. The relay **MUST** perform the same work for an unknown `peerId` as for a known one, so that response timing does not enumerate the map's membership — the `peerId`s are on the status page anyway, which is a reason to be tidy here rather than a reason not to bother. |
+| Storage | The relay stores a **verifier**, not the secret: a salted hash from which the join string cannot be recovered. A relay whose store is read must not thereby hand over every peer's identity. |
+| Issuance | **The relay mints the secret at first claim and prints a join string.** No accounts, no email, no password reset (DQ1). The join string carries the relay URL, the `peerId` and the secret, and it is printed **once**, on the relay's own console, for an operator to hand over out of band. |
+| Missing, malformed or wrong | The relay answers HTTP **401** with `WWW-Authenticate: Bearer` and **does not upgrade**. There is no WebSocket, so there is no close code — unchanged from the token rule, and deliberately: a refusal before the upgrade is the one refusal that costs the relay nothing. |
+| No credential store configured | The relay **MUST** refuse to start, unless `--insecure-no-token` is passed, in which case it logs one loud warning per accepted connection and **MUST** also refuse to bind anything but loopback. The flag exists for a single-machine test rig. **It is a defaults-audit item for M5's package** (`m5_considerations.md`, decision 7): no installer, script or document may instruct a stranger to pass it. |
+| Client reaction to 401 | Retry on the normal backoff ladder and log one loud error each time, naming **the remedy and who must act** — *"this peer's credential was refused; re-run the join string, or ask the relay operator for a slot handover"*. After `authFailuresBeforeCeiling` (5) consecutive 401s, hold the backoff at `relayBackoffMaxMs`. A refused credential is an operator problem and hammering the relay will not fix it. |
+| What a refused peer **MUST NOT** do | Generate a fresh `peerId` and connect as a stranger — that strands its slot, its journal's `destSlot` and every organism addressed to it (§7.3 rule 3). Fall back to an unauthenticated connection. Fall back to `ws://`. Try another peer's credential. A sidecar whose credential is refused **keeps its journal, keeps delivering inbound entries to its own mod, and waits for a person** (§7.5). |
 
-**What this does and does not buy.** It keeps an unrelated device on the LAN out of the map.
-It does **not** authenticate a peer *identity*: a token holder can present any `peerId`,
-including one that already holds a slot, and the `4006` rule (§3.2) will then evict the
-legitimate peer. It does **not** provide confidentiality. Both gaps are accepted for a
-milestone whose entire network is two computers the owner owns, and both are closed by M5's
-TLS and per-peer credentials (§13 item 1).
+**What this buys, and what it costs.** It closes both M4 gaps at once: a `peerId` is now a
+**credential rather than a claim**, so §3.2's `4006` eviction stops being a one-frame denial of
+service against any peer whose `peerId` can be read off the status page; and B23's TLS keeps
+the credential, the genome and the peer id off the wire in clear. **The cost is stated because
+it is real**: there is no recovery path in the software. A stranger who loses their join string
+loses that world's identity until an operator hands the slot over by name — `--handover-slot`
+(§7.5), over the authenticated admin path B28 adds. That is the honest price of *no accounts*,
+and it was chosen with the price in view (DQ1).
 
-**One M4 rule sharpens the identity gap, and it is worth naming here.** Slot handover (§7.5)
-rebinds a reservation to a new `peerId` by operator command, on the relay's own machine. It
-is not a wire operation and no frame can trigger it — which is deliberate, because on this
-transport a `peerId` is a claim, not a credential.
+**One M4 rule kept its shape and changed its reason** (amended — §22, B22, B28). Slot handover
+(§7.5) rebinds a reservation to a new `peerId`. Under M4 it could not be a wire operation
+because a `peerId` was a claim, not a credential; under `contract-b/4.0` it **may** be one, and
+B28 gives it an authenticated path — because the operator whose console it needed is now on a
+VPS and the peer that needs it is a stranger. What does **not** change is that it stays a
+deliberate act with a printed consequence and a confirmation (§7.5).
 
 ### 3.2 Close codes
 
@@ -320,10 +401,56 @@ transport a `peerId` is a claim, not a credential.
 | `1000` | `NORMAL` | either | Clean shutdown. |
 | `1009` | `TOO_BIG` | either | Frame over `maxFrameBytes`. |
 | `4000` | `PROTOCOL_UNSUPPORTED` | relay | The `protocol` **major** version is not supported, or the connection arrived on a retired path (§3). The client **MUST NOT** reconnect until it is restarted. |
-| `4003` | `MALFORMED_FRAME` | either | Not valid JSON, a missing REQUIRED envelope field, no `HANDSHAKE` first, or a routing field that disagrees with the sender's own peer id. Reconnect with backoff. |
+| `4003` | `MALFORMED_FRAME` | either | Not valid JSON, a missing REQUIRED envelope field, no `HANDSHAKE` first, a routing field that disagrees with the sender's own peer id, **a `HANDSHAKE.peerId` that disagrees with the credential the connection was opened with** (added — §22, B22), **a `gameVersion` incompatible with the map's** (§6.1, unchanged), or **a `protocolVersion` below the relay's published minimum** (added — §22, B25). Reconnect with backoff. The four causes are told apart by the close **reason string**, by the relay's log line and by `lastRefusal` on that slot (§6.5) — except the credential-mismatch case, which reaches no slot and appears on none (B22). |
 | `4004` | `LIVENESS_TIMEOUT` | relay | No frame and no `PONG` within `peerTimeoutMs`. Reconnect with backoff. |
 | `4005` | `SHUTTING_DOWN` | either | The sender is draining. Reconnect with backoff. |
-| `4006` | `REPLACED` | relay | A newer connection claimed the same `peerId`. The old connection **MUST NOT** reconnect. |
+| `4006` | `REPLACED` | relay | A newer connection **that authenticated as the same `peerId`** claimed it (amended — §22, B22). The old connection **MUST NOT** reconnect. **The credential is what makes this rule safe**: under the shared token any holder could take any peer's slot with one frame, and under §3.1 only the peer itself can replace itself — which is the same self-healing rule `contract-a.md` §2 gives the mod socket, with the impersonation removed. |
+| `4007` | `CAPACITY` | relay | **New in `contract-b/4.0`** (added — §22, B24). A published limit in §3.3 was exceeded and the relay is shedding this connection rather than the map. The close reason names **which** limit and its value. Reconnect with backoff; a client that takes two `4007`s in a row **MUST** hold at `relayBackoffMaxMs` until an operator or a configuration change intervenes, because a client that is over a limit will be over it again in a second. |
+
+### 3.3 Capacity and abuse limits (added — §22, B24)
+
+**New in `contract-b/4.0`.** A public relay meets peers nobody vetted, and M4 had no limit of
+any kind on this wire beyond `maxFrameBytes` and one compiled-in genome rate. B24 states the
+table; the whole of its design constraint is D1: **every limit here is countable at the frame
+level**, so none of them requires the relay to read a body it is forbidden to read (§5).
+
+| Limit | Default | Scope | What it counts |
+|---|---|---|---|
+| `maxConnectionsPerPeer` | `2` | relay, per `peerId` | Simultaneous authenticated connections. The second is the §3.2 `4006` overlap during a reconnect; a third is `4007`. |
+| `maxConnectionsPerAddress` | `8` | relay, per source address | Simultaneous connections before the upgrade is refused with HTTP **429**. It is deliberately loose: one machine legitimately runs several peers, and the rig runs five. |
+| `maxFramesPerSecond` | `50` | relay, per peer | Frames of any type. A peer at `statsIntervalMs` sends well under one a second; the ceiling is sized for a migration burst, not for a steady rate. |
+| `maxFrameBytes` | `8388608` | both | Unchanged (§12). Over it is close `1009`, not `4007`. |
+| `maxBytesPerSecond` | `4194304` | relay, per peer | Sustained inbound bytes. It is what stops `maxFramesPerSecond` from being evaded with maximum frames. |
+| `maxClaimsPerMinute` | `12` | relay, per peer | `SECTOR_CLAIM` frames. Above it the relay answers `granted: false, reason: "rate_limited"` and does **not** close: a claim storm is usually a peer whose measured time scale is wandering (DQ3's 64 claims in a day), and a refusal it can read beats a close it must recover from. |
+| `maxGenomeRequestsPerMinute` | `30` | both, per requester **per answering peer** | The existing `genomeRequestsPerMinute` (§10, §12), **renamed into this table and now a knob**. Above it the answer is `found: false, reason: "rate_limited"`, exactly as today. |
+| `maxSubscribers` | `4` | relay | Connected `role: "archive"` clients. B27 makes each one individually authorised, so this bounds the fan-out cost rather than the trust. |
+
+**Every one of them is a knob** (D20). Each has a flag and an environment variable, and none
+is a compiled constant — *"a tunable an operator cannot retune from the metric that measures
+it is not a tunable."* `genomeRequestsPerMinute` is the worked example of the failure: it
+shipped as `contractb.GenomeRequestsPerMinute = 30`, reachable only by editing source, and it
+is the limit a public archive is most likely to need to move.
+
+**Every peer-visible one is published**, and that is the second half of D20's rule. The relay
+publishes the values **it is running with** — not the shipped defaults above — in
+`HANDSHAKE_ACK.limits` at connect and `PEER_STATUS.limits` thereafter (§6.2, §6.5), which is
+the same broadcast the stats blocks ride so a page can render one against the other. A peer can
+therefore be **built** to respect a ceiling instead of discovering it as a `4007`, and a limit
+nobody can read is a support conversation nobody can win. **They are beside the stats block and
+not inside it**, and §6.3.1 states why: that block is peer-authored end to end, and a
+relay-authored field in it would be the first value on it the peer did not write.
+
+**What a limit MUST NOT be.** No limit on this wire may require the relay to decode
+`data.body.bb8`, `data.lineage` or `data.species` (§5), to index anything, or to keep
+per-organism state. A limit that needs a payload read is a limit this relay may not have —
+D1 is why the archive is a separate service and why M6 can replace the relay with libp2p, and
+an abuse limit is not worth spending it.
+
+**The relay sheds the connection, never the map.** A peer over a limit is closed with `4007`
+or refused a claim; **no other peer's traffic changes**, no lane closes, and no migration is
+dropped in flight. `SLOT_VACANT` still means what §6.8 says it means, and a peer shed for
+capacity is `live: false` with `darkSinceMs` set like any other dark peer (§6.5), which its
+neighbours route around exactly as they always did (§8).
 
 ---
 
@@ -333,7 +460,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -411,6 +538,27 @@ path renders as unknown on the page** (§10.1), and here too "unknown" must beat
 substitute out loud — a page that fills in `saveMinutes: 10` because that is the shipped
 default is describing a world whose save timer may well be off.
 
+**`contract-b/4.0` is the second major, and it is a major for one row of one table**
+(amended — §22, B32). B32 applies §4's test line by line; the short form is that §3.1's
+shared-token rule is **replaced** and there is an installed base, which is the expensive shape
+§3.1 and `contract-a.md` §15's A41 both name. Everything else in §22 passes the additive test:
+one new message type (`FORWARD_RECEIPT`, §6.12), one new section (§3.3), new OPTIONAL fields
+on existing objects, new *reasons* on existing codes, and one new close code. **A
+`contract-b/3` sidecar and a `contract-b/4` relay are incompatible by design** and say so with
+close `4000` on the retired `/contract-b/v3` path (§3), exactly as `contract-b/2` and
+`contract-b/3` did.
+
+**One rule §22 adds is deliberately *not* a compatibility rule, and the distinction has to be
+read here** (added — §22, B25). B25's minimum **contract**-version gate refuses a peer whose
+`protocolVersion` is below a published floor — and that floor may sit at a **minor**. That
+does not make the minor a rejection reason on this wire: §4's rule is about what two *peers*
+may assume of each other, and it is unchanged — the minor is never a rejection reason, unknown
+fields and types are ignored, and a feature is detected by the presence of its field. B25's
+floor is an **admission policy of one map**, set by its operator, defaulting to *no minimum*,
+published where a peer can read it before it dials, and raised only after the release that
+satisfies it exists (DQ5, D25). A relay that raises it has changed its own deployment; it has
+not changed this contract's compatibility rule.
+
 Timestamps are informational (D5). `messageId` is for log correlation only; `migrationId` is
 the one idempotency key in the system (`contract-a.md` §7.1).
 
@@ -453,13 +601,23 @@ re-route (§5.2).
 a deliberately dumb relay: it still parses no body, indexes nothing, and stores no
 organism. §8 states the walk.
 
-### 5.1 The archive is a read-only subscriber
+### 5.1 The archive is a read-only, **authorised** subscriber (amended — §22, B27)
 
 `multiverse-archive` connects to the relay as a client with `role: "archive"` (§6.1). It
 owns no world, holds no slot, and never appears in the structural order.
 
+**It is no longer any client that happens to hold the token** (amended — §22, B27). Under M4
+`role: "archive"` was a self-declaration and the shared token was the only gate, so anyone who
+could open a socket could subscribe to every envelope on the map. Under §3.1 a subscriber
+authenticates as a `peerId` like everybody else, and the **subscribe grant is separate from
+the peer grant**: the same mechanism, a different permission.
+
 | Rule | Statement |
 |---|---|
+| **Authorisation** (added — §22, B27) | A client MAY take `role: "archive"` **only** when its credential carries the **subscribe** grant. A credential without it that asks for `role: "archive"` is refused at the handshake with `4003` and a reason naming the missing grant. A credential **with** it that asks for `role: "peer"` is refused the same way: the two grants are disjoint, so a compromised subscriber cannot claim a slot and a compromised peer cannot read the map's whole traffic. |
+| **Granting it** (added — §22, B27) | The subscribe grant is issued by the **relay operator**, deliberately, at the same console that mints a join string (§3.1) — there is no wire message that asks for one and none that confers one. A public map has exactly as many subscribers as its operator decided to have, bounded by `maxSubscribers` (§3.3). |
+| **The visibility boundary, stated rather than implied** (added — §22, B27) | A subscriber sees **every** `MIGRATION_PAYLOAD`, `MIGRATION_ACK` and `MIGRATION_NACK` the relay routes or generates, and **every** `PEER_STATUS` — which since §16 carries each world's species census and since §19 its mod version, its `contract-a` version, its save policy and its exclusion list (§6.3.1). **That is a fairly complete profile of a stranger's machine, and it is what the grant grants.** It is stated here so that granting it is a decision rather than a default, and so that D24's participant announcement can say what a participant is agreeing to. What a subscriber does **not** get is anything more than the peers themselves get: every field it reads is a field the relay already broadcasts to all six sidecars, and there is no subscriber-only view, no private field and no back channel. |
+| **What a peer may assume about its own stats** (added — §22, B27) | Nothing is confidential on this wire. A peer that must not publish a value **MUST NOT put it on the stats block**, because there is no rule here that would keep it from a subscriber. The block is a publication, and §6.3.1's fields are the whole of what is published. |
 | Fan-out | The relay **MUST** send every connected subscriber a **byte-identical copy** of every `MIGRATION_PAYLOAD` it routes, and of every `MIGRATION_ACK` and `MIGRATION_NACK` it routes. The copy carries the original `sourcePeer`, `destSlot` and `migrationId`. |
 | Fan-out covers the relay's own non-delivery answers | **The set is a superset of "routed"** (amended — §14, B7). Every `MIGRATION_NACK` the relay **generates in answer to a `MIGRATION_PAYLOAD` it declined to forward** — `SLOT_VACANT`, `PEER_OFFLINE`, `NOT_FORWARDED` (§6.8) — **MUST** also be fanned out. Those three are exactly the frames that carry `neverForwarded` and `relaySessionId`, so they are the only record a subscriber can ever have of a hop that reached no sidecar. The relay's two **connection-level** refusals are **not** fanned out, because no migration was in question: `NOT_A_MEMBER` (a payload from a subscriber, refused as a role error) and `PEER_UNKNOWN` (a routed `ACK`/`NACK` whose `destPeer` has gone). |
 | Best effort | The fan-out **MUST NOT** delay, block or fail a migration. A subscriber that is absent, slow or dead changes nothing on the migration path. |
@@ -491,6 +649,32 @@ never forwarded reached no sidecar and created no custody.
 | The session | The relay mints a `relaySessionId` (a UUID) at process start and reports it in `HANDSHAKE_ACK` (§6.2) and in every relay-generated `MIGRATION_NACK` (§6.8). The record covers **that session only**. |
 | The answer | A relay-generated `MIGRATION_NACK` carries `neverForwarded: true` **only** when the `migrationId` is absent from the record of the current session. Otherwise it carries `false`. |
 | Memory | One `migrationId` and one timestamp per forwarded migration. At T1's measured rate — 1 799 hops an hour — 48 hours is about 86 000 entries, a few megabytes. It is in memory, and it is deliberately **not** durable: a relay restart is exactly the event that invalidates the proof, and persisting it would claim knowledge the new process does not have. |
+| **The receipt** (added — §22, B26) | The relay **MUST** send the **sender** one `FORWARD_RECEIPT` (§6.12) per `MIGRATION_PAYLOAD` it forwards, at the moment the frame is written to a destination connection — the same moment that puts the `migrationId` in the record above. One forward, one receipt; a re-forward of the same `migrationId` produces another. The receipt carries the `relaySessionId` in force, so the sender learns the scope of the fact along with the fact. |
+| **What the receipt is for** (added — §22, B26) | It moves the forwarding record **into the sender's own durable journal** (§7.4, §9.2). A sender that holds a receipt knows the frame was forwarded under a named session and does not need to ask; a sender that holds **no** receipt for an entry it wrote to a live relay connection knows only that it does not know, which is exactly what `sent` already means. |
+| **What the receipt is NOT** (added — §22, B26) | Not a delivery acknowledgement — §6.7's `MIGRATION_ACK` is, and it comes from the destination sidecar after custody. Not custody. Not an answer. **Not proof of non-delivery, and never proof of delivery**: a receipt states that the relay wrote bytes, and §5.2's own rule says a written frame and a delivered frame are indistinguishable. The safe direction of §9.2 is unchanged in every particular — a receipt can only ever move an entry *toward* holding, never toward re-routing. |
+
+**Why the receipt, and why now** (added — §22, B26). §13 item 6 named this fix, priced it at
+one frame per migration, and declined it because *"a relay restart is rare and
+`--release-inflight` is one command"*. **Both halves of that sentence are properties of a
+relay on the owner's desk.** A hosted relay has deploys, certificate rotation, kernel updates
+and a supervisor doing its job (D24, DQ2), so restarts stop being rare; and
+`--release-inflight` is typed on the **sender's** machine, which after M5 is usually a
+stranger's. The condition item 6 set was *"if this ever hurts"*, and the change of venue is
+what makes it hurt — knowably in advance rather than after the first bad night.
+
+**What it costs, and where that is measured.** One extra frame per migration on a relay whose
+whole design virtue is that it forwards frames and does nothing else (D1). At the rig's
+measured 300–500 crossings a minute it is a rounding error; at a public map's rates it is a
+real cost, and WP3 **measures it at rate rather than assuming it away**
+(`m5_considerations.md`, DQ2). The receipt is deliberately the cheapest possible frame: three
+fields, no body, no fan-out to subscribers, and no answer.
+
+**The receipt does not make the record durable, and must not be read as doing so.** The relay
+still cannot speak for a session it did not run, and a sender that holds a receipt from
+session *X* and hears `neverForwarded: true` from session *Y* has learned nothing about *X*
+(§9.2). What the receipt buys is that the sender no longer needs the relay to still be the
+same process to know its own entry was forwarded — the fact is in the sender's journal, where
+D2 keeps custody.
 
 **Why the session id, and not a timestamp.** The sender has to know whether the relay's
 answer covers the whole life of its journal entry. A timestamp comparison would put a
@@ -513,6 +697,11 @@ Silence is never proof in this contract; only a relay statement or a peer NACK i
 Twelve types. **None is new in M4** — the non-delivery proof rides on the existing
 `MIGRATION_NACK`, and the operator commands are deliberately not wire operations (§7.5).
 
+**Thirteen since `contract-b/4.0`, and the thirteenth is the only message this project has
+added since M3** (amended — §22, B26): `FORWARD_RECEIPT` (§6.12). The operator commands stay
+off the wire in shape — B28 authenticates the **path** to them and does not turn them into
+messages — so the catalogue grows by exactly one.
+
 | Type | Direction | Answered by |
 |---|---|---|
 | `HANDSHAKE` | client → relay | `HANDSHAKE_ACK`, or a close |
@@ -525,6 +714,7 @@ Twelve types. **None is new in M4** — the non-delivery proof rides on the exis
 | `MIGRATION_NACK` | sidecar → sidecar or relay → sidecar; copied | nothing |
 | `GENOME_REQUEST` | archive or sidecar → sidecar, forwarded | `GENOME_RESPONSE` |
 | `GENOME_RESPONSE` | sidecar → requester, forwarded; relay → requester on failure | nothing |
+| `FORWARD_RECEIPT` | relay → sender (added — §22, B26); **not** copied to subscribers | nothing |
 | `PING` / `PONG` | either | `PONG` / nothing |
 
 The two claim messages keep their M2 names for the third milestone running. The noun changed
@@ -541,16 +731,19 @@ The **first frame on every connection**. Any other first frame closes with `4003
 
 | Field | Type | Required | Semantics |
 |---|---|---|---|
-| `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). |
-| `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). |
-| `protocolVersion` | string | yes | `"contract-b/3.5"` (amended — §19, B19; `"contract-b/3.4"` before it, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. |
+| `peerId` | string | yes | Stable identity of this client. `1`–`64` characters, `[A-Za-z0-9._-]`. It is what makes a slot reclaim work across a restart, so it **MUST** be persisted (§7.4). **It is now also authenticated** (amended — §22, B22): the relay **MUST** refuse the connection when this value disagrees with the `peerId` the credential named, and the peer whose id was borrowed observes nothing (§3.1). |
+| `role` | string enum | yes | `"peer"` — owns a world and a slot — or `"archive"` — a read-only subscriber (§5.1). **The credential's grant decides which values are legal for this connection** (amended — §22, B27), and a role the grant does not carry is refused with `4003`. |
+| `protocolVersion` | string | yes | `"contract-b/4.0"` (amended — §22, B32; `"contract-b/3.5"` before it, §19 B19; `"contract-b/3.4"` before that, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). A different **major** closes with `4000`. **A value below the relay's published `minContractVersion` closes with `4003`** (added — §22, B25) — a *compatibility* refusal and never a security one, because this string is chosen by the peer that sends it. |
 | `gameVersion` | string | yes | The game version behind this sidecar, from the mod's `CONFIG_UPDATE`. Empty while no mod is connected, and always empty for an archive. |
 | `sidecarVersion` | string | yes | Informational. The archive sends its own version here. |
 | `simulationSize` | float | no | `S`, when a mod has already reported one. |
 
-A second connection presenting a `peerId` that is already live **MUST** cause the relay to
-close the older connection with `4006` and serve the newer one — the same self-healing rule
-`contract-a.md` §2 gives the mod socket.
+A second connection **that authenticated as** a `peerId` which is already live **MUST** cause
+the relay to close the older connection with `4006` and serve the newer one — the same
+self-healing rule `contract-a.md` §2 gives the mod socket (amended — §22, B22). A connection
+that presents somebody else's `peerId` never reaches this rule: it is refused at the
+credential check, before the upgrade or at the handshake, and the live peer is not told,
+because nothing happened to it (§3.1, §3.2).
 
 **Compatibility enforcement at connect.** The relay **MUST** refuse a peer whose
 `gameVersion` is incompatible with the map's, and it **MUST** be loud about it: it closes
@@ -560,16 +753,42 @@ from a dead peer — under M4 both end with a lane routed around them — and M4
 independently updated installs, so this is the failure most likely to waste an evening. An
 **empty** `gameVersion` is not a mismatch: it means no mod is connected yet.
 
+**This game-version refusal is kept deliberately under D22, and §22 does not touch it**
+(added — §22, B31). D22 makes the **contract** version the map's membership test and the game
+version a per-machine matter answered by a published support matrix — which reads like a reason
+to retire this paragraph, and the owner decided on 2026-08-11 not to: *"lets not change this
+then we will reconsider in the future if there's issues i think we can leave it like its working
+now."* So the rule above stands exactly as written, as the fourth of the **four kept exceptions**
+B31 names to the game version's diagnostic-only rule. What that costs an operator, and what a
+version-skewed map looks like, is stated in B31 where an operator will read it.
+
+**The contract-version gate is the rule D22 actually adds, and it sits beside the one above**
+(added — §22, B25). The relay **MUST** refuse a peer whose `protocolVersion` names a different
+**major**, with `4000` (unchanged, §3.2), and **MUST** refuse one below its published
+`minContractVersion`, with `4003`, a log line naming both versions and the same `lastRefusal`
+on that slot. The floor's value is published in `HANDSHAKE_ACK` and on `PEER_STATUS` (§6.2,
+§6.5) so a peer can read what it failed before it is refused again, and it defaults to **no
+minimum**, which is the only honest default for a map whose operator has not decided one.
+
+**Say both halves of what that gate is, in the same breath, or an implementer will assume the
+first implies the second** (added — §22, B25):
+
+| The gate **is** | The gate is **not** |
+|---|---|
+| A **compatibility** control. It keeps an honestly stale peer off a map it would degrade — and `dev_environment.md`'s *The minors* is the episode that earns it: a pre-`3.3` sidecar answered an upgraded neighbour's `W` exports with a **permanent** `MALFORMED_MESSAGE`, so two lanes ran at ~40 hops/min against ~4–6 everywhere else and two other slots pinned at `inboundQueueMax`. Nothing was lost; the map was simply not operationally complete until every peer upgraded. | A **security** control. `protocolVersion` is attacker-chosen text, exactly as §13 item 7 says `contractAVersion` is. A peer that edits one string walks through this gate. It stops the honest and inconveniences nobody else. |
+| A statement about **this map**, set by its operator, raised only **after** the release that satisfies it exists (D25 — GitHub Releases pushes nothing, so publication is the whole fleet-moving mechanism). | A version **negotiation**. Nothing is negotiated: the peer states, the relay admits or refuses, and §4's compatibility rule between peers is untouched. |
+| The reason the relay is the right place for it: **the relay is the only party that sees every peer's claimed version at once**, and the peer that suffers from staleness is the stale peer's *neighbour*. | A substitute for the support matrix. The matrix answers *which build runs on my game*; this gate answers *may this build join this map*. Two layers, two tests, and they never meet (D22). |
+
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
   "data": {
     "peerId": "peer-lan-slot5",
     "role": "peer",
-    "protocolVersion": "contract-b/3.5",
+    "protocolVersion": "contract-b/4.0",
     "gameVersion": "0.6.3.1",
     "sidecarVersion": "0.4.0",
     "simulationSize": 2000.0
@@ -577,12 +796,92 @@ independently updated installs, so this is the failure most likely to waste an e
 }
 ```
 
+**The credential is not in that frame and never will be** (added — §22, B22). It is on the
+HTTP upgrade that carried it, which is the only place §3.1 permits:
+
+```http
+GET /contract-b/v4 HTTP/1.1
+Host: relay.example.net
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Version: 13
+Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==
+Authorization: Bearer peer-lan-slot5.9f3c1a2b7e4d05688c1f0a37d5b9e264
+```
+
+The relay splits that credential on its **last** `.`, verifies the secret against the
+verifier it holds for `peer-lan-slot5`, and then holds the name until the first frame
+arrives. The frame above says `"peerId": "peer-lan-slot5"`, the two agree, and the session
+proceeds.
+
+**The refusal that is the whole security property.** The same credential, presented by
+somebody who read `peer-main-slot1` off the public status page and wants its slot:
+
+```http
+GET /contract-b/v4 HTTP/1.1
+Host: relay.example.net
+Authorization: Bearer peer-lan-slot5.9f3c1a2b7e4d05688c1f0a37d5b9e264
+```
+```json
+{
+  "protocol": "contract-b/4.0",
+  "type": "HANDSHAKE",
+  "messageId": "5e2b90c1-77af-4d13-b0a6-31c8e5079f42",
+  "sentAt": 1785693597100,
+  "data": {
+    "peerId": "peer-main-slot1",
+    "role": "peer",
+    "protocolVersion": "contract-b/4.0",
+    "gameVersion": "0.6.3.1",
+    "sidecarVersion": "0.4.0"
+  }
+}
+```
+
+The upgrade succeeded — the credential is valid — and the **handshake** does not: the
+credential names `peer-lan-slot5` and the frame claims `peer-main-slot1`.
+
+```
+← close 4003 "peerId does not match the authenticated credential"
+```
+
+and the relay logs one error. **What does not happen is the whole test** (Risk 1): slot 1 is
+not closed with `4006`, slot 1's connection is not touched, `PEER_STATUS` does not change, no
+`lastRefusal` appears on slot 1, and `peer-main-slot1` — which did nothing and is at fault for
+nothing — **observes nothing at all**. Under M4's shared token this same sequence took slot 1
+off the map in one frame.
+
+**A peer refused for its contract version, and what it can read afterwards** (added — §22,
+B25). A `contract-b/4.0` sidecar dialling a relay whose operator has published a floor of
+`contract-b/4.2`:
+
+```
+← close 4003 "protocolVersion contract-b/4.0 is below this relay's minimum contract-b/4.2"
+```
+
+and, in the next `PEER_STATUS` every other client receives, on that peer's slot:
+
+```json
+{ "slot": 5, "position": { "col": 1, "row": 1 }, "peerId": "peer-lan-slot5",
+  "live": false, "modConnected": false, "gameVersion": "0.6.3.1",
+  "simulationSize": 2000.0, "exportEdges": ["E", "N"],
+  "darkSinceMs": 1785693719004,
+  "lastRefusal": "contract_version_below_minimum: contract-b/4.0 < contract-b/4.2" }
+```
+
+That is what stops a stale peer from reading as a dead one, which is the same reason §6.1's
+game-version refusal has always written `lastRefusal` (§6.5). **The remedy names who must
+act**: the peer's own operator upgrades from the published release, and nobody on the relay's
+side can do it for them (D25).
+
 ### 6.2 `HANDSHAKE_ACK` — relay → client
 
 | Field | Type | Required | Semantics |
 |---|---|---|---|
 | `relayVersion` | string | yes | Informational. |
-| `protocolVersion` | string | yes | `"contract-b/3.5"` (amended — §19, B19; `"contract-b/3.4"` before it, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
+| `protocolVersion` | string | yes | `"contract-b/4.0"` (amended — §22, B32; `"contract-b/3.5"` before it, §19 B19; `"contract-b/3.4"` before that, §18 B17; `"contract-b/3.3"` before that, §17 B15; `"contract-b/3.2"` before that, §16 B12; `"contract-b/3.1"` before that, §15 B10). |
+| `minContractVersion` | string | no | **The floor this relay admits** (added — §22, B25). Absent means **no minimum**, which is the default. A peer that reads it can say what it will need before it needs it, and an operator surface can say which peers are one release from being refused. It is a **compatibility** statement and never a security one (§6.1). |
+| `limits` | object | yes | **The published capacity table** (added — §22, B24), as §3.3 defines it: the limits this relay is actually running with, not the shipped defaults. A peer reads it at connect and **MUST** respect it; a peer that cannot is a peer that will be shed with `4007`. It is the relay's own configuration, so it is authoritative and it changes only when the relay restarts. |
 | `relaySessionId` | `uuid` | yes | **New in M4.** Minted once at relay start, constant for the life of the relay process. It is the scope of the forwarding record (§5.2), and a sidecar **MUST** persist it against every journal entry it hands over while this connection is live (§9.2). |
 | `assignedSlot` | number (int) | no | The slot this `peerId` already holds, when the relay remembers one. Absent for a first-time peer and always absent for an archive. |
 | `assignedPosition` | object `{col,row}` | no | Its position. Present exactly when `assignedSlot` is. |
@@ -592,22 +891,39 @@ independently updated installs, so this is the failure most likely to waste an e
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
   "data": {
     "relayVersion": "0.4.0",
-    "protocolVersion": "contract-b/3.5",
+    "protocolVersion": "contract-b/4.0",
     "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
     "assignedSlot": 5,
     "assignedPosition": { "col": 1, "row": 1 },
     "map": { "width": 3, "height": 2 },
     "slotCount": 6,
-    "receivedAt": 1785693597018
+    "receivedAt": 1785693597018,
+    "minContractVersion": "contract-b/4.0",
+    "limits": {
+      "maxConnectionsPerPeer": 2,
+      "maxConnectionsPerAddress": 8,
+      "maxFramesPerSecond": 50,
+      "maxFrameBytes": 8388608,
+      "maxBytesPerSecond": 4194304,
+      "maxClaimsPerMinute": 12,
+      "maxGenomeRequestsPerMinute": 30,
+      "maxSubscribers": 4
+    }
   }
 }
 ```
+
+**`limits` is the first thing on this wire the relay tells a peer about the relay**
+(added — §22, B24), and it is here rather than on a later frame because a peer that learns its
+ceilings after it has already exceeded them learns them from a `4007`. The values shown are
+§3.3's defaults; a relay that was configured differently publishes what it is running with,
+never the table (D20).
 
 ### 6.3 `SECTOR_CLAIM` — sidecar → relay
 
@@ -636,7 +952,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -684,7 +1000,7 @@ Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -760,6 +1076,26 @@ B18): §18's three pacing settings were the field after the census, and §19's s
 the field after those. A relay that stores the block as bytes carried both without a line
 changing.
 
+**Nothing on this block is confidential, and §22 makes that a rule rather than a circumstance**
+(added — §22, B27). Every field here is republished to every peer and to every authorised
+subscriber, and B27 states the boundary from the subscriber's side: a public map's
+`PEER_STATUS` carries each world's census, mod version, save policy and exclusion list, which
+together are a fairly complete profile of a stranger's machine. **A sidecar that must not
+publish a value MUST NOT put it on this block**, because no rule downstream will keep it back.
+
+**The relay's own limits are NOT on this block, and the reason is this block's discipline**
+(added — §22, B24). D20's rule — *every knob a peer's behaviour depends on must be published* —
+is satisfied by §3.3's table riding `HANDSHAKE_ACK` and `PEER_STATUS` (§6.2, §6.5), **not** by
+a `limits` key inside `stats`. This block is **peer-authored end to end**: the sidecar copies
+it from its mod or reports its own configuration, the relay stores it as the bytes it arrived
+as and interprets nothing (below), and a relay-authored field inside it would be the first
+value on this block the peer did not write — which is exactly the habit §16's B11 asked the
+relay *not* to acquire. The property D20 actually wants is that **a depth is readable against
+the cap it is queued behind**, and it holds either way: the page renders each peer's
+`pacedDepth` against the peer's own `inboundRatePerSimMinute` (§18, B16) and each peer's frame
+and claim behaviour against the relay's published `limits`, both from the same broadcast
+(§10.1).
+
 **The settings on this block are read-only, and that is a rule rather than a description**
 (added — §19, B18). `modVersion`, `contractAVersion`, `migrationExclude`, `saveMinutes`,
 `saveKeep`, `saveOnQuit` and `worldWrapping` are what the **origin mod** reports about itself.
@@ -792,7 +1128,7 @@ edge**. Together they are the entire topology a sidecar needs (D8, D12, D13).
 | `position` | object `{col,row}` | no | Present when `granted` is `true`. **May change** across grants when the map grows (§7.3). |
 | `map` | object `{width,height}` | yes | The rectangle after this grant. |
 | `slotCount` | number (int) | yes | Reserved slots after this grant. |
-| `reason` | string enum | yes | `"granted"` (a new slot was placed), `"reclaimed"` (the reservation for this `peerId` was still held), `"updated"` (a repeat claim), `"repositioned"` (same slot, new coordinate, because the map grew), `"handover"` (this peer inherited a slot by operator command — §7.5), `"role_has_no_slot"`, `"protocol_mismatch"`, `"version_incompatible"`. |
+| `reason` | string enum | yes | `"granted"` (a new slot was placed), `"reclaimed"` (the reservation for this `peerId` was still held), `"updated"` (a repeat claim), `"repositioned"` (same slot, new coordinate, because the map grew), `"handover"` (this peer inherited a slot by operator command — §7.5), `"role_has_no_slot"`, `"protocol_mismatch"`, `"version_incompatible"`, **`"rate_limited"`** (added — §22, B24: this peer is over `maxClaimsPerMinute`, §3.3 — the claim is refused and the connection is **not** closed, because a claim storm is usually a peer whose measured time scale is wandering and a refusal it can read beats a close it must recover from). |
 | `neighbours` | object | no | Present when `granted` is `true`. Keyed by **export edge**: `"E"`, `"N"` — and, under two-way lanes, also `"W"` and `"S"` (amended — §17, B13). **A key is absent when that edge has no deliverable target**, and its absence is what closes that export edge with `no_peer` (§8). The relay emits a key for **every edge the sidecar declared** in `SECTOR_CLAIM.exportEdges` and finds a target for, and for no other; a sidecar **MUST** ignore a key for an edge it did not declare, and **MUST NOT** treat an absent key as an error. |
 | `neighbours.<edge>.slot` | number (int) | yes | The **effective** target: the first deliverable slot along that axis. |
 | `neighbours.<edge>.peerId` | string | yes | The identity reserved to that slot. |
@@ -813,7 +1149,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -915,11 +1251,13 @@ both is deliberate: a structure alone hides a bypass, and an effect alone hides 
 | `slots[].exportEdges` | array of edge | yes | What that peer declared. `[]` when unknown. It is what tells a reader which lanes that peer is even trying to run. |
 | `slots[].lastSeenMs` | `timestampMs` | no | Relay clock, last frame from that peer. Informational, for the operator. |
 | `slots[].darkSinceMs` | `timestampMs` | no | **New in M4.** Relay clock, the moment this peer's connection was lost. Present exactly when `live` is `false` and the relay saw it go. Absent for a peer that has never connected in this relay session. This is the field Risk 5 needs: **a healed map hides a dead world**, and "bypassed since 04:12" is what stops an operator missing it for a day. |
-| `slots[].lastRefusal` | string | no | Present when the relay last refused this peer's connection, naming the reason (§6.1). This is how a version mismatch stops looking like a dead peer. |
+| `slots[].lastRefusal` | string | no | Present when the relay last refused this peer's connection, naming the reason (§6.1). This is how a version mismatch stops looking like a dead peer. **It now carries three refusal axes and names which one fired** (amended — §22, B24, B25): `game_version_incompatible` (§6.1, unchanged and kept — B31), **`contract_version_below_minimum`** (added — B25, and the string carries both versions so the remedy is legible: `"contract_version_below_minimum: contract-b/4.0 < contract-b/4.2"`), and **`capacity`** (added — B24, naming the §3.3 limit that fired). **A credential failure never appears here** (B22): a refused credential reaches no slot, and writing it on the slot whose id was borrowed would tell an innocent peer it had been attacked and give an attacker a confirmation surface. |
 | `slots[].stats` | object | no | The last peer stats block from that peer (§6.3.1). Absent when none has arrived. |
 | `slots[].statsAsOfMs` | `timestampMs` | no | Relay clock when that block arrived. Present exactly when `stats` is. **A reader MUST use it to age the stats**: a population from a peer that went dark an hour ago is history, not state. |
 | `you` | object | yes | `{"slot": int\|null, "position": {col,row}\|null, "neighbours": {"E": int\|null, "N": int\|null}}` for the receiving client. All null for a subscriber. |
-| `observers` | number (int) | yes | Connected read-only subscribers. Informational. |
+| `observers` | number (int) | yes | Connected read-only subscribers. Informational. **Each one is now individually authorised** (amended — §22, B27), so this number is a count of decisions an operator made rather than of sockets that knew a token. |
+| `limits` | object | yes | **The relay's published capacity table** (added — §22, B24), the same object `HANDSHAKE_ACK` carries (§6.2, §3.3). It is republished here so that a page fed only by broadcasts can render each peer's behaviour against the ceilings it is measured on, and so that a peer whose relay was reconfigured under it learns the new values without reconnecting. |
+| `minContractVersion` | string | no | **The floor this relay admits** (added — §22, B25). Absent means no minimum. It is on this frame so an operator surface can say which peers are one release away from being refused, and so that D25's *publish, then raise the floor* is a sequence a reader can watch rather than a policy they must be told. |
 
 **Holes are derived, not sent.** A position is a hole when it is inside the rectangle and no
 entry in `slots` names it:
@@ -941,7 +1279,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -997,7 +1335,18 @@ the two disagree the display is stale.
     ],
     "you": { "slot": 4, "position": { "col": 0, "row": 1 },
              "neighbours": { "E": 6, "N": 1 } },
-    "observers": 1
+    "observers": 1,
+    "minContractVersion": "contract-b/4.0",
+    "limits": {
+      "maxConnectionsPerPeer": 2,
+      "maxConnectionsPerAddress": 8,
+      "maxFramesPerSecond": 50,
+      "maxFrameBytes": 8388608,
+      "maxBytesPerSecond": 4194304,
+      "maxClaimsPerMinute": 12,
+      "maxGenomeRequestsPerMinute": 30,
+      "maxSubscribers": 4
+    }
   }
 }
 ```
@@ -1034,14 +1383,14 @@ The Contract C `MigrationEnvelope`, carried in `data`, with the lineage annex (D
 |---|---|---|---|
 | `migrationId` | `uuid` | yes | The idempotency key (D2). Minted by the origin **mod**, preserved end to end — **including across a re-route** (§9.2). |
 | `kind` | string enum | yes | `"bibite"` in M4. Anything else is answered `MIGRATION_NACK` / `KIND_UNSUPPORTED`. |
-| `body.version` | string | yes | The game version that serialized the blob. Authoritative over the blob's own `version` key (`contract-a.md` §4.6). |
-| `body.bb8` | string | yes | The opaque blob, as a JSON **string**, never nested, never base64. Max `maxPayloadBytes` (4 MiB). |
+| `body.version` | string | yes | The game version that serialized the blob. Authoritative over the blob's own `version` key (`contract-a.md` §4.6). **It is diagnostic metadata, and a NEW reader MUST NOT parse it into a capability or refusal decision** (amended — §22, B31) — the rule §13 item 7 puts on `contractAVersion`, applied to the second version axis (D22, refined 2026-08-11). It is carried so a future cross-version incident is diagnosable from the record instead of reconstructed from memory. **Four shipped readers do decide on it and are kept, deliberately**; B31 names all four and states what a skewed map looks like. |
+| `body.bb8` | string | yes | The opaque blob, as a JSON **string**, never nested, never base64. Max `maxPayloadBytes` (4 MiB). **The payload stays opaque and cross-version loading is assumed to work** (amended — §22, B31): D4 is unchanged and unextended, no refusal path is designed on the game-version axis, and neither a normalized canonical schema nor a marker-plus-refusal is built until an incident makes one necessary (D22). |
 | `lineage` | object | yes | The annex. Always present; `parents` may be empty. |
 | `lineage.genomeHash` | string | yes | The migrant's own genome hash, computed by the **source sidecar** from `body.bb8` with `genome-hash.md`. The archive's join key. **The empty string when the migrant's own genome will not hash** — see below. Always present as a key. |
 | `lineage.parents` | array of object | yes | `0`–`2` entries, in `genes.parent1` then `genes.parent2` order. `[]` is normal. |
 | `lineage.parents[].entityId` | `entityId` | yes | The parent's id, from the migrant's genes. Signed int32, often negative. |
 | `lineage.parents[].genomeHash` | string | no | The parent's genome hash. **Absent means a gap** — the parent genome was not available to hash. |
-| `lineage.parents[].gapReason` | string enum | no | Present exactly when `genomeHash` is absent: `"parent_gone"` (no blob was shipped — the usual case), `"blob_invalid"` (`bb8-schema` could not hash it), `"blob_dropped_for_size"` (the mod trimmed it to fit the frame). **`"blob_dropped_for_size"` is still unreachable** — see below. |
+| `lineage.parents[].gapReason` | string enum | no | Present exactly when `genomeHash` is absent: `"parent_gone"` (no blob was shipped — the usual case), `"blob_invalid"` (`bb8-schema` could not hash it), `"blob_dropped_for_size"` (the mod trimmed it to fit the frame). ~~**`"blob_dropped_for_size"` is still unreachable**~~ **All three values are reachable from `contract-a/2.4` onward** — `contract-a.md` §21, A49 adds the `parents[].blobDroppedForSize` flag that tells the two blobless cases apart — see below. |
 | `species` | object | no | **The migrant's species identity, opaque to this wire** (added — §15, B9). Copied verbatim out of the origin mod's `MIGRATE_OUT.species` (`contract-a.md` §5.3, §16 A30) and handed verbatim to the destination mod on `MIGRATE_IN`. Absent is valid and ordinary: an organism with no species record, a mod that does not implement `contract-a/2.1`, or a block a schema check stripped. |
 | `species.genericName` | string | yes | The genus half of the species name. REQUIRED when `species` is present. Non-empty, at most **64 UTF-8 bytes**, carried byte for byte — no trimming, no case folding, no normalization. **This wire's rule is unchanged by `contract-a.md` §16 A34**: the *exporting mod* normalizes a name's whitespace at the source, before it ever reaches a sidecar, and nothing on this wire may repair one. |
 | `species.specificName` | string | yes | The specific half. Same rules. The destination mod matches on `genericName + " " + specificName` with exactly one U+0020 between them (`contract-a.md` §5.7 step 3). |
@@ -1102,14 +1451,21 @@ neither computed here nor hashed here — it is metadata the origin *world* asse
 inside the annex would invite an implementer to treat it as a derived value and to
 reconcile it against a hash that deliberately excludes it (`genome-hash.md` §4.3).
 
-**Contract debt — the sidecar can only emit two of the three `gapReason` values.** A parent
-the mod dropped for frame size arrives on Contract A as an `entityId` with no `payload`,
-which is byte for byte what a dead parent looks like, so the sidecar records `"parent_gone"`
-and `"blob_dropped_for_size"` never appears on this wire. The value stays in the enum: the
-mod logs each drop on its own side, a receiver must already tolerate every value here, and
-removing it would be a wire change for a field a reader must handle defensively anyway.
-Closing the debt needs one additive optional flag on Contract A's `parents[]`, and M4 does
-not add it either (`contract-a.md` §14 A12, §12 item 8).
+**Contract debt, closed in M5 — the sidecar can now emit all three `gapReason` values**
+(closed by `contract-a.md` §21, A49; **no amendment of this document was needed and none is
+claimed**, because the enum and every obligation around it are unchanged). Through M3 and M4 a parent
+the mod dropped for frame size arrived on Contract A as an `entityId` with no `payload`, which
+is byte for byte what a dead parent looks like, so the sidecar recorded `"parent_gone"` and
+`"blob_dropped_for_size"` never appeared on this wire. The value stayed in the enum: the mod
+logged each drop on its own side, a receiver must already tolerate every value here, and
+removing it would have been a wire change for a field a reader must handle defensively anyway.
+**Closing the debt needed one additive optional flag on Contract A's `parents[]`, and
+`contract-a.md` §21, A49 adds it** — `parents[].blobDroppedForSize` — so from a
+`contract-a/2.4` mod onward the sidecar maps a blobless entry carrying the flag to
+`"blob_dropped_for_size"` and every other blobless entry to `"parent_gone"`
+(`contract-a.md` §14 A12, §12 item 8). **Nothing on this wire changes for it**: the enum, the
+field and every receiver's obligation are exactly as they were, and a `contract-a/2.3` mod goes
+on producing the two-value behaviour above, indefinitely and conformantly.
 
 The receiving sidecar **MUST**, in this order:
 
@@ -1175,7 +1531,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -1222,7 +1578,7 @@ geometry and the species block are untouched, and **only `destSlot` changed** �
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -1301,7 +1657,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1373,7 +1729,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1397,7 +1753,7 @@ simply cannot speak for the period before it started, so it says `false` and the
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -1440,7 +1796,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -1469,7 +1825,7 @@ Also generated **by the relay** when it cannot route the request. Unchanged from
 | `genomeHash` | string | yes | Echoed, so a late answer is still attributable. |
 | `found` | bool | yes | |
 | `body` | object | no | Present exactly when `found` is `true`. |
-| `body.version` | string | yes | The game version the blob was serialized by. |
+| `body.version` | string | yes | The game version the blob was serialized by. **Diagnostic metadata here too** (amended — §22, B31): it is an input to `genome-hash.md`'s projection, which is an **identity** computation and not a capability one, and no reader may turn it into a refusal on this path. A genome the requester cannot hash under that version is a hash mismatch and is handled as one, below. |
 | `body.bb8` | string | yes | The opaque blob, as a JSON string, never nested, never base64. Max `maxPayloadBytes`. |
 | `reason` | string enum | no | Present exactly when `found` is `false`: `"unknown_hash"`, `"rate_limited"`, `"peer_offline"` (relay-generated), `"too_large"`, `"shutting_down"`. |
 | `retryAfterMs` | number (int) | no | Present on `"rate_limited"`. |
@@ -1486,7 +1842,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -1525,7 +1881,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/3.5",
+  "protocol": "contract-b/4.0",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -1562,6 +1918,52 @@ name the species a world held when it last resized. The block is the one the sid
 received on `HEARTBEAT`, copied verbatim — the sidecar re-sorts nothing, merges nothing,
 renames nothing and drops nothing that passed its Contract A shape check
 (`contract-a.md` §5.2).
+
+### 6.12 `FORWARD_RECEIPT` — relay → sender (added — §22, B26)
+
+**New in `contract-b/4.0`, and the only message added since M3.** The relay sends one to the
+**sender** each time it writes a `MIGRATION_PAYLOAD` to a destination connection (§5.2, B26).
+It is the cheapest frame on this wire: three fields, no body, no answer, and **no fan-out** —
+a subscriber is not copied, because a receipt is a fact about the sender's own journal and not
+about the migration.
+
+| Field | Type | Required | Semantics |
+|---|---|---|---|
+| `migrationId` | `uuid` | yes | The migration that was forwarded. It is the sender's join key into its own journal (`contract-a.md` §7.1). |
+| `destSlot` | number (int) | yes | The slot the frame was written to. It is the `destSlot` the sender recorded, echoed so a sender that re-routed can tell two attempts apart. |
+| `relaySessionId` | `uuid` | yes | The session in force at the write. **A receipt is a statement about one session and nothing else** (§5.2), and this is the field that says which. |
+| `forwardedAt` | `timestampMs` | yes | The relay's own clock. Informational (D5), and useful only for a log. |
+
+| Rule | Statement |
+|---|---|
+| When | At the write, not before it and not after the write completes. §5.2's *what counts as forwarded* is unchanged: **any attempted write** counts, including one that later fails, because a partial write and a peer that dies with bytes in its buffer are indistinguishable. |
+| One per forward | A re-forward or a re-route of the same `migrationId` produces another receipt. A sender that holds two receipts under one `migrationId` has forwarded twice; that is a fact about its own retries, never a duplicate organism (the `migrationId` is preserved and the destination deduplicates — §6.6). |
+| What the sender does with it | **Records it against the journal entry, durably** (§7.4, §9.2), and nothing else. It sends no answer. A receipt changes no handoff state on its own: an entry that is `sent` stays `sent`. |
+| Not delivery | It is **not** `MIGRATION_ACK`. Custody moves when the destination sidecar journals and its mod acknowledges (§9.1); a receipt says the relay wrote bytes at a socket. |
+| Not proof of non-delivery | And it can never become one. `neverForwarded` (§6.8) is still the only statement that authorizes a re-route, and a receipt only ever makes the safe answer *more* certain: an entry with a receipt was forwarded, so it holds. |
+| Best effort, and the failure direction is safe | A receipt the sender never sees costs nothing but the certainty it would have added — the entry stays `sent`, which is where the receipt would have kept it anyway. The relay **MUST NOT** delay, block or fail a forward on account of a receipt it could not send. |
+| Bounded | A receipt is subject to the same per-peer outbound queue as everything else. If the sender's outbound queue is full, the receipt is dropped, not queued indefinitely — see the row above for why that is safe. |
+
+```json
+{
+  "protocol": "contract-b/4.0",
+  "type": "FORWARD_RECEIPT",
+  "messageId": "3f2a71b8-4c09-4d6e-9a15-8b0c7e42d391",
+  "sentAt": 1785693732104,
+  "data": {
+    "migrationId": "0f6c8b3e-2c41-4a8f-9d1e-7a3b5c9d0e12",
+    "destSlot": 5,
+    "relaySessionId": "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95",
+    "forwardedAt": 1785693732103
+  }
+}
+```
+
+**What it changes for a sender, in one sentence:** the sender's own journal now records that a
+hop was forwarded and under which session, so a relay restart no longer takes the fact with it
+— **but a relay restart still takes the relay's ability to answer for the *absence* of a
+forward**, which is the direction that matters for a re-route, and §9.2 is unchanged in every
+particular.
 
 ---
 
@@ -1614,7 +2016,14 @@ On `SECTOR_CLAIM` from a peer, in this order. The first rule that applies wins.
 3. **`preferredSlot` names a reservation held by somebody else** → ignore the preference and
    fall through. A preference never evicts anybody.
 4. **`preferredPosition` is usable** → grant a new reservation there, with
-   `slot = maxSlotEverIssued + 1`. Usable means one of:
+   `slot = maxSlotEverIssued + 1`. **Usable is narrowed under `contract-b/4.0`: the three
+   growth cases below apply only while the rectangle has no hole** (amended — §22, B29). A
+   `preferredPosition` that would extend an axis while any hole exists is **ignored** and
+   falls through to rule 6, which fills the hole. The hole case itself is unchanged and always
+   usable. **Holes before growth is now the map's rule and not only auto-placement's**, because
+   under churn a preference is an ordinary stranger's configuration file rather than an
+   operator's layout, and one newcomer that extends an axis creates `height` (or `width`)
+   positions and fills one of them. Usable means one of:
    - it names a **hole** inside the current rectangle; or
    - it names a position exactly **one column beyond** the rectangle (`col == width`,
      `row < max(height, 1)`) → `width += 1`, and every other position in the new column
@@ -1677,6 +2086,37 @@ a row, the last two by filling the holes that row created.
 such a map close to square rather than stretching one axis until route-around has nothing to
 route around. It is not a way to build a *particular* map, and it is not meant to be.
 
+**The join kit still builds the rig's layout under B29's narrowing, and that is the test of
+the narrowing** (added — §22, B29). Each of the six sidecars sends its own
+`preferredPosition` — `(0,0) (1,0) (2,0) (0,1) (1,1) (2,1)` — and at every moment one of them
+asks to *extend*, the rectangle is full: `(0,1)` extends the row of a full 3×1, and `(1,1)`
+and `(2,1)` then fill the holes that extension created. No claim in that sequence is refused
+by the new rule, so the layout the rig runs is unchanged.
+
+**Placement under churn, which is what a public map does all day** (added — §22, B29). M4
+placed six known peers and spliced one newcomer, by hand, once each; §13 item 3 named the
+three things continuous joining and leaving would stress first, and this is the rule for them.
+
+| Question churn asks | The answer, and why |
+|---|---|
+| **A peer left. What happens to its position?** | Nothing, until an operator acts. The reservation never expires (rule 1) and a returning peer lands where it was, which is the whole of *return needs no insertion*. **A position becomes fillable only through `--release-slot`** (§7.5), and then it becomes an ordinary hole that rule 6 fills before any axis grows. |
+| **And to its address?** | **It is retired forever.** `maxSlotEverIssued` never decreases and a slot number is never reused (D8, D12). This is custody, not tidiness: `SLOT_VACANT` is a **permanent** answer and therefore a valid proof of non-delivery (§6.8), and reissuing an address would silently convert that proof into a lie. **The split is the point** — D12 and D13 separate the address from the coordinate exactly so that *positions* can be recycled while *addresses* never are. |
+| **Does the address space grow without bound, then?** | Yes, monotonically, and that is accepted. `maxSlotEverIssued` has **never been tested at any scale** and §13 item 3 says so; WP5 tests it against a synthetic churn harness before strangers are involved (`m5_considerations.md`, DQ3). What the contract fixes is the rule; what a rig measures is the number. |
+| **Holes or growth?** | **Holes, always, and by both routes now** (rule 4 as narrowed, rule 6 as written). A map that extended on every join would grow a row of holes per join and route-around would walk all of them. |
+| **Which axis extends?** | The **shorter** one, so the rectangle stays close to square. The reason is mixing, not aesthetics: the cycle length on each axis is what genetic mixing depends on, and a map stretched along one axis is a map whose other axis has nothing to route around (§2.1). |
+| **How many joins and departures collapse into one broadcast?** | As many as land inside the coalescing window, and the window **widens under churn** — see below. |
+
+**The broadcast bound churn needs is stated with *No storm* below**, because that is where the
+coalescing window already lives (added — §22, B29).
+
+**One consequence of churn belongs in the contract rather than in a surprise** (added — §22,
+B29). An organism routed around a bypassed slot never sees that world (§8), so a map with
+continuous churn is a map with a **continuously shifting cycle**. That is not a defect — D12
+chose route-around over a closed lane deliberately — but it means the genetic mixing a public
+map produces is **not** the mixing a stable map of the same size produces. The archive records
+what actually crossed (§10), so whoever reads the record later can tell which map they are
+looking at; nobody can reconstruct it afterwards if the difference is not written down now.
+
 **Two peers that claim one position race, and neither fails.** The relay serializes claims and
 answers them in arrival order. The second peer's `preferredPosition` is no longer a hole, so
 it falls through to rule 6 and lands somewhere. The grant names the position it actually
@@ -1701,6 +2141,28 @@ anybody can read. The relay **MUST** coalesce: at most one `PEER_STATUS` broadca
 finishing with a frame that reflects the final state. Coalescing may drop intermediate states;
 it **MUST NOT** drop the last one, because every one of these messages is full state and the
 last one is the truth.
+
+**Two rules join it for a public map, and both are about the broadcast *rate* rather than its
+spacing** (amended — §22, B29). A broadcast costs `slotCount` stats blocks, so both terms grow
+with the map and a fixed floor stops being a bound:
+
+1. **The window widens under sustained churn.** When more than `statusChurnBurstThreshold` (8)
+   registry changes land inside one window, the relay **MUST** double the window, up to
+   `statusCoalesceMaxMs` (2 000 ms), and narrow it back one step after a window that saw
+   fewer. Every rule above still binds — the last frame of a burst is always sent — and the
+   ceiling is arithmetic a reader can check: `60 000 / statusCoalesceMs` broadcasts a minute at
+   the floor, `60 000 / statusCoalesceMaxMs` under a storm.
+2. **A repeat claim that changes nothing structural broadcasts nothing.** A `SECTOR_CLAIM`
+   answered `reason: "updated"` whose `slot`, `position`, `exportEdges`, `borderEdges`,
+   `modConnected`, `gameVersion` and `simulationSize` are all unchanged **MUST NOT** raise the
+   epoch or trigger a broadcast. Its stats ride the next `statsBroadcastIntervalMs` timer,
+   which was going to send them anyway (§6.5, §14 B4). **This is the epoch rate's actual
+   cause, measured**: the living deployment's slot 6 issued **64** placement claims in one day
+   against two or three from each local slot, every one a re-claim with `reason: "updated"` as
+   its measured time scale wandered (`m5_considerations.md`, DQ3). Not a reconnect, not a
+   defect — 64 epochs, on a six-slot map, from one peer, for nothing. The relay still answers
+   every claim with a `SECTOR_GRANT`, because the claimant is owed an answer; what it stops
+   doing is telling everybody else.
 
 ### 7.3 Placement must not disturb work in flight
 
@@ -1758,16 +2220,44 @@ the safety property, not just the bookkeeping.
 ### 7.5 Operator commands — release, handover, and the custody rules around them
 
 The reservation never expires, so the map needs operator escape hatches. There are three, and
-**none of them is a wire message**: an operator command is a rare, deliberate, physical act on
-the machine that owns the data, and giving it a network surface in a milestone with one shared
-token is a poor trade (§3.1). M5 brings authentication, and §13 item 5 records that release
-and handover are the first commands that will want an authenticated admin path.
+~~**none of them is a wire message**: an operator command is a rare, deliberate, physical act
+on the machine that owns the data, and giving it a network surface in a milestone with one
+shared token is a poor trade (§3.1). M5 brings authentication, and §13 item 5 records that
+release and handover are the first commands that will want an authenticated admin path.~~
+**Amended — §22, B28.** M5 brought the authentication, and item 5's condition — *"if the map
+ever grows past what one operator can restart at will"* — is met by the venue rather than by
+the size: the relay is a hosted service (D24) and a restart drops **every** peer's session at
+once, so *at startup* had become a price paid by six innocent peers to fix one. B28 adds an
+authenticated admin **path**, and it is deliberately **not a wire message**: nothing in the
+Contract B catalogue can trigger any of these acts, and D1's dumb relay routes frames and
+still does nothing else.
 
 | Command | Where | What it does |
 |---|---|---|
-| `multiverse-relay --release-slot <n>` | relay, at startup | Removes slot `n` from `ring.json` and leaves its position a **hole**. Surviving slots keep their numbers, their positions and their relative order. The number is not reused: `maxSlotEverIssued` never decreases. |
-| `multiverse-relay --handover-slot <n> <newPeerId>` | relay, at startup | **New in M4** (D15). Rebinds the reservation — slot number **and** position — to a different `peerId`. The map does not change shape and no lane moves. |
-| `multiverse-sidecar --release-inflight <migrationId> bounce\|drop` | the sidecar that holds the journal | **New in M4** (D2, D12). Releases one **held** entry by hand, before the hold timeout expires (§9.3). |
+| `multiverse-relay --release-slot <n>` | relay, at startup **or over the admin path** (amended — §22, B28) | Removes slot `n` from `ring.json` and leaves its position a **hole**. Surviving slots keep their numbers, their positions and their relative order. The number is not reused: `maxSlotEverIssued` never decreases. **This is the operator's answer for a position that will never be filled again** (added — §22, B29): the position rejoins the map as an ordinary hole that the next newcomer fills before any axis grows, and the address stays retired forever, so every journal entry that names it still gets its permanent `SLOT_VACANT`. |
+| `multiverse-relay --handover-slot <n> <newPeerId>` | relay, at startup **or over the admin path** (amended — §22, B28) | **New in M4** (D15). Rebinds the reservation — slot number **and** position — to a different `peerId`. The map does not change shape and no lane moves. **It is also the credential recovery path** (added — §22, B22): a stranger who lost their join string is handed their own slot back under a new `peerId` and a freshly minted credential. There is no other recovery, and §3.1 says so rather than implying it. |
+| `multiverse-relay --evict-peer <peerId> [--for <duration>]` | relay, at startup or over the admin path | **New in `contract-b/4.0`** (added — §22, B28). Closes that peer's connection with `4005` and refuses it for the stated period, or until lifted. **It releases nothing**: the reservation, the slot number and the position all survive untouched, so the peer's return is an ordinary `reason: "reclaimed"` and its journal is still addressable throughout. Eviction is a **liveness** act, not a placement act, and the map treats an evicted peer exactly as it treats a dark one (§8). It is what `m5_considerations.md` DQ7 leaves for a peer that will not stop when suppressing its text at the renderer was not enough. |
+| `multiverse-sidecar --release-inflight <migrationId> bounce\|drop` | the sidecar that holds the journal | **New in M4** (D2, D12). Releases one **held** entry by hand, before the hold timeout expires (§9.3). **It stays on the sidecar's own machine and gets no admin path**, because custody is local (D2) and the machine is a stranger's. The receipt B26 adds is what reduces how often anybody needs it (§5.2, §13 item 6). |
+
+**The admin path, and the four properties that make it safe** (added — §22, B28).
+
+| Rule | Statement |
+|---|---|
+| It is not on this wire | The admin surface is a **separate listener** on the relay, never the Contract B WebSocket. No frame of §6's catalogue can invoke an act, and no peer or subscriber can reach one. A relay that accepted an admin instruction on the peer wire would have to authorize per message on the path that D1 keeps free of decisions. |
+| Authentication is §3.1's, with a third grant | The same credential mechanism, an **admin** grant, disjoint from the peer and subscribe grants (§5.1, B27). An admin credential is minted at the relay's console like any other and is never a peer's. The listener binds loopback by default and **MUST** be TLS if it is bound anywhere else (B23). |
+| **The act stays deliberate: the report comes first, and it is the same report** | `--release-slot`, `--handover-slot` and `--evict-peer` **MUST** print the full consequence before acting, over the admin path exactly as at a console: the slot, its position, its `peerId`, how long it has been dark, which peers' effective lanes change, and which positions become holes. Over the path this is **two calls**: the first returns the report and a single-use confirmation token bound to the act and the current `ring.json` state; the second performs the act and **MUST** be refused if the map changed underneath the token. A confirmation an operator cannot see is not a confirmation. |
+| Every act is audited | One durable line per act: which grant, which act, which slot, the state before, and the reason string the operator supplied. D23 defers the *control surface* to M6 and names an audit trail among the questions it must answer; this path answers that question for its own three acts and claims nothing about the larger one. |
+
+**What the admin path deliberately does not become** (added — §22, B28). It is not the control
+surface. It changes the **map's registry** — a reservation, an identity, a peer's admission —
+and it touches nothing inside a world: no time scale, no save policy, no exclusion list, no
+setting a mod reported. §6.3.1's read-only rule and `contract-a.md` §19's A43 are unchanged —
+that document's matching set (**`contract-a.md` §21, A47–A52**) supplies the *authentication* A43 listed first
+among the questions a control surface must answer, and answers none of the other four
+(`contract-a.md` §21, A47; §12 item 10 there) —
+and D23 keeps the surface that would write those in M6 (§13 item 8). Three acts on
+the relay's own registry are not the thin end of that wedge; they are the escape hatches §7.5
+has always had, reachable without dropping six sessions to use one.
 
 **A release or a handover never moves a journal** (D12, Question 3). This is the rule that
 everything else here follows from:
@@ -1808,6 +2298,15 @@ a relay that reads journals. The division is therefore:
 The operator therefore makes one decision with the facts in view; the facts simply come from
 two places, because custody does.
 
+**The admin path changes none of that division** (added — §22, B28). The relay still cannot
+enumerate journals it is forbidden to read, so the report it returns over the path is the
+report it printed at a console — the map's half — and `heldDepth` on `PEER_STATUS` is still
+where an operator sees who is holding organisms addressed to the slot. What **does** change
+with a public map is who can run the third row: `--list-inflight` is typed on the machine that
+holds the journal, and after M5 that machine is usually a stranger's. **The operator's honest
+answer becomes "ask the peer"**, and the support surface WP7 owes has to say so rather than
+implying the relay could look.
+
 ---
 
 ## 8. From `PEER_STATUS` to `EDGE_STATUS` — the per-axis walk
@@ -1825,10 +2324,17 @@ slot and uses them to **filter**:
 deliverable(slot) ⇔ slot is reserved            (a hole is not deliverable)
                   ∧ live                        (a relay connection exists)
                   ∧ modConnected                (something can spawn an organism)
-                  ∧ gameVersion compatible      (with mine)
+                  ∧ gameVersion compatible      (with mine)      ← kept gate, §22 B31
                   ∧ simulationSize equal to mine (contract-a.md §13, A10)
                   ∧ slot ≠ me                   (a peer never exports to itself)
 ```
+
+**The `gameVersion` term is the second of B31's four kept gates, and it is unchanged**
+(added — §22, B31). D22 makes the game version a per-machine matter and this walk reads it as
+a routing decision, which is the contradiction B31 records rather than resolves: the owner
+chose on 2026-08-11 to leave every shipped gate alone. The term stays, `peer_incompatible`
+stays as the skip reason below, and **what it produces on a version-skewed map is a partition
+rather than a defect** — B31 states the shape and the operator's reading of it.
 
 The walk, per export edge, over the positions of `PEER_STATUS`:
 
@@ -1979,7 +2485,7 @@ Every outbound journal entry therefore carries a **handoff state**, durable (§7
 | State | Meaning | Custody may have moved? |
 |---|---|---|
 | `pending` | Journaled. Never written to a live relay connection. | **No** |
-| `sent` | Written to a live relay connection, no terminal answer yet. Carries the `relaySessionId` in force at that first write. | **Yes — unknowably** |
+| `sent` | Written to a live relay connection, no terminal answer yet. Carries the `relaySessionId` in force at that first write — **and, since `contract-b/4.0`, the relay's own `FORWARD_RECEIPT` for that write when one arrived** (amended — §22, B26). The receipt does not change the state; it is the evidence that the state is right. | **Yes — unknowably** |
 | `held` | `sent`, and the destination is observed dark. The hold clock accrues here and nowhere else (§9.3). | **Yes — unknowably** |
 | `refused` | A statement arrived that proves no custody moved. | **No** |
 | `done` | `MIGRATION_ACK` received. Becomes a tombstone. | It moved, and completed. |
@@ -2023,6 +2529,7 @@ for an unknown `migrationId` silently throws it away.
 | A relay NACK carrying **no** `neverForwarded` field at all | A conforming relay always sets it on a NACK it generated (§6.8), so a missing field is a defect or a frame that came from somewhere else. Treat a missing proof as no proof, and log it. |
 | The `code` alone, on any single attempt | Every relay `code` describes **that attempt**. Attempt 1 may well have been forwarded, and only the boolean speaks about the whole migration. |
 | `SLOT_VACANT` on its own | It proves the destination will never return, which is a reason to stop retrying — not a statement that nothing was ever delivered there. |
+| **The absence of a `FORWARD_RECEIPT`** (added — §22, B26) | A receipt that was never sent, was dropped from a full outbound queue, or was lost with the session is indistinguishable from a forward that never happened. **A missing receipt is silence, and silence is never proof in this contract.** The receipt is evidence in exactly one direction: holding one means the frame *was* forwarded. Not holding one means nothing at all. |
 
 **The rule, as the design states it** (`m4_considerations.md`, Question 2):
 
@@ -2030,7 +2537,7 @@ for an unknown `migrationId` silently throws it away.
 |---|---|---|
 | Never forwarded | `pending`, or a relay `SLOT_VACANT` / `PEER_OFFLINE` / `NOT_FORWARDED` carrying a matched `neverForwarded: true` | **Re-route** along the same axis to the current effective neighbour. Keep the `migrationId`. Rewrite `destSlot`. |
 | Refused for a peer-local reason | `MIGRATION_NACK` with `OVERLOADED`, `SIM_SIZE_MISMATCH` or `MOD_ABSENT` | **Re-route.** The receiver stated it took no custody, and another slot accepts the same organism. |
-| Refused for a payload reason | `MIGRATION_NACK` with `INVALID_PAYLOAD`, `KIND_UNSUPPORTED`, `VERSION_UNSUPPORTED` or `MALFORMED_MESSAGE` | **Bounce home.** Every slot refuses this organism, so the map is not the answer. |
+| Refused for a payload reason | `MIGRATION_NACK` with `INVALID_PAYLOAD`, `KIND_UNSUPPORTED`, `VERSION_UNSUPPORTED` or `MALFORMED_MESSAGE` | **Bounce home.** Every slot refuses this organism, so the map is not the answer. **`VERSION_UNSUPPORTED` is the first of B31's four kept gates** (added — §22, B31): the importing mod refuses a payload whose game version it has no dialect for, permanently, and D22's diagnostic-only rule does **not** retire it. `contract-a.md` **§21, A48** owns the mod-side statement — it keeps that document's §9.2 `VERSION_UNSUPPORTED` and its close `4002` as two of the four named exceptions, and states the diagnostic-only rule for `MIGRATE_OUT.gameVersion`, `parents[].gameVersion` and `MIGRATE_IN.gameVersion`; this row is the Contract B consequence and it is unchanged. |
 | Forwarded, then silence | none | **Hold, then bounce** (§9.3). Retry the recorded `destSlot` on the retry cadence — flat toward a dark destination, backing off exponentially toward a live one (amended — §14, B8); the retry is idempotent because the destination deduplicates. |
 
 **Re-route mechanics.**
@@ -2203,7 +2710,7 @@ tunable above — it is the record, and nothing evicts from it (§20, B20).
 | Never block | A migration record is written when the envelope arrives. A missing genome is a **gap** on that record, never a reason to delay or refuse a record. |
 | Ask the source first | The envelope's `sourcePeer` hashed the blob and cached it, so it is the peer most likely to have it. |
 | Then ask around | On `unknown_hash`, try other live peers in structural order, one at a time. |
-| Rate limit | At most `genomeRequestsPerMinute` (30) requests from one requester to one peer. The answering sidecar enforces the same limit and answers `rate_limited` above it. |
+| Rate limit | At most `genomeRequestsPerMinute` (30) requests from one requester to one peer. The answering sidecar enforces the same limit and answers `rate_limited` above it. **It is a published knob under `contract-b/4.0`, not a compiled constant** (amended — §22, B24): §3.3 names it `maxGenomeRequestsPerMinute`, the relay publishes the value it is running with (§6.2, §6.5), and an operator can retune it from the metric that measures it (D20). Nothing about the limit's behaviour changes; what changes is that it can be moved without a rebuild, which on a public archive is the difference between a support answer and a release. |
 | Pace it, and bound the pass (added — §21, B21) | The rate above is **not** a budget. One pass of the queue examines at most `genomeScanPerTick` gaps, round-robin over a stable order and resumed where the last pass stopped; releases the requester's own lock every `genomeScanChunkSize` gaps, so its read loop is never starved; and sends at most `genomeRequestsPerTick` requests, carrying at most `genomeInFlightPerPeer` unanswered to any one peer. **None of it changes when a gap is retried** — see §21 for the incident that made a 64,736-entry backlog cost 7,789 ledger records. |
 | Retry schedule | 1 minute, 5 minutes, 30 minutes, 6 hours, then daily. Reset the ladder when the map's membership changes — a peer that just came back may hold what nobody had. |
 | Keep the hash forever | A hash with no genome is a permanent, useful record: it is still a lineage-graph node, and a fetch that failed for a year can succeed tomorrow. |
@@ -2223,9 +2730,29 @@ name is used for anything.
 | The win | Before this the ledger could name only hashes, so "which species crossed, and when" was a question the archive held the data to answer and not the labels. It now travels on every hop that carries a block. |
 | Not the page's species view | **Amended — §16, B12.** The page *does* render species now, and **not from here**: its species view is the live census in `stats.species` (§6.3.1), which describes who lives in a world. This ledger describes who **crossed**, and it remains **not an input to any abundance claim** — a database built from migrations holds migrants and their ancestors, never a resident population (D11, below). The two also spell a name differently on purpose: the ledger's copy is normalized at the source (`contract-a.md` §16, A34) and the census's is raw (`contract-a.md` §17, A36), so a consumer that joins them normalizes **for the comparison only** and rewrites neither. |
 
+**The game version on the record is diagnostic, and this is the record it is diagnostic for**
+(added — §22, B31). The archive already writes `body.version` against every migration it is
+copied — the living deployment's ledger lines carry `"gameVersion":"0.6.3.1"` today — and D22's
+refinement of 2026-08-11 is what that field is *for*: **carry it, decide nothing from it.** The
+archive **MUST NOT** refuse a record, split a lineage, filter a fetch, order a queue or mark a
+peer on the strength of it. It is the field that makes a first cross-version incident legible
+from the record instead of reconstructed from memory, and until one happens there is nothing
+here to design (D22, *the trigger is an actual cross-version load failure*).
+
 **The known limit, restated because it is load-bearing** (D11): a database built from
 migrations holds migrants and their ancestors, never the resident population of a peer.
 Census uploads would close the gap and are not M4.
+
+**And one limit that is now on somebody else's timetable** (added — §22, B27). Nothing evicts
+from the ledger or the genome store (D11, §20 B20) and a public archive's growth scales with
+peer count, so the operator who hosts one has to size a disk **before** it fills rather than
+after — the 2026-08-08 ENOSPC outage happened on a volume one person was watching. The
+retention rule itself, and the per-peer growth arithmetic that goes to whoever hosts the
+archive, are **WP3's deliverable and not this contract's**: `m5_considerations.md` decision 3
+ratifies that the *deciding* happens in M5 and D24's announced ending is its deadline. What
+this document states is the constraint that decision has to live inside — **nothing here may
+evict**, and a retention rule that contradicts that is a change to D11 rather than a
+configuration of it.
 
 ### 10.1 What the status page may claim, and what it must call unknown
 
@@ -2242,6 +2769,10 @@ specify it. **Its inputs are**, and three rules keep them honest (Risk 4):
 | Two species facts, two sources, and only one of them is abundance (added — §16, B12) | The **census** says what lives in a world **now** and arrives on `PEER_STATUS`. The archive's **ledger** of `MIGRATION_PAYLOAD.species` (§10) says what **crossed**, and when. The page's species view comes from the census alone: a migration ledger holds migrants and their ancestors, never a resident population (D11), so answering "which species live in slot 4" from it produces a plausible-looking wrong number. A page that shows both **MUST** label which question each answers, and **MUST NOT** join them on a name without normalizing the census copy for the comparison only (`contract-a.md` §17, A36). |
 | A world's speed and its pacing are settings, and unknown beats the default (added — §18, B17) | The page may show each world's `timeScale` and the `inboundRatePerSimMinute` / `pacedDepth` pair (§6.3.1), because a depth is only readable against the cap it is queued behind and a simulated-minute cap is only readable against the speed that spends it. Every rule above binds them, and **the unknown rule binds them hardest**: a peer that publishes no cap renders as **unknown**, never as the shipped default. `timeScale: 0` is the opposite case and the page **MUST** keep the two apart — a world standing still is a reading, and a world that has not said is a gap. |
 | A world's settings are what it was told to do, they are read-only, and unknown beats the default (added — §19, B19) | The page may show each world's `modVersion`, `contractAVersion`, `migrationExclude`, `saveMinutes`, `saveKeep`, `saveOnQuit` and `worldWrapping` (§6.3.1). They are the **cause** behind numbers the page already shows, and each has a reading the page **MUST NOT** flatten into a gap: `saveMinutes: 0` is a save timer that is **off** and is the explanation for an absent `lastSave`; a present `migrationExclude: []` is a policy that is **off**, and a populated one is why a world can be full of a species that never appears on a lane (§17, B14 names that shape); `worldWrapping: false` is a world not containing its own organisms. **Absent is unknown in every case, and the page MUST NOT substitute a shipped default** — the one it would reach for, `saveMinutes: 10`, would claim a world is being saved when its timer may be off, which is the most expensive wrong number this page could print. They are also **read-only**: the page renders them and offers no way to change one (`contract-a.md` §19, A43). |
+| **Every string on this page is attacker-chosen, and escaping it is a testable obligation** (added — §22, B30) | The page and `ringstat` **MUST** escape every peer-supplied string for the surface they render it into — HTML, an HTML attribute, a URL, JSON embedded in a script, and a terminal's escape sequences — and **MUST NOT** render one as markup under any circumstance. The strings are named so nobody has to infer the list: `species[].genericName` and `.specificName` (up to 64 UTF-8 bytes each, `speciesCensusMax` of them per peer), `migrationExclude[]`, `modVersion`, `contractAVersion`, `lastRefusal`, `lastSave.name`, and the two the contract never counted because they predate the concern — **`peerId`**, and the world name a player chose. **A rule written in a contract is not code**, so this one ships with a **test in CI and not an inspection by eye**: a peer reports a species named with markup, and the rendered page and `ringstat`'s terminal output are both asserted against it. That test is WP7's, and it is the only form in which this row is true of a running system. |
+| **A version string is never a capability decision, and a page is where that gets forgotten** (added — §22, B30) | §13 item 7 states it of `contractAVersion` and the rule is repeated **here**, where the person implementing a page will actually read it: a reader **MUST NOT** parse `contractAVersion`, `modVersion` or a peer's `gameVersion` into a capability or a refusal. A peer that can choose the string can choose the capability it claims. **Detect a feature by the presence of its field** (`contract-a.md` §3.1) — `stats.species` absent means unknown, not "old mod", and the page renders unknown either way. The same prohibition binds the envelope's game version (B31), and the four kept exceptions to it are gates in the relay, the walk and the mods — **never in a page**. |
+| **Suppression happens in the view, and the record keeps everything** (added — §22, B30) | Beyond injection there is moderation, and the honest boundary has to be stated before somebody is asked for a takedown. The page and `ringstat` MAY apply an **operator-side deny list at render**, suppressing a string without evicting the world that produced it: it needs no peer cooperation, no wire field and no contract change, and eviction stays available through B28's admin path for a peer that will not stop. **What cannot be promised is removal from the record**: D11 and §10 make the ledger a thing nothing evicts from, so **M5 promises removal from the view and explicitly does not promise removal from the record**. Anything stronger is a change to D11's never-evict rule and belongs in a decision row, not in a support reply (`m5_considerations.md`, DQ7). |
+| **The relay's limits render beside the behaviour they bound** (added — §22, B24) | The page may show `limits` and `minContractVersion` from `PEER_STATUS` (§6.5). They are the relay's own configuration, so unlike every stats field they are **authoritative rather than reported** — but the unknown rule still binds their *effects*: a peer's frame or claim rate the page did not observe is unknown, never zero. The value is the same one §18's B17 found for pacing: **a number is only readable against the cap it is measured on**, and a `lastRefusal` of `contract_version_below_minimum` is only actionable beside the minimum that refused it. |
 | The recent-hops feed is ledger, and it animates rather than counts (added — §17, B14) | The page may show **which species crossed which lane, just now**, as a bounded feed of the last ~60 seconds drawn from the `MIGRATION_PAYLOAD` copies the archive already records. It is B12's third row exercised — *history, labelled as history* — and every rule above binds it: a hop whose envelope carried **no** species block renders as the **neutral glyph**, never a guessed name and never omitted; the feed is **never summed**, into a census or into anything else; and it must be bounded in **both** time and count, because the status view is serialized verbatim into the durable metrics file once a minute. |
 
 **What changed here, and what did not** (amended — §16, B12). §15's B10 stated that the
@@ -2377,8 +2908,12 @@ crossing" is now one of those claims.
 | `relayBackoffMinMs` | `1000` | client | Reconnect floor. |
 | `relayBackoffMaxMs` | `30000` | client | Reconnect ceiling. |
 | `stableSessionMs` | `5000` | client | How long a connection must live before the backoff ladder resets (`contract-a.md` §13, A8). |
-| `authFailuresBeforeCeiling` | `5` | client | Consecutive HTTP 401s before the backoff is pinned at the ceiling (§3.1). |
-| `statusCoalesceMs` | `250` | relay | Minimum spacing between `PEER_STATUS` broadcasts, and between grants to one peer. The last frame of a burst is always sent (§7.2). |
+| `authFailuresBeforeCeiling` | `5` | client | Consecutive HTTP 401s before the backoff is pinned at the ceiling (§3.1). **Unchanged in value and changed in meaning** (amended — §22, B22): a 401 now means *this peer's credential* was refused, so the log line names the remedy and the peer waits for a person rather than for the relay. |
+| `relayTLSMinVersion` | `1.2` | relay | **New in `contract-b/4.0`** (added — §22, B23). The lowest TLS version the relay's own listener accepts. A relay behind a fronting proxy does not own this; the proxy does, and B23 says the wire-visible behaviour is what this contract specifies either way. |
+| `statusCoalesceMs` | `250` | relay | Minimum spacing between `PEER_STATUS` broadcasts, and between grants to one peer. The last frame of a burst is always sent (§7.2). **It is now the floor of a window that widens** (amended — §22, B29). |
+| `statusCoalesceMaxMs` | `2000` | relay | **New in `contract-b/4.0`** (added — §22, B29). Ceiling of the coalescing window under sustained churn. The window doubles from `statusCoalesceMs` toward this value while a window sees more than `statusChurnBurstThreshold` registry changes, and narrows one step after a quieter one. It bounds the broadcast **rate**, which is what a public map's `slotCount` stats blocks per frame make expensive (§7.2). |
+| `statusChurnBurstThreshold` | `8` | relay | **New in `contract-b/4.0`** (added — §22, B29). Registry changes inside one window that make the relay widen it. Sized above what a single peer's join or departure produces, so an ordinary event never widens the window and a churn storm always does. |
+| `minContractVersion` | *unset* | relay | **New in `contract-b/4.0`** (added — §22, B25). The lowest `protocolVersion` this relay admits, published in `HANDSHAKE_ACK` and `PEER_STATUS`. **Unset means no minimum, and that is the default**: a floor is a deployment decision, and a relay that has not made one must not enforce a guess. It is raised only **after** the release that satisfies it is published (D25). A **compatibility** control, never a security one (§6.1). |
 | `statsBroadcastIntervalMs` | `5000` | relay | **New in M4** (added — §14, B4). The §6.5 timer that republishes `PEER_STATUS`, and re-sends any changed `SECTOR_GRANT`, because **stats change without the registry changing**. §6.5 named it and this table did not define it. Set to `statsIntervalMs`, the cadence at which the stats it carries arrive: a faster timer would republish the same block, a slower one would age it. It is a compiled default with no flag and no environment variable. |
 | `statsIntervalMs` | `5000` | sidecar | Minimum spacing between stats-bearing `PING`s (§6.11). |
 | `statsStaleMs` | `30000` | archive | Age at which a `stats` block renders as unknown rather than as state (§10.1). |
@@ -2396,8 +2931,15 @@ crossing" is now one of those claims.
 | `maxFrameBytes` | `8388608` | both | Shared with `contract-a.md` §10. |
 | `maxPayloadBytes` | `4194304` | both | Shared with `contract-a.md` §10. Applies to `body.bb8` and to a `GENOME_RESPONSE` body. |
 | `archiveQueueMax` | `1024` | relay | Copied frames buffered per subscriber before the oldest is dropped (§5.1). |
+| `maxConnectionsPerPeer` | `2` | relay | **New in `contract-b/4.0`** (added — §22, B24). §3.3. Simultaneous authenticated connections per `peerId`; the second is the `4006` overlap during a reconnect. |
+| `maxConnectionsPerAddress` | `8` | relay | **New in `contract-b/4.0`** (added — §22, B24). §3.3. Deliberately loose — the rig itself runs five peers on one machine. |
+| `maxFramesPerSecond` | `50` | relay | **New in `contract-b/4.0`** (added — §22, B24). §3.3, per peer, all types. Sized for a migration burst, not for a steady rate. |
+| `maxBytesPerSecond` | `4194304` | relay | **New in `contract-b/4.0`** (added — §22, B24). §3.3, per peer. It is what stops `maxFramesPerSecond` being evaded with maximum frames. |
+| `maxClaimsPerMinute` | `12` | relay | **New in `contract-b/4.0`** (added — §22, B24). §3.3. Above it a claim is answered `reason: "rate_limited"` and the connection is **not** closed (§6.4). |
+| `maxSubscribers` | `4` | relay | **New in `contract-b/4.0`** (added — §22, B24). §3.3. Bounds the fan-out cost; B27's grant is what bounds the trust. |
+| `credentialVerifierStore` | `<data-dir>/peers.json` | relay | **New in `contract-b/4.0`** (added — §22, B22). Where the per-peer **verifiers** and their grants live. It holds no recoverable secret (§3.1) and it is the third file the operator must back up, beside `ring.json` and the archive's durable set (D24, DQ2). |
 | `genomeRequestTimeoutMs` | `15000` | requester | How long a requester waits for a `GENOME_RESPONSE` before it counts the attempt as failed. **Requester-side only, and deliberately the only entry** — see the note below. |
-| `genomeRequestsPerMinute` | `30` | both | Per requester, per answering peer. Enforced on both sides (§10). **It is a RATE and it is not a burst bound, nor a bound on the work of one pass** — see `genomeScanPerTick` below and §21, B21. |
+| `genomeRequestsPerMinute` | `30` | both | Per requester, per answering peer. Enforced on both sides (§10). **It is a RATE and it is not a burst bound, nor a bound on the work of one pass** — see `genomeScanPerTick` below and §21, B21. **It is `maxGenomeRequestsPerMinute` in §3.3's published table and it is a knob** (amended — §22, B24): the compiled constant `contractb.GenomeRequestsPerMinute = 30` is the worked example D20's rule was written about, and a public archive is the first deployment likely to need it moved. |
 | `genomeScanPerTick` | `2048` | requester | **New after M4** (added — §21, B21). How many pending gaps one pass of the fetch queue may examine, walked round-robin over a stable order and resumed where the last pass stopped. It bounds the WORK of a pass, so the cost of a pass stops growing with the backlog. |
 | `genomeScanChunkSize` | `256` | requester | **New after M4** (added — §21, B21). How many gaps may be examined under one acquisition of the requester's own lock. It is the yield: it bounds how long the requester's read loop can be kept from the socket, whatever the backlog. |
 | `genomeRequestsPerTick` | `8` | requester | **New after M4** (added — §21, B21). How many `GENOME_REQUEST`s one pass may put on the wire. It bounds the BURST. Set far above what `genomeRequestsPerMinute` can sustain, so it never lowers the fetch rate. |
@@ -2501,42 +3043,63 @@ first.
 
 ## 13. Open items for M5
 
-**Every item below is now placed.** `m5_considerations.md` (2026-08-09) opens the milestone
-and carries each one into a scope line, a work package, a contract change or an owner
-decision; its *Scope* section cites this list item by item, and its *Contract Changes Needed*
-table names the section of this document each amendment lands in. **Its nine owner decisions
-were ratified on 2026-08-10** — five as `system_decomposition.md` D21–D25, four as calls inside
-the milestone — and that **still changes nothing normative here**: no rule in this section
-changes, no field moves, and `contract-b/3.5` stands until the M5 amendment wave writes the
-next version. §13 remains the authoritative statement of what is open; the other document says
-where each item goes, and now also at which version it lands.
+**Every item below was placed by `m5_considerations.md` (2026-08-09), and six of the eight are
+now closed by §22** (amended — §22). That document carried each one into a scope line, a work
+package, a contract change or an owner decision; its *Scope* section cites this list item by
+item, and its *Contract Changes Needed* table names the section of this document each amendment
+lands in. Its nine owner decisions were ratified on 2026-08-10 — five as
+`system_decomposition.md` D21–D25, four as calls inside the milestone — and two were refined on
+2026-08-11.
 
-1. **No TLS, and one shared token** (§3.1). The wire is plain HTTP on a LAN, so a genome, a
+**The M5 amendment wave is §22, and it moved the version to `contract-b/4.0`.** Each item below
+now carries its disposition on its own first line: **Closed** with the amendments that closed
+it, or **Open** with what it is still waiting for. **Items 2 and 8 stay open**, and §13 remains
+the authoritative statement of what is open on this wire.
+
+1. **CLOSED — §22, B22, B23, B32.** *No TLS, and one shared token* (§3.1). The wire is plain HTTP on a LAN, so a genome, a
    peer id and the token itself are readable in transit, and any token holder can present any
    `peerId`. M5 brings TLS and per-peer credentials together, because splitting them produces
    a half-secured relay that reads as secured. **Unchanged from M3, and now one milestone
    nearer.** **The version call is made — `contract-b/4`** (ratified 2026-08-10;
    `system_decomposition.md` D21, `m5_considerations.md` decision 1). Replacing §3.1's rule is
    not additive and there is an installed base, so the pair lands on a **major**, taken before
-   strangers run the build. Nothing in this section moves until that wave writes it; the
-   credential binds to the `peerId`, and §3.2's `4006` eviction will require it.
-2. **A permanently rejected inbound organism is held, never returned** (§9.4). A safe
+   strangers run the build. ~~Nothing in this section moves until that wave writes it~~ — **the
+   wave wrote it**: §3.1's rule is replaced by a credential bound to the `peerId` (B22), the
+   transport is TLS (B23), §3.2's `4006` requires the credential, and the version and path
+   moved to `contract-b/4.0` and `/contract-b/v4` (B32).
+2. **OPEN.** *A permanently rejected inbound organism is held, never returned* (§9.4). A safe
    two-phase return needs one more message pair. It stays parked while "held for an operator"
-   remains an honest answer.
-3. **Placement under churn is still only half-tested.** M4 places six known peers and splices
+   remains an honest answer. **§22 did not touch it**, and the reason is unchanged: a public
+   map makes "held for an operator" a *worse* answer, because the operator is now a stranger —
+   but a two-phase return is a custody design and not a milestone's spare capacity, and M5 was
+   already replacing the authentication model.
+3. **CLOSED — §22, B29.** *Placement under churn is still only half-tested.* M4 places six known peers and splices
    one newcomer, by hand, once each. Strangers joining and leaving continuously is M5's
    problem, and it is where auto-placement, the coalescing window and `maxSlotEverIssued`
-   growth will first be stressed.
-4. **The archive has no write interface and no authentication of its own.** It is a
+   growth will first be stressed. **B29 writes all three rules** — holes before growth on both
+   claim routes, the shorter axis, a coalescing window that widens under churn and a repeat
+   claim that broadcasts nothing. **What the rule does not do is test itself**:
+   `maxSlotEverIssued` growth has still never been run at any scale, and WP5's synthetic churn
+   harness is where it is measured before strangers are involved.
+4. **CLOSED — §22, B27.** *The archive has no write interface and no authentication of its own.* It is a
    subscriber that trusts the shared token. A public relay cannot copy every envelope to
    whoever asks, so M5 needs a subscriber authorisation rule — and the M4 stats block makes
    that sharper, because a copied `PEER_STATUS` now carries every world's population and save
    state — since §16, the name of every species living in it (§6.3.1, B11), and since §19, its
-   mod version, its save policy and the species it refuses to export (§6.3.1, B18).
-5. **Release and handover are startup flags** (§7.5). If the map ever grows past what one
+   mod version, its save policy and the species it refuses to export (§6.3.1, B18). **B27 makes
+   the subscribe grant a decision an operator takes** rather than a role a token holder
+   declares, and it **states the visibility boundary** the two paragraphs above only implied:
+   what a subscriber sees is exactly what every peer already sees, and it is a fairly complete
+   profile of a stranger's machine, which is what D24's participant announcement has to say out
+   loud.
+5. **CLOSED — §22, B28.** *Release and handover are startup flags* (§7.5). If the map ever grows past what one
    operator can restart at will, both need an authenticated admin path — which is another
-   reason they wait for the milestone that brings authentication.
-6. **The forwarding record does not survive a relay restart** (§5.2). Every outstanding
+   reason they wait for the milestone that brings authentication. **The condition was met by
+   the venue rather than by the size**: a hosted relay's restart drops every peer's session at
+   once, so *at startup* is a price six innocent peers pay to fix one. B28 adds the path, adds
+   `--evict-peer` beside the two, keeps the printed consequence report as a two-call
+   confirmation, and keeps all three off the wire catalogue.
+6. **CLOSED — §22, B26.** *The forwarding record does not survive a relay restart* (§5.2). Every outstanding
    `sent` entry loses its chance of a proof at that moment and falls back to the bounded hold.
    That is correct, and it is also a real cost the first time a relay is restarted under load:
    entries that could have been re-routed in seconds wait out a 24-hour clock instead. A
@@ -2549,9 +3112,14 @@ where each item goes, and now also at which version it lands.
    last sentence are properties of a relay on the owner's own desk, and a hosted one has
    deploys, certificate rotation, kernel updates and a supervisor, while `--release-inflight`
    is typed on the sender's machine — which after M5 is usually a stranger's. The condition
-   set here is unchanged; what changes is that the venue meets it. A proposal, not an
-   amendment: nothing in this item is normative yet.
-7. **A stats block is unauthenticated telemetry from a peer.** The relay copies it verbatim
+   set here is unchanged; what changes is that the venue meets it. ~~A proposal, not an
+   amendment: nothing in this item is normative yet.~~ **B26 made it normative**:
+   `FORWARD_RECEIPT` (§6.12) is one frame per forward, it carries the `relaySessionId`, and it
+   moves the fact into the sender's own journal. **It changes no safety rule** — §9.2's proof
+   of non-delivery is untouched, a missing receipt is silence, and silence is still never
+   proof. Its cost is one frame per migration on a relay whose virtue is that it forwards
+   frames, and WP3 measures that at rate rather than assuming it.
+7. **CLOSED for the wire's half — §22, B30.** *A stats block is unauthenticated telemetry from a peer.* The relay copies it verbatim
    into a broadcast every client reads. On a LAN of the owner's own machines that is fine; on
    a public relay a peer could report any population it liked, and the status page would show
    it. M5's per-peer credentials are the precondition for trusting any of it. **The census
@@ -2568,8 +3136,16 @@ where each item goes, and now also at which version it lands.
    escaping in the renderer — with one addition specific to these: a reader **MUST NOT** parse
    `contractAVersion` into a capability decision, because a peer that can choose the string can
    choose the capability it claims. Detect a feature by the presence of its field
-   (`contract-a.md` §3.1).
-8. **There is no control surface, and adding one is a design and not a field.** The operator
+   (`contract-a.md` §3.1). **B30 moves both rules to §10.1, where the person implementing a page
+   reads them**, states the escaping obligation as something a CI test asserts rather than
+   something a contract asks for, names every attacker-chosen string on the page including the
+   two this item never counted — `peerId` and the world name a player chose — and draws the
+   moderation boundary: **suppression at the view, never removal from the record** (D11, §10).
+   **The telemetry half of this item is now a precondition rather than a gap**: B22's credential
+   means a stats block comes from a peer that is who it says it is. It still does not mean the
+   *numbers* are true, and nothing on this wire will ever make them true — a peer can report any
+   population it likes about its own world, and the page shows what it reported.
+8. **OPEN.** *There is no control surface, and adding one is a design and not a field.* The operator
    surface is read-only end to end: every field on this wire flows peer → relay → subscriber,
    and nothing flows back toward a mod. The owner has ratified a control surface as **later
    work** (added — §19, B19). It needs its own message, and it needs answers this contract does
@@ -2578,8 +3154,13 @@ where each item goes, and now also at which version it lands.
    load, and an audit trail. **Reversing `CONFIG_UPDATE` or making a stats field writable is
    not the cheap version of that work; it is the same work with the questions skipped**
    (`contract-a.md` §19, A43). **"Later" now has a milestone: M6** (ratified 2026-08-10;
-   `system_decomposition.md` D23). M5 supplies items 1, 4 and 5 — the three blockers — and
-   still does not build the surface, and the accepted cost is stated as
+   `system_decomposition.md` D23). ~~M5 supplies items 1, 4 and 5 — the three blockers — and
+   still does not build the surface~~ — **§22 supplied all three** (amended — §22): the
+   per-peer credential (B22), subscriber authorisation (B27) and an authenticated admin path
+   (B28). **The surface is still not built, and that is the decision rather than an omission.**
+   B28's path changes the relay's own registry — a reservation, an identity, a peer's admission
+   — and touches nothing inside a world; the questions D23 defers are the ones about writing
+   into a world, and none of them is answered by it. The accepted cost is stated as
    `m5_considerations.md` Risk 9: an operator can read a peer's `timeScale` (§18, B16)
    throughout the public release and can do nothing about it.
 
@@ -3484,3 +4065,716 @@ accounting; the **relay**, unchanged, for going on closing a subscriber that sto
 which is the behaviour that made this visible rather than silent; and the **operator**, for
 reading `genomeGaps` as a queue whose *magnitude* now has consequences and not only as a
 number on a page.
+
+## 22. The public-release amendments (`contract-b/4.0`, 2026-08-11)
+
+M5 takes this wire out of the owner's house. Every rule in this document up to §21 was
+written for a network of two computers one person owns, and §13 said so item by item: no TLS,
+one shared token, an archive that trusts it, operator commands that are startup flags, and no
+limit of any kind on what a peer may do to the relay. **A public relay meets peers nobody
+vetted**, and every one of those items becomes a defect the moment it does.
+
+The nine M5 decisions were ratified on **2026-08-10** and two were refined by the owner on
+**2026-08-11** (`system_decomposition.md` D21–D25; `m5_considerations.md`, *Decisions for the
+Owner*). This set is the wire they describe. It is written **before any M5 code**, which is
+WP1's whole reason to exist: `contract-b/4.0` is what every other M5 package builds against,
+and M2 and M3 both paid for the alternative.
+
+**Eleven amendments, B22 to B32**, continuing the `B` series for the reason §14 gives, and
+each one carries the row of `m5_considerations.md`'s *Contract Changes Needed* it comes from:
+
+| Amendment | Source row | What it does |
+|---|---|---|
+| **B22** | row 1 | Per-peer credentials replace the shared token, bound to the `peerId` |
+| **B23** | row 2 | TLS: the scheme, the certificate, the rotation |
+| **B24** | row 9 | Capacity limits as a published table, every one a knob |
+| **B25** | row 10, additive half | A minimum **contract** version at the handshake — a compatibility gate, never a security control |
+| **B26** | row 6 | The relay forward receipt |
+| **B27** | row 4 | The archive as an **authorised** subscriber, and what it may see |
+| **B28** | row 5 | An authenticated admin path for release, handover and eviction |
+| **B29** | row 8 | Auto-placement under churn, and the broadcast bound |
+| **B30** | row 7 | The renderer's escaping obligation as a testable rule, and the version prohibition where a page implementer reads it |
+| **B31** | row 10a | The envelope's game version as diagnostic metadata, D22's layered statement, and the four kept gates |
+| **B32** | row 15 | `contract-b/4.0`, `/contract-b/v4`, and the migration note for the living deployment |
+
+**Rows 3, 11, 12 and 13 are Contract A's**, and `contract-a.md` **§21, A47–A52** — authored in
+the same wave — carries them at `contract-a/2.4`: **A47** the bearer token on that wire's
+upgrade (row 3), **A49** the `parents[].blobDroppedForSize` flag that finally makes
+`"blob_dropped_for_size"` reachable (row 11, §6.6 here), **A50** the sidecar's refusal of a
+declared export set the map cannot use (row 12), **A51** the fourth assessment of contract debt
+A5, which stays open and moot (row 13), and **A52** the version call (row 15). **Row 10a is
+shared and each document writes its own half**: B31 below states D22's layering and the four
+kept gates for the map, and `contract-a.md` §21, A48 states them for the mod and the sidecar.
+**Row 14 is not written**: decision 9 took
+the velocity floor out of the milestone, to be instrumented during the playtest and built only
+if the measurement says so, and `contract-a.md` §12 item 7 stays open across a public release
+(`m5_considerations.md`, Risk 8). **Row 16 is a documentation correction in other files** and
+is not a contract change.
+
+**This set changes the wire, and one row of one table is why it is a major.** §3.1's
+shared-token rule is **replaced** and it has an installed base — the shape §3.1's own test and
+`contract-a.md` §15's A41 both put on the expensive side. Everything else here passes the
+additive test: **one** new message type (`FORWARD_RECEIPT`), one new section (§3.3), one new
+close code (`4007`), one new `SECTOR_GRANT` reason (`"rate_limited"`), new OPTIONAL fields on
+existing objects, and rules written down where none existed. **The message catalogue, the
+envelope, custody, dedup, the hold, the fan-out, hashing and the routing inputs are
+untouched.** §4's test therefore answers **major**, and the identifier moves to
+**`contract-b/4.0`** with the URL path to **`/contract-b/v4`** (B32).
+
+Affected body text carries an `(amended — §22, Bx)` or `(added — §22, Bx)` marker, and
+**§22 wins over the body and over §14 to §21 wherever they disagree.**
+
+**One thing this set deliberately does not do, and it is the exception that shapes B31.**
+**§22 retires no version gate.** The owner was asked on 2026-08-11 whether D22's layering
+should retire the four shipped mechanisms that decide on the game version, and answered
+*"lets not change this then we will reconsider in the future if there's issues i think we can
+leave it like its working now."* So §6.1's relay refusal stands, §9.2's `VERSION_UNSUPPORTED`
+stands, §8's `peer_incompatible` skip stands, and `contract-a.md`'s close `4002` stands. B31
+writes them down as **kept, deliberate exceptions** and states what they cost, which is more
+useful than a prohibition four shipped mechanisms violate.
+
+### B22 — The shared token is replaced by a per-peer credential bound to the `peerId` (§1, §3, §3.1, §3.2, §6.1, §7.5, §12, §13 item 1)
+
+*Contract Change 1 (D21). **This is the breaking change**, and it is the reason
+`contract-b/4.0` exists.*
+
+**Gap.** §3.1 gave the whole map one bearer token and said plainly what it did not buy: *"it
+does not authenticate a peer identity: a token holder can present any `peerId`, including one
+that already holds a slot, and the `4006` rule will then evict the legitimate peer."* On a LAN
+of the owner's own machines that composition is fine, and §3.1 says why. **On a public relay it
+is a one-frame denial of service against any peer whose `peerId` can be read off the status
+page** — and the status page publishes every one of them.
+
+**Resolution.** §3.1 is rewritten; the table there is normative and this is what it settles.
+
+| Rule | Statement |
+|---|---|
+| One credential per peer | `Authorization: Bearer <peerId>.<secret>` on the HTTP upgrade, split on the **last** `.` because a `peerId` may legally contain one. Never in a frame — a frame is logged, copied to subscribers and forwarded. |
+| **The binding is the security property** | The relay MUST verify that the credential's `peerId` equals the `HANDSHAKE.peerId`, and MUST refuse the connection when they differ. **A valid credential for `peer-A` presented with `peerId: "peer-B"` is refused at the handshake, and `peer-B` observes nothing**: no close, no `4006`, no `PEER_STATUS` change, no `lastRefusal`. §6.1 carries the worked example, and this sentence is the acceptance test WP2 reports against (Risk 1, D21). |
+| `4006` requires it | §3.2's eviction now fires only for a connection that **authenticated as** the same `peerId`. The self-healing rule `contract-a.md` §2 gives the mod socket survives; the impersonation it permitted does not. |
+| A refused peer waits for a person | HTTP 401, the backoff ladder, the ceiling at `authFailuresBeforeCeiling`, and a log line that names **the remedy and who must act**. A sidecar whose credential is refused MUST NOT generate a fresh `peerId`, fall back to an unauthenticated connection, fall back to `ws://`, or try another peer's credential. It keeps its journal and goes on delivering inbound entries to its own mod. |
+| Issuance is the smallest design that works | The relay mints the secret at first claim and prints a **join string** — relay URL, `peerId`, secret — once, at its own console, for an operator to hand over out of band. **No accounts, no email, no password reset** (DQ1). |
+| Recovery is a slot handover | §7.5's `--handover-slot`, over B28's authenticated path, rebinds the reservation to a new `peerId` with a freshly minted credential. It already exists, already refuses to run while the old peer is live, and already prints its consequence. |
+| Storage is a verifier | The relay keeps a salted hash and the grant, in `credentialVerifierStore`, never the secret. A relay whose store is read must not thereby hand over every peer's identity. |
+| Grants are disjoint | **peer**, **subscribe** (B27) and **admin** (B28). One credential, three possible grants, and a credential that holds one does not hold another. |
+
+**The cost, stated because it is real and was chosen with the price in view.** There is no
+recovery path in the software. **A stranger who loses their join string loses that world's
+identity until an operator hands the slot over by name.** That is the honest price of *no
+accounts*: the alternative is an account system, an email, a reset flow and a support surface,
+in the milestone that already replaces the authentication model, hosts the relay and meets
+strangers (DQ1). The cost is bounded by the thing that makes it recoverable at all — the
+reservation never expires, so the slot, the position and every journal entry addressed to it
+are still there when the operator gets to it.
+
+**What it does not buy, said so nobody assumes it.** A credential authenticates *who is
+speaking*, not *what they say*. A peer can still report any population, census or setting it
+likes about its own world (§13 item 7), and no rule on this wire will ever make a stat true.
+What changes is that the stat is now attributable.
+
+**Enforced by:** the **relay**, for the binding, the constant-time comparison, the verifier
+store and the mint-at-first-claim; the **sidecar** and the **archive**, for holding their own
+credential, for the 401 discipline and for never inventing a new identity to get past a
+refusal; the **operator**, for handing over join strings and for never being asked to type
+`--insecure-no-token` by any document this project ships (`m5_considerations.md`, decision 7).
+
+### B23 — TLS at the relay's front door (§3, §12)
+
+*Contract Change 2.*
+
+**Gap.** §3's transport table said *"WebSocket over plain HTTP. TLS is M5"*, and §13 item 1
+named the reason the two halves ship together: **splitting them produces a half-secured relay
+that reads as secured.** TLS without credentials encrypts a wire on which any participant can
+impersonate any other; credentials without TLS put the credential on the wire in the clear.
+Neither half is a milestone; the pair is.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The scheme | Clients dial **`wss://`**. A public relay MUST refuse a plain `ws://` upgrade — HTTP **426** with `Upgrade: TLS/1.2, HTTP/1.1`, not a redirect, because a redirect to a scheme the client did not ask for is how a downgrade goes unnoticed. Plain `ws://` survives **only** on a loopback bind for a single-machine rehearsal. |
+| Where it terminates | **At the relay's front door** — the relay itself, or a fronting proxy that terminates for it. **That choice is operational and belongs to WP3**, not here. What this contract specifies is the wire-visible behaviour, and it is identical either way. |
+| The certificate | Issued for the relay's DNS name by a CA the client's platform already trusts. A client MUST verify the chain, the name and the validity window, using its platform's trust store. |
+| A certificate a client cannot verify | **Fail the connection and say why.** A client MUST NOT proceed, MUST NOT prompt, MUST NOT offer a flag that skips verification, and MUST NOT pin as a workaround. It logs one loud error naming the host, the presented name and the verification failure, and it retries on the ordinary backoff ladder — which will keep failing, which is correct: a certificate a client cannot verify is an operator problem at one end or the other, and there is no client-side action that makes it safe. |
+| A rotation, seen from a connected peer | **Nothing.** A rotation replaces the certificate the *listener* presents to the **next** handshake; an established TLS session is unaffected and its WebSocket stays up. A peer sees a rotation only if the rotation restarts the process — and then it sees an ordinary disconnect, reconnects on the backoff ladder, and rejoins with `reason: "reclaimed"` (§7.2 rule 1). **The relay MUST be able to load a renewed certificate without dropping sessions**, and where it cannot, the rotation is a **routine restart** and D24's restart policy is what tells participants what it looks like (DQ2). |
+| What TLS is not | Not authentication — B22 is. Not a reason to relax anything else: the frame checks, the `sourcePeer` comparison, `maxFrameBytes` and §3.3's limits all apply to a TLS connection exactly as they applied to a plain one. |
+| The retired paths keep it | `/contract-b/v2` and `/contract-b/v3` are served over TLS like the live path (§3). A peer that cannot complete a handshake learns nothing, and the whole point of a retired path is that it teaches (`contract-a.md` §15, A23). |
+
+**Why the operational half is deliberately left open.** A name, a certificate, an ACME client
+and a renewal that the relay survives are WP3's work, and DQ2 lists them beside the supervisor,
+the monitoring and the backup that a hosted service also needs and a desktop never did. This
+amendment fixes only what a *client implementer* must do, because that is the part two
+independent implementations have to agree on.
+
+**Enforced by:** the **relay or its fronting proxy**, for the listener, the certificate and a
+reload that does not drop sessions; **every client**, for verifying, for refusing to proceed
+without verifying, and for having no flag that skips it; the **operator**, for the name, the
+renewal and for stating in D24's announcement what a routine restart looks like.
+
+### B24 — Capacity limits are a published table, and every one is a knob (§3.2, §3.3, §6.2, §6.3.1, §6.4, §6.5, §10, §10.1, §12)
+
+*Contract Change 9 (D20's knob rule; DQ3).*
+
+**Gap.** This wire had **no capacity limit of any kind** beyond `maxFrameBytes` and one
+compiled-in genome rate. On a LAN of six known peers that was not a gap; on a public relay it
+is the whole abuse surface. And the one limit of the right shape that did exist is the
+instructive one: `contractb.GenomeRequestsPerMinute = 30` is a **compiled constant**, reachable
+only by editing source — which D20 has already ruled on: *"a tunable an operator cannot retune
+from the metric that measures it is not a tunable."*
+
+**Resolution.** §3.3 is the table and is normative. Four rules govern it.
+
+| Rule | Statement |
+|---|---|
+| **Countable at the frame level, or it is not a limit this relay may have** | Connections, frames per second, bytes per second, claims per minute, genome requests per minute, subscribers. **No limit may require the relay to decode a body**, index anything, or keep per-organism state. D1 is load-bearing — it is why the archive is a separate service and why M6 can replace the relay with libp2p — and an abuse limit is not worth spending it (DQ3). |
+| **Every one is a knob** | Flag and environment variable, no compiled constants. `genomeRequestsPerMinute` moves into the table as `maxGenomeRequestsPerMinute` and becomes one (§10, §12). |
+| **Every peer-visible one is published** | The relay publishes the values **it is running with** — not the shipped defaults — in `HANDSHAKE_ACK.limits` at connect and `PEER_STATUS.limits` thereafter (§6.2, §6.5). A peer that does not know the ceiling it is measured against cannot be built to respect it, and a support conversation about a limit nobody can read is unwinnable. |
+| **The relay sheds the connection, never the map** | Over a limit is close `4007` (§3.2) or, for claims, `granted: false, reason: "rate_limited"` (§6.4) — and **no other peer's traffic changes**. A shed peer is `live: false` with `darkSinceMs` set, which its neighbours route around exactly as they route around any dark peer (§8). No migration is dropped in flight and `SLOT_VACANT` still means what §6.8 says. |
+
+**Where the published table lives, and why it is not inside `stats`.** DQ3 asks for the limits
+*"published on the stats block"*, on the model of D20 putting `inboundRatePerSimMinute` there.
+**They are published beside it instead, on the same broadcast**, and the reason is that block's
+own discipline: §6.3.1 is **peer-authored end to end**, the relay stores it as the bytes it
+arrived as and interprets nothing (§16, B11), and a relay-authored key inside it would be the
+first value on that block the peer did not write. The property D20 actually wants — **a number
+is only readable against the cap it is measured on** — holds either way, because `limits` and
+every peer's `stats` arrive in the same `PEER_STATUS` frame and the page renders them together
+(§10.1).
+
+A peer shed for capacity, in one frame:
+
+```json
+{
+  "protocol": "contract-b/4.0",
+  "type": "PEER_STATUS",
+  "messageId": "e41a7b09-38cd-4f62-a5b7-0c9e1d43f820",
+  "sentAt": 1785693845000,
+  "data": {
+    "epoch": 58,
+    "map": { "width": 3, "height": 2 },
+    "slotCount": 6,
+    "slots": [
+      { "slot": 2, "position": { "col": 1, "row": 0 }, "peerId": "peer-main-slot2",
+        "live": false, "modConnected": false, "gameVersion": "0.6.3.1",
+        "simulationSize": 2000.0, "exportEdges": ["E", "N"],
+        "darkSinceMs": 1785693844880,
+        "lastRefusal": "capacity: maxFramesPerSecond 50 exceeded (peak 412/s)" }
+    ],
+    "you": { "slot": 4, "position": { "col": 0, "row": 1 },
+             "neighbours": { "E": 6, "N": 1 } },
+    "observers": 1,
+    "limits": { "maxFramesPerSecond": 50, "maxBytesPerSecond": 4194304,
+                "maxClaimsPerMinute": 12, "maxConnectionsPerPeer": 2,
+                "maxConnectionsPerAddress": 8, "maxGenomeRequestsPerMinute": 30,
+                "maxSubscribers": 4, "maxFrameBytes": 8388608 }
+  }
+}
+```
+
+The close that produced it, on slot 2's own connection:
+
+```
+← close 4007 "maxFramesPerSecond 50 exceeded (peak 412/s over 3s)"
+```
+
+**Slot 2's neighbours lost a lane and nothing else.** Slot 1 re-targets east past it, slot 5's
+column re-pairs, every in-flight migration addressed to slot 2 follows §9.2 unchanged, and the
+map keeps running — which is the property that makes a capacity limit safe to have at all.
+
+**Enforced by:** the **relay**, for counting at the frame level, for publishing what it runs
+with, for `4007` and `"rate_limited"`, and for never letting a limit reach into a body; **every
+client**, for reading `limits` at connect and being built to respect it; the **archive**, for
+enforcing `maxGenomeRequestsPerMinute` on its own send path as it always has (§10); the
+**operator**, for having a knob to turn at 03:00 instead of a rebuild.
+
+### B25 — A minimum contract version at the handshake: a compatibility gate, never a security control (§3.2, §4, §6.1, §6.2, §6.5, §12)
+
+*Contract Change 10, **additive half only** (D22).*
+
+**Gap.** Compatibility on this wire is on the **major** alone, and that rule held for three
+consecutive minors — the far end sat one behind and kept exchanging organisms. Then
+`contract-b/3.3` broke the streak. `dev_environment.md`, *The minors*, records it: a pre-3.3
+sidecar validates `MIGRATION_PAYLOAD.exitEdge` against `E`/`N` and answers `W` with a
+**permanent** `MALFORMED_MESSAGE` NACK, so an upgraded neighbour's west and south exports were
+refused, bounced and re-exported. **The two lanes into the stale peer ran at ~40 hops/min
+against ~4–6 everywhere else**, two other slots pinned at `inboundQueueMax` and started
+answering their own senders with `OVERLOADED`. Nothing was lost; the map was simply not
+operationally complete until every peer upgraded.
+
+The lesson `dev_environment.md` draws is the design input: *"a stale value range in a field
+both sides already exchange breaks traffic; a stale absent optional field only ever costs a
+number on a page."* **A public map cannot tell those two apart by itself, and the relay is the
+only party that sees every peer's claimed version at once.**
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The gate | The relay MAY publish a `minContractVersion`, and MUST refuse a peer whose `protocolVersion` is below it: close `4003`, one log line naming both versions, and `lastRefusal` on that slot as `contract_version_below_minimum` (§6.1, §6.5). |
+| It is published | In `HANDSHAKE_ACK` and on every `PEER_STATUS` (§6.2, §6.5), so a peer can read what refused it and an operator surface can say which peers are one release from being refused. |
+| It defaults to nothing | Unset means **no minimum**. A floor is a deployment decision and a relay that has not made one must not enforce a guess. |
+| It rises only after the release exists | D25 chose GitHub Releases, which **pushes nothing**, so there is no forced-update lever to design: **the fleet moves by publication** — a release, a matrix entry, and then a relay-side minimum. A floor raised before the release that satisfies it is a floor that ejects peers who cannot comply. |
+| **It is a compatibility control and never a security control** | A version a peer *claims* is attacker-chosen text — §13 item 7 already forbids reading `contractAVersion` as a capability decision for exactly this reason. The gate keeps **honest** stale peers off a map they would degrade; it stops nobody who edits a string. **Both halves belong in the same paragraph** or an implementer will assume the first implies the second, and §6.1 states them side by side in a table for that reason. |
+| It does not change §4's compatibility rule | Between **peers**, the minor is still never a rejection reason, unknown fields and types are still ignored, and a feature is still detected by the presence of its field. The floor is an **admission policy of one map**, not a statement about what two peers may assume of each other (§4). |
+| It is not the support matrix | The matrix answers *which build runs on my game* and is settled on the operator's own machine; the gate answers *may this build join this map*. Two layers, two tests, and D22 is the decision that they never meet. |
+
+**Why urgency rather than tidiness.** The peer that suffers from staleness **is not the peer
+that is stale** — it is the neighbour whose exports bounce — and whether a fix has been applied
+on somebody else's machine is unobservable from here (`dev_environment.md`, *The far end*). At
+six peers you ask the operator. At sixty there is nobody to ask.
+
+**Enforced by:** the **relay**, for the gate, the close, the `lastRefusal` and the publication;
+**every client**, for reading the floor and for treating a refusal as an upgrade instruction
+rather than a retry; the **operator**, for raising the floor only after the release exists, and
+for never mistaking it for a security control.
+
+### B26 — The relay acknowledges every forward, and the sender's own journal becomes the evidence (§5.2, §6, §6.12, §7.4, §9.2, §12, §13 item 6)
+
+*Contract Change 6 (DQ2).*
+
+**Gap.** §13 item 6 states it exactly: the forwarding record is in memory and does not survive
+a relay restart, so **every outstanding `sent` entry loses its chance of a proof at that
+moment** and falls back to the bounded 24-hour hold instead of re-routing in seconds. The item
+names the fix — a receipt — and declines it: *"M4 does not buy that, because a relay restart is
+rare and `--release-inflight` is one command."*
+
+**Both halves of that argument are properties of a relay on the owner's desk.** On a hosted
+relay (D24) restarts stop being rare — deploys, certificate rotation, kernel updates, the
+supervisor doing its job — and `--release-inflight` is typed on the **sender's** machine, which
+after M5 is usually a stranger's. The condition item 6 set was *"if this ever hurts"*, and the
+change of venue is what makes it hurt, knowably in advance rather than after the first bad
+night.
+
+**Resolution.** §6.12 defines the message and §5.2 carries the rules; this is what they settle.
+
+| Rule | Statement |
+|---|---|
+| One receipt per forward | Sent to the **sender** at the moment the relay writes a `MIGRATION_PAYLOAD` to a destination connection — the same moment that puts the `migrationId` in §5.2's record. A re-forward produces another. |
+| It carries the session | `relaySessionId` rides the receipt, so the sender learns the **scope** of the fact with the fact (§5.2). |
+| It lands in the journal | The sender records it durably against the entry (§7.4) and answers nothing. |
+| **It changes no safety rule** | §9.2 is untouched in every particular. A receipt is **not** delivery, **not** custody, **not** proof of non-delivery, and it can never authorize a re-route. Its only direction is *toward holding*: an entry with a receipt was forwarded, so it holds. |
+| **A missing receipt is silence** | Never sent, dropped from a full queue, or lost with the session — all indistinguishable. §9.2's *not evidence* table gains the row, because *silence is never proof in this contract* is the sentence this whole design rests on and a new frame is exactly the kind of thing that erodes it. |
+| Not copied to subscribers | A receipt is a fact about one sender's journal, not about the migration. The fan-out set of §5.1 is unchanged. |
+| Best effort | The relay MUST NOT delay, block or fail a forward on account of a receipt it could not send. |
+
+**What it buys, in one sentence.** The sender no longer needs the relay to still be the same
+process in order to know its own entry was forwarded — **and it still needs a live relay of the
+right session to learn that an entry was *never* forwarded**, which is the direction a re-route
+depends on and the direction a restart will always take away. That asymmetry is not a
+shortcoming of the receipt; it is §5.2's *"a relay restart is exactly the event that
+invalidates the proof"*, and a receipt that pretended otherwise would be a durable record
+asserting what the new process cannot know.
+
+**What it costs, and where that is measured.** One extra frame per migration, on a relay whose
+whole design virtue is that it forwards frames and does nothing else (D1). At the rig's
+measured 300–500 crossings a minute it is a rounding error. At a public map's rates it is a
+real cost, and **WP3 measures it at rate rather than assuming it away** (DQ2) — which is also
+why the frame is the cheapest one on this wire: four fields, no body, no fan-out, no answer.
+
+**Enforced by:** the **relay**, for sending one receipt per write and for never letting a
+receipt delay a forward; the **sidecar**, for journaling it durably and for not letting it
+change a handoff state; **both**, for leaving §9.2's proof rules exactly as they were.
+
+### B27 — The archive is an authorised subscriber, and the visibility boundary is stated (§5.1, §6.1, §6.3.1, §6.5, §10, §13 item 4)
+
+*Contract Change 4 (DQ1).*
+
+**Gap.** §13 item 4: *"The archive has no write interface and no authentication of its own. It
+is a subscriber that trusts the shared token."* Under M4, `role: "archive"` was a
+**self-declaration** — anyone holding the one token could open a socket, declare themselves a
+subscriber and receive a byte-identical copy of every envelope on the map. And the question got
+sharper twice after §13 was written: since §16 a copied `PEER_STATUS` carries **every world's
+species census**, and since §19 it carries the **mod version, the save policy and the exclusion
+list** (§6.3.1). **A public archive that copies every envelope to whoever asks is publishing a
+fairly complete profile of a stranger's machine.**
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| A grant, not a role | `role: "archive"` requires the **subscribe** grant on the credential (B22). Without it, `4003` and a reason naming the missing grant. **The grants are disjoint**: a subscribe credential cannot claim a slot and a peer credential cannot subscribe, so neither compromise becomes the other. |
+| It is issued deliberately | At the relay's console, by the operator, like a join string. **No wire message asks for the grant and none confers it.** A public map has exactly as many subscribers as its operator decided to have, bounded by `maxSubscribers` (§3.3, B24). |
+| **The boundary, stated rather than implied** | A subscriber sees every `MIGRATION_PAYLOAD`, `MIGRATION_ACK` and `MIGRATION_NACK` the relay routes or generates, and every `PEER_STATUS` — census, mod version, `contract-a` version, save policy, exclusion list, populations, depths and speeds, per world. That is the grant. It is written here so that **granting it is a decision** and so that D24's participant announcement can say what a participant is agreeing to before they join. |
+| It is not a privileged view | A subscriber gets **nothing a peer does not already get**. Every field it reads is a field the relay already broadcasts to every sidecar on the map. There is no subscriber-only field, no private channel and no back door — which is what makes the boundary describable in one sentence. |
+| The peer's own rule follows from it | **Nothing on this wire is confidential.** A sidecar that must not publish a value MUST NOT put it on the stats block (§6.3.1), because no rule downstream will hold it back. |
+| Everything else about a subscriber is unchanged | Read-only, no answers, no sending, no claim, bounded queue, dedup on `migrationId` (and on `migrationId` + `code` for a NACK), and the relay closing a subscriber that stops reading (§5.1, §21 B21). B27 adds a gate at the door and changes nothing behind it. |
+
+A client with a peer credential asking to subscribe:
+
+```json
+{
+  "protocol": "contract-b/4.0",
+  "type": "HANDSHAKE",
+  "messageId": "c07f3d21-6b48-4a95-8e30-1f5b92d4a708",
+  "sentAt": 1785693598200,
+  "data": {
+    "peerId": "peer-lan-slot5",
+    "role": "archive",
+    "protocolVersion": "contract-b/4.0",
+    "gameVersion": "",
+    "sidecarVersion": "0.4.0"
+  }
+}
+```
+```
+← close 4003 "credential for peer-lan-slot5 does not carry the subscribe grant"
+```
+
+and nothing appears on slot 5's `lastRefusal`, because slot 5's *peer* connection was refused
+nothing — this is a role error on one connection, not a refusal of that peer.
+
+**Enforced by:** the **relay**, for the grant check at the handshake, for the disjointness, and
+for `maxSubscribers`; the **archive**, for holding a subscribe credential and for going on
+being read-only; the **operator**, for issuing the grant deliberately and for telling
+participants what it lets its holder see (D24).
+
+### B28 — An authenticated admin path for release, handover and eviction (§7.5, §13 item 5)
+
+*Contract Change 5.*
+
+**Gap.** §13 item 5: *"Release and handover are startup flags. If the map ever grows past what
+one operator can restart at will, both need an authenticated admin path."* **The condition was
+met by the venue rather than by the size.** A hosted relay's restart drops every peer's session
+at once, so *at startup* is a price six innocent peers pay so that one slot can be released —
+and after M5 those peers are strangers who were told what a restart looks like (D24) and are
+now getting one for somebody else's problem.
+
+**Resolution.** §7.5 carries the table; four properties make the path safe.
+
+| Rule | Statement |
+|---|---|
+| **It is not on this wire** | A **separate listener**, never the Contract B WebSocket. No frame of §6's catalogue invokes an act, and no peer or subscriber can reach one. D1's relay routes frames and still does nothing else; the message catalogue grows by exactly one in this whole set, and it is B26's receipt. |
+| Authentication is B22's, with a third grant | The **admin** grant, disjoint from peer and subscribe. Loopback by default, TLS if bound anywhere else (B23). |
+| **The act stays deliberate** | Two calls. The first returns the **same consequence report** §7.5 has always required an operator to read — the slot, its position, its `peerId`, how long it has been dark, whose lanes change, which positions become holes — plus a single-use token bound to the act **and to the current `ring.json` state**. The second performs the act, and MUST be refused if the map moved underneath the token. **A confirmation an operator cannot see is not a confirmation.** |
+| Every act is audited | One durable line: grant, act, slot, state before, and the operator's reason string. |
+
+**A third act joins the two.** `--evict-peer <peerId> [--for <duration>]` closes a peer's
+connection with `4005` and refuses it for a stated period. **It releases nothing** — the
+reservation, the slot number and the position all survive — so an eviction is a **liveness**
+act and the map treats an evicted peer exactly as it treats a dark one (§8). It is what DQ7
+leaves for a peer that will not stop when suppressing its text at the renderer (B30) was not
+enough, and it is deliberately the weaker of the two tools: suppression needs no peer's
+cooperation and costs that peer nothing, and eviction takes a world off the map.
+
+Release, over the path, in the two calls it takes:
+
+```http
+POST /admin/release-slot HTTP/1.1
+Authorization: Bearer admin-ops.4b91c0e7d2a85f3168b0d47ac9e21356
+Content-Type: application/json
+
+{ "slot": 5, "reason": "peer departed 2026-08-09, operator request" }
+```
+```json
+{
+  "act": "release-slot",
+  "slot": 5,
+  "position": { "col": 1, "row": 1 },
+  "peerId": "peer-lan-slot5",
+  "darkForMs": 172800000,
+  "becomesHole": [ { "col": 1, "row": 1 } ],
+  "lanesChanged": [
+    { "peerId": "peer-main-slot2", "edge": "N", "from": 5, "to": null },
+    { "peerId": "peer-lan-slot4",  "edge": "E", "from": 6, "to": 6 }
+  ],
+  "addressRetiredForever": true,
+  "heldEntriesAddressedHere": "not knowable from the relay — read stats.heldDepth on PEER_STATUS, and multiverse-sidecar --list-inflight --dest-slot 5 on the machine that holds the journal",
+  "confirmToken": "3a0c7e91-52bd-4f16-9c48-7e10b8d3a624",
+  "ringStateHash": "9f41c8a02e7b5d63"
+}
+```
+```http
+POST /admin/release-slot/confirm HTTP/1.1
+Authorization: Bearer admin-ops.4b91c0e7d2a85f3168b0d47ac9e21356
+Content-Type: application/json
+
+{ "confirmToken": "3a0c7e91-52bd-4f16-9c48-7e10b8d3a624",
+  "ringStateHash": "9f41c8a02e7b5d63" }
+```
+```json
+{ "act": "release-slot", "slot": 5, "applied": true,
+  "map": { "width": 3, "height": 2 }, "slotCount": 5,
+  "maxSlotEverIssued": 7, "epoch": 62 }
+```
+
+**`heldEntriesAddressedHere` is a sentence and not a list on purpose.** The relay **cannot**
+enumerate journals — they live on other people's machines and D2 keeps custody local — so the
+field says what the relay does not know and where the answer is, which is the same division
+§7.5 has always drawn. **After M5 the third row of that division changes hands**:
+`--list-inflight` is typed on the machine that holds the journal, and that machine is usually a
+stranger's, so the operator's honest answer becomes *ask the peer*.
+
+**What this path deliberately does not become.** It is **not** the control surface. It changes
+the map's **registry** — a reservation, an identity, a peer's admission — and touches nothing
+inside a world: no time scale, no save policy, no exclusion list, no setting a mod reported.
+D23 defers the surface that would write those to M6 and names the questions it must answer
+(ordering against a world load, a disconnected target, authorization across machines D9 keeps
+undriven, an audit trail); three acts on the relay's own registry answer none of them and claim
+to answer none of them (§13 item 8).
+
+**Enforced by:** the **relay**, for the separate listener, the admin grant, the two-call
+confirmation bound to `ring.json`'s state, and the audit line; the **operator**, for reading
+the report; **nothing on the peer wire**, which is the property that keeps D1 intact.
+
+### B29 — Placement under churn: holes before growth, the shorter axis, and a broadcast bound (§1, §7.2, §7.5, §12, §13 item 3)
+
+*Contract Change 8 (DQ6).*
+
+**Gap.** §13 item 3: *"M4 places six known peers and splices one newcomer, by hand, once each.
+Strangers joining and leaving continuously is M5's problem, and it is where auto-placement, the
+coalescing window and `maxSlotEverIssued` growth will first be stressed."* The relay has
+`--reserve-slot` and honours an advisory `insertAfterSlot`; **what it did not have is a rule
+for a peer nobody expected**, and a public map is nothing but those.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **Holes before growth, on both claim routes** | Rule 6 always filled a hole before extending an axis. **Rule 4 now does too**: a `preferredPosition` that would extend an axis while any hole exists is ignored and falls through to rule 6. A preference is an operator's layout on the rig and an ordinary stranger's configuration file on a public map, and one newcomer that extends an axis creates `height` (or `width`) positions and fills exactly one of them. |
+| It does not break the rig's layout | The join kit's six positions each extend only when the rectangle is full, so every claim in that sequence is granted exactly as before (§7.2). That is the test of the narrowing rather than a footnote to it. |
+| **Which axis extends** | The **shorter** one, unchanged, and the reason is now written down: the cycle length on each axis is what genetic mixing depends on, so a map stretched along one axis is a map whose other axis has nothing to route around (§2.1). |
+| A departed peer's position and address part company | The reservation never expires and a returning peer lands where it was; the position becomes fillable **only** through `--release-slot`, and then only as an ordinary hole. **The address is retired forever** — `maxSlotEverIssued` never decreases — because `SLOT_VACANT` is a permanent answer and therefore a valid proof of non-delivery (§6.8), and reissuing an address would silently convert that proof into a lie. This is exactly the split D12 and D13 built (DQ3). |
+| **The broadcast rate is bounded, twice** | The coalescing window **widens** from `statusCoalesceMs` toward `statusCoalesceMaxMs` while a window sees more than `statusChurnBurstThreshold` changes, and narrows again after a quiet one; the last frame of a burst is still always sent. And **a repeat claim that changes nothing structural broadcasts nothing** — the claimant still gets its `SECTOR_GRANT`, and everybody else is not told. |
+| The epoch rate had a measured cause | The living deployment's slot 6 issued **64** placement claims in one day against two or three from each local slot, every one a re-claim with `reason: "updated"` as its measured time scale wandered (DQ3). Not a reconnect and not a defect — **64 epochs on a six-slot map, from one peer, for nothing**, and the second rule above is what stops that scaling with peer count. |
+| **A consequence, stated rather than discovered** | An organism routed around a bypassed slot never sees that world, so a map with continuous churn has a **continuously shifting cycle**. D12 chose route-around deliberately, so this is not a defect — but the genetic mixing a public map produces is **not** the mixing a stable map of the same size produces, and whoever reads the archive later should know which one they are looking at. |
+
+**What this amendment does not do is test itself.** `maxSlotEverIssued` growth has **never**
+been run at any scale, and neither the widened window nor the suppressed re-claim has been
+measured under churn. **WP5 runs a synthetic churn harness — join, leave, return, never return
+— to exhaustion before WP8 involves anybody**, because Risk 2's accepted cost is that the exit
+test cannot be re-run cheaply: it spends other people's goodwill each time.
+
+**Enforced by:** the **relay**, for the narrowed rule 4, the widening window, the suppressed
+re-claim broadcast and the monotone `maxSlotEverIssued`; the **sidecar**, for sending a
+`preferredPosition` it is content to lose (§7.2 — a claim is advisory in every part and never
+fails for a lost race); the **operator**, for `--release-slot` being the only way a position
+comes back.
+
+### B30 — Attacker-chosen text: the escaping obligation is testable, the version prohibition sits where a page implementer reads it, and moderation stops at the view (§10.1, §13 item 7)
+
+*Contract Change 7 (DQ7).*
+
+**Gap.** §13 item 7 names the surface and is blunt about the split: the wire's answer is the
+shape check and the cap, and it is done; *"the renderer's answer is its own, and a page that
+interpolates a name into HTML without escaping it has a defect this contract cannot fix for
+it."* Two problems with leaving it there. **An escaping rule written in a contract is not
+code** — nothing in this project asserts it. And the rule lives in §13, a section titled *Open
+items for M5*, which is not where anybody implementing a page is reading.
+
+**Resolution.** §10.1 gains three rows — the section that states what the page may claim — and
+this is what they settle.
+
+| Rule | Statement |
+|---|---|
+| The inventory, complete | `species[].genericName` and `.specificName` (64 UTF-8 bytes each, 32 per peer), `migrationExclude[]`, `modVersion`, `contractAVersion`, `lastRefusal`, `lastSave.name`, **and the two the contract never counted because they predate the concern — `peerId`, and the world name a player chose.** |
+| The obligation | Escape for the surface rendered into — HTML, an HTML attribute, a URL, JSON in a script, terminal escape sequences — and never render one as markup. `ringstat`'s terminal is a rendering surface with its own injection story and is bound identically. |
+| **The test, which is the point** | A peer reports a species named with markup; the rendered page and `ringstat`'s output are asserted against it, **in CI and not by eye**. That test is WP7's, and it is the only form in which this rule is true of a running system. |
+| The version prohibition, repeated where it is read | A reader **MUST NOT** parse `contractAVersion`, `modVersion` or a peer's `gameVersion` into a capability or refusal. A peer that can choose the string can choose the capability it claims. **Detect a feature by the presence of its field** (`contract-a.md` §3.1). It is the same rule B31 puts on the envelope's game version, and the four exceptions B31 keeps are gates in the relay, the walk and the mods — **never in a page**. |
+| **Moderation: the view, not the record** | The page and `ringstat` MAY apply an operator-side **deny list at render**, suppressing a string without evicting the world that produced it — no peer cooperation, no wire field, no contract change — and B28's eviction stays available for a peer that will not stop. **What cannot be promised is removal from the record**: D11 and §10 make the ledger a thing nothing evicts from. **M5 promises removal from the view and explicitly does not promise removal from the record.** Anything stronger is a change to D11's never-evict rule and belongs in a decision row, not in a support reply. |
+
+**Why the deny list is the right minimum.** A species name is a string a player typed or the
+game generated, published to every subscriber and rendered on a page anyone with the URL can
+read, and until M5 there was no operator action between *ignore it* and *evict the peer*.
+Suppression at render costs the suppressed world nothing, needs nothing of the wire, and leaves
+the record intact — which is the only combination that does not contradict something this
+system is built on.
+
+**Enforced by:** the **page and `ringstat`**, for escaping every listed field and for the deny
+list; **CI**, for the markup-species-name test, which is what makes the first row a fact rather
+than an intention; the **archive**, for going on recording verbatim (§10) — the record is not
+where suppression happens; the **operator**, for the deny list's contents and for not promising
+a takedown the design forbids.
+
+### B31 — The envelope's game version is diagnostic metadata, D22's layering is stated, and four shipped gates are kept as named exceptions (§4, §6.6, §6.10, §8, §9.2, §10, §13 item 7)
+
+*Contract Change 10a (D22, refined and closed 2026-08-11).*
+
+**The layered statement, first, because everything else here follows from it.** D22 is the
+owner's own design, in his words: *"game version compatibility should work basically what
+matters is like the sidecar version compatible with the relay server right then it depends if
+theres a sidecar version compatible to the game version."* Read as a design it is **two tests
+that never meet**:
+
+- **The relay's test — the wire is the membership test.** The relay cares that each sidecar
+  speaks a compatible **contract** version and about nothing else. That is the only question
+  the map has an opinion on, and B25 is the mechanism.
+- **The machine's test — a support matrix, not a fleet pin.** Each operator needs a sidecar and
+  mod build compatible with the game version *they* run. The project publishes a matrix over
+  game versions, and the test is settled on the operator's own machine before anything dials
+  the relay.
+
+**This supersedes the fleet-wide same-game-version rule** as a *design*. The old rule was
+unenforceable and misplaced at once: Steam auto-updates stay on and land unevenly, so *every
+peer runs the same build* stops being true within hours of an update and there is nobody to
+tell — while a map-wide pin would eject honest players for something they did not choose and
+could not defer.
+
+**Gap.** The envelope has carried the serializing game's version since M2, end to end and as a
+REQUIRED field — `contract-a.md` §5.3's `MIGRATE_OUT.gameVersion`, this document's
+`body.version`, `parents[].gameVersion`, `MIGRATE_IN.gameVersion`, the sidecar's journal and
+the archive's ledger, whose live lines carry `"gameVersion":"0.6.3.1"` today. **Nothing had to
+be added to carry it.** What was missing was a statement of what it is *for*, and the owner
+supplied it on 2026-08-11: *"for now lets just keep doing the payload opaque and assume it will
+work, we will worry about doing the normalized own schema or the cheaper alternative in the
+future if we run into an issue, for now we can just assume this will work and carry the game
+version info for potential future debugging."*
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The payload stays opaque | D4 unchanged and unextended. **Cross-version loading is assumed to work.** No refusal path is designed on the game-version axis, no gate is added, and the stability research is not done now. |
+| The field is diagnostic | `body.version` and `parents[].gameVersion` are carried so a future incident is **diagnosable from the record** instead of reconstructed from memory. **A reader MUST NOT parse either into a capability or refusal decision** — §13 item 7's `contractAVersion` rule, applied to the second version axis. |
+| **It binds NEW readers only** | This is the narrowing that makes the rule honest. Four shipped mechanisms already decide on the game version; the owner chose the same day to keep every one of them. So the prohibition binds **readers written from `contract-b/4.0` onward**, and the four are stated below as **kept, deliberate exceptions** rather than as violations nobody intends to fix. |
+| Both fuller answers are deferred, not rejected | This project's own **normalized canonical schema**, and the cheaper **marker-plus-refusal**. Neither is built until an incident makes one necessary. |
+| The archive decides nothing from it | It records `body.version` against every migration and MUST NOT refuse a record, split a lineage, filter a fetch, order a queue or mark a peer on the strength of it (§10). |
+| `genome-hash.md` is untouched | The projection takes the version tag as an **identity** input, not a capability one — two game versions produce two hashes for one organism, deliberately, because gene names and `NodeType` ordinals are version-scoped (`genome-hash.md` §10 item 2). An identity computation is not a refusal decision and this rule does not reach it. |
+
+**The four kept gates, named, with where each fires:**
+
+| Gate | Where it fires | What it does |
+|---|---|---|
+| §9.2's `VERSION_UNSUPPORTED` | The **importing mod**, on a payload whose `body.version` has no `bb8-schema` dialect | Answers `MIGRATE_IN_NACK` / `VERSION_UNSUPPORTED`, **permanent**; §9.2 makes it normative — *do not re-deliver, hold for an operator, mark the peer pair incompatible*. **This is the marker-plus-refusal design, already shipped.** |
+| `mapwalk`'s `peer_incompatible` skip | The **routing walk**, in the sidecar and in the relay's own neighbour walk (§8) | Skips a peer on a different game version, which §8 aggregates into a **closed edge** and `contract-a.md`'s `EDGE_STATUS` reports to the mod. |
+| Close `4002` | The **mod ↔ sidecar handshake** (`contract-a.md` **§2.1's close table**; **that document's rule, named here and not authored here** — `contract-a.md` §21, A48 keeps it as a named exception) | Refuses a mod whose `CONFIG_UPDATE.gameVersion` has no dialect. Inert in practice — the allow-list is empty outside tests and empty means accept — and normative. |
+| §6.1's relay refusal | The **relay**, at connect and at claim | Closes a mismatched handshake with `4003`, answers a mismatched `SECTOR_CLAIM` with `version_incompatible`, and skips a mismatched peer in its own neighbour walk. **§22 does not touch it** (§6.1). |
+
+**What a version-skewed map looks like, written here because it is the accepted behaviour and
+an operator will meet it.** Two machines on different game builds **do not exchange organisms**.
+The relay refuses whichever peer disagrees with the version the map already reports, at connect
+or at claim; `mapwalk` and the relay's own walk close the edges between mismatched pairs; and
+the importing mod answers a permanent `VERSION_UNSUPPORTED` if a payload ever reaches it. **That
+is safe** — no cross-version payload reaches the loader at all — and it is exactly why the
+assumption above stays untested rather than validated. The everyday shape of it is a **partition
+along a version boundary after a staggered game update**, and it ends when every machine is on
+the new build. The rig has always lived this: re-syncing both computers promptly after a game
+update is what ends the partition (`dev_environment.md`, *The far end*).
+
+**The cost of keeping the gates, stated rather than discovered.** *Assume it works* and *keep
+the gate that stops it being tried* compose into an assumption **that can never be exercised**:
+a gate that refuses every cross-version crossing means the ledger can never record one. So the
+signal that reopens this design space is **not** a failed restore — it is the **partition
+itself**: refused claims, `lastRefusal` on a slot, `peer_incompatible` edges and
+`VERSION_UNSUPPORTED` NACKs, counted after a staggered game update. **WP8 watches for that
+instead of for a crossing** (DQ5).
+
+**And one contradiction is held open knowingly rather than resolved.** D22 says the map holds no
+opinion about the game version; §6.1 says the relay MUST refuse on it, and the relay enforces
+that in code. **Both statements stand.** The owner's call of 2026-08-11 was to leave the shipped
+gates alone and reconsider when skew causes a real operational problem, so this document records
+the disagreement in the open — in §6.1, in §8, in §9.2 and here — rather than papering it over
+with wording that no running component obeys. The whole cross-version design space reopens
+together, or not at all.
+
+**Enforced by:** **every new reader**, for treating the field as a note; the **archive**, for
+recording it and deciding nothing from it; the **four gates**, for going on doing exactly what
+they do; the **operator and WP8**, for counting the partition rather than waiting for a crossing
+that the gates guarantee will never happen.
+
+### B32 — `contract-b/4.0` is a major bump, the path moves to `/contract-b/v4`, and the fleet crosses in lockstep (§3, §4, §6.1, §6.2, §12, header)
+
+*Contract Change 15 (D21).*
+
+**Change.** §3.1's rule is explicit about what costs a major: additive fields raise the minor;
+**a changed rule with an installed base** does not. B22 removes the shared token and replaces it
+with a per-peer credential, and §3.1's own framing and `contract-a.md` §15's A41 both put that
+on the expensive side.
+
+**Resolution.** Apply the contract's own test honestly, item by item:
+
+| M5 change to Contract B | Kind | Needs a major? |
+|---|---|---|
+| §3.1's shared token replaced by a per-peer credential bound to the `peerId` (B22) | **a rule replaced, with an installed base** | **yes** |
+| §3.2's `4006` narrowed to require the credential (B22) | an existing code's precondition changes | **yes** |
+| Transport becomes TLS; `ws://` refused off loopback (B23) | the transport a client must speak changes | **yes** |
+| `FORWARD_RECEIPT` added (B26) | additive message type — a receiver that does not know it ignores it (§4) | no |
+| §3.3's limit table; `limits` on `HANDSHAKE_ACK` and `PEER_STATUS` (B24) | new section, additive OPTIONAL and REQUIRED fields on relay-authored frames | no |
+| Close `4007`; `SECTOR_GRANT.reason` gains `"rate_limited"` (B24) | additive close code, additive enum value | no |
+| `minContractVersion` published and enforced (B25) | additive field; an **admission policy**, not a compatibility rule (§4) | no |
+| Subscriber grant (B27), admin path (B28) | an authorisation rule and an off-wire surface | no |
+| Rule 4 narrowed to holes-before-growth; the widening window (B29) | placement and broadcast behaviour, no wire shape | no |
+| §10.1's escaping, version and moderation rows (B30) | page-input rules, off the wire | no |
+| `body.version` restated as diagnostic (B31) | a prohibition on new readers; no field, no type, no enum | no |
+| Message catalogue otherwise, envelope, custody, dedup, the hold, the fan-out, hashing, routing inputs | **all unchanged** | no |
+
+Three rows are enough. **The identifier is `contract-b/4.0`**, and by §3.1's rule the URL path
+moves with the major to **`/contract-b/v4`**.
+
+**The retired paths, and the same rule for the same reason as `contract-a.md` §15, A23.** A
+relay MUST keep serving `/contract-b/v2` and `/contract-b/v3` and MUST close every connection
+on one immediately with `4000 PROTOCOL_UNSUPPORTED`. A bare HTTP 404 is a socket error in a log
+and half an evening of diagnosis; `4000` is a defined close the client already handles by
+logging one loud error and not reconnecting (§3.2). **The retired paths are served over TLS**
+(B23) — a peer that cannot complete a handshake learns nothing, and the point of a retired path
+is that it teaches. There is no field-level fallback anywhere: a `contract-b/3` peer cannot be
+made to work by presence-detecting a credential field, because the *rule* changed and not the
+shape, and a compatibility path only an already-rejected peer can take is dead code that reads
+like a supported configuration.
+
+**The document's own identity moves with it, and its filename does not.** The title stops
+naming a milestone, because a document titled *Contract B — M4* that specifies M5's wire is
+false on its first line; `contracts/contract-b-m4.md` **stays the path**, because every document
+in this project cites it by name. The header's box applies the same three tests that split
+`contract-b-m3.md` off — milestone-scoped? structural? is the old text still needed as it
+stands? — and answers *in this file*, which is the answer `contract-a.md` §15's box gave for
+`contract-a/2.0`, for the same reason: **the version identifies the wire, the file identifies
+the interface.**
+
+**Contract A takes a minor in the same wave.** A bearer token is an **additive precondition on
+an existing handshake**, so by that document's own test it is `contract-a/2.4` — no path move,
+no rebuild of the mod's message catalogue. Its matching set is `contract-a.md` **§21, A47–A52**,
+authored in the same wave, and it carries Contract Changes **3, 11, 12, 13 and 15** plus
+Contract A's half of **10a** in A48. **The rollout is where the two sets meet in practice:**
+A47 is a **mod** change, so the rig's crossing to `contract-a/2.4` takes all five local games
+down at once — which is the same window this document's crossing needs, and the reason both
+belong in one deploy rather than two (`contract-a.md` §21, A52, *The migration note for the
+living deployment*).
+
+#### The migration note for the living deployment
+
+**The fleet that crosses this major is six worlds on two machines, and it moves in lockstep.**
+That is D21's whole reason for taking the major **now**: this is the last moment a breaking wire
+change costs a rebuild instead of a migration story for people the owner cannot reach (D13,
+applied one milestone later). **It is also the only rehearsal this project gets** for moving a
+fleet across a major before the peers are strangers, and it should be run as a rehearsal rather
+than as a deploy.
+
+**What a fleet does to cross a major, in order:**
+
+1. **The sidecars and the relay move together.** A `contract-b/3` sidecar and a `contract-b/4`
+   relay are incompatible **by design**; there is no rolling window in which the map is half
+   crossed and still exchanging organisms. Every peer needs its credential **before** the relay
+   stops accepting the shared token, which means the join strings are minted and distributed
+   first, while the old wire still works.
+2. **The old path stops answering, loudly.** `/contract-b/v3` goes to `4000` at the moment the
+   relay restarts on `contract-b/4.0`. A peer left behind gets a defined close and a log line,
+   never a silence — which is the difference between an upgrade somebody notices and one they
+   diagnose.
+3. **The far end applies it at its own operator's leisure, and that is not observable from
+   here.** D9 forbids the rig to drive the second computer. The one observable is the
+   `client gone` / `client connected` / `reason=reclaimed` triple for that peer in `relay.log`,
+   and until it appears, that slot is dark and its lanes are bypassed — working exactly as
+   designed, and looking exactly like a peer that has gone away (§8, Risk 5).
+4. **The far-end bundle is rebuilt after the change**, because a stale far-end sidecar is what
+   refuses an upgraded neighbour's exports — `dev_environment.md`'s *The minors* is the episode,
+   and B25's gate is the rule written from it.
+
+**The rollout shape this specific rig has, stated because it changes the cost.** Contract A's
+bearer token ships in the same milestone and is a **mod** change, and a mod deploy takes all
+five local games down at once — `deploy.sh` copies into `BepInEx/plugins/` and a running game
+locks the DLL. **So the rig's crossing to `contract-b/4.0` is a five-games-down deploy, not a
+rolling sidecar change**, and every other pending mod change belongs in the same window.
+`m5_tracking.md` carries the measured cost and the sequence; the contract's part is only to say
+that the crossing is one window rather than six.
+
+**What the crossing must not cost, and it is the bar WP2 reports against: zero discarded
+journal bytes.** Every sidecar comes back to **its own slot and its own coordinate** with
+`reason: "reclaimed"`, replays its journal with **zero** discarded bytes, and reopens all of its
+lanes — because a credential change touches the wire and not custody, and a peer that loses a
+journal entry to an authentication upgrade has lost an organism to bookkeeping (D2).
+
+**Enforced by:** both wire ends, symmetrically — each side sends `"contract-b/4.0"` and compares
+only the major; the **relay**, additionally, for the retired paths and their `4000`; the
+**operator**, for minting the credentials before the old wire stops, for one deploy window
+rather than six, and for reading the far end's return out of `relay.log` rather than assuming
+it.

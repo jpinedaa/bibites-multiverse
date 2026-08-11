@@ -1,13 +1,20 @@
 # The Canonical Genome Projection and `genomeHash`
 
 **Version:** `bb8-genome/1`
-**Status:** implementation-ready for M3 and **unchanged by M4**. New on 2026-08-03, from
-decision D11 and `m3_considerations.md` Risk 9. Re-verified on 2026-08-05 against the M4
-contract wave: the projection covers one organism's genes, brain and version tag, and
-nothing in D12–D16 touches any of them. The grid, route-around, the bounded hold and the
-delivery rate limit all move *where* and *when* an organism goes, never what its genome is,
+**Status:** implementation-ready for M3 and **unchanged by M4 and by `contract-b/4.0`**. New on
+2026-08-03, from decision D11 and `m3_considerations.md` Risk 9. Re-verified on 2026-08-05
+against the M4 contract wave: the projection covers one organism's genes, brain and version
+tag, and nothing in D12–D16 touches any of them. The grid, route-around, the bounded hold and
+the delivery rate limit all move *where* and *when* an organism goes, never what its genome is,
 so the digest of a given organism is the same value under `contract-b/2.0` and
-`contract-b/3.0`. Only the cross-references below moved.
+`contract-b/3.0`. **Re-verified again on 2026-08-11 against the M5 wave**
+(`contract-b-m4.md` §22, `contract-b/4.0`): per-peer credentials, TLS, capacity limits, a
+forward receipt, subscriber authorisation and an admin path all change *who may speak* and
+*what may be sent*, never what a genome is, so the digest is the same value under
+`contract-b/4.0` too. The projection stays `bb8-genome/1`. **One cross-reference moved and it
+is the only substantive change**: §10 item 2's argument used to rest on the relay's
+game-version refusal as the map's membership rule, and under D22 the map's membership rule is
+the **contract** version — see that item.
 **Owner:** `bb8-schema` (Go, sidecar-side only — D4, D7).
 
 `genomeHash` is the join key of `multiverse-archive` and the node identity of the lineage
@@ -522,6 +529,20 @@ validation may reject something this document would happily hash.
    version mismatch at connect (`contract-b-m4.md` §6.1), so one map runs one version.
    A mixed-version map would split the lineage graph at the version boundary, and the
    answer is conversion-then-hash, not a weaker hash.
+
+   **What holds this up changed on 2026-08-11, and the item did not.** D22 makes the map's
+   membership test the **contract** version and the game version a per-machine matter answered
+   by a published support matrix, so *"one map runs one version"* is no longer a property of
+   the design. It is still a property of the running system, because the owner chose the same
+   day to **keep** the four shipped game-version gates — §6.1's relay refusal among them — as
+   named, deliberate exceptions (`contract-b-m4.md` §22, B31). So the harmlessness above stands
+   **on a gate that is kept rather than on a rule that is stated**, and it is the gate's
+   retirement, not a `bb8-genome/2`, that would make the lineage graph split real. **The
+   diagnostic-only rule B31 puts on the envelope's game version does not reach this
+   document**: the projection reads the version tag as an **identity** input — two game
+   versions are two genomes for hashing purposes, by design — and never as a capability or a
+   refusal decision, which is the only thing B31 prohibits. Nothing here changes at
+   `contract-b/4.0`.
 3. **`Inov` is in the hash.** Two independently evolved but structurally identical brains
    hash differently, because their innovation numbers differ. This is correct for lineage —
    they *are* different genomes by descent — but it means the hash is not a structural

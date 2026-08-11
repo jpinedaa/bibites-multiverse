@@ -1,6 +1,6 @@
 # Contract A — Mod ↔ Sidecar Wire Specification
 
-**Version:** `contract-a/2.3`
+**Version:** `contract-a/2.4` (amended — §21, A52; `contract-a/2.3` before it, §19 A44)
 **Amended:** 2026-08-02, amendment set `contract-a/1 + A1–A10` (§13). Both implementations
 exist, and each side resolved an ambiguity locally before the other could see it; §13
 makes every resolution law. Each place in the body that was wrong or under-specified now
@@ -73,16 +73,39 @@ following §18 A40's precedent exactly. The save-interval half never reached thi
 always defaulted `saveMinutes` to `10` and named the mod as its owner, and what changed is that
 the rig stopped overriding it. Affected body text carries an `(amended — §20, Ax)` marker, and
 **§20 wins over the body and over §13 to §19 wherever they disagree.**
+**Amended:** 2026-08-11, amendment set `contract-a/2.4 + A47–A52` (**§21**), from the M5
+decisions the owner ratified on 2026-08-10 and refined on 2026-08-11 — **D21** the public
+wire, **D22** layered version compatibility (`system_decomposition.md`;
+`m5_considerations.md`, *Decisions for the Owner*). This wire gains a **bearer token on the
+WebSocket upgrade**, which closes §12 item 1 after three milestones of *not yet*; the
+envelope's game version is stated as **diagnostic metadata** that no new reader may parse into
+a capability decision, with the shipped gates kept as named exceptions; `parents[]` gains one
+OPTIONAL flag that makes `"blob_dropped_for_size"` reachable at last (§12 item 8); the sidecar
+refuses a declared export set the map cannot use, once, instead of leaving a misconfigured
+world silently quiet (§12 item 9); and contract debt A5 is re-assessed for the fourth time
+(§12 item 6). One header, one OPTIONAL field and one close code are all additive, so §3.1's
+own test answers with a **minor** bump to **`contract-a/2.4`** and the URL path does **not**
+move — it stays `/contract-a/v2` (§21, A52). Contract B's matching set is
+`contract-b-m4.md` §22, B22–B32, which takes **that** wire to the major `contract-b/4.0`;
+the two tokens are different secrets on different wires and neither is the other (§21, A47).
+Affected body text carries an `(amended — §21, Ax)` or `(added — §21, Ax)` marker, and
+**§21 wins over the body and over §13 to §20 wherever they disagree.**
 **Status:** implementation-ready for M4. Derived from the ratified decisions D1–D20 in
 `system_decomposition.md`, the runtime facts in `m1_findings.md`, the world-geometry and
 entry-position research in `m2_findings.md`, the ring, containment and lineage designs in
 `m3_considerations.md`, and the grid, healing, recovery and operations designs in
-`m4_considerations.md`.
-**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/3.5`, sidecar ↔ relay ↔
-sidecar ↔ archive) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged by M4, by §16 —
-`genes.speciesID` is excluded from the canonical projection, §4.3 there — by §17, which
-adds no payload field and hashes nothing, by §18, which adds no field at all, and by §19,
-whose five fields describe a world rather than an organism and are hashed by nobody).
+`m4_considerations.md`. **Implementation-ready for M5 since §21** (added — §21, A52), written
+2026-08-11 from D21–D25 and the Contract A rows of `m5_considerations.md`, *Contract Changes
+Needed* — rows 3, 10a, 11, 12, 13 and 15 — and from the work-package order in
+`m5_tracking.md`. **§21 is written before any M5 code**, which is WP1's whole reason to exist.
+**Companion documents:** `contracts/contract-b-m4.md` (`contract-b/4.0`, sidecar ↔ relay ↔
+sidecar ↔ archive — the major its own M5 set takes for the per-peer credential, authored in
+the same wave; amended — §21, A52) and `contracts/genome-hash.md` (`bb8-genome/1`, unchanged
+by M4, by §16 — `genes.speciesID` is excluded from the canonical projection, §4.3 there — by
+§17, which adds no payload field and hashes nothing, by §18, which adds no field at all, by
+§19, whose five fields describe a world rather than an organism and are hashed by nobody, and
+by §21, whose one new payload-adjacent field says whether a blob was *shipped* and never what
+is *in* one).
 
 This document is the complete interface between `bibites-mod` (C#, in-process with The
 Bibites) and `multiverse-sidecar` (Go, a separate process on the same machine). It is
@@ -137,7 +160,7 @@ A20, A21):
 | Subprotocol | None requested, none required |
 | Max frame size | 8 MiB (`maxFrameBytes`), enforced by both sides |
 | Concurrency | The sidecar accepts **at most one** mod connection at a time |
-| Authentication | None, in M2 **and in M3** (amended — §14, A17). The token M3 adds lives on Contract B, not here — see §12, open item 1 |
+| Authentication | **A bearer token on the HTTP upgrade** (amended — §21, A47): `Authorization: Bearer <token>`, verified before the WebSocket exists and refused with HTTP **401**. None in M2, M3 or M4 (amended — §14, A17), and §12 item 1 is closed by A47. The token is **this machine's own**, shared by exactly two local processes; it is **not** Contract B's per-peer credential and carries none of that credential's three grants (`contract-b-m4.md` §3.1, §22 B22) |
 
 The mod connects only while a simulation world is loaded. It connects after the world is
 ready and closes with code `1000` when the world unloads or the game quits. The mod
@@ -159,13 +182,20 @@ message — it terminates the session.
 | `1009` | `TOO_BIG` | either | A frame exceeded `maxFrameBytes`. Emitted by stock WebSocket libraries. Treat as `4003`. |
 | `4000` | `PROTOCOL_UNSUPPORTED` | sidecar | The envelope's `protocol` major version is not supported. The mod **MUST NOT** reconnect until it is restarted or reconfigured. It logs one loud error. |
 | `4001` | `SLOT_MISMATCH` | sidecar | `CONFIG_UPDATE.ringSlot` disagrees with the slot the sidecar holds. A mis-wired rig. The mod **MUST NOT** reconnect automatically. Named `SECTOR_MISMATCH` in M2, over the retired `{x, y}` sector; the code and the behaviour are unchanged (amended — §14, A14). |
-| `4002` | `GAME_VERSION_UNSUPPORTED` | sidecar | `bb8-schema` has no support for `CONFIG_UPDATE.gameVersion`. The mod **MUST NOT** reconnect automatically. |
+| `4002` | `GAME_VERSION_UNSUPPORTED` | sidecar | `bb8-schema` has no support for `CONFIG_UPDATE.gameVersion`. The mod **MUST NOT** reconnect automatically. **This is one of the four version gates D22 keeps as a named exception** (amended — §21, A48): it decides on a game version, which no *new* reader may do, and the owner chose on 2026-08-11 to leave every shipped gate exactly as it runs. Inert in practice — the allow-list is empty outside tests and empty means accept — and normative. |
 | `4003` | `MALFORMED_FRAME` | either | A frame was not valid JSON, or the envelope was missing a REQUIRED field. The mod reconnects with backoff. |
 | `4004` | `HEARTBEAT_TIMEOUT` | sidecar | No `HEARTBEAT` within `heartbeatTimeoutMs`. See §8. The mod reconnects with backoff. **It is also the code for the transport half of §8's table** — no pong within `wsPongTimeoutMs` — because the reaction is identical and a mod must never have to tell them apart (stated — §20, A45). **A diagnosis does have to**, and the sidecar's own log is where: the heartbeat path logs a `silentFor`, the pong path logs an `err`. |
 | `4005` | `SHUTTING_DOWN` | either | The sender is draining. The mod reconnects with backoff. |
 | `4006` | `REPLACED` | sidecar | A newer mod connection took over. The old connection **MUST NOT** reconnect. |
+| `4007` | `EXPORT_EDGES_UNUSABLE` | sidecar | **No edge of the declared `exportEdges` lies on an axis this map has** (added — §21, A50), on a map that has at least one axis. A configuration error on **this** machine, not a map state and not a peer's fault. The mod **MUST NOT** reconnect automatically. The reason string names the declared set and the map's shape; the sidecar's log names the remedy and who must act (§5.1, §6.1, §12 item 9). |
 
 The close reason string is free text for humans. No side parses it.
+
+**A refused *upgrade* is not a close** (added — §21, A47). The bearer token of A47 is verified
+on the HTTP upgrade, before a WebSocket exists, so a bad or missing token is answered with HTTP
+**401** and never with a code from this table. There is deliberately no close code for
+authentication: a code in this table is a statement made *inside* a session, and a session the
+token did not open never started (§2, §6.2).
 
 ---
 
@@ -175,7 +205,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_OUT",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -185,7 +215,7 @@ Every frame, in both directions, is a JSON object with exactly this shape:
 
 | Field | JSON type | Required | Semantics |
 |---|---|---|---|
-| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.3"` (amended — §19, A44; `"contract-a/2.2"` before it, §17 A37, `"contract-a/2.1"` before that, §16 A33, and `"contract-a/2.0"` before that, §15 A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
+| `protocol` | string | yes | Protocol identifier, major and minor version: `"contract-a/<major>.<minor>"`. This release is `"contract-a/2.4"` (amended — §21, A52; `"contract-a/2.3"` before it, §19 A44, `"contract-a/2.2"` before that, §17 A37, `"contract-a/2.1"` before that, §16 A33, and `"contract-a/2.0"` before that, §15 A23). A value with no `.` means minor `0`, so the M2 string `"contract-a/1"` reads as major 1, minor 0 (amended — §14, A16). |
 | `type` | string | yes | The message discriminator. One of the nine names in §5. Uppercase, `A–Z` and `_` only. |
 | `messageId` | string | yes | UUID v4, lowercase, hyphenated, 36 characters. Unique per frame. Used **only** for log correlation. It is **not** an idempotency key. |
 | `sentAt` | number (int64) | yes | Unix milliseconds on the sender's wall clock. Informational only (D5). No side compares it against its own clock to make a decision. |
@@ -208,8 +238,9 @@ Every frame, in both directions, is a JSON object with exactly this shape:
   of its field, never by arithmetic on the minor. The minor exists so a log line and a
   bug report say which shape was on the wire.
 - The URL path stays major-scoped: `/contract-a/v2` serves every `contract-a/2.x` — including
-  `contract-a/2.1` (amended — §16, A33), `contract-a/2.2` (amended — §17, A37) and
-  `contract-a/2.3` (amended — §19, A44) — exactly as `/contract-a/v1` served every
+  `contract-a/2.1` (amended — §16, A33), `contract-a/2.2` (amended — §17, A37),
+  `contract-a/2.3` (amended — §19, A44) and `contract-a/2.4` (amended — §21, A52) — exactly as
+  `/contract-a/v1` served every
   `contract-a/1.x` (amended — §15, A23). A **major** bump
   therefore moves the path, and the retired path is kept alive only to answer with close
   `4000` (§2).
@@ -600,6 +631,13 @@ again whenever any field in it changes. It is not periodic.
 The mod **MUST** send `CONFIG_UPDATE` before any other frame. The sidecar **MUST** treat
 any other first frame as malformed and close with `4003`.
 
+**The handshake is authenticated one layer below this frame** (added — §21, A47). The bearer
+token rides the HTTP upgrade as `Authorization: Bearer <token>` and is verified before the
+WebSocket exists, so a mod that fails it never sends this message at all and no credential ever
+appears in a frame, a log line or a `messageId` correlation. **`CONFIG_UPDATE` gains no field
+for it**, and it never will: a value that authenticates the connection cannot be carried by a
+message the connection had to be open to deliver (§2, §21 A47).
+
 | Field | JSON type | Required | Semantics |
 |---|---|---|---|
 | `sessionId` | `uuid` | yes | Minted fresh on **every world load**. A change in `sessionId` tells the sidecar the mod lost all in-memory state and that the world may have rolled back to an earlier save. This drives custody reassertion (§7.4). The game's own `gameName` is unreliable for this — `CreateSave` never writes one (`m1_findings.md`, hazards) — so the mod mints its own value. |
@@ -631,6 +669,14 @@ The sidecar also **MUST** forward the declared `exportEdges` to the relay on its
 `SECTOR_CLAIM` (`contract-b-m4.md` §6.3), because the relay computes one effective
 neighbour per export edge and cannot do that for an edge it has not been told about.
 
+**And it MUST check the declared set against the map, once it holds one** (added — §21, A50).
+The three validations above are all the sidecar can perform from the frame alone; whether the
+declared edges lie on axes this map actually has is a **topology** question, and the sidecar is
+the only party that may answer it — the mod declares geometry and learns no topology (D8, D13,
+§15 A18). A declared set with **no** usable edge on a map that has at least one axis closes the
+session with `4007`; a partially usable set is not refused and is logged edge by edge. A50
+states the check, its timing and its two answers, and it closes §12 item 9.
+
 **The five settings fields are validated but never fatal** (added — §19, A42). The sidecar
 checks each one's shape, **strips what fails**, keeps the rest, and **MUST NOT** close on any
 of them — the third named exception to §9.3, and the second on a frame with no NACK channel.
@@ -641,7 +687,7 @@ custody or the `S` check. The sidecar carries what survives to the relay in its 
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "CONFIG_UPDATE",
   "messageId": "1c2fbe80-5a17-4a2b-9a20-3d54f1b7e001",
   "sentAt": 1785693598004,
@@ -740,7 +786,7 @@ is conformant and simply reads as unknown — an honest gap, never a zero.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "HEARTBEAT",
   "messageId": "6b0a3f1d-3c4e-4a91-b7f2-51c8a0d33e42",
   "sentAt": 1785693600000,
@@ -809,12 +855,13 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
 | `migrationId` | `uuid` | yes | **The idempotency key (D2).** Minted by the mod, once per organism per migration attempt. It **MUST NOT** change across a retry of the same organism, including a retry after a reconnect. |
 | `entityId` | `entityId` | yes | `BibiteBody.id.id`. Survives the round trip (`m1_findings.md` §4.1) and is the durable dedup key at the destination and the reconciliation key after a rollback (§7.4). |
 | `kind` | string enum | yes | `"bibite"` in M2 and M3. |
-| `gameVersion` | string | yes | The version that produced `payload`. Authoritative over the blob's own `version` key. |
+| `gameVersion` | string | yes | The version that produced `payload`. Authoritative over the blob's own `version` key. **It is diagnostic metadata** (amended — §21, A48): a reader written from `contract-a/2.4` onward **MUST NOT** parse it into a capability or refusal decision. Selecting the `bb8-schema` dialect that validates `payload` is **not** such a decision — it is a parse of bytes, and `INVALID_PAYLOAD` is a verdict on the blob, never on the version (A48). |
 | `payload` | string | yes | The opaque bb8 blob (§4.6). |
 | `parents` | array of object | no | **The lineage inputs** (added — §14, A12). `0`–`maxParentBlobs` (2) entries, in `BibiteGenes.parent1` then `BibiteGenes.parent2` order. Absent and `[]` mean the same thing: no parent is known. |
 | `parents[].entityId` | `entityId` | yes | The parent's `BibiteBody.id.id`, read from the **live `BibiteGenes` component** of the migrant — never from the migrant's serialized payload (amended — §14, A12). `0` is the game's "unassigned" sentinel and such an entry **MUST** be omitted entirely. |
-| `parents[].payload` | string | no | The parent's own opaque bb8 blob, from `SaveSystem.SerializeBibite`, subject to the same rules as `payload` (§4.6). **Absent means the parent is gone** — `BibiteGenes` drops the parentage once the parent GameObject is destroyed, so this is normal and is recorded as a gap, never as an error. |
-| `parents[].gameVersion` | string | no | The version that produced `parents[].payload`. Absent means "the same as the migrant's `gameVersion`", which is always true in practice because both were serialized in the same tick. |
+| `parents[].payload` | string | no | The parent's own opaque bb8 blob, from `SaveSystem.SerializeBibite`, subject to the same rules as `payload` (§4.6). **Absent means the parent is gone** — `BibiteGenes` drops the parentage once the parent GameObject is destroyed, so this is normal and is recorded as a gap, never as an error. **Unless `blobDroppedForSize` says otherwise**, which is the one other way an entry arrives blobless (amended — §21, A49). |
+| `parents[].gameVersion` | string | no | The version that produced `parents[].payload`. Absent means "the same as the migrant's `gameVersion`", which is always true in practice because both were serialized in the same tick. **Diagnostic metadata, on the same terms as the migrant's own `gameVersion`** (amended — §21, A48). |
+| `parents[].blobDroppedForSize` | bool | no | **This parent had a blob and the mod dropped it to fit the frame** (added — §21, A49). Present and `true` **only** on an entry with no `payload`, and **only** for a drop under §5.3's frame-size rule — never for a dead parent and never for a serialization failure, both of which stay ordinary gaps. Absent means *no statement*, which is what every `contract-a/2.3` mod says and what a `contract-a/2.4` mod says about a parent it did not drop. This is the field that makes `contract-b-m4.md` §6.6's `"blob_dropped_for_size"` reachable after two milestones in which it was defined and never emitted (§12 item 8). |
 | `species` | object | no | **The migrant's species identity** (added — §16, A30). Read from the live organism's own `Species` record — `BibiteGenes.species` — never from the payload, which carries only a world-local integer. Absent when the organism has no species record, and absent from a mod that does not implement §16 at all; both are conformant, and §5.7's absent-block rule states exactly what the importer then does. |
 | `species.genericName` | string | yes | The genus half of the name, as the source world holds it (`Species.genericName`), **with its whitespace normalized by the exporting mod** — trimmed at the edges, internal runs collapsed to one U+0020 — before the rules below are applied (amended — §16, A34; "byte for byte" before it). REQUIRED when `species` is present. Non-empty, at most **64 UTF-8 bytes**, no leading or trailing whitespace. |
 | `species.specificName` | string | yes | The specific half (`Species.specificName`). Same rules. The name the importer matches on is `genericName + " " + specificName`, assembled with exactly one U+0020 — the game's own `Species.name` (`Species.cs:85`). |
@@ -849,6 +896,11 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
    projection (`genome-hash.md`), cache each blob in the genome cache under its hash, and
    record a **gap** for every parent entry that carries no blob or whose blob will not
    hash. This step **MUST NOT** fail the migration: a gap is a normal outcome (D11).
+   **The gap's reason now has three reachable values, not two** (amended — §21, A49): a
+   blobless entry with `blobDroppedForSize: true` records `"blob_dropped_for_size"`, a
+   blobless entry without it records `"parent_gone"`, and a blob that will not hash records
+   `"blob_invalid"` (`contract-b-m4.md` §6.6). The flag is a **label on a gap**, never a
+   reason to refuse one.
 6. Write the journal entry and **flush it to durable storage** (`fsync` the file and its
    directory). Only then reply `MIGRATE_OUT_ACK`. An ACK before the flush breaks D2.
 7. Forward over Contract B, with the annex attached and **every parent blob stripped**
@@ -869,9 +921,14 @@ message resolves. See §6.3. The mod **MUST NOT** destroy it yet.
   the mod, and the hash is the sidecar's job;
 - keep the whole frame under `maxFrameBytes`. When the migrant plus its parents would
   exceed `maxFrameBytes − frameHeadroomBytes`, the mod **MUST** drop parent **blobs**,
-  largest first, keeping their `entityId` entries. A dropped blob is a gap, and a gap is
-  never a reason to abandon a migration. The migrant's own `payload` is never dropped;
-- treat a serialization failure for a parent as a gap, not as an error.
+  largest first, keeping their `entityId` entries, and **MUST** set
+  `blobDroppedForSize: true` on every entry it drops (amended — §21, A49). A dropped blob is
+  a gap, and a gap is never a reason to abandon a migration. The migrant's own `payload` is
+  never dropped;
+- treat a serialization failure for a parent as a gap, not as an error — and **not** as a
+  drop: `blobDroppedForSize` says *I had it and could not fit it*, which is a different fact
+  from *I could not produce it*, and a mod that conflated the two would put a false label on
+  a permanent absence (added — §21, A49).
 
 An implementation **SHOULD** cache the serialized blob by entity ID **within one tick**: a
 brood of siblings crossing together would otherwise serialize the same mother repeatedly on
@@ -904,7 +961,7 @@ species travels when that parent migrates, and not before.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_OUT",
   "messageId": "d3a11c9e-77b4-4b2f-8e5c-0a91f4d6b210",
   "sentAt": 1785693600123,
@@ -957,7 +1014,7 @@ are unchanged.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_OUT",
   "messageId": "f4b83c17-0d95-4a6e-b721-8c50a9f3e264",
   "sentAt": 1785693600123,
@@ -1029,7 +1086,7 @@ always accepts" is the same rule, restated now that the passive category is gone
 | `edges` | array of object | yes | **One entry per declared export edge** (amended — §15, A18) — **four under D17** (amended — §18, A38). At most one entry per `edge` value; a duplicate `edge` is a sidecar defect and the mod applies the **first** and logs one warning. An empty array closes **every** export edge and is the correct frame to send when the sidecar holds no slot. |
 | `edges[].edge` | edge enum | yes | Which edge. **MUST** be a member of the `exportEdges` the mod declared. |
 | `edges[].open` | bool | yes | `true` means migration **out of** this edge is permitted right now. It says nothing about arrivals **on** this edge, which are never gated by it (amended — §18, A38). All declared edges are independent: a peer with a dead row still exports north (`m4_considerations.md`, Question 6), and under D17 a peer whose east neighbour is dark still exports west along the same row. |
-| `edges[].reason` | string enum | yes | Why, for this edge. When `open` is `true`: `"peer_live"`. When `open` is `false`: `"no_peer"`, `"peer_mod_absent"` (added — §14, A11), `"peer_incompatible"`, `"peer_unreachable"`, `"peer_overloaded"`, `"admin_closed"`, `"sim_size_mismatch"`. Under route-around a closed edge means **no slot on that axis is deliverable**, so the reason is an aggregate: `contract-b-m4.md` §8 fixes exactly which value the sidecar picks. |
+| `edges[].reason` | string enum | yes | Why, for this edge. When `open` is `true`: `"peer_live"`. When `open` is `false`: `"no_peer"`, `"peer_mod_absent"` (added — §14, A11), `"peer_incompatible"`, `"peer_unreachable"`, `"peer_overloaded"`, `"admin_closed"`, `"sim_size_mismatch"`. Under route-around a closed edge means **no slot on that axis is deliverable**, so the reason is an aggregate: `contract-b-m4.md` §8 fixes exactly which value the sidecar picks. **`"peer_incompatible"` is where the mod meets the third of D22's four kept version gates** (amended — §21, A48): the walk skipped a peer on a different game version, that gate is kept exactly as shipped, and this value plus §9.1's `PEER_INCOMPATIBLE` are the two names it arrives under. |
 | `edges[].peerSimulationSize` | float | no | Present when `open` is `true`. The **effective neighbour's** `S` on that edge — which may differ between the two edges, because they are different peers. The mod **MUST** compare it against its own `S` and treat that edge as closed on a mismatch, even though the sidecar already checked. Two independent checks, because a mid-run resize can race. |
 
 `contract-b-m4.md` §8 gives the exact mapping from the relay's `PEER_STATUS` and
@@ -1066,7 +1123,7 @@ Both lanes open, which is the ordinary state of a peer on a live grid:
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "EDGE_STATUS",
   "messageId": "5e18b2c0-4a6d-4f88-9c31-b0e75a2d4413",
   "sentAt": 1785693598041,
@@ -1097,7 +1154,7 @@ go, because a column of two holds no third slot to skip to (`contract-b-m4.md` �
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "EDGE_STATUS",
   "messageId": "b41c7d29-6e05-4f3a-8d17-92c0be5a4f38",
   "sentAt": 1785693731660,
@@ -1128,7 +1185,7 @@ Note that this mod keeps receiving organisms on `N` and `S` while both are close
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "EDGE_STATUS",
   "messageId": "7a3f1d84-2c96-4b07-a5e1-38d0c6b91f27",
   "sentAt": 1786121853812,
@@ -1182,7 +1239,7 @@ There is no acknowledgement of an acknowledgement. The chain stops here.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_OUT_ACK",
   "messageId": "a0c47f21-6b19-4d05-93ae-1c8f2b6e5507",
   "sentAt": 1785693600141,
@@ -1217,7 +1274,7 @@ the strip forever.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_OUT_NACK",
   "messageId": "cf51d7a3-882b-4e14-a0d6-33b9c4e17708",
   "sentAt": 1785693600138,
@@ -1260,7 +1317,7 @@ something to infer anything from.
 | `migrationId` | `uuid` | yes | The idempotency key. Preserved end to end from the originating mod. |
 | `entityId` | `entityId` | yes | Extracted from the blob by `bb8-schema`. The mod uses it as its **durable** dedup key (§7.3) and never parses the blob itself (D4). |
 | `kind` | string enum | yes | `"bibite"` in M2 and M3. Unknown kind → `MIGRATE_IN_NACK` / `KIND_UNSUPPORTED`. |
-| `gameVersion` | string | yes | The version the blob is valid for, after any sidecar-side conversion. The mod compares it against `Application.version`. |
+| `gameVersion` | string | yes | The version the blob is valid for, after any sidecar-side conversion. The mod compares it against `Application.version`. **That comparison is one of the four version gates D22 keeps as a named exception** (amended — §21, A48): it is the input to §9.2's permanent `VERSION_UNSUPPORTED`, it decides on a game version, and the owner chose on 2026-08-11 to leave it running exactly as it is. **No other reader may follow it** — for anyone else this field is diagnostic metadata and nothing more (A48). |
 | `payload` | string | yes | The opaque bb8 blob (§4.6), already validated by `bb8-schema`. |
 | `species` | object | no | **The migrant's species identity, as its origin world named it** (added — §16, A30). Same four fields, same rules and the same all-or-nothing parent pair as `MIGRATE_OUT` (§5.3); the sidecar copies it out of the envelope unchanged (`contract-b-m4.md` §6.6) and never authors one. Absent means the sender did not carry one — a legacy mod, an organism with no species record, or a block the schema check stripped — and step 3's **absent-block rule** covers all three identically. |
 | `entryEdge` | edge enum | yes | The edge of the **receiving** sim the organism enters through. The sidecar computes it; the mod does not derive it. Under the grid it is the **opposite of the sender's `exitEdge`** — `"W"` for traffic off an east lane, `"S"` for traffic off a north lane — and, for a bounce-back, the **origin's own exit edge**, because a bounce-back comes home through the door it left by (amended — §15, A18; §14, A11; `contract-b-m4.md` §6.6, §9). All four values therefore appear here in M4. |
@@ -1391,7 +1448,7 @@ swallows every exception (`m1_findings.md` §1.2). Reply `DESERIALIZE_FAILED`.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_IN",
   "messageId": "7f2b91d6-0e34-4c7a-b158-9a03e6c2f411",
   "sentAt": 1785693600187,
@@ -1425,7 +1482,7 @@ copied, so it arrives still travelling north (added — §15, A18):
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_IN",
   "messageId": "0a5e83b1-9c47-4d20-b6f8-31e70c9a5d42",
   "sentAt": 1785693612044,
@@ -1480,7 +1537,7 @@ later replay of the same `migrationId` is answered without a second delivery.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_IN_ACK",
   "messageId": "34ab7c05-1d92-4e60-8b47-c1f0d5a29316",
   "sentAt": 1785693600231,
@@ -1527,7 +1584,7 @@ the one failure mode D2 accepts, but it is never the first choice.
 
 ```json
 {
-  "protocol": "contract-a/2.3",
+  "protocol": "contract-a/2.4",
   "type": "MIGRATE_IN_NACK",
   "messageId": "e91d4f3b-7c60-4a25-91b8-40d7e2ca6b19",
   "sentAt": 1785693600244,
@@ -1550,7 +1607,7 @@ the one failure mode D2 accepts, but it is never the first choice.
 
 ```
 mod                                   sidecar
- |  TCP + WebSocket upgrade  --------> |
+ |  TCP + upgrade + Bearer token ----> |   verify the token; 401 and no socket if it fails
  |  CONFIG_UPDATE(reason=connect) ---> |   validate gameVersion, ringSlot, exportEdges
  |  <-------------------- EDGE_STATUS  |   epoch = 1, full state, one entry per export edge
  |  HEARTBEAT ------------------------>|   (every 1000 ms from here on)
@@ -1559,6 +1616,14 @@ mod                                   sidecar
 
 The mod does not migrate anything through **any** edge until it has applied an
 `EDGE_STATUS` (amended — §15, A18).
+
+**The token is the first step and it fails before anything else can** (amended — §21, A47).
+An upgrade without an acceptable `Authorization` header is answered with HTTP **401** and no
+WebSocket is created, so none of the four validations below it ever runs and the sidecar
+learns nothing about the caller — not its `sessionId`, not its `gameVersion`, not its slot.
+**The export-set check of A50 is the one validation that cannot run here**, because the map
+is not the mod's to declare: it runs at the first `SECTOR_GRANT` this session sees, which may
+be the same second or may be an hour later (added — §21, A50).
 
 ### 6.2 Disconnect and reconnect
 
@@ -1573,8 +1638,15 @@ The mod is the reconnecting side. The sidecar never dials.
   its floor and produce an unthrottled redial loop (amended — §13, A8).
 - The connect attempt **MUST** run off the Unity main thread. A blocking connect on the
   main thread freezes the simulation.
-- Close codes `4000`, `4001`, `4002` and `4006` stop reconnection until the mod is
-  restarted or reconfigured. Every other close code reconnects with backoff.
+- Close codes `4000`, `4001`, `4002`, `4006` and `4007` stop reconnection until the mod is
+  restarted or reconfigured (amended — §21, A50). Every other close code reconnects with
+  backoff.
+- **An HTTP 401 on the upgrade reconnects with backoff and pins** (added — §21, A47). It is
+  not a close code, so it cannot appear in the list above; the mod retries on the ordinary
+  ladder and, after `authFailuresBeforeCeiling` consecutive 401s, holds at
+  `reconnectBackoffMaxMs` and logs **once** — naming the remedy and who must act. It **MUST
+  NOT** retry without the header, mint a token, or read one from anywhere but its configured
+  source. A wrong token is a person's problem and no amount of redialling is the fix.
 - On every reconnect the mod sends a fresh `CONFIG_UPDATE`. The `sessionId` is unchanged
   when the world did not reload, and new when it did.
 - The `EDGE_STATUS` `epoch` counter resets to 1 on a new connection. The mod resets its
@@ -1829,7 +1901,7 @@ switch on `code` without a default branch.
 | `EDGE_CLOSED` | transient | The exit edge has no live neighbour, or it was closed since the last `EDGE_STATUS`. | Revive. Stop migrating on that edge until a new `EDGE_STATUS` opens it. |
 | `NO_ROUTE` | transient | The edge is open but the sidecar has no destination for it: the relay has not granted a slot yet, or the effective-neighbour walk on that axis found no deliverable slot between the last `EDGE_STATUS` and this frame (amended — §15, A18). | Revive. Retry after `retryAfterMs`. |
 | `SIM_SIZE_MISMATCH` | transient | The neighbour's `S` differs from `simulationSize`. The transverse mapping would be ill-defined (`m2_findings.md` §2.4). | Revive. Treat the edge as closed until a new `EDGE_STATUS`. |
-| `PEER_INCOMPATIBLE` | permanent | The neighbour's game version or mod set cannot accept this organism. | Revive. Mark the edge unusable for this peer. |
+| `PEER_INCOMPATIBLE` | permanent | The neighbour's game version or mod set cannot accept this organism. **This is the mod-facing face of `mapwalk`'s `peer_incompatible` skip, the second of D22's four kept gates** (amended — §21, A48): the walk decides on a game version, the decision is kept as shipped, and this NACK and `EDGE_STATUS.reason: "peer_incompatible"` (§5.4) are the two places the mod meets it. | Revive. Mark the edge unusable for this peer. |
 | `KIND_UNSUPPORTED` | permanent | `kind` is not `"bibite"`. | Revive. Never retry this organism. |
 | `INVALID_PAYLOAD` | permanent | `bb8-schema` rejected the blob, or it exceeded `maxPayloadBytes`. | Revive. Never retry this organism. Log the blob size and the first 200 characters. |
 | `DUPLICATE_MIGRATION_ID` | permanent | The `migrationId` is journaled against a different payload. A mod defect. | Revive. Log loudly. Never reuse that id. |
@@ -1853,6 +1925,13 @@ that condition permanent rather than temporary, and the debt stays open and moot
 debt moot: **the mod MUST record `exitEdge` in its in-flight record**, and on a
 `transient` NACK it closes **only that edge** until the next `EDGE_STATUS`, never both. A mod
 that closes every edge on one `EDGE_CLOSED` throws away a lane that is open.
+
+**M5 re-assessed the debt a fourth time and still does not add the field** (amended — §21,
+A51). The obligation above is now a conformance requirement for a mod this project may not
+have compiled, which is the strongest reason yet to look at it — and the answer is unchanged,
+for a reason A22 did not have: an `edge` on the NACK would create a second answer that can
+**disagree** with the mod's own in-flight record, and reconciling two answers is a rule this
+wire has never needed. A51 records the full assessment and what would close the item.
 
 **M4 adds no `MIGRATE_OUT_NACK` code and no `MIGRATE_IN_NACK` code.** Every M4 failure mode
 on this wire is an existing code applied per edge: a closed lane is `EDGE_CLOSED`, an
@@ -1882,7 +1961,7 @@ while the organism is not.
 | `EDGE_CLOSED` | transient | `entryEdge` is not one of the edges the mod **declared** in `CONFIG_UPDATE.borderEdges`. A declared edge that is merely closed right now still accepts inbound organisms — a bounce-back arrives exactly when the edge just closed (amended — §13, A3). | Keep custody. Do not re-deliver on this edge until `CONFIG_UPDATE` changes `borderEdges`. |
 | `DESERIALIZE_FAILED` | permanent | `LoadBibiteOrEggFromData` returned `null`. The method swallows every exception, so no detail is available (`m1_findings.md` §1.2). | Do not re-deliver. Hold in the journal for an operator (amended — §13, A7). |
 | `RELINK_FAILED` | permanent | The restore succeeded but the parent/child repair threw. The mod destroyed the half-restored organism before replying. | Do not re-deliver. Hold for an operator. Log loudly — this is the M1 carried gap firing (amended — §13, A7). |
-| `VERSION_UNSUPPORTED` | permanent | `gameVersion` does not match the running `Application.version` and the mod refuses the risk. | Do not re-deliver. Hold for an operator. Mark the peer pair incompatible (amended — §13, A7). |
+| `VERSION_UNSUPPORTED` | permanent | `gameVersion` does not match the running `Application.version` and the mod refuses the risk. **The first of D22's four kept gates, and the one this document owns** (amended — §21, A48): it is the marker-plus-refusal design already shipped, it is **not** retired by the diagnostic-only rule, and `contract-b-m4.md` §9.2 carries the Contract B consequence of the same refusal (§22, B31). | Do not re-deliver. Hold for an operator. Mark the peer pair incompatible (amended — §13, A7). |
 | `KIND_UNSUPPORTED` | permanent | `kind` is not `"bibite"`. | Do not re-deliver. Hold for an operator. |
 | `MALFORMED_MESSAGE` | permanent | The `data` object failed field validation. A sidecar defect. | Do not re-deliver. Hold for an operator. Log loudly. |
 | `SHUTTING_DOWN` | transient | The game is unloading the world or quitting. | Keep custody. Re-deliver after the next handshake. |
@@ -1927,6 +2006,8 @@ Both sides ship these defaults. Only the owning side needs a knob for its own va
 | `reconnectBackoffMinMs` | `1000` | mod | Backoff floor. |
 | `reconnectBackoffMaxMs` | `30000` | mod | Backoff ceiling. |
 | `stableSessionMs` | `5000` | mod | How long a connection must live before the backoff ladder resets (§6.2, §13 A8). |
+| `contractATokenFile` | `<state-dir>/contract-a.token` | both | **Where the bearer token lives** (added — §21, A47). The sidecar's `--contract-a-token-file` / `MULTIVERSE_CONTRACT_A_TOKEN_FILE` and the mod's `MULTIVERSE_CONTRACT_A_TOKEN_FILE` name the same file on the same machine (D9). The mod may instead take the value directly from `MULTIVERSE_CONTRACT_A_TOKEN`. Mode `0600`, minted by the sidecar at first start when the file does not exist. **Not** Contract B's `MULTIVERSE_TOKEN` / `--token-file`, which is a different secret on a different wire (`contract-b-m4.md` §3.1). |
+| `authFailuresBeforeCeiling` | `5` | mod | Consecutive HTTP **401**s on the upgrade after which the reconnect ladder holds at `reconnectBackoffMaxMs` and the mod logs once, naming the remedy and who must act (added — §21, A47). It is the mod-side half of DQ8's *"HTTP 401, backoff pinned after five tries"*, and it exists so a misconfigured install is a quiet, diagnosable loop rather than a redial storm. |
 | `simNotReadyGraceMs` | `2000` | mod | How long a `MIGRATE_IN` may sit queued at `timeScale` 0 before `SIM_NOT_READY` (§13, A4). |
 | `simSizeEpsilon` | `1e-6` | both | Relative tolerance for every `S` comparison (§13, A10). |
 | `maxFrameBytes` | `8388608` | both | 8 MiB WebSocket frame limit. |
@@ -2032,6 +2113,19 @@ These notes are non-normative. They exist so the two sides do not have to negoti
   `utf8.ValidString(s)`, `len(s) >= 1 && len(s) <= 64` on the **byte** length, and **no**
   `strings.TrimSpace` — trimming here is a contract violation, not a tidy-up (§17, A36).
   Carry the block onward as the bytes you received (`contract-b-m4.md` §6.3.1).
+- **Verify the bearer token in the HTTP handler, before the upgrade, in constant time**
+  (added — §21, A47). `crypto/subtle.ConstantTimeCompare` on the raw bytes; refuse with
+  `http.Error(w, ..., http.StatusUnauthorized)` and **do not** call the upgrader, so a
+  refused caller never gets a socket to hold open. **Never log the token**, not at debug and
+  not in a redacted-looking prefix — a prefix of a shared secret on a single-user machine is
+  most of the secret. Mint the file with `os.OpenFile(..., os.O_CREATE|os.O_EXCL, 0600)` so
+  two sidecars racing at first start cannot both believe they authored it, and read it back
+  after minting rather than trusting what was written.
+- **Do the A50 export-set check where the map arrives, not where the handshake does**
+  (added — §21, A50). The two inputs are held by different goroutines and arrive in either
+  order — the mod's `CONFIG_UPDATE` and the relay's `SECTOR_GRANT` — so evaluate the check at
+  the join of the two and re-evaluate whenever either changes. A check written only in the
+  handshake path silently never runs on the ordinary startup where the grant comes second.
 
 ### 11.2 For the C# implementer (`bibites-mod`)
 
@@ -2049,6 +2143,14 @@ These notes are non-normative. They exist so the two sides do not have to negoti
   coherent.
 - **Never block the main thread on I/O.** No synchronous connect, no `.Result`, no
   `.Wait()`. A 5-second DNS or connect stall is a 5-second frozen simulation.
+- **Read the token on the socket thread, at dial time, every dial** (added — §21, A47). It is
+  a file read, so it belongs off the main thread with the connect (§6.2); reading it per dial
+  is also what makes rotation cost one reconnect instead of a game restart. Set
+  `Authorization: Bearer <token>` as a request header on the upgrade — `ClientWebSocket`
+  exposes `Options.SetRequestHeader` — and treat an HTTP 401 as an authentication failure
+  rather than a transport error: it is the one dial outcome that will never succeed on retry
+  (§6.2, `authFailuresBeforeCeiling`). **Never write the token to the BepInEx log**, which is
+  a file the project's own runbook asks players to archive and share.
 - **Parse the payload with `Newtonsoft.Json.Linq` only for the eight position numbers and
   `$.genes.speciesID`** (amended — §16, A31). Use `JObject.Parse` / `ToString()`. Do not
   deserialize it into a typed model — that would re-introduce the C# schema D4 removed. The
@@ -2136,14 +2238,27 @@ These notes are non-normative. They exist so the two sides do not have to negoti
 
 ## 12. Open items for the owner
 
-1. **No authentication in M2, M3 or M4** (amended — §14, A17; §15, A24). Any local
-   process can connect to the sidecar and drive migrations, and any local process can
-   impersonate the sidecar to the mod. Contract A binds loopback only, and D9 keeps the mod
-   and its sidecar on one machine, so neither the LAN milestone nor the operations milestone
-   changes this contract's exposure. The shared token M3 adds lives on **Contract B**, where
-   the wire leaves the loopback (`contract-b-m4.md` §3). A bearer token here waits for **M5**,
-   with TLS and the rest of the public-exposure set — D16 renumbered that milestone, and the
-   exposure it brings is unchanged.
+**Three of these are closed by §21 and they keep their numbers** (added — §21, A52). Items 1,
+8 and 9 were answered in M5 and are marked **CLOSED** in place, with their history intact,
+because every other document in this project cites them by number and renumbering a list to
+tidy it is how a citation starts pointing at the wrong item. A closed item states what closed
+it; an open one states why it is still open.
+
+1. **CLOSED by §21, A47 — the bearer token landed in M5** (amended — §21, A47; §14, A17;
+   §15, A24). *The history, because it is the record of why the answer took three
+   milestones.* Any local process could connect to the sidecar and drive migrations, and any
+   local process could impersonate the sidecar to the mod. Contract A binds loopback only, and
+   D9 keeps the mod and its sidecar on one machine, so neither the LAN milestone nor the
+   operations milestone changed this contract's exposure, and the shared token M3 added lives
+   on **Contract B**, where the wire leaves the loopback (`contract-b-m4.md` §3). A bearer
+   token here waited for **M5**, with TLS and the rest of the public-exposure set — D16
+   renumbered that milestone, and the exposure it brought was unchanged. **M5 is that
+   milestone.** A47 puts `Authorization: Bearer <token>` on the HTTP upgrade, refuses a bad
+   one with HTTP 401 before a WebSocket exists, and states the residual risk that a token on
+   a loopback wire does and does not buy (§2, §5.1, §6.2). **What it is not** is Contract B's
+   per-peer credential: that one binds to a `peerId` and carries one of three grants
+   (`contract-b-m4.md` §22, B22, B27, B28); this one binds two processes on one machine and
+   carries none.
 2. **`MIGRATE_OUT_ACK` now carries `entityId` and can arrive unsolicited** (§7.4). This
    widens the message from "answer to a `MIGRATE_OUT`" to "custody assertion". It is the
    mechanism that stops a `kill -9` on the game from duplicating an organism, and it
@@ -2169,7 +2284,14 @@ These notes are non-normative. They exist so the two sides do not have to negoti
    needed** (§15, A22): the correlation is on `migrationId` and the mod's own in-flight
    record holds the edge. The item stays open because the *reason* it is moot changed — from
    "there is only one edge" to "the mod records the edge" — and that second reason is an
-   obligation somebody could drop.
+   obligation somebody could drop. **M5 assessed it a fourth time and it stays open and moot**
+   (amended — §21, A51): the obligation is now a conformance requirement for mods this project
+   did not compile, which is the sharpest form the worry has taken — and the field is still not
+   the answer, because it would create a second statement of the exit edge that can
+   **disagree** with the first, and this wire has no reconciliation rule and should not grow
+   one. A51 also records the thing that makes the deferral safe rather than lucky: the fix is a
+   **sidecar-authored OPTIONAL field**, so it stays additive and cheap forever, and D13's
+   *last-cheap-moment* clock — which counts down on **mod-side** rules — never applied to it.
 7. **The capture band's direction test has no magnitude floor** (§4.3.1). `velocity.x > 0`
    admits an export on a single tick of eastward jitter, so an organism loitering in the
    band can cross without ever meaning to. M3 accepts it: a floor is a second tunable, it
@@ -2186,30 +2308,42 @@ These notes are non-normative. They exist so the two sides do not have to negoti
    both ways in quick succession, which is the signature — and that measurement decides
    whether it is ever built. The item therefore stays open across a public release, with the
    cost accepted and the next change to it reaching people the owner cannot contact.
-8. **A parent blob dropped for frame size is unreachable at the sidecar** (§14, A12). The
-   sidecar records it as `"parent_gone"` because the two look identical on the wire, so
-   `contract-b-m4.md` §6.6's `"blob_dropped_for_size"` is defined and never emitted. The
-   fix is one additive optional field on `parents[]`; M3 does not add it.
-9. **Neither side refuses a non-grid `exportEdges` set at `CONFIG_UPDATE`** (§5.1, §15 A18,
-   §15 A26). A18 requires at least one member, no duplicates, and every member also in
+8. **CLOSED by §21, A49 — `parents[]` gained the flag** (amended — §21, A49). *The history.*
+   A parent blob dropped for frame size was unreachable at the sidecar (§14, A12): the sidecar
+   recorded it as `"parent_gone"` because the two look identical on the wire, so
+   `contract-b-m4.md` §6.6's `"blob_dropped_for_size"` was defined and never emitted. The fix
+   was named there as *one additive optional field on `parents[]`*, and M3 and M4 both declined
+   it. **A49 adds exactly that field** — `parents[].blobDroppedForSize` — and the third
+   `gapReason` value becomes reachable from `contract-a/2.4` mods onward (§5.3). It closes here
+   for the reason `m5_considerations.md` gives: it is additive today and a migration story for
+   people the owner cannot reach afterwards.
+9. **CLOSED by §21, A50 — the sidecar now refuses a set the map cannot use** (amended — §21,
+   A50; §5.1, §15 A18, §15 A26). *The history, and one of its grounds expired before it was
+   closed.* A18 requires at least one member, no duplicates, and every member also in
    `borderEdges`, and both implementations enforce exactly that. A set the map cannot use —
-   `["E", "S"]`, say — passes every check, handshakes cleanly, and is then refused **one
-   organism at a time** at `MIGRATE_OUT`, because M4's grid exports east and north and
-   nothing else. The mod additionally rejects an edge declared with its opposite, which
-   catches `["E", "W"]` but not `["E", "S"]`. Open rather than fixed because the rule that
-   would close it is a **topology** rule — "these are the map's export axes" — and A18's whole
-   point is that the mod declares geometry and learns no topology. The honest fix is a
-   startup refusal in the sidecar, which knows the map; M4 does not add it, and a
-   misconfigured slot is therefore diagnosed from a stream of NACKs rather than from one
-   startup error.
+   `["E", "S"]`, say — passed every check, handshook cleanly, and was then refused **one
+   organism at a time** at `MIGRATE_OUT`, because M4's grid exported east and north and nothing
+   else. **That example stopped being true at §18 A38**, which made every lane two-way: on a
+   D17 map `["E", "S"]` is an ordinary under-declaration and nothing refuses it. What survived
+   is the defect's shape, and M5 found it had become **worse rather than better** — a
+   misconfigured world is now silently *quiet* rather than noisily refused, and quiet is
+   indistinguishable from a sleeping neighbour to the one person who cannot ask anybody
+   (`m5_considerations.md`, DQ8). A50 states the check the sidecar was always the only party
+   able to make, at the first moment both facts exist, with close `4007` for the total case and
+   a named log line for the partial one.
 10. **There is no control surface, and §19's settings are not one** (added — §19, A43).
     `CONFIG_UPDATE` now reports five values an operator would plausibly want to change, in a
     message whose `reason` enum already says `"settings_changed"`. It stays **mod → sidecar**,
     and every one of the five is read-only (§5.1, §19 A43). The owner has ratified a control
     surface as **later work**; it is a separate design and needs answers this contract does not
-    have — item 1's authentication first of all, then authorization across two machines where
+    have — authorization across two machines where
     D9 keeps the far one undriven, ordering and idempotency for a write that races a world
-    load, what a write means when its target mod is disconnected, and an audit trail. Open,
+    load, what a write means when its target mod is disconnected, and an audit trail.
+    **Authentication has come off that list** (amended — §21, A47): A47 supplies it on this
+    wire and `contract-b-m4.md` §22 B22 and B28 supply it on the other, which is exactly what
+    decision 2 predicted M5 would do — *M5 supplies the authentication this item waits on and
+    still does not build the surface*. The remaining four questions are untouched, and they are
+    the ones that made the surface a design rather than a field. Open,
     with the boundary written down, because the cheap-looking version of this work is to make
     one of these fields writable and that is the same work with the questions skipped.
     **"Later" is M6** (ratified 2026-08-10; `system_decomposition.md` D23): M5 supplies the
@@ -2535,6 +2669,9 @@ loudly on its own side, so the information is not lost, only unjoined. **M3 adds
 this.** The fix is one optional boolean on `parents[]`, it is additive, and it is worth doing
 the first time an operator actually has to correlate two logs to answer "did we ship that
 genome?". Recorded here so the next reader does not mistake the missing value for a defect.
+**§21's A49 is that optional boolean** (amended — §21, A49), and the trigger it named turned
+out to be the milestone rather than an operator: after M5 the two logs are on two people's
+machines, so *correlate them* stops being work and starts being a request.
 
 The cost lands on the export path, on the Unity main thread: one export may now serialize
 three organisms in one `FixedUpdate`. §5.3 requires a within-tick cache by entity ID, and
@@ -2673,7 +2810,11 @@ impersonate the sidecar. On a single-owner machine that is the same trust bounda
 game's own save directory.
 
 **Enforced by:** neither, deliberately. Recorded so that the next reader of §12 item 1 does
-not implement a token that no milestone asked for.
+not implement a token that no milestone asked for. **M5 is the milestone that asked for it,
+and §21's A47 is the token** (amended — §21, A47): the wire still never leaves the loopback,
+so what changed is not the exposure but the population — after M5 the machine is a stranger's,
+and *the same trust boundary as the game's own save directory* is a sentence about a machine
+whose other processes nobody here chose.
 
 ---
 
@@ -2909,7 +3050,9 @@ never computes it.
 
 ### A22 — Contract debt A5 survives the second export edge, still open, still moot (§9.1, §12 item 6, §13 A5, §14 A15)
 
-*Work order item 11 (D13).*
+*Work order item 11 (D13).* **Re-assessed a fourth time by §21, A51, for the public release:
+still open, still moot, and the argument against the field is now stronger than the argument
+that made it unnecessary.**
 
 **Assessment.** §13 A5 accepted that `MIGRATE_OUT_NACK` carries no `edge`, on the grounds
 that M2 declared one edge. §14 A15 re-assessed it under the ring and called the condition
@@ -2974,10 +3117,12 @@ are incompatible **by design**, and both sides say so loudly rather than misread
 
 **Enforced by:** both, symmetrically. Each side sends `"contract-a/2.0"` and compares only
 the major. The sidecar additionally owns the retired path and its `4000`.
-**The version string moved on with §16, A33, again with §17, A37 and again with §19, A44** —
-each side now sends `"contract-a/2.3"` — and everything else in this amendment stands,
-including the path and the `4000` on `v1`: a minor bump moves no path (amended — §16, A33;
-§17, A37; §19, A44).
+**The version string moved on with §16, A33, again with §17, A37, again with §19, A44 and
+again with §21, A52** — each side now sends `"contract-a/2.4"` — and everything else in this
+amendment stands, including the path and the `4000` on `v1`: a minor bump moves no path
+(amended — §16, A33; §17, A37; §19, A44; §21, A52). **What §21 adds in front of it is not a
+version matter at all**: the bearer token is checked on the HTTP upgrade, so an unauthenticated
+dial never reaches the envelope check this amendment is about (amended — §21, A47).
 
 ### A24 — D16's renumbering: the "M4" that meant public release is M5 (§4.5, §12 item 1, §14 A17)
 
@@ -4159,7 +4304,7 @@ not**, and this amendment exists so nobody has to reconstruct why.
 | Direction | `CONFIG_UPDATE` is **mod → sidecar** and stays that way (§5). There is no sidecar → mod settings message, and §19 does not create the beginning of one. |
 | What these five fields are | A **report**. The mod states what it was configured to do. Every party downstream renders it and no party acts on it. |
 | The one-way rule | A sidecar, relay, archive or page **MUST NOT** treat any of these fields as a request, a default to fill in, a value to echo back, or an input to any decision. A reader that cannot see a field renders **unknown** (§10.1 there) — it does not substitute the shipped default, which is the rule `contract-b-m4.md` §18 B16 already had to write down for a cap that moved three times in a day. |
-| A control surface is a separate design | The owner has ratified a control surface as **later work**. When it is designed it needs its own answers to questions these fields do not raise: authentication, which §12 item 1 still lists as open on this contract; authorization, since a rig spans two machines and D9 keeps the far one undriven; idempotency and ordering for a write that races a world load; what happens to a write whose target mod is disconnected; and an audit trail, because a setting that changed itself is the worst thing to find in an incident. **None of those is answered by an OPTIONAL field on a handshake**, and reusing these fields would mean answering them by accident. |
+| A control surface is a separate design | The owner has ratified a control surface as **later work**. When it is designed it needs its own answers to questions these fields do not raise: authentication, ~~which §12 item 1 still lists as open on this contract~~ **which §21's A47 has now supplied and which was always the least of the five** (amended — §21, A47); authorization, since a rig spans two machines and D9 keeps the far one undriven; idempotency and ordering for a write that races a world load; what happens to a write whose target mod is disconnected; and an audit trail, because a setting that changed itself is the worst thing to find in an incident. **None of those is answered by an OPTIONAL field on a handshake**, and reusing these fields would mean answering them by accident. **Four of the five are still unanswered and A43 is unchanged in every other particular** — which is the statement `contract-b-m4.md` §7.5 and §22 B28 cite when they say the admin path is not the control surface. |
 | Why it is cheap to keep separate | Nothing in A42 has to be undone to add a control surface later. A new message type is additive under §3.1 and costs a minor; a reversed `CONFIG_UPDATE` would be a semantic change to an existing message with an installed base, which is the expensive kind. The read path staying read-only is what keeps the write path cheap. |
 | The exclusion list in particular | Publishing it is **not** a step toward remote-editing it, and §18 A39's reasoning is why: a species that must not leave world 4 is a fact about world 4's population. Making it settable from elsewhere would put one operator's opinion into another world's capture test, which is the thing A39 refused when it was only a wire field being proposed. |
 
@@ -4398,3 +4543,615 @@ whether a session churns; custody, dedup and the journal are the same on both pa
 
 **Enforced by:** both sides, symmetrically. Each keeps sending `"contract-a/2.3"` and comparing
 only the major.
+
+---
+
+## 21. The public-release amendments (`contract-a/2.4`, 2026-08-11)
+
+M5 takes this system out of the owner's house, and it reaches this wire in a smaller way than
+it reaches the other one. Contract B meets strangers: it replaces its authentication model,
+takes TLS, publishes a limit table and goes to `contract-b/4.0`. Contract A still runs on
+`127.0.0.1` between two processes D9 keeps on one machine, and **nothing about that changes**.
+What changes is **whose machine it is**. Every rule in this document up to §20 was written for
+a computer the owner owns, where "any local process can drive migrations" is the same trust
+boundary as the game's own save directory (§14, A17). After M5 that sentence is about a
+stranger's desktop, and the residual risk it accepted is one nobody here chose.
+
+The nine M5 decisions were ratified on **2026-08-10** and two were refined by the owner on
+**2026-08-11** (`system_decomposition.md` D21–D25; `m5_considerations.md`, *Decisions for the
+Owner*). This set is Contract A's half of the wire they describe. It is written **before any
+M5 code**, which is WP1's whole reason to exist, and M2 and M3 both paid for the alternative.
+
+**Six amendments, A47 to A52**, each carrying the row of `m5_considerations.md`'s *Contract
+Changes Needed* it comes from:
+
+| Amendment | Source row | What it does |
+|---|---|---|
+| **A47** | row 3 | A bearer token on the HTTP upgrade, and why it is not Contract B's credential |
+| **A48** | row 10a | The envelope's game version as diagnostic metadata, D22's layering, and the gates this wire keeps |
+| **A49** | row 11 | `parents[].blobDroppedForSize`, which makes `"blob_dropped_for_size"` reachable |
+| **A50** | row 12 | The sidecar refuses a declared export set the map cannot use |
+| **A51** | row 13 | Contract debt A5, assessed a fourth time |
+| **A52** | row 15 | `contract-a/2.4`, the path that does not move, and the migration note |
+
+**Rows 1, 2, 4, 5, 6, 7, 8, 9 and 10 are Contract B's**, and `contract-b-m4.md` §22, B22–B32
+carries them at `contract-b/4.0` — the per-peer credential, TLS, the subscriber grant, the
+admin path, the forward receipt, the limit table, auto-placement under churn, the escaping
+rules and the minimum contract version. **Row 10 was addressed to both documents and now
+touches only one**: its retirement half was dropped on 2026-08-11 when the owner kept the
+shipped gates, and its surviving additive half — the minimum **contract** version at the relay
+handshake — is entirely B25's. **Row 10a is shared and each document writes its own half**:
+B31 states D22's layering and the four kept gates for the map, A48 states them for the
+mod and the sidecar. **Row 14 is not written**: decision 9 took the velocity magnitude floor
+out of the milestone, to be instrumented during the playtest and built only if the measurement
+says so, and **§12 item 7 stays open across a public release** with its cost accepted
+(`m5_considerations.md`, Risk 8). **Row 16 is a documentation correction in other files** and
+is not a contract change.
+
+**This set changes the wire, and every change is additive.** One request header on an upgrade
+that already existed; one OPTIONAL boolean on an existing OPTIONAL object; one new close code,
+which §3.1 counts as an added enum value; and three statements about fields that already
+travel. No field is removed, no type changes, no enum value is removed, no message is added or
+retired, and custody, dedup, pacing, geometry and routing are untouched — so §3.1's own test
+answers with a **minor** bump to `contract-a/2.4`, and the URL path stays `/contract-a/v2`
+(A52). The contrast with the other wire is the whole of D21's reasoning and it is worth
+stating once: Contract B **replaces** a rule with an installed base and pays a major for it;
+Contract A **adds** a check where there was none, and pays a minor.
+
+Affected body text carries an `(amended — §21, Ax)` or `(added — §21, Ax)` marker, and
+**§21 wins over the body and over §13 to §20 wherever they disagree.**
+
+**One thing this set deliberately does not do, and it is the exception that shapes A48.**
+**§21 retires no version gate.** The owner was asked on 2026-08-11 whether D22's layering
+should retire the four shipped mechanisms that decide on the game version, and answered *"lets
+not change this then we will reconsider in the future if there's issues i think we can leave it
+like its working now."* So §9.2's `VERSION_UNSUPPORTED` stands, close `4002` stands,
+`mapwalk`'s `peer_incompatible` skip stands, and `contract-b-m4.md` §6.1's relay refusal
+stands. A48 writes them down as **kept, deliberate exceptions** and states what keeping them
+costs, which is more useful than a prohibition that four shipped mechanisms violate.
+
+### A47 — A bearer token on the upgrade, and it is not Contract B's credential (§2, §2.1, §5.1, §6.1, §6.2, §10, §11.1, §11.2, §12 item 1)
+
+*Contract Change 3 (D21; `m5_considerations.md`, DQ1). **§12 item 1 closes here**, after three
+milestones of answering "not yet" for a reason that was true each time.*
+
+**Gap.** §12 item 1 has said the same thing since M2 and A17 and A24 each re-confirmed it: *any
+local process can connect to the sidecar and drive migrations, and any local process can
+impersonate the sidecar to the mod.* The answer was always that the wire never leaves the
+loopback, D9 keeps the mod and its sidecar on one machine, and on a single-owner machine that
+is the save directory's trust boundary. **All three of those facts are still true and the
+conclusion no longer follows.** The package M5 ships (D25) installs both processes on a machine
+the owner has never seen, running whatever else its player runs, and "the only other processes
+here are mine" stops being something anybody can assert. A sidecar with no authentication is
+also the one component in the M5 package that an install guide would have to describe as
+deliberately open, and DQ4's defaults audit exists to stop exactly that sentence being
+shipped.
+
+**Resolution.** The token rides the HTTP upgrade. This table is normative.
+
+| Rule | Statement |
+|---|---|
+| Where it goes | `Authorization: Bearer <token>` on the WebSocket upgrade request, verified **before** the upgrade completes. **Never in a frame.** A frame is logged, correlated by `messageId` and quoted into bug reports; and a value that authenticates the connection cannot ride a message the connection had to be open to carry (§5.1). |
+| What refuses | HTTP **401**, and **no WebSocket is created**. There is deliberately **no close code for authentication**: §2.1's codes are statements made inside a session, and a session the token did not open never started. The 401 body is free text for a human and no side parses it. |
+| What the mod does with a 401 | Retry on §6.2's ordinary ladder, and after `authFailuresBeforeCeiling` (5) consecutive 401s hold at `reconnectBackoffMaxMs` and log **once**, naming the remedy **and who must act** — the person at this machine, because the file is on it. A mod **MUST NOT** retry without the header, mint or derive a token, read one from anywhere but its configured source, or dial a different port looking for a sidecar that will take it. |
+| Where the token comes from | `contractATokenFile` (§10). The sidecar mints it at first start when the file does not exist, `0600`, and both processes read the same path on the same machine (D9). **No accounts, no rotation ceremony, no recovery flow** — the same *smallest design that works* DQ1 chose for the other wire, for the same reason, and here it is smaller still because both ends are one person's own processes. |
+| Rotation | Delete the file and restart the sidecar; the mod picks the new value up on its next dial, because it reads the file **per dial** (§11.2). A rotation therefore costs one reconnect and never a game restart. |
+| Comparison and logging | Constant-time comparison on the raw bytes. **Neither side may log the token**, at any level, in whole or in prefix (§11.1, §11.2). |
+| The off switch, and the discipline around it | `--insecure-no-contract-a-token` / `MULTIVERSE_INSECURE_NO_CONTRACT_A_TOKEN` on the sidecar disables the check and logs one loud warning **per accepted connection**. It exists for a single-machine rehearsal and for nothing else. **No document this project ships may instruct a player to pass it** — that is the rule DQ4's defaults audit applies to the relay's own `--insecure-no-token`, and this is a **different flag on a different binary for a different wire**, named differently on purpose so that a runbook cannot confuse them. |
+| **It is not Contract B's credential** | Contract B's is a **per-peer** credential bound to a `peerId`, carrying exactly one of three disjoint grants — **peer**, **subscribe**, **admin** (`contract-b-m4.md` §22, B22, B27, B28). Contract A's token binds **two processes on one machine**, names no identity, carries **no grant**, and answers no question about the map. A sidecar **MUST NOT** present its Contract A token to a relay, and **MUST NOT** accept a Contract B credential on this wire. They are different secrets, in different files, on different wires, and the only thing they have in common is the word *bearer*. |
+
+**What it buys and what it does not, stated so nobody assumes the stronger version.** The token
+raises the bar from *any local process* to *any local process that can read a `0600` file owned
+by the player*. It is not confidentiality: this wire is plain HTTP on loopback and §21 does not
+give it TLS, because a loopback wire's confidentiality is the operating system's job and
+terminating TLS between two processes on one machine buys a certificate problem rather than a
+secret. It is not an identity: there is one mod and one sidecar, and §2's `4006` self-healing
+rule is unchanged — a newer authenticated connection still replaces an older one, because a
+crashed-and-restarted game must still be able to come back. And it does not make a compromised
+machine safe; nothing on a machine can.
+
+The handshake, with the header, and the refusal that replaces it:
+
+```http
+GET /contract-a/v2 HTTP/1.1
+Host: 127.0.0.1:8791
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Version: 13
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+Authorization: Bearer 7f3c1ab9e04d5286b1c7fa30e95d84c2
+```
+```http
+HTTP/1.1 101 Switching Protocols
+Upgrade: websocket
+Connection: Upgrade
+Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+```
+
+and then the first frame, unchanged in every field, at the new identifier (§5.1):
+
+```json
+{
+  "protocol": "contract-a/2.4",
+  "type": "CONFIG_UPDATE",
+  "messageId": "1c2fbe80-5a17-4a2b-9a20-3d54f1b7e001",
+  "sentAt": 1785693598004,
+  "data": {
+    "sessionId": "9a4c1e77-0b3d-4f52-8c19-6d2e7f0a5b31",
+    "reason": "connect",
+    "gameVersion": "0.6.3.1",
+    "modVersion": "0.3.0",
+    "simulationSize": 2000.0,
+    "borderEdges": ["E", "N", "W", "S"],
+    "exportEdges": ["E", "N", "W", "S"],
+    "borderWidth": 60.0,
+    "ringSlot": 5,
+    "worldName": "M4-Slot5",
+    "migrationExclude": ["Basic bibite"],
+    "saveMinutes": 10.0,
+    "saveKeep": 6,
+    "saveOnQuit": true,
+    "worldWrapping": true
+  }
+}
+```
+
+The same dial with a stale token, which is what a player who reinstalled the sidecar without
+re-reading the file will see:
+
+```http
+HTTP/1.1 401 Unauthorized
+Content-Type: text/plain; charset=utf-8
+
+contract A: bearer token rejected. The mod and the sidecar must read the same
+MULTIVERSE_CONTRACT_A_TOKEN_FILE on this machine. This is not the relay token.
+```
+```
+sidecar log:  contract A: upgrade refused, bad bearer token from 127.0.0.1:52318 (1 of 5)
+mod log:      [Multiverse] contract A: 401 from ws://127.0.0.1:8791/contract-a/v2 —
+              token rejected. Remedy: this machine's operator re-points
+              MULTIVERSE_CONTRACT_A_TOKEN_FILE at the sidecar's token file.
+              Backoff pinned at 30000 ms after 5 attempts; no organism is at risk.
+```
+
+**Nothing about custody moves while this fails**, and the log says so on purpose. A mod that
+cannot authenticate is a mod with a closed export set (§5.4's fail-safe) and a sidecar holding
+its journal (§13, A1: *no mod connection is not an error*). The failure costs migrations that
+have not happened yet, and costs no organism that has.
+
+**Enforced by:** the **sidecar**, for verifying before the upgrade, for the constant-time
+comparison, for minting the file `0600`, and for never logging the value; the **mod**, for
+sending the header on every dial, for the 401 discipline and the ceiling, and for never
+inventing a token to get past a refusal; the **operator or installer**, for putting the same
+path in front of both processes — which is WP6's job, and the reason A47's rollout is a mod
+deploy (A52's migration note).
+
+### A48 — The envelope's game version is diagnostic metadata, and the gates this wire owns are kept as named exceptions (§2.1, §5.3, §5.4, §5.7, §9.1, §9.2)
+
+*Contract Change 10a, Contract A's half (D22, refined and closed 2026-08-11).
+`contract-b-m4.md` §22, B31 is the other half and states the same rule for the map.*
+
+**The layered statement, first, because everything else follows from it.** D22 is the owner's
+own design, in his words: *"game version compatibility should work basically what matters is
+like the sidecar version compatible with the relay server right then it depends if theres a
+sidecar version compatible to the game version."* Read as a design it is **two tests that never
+meet**, and this document's reader needs both because both are visible here:
+
+- **The contract version is the membership test.** Whether a peer may be on the map at all is
+  answered by the wire version, at the relay, and by nothing else (`contract-b-m4.md` §22,
+  B25). On *this* wire the same shape already exists and always has: §3.1's major is what two
+  local processes must agree on, and close `4000` is the answer when they do not.
+- **The game version is a per-machine support matrix.** Each operator needs a sidecar and mod
+  build compatible with the game version *they* run, and that test is settled on the operator's
+  own machine before anything dials anything. `setup-farend.ps1`'s assembly-hash refusal is one
+  entry in that matrix, not a rule about the map.
+
+**Gap.** This wire has carried the serializing game's version since M2, end to end and as a
+REQUIRED field: `MIGRATE_OUT.gameVersion` (§5.3), `parents[].gameVersion` (§5.3),
+`MIGRATE_IN.gameVersion` (§5.7), and onward into the sidecar's journal, Contract B's
+`body.version` and the archive's ledger, whose live lines carry `"gameVersion":"0.6.3.1"`
+today. **Nothing had to be added to carry it.** What was missing was a statement of what it is
+*for*, and the owner supplied it on 2026-08-11: *"for now lets just keep doing the payload
+opaque and assume it will work, we will worry about doing the normalized own schema or the
+cheaper alternative in the future if we run into an issue, for now we can just assume this will
+work and carry the game version info for potential future debugging."*
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The payload stays opaque | D4 unchanged and unextended (§1). **Cross-version loading is assumed to work.** No refusal path is designed on the game-version axis, no gate is added, and the stability research is not done now. |
+| The field is diagnostic | `MIGRATE_OUT.gameVersion`, `parents[].gameVersion` and `MIGRATE_IN.gameVersion` are carried so that a future incident is **diagnosable from the record** instead of reconstructed from memory. **A reader MUST NOT parse any of them into a capability or refusal decision.** It is `contract-b-m4.md` §13 item 7's `contractAVersion` prohibition — *a peer that can choose the string can choose the capability it claims* — applied to the second version axis, and B30 repeats it where a page implementer reads it. |
+| **It binds NEW readers only** | This is the narrowing that makes the rule honest. Four shipped mechanisms already decide on the game version and the owner chose the same day to keep every one, so the prohibition binds **readers written from `contract-a/2.4` onward**. The four are stated below as **kept, deliberate exceptions**, not as violations nobody intends to fix. |
+| **Selecting a schema dialect is not a capability decision** | §5.3's step 1 validates `payload` with `bb8-schema` **against `gameVersion`**, and step 5 hashes with the same dialect. That is a **parse of bytes**, not a statement about a peer: `INVALID_PAYLOAD` is a verdict on the blob and would be reached identically if the version were guessed from the blob's own `version` key. Written down because it is the reading an implementer is most likely to get wrong in the strict direction, by removing a dialect selection the sidecar cannot work without. |
+| `genome-hash.md` is untouched | The canonical projection takes the version tag as an **identity** input, not a capability one — two game versions produce two hashes for one organism, deliberately, because gene names and `NodeType` ordinals are version-scoped (`genome-hash.md` §10 item 2). An identity computation is not a refusal decision and this rule does not reach it. |
+| Both fuller answers are deferred, not rejected | This project's own **normalized canonical schema**, and the cheaper **marker-plus-refusal**. Neither is built until an incident makes one necessary, and the incident is a real cross-version load failure. |
+| Nothing new is added to carry it | No field, no type, no enum, no message. A48 is a statement about fields that already travel, which is why A52 finds no version consequence in it. |
+
+**The four kept gates, and where this wire meets each one:**
+
+| Gate | Whose rule | Where the mod or sidecar meets it |
+|---|---|---|
+| §9.2's `VERSION_UNSUPPORTED` | **This document's** | The **importing mod**, comparing `MIGRATE_IN.gameVersion` against `Application.version` (§5.7). Answers `MIGRATE_IN_NACK` / `VERSION_UNSUPPORTED`, **permanent** — *do not re-deliver, hold for an operator, mark the peer pair incompatible*. **This is the marker-plus-refusal design, already shipped**, and `contract-b-m4.md` §9.2 carries the Contract B consequence. |
+| Close `4002` | **This document's** | The **sidecar**, refusing a mod whose `CONFIG_UPDATE.gameVersion` has no `bb8-schema` dialect (§2.1). Inert in practice — the allow-list is empty outside tests and empty means accept — and normative. |
+| `mapwalk`'s `peer_incompatible` skip | `contract-b-m4.md` §8's | The **mod**, as `EDGE_STATUS.reason: "peer_incompatible"` (§5.4) and as `MIGRATE_OUT_NACK` / `PEER_INCOMPATIBLE` (§9.1). The decision is made off this wire; the two names above are how it arrives. |
+| §6.1's relay refusal | `contract-b-m4.md` §6.1's | **Not visible here at all**, except as its consequence: a slot that never joins, and edges that report `no_peer`. Named so that a reader of this document who counts three does not conclude the fourth was retired. |
+
+**What a version-skewed map looks like, written here because it is the accepted behaviour and
+a mod's operator will meet it.** Two machines on different game builds **do not exchange
+organisms**. The relay refuses whichever peer disagrees with the version the map already
+reports; `mapwalk` and the relay's own walk close the edges between mismatched pairs, which
+this wire renders as closed edges with `peer_incompatible`; and the importing mod answers a
+permanent `VERSION_UNSUPPORTED` if a payload ever reaches it anyway. **That is safe** — no
+cross-version payload reaches `SaveSystem.LoadBibiteOrEggFromData` at all — and it is exactly
+why the assumption above stays untested rather than validated. The everyday shape is a
+**partition along a version boundary after a staggered game update**, and it ends when every
+machine is on the new build; the rig has always lived it, and re-syncing both computers
+promptly after a game update is what ends it (`dev_environment.md`, *The far end*).
+
+The gate this document owns, in the one frame a mod ever emits for it:
+
+```json
+{
+  "protocol": "contract-a/2.4",
+  "type": "MIGRATE_IN_NACK",
+  "messageId": "9d40b7e2-15af-4c88-b063-7e2a5c19d340",
+  "sentAt": 1785693742118,
+  "data": {
+    "migrationId": "0f6c8b3e-2c41-4a8f-9d1e-7a3b5c9d0e12",
+    "entityId": -843827577,
+    "code": "VERSION_UNSUPPORTED",
+    "class": "permanent",
+    "message": "payload gameVersion 0.6.3.1, this world runs 0.6.4.0"
+  }
+}
+```
+
+The sidecar holds it for an operator and never re-delivers it (§13, A7), the ledger records the
+attempt with both versions on it, and **that record is the whole of what the diagnostic rule
+buys**: the next reader of an incident can see which two builds met, without asking anybody to
+remember.
+
+**The cost of keeping the gates, stated rather than discovered.** *Assume it works* and *keep
+the gate that stops it being tried* compose into an assumption **that can never be exercised**:
+a gate that refuses every cross-version crossing means no ledger will ever record one. So the
+signal that reopens this design space is **not** a failed restore — it is the **partition
+itself**: `peer_incompatible` edges, `VERSION_UNSUPPORTED` NACKs, and refused claims on the
+other wire, counted after a staggered game update. **WP8 watches for that instead of for a
+crossing** (`m5_considerations.md`, DQ5).
+
+**And one contradiction is held open knowingly rather than resolved.** D22 says the map holds
+no opinion about the game version; `contract-b-m4.md` §6.1 says the relay MUST refuse on it,
+and the relay enforces that in code. **Both statements stand.** The owner's call of 2026-08-11
+was to leave the shipped gates alone and reconsider when skew causes a real operational
+problem, so both documents record the disagreement in the open rather than papering it over
+with wording no running component obeys. The whole cross-version design space reopens together,
+or not at all.
+
+**Enforced by:** **every new reader**, for treating the field as a note; the **sidecar**, for
+going on selecting a dialect and for deciding nothing else from it; the **two gates this
+document owns**, for going on doing exactly what they do; **WP8**, for counting the partition
+rather than waiting for a crossing the gates guarantee will never happen.
+
+### A49 — `parents[]` says when a blob was dropped for size, and the third gap reason becomes reachable (§5.3, §9.1, §10, §12 item 8, §14 A12)
+
+*Contract Change 11. **§12 item 8 closes here.***
+
+**Gap.** `contract-b-m4.md` §6.6 defines three `gapReason` values and the sidecar can emit only
+two. A parent the mod dropped to fit `maxFrameBytes` arrives on this wire as an entry with an
+`entityId` and no `payload` — **byte for byte what a dead parent looks like** — so the sidecar
+records `"parent_gone"` and `"blob_dropped_for_size"` has been defined and never emitted since
+M3. §14 A12's own note named the fix and its trigger: *one optional boolean on `parents[]`*,
+worth doing *the first time an operator actually has to correlate two logs to answer "did we
+ship that genome?"*.
+
+**The trigger turned out to be the milestone, not an operator.** The mod logs each drop, so the
+information exists — on the machine that dropped it. After M5 the archive's gap and the mod's
+log line are on **two different people's computers**, and *correlate them* stops being work and
+becomes a request to a stranger, on a question (*is this genome recoverable, or was it never
+sent?*) whose answer decides whether Risk 7's fetch ladder is chasing something that exists.
+That is also why it lands now rather than later: it is additive today and a migration story for
+people the owner cannot reach afterwards (§15, A23; D13).
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The field | `parents[].blobDroppedForSize`, OPTIONAL boolean (§5.3). |
+| What it means, exactly | *This parent had a serializable blob and the mod dropped it to fit the frame.* Nothing else. |
+| Where it may appear | **Only on an entry with no `payload`.** A `true` beside a present `payload` is a mod defect; the sidecar logs one warning and treats the entry as an ordinary blob-bearing parent, because the blob is the fact and the flag is the label. |
+| Where it may not | **Not for a dead parent** (`BibiteGenes` dropped the parentage), and **not for a serialization failure**. Both stay ordinary gaps. *I had it and could not fit it* is a different fact from *I could not produce it*, and a mod that conflated them would put a recoverable label on a permanent absence. |
+| Absence | **No statement.** That is what every `contract-a/2.3` mod says about every entry, and what a `contract-a/2.4` mod says about a parent it did not drop. A reader **MUST NOT** read absence as `false`-with-confidence; it reads as the `"parent_gone"` the sidecar has always recorded. |
+| What the sidecar does with it | Maps the gap: blobless + `true` → `"blob_dropped_for_size"`; blobless without it → `"parent_gone"`; a blob that will not hash → `"blob_invalid"` (§5.3 step 5, `contract-b-m4.md` §6.6). It changes nothing else — not the annex, not the hash, not the cache, not a NACK. |
+| It can never fail a migration | §9.1's rule is unchanged: **no code in that table is ever caused by `parents`** (§14, A12). The flag is a label on a gap, and a gap is a normal outcome under D11. |
+| It is not a Contract B change | `"blob_dropped_for_size"` is already in that document's enum and every receiver already had to tolerate it. What changes is that it becomes **reachable**, which is a fact about emitters and not about the wire's shape — so `contract-b-m4.md` takes no version move for A49. |
+
+A migrant with two parents, one dead and one dropped for size — which is the pair the sidecar
+could not tell apart until now:
+
+```json
+{
+  "protocol": "contract-a/2.4",
+  "type": "MIGRATE_OUT",
+  "messageId": "6b2e9f41-83c7-4d05-a1fe-70c4b93d8215",
+  "sentAt": 1785693611402,
+  "data": {
+    "migrationId": "3d51c8a7-9e02-4bb6-8f14-5c07e2a91d63",
+    "entityId": -843827577,
+    "kind": "bibite",
+    "gameVersion": "0.6.3.1",
+    "payload": "{\"transform\":{ ... },\"rb2d\":{ ... },\"genes\":{ ... },\"body\":{\"id\":-843827577, ... },\"clock\":{ ... },\"brain\":{ ... },\"version\":\"0.6.3.1\"}",
+    "parents": [
+      { "entityId": -1180911975, "blobDroppedForSize": true },
+      { "entityId": 204418833 }
+    ],
+    "species": {
+      "genericName": "Cyanea",
+      "specificName": "velox"
+    },
+    "exitEdge": "E",
+    "exitPosition": 1.0,
+    "velocity": { "x": 61.2, "y": 4.4 },
+    "heading": 274.11,
+    "simulationSize": 2000.0,
+    "simTick": 4820351
+  }
+}
+```
+
+The first parent was **alive and serialized**, and its blob was the largest thing in the frame
+when the migrant's own payload and it together exceeded
+`maxFrameBytes − frameHeadroomBytes` — two blobs of up to `maxPayloadBytes` each do not fit in
+one 8 MiB frame, which is the whole of why §5.3's drop rule exists. The rule took it, largest
+first, and A49 is why the frame now says so. The second parent is an ordinary gap: its `GameObject` is gone, the
+entity ID came from the component's `parent2ID`, and no blob ever existed to drop. The annex
+the sidecar builds from this frame carries
+`gapReason: "blob_dropped_for_size"` for the first and `"parent_gone"` for the second, and the
+archive's lineage graph can finally distinguish *ask the source sidecar, it has this genome*
+from *nobody has this genome and nobody ever will*.
+
+**Enforced by:** the **mod**, for setting the flag on exactly the entries its own drop rule
+emptied and on no others; the **sidecar**, for mapping the third `gapReason` and for changing
+nothing else about the annex; the **archive**, for reading a distinction it has been unable to
+make since M3.
+
+### A50 — The sidecar refuses a declared export set the map cannot use (§2.1, §5.1, §6.1, §6.2, §11.1, §12 item 9)
+
+*Contract Change 12. **§12 item 9 closes here**, and one of its stated grounds had expired
+before it did.*
+
+**Gap, as item 9 wrote it.** A18 requires `exportEdges` to hold at least one member, no
+duplicate, and every member also in `borderEdges` — and both implementations enforce exactly
+that and nothing more. A set the map cannot use passed every check, handshook cleanly, and was
+then refused **one organism at a time** at `MIGRATE_OUT`. The item's example was `["E", "S"]`,
+*because M4's grid exports east and north and nothing else*.
+
+**That example expired at §18, A38**, which made every lane two-way and every edge an export
+edge. On a D17 map `["E", "S"]` is an ordinary under-declaration and nothing refuses it. **The
+defect's shape survived the example, and M5 found it had got worse rather than better.** A
+declared edge the map cannot route is now reported **closed** rather than refused, so the
+misconfigured world produces no NACK stream at all — it comes up healthy, handshakes, reports
+`no_peer`, and looks **exactly like a world whose neighbours are asleep**. On the rig the owner
+knows which it is. After M5 the person looking at it is the one person who cannot ask anybody,
+and DQ8's table already names this as the worst class of failure this system has: *the peer
+cannot see the cause, and the cause is not on their machine* — except here it is, and nothing
+tells them.
+
+**Resolution.** The check belongs to the sidecar because only the sidecar may hold a map.
+
+| Rule | Statement |
+|---|---|
+| **Whose check it is** | The **sidecar's**, alone. The mod declares **geometry** — *I run a capture band here* — and learns no topology: not its coordinate, not its neighbour, not the map's shape (D8, D13, §15 A18, §15 A25). Nothing about this check reaches `CONFIG_UPDATE`, and there is no field for a mod to be told the answer with. |
+| **When it runs** | At the **join of the two inputs**: the mod's declared `exportEdges` and the map the relay granted. Whichever arrives second triggers it — ordinarily the `SECTOR_GRANT`, which may land in the same second as the handshake or an hour later (§6.1) — and it re-runs whenever either input changes. |
+| **What the refusal is about** | **A declaration, never a map.** Only a `CONFIG_UPDATE` — the handshake, or a later one that changes `exportEdges` — may be refused with `4007`. **A change on the map's side never ends a running session**: if the map is what turned a usable declaration unusable, the affected edges close by the ordinary rules, the sidecar logs the partial case below, and the world goes on receiving organisms on every declared edge (§5.4's `open: false` closes exports and never arrivals). Ejecting a peer for something another peer's departure did would be the one way this check could lose an organism, and it does not. |
+| **What "usable" means** | An edge is usable when the axis it lies on **exists on this map**. The row axis carries `E` and `W` and exists when the map's `width ≥ 2`; the column axis carries `N` and `S` and exists when `height ≥ 2` (`contract-b-m4.md` §2, §6.4, §6.5). The **usable set** is the declared edges that pass. |
+| **The refusal** | A map with **at least one axis** and a declared set with **no** usable member: close `4007 EXPORT_EDGES_UNUSABLE` (§2.1). The mod **MUST NOT** reconnect automatically — reconnecting would re-read the same environment variable and reach the same answer, which is a redial loop with a configuration file at the bottom of it (§13, A8; §6.2). |
+| **The partial case is not a refusal, and it is not a fault** | A set with a usable member and an unusable one is **legal and unchanged**: the usable edges behave exactly as they always have, the unusable ones report closed by the ordinary rules, and no organism is affected. `contract-b-m4.md` §2.1 says so directly for the commonest instance — on a `w×1` map *"the north edge is declared by the mod and stays closed with `no_peer` for the life of the map"* — and that is a map shape, not a misconfiguration. What the partial case gains is **one line per unusable edge, once per session and at warning level**, naming the edge and the map's shape and saying it will stay closed. **It states no remedy**, because the remedy is a map that grows an axis and that is nobody at this machine's to apply. Refusing here would eject a world for a declaration that costs it nothing, and would eject every peer of every single-row map ever run. |
+| **A map with no axis is not a misconfiguration** | On a `1×1` map no axis exists, so no declaration is usable and **nothing is refused**. A lone first peer on a map that has not grown yet is the normal opening state of every map this project will ever run, and a check that ejected it would make an empty map unjoinable. The refusal fires only when the map can route **something** and this peer declared **none of it**. |
+| **It is an admission policy of one machine** | Not a compatibility rule, and not a statement about any other peer. It is the same shape `contract-b-m4.md` §22 B25 gives `minContractVersion` on the other wire, one layer down: §3.1's compatibility rules are about frames, and this is a decision made about a configuration before any frame is exchanged on the strength of it. |
+
+A world whose operator set `MULTIVERSE_EXPORT_EDGES=N,S` on a map three slots wide and one
+slot tall — a real single-row rig, and the most likely way a stranger produces a world that
+exports nothing:
+
+```json
+{
+  "protocol": "contract-a/2.4",
+  "type": "CONFIG_UPDATE",
+  "messageId": "2f8c04b1-6d39-4e57-9a02-c8b13e75d940",
+  "sentAt": 1785693598004,
+  "data": {
+    "sessionId": "b7301ea4-5c92-4f18-8d60-31ae7c05f2b9",
+    "reason": "connect",
+    "gameVersion": "0.6.3.1",
+    "modVersion": "0.3.0",
+    "simulationSize": 2000.0,
+    "borderEdges": ["E", "N", "W", "S"],
+    "exportEdges": ["N", "S"],
+    "borderWidth": 60.0,
+    "ringSlot": 2,
+    "worldName": "Slot2",
+    "worldWrapping": true
+  }
+}
+```
+```
+← close 4007 "exportEdges [N,S] has no usable edge on a 3x1 map (no column axis)"
+```
+```
+sidecar log:  contract A: refusing session — exportEdges [N,S] declares only the column
+              axis and this map is 3x1, so no declared edge can ever carry an organism.
+              Remedy: this machine's operator sets MULTIVERSE_EXPORT_EDGES to include E
+              or W, or leaves it unset for D17's default of all four edges. Nobody else
+              can fix this and no other peer is affected.
+```
+
+Note the frame is **valid** by every rule this document had before §21: all four
+`borderEdges`, a non-empty duplicate-free `exportEdges`, every member of it in `borderEdges`.
+That is the point of the item — the frame was never wrong, the **pairing** of the frame with
+the map was, and the sidecar is the only party that can see both. Note also what the log line
+does that the close code cannot: it names **who must act**, which is WP7's taxonomy rule
+arriving one package early because this refusal is the first one M5 invents on this wire.
+
+The same declaration on a `3×2` map is **granted without comment**: the column axis exists,
+both edges are usable, and the world exports north and south and never east or west, which is
+a legal thing to want.
+
+**Enforced by:** the **sidecar**, for holding the map, for evaluating at the join of the two
+inputs, and for the two different answers to the total and partial cases; the **mod**, for not
+reconnecting after `4007` and for having no opinion about any of it; the **operator or
+installer**, for the environment variable — and for the rig's own explicit-variable discipline,
+which is why `e2e/run-m4.sh` states `MULTIVERSE_EXPORT_EDGES` rather than inheriting a default
+(`m5_considerations.md`, DQ4, decision 7).
+
+### A51 — Contract debt A5, assessed a fourth time: still open, still moot, and the field would now be worse (§9.1, §12 item 6, §13 A5, §14 A15, §15 A22)
+
+*Contract Change 13 — **assess only**, and this is the assessment.*
+
+**The history, because a fourth assessment has to say what the first three settled.** §13 A5
+accepted that `MIGRATE_OUT_NACK` carries no `edge` field, because M2 declared one export edge
+per sim. §14 A15 re-assessed under the ring and called the condition permanent. §15 A22 found
+that M4's second edge had expired those grounds and identified the reason that was always the
+real one: **the mod binds one `migrationId` to one organism and one `exitEdge`**, so a NACK
+naming the `migrationId` names the edge — and M4 turned the implication into a requirement,
+*the mod MUST record `exitEdge` in its in-flight record and MUST close only that edge on a
+transient NACK*. A22 left the item open and named the residue precisely: *the debt is no longer
+inert; it rests on a rule somebody could drop.*
+
+**What M5 changes about the question.** The rule is now a conformance requirement for a mod
+this project may not have compiled. The package ships to strangers (D25), the wire is public,
+and a second implementation of either side is exactly what a published contract invites. That
+is the sharpest form the residue has taken, and it is the reason row 13 asked for the
+assessment in the milestone where an additive field is still cheap.
+
+**Assessment — the field is still not the answer, and M5 supplies a new argument against it.**
+
+| Question | Answer |
+|---|---|
+| Would `edge` on the NACK remove the obligation? | **No.** §6.3 already requires the mod to keep an in-flight record: one live `migrationId` per organism, bound to that organism, kept across a reconnect, with the organism inert until it resolves. The `exitEdge` is one field of a record the mod **must** keep anyway. The field would duplicate a value, not remove a duty. |
+| What does duplicating it cost? | **A disagreement with no rule to settle it.** Today one party states the exit edge and it is the party that chose it. With the field, two statements exist and can differ — a sidecar defect, a re-routed frame, a NACK generated from a stale record — and this wire would need its first reconciliation rule for a question that already has one answer. A22 called this *"the second way to answer a question that already has an answer, which is how two implementations start disagreeing about which one is authoritative"*; the public release does not weaken that, it sharpens it, because the two implementations are now the ones that never talk. |
+| What does dropping the obligation actually cost? | **A live lane, visibly.** A mod that closes every edge on one `EDGE_CLOSED` stops exporting through edges that are open. **No organism is lost and D2 is untouched** — the organism is revived and the export retried later — and the signature is legible on the operator surface: a world whose lanes are quiet while its neighbours' are busy, against `EDGE_STATUS` frames that say those edges are open. That is a **diagnosable** failure with a named cause, which is what WP7's taxonomy is for, and it is a far better failure than a silent one. |
+| **Does D13's clock apply?** | **No, and this is the finding that makes deferring safe rather than lucky.** D13's *last cheap moment* argument is about **mod-side rules and breaking changes**, which after M5 reach people the owner cannot contact. `MIGRATE_OUT_NACK.edge` is a **sidecar-authored OPTIONAL field**: adding it later is additive, costs a minor, and a mod that never reads it stays conformant forever. It is cheap **now and later**, which is precisely why it does not have to be bought now — unlike A49's flag, which is **mod**-authored and therefore does have D13's clock on it. Two additive fields, two different deadlines, and telling them apart is what row 13 was for. |
+
+**Resolution. The debt stays open and moot, and §12 item 6 keeps its number with its reasoning
+updated.** The fourth reason is the third reason plus a new argument against the fix, and the
+item's own text now records both. **What would close it** is unchanged and is written down so
+the next assessor does not have to re-derive it: a second party that authors a
+`MIGRATE_OUT_NACK` — a sidecar that generates one from a record the mod did not produce, which
+today does not exist — or a measured case of a conforming mod getting the correlation wrong.
+Neither has happened in four milestones.
+
+**Enforced by:** the **mod**, unchanged from A22 — the in-flight record and the close-only-that-
+edge rule are the whole of the mechanism. **This amendment adds no obligation to either side**
+and changes no field; it is an assessment, and its output is the record of one.
+
+### A52 — `contract-a/2.4` is a minor bump, and the path does not move (§2, §3, §3.1)
+
+*Contract Change 15 (D21).*
+
+**Change.** §3.1: additive fields raise the **minor**; field removal, type changes and
+enum-value removal require a **major**. Adding an enum *value* is additive. A47 through A51
+add one request header, one OPTIONAL field, one close code and three statements, and remove
+nothing.
+
+**Resolution.** Apply the contract's own test, item by item:
+
+| M5 change to Contract A | Kind | Needs a major? |
+|---|---|---|
+| `Authorization: Bearer` required on the upgrade (A47) | **a transport precondition, below the envelope** — no field, no message, and §3.1's rules are about frames | no |
+| HTTP 401 as the refusal (A47) | an HTTP status on a request that never became a session | no |
+| `authFailuresBeforeCeiling`, `contractATokenFile` named in §10 (A47) | named defaults and knobs for a new mechanism | no |
+| `MIGRATE_OUT.gameVersion`, `parents[].gameVersion`, `MIGRATE_IN.gameVersion` restated as diagnostic (A48) | **a prohibition on new readers**; no field, no type, no enum | no |
+| The four kept gates named as exceptions (A48) | shipped behaviour written down, nothing changed | no |
+| `parents[].blobDroppedForSize` added (A49) | **additive OPTIONAL field** on an existing OPTIONAL object | no |
+| `"blob_dropped_for_size"` becomes reachable (A49) | a value already in `contract-b-m4.md` §6.6's enum, now emitted | no |
+| Close `4007 EXPORT_EDGES_UNUSABLE` added (A50) | **additive enum value** — §3.1 says adding one is additive; removing one is not | no |
+| The sidecar's export-set check (A50) | receiver behaviour, no wire shape | no |
+| A5 assessed and left open (A51) | an assessment; no field either way | no |
+| Message catalogue, envelope, field tables, other enums, other close codes, NACK codes, geometry, capture bands, custody, dedup, pacing, replay | **all unchanged** | no |
+
+**No row is a major, and one row is what makes it a minor rather than nothing.**
+`parents[].blobDroppedForSize` is a new field a receiver detects **by its presence**, which is
+exactly the case §3.1 says the minor exists to record — the same test A44 applied to
+`CONFIG_UPDATE`'s five settings, and the test A41 and A46 answered the other way because those
+sets had **no field to detect**. The identifier is **`contract-a/2.4`**, the URL path is
+major-scoped and therefore stays **`/contract-a/v2`**, and `/contract-a/v1` keeps answering
+with close `4000` exactly as A23 left it.
+
+**Why the other wire took a major in the same wave, stated because a reader will ask.** A
+bearer token on Contract A **adds** a check where there was none; Contract B's per-peer
+credential **replaces** §3.1's shared-token rule, which has an installed base — and §3.1's own
+framing and A41's test both put *a changed rule with an installed base* on the expensive side.
+`contract-b-m4.md` §22, B32 applies that test and answers **major**, moving the path to
+`/contract-b/v4`. One milestone, one wave, two honest answers from two documents' own rules
+(D21).
+
+**What a mixed rig does, honestly. Every degradation lands on "unknown" or on a refusal a
+person can read, and none lands on a wrong number or a lost organism:**
+
+1. A `contract-a/2.3` **mod** with a `contract-a/2.4` sidecar that is **enforcing the token**
+   never connects: 401 on every dial, the ladder pins at five, and the mod logs the remedy. It
+   is a **refusal to admit**, not a version rejection — §3.1's *the minor is never a reason to
+   reject* is untouched, because nothing here reads a minor. Its journal is intact, its
+   organisms are inert or spawned, and one environment variable is between it and working.
+2. A `contract-a/2.3` **mod** with a `contract-a/2.4` sidecar that has **no token configured**
+   connects and runs exactly as it did yesterday. It sends no `blobDroppedForSize`, so every
+   blobless parent is `"parent_gone"` — which is what the archive recorded for two milestones
+   and is the honest answer for a mod that makes no statement.
+3. A `contract-a/2.4` **mod** with a `contract-a/2.3` **sidecar** sends the header, which an
+   older sidecar ignores as an unknown HTTP header, and sends `blobDroppedForSize`, which an
+   older sidecar ignores as an unknown field inside `data` (§3.1). The connection works; the
+   gap reason falls back to `"parent_gone"`; nothing is refused and nothing is wrong.
+4. **A45's rig case does not repeat here, and that is worth saying rather than assuming.** A45
+   crossed slot by slot because a sidecar-only change can: each sidecar owns exactly one mod on
+   its own loopback socket, and nothing about that judgement is shared. **A47 is a mod change**,
+   so the rig does not cross this one rolling at all — all five games go down in one window
+   (below), and the mixed state rows 1 and 2 describe is a state the rig passes *through* for
+   about a hundred seconds rather than one it runs in for hours. It is written down anyway,
+   because a stranger's machine can sit in it indefinitely and because the far end will.
+5. **No configuration produces a lost organism, a duplicated one, a wrong gap reason or a wrong
+   number** — the standard A37, A41, A44 and A46 held their sets to. A refused session is a
+   world that stops exporting, which is §5.4's fail-safe working, and a sidecar that holds a
+   journal for a mod that has not authenticated is §13 A1's *no mod connection is not an
+   error*.
+
+#### The migration note for the living deployment
+
+**The fleet that crosses this minor is six worlds on two machines**, and it crosses **in the
+same window** as Contract B's major, because the two sets ship together (D21). The Contract B
+crossing is described where it belongs — `contract-b-m4.md` §22, B32 — and this note states
+only what Contract A adds to its cost.
+
+**A47 is a mod change, and that is what shapes the whole rollout.** The mod must send the
+`Authorization` header, so the DLL changes; `deploy.sh` copies into `BepInEx/plugins/` and a
+running game locks the DLL. **So the rig's crossing to `contract-a/2.4` takes all five local
+games down at once** — it is not a rolling sidecar change, and it cannot be made into one.
+Three consequences follow, and every one of them is an argument for doing it once:
+
+1. **One window, not two.** The `contract-b/4.0` crossing and the `contract-a/2.4` crossing
+   belong in the **same** five-games-down deploy, and **every other pending mod change belongs
+   in it too**. `m5_tracking.md` carries the measured cost and the exact sequence; the
+   contract's part is only to say that the crossing is one window rather than several, and that
+   each additional window costs a custody replay burst that buys nothing.
+2. **The token has to exist before the mod that needs it.** The sidecar mints
+   `contractATokenFile` at first start, so the ordering is: sidecars up on the new build and
+   the file present, **then** the games come back. A mod that returns first meets a sidecar
+   that is enforcing and answers 401 on the ordinary ladder — recoverable, noisy, and entirely
+   avoidable by ordering.
+3. **The far end applies it at its own operator's leisure, and that is not observable from
+   here.** D9 forbids the rig to drive the second computer. Its slot stays dark and its lanes
+   bypassed until it returns — working exactly as designed and looking exactly like a peer that
+   has gone away — and the far-end bundle must be rebuilt after the mod deploy so that the DLL
+   in the zip is the one this machine runs.
+
+**What the crossing must not cost, and it is the bar WP2 reports against: zero discarded
+journal bytes.** A token is a check on a connection and touches nothing about custody. Every
+sidecar comes back to its own slot and its own coordinate, replays its journal with **zero**
+discarded bytes, and reopens its lanes; every organism the mod left inert is still inert and
+still bound to its `migrationId` (§6.3). A peer that loses a journal entry to an authentication
+upgrade has lost an organism to bookkeeping (D2).
+
+**Enforced by:** both sides, symmetrically. Each side sends `"contract-a/2.4"` and compares
+only the major, exactly as A23 requires — and the sidecar additionally owns the retired
+`/contract-a/v1` and its `4000`, which A47's token does not change, because a peer that cannot
+complete a handshake should still learn why (§15, A23).
