@@ -110,7 +110,7 @@ namespace BibitesMultiverse
     }
 
     /// <summary>
-    /// The wire vocabulary of contracts/contract-a.md, version contract-a/2.3: the envelope, the nine
+    /// The wire vocabulary of contracts/contract-a.md, version contract-a/2.4: the envelope, the nine
     /// message types, the close codes, the NACK taxonomy and the mod-owned tunables of §10.
     ///
     /// Nothing here touches Unity, so it is safe to call from the socket thread.
@@ -118,25 +118,39 @@ namespace BibitesMultiverse
     internal static class ContractA
     {
         /// <summary>
-        /// §3, §19 A44 — this release is **2.3**. A42 adds five OPTIONAL fields to one message — the
-        /// world's settings on CONFIG_UPDATE: <c>migrationExclude</c>, <c>saveMinutes</c>,
-        /// <c>saveKeep</c>, <c>saveOnQuit</c> and <c>worldWrapping</c> — and removes nothing, which
-        /// §3.1's own test answers with a **minor** bump; the major, the message catalogue, the enums
-        /// and the close codes are all untouched, so the URL path does not move and any earlier
-        /// <c>contract-a/2.x</c> peer stays compatible by construction. The minor is a capability
-        /// statement, never a negotiation: this side detects a feature by the **presence of the field**
-        /// and never by arithmetic on the minor.
+        /// §3, §21 A52 — this release is **2.4**. §21's six amendments add one request header, one
+        /// OPTIONAL field, one close code and three statements, and remove nothing, which §3.1's own
+        /// test answers with a **minor** bump. The header is A47's <c>Authorization: Bearer</c> on the
+        /// upgrade — a transport precondition **below** the envelope, so it is not what earns the bump;
+        /// A49's OPTIONAL <c>parents[].blobDroppedForSize</c> is, because it is a field a receiver
+        /// detects by its presence. The URL path is major-scoped and therefore does **not** move: it
+        /// stays <c>/contract-a/v2</c>, and <c>/contract-a/v1</c> keeps answering with close 4000.
         ///
-        /// 2.2 (§17, A37) added the species census and its <c>truncated</c> flag to HEARTBEAT. 2.1
-        /// (§16, A33) added the species block to MIGRATE_OUT and MIGRATE_IN. 2.0 (§15, A23) was the
-        /// first breaking change: A18 removed <c>exportEdge</c> for <c>exportEdges</c>, a field removal
-        /// and a type change together. §18 (two-way lanes) took no bump at all — it added no field.
+        /// 2.3 (§19, A44) added the world's five settings to CONFIG_UPDATE — <c>migrationExclude</c>,
+        /// <c>saveMinutes</c>, <c>saveKeep</c>, <c>saveOnQuit</c> and <c>worldWrapping</c>. 2.2 (§17,
+        /// A37) added the species census and its <c>truncated</c> flag to HEARTBEAT. 2.1 (§16, A33)
+        /// added the species block to MIGRATE_OUT and MIGRATE_IN. 2.0 (§15, A23) was the first breaking
+        /// change: A18 removed <c>exportEdge</c> for <c>exportEdges</c>, a field removal and a type
+        /// change together. §18 (two-way lanes) took no bump at all — it added no field.
+        ///
+        /// The minor is a capability statement, never a negotiation: this side detects a feature by the
+        /// **presence of the field** and never by arithmetic on the minor, and §3.1's *the minor is
+        /// never a reason to reject* is why a 2.4 mod and a 2.3 sidecar still interoperate — the older
+        /// sidecar ignores the Authorization header as an unknown HTTP header (A52).
+        ///
+        /// **Two of §21's amendments are not in this build yet, and the identifier does not lie about
+        /// either.** This mod does not send A49's <c>parents[].blobDroppedForSize</c>: absence is *no
+        /// statement*, which A49 says is exactly what a 2.4 mod says about a parent it did not drop, so
+        /// a blobless parent still reaches the archive as the <c>"parent_gone"</c> it has always been.
+        /// And A50's close <c>4007 EXPORT_EDGES_UNUSABLE</c> has no constant below and is not in the
+        /// no-reconnect set, because A50 is a separate change; a sidecar that closes 4007 is answered
+        /// with an ordinary reconnect until it lands.
         /// </summary>
-        internal const string Protocol = "contract-a/2.3";
+        internal const string Protocol = "contract-a/2.4";
 
         internal const string ProtocolName = "contract-a";
         internal const int ProtocolMajor = 2;
-        internal const int ProtocolMinor = 3;
+        internal const int ProtocolMinor = 4;
 
         /// <summary>§3.1, §15 A23 — the path is major-scoped, so a major bump moves it. Serves every contract-a/2.x.</summary>
         internal const string UrlPath = "/contract-a/v2";
@@ -172,6 +186,16 @@ namespace BibitesMultiverse
         internal const int ReconnectBackoffMinMs = 1000;
         internal const int ReconnectBackoffMaxMs = 30000;
         internal const int StableSessionMs = 5000;
+
+        /// <summary>
+        /// §10, §21 A47 — consecutive HTTP **401**s on the upgrade after which the reconnect ladder
+        /// holds at <see cref="ReconnectBackoffMaxMs"/> and the mod logs **once**, naming the remedy and
+        /// who must act. It exists so a misconfigured install is a quiet, diagnosable loop rather than a
+        /// redial storm. A 401 is not a close code and never will be: §2.1's codes are statements made
+        /// inside a session, and a session the token did not open never started.
+        /// </summary>
+        internal const int AuthFailuresBeforeCeiling = 5;
+
         internal const int SimNotReadyGraceMs = 2000;
         internal const int MaxFrameBytes = 8388608;
         internal const int MaxPayloadBytes = 4194304;

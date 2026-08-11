@@ -23,6 +23,15 @@ namespace BibitesMultiverse
     /// Declaring an edge is a statement about **geometry, not topology**: it means "I run a capture
     /// band here". Whether that edge has a lane is the sidecar's answer in <c>EDGE_STATUS</c>. A mod
     /// **MUST NOT** vary its declaration by map shape — it has no way to know the shape.
+    ///
+    /// **One setting deliberately does not live here** (contract-a.md §21, A47): the bearer token that
+    /// authenticates the Contract A upgrade. Its two variables — <c>MULTIVERSE_CONTRACT_A_TOKEN_FILE</c>
+    /// and <c>MULTIVERSE_CONTRACT_A_TOKEN</c> — are read by <see cref="ContractAToken"/> on the socket
+    /// thread, on **every** dial, because a token read once at startup could not pick up a rotation
+    /// without a game restart. They get no BepInEx config entry either: a secret in
+    /// <c>config/</c> would be one file shared by every instance of the rig, and this one is per
+    /// machine. Only their *presence* and the file's *path* are summarized below; the value is never
+    /// logged.
     /// </summary>
     internal class MultiverseConfig
     {
@@ -476,6 +485,10 @@ namespace BibitesMultiverse
                 $"{EnvPortalFlourishes}={Show(Env(EnvPortalFlourishes))} " +
                 $"{EnvMigrationExclude}={Show(Env(EnvMigrationExclude))} " +
                 "(environment beats the BepInEx config; WSLENV must name each variable)");
+            MultiversePlugin.Log.LogInfo(
+                $"[M2] contract A token: {ContractAToken.DescribeConfiguration()} — the bearer token of §21 A47, " +
+                "which authenticates the WebSocket upgrade. It is not the relay's credential and no part of it is " +
+                "ever written to this log. Both variables must be named in WSLENV like every other one.");
         }
 
         private static string Show(string value)

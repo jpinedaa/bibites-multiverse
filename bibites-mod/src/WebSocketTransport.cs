@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
@@ -46,7 +47,19 @@ namespace BibitesMultiverse
     /// ManagedWebSocket.CreateFromConnectedStream — the fully managed .NET implementation, not a
     /// PlatformNotSupported stub. A hand-rolled RFC 6455 client would only be needed if that type
     /// were missing or stubbed; <see cref="ProbeAvailability"/> reports which case this build is in
-    /// before the first connect, so the answer is in the log rather than in a crash.
+    /// before the first connect, so the answer is in the log rather than in a crash. §11.2 names
+    /// that type and its <c>Options.SetRequestHeader</c> as the way A47's bearer token rides the
+    /// upgrade, which is the second reason not to hand-roll one.
+    ///
+    /// **The dial is authenticated (§21, A47).** Every connect attempt carries
+    /// <c>Authorization: Bearer &lt;token&gt;</c>, resolved on this thread, at dial time, on every
+    /// dial (<see cref="ContractAToken"/>). A refusal is HTTP **401** and no WebSocket — deliberately
+    /// not a close code, because §2.1's codes are statements made inside a session and a session the
+    /// token did not open never started. So the refusal arrives here as a failed
+    /// <see cref="ClientWebSocket.ConnectAsync"/> rather than as a <c>Disconnected</c> event, it
+    /// retries on §6.2's ordinary ladder, and after
+    /// <see cref="ContractA.AuthFailuresBeforeCeiling"/> consecutive refusals the ladder holds at
+    /// <see cref="ContractA.ReconnectBackoffMaxMs"/> and one line names the remedy and who must act.
     /// </summary>
     internal class WebSocketTransport
     {
@@ -84,6 +97,28 @@ namespace BibitesMultiverse
         private volatile bool halted;
         private volatile bool connected;
         private int generation;
+
+        /// <summary>
+        /// §21 A47 — consecutive HTTP 401s on the upgrade. Reset by any dial that opened a socket and
+        /// by any failure that was not an authentication refusal, because A47 counts *consecutive*
+        /// ones. Socket-thread only.
+        /// </summary>
+        private int authFailures;
+
+        /// <summary>
+        /// §21 A47 — the ceiling line is logged **once** per run of refusals, not once per attempt. A
+        /// misconfigured install must be a quiet, diagnosable loop rather than a wall of text.
+        /// </summary>
+        private bool authCeilingLogged;
+
+        /// <summary>
+        /// The last <see cref="ContractAToken.Resolution.Summary"/> reported, so the token's source is
+        /// stated when it changes and not on every rung of the ladder. **Never the value.**
+        /// </summary>
+        private string lastTokenSummary;
+
+        /// <summary>The remedy sentence that belongs to the resolution the current dial used.</summary>
+        private string lastTokenRemedy = string.Empty;
 
         /// <summary>Bound on the send queue, so an unread socket cannot grow memory without limit.</summary>
         private const int MaxQueuedFrames = 256;
@@ -279,6 +314,7 @@ namespace BibitesMultiverse
                 try
                 {
                     socket = new ClientWebSocket();
+                    Authenticate(socket);
                     await socket.ConnectAsync(uri, token).ConfigureAwait(false);
 
                     // Drain **after** the connect, not before it. Anything still queued belongs to the
@@ -286,6 +322,11 @@ namespace BibitesMultiverse
                     // had not yet drained the Disconnected event — and §5.1 says the first frame on a
                     // new connection is CONFIG_UPDATE.
                     DrainOutbound();
+
+                    // §21 A47 — the sidecar verified the token before the upgrade completed, so an
+                    // open socket **is** the acceptance. The run of consecutive 401s ends here.
+                    authFailures = 0;
+                    authCeilingLogged = false;
 
                     Report(TransportLogLevel.Info, $"connected to {url} on backoff rung {attempt}.");
                     session.Start();
@@ -311,8 +352,17 @@ namespace BibitesMultiverse
                     {
                         Report(TransportLogLevel.Warning, $"connection to {url} dropped: {closeReason}");
                     }
+                    else if (IsUpgradeRefused(e))
+                    {
+                        NoteAuthenticationRefusal(attempt);
+                    }
                     else
                     {
+                        // Not an authentication refusal, so the run of consecutive 401s is broken
+                        // (§21, A47 counts consecutive ones) and the ceiling line may be earned again.
+                        authFailures = 0;
+                        authCeilingLogged = false;
+
                         // Exactly one line per failed attempt — a dead sidecar must not flood the log.
                         int next = FullJitterDelayMs(attempt);
                         Report(
@@ -493,14 +543,157 @@ namespace BibitesMultiverse
             }
         }
 
-        /// <summary>§6.2 — delay = random(0, min(max, min * 2^n)).</summary>
+        /// <summary>
+        /// §21 A47 — put the bearer token on this dial. Resolved here, on the socket thread, once per
+        /// connect attempt (§11.2): it is a file read, so it belongs off the main thread with the
+        /// connect, and reading it per dial is what makes A47's rotation cost one reconnect instead of
+        /// a game restart.
+        ///
+        /// A source that yields nothing leaves the header off and lets the sidecar's 401 be the
+        /// answer — which is also how a rig running the sidecar's own insecure no-token switch
+        /// connects. It is **not** a retry without the header: a mod that has no token has never had
+        /// one to drop, and nothing here invents, derives or hunts for a value that a refusal would
+        /// accept.
+        /// </summary>
+        private void Authenticate(ClientWebSocket socket)
+        {
+            ContractAToken.Resolution resolution = ContractAToken.Resolve();
+            lastTokenRemedy = resolution.Remedy;
+
+            string summary = resolution.Summary;
+            if (!string.Equals(summary, lastTokenSummary, StringComparison.Ordinal))
+            {
+                lastTokenSummary = summary;
+                Report(
+                    resolution.Value != null ? TransportLogLevel.Info : TransportLogLevel.Warning,
+                    summary);
+            }
+
+            if (resolution.Value == null)
+            {
+                return;
+            }
+
+            try
+            {
+                socket.Options.SetRequestHeader(
+                    ContractAToken.HeaderName, ContractAToken.HeaderValue(resolution.Value));
+            }
+            catch (Exception e)
+            {
+                // A value with a control character in it cannot become a header. Report the failure
+                // and the source, never the value; the dial goes ahead bare and the sidecar's 401
+                // puts the same conclusion in the sidecar's log too.
+                Report(
+                    TransportLogLevel.Error,
+                    $"contract A: the bearer token from {resolution.Source} cannot be sent as an " +
+                    $"{ContractAToken.HeaderName} header ({e.GetType().Name}: {e.Message}). The token file holds " +
+                    "one line and nothing else.");
+            }
+        }
+
+        /// <summary>
+        /// §21 A47 — count one HTTP 401 on the upgrade, and at
+        /// <see cref="ContractA.AuthFailuresBeforeCeiling"/> consecutive ones log **once**, naming the
+        /// remedy and who must act: the person at this machine, because the file is on it.
+        ///
+        /// Nothing about custody moves while this fails, and the line says so on purpose. A mod that
+        /// cannot authenticate is a mod with a closed export set (§5.4's fail-safe) and a sidecar
+        /// holding its journal (§13, A1). The failure costs migrations that have not happened yet, and
+        /// costs no organism that has.
+        /// </summary>
+        private void NoteAuthenticationRefusal(int attempt)
+        {
+            authFailures++;
+            int next = FullJitterDelayMs(attempt);
+
+            // One line per attempt, the same budget the ordinary failure path keeps.
+            Report(
+                TransportLogLevel.Warning,
+                $"contract A: the upgrade to {url} was refused before the WebSocket existed — HTTP 401, the " +
+                $"bearer token was not accepted ({authFailures} of {ContractA.AuthFailuresBeforeCeiling}). " +
+                $"Retrying in about {next} ms, with the header and never without it.");
+
+            if (authFailures < ContractA.AuthFailuresBeforeCeiling || authCeilingLogged)
+            {
+                return;
+            }
+
+            authCeilingLogged = true;
+            Report(
+                TransportLogLevel.Error,
+                $"contract A: 401 from {url} — token rejected. Remedy: {lastTokenRemedy}. Backoff pinned at " +
+                $"{ContractA.ReconnectBackoffMaxMs} ms after {ContractA.AuthFailuresBeforeCeiling} attempts; no " +
+                "organism is at risk — every edge is closed and the sidecar is holding its journal. This mod will " +
+                "not retry without the header, mint a token, or dial another port looking for a sidecar that " +
+                "would take it.");
+        }
+
+        /// <summary>
+        /// §21 A47 — did the sidecar refuse this upgrade rather than fail to answer it?
+        ///
+        /// A 401 is an HTTP status on a request that never became a session, so it never reaches
+        /// <c>DescribeCloseCode</c>: it surfaces as a failed <c>ConnectAsync</c>, and the mod has to
+        /// tell it apart from "no sidecar is listening". Two shapes are read, because the game's Mono
+        /// is the one that decides which one arrives:
+        ///
+        /// * a <see cref="WebException"/> anywhere in the chain carrying an <see cref="HttpWebResponse"/>
+        ///   with status 401 — the exact answer, available from the <c>HttpWebRequest</c>-based
+        ///   ClientWebSocket some Mono builds ship;
+        /// * a <see cref="WebSocketException"/> with **no inner exception**, which is what the build
+        ///   this mod is compiled against throws. Its <c>WebSocketHandle</c> writes the upgrade over a
+        ///   raw socket and throws a bare <c>WebSocketException</c> when the status line is not
+        ///   <c>HTTP/1.1 101</c>, without putting the code in the message; every failure *before* the
+        ///   response — DNS, connect, cancellation — is wrapped, so it arrives with an inner exception
+        ///   instead. An inner-null one therefore means the server answered and the answer was not a
+        ///   101, and on <c>/contract-a/v2</c> the sidecar's only such answer is A47's 401. The two
+        ///   error codes that mean "this is not HTTP at all" are excluded so a squatter on the port
+        ///   does not read as a rejected token.
+        /// </summary>
+        private static bool IsUpgradeRefused(Exception e)
+        {
+            for (Exception current = e; current != null; current = current.InnerException)
+            {
+                if (current is WebException webException
+                    && webException.Response is HttpWebResponse response
+                    && response.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    return true;
+                }
+            }
+
+            return e is WebSocketException socketException
+                && socketException.InnerException == null
+                && socketException.WebSocketErrorCode != WebSocketError.HeaderError
+                && socketException.WebSocketErrorCode != WebSocketError.UnsupportedProtocol;
+        }
+
+        /// <summary>
+        /// §6.2 — delay = random(0, min(max, min * 2^n)).
+        ///
+        /// §21 A47 pins the rung: after <see cref="ContractA.AuthFailuresBeforeCeiling"/> consecutive
+        /// 401s the ladder **holds at** <see cref="ContractA.ReconnectBackoffMaxMs"/>. The jitter stays
+        /// — A47 says the refusal retries on §6.2's *ordinary* ladder and names only the ceiling it
+        /// holds at, and full jitter is what that ladder is. In practice the climb reaches the same
+        /// ceiling by rung 6 anyway, because §13 A8 resets the ladder only after a session that stayed
+        /// up and a refused upgrade never opens one; the pin is here so the rule is enforced rather
+        /// than inferred from the arithmetic.
+        /// </summary>
         private int FullJitterDelayMs(int attempt)
         {
-            int exponent = Math.Min(attempt - 1, 30);
-            long ceiling = ContractA.ReconnectBackoffMinMs * (1L << exponent);
-            if (ceiling > ContractA.ReconnectBackoffMaxMs || ceiling <= 0)
+            long ceiling;
+            if (authFailures >= ContractA.AuthFailuresBeforeCeiling)
             {
                 ceiling = ContractA.ReconnectBackoffMaxMs;
+            }
+            else
+            {
+                int exponent = Math.Min(attempt - 1, 30);
+                ceiling = ContractA.ReconnectBackoffMinMs * (1L << exponent);
+                if (ceiling > ContractA.ReconnectBackoffMaxMs || ceiling <= 0)
+                {
+                    ceiling = ContractA.ReconnectBackoffMaxMs;
+                }
             }
 
             lock (random)

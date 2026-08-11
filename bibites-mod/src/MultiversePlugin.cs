@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.6.3";
+        public const string Version = "0.6.4";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -22,12 +22,14 @@ namespace BibitesMultiverse
         {
             Log = Logger;
             Log.LogInfo(
-                $"{Name} {Version} loaded — {ContractA.Protocol} client, two-way lanes (D17, §18 A38): all four edges " +
-                "declared by default, a capture band on each (§4.3.1) and the corner rule at all four corners (§4.3.2). " +
-                "Plus the migration exclusion list (D18, §18 A39), the lineage annex, species identity in the envelope " +
-                "(§16), the active-species census on the heartbeat (§17), this world's settings on the handshake " +
-                "(§19 A42 — read-only, never a control surface), wrap-on containment (D10), periodic world saves " +
-                "(D14) and the two-lane portal (WP7).");
+                $"{Name} {Version} loaded — {ContractA.Protocol} client. The dial is authenticated: " +
+                $"{ContractAToken.HeaderName}: Bearer on the HTTP upgrade, from {ContractAToken.EnvTokenFile} or " +
+                $"{ContractAToken.EnvToken}, re-read on every dial and never logged (§21 A47). Two-way lanes " +
+                "(D17, §18 A38): all four edges declared by default, a capture band on each (§4.3.1) and the corner " +
+                "rule at all four corners (§4.3.2). Plus the migration exclusion list (D18, §18 A39), the lineage " +
+                "annex, species identity in the envelope (§16), the active-species census on the heartbeat (§17), " +
+                "this world's settings on the handshake (§19 A42 — read-only, never a control surface), wrap-on " +
+                "containment (D10), periodic world saves (D14) and the two-lane portal (WP7).");
             Log.LogInfo($"Application.version = {Application.version}");
             Log.LogInfo($"Application.unityVersion = {Application.unityVersion}");
 
