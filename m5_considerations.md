@@ -109,9 +109,10 @@ In scope:
   package exposes to a machine the owner does not run
 - A **layered** compatibility policy (decision 5, D22): a contract-version gate at the relay,
   a published support matrix over game versions, and a way to move a fleet the owner cannot
-  reach. The bb8 payload question that layering exposes is **deferred by the owner's
-  refinement of 2026-08-11** — the payload is assumed to load across versions and the envelope
-  carries the serializing game version as diagnostic metadata only
+  reach. The bb8 payload question that layering exposes is **deferred by the owner's two calls
+  of 2026-08-11** — the payload is assumed to load across versions, the envelope carries the
+  serializing game version as diagnostic metadata, and **the shipped version gates stay as they
+  are**, so the whole cross-version design space waits for an operational problem
 - A support surface: an error taxonomy, a diagnostics command, and documentation a
   non-operator can follow alone
 - The community playtest itself
@@ -166,10 +167,12 @@ answered: **D17's four edges**, stated in the package rather than discovered (de
 so the row is no longer one policy but two, a contract-version gate on the wire and a support
 matrix per machine (decision 5, D22) — and it settles the shape of *a fleet-update mechanism*
 with it, because a release page pushes nothing to anybody: the fleet moves by publication plus
-a relay-side minimum contract version, never by force. **The owner's refinement of 2026-08-11
-closes the third part of that row**, the payload question the layering exposed: the bb8 body
-stays opaque, cross-version loading is assumed, and the envelope's game version is diagnostic
-metadata rather than a gate. *Archive retention as a shipped rule*
+a relay-side minimum contract version, never by force. **The owner's two calls of 2026-08-11
+close the third part of that row**, the payload question the layering exposed: the bb8 body
+stays opaque, cross-version loading is assumed, the envelope's game version is diagnostic
+metadata — and **the shipped game-version gates are kept**, so what the row now describes is a
+policy plus one accepted behaviour, a map that partitions along a version boundary until every
+machine is on the same build. *Archive retention as a shipped rule*
 is answered **as process**: M5 produces the rule, even if the rule is *keep everything*
 (decision 3). Everything else in the table — relay operations, the DNS name and certificate,
 the forward receipt, the public-safe defaults audit, slot-space growth, moderation and the
@@ -435,11 +438,13 @@ version."* Read as a design, it is two tests that never meet:
 **This supersedes the fleet-wide same-game-version rule.** `system_decomposition.md`'s relay
 listed "reject mismatched game/mod versions" at connect and now gates on the contract version;
 `setup-farend.ps1`'s `$AssemblySha256` refusal and the far-end bundle's pin survive as **that
-machine's** matrix entry rather than as a rule about the map. **One piece of live normative
-text still says the old thing** — `contract-b-m4.md` §6.1's *"the relay **MUST** refuse a peer
-whose `gameVersion` is incompatible with the map's"* — and Contract Change 10 is where WP1
-replaces it. Until then the contract is behind the decision, which is the ordinary order here
-and not a disagreement. Nothing is loosened where it
+machine's** matrix entry rather than as a rule about the map. **One rule still says the old
+thing, in the contract and in the relay** — `contract-b-m4.md` §6.1's *"the relay **MUST**
+refuse a peer whose `gameVersion` is incompatible with the map's"*, enforced at `relay.go:467`
+and `:655` — and Contract Change 10 was where WP1 would have replaced it. **It no longer does:
+the owner chose on 2026-08-11 to leave every shipped version gate alone**, so row 10 keeps only
+its additive half and the disagreement between D22's wording and the running relay is held open
+knowingly (the answer, and what it costs, is at the end of this section). Nothing is loosened where it
 matters: a peer that cannot speak the wire still cannot join, and the peer that suffers from
 staleness — the *neighbour* of the stale peer, per the episode below — is protected by the test
 that actually predicts breakage.
@@ -483,7 +488,8 @@ potential future debugging."* Read as a design, it settles four things:
   reading `contractAVersion` as a capability decision, and the game version on a migration
   carries exactly the same prohibition — **a reader MUST NOT parse it into a capability
   decision.** It is carried so that a future incident is diagnosable from the record instead of
-  reconstructed from memory.
+  reconstructed from memory. **Narrowed the same day to bind *new* readers only**, because the
+  gates already shipped are kept — see the answer below.
 - **(c) Both designed answers are deferred, not rejected** — this project's own normalized
   canonical schema, and the cheaper marker-plus-refusal of option 2. Neither is built until an
   incident makes one necessary.
@@ -506,16 +512,18 @@ journal entry; and the archive's ledger record, whose live lines carry
 `"gameVersion":"0.6.3.1"` today. `parents[].gameVersion` carries it for the lineage blobs.
 **Nothing has to be added to satisfy (b)'s *carrying*.**
 
-**What is not yet true is (b)'s *only*.** Three shipped mechanisms read the game version as a
-decision rather than as a note, and the refinement puts all three on the wrong side of its own
-rule:
+**What is not true is (b)'s *only*, and the owner has since chosen to keep it that way.** Three
+shipped mechanisms read the game version as a decision rather than as a note — four, counting
+the relay's own refusal below — and the refinement put every one of them on the wrong side of
+its own rule until the answer of 2026-08-11 turned them into stated exceptions to it:
 
 - **The importing mod refuses on an exact string mismatch.** `MigrationImporter.cs:199-204`
   answers `MIGRATE_IN_NACK` / `VERSION_UNSUPPORTED`, permanent, and §9.2 makes it normative —
   *"do not re-deliver, hold for an operator, mark the peer pair incompatible"*. **This is
-  option 2, already shipped.** The refinement does not ask for it to be built; it asks for it
-  not to fire — and while it stands, "assume it will work" cannot be tested, because no
-  cross-version organism ever reaches `LoadBibiteOrEggFromData` to prove or disprove it.
+  option 2, already shipped.** The refinement did not ask for it to be built; read literally it
+  asked for it not to fire, and the owner's answer keeps it firing — so "assume it will work"
+  cannot be tested, because no cross-version organism ever reaches `LoadBibiteOrEggFromData` to
+  prove or disprove it.
 - **The routing walk skips a peer on a different game version.** `mapwalk.Deliverable`
   (`go/internal/mapwalk/mapwalk.go:40`) returns `peer_incompatible`, which `contract-b-m4.md`
   §8 aggregates into a closed edge and `contract-a.md` §5.4's `EDGE_STATUS` reports to the mod.
@@ -524,19 +532,47 @@ rule:
   refuses a mod whose `CONFIG_UPDATE.gameVersion` has no `bb8-schema` dialect. Inert in
   practice — the allow-list is empty outside tests and empty means accept — but normative.
 
-`contract-b-m4.md` §6.1's relay refusal is the fourth and was already known; Contract Change 10
-retires it. **So 10a's remaining work is a subtraction from three places, not an addition to
-one, and that is more than the owner's words settle on their face.** It is recorded here as
-WP1's question to put to him rather than assumed away: the plain reading of (a) and (b) is that
-a version mismatch must stop refusing organisms and stop closing lanes, but all three are live
-behaviour on a running deployment, and retiring them changes what happens the first time two
-game builds really do meet.
+`contract-b-m4.md` §6.1's relay refusal is the fourth, and it is not merely normative text the
+wire has yet to catch up with: the relay **enforces** it, closing a mismatched handshake with
+`4003` (`go/internal/relay/relay.go:467`), answering a mismatched `SECTOR_CLAIM` with
+`version_incompatible` (`relay.go:655`), and skipping a mismatched peer in its own neighbour
+walk exactly as `mapwalk` does (`relay.go:771`). **So 10a's remaining work read as a
+subtraction from four shipped places rather than an addition to one, and that is more than the
+owner's words settled on their face.** It was put to him as WP1's first question rather than
+assumed away.
+
+**ANSWERED 2026-08-11 — the gates stay.** In his words: *"lets not change this then we will
+reconsider in the future if there's issues i think we can leave it like its working now."*
+Nothing is retired: §9.2's `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible`, close
+`4002` and the relay's own refusal all stand exactly as shipped, and **WP1 owes no gate
+retirement.** Read with the earlier refinement, *assume it works* means **no new mechanism is
+built in either direction** — none is designed on the game-version axis, and none is removed to
+make the assumption testable. The whole cross-version design space — retiring the gates, this
+project's own normalized schema, marker-plus-refusal — is **deferred until version skew
+actually causes an operational problem.**
+
+**What the system does on version skew, stated plainly because it is now the accepted
+behaviour rather than a defect:** two machines on different game builds do not exchange
+organisms. The relay refuses whichever peer disagrees with the version the map already reports,
+at connect or at claim; `mapwalk` and the relay's own walk close the edges between mismatched
+pairs; and the importing mod answers a permanent `VERSION_UNSUPPORTED` if a payload ever
+reaches it. That is **safe** — no cross-version payload reaches
+`SaveSystem.LoadBibiteOrEggFromData` at all — and it is exactly why the assumption stays
+untested rather than validated. It is also why the rig's practice survives the layering: when
+Steam updates the game, machines that update at different moments **partition organism flow**
+until every machine is on the new build, and re-syncing all machines promptly after a game
+update is what ends the partition (`dev_environment.md`, *The far end*).
 
 The fleet-wide rule the layered model replaced never answered this question either — it only
 made it invisible, by asserting that every peer ran one version, an assertion nobody could
 check and Steam could break in an afternoon. The refinement does not make the question
-invisible. It makes it **deferred and instrumented**, which is the move Decision 9 made for the
-velocity floor: do not build the mechanism, keep the signal that would tell you to.
+invisible. It makes it **deferred**, which is the move Decision 9 made for the velocity floor:
+do not build the mechanism, keep the signal that would tell you to. **What the gates-stay
+answer costs is the instrumentation half of that move**, and it has to be said rather than
+discovered: a gate that refuses every crossing means the ledger can never record one, so the
+signal that reopens the design space is not a failed restore but the **partition itself** —
+refused claims, `lastRefusal` on a slot, `peer_incompatible` edges and `VERSION_UNSUPPORTED`
+NACKs, counted after a staggered game update. WP8 watches for that instead of for a crossing.
 
 **The wire, where the lesson is sharper** and where the membership test now lives.
 Compatibility is on the major alone, a minor is a capability statement rather than a
@@ -945,8 +981,10 @@ and added one row**, all marked in place: row 1 has its version (`contract-b/4`)
 version calls are both made, row 14 leaves the milestone, and row **10a** is new — the payload
 question D22 named as its remaining work. **The owner's refinement of 2026-08-11 rewrote 10a
 in place**, from a compatibility mechanism to a diagnostic field, and took it off the critical
-path; DQ5 carries the call. Rows are not renumbered, because WP1 and the paragraph below cite
-them by number. Sixteen of the seventeen rows are M5 work; row 14 is not.
+path; **his second answer the same day closed the half 10a had left open — the shipped version
+gates stay — which also removes the retirement half of row 10.** DQ5 carries both calls. Rows
+are not renumbered, because WP1 and the paragraph below cite them by number. Sixteen of the
+seventeen rows are M5 work; row 14 is not.
 
 | # | Document | Change | Source | Status |
 |---|---|---|---|---|
@@ -959,8 +997,8 @@ them by number. Sixteen of the seventeen rows are M5 work; row 14 is not.
 | 7 | `contract-b-m4.md` §13 item 7 | Restate the renderer's escaping obligation as a testable rule, and repeat the `contractAVersion` prohibition where an implementer of a page will read it. | §13 item 7 | **M5** |
 | 8 | `contract-b-m4.md` §7.2 | Auto-placement under churn: holes before axis extension, which axis extends, the coalescing window, and a bound on `PEER_STATUS` broadcast rate. | §13 item 3 | **M5** |
 | 9 | `contract-b-m4.md` §3.x (new) | Capacity limits as a published table — connections, frames, claims, payload bytes and genome requests per peer — every one a knob, and every one a peer depends on published on the stats block. | Inferred; D20's knob rule | **M5** |
-| 10 | `contract-b-m4.md` §6.1, and both documents | A minimum **contract**-version rule at the relay handshake, stated as a **compatibility** gate and explicitly not a security control — and, in its place, the retirement of §6.1's current *"the relay **MUST** refuse a peer whose `gameVersion` is incompatible with the map's"*, which D22 supersedes: the game version stays a reported field and a per-machine matter answered by the support matrix, not a membership test. `4003` and `lastRefusal` survive, on the contract-version axis. | Inferred; `dev_environment.md`, *The minors*; Decision 5 (D22) | **M5** — the one place a ratified decision contradicts live normative text, and WP1 is where it is resolved |
-| 10a | `contract-a.md` §5.3, §9.2, §2.1; `contract-b-m4.md` §8; Contract C | **Redefined 2026-08-11** by the owner's refinement of D22, from a compatibility mechanism to a **small additive diagnostic field**. The envelope's game version is carried for future debugging, and **a reader MUST NOT parse it into a capability or refusal decision** — §13 item 7's `contractAVersion` rule, applied to the second version axis. The field already exists end to end (`MIGRATE_OUT.gameVersion`, `parents[].gameVersion`, `body.version`, `MIGRATE_IN.gameVersion`, the sidecar journal, the archive ledger), so what is left is **stating the prohibition** and retiring the three places that still decide on it: §9.2's `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible` skip, and close `4002`. Neither the normalized canonical schema nor the marker-plus-refusal design is built until an actual cross-version load failure occurs. | Decision 5 (D22), refined 2026-08-11 | **M5** — additive and cheap, and **no longer on the critical path**. The three retirements exceed what the owner's words settle: WP1 puts them to him |
+| 10 | `contract-b-m4.md` §6.1, and both documents | **Narrowed 2026-08-11 to its additive half.** A minimum **contract**-version rule at the relay handshake, stated as a **compatibility** gate and explicitly not a security control; `4003` and `lastRefusal` gain the contract-version axis. **The retirement half is dropped:** §6.1's *"the relay **MUST** refuse a peer whose `gameVersion` is incompatible with the map's"* stays, because the relay enforces it in code (`relay.go:467`, `:655`, `:771`) and the owner's answer that day was to leave the shipped version gates alone. D22's layering still stands as the design — the contract version is what the map's membership *ought* to rest on, and the support matrix is still per machine — but the game-version refusal is kept deliberately rather than superseded in place. | Inferred; `dev_environment.md`, *The minors*; Decision 5 (D22), narrowed 2026-08-11 | **M5** — additive only. WP1 adds the contract-version gate and **does not touch §6.1**; the contradiction between D22's wording and §6.1 is now knowingly held open rather than resolved, and it reopens with the rest of the cross-version design space |
+| 10a | `contract-a.md` §5.3, §9.2, §2.1; `contract-b-m4.md` §8; Contract C | **Redefined 2026-08-11** by the owner's refinement of D22, from a compatibility mechanism to a **small additive diagnostic field**. The envelope's game version is carried for future debugging, and **a reader MUST NOT parse it into a capability or refusal decision** — §13 item 7's `contractAVersion` rule, applied to the second version axis. The field already exists end to end (`MIGRATE_OUT.gameVersion`, `parents[].gameVersion`, `body.version`, `MIGRATE_IN.gameVersion`, the sidecar journal, the archive ledger), so nothing has to be added to carry it. **Closed the same day: the gates stay**, so the prohibition cannot be written flat. It binds **new** readers only, and the contract states the four shipped decision points as named exceptions rather than forbidding them: §9.2's `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible` skip, close `4002`, and §6.1's relay refusal. Neither the normalized canonical schema nor the marker-plus-refusal design is built until version skew causes an operational problem. | Decision 5 (D22), refined and closed 2026-08-11 | **M5** — wording only, and **no longer on the critical path**. **No retirement:** the owner answered on 2026-08-11 that the shipped gates stay, so WP1 writes the diagnostic intent plus the exception list |
 | 11 | `contract-a.md` §12 item 8 | `"blob_dropped_for_size"` is defined and never emitted. One additive OPTIONAL field on `parents[]` closes it. | §12 item 8 | **M5** — cheap now, a migration story later |
 | 12 | `contract-a.md` §12 item 9 | A startup refusal in the sidecar for a non-grid `exportEdges` set. The sidecar knows the map; the mod must not. | §12 item 9 | **M5** — it bites hardest with strangers |
 | 13 | `contract-a.md` §12 item 6 | Contract debt A5: assess and either close it or restate why it stays moot. Its second reason — "the mod records the edge" — is an obligation somebody could drop. | §12 item 6 | **M5** — assess only |
@@ -994,13 +1032,16 @@ ratified as of 2026-08-10**, so nothing here is gated on a signature any more.
 - **The version calls, applied:** `contract-b/4` for the credential, `contract-a/2.4` for the
   bearer token, with a migration note for the living deployment — which is itself a peer that
   has to move, and the only rehearsal this project gets for moving a fleet across a major
-- **The layered compatibility statement of D22**, in both documents: the contract-version gate,
-  the explicit non-gating of the game version, and row 10a as the owner refined it on
-  2026-08-11 — the envelope's game version stated as **diagnostic metadata a reader MUST NOT
-  parse into a capability decision**, on the model of §13 item 7's `contractAVersion` rule.
-  **Put the three live exceptions to him in this package**, because retiring them is behaviour
-  and not wording: §9.2's `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible` skip, and
-  close `4002` (DQ5 states each one and where it fires)
+- **The layered compatibility statement of D22**, in both documents: the contract-version gate
+  added at the relay handshake, and row 10a as the owner refined it on 2026-08-11 — the
+  envelope's game version stated as **diagnostic metadata no new reader may parse into a
+  capability decision**, on the model of §13 item 7's `contractAVersion` rule. **This package
+  retires no gate.** The question it was carrying was answered on 2026-08-11 — *"lets not
+  change this … we can leave it like its working now"* — so §9.2's `VERSION_UNSUPPORTED`,
+  `mapwalk`'s `peer_incompatible` skip, close `4002` and §6.1's relay refusal are all written
+  down as **kept, deliberate exceptions** to the diagnostic-only rule, with the version-skew
+  behaviour they produce stated where an operator will read it (DQ5 states each one, where it
+  fires, and what a skewed map looks like)
 - The stale-milestone correction of item 16
 
 Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said so.
@@ -1102,14 +1143,17 @@ Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said 
 - **The velocity-floor instrumentation of Decision 9**: D19's hop feed watched for one species
   crossing one lane both ways in quick succession, counted rather than eyeballed, because this
   run is what decides whether the floor is ever built
-- **The cross-version watch that D22's 2026-08-11 refinement leaves in place of research.**
-  The playtest is the first population where two game builds genuinely coexist — Steam updates
-  land unevenly and the matrix is per machine — so it is where the deferred question gets its
-  only real test. Read the ledger's `gameVersion` against the receiving world's and count any
-  migration that crossed a version boundary; a restore that fails or arrives wrong on such a
-  crossing is the incident that reopens the normalized-schema and marker-plus-refusal designs.
-  **Zero such crossings is a result too**, and it must be reported as *untested* rather than
-  as *stable*
+- **The version-skew watch that D22's 2026-08-11 calls leave in place of research.** The
+  playtest is the first population where two game builds genuinely coexist — Steam updates land
+  unevenly and nobody can be told to defer one. **With the gates kept, the thing to count is
+  not a crossing but a partition:** zero migrations can cross a version boundary by
+  construction, so read refused claims and `lastRefusal`, `peer_incompatible` edges,
+  `VERSION_UNSUPPORTED` NACKs, and above all **how long the map stays split after an update
+  lands unevenly** — a map that spends days partitioned is the operational problem that reopens
+  the normalized-schema and marker-plus-refusal designs. Keep reading the ledger's
+  `gameVersion` against the receiving world's anyway, because a crossing that *does* appear
+  means a gate did not hold and is its own finding. **The payload assumption stays untested
+  either way**, and it must be reported as *untested* rather than as *stable*
 - The record: per-peer archive growth, crossing rates, churn behaviour, and every support
   interaction that needed the owner
 
@@ -1228,9 +1272,11 @@ Nothing is delivered. This is the list the milestone will report against.
 - A player-facing package on GitHub Releases, with published checksums, D17's shipped default
   stated, and a completed defaults audit
 - The **layered** compatibility policy of D22: a contract-version gate at the relay, a
-  published support matrix over game versions, and — as the owner refined it on 2026-08-11 —
-  the envelope's game version stated as **diagnostic metadata only**, with the payload assumed
-  to load across versions and both compatibility designs deferred until an incident
+  published support matrix over game versions, and — as the owner settled it on 2026-08-11 —
+  the envelope's game version stated as **diagnostic metadata** no new reader may act on, with
+  the payload assumed to load across versions, the four shipped version gates **kept as named
+  exceptions**, and both compatibility designs deferred until skew causes an operational
+  problem
 - The archive's retention rule, and the announced period the relay is committed for
 - An error taxonomy, `multiverse-sidecar --diagnose`, and documentation a non-operator can
   follow alone
@@ -1368,8 +1414,24 @@ goes back to ordinary research-table status, and Contract Change 10a becomes a s
 diagnostic field. **D22 is not reopened by this** — the layering, the contract-version gate and
 the support matrix all stand; what changed is the disposition of the work D22 named, from *owed
 this milestone* to *deferred with a stated trigger*. DQ5 carries the full reading, including
-the one thing the words do not settle: the field is already carried, and three shipped
+the one thing the words did not settle: the field is already carried, and four shipped
 mechanisms still decide on it.
+
+**CLOSED 2026-08-11 — the one thing the refinement left open, answered the same day: the gates
+stay.** Put the four to him — §9.2's `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible`,
+close `4002` and §6.1's relay refusal — and the answer was: *"lets not change this then we will
+reconsider in the future if there's issues i think we can leave it like its working now."* So
+**nothing is retired, in the contracts or in the code.** *Assume it works* means no new
+mechanism in either direction: none built on the game-version axis, and none removed to make
+the assumption testable. The behaviour that stands is a **partition** — two machines on
+different game builds refuse each other's organisms and close the edges between them, which is
+safe, because no cross-version payload reaches the loader at all. The whole cross-version
+design space is deferred until version skew causes a real **operational** problem, and the
+practical consequence is the one the rig already lives with: after a game update, machines
+update at different moments and organism flow is split until every machine is on the new build.
+Two knock-ons are recorded rather than left to be discovered: Contract Change 10 loses its
+retirement half (§6.1 stays, and D22's wording and the shipped relay disagree knowingly), and
+10a's prohibition binds new readers only, with the four gates written down as named exceptions.
 
 **6. What is the distribution channel, and is the sidecar signed?**
 Thunderstore, Steam Workshop and GitHub Releases differ in who updates a player's install,
@@ -1477,9 +1539,10 @@ test and before M5 — and the work they belong to is already in the living depl
    payload answer is no longer an input WP1 is waiting on** — the owner refined it on
    2026-08-11 to *assume it works and carry the game version for future debugging*, so WP1
    writes the diagnostic-only prohibition instead of researching stability, and the research
-   itself is deferred until an incident. What WP1 does owe the owner is the question DQ5
-   raises: the field is already carried, and three shipped mechanisms still refuse or gate on
-   it.
+   itself is deferred. **WP1 owes the owner nothing further on this axis either:** the one
+   question DQ5 still carried — four shipped mechanisms refuse or gate on the game version —
+   was answered the same day, *leave it like its working now*, so WP1 writes them down as kept
+   exceptions and retires none of them.
 2. **Write `m4_findings.md`.** **DONE, 2026-08-10.** M4 has no open deliverable left, and the
    baseline a public map will be compared against now exists in one place.
 3. **Keep the living deployment running, and treat it as M5's first participant.** Every

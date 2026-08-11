@@ -759,11 +759,32 @@ records it on every migration; the live ledger lines read `"gameVersion":"0.6.3.
 mod build the matrix could ever list already sends it — the far end's `0.6.2` plugin included,
 because the field predates both — and there is no absent case to interpret. The rig's real obstacle is the opposite one: the
 importing mod still refuses a mismatch outright (`MigrationImporter.cs:199`, `contract-a.md`
-§9.2 `VERSION_UNSUPPORTED`) and the sidecar's walk still skips a peer on a different game
-version (`mapwalk.Deliverable` → `peer_incompatible`), so two game builds cannot in fact share
-this map yet, whatever the map *rule* now says. `m5_considerations.md` DQ5 carries that as
-WP1's question to the owner. **Until it is answered, keep both computers on one build** — the
-practice above is unchanged, and now it is load-bearing rather than merely tidy.
+§9.2 `VERSION_UNSUPPORTED`), the sidecar's walk still skips a peer on a different game
+version (`mapwalk.Deliverable` → `peer_incompatible`), and the **relay** still refuses a
+mismatched peer at the handshake and a mismatched `SECTOR_CLAIM`
+(`go/internal/relay/relay.go:467`, `:655`; `contract-b-m4.md` §6.1, §7.2 rule 8). Two game
+builds cannot in fact share this map, whatever the map *rule* now says.
+
+**The owner settled that on 2026-08-11 too, and the answer is to leave it alone:** *"lets not
+change this then we will reconsider in the future if there's issues i think we can leave it
+like its working now."* So the gates stay as shipped, and **one build across both computers is
+confirmed standing practice** — not an interim measure waiting on an answer. It is also
+**safe** rather than merely tidy: because nothing cross-version is ever delivered, no payload
+from another game build reaches `SaveSystem.LoadBibiteOrEggFromData`, which is why the
+assume-it-works reading is untested and not disproved.
+
+**The consequence to plan a game update around.** Steam auto-updates stay on and land on the
+two computers at different moments, so between the first update and the last the two machines
+are on different builds and **organism flow partitions**: the relay refuses whichever peer
+disagrees with the version the map already reports (`lastRefusal` on that slot, a
+`version_incompatible` grant), the edges between mismatched pairs close, and any payload that
+did get through would be NACKed permanently. That is working as shipped, not a fault to
+diagnose. What ends it is the ordinary ritual, done promptly rather than at leisure:
+`sync-game-refs.sh`, rebuild, `deploy.sh` here, and a fresh `make-farend-bundle.sh` zip applied
+on the far end — the same *re-take the bundle promptly* rule that *The minors* gives for a
+breaking wire minor, now applying to the game version as well. Until every machine is on the
+new build, expect closed lanes and a bypassed slot, and read them as skew rather than as a dead
+peer.
 
 **The repo distributes the bundle.** `farend/dist/farend-bundle.zip` is tracked as of
 `8463b72`, so the second computer clones the private GitHub repo and takes the zip out of the
@@ -2584,7 +2605,11 @@ defect, and it stays on this list because M5 changes what it will mean.
   version. `sync-game-refs.sh` compares the game's `BibitesAssembly.dll` hash against
   `libs/` (and reports the Steam buildid); `deploy.sh` runs the same cheap check and
   warns before building against stale references. After any re-sync, re-verify mod
-  code against the changed APIs.
+  code against the changed APIs. **An update also costs the map, not just the build:** the two
+  computers update at different moments, and a game-version mismatch refuses organisms and
+  closes the edges between the mismatched pair until both are on the new build — kept
+  behaviour, by the owner's call of 2026-08-11. Re-sync, rebuild and re-take the far-end bundle
+  promptly; *The far end* states the ritual and what the partition looks like.
 - **Stop the game before you deploy.** With the game running, `deploy.sh` fails at the
   copy step with `Invalid argument` — Windows holds `BibitesMultiverse.dll` open. The
   `dotnet build` before it still succeeds, so the output reads like a success until the
