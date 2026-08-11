@@ -264,6 +264,9 @@ since 2026-08-10**. It has since survived two host reboots, on 2026-08-08 and
 2026-08-09, and was brought back by hand both times; on **2026-08-11 it crossed to
 `contract-b/4.0`** in a 7m18s window, which is the third planned outage it has been through and
 the only one that changed the wire (*The living deployment → The crossing to `contract-b/4.0`*).
+Later the same day it took **WP4 and WP5** by rolling restart with **no map outage** — a relay
+restart plus five one-at-a-time sidecar restarts, no game touched (*The living deployment → The
+WP4 + WP5 rollout*).
 Do not start another rig against it, and
 do not stop a process it owns — see *Only one rig can run at a time* in Gotchas.
 `m4_considerations.md`, *Exit Test → Result*, records the exit-test run; **the current
@@ -1434,8 +1437,9 @@ ls ~/bibites-multiverse/     # must list the repo, not fail
 
 The M4 LAN rig has carried the same six worlds since the exit test of 2026-08-06 — across a
 full-disk outage, two host reboots, one far-end restart and, on 2026-08-11, a **major wire
-crossing**. This section is what it last read, how to bring it back after a reboot, and what is
-being watched.
+crossing** followed the same day by the **WP4 + WP5 rollout, which cost no downtime at all**
+because it moved binaries and not the wire. This section is what it last read, how to bring it
+back after a reboot, and what is being watched.
 
 ### The reading of 2026-08-09, after the second reboot
 
@@ -2175,6 +2179,122 @@ live: `e2e/crossing/mint-credentials.sh` defaulted `RELAY_BIN` to `bin/relay`, w
 still the old binary with none of the new flags, and the runbook's P4 gate asserted a `grep` count
 that the patch it applies makes impossible. `e2e/crossing/RUNBOOK.md` carries both corrections, so
 the next major inherits a corrected template rather than this one.
+
+### The WP4 + WP5 rollout, 2026-08-11 — a rolling window with no map outage
+
+**The second planned change of the day moved no wire, and that is why it cost no downtime.** WP4
+(capacity limits, the admin path, the render deny list, A49/A50's sidecar halves) and WP5
+(holes-before-growth, the widening coalescing window, the quiet re-claim) went onto the live map
+together, batched exactly as `m5_tracking.md` said to batch them. Nothing in either package
+changes a frame's shape, so the relay and the five sidecars were replaced under a running map
+rather than around a stopped one.
+
+| | |
+|---|---|
+| Map down | **none.** The relay was absent for under one second; each sidecar for one to two seconds, one at a time. `/api/status` never left 5/5 live |
+| The new relay | started **20:56:15.826Z**, same flags, same `--advertise-url wss://192.168.1.227:8795/contract-b/v4`, `credentials=7`, `relaySessionId=0eab5f24`. Three startup lines are new: the **capacity-limit envelope**, the **`PEER_STATUS` coalescing window**, and the **slot-space** line |
+| The five sidecars | rolled one at a time, **20:59:10Z → 21:03:53Z**. Every one `reason=reclaimed`, on its own coordinate, with **zero discarded journal bytes**; slots 2 and 5 replayed one journal entry each and flushed it |
+| The games | **not restarted.** No mod change, so no `deploy.sh`, no `archive_bepinex_logs`, no time-scale re-send. Each slot's mod redialled Contract A on its own ladder and `modConnected` came back in **4 s to 20 s** |
+| The archive | **not restarted**, deliberately — the deny list is an optional flag for a later batch and A49's ledger reason is sidecar-authored. It kept its session across the relay restart and its pid across the whole window, so the ledger has **no gap** |
+| Slot 6 | **dark at both ends of the window.** The owner's far-end trip has not happened |
+
+**A relay restart is not an outage when the sidecars stay up, and the measured gap is under a
+second.** All five sidecars reclaimed between **20:56:15.945Z and 20:56:16.474Z** — inside 650 ms
+of the new relay's listen line, so not one of them reached the first rung of the 1 s–30 s
+reconnect ladder. Because the sidecars are *not* restarted in this phase each holds exactly one
+connection, so `maxConnectionsPerPeer` **2** is never approached and the hard-kill trap that WP4's
+rollout note warns about does not arise. The transient is a second of `4005 relay draining`,
+`NO_ROUTE` and *holding a forwarded organism whose destination went dark* on local destinations,
+all of it drained by the next sample. Contrast the crossing's 7m18s: **what costs the map time is
+a wire change, not a binary change.**
+
+**The three new startup lines are the deliverable, because a limit an operator cannot read in
+their own log is one they read off a peer's `4007`:**
+
+```
+msg="relay: capacity limits, as this relay is running them (contract-b-m4.md §3.3)"
+  limits="map[maxBytesPerSecond:4194304 maxClaimsPerMinute:12 maxConnectionsPerAddress:8
+  maxConnectionsPerPeer:2 maxFrameBytes:8388608 maxFramesPerSecond:50
+  maxGenomeRequestsPerMinute:30 maxSubscribers:4]"
+
+msg="relay: the PEER_STATUS coalescing window, and the broadcast rate it bounds (§7.2, §22 B29)"
+  statusCoalesceMs=250 statusCoalesceMaxMs=2000 statusChurnBurstThreshold=8
+  broadcastsPerMinuteAtRest=240 broadcastsPerMinuteUnderAStorm=30
+  costPerBroadcast="slotCount stats blocks to every peer AND every subscriber"
+
+msg="relay: slot space (contract-b-m4.md §7.2, §7.5)"
+  maxSlotEverIssued=6 map="{Width:3 Height:2}" slotCount=6 holes=[]
+```
+
+**`maxSlotEverIssued=6` on a six-slot map is WP5's own invariant read off the living deployment**
+— the address counter has never exceeded the placements, which is what the churn harness proved to
+exhaustion and what this line lets an operator confirm without one.
+
+**The published limits are readable in the relay's log and nowhere else on this rig, and that is
+expected rather than a fault.** The running archive predates WP4, so `/api/status` carries no
+`limits` key and neither the page nor `ringstat` shows the table. The sidecars do not log it
+either. That visibility arrives with the next archive restart — batch it with the deny list; do
+not restart the archive to see a number the relay already printed.
+
+**`--admin-listen` was deliberately not passed, and the admin listener therefore bound nothing.**
+B28's path is compiled into this relay and is off: an empty `--admin-listen` returns before it
+looks at anything, and even with the flag it refuses to bind on a relay holding no `admin`
+credential. Turning it on is a separate, owner-level act with its own credential mint.
+
+**The `PEER_STATUS` cadence fell 20.6%, and the honest reading is that this is the FLOOR of what
+WP5 buys rather than its measure.** Measured off `/api/status`'s `epoch`, which is a per-connection
+count of the broadcasts the archive received and therefore the broadcast rate exactly: **55.4 a
+minute before** (20:49:26Z–20:56:08Z, 371 epochs in 402 s) and **43.9 a minute after**
+(21:04:02Z–21:16:18Z, 539 epochs in 736 s). The reason it is not larger is that **the peer B29's
+quiet re-claim was written for is not on the map**: DQ3's 64 re-claims in a day came from slot 6 as
+its measured time scale wandered, and slot 6 is dark. The five local slots claim a handful of times
+an *hour* — 25 claims in this whole window, every one structural and every one correctly
+broadcast — so what remains is the stats-block term, one `pending` per §14 B4 stats update off a
+PING, which WP5 does not bound and does not intend to. **Re-measure when slot 6 rejoins**; that is
+the reading the amendment is about.
+
+**Nothing else moved.** `modVersion` **0.6.4** and `contractAVersion` **contract-a/2.4** on all
+five throughout — nothing mod-side was touched. Lanes were identical before and after: **18/20
+open**, slot 3's north and south closed `no_peer`, four bypasses — the shape a hole at (2,1) makes.
+`heldDepth` **0** and `timeoutBounces` **0** on every slot in every sample; `custodyDepth` ranged
+1–27 and `pacedDepth` 0–7 and both fell every time they rose. Zero `level=ERROR` lines on the Go
+side, zero `4007`s, and **A50's partial-case WARN fired nothing** — on a full 3×2 every declared
+edge lies on an axis the map has, which is exactly what it should say. `genomeGaps` read **136,628**
+at a ledger of 6.87 M and grew ~**72 a minute** across the window with no drain, which is another
+sample for its watch item and moves nothing about the finding.
+
+**The sidecar changed, so the bundle was re-taken — and this time the trip carries everything in
+one go.** `farend/dist/farend-bundle.zip` was rebuilt at 21:04Z: **6,637,894 bytes**, sha256
+`11e58d7e2862f886918739d4667ce26df72e0e4fe7084f508c39657e7dcc2c40`. It carries the **new**
+`multiverse-sidecar.exe` (`63b1de8b…`) and the **same** `BibitesMultiverse.dll` (`fae0d50c…`, mod
+`0.6.4`) that is deployed here — byte-identical to the plugin in the game's own `BepInEx/plugins/`,
+which is the check the bundle rule asks for. `deploy.sh` was not run and no game was stopped: the
+mod did not change. **Because the owner's trip has not happened yet, there is no version debt** —
+whenever it does, it delivers the latest sidecar and the latest bundle together. Had the far end
+already crossed, it would now be one sidecar version behind and owed a later application at its
+operator's leisure; nothing in WP4 or WP5 moves the wire, so either way it is wire-compatible.
+
+**The rollback set for this window is NOT `~/.multiverse-rollback-bin/`.** That set is the
+`contract-b/3.5` binaries and it predates the crossing, so restoring it would take the map back
+across a major. The pre-rollout `contract-b/4.0` binaries this window replaced were copied aside
+first, to **`/mnt/wsl/data/bibites-multiverse-prewp45-bin/`** (`relay`, `sidecar`, `archive`,
+`multiverse-sidecar.exe`) — that is the set a bad relay rolls back to, and it retires on the same
+rule the crossing's set does: when the map has run a day on the new binaries.
+
+**One thing on this rig has been dialling the relay in plaintext since the moment TLS went up, and
+it stopped by itself before this window.** `relay.stderr.log` holds 809 `TLS handshake error …
+client sent an HTTP request to an HTTPS server` records from **172.24.96.1** — the Windows host
+side of the WSL boundary, which is also what the `8795` portproxy rewrites a LAN source to — at
+roughly one every 15 s from **17:17:22Z**, twelve seconds after the crossing relay started, until
+**20:45:52Z**. The cadence is a client on a fixed retry ladder and the wire is `ws://`, which is
+what a **pre-crossing slot 6** would do; a TLS handshake never names a peer, so this is consistent
+with the crossing record's "nothing has yet observed the far end attempt the new wire" rather than
+a contradiction of it. It ceased ten minutes before this window opened and has not resumed under
+the new relay. **Treat it as evidence about the far end and not about this machine**, and expect it
+to stop for good once the far end takes the bundle. The same file holds **two** unexplained
+plaintext dials from **127.0.0.1** at 21:14:09Z, inside this window and from nothing this window
+ran; nothing on the rig dials `8795` over `http` — the collector reads only `8796` and every rig
+helper uses `https://…/healthz` — so they are noted and not accounted for.
 
 ### Bringing it back after a reboot
 
