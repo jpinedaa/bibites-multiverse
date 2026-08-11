@@ -201,7 +201,10 @@ namespace BibitesMultiverse
             connected = false;
         }
 
-        /// <summary>Refuse to reconnect until the mod is restarted or reconfigured (close 4000/4001/4002/4006).</summary>
+        /// <summary>
+        /// Refuse to reconnect until the mod is restarted or reconfigured
+        /// (close 4000/4001/4002/4006/4007 — §6.2, amended §21 A50).
+        /// </summary>
         internal void Halt()
         {
             halted = true;
@@ -760,6 +763,7 @@ namespace BibitesMultiverse
                 case ContractA.CloseHeartbeatTimeout: return "4004 HEARTBEAT_TIMEOUT";
                 case ContractA.CloseShuttingDown: return "4005 SHUTTING_DOWN";
                 case ContractA.CloseReplaced: return "4006 REPLACED";
+                case ContractA.CloseExportEdgesUnusable: return "4007 EXPORT_EDGES_UNUSABLE";
                 default: return code.ToString(CultureInfo.InvariantCulture);
             }
         }

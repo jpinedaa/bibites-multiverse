@@ -138,13 +138,16 @@ namespace BibitesMultiverse
         /// never a reason to reject* is why a 2.4 mod and a 2.3 sidecar still interoperate — the older
         /// sidecar ignores the Authorization header as an unknown HTTP header (A52).
         ///
-        /// **Two of §21's amendments are not in this build yet, and the identifier does not lie about
-        /// either.** This mod does not send A49's <c>parents[].blobDroppedForSize</c>: absence is *no
-        /// statement*, which A49 says is exactly what a 2.4 mod says about a parent it did not drop, so
-        /// a blobless parent still reaches the archive as the <c>"parent_gone"</c> it has always been.
-        /// And A50's close <c>4007 EXPORT_EDGES_UNUSABLE</c> has no constant below and is not in the
-        /// no-reconnect set, because A50 is a separate change; a sidecar that closes 4007 is answered
-        /// with an ordinary reconnect until it lands.
+        /// **§21 is now complete on this side.** A47's bearer token rides every dial
+        /// (<see cref="ContractAToken"/>); A49's <c>parents[].blobDroppedForSize</c> is set at the one
+        /// site that drops a parent blob for the frame budget and nowhere else
+        /// (<see cref="LineageCollector"/>), so a dropped blob now says so on the wire and a sidecar
+        /// that maps it records <c>"blob_dropped_for_size"</c> where it recorded the
+        /// <c>"parent_gone"</c> of a dead parent; and A50's close
+        /// <see cref="CloseExportEdgesUnusable"/> has its constant below and is in §6.2's no-reconnect
+        /// set. The other three ask nothing of this build: A48 keeps the mod's own shipped game-version
+        /// gates as named exceptions and adds no new one (§5.7, §9.2), A51 is an assessment, and A52 is
+        /// this identifier.
         /// </summary>
         internal const string Protocol = "contract-a/2.4";
 
@@ -179,6 +182,17 @@ namespace BibitesMultiverse
         internal const int CloseHeartbeatTimeout = 4004;
         internal const int CloseShuttingDown = 4005;
         internal const int CloseReplaced = 4006;
+
+        /// <summary>
+        /// 4007 (added — §21, A50). No edge of the <c>exportEdges</c> this mod declared lies on an axis
+        /// the sidecar's map has, on a map that has at least one axis: this world can never export
+        /// anything. It is a **configuration error on this machine** — not a map state, not a peer's
+        /// fault — so §6.2 puts it in the no-reconnect set: redialling would re-read the same
+        /// environment variable and reach the same answer, which is a redial loop with a configuration
+        /// file at the bottom of it (§13, A8). The remedy belongs to this machine's operator and the
+        /// mod says so once, loudly, and then stops.
+        /// </summary>
+        internal const int CloseExportEdgesUnusable = 4007;
 
         // ---- §10, the tunables this side owns ---------------------------------------------
         internal const int HeartbeatIntervalMs = 1000;

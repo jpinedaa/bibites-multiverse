@@ -28,6 +28,13 @@ namespace BibitesMultiverse
     /// * an entity ID of <c>0</c> is the game's "unassigned" sentinel, and such an entry is omitted
     ///   entirely.
     ///
+    /// **One of those gaps now says which one it is** (§21, A49). <c>blobDroppedForSize: true</c> is
+    /// set on exactly the entries <see cref="DropForSize"/> emptied and on no others: it means *I had
+    /// this blob and could not fit it in the frame*, which is a recoverable absence, and it is a
+    /// different fact from *I could not produce it*. A dead parent and a serialization failure stay
+    /// ordinary gaps and carry no flag, because absence of the flag is **no statement** and a false
+    /// label on a permanent absence would send the archive looking for a genome that never existed.
+    ///
     /// The blob is cached by entity ID **within one tick**: a brood of siblings crossing together
     /// would otherwise serialize the same mother once per sibling, on the main thread (Risk 8).
     /// </summary>
@@ -50,6 +57,9 @@ namespace BibitesMultiverse
             internal int gaps;
             internal int blobBytes;
             internal int cacheHits;
+
+            /// <summary>How many of <see cref="gaps"/> are §5.3 frame-size drops (§21, A49).</summary>
+            internal int droppedForSize;
         }
 
         private readonly Dictionary<int, string> blobCache = new Dictionary<int, string>();
@@ -60,6 +70,13 @@ namespace BibitesMultiverse
         private readonly List<GameObject> objects = new List<GameObject>(ContractA.MaxParentBlobs);
         private readonly List<string> blobs = new List<string>(ContractA.MaxParentBlobs);
         private readonly List<int> sizes = new List<int>(ContractA.MaxParentBlobs);
+
+        /// <summary>
+        /// §21 A49 — parallel to <see cref="blobs"/>: true only where <see cref="DropForSize"/> took a
+        /// blob this collector had already produced. Never set anywhere else, which is what keeps the
+        /// flag off a dead parent and off a serialization failure.
+        /// </summary>
+        private readonly List<bool> dropped = new List<bool>(ContractA.MaxParentBlobs);
 
         internal void Clear()
         {
@@ -86,6 +103,7 @@ namespace BibitesMultiverse
             objects.Clear();
             blobs.Clear();
             sizes.Clear();
+            dropped.Clear();
             cacheHits = 0;
 
             BibiteGenes genes = (migrant != null) ? migrant.gene : null;
@@ -112,6 +130,7 @@ namespace BibitesMultiverse
                 string blob = Serialize(ids[i], objects[i], gameVersion);
                 blobs.Add(blob);
                 sizes.Add(blob != null ? System.Text.Encoding.UTF8.GetByteCount(blob) : 0);
+                dropped.Add(false);
             }
 
             clock.Stop();
@@ -134,6 +153,15 @@ namespace BibitesMultiverse
                 else
                 {
                     result.gaps++;
+
+                    // §5.3, §21 A49 — the flag rides only on an entry this collector emptied under the
+                    // frame-size rule, and only beside an absent payload. Every other gap says nothing,
+                    // which is what the sidecar reads as the "parent_gone" it has always recorded.
+                    if (dropped[i])
+                    {
+                        entry["blobDroppedForSize"] = true;
+                        result.droppedForSize++;
+                    }
                 }
 
                 parents.Add(entry);
@@ -144,7 +172,14 @@ namespace BibitesMultiverse
                 }
 
                 summary.Append(ids[i].ToString(CultureInfo.InvariantCulture));
-                summary.Append(blobs[i] != null ? ":blob(" + sizes[i].ToString(CultureInfo.InvariantCulture) + "B)" : ":gap");
+                if (blobs[i] != null)
+                {
+                    summary.Append(":blob(" + sizes[i].ToString(CultureInfo.InvariantCulture) + "B)");
+                }
+                else
+                {
+                    summary.Append(dropped[i] ? ":dropped(" + sizes[i].ToString(CultureInfo.InvariantCulture) + "B)" : ":gap");
+                }
             }
 
             result.parents = parents;
@@ -244,6 +279,11 @@ namespace BibitesMultiverse
         /// §5.3 — keep the whole frame under <c>maxFrameBytes − frameHeadroomBytes</c> by dropping
         /// parent **blobs**, largest first, and keeping their entity IDs. A dropped blob is a gap, and
         /// a gap is never a reason to abandon a migration. The migrant's own payload is never dropped.
+        ///
+        /// **This is the one site that sets <c>blobDroppedForSize</c>** (§21, A49). The blob existed
+        /// here — it was serialized a few lines up — and only the frame budget took it, so the entry
+        /// carries the one label that tells the archive the genome is recoverable from the world that
+        /// sent it rather than gone forever.
         /// </summary>
         private void DropForSize(int migrantPayloadBytes)
         {
@@ -277,9 +317,11 @@ namespace BibitesMultiverse
 
                 MultiversePlugin.Log.LogWarning(
                     $"{Prefix} dropping the blob of parent {ids[largest]} ({sizes[largest]} bytes): the migrant plus its " +
-                    $"parents would pass maxFrameBytes - frameHeadroomBytes. The entity ID stays and the blob becomes a gap.");
+                    $"parents would pass maxFrameBytes - frameHeadroomBytes. The entity ID stays, the blob becomes a gap, " +
+                    "and the entry carries blobDroppedForSize=true so the gap reads as a drop and not as a dead parent.");
                 used -= sizes[largest];
                 blobs[largest] = null;
+                dropped[largest] = true;
             }
         }
     }

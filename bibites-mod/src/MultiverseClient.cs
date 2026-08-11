@@ -476,18 +476,42 @@ namespace BibitesMultiverse
             string wasOpen = edgeStates.Describe(config.ExportEdges);
             edgeStates = EdgeStates.AllClosed(config.ExportEdges, 0, "disconnected");
 
+            // §6.2 — these codes stop reconnection until the mod is restarted or reconfigured. 4007
+            // joined the set with §21 A50: it answers a declaration, not a map, so the same dial would
+            // re-read the same environment variable and earn the same refusal (§13, A8).
             bool fatal = closeCode == ContractA.CloseProtocolUnsupported
                 || closeCode == ContractA.CloseSlotMismatch
                 || closeCode == ContractA.CloseGameVersionUnsupported
-                || closeCode == ContractA.CloseReplaced;
+                || closeCode == ContractA.CloseReplaced
+                || closeCode == ContractA.CloseExportEdgesUnusable;
 
             string description = WebSocketTransport.DescribeCloseCode(closeCode);
             if (fatal)
             {
                 transport.Halt();
-                MultiversePlugin.Log.LogError(
-                    $"{Prefix} the sidecar closed with {description}: {reason}. This is not retried — restart or reconfigure the mod. " +
-                    "Every edge stays closed.");
+                if (closeCode == ContractA.CloseExportEdgesUnusable)
+                {
+                    // §21 A50 — the one refusal on this wire whose cause is on **this** machine and whose
+                    // remedy belongs to **this** machine's operator. The close reason names the declared
+                    // set and the map's shape; this line names the remedy and who must act, because after
+                    // M5 the person reading it is the one person who cannot ask anybody (WP7's taxonomy
+                    // rule, in the register A47's 401 ceiling line established).
+                    MultiversePlugin.Log.LogError(
+                        $"{Prefix} the sidecar refused this session with {description}: {reason}. This world declares " +
+                        $"exportEdges=[{ContractA.EdgeNames(config.ExportEdges)}] and not one of them lies on an axis its " +
+                        "map has, so no organism this world exports could ever be routed. This is not retried — the same " +
+                        "dial would send the same declaration and earn the same refusal. Remedy: this machine's operator " +
+                        $"sets {MultiverseConfig.EnvExportEdges} to a set that includes an edge the map can carry, or " +
+                        "unsets it for the default of all four edges, and restarts this game. Nobody else can fix this " +
+                        "and no other peer is affected; no organism is at risk — every edge is closed and the sidecar " +
+                        "is holding its journal.");
+                }
+                else
+                {
+                    MultiversePlugin.Log.LogError(
+                        $"{Prefix} the sidecar closed with {description}: {reason}. This is not retried — restart or reconfigure the mod. " +
+                        "Every edge stays closed.");
+                }
             }
             else
             {

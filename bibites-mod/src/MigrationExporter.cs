@@ -261,6 +261,7 @@ namespace BibitesMultiverse
             MultiversePlugin.Log.LogInfo(
                 $"{LineageCollector.Prefix} migrationId={migrationId} entityId={entityId} " +
                 $"parents=[{parents.summary}] blobs={parents.blobs} gaps={parents.gaps} " +
+                $"droppedForSize={parents.droppedForSize} " +
                 $"blobBytes={parents.blobBytes} cacheHits={parents.cacheHits} " +
                 $"parentSerializeMs={parents.serializeMs.ToString("F2", CultureInfo.InvariantCulture)}");
             return true;
