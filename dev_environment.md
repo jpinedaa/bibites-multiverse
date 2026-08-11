@@ -747,9 +747,23 @@ this pin stops being a rule about the map and becomes the far end's own matrix e
 sidecar-and-mod build, stated against one game version. Keep running the rig the way it runs
 now, on one build across both computers, because that is what makes a two-machine deployment
 diagnosable; but a stale pin is a stale *bundle*, not a broken map rule. What would have to be
-answered before two game builds legitimately shared one map is the bb8 payload question D22
-names as its remaining work — whether a payload serialized by one game version restores safely
+answered before two game builds legitimately shared one map was the bb8 payload question D22
+named as its remaining work — whether a payload serialized by one game version restores safely
 into another.
+
+**The owner refined that on 2026-08-11: it is assumed to work, and the envelope carries the
+serializing game's version for diagnosis only.** Nothing has to be built for the carrying, and
+no bundle has to be rebuilt for it. `gameVersion` has been a **REQUIRED** field on
+`MIGRATE_OUT` and `MIGRATE_IN` — and `body.version` on the wire — since M2, and the archive
+records it on every migration; the live ledger lines read `"gameVersion":"0.6.3.1"`. So every
+mod build the matrix could ever list already sends it — the far end's `0.6.2` plugin included,
+because the field predates both — and there is no absent case to interpret. The rig's real obstacle is the opposite one: the
+importing mod still refuses a mismatch outright (`MigrationImporter.cs:199`, `contract-a.md`
+§9.2 `VERSION_UNSUPPORTED`) and the sidecar's walk still skips a peer on a different game
+version (`mapwalk.Deliverable` → `peer_incompatible`), so two game builds cannot in fact share
+this map yet, whatever the map *rule* now says. `m5_considerations.md` DQ5 carries that as
+WP1's question to the owner. **Until it is answered, keep both computers on one build** — the
+practice above is unchanged, and now it is load-bearing rather than merely tidy.
 
 **The repo distributes the bundle.** `farend/dist/farend-bundle.zip` is tracked as of
 `8463b72`, so the second computer clones the private GitHub repo and takes the zip out of the

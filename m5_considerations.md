@@ -109,7 +109,9 @@ In scope:
   package exposes to a machine the owner does not run
 - A **layered** compatibility policy (decision 5, D22): a contract-version gate at the relay,
   a published support matrix over game versions, and a way to move a fleet the owner cannot
-  reach — plus the bb8 payload question that layering exposes
+  reach. The bb8 payload question that layering exposes is **deferred by the owner's
+  refinement of 2026-08-11** — the payload is assumed to load across versions and the envelope
+  carries the serializing game version as diagnostic metadata only
 - A support surface: an error taxonomy, a diagnostics command, and documentation a
   non-operator can follow alone
 - The community playtest itself
@@ -164,7 +166,10 @@ answered: **D17's four edges**, stated in the package rather than discovered (de
 so the row is no longer one policy but two, a contract-version gate on the wire and a support
 matrix per machine (decision 5, D22) — and it settles the shape of *a fleet-update mechanism*
 with it, because a release page pushes nothing to anybody: the fleet moves by publication plus
-a relay-side minimum contract version, never by force. *Archive retention as a shipped rule*
+a relay-side minimum contract version, never by force. **The owner's refinement of 2026-08-11
+closes the third part of that row**, the payload question the layering exposed: the bb8 body
+stays opaque, cross-version loading is assumed, and the envelope's game version is diagnostic
+metadata rather than a gate. *Archive retention as a shipped rule*
 is answered **as process**: M5 produces the rule, even if the rule is *keep everything*
 (decision 3). Everything else in the table — relay operations, the DNS name and certificate,
 the forward receipt, the public-safe defaults audit, slot-space growth, moderation and the
@@ -453,8 +458,7 @@ policing installs.
 *between* games. A bb8 payload serialized by game version X lands in game version Y through
 `SaveSystem.LoadBibiteOrEggFromData`, and whether that is safe is precisely the cross-version
 question `system_decomposition.md`'s research table still lists as **unresearched** for
-`bb8-schema`. The layered design is what puts that row on M5's critical path, and **the design
-is not finished until WP work answers it one of two ways:**
+`bb8-schema`. Two answers were available, and the milestone was told to produce one of them:
 
 1. **Evidence** that bb8 payloads are stable across the span of game versions the matrix
    covers. `m1_findings.md`'s result that genes are keyed by enum **name** — so reordering is
@@ -465,10 +469,74 @@ is not finished until WP work answers it one of two ways:**
    the sender can read and the ledger can count — rather than restoring a blob the game will
    quietly misinterpret.
 
-That is the design's own frontier, acknowledged rather than resolved, and it is not an argument
-against the decision: the fleet-wide rule the layered model replaced never answered the
-question either. It only made it invisible, by asserting that every peer ran one version — an
-assertion nobody could check and Steam could break in an afternoon.
+**REFINED 2026-08-11 — the owner took neither, deliberately, and said what to do instead.** In
+his words: *"for now lets just keep doing the payload opaque and assume it will work, we will
+worry about doing the normalized own schema or the cheaper alternative in the future if we run
+into an issue, for now we can just assume this will work and carry the game version info for
+potential future debugging."* Read as a design, it settles four things:
+
+- **(a) The payload stays opaque, and cross-version loading is assumed to work.** D4 is
+  unchanged and unextended. No refusal path is designed on the game-version axis, no gate is
+  added, and the stability research of option 1 is not done now.
+- **(b) The envelope carries the serializing game's version as diagnostic metadata, and
+  nothing may be inferred from it.** This wire already has the rule-shape: §13 item 7 forbids
+  reading `contractAVersion` as a capability decision, and the game version on a migration
+  carries exactly the same prohibition — **a reader MUST NOT parse it into a capability
+  decision.** It is carried so that a future incident is diagnosable from the record instead of
+  reconstructed from memory.
+- **(c) Both designed answers are deferred, not rejected** — this project's own normalized
+  canonical schema, and the cheaper marker-plus-refusal of option 2. Neither is built until an
+  incident makes one necessary.
+- **(d) The `bb8-schema` cross-version row therefore comes off M5's critical path** and returns
+  to ordinary research-table status, and Contract Change 10a is redefined from a compatibility
+  mechanism to a small additive diagnostic field.
+
+**The trigger for revisiting is an actual cross-version load failure** — on the rig or on a
+participant's world: an organism that arrives and restores wrong or not at all, whose envelope
+names a game version other than the receiving world's. Until one occurs there is nothing here
+to design, and the ledger's `gameVersion` is what makes the first one legible.
+
+**The carrying half is already built, and that is what makes the call cheap.** The migration
+envelope has carried the serializing game's version since M2, end to end, as a REQUIRED field:
+`contract-a.md` §5.3 `MIGRATE_OUT.gameVersion` — *"the version that produced `payload`,
+authoritative over the blob's own `version` key"* — stamped by the mod from
+`Application.version` (`MigrationExporter.cs:209`); `contract-b-m4.md`'s
+`MIGRATION_PAYLOAD.body.version`; `MIGRATE_IN.gameVersion` at the receiving mod; the sidecar's
+journal entry; and the archive's ledger record, whose live lines carry
+`"gameVersion":"0.6.3.1"` today. `parents[].gameVersion` carries it for the lineage blobs.
+**Nothing has to be added to satisfy (b)'s *carrying*.**
+
+**What is not yet true is (b)'s *only*.** Three shipped mechanisms read the game version as a
+decision rather than as a note, and the refinement puts all three on the wrong side of its own
+rule:
+
+- **The importing mod refuses on an exact string mismatch.** `MigrationImporter.cs:199-204`
+  answers `MIGRATE_IN_NACK` / `VERSION_UNSUPPORTED`, permanent, and §9.2 makes it normative —
+  *"do not re-deliver, hold for an operator, mark the peer pair incompatible"*. **This is
+  option 2, already shipped.** The refinement does not ask for it to be built; it asks for it
+  not to fire — and while it stands, "assume it will work" cannot be tested, because no
+  cross-version organism ever reaches `LoadBibiteOrEggFromData` to prove or disprove it.
+- **The routing walk skips a peer on a different game version.** `mapwalk.Deliverable`
+  (`go/internal/mapwalk/mapwalk.go:40`) returns `peer_incompatible`, which `contract-b-m4.md`
+  §8 aggregates into a closed edge and `contract-a.md` §5.4's `EDGE_STATUS` reports to the mod.
+  That is a gate, on the axis the map is now supposed to hold no opinion about.
+- **The handshake close `4002`** (`contract-a.md` §2.1's close table, `bb8.GameVersionSupported`)
+  refuses a mod whose `CONFIG_UPDATE.gameVersion` has no `bb8-schema` dialect. Inert in
+  practice — the allow-list is empty outside tests and empty means accept — but normative.
+
+`contract-b-m4.md` §6.1's relay refusal is the fourth and was already known; Contract Change 10
+retires it. **So 10a's remaining work is a subtraction from three places, not an addition to
+one, and that is more than the owner's words settle on their face.** It is recorded here as
+WP1's question to put to him rather than assumed away: the plain reading of (a) and (b) is that
+a version mismatch must stop refusing organisms and stop closing lanes, but all three are live
+behaviour on a running deployment, and retiring them changes what happens the first time two
+game builds really do meet.
+
+The fleet-wide rule the layered model replaced never answered this question either — it only
+made it invisible, by asserting that every peer ran one version, an assertion nobody could
+check and Steam could break in an afternoon. The refinement does not make the question
+invisible. It makes it **deferred and instrumented**, which is the move Decision 9 made for the
+velocity floor: do not build the mechanism, keep the signal that would tell you to.
 
 **The wire, where the lesson is sharper** and where the membership test now lives.
 Compatibility is on the major alone, a minor is a capability statement rather than a
@@ -875,8 +943,10 @@ implementation wave, and the **Status** column separates what this document prop
 from what it proposes to leave alone. **The ratifications of 2026-08-10 moved three statuses
 and added one row**, all marked in place: row 1 has its version (`contract-b/4`), row 15's two
 version calls are both made, row 14 leaves the milestone, and row **10a** is new — the payload
-question D22 named as its remaining work. Rows are not renumbered, because WP1 and the
-paragraph below cite them by number. Sixteen of the seventeen rows are M5 work; row 14 is not.
+question D22 named as its remaining work. **The owner's refinement of 2026-08-11 rewrote 10a
+in place**, from a compatibility mechanism to a diagnostic field, and took it off the critical
+path; DQ5 carries the call. Rows are not renumbered, because WP1 and the paragraph below cite
+them by number. Sixteen of the seventeen rows are M5 work; row 14 is not.
 
 | # | Document | Change | Source | Status |
 |---|---|---|---|---|
@@ -890,7 +960,7 @@ paragraph below cite them by number. Sixteen of the seventeen rows are M5 work; 
 | 8 | `contract-b-m4.md` §7.2 | Auto-placement under churn: holes before axis extension, which axis extends, the coalescing window, and a bound on `PEER_STATUS` broadcast rate. | §13 item 3 | **M5** |
 | 9 | `contract-b-m4.md` §3.x (new) | Capacity limits as a published table — connections, frames, claims, payload bytes and genome requests per peer — every one a knob, and every one a peer depends on published on the stats block. | Inferred; D20's knob rule | **M5** |
 | 10 | `contract-b-m4.md` §6.1, and both documents | A minimum **contract**-version rule at the relay handshake, stated as a **compatibility** gate and explicitly not a security control — and, in its place, the retirement of §6.1's current *"the relay **MUST** refuse a peer whose `gameVersion` is incompatible with the map's"*, which D22 supersedes: the game version stays a reported field and a per-machine matter answered by the support matrix, not a membership test. `4003` and `lastRefusal` survive, on the contract-version axis. | Inferred; `dev_environment.md`, *The minors*; Decision 5 (D22) | **M5** — the one place a ratified decision contradicts live normative text, and WP1 is where it is resolved |
-| 10a | `contract-a.md` §5.3, Contract C | The game-version answer D22 names as its remaining work: either recorded evidence that bb8 payloads load across the matrix's span, or a **game-version marker on the envelope with a defined refusal path**. Which of the two is a WP finding, not a decision. | Decision 5 (D22) | **M5** — new, and on the critical path |
+| 10a | `contract-a.md` §5.3, §9.2, §2.1; `contract-b-m4.md` §8; Contract C | **Redefined 2026-08-11** by the owner's refinement of D22, from a compatibility mechanism to a **small additive diagnostic field**. The envelope's game version is carried for future debugging, and **a reader MUST NOT parse it into a capability or refusal decision** — §13 item 7's `contractAVersion` rule, applied to the second version axis. The field already exists end to end (`MIGRATE_OUT.gameVersion`, `parents[].gameVersion`, `body.version`, `MIGRATE_IN.gameVersion`, the sidecar journal, the archive ledger), so what is left is **stating the prohibition** and retiring the three places that still decide on it: §9.2's `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible` skip, and close `4002`. Neither the normalized canonical schema nor the marker-plus-refusal design is built until an actual cross-version load failure occurs. | Decision 5 (D22), refined 2026-08-11 | **M5** — additive and cheap, and **no longer on the critical path**. The three retirements exceed what the owner's words settle: WP1 puts them to him |
 | 11 | `contract-a.md` §12 item 8 | `"blob_dropped_for_size"` is defined and never emitted. One additive OPTIONAL field on `parents[]` closes it. | §12 item 8 | **M5** — cheap now, a migration story later |
 | 12 | `contract-a.md` §12 item 9 | A startup refusal in the sidecar for a non-grid `exportEdges` set. The sidecar knows the map; the mod must not. | §12 item 9 | **M5** — it bites hardest with strangers |
 | 13 | `contract-a.md` §12 item 6 | Contract debt A5: assess and either close it or restate why it stays moot. Its second reason — "the mod records the edge" — is an obligation somebody could drop. | §12 item 6 | **M5** — assess only |
@@ -925,7 +995,12 @@ ratified as of 2026-08-10**, so nothing here is gated on a signature any more.
   bearer token, with a migration note for the living deployment — which is itself a peer that
   has to move, and the only rehearsal this project gets for moving a fleet across a major
 - **The layered compatibility statement of D22**, in both documents: the contract-version gate,
-  the explicit non-gating of the game version, and row 10a's payload answer
+  the explicit non-gating of the game version, and row 10a as the owner refined it on
+  2026-08-11 — the envelope's game version stated as **diagnostic metadata a reader MUST NOT
+  parse into a capability decision**, on the model of §13 item 7's `contractAVersion` rule.
+  **Put the three live exceptions to him in this package**, because retiring them is behaviour
+  and not wording: §9.2's `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible` skip, and
+  close `4002` (DQ5 states each one and where it fires)
 - The stale-milestone correction of item 16
 
 Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said so.
@@ -1027,6 +1102,14 @@ Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said 
 - **The velocity-floor instrumentation of Decision 9**: D19's hop feed watched for one species
   crossing one lane both ways in quick succession, counted rather than eyeballed, because this
   run is what decides whether the floor is ever built
+- **The cross-version watch that D22's 2026-08-11 refinement leaves in place of research.**
+  The playtest is the first population where two game builds genuinely coexist — Steam updates
+  land unevenly and the matrix is per machine — so it is where the deferred question gets its
+  only real test. Read the ledger's `gameVersion` against the receiving world's and count any
+  migration that crossed a version boundary; a restore that fails or arrives wrong on such a
+  crossing is the incident that reopens the normalized-schema and marker-plus-refusal designs.
+  **Zero such crossings is a result too**, and it must be reported as *untested* rather than
+  as *stable*
 - The record: per-peer archive growth, crossing rates, churn behaviour, and every support
   interaction that needed the owner
 
@@ -1145,8 +1228,9 @@ Nothing is delivered. This is the list the milestone will report against.
 - A player-facing package on GitHub Releases, with published checksums, D17's shipped default
   stated, and a completed defaults audit
 - The **layered** compatibility policy of D22: a contract-version gate at the relay, a
-  published support matrix over game versions, and the bb8 payload answer that layering
-  requires — evidence, or an envelope marker with a refusal path
+  published support matrix over game versions, and — as the owner refined it on 2026-08-11 —
+  the envelope's game version stated as **diagnostic metadata only**, with the payload assumed
+  to load across versions and both compatibility designs deferred until an incident
 - The archive's retention rule, and the announced period the relay is committed for
 - An error taxonomy, `multiverse-sidecar --diagnose`, and documentation a non-operator can
   follow alone
@@ -1263,12 +1347,29 @@ rewritten around it.
 by it.** Organisms cross *between* games: a bb8 payload serialized by game version X lands in
 game version Y through `SaveSystem.LoadBibiteOrEggFromData`, and whether that is safe is
 exactly the unresearched bb8-schema question the recommendation had leaned on. The ratified
-design therefore owes a **payload-compatibility answer inside WP** — either evidence that bb8
+design therefore owed a **payload-compatibility answer inside WP** — either evidence that bb8
 payloads are stable across the versions the matrix spans, or a **version marker on the envelope
-with a defined refusal path** (Contract Change 10a). Until it has one, `bb8-schema`'s
-cross-version row sits on M5's critical path. This is the design's frontier, not a
+with a defined refusal path** (Contract Change 10a). This was the design's frontier, not a
 contradiction of it: the rule it replaced never answered the question either — it asserted the
 question away.
+
+**REFINED 2026-08-11 — the owner answered his own remaining work, and the answer is "assume it
+works, and keep the evidence".** In his words: *"for now lets just keep doing the payload
+opaque and assume it will work, we will worry about doing the normalized own schema or the
+cheaper alternative in the future if we run into an issue, for now we can just assume this will
+work and carry the game version info for potential future debugging."* The payload stays
+opaque (D4, unchanged), cross-version loading is **assumed** rather than gated, and the game
+version rides the envelope as **diagnostic metadata only** — under the same prohibition §13
+item 7 puts on `contractAVersion`, *a reader **MUST NOT** parse it into a capability decision*.
+The normalized canonical schema and the marker-plus-refusal design are both **deferred until an
+incident**, and the incident that reopens them is a real cross-version load failure. The
+consequence for the plan: `bb8-schema`'s cross-version row **leaves M5's critical path** and
+goes back to ordinary research-table status, and Contract Change 10a becomes a small additive
+diagnostic field. **D22 is not reopened by this** — the layering, the contract-version gate and
+the support matrix all stand; what changed is the disposition of the work D22 named, from *owed
+this milestone* to *deferred with a stated trigger*. DQ5 carries the full reading, including
+the one thing the words do not settle: the field is already carried, and three shipped
+mechanisms still decide on it.
 
 **6. What is the distribution channel, and is the sidecar signed?**
 Thunderstore, Steam Workshop and GitHub Releases differ in who updates a player's install,
@@ -1372,9 +1473,13 @@ test and before M5 — and the work they belong to is already in the living depl
 
 1. ~~**Get Decisions 1, 2 and 9 ratified.**~~ **DONE, 2026-08-10 — all nine, not three.**
    WP1's gate is open: it writes `contract-b/4`, `contract-a/2.4`, D22's layered compatibility
-   statement and Contract Change 10a, and it does **not** write Contract Change 14. The
-   remaining input WP1 does not have is the payload answer D22 names — evidence or an envelope
-   marker — and finding out which is the first piece of research the milestone owes.
+   statement and Contract Change 10a, and it does **not** write Contract Change 14. **The
+   payload answer is no longer an input WP1 is waiting on** — the owner refined it on
+   2026-08-11 to *assume it works and carry the game version for future debugging*, so WP1
+   writes the diagnostic-only prohibition instead of researching stability, and the research
+   itself is deferred until an incident. What WP1 does owe the owner is the question DQ5
+   raises: the field is already carried, and three shipped mechanisms still refuse or gate on
+   it.
 2. **Write `m4_findings.md`.** **DONE, 2026-08-10.** M4 has no open deliverable left, and the
    baseline a public map will be compared against now exists in one place.
 3. **Keep the living deployment running, and treat it as M5's first participant.** Every
