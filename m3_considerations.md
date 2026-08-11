@@ -296,7 +296,7 @@ implementation wave. Each item names the document and the decision behind it.
 | 2 | `contract-b-m2.md` §5.5 | `PEER_STATUS` reports the ring order, not a sector list. A vacant slot stays in the ring with no live peer. | D8 |
 | 3 | `contract-b-m2.md` §5.6 | `MIGRATION_PAYLOAD` gains the `lineage` annex. `sourceSector` and `destSector` become ring slots. `exitEdge` is always `E`. | D8, D11 |
 | 4 | `contract-b-m2.md` §5 | Add `GENOME_REQUEST` and `GENOME_RESPONSE`, for the archive. Name the answering party, the timeout, and the answer for an unknown hash. | D11 |
-| 5 | `contract-b-m2.md` §2, §10 item 1 | Add the shared token on the WebSocket upgrade. The wire leaves the loopback in M3. TLS waits for M4. | D9 |
+| 5 | `contract-b-m2.md` §2, §10 item 1 | Add the shared token on the WebSocket upgrade. The wire leaves the loopback in M3. TLS waits for M4 as written; **M5** after D16. | D9 |
 | 6 | `contract-a.md` §5.4 | Narrow `EDGE_STATUS` to the export edge. State that the entry edge is passive and always accepts an inbound organism. | D8 |
 | 7 | `contract-a.md` §5.3 | `MIGRATE_OUT` gains the parent entity IDs and the opaque parent blobs. The sidecar hashes them and strips them from the wire envelope. | D11, D4 |
 | 8 | `contract-a.md` §4.3 | State the capture band outside the square, and the clamp that a diagonal escape needs. | D10 |

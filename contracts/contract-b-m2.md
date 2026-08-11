@@ -36,8 +36,10 @@ with §7 of this document, and change nothing here.
 `system_decomposition.md` lists ten Contract B message types. M2 needs six of them plus
 three relay-control replies, on one machine, over loopback, between exactly two sidecars.
 `TOPOLOGY_GOSSIP`, `PEER_EXCHANGE`, `CATALOG_QUERY` and `CATALOG_RESPONSE` are **out of
-scope** — they arrive with M4 and M5. Transport security, peer authentication, and more
-than two sectors are also out of scope (M3/M4).
+scope** — they arrive with M4 and M5 as written; **M6** and **M7** after the renumberings
+of D9 and D16. Transport security, peer authentication, and more than two sectors are also
+out of scope (M3/M4 as written; more than two sectors landed in M3, and transport security
+with peer authentication is **M5** after the same two renumberings).
 
 This document is written in the spirit of `contracts/contract-a.md` and reuses its
 envelope, its version rules, and its RFC 2119 key words. Where Contract A already answers
@@ -76,7 +78,7 @@ M2 has exactly two sectors, `A` and `B`, side by side:
 
 | Property | Value |
 |---|---|
-| Protocol | WebSocket (RFC 6455) over plain HTTP. TLS is M3. |
+| Protocol | WebSocket (RFC 6455) over plain HTTP. TLS is M3 as written; **M5** after the renumberings of D9 and D16. |
 | URL | `ws://{relay-host}:{port}/contract-b/v1` |
 | Default port | `8790` |
 | Roles | The **relay is the server**. Every sidecar is a **client** and does all the dialling. |
@@ -458,7 +460,8 @@ M2's message list and a lost return frame would lose the organism outright. Cont
    the same one Contract A §12 proposes.
 2. **The relay's sector memory is in RAM.** A relay restart forgets which peer held which
    sector; `preferredSector` covers the two-sector case, but a real deployment wants a
-   durable, leased sector map (M4).
+   durable, leased sector map (M4 as written; **M6** after the renumberings of D9 and
+   D16 — lease-based slot claims are that milestone's).
 3. **Two sectors only.** The `["A", "B"]` set, the fixed east/west pairing, and the
    opposite-edge mapping are hard-coded. M3 generalises to an `{x, y}` grid.
 4. **A permanently rejected inbound organism is held, never returned** (§7). A safe
