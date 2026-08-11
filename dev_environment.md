@@ -11,14 +11,15 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | BepInEx log | `…/The Bibites/BepInEx/LogOutput.log` |
 | Plugin project | `bibites-mod/` (source in `src/`, reference DLLs in `libs/` — see *The reference DLL set*) |
 | Go module (`multiverse-relay`, `multiverse-sidecar`, `multiverse-archive`) | `go/` (module `multiverse`; binaries in `cmd/`, libraries in `internal/`). `cmd/worldstat`, `cmd/ringstat` and **`cmd/fakemod`** are rig tools rather than rig components — `fakemod` is a Contract A peer with no game, and *The five-instance ceiling* below is why it exists |
-| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.4`**, amended in place; §15 is the M4 set, §16 the species-identity set, §17 the species-census set, §18 the two-way-lane set (A38–A41), **§19 the world-settings set, A42–A44**, §20 the heartbeat set (A45–A46) and **§21 the M5 public-release set, A47–A52**), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/4.0`**; §14 is its reconciliation set, §15 the species-identity amendment, §16 the census amendment, §17 the two-way-lane and hop-feed amendment (B13–B15), §18 the pacing and speed readout, §19 the world-settings readout, **§20 the disk budget, B20** — the only amendment that changes no wire field — §21 the genome-pump bounds (B21) and **§22 the M5 public-release set, B22–B32**. **The published wire is ahead of the running fleet**: the live deployment still speaks `contract-a/2.3` and `contract-b/3.5` until the M5 crossing — `m5_tracking.md`, WP2), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by every amendment since — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
+| Wire specifications | `contracts/` — `contract-a.md` (mod ↔ sidecar, **`contract-a/2.4`**, amended in place; §15 is the M4 set, §16 the species-identity set, §17 the species-census set, §18 the two-way-lane set (A38–A41), **§19 the world-settings set, A42–A44**, §20 the heartbeat set (A45–A46) and **§21 the M5 public-release set, A47–A52**), `contract-b-m4.md` (sidecar ↔ relay ↔ sidecar ↔ archive, **`contract-b/4.0`**; §14 is its reconciliation set, §15 the species-identity amendment, §16 the census amendment, §17 the two-way-lane and hop-feed amendment (B13–B15), §18 the pacing and speed readout, §19 the world-settings readout, **§20 the disk budget, B20** — the only amendment that changes no wire field — §21 the genome-pump bounds (B21) and **§22 the M5 public-release set, B22–B32**. **The running fleet speaks both of these as of 2026-08-11**: the living deployment crossed to `contract-b/4.0` / `contract-a/2.4` / mod `0.6.4` in a 7m18s window that day, per `e2e/crossing/RUNBOOK.md` — see *The crossing to `contract-b/4.0`* under *The living deployment*. Slot 6 is the one exception and it is dark until its own operator applies the new bundle), `genome-hash.md` (the canonical genome projection, unchanged by M4 and by every amendment since — the block rides **beside** the blob, so no hash moves). `contract-b-m3.md` and `contract-b-m2.md` are the superseded M3 and M2 wires, kept as the record of what `contract-b/2` and `contract-b/1` said — **neither is current guidance** |
 | Participant docs and the support surface | `docs/` — the error taxonomy, the participant set (install / join / diagnose / leave) and the `--diagnose` spec, written for a stranger rather than for this rig; `docs/README.md` states the audience rule. Drafted by M5's WP7 with its open slots marked by owning package. This document stays the rig's own book — nothing in `docs/` is a copy of it |
 | Rigs and exit tests | `e2e/` — **`run-m4.sh` = the 3×2 six-slot grid on one machine** (the M4 local rehearsal; read its header before running it), **`run-m4-lan.sh` = the same map with slot 6 on the second computer** (the M4 exit-test rig; it sources `run-m4.sh` with `M4_LIB=1`), `run-m3.sh` = the three-slot ring rig on one machine, `run-m3-lan.sh` = the same ring with slot 2 on the second computer, `run-m2.sh` = the M2 two-sector rig (**historical**, speaks `contract-b/1`), `baseline.sh` = the T0/T1 capture, `journal.py` = journal reader. **The M3 scripts still speak the retired wire** — see *The M4 rigs* |
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
-| Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data*/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data*/` (the relay's `ring.json` slot reservations), `e2e/archive-data*/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs*/`, `e2e/run*/` (pid files). Each rig has its own suffixed set; the M4 LAN rig's are the `-m4-lan` ones and are the **living deployment's** |
+| Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data*/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data*/` (the relay's `ring.json` slot reservations and, since 2026-08-11, its `peers.json` credential verifiers), `e2e/archive-data*/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs*/`, `e2e/run*/` (pid files). Each rig has its own suffixed set; the M4 LAN rig's are the `-m4-lan` ones and are the **living deployment's** |
 | Retired rigs — **gitignored** | `e2e/<name>.tar.zst`. A retired runtime dir is still the record of a run that happened, so it is compressed in place rather than deleted: `e2e/data.tar.zst` (the M2/M3 journals, and **the only copy of the M4 resume test's input** — `data/slot-1/journal/journal.log`, the real in-flight hop of 2026-08-04; extract before re-running that test), `e2e/logs-m3-lan.tar.zst`, `e2e/archive-data.tar.zst`, `e2e/data-m4.tar.zst`. Restore one with `tar --zstd -xf e2e/<name>.tar.zst -C e2e/` |
 | **The repo itself** | **Real location `/mnt/wsl/data/bibites-multiverse/`; `~/bibites-multiverse` is a symlink to it** (moved 2026-08-08 — see *The disk budget*). Every absolute path in every script, pid file and command line resolves through the symlink unchanged, so nothing had to be rewritten. `/mnt/wsl/data` is a separate 251 GB ext4 volume; the WSL root it left is 98 GB and shared with everything else on this machine |
-| Shared LAN token — **never in the repo** | `~/.multiverse-token`, mode `600`. See *The LAN token* below |
+| Secrets and TLS material — **never in the repo** | Per-peer credential secrets in `~/.multiverse/*.secret`, mode `600`; the relay's own key pair and CA in the **gitignored** `e2e/tls-m4-lan/`; each sidecar's minted `<data-dir>/contract-a.token`, mode `600`. The shared `~/.multiverse-token` is **retired since the crossing of 2026-08-11** and nothing reads it. See *Credentials, TLS, and the retired LAN token* below |
+| The relay's third durable file | `e2e/relay-data-m4-lan/peers.json` — the credential **verifiers** (salted SHA-256, never a secret) and their grants. **Back it up with `ring.json`**: a lost verifier store costs a slot handover per peer |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
 | Game user data (`Application.persistentDataPath`) | `/mnt/c/Users/<user>/AppData/LocalLow/The Bibites/The Bibites/` — holds `Savefiles/`, `Autosaves/`, `Scenarios/`, `Bibites/` |
 
@@ -27,8 +28,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Component | Version |
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
-| The plugin | `0.6.3` (`MultiversePlugin.Version`) — the **save-phase build**: `0.6.2`'s headless-speed work (`MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device — *A world can be at the wrong time scale*, in Gotchas) and `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping) on top of the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals, **plus `SavePhases`, which times `SaveSystem.CreateSave` from the inside and puts the decomposition on every `[M4-SAVE]` line** (*Watch items*, first item). `SavePhases` is measurement only — it patches nothing that changes what a save does, and a span it cannot resolve reads `0` rather than failing the save. It still speaks `contract-a/2.3`: neither `0.6.2` nor `0.6.3` adds, removes or moves **any wire field**, so the minor did not budge and a peer on an older build is not stale in any operational sense. Measured on the live map 2026-08-10: the five local slots publish `0.6.3` and slot 6 publishes `0.6.2`, and nothing about the map reads differently for it. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | `contract-b/3.5` — the world-settings readout (§19) on top of §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, plus **§20's disk budget (B20)**: timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — the sidecar's journal since 2026-08-08, the archive's ledger since 2026-08-09. §20 changes no wire field, so the identifier does not move — see *The disk budget*. It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`. Since 2026-08-10 it also **measures** each world's achieved time scale and shows it beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas) — a §10.1 derivation from fields `PEER_STATUS` already carried, so that one moves no identifier either. Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` |
+| The plugin | `0.6.4` (`MultiversePlugin.Version`), **deployed to the five local games 2026-08-11 in the crossing window** — the **public-release build**, and the first that speaks **`contract-a/2.4`**: it presents a bearer token on the Contract A upgrade (§21 A47), reading the path in `MULTIVERSE_CONTRACT_A_TOKEN_FILE`; it reports `blobDroppedForSize` on `parents[]` (A49); and it handles the sidecar's `4007` close for an export set the map cannot use (A50). Underneath it is unchanged: `0.6.3`'s `SavePhases`, which times `SaveSystem.CreateSave` from the inside and puts the decomposition on every `[M4-SAVE]` line (*Watch items*, first item, and it is measurement only — a span it cannot resolve reads `0` rather than failing the save); `0.6.2`'s headless-speed work (`MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device — *A world can be at the wrong time scale*, in Gotchas); `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping); and the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. **The minor moved this time, and it did not for `0.6.2` or `0.6.3`** — those added no wire field, which is why the five local slots published `0.6.3` against `contract-a/2.3` through 2026-08-10. **Slot 6 is still on `0.6.2` and `contract-a/2.3`**: it was already one version behind at `0.6.3` and the crossing left it **two** behind, dark until its own operator applies the bundle rebuilt for `0.6.4` (`32f41f8`). The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
+| The Go side | **`contract-b/4.0`**, running on the living deployment since the crossing of **2026-08-11** — the M5 public-release set (§22, B22–B32). The three that changed how this rig is *operated*: **B22** replaces the one shared LAN token with a per-peer credential bound to the `peerId`, verifiers in `<relay-data-dir>/peers.json`; **B23** puts TLS at the relay's front door, so the whole listener is `wss://` including loopback; and **B32** moves the path to **`/contract-b/v4`** and crosses the fleet in lockstep. Beside them: B24's published capacity table, B25's optional `--min-contract-version` floor (left **unset** here), B26's forward acknowledgements, B27's `subscribe` grant for the archive, B28's authenticated admin path, B29's placement-under-churn rules and B30/B31's escaping and game-version rules. Under all of it, unchanged: the world-settings readout (§19), §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, **§20's disk budget (B20)** — timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — and §21's genome-pump bounds (B21). It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`, and since 2026-08-10 it **measures** each world's achieved time scale beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas). Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` — **except during a crossing**, where a running sidecar holds `bin/sidecar` open and the build goes to a scratch directory on the same filesystem and is renamed in (`e2e/crossing/RUNBOOK.md` P0.3 and P3) |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -260,7 +261,10 @@ e2e/run-m4-lan.sh all        # up, phase1..8 (phase5far is excluded: it blocks o
 up after the test and holds the living deployment: six worlds, periodic saves every 2 minutes
 here and every 10 on the far end, **all six headless and the five local ones targeting ×100
 since 2026-08-10**. It has since survived two host reboots, on 2026-08-08 and
-2026-08-09, and was brought back by hand both times. Do not start another rig against it, and
+2026-08-09, and was brought back by hand both times; on **2026-08-11 it crossed to
+`contract-b/4.0`** in a 7m18s window, which is the third planned outage it has been through and
+the only one that changed the wire (*The living deployment → The crossing to `contract-b/4.0`*).
+Do not start another rig against it, and
 do not stop a process it owns — see *Only one rig can run at a time* in Gotchas.
 `m4_considerations.md`, *Exit Test → Result*, records the exit-test run; **the current
 reading, the reboot ritual and the open watch items are in *The living deployment* below.**
@@ -315,22 +319,34 @@ Six things about it are load-bearing:
   command.
 
 **The M3 scripts still speak a wire the binaries retired.** M4 bumped both majors — to
-`contract-a/2` and `contract-b/3` — and moved both paths. A relay and a sidecar still
-*serve* the old paths and then close the connection with an explanation, so a stale script
+`contract-a/2` and `contract-b/3` — and moved both paths; **M5 bumped Contract B's again on
+2026-08-11, to `contract-b/4`, and moved that path to `/contract-b/v4`** (§22, B32), so the M3
+scripts are now two Contract B majors behind and `run-m2.sh` is three. A relay and a sidecar
+still *serve* the old paths and then close the connection with an explanation, so a stale script
 does not fail with a socket error — it connects, gets closed, and looks like a peer that
-will not join. That is the failure to expect, and it is why this list exists.
+will not join. That is the failure to expect, and it is why this list exists. **Since the
+crossing there is a second failure to expect on top of it**, and it comes first: the relay's
+whole listener is TLS, so a client dialling `ws://` on any of these paths does not reach the
+close code at all — a plain HTTP `GET` to `127.0.0.1:8795` answers `400 Client sent an HTTP
+request to an HTTPS server`.
 
-**The minors are now `contract-a/2.3` and `contract-b/3.5`** (the world-settings set, 2026-08-07;
+**The wire is now `contract-a/2.4` and `contract-b/4.0`, since 2026-08-11** — the public-release
+sets, `contract-a.md` §21 (A47–A52) and `contract-b-m4.md` §22 (B22–B32). **The minors before it
+were `contract-a/2.3` and `contract-b/3.5`** (the world-settings set, 2026-08-07;
 `2.2`/`3.4` and `2.2`/`3.3` were the two-way lanes and the pacing readout, `2.2`/`3.2` the species
-census, `2.1`/`3.1` the species identity, all of the same day), and **nothing in this table moves
-with them**. Contract A did **not** move for D17 — §18's A41 says so explicitly: every field the
+census, `2.1`/`3.1` the species identity, all of the same day), and **no minor ever moved anything in
+this table**. The `contract-b/4.0` **major** did: the first row's path is now `/contract-b/v4`,
+and the scheme is `wss://`. Contract A did **not** move for D17 — §18's A41 says so explicitly: every field the
 two-way set touches already existed and already accepted all four edge values, so there was
 nothing additive to bump. It **did** move for §19, because A42 adds five genuinely new
 `CONFIG_UPDATE` fields. Compatibility is on the major alone: a minor is never a rejection reason,
-the URL paths did not move, and every field these sets added — the migration `species` block, the
+none of those minors moved a URL path, and every field they added — the migration `species` block, the
 `HEARTBEAT` census with its `truncated` sibling, `SECTOR_GRANT.neighbours`' `"W"` and `"S"` keys,
 and §19's five settings — is OPTIONAL on both wires. **The minor is a capability statement, not a
-negotiation:** detect a feature by the presence of its field, never by arithmetic on the minor. A
+negotiation:** detect a feature by the presence of its field, never by arithmetic on the minor.
+**The corollary is what the 2026-08-11 window was spent on**: a *major* is exactly the rejection
+reason a minor is not, so `contract-b/4.0` moved the path, and every peer on this map had to cross
+in one window rather than at leisure (§22, B32). Nothing straddles a major. A
 world whose mod predates the census therefore reads **species unknown** on the status page, and
 one whose mod predates §19 reads **`?`** in every settings cell — honest, and never a wrong
 number, and never the value the game ships with. Measured on the live map on 2026-08-07 with the
@@ -371,7 +387,7 @@ for the first kind, at leisure for the second, and do not confuse them.
 
 | What the scripts speak | What M4 speaks | Where |
 |---|---|---|
-| `/contract-b/v2` | **`/contract-b/v3`** | `e2e/run-m3.sh` (`RELAY_URL`), and it is **sourced as a library** by `run-m3-lan.sh` and `baseline.sh`, so this one line reaches all three. Also `e2e/run-m3-lan.sh` (the operator note). `e2e/run-m2.sh` still says `/contract-b/v1`, two majors back. **`farend/setup-farend.ps1` is done** — it builds `/contract-b/v3`. |
+| `/contract-b/v2` | **`wss://…/contract-b/v4`**, since 2026-08-11 (it was `ws://…/contract-b/v3` from M4 until then) | `e2e/run-m3.sh` (`RELAY_URL`), and it is **sourced as a library** by `run-m3-lan.sh` and `baseline.sh`, so this one line reaches all three. Also `e2e/run-m3-lan.sh` (the operator note). `e2e/run-m2.sh` still says `/contract-b/v1`, three majors back. **`farend/setup-farend.ps1` is done** — it builds `wss://<host>:8795/contract-b/v4` and takes the CA to verify it. The M3 scripts are **deliberately not** patched: they speak retired wires, they are the record of runs that happened, and they keep their own `ensure_token` plumbing because it is what they need. |
 | `/contract-a/v1` | **`/contract-a/v2`** | **Nothing to change.** No script hardcodes a Contract A path — the sidecar's `--listen` and the mod's `MULTIVERSE_SIDECAR_PORT` carry it, and both sides already agree. |
 | `MULTIVERSE_EXPORT_EDGE=E` | **`MULTIVERSE_EXPORT_EDGES=E,N,W,S`** | `e2e/run-m3.sh`. The old name still parses, so this is not a break — it just cannot produce anything but a line topology. **`farend/setup-farend.ps1` is done**: its generated `start-slot6.ps1` sets the plural name, its `-ExportEdges` default is all four, and it rejects a token that is not an edge or an edge repeated. It no longer rejects an edge declared with its opposite — that refusal rested on the one-way lane and D17 retired it (§18 A38). |
 | the relay's `ring.json` key `"ring"` | **`"slots"`**, with `width`, `height`, `col`, `row` | `e2e/run-m3-lan.sh` (`ring_order()`) and `e2e/baseline.sh`. **This is the silent one.** `"ring"` is a read-only migration path: an M4 relay reads an M3 file once and never writes that key again. Both readers work today against the committed M3 `ring.json` and start returning empty the first time an M4 relay saves. |
@@ -563,26 +579,89 @@ world that was **seconds old**, and the answer to why it no longer reads that wa
 place. Since `0.6.3` the same line also carries `verifyMs` and the four `SavePhases` fields, so
 the stall is no longer one number.
 
-### The LAN token
+### Credentials, TLS, and the retired LAN token
 
-`contract-b-m4.md` §3.1 puts one shared bearer token on the Contract B upgrade, because M3's
-wire leaves the loopback. **There is no flag that takes the token literally** — that is a
-rule, not an omission, because a literal flag puts the secret in every process listing. Mint
-it once, into a file only you can read:
+**Since the crossing of 2026-08-11 there are three secrets on this rig and none of them is
+shared.** `contract-b-m4.md` §22 (B22, B23) replaced M4's one LAN token with a **per-peer
+credential bound to the `peerId`**, and put **TLS at the relay's front door**. `contract-a.md`
+§21 (A47) added a third, local, secret on the mod ↔ sidecar hop, which had none at all.
 
-```sh
-umask 077 && head -c 32 /dev/urandom | base64 | tr -d '/+=' > ~/.multiverse-token
-chmod 600 ~/.multiverse-token
-```
+**A credential is a join string, and it is born at the relay.** `--reserve-slot <peerId>[@c,r]`
+mints one for a peer that has none and `--mint-credential <peerId> --grant <g>` mints one for an
+identity that holds no slot; either prints the join string **once**, on stdout. The relay keeps
+only a **verifier** — a salted SHA-256 — in `<data-dir>/peers.json`, so it cannot print it again.
+The three grants are **disjoint** (B27): a `subscribe` credential cannot claim a slot and a
+`peer` credential cannot subscribe; `admin` is the release/handover/eviction path (B28). On this
+map that is seven records: six `peer` and the archive's one `subscribe`, which is what
+`credentials=7` on the relay's startup line counts.
 
-Every binary then takes `--token-file ~/.multiverse-token`, or reads `MULTIVERSE_TOKEN`, or
-reads `MULTIVERSE_TOKEN_FILE`. The token must be 16–256 bytes of printable ASCII with no
-spaces. The relay compares it in constant time and answers `401` on a mismatch; a client that
-collects `authFailuresBeforeCeiling` (5) consecutive 401s pins its backoff at the ceiling, so
-a wrong token looks like a peer that never joins rather than a reconnect storm.
+**Losing a secret costs an identity, not a password.** The only recovery is
+`--handover-slot <n>=<newPeerId>`, which mints for a **new** `peerId` and drops the old — and for
+slot 6 that means an errand on somebody else's machine, because the second computer has persisted
+the old id. So the secrets are captured into files, never into a scrollback:
+`e2e/crossing/mint-credentials.sh` is the only place this project mints, and `run-m4.sh reserve`
+delegates to it.
 
-`bin/relay --insecure-no-token` accepts unauthenticated connections. It is for a
-single-machine test rig only and **never** on the LAN.
+| Secret | Where | Who reads it |
+|---|---|---|
+| Five local peer credentials | `~/.multiverse/peer-slot-1.secret` … `peer-slot-5.secret`, mode `600` | each sidecar, as `--credential-file` (or `MULTIVERSE_PEER_SECRET`) |
+| The archive's subscribe credential | `~/.multiverse/archive-main.secret`, mode `600` | the archive, as `--credential-file` |
+| Slot 6's credential | **the second computer.** The handoff copy is `~/.multiverse/slot-6-handoff.secret` and is **deleted once the far end has applied it** — this machine has no use for another machine's identity | `setup-farend.ps1 -PeerSecretFile`, which stores it under `%LOCALAPPDATA%` with a user-only ACL |
+| Contract A's token, per slot | `<data-dir>/contract-a.token`, mode `600`, **minted by the sidecar itself** at first start | that slot's game, through `MULTIVERSE_CONTRACT_A_TOKEN_FILE` |
+
+**There is still no flag that takes a secret literally**, on either contract — the same rule the
+shared token lived by, and for the same reason: a literal flag puts the secret in every process
+listing. `--credential-file` carries the **secret half only**; the `peerId` half is `--peer-id`
+and `<data-dir>/peer-id`, and the relay refuses a connection whose handshake claims a different
+one. That binding is the whole of B22: a `peerId` used to be a claim and is now a credential.
+The relay answers `401` on a mismatch, and a client that collects `authFailuresBeforeCeiling`
+(**5**) consecutive 401s pins its backoff at the ceiling — so a wrong secret still looks like a
+peer that never joins rather than a reconnect storm.
+
+**TLS is the other half of the same amendment, and splitting them is what B23 forbids.** The
+relay wraps its *whole* listener in TLS, so no plaintext path survives even on loopback: the five
+local sidecars and the archive dial `wss://127.0.0.1:8795/contract-b/v4`, and a plain HTTP `GET`
+to that port answers `400 Client sent an HTTP request to an HTTPS server` (measured 2026-08-11 —
+B23's `426` is a different rule for a deployment shape this rig does not have).
+
+- **The material lives in `e2e/tls-m4-lan/`, which is gitignored**, and is minted by
+  `e2e/crossing/mint-tls.sh`. The certificate carries four SANs and each is load-bearing:
+  `127.0.0.1` and `localhost` for the local clients, **`192.168.1.227`** because the far end's
+  TLS client verifies the name it *dialled* — the Windows LAN address, not the WSL address behind
+  the portproxy — and `172.24.110.174` so a debugging dial straight at the VM does not fail on the
+  name.
+- **`ca.key` must never be lost.** A new CA means a fresh trust import on the second computer,
+  which is an errand D9 forbids this machine to run. **The leaf expires 2027-09-12**;
+  `mint-tls.sh --renew-leaf` mints a new server certificate and **keeps** the CA, so a renewal
+  costs the far end nothing.
+- **Trusting the CA here needs no `sudo`.** A Contract B client verifies against its platform
+  trust store and there is deliberately no flag between it and one, so `run-m4.sh` exports
+  `SSL_CERT_FILE=$TLS_CA` — Go's `crypto/x509` and `curl` both read it, and nothing in `/etc`
+  changes. Without it a sidecar logs *the relay's TLS certificate did not verify; NOT CONNECTING*
+  and never dials.
+
+**Contract A's token is local, per-slot, and nobody mints it by hand** (A47). Each sidecar writes
+`<data-dir>/contract-a.token` at `0600` on first start, and `start_game` hands that path to the
+game in `MULTIVERSE_CONTRACT_A_TOKEN_FILE` — the one variable in `WSLENV` carrying the **`/p`**
+flag, because the mod is a Windows process and the value is a path: it arrives as
+`\\wsl.localhost\Ubuntu\mnt\wsl\data\…\slot-N\contract-a.token`. A `/p` on the wrong variable
+would corrupt it, which is why the flag is on exactly one name. **Nothing anywhere writes the
+token's value — only its path.** A slot whose variable did not cross the boundary logs
+`<unset>`, dials bare, is refused `401` and reconnects on the ordinary ladder; the fix is to
+restart that one instance through the rig's `start_game`, never to hand-edit its environment.
+
+`--insecure-no-token` and `--insecure-no-contract-a-token` accept unauthenticated connections.
+They are for a single-machine test rig only, `--insecure-no-token` now **refuses to bind anything
+but loopback**, and **no document this project ships may instruct anyone to pass them.**
+
+**The shared LAN token is history, and this is its record.** From M3 until 2026-08-11 one secret
+in `~/.multiverse-token` (mode `600`) authenticated every peer on the Contract B upgrade, passed
+as `--token-file`, `MULTIVERSE_TOKEN` or `MULTIVERSE_TOKEN_FILE`, minted by hand with
+`head -c 32 /dev/urandom | base64`. It travelled to the second computer by hand as `token.txt`.
+`--token-file` now exists on **no binary**, no running process references the file, and
+`e2e/run-m3.sh` keeps its own `ensure_token` only because it still speaks the retired wire. The
+file itself is **left in place pending the owner's disposal call** — it is mode `600` and outside
+the repo, so leaving it costs nothing and deleting it removes a retired secret.
 
 ### Driving one component by hand
 
@@ -590,30 +669,41 @@ Start the rig in dependency order — the relay first, then the archive, then th
 sidecars, then the three game instances:
 
 ```sh
+export SSL_CERT_FILE=./e2e/tls-m4-lan/ca.crt        # trust this rig's CA, no sudo, no /etc
+
 bin/relay   --listen 127.0.0.1:8795 --data-dir ./e2e/relay-data \
-            --token-file ~/.multiverse-token
-bin/archive --relay ws://127.0.0.1:8795/contract-b/v3 --peer-id archive-main \
-            --data-dir ./e2e/archive-data --token-file ~/.multiverse-token \
+            --tls-cert ./e2e/tls-m4-lan/relay.crt --tls-key ./e2e/tls-m4-lan/relay.key
+bin/archive --relay wss://127.0.0.1:8795/contract-b/v4 --peer-id archive-main \
+            --data-dir ./e2e/archive-data --credential-file ~/.multiverse/archive-main.secret \
             --http 127.0.0.1:8796
-bin/sidecar --listen 127.0.0.1:8787 --relay ws://127.0.0.1:8795/contract-b/v3 \
+bin/sidecar --listen 127.0.0.1:8787 --relay wss://127.0.0.1:8795/contract-b/v4 \
             --peer-id slot-1 --position 0,0 \
-            --data-dir ./e2e/data/slot-1 --token-file ~/.multiverse-token
-bin/sidecar --listen 127.0.0.1:8788 --relay ws://127.0.0.1:8795/contract-b/v3 \
+            --data-dir ./e2e/data/slot-1 --credential-file ~/.multiverse/peer-slot-1.secret
+bin/sidecar --listen 127.0.0.1:8788 --relay wss://127.0.0.1:8795/contract-b/v4 \
             --peer-id slot-2 --position 1,0 \
-            --data-dir ./e2e/data/slot-2 --token-file ~/.multiverse-token
-bin/sidecar --listen 127.0.0.1:8789 --relay ws://127.0.0.1:8795/contract-b/v3 \
+            --data-dir ./e2e/data/slot-2 --credential-file ~/.multiverse/peer-slot-2.secret
+bin/sidecar --listen 127.0.0.1:8789 --relay wss://127.0.0.1:8795/contract-b/v4 \
             --peer-id slot-3 --position 2,0 \
-            --data-dir ./e2e/data/slot-3 --token-file ~/.multiverse-token
+            --data-dir ./e2e/data/slot-3 --credential-file ~/.multiverse/peer-slot-3.secret
 ```
 
 Both of those port numbers are now the compiled defaults, so the two flags above are
 redundant and are written out only to make the layout explicit. See *The M4 port plan*.
+**`--contract-a-token-file` is deliberately absent**: it defaults to
+`<data-dir>/contract-a.token`, which the sidecar mints itself, and that is the exact path the
+game is handed (*Credentials, TLS, and the retired LAN token*).
 
-Four things about that invocation are load-bearing:
+Five things about that invocation are load-bearing:
 
-- **The path is `/contract-b/v3`.** M3's `/contract-b/v2` and M2's `/contract-b/v1` are
-  different wires. The relay still *answers* on `v2` and closes the connection with `4000`,
-  so a stale client looks like a peer that will not join rather than a 404.
+- **The path is `/contract-b/v4` and the scheme is `wss://`, since 2026-08-11.** M4's
+  `/contract-b/v3`, M3's `/contract-b/v2` and M2's `/contract-b/v1` are different wires. The
+  relay still *answers* on the retired paths and closes the connection with `4000`, so a stale
+  client looks like a peer that will not join rather than a 404 — but a client still dialling
+  `ws://` never reaches that close code, because the listener is TLS to its front door.
+- **The relay takes no secret on a flag; every client takes exactly one.** `--tls-cert` and
+  `--tls-key` are the relay's whole authentication configuration — the verifiers are already in
+  `<data-dir>/peers.json` — and each client passes its own `--credential-file`. Passing the wrong
+  peer's file is a `401`, not a mis-placed slot.
 - **`--position <col>,<row>` is a sidecar flag, and it is how a map takes a shape.** Without
   it a peer is placed by the relay: the first hole in row-major order, or a new column on the
   shorter axis. That is deterministic but it is not *your* layout. `--insert-after-slot` and
@@ -647,10 +737,14 @@ then the rate.
 `--listen` is loopback-only by contract and refuses a wildcard address. The relay's
 `--listen` does not: it binds LAN-reachable (`0.0.0.0:8795` by default). Every flag also
 reads an environment variable — `MULTIVERSE_LISTEN`, `MULTIVERSE_RELAY`,
-`MULTIVERSE_PEER_ID`, `MULTIVERSE_DATA_DIR`, `MULTIVERSE_SLOT`, `MULTIVERSE_TOKEN_FILE`,
+`MULTIVERSE_PEER_ID`, `MULTIVERSE_DATA_DIR`, `MULTIVERSE_SLOT`, **`MULTIVERSE_CREDENTIAL_FILE`**
+(and `MULTIVERSE_PEER_SECRET` for the secret itself — the retired names were
+`MULTIVERSE_TOKEN_FILE` and `MULTIVERSE_TOKEN`), **`MULTIVERSE_CONTRACT_A_TOKEN_FILE`**,
 `MULTIVERSE_LOG_LEVEL`, and `MULTIVERSE_RELAY_LISTEN` / `MULTIVERSE_RELAY_DATA_DIR` /
+`MULTIVERSE_RELAY_TLS_CERT` / `MULTIVERSE_RELAY_TLS_KEY` /
 `MULTIVERSE_ARCHIVE_PEER_ID` / `MULTIVERSE_ARCHIVE_DATA_DIR` for the other two binaries.
-Relay and sidecar answer `GET /healthz`, and each sidecar writes its resolved listen address
+Sidecar and relay answer `GET /healthz` — **the relay's is `https://` now**, which is why the
+rigs carry a `RELAY_HEALTH` beside `RELAY_URL` — and each sidecar writes its resolved listen address
 to `<data-dir>/listen.addr`, which is how `--listen 127.0.0.1:0` stays usable from a script.
 The journal lives in `<data-dir>/journal/` and is the durable custody of decision D2 — keep
 it across a restart or the sidecar loses every organism it was holding.
@@ -686,12 +780,13 @@ relay before running it, and restart it afterwards.
 
 **Handing a slot to a different peer.** M4's addition, and the answer to a reinstall that took
 a fresh data dir and therefore a fresh `peerId`. It rebinds the reservation — slot, position
-and all — to the new identity, and it is deliberately **not** a wire operation: on this
-transport a `peerId` is a claim, not a credential, so only a command on the relay's own
-machine can do it.
+and all — to the new identity, and it is a command on the relay's own machine rather than a wire
+operation. **Since `contract-b/4.0` it also mints a credential for the new `peerId` and drops the
+old one** (§7.5, B22), which is what makes it the *only* recovery from a lost join string — and
+what makes it expensive for slot 6, whose machine has persisted the id being retired.
 
 ```sh
-bin/relay --data-dir ./e2e/relay-data --handover-slot 5=peer-lan-slot5-new   # rebinds, logs, exits 0
+bin/relay --data-dir ./e2e/relay-data --handover-slot 5=peer-lan-slot5-new   # rebinds, mints, logs, exits 0
 ```
 
 **Reserving a slot before its peer connects.** The mirror image of the release flag, and
@@ -702,6 +797,15 @@ bin/relay --data-dir ./e2e/relay-data \
           --reserve-slot slot-1@0,0 --reserve-slot slot-2@1,0 --reserve-slot slot-3@2,0 \
           --reserve-slot slot-4@0,1 --reserve-slot slot-5@1,1 --reserve-slot slot-6@2,1
 ```
+
+**Do not run that form by hand any more.** B22 folded issuance into reservation: a peer that
+holds no credential gets one minted and its join string printed **once**, on stdout, and the
+relay can never print it again. Six unrecoverable secrets in a terminal scrollback is how a map
+loses its own members, so the capture belongs in a tool —
+`e2e/crossing/mint-credentials.sh`, which files each secret into a `0600` file and prints only
+the far end's. `run-m4.sh reserve` and `run-m4-lan.sh reserve` both delegate to it. **A peer that
+already holds a slot is untouched**, credential included, which is what made minting against the
+live map safe on 2026-08-11: `ring.json` came back byte-identical.
 
 **The `@<col>,<row>` suffix is M4's, and it is optional.** With it the flags *are* the map, and
 a 3×2 grid forms whatever order the six peers join in. Without it — the M3 form,
@@ -734,7 +838,11 @@ the games, `bibites-mod/deploy.sh`, bring the rig back up.
 The bundle holds `setup-farend.ps1`, `README.md`, a **fresh** `BibitesMultiverse.dll`,
 `multiverse-sidecar.exe` (cross-compiled `GOOS=windows CGO_ENABLED=0` from
 `go/`), and the pinned BepInEx 5.4.23.3 zip (downloaded once into the gitignored
-`farend/dist/cache/`, SHA-256 verified). The script refuses to build when
+`farend/dist/cache/`, SHA-256 verified). **The zip is no longer the whole handover**: since
+`contract-b/4.0` the far end needs two more files that are deliberately *not* in it — the
+relay's CA (`e2e/tls-m4-lan/ca.crt`, per deployment and not a secret) and the secret half of slot
+6's join string. Both are carried by hand; the script's closing message lists all three. The
+script refuses to build when
 `setup-farend.ps1`'s pinned `$AssemblySha256` no longer equals
 `bibites-mod/libs/BibitesAssembly.dll` — that pin **is** the version gate on the far end, and a
 stale one would let two different game builds into one map. It also warns, without stopping,
@@ -789,9 +897,12 @@ peer.
 
 **The repo distributes the bundle.** `farend/dist/farend-bundle.zip` is tracked as of
 `8463b72`, so the second computer clones the private GitHub repo and takes the zip out of the
-checkout instead of receiving a hand-copied file. Only two things still travel by hand:
-`~/.multiverse-token` (as `token.txt`) and the relay's LAN address — **neither belongs in the
-repo**. **Re-run `make-farend-bundle.sh` and commit the new zip** whenever the plugin, the
+checkout instead of receiving a hand-copied file. **Three things still travel by hand, and since
+2026-08-11 that is two more than it was**: the relay's CA as `ca.crt`, the secret half of slot 6's
+join string as `peer-secret.txt`, and the relay's LAN address — **none of them belongs in the
+repo**, and the middle one is a secret the relay can never reprint. The retired
+`~/.multiverse-token`, carried as `token.txt`, was the single hand-carried file until the
+crossing. **Re-run `make-farend-bundle.sh` and commit the new zip** whenever the plugin, the
 sidecar binary, `setup-farend.ps1`, `farend/README.md` or the `$AssemblySha256` pin changes;
 a stale committed bundle is a stale member of the map, and under M4 that is a missing sixth
 world rather than a spare.
@@ -811,16 +922,25 @@ With the zip in hand, its operator runs two commands, and `farend/README.md` is 
 their instructions:
 
 ```powershell
-.\setup-farend.ps1 -RelayHost 192.168.1.227 -TokenFile .\token.txt
+.\setup-farend.ps1 -RelayHost 192.168.1.227 -CaFile .\ca.crt `
+    -PeerSecretFile .\peer-secret.txt
 .\start-slot6.ps1
 ```
 
 `setup-farend.ps1` finds Steam's copy of the game (registry, the usual folders, and every
 extra library in `libraryfolders.vdf`), verifies `BibitesAssembly.dll` against the pin,
 validates `-Position` and `-ExportEdges` before anything can silently disable the client,
-installs BepInEx if it is absent, copies the plugin, writes the token to
-`%LOCALAPPDATA%\BibitesMultiverse\token.txt` with a user-only ACL, and generates
-`start-slot6.ps1` and `stop-slot6.ps1`. Its M4 defaults are `-RelayPort 8795`, `-Slot 6`,
+installs BepInEx if it is absent, copies the plugin, **imports the relay's CA and stores this
+world's own credential**, and generates
+`start-slot6.ps1` and `stop-slot6.ps1`. **Both credential steps are new at `contract-b/4.0`**;
+before it the installer took `-TokenFile .\token.txt` and wrote the shared token to
+`%LOCALAPPDATA%\BibitesMultiverse\token.txt` with a user-only ACL. The CA import goes into *that
+operator's own* trust store, `Cert:\CurrentUser\Root` — no administrator rights and no other
+account affected — and the installer prints the CA's subject, thumbprint and expiry first, reads
+the store back by thumbprint to prove the import landed, and prints the exact manual command if
+it did not. `-SkipCaImport` is there for an operator who would rather do it themselves.
+**Asking somebody else's machine to trust this rig's CA is a real request, and it is the owner's
+to make.** Its M4 defaults are `-RelayPort 8795`, `-Slot 6`,
 `-Position '2,1'`, `-PeerId slot-6`, `-World M4-Slot6`, **`-ExportEdges 'E,N,W,S'`** and
 `-SidecarPort 8787` (loopback on that machine, where nothing competes for it). The
 `-ExportEdges` validation still refuses a token that is not an edge and an edge repeated; the
@@ -833,7 +953,18 @@ neighbour's west and south exports — see *The minors* for the measured symptom
 `farend/make-farend-bundle.sh` (it builds both fresh) **after** `bibites-mod/deploy.sh`, so the
 DLL in the zip is the one this machine is running.
 
-**The tracked bundle is current. It was rebuilt three times on 2026-08-10** — at `c4a7b51` for
+**After a `contract-b` MAJOR it is not a matter of degree at all**, and 2026-08-11 is the first
+time this rig has said that. A stale sidecar does not refuse two lanes — it never joins: it dials
+`ws://…/contract-b/v3` at a listener that is TLS to its front door, with a shared token no binary
+takes any more. **Slot 6 is dark from the moment the new relay starts until its own operator
+applies the new bundle**, and this machine cannot shorten that and must not try (D9). The useful
+bound is 24 hours (`holdTimeoutMs`), which is not a deadline but the point at which entries held
+for slot 6 bounce home by themselves.
+
+**The tracked bundle is current, and it was rebuilt for the crossing on 2026-08-11** — `32f41f8`,
+carrying mod `0.6.4` and the `contract-b/4.0` sidecar, built after `bibites-mod/deploy.sh` so the
+DLL in the zip is byte-identical to the one this machine runs. **That is the bundle slot 6 has not
+taken yet.** Before it, the bundle was rebuilt three times on 2026-08-10 — at `c4a7b51` for
 the `0.6.2` plugin (the minimum-FPS disarm, which matters on a far end that also runs headless);
 again after `contract-a.md` §20 A45 raised `heartbeatTimeoutMs` to 13 000, because that
 number lives in the **sidecar** and the zip's rule is that it carries what this machine runs; and
@@ -870,19 +1001,23 @@ check to make**, and it is cheap: `grep 'peer=slot-6' relay.log | grep 'client '
 **What it does not tell you is the value, and `modVersion` cannot close the gap — this is the trap.**
 Mod `0.6.2` shipped in **two** consecutive bundles with **different** sidecars:
 
-| Bundle | Committed | Mod in it | `HeartbeatTimeoutMs` in it |
-|---|---|---|---|
-| `c4a7b51` | 2026-08-10 15:05Z | `0.6.2` | **3 500** |
-| `0290f6b` | 2026-08-10 16:30Z | `0.6.2` | **13 000** |
-| `04f22ee` | 2026-08-10 18:13Z | `0.6.3` | 13 000 |
+| Bundle | Committed | Mod in it | `HeartbeatTimeoutMs` in it | Wire it speaks |
+|---|---|---|---|---|
+| `c4a7b51` | 2026-08-10 15:05Z | `0.6.2` | **3 500** | `contract-b/3.5` |
+| `0290f6b` | 2026-08-10 16:30Z | `0.6.2` | **13 000** | `contract-b/3.5` |
+| `04f22ee` | 2026-08-10 18:13Z | `0.6.3` | 13 000 | `contract-b/3.5` |
+| `32f41f8` | 2026-08-11 | **`0.6.4`** | 13 000 | **`contract-b/4.0`** — and this is the one that is not optional |
 
 Slot 6 publishes `0.6.2`, so "the mod version moved, therefore it took the bundle carrying the
 raise" **does not follow**. What narrows it is the clock, not the wire: it ran the installer at
 17:16Z, by which time `c4a7b51` had been superseded for 46 minutes, so the far sidecar is on 13 000
 ms **if the operator fetched the bundle when they applied it**. Treat that as *probable by
 provenance and unverified by observation* — and note that this ambiguity is a direct consequence of
-A46 declining a version bump for a §10 default. `contractAVersion` reads `contract-a/2.3` on all six
-slots and is designed not to discriminate here.
+A46 declining a version bump for a §10 default. `contractAVersion` read `contract-a/2.3` on all six
+slots while that was measured, and is designed not to discriminate here. **The crossing ends the
+ambiguity rather than answering it**: whatever slot 6 is on now, it cannot join at all until it
+takes `32f41f8`, and after that it is on `0.6.4`, `contract-a/2.4` and 13 000 ms by construction.
+Until then the five local slots read `contract-a/2.4` and slot 6 reads nothing, because it is dark.
 **The natural experiment that would settle it has not occurred**: slot 6's mod has not gone silent
 since 17:17:51Z, so no `silentFor` has ever been produced on that host to read. A `peer_mod_absent`
 closure after ~3.5 s of slot-6 mod silence would prove 3 500; the lanes staying open through 4–12 s
@@ -901,9 +1036,12 @@ minutes of 18:39Z in which every local peer churned, slot 6 logged nothing at al
 two session storms*).
 
 `start-slot6.ps1` sets the mod's whole configuration natively — there is no `WSLENV` on that
-machine — starts the sidecar with `--position 2,1`, **waits for `contract B: slot granted` in
+machine, so `MULTIVERSE_CONTRACT_A_TOKEN_FILE` is set directly and needs no path translation —
+starts the sidecar with `--position 2,1`, **waits for `contract B: slot granted` in
 its log**, and only then starts the game. A failure to join prints the four usual causes,
-names TCP 8795, and does not start the game.
+names TCP 8795, and does not start the game. **That order was already right and now has a second
+reason**: the sidecar mints the Contract A token file the game reads, so a game started first
+would meet an enforcing sidecar and take a `401` on the ordinary ladder.
 
 | Variable it sets | Value | Why it belongs there and not here |
 |---|---|---|
@@ -990,6 +1128,14 @@ computer ran `setup-farend.ps1 -RelayHost 192.168.1.227`, was granted slot 2, an
 reported `ringSize=3`. Give the same value to `setup-farend.ps1 -RelayHost`. It is one of this
 machine's Windows IPv4 addresses; `lanhost` lists the candidates, and the home-LAN one is
 normally `192.168.x.x` or `10.x.x.x`, never a `172.x` hypervisor address.
+
+**Since 2026-08-11 this address is also on the relay's certificate.** The far end's TLS client
+verifies the name it *dialled*, so `192.168.1.227` is a SAN on the leaf that
+`e2e/crossing/mint-tls.sh` mints (beside `127.0.0.1`, `localhost` and the WSL address). **If the
+LAN host ever changes, the certificate has to be re-minted** — `mint-tls.sh --renew-leaf`, which
+keeps the CA and therefore costs the second computer nothing. A far end dialling a name that is
+not on the leaf fails verification and never connects, which from here is a dark slot 6 and no
+other symptom.
 
 **The address alone is not enough — the portproxy behind it must exist.** `192.168.1.227:8795`
 only reaches the relay while the `netsh` portproxy above points at the *current* WSL address.
@@ -1217,6 +1363,20 @@ living deployment*, which also has the reconciliation against `wc -l`.
 | `e2e/archive-data-m4-lan/metrics.jsonl` | with **time**, one sample per slot per `metricsInterval` | **0.7 MB/h = 0.02 GB/day** |
 | `e2e/baselines/m4-collector/` | with **time**. Not part of the deployment — it is a read-only observation loop, copying five world saves and one `/api/status` sample every 5 minutes. Written and launched by the evolution-analysis session on 2026-08-07, not by hand. Stop it with `kill "$(cat e2e/baselines/m4-collector/collector.pid)"`; **every reboot kills it and nothing restarts it** — see *The living deployment* | **19 MB/h = 0.5 GB/day** |
 | **total** | | **97 MB/h = 2.3 GB/day = ~70 GB/month** |
+| `e2e/logs-m4-lan/bepinex/` | with **restarts, not with time** — so it is not in the total above. Every archiving pass copies the whole live BepInEx set, and nothing ever sweeps a generation | **3.4 GB → 21 GB in the single crossing window of 2026-08-11** |
+
+**The BepInEx log archive is the grower nobody sized, and one window found it.** The five live
+`LogOutput.log` files were **6.08 GB** on 2026-08-11, and a crossing copies them **three times**:
+once by hand before anything stops (`RUNBOOK.md` P1, so a mod deploy cannot truncate the
+`[M4-SAVE]` history it is deployed to measure), then again inside `lan_down`, then again inside
+`lan_up`. That is ~18 GB added in seven minutes, and it took `e2e/logs-m4-lan/bepinex/` from
+**3.4 GB to 21 GB**. The volume absorbed it — `/mnt/wsl/data` went from **39 GB to 56 GB used,
+195 GB free** — so this cost the window nothing but time. **What it costs is time**: see the same
+window's entry in *The living deployment*, where those copies are most of the difference between
+the runbook's estimate and the measured outage. **A retention rule for this directory is a watch
+item** (*Watch items*, fourth): the archive is the only record of `[M4-SAVE]` history and cannot
+simply be deleted, but keeping every generation of a 6 GB set at three copies per window is not a
+rule either.
 
 **`e2e/baselines/m4-collector/` is gitignored, and that is load-bearing.** `e2e/baselines/`
 itself **is** tracked — 57 files including earlier baseline save zips — so this directory
@@ -1273,8 +1433,9 @@ ls ~/bibites-multiverse/     # must list the repo, not fail
 ## The living deployment
 
 The M4 LAN rig has carried the same six worlds since the exit test of 2026-08-06 — across a
-full-disk outage, two host reboots and one far-end restart. This section is what it last read,
-how to bring it back after a reboot, and what is being watched.
+full-disk outage, two host reboots, one far-end restart and, on 2026-08-11, a **major wire
+crossing**. This section is what it last read, how to bring it back after a reboot, and what is
+being watched.
 
 ### The reading of 2026-08-09, after the second reboot
 
@@ -1796,7 +1957,7 @@ queue-fill deadline **shrinks** with the crossing rate, and 20:14Z and 20:19Z ar
 above records. The fix removes the marginality rather than moving the margin.
 
 **The fix: `contract-b-m4.md` §21, B21 — a rate is not a budget.** A `contract-b` amendment that
-**does not move the version** (`contract-b/3.5` stands; nothing on the wire changes and a bounded
+**does not move the version** (`contract-b/3.5` stood at the time; nothing on the wire changes and a bounded
 requester still never exceeds `genomeRequestsPerMinute`), on the §20 precedent. Four bounds, all
 of them on the pump and **none on the retry ladder** — `genomeScanPerTick` 2048 examined per pass,
 walked **round-robin over a stable order** and resumed where the last pass stopped so no gap is
@@ -1946,9 +2107,80 @@ process ids; 24/24 lanes stayed `peer_live` with `pacedDepth`, `heldDepth` and `
 0 throughout; and the five sidecar logs recorded zero `OVERLOADED`, zero `MALFORMED_MESSAGE` and
 zero `bounceBack=true` across the restart. The far end never noticed.
 
+### The crossing to `contract-b/4.0`, 2026-08-11 — a 7m18s window
+
+**The whole fleet moved wire in one window, because a major is the one thing that cannot be
+rolled out at leisure.** `contract-b/3.5` → **`contract-b/4.0`**, `contract-a/2.3` →
+**`contract-a/2.4`**, mod `0.6.3` → **`0.6.4`**; the shared LAN token replaced by per-peer
+credentials, `ws://` replaced by `wss://` on every client including the loopback ones, and the
+path moved from `/contract-b/v3` to `/contract-b/v4`. It ran literally from
+`e2e/crossing/RUNBOOK.md`, which now carries the annotations this execution produced. The two
+commits are `8e714ba` (the launch material) and `32f41f8` (the rebuilt far-end bundle).
+
+| | |
+|---|---|
+| Map down | **7m18s** — `down` at **17:12:57Z**, `up` returned at **17:20:15Z** |
+| The new relay | started **17:17:10Z**, terminating TLS itself: `scheme=wss path=/contract-b/v4 retiredPaths=[/contract-b/v2 /contract-b/v3] credentials=7 minContractVersion=<none>`. `credentials=7` is the count that proves the mint landed: six `peer`, one `subscribe` |
+| The archive | replay **128 s** at **6.24 M records** — against the ~150 s the runbook derived — re-subscribed **17:19:19.040Z** |
+| The five sidecars | every one `reason=reclaimed`, on its own coordinate, with **zero discarded journal bytes** |
+| The five games | `0.6.4`, `contract-a/2.4`, `timeScale 100` confirmed on all five |
+| Slot 6 | **dark**, holding its reservation. Nothing named it in the new relay's log, so nothing on this side has yet observed the far end even attempt the new wire. Its `holdTimeoutMs` — 24 h, after which entries held for it bounce home by themselves — runs from **17:17:10Z**, the moment the new relay started |
+
+**The ledger gap was zero crossings, and that is the finding worth carrying to the next major.**
+§5.1 makes any archive absence *while the map is live* a permanent hole in the record — the last
+measured restart cost **1,940** crossings and the runbook budgeted ~1,600 for a repeat. Restarting
+it inside a full outage costs nothing instead, because there are no crossings to miss: the archive
+re-subscribed at 17:19:19.040Z and the **first sidecar was granted 880 ms later**. **Restart the
+archive inside the outage** is now a proven cheap pattern and not a theory, and it is the reason
+the archive is restarted exactly once in that runbook and why that once is where it is.
+
+**The expected custody burst did not happen, and the reason changes what to expect next time.**
+The runbook budgeted the recorded peak of `custodyDepth` **55** / `pacedDepth` **14** draining over
+about four minutes. Measured this window: peak custody **4**, paced **0**. The recorded burst came
+from a **mod-deploy** cycle in which the *sidecars stayed up* and took custody of everything their
+absent worlds could not accept; a full `down` takes the sidecars too, so nothing accumulates
+anywhere — each journal replays and flushes the moment its own mod attaches. **A mod deploy inside
+a full rig outage costs no custody burst**; a mod deploy with the sidecars left running costs the
+55/14 one. Both are now on record, and which one applies is decided by whether the sidecars go
+down.
+
+**The time-scale trap did not fire either, and the check is still the deliverable.** *A world can
+be at the wrong time scale* says the first `timescale` after a world load answers
+`Time.timeScale=1.00` and the reported scale sticks there. This time all five slots already read
+`100` before the documented re-send, so the re-send changed nothing. Read the scale; do not
+predict it.
+
+**The `down` estimate was the one number that was badly wrong, and the cause is the log archive.**
+The runbook's §9 sized `lan_down` at ~15 s. Both `lan_down` **and** `lan_up` re-archive the
+BepInEx logs *inside* the outage, and at 2026-08-11's **6.08 GB** of live logs and drvfs read
+rates of **24–30 MB/s** that is ~4 minutes cold. It cost **90 s and 65 s** here only because P1's
+own archiving pass had already warmed the page cache. The disk side of the same fact is in *The
+disk budget* — three copies of 6.08 GB in one window, and the archive directory went 3.4 GB → 21 GB.
+
+**What is durable now that was not before.** `e2e/relay-data-m4-lan/peers.json` — the credential
+verifier store, salted SHA-256 verifiers and grants, never secrets — is the relay's **third**
+durable file beside `ring.json` and the archive's set, and it was backed up this window to
+`~/.multiverse/backup-20260811T170259Z/`. The TLS material in the gitignored `e2e/tls-m4-lan/`
+is the fourth thing to keep: **`ca.key` must never be lost**, because a new CA means a fresh trust
+import on somebody else's computer.
+
+**The rollback set is still on disk and there is a rule for retiring it.**
+`~/.multiverse-rollback-bin/` (the `contract-b/3.5` binaries) and the `0.6.3` DLL copy beside it
+**stay until slot 6 has rejoined and the map has run a day on the new wire.** Until then the far
+end is the half of this deployment that has not crossed, and the old binaries are the only thing
+that could carry it back.
+
+**Two defects in this rig's own tooling were found by running it**, and both are fixed where they
+live: `e2e/crossing/mint-credentials.sh` defaulted `RELAY_BIN` to `bin/relay`, which at P0.5 is
+still the old binary with none of the new flags, and the runbook's P4 gate asserted a `grep` count
+that the patch it applies makes impossible. `e2e/crossing/RUNBOOK.md` carries both corrections, so
+the next major inherits a corrected template rather than this one.
+
 ### Bringing it back after a reboot
 
-Proven end to end twice, on 2026-08-08 and 2026-08-09. The steps are ordered and step 1
+Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
+2026-08-11 crossing window — where step 4 was the same `up` and the archive replay was the same
+single largest term. The steps are ordered and step 1
 gates the rest.
 
 1. **Mount `/mnt/wsl/data`.** See *Where the rig lives now* above. Nothing — not `git`, not
@@ -1978,6 +2210,14 @@ gates the rest.
    ```sh
    ARCHIVE_HTTP=0.0.0.0:8796 ./e2e/run-m4-lan.sh up
    ```
+
+   **It refuses to start without the credentials, and that refusal is the feature.** Since
+   2026-08-11 `up` runs `ensure_credentials` first — it mints nothing, because only the relay can
+   mint; it checks that `e2e/tls-m4-lan/`'s three files and the six secrets under
+   `~/.multiverse/` are on disk, and fails loudly if any is missing. The alternative it exists to
+   prevent is five sidecars on a backoff ladder against a `401`. If it ever fires after a reboot,
+   the answer is a restored secret, never a re-mint: re-minting is `--handover-slot`, which
+   changes a `peerId` (*Credentials, TLS, and the retired LAN token*).
 
    **That one command now reproduces the whole regime, and the command line does not carry
    it.** `run-m4-lan.sh` exports `BIBITES_EXTRA_ARGS='-batchmode -nographics'` and assigns
@@ -2025,13 +2265,14 @@ gates the rest.
 recovery has happened and every later replay reads the same records. See *The archive's ledger
 recovery* above for what it cost and what it proved. Two things from it stay true of every
 bring-up from here: the replay costs **minutes of no status page and more of them every day**
-— ~93 s at 2026-08-10's 3.7 M records / 1.22 GB, **~150 s at 2026-08-11's 6.24 M / 2.0 GB** —
-so `up` reaches `archive subscribed` two to three minutes after it starts the archive rather
+— ~93 s at 2026-08-10's 3.7 M records / 1.22 GB, and **128 s measured on 2026-08-11 at 6.24 M /
+2.0 GB**, against the ~150 s the same rate predicted for it — so `up` reaches `archive subscribed`
+two to three minutes after it starts the archive rather
 than instantly, and **the seconds in that sentence are stale as soon as they are written**
 (*The status page on the LAN* has the rate to compute them from). **The wait in `run-m4-lan.sh`
-is the thing this breaks first**: it was 60 s and would have failed a healthy bring-up, it has
-been 300 s since 2026-08-10, and one day of ledger growth has taken that from 3× headroom to
-2× — `e2e/crossing/RUNBOOK.md`'s patch raises it to 600 s. Size it from the ledger and raise it
+is the thing this breaks first**: it was 60 s and would have failed a healthy bring-up, it was
+300 s from 2026-08-10, and one day of ledger growth took that from 3× headroom to
+2× — **it has been 600 s since the crossing of 2026-08-11**. Size it from the ledger and raise it
 rather than believing a timeout here. The second: `ledgerRecords` still runs
 **below** `wc -l` and drifts further every hour,
 because the live counter only increments on migration, ACK and NACK records while a `GENOME`
@@ -2040,7 +2281,7 @@ append (`archive.go`, `RecordGenome`) is counted at boot replay and never during
 
 ### Watch items
 
-Three things are being watched on the running deployment. The first is a **measured breach of
+Four things are being watched on the running deployment. The first is a **measured breach of
 a bar the owner set**; the owner's decision on it **landed on 2026-08-10**, so what it now
 waits on is whether the change works — which is evidence, and evidence takes a generation to
 accrue. **The first evidence is in, as of 2026-08-10 20:20Z, and it points the right way without
@@ -2051,7 +2292,9 @@ yet, and it **grew a defect and lost it again on 2026-08-10**: the magnitude of 
 backlog cost the archive twenty-six relay sessions and the ledger 9,641 records, that half is
 root-caused, fixed and closed (`contract-b-m4.md` §21, B21), and what stays on this list is the
 growth of the queue itself. The third **has its verdict** — the reading is understood, it is not a
-defect, and it stays on this list because M5 changes what it will mean.
+defect, and it stays on this list because M5 changes what it will mean. **The fourth was opened
+by the crossing of 2026-08-11**: the BepInEx log archive has no retention rule, and one window
+took it from 3.4 GB to 21 GB.
 
 - **The 2-second save-stall budget is breached routinely, and it has been since the day the
   exit test passed.** D14 set the bar at 2 000 ms and the exit test of 2026-08-06 measured
@@ -2607,6 +2850,23 @@ defect, and it stays on this list because M5 changes what it will mean.
   comes round less often, so take it when it does — a lull, a restart, or a deliberate
   `send <n> timescale 5` on one world.
 
+- **The BepInEx log archive has no retention rule, and it is now the fastest-growing thing on
+  the volume. Opened 2026-08-11.** `e2e/logs-m4-lan/bepinex/` went from **3.4 GB to 21 GB in the
+  single crossing window**, because the five live `LogOutput.log` files were 6.08 GB and a
+  crossing copies them three times — once by hand at P1, then inside `lan_down`, then inside
+  `lan_up` (*The disk budget*). Nothing sweeps it, and the copies are not redundant in any way a
+  script can see: each is a different generation of a file BepInEx truncates on launch.
+  **It is not a defect and it cannot simply be deleted** — this directory is the *only* record of
+  `[M4-SAVE]` history, which is the evidence the first watch item is built on, and the one time
+  archiving was skipped the loss was permanent (~33 saves, 2026-08-10). **What is missing is a
+  rule**, and it is an owner's call of the same shape as the collector's: which generations are
+  keepers, what prunes, and whether an archived generation should be compressed in place the way a
+  retired rig directory is (`e2e/<name>.tar.zst`, *Layout*). **Watch the volume, not the
+  directory**: `/mnt/wsl/data` went 39 GB → 56 GB used across the window and has 195 GB free, so
+  the pressure is real but slow. At roughly 18 GB per crossing window and ~2.3 GB/day of ordinary
+  growth, this is the first term that would make the *three months* estimate in *The disk budget*
+  wrong.
+
 ## Gotchas
 
 - **The rig lives on `/mnt/wsl/data`, reached through a symlink.** `~/bibites-multiverse`
@@ -2706,6 +2966,12 @@ defect, and it stays on this list because M5 changes what it will mean.
     the other four still reported `×5`** — no restart involved at all. A plain
     `send 2 timescale 5` corrected it and it held, so the one-command remedy does not depend
     on what caused the drift.
+
+  **The 2026-08-11 crossing is the fourth reading and it needed nothing**: all five worlds came
+  back from a full `down`/`up` already reporting `timeScale 100`, so the documented re-send
+  changed nothing and the *first-send-answers-`1.00`* trap never fired. That is two bring-ups in
+  a row with no correction needed — which is exactly why the sweep, and not the correction, is the
+  deliverable.
 
   So it is not a property of a restart. Sweep all five on `/api/status` after any bring-up,
   and again whenever a rate reading looks wrong: a world running seven times too fast inflates
