@@ -64,6 +64,19 @@ type credRelayOptions struct {
 	// peer observed NOTHING sets it out of reach, so that any frame arriving in
 	// its window is a registry change and not a heartbeat of the map.
 	statsBroadcast time.Duration
+	// B29's coalescing window (§22, B29). A churn test sets the floor and the
+	// ceiling far below the shipped 250/2000 ms so that a storm fits inside a
+	// test's patience; the RATIO is what the bound is about, and it is preserved.
+	statusCoalesce    time.Duration
+	statusCoalesceMax time.Duration
+	churnThreshold    int
+	// inMemoryGrid keeps ring.json out of it. The credential store still lives on
+	// disk, because that is what a real relay authenticates against; the MAP does
+	// not, because Grid.Save fsyncs twice per registry change and a test that
+	// wants to measure a CHURN RATE would be measuring this host's disk. §7.4
+	// requires the durability in production and says so; nothing about placement
+	// arbitration depends on it.
+	inMemoryGrid bool
 }
 
 func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
@@ -85,16 +98,33 @@ func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
 	if statsBroadcast == 0 {
 		statsBroadcast = 250 * time.Millisecond
 	}
+	statusCoalesce := opts.statusCoalesce
+	if statusCoalesce == 0 {
+		statusCoalesce = 10 * time.Millisecond
+	}
+	statusCoalesceMax := opts.statusCoalesceMax
+	if statusCoalesceMax == 0 {
+		// A test that did not ask about B29's widening gets a window that does
+		// not widen, so a burst of registry changes cannot silently stretch some
+		// other test's timing. The churn tests set both ends deliberately.
+		statusCoalesceMax = statusCoalesce
+	}
+	gridDir := dir
+	if opts.inMemoryGrid {
+		gridDir = ""
+	}
 	srv, err := New(Options{
-		Logger:             slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})),
-		DataDir:            dir,
-		Credentials:        store,
-		MinContractVersion: opts.minContractVersion,
-		Limits:             opts.limits,
-		PingInterval:       time.Second,
-		PeerTimeout:        30 * time.Second,
-		StatusCoalesce:     10 * time.Millisecond,
-		StatsBroadcast:     statsBroadcast,
+		Logger:                    slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})),
+		DataDir:                   gridDir,
+		Credentials:               store,
+		MinContractVersion:        opts.minContractVersion,
+		Limits:                    opts.limits,
+		PingInterval:              time.Second,
+		PeerTimeout:               30 * time.Second,
+		StatusCoalesce:            statusCoalesce,
+		StatusCoalesceMax:         statusCoalesceMax,
+		StatusChurnBurstThreshold: opts.churnThreshold,
+		StatsBroadcast:            statsBroadcast,
 	})
 	if err != nil {
 		t.Fatalf("relay: new: %v", err)
@@ -271,6 +301,23 @@ func (p *credPeer) wait(typ string, timeout time.Duration) wire.Envelope {
 	}
 }
 
+// findAll returns EVERY frame of a type, which is what a test wanting "did the
+// relay ever publish X" must ask. find() returns the first, and a test that
+// used it to look for a LATER property — a stats block that only exists after
+// the peer has claimed, say — is a test that races the coalescing window and
+// loses whenever the window closes between the handshake and the claim.
+func (p *credPeer) findAll(typ string) []wire.Envelope {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := []wire.Envelope{}
+	for _, env := range p.frames {
+		if env.Type == typ {
+			out = append(out, env)
+		}
+	}
+	return out
+}
+
 func (p *credPeer) find(typ string) (wire.Envelope, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -280,6 +327,39 @@ func (p *credPeer) find(typ string) (wire.Envelope, bool) {
 		}
 	}
 	return wire.Envelope{}, false
+}
+
+// waitGrantReason waits for the SECTOR_GRANT carrying a particular reason.
+//
+// A test that wants the grant ANSWERING ITS OWN CLAIM must ask for it this way
+// whenever the peer already holds a reservation. The publisher re-sends grants
+// to every live slot holder whose grant body changed (§7.2 ordering step 4) and
+// spells every one of them reason:"updated", so a peer with a pre-seeded slot
+// routinely receives one of those between its HANDSHAKE_ACK and the answer to
+// its claim. Taking the first grant and asserting its reason is a race with the
+// coalescing window, and it is a race that gets easier to lose the wider the
+// window is allowed to grow (§22, B29).
+func (p *credPeer) waitGrantReason(reason string, timeout time.Duration) contractb.SectorGrant {
+	p.t.Helper()
+	deadline := time.Now().Add(timeout)
+	seen := []string{}
+	for {
+		seen = seen[:0]
+		for _, env := range p.findAll(contractb.TypeSectorGrant) {
+			var grant contractb.SectorGrant
+			if json.Unmarshal(env.Data, &grant) != nil {
+				continue
+			}
+			if grant.Reason == reason {
+				return grant
+			}
+			seen = append(seen, grant.Reason)
+		}
+		if time.Now().After(deadline) {
+			p.t.Fatalf("no SECTOR_GRANT with reason %q within %s; saw %v", reason, timeout, seen)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func (p *credPeer) frameCount() int {

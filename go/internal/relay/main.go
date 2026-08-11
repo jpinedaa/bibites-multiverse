@@ -105,6 +105,29 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		"connected role:\"archive\" clients (§3.3). It bounds the FAN-OUT COST; B27's subscribe "+
 			"grant is what bounds the trust")
 
+	// ------------------------------------------- §7.2's coalescing window (B29)
+	//
+	// The window is a §12 tunable rather than a §3.3 published limit, so it does
+	// not ride the wire — but D20's rule reaches it anyway: THE BROADCAST RATE IS
+	// THE THING A PUBLIC MAP'S OPERATOR HAS TO BE ABLE TO TUNE FROM THE METRIC
+	// THAT MEASURES IT, because one broadcast costs slotCount stats blocks and
+	// the operator is the only person who can see how many that has become.
+	statusCoalesceMs := fs.Int64("status-coalesce-ms",
+		envInt64("MULTIVERSE_STATUS_COALESCE_MS", contractb.StatusCoalesce.Milliseconds()),
+		"floor of the PEER_STATUS coalescing window (§12 statusCoalesceMs, §22 B29). At most one "+
+			"broadcast per window and one SECTOR_GRANT per peer in it; the last frame of a burst "+
+			"is always sent")
+	statusCoalesceMaxMs := fs.Int64("status-coalesce-max-ms",
+		envInt64("MULTIVERSE_STATUS_COALESCE_MAX_MS", contractb.StatusCoalesceMax.Milliseconds()),
+		"ceiling the window widens to under sustained churn (§12 statusCoalesceMaxMs, §22 B29). "+
+			"It bounds the broadcast RATE: 60000/floor broadcasts a minute at rest, 60000/ceiling "+
+			"under a storm")
+	churnBurstThreshold := fs.Int64("status-churn-burst-threshold",
+		envInt64("MULTIVERSE_STATUS_CHURN_BURST_THRESHOLD", contractb.StatusChurnBurstThreshold),
+		"REGISTRY changes inside one window that make it double (§12 statusChurnBurstThreshold, "+
+			"§22 B29). Sized above what one peer's join or departure produces, so an ordinary "+
+			"event never widens the window and a churn storm always does")
+
 	// ---------------------------------------------------- §7.5's operator acts
 	releaseSlot := fs.Int("release-slot", 0,
 		"release slot n at startup and exit, leaving its position a hole (contract-b-m4.md §7.5)")
@@ -177,6 +200,9 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 			MaxGenomeRequestsPerMinute: *maxGenomeRPM,
 			MaxSubscribers:             *maxSubscribers,
 		},
+		StatusCoalesce:            time.Duration(*statusCoalesceMs) * time.Millisecond,
+		StatusCoalesceMax:         time.Duration(*statusCoalesceMaxMs) * time.Millisecond,
+		StatusChurnBurstThreshold: int(*churnBurstThreshold),
 	})
 	if err != nil {
 		log.Error("relay: startup failed", "err", err)
@@ -297,6 +323,27 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 	// cannot read in their own log is one they will read off a peer's 4007.
 	log.Info("relay: capacity limits, as this relay is running them (contract-b-m4.md §3.3)",
 		"limits", srv.Limits().Published())
+	// B29's bound, printed as the arithmetic rather than as the knobs, because
+	// what an operator has to be able to check is the RATE. The window widens
+	// under churn and narrows after it, so the two numbers are the envelope this
+	// relay's PEER_STATUS volume lives inside.
+	log.Info("relay: the PEER_STATUS coalescing window, and the broadcast rate it bounds "+
+		"(contract-b-m4.md §7.2, §22 B29)",
+		"statusCoalesceMs", *statusCoalesceMs, "statusCoalesceMaxMs", *statusCoalesceMaxMs,
+		"statusChurnBurstThreshold", *churnBurstThreshold,
+		"broadcastsPerMinuteAtRest", int(maxBroadcastsPerMinute(
+			time.Duration(*statusCoalesceMs)*time.Millisecond)),
+		"broadcastsPerMinuteUnderAStorm", int(maxBroadcastsPerMinute(
+			time.Duration(*statusCoalesceMaxMs)*time.Millisecond)),
+		"costPerBroadcast", "slotCount stats blocks to every peer AND every subscriber")
+	// The slot-space picture, at the one moment an operator is certainly reading
+	// (§7.2, §7.5, DQ3). Holes are where the next newcomer goes before any axis
+	// grows; maxSlotEverIssued is the address counter that never decreases.
+	log.Info("relay: slot space (contract-b-m4.md §7.2, §7.5)",
+		"maxSlotEverIssued", srv.MaxSlotEverIssued(), "map", srv.MapShape(),
+		"slotCount", len(srv.Snapshot()), "holes", srv.Holes(),
+		"note", "a released POSITION is refilled by the next newcomer before any axis grows; "+
+			"a released ADDRESS is retired forever")
 
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
@@ -522,14 +569,41 @@ func (s *Server) consequenceOfRelease(slot int) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\nRELEASE slot %d\n", res.Slot)
 	s.describeSlotLocked(&b, res)
-	fmt.Fprintf(&b, "  after       position (%d,%d) becomes a HOLE; the map stays %dx%d\n",
-		res.Col, res.Row, s.grid.Width, s.grid.Height)
-	fmt.Fprintf(&b, "              slot %d is retired for good: maxSlotEverIssued (%d) never decreases,\n",
-		res.Slot, s.grid.MaxSlotEverIssued)
-	fmt.Fprintf(&b, "              so every journaled destSlot %d now answers SLOT_VACANT, permanently\n", res.Slot)
+	// DQ3's slot-space policy, in the SAME WORDS the admin path returns (§22,
+	// B29). An operator who read the JSON and acted at the console, or the other
+	// way round, must not have been told two different things.
+	describeWrapped(&b, "  after       ", slotSpacePolicy(s.grid, res))
 	s.describeLaneChangesLocked(&b, res)
 	s.describeCustodySplitLocked(&b, res)
 	return b.String(), nil
+}
+
+// describeWrapped renders the shared policy sentences under a console label,
+// one bullet each, wrapped so a report stays readable in an 80-column terminal
+// — which is where an operator is standing when they read it.
+func describeWrapped(b *strings.Builder, label string, lines []string) {
+	const width = 78
+	indent := strings.Repeat(" ", len(label))
+	for i, line := range lines {
+		head := indent
+		if i == 0 {
+			head = label
+		}
+		fmt.Fprintf(b, "%s- ", head)
+		col := len(head) + 2
+		for j, word := range strings.Fields(line) {
+			if j > 0 && col+1+len(word) > width {
+				fmt.Fprintf(b, "\n%s  ", indent)
+				col = len(indent) + 2
+			} else if j > 0 {
+				fmt.Fprint(b, " ")
+				col++
+			}
+			fmt.Fprint(b, word)
+			col += len(word)
+		}
+		fmt.Fprintln(b)
+	}
 }
 
 func (s *Server) consequenceOfHandover(slot int, newPeerID string) (string, error) {
@@ -729,8 +803,13 @@ func (s *Server) describeLaneChangesLocked(b *strings.Builder, going Reservation
 }
 
 func (s *Server) describeCustodySplitLocked(b *strings.Builder, res Reservation) {
+	// "six other machines" was true of the M4 rig and is not true of a public
+	// map, where the machine that holds a journal is usually a stranger's. §7.5
+	// as amended says the operator's honest answer becomes *ask the peer*, and
+	// the report has to say that rather than imply a fleet the operator can log
+	// in to.
 	fmt.Fprintf(b, "  custody     this relay CANNOT list the entries that name slot %d: journals live on\n", res.Slot)
-	fmt.Fprintf(b, "              six other machines and D2 keeps custody local. Read heldDepth per peer on\n")
+	fmt.Fprintf(b, "              the peers' own machines and D2 keeps custody local. Read heldDepth per peer on\n")
 	fmt.Fprintf(b, "              the status page or in ringstat, then run on the machine that owns them:\n")
 	fmt.Fprintf(b, "                  multiverse-sidecar --list-inflight --dest-slot %d\n", res.Slot)
 }

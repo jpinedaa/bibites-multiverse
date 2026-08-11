@@ -130,10 +130,13 @@ func TestLimitsRideBesideTheStatsBlockAndNeverInsideIt(t *testing.T) {
 		Stats:        &contractb.PeerStats{Population: contractb.IntPtr(7)},
 	})
 
+	// EVERY PEER_STATUS is examined, not only the first. The first one a peer
+	// receives is published for its HANDSHAKE and names no slot at all — it
+	// has not claimed yet — so a test that looked only at frame one was racing
+	// the coalescing window and asserting nothing whenever it lost.
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		status, ok := p.find(contractb.TypePeerStatus)
-		if ok {
+		for _, status := range p.findAll(contractb.TypePeerStatus) {
 			var raw struct {
 				Slots []struct {
 					Stats map[string]json.RawMessage `json:"stats"`
@@ -143,18 +146,19 @@ func TestLimitsRideBesideTheStatsBlockAndNeverInsideIt(t *testing.T) {
 			if err := json.Unmarshal(status.Data, &raw); err != nil {
 				t.Fatalf("decode PEER_STATUS: %v", err)
 			}
-			if len(raw.Slots) > 0 && raw.Slots[0].Stats != nil {
-				if len(raw.Limits) == 0 {
-					t.Fatal("PEER_STATUS carries a stats block and no limits object beside it")
-				}
-				for _, key := range contractb.PublishedLimitKeys {
-					if _, leaked := raw.Slots[0].Stats[key]; leaked {
-						t.Fatalf("the relay wrote %q INSIDE a peer's stats block; §6.3.1 is "+
-							"peer-authored end to end", key)
-					}
-				}
-				return
+			if len(raw.Slots) == 0 || raw.Slots[0].Stats == nil {
+				continue
 			}
+			if len(raw.Limits) == 0 {
+				t.Fatal("PEER_STATUS carries a stats block and no limits object beside it")
+			}
+			for _, key := range contractb.PublishedLimitKeys {
+				if _, leaked := raw.Slots[0].Stats[key]; leaked {
+					t.Fatalf("the relay wrote %q INSIDE a peer's stats block; §6.3.1 is "+
+						"peer-authored end to end", key)
+				}
+			}
+			return
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("no PEER_STATUS carrying a stats block arrived")

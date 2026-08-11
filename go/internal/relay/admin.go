@@ -102,6 +102,17 @@ type AdminReport struct {
 	// comes back, so every journal entry that names it still gets its permanent
 	// SLOT_VACANT, which is what lets an orphaned entry re-route at all.
 	AddressRetiredForever bool `json:"addressRetiredForever,omitempty"`
+	// HolesAfter is every position the map would hold with nobody in it once
+	// this act applied, in structural order (added for B29's slot-space policy).
+	// It is the list the NEXT newcomer is filled from, before any axis grows, so
+	// it is the operator's picture of what releasing this slot actually offers
+	// the map: not an empty space kept for a departed peer, but the next
+	// stranger's position.
+	HolesAfter []contractb.Position `json:"holesAfter"`
+	// MaxSlotEverIssued is the address counter that never decreases, reported
+	// beside the act because release is the one act that adds to the gap between
+	// it and slotCount.
+	MaxSlotEverIssued int `json:"maxSlotEverIssued,omitempty"`
 	// NewPeerID is handover's.
 	NewPeerID string `json:"newPeerId,omitempty"`
 	// EvictedUntilMs and EvictedFor are eviction's. A zero EvictedUntilMs with
@@ -354,6 +365,80 @@ func adminError(w http.ResponseWriter, status int, msg string) {
 	adminJSON(w, status, map[string]string{"error": msg})
 }
 
+// ---------------------------------------------------------- the slot-space policy
+
+// slotSpacePolicy is DQ3's question answered in the operator's own words:
+// WHAT DO YOU DO WITH A POSITION THAT WILL NEVER BE FILLED AGAIN
+// (m5_considerations.md DQ3; contract-b-m4.md §7.5, §22 B29).
+//
+// It is written ONCE and rendered by both doors — the console's printed report
+// and the admin path's JSON — because an operator who read one of them and
+// acted through the other must not have been told two different things. The
+// sentences are the quotable form: the participant documentation WP7 owes
+// quotes them rather than paraphrasing, so the map's rule and the support
+// answer cannot drift apart.
+//
+// The decision the operator is actually making has two arms and the report has
+// to state both, because doing nothing is a choice here rather than a delay:
+//
+//   - LEAVE IT. The reservation never expires (§7.2 rule 1). The position stays
+//     held for that peerId for as long as this map exists, no newcomer can have
+//     it, and a peer that returns after two weeks lands exactly where it was
+//     with reason:"reclaimed". That is the right answer for a peer that MIGHT
+//     come back, and it costs the map one bypassed position that both axes
+//     route around.
+//   - RELEASE IT. The POSITION becomes an ordinary hole that the next newcomer
+//     fills before any axis grows (B29). The ADDRESS is retired forever. That
+//     is the right answer for a peer that will not come back, and it is
+//     irreversible: the returning peer would be a new slot number at whatever
+//     position the map had left.
+func slotSpacePolicy(g *Grid, res Reservation) []string {
+	holes := len(g.Holes())
+	return []string{
+		fmt.Sprintf("the map stays %dx%d and position (%d,%d) becomes a HOLE that both axes route "+
+			"around (§8)", g.Width, g.Height, res.Col, res.Row),
+		fmt.Sprintf("that hole is where the NEXT newcomer goes: rule 6 fills the first hole in "+
+			"structural order before any axis grows, and under contract-b/4.0 a newcomer that "+
+			"asked to extend an axis instead is refused the extension while any hole exists "+
+			"(§7.2 rule 4, §22 B29). After this act the map offers %s",
+			plural(holes+1, "hole", "holes")),
+		fmt.Sprintf("slot %d is retired for good: maxSlotEverIssued (%d) never decreases, so every "+
+			"journaled destSlot %d answers SLOT_VACANT permanently — which is what lets an "+
+			"orphaned entry prove non-delivery and re-route (§6.8)",
+			res.Slot, g.MaxSlotEverIssued, res.Slot),
+		fmt.Sprintf("IF YOU DO NOTHING INSTEAD, the reservation never expires: position (%d,%d) "+
+			"stays held for %s for as long as this map exists, no newcomer can have it, and a "+
+			"return is an ordinary reason=\"reclaimed\" at the same slot and the same position. "+
+			"Release is for a peer that will NOT come back, and it cannot be undone",
+			res.Col, res.Row, res.PeerID),
+		res.PeerID + " keeps its journal, its genome cache and its logs; a release never moves a journal",
+	}
+}
+
+// plural writes a count an operator reads at three in the morning.
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
+// holesAfterRelease is the hole list the map would hold once slot n is gone. It
+// is computed without mutating anything, because a consequence report that
+// changed the map to describe it would be the one thing B28's first call must
+// never do.
+func holesAfterRelease(g *Grid, going Reservation) []contractb.Position {
+	out := []contractb.Position{}
+	for row := 0; row < g.Height; row++ {
+		for col := 0; col < g.Width; col++ {
+			if res, ok := g.At(col, row); !ok || res.Slot == going.Slot {
+				out = append(out, contractb.Position{Col: col, Row: row})
+			}
+		}
+	}
+	return out
+}
+
 // ---------------------------------------------------------------- consequences
 
 // consequence builds the pre-act report for one act. It is the map's half of
@@ -378,17 +463,13 @@ func (s *Server) consequence(act string, req adminRequest) (AdminReport, error) 
 			Act: act, Slot: res.Slot, PeerID: res.PeerID, Position: &pos,
 			BecomesHole:              []contractb.Position{pos},
 			AddressRetiredForever:    true,
+			HolesAfter:               holesAfterRelease(s.grid, res),
+			MaxSlotEverIssued:        s.grid.MaxSlotEverIssued,
 			LanesChanged:             s.laneChangesLocked(res),
 			HeldEntriesAddressedHere: fmt.Sprintf(heldEntriesSentence, res.Slot),
 			RingStateHash:            hash,
-			Notes: []string{
-				fmt.Sprintf("the map stays %dx%d and position (%d,%d) becomes a hole both axes route around",
-					s.grid.Width, s.grid.Height, res.Col, res.Row),
-				fmt.Sprintf("slot %d is retired for good: maxSlotEverIssued (%d) never decreases, so every "+
-					"journaled destSlot %d answers SLOT_VACANT permanently",
-					res.Slot, s.grid.MaxSlotEverIssued, res.Slot),
-				res.PeerID + " keeps its journal, its genome cache and its logs; a release never moves a journal",
-			},
+			// DQ3's answer, in the words both doors use (§22, B29).
+			Notes: slotSpacePolicy(s.grid, res),
 		}
 		s.fillDarkLocked(&rep, res.PeerID)
 		return rep, nil
@@ -414,8 +495,12 @@ func (s *Server) consequence(act string, req adminRequest) (AdminReport, error) 
 		rep := AdminReport{
 			Act: act, Slot: res.Slot, PeerID: res.PeerID, NewPeerID: newPeer, Position: &pos,
 			// A handover changes no shape and moves no lane: the reservation is
-			// rebound, and the position it names does not move.
+			// rebound, and the position it names does not move. The hole list is
+			// reported unchanged for the same reason — a handover offers the map
+			// nothing new, which is exactly what tells it apart from a release.
 			LanesChanged:             []LaneChange{},
+			HolesAfter:               s.grid.Holes(),
+			MaxSlotEverIssued:        s.grid.MaxSlotEverIssued,
 			HeldEntriesAddressedHere: fmt.Sprintf(heldEntriesSentence, res.Slot),
 			RingStateHash:            hash,
 			Notes: []string{
@@ -443,7 +528,12 @@ func (s *Server) consequence(act string, req adminRequest) (AdminReport, error) 
 		}
 		rep := AdminReport{
 			Act: act, PeerID: peerID, Lifts: lift,
-			LanesChanged:             []LaneChange{},
+			LanesChanged: []LaneChange{},
+			// An eviction RELEASES NOTHING, so the hole list is the map's current
+			// one and the address counter does not move. Reporting them anyway is
+			// what makes the three acts comparable at a glance.
+			HolesAfter:               s.grid.Holes(),
+			MaxSlotEverIssued:        s.grid.MaxSlotEverIssued,
 			HeldEntriesAddressedHere: heldEntriesSentenceNoSlot,
 			RingStateHash:            hash,
 		}

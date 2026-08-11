@@ -70,8 +70,16 @@ type Options struct {
 	ArchiveQueue int
 	// StatusCoalesce is the minimum spacing between PEER_STATUS broadcasts and
 	// between grants to one peer (§7.2). The last frame of a burst is always
-	// sent.
+	// sent. Under contract-b/4.0 it is the FLOOR of a window that widens
+	// (amended — §22, B29).
 	StatusCoalesce time.Duration
+	// StatusCoalesceMax is the ceiling that window widens toward under sustained
+	// churn (added — §22, B29). It bounds the broadcast RATE, which is what a
+	// public map's slotCount stats blocks per frame make expensive.
+	StatusCoalesceMax time.Duration
+	// StatusChurnBurstThreshold is how many REGISTRY changes inside one window
+	// make the relay widen it (added — §22, B29).
+	StatusChurnBurstThreshold int
 	// StatsBroadcast republishes PEER_STATUS on a timer, because stats change
 	// without the registry changing (§6.5).
 	StatsBroadcast time.Duration
@@ -92,8 +100,13 @@ type Server struct {
 	peerTimeout     time.Duration
 	archiveQueue    int
 	statusCoalesce  time.Duration
-	statsBroadcast  time.Duration
-	forwardRetain   time.Duration
+	// B29's two new tunables. statusCoalesce is the floor of the window these
+	// two shape; the window itself lives in the publish loop, which is the one
+	// goroutine allowed to touch it.
+	statusCoalesceMax time.Duration
+	churnThreshold    int
+	statsBroadcast    time.Duration
+	forwardRetain     time.Duration
 
 	// B24's two socket counters. They are outside s.mu deliberately: an upgrade
 	// must not queue behind a PEER_STATUS broadcast, and a connection storm is
@@ -128,10 +141,30 @@ type Server struct {
 	// what the relay knows about a peer id, live or not. PEER_STATUS keeps
 	// reporting a reserved slot after its peer goes away (§6.5).
 	meta map[string]*peerMeta
-	// dirty is set by any registry change and drained by the publisher, which is
-	// what bounds the storm six peers, two axes and a flapping link can make.
-	dirty    bool
-	draining bool
+	// pending counts everything the next broadcast would carry that the last one
+	// did not — a registry change OR a stats block. It is drained by the
+	// publisher, and it is what guarantees B29's "the last frame of a burst is
+	// always sent": nothing but a publish that actually happened clears it.
+	pending int
+	// churn counts the REGISTRY changes inside the current window, which is the
+	// narrower thing B29 widens the window on. A stats block bumps pending and
+	// not this: it changes what the next frame says, not what the map is, and
+	// widening the window on a quiet map's heartbeat would be a bound that fired
+	// when nothing was happening.
+	churn int
+	// broadcasts counts PEER_STATUS broadcast rounds for the life of the
+	// process, for the operator log line and for the churn harness's measured
+	// rate against B29's arithmetic.
+	broadcasts int64
+	// coalesceWindow is the width the publisher is currently waiting, published
+	// here so an operator and a test can read the window a storm produced.
+	coalesceWindow time.Duration
+	// lastPublishAt is when the last broadcast round went out, from WHICHEVER
+	// path made it — the coalescing window or an admin act's publishNow. §14 B4
+	// makes the stats timer a bound on how far apart broadcasts may DRIFT, so it
+	// has to see every publish, not only the ones its own loop made.
+	lastPublishAt time.Time
+	draining      bool
 	// forwarded is the §5.2 record: the migrationIds this PROCESS has attempted
 	// to write to some peer's connection, with the time of the first attempt.
 	forwarded map[string]time.Time
@@ -148,8 +181,13 @@ type peerMeta struct {
 	lastSeenMs   int64
 	darkSinceMs  int64
 	lastRefusal  string
-	stats        *contractb.PeerStats
-	statsAsOfMs  int64
+	// borderEdges is kept for ONE reason: B29's second rule names it among the
+	// fields whose change forbids the suppression of a broadcast. Nothing
+	// publishes it — §6.5's SlotInfo carries exportEdges and not this — so it is
+	// stored to be compared and for nothing else.
+	borderEdges []string
+	stats       *contractb.PeerStats
+	statsAsOfMs int64
 	// claims is maxClaimsPerMinute's counter, kept HERE rather than on the
 	// connection because §3.3 scopes it per peer: this struct outlives a
 	// reconnect and a per-connection counter would hand a storming peer a fresh
@@ -194,6 +232,23 @@ func New(opts Options) (*Server, error) {
 	if opts.StatusCoalesce <= 0 {
 		opts.StatusCoalesce = contractb.StatusCoalesce
 	}
+	if opts.StatusCoalesceMax <= 0 {
+		opts.StatusCoalesceMax = contractb.StatusCoalesceMax
+	}
+	if opts.StatusCoalesceMax < opts.StatusCoalesce {
+		// A ceiling under the floor is a configuration that cannot be obeyed. It
+		// resolves to "no widening" rather than to a startup failure, because the
+		// floor alone is exactly the pre-B29 behaviour and a relay that refused to
+		// start over a coalescing knob would take a live map down for it.
+		opts.Logger.Warn("relay: --status-coalesce-max-ms is below --status-coalesce-ms; the "+
+			"window will not widen",
+			"statusCoalesceMs", opts.StatusCoalesce, "statusCoalesceMaxMs", opts.StatusCoalesceMax,
+			"remedy", "the ceiling must be at or above the floor (contract-b-m4.md §12, §22 B29)")
+		opts.StatusCoalesceMax = opts.StatusCoalesce
+	}
+	if opts.StatusChurnBurstThreshold <= 0 {
+		opts.StatusChurnBurstThreshold = contractb.StatusChurnBurstThreshold
+	}
 	if opts.StatsBroadcast <= 0 {
 		opts.StatsBroadcast = contractb.StatsBroadcastInterval
 	}
@@ -219,30 +274,33 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 	s := &Server{
-		log:             opts.Logger,
-		creds:           opts.Credentials,
-		insecureNoToken: opts.InsecureNoToken,
-		minContract:     opts.MinContractVersion,
-		limits:          opts.Limits,
-		advertiseURL:    opts.AdvertiseURL,
-		pingInterval:    opts.PingInterval,
-		peerTimeout:     opts.PeerTimeout,
-		archiveQueue:    opts.ArchiveQueue,
-		statusCoalesce:  opts.StatusCoalesce,
-		statsBroadcast:  opts.StatsBroadcast,
-		forwardRetain:   opts.ForwardRecordRetention,
-		sessionID:       wire.NewUUID(),
-		stop:            make(chan struct{}),
-		grid:            grid,
-		peers:           map[string]*peer{},
-		subscribers:     map[string]*peer{},
-		meta:            map[string]*peerMeta{},
-		forwarded:       map[string]time.Time{},
-		inherited:       map[string]bool{},
-		perAddress:      newSlotCounter(),
-		perPeer:         newSlotCounter(),
-		evictions:       map[string]eviction{},
-		adminTokens:     map[string]*adminPending{},
+		log:               opts.Logger,
+		creds:             opts.Credentials,
+		insecureNoToken:   opts.InsecureNoToken,
+		minContract:       opts.MinContractVersion,
+		limits:            opts.Limits,
+		advertiseURL:      opts.AdvertiseURL,
+		pingInterval:      opts.PingInterval,
+		peerTimeout:       opts.PeerTimeout,
+		archiveQueue:      opts.ArchiveQueue,
+		statusCoalesce:    opts.StatusCoalesce,
+		statusCoalesceMax: opts.StatusCoalesceMax,
+		churnThreshold:    opts.StatusChurnBurstThreshold,
+		coalesceWindow:    opts.StatusCoalesce,
+		statsBroadcast:    opts.StatsBroadcast,
+		forwardRetain:     opts.ForwardRecordRetention,
+		sessionID:         wire.NewUUID(),
+		stop:              make(chan struct{}),
+		grid:              grid,
+		peers:             map[string]*peer{},
+		subscribers:       map[string]*peer{},
+		meta:              map[string]*peerMeta{},
+		forwarded:         map[string]time.Time{},
+		inherited:         map[string]bool{},
+		perAddress:        newSlotCounter(),
+		perPeer:           newSlotCounter(),
+		evictions:         map[string]eviction{},
+		adminTokens:       map[string]*adminPending{},
 	}
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); s.publishLoop() }()
@@ -302,7 +360,7 @@ func (s *Server) ReleaseSlot(slot int) error {
 	s.log.Warn("relay: released a slot by operator command",
 		"slot", res.Slot, "position", res.Position(), "peer", res.PeerID,
 		"slotCount", s.grid.Size(), "positionIsNowAHole", res.Position())
-	s.dirty = true
+	s.markChurnLocked()
 	return nil
 }
 
@@ -343,7 +401,7 @@ func (s *Server) HandoverSlot(slot int, newPeerID string) (Reservation, Reservat
 	s.inherited[newPeerID] = true
 	s.log.Warn("relay: handed a slot to a new peer identity by operator command",
 		"slot", now.Slot, "position", now.Position(), "from", old.PeerID, "to", newPeerID)
-	s.dirty = true
+	s.markChurnLocked()
 	return old, now, nil
 }
 
@@ -374,6 +432,11 @@ func (s *Server) ReserveSlot(peerID string, at *contractb.Position) (Reservation
 		s.grid.Release(res.Slot)
 		return Reservation{}, false, err
 	}
+	// A reservation is a registry change like any other. At startup, which is
+	// where this command lives, nothing is connected and the mark costs nothing;
+	// it is here so that the counter means "the registry moved" rather than "the
+	// registry moved through one of the paths somebody remembered to annotate".
+	s.markChurnLocked()
 	return res, true, nil
 }
 
@@ -638,7 +701,7 @@ func (s *Server) shedUpgrade(w http.ResponseWriter, r *http.Request, peerID, bre
 			// map sees WHICH limit shed this peer rather than a slot that merely
 			// went quiet. Only a reserved slot has anywhere to write it.
 			s.metaLocked(peerID).lastRefusal = capacityRefusal(breach)
-			s.dirty = true
+			s.markChurnLocked()
 		}
 		s.mu.Unlock()
 	}
@@ -709,7 +772,7 @@ func (s *Server) shedForCapacity(p *peer, breach string) {
 	s.mu.Lock()
 	if p.role == contractb.RolePeer {
 		s.metaLocked(p.id).lastRefusal = capacityRefusal(breach)
-		s.dirty = true
+		s.markChurnLocked()
 	}
 	s.mu.Unlock()
 	s.log.Error("relay: shedding a connection over a published capacity limit",
@@ -769,7 +832,8 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, 
 	//
 	// AND THE PEER WHOSE ID WAS BORROWED OBSERVES NOTHING AT ALL: no close, no
 	// 4006, no PEER_STATUS change, no lastRefusal on its slot. That is why this
-	// check sits ahead of every line that touches s.meta, s.peers or s.dirty —
+	// check sits ahead of every line that touches s.meta, s.peers or the publish
+	// counters —
 	// the refusal must be unable to reach the map, not merely decline to publish
 	// to it. Under M4's shared token this exact sequence took a peer off the map
 	// in one frame (§3.1, §6.1; m5_considerations.md, Risk 1; D21).
@@ -823,7 +887,7 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, 
 			if p.role == contractb.RolePeer {
 				s.metaLocked(p.id).lastRefusal = contractb.RefusalContractVersion + ": " +
 					hs.ProtocolVersion + " < " + s.minContract
-				s.dirty = true
+				s.markChurnLocked()
 			}
 			s.mu.Unlock()
 			s.log.Error("relay: refusing a peer below this relay's minimum contract version",
@@ -853,7 +917,7 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, 
 			mapVersion != hs.GameVersion {
 			s.metaLocked(p.id).lastRefusal = contractb.RefusalGameVersion + ": " +
 				hs.GameVersion + " != the map's " + mapVersion
-			s.dirty = true
+			s.markChurnLocked()
 			s.mu.Unlock()
 			s.log.Error("relay: refusing a peer on gameVersion grounds",
 				"peer", p.id, "peerGameVersion", hs.GameVersion, "mapGameVersion", mapVersion)
@@ -948,7 +1012,7 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, 
 			ack.AssignedPosition = &pos
 		}
 	}
-	s.dirty = true
+	s.markChurnLocked()
 	s.mu.Unlock()
 
 	s.send(p, contractb.TypeHandshakeAck, ack)
@@ -982,6 +1046,22 @@ func (s *Server) mapVersionLocked(self string) string {
 	}
 	return ""
 }
+
+// markChurnLocked records a REGISTRY change: a placement, a release, a
+// handover, a peer arriving or going dark, an eviction, or a refusal written to
+// a slot. It bumps both counters, because a registry change is both something
+// the next broadcast must carry and something B29 widens the window on.
+func (s *Server) markChurnLocked() {
+	s.churn++
+	s.pending++
+}
+
+// markStatsLocked records a change to what the next broadcast SAYS without a
+// change to what the map IS — a stats block off a PING, and nothing else. It
+// bumps pending so the frame goes out, and deliberately NOT churn: the window
+// must not widen because a healthy map is breathing (§12
+// statusChurnBurstThreshold, §14 B4).
+func (s *Server) markStatsLocked() { s.pending++ }
 
 func (s *Server) metaLocked(peerID string) *peerMeta {
 	m, ok := s.meta[peerID]
@@ -1056,7 +1136,7 @@ func (s *Server) dispatch(p *peer, frame []byte) bool {
 				m := s.metaLocked(p.id)
 				m.stats = ping.Stats
 				m.statsAsOfMs = time.Now().UnixMilli()
-				s.dirty = true
+				s.markStatsLocked()
 				s.mu.Unlock()
 			}
 			s.send(p, contractb.TypePong, contractb.Pong{Nonce: ping.Nonce})
@@ -1111,7 +1191,7 @@ func (s *Server) onSectorClaim(p *peer, env wire.Envelope) bool {
 		grant := contractb.SectorGrant{
 			Granted: false, Map: s.grid.Shape(), SlotCount: s.grid.Size(),
 			Reason: contractb.GrantRateLimited}
-		s.dirty = true
+		s.markChurnLocked()
 		s.mu.Unlock()
 		s.log.Warn("relay: refusing a claim over maxClaimsPerMinute; the connection stays up",
 			"peer", p.id, "breach", breach,
@@ -1131,7 +1211,7 @@ func (s *Server) onSectorClaim(p *peer, env wire.Envelope) bool {
 		grant := contractb.SectorGrant{
 			Granted: false, Map: s.grid.Shape(), SlotCount: s.grid.Size(),
 			Reason: contractb.GrantVersionIncompatible}
-		s.dirty = true
+		s.markChurnLocked()
 		s.mu.Unlock()
 		s.log.Error("relay: refusing a claim on gameVersion grounds",
 			"peer", p.id, "peerGameVersion", claim.GameVersion, "mapGameVersion", mapVersion)
@@ -1139,15 +1219,24 @@ func (s *Server) onSectorClaim(p *peer, env wire.Envelope) bool {
 		return true
 	}
 
+	// B29's second rule needs the shape BEFORE this claim is applied, so it is
+	// taken before the first field moves.
+	before := s.claimShapeLocked(p.id)
+
 	m := s.metaLocked(p.id)
 	m.simSize = claim.SimulationSize
 	m.modConnected = claim.ModConnected
 	m.exportEdges = append([]string(nil), claim.ExportEdges...)
+	m.borderEdges = append([]string(nil), claim.BorderEdges...)
 	m.lastRefusal = ""
 	if claim.GameVersion != "" {
 		m.gameVersion = claim.GameVersion
 	}
 	if claim.Stats != nil {
+		// STATS ARE NOT PART OF THE SHAPE. B29's second rule lists seven fields
+		// and none of them is a stat: a claim whose only news is a population
+		// count rides the next statsBroadcastIntervalMs timer, which was going to
+		// send it anyway (§6.5, §14 B4).
 		m.stats = claim.Stats
 		m.statsAsOfMs = time.Now().UnixMilli()
 	}
@@ -1170,18 +1259,60 @@ func (s *Server) onSectorClaim(p *peer, env wire.Envelope) bool {
 	}
 	p.claimed = true
 	grant := s.grantForLocked(res, reason)
-	s.dirty = true
+	// ------------------------------------------- B29's second broadcast bound
+	//
+	// A REPEAT CLAIM THAT CHANGES NOTHING STRUCTURAL BROADCASTS NOTHING. A claim
+	// answered reason:"updated" whose slot, position, exportEdges, borderEdges,
+	// modConnected, gameVersion and simulationSize are all unchanged MUST NOT
+	// raise the epoch or trigger a broadcast. The relay still answers the claim
+	// with its SECTOR_GRANT below, because THE CLAIMANT IS OWED AN ANSWER; what
+	// it stops doing is telling everybody else.
+	//
+	// This is the epoch rate's measured cause, not a hypothetical: slot 6 of the
+	// living deployment issued 64 placement claims in one day against two or
+	// three from each local slot, every one a re-claim as its measured time scale
+	// wandered — 64 epochs, on a six-slot map, from one peer, for nothing
+	// (m5_considerations.md, DQ3). Every one of those is a frame carrying
+	// slotCount stats blocks, so the term this suppresses grows with the map on
+	// both sides.
+	after := s.claimShapeLocked(p.id)
+	quiet := reason == contractb.GrantUpdated && before.same(after)
+	if !quiet {
+		s.markChurnLocked()
+	}
 	s.mu.Unlock()
 
 	s.log.Info("relay: placement claim", "peer", p.id, "slot", res.Slot,
 		"position", res.Position(), "reason", reason,
 		"simulationSize", claim.SimulationSize, "modConnected", claim.ModConnected,
-		"exportEdges", claim.ExportEdges)
+		"exportEdges", claim.ExportEdges, "broadcast", !quiet)
 	// §7.2 ordering step 2: answer the claim. Steps 3 and 4 — the PEER_STATUS
 	// broadcast and the fresh grants to every peer whose effective neighbour
 	// changed — belong to the publisher, which coalesces them.
 	s.answerClaim(p, grant)
 	return true
+}
+
+// claimShapeLocked is B29's comparison subject: everything about this peer that
+// a PEER_STATUS broadcast would carry differently if it changed. A peer with no
+// reservation and no meta yields the zero shape, which differs from every real
+// one, so a first claim is never mistaken for a repeat.
+func (s *Server) claimShapeLocked(peerID string) claimShape {
+	shape := claimShape{}
+	if res, ok := s.grid.ResOfPeer(peerID); ok {
+		shape.slot, shape.col, shape.row = res.Slot, res.Col, res.Row
+	}
+	m, ok := s.meta[peerID]
+	if !ok {
+		return shape
+	}
+	shape.exportEdges = edgeKey(m.exportEdges)
+	shape.borderEdges = edgeKey(m.borderEdges)
+	shape.modConnected = m.modConnected
+	shape.gameVersion = m.gameVersion
+	shape.simSize = m.simSize
+	shape.refusal = m.lastRefusal
+	return shape
 }
 
 // assignLocked implements §7.2's arbitration rules 1 to 6, in order.
@@ -1336,35 +1467,71 @@ func (s *Server) answerClaim(p *peer, grant contractb.SectorGrant) {
 
 // ---------------------------------------------------------------- publishing
 
-// publishLoop is §7.2's "no storm" rule. Six peers, two axes and a flapping
-// link can generate more registry changes than anybody can read, so at most one
-// PEER_STATUS broadcast per statusCoalesceMs and at most one SECTOR_GRANT per
-// peer in that window. Coalescing may drop intermediate states; it MUST NOT
-// drop the last one, because every one of these messages is full state and the
-// last one is the truth — which the dirty flag guarantees, since it stays set
-// until a publish actually happens.
+// publishLoop is §7.2's "no storm" rule, and under contract-b/4.0 it is also
+// B29's broadcast bound.
+//
+// THE OLD RULE, UNCHANGED. At most one PEER_STATUS broadcast per window and at
+// most one SECTOR_GRANT per peer in it. Coalescing may drop intermediate
+// states; it MUST NOT drop the last one, because every one of these messages is
+// full state and the last one is the truth. The pending counter guarantees it:
+// it survives every widening and every timer reset and is cleared only by a
+// publish that happened.
+//
+// THE NEW RULE. The window is no longer a fixed ticker. It starts at
+// statusCoalesceMs, DOUBLES toward statusCoalesceMaxMs after any window that
+// saw more than statusChurnBurstThreshold registry changes, and narrows one
+// step after a quieter one. That converts a bound on SPACING into a bound on
+// RATE, which is the thing that matters once a broadcast costs slotCount stats
+// blocks (§22, B29).
+//
+// THE STATS TIMER IS A FLOOR ON FRESHNESS, NOT A SECOND SOURCE OF FRAMES.
+// §14 B4 states the interaction exactly: "coalescing bounds how CLOSELY two
+// broadcasts may follow each other, and this timer bounds how FAR APART they
+// may drift." So it publishes only when nothing has been published for
+// statsBroadcastIntervalMs — which leaves every broadcast this relay makes
+// emitted from one place, spaced at least one window apart, and makes B29's
+// arithmetic (60000/window a minute) a bound a test can assert rather than an
+// estimate.
 func (s *Server) publishLoop() {
-	coalesce := time.NewTicker(s.statusCoalesce)
+	window := newChurnWindow(s.statusCoalesce, s.statusCoalesceMax, s.churnThreshold)
+	coalesce := time.NewTimer(window.current())
 	defer coalesce.Stop()
 	stats := time.NewTicker(s.statsBroadcast)
 	defer stats.Stop()
 	sweep := time.NewTicker(time.Minute)
 	defer sweep.Stop()
+	s.mu.Lock()
+	s.lastPublishAt = time.Now()
+	s.mu.Unlock()
 	for {
 		select {
 		case <-s.stop:
 			return
 		case <-coalesce.C:
 			s.mu.Lock()
-			dirty := s.dirty
-			s.dirty = false
+			pending, churn := s.pending, s.churn
+			s.pending, s.churn = 0, 0
 			s.mu.Unlock()
-			if dirty {
+			if pending > 0 {
 				s.publish()
 			}
+			next := window.observe(churn)
+			s.mu.Lock()
+			s.coalesceWindow = next
+			s.mu.Unlock()
+			coalesce.Reset(next)
 		case <-stats.C:
 			// §6.5: also sent on a timer, because stats change without the
-			// registry changing.
+			// registry changing — and §14 B4's drift bound, so a map that has
+			// just been published is not published again for it. The check reads
+			// the SHARED timestamp rather than a local one, so an admin act's
+			// immediate publish counts too.
+			s.mu.Lock()
+			since := time.Since(s.lastPublishAt)
+			s.mu.Unlock()
+			if since < s.statsBroadcast {
+				continue
+			}
 			s.publish()
 		case <-sweep.C:
 			s.sweepForwardRecord()
@@ -1375,12 +1542,47 @@ func (s *Server) publishLoop() {
 func (s *Server) publish() {
 	s.broadcastPeerStatus()
 	s.sendGrants()
+	s.mu.Lock()
+	s.lastPublishAt = time.Now()
+	s.mu.Unlock()
 }
 
-func (s *Server) markDirty() {
+// BroadcastCount is how many PEER_STATUS broadcast ROUNDS this process has made
+// — one per publish, not one per frame. It is what an operator reads against
+// B29's arithmetic and what the churn harness measures a rate from.
+func (s *Server) BroadcastCount() int64 {
 	s.mu.Lock()
-	s.dirty = true
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	return s.broadcasts
+}
+
+// CoalesceWindow is the width the publisher is currently waiting. On a quiet
+// map it is statusCoalesceMs; under sustained churn it climbs toward
+// statusCoalesceMaxMs, and reading it is how an operator tells a busy map from
+// a stalled publisher.
+func (s *Server) CoalesceWindow() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.coalesceWindow
+}
+
+// MaxSlotEverIssued is the monotone address counter of §7.2 and D8. It NEVER
+// decreases — a released number is retired forever, because SLOT_VACANT is a
+// permanent answer and therefore a valid proof of non-delivery (§6.8), and
+// reissuing an address would silently convert that proof into a lie.
+func (s *Server) MaxSlotEverIssued() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.grid.MaxSlotEverIssued
+}
+
+// Holes is every position inside the rectangle that no slot names — the
+// positions B29 fills before any axis grows. An operator deciding whether to
+// release a slot is deciding whether to add one to this list.
+func (s *Server) Holes() []contractb.Position {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.grid.Holes()
 }
 
 // sendGrants pushes a SECTOR_GRANT to every live slot holder whose grant body
@@ -1431,6 +1633,10 @@ func (s *Server) sendGrants() {
 
 func (s *Server) broadcastPeerStatus() {
 	s.mu.Lock()
+	// One round, counted once. B29's bound is on ROUNDS: the per-client frame
+	// count is len(peers)+len(subscribers) and grows with the map by design,
+	// which is exactly why the rate of rounds had to become the bounded thing.
+	s.broadcasts++
 	slots := make([]contractb.SlotInfo, 0, s.grid.Size())
 	for _, res := range s.grid.Slots {
 		m := s.metaLocked(res.PeerID)
@@ -1840,7 +2046,7 @@ func (s *Server) drop(p *peer) {
 		}
 	}
 	slot := s.grid.SlotOfPeer(p.id)
-	s.dirty = true
+	s.markChurnLocked()
 	s.mu.Unlock()
 	s.log.Info("relay: client gone", "peer", p.id, "role", p.role, "slot", slot,
 		"reservationKept", slot > 0)

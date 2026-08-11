@@ -260,7 +260,26 @@ const (
 	RelayBackoffMax           = 30 * time.Second
 	StableSession             = 5 * time.Second
 	AuthFailuresBeforeCeiling = 5
-	StatusCoalesce            = 250 * time.Millisecond
+	// StatusCoalesce is `statusCoalesceMs` (§12): the minimum spacing between
+	// PEER_STATUS broadcasts and between grants to one peer. Under
+	// contract-b/4.0 it is no longer a fixed spacing but the FLOOR OF A WINDOW
+	// THAT WIDENS (amended — §22, B29).
+	StatusCoalesce = 250 * time.Millisecond
+	// StatusCoalesceMax is `statusCoalesceMaxMs` (§12, new in contract-b/4.0 —
+	// §22, B29): the ceiling of the coalescing window under sustained churn.
+	//
+	// IT BOUNDS THE BROADCAST RATE AND NOT ITS SPACING, which is the distinction
+	// B29 exists for: one broadcast costs `slotCount` stats blocks, so both terms
+	// of the cost grow with the map and a fixed floor stops being a bound. The
+	// arithmetic a reader can check is 60000/statusCoalesceMs broadcasts a minute
+	// at the floor and 60000/statusCoalesceMaxMs under a storm.
+	StatusCoalesceMax = 2000 * time.Millisecond
+	// StatusChurnBurstThreshold is `statusChurnBurstThreshold` (§12, new in
+	// contract-b/4.0 — §22, B29): the number of REGISTRY changes inside one
+	// window that make the relay widen it. Sized above what a single peer's join
+	// or departure produces, so an ordinary event never widens the window and a
+	// churn storm always does.
+	StatusChurnBurstThreshold = 8
 	StatsInterval             = 5 * time.Second
 	StatsStale                = 30 * time.Second
 	ForwardRetry              = 5 * time.Second

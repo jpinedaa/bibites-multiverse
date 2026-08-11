@@ -248,6 +248,42 @@ func (g *Grid) Holes() []contractb.Position {
 	return out
 }
 
+// firstHole is rule 6's target: the first hole in STRUCTURAL ORDER, row
+// ascending then col ascending (§7.2 rule 6, §6.5).
+//
+// It exists rather than Holes()[0] because B29 put this search on the hot path
+// twice. Rule 6 always ran it; rule 4 now falls through to rule 6 whenever a
+// preference would extend an axis while a hole exists, so a public map runs it
+// on essentially every claim. Building the whole hole list to use one element
+// of it costs an allocation and the whole rectangle on a map whose rectangle is
+// the thing that grows.
+func (g *Grid) firstHole() (contractb.Position, bool) {
+	if !g.HasHole() {
+		return contractb.Position{}, false
+	}
+	for row := 0; row < g.Height; row++ {
+		for col := 0; col < g.Width; col++ {
+			if _, ok := g.At(col, row); !ok {
+				return contractb.Position{Col: col, Row: row}, true
+			}
+		}
+	}
+	return contractb.Position{}, false
+}
+
+// HasHole answers B29's question — is there anywhere inside the rectangle for a
+// newcomer to go — without building the list. Rule 4 asks it on every claim
+// carrying a preferredPosition, so it must not cost a slice.
+//
+// The arithmetic is exact under the map's own two invariants: every reservation
+// sits INSIDE the rectangle (reserve and splice grow it to fit) and NO TWO
+// RESERVATIONS SHARE A POSITION. Those are the invariants the churn harness
+// sweeps for after every event, which is what makes this line safe to write
+// rather than a shortcut taken on trust.
+func (g *Grid) HasHole() bool {
+	return g.Width*g.Height > len(g.Slots)
+}
+
 // Preference is the advisory part of a SECTOR_CLAIM (§6.3). Every field of it
 // may be ignored, and a claim never fails for a lost race.
 type Preference struct {
@@ -276,6 +312,13 @@ func (g *Grid) Place(peerID string, pref Preference) Reservation {
 		}
 	}
 	// Rule 5: insertAfterSlot splices a whole column or a whole row.
+	//
+	// B29 NARROWED RULE 4 AND LEFT THIS ONE ALONE, and that is read from the
+	// amendment rather than assumed: its table says "Rule 6 always filled a hole
+	// before extending an axis. Rule 4 now does too", and names no third route.
+	// A splice is not "extend the map because a newcomer arrived" — it is an
+	// operator naming WHERE, between two live slots, on a stated axis, which is
+	// the one placement act that cannot be expressed as filling a hole.
 	if pref.InsertAfterSlot > 0 {
 		if anchor, ok := g.ResOfSlot(pref.InsertAfterSlot); ok {
 			axis := pref.InsertAxis
@@ -285,10 +328,15 @@ func (g *Grid) Place(peerID string, pref Preference) Reservation {
 			return g.splice(peerID, anchor, axis)
 		}
 	}
-	// Rule 6: auto-place. The first hole in structural order, else grow the
-	// shorter axis. Six peers with no opinion land in a full 3x2 map, which is
+	// Rule 6: auto-place. The first hole in structural order, else GROW THE
+	// SHORTER AXIS. Six peers with no opinion land in a full 3x2 map, which is
 	// the shape the exit test needs and the smallest honest two-axis map.
-	for _, hole := range g.Holes() {
+	//
+	// The shorter axis, and B29 writes down the reason rather than leaving it as
+	// taste: THE CYCLE LENGTH ON EACH AXIS IS WHAT GENETIC MIXING DEPENDS ON, so
+	// a map stretched along one axis is a map whose other axis has nothing to
+	// route around (§2.1).
+	if hole, ok := g.firstHole(); ok {
 		return g.reserve(peerID, hole.Col, hole.Row)
 	}
 	switch {
@@ -307,6 +355,22 @@ func (g *Grid) Place(peerID string, pref Preference) Reservation {
 // placeAt implements rule 4's "usable" test. A RAGGED MAP IS NEVER LEGAL:
 // growth is always by a whole column or a whole row, and the rest of it is
 // holes.
+//
+// USABLE IS NARROWED UNDER contract-b/4.0 (§7.2 rule 4, amended — §22, B29):
+// the three GROWTH cases apply only while the rectangle has no hole. A
+// preferredPosition that would extend an axis while any hole exists is IGNORED
+// and falls through to rule 6, which fills the hole.
+//
+// Why the narrowing is not a special case for auto-placement. Rule 6 always
+// filled a hole before extending an axis; rule 4 did not, and on the rig that
+// was right — a preference there is an operator's layout. On a public map a
+// preference is an ordinary stranger's configuration file, and ONE NEWCOMER
+// THAT EXTENDS AN AXIS CREATES height (OR width) POSITIONS AND FILLS EXACTLY
+// ONE OF THEM. A map that extended on every join would grow a row of holes per
+// join and route-around would walk all of them.
+//
+// The hole case itself is unchanged and always usable, and so is the empty map:
+// a 0x0 rectangle has no hole to prefer.
 func (g *Grid) placeAt(peerID string, col, row int) (Reservation, bool) {
 	if col < 0 || row < 0 {
 		return Reservation{}, false
@@ -322,11 +386,17 @@ func (g *Grid) placeAt(peerID string, col, row int) (Reservation, bool) {
 			return Reservation{}, false
 		}
 	case col == g.Width && row < max(g.Height, 1):
+		if g.HasHole() {
+			return Reservation{}, false // B29: holes before growth.
+		}
 		g.Width++
 		if g.Height == 0 {
 			g.Height = 1
 		}
 	case row == g.Height && col < max(g.Width, 1):
+		if g.HasHole() {
+			return Reservation{}, false // B29: holes before growth.
+		}
 		g.Height++
 		if g.Width == 0 {
 			g.Width = 1

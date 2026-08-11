@@ -369,17 +369,16 @@ func TestEvictionReleasesNothingAndLiftingRestoresAdmission(t *testing.T) {
 	if _, evicted := a.srv.Evictions()["peer-loud"]; evicted {
 		t.Fatal("the eviction survived being lifted")
 	}
-	// And the peer is admitted again, back to its own slot.
+	// And the peer is admitted again, back to its own slot. The grant this test
+	// is about is the one that ANSWERS ITS CLAIM: a peer with a reservation also
+	// receives the publisher's republished grant, spelled reason:"updated", and
+	// which of the two lands first is the coalescing window's business.
 	back := a.dial(dialSpec{credentialPeer: "peer-loud", claimPeer: "peer-loud", sendHandshake: true})
 	back.wait(contractb.TypeHandshakeAck, 2*time.Second)
 	back.claim()
-	grant := back.wait(contractb.TypeSectorGrant, 2*time.Second)
-	var g contractb.SectorGrant
-	if err := json.Unmarshal(grant.Data, &g); err != nil {
-		t.Fatalf("decode grant: %v", err)
-	}
-	if !g.Granted || g.Slot != res.Slot || g.Reason != contractb.GrantReclaimed {
-		t.Fatalf("the returning peer got %+v, want its own slot back with reason reclaimed", g)
+	g := back.waitGrantReason(contractb.GrantReclaimed, 2*time.Second)
+	if !g.Granted || g.Slot != res.Slot {
+		t.Fatalf("the returning peer got %+v, want its own slot (%d) back", g, res.Slot)
 	}
 }
 
