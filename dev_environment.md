@@ -740,6 +740,17 @@ stale one would let two different game builds into one map. It also warns, witho
 when `libs/` no longer matches the game installed here — the check `deploy.sh` used to make on
 its behalf.
 
+**What that pin means changes at M5, and the rig's practice does not.** D22 (ratified
+2026-08-10) makes compatibility layered: the map's membership test is the **contract** version,
+and the game version is a **per-machine** matter answered by a published support matrix. So
+this pin stops being a rule about the map and becomes the far end's own matrix entry — one
+sidecar-and-mod build, stated against one game version. Keep running the rig the way it runs
+now, on one build across both computers, because that is what makes a two-machine deployment
+diagnosable; but a stale pin is a stale *bundle*, not a broken map rule. What would have to be
+answered before two game builds legitimately shared one map is the bb8 payload question D22
+names as its remaining work — whether a payload serialized by one game version restores safely
+into another.
+
 **The repo distributes the bundle.** `farend/dist/farend-bundle.zip` is tracked as of
 `8463b72`, so the second computer clones the private GitHub repo and takes the zip out of the
 checkout instead of receiving a hand-copied file. Only two things still travel by hand:

@@ -1201,7 +1201,10 @@ To M5, and to any milestone that ships a deployment rather than a test:
    a `?`, never the value the game ships with.
 7. **A stale value range breaks traffic; a stale absent field costs a number on a page.** After
    M5 every peer is a peer the operator cannot reach, so this distinction becomes the whole
-   upgrade policy.
+   upgrade policy. **It is now literally the policy** (2026-08-10, `system_decomposition.md`
+   D22): the relay's membership test is the **contract** version — the axis on which a stale
+   peer breaks its neighbours — and the game version is a per-machine support-matrix question
+   the map holds no opinion on.
 8. **Route-around's success is its own failure mode**, and it now hides a dead peer from an
    operator who is not reading the page. M4 built the surface; M5 needs somebody or something
    watching it.
@@ -1249,7 +1252,10 @@ To M5, and to any milestone that ships a deployment rather than a test:
    immunity window but no longer impossible. The signature to watch for is D19's own hop feed showing
    one species crossing one lane both ways in quick succession, and the fix, if it is ever needed, is
    a floor on the **multi-tick** outward component and never on one sample. It is unmeasured, and M5
-   puts it in front of strangers.
+   puts it in front of strangers. **The owner ruled on 2026-08-10** (`m5_considerations.md`
+   decision 9): the floor is **not built in M5** and the signature above is **instrumented during the
+   playtest**, so this uncertainty becomes a measurement M5 is obliged to take rather than one it
+   might. Whether the floor is ever built is what that measurement decides.
 7. **Whether the corpse pile at the origin regrows.** If out-of-bounds deaths really clamp corpse
    pellets to (0,0), any future breakout re-seeds it, and the cheap watchdog
    (`m4_livelock_findings.md` §4b follow-up (a)) has not been built.

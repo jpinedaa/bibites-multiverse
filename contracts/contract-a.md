@@ -2175,7 +2175,17 @@ These notes are non-normative. They exist so the two sides do not have to negoti
    band can cross without ever meaning to. M3 accepts it: a floor is a second tunable, it
    must scale with `S`, and the one-way ring bounds the consequence to "the organism moved
    on". Open because it is a **rate** question that only a populated ring can answer, and
-   the answer changes a rule the mod enforces on every organism on every tick.
+   the answer changes a rule the mod enforces on every organism on every tick. **The
+   one-way-ring half of that argument is withdrawn** (§18, A38): every lane is two-way, a
+   round trip through one neighbour is legal, and a loiterer on a shared border can
+   oscillate across it — bounded in rate by the arrival inset and the immunity window, no
+   longer impossible. The item is reopened at its original priority, and §4.3.1's `OPEN`
+   note carries the detail. **M5 assessed it and the owner ruled on 2026-08-10**
+   (`m5_considerations.md` decision 9): the floor is **not built in M5**, it is
+   **instrumented during the playtest** — D19's hop feed shows one species crossing one lane
+   both ways in quick succession, which is the signature — and that measurement decides
+   whether it is ever built. The item therefore stays open across a public release, with the
+   cost accepted and the next change to it reaching people the owner cannot contact.
 8. **A parent blob dropped for frame size is unreachable at the sidecar** (§14, A12). The
    sidecar records it as `"parent_gone"` because the two look identical on the wire, so
    `contract-b-m4.md` §6.6's `"blob_dropped_for_size"` is defined and never emitted. The
@@ -2202,6 +2212,8 @@ These notes are non-normative. They exist so the two sides do not have to negoti
     load, what a write means when its target mod is disconnected, and an audit trail. Open,
     with the boundary written down, because the cheap-looking version of this work is to make
     one of these fields writable and that is the same work with the questions skipped.
+    **"Later" is M6** (ratified 2026-08-10; `system_decomposition.md` D23): M5 supplies the
+    authentication this item waits on and still does not build the surface.
 
 ---
 

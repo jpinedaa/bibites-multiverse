@@ -2,19 +2,29 @@
 
 This report expands milestone M5 of `system_decomposition.md`.
 
-**Status: PROPOSED. Nothing in this document is ratified.** M4 is complete and its rig runs
-on as the living deployment. This is the design pass that opens M5, written before any work
-starts and before the owner has signed anything. Two sections hold what needs a signature:
-*Scope the documents do not state*, which is new scope nobody has agreed to yet, and
-*Decisions for the Owner*, which is nine calls this document recommends and cannot make.
-Every recommendation below is a recommendation. The owner overrode three of them in M4 and
-three more in M3, and this document is written to be overridden the same way.
+**Status: the nine decisions are RATIFIED, 2026-08-10. Everything else here is still a design
+pass.** M4 is complete and its rig runs on as the living deployment. This document opened M5
+on 2026-08-09, written before any work started and before the owner had signed anything, and
+the owner took all nine calls in *Decisions for the Owner* the next day. Seven adopt the
+recommendation as written; **decisions 5 and 6 are the owner's own**, and decision 5 does what
+this document was written to allow — it replaces the recommendation with a better model and
+supersedes a rule `system_decomposition.md` had stated. Five of the nine became **D21–D25** in
+`system_decomposition.md`; the other four stay milestone-internal, and each decision below
+records which it is.
+
+What is **not** ratified is the rest of the document. *Scope the documents do not state* is
+still inferred scope — five of its rows now have a decision behind them and the remainder do
+not — no work package is started, and every risk, design question and contract change below is
+still a proposal for the implementation wave to accept or override. The owner overrode three
+recommendations in M4 and three more in M3.
 
 The milestone was created by D9, renumbered by D16, and its scope has not changed since:
 `system_decomposition.md`, *M5 — Public release*. The starting point is M4's join kit
 (`farend/`) and the wire as it stands — `contract-a/2.3` and `contract-b/3.5`, which is what
 the contracts said on 2026-08-07 and what the living deployment speaks today. Read the
-contracts for the current pair rather than this line.
+contracts for the current pair rather than this line. **Where the milestone ends is decided:**
+`contract-b/4` for the per-peer credential and `contract-a/2.4` for the bearer token
+(decision 1).
 
 ## Purpose
 
@@ -82,7 +92,7 @@ In scope:
 
 - A relay and an archive hosted on a VPS, operated as a service rather than started by hand
 - TLS on Contract B, and per-peer credentials replacing the shared token — the two together
-  (`contract-b-m4.md` §13 item 1)
+  (`contract-b-m4.md` §13 item 1), at **`contract-b/4`** (decision 1, D21)
 - A bearer token on Contract A (`contract-a.md` §12 item 1)
 - A subscriber authorisation rule for the archive (§13 item 4)
 - An authenticated admin path for slot release, handover and eviction (§13 item 5)
@@ -92,12 +102,14 @@ In scope:
   `contractAVersion` into a capability decision (§13 item 7)
 - A relay forward receipt (§13 item 6), promoted from parked — Design Question 2 argues it
 - Placement, auto-placement and route-around under continuous churn (§13 item 3)
-- A player-facing package for the mod and the sidecar, installable without a build toolchain
-  and without asking a stranger to disable a security control
+- A player-facing package for the mod and the sidecar, published on **GitHub Releases**
+  (decision 6, D25), installable without a build toolchain and without asking a stranger to
+  disable a security control
 - A decided shipped default for a bare install, and an audit of every other default the
   package exposes to a machine the owner does not run
-- A game-version and wire-version compatibility policy, and a way to move a fleet the owner
-  cannot reach
+- A **layered** compatibility policy (decision 5, D22): a contract-version gate at the relay,
+  a published support matrix over game versions, and a way to move a fleet the owner cannot
+  reach — plus the bb8 payload question that layering exposes
 - A support surface: an error taxonomy, a diagnostics command, and documentation a
   non-operator can follow alone
 - The community playtest itself
@@ -108,7 +120,8 @@ Out of scope:
   message pair, and "held for an operator" stays an honest answer. Parked, and M5 does not
   unpark it — but note that the operator it is held for is now, sometimes, a stranger.
 - **The control surface.** All three of its blockers are M5 items and none of them is the
-  design itself. Decision 2 proposes deferring it; A43 states why deferring is cheap.
+  design itself. **Decision 2, ratified: it defers to M6 and Risk 9 is the accepted cost**
+  (D23); A43 states why deferring is cheap.
 - **libp2p and direct peer-to-peer transport** (M6).
 - **The `species-catalog` module, and corpse, pellet and egg payloads** (M7).
 - **Census uploads to the archive** (D11).
@@ -120,11 +133,13 @@ listing it.
 
 ## Scope the documents do not state
 
-**Everything in this section is inferred. No document assigns any of it to M5, and none of it
-is ratified.** It is here because the investigation that preceded this document went looking
-for the M5 backlog and found that the authoritative lists — `contract-b-m4.md` §13 and
-`contract-a.md` §12 — describe the *wire* work of going public and almost none of the work of
-running something in public. Each item names where it is worked through.
+**Everything in this section was inferred, and no authoritative list assigns any of it to
+M5.** Five rows changed status on 2026-08-10, when the owner's decisions gave them an answer
+or a shape — see *What the ratifications did to this table*, below it. The rest is still
+inferred and still unagreed. It is here because the investigation that preceded this document
+went looking for the M5 backlog and found that the authoritative lists —
+`contract-b-m4.md` §13 and `contract-a.md` §12 — describe the *wire* work of going public and
+almost none of the work of running something in public. Each item names where it is worked through.
 
 | Inferred item | Why it is not optional | Worked through in |
 |---|---|---|
@@ -141,6 +156,20 @@ running something in public. Each item names where it is worked through.
 | **Moderation and takedown for user-authored text** | Species names, world names and peer IDs are user text published to every subscriber. There is no report path and no operator action short of eviction | DQ7 |
 | **A support surface for strangers** | One README, no error taxonomy, no diagnostics command. The owner is currently the diagnostics command | DQ8 |
 | **Archive retention as a shipped rule** | The archive grows without bound *on purpose*, and peer count is the multiplier | DQ3, Decision 3 |
+
+**What the ratifications did to this table** (2026-08-10). *A distribution channel* is
+answered: **GitHub Releases** (decision 6, D25). *The shipped default for a bare install* is
+answered: **D17's four edges**, stated in the package rather than discovered (decision 7).
+*A game-version compatibility policy* is answered and reshaped — compatibility is **layered**,
+so the row is no longer one policy but two, a contract-version gate on the wire and a support
+matrix per machine (decision 5, D22) — and it settles the shape of *a fleet-update mechanism*
+with it, because a release page pushes nothing to anybody: the fleet moves by publication plus
+a relay-side minimum contract version, never by force. *Archive retention as a shipped rule*
+is answered **as process**: M5 produces the rule, even if the rule is *keep everything*
+(decision 3). Everything else in the table — relay operations, the DNS name and certificate,
+the forward receipt, the public-safe defaults audit, slot-space growth, moderation and the
+support surface — is still inferred, still unassigned by any authoritative list, and still
+worked through where the table says.
 
 Two of these were created by this pass rather than found: the shipped default for a bare
 install, and the public-safe defaults audit. Neither exists as a to-do in any document. The
@@ -193,13 +222,16 @@ allowed to see. That question got sharper twice after §13 was written. Since §
 save policy and the exclusion list. A public archive that copies every envelope to whoever
 asks is publishing a fairly complete profile of a stranger's machine.
 
-**The version calls.** On Contract A a bearer token is an additive field on an existing
-handshake, so by §3.1's own test it is a **minor**: `contract-a/2.4`. On Contract B it is not
-additive. §3.1's rule changes, the shared token stops being sufficient, and there is an
-installed base — which is exactly the shape A41 and §3.1 call the expensive kind. **No
-document decides whether that forces `contract-b/4`.** Decision 1 puts the call to the owner,
-and D13's own argument is the reason it should be made now rather than later: pre-strangers
-is the last moment a major costs a rebuild instead of a migration story.
+**The version calls, and they are now made.** On Contract A a bearer token is an additive
+field on an existing handshake, so by §3.1's own test it is a **minor**: `contract-a/2.4`. On
+Contract B it is not additive. §3.1's rule changes, the shared token stops being sufficient,
+and there is an installed base — which is exactly the shape A41 and §3.1 call the expensive
+kind. **The owner ratified `contract-b/4` on 2026-08-10** (decision 1, now D21), taken in WP1
+so that everything else in the milestone is built on the wire that ships, and taken
+pre-strangers for D13's reason: this is the last moment a major costs a rebuild instead of a
+migration story. The living deployment is the fleet that has to cross it — six worlds on two
+machines, in lockstep, which is the only migration rehearsal this project will get before the
+peers are people it cannot reach.
 
 ## Design Question 2 — The hosted relay is a service, not a process
 
@@ -225,6 +257,15 @@ that every reboot kills. None of that applies to a VPS, and none of its replacem
 - **A name, a certificate and its renewal.** ACME is the obvious answer and it has one
   non-obvious consequence: the relay must survive its own certificate rotating, which is
   another routine restart or a reload path.
+
+**The ratification added a sixth item on 2026-08-10.** Decision 4 makes the hosted relay a
+**bounded, announced commitment** (D24), and that is an operational obligation rather than
+only a social one. The period is stated before anybody joins; what a restart looks like is
+stated while it runs; and the **ending** has to say what becomes of `ring.json` and the
+archive's three durable files, which is where decision 3's retention rule is actually
+consumed. A service with an announced end needs a wind-down procedure in the same way it needs
+a restart policy, and it is the same kind of document — written before the participants
+arrive, not after they ask.
 
 **And the routine restart is what promotes the forward receipt.** §13 item 6 records the
 declination and its reasoning exactly: a relay restart drops every outstanding `sent` record,
@@ -293,7 +334,13 @@ months on the 251 GB volume. *"Somebody has to decide what the archive is for be
 out."* A public archive scales with peer count, so the three months becomes weeks at a dozen
 peers. The graduation question D6 leaves open — whether M7's `species-catalog` seeds from the
 archive or supersedes it — stops being an M7 question the moment the disk is the binding
-constraint. Decision 3 puts it to the owner. **What M5 must ship regardless of the answer** is
+constraint. **Decision 3, ratified 2026-08-10: the decision happens in M5.** Not the answer —
+the *deciding*. An M5 work item produces the retention rule and D6's graduation call with it,
+even if the rule turns out to be *keep everything*, and D6's row in `system_decomposition.md`
+now records that the call moved forward. The three options are unchanged and still
+distinguishable, and the deadline for choosing between them is the announced ending of D24's
+bounded run, because that is when somebody has to say what becomes of the record.
+**What M5 must ship regardless of the answer** is
 the honest arithmetic in the operator's hands: published per-peer growth rates and a sizing
 procedure, so that whoever runs the relay knows what they signed up for before the volume
 fills rather than after. The 2026-08-08 ENOSPC outage is the argument, and it happened on a
@@ -311,16 +358,23 @@ build, installs BepInEx and the plugin, stores the token and writes start and st
 so M5's packaging work is mostly about how the artifact arrives and who vouches for it, not
 about what it does once it runs.
 
-**Distribution is a support-model choice, not a hosting choice**, which is why Decision 6 puts
+**Distribution is a support-model choice, not a hosting choice**, which is why Decision 6 put
 it to the owner rather than recommending a URL. A mod site, a Workshop item and a GitHub
 release differ in who updates a player's install, whether an update can be forced, and where a
 confused person goes to complain. That last one matters more than it sounds, because DQ8 is
-about the same population.
+about the same population. **The owner chose GitHub Releases on 2026-08-10** (D25), and the
+choice answers the second of those three by declining it: a release page pushes nothing, so
+there is no forced update to design a fleet policy around, and D22's support matrix plus a
+relay-side minimum contract version carry the whole of DQ5's fleet-update item.
 
-**Signing is the part that cannot be argued away.** A signed installer removes the two
-commands above; an unsigned zip does not, whatever the README says. If signing is not
-available, the honest alternative is a delivery path that does not carry the mark of the web,
-not a README that talks a stranger through disabling execution policy.
+**Signing is the part that cannot be argued away, and the ratification folded it into the
+channel rather than resolving it.** A signed installer removes the two commands above; an
+unsigned zip does not, whatever the README says. What decision 6 commits to is the floor:
+**published checksums and the `Unblock-File` story written on the release page itself**,
+where a reader meets it before the download rather than in a README after it. Anything
+stronger — an Authenticode certificate, or a delivery path that does not carry the mark of the
+web at all — is WP6 design and still worth costing, because the floor is honest about the
+mark of the web and does not remove it.
 
 **The shipped default for a bare install is a to-do that had to be created rather than
 found.** `MultiverseConfig.ParseExportEdges` (`MultiverseConfig.cs:374-379`): an empty or
@@ -341,7 +395,10 @@ question: what does a player who has configured a relay but not an edge set mean
 exists to give. **The actual to-do is therefore to state the shipped default, once, in the
 package and in the documentation, and to keep the rig's explicit-variable discipline** so that
 a future change to the mod's default cannot silently move either what the rig measures or what
-a stranger's world does.
+a stranger's world does. **Decision 7, ratified 2026-08-10: exactly that.** D17's default
+stands, the statement is explicit — in the packaging documentation *and* in the installer's
+own output — and D25 carries it, because the release page is where a reader decides what the
+thing does before running it.
 
 **The public-safe defaults audit is the second created item, and it is four specific
 defaults:**
@@ -353,23 +410,71 @@ defaults:**
 | `MULTIVERSE_MIGRATION_EXCLUDE` | Defaults to `Basic bibite` (`MigrationExclusion.cs:55`), read on presence, so an explicitly empty value disables the policy | D18 chose that default to keep founder stock off the lanes. A stranger who sets the variable empty floods a public map with seed genomes, and the census will show it as normal |
 | `MULTIVERSE_SAVE_*` | `SaveMinutes` 10, `SaveKeep` 6, `SaveOnQuit` true (`MultiverseConfig.cs:80-81`, `104-106`) | Six retained saves of a world is a footprint on a disk the player did not budget, and the save interval is also the stall cadence — see Risk 3. **These three are now what the owner's own deployment runs** (2026-08-10): the rig's `2`/`4` override is gone, so the audit and the rig finally measure the same numbers |
 
-## Design Question 5 — Version compatibility, and a fleet the owner cannot reach
+## Design Question 5 — Version compatibility is layered, and a fleet the owner cannot reach
 
-**Two version axes, and the docs have a hard-won lesson on each.**
+**Two version axes, and the owner's decision puts them on two different layers.** This section
+originally asked for one policy over "the version", and that was the wrong shape. Decision 5,
+ratified 2026-08-10 and recorded as D22, is the owner's own design, in his words: *"game
+version compatibility should work basically what matters is like the sidecar version compatible
+with the relay server right then it depends if theres a sidecar version compatible to the game
+version."* Read as a design, it is two tests that never meet:
 
-**The game.** `setup-farend.ps1` refuses to install against a mismatched build, and Steam
-auto-updates stay on. Today that composes into a workable answer: both computers run the same
-version, and if they do not, the owner is told. With strangers it composes into nothing — a
-Steam update lands on some players and not others within hours, and the mod is a Harmony patch
-against a specific assembly. `bb8-schema`'s cross-version conversion is listed as
-unresearched in `system_decomposition.md`'s research table, so a mixed-version map is not
-currently a thing anyone can reason about. Decision 5 asks for the policy: a tolerance window,
-a forced-update path, or a stated refusal.
+- **The relay's test — the wire is the membership test.** The relay cares that each sidecar
+  speaks a compatible **contract** version and about nothing else. That is the only question
+  the map has an opinion on.
+- **The machine's test — a support matrix, not a fleet pin.** Each operator needs a sidecar
+  and mod build compatible with the game version *they* run. The project publishes a matrix
+  over game versions, and the test is settled on the operator's own machine before anything
+  dials the relay.
 
-**The wire, where the lesson is sharper.** Compatibility is on the major alone, a minor is a
-capability statement rather than a negotiation, and a feature is detected by the presence of
-its field. That rule held for three consecutive minors — the far end sat one behind and kept
-exchanging organisms — and then `contract-b/3.3` broke the streak.
+**This supersedes the fleet-wide same-game-version rule.** `system_decomposition.md`'s relay
+listed "reject mismatched game/mod versions" at connect and now gates on the contract version;
+`setup-farend.ps1`'s `$AssemblySha256` refusal and the far-end bundle's pin survive as **that
+machine's** matrix entry rather than as a rule about the map. **One piece of live normative
+text still says the old thing** — `contract-b-m4.md` §6.1's *"the relay **MUST** refuse a peer
+whose `gameVersion` is incompatible with the map's"* — and Contract Change 10 is where WP1
+replaces it. Until then the contract is behind the decision, which is the ordinary order here
+and not a disagreement. Nothing is loosened where it
+matters: a peer that cannot speak the wire still cannot join, and the peer that suffers from
+staleness — the *neighbour* of the stale peer, per the episode below — is protected by the test
+that actually predicts breakage.
+
+**The game, and why the old answer had run out anyway.** `setup-farend.ps1` refuses to install
+against a mismatched build, and Steam auto-updates stay on. On the rig that composed into a
+workable answer: both computers run the same version, and if they do not, the owner is told.
+With strangers it composed into nothing — a Steam update lands on some players and not others
+within hours, and the mod is a Harmony patch against a specific assembly, so a map-wide pin
+would eject honest players for something they did not choose and could not defer. The layered
+model is what survives that: a player whose game updated waits for a matrix entry instead of
+being thrown off the map, and the operator's job becomes publishing builds rather than
+policing installs.
+
+**The named remaining work, and the owner named it when he made the call.** Organisms cross
+*between* games. A bb8 payload serialized by game version X lands in game version Y through
+`SaveSystem.LoadBibiteOrEggFromData`, and whether that is safe is precisely the cross-version
+question `system_decomposition.md`'s research table still lists as **unresearched** for
+`bb8-schema`. The layered design is what puts that row on M5's critical path, and **the design
+is not finished until WP work answers it one of two ways:**
+
+1. **Evidence** that bb8 payloads are stable across the span of game versions the matrix
+   covers. `m1_findings.md`'s result that genes are keyed by enum **name** — so reordering is
+   safe and only additions and removals need conversion — is the reason to expect stability
+   and is not a substitute for testing it against two real game builds.
+2. **A game-version marker on the envelope, with a defined refusal path.** The payload states
+   the version that serialized it, and an importing mod that cannot accept it refuses in a way
+   the sender can read and the ledger can count — rather than restoring a blob the game will
+   quietly misinterpret.
+
+That is the design's own frontier, acknowledged rather than resolved, and it is not an argument
+against the decision: the fleet-wide rule the layered model replaced never answered the
+question either. It only made it invisible, by asserting that every peer ran one version — an
+assertion nobody could check and Steam could break in an afternoon.
+
+**The wire, where the lesson is sharper** and where the membership test now lives.
+Compatibility is on the major alone, a minor is a capability statement rather than a
+negotiation, and a feature is detected by the presence of its field. That rule held for three
+consecutive minors — the far end sat one behind and kept exchanging organisms — and then
+`contract-b/3.3` broke the streak.
 `dev_environment.md`, *The minors*, records what happened: a pre-3.3 sidecar validates
 `MIGRATION_PAYLOAD.exitEdge` against `E`/`N` and answers `W` with a **permanent**
 `MALFORMED_MESSAGE` NACK, so an upgraded neighbour's west and south exports were refused,
@@ -383,13 +488,20 @@ both sides already exchange breaks traffic; a stale absent optional field only e
 number on a page."* A public map cannot tell those two apart by itself, and the relay is the
 only party that sees every peer's claimed version at once.
 
-**So the proposal is a published minimum-version rule enforced at the relay handshake, plus a
-way to move the fleet — and one caveat that must be written into the contract beside it.** A
-version a peer *claims* is attacker-chosen text. §13 item 7 already forbids reading
-`contractAVersion` as a capability decision for exactly this reason. A minimum-version gate is
-therefore a **compatibility control and never a security control**: it keeps honest stale
-peers off a map they would degrade, and it stops nobody who edits a string. Both halves have
-to be said in the same paragraph or an implementer will assume the first implies the second.
+**So the mechanism is a published minimum *contract*-version rule enforced at the relay
+handshake, plus a way to move the fleet — and one caveat that must be written into the contract
+beside it.** A version a peer *claims* is attacker-chosen text. §13 item 7 already forbids
+reading `contractAVersion` as a capability decision for exactly this reason. A minimum-version
+gate is therefore a **compatibility control and never a security control**: it keeps honest
+stale peers off a map they would degrade, and it stops nobody who edits a string. Both halves
+have to be said in the same paragraph or an implementer will assume the first implies the
+second.
+
+**And the way to move the fleet is now known, because decision 6 chose the channel.** GitHub
+Releases pushes nothing to anybody (D25), so there is no forced-update lever to design: the
+fleet moves by publication — a release, a matrix entry, and a relay-side minimum that rises
+only after the release exists — and the gate's job is to keep an un-upgraded peer from
+degrading its neighbours in the meantime, not to upgrade it.
 
 **And note what makes this urgent rather than tidy.** The peer that suffers from staleness is
 not the peer that is stale, and application of a fix on somebody else's machine is
@@ -525,8 +637,9 @@ coexisting with it.
   measured reading copied from `HEARTBEAT` and *never computed*, and there is no message that
   sets it. On the LAN the remedy is one dev command — `run-m4-lan.sh send 2 timescale 5`, which
   corrected a settled world that had drifted to ×34.7 hours after a clean bring-up. On a public
-  map there is no such command and no way to obtain one without the control surface. See
-  Risk 9.
+  map there is no such command and no way to obtain one without the control surface — **which
+  Decision 2 has now put in M6 (D23), so the thread crosses M5 unresolved by design rather than
+  by omission.** See Risk 9.
 - **`genomeGaps` changes character when peers leave forever.** The backlog is throughput-limited
   rather than leaky — the collector's series shows long stretches at zero, a rise that tracks
   the crossing rate and a monotone drain when traffic falls — and `dev_environment.md`'s watch
@@ -558,7 +671,9 @@ coexisting with it.
   drive, so a test that needs a person at the far end needs a person who volunteered.
 - **The capture band still has no velocity magnitude floor, and A38 reopened the item at its
   original priority.** `contract-a.md` §12 item 7's cheapness argument rested on the one-way
-  lane, and D17 removed the lane. See Risk 8 and Decision 9.
+  lane, and D17 removed the lane. **Decision 9 settles its disposition without closing it**
+  (2026-08-10): not built in M5, instrumented during the playtest, and the measurement decides.
+  See Risk 8.
 
 ## Risks
 
@@ -583,8 +698,10 @@ interest on day two. A run that ends early is the likely case, not the exception
 Mitigation: recruit more participants than the bar requires; define the pass on the map's
 behaviour rather than on attendance, so that a departure is a churn test instead of an
 aborted run; and instrument enough that a run which ends on day two still yields the
-measurements. Decision 8 asks the owner to set the bar, because "a handful" and "days" are
-not testable as written.
+measurements. **The owner set the bar on 2026-08-10** (decision 8): four non-owner peers, 72
+continuous hours, zero operator actions on any participant's machine. It is a *bar*, not a
+prediction — this risk's whole point is that a run can end before it, and the instrumentation
+is what makes an early ending report what it proved instead of failing silently.
 
 Accepted cost: the exit test cannot be re-run cheaply. Unlike every M4 phase, it costs other
 people's goodwill each time, which argues for doing the abuse cases and the churn harness
@@ -643,9 +760,13 @@ understand.
 
 Mitigation: publish the per-peer growth arithmetic so the hoster sizes the volume from a
 number rather than a hope; monitor free space as a first-class signal, not as part of a
-weekly look; and settle Decision 3 before the volume rather than after. **Accepted cost if
-Decision 3 says "keep everything":** the operator is signing up for a disk bill that grows
-with the community's success, and that should be an informed signature.
+weekly look; and settle the retention rule before the volume rather than after. **Decision 3
+is ratified as process** (2026-08-10): M5 produces the rule, and the deadline is D24's
+announced ending, which is the moment somebody has to say what becomes of the record.
+**Accepted cost if the rule turns out to be "keep everything":** the operator is signing up for
+a disk bill that grows with the community's success, and that should be an informed signature
+— which, under a *bounded* commitment, is a bill with a stated end date rather than an open
+one.
 
 ### Risk 6 — A stale peer breaks its neighbours' traffic, not its own
 
@@ -654,11 +775,14 @@ hops/min bounce loop and two innocent slots pinned at `inboundQueueMax`. On the 
 resolved by re-taking a bundle. On a public map the stale peer has no incentive to act,
 because their world is fine.
 
-Mitigation: a relay-side minimum-version gate (DQ5), the fleet-update mechanism behind it, and
-an operator view that names the peer *causing* the degradation rather than the peers
-displaying it. Accepted cost: the gate trusts a self-reported string and therefore only
-handles honest staleness. That is the majority of cases and it must be documented as the
-limit of the control, not sold as more.
+Mitigation: a relay-side minimum **contract**-version gate (DQ5, D22), the publication path
+behind it (D25), and an operator view that names the peer *causing* the degradation rather
+than the peers displaying it. **D22 sharpens this risk rather than softening it:** the episode
+above was a *wire* staleness, which is exactly what the ratified membership test measures, so
+the control now sits on the axis that predicts the failure instead of on the game version,
+which never did. Accepted cost, unchanged: the gate trusts a self-reported string and
+therefore only handles honest staleness. That is the majority of cases and it must be
+documented as the limit of the control, not sold as more.
 
 ### Risk 7 — A departed stranger's genomes become permanently unfetchable
 
@@ -693,9 +817,17 @@ into a ledger nothing may evict from. The fix A38 sketches is a floor on the out
 **over several ticks**, not on one sample, and it changes a rule the mod enforces on every
 organism on every tick — which is why it is a decision (Decision 9) rather than a work item.
 
-Mitigation if the answer is "not in M5": measure it during the playtest, because a populated
-public map is the only place the rate question can be answered, and D13's argument means the
-next comfortable moment to change a mod-side rule is worse than this one.
+**Decision 9, ratified 2026-08-10: not in M5.** The floor is not built; it is **instrumented**
+during the playtest, and the measurement decides whether it is ever built. A populated public
+map is the only place the rate question can be answered, and shipping a threshold guessed
+before that measurement is the worse mistake — it is the same error M4 made twice when it
+sized a rate limit from offered load (`m4_findings.md`, *What transfers forward* 4). The
+accepted cost is this risk, for the duration of the playtest, with D13's argument standing
+against it: the next comfortable moment to change a mod-side rule is worse than this one, so
+if the measurement says build it, the migration story is the price already accepted here.
+The signature to instrument is D19's hop feed showing one species crossing one lane both ways
+in quick succession (`contract-a.md` §4.3.1's `OPEN` note; `m4_findings.md`, open uncertainty
+6).
 
 ### Risk 9 — Time scale is unfixable on a stranger's world, and it corrupts the readings
 
@@ -710,10 +842,14 @@ per-simulated-minute series across peers running at different speeds — an aggr
 mixed time scales is not a slow number, it is a meaningless one. Accepted cost: some
 participants will run fast worlds and their pacing behaviour will differ from everyone else's.
 
-This is also the strongest live argument for the control surface, and Decision 2 should be
-read with it in view: the case for deferring the control surface is that it is cheap to add
-later; the case against is that M5 is the first milestone where its absence is felt by
-somebody other than the owner.
+This was the strongest live argument for the control surface, and it lost: **decision 2 is
+ratified — the control surface defers to M6 (D23) and this risk is the accepted cost**, named
+and dated. The case that won is A43's: deferring costs a minor later, while building it now
+means answering ordering, idempotency, disconnected targets, cross-machine authorization and
+an audit trail inside the milestone that already replaces the authentication model and meets
+strangers. What M5 owes in exchange is that the cost is *visible* — every per-simulated-minute
+series carries the time scale it was measured at, so a reader can see the peer the operator
+cannot fix.
 
 ### Risk 10 — The operator is one person, and hosting is a standing commitment
 
@@ -723,20 +859,28 @@ means in practice — a collector that no reboot restarts, a bring-up that is a 
 procedure, a full-disk outage discovered by its symptoms.
 
 Mitigation: DQ2's supervision and monitoring are the technical half. The other half is
-Decision 4, which is not a technical question at all. **A playtest that succeeds creates an
-obligation**, and the honest options include running the relay for a bounded, announced
-period, or publishing the relay so somebody else can run one. Deciding that after the
-strangers arrive is worse than deciding it now.
+Decision 4, which is not a technical question at all — and **the owner answered it on
+2026-08-10: a bounded, announced commitment** (D24). **A playtest that succeeds creates an
+obligation**, and this is the answer that keeps the obligation finite: the period is announced
+to participants before they join, the publish-the-relay path is prepared so a map can outlive
+the owner's run, and the ending is a stated event rather than a service quietly decaying. The
+residue this risk keeps is the run itself — one person, a support load, and a desktop-shaped
+operational record — and the wind-down procedure DQ2 now owes is what stops the end of the
+period from being its own incident.
 
 ## Contract Changes Needed
 
 This pass does not rewrite the contracts. The list below is the design input for the
 implementation wave, and the **Status** column separates what this document proposes to commit
-from what it proposes to leave alone.
+from what it proposes to leave alone. **The ratifications of 2026-08-10 moved three statuses
+and added one row**, all marked in place: row 1 has its version (`contract-b/4`), row 15's two
+version calls are both made, row 14 leaves the milestone, and row **10a** is new — the payload
+question D22 named as its remaining work. Rows are not renumbered, because WP1 and the
+paragraph below cite them by number. Sixteen of the seventeen rows are M5 work; row 14 is not.
 
 | # | Document | Change | Source | Status |
 |---|---|---|---|---|
-| 1 | `contract-b-m4.md` §3.1 | Per-peer credentials replace the one shared token. The credential binds to the `peerId`, and §3.2's `4006` eviction requires it. State what a peer does when its credential is rejected. | §13 item 1 | **M5**. Version call open — Decision 1 |
+| 1 | `contract-b-m4.md` §3.1 | Per-peer credentials replace the one shared token. The credential binds to the `peerId`, and §3.2's `4006` eviction requires it. State what a peer does when its credential is rejected. | §13 item 1 | **M5, at `contract-b/4`** — Decision 1 ratified 2026-08-10 (D21) |
 | 2 | `contract-b-m4.md` §3 | TLS: the scheme, certificate expectations, what a client does with a certificate it cannot verify, and what a certificate rotation looks like to a connected peer. | §13 item 1 | **M5** |
 | 3 | `contract-a.md` §5, §12 item 1 | A bearer token on Contract A. Additive on an existing handshake, so a **minor**: `contract-a/2.4`. | §12 item 1 | **M5** |
 | 4 | `contract-b-m4.md` §10, §13 item 4 | A subscriber authorisation rule for the archive, and what a subscriber is permitted to see of another peer's stats block now that it carries the census, the mod version, the save policy and the exclusion list. | §13 item 4 | **M5** |
@@ -745,12 +889,13 @@ from what it proposes to leave alone.
 | 7 | `contract-b-m4.md` §13 item 7 | Restate the renderer's escaping obligation as a testable rule, and repeat the `contractAVersion` prohibition where an implementer of a page will read it. | §13 item 7 | **M5** |
 | 8 | `contract-b-m4.md` §7.2 | Auto-placement under churn: holes before axis extension, which axis extends, the coalescing window, and a bound on `PEER_STATUS` broadcast rate. | §13 item 3 | **M5** |
 | 9 | `contract-b-m4.md` §3.x (new) | Capacity limits as a published table — connections, frames, claims, payload bytes and genome requests per peer — every one a knob, and every one a peer depends on published on the stats block. | Inferred; D20's knob rule | **M5** |
-| 10 | Both documents | A minimum-version rule at the relay handshake, stated as a **compatibility** gate and explicitly not a security control. | Inferred; `dev_environment.md`, *The minors* | **M5** |
+| 10 | `contract-b-m4.md` §6.1, and both documents | A minimum **contract**-version rule at the relay handshake, stated as a **compatibility** gate and explicitly not a security control — and, in its place, the retirement of §6.1's current *"the relay **MUST** refuse a peer whose `gameVersion` is incompatible with the map's"*, which D22 supersedes: the game version stays a reported field and a per-machine matter answered by the support matrix, not a membership test. `4003` and `lastRefusal` survive, on the contract-version axis. | Inferred; `dev_environment.md`, *The minors*; Decision 5 (D22) | **M5** — the one place a ratified decision contradicts live normative text, and WP1 is where it is resolved |
+| 10a | `contract-a.md` §5.3, Contract C | The game-version answer D22 names as its remaining work: either recorded evidence that bb8 payloads load across the matrix's span, or a **game-version marker on the envelope with a defined refusal path**. Which of the two is a WP finding, not a decision. | Decision 5 (D22) | **M5** — new, and on the critical path |
 | 11 | `contract-a.md` §12 item 8 | `"blob_dropped_for_size"` is defined and never emitted. One additive OPTIONAL field on `parents[]` closes it. | §12 item 8 | **M5** — cheap now, a migration story later |
 | 12 | `contract-a.md` §12 item 9 | A startup refusal in the sidecar for a non-grid `exportEdges` set. The sidecar knows the map; the mod must not. | §12 item 9 | **M5** — it bites hardest with strangers |
 | 13 | `contract-a.md` §12 item 6 | Contract debt A5: assess and either close it or restate why it stays moot. Its second reason — "the mod records the edge" — is an obligation somebody could drop. | §12 item 6 | **M5** — assess only |
-| 14 | `contract-a.md` §4.3.1, §12 item 7 | A velocity magnitude floor on the capture test, over several ticks rather than one sample. | A38 | **Owner call** — Decision 9 |
-| 15 | Both documents | The version calls: `contract-a/2.4` for item 3, and major-or-minor on Contract B for item 1. | §3.1, A41, D13 | **Owner call** — Decision 1 |
+| 14 | `contract-a.md` §4.3.1, §12 item 7 | A velocity magnitude floor on the capture test, over several ticks rather than one sample. | A38 | **Not M5** — Decision 9 ratified 2026-08-10: instrumented during the playtest, and the measurement decides whether it is ever built. §12 item 7 stays open across a public release |
+| 15 | Both documents | The version calls: `contract-a/2.4` for item 3, and **`contract-b/4`** for item 1. | §3.1, A41, D13 | **Decided** 2026-08-10 (D21) — WP1 applies both |
 | 16 | `m1_considerations.md`, `m2_considerations.md`, `m2_findings.md`, `m3_considerations.md`, `contract-b-m2.md` | Older documents still say "M5" where D16's renumbering makes them mean M6 or M7. Correct them in this wave, as D16's own item 13 corrected the previous round. | D16 | **M5** — documentation |
 
 Items 11, 12 and 13 are not urgent and are listed because this is the last milestone in which
@@ -764,17 +909,23 @@ Eight packages. WP1 gates the wire work, WP2 gates WP3 and WP4, and WP8 cannot s
 everything else has run against a synthetic map first.
 
 Nothing is started. The status lines below are placeholders for the record each package will
-carry, in the form M4's packages carry theirs.
+carry, in the form M4's packages carry theirs. **Every decision the packages waited on is
+ratified as of 2026-08-10**, so nothing here is gated on a signature any more.
 
 ### WP1 — The contract amendments
 
-**Depends on:** this document, and Decisions 1, 2 and 9.
+**Depends on:** this document. Decisions 1, 2 and 9 were its gate and all three landed on
+2026-08-10, so it is startable.
 **Needs the game:** no.
 
-- The sixteen items of *Contract Changes Needed*
+- The sixteen M5 items of *Contract Changes Needed* — every row but 14, which Decision 9
+  removed from the milestone
 - One worked example for each changed or added message
-- The version decision, applied, with a migration note for the living deployment — which is
-  itself a peer that has to move
+- **The version calls, applied:** `contract-b/4` for the credential, `contract-a/2.4` for the
+  bearer token, with a migration note for the living deployment — which is itself a peer that
+  has to move, and the only rehearsal this project gets for moving a fleet across a major
+- **The layered compatibility statement of D22**, in both documents: the contract-version gate,
+  the explicit non-gating of the game version, and row 10a's payload answer
 - The stale-milestone correction of item 16
 
 Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said so.
@@ -801,6 +952,12 @@ Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said 
 - Backup for `ring.json` and the archive's three durable files
 - A written restart policy, and the participant-facing statement of what a restart looks like
 - **The forward receipt**, and the measurement of what it costs per migration at rate
+- **The commitment itself** (Decision 4, D24): the announced period, stated to participants
+  before they join, and the wind-down procedure that ends it — including what becomes of
+  `ring.json` and the archive's durable files
+- **The archive's retention rule** (Decision 3), produced in this milestone even if it is *keep
+  everything*, shipped with the per-peer growth arithmetic a hoster sizes a volume from, and
+  answering D6's graduation question with it
 
 ### WP4 — Capacity, abuse limits and the admin path
 
@@ -834,12 +991,16 @@ Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said 
 
 - A player-facing installer for the mod and the sidecar, with no build toolchain and no
   instruction to disable a security control
-- Signing, or a delivery path that does not need it (Decision 6)
-- **The shipped default for a bare install**, decided and stated in one place (Decision 7)
+- **The GitHub release page** (Decision 6, D25): the artifacts, published checksums, and the
+  `Unblock-File` story stated where a reader meets it before the download. Signing beyond that
+  floor is this package's own design question, costed rather than assumed away
+- **The shipped default for a bare install**: D17's four edges, stated in the documentation and
+  in the installer's output (Decision 7, D25)
 - **The public-safe defaults audit**: `--insecure-no-token`, the archive bind habit, the
   exclusion default and the save defaults
-- The game-version policy of Decision 5, enforced by the installer as `setup-farend.ps1`
-  already enforces its own
+- **The support matrix of D22** — which sidecar-and-mod build goes with which game version —
+  published beside the release, and the installer's own per-machine check (`setup-farend.ps1`
+  already enforces exactly this, for one entry)
 - An uninstall that leaves the player's game as it found it
 
 ### WP7 — The support surface
@@ -858,9 +1019,14 @@ Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said 
 **Depends on:** WP2, WP3, WP4, WP5, WP6, WP7.
 **Needs the game:** yes, on other people's machines.
 
-- Recruiting, and the bar of Decision 8
+- Recruiting, against the ratified bar of Decision 8 — four non-owner peers, 72 hours, zero
+  operator actions on a participant's machine — with more participants recruited than the bar
+  needs, per Risk 2
 - The run, and the observation plan that survives an early ending
 - The abuse cases of Exit Test Part 5, run by the operator against the live relay
+- **The velocity-floor instrumentation of Decision 9**: D19's hop feed watched for one species
+  crossing one lane both ways in quick succession, counted rather than eyeballed, because this
+  run is what decides whether the floor is ever built
 - The record: per-peer archive growth, crossing rates, churn behaviour, and every support
   interaction that needed the owner
 
@@ -868,10 +1034,10 @@ Write WP1 before any code. M2 and M3 both paid for the alternative, and M4 said 
 
 `system_decomposition.md` states it in one sentence: **a small community playtest — a handful
 of strangers' sims exchanging organisms for days without operator intervention.** The parts
-below make that testable. "A handful" and "days" are Decision 8; the placeholders here are
-this document's proposal, not a bar anybody has agreed to.
+below make that testable. "A handful" and "days" were Decision 8, and **the owner ratified this
+document's proposal verbatim on 2026-08-10**, so the bar below is the bar.
 
-Proposed bar: **at least four peers that are not the owner's, at least 72 continuous hours,
+Ratified bar: **at least four peers that are not the owner's, at least 72 continuous hours,
 and zero operator actions on any participant's machine.** An operator action on the *relay* is
 allowed and counted — a restart under load is Part 4 — but anything typed on a participant's
 computer at the operator's instruction is an intervention and fails the sentence.
@@ -966,7 +1132,7 @@ and every log a participant is willing to share.
 
 Nothing is delivered. This is the list the milestone will report against.
 
-- The wire specification, from WP1, at whatever versions Decision 1 sets
+- The wire specification, from WP1, at **`contract-b/4`** and **`contract-a/2.4`** (Decision 1)
 - A relay with TLS, per-peer credentials and an authenticated admin path
 - An archive with a subscriber authorisation rule and a stated visibility boundary
 - A published capacity-limit table, every entry a knob and every relevant one on the stats
@@ -976,9 +1142,12 @@ Nothing is delivered. This is the list the milestone will report against.
   is involved
 - A hosted deployment: VPS, DNS, certificate renewal, supervision, monitoring, backup and a
   written restart policy
-- A player-facing package with a decided shipped default and a completed defaults audit
-- A game-version and wire-version compatibility policy, enforced where it can be and
-  documented where it cannot
+- A player-facing package on GitHub Releases, with published checksums, D17's shipped default
+  stated, and a completed defaults audit
+- The **layered** compatibility policy of D22: a contract-version gate at the relay, a
+  published support matrix over game versions, and the bb8 payload answer that layering
+  requires — evidence, or an envelope marker with a refusal path
+- The archive's retention rule, and the announced period the relay is committed for
 - An error taxonomy, `multiverse-sidecar --diagnose`, and documentation a non-operator can
   follow alone
 - Renderer escaping, with its test
@@ -987,12 +1156,20 @@ Nothing is delivered. This is the list the milestone will report against.
   either to close it, because its results come from people who will not be available to ask
   again.
 
-## Decisions for the Owner
+## Decisions for the Owner — RATIFIED 2026-08-10
 
-**None of these is decided. Every item below is a PROPOSAL awaiting ratification**, in the
-form the previous milestones used: the recommendation is stated, the argument against it is
-stated, and the owner's call is what settles it. Three of M4's recommendations were overridden
-and the milestone was better for it.
+**All nine are decided.** They were put in the form the previous milestones used — the
+recommendation stated, the argument against it stated, and the owner's call settling it — and
+the owner took all nine on **2026-08-10**, the day after this document opened the milestone.
+Seven adopt the recommendation as written. **Decisions 5 and 6 are the owner's own:** 5
+overrides the recommendation with a better model, and 6 answers a question this document
+deliberately declined to answer for him.
+
+Each item below keeps its original argument, because that is the record of why the call was
+available, and ends with **the call**. Five became `system_decomposition.md` **D21–D25**; the
+other four — 3, 7, 8 and 9 — are milestone-internal, and this section plus the M5 milestone
+entry are their home. Three of M4's recommendations were overridden and the milestone was
+better for it; this round overrode one.
 
 **1. Does per-peer credentialing take Contract B to a major?**
 Replacing §3.1's shared-token rule is not additive. §3.1's own framing and A41's test both
@@ -1003,6 +1180,10 @@ later.** The breaking `exportEdge`→`exportEdges` change landed in M4 precisely
 breaking wire change after strangers run the build costs a migration story rather than a
 rebuild", and M5 is the last moment that sentence is true. *Recommended: take the major, and
 take it in WP1 so that everything else in the milestone is built on the wire that ships.*
+**RATIFIED 2026-08-10 — the recommendation, verbatim.** The wire goes to **`contract-b/4`**,
+the work happens in WP1, and it happens **pre-strangers** for D13's reason. Contract A's bearer
+token stays the minor `contract-a/2.4`. Recorded as **D21**; the living deployment is the fleet
+that rehearses the crossing.
 
 **2. Does the control surface land in M5?**
 All three of its blockers are M5 items — per-peer authentication, subscriber authorisation
@@ -1015,6 +1196,10 @@ a disconnected target, authorization across machines D9 keeps undriven, and an a
 and *"reversing `CONFIG_UPDATE` or making a stats field writable is not the cheap version of
 that work; it is the same work with the questions skipped."* *Recommended: defer to M6, and
 record Risk 9 as the accepted cost.*
+**RATIFIED 2026-08-10 — the recommendation, verbatim. The risk is accepted.** The control
+surface is M6 work, the operator surface stays read-only through the public release, and Risk 9
+is the cost, named and dated rather than discovered. Recorded as **D23**; M6's entry in
+`system_decomposition.md` now carries the design alongside libp2p.
 
 **3. What is the archive for — and does M7's catalog seed from it or supersede it?**
 About three months of headroom at six worlds, and peer count is the multiplier. Nothing may
@@ -1025,6 +1210,13 @@ distinguishable: keep everything and size the disk; keep the ledger and prune ge
 horizon; or graduate now and let the archive become the catalog's ancestor in fact rather than
 in principle. *Recommended: decide the retention rule in M5 even if the answer is "keep
 everything", and ship the arithmetic to the hoster either way.*
+**RATIFIED 2026-08-10 as process — the recommendation, verbatim.** *The decision happens in
+M5.* An M5 work item produces the retention rule, and it produces one even if the rule is *keep
+everything*; the arithmetic ships to the hoster either way. What is ratified is that the answer
+exists by the end of the milestone, not what the answer is. **Milestone-internal** — no D-row
+of its own — but it moves D6: `system_decomposition.md`'s D6 row and the archive research row
+now record that the graduation call comes forward out of M7. WP3 carries the work; D24's
+announced ending is its deadline.
 
 **4. Who operates the public relay, and under what commitment?**
 `system_decomposition.md`'s research table still lists this as open, and D9 answered it only
@@ -1034,6 +1226,12 @@ period, the owner running it indefinitely, or publishing the relay so other peop
 own maps. *Recommended: a bounded, announced commitment for the playtest, with the
 publish-the-relay path prepared, so the answer to "what happens after" is not improvised in
 front of participants.*
+**RATIFIED 2026-08-10 — the recommendation, verbatim.** The relay is up for the playtest
+period, that period is **stated to participants** before they join, and it is not an
+open-ended service. Recorded as **D24**, which also closes the research table's oldest open
+question — *who operates a public relay* — that D9 had answered for the LAN only. The
+obligations it creates are WP3's: the announcement, the wind-down, and what becomes of the
+record at the end.
 
 **5. What is the game-version compatibility policy?**
 Steam auto-updates stay on and land unevenly. `bb8-schema` cross-version conversion is
@@ -1042,12 +1240,48 @@ run mixed versions at all. *Recommended: refuse mixed versions at the relay hand
 and say so plainly, because a tolerance window rests on research that has not been done and a
 forced-update path needs a distribution channel that has not been chosen.*
 
+**RATIFIED 2026-08-10 — OVERRIDDEN. This is the owner's own design**, and it is recorded here
+in his words before it is interpreted: *"game version compatibility should work basically what
+matters is like the sidecar version compatible with the relay server right then it depends if
+theres a sidecar version compatible to the game version."*
+
+**Compatibility is layered**, and the two layers never meet:
+
+- **(a) The relay cares only that each sidecar speaks a compatible contract version.** The
+  wire is the membership test, and it is the only test the map applies.
+- **(b) Each machine's operator needs a sidecar-and-mod build compatible with *their* game
+  version.** That is a published **support matrix** over game versions, settled on the
+  operator's own machine, not a fleet-wide pin.
+
+**This supersedes the fleet-wide same-game-version rule.** The handshake pin in
+`system_decomposition.md`'s relay section — *"reject mismatched game/mod versions"* — becomes a
+contract-version gate, and `setup-farend.ps1`'s `$AssemblySha256` refusal stays as **that
+machine's** matrix entry rather than a rule about the map. Recorded as **D22**, and DQ5 is
+rewritten around it.
+
+**The named remaining work, acknowledged by the owner when he made the call, and not resolved
+by it.** Organisms cross *between* games: a bb8 payload serialized by game version X lands in
+game version Y through `SaveSystem.LoadBibiteOrEggFromData`, and whether that is safe is
+exactly the unresearched bb8-schema question the recommendation had leaned on. The ratified
+design therefore owes a **payload-compatibility answer inside WP** — either evidence that bb8
+payloads are stable across the versions the matrix spans, or a **version marker on the envelope
+with a defined refusal path** (Contract Change 10a). Until it has one, `bb8-schema`'s
+cross-version row sits on M5's critical path. This is the design's frontier, not a
+contradiction of it: the rule it replaced never answered the question either — it asserted the
+question away.
+
 **6. What is the distribution channel, and is the sidecar signed?**
 Thunderstore, Steam Workshop and GitHub Releases differ in who updates a player's install,
 whether an update can be pushed, and where a confused person goes for help. Signing decides
 whether the README still has to ask a stranger to bypass execution policy. *Recommended:
 pick the channel before WP6 starts, because the fleet-update mechanism of DQ5 is built on
 whatever it can do.*
+**RATIFIED 2026-08-10 — the owner's choice: GITHUB RELEASES.** The signing question folds into
+this work package rather than staying separate: the floor is **documented checksums plus the
+`Unblock-File` story on the release page**, and anything beyond that floor is WP6 design to be
+costed. The channel pushes nothing, which settles DQ5's fleet-update item by removing the
+forced-update option from it: the fleet moves by publication, a matrix entry and a relay-side
+minimum contract version. Recorded as **D25**, which also carries decision 7's stated default.
 
 **7. What default does a bare install ship with?**
 `MultiverseConfig.cs:374-379` gives an unconfigured mod all four export edges and
@@ -1058,6 +1292,11 @@ remains is a semantics call the package must state out loud. *Recommended: keep 
 state it in the package documentation and in the installer's own output, and preserve the
 rig's explicit-variable discipline so that neither the rig's measurements nor a stranger's
 world can be moved by a future change to a default.*
+**RATIFIED 2026-08-10 — the recommendation, verbatim.** D17's client-ON all-four-edges default
+is **kept**, and it is **stated explicitly in the packaging documentation** rather than left to
+be inferred from the source. **Milestone-internal** — no D-row of its own — but D25 carries the
+statement, because the release page is where a reader decides what the thing does before
+running it. WP6 owns both halves.
 
 **8. What is the exit-test bar?**
 "A handful of strangers' sims exchanging organisms for days" is not testable as written, and
@@ -1065,6 +1304,10 @@ Risk 2 says a run will probably end early. *Recommended: at least four non-owner
 least 72 continuous hours, zero operator actions on any participant's machine, with relay-side
 actions allowed and counted. A shorter run reports what it proved rather than failing
 silently.*
+**RATIFIED 2026-08-10 — the recommendation, verbatim:** **≥4 non-owner peers, ≥72 hours, zero
+operator actions on any participant's machine.** **Milestone-internal**, and
+`system_decomposition.md`'s M5 exit-test line now states it, because that is where the
+one-sentence version has lived since D9.
 
 **9. Does the velocity magnitude floor land in M5?**
 A38 reopened `contract-a.md` §12 item 7 at its original priority when D17 removed the one-way
@@ -1075,6 +1318,12 @@ Against: it is a **rate** question, and only a populated public map can answer i
 means shipping the floor in M5 means guessing the threshold. *Recommended: do not ship the
 floor; instrument it during the playtest so the threshold comes from a measurement, and accept
 Risk 8's cost for the duration.*
+**RATIFIED 2026-08-10 — the recommendation, verbatim.** The floor is **not built in M5**; it is
+**instrumented during the playtest**, and the measurement decides whether it is ever built.
+**Milestone-internal**: Contract Change 14 leaves the milestone, `contract-a.md` §12 item 7
+stays open across a public release with its cost accepted, and WP8 carries the instrumentation.
+D13's argument stands as the accepted price — if the measurement says build it, the change
+reaches people the owner cannot contact.
 
 ## What M5 does not do
 
@@ -1086,9 +1335,9 @@ spend the map's capacity on nothing is bounded by the published limits and by ev
 nothing else. That is the right level for a hobby map of evolving organisms, and it should be
 said rather than left to be assumed in either direction.
 
-**It does not deliver a control surface**, if Decision 2 goes the recommended way. The
-operator will be able to see everything and change almost nothing on a participant's world.
-Risk 9 is the sharpest example and the accepted cost is stated there.
+**It does not deliver a control surface.** Decision 2 is ratified and D23 puts the design in
+M6. The operator will be able to see everything and change almost nothing on a participant's
+world. Risk 9 is the sharpest example and the accepted cost is stated there.
 
 **It does not return a permanently rejected organism.** §13 item 2 stays parked, and the only
 change is that the operator it is held for may now be somebody the owner has never met.
@@ -1099,13 +1348,14 @@ that traffic provokes will be found by strangers running the mod, and finding th
 legitimate output of the playtest rather than a failure of it.
 
 **It does not do direct peer-to-peer transport.** That is M6: libp2p behind unchanged Contract
-B shapes, NAT traversal, peer discovery, gossip, lease-based slot claims, with the relay
-degrading to bootstrap and relay-of-last-resort. M5's credential design should be read with M6
-in view, because a per-peer secret issued by a relay is a different object from a peer
-identity that survives the relay's demotion.
+B shapes, NAT traversal, peer discovery, gossip, lease-based slot claims, the control surface
+(D23), and the relay degrading to bootstrap and relay-of-last-resort. M5's credential design
+should be read with M6 in view, because a per-peer secret issued by a relay is a different
+object from a peer identity that survives the relay's demotion.
 
-**It does not do the species catalog, corpses, pellets or eggs.** That is M7, and D6's
-graduation question is the one part of it Decision 3 may pull forward.
+**It does not do the species catalog, corpses, pellets or eggs.** That is M7 — except D6's
+graduation question, which Decision 3 **has** pulled forward: M5 answers it with the retention
+rule.
 
 **One numbering caveat, because the tree still contradicts itself.** D16 renumbered the
 milestones on 2026-08-05 and corrected `system_decomposition.md` throughout; the older
@@ -1120,8 +1370,11 @@ test and before M5 — and the work they belong to is already in the living depl
 
 ## Next Steps
 
-1. **Get Decisions 1, 2 and 9 ratified.** WP1 cannot start without the first, and the other
-   two change what WP1 writes.
+1. ~~**Get Decisions 1, 2 and 9 ratified.**~~ **DONE, 2026-08-10 — all nine, not three.**
+   WP1's gate is open: it writes `contract-b/4`, `contract-a/2.4`, D22's layered compatibility
+   statement and Contract Change 10a, and it does **not** write Contract Change 14. The
+   remaining input WP1 does not have is the payload answer D22 names — evidence or an envelope
+   marker — and finding out which is the first piece of research the milestone owes.
 2. **Write `m4_findings.md`.** **DONE, 2026-08-10.** M4 has no open deliverable left, and the
    baseline a public map will be compared against now exists in one place.
 3. **Keep the living deployment running, and treat it as M5's first participant.** Every

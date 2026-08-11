@@ -2504,16 +2504,22 @@ first.
 **Every item below is now placed.** `m5_considerations.md` (2026-08-09) opens the milestone
 and carries each one into a scope line, a work package, a contract change or an owner
 decision; its *Scope* section cites this list item by item, and its *Contract Changes Needed*
-table names the section of this document each amendment lands in. That document is **PROPOSED
-and ratifies nothing here**: no rule in this section changes, no field moves, and
-`contract-b/3.5` stands. §13 remains the authoritative statement of what is open; the other
-document says where it goes.
+table names the section of this document each amendment lands in. **Its nine owner decisions
+were ratified on 2026-08-10** — five as `system_decomposition.md` D21–D25, four as calls inside
+the milestone — and that **still changes nothing normative here**: no rule in this section
+changes, no field moves, and `contract-b/3.5` stands until the M5 amendment wave writes the
+next version. §13 remains the authoritative statement of what is open; the other document says
+where each item goes, and now also at which version it lands.
 
 1. **No TLS, and one shared token** (§3.1). The wire is plain HTTP on a LAN, so a genome, a
    peer id and the token itself are readable in transit, and any token holder can present any
    `peerId`. M5 brings TLS and per-peer credentials together, because splitting them produces
    a half-secured relay that reads as secured. **Unchanged from M3, and now one milestone
-   nearer.**
+   nearer.** **The version call is made — `contract-b/4`** (ratified 2026-08-10;
+   `system_decomposition.md` D21, `m5_considerations.md` decision 1). Replacing §3.1's rule is
+   not additive and there is an installed base, so the pair lands on a **major**, taken before
+   strangers run the build. Nothing in this section moves until that wave writes it; the
+   credential binds to the `peerId`, and §3.2's `4006` eviction will require it.
 2. **A permanently rejected inbound organism is held, never returned** (§9.4). A safe
    two-phase return needs one more message pair. It stays parked while "held for an operator"
    remains an honest answer.
@@ -2571,7 +2577,11 @@ document says where it goes.
    authenticated admin path (item 5), ordering and idempotency for a write that races a world
    load, and an audit trail. **Reversing `CONFIG_UPDATE` or making a stats field writable is
    not the cheap version of that work; it is the same work with the questions skipped**
-   (`contract-a.md` §19, A43).
+   (`contract-a.md` §19, A43). **"Later" now has a milestone: M6** (ratified 2026-08-10;
+   `system_decomposition.md` D23). M5 supplies items 1, 4 and 5 — the three blockers — and
+   still does not build the surface, and the accepted cost is stated as
+   `m5_considerations.md` Risk 9: an operator can read a peer's `timeScale` (§18, B16)
+   throughout the public release and can do nothing about it.
 
 ---
 

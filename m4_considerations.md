@@ -1320,9 +1320,10 @@ steps below carry the milestone's remainder into the living deployment and into 
    rule across the LAN. Phase 5 already proves the rule locally, so this is confirmation.
 5. **Preserve the T1 journals and the harvested BepInEx logs.** Part 6 has no other input.
 6. **Open M5** (public release). **DONE, 2026-08-09: `m5_considerations.md`** is the design
-   pass that opens it, and it is PROPOSED — nine owner decisions are open and nothing in it
-   is ratified, starting with the one that gates its first work package. The join kit is its
-   starting point, and the wire shapes it publishes are whatever the contracts say at the
-   time — **`contract-a/2.3` plus `contract-b/3.5` as of 2026-08-07**, after the census, D17's
-   two-way lanes and §19's world settings. Read the contracts for the current pair rather
-   than this line.
+   pass that opens it, and its **nine owner decisions were ratified on 2026-08-10** — five as
+   `system_decomposition.md` D21–D25, four as calls inside the milestone — so the decision that
+   gated its first work package is made. The join kit is its starting point, and the wire it
+   starts from is whatever the contracts say at the time — **`contract-a/2.3` plus
+   `contract-b/3.5` as of 2026-08-07**, after the census, D17's two-way lanes and §19's world
+   settings; D21 then takes it to `contract-b/4` inside the milestone. Read the contracts for
+   the current pair rather than this line.
