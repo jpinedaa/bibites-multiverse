@@ -906,7 +906,8 @@ which took the map to **24** lanes, and through two host reboots. Full result in
 are in `dev_environment.md`, *The living deployment*.
 
 ### M5 — Public release — **NEXT**
-**Opened 2026-08-09. Full plan: `m5_considerations.md`** — its nine owner decisions were
+**Opened 2026-08-09. Full plan: `m5_considerations.md`. Execution state: `m5_tracking.md`** —
+its nine owner decisions were
 **ratified on 2026-08-10**, five of them as D21–D25 above and four as calls inside the
 milestone. The scope it infers beyond the contracts' own M5 lists is still inferred, and the
 work packages are still unstarted.

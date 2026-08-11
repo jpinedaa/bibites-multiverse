@@ -2,6 +2,10 @@
 
 This report expands milestone M5 of `system_decomposition.md`.
 
+**Execution state: `m5_tracking.md`** — work-package status, the recommended order, the
+orchestration protocol and the live-rig constraints. The design lives here; what is done
+against it lives there.
+
 **Status: the nine decisions are RATIFIED, 2026-08-10. Everything else here is still a design
 pass.** M4 is complete and its rig runs on as the living deployment. This document opened M5
 on 2026-08-09, written before any work started and before the owner had signed anything, and
