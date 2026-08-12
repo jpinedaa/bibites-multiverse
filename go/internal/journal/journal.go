@@ -176,6 +176,31 @@ type State struct {
 	// only when its relaySessionId equals this one (§5.2): a link flap keeps the
 	// id and keeps the proof; a relay restart changes it and the sender holds.
 	RelaySessionID string `json:"relaySessionId,omitempty"`
+	// ForwardReceipts is how many FORWARD_RECEIPTs this sender has recorded for
+	// this migration (contract-b-m4.md §6.12, §22 B26). ONE FORWARD, ONE
+	// RECEIPT, so two under one migrationId means this sender forwarded twice —
+	// a fact about its own retries, never a duplicated organism, because the
+	// migrationId is preserved and the destination deduplicates (§6.6).
+	//
+	// It is DURABLE for the reason B26 exists: the relay's forwarding record is
+	// in memory and dies with the process, and the whole point of the receipt is
+	// that the fact moves into the sender's own journal, where D2 keeps custody.
+	// A sidecar that held it in memory would have bought nothing.
+	ForwardReceipts int `json:"forwardReceipts,omitempty"`
+	// ReceiptSessionID, ReceiptDestSlot and ReceiptForwardedAtMs are the LAST
+	// receipt's three fields. The session is the load-bearing one: a receipt is a
+	// statement about ONE relay session (§5.2), and comparing it against a relay
+	// NACK's session is what makes ForwardedUnder a contradiction test rather
+	// than a hint.
+	ReceiptSessionID string `json:"receiptSessionId,omitempty"`
+	// ReceiptDestSlot is the slot the relay wrote to, echoed on the receipt so a
+	// sender that re-routed can tell two attempts apart (§6.12).
+	ReceiptDestSlot int `json:"receiptDestSlot,omitempty"`
+	// ReceiptForwardedAtMs is the RELAY's clock at the write. Informational (D5)
+	// and kept for the operator's report only: no rule compares it with anything,
+	// because a correctness decision on another machine's clock is what the
+	// session id exists to avoid.
+	ReceiptForwardedAtMs int64 `json:"receiptForwardedAt,omitempty"`
 	// AccruedHoldMs is ACCRUED dark time, not a deadline. A wall-clock deadline
 	// cannot express a clock that stops, so the entry carries the accrual
 	// instead — a restart cannot lose time already served, and cannot invent
@@ -200,6 +225,26 @@ type State struct {
 func (s *State) Clone() *State {
 	c := *s
 	return &c
+}
+
+// ForwardedUnder reports whether this entry holds a FORWARD_RECEIPT issued under
+// session — that is, whether THIS SENDER'S OWN JOURNAL says the relay wrote this
+// migration's bytes to a socket during that session (contract-b-m4.md §6.12,
+// §22 B26).
+//
+// IT IS EVIDENCE IN EXACTLY ONE DIRECTION. True means the frame WAS forwarded.
+// False means nothing at all: a receipt that was never sent, was dropped from a
+// full outbound queue, or was lost with the session is indistinguishable from a
+// forward that never happened, and §9.2 gained the row that says so — A MISSING
+// RECEIPT IS SILENCE, AND SILENCE IS NEVER PROOF IN THIS CONTRACT.
+//
+// Its ONE caller is the sender's answer to a relay-generated
+// `neverForwarded: true`, and the direction it can push that answer is toward
+// HOLDING and never toward re-routing (B26's *It changes no safety rule* row).
+// An empty session matches nothing, because "no session" is not a session two
+// statements can be about.
+func (s *State) ForwardedUnder(session string) bool {
+	return s.ForwardReceipts > 0 && session != "" && s.ReceiptSessionID == session
 }
 
 type record struct {
@@ -227,6 +272,16 @@ type record struct {
 	RerouteProof   *string  `json:"rerouteProof,omitempty"`
 	RerouteAtMs    *int64   `json:"rerouteAtMs,omitempty"`
 	BouncedTimeout *bool    `json:"bouncedTimeout,omitempty"`
+
+	// B26's four. The COUNT is written absolute rather than as an increment,
+	// which is what makes a record idempotent under both of the ways this log is
+	// read: replay applies every line once, and a compaction rewrites the live
+	// state as one status record. An increment would be correct for the first
+	// and a lie for the second.
+	ForwardReceipts      *int    `json:"forwardReceipts,omitempty"`
+	ReceiptSessionID     *string `json:"receiptSessionId,omitempty"`
+	ReceiptDestSlot      *int    `json:"receiptDestSlot,omitempty"`
+	ReceiptForwardedAtMs *int64  `json:"receiptForwardedAt,omitempty"`
 }
 
 const (
@@ -523,6 +578,18 @@ func (j *Journal) apply(rec record) {
 		if rec.BouncedTimeout != nil {
 			st.BouncedTimeout = *rec.BouncedTimeout
 		}
+		if rec.ForwardReceipts != nil {
+			st.ForwardReceipts = *rec.ForwardReceipts
+		}
+		if rec.ReceiptSessionID != nil {
+			st.ReceiptSessionID = *rec.ReceiptSessionID
+		}
+		if rec.ReceiptDestSlot != nil {
+			st.ReceiptDestSlot = *rec.ReceiptDestSlot
+		}
+		if rec.ReceiptForwardedAtMs != nil {
+			st.ReceiptForwardedAtMs = *rec.ReceiptForwardedAtMs
+		}
 		if st.Status == StatusDone {
 			// A tombstone keeps the identity and drops the bytes.
 			st.Entry.Payload = ""
@@ -651,6 +718,15 @@ func (j *Journal) compact() error {
 		}
 		if st.RelaySessionID != "" {
 			status.RelaySessionID = strPtr(st.RelaySessionID)
+		}
+		// B26's block survives a compaction, and it has to: a compaction is
+		// routine (journalCompactMinutes, §20 B20) and an entry that lost its
+		// receipt to one would have lost the evidence B26 exists to make durable.
+		if st.ForwardReceipts > 0 {
+			status.ForwardReceipts = intPtr(st.ForwardReceipts)
+			status.ReceiptSessionID = strPtr(st.ReceiptSessionID)
+			status.ReceiptDestSlot = intPtr(st.ReceiptDestSlot)
+			status.ReceiptForwardedAtMs = int64Ptr(st.ReceiptForwardedAtMs)
 		}
 		if st.CompletedAt != 0 {
 			status.CompletedAt = int64Ptr(st.CompletedAt)
@@ -805,6 +881,13 @@ type Update struct {
 	RerouteProof   *string
 	RerouteAtMs    *int64
 	BouncedTimeout *bool
+	// The FORWARD_RECEIPT block (§6.12, §22 B26). ForwardReceipts is the new
+	// ABSOLUTE count, not a delta; the caller reads the current one and writes
+	// count+1, so a replayed record can never double-count a forward.
+	ForwardReceipts      *int
+	ReceiptSessionID     *string
+	ReceiptDestSlot      *int
+	ReceiptForwardedAtMs *int64
 }
 
 // Apply durably records u against migrationID.
@@ -823,7 +906,9 @@ func (j *Journal) Apply(migrationID string, u Update) (*State, error) {
 		Note: u.Note, RelaySessionID: u.RelaySessionID, AccruedHoldMs: u.AccruedHoldMs,
 		DestSlot: u.DestSlot, RerouteCount: u.RerouteCount, RerouteFrom: u.RerouteFrom,
 		RerouteProof: u.RerouteProof, RerouteAtMs: u.RerouteAtMs,
-		BouncedTimeout: u.BouncedTimeout}
+		BouncedTimeout: u.BouncedTimeout, ForwardReceipts: u.ForwardReceipts,
+		ReceiptSessionID: u.ReceiptSessionID, ReceiptDestSlot: u.ReceiptDestSlot,
+		ReceiptForwardedAtMs: u.ReceiptForwardedAtMs}
 	if u.Handoff != "" {
 		h := u.Handoff
 		rec.Handoff = &h

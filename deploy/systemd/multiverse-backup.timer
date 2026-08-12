@@ -1,0 +1,17 @@
+[Unit]
+Description=Back up ring.json, peers.json and the archive's durable files, hourly
+Documentation=file:///opt/multiverse/deploy/backup.sh
+
+[Timer]
+OnCalendar=hourly
+# The identity tier is kilobytes and runs every hour. The heavy tier runs once a
+# day, inside the run that lands in MV_BACKUP_DAILY_HOUR — the script decides,
+# not the timer, so a missed hour does not skip a day.
+RandomizedDelaySec=300
+AccuracySec=1min
+# A box that was off through an hour still takes that hour's snapshot when it
+# comes back, because the identity files are the ones with no other copy.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

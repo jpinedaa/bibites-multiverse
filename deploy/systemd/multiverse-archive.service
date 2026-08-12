@@ -1,0 +1,70 @@
+[Unit]
+Description=Bibites Multiverse archive (Contract B subscriber, status page)
+Documentation=file:///opt/multiverse/deploy/RESTART-POLICY.md
+After=network-online.target multiverse-relay.service
+# Wants, NOT Requires. The archive retries its subscription on its own ladder, so
+# it should keep trying while the relay is down rather than be stopped with it —
+# and a relay restart must not cost an archive replay, which is the expensive one.
+Wants=network-online.target multiverse-relay.service
+StartLimitIntervalSec=600
+StartLimitBurst=6
+
+[Service]
+Type=simple
+User=multiverse
+Group=multiverse
+WorkingDirectory=/var/lib/multiverse
+
+EnvironmentFile=/etc/multiverse/archive.env
+ExecStart=/opt/multiverse/bin/multiverse-archive
+
+Restart=always
+# Longer than the relay's: a restart loop here replays the whole ledger each
+# time, and a tight loop would be a self-inflicted denial of service on a box
+# with two vCPUs.
+RestartSec=15s
+# The archive's own shutdown gives itself 5 s and then warns. This leaves room
+# for a flush without letting a wedged process hold the boot.
+TimeoutStopSec=45
+
+NoNewPrivileges=true
+
+# The archive is the process that may legitimately want gigabytes: ~0.30 KB
+# resident per ledger record and ~1.30 KB peak during replay. Under pressure it
+# is the one to lose — losing it costs a ledger gap, losing the relay costs the
+# map.
+OOMScoreAdjust=+200
+# THERE IS NO MemoryMax HERE, AND THAT IS DELIBERATE. A hard cap kills the
+# replay, and the replay is the one thing that must not fail. provision.sh writes
+# a MemoryHigh drop-in when deploy.env sets one: MemoryHigh throttles and
+# reclaims, it does not kill.
+#
+# The replay also saturates a core while it runs. On a two-vCPU box that is the
+# whole machine, so it yields to the relay rather than competing with it.
+Nice=5
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# migrations.jsonl, metrics.jsonl, genomes/ and the rotated log.
+ReadWritePaths=/var/lib/multiverse/archive /var/log/multiverse
+
+[Install]
+WantedBy=multi-user.target

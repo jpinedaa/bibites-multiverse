@@ -1,0 +1,76 @@
+[Unit]
+# m5_considerations.md, Design Question 2, first item: "The relay and the archive
+# restart on exit and start on boot. This is the smallest item on the list and
+# the one whose absence is most embarrassing."
+Description=Bibites Multiverse relay (Contract B)
+Documentation=file:///opt/multiverse/deploy/RESTART-POLICY.md
+After=network-online.target
+Wants=network-online.target
+# Ten restarts in five minutes before systemd gives up. A relay that crash-loops
+# faster than that is not going to be fixed by an eleventh try, and monitor.sh's
+# unit check is what turns "systemd gave up" into a message to a person. There is
+# deliberately no auto-heal beyond this: a service that hides its own failure
+# from the operator is worse than one that stops.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=multiverse
+Group=multiverse
+WorkingDirectory=/var/lib/multiverse
+
+# EVERY argument is an environment variable. Both processes give each knob a flag
+# AND an env var on purpose — "the rig sets one way and a service unit sets the
+# other" — so ExecStart carries nothing and retuning a limit is one file plus one
+# restart, never a unit edit.
+EnvironmentFile=/etc/multiverse/relay.env
+ExecStart=/opt/multiverse/bin/multiverse-relay
+
+Restart=always
+RestartSec=5s
+TimeoutStopSec=20
+
+# Port 443 without root. The capability is granted to the process by systemd
+# rather than stamped on the file with setcap, because a setcap bit is lost the
+# moment the binary is replaced by an upgrade — which is exactly when nobody
+# would think to re-apply it.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+
+# The relay is the map. Under memory pressure the kernel should take the archive,
+# which restarts into a replay, before it takes the process every participant is
+# connected to.
+OOMScoreAdjust=-500
+# 93 MB resident and flat at eleven times a real map's rate. This is a tripwire,
+# not a budget: if the relay ever approaches it, something has changed that an
+# operator needs to know about.
+MemoryMax=512M
+LimitNOFILE=65535
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# ring.json, peers.json and the rotated log are the only things it may write.
+ReadWritePaths=/var/lib/multiverse/relay /var/log/multiverse
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=Run the Bibites Multiverse service checks every five minutes
+Documentation=file:///opt/multiverse/deploy/monitor.sh
+
+[Timer]
+# Late enough after boot that the archive's replay is not reported as an outage.
+OnBootSec=5min
+OnUnitActiveSec=5min
+# Five minutes is the resolution of every "how long was it down" answer this
+# service can give. It is chosen against MV_STATUS_AGE_WARN_MS (two minutes) so
+# that a quiet map is caught on the first or second tick.
+RandomizedDelaySec=30
+AccuracySec=30
+Persistent=false
+
+[Install]
+WantedBy=timers.target

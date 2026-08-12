@@ -25,10 +25,16 @@ options:
    4.5% of one core. The archive's *steady state* is cheap too. But its startup replay wants
    **1.3 KB of RAM per ledger record**, and DQ2's whole argument is that on a hosted service
    restarts stop being rare. At the exit-test bar over the full three months that is a
-   **28 GB** replay on today's implementation.
+   **28 GB** replay on today's implementation. Measured since **[rig experiment, 2026-08-12]**:
+   `GOMEMLIMIT` takes about a third off that peak for no measurable wall clock and is worth
+   setting on any instance bought, but it does not reach day 90 —
+   **the ledger is materialised in memory before it is applied, and streaming it instead takes
+   5.6–7.0× off the peak for about 80 lines of one package.**
 2. **The status page is the largest single egress term**, and it is bigger than the game
-   traffic. It serves ~20 KB every 2 s and ~49 KB every 1.5 s, **uncompressed**, per open
-   browser tab. That is ~3.7 GB/day/tab at this rig's rate.
+   traffic. It serves ~20 KB every 2 s and ~49 KB every 1.5 s, **uncompressed as measured**, per
+   open browser tab. That is ~3.7 GB/day/tab at this rig's rate. Gzip negotiation has since been
+   implemented **[implemented 2026-08-12]** and takes effect at the archive's next restart, which
+   is what turns ~32 GB/month/tab into ~4 GB.
 3. **The Bibites has a free, native Linux build on itch.io at exactly the version this rig
    runs.** That removes Steam, Wine and the Windows licence premium from the spot-simulation
    idea's critical path, and takes a cloud world from roughly $90/month to roughly $30.
@@ -37,11 +43,12 @@ options:
 
 ## How to read the numbers
 
-Four provenance classes, used consistently below.
+Five provenance classes, used consistently below.
 
 | Tag | Means |
 |---|---|
 | **[rig]** | Measured on the living deployment, by this pass, on **2026-08-11 ~22:10Z**. Reproducible; the command is named where it is not obvious. |
+| **[rig experiment, date]** | Measured by a run made **for** this document against a **copy** of the deployment's data in a scratch directory — never against the deployment itself, and never writing to it. One so far: the replay-memory matrix of 2026-08-12 in *The term nobody has priced*. |
 | **[record]** | Quoted from the project's own record — `dev_environment.md`, `m5_considerations.md`, the contracts. Cited by section. |
 | **[web, date]** | Fetched from a vendor page or a search result on the stated date. Vendor prices move; every one of these needs re-checking at the moment of purchase. |
 | **[training]** | Carried from model training knowledge, not verified by search this pass. Treat as a lead, not a price. |
@@ -78,7 +85,7 @@ because the model it feeds is what makes a stranger's map costable at all.
 | `/api/hops` | **49,307 B**, gzip 6,562 (**7.5×**) | same |
 | `/api/species` | **7,323 B**, gzip 1,451 (5.0×) | same |
 | Poll cadence | status **2,000 ms**, hops **1,500 ms**, history 60,000 ms | `go/internal/archive/page.go:2749–2755` |
-| Compression on the wire | **none** — a request with `Accept-Encoding: gzip` returns the identical byte count | `curl -H 'Accept-Encoding: gzip'` |
+| Compression on the wire | **none as measured** — a request with `Accept-Encoding: gzip` returned the identical byte count. Answered since: gzip negotiation landed 2026-08-12 and takes effect at the archive's next restart (see *the status page*, below) | `curl -H 'Accept-Encoding: gzip'` |
 | Binaries | `relay` 10.5 MB, `archive` 10.6 MB, **statically linked ELF, no cgo** | `file bin/relay bin/archive` |
 
 Two of these are worth pausing on. The relay is a **single static binary with one non-stdlib
@@ -170,9 +177,14 @@ This is the finding that changes the recommendation.
 | Archive resident, 7.43 M records, 2026-08-11 **[rig]** | 2.26 GB | **0.30 KB** |
 | Replay high-water, 3.70 M records, 2026-08-10 **[record]** | 5.2 GB | 1.41 KB |
 | Replay high-water, ~6.4 M records, 2026-08-11 **[rig]** | 8.24 GB | **1.30 KB** |
+| Replay high-water, 8.16 M records, 2026-08-12 **[rig experiment, 2026-08-12]** | 8.40–10.49 GB | **1.03–1.29 KB** |
 
-Two independent pairs, twelve-fold apart in scale, both linear. The model:
-**0.30 KB resident per record, 1.30 KB peak during replay.**
+Two independent pairs, twelve-fold apart in scale, both linear, **and the fourth row has since been
+reproduced directly**: three replays of a copy of today's ledger peaked between 1.03 and 1.29 KB per
+record, with the model's 1.30 at the top of the range. The model stands:
+**0.30 KB resident per record, 1.30 KB peak during replay** — and *sizing must use the top of that
+range*, because the spread is not noise in the measurement, it is the collector choosing a different
+heap goal on each run (see the matrix below).
 
 Applied to the sizing table, at the exit-test bar (S = 5, 242,000 records/day):
 
@@ -187,29 +199,113 @@ Applied to the sizing table, at the exit-test bar (S = 5, 242,000 records/day):
 Replay time comes from the documented rate of **~40,000 records/s on this host** **[record]**, and
 `dev_environment.md` is emphatic that every recorded replay figure expires the day after it is
 written — size it from `wc -l` on the day, never from a quotation. On a smaller cloud vCPU it will
-be slower than 40,000/s, not faster.
+be slower than 40,000/s, not faster. The rate has since been measured again on 8.16 M records:
+**36,900–48,600 records/s**, the low end being a run whose genome-store metadata was still cold.
+A fresh cloud instance is always the cold case.
 
-**Three honest things follow.**
+**One denominator warning before any of this is re-derived.** `/api/status`'s `ledgerRecords` is
+**not** `wc -l` on the ledger: `RecordGenome` lines are appended without incrementing the counter
+(`go/internal/archive/archive.go:1219` against the three `recordCount++` sites), so the counter
+drifts below the file from every restart onward — 8,060,891 against 8,156,869 lines on 2026-08-12,
+1.2% low **[rig experiment, 2026-08-12]**. Every per-record figure here is denominated in **lines
+actually replayed**, which is what the memory is spent on.
+
+#### The measured answer: `GOMEMLIMIT` works, and it is not the fix
+
+**[rig experiment, 2026-08-12.]** A copy of the deployment's `migrations.jsonl` — 2,726,784,283
+bytes, **8,156,868 records replayed** — taken at 08:13Z into a scratch directory and replayed there
+by an archive built from `HEAD`, with the genome store read through a symlink, no relay to dial and
+the status page on a scratch port. `nice -n 19`, one run at a time, page cache warm unless noted.
+The deployment was read and never written; it kept running throughout.
+
+| Setting | Runs | Replay wall | Peak RSS (`VmHWM`) | Peak per record | CPU spent replaying | RSS 3 min later |
+|---|---|---|---|---|---|---|
+| **no `GOMEMLIMIT`** — what the deployment does today | 3 | 168–221 s | **8.40–10.49 GB** | 1,030–1,286 B | 196–256 s (**1.16 cores**) | 5.3–6.4 GB |
+| `GOMEMLIMIT=5GiB` — about 2× the retained set | 3 | 173–200 s | **5.88–6.30 GB** | 721–772 B | 255–300 s (1.4–1.5 cores) | 4.4–4.6 GB |
+| `GOMEMLIMIT=4GiB` — about 1.5× | 1 | 283 s | 5.80 GB | 711 B | **1,408 s (4.97 cores)** | 2.3 GB |
+| `GOMEMLIMIT=3GiB` — aggressive | 1 | **403 s** | 4.90 GB | 600 B | **2,534 s (6.28 cores)** | 2.1 GB |
+| **a streaming replay**, no `GOMEMLIMIT` | 2 | 189–201 s | **1.50 GB** | **184 B** | 258–271 s (1.35 cores) | 1.3–1.4 GB |
+
+**Six things follow, in the order they matter.**
+
+1. **`GOMEMLIMIT` is real and it should be set.** At 5 GiB it turns a peak that wandered between
+   **8.40 and 10.49 GB** across three runs of the identical file into one that sat between **5.88
+   and 6.30 GB** — a 25–44% cut depending on which pair is compared, and, more usefully, a
+   *predictable* number, since an unpredictable peak has to be sized against its worst case anyway.
+   It cost **no measurable wall clock** (−9% to +14% across matched pairs, inside this host's
+   run-to-run noise) and **17–39% more CPU**. That is a good trade on any machine and it is one line
+   in a service unit.
+2. **It does not reach day 90.** 772 B/record × 21.8 M records is **16.8 GB**. The $44 bundle has 8.
+3. **Below ~2× the retained set the trade turns ruinous, in exactly the resource a cheap instance
+   has least of.** 4 GiB bought a 1.4% better peak for **7× the CPU**; 3 GiB bought 17% for **13×**.
+   Those runs demanded 5–6.3 cores, which a 16-core host absorbs in parallel and a **2-vCPU bundle
+   cannot**: 1,408 CPU-seconds is **≥ 12 minutes** of wall clock on two vCPUs and 2,534 is **≥ 21**,
+   against about three today. The archive serves nothing for every second of it. At 5 GiB the CPU
+   still fits inside two vCPUs (1.5 cores), so the winner is *the loosest limit that helps*, not the
+   tightest one that fits.
+4. **There is a floor, and no collector setting goes under it.** The most aggressive run that
+   completed still peaked at 4.90 GB — **600 B/record, 3.6× the state the replay retains** — because
+   `ReadLedger` (`go/internal/archive/store.go:339`) materialises the **entire ledger as one
+   `[]Record`** and `New` walks the slice afterwards. The whole file is live at once by
+   construction, so there is nothing for a collector to reclaim.
+5. **The floor is a shape, not a size, and the shape is cheap to change.** A prototype that streams
+   the replay — `ScanLedger(dir, func(Record))`, with `New`'s existing loop body as the callback —
+   peaked at **1.50 GB, 184 B/record — 5.6× lower than the baseline run of the identical build, and
+   7.0× lower than the worst baseline seen — and about 1.1× the state it retains**, with
+   no `GOMEMLIMIT` at all. Both streaming runs peaked within 0.3% of each other, against the
+   baseline's 25% spread: a small heap is a predictable one. It replayed the same 8,156,868 records
+   through the same code that applies them, left the same aggregates, and
+   passed the archive package's tests unchanged; it is about 80 lines across two functions in one
+   package and changes no contract, no wire type and no file format. **This, not `GOMEMLIMIT`, is
+   the answer to the $96 question.** *(Measured on a patched build in a scratch tree. It is not in
+   `bin/`, not committed, and nobody has yet written a test that pins the streaming path itself.)*
+6. **Swap is not an alternative, and the peak is not a spike.** RSS stayed within 0.1% of its
+   high-water mark for **150 seconds after the replay ended** before Go's scavenger returned
+   anything. A box that meets its peak in swap is thrashing a live heap that the collector is
+   walking, for minutes.
+
+**What each answer buys**, at the exit-test bar (S = 5, 242,000 records/day, from an empty ledger on
+day one). The day is when the *replay* stops fitting; resident is the separate line above:
+
+| Replay implementation | Peak/record | Day-90 peak | 2 GB | 4 GB | 8 GB |
+|---|---|---|---|---|---|
+| today's, no `GOMEMLIMIT` | 1,286 B | **28.0 GB** | day 6 | day 13 | **day 26** |
+| today's, `GOMEMLIMIT=5GiB` | 772 B | 16.8 GB | day 11 | day 21 | **day 43** |
+| today's, `GOMEMLIMIT` at the floor, at 5–6 cores | 600 B | 13.1 GB | day 14 | day 28 | day 55 |
+| **streaming replay** | 184 B | **4.0 GB** | day 45 | day 90 | **day 180** |
+
+**Read the last row against the resident line and the whole shape of the problem changes.** With a
+streaming replay the replay stops being the binding constraint at all: resident crosses 8 GB at day
+110 and the replay would not cross it until day 180, so **the $44 bundle becomes restartable for the
+entire announced period** — and it is the *retention rule*, not the collector, that decides
+everything again. Note also that the streaming build's retained set right after replay was
+**0.16 KB/record**, half the 0.30 KB the deployment shows: part of what the running archive holds is
+its own replay, which it never fully gives back. That halving is **not** claimed as a resident
+model — no streamed archive has yet served live traffic for a day — so keep sizing resident from the
+deployment's own 0.30 KB/record until one has.
+
+**Three things still follow, and the third is still the biggest.**
 
 - **Steady state is not the constraint.** 0.045 cores for the relay and 0.18 for the archive, at
   eleven times a real map's rate, means the *running* map fits on almost anything.
-- **~77% of the replay peak is garbage, not state** — 1.30 KB peak against 0.30 KB retained. Go's
-  collector is not being asked to run during a tight replay loop. **`GOMEMLIMIT` is a
-  one-environment-variable lever that has never been tried here**, and trying it costs one rig run
-  against a copy of today's ledger. This is the cheapest experiment in the document and it should
-  happen before any instance is bought. It is *not* a certainty: trading RSS for GC CPU could turn
-  a 9-minute replay into a 25-minute one, and the archive serves nothing until it finishes.
+- **~77% of the replay peak is garbage, not state** — the measurement that says so is above. Go's
+  collector is not being asked to run during a tight replay loop, and when it is asked, it collects
+  what it can and then hits the ledger-sized slice it cannot.
 - **Decision 3 is the instance-sizing decision.** Retained memory grows forever at 0.30 KB/record
   because nothing may evict from the ledger (`contract-b-m4.md` §10). A retention rule that bounds
   the ledger — any of the three options Decision 3 names — puts the whole service on a 2 GB box.
-  *Keep everything* puts it on an 8 GB box that cannot restart in month three without
-  `GOMEMLIMIT`, swap, or both. **The gap between those two is about $96 over the period, and it is
-  the difference between a service that restarts and one that does not.**
+  *Keep everything* puts it on an 8 GB box that **cannot restart in month three on today's
+  implementation, and `GOMEMLIMIT` alone does not change that** — it moves the wall from day 26 to
+  day 43. **The gap between those two is about $96 over the period, and it is the difference between
+  a service that restarts and one that does not** — but the measurement has now added a third
+  option that costs neither: fix the replay's shape and the $44 bundle carries *keep everything* for
+  the whole run.
 
 ### The other term nobody has priced: the status page
 
 `/api/status` is 19.7 KB and refreshes every 2 s; `/api/hops` is 49.3 KB and refreshes every 1.5 s;
-**neither is compressed** **[rig]**. Per continuously open browser tab, at this rig's rate:
+**neither was compressed when this was measured** **[rig]** — see *Compression: done*, below. Per
+continuously open browser tab, at this rig's rate:
 
 > 19.7 KB / 2 s + 49.3 KB / 1.5 s ≈ **43 KB/s = 3.7 GB/day = ~111 GB/month, per tab.**
 
@@ -223,11 +319,26 @@ That is **more than half the entire migration traffic of the map** (54 GB/month 
 by one person leaving a browser tab open. Five curious strangers doing the same triples the
 service's egress, and none of it is game traffic.
 
-**Two cheap answers, both outside this document's authority to take.** Serving the three JSON
-endpoints gzipped cuts them **8.7×, 7.5× and 5.0×** as measured — that is one handler wrapper.
-Lengthening the two poll intervals would cut it proportionally and would change what the page
-feels like, which is a design question the page's owner should answer, not this document. **The
-measurement is offered; the change belongs to whoever owns `page.go`.**
+**Two cheap answers. The first has been taken; the second is still the page owner's.**
+
+**Compression: done** **[implemented 2026-08-12]**. `go/internal/archive/compress.go` wraps the
+whole operator mux in standard `Accept-Encoding` negotiation — the five JSON endpoints and the page
+itself. A client that asks for gzip gets it; a client that says nothing gets the identical bytes it
+always got; `Vary: Accept-Encoding` is on both, nothing is encoded twice, and an answer under one
+packet is left alone. On a six-slot fixture the status frame compresses **10.2×**, which is the
+same shape as the **8.7×** measured here with `gzip -9`, and the page's own **138 KB** first load
+falls to **45 KB** — a term this section had not counted at all. It is transport and nothing else:
+no payload changed shape, no interval moved, and no existing reader had to change. `curl` sends no
+`Accept-Encoding`, so every shell probe in `e2e/` keeps parsing the identity bytes it always did;
+`ringstat` is Go, and `net/http` asks and decompresses on its own behalf, so the terminal tool takes
+the saving for free. **It is not on the wire yet** — it rides the archive's next restart and joins
+the debt `m5_tracking.md` already holds against that restart (WP4's deny-list flag and the `limits`
+key on `/api/status`). An archive restart is expensive and its cost grows with the ledger, so the
+rule there stands: batch the reasons, never restart to collect one.
+
+**Cadence: still open, and still not this document's.** Lengthening the two poll intervals would
+cut what is left proportionally and would change what the page feels like. **The measurement is
+offered; that change belongs to whoever owns `page.go`.**
 
 Note also that this is the same page `m5_tracking.md` records as **never having been reachable by
 anyone but the owner** — the `8796` firewall rule and portproxy have no record of being run. WP3
@@ -286,15 +397,29 @@ Monthly, at the exit-test bar (S = 5, six slots):
 | Flow | Monthly | Notes |
 |---|---|---|
 | Migration forwards out of the relay | **54 GB** | 357 MB/day × S; ingress is free on both clouds |
-| Status page | **32 GB per continuously open tab** | uncompressed; ~4 GB gzipped |
+| Status page | **32 GB per continuously open tab** | uncompressed; **~4 GB gzipped**, which is what it becomes at the archive's next restart **[implemented 2026-08-12]** |
 | Genome fetches served through the relay | **up to 92 GB** | ceiling is `genomeRequestsPerMinute` 30/peer × 14.2 KB; observed far below |
+| `FORWARD_RECEIPT`, one per forward | **0.97 GB** | **287 B measured**, × 22,600 crossings/day × S. B26's whole egress cost, and **1.8% of the forward term it rides beside** **[measured 2026-08-12]** |
 | `PEER_STATUS` broadcasts | negligible | 43.9/min after WP5's coalescing window **[record]**, small frames |
-| ACKs, receipts, heartbeats | negligible | a few hundred bytes each |
-| **Realistic budget** | **90–150 GB/month** | tail risk to ~250 GB if the genome pump ever drains |
+| ACKs, `PONG`s, save receipts | negligible | a few hundred bytes each |
+| **Realistic budget** | **90–150 GB/month** | tail risk to ~250 GB if the genome pump ever drains; the receipt row sits inside this band and does not move it |
 
 **This is small by cloud standards and awkward by cloud pricing.** It sits just above AWS's 100 GB
 free allowance and far above GCP Premium Tier's 1 GiB, which is exactly the band where the pricing
 model matters more than the volume.
+
+**The receipt row is a measurement, not an estimate, and that was WP3's job.** B26 declined to
+assume its own cost away and handed the arithmetic here (`contract-b-m4.md` §5.2; DQ2). The
+harness — `go/internal/relay/receipt_cost_test.go`, 2 000 migrations through an in-process relay
+at 15.8 KB a crossing — measures **287 B per receipt**, **relay-written frames per migration 2 → 3**
+(forward + ack + receipt) with relay-*read* frames unchanged at 2, and **1.3% marginal CPU** on the
+forward path, which is dominated by the JSON decode of the 15.8 KB frame it acknowledges. Three
+properties keep the row this small and all three are contract, not luck: the frame is four fields
+with no body, it is **not copied to subscribers** (§5.1's fan-out set is unchanged), and it enters
+**no** §3.3 ceiling, because every published limit counts the relay's *inbound* path. The term the
+egress table cannot show is the **sender's**: one journal `Apply` — an appended ~221 B record and an
+fsync — per forwarded migration, taking the outbound path from 3 durable writes to 4. That is disk
+and latency on a participant's own machine, not egress on the hoster's bill.
 
 ### TLS, DNS, and what the name costs to change later
 
@@ -339,9 +464,9 @@ for a modest run.
 
 | # | Option | Compute (3 mo) | Disk (3 mo) | IPv4 (3 mo) | Egress (3 mo) | **3-month total** | RAM verdict |
 |---|---|---|---|---|---|---|---|
-| 1 | **Lightsail $12** — 2 vCPU, 2 GB, 60 GB SSD, 3 TB transfer | $36.00 | incl. | incl. | incl. | **$36.00** — or **$0** on the 90-day trial | 2 GB: archive resident crosses it at **day 28** |
-| 2 | **Lightsail $24** — 2 vCPU, 4 GB, 80 GB SSD, 4 TB | $72.00 | incl. | incl. | incl. | **$72.00** | 4 GB: crossed at **day 55** |
-| 3 | **Lightsail $44** — 2 vCPU, 8 GB, 160 GB SSD, 5 TB | $132.00 | incl. | incl. | incl. | **$132.00** | 8 GB: survives 90 days resident; **cannot replay after ~day 26** without `GOMEMLIMIT` or swap |
+| 1 | **Lightsail $12** — 2 vCPU, 2 GB, 60 GB SSD, 3 TB transfer | $36.00 | incl. | incl. | incl. | **$36.00** — or **$0** on the 90-day trial | 2 GB: resident crosses it at **day 28**, but the **replay** crosses it at **day 6** — day 11 with `GOMEMLIMIT`, day 45 streamed |
+| 2 | **Lightsail $24** — 2 vCPU, 4 GB, 80 GB SSD, 4 TB | $72.00 | incl. | incl. | incl. | **$72.00** | 4 GB: resident at **day 55**, replay at **day 13** — day 21 with `GOMEMLIMIT`, day 90 streamed |
+| 3 | **Lightsail $44** — 2 vCPU, 8 GB, 160 GB SSD, 5 TB | $132.00 | incl. | incl. | incl. | **$132.00** | 8 GB: survives 90 days resident; **cannot replay after ~day 26**. `GOMEMLIMIT` moves that to **day 43**, not to 90; a streaming replay moves it to **day 180** **[rig experiment, 2026-08-12]** |
 | 4 | **EC2 t4g.small** (ARM) + 60 GB gp3 | $36.79 | $14.40 | $10.95 | ~$5 | **~$67** | as row 1 |
 | 5 | **EC2 t4g.medium** (ARM, 4 GB) + 80 GB gp3 | $73.59 | $19.20 | $10.95 | ~$5 | **~$109** | as row 2 |
 | 6 | **GCE e2-micro, Always Free** + 30 GB standard PD | **$0** | **$0** | ~$11 | $0 on Standard Tier | **~$11** | 1 GB. **Relay only — it cannot host the archive at any interesting ledger size** |
@@ -378,7 +503,7 @@ Price provenance, all **[web, 2026-08-11]** unless marked:
   anything, and note that only **one** bundle per account is covered, so a second instance for a
   cloud world (Part 2) is not free.
 
-### The single recommendation, and its condition
+### The single recommendation, and the condition that has now been discharged
 
 > **Amazon Lightsail, US East, one instance running relay and archive together, on a domain the
 > owner registers. Which bundle depends on Decision 3, and that is the point.**
@@ -390,14 +515,33 @@ Price provenance, all **[web, 2026-08-11]** unless marked:
 - **If the rule is *keep everything*** — which Decision 3 explicitly allows — take the **$44
   bundle**: 8 GB, 160 GB, 5 TB, **$132 for the period**. And understand what is being bought: 8 GB
   holds the archive *resident* through day 110, but on today's implementation it stops being able
-  to *replay* at around day 26. **That instance is not restartable in month three unless
-  `GOMEMLIMIT` or swap is proven first.**
+  to *replay* at around day 26 — **day 43 with `GOMEMLIMIT`, which is still inside the announced
+  period.** Buying this bundle without changing the replay buys a machine that holds the archive and
+  cannot restart it in month three.
 
-**The condition, stated as a gate rather than a caveat: measure the archive's replay memory against
-a copy of today's ledger, with and without `GOMEMLIMIT`, before buying anything.** It is one rig
-run, it does not touch the living deployment, and it decides a ~$96 difference and whether the
-service survives its own restart policy. WP3's done-when already requires a written restart policy;
-this is the measurement that policy has to be written from.
+**The condition was a gate, and the gate has been run** — the replay-memory matrix above,
+**[rig experiment, 2026-08-12]**, against a copy of the ledger and never the deployment. Its answer,
+in the order the money depends on it:
+
+- **Set `GOMEMLIMIT` on whatever is bought.** `GOMEMLIMIT=5GiB` on an 8 GB instance, or ~75% of RAM
+  on any other, in the service unit beside the binary. It took **a third off the replay peak for no
+  measurable wall clock**, and it converts an out-of-memory kill into a slow start, which is the
+  trade an unattended box should always take. **Do not tighten it past ~2× the retained set**: at
+  1.5× the same run cost 7× the CPU, and on two vCPUs that is the difference between a three-minute
+  restart and a twelve-minute one.
+- **`GOMEMLIMIT` does not make *keep everything* survive its own restart policy**, so it does not
+  by itself justify the extra $96. It moves the wall from day 26 to day 43.
+- **The thing that does is a change to the archive, not to the invoice.** The replay materialises
+  the whole ledger in memory before applying any of it; streaming it instead measured a
+  **5.6–7.0× lower peak**, and puts the $44 bundle past day 180 and the $12 bundle at day 45. It
+  is ~80 lines in one package with no contract implication, and it is now the cheapest item on this
+  page. **Land it before day one and the bundle question goes back to being about disk and
+  traffic.**
+
+WP3's done-when already requires a written restart policy. It can now be written from measurements
+instead of from a model: **restart cost is ~3 minutes and ~10 GB today, ~3 minutes and ~6 GB with
+`GOMEMLIMIT`, and it grows linearly with the ledger** — size it from `wc -l` on the day, never from
+this page.
 
 **Why not GCP.** Nothing disqualifies it, and if the owner has existing GCP familiarity that is a
 real cost saving this document cannot price. But at every RAM tier it is more expensive, its egress
@@ -477,15 +621,17 @@ Linux spot **$0.032/hr**):
 **On GCP the Windows licence alone costs more than twice the entire Linux instance.** That is the
 number that makes the itch.io build worth an evening of rehearsal.
 
-#### (b) Linux — why Proton is probably not the question
+#### (b) Linux — the native build works, and it has now been run
 
-**The native Linux build makes Wine/Proton a fallback rather than a plan.** Worth stating why the
-native path is plausible, and exactly what is unverified:
+**The native Linux build removes Wine/Proton from the plan entirely** — rehearsed end to end on
+this machine on 2026-08-12. Three reasons said the native path was plausible; all three held:
 
-- **Unity Mono is the same IL on every platform.** The mod is Harmony patches against
-  `BibitesAssembly.dll`, and a Mono build's managed assemblies are platform-independent. That is
-  the whole reason `dev_environment.md` records "Mono backend (not IL2CPP — Harmony and
-  decompilation fully work)" as a load-bearing fact **[record]**.
+- **Unity Mono is nearly the same IL on every platform — and "nearly" is now measured, not
+  assumed.** The mod is Harmony patches against `BibitesAssembly.dll`, and a Mono build's managed
+  assemblies are *almost* platform-independent: the two builds differ only where the game calls a
+  native file dialog or asks the shell to reveal a folder (question 1 below). That is the whole
+  reason `dev_environment.md` records "Mono backend (not IL2CPP — Harmony and decompilation fully
+  work)" as a load-bearing fact **[record]**.
 - **BepInEx 5 ships Linux builds.** 5.4.23.x splits its unix zip into `linux_x86`, `linux_x64` and
   `macos_x64`, with Doorstop 4.3 and a `run_bepinex.sh` launcher, and BepInEx's own guidance is to
   stay on 5 for Unity Mono games **[web, 2026-08-11]**.
@@ -493,29 +639,92 @@ native path is plausible, and exactly what is unverified:
   all five local worlds that way since 2026-08-10, and `0.6.2`'s `MinFpsGovernor` exists precisely
   to disarm the game's min-FPS servo in a process with no graphics device **[record]**.
 
-**What is UNTESTED, and must be a rehearsal item rather than an assumption.** Every line below is a
-question, not a risk assessment:
+**These five were the rehearsal items. All five are now ANSWERED on this machine**
+**[rig experiment, 2026-08-12]** — the itch.io Linux build downloaded non-interactively, unpacked
+to scratch, run headless against a scratch relay and sidecar on ports 18795/18787, while the live
+five-world rig kept running untouched:
 
-1. Does the Linux build's `BibitesAssembly.dll` match the Windows one closely enough for the mod's
-   patches to bind? **This is D22's support matrix doing its job** — `setup-farend.ps1` already pins
-   `$AssemblySha256` as *that machine's* matrix entry, so a Linux assembly with a different hash is
-   a new matrix row rather than a contradiction.
-2. Does BepInEx 5.4.23.3 `linux_x64` load the plugin, and does the plugin's `0.6.4` behaviour
-   survive it?
-3. `Application.persistentDataPath` moves from `AppData/LocalLow/...` to `~/.config/unity3d/...` on
-   Linux. Anything in the mod or the rig scripts that hardcodes the Windows path breaks.
-4. Does the log-file starvation trap exist on Linux? It is a BepInEx `DiskLogListener` behaviour,
-   not a Windows one, so **assume yes** until measured — though a one-instance-per-VM cloud world
-   never hits the five-file ceiling.
-5. Does the achieved-vs-applied time-scale gap look the same? `TimeController.CheckMinFPS` and
-   `Time.maximumDeltaTime` are engine-side, so probably — but the whole point of a cloud world is
-   speed, and this is the number that decides whether it is worth paying for.
+1. **Does the Linux `BibitesAssembly.dll` bind the mod's patches? YES — and the hash differs, which
+   is D22's support matrix doing exactly its job.** Windows/Steam is
+   `12455e48…` (1 376 256 B); Linux/itch.io is `5b145a0a…` (1 375 744 B) — 512 bytes, one PE
+   alignment unit. A full `ilspycmd` decompile of both, diffed, puts **every** difference in three
+   places the mod never touches: `StandaloneFileBrowserWindows` + `WindowWrapper` (`user32.dll`,
+   `System.Windows.Forms`, `Ookii.Dialogs`) become `StandaloneFileBrowserLinux`
+   (`DllImport("StandaloneFileBrowser")`); three "reveal the save folder"
+   `Process.Start("explorer.exe", …)` calls become no-ops; and Unity's own `MonoScriptData`
+   bookkeeping shifts (`TotalTypes` 631 → 630, exactly the one type removed). **All six types the
+   mod patches or reads are byte-identical across the two builds** — `TimeController`, `BibiteBody`,
+   `GlobalLineageManager`, `ScreenShotHandler`, `SaveSystem`, `SaveController` — and all ten patch
+   targets are present on both sides.
+2. **Does BepInEx 5.4.23.3 `linux_x64` load the plugin, and does `0.6.4` behave? YES, completely.**
+   `BepInEx_linux_x64_5.4.23.3.zip` over the game directory, `BibitesMultiverse.dll` (`fae0d50c…`)
+   into `BepInEx/plugins/`, `./run_bepinex.sh "./The Bibites.x86_64" -batchmode -nographics`.
+   The log reads `System platform: Bits64, Linux`, `Detected Unity version: v6000.0.44f1`,
+   `Loading [Bibites Multiverse 0.6.4]`, and the mod prints `Application.version = 0.6.3.1` — the
+   build **is** the version this rig runs. Config was read from the BepInEx `.cfg` and the
+   environment; every subsystem armed (border strip on `BibiteBody.FixedUpdate`, `[M5-HISTORY]`,
+   `[M4-PHASE]`, dev commands); `MinFpsGovernor` detected `headless=True` and disarmed itself
+   unprompted. **The Contract A dial used the shipped token flow, not the rig escape hatch** — the
+   sidecar minted `<data-dir>/contract-a.token` 0600 at first start and the mod read it from
+   `MULTIVERSE_CONTRACT_A_TOKEN_FILE` — and the handshake carried `gameVersion=0.6.3.1
+   modVersion=0.6.4 contractAVersion=contract-a/2.4`. The relay saw `modConnected=true
+   exportEdges="[E N W S]"`. **The session ran 14 m 08 s and ended only when told to quit**, which
+   is the heartbeat answer: the sidecar's 13-second deadline never fired once.
+   **On Linux there is no `WSLENV` and no path translation** — the token path passes through as
+   itself, deleting the single fiddliest line in `run-m4.sh`'s `start_game`.
+3. **What breaks on `persistentDataPath`? Nothing in the mod; four lines in the rig scripts.** The
+   path resolved to `/home/ubuntu/.config/unity3d/The Bibites/The Bibites`, with `Savefiles/`,
+   `Scenarios/`, `Bibites/Templates/` and `prefs` all created correctly. **The mod is already
+   clean** — every path goes through `SaveController.SavePath` (which is
+   `Path.Combine(Application.persistentDataPath, "Savefiles")`) or `Application.persistentDataPath`
+   directly, and it logged its own directory correctly at startup. Eight saves landed, rotation and
+   pruning worked (`keep=4`, `pruned=1`), and save-on-quit fired (`why=quit`). **What hardcodes the
+   Windows path is the rig, not the product**: `e2e/run-m4.sh:355`, `e2e/baseline.sh:55` and `:711`,
+   and `e2e/species-guard-check.sh:27-28` all glob
+   `/mnt/c/Users/*/AppData/LocalLow/...`. `$XDG_CONFIG_HOME` relocates the whole tree, which is how
+   a cloud world puts its saves on the persistent volume of (d).
+4. **Does the log-starvation trap exist on Linux? NO — and what replaces it is worse to debug,
+   though harmless to a one-instance-per-VM cloud world.** Five concurrent instances out of one
+   game directory produced **no `LogOutput.log.1`–`.4` at all**: the Windows fallback is driven by
+   an exclusive file lock Linux never takes. **All five loaded the mod** — `BibitesMultiverse.dll`
+   is mapped in all five processes — so the *functional* failure mode of the Windows trap (an
+   instance that gets no log file never loads the mod, and comes up `modConnected=false` with
+   `exportEdges=[]`) **does not exist here**. Instead all five held an open descriptor on the *same*
+   `LogOutput.log`, each with its own file offset and each truncating on launch: the file ended as
+   **227 402 bytes of which 200 557 were NUL**, `file` reporting `data` rather than text, with only
+   one of five session headers and two of five `event=SAVED` lines surviving. **Windows loses one
+   instance loudly; Linux keeps every instance and shreds the shared evidence window for all of
+   them at once.** A cloud world runs one instance per VM and never meets this. **A Linux
+   *participant* running more than one world on one box does**, and it is a WP6 packaging item, not
+   a cloud one.
+5. **Does the achieved-vs-applied time-scale gap look the same? The gap is real and WIDER here, but
+   this host cannot settle the number.** `Time.timeScale` accepted **100.00 on the first send** —
+   the Windows rig's rule that the first `timescale` after a load sticks at 1.00 and needs a second
+   send twenty seconds later **did not reproduce** (observed once; not yet a rule). Achieved rate
+   over six 67-second samples was **6.3–7.2×** against an applied 100, at a population of 14–28.
+   **That number is not a cloud number and must not be quoted as one:** it was taken on a WSL2 VM
+   whose 16 cores were carrying five live Windows worlds, the relay, the archive and the collector
+   at a load average of 14–20, with everything niced to 19. It bounds the gap's *existence*, not its
+   size. **A clean single-tenant box is the only place this can be measured, and Stage 2 is that
+   box.**
 
-**Proton/Wine, if 1–4 fail.** Unity Mono Windows builds are a well-trodden Wine case and BepInEx has
-a documented Wine story, but it adds a translation layer under a process that must run unattended
-for weeks, and it re-introduces a Windows game binary without re-introducing a Windows licence bill.
-It is the fallback. **It should not be attempted before the native build has been tried, because
-trying the native build costs one afternoon and answers a better question.**
+**Sizing, from the same run** — the cloud-world numbers of *Costing one cloud world* are
+Windows-measured, and the Linux instance is **cheaper on memory**: the headless game held
+**368–401 MB** RSS (rising steadily over 6.5 minutes as population grew 14 → 28) against Windows's
+403–466 MB fresh and 1 954–2 450 MB at a ×100 target, and burned **0.86–1.17 cores** against
+Windows's 1.04–1.40. Its sidecar held **13–14 MB** — far under the Windows 70–145 MB — at
+effectively no CPU on a single-peer map with no lanes open. **2 vCPU / 4 GB remains the honest
+minimum and 8 GB the honest recommendation**, because nothing here ran long enough to reach the
+steady state that produces the 2 GB figure. Save stalls were **277–682 ms across all eight saves,
+every one inside D14's 2 000 ms budget** — against the live rig's 43-of-76 breach rate — but the
+worlds are not comparable: `lineageMs` was 4–11 ms here against 53% of `writeMs` there, because this
+world had minutes of species history and the rig's have weeks. **Clean quit with save-on-quit took
+2.05 s**, comfortably inside even GCP's 30-second preemption notice.
+
+**Proton/Wine is now dead as a path, not merely a fallback.** Questions 1–4 all passed on the native
+build, so the translation layer buys nothing and costs a Windows game binary under a process that
+must run unattended for weeks. **It should not be revisited unless a future game version breaks the
+native build.**
 
 #### (c) The Steam constraint, and the honest licensing position
 
@@ -648,9 +857,12 @@ Three stages. Each one is separately abandonable, and each one names what it pro
 
 ### Stage 1 — the core service. This is WP3 proper.
 
-**Before buying anything:** measure the archive's replay memory against a copy of today's ledger,
-with and without `GOMEMLIMIT`. One rig run, no effect on the living deployment, and it decides the
-bundle.
+**The measurement this stage used to wait on is done** **[rig experiment, 2026-08-12]**:
+`GOMEMLIMIT=5GiB` takes about a third off the replay peak for no measurable wall clock and belongs
+in the service unit, and it moves *keep everything* on an 8 GB instance from day 26 to day 43 — not
+to 90.
+**What the bundle waits on now is Decision 3 and one ~80-line change to the archive's replay**,
+which takes 5.6–7.0× off the peak and puts the same instance past day 180.
 
 | | |
 |---|---|
@@ -666,7 +878,7 @@ bundle.
 |---|---|
 | **What** | One spot instance, same AZ as Stage 1, running the **itch.io Linux build** headless under BepInEx `linux_x64`, with a persistent volume carrying the journal, peer identity, credential and saves, and a handoff script on the interruption notice |
 | **Cost** | **~$30/month**, so **~$60–90** for the remainder of the period. Plus ~0.8 GB/day of archive growth if it runs fast — ~$0 on a Lightsail bundle's included disk, real on a metered one |
-| **Proves, in order of value** | (1) whether the Linux + BepInEx path works at all — the five untested questions in Part 2(b); (2) whether the spot handoff is as free as WP5 says, with a **real game** behind it; (3) how often the reload-to-last-save gap actually bites, which nothing has measured; (4) what a world costs per achieved ×, which is the number that decides whether Stage 3 is worth anything |
+| **Proves, in order of value** | (1) **what a world costs per achieved ×** on a clean single-tenant box — Part 2(b)'s rehearsal answered its five questions but could only bound the time-scale gap's *existence*, because this host carries five live worlds; that number decides whether Stage 3 is worth anything; (2) whether the spot handoff is as free as WP5 says, with a **real game** behind it; (3) how often the reload-to-last-save gap actually bites, which nothing has measured; (4) that the Linux + BepInEx path survives *unattended for weeks*, which one 15-minute rig run cannot show |
 | **D24 says** | it fits inside the period with room to fail. It is also the **only** stage that can be abandoned mid-run with no participant-facing consequence, because it is just another peer |
 | **The system working** | if it dies and the map does not notice, that is the result, not a near miss. Say so in the record |
 | **Owner's calls in it** | whether to ask the developer first; whether to pay him and how much; whether a peer he controls belongs on a map he is asking strangers to join |
@@ -709,6 +921,8 @@ Ordered by how much else depends on them.
    notice against 30 seconds. It does not know what the owner already knows how to operate, and
    that is worth more than the difference.
 3. **The bundle**, once (1) is answered: $12 with a bounded ledger, $44 with *keep everything*.
+   With *keep everything*, the $44 bundle is only restartable through month three if the replay is
+   streamed first (measured 2026-08-12); `GOMEMLIMIT` alone gets it to day 43.
 4. **The name.** A registered domain (~$5 for the period) or free dynamic DNS ($0). Either works;
    the cloud's own hostname does not. **It is effectively permanent once the first join string is
    minted.**
@@ -717,8 +931,9 @@ Ordered by how much else depends on them.
 6. **Whether to run any cloud world at all**, and whether to ask the developer first.
 7. **Whether to pay for the itch.io build per cloud instance**, and how much. Name-your-own-price
    makes this a choice.
-8. **Whether the status page's poll cadence and compression are worth changing.** The measurement
-   is here; the design is not this document's.
+8. **Whether the status page's poll cadence is worth changing.** The measurement is here; the
+   design is not this document's. Compression is no longer part of this question — it was
+   implemented on 2026-08-12 and ships with the archive's next restart.
 9. **Whether a peer the owner controls belongs on a map of strangers**, given that Decision 8's bar
    counts only non-owner peers.
 
@@ -735,9 +950,13 @@ Ordered by how much else depends on them.
 - **Does the itch.io Linux build's `BibitesAssembly.dll` match the Windows one?** Downloadable and
   checkable in minutes; not done here because this document was scoped to buy nothing and install
   nothing.
-- **Will `GOMEMLIMIT` bring the archive's replay peak down, and at what cost in replay time?**
-  One rig run against a copy of today's ledger. **This is the single highest-value experiment named
-  anywhere in this document.**
+- ~~**Will `GOMEMLIMIT` bring the archive's replay peak down, and at what cost in replay time?**~~
+  **Closed 2026-08-12** by the matrix in *The term nobody has priced*: yes — about a third off the
+  peak at `GOMEMLIMIT=5GiB` for no measurable wall clock and 17–39% more CPU, ruinous below ~2× the
+  retained set, and **not enough to reach day 90**. It left a bigger question in its place, one
+  that is not open so much as unowned: **the replay materialises the whole ledger before applying
+  it, and streaming it instead measured a 5.6–7.0× lower peak in ~80 lines.** That change belongs
+  to whoever owns `go/internal/archive/store.go`; this document only measured it.
 
 ## Sources
 
@@ -768,5 +987,6 @@ Project sources, cited inline by document and section: `m5_tracking.md`, `m5_con
 (DQ2, DQ3, Decisions 2/3/4/8, Risks 3/5/7/9/10, WP3–WP5), `dev_environment.md` (*Versions*,
 *The disk budget*, *The living deployment*, *Watch items*, *Gotchas*),
 `contracts/contract-a.md` (D2, §7.3), `contracts/contract-b-m4.md` (§9, §10, B21–B32),
-`go/internal/peercred/peercred.go`, `go/internal/archive/page.go`, `go/internal/relay/relay.go`,
-`bibites-mod/game.sh`.
+`go/internal/peercred/peercred.go`, `go/internal/archive/page.go`,
+`go/internal/archive/store.go` (`ReadLedger`) and `go/internal/archive/archive.go` (`New`'s replay),
+`go/internal/relay/relay.go`, `bibites-mod/game.sh`.

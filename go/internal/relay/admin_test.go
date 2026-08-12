@@ -427,6 +427,11 @@ func TestTheAdminPathIsNotOnTheContractBWire(t *testing.T) {
 			contractb.TypeSectorGrant, contractb.TypePeerStatus, contractb.TypeMigrationPayload,
 			contractb.TypeMigrationAck, contractb.TypeMigrationNack, contractb.TypeGenomeRequest,
 			contractb.TypeGenomeResponse, contractb.TypePing, contractb.TypePong,
+			// The thirteenth, and the only message this project has added since M3
+			// (§22, B26). B28's own table says the catalogue grows by exactly one
+			// in the whole §22 set, and it is this — so the list that proves no
+			// admin act is a message type has to carry it.
+			contractb.TypeForwardReceipt,
 		} {
 			if strings.EqualFold(typ, known) {
 				t.Fatalf("%q is both an admin act and a Contract B message type", typ)

@@ -35,7 +35,11 @@ import (
 	"multiverse/internal/wire"
 )
 
-// Message types (contract-b-m4.md §6). Twelve, none new in M4.
+// Message types (contract-b-m4.md §6). Twelve in M4; THIRTEEN since
+// contract-b/4.0, and the thirteenth is the only message this project has added
+// since M3 (amended — §22, B26): FORWARD_RECEIPT (§6.12). The operator commands
+// stay off the wire in shape — B28 authenticates the PATH to them and does not
+// turn them into messages — so the catalogue grows by exactly one.
 const (
 	TypeHandshake        = "HANDSHAKE"
 	TypeHandshakeAck     = "HANDSHAKE_ACK"
@@ -49,6 +53,9 @@ const (
 	TypeGenomeResponse   = "GENOME_RESPONSE"
 	TypePing             = "PING"
 	TypePong             = "PONG"
+	// TypeForwardReceipt is relay -> SENDER, one per forwarded
+	// MIGRATION_PAYLOAD, and it is NOT copied to subscribers (added — §22, B26).
+	TypeForwardReceipt = "FORWARD_RECEIPT"
 )
 
 // Close codes (contract-b-m4.md §3.2).
@@ -977,6 +984,61 @@ func (n *MigrationNack) ProvesNoCustody(entrySession string) bool {
 		return false
 	}
 	return n.RelaySessionID == entrySession
+}
+
+// ForwardReceipt is FORWARD_RECEIPT (contract-b-m4.md §6.12, added — §22 B26):
+// the relay telling the SENDER that it wrote one MIGRATION_PAYLOAD to a
+// destination connection.
+//
+// IT IS THE CHEAPEST FRAME ON THIS WIRE, and that is a design constraint rather
+// than an observation: four fields, no body, no answer, and no fan-out — a
+// subscriber is not copied, because a receipt is a fact about the sender's own
+// journal and not about the migration (§5.1 is unchanged).
+//
+// WHAT IT IS NOT, in the order an implementer is tempted to get it wrong:
+//
+//   - NOT delivery. MIGRATION_ACK is, and it comes from the destination sidecar
+//     after custody (§6.7, §9.1). A receipt says the relay wrote bytes at a
+//     socket, and §5.2's own rule is that a written frame and a delivered frame
+//     are indistinguishable.
+//   - NOT custody, and NOT an answer. The sender records it and sends nothing.
+//   - NOT proof of non-delivery, and it can never become one. neverForwarded
+//     (§6.8) is still the only relay statement that authorizes a re-route.
+//   - NOT a state change. An entry that is `sent` stays `sent`; the receipt is
+//     the evidence that the state is right (§9.2).
+//
+// ITS ONLY DIRECTION IS TOWARD HOLDING: an entry with a receipt was forwarded,
+// so it holds. State.ForwardedUnder is where that sentence becomes code.
+type ForwardReceipt struct {
+	// MigrationID is the sender's join key into its own journal.
+	MigrationID string `json:"migrationId"`
+	// DestSlot is the slot the frame was written to, echoed so a sender that
+	// re-routed can tell two attempts apart.
+	DestSlot int `json:"destSlot"`
+	// RelaySessionID is the session in force at the write. A RECEIPT IS A
+	// STATEMENT ABOUT ONE SESSION AND NOTHING ELSE (§5.2), and this is the field
+	// that says which.
+	RelaySessionID string `json:"relaySessionId"`
+	// ForwardedAt is the RELAY's own clock. Informational (D5), and useful only
+	// for a log: no rule anywhere compares it with anything.
+	ForwardedAt int64 `json:"forwardedAt"`
+}
+
+// Validate is the receiver's shape check. All four fields are REQUIRED (§6.12),
+// and a receipt that fails this is DROPPED AND LOGGED rather than answered:
+// there is no answer to a receipt, and a malformed one is exactly as much
+// evidence as no receipt at all — which is none.
+func (r *ForwardReceipt) Validate() error {
+	if !wire.ValidUUID(r.MigrationID) {
+		return invalid("migrationId %q is not a uuid", r.MigrationID)
+	}
+	if r.DestSlot < 1 {
+		return invalid("destSlot %d is not a slot", r.DestSlot)
+	}
+	if !wire.ValidUUID(r.RelaySessionID) {
+		return invalid("relaySessionId %q is not a uuid", r.RelaySessionID)
+	}
+	return nil
 }
 
 // GenomeContext is GENOME_REQUEST.context: the annex the hash came from.

@@ -402,6 +402,8 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 		return s.onMigrationAck(env)
 	case contractb.TypeMigrationNack:
 		return s.onMigrationNack(env)
+	case contractb.TypeForwardReceipt:
+		return s.onForwardReceipt(env)
 	case contractb.TypeGenomeRequest:
 		return s.onGenomeRequest(env)
 	case contractb.TypeGenomeResponse:
@@ -900,6 +902,99 @@ func (s *Sidecar) onMigrationAck(env wire.Envelope) bool {
 	return true
 }
 
+// onForwardReceipt is B26's whole sidecar-side obligation (§6.12): RECORD IT
+// AGAINST THE JOURNAL ENTRY, DURABLY, AND DO NOTHING ELSE.
+//
+// Nothing else means nothing else. It sends no answer — there is no answer to a
+// receipt on this wire. It changes no handoff state: an entry that is `sent`
+// stays `sent`, and the receipt is the evidence that the state is right rather
+// than a reason to move it. It never touches the hold clock, the retry cadence,
+// the re-route count or the destination. What it changes is that the fact
+// survives the relay process that produced it, which is the entire point: §5.2's
+// forwarding record is in memory and dies at a restart, and after B26 the
+// sender's own journal is where the fact lives.
+//
+// THE DURABLE WRITE IS THE COST, and it is the honest one to name. This is one
+// journal Apply — one appended record and one fsync — per forwarded migration,
+// on top of the create, the hand-off and the ACK the sender already pays. WP3's
+// measurement counts it (relay/receipt_cost_test.go) rather than assuming it
+// away.
+func (s *Sidecar) onForwardReceipt(env wire.Envelope) bool {
+	var receipt contractb.ForwardReceipt
+	if err := contractb.DecodeData(env.Data, &receipt); err != nil {
+		s.log.Warn("contract B: malformed FORWARD_RECEIPT, dropping it",
+			"err", err, "meaning", "a malformed receipt is exactly as much evidence as none")
+		return true
+	}
+	if err := receipt.Validate(); err != nil {
+		s.log.Warn("contract B: FORWARD_RECEIPT failed its shape check, dropping it",
+			"migrationId", receipt.MigrationID, "err", err)
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.jr.Get(receipt.MigrationID)
+	if !ok {
+		// A receipt for a migration this sender does not know: a tombstone that
+		// was already purged, another peer's id on a defective relay, or a replay.
+		// It is DROPPED — there is nothing to record it against — and logged,
+		// because a conforming relay only ever receipts a frame this peer sent.
+		s.log.Warn("contract B: FORWARD_RECEIPT for a migration this sidecar does not know; dropping it",
+			"migrationId", receipt.MigrationID, "destSlot", receipt.DestSlot,
+			"relaySessionId", receipt.RelaySessionID)
+		return true
+	}
+	if st.Direction != journal.Out {
+		// An INBOUND entry is one this peer received; nothing about it was ever
+		// forwarded by this peer, so a receipt against it would be a fact filed
+		// under the wrong migration's direction.
+		s.log.Warn("contract B: FORWARD_RECEIPT for an INBOUND journal entry; dropping it",
+			"migrationId", receipt.MigrationID)
+		return true
+	}
+	if st.Status == journal.StatusDone {
+		// The chain already completed, which is strictly stronger evidence than a
+		// receipt: custody moved AND was acknowledged. Recording it would cost an
+		// fsync to learn something the tombstone already says.
+		s.log.Debug("contract B: FORWARD_RECEIPT for a completed migration; nothing to record",
+			"migrationId", receipt.MigrationID)
+		return true
+	}
+	count := st.ForwardReceipts + 1
+	if _, err := s.jr.Apply(receipt.MigrationID, journal.Update{
+		// ABSOLUTE, never a delta: the journal is replayed record by record and
+		// compacted into one status record, and only an absolute count is right
+		// under both.
+		ForwardReceipts:      &count,
+		ReceiptSessionID:     &receipt.RelaySessionID,
+		ReceiptDestSlot:      &receipt.DestSlot,
+		ReceiptForwardedAtMs: &receipt.ForwardedAt,
+	}); err != nil {
+		// A receipt that could not be journaled is a receipt that never arrived,
+		// and that costs nothing but the certainty it would have added. The entry
+		// keeps every other property it had.
+		s.log.Error("contract B: could not journal a FORWARD_RECEIPT; treating it as never received",
+			"migrationId", receipt.MigrationID, "err", err)
+		return true
+	}
+	s.receiptsRecorded++
+	if count > 1 {
+		// §6.12: two receipts under one migrationId means THIS SENDER FORWARDED
+		// TWICE — a retry or a re-route — and never a duplicated organism, because
+		// the migrationId is preserved and the destination deduplicates (§6.6).
+		s.log.Info("contract B: a second FORWARD_RECEIPT for this migration; this sender has "+
+			"forwarded it more than once",
+			"migrationId", receipt.MigrationID, "forwards", count,
+			"destSlot", receipt.DestSlot, "relaySessionId", receipt.RelaySessionID,
+			"why", "a retry or a re-route; the destination deduplicates on migrationId (§6.6)")
+		return true
+	}
+	s.log.Debug("contract B: recorded a FORWARD_RECEIPT",
+		"migrationId", receipt.MigrationID, "destSlot", receipt.DestSlot,
+		"relaySessionId", receipt.RelaySessionID, "handoff", st.Handoff)
+	return true
+}
+
 // onMigrationNack applies §9.2's evidence table. It is the most load-bearing
 // switch in the sidecar: SILENCE IS NEVER PROOF, and every ambiguity resolves
 // toward holding, because holding costs a delay and re-routing on a bad proof
@@ -949,6 +1044,37 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 			sc.bounceAt = time.Time{}
 			sc.nextForward = time.Time{}
 		}
+		return true
+
+	case relayGenerated && nack.ProvesNoCustody(st.RelaySessionID) &&
+		st.ForwardedUnder(nack.RelaySessionID):
+		// ------------------------------------------------------- B26, §6.12
+		//
+		// THE RELAY SAYS IT NEVER FORWARDED THIS MIGRATION IN THIS SESSION, AND
+		// THIS SENDER'S OWN JOURNAL HOLDS THE RELAY'S RECEIPT FOR A FORWARD IN
+		// THAT SAME SESSION. Two statements from the same process about the same
+		// session contradict each other, and this is the one place B26's
+		// direction rule decides an outcome: a receipt can only ever move an
+		// entry TOWARD HOLDING, never toward re-routing.
+		//
+		// So the proof is refused and the entry holds. It is a strict NARROWING
+		// of what may re-route — nothing that held before now re-routes — so it
+		// cannot introduce a duplication, which is the only failure this whole
+		// mechanism is built to avoid. §9.2 is otherwise untouched in every
+		// particular.
+		//
+		// Reaching it means a defect at one end or the other. It is logged at
+		// ERROR because it is a relay this map cannot take a proof from, and an
+		// operator who sees this line is looking at the one condition that could
+		// have duplicated an organism if the receipt had not been there.
+		s.log.Error("contract B: a relay-generated neverForwarded CONTRADICTS a FORWARD_RECEIPT "+
+			"this sidecar holds for the same relay session — refusing the proof and HOLDING",
+			"migrationId", nack.MigrationID, "code", nack.Code,
+			"relaySessionId", nack.RelaySessionID, "receipts", st.ForwardReceipts,
+			"receiptDestSlot", st.ReceiptDestSlot,
+			"meaning", "one of the two statements is wrong and this sender cannot tell which; "+
+				"holding costs a delay and re-routing on a bad proof costs a duplicated organism "+
+				"(contract-b-m4.md §9.2, §6.12, §22 B26)")
 		return true
 
 	case relayGenerated && nack.ProvesNoCustody(st.RelaySessionID):

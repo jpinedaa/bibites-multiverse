@@ -9,6 +9,11 @@ bibites-mod/bin/
 bibites-mod/obj/
 bin/
 
+# The hosting kit's cross-compiled artifacts. deploy/ship.sh builds the relay,
+# the archive and ringstat for linux/amd64 and linux/arm64 here and scps them to
+# the instance; they are regenerable from go/ and are ~60 MB a set.
+deploy/stage/
+
 # E2E rig runtime state. e2e/data/ holds the sidecar journals — the durable custody
 # record of decision D2 — which belong to one run of one machine, never to the repo.
 e2e/data/

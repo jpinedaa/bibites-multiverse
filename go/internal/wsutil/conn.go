@@ -91,6 +91,36 @@ func (c *Conn) Send(frame []byte) error {
 	}
 }
 
+// TrySend enqueues one text frame and DROPS IT rather than closing the
+// connection when the queue is full. It is Send's twin for a frame that is
+// explicitly best effort, and there is exactly one on either wire:
+// contract-b-m4.md §6.12's FORWARD_RECEIPT (added — §22, B26).
+//
+// The distinction is the whole reason this method exists. Send closes because a
+// peer that stops reading has failed and every frame Send carries is one the
+// peer needs. A receipt is not: §6.12 says the relay MUST NOT delay, block or
+// fail a forward on account of a receipt it could not send, and that a receipt
+// the sender never sees costs nothing but the certainty it would have added.
+// Closing a healthy sender's connection to report a dropped receipt would turn
+// the cheapest frame on the wire into the most expensive one.
+//
+// It returns ErrQueueFull on a drop and ErrClosed after the connection has begun
+// closing. Both are counted by the caller, never acted on.
+func (c *Conn) TrySend(frame []byte) error {
+	c.mu.Lock()
+	stopping := c.stopping
+	c.mu.Unlock()
+	if stopping {
+		return ErrClosed
+	}
+	select {
+	case c.out <- frame:
+		return nil
+	default:
+		return ErrQueueFull
+	}
+}
+
 // Read returns the next text frame. Binary frames are rejected as malformed by
 // the caller's contract, so they are surfaced as an error here.
 func (c *Conn) Read(ctx context.Context) ([]byte, error) {

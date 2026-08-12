@@ -428,6 +428,7 @@ func listInflightCommand(dataDir string, destSlot int, stdout, stderr io.Writer)
 			if e.RelaySession != "" {
 				fmt.Fprintf(stdout, "    relaySessionId %s\n", e.RelaySession)
 			}
+			fmt.Fprint(stdout, renderReceiptEvidence(e, "    "))
 		}
 		if e.Note != "" {
 			fmt.Fprintf(stdout, "    %s\n", e.Note)
@@ -437,6 +438,32 @@ func listInflightCommand(dataDir string, destSlot int, stdout, stderr io.Writer)
 		"    multiverse-sidecar --data-dir %s --release-inflight <migrationId> bounce|drop\n",
 		len(entries), dataDir)
 	return 0
+}
+
+// renderReceiptEvidence is the sender's own journal answering "was this frame
+// ever forwarded?" — the question §5.2's forwarding record could only answer
+// while the relay that made it was still the same process (§6.12, §22 B26).
+//
+// BOTH ANSWERS ARE PRINTED, and the negative one is printed carefully. Holding a
+// receipt means the relay wrote the bytes. Holding none means NOTHING AT ALL: it
+// is indistinguishable from a receipt that was never sent, was dropped from a
+// full outbound queue, or was lost with the session. An operator who read the
+// absence as "so it was never forwarded" would be reading silence as proof,
+// which is the one mistake this contract is built around (§9.2).
+func renderReceiptEvidence(e InflightEntry, indent string) string {
+	if e.ForwardReceipts == 0 {
+		return indent + "no FORWARD_RECEIPT: this proves NOTHING either way — a receipt that was\n" +
+			indent + "never sent, was dropped, or was lost with the relay's session looks exactly\n" +
+			indent + "like a forward that never happened (§6.12)\n"
+	}
+	when := "an unrecorded time"
+	if !e.ReceiptForwarded.IsZero() {
+		when = e.ReceiptForwarded.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("%sFORWARDED: the relay acknowledged %d forward(s); the last wrote this frame\n"+
+		"%sto slot %d at %s under relay session %s. Custody MAY have\n"+
+		"%smoved, and a bounce from here is the duplication case below.\n",
+		indent, e.ForwardReceipts, indent, e.ReceiptDestSlot, when, e.ReceiptSession, indent)
 }
 
 func releaseInflightCommand(dataDir, migrationID, action string, yes bool, stdout, stderr io.Writer) int {
@@ -456,6 +483,10 @@ func releaseInflightCommand(dataDir, migrationID, action string, yes bool, stdou
 		fmt.Fprintf(stdout, "\n%s  entity %d  destSlot %d via %s  handoff %s  accrued hold %s\n",
 			e.MigrationID, e.EntityID, e.DestSlot, e.ExitEdge, e.Handoff,
 			e.AccruedHold.Truncate(time.Second))
+		// B26's whole operator payoff, printed where a person is about to decide
+		// (§6.12, §7.5). The receipt is what tells a bounce that MIGHT duplicate
+		// from one that IS known to have been forwarded.
+		fmt.Fprint(stdout, renderReceiptEvidence(e, "  "))
 	}
 	fmt.Fprint(stdout, InflightRisk)
 	if !yes {
