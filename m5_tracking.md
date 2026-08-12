@@ -128,8 +128,11 @@ burst, and each one also costs the far end a bundle rebuild.
   a page tab: the living species as leaves, ancestors reduced to branching points, chains
   collapsed. Derived entirely from A30/B9's parent-species field the ledger already carried —
   no wire change. On the live rig: 11 of 12 living species connectable, deepest lineage 40
-  generations, 2,407 recorded species reduce to a 15-node tree. Rides the next archive restart
-  (the pending batch's successor); until then the endpoint exists only in HEAD.
+  generations, 2,407 recorded species reduce to a 15-node tree. **Live on the map since 2026-08-12 16:26Z** (the
+  archive-views window, f983213 — same zero-gap pattern, archive-only, 4m57s pause; the limits
+  view went live in the same restart). Served shape at go-live: 18 nodes, 2 roots, 14 living
+  leaves. Replay note: 47.8 k rec/s vs the prior 57 k — the tree's per-record maintenance is the
+  prime suspect; size future paused windows from 48 k/s.
 
 - **Keep the living deployment running, and treat it as M5's first participant.** Every upgrade
   the milestone ships has to move it, and it is the only peer whose before and after are fully
