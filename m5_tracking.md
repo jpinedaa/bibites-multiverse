@@ -137,10 +137,13 @@ burst, and each one also costs the far end a bundle rebuild.
   map genuinely descends from the seed stock, but the first 19.5 h / 203,168 crossings predate
   A30's species blocks, and nameless arrivals founded 408 permanently parentless species — the
   living family's true recorded top is `Livilus yodexxus`, extinct since 08-07 and so forever
-  unlinkable. No fabricated edges; a root-badge labelling fix is in flight. Also observed: 143
-  species carry conflicting parents across worlds (resolved last-write-wins by `recordedAt`) —
-  a deep chain can shift between polls; surfaced-if-cheap in the same fix, otherwise a watch
-  note.
+  unlinkable. No fabricated edges; the root-badge fix **landed** (bdb5efb): a root the
+  record reaches above wears "THE RECORD BEGINS HERE · N GENERATIONS ABOVE" distinct from the
+  amber no-ancestry badge, and the tab prints the record's floor ("ancestry recorded since
+  2026-08-07 UTC") from one maintained int64. Rides the next archive restart. The 143
+  conflicting parents (last-write-wins by `recordedAt`; a deep chain can shift between polls)
+  stay a WATCH NOTE — the aggregate does not count overwrites and a counter for a caption was
+  refused.
 
 - **Keep the living deployment running, and treat it as M5's first participant.** Every upgrade
   the milestone ships has to move it, and it is the only peer whose before and after are fully
