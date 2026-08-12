@@ -249,14 +249,18 @@ only fleet that rehearses `contract-b/4`. Every constraint below is on record in
 
 ## Standing watch items that interact with M5 work
 
-- **The rejoin-burst finding, from slot 6's own crossing (2026-08-11 ~21:40 local).** Draining an
-  evening's backlog, slot 6 tripped `maxFramesPerSecond 50` **eighteen times, every peak exactly
-  51/s** — a shed/reconnect cycle (`4007` → ~30 s backoff → reclaim → burst → shed) that converged
-  only because each window drained frames before the shed. Nothing sidecar-side paces outbound
-  frames against the published `limits` object, though §3.3 says a peer "must be built against"
-  it; WP4 added only the defensive two-4007s pin. **A stranger returning after a long absence
-  will cycle exactly like this.** Fix dispatched 2026-08-11: sidecar outbound pacing against the
-  published limit. `heldDepth` 42 during the churn was transient and drained.
+- **The outbound-burst defect: found on slot 6's rejoin, proven fleet-wide, fixed and rolled out
+  (2026-08-11/12).** Slot 6's backlog drain tripped `maxFramesPerSecond 50` in a shed/reconnect
+  cycle — and the pre-roll log shows it was **never only a rejoin problem**: 19 sheds in 48
+  minutes across slot-6 (×11), slot-5 (×7) and slot-1 (×1), every peak exactly 51/s, slot 5
+  running the full backoff-ceiling cycle on the live map. The fix (9b1592d): the sidecar paces
+  outbound under the published `limits` from `HANDSHAKE_ACK` — half-ceiling rate, quarter-ceiling
+  burst, a control reserve — plus bulk gated on the handshake ack (which also closed a §5.2
+  empty-session-stamp defect). Rolled onto all five local sidecars 02:20–02:23Z with zero
+  discarded bytes and 24/24 lanes throughout; **zero sheds since**. Debt: **slot 6 still runs the
+  unpaced sidecar** — bundle `e2d70650…` carries the fix, sidecar-only swap at the operator's
+  leisure; until applied, slot 6 is the one peer that will burst on a future rejoin. Log-reading
+  caution: grep for `SHED THIS CONNECTION`, not `4007` (id substrings alias).
 
 Full readings and their evidence are in `dev_environment.md`, *The living deployment → Watch
 items*. What follows is only why each one touches this milestone.
