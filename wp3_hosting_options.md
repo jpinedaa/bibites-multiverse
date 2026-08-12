@@ -27,8 +27,10 @@ options:
    restarts stop being rare. At the exit-test bar over the full three months that is a
    **28 GB** replay on today's implementation.
 2. **The status page is the largest single egress term**, and it is bigger than the game
-   traffic. It serves ~20 KB every 2 s and ~49 KB every 1.5 s, **uncompressed**, per open
-   browser tab. That is ~3.7 GB/day/tab at this rig's rate.
+   traffic. It serves ~20 KB every 2 s and ~49 KB every 1.5 s, **uncompressed as measured**, per
+   open browser tab. That is ~3.7 GB/day/tab at this rig's rate. Gzip negotiation has since been
+   implemented **[implemented 2026-08-12]** and takes effect at the archive's next restart, which
+   is what turns ~32 GB/month/tab into ~4 GB.
 3. **The Bibites has a free, native Linux build on itch.io at exactly the version this rig
    runs.** That removes Steam, Wine and the Windows licence premium from the spot-simulation
    idea's critical path, and takes a cloud world from roughly $90/month to roughly $30.
@@ -37,11 +39,12 @@ options:
 
 ## How to read the numbers
 
-Four provenance classes, used consistently below.
+Five provenance classes, used consistently below.
 
 | Tag | Means |
 |---|---|
 | **[rig]** | Measured on the living deployment, by this pass, on **2026-08-11 ~22:10Z**. Reproducible; the command is named where it is not obvious. |
+| **[rig experiment, date]** | Measured by a run made **for** this document against a **copy** of the deployment's data in a scratch directory — never against the deployment itself, and never writing to it. One so far: the replay-memory matrix of 2026-08-12 in *The term nobody has priced*. |
 | **[record]** | Quoted from the project's own record — `dev_environment.md`, `m5_considerations.md`, the contracts. Cited by section. |
 | **[web, date]** | Fetched from a vendor page or a search result on the stated date. Vendor prices move; every one of these needs re-checking at the moment of purchase. |
 | **[training]** | Carried from model training knowledge, not verified by search this pass. Treat as a lead, not a price. |
@@ -78,7 +81,7 @@ because the model it feeds is what makes a stranger's map costable at all.
 | `/api/hops` | **49,307 B**, gzip 6,562 (**7.5×**) | same |
 | `/api/species` | **7,323 B**, gzip 1,451 (5.0×) | same |
 | Poll cadence | status **2,000 ms**, hops **1,500 ms**, history 60,000 ms | `go/internal/archive/page.go:2749–2755` |
-| Compression on the wire | **none** — a request with `Accept-Encoding: gzip` returns the identical byte count | `curl -H 'Accept-Encoding: gzip'` |
+| Compression on the wire | **none as measured** — a request with `Accept-Encoding: gzip` returned the identical byte count. Answered since: gzip negotiation landed 2026-08-12 and takes effect at the archive's next restart (see *the status page*, below) | `curl -H 'Accept-Encoding: gzip'` |
 | Binaries | `relay` 10.5 MB, `archive` 10.6 MB, **statically linked ELF, no cgo** | `file bin/relay bin/archive` |
 
 Two of these are worth pausing on. The relay is a **single static binary with one non-stdlib
@@ -209,7 +212,8 @@ be slower than 40,000/s, not faster.
 ### The other term nobody has priced: the status page
 
 `/api/status` is 19.7 KB and refreshes every 2 s; `/api/hops` is 49.3 KB and refreshes every 1.5 s;
-**neither is compressed** **[rig]**. Per continuously open browser tab, at this rig's rate:
+**neither was compressed when this was measured** **[rig]** — see *Compression: done*, below. Per
+continuously open browser tab, at this rig's rate:
 
 > 19.7 KB / 2 s + 49.3 KB / 1.5 s ≈ **43 KB/s = 3.7 GB/day = ~111 GB/month, per tab.**
 
@@ -223,11 +227,26 @@ That is **more than half the entire migration traffic of the map** (54 GB/month 
 by one person leaving a browser tab open. Five curious strangers doing the same triples the
 service's egress, and none of it is game traffic.
 
-**Two cheap answers, both outside this document's authority to take.** Serving the three JSON
-endpoints gzipped cuts them **8.7×, 7.5× and 5.0×** as measured — that is one handler wrapper.
-Lengthening the two poll intervals would cut it proportionally and would change what the page
-feels like, which is a design question the page's owner should answer, not this document. **The
-measurement is offered; the change belongs to whoever owns `page.go`.**
+**Two cheap answers. The first has been taken; the second is still the page owner's.**
+
+**Compression: done** **[implemented 2026-08-12]**. `go/internal/archive/compress.go` wraps the
+whole operator mux in standard `Accept-Encoding` negotiation — the five JSON endpoints and the page
+itself. A client that asks for gzip gets it; a client that says nothing gets the identical bytes it
+always got; `Vary: Accept-Encoding` is on both, nothing is encoded twice, and an answer under one
+packet is left alone. On a six-slot fixture the status frame compresses **10.2×**, which is the
+same shape as the **8.7×** measured here with `gzip -9`, and the page's own **138 KB** first load
+falls to **45 KB** — a term this section had not counted at all. It is transport and nothing else:
+no payload changed shape, no interval moved, and no existing reader had to change. `curl` sends no
+`Accept-Encoding`, so every shell probe in `e2e/` keeps parsing the identity bytes it always did;
+`ringstat` is Go, and `net/http` asks and decompresses on its own behalf, so the terminal tool takes
+the saving for free. **It is not on the wire yet** — it rides the archive's next restart and joins
+the debt `m5_tracking.md` already holds against that restart (WP4's deny-list flag and the `limits`
+key on `/api/status`). An archive restart is expensive and its cost grows with the ledger, so the
+rule there stands: batch the reasons, never restart to collect one.
+
+**Cadence: still open, and still not this document's.** Lengthening the two poll intervals would
+cut what is left proportionally and would change what the page feels like. **The measurement is
+offered; that change belongs to whoever owns `page.go`.**
 
 Note also that this is the same page `m5_tracking.md` records as **never having been reachable by
 anyone but the owner** — the `8796` firewall rule and portproxy have no record of being run. WP3
@@ -286,15 +305,29 @@ Monthly, at the exit-test bar (S = 5, six slots):
 | Flow | Monthly | Notes |
 |---|---|---|
 | Migration forwards out of the relay | **54 GB** | 357 MB/day × S; ingress is free on both clouds |
-| Status page | **32 GB per continuously open tab** | uncompressed; ~4 GB gzipped |
+| Status page | **32 GB per continuously open tab** | uncompressed; **~4 GB gzipped**, which is what it becomes at the archive's next restart **[implemented 2026-08-12]** |
 | Genome fetches served through the relay | **up to 92 GB** | ceiling is `genomeRequestsPerMinute` 30/peer × 14.2 KB; observed far below |
+| `FORWARD_RECEIPT`, one per forward | **0.97 GB** | **287 B measured**, × 22,600 crossings/day × S. B26's whole egress cost, and **1.8% of the forward term it rides beside** **[measured 2026-08-12]** |
 | `PEER_STATUS` broadcasts | negligible | 43.9/min after WP5's coalescing window **[record]**, small frames |
-| ACKs, receipts, heartbeats | negligible | a few hundred bytes each |
-| **Realistic budget** | **90–150 GB/month** | tail risk to ~250 GB if the genome pump ever drains |
+| ACKs, `PONG`s, save receipts | negligible | a few hundred bytes each |
+| **Realistic budget** | **90–150 GB/month** | tail risk to ~250 GB if the genome pump ever drains; the receipt row sits inside this band and does not move it |
 
 **This is small by cloud standards and awkward by cloud pricing.** It sits just above AWS's 100 GB
 free allowance and far above GCP Premium Tier's 1 GiB, which is exactly the band where the pricing
 model matters more than the volume.
+
+**The receipt row is a measurement, not an estimate, and that was WP3's job.** B26 declined to
+assume its own cost away and handed the arithmetic here (`contract-b-m4.md` §5.2; DQ2). The
+harness — `go/internal/relay/receipt_cost_test.go`, 2 000 migrations through an in-process relay
+at 15.8 KB a crossing — measures **287 B per receipt**, **relay-written frames per migration 2 → 3**
+(forward + ack + receipt) with relay-*read* frames unchanged at 2, and **1.3% marginal CPU** on the
+forward path, which is dominated by the JSON decode of the 15.8 KB frame it acknowledges. Three
+properties keep the row this small and all three are contract, not luck: the frame is four fields
+with no body, it is **not copied to subscribers** (§5.1's fan-out set is unchanged), and it enters
+**no** §3.3 ceiling, because every published limit counts the relay's *inbound* path. The term the
+egress table cannot show is the **sender's**: one journal `Apply` — an appended ~221 B record and an
+fsync — per forwarded migration, taking the outbound path from 3 durable writes to 4. That is disk
+and latency on a participant's own machine, not egress on the hoster's bill.
 
 ### TLS, DNS, and what the name costs to change later
 
@@ -477,15 +510,17 @@ Linux spot **$0.032/hr**):
 **On GCP the Windows licence alone costs more than twice the entire Linux instance.** That is the
 number that makes the itch.io build worth an evening of rehearsal.
 
-#### (b) Linux — why Proton is probably not the question
+#### (b) Linux — the native build works, and it has now been run
 
-**The native Linux build makes Wine/Proton a fallback rather than a plan.** Worth stating why the
-native path is plausible, and exactly what is unverified:
+**The native Linux build removes Wine/Proton from the plan entirely** — rehearsed end to end on
+this machine on 2026-08-12. Three reasons said the native path was plausible; all three held:
 
-- **Unity Mono is the same IL on every platform.** The mod is Harmony patches against
-  `BibitesAssembly.dll`, and a Mono build's managed assemblies are platform-independent. That is
-  the whole reason `dev_environment.md` records "Mono backend (not IL2CPP — Harmony and
-  decompilation fully work)" as a load-bearing fact **[record]**.
+- **Unity Mono is nearly the same IL on every platform — and "nearly" is now measured, not
+  assumed.** The mod is Harmony patches against `BibitesAssembly.dll`, and a Mono build's managed
+  assemblies are *almost* platform-independent: the two builds differ only where the game calls a
+  native file dialog or asks the shell to reveal a folder (question 1 below). That is the whole
+  reason `dev_environment.md` records "Mono backend (not IL2CPP — Harmony and decompilation fully
+  work)" as a load-bearing fact **[record]**.
 - **BepInEx 5 ships Linux builds.** 5.4.23.x splits its unix zip into `linux_x86`, `linux_x64` and
   `macos_x64`, with Doorstop 4.3 and a `run_bepinex.sh` launcher, and BepInEx's own guidance is to
   stay on 5 for Unity Mono games **[web, 2026-08-11]**.
@@ -493,29 +528,92 @@ native path is plausible, and exactly what is unverified:
   all five local worlds that way since 2026-08-10, and `0.6.2`'s `MinFpsGovernor` exists precisely
   to disarm the game's min-FPS servo in a process with no graphics device **[record]**.
 
-**What is UNTESTED, and must be a rehearsal item rather than an assumption.** Every line below is a
-question, not a risk assessment:
+**These five were the rehearsal items. All five are now ANSWERED on this machine**
+**[rig experiment, 2026-08-12]** — the itch.io Linux build downloaded non-interactively, unpacked
+to scratch, run headless against a scratch relay and sidecar on ports 18795/18787, while the live
+five-world rig kept running untouched:
 
-1. Does the Linux build's `BibitesAssembly.dll` match the Windows one closely enough for the mod's
-   patches to bind? **This is D22's support matrix doing its job** — `setup-farend.ps1` already pins
-   `$AssemblySha256` as *that machine's* matrix entry, so a Linux assembly with a different hash is
-   a new matrix row rather than a contradiction.
-2. Does BepInEx 5.4.23.3 `linux_x64` load the plugin, and does the plugin's `0.6.4` behaviour
-   survive it?
-3. `Application.persistentDataPath` moves from `AppData/LocalLow/...` to `~/.config/unity3d/...` on
-   Linux. Anything in the mod or the rig scripts that hardcodes the Windows path breaks.
-4. Does the log-file starvation trap exist on Linux? It is a BepInEx `DiskLogListener` behaviour,
-   not a Windows one, so **assume yes** until measured — though a one-instance-per-VM cloud world
-   never hits the five-file ceiling.
-5. Does the achieved-vs-applied time-scale gap look the same? `TimeController.CheckMinFPS` and
-   `Time.maximumDeltaTime` are engine-side, so probably — but the whole point of a cloud world is
-   speed, and this is the number that decides whether it is worth paying for.
+1. **Does the Linux `BibitesAssembly.dll` bind the mod's patches? YES — and the hash differs, which
+   is D22's support matrix doing exactly its job.** Windows/Steam is
+   `12455e48…` (1 376 256 B); Linux/itch.io is `5b145a0a…` (1 375 744 B) — 512 bytes, one PE
+   alignment unit. A full `ilspycmd` decompile of both, diffed, puts **every** difference in three
+   places the mod never touches: `StandaloneFileBrowserWindows` + `WindowWrapper` (`user32.dll`,
+   `System.Windows.Forms`, `Ookii.Dialogs`) become `StandaloneFileBrowserLinux`
+   (`DllImport("StandaloneFileBrowser")`); three "reveal the save folder"
+   `Process.Start("explorer.exe", …)` calls become no-ops; and Unity's own `MonoScriptData`
+   bookkeeping shifts (`TotalTypes` 631 → 630, exactly the one type removed). **All six types the
+   mod patches or reads are byte-identical across the two builds** — `TimeController`, `BibiteBody`,
+   `GlobalLineageManager`, `ScreenShotHandler`, `SaveSystem`, `SaveController` — and all ten patch
+   targets are present on both sides.
+2. **Does BepInEx 5.4.23.3 `linux_x64` load the plugin, and does `0.6.4` behave? YES, completely.**
+   `BepInEx_linux_x64_5.4.23.3.zip` over the game directory, `BibitesMultiverse.dll` (`fae0d50c…`)
+   into `BepInEx/plugins/`, `./run_bepinex.sh "./The Bibites.x86_64" -batchmode -nographics`.
+   The log reads `System platform: Bits64, Linux`, `Detected Unity version: v6000.0.44f1`,
+   `Loading [Bibites Multiverse 0.6.4]`, and the mod prints `Application.version = 0.6.3.1` — the
+   build **is** the version this rig runs. Config was read from the BepInEx `.cfg` and the
+   environment; every subsystem armed (border strip on `BibiteBody.FixedUpdate`, `[M5-HISTORY]`,
+   `[M4-PHASE]`, dev commands); `MinFpsGovernor` detected `headless=True` and disarmed itself
+   unprompted. **The Contract A dial used the shipped token flow, not the rig escape hatch** — the
+   sidecar minted `<data-dir>/contract-a.token` 0600 at first start and the mod read it from
+   `MULTIVERSE_CONTRACT_A_TOKEN_FILE` — and the handshake carried `gameVersion=0.6.3.1
+   modVersion=0.6.4 contractAVersion=contract-a/2.4`. The relay saw `modConnected=true
+   exportEdges="[E N W S]"`. **The session ran 14 m 08 s and ended only when told to quit**, which
+   is the heartbeat answer: the sidecar's 13-second deadline never fired once.
+   **On Linux there is no `WSLENV` and no path translation** — the token path passes through as
+   itself, deleting the single fiddliest line in `run-m4.sh`'s `start_game`.
+3. **What breaks on `persistentDataPath`? Nothing in the mod; four lines in the rig scripts.** The
+   path resolved to `/home/ubuntu/.config/unity3d/The Bibites/The Bibites`, with `Savefiles/`,
+   `Scenarios/`, `Bibites/Templates/` and `prefs` all created correctly. **The mod is already
+   clean** — every path goes through `SaveController.SavePath` (which is
+   `Path.Combine(Application.persistentDataPath, "Savefiles")`) or `Application.persistentDataPath`
+   directly, and it logged its own directory correctly at startup. Eight saves landed, rotation and
+   pruning worked (`keep=4`, `pruned=1`), and save-on-quit fired (`why=quit`). **What hardcodes the
+   Windows path is the rig, not the product**: `e2e/run-m4.sh:355`, `e2e/baseline.sh:55` and `:711`,
+   and `e2e/species-guard-check.sh:27-28` all glob
+   `/mnt/c/Users/*/AppData/LocalLow/...`. `$XDG_CONFIG_HOME` relocates the whole tree, which is how
+   a cloud world puts its saves on the persistent volume of (d).
+4. **Does the log-starvation trap exist on Linux? NO — and what replaces it is worse to debug,
+   though harmless to a one-instance-per-VM cloud world.** Five concurrent instances out of one
+   game directory produced **no `LogOutput.log.1`–`.4` at all**: the Windows fallback is driven by
+   an exclusive file lock Linux never takes. **All five loaded the mod** — `BibitesMultiverse.dll`
+   is mapped in all five processes — so the *functional* failure mode of the Windows trap (an
+   instance that gets no log file never loads the mod, and comes up `modConnected=false` with
+   `exportEdges=[]`) **does not exist here**. Instead all five held an open descriptor on the *same*
+   `LogOutput.log`, each with its own file offset and each truncating on launch: the file ended as
+   **227 402 bytes of which 200 557 were NUL**, `file` reporting `data` rather than text, with only
+   one of five session headers and two of five `event=SAVED` lines surviving. **Windows loses one
+   instance loudly; Linux keeps every instance and shreds the shared evidence window for all of
+   them at once.** A cloud world runs one instance per VM and never meets this. **A Linux
+   *participant* running more than one world on one box does**, and it is a WP6 packaging item, not
+   a cloud one.
+5. **Does the achieved-vs-applied time-scale gap look the same? The gap is real and WIDER here, but
+   this host cannot settle the number.** `Time.timeScale` accepted **100.00 on the first send** —
+   the Windows rig's rule that the first `timescale` after a load sticks at 1.00 and needs a second
+   send twenty seconds later **did not reproduce** (observed once; not yet a rule). Achieved rate
+   over six 67-second samples was **6.3–7.2×** against an applied 100, at a population of 14–28.
+   **That number is not a cloud number and must not be quoted as one:** it was taken on a WSL2 VM
+   whose 16 cores were carrying five live Windows worlds, the relay, the archive and the collector
+   at a load average of 14–20, with everything niced to 19. It bounds the gap's *existence*, not its
+   size. **A clean single-tenant box is the only place this can be measured, and Stage 2 is that
+   box.**
 
-**Proton/Wine, if 1–4 fail.** Unity Mono Windows builds are a well-trodden Wine case and BepInEx has
-a documented Wine story, but it adds a translation layer under a process that must run unattended
-for weeks, and it re-introduces a Windows game binary without re-introducing a Windows licence bill.
-It is the fallback. **It should not be attempted before the native build has been tried, because
-trying the native build costs one afternoon and answers a better question.**
+**Sizing, from the same run** — the cloud-world numbers of *Costing one cloud world* are
+Windows-measured, and the Linux instance is **cheaper on memory**: the headless game held
+**368–401 MB** RSS (rising steadily over 6.5 minutes as population grew 14 → 28) against Windows's
+403–466 MB fresh and 1 954–2 450 MB at a ×100 target, and burned **0.86–1.17 cores** against
+Windows's 1.04–1.40. Its sidecar held **13–14 MB** — far under the Windows 70–145 MB — at
+effectively no CPU on a single-peer map with no lanes open. **2 vCPU / 4 GB remains the honest
+minimum and 8 GB the honest recommendation**, because nothing here ran long enough to reach the
+steady state that produces the 2 GB figure. Save stalls were **277–682 ms across all eight saves,
+every one inside D14's 2 000 ms budget** — against the live rig's 43-of-76 breach rate — but the
+worlds are not comparable: `lineageMs` was 4–11 ms here against 53% of `writeMs` there, because this
+world had minutes of species history and the rig's have weeks. **Clean quit with save-on-quit took
+2.05 s**, comfortably inside even GCP's 30-second preemption notice.
+
+**Proton/Wine is now dead as a path, not merely a fallback.** Questions 1–4 all passed on the native
+build, so the translation layer buys nothing and costs a Windows game binary under a process that
+must run unattended for weeks. **It should not be revisited unless a future game version breaks the
+native build.**
 
 #### (c) The Steam constraint, and the honest licensing position
 
@@ -666,7 +764,7 @@ bundle.
 |---|---|
 | **What** | One spot instance, same AZ as Stage 1, running the **itch.io Linux build** headless under BepInEx `linux_x64`, with a persistent volume carrying the journal, peer identity, credential and saves, and a handoff script on the interruption notice |
 | **Cost** | **~$30/month**, so **~$60–90** for the remainder of the period. Plus ~0.8 GB/day of archive growth if it runs fast — ~$0 on a Lightsail bundle's included disk, real on a metered one |
-| **Proves, in order of value** | (1) whether the Linux + BepInEx path works at all — the five untested questions in Part 2(b); (2) whether the spot handoff is as free as WP5 says, with a **real game** behind it; (3) how often the reload-to-last-save gap actually bites, which nothing has measured; (4) what a world costs per achieved ×, which is the number that decides whether Stage 3 is worth anything |
+| **Proves, in order of value** | (1) **what a world costs per achieved ×** on a clean single-tenant box — Part 2(b)'s rehearsal answered its five questions but could only bound the time-scale gap's *existence*, because this host carries five live worlds; that number decides whether Stage 3 is worth anything; (2) whether the spot handoff is as free as WP5 says, with a **real game** behind it; (3) how often the reload-to-last-save gap actually bites, which nothing has measured; (4) that the Linux + BepInEx path survives *unattended for weeks*, which one 15-minute rig run cannot show |
 | **D24 says** | it fits inside the period with room to fail. It is also the **only** stage that can be abandoned mid-run with no participant-facing consequence, because it is just another peer |
 | **The system working** | if it dies and the map does not notice, that is the result, not a near miss. Say so in the record |
 | **Owner's calls in it** | whether to ask the developer first; whether to pay him and how much; whether a peer he controls belongs on a map he is asking strangers to join |
@@ -717,8 +815,9 @@ Ordered by how much else depends on them.
 6. **Whether to run any cloud world at all**, and whether to ask the developer first.
 7. **Whether to pay for the itch.io build per cloud instance**, and how much. Name-your-own-price
    makes this a choice.
-8. **Whether the status page's poll cadence and compression are worth changing.** The measurement
-   is here; the design is not this document's.
+8. **Whether the status page's poll cadence is worth changing.** The measurement is here; the
+   design is not this document's. Compression is no longer part of this question — it was
+   implemented on 2026-08-12 and ships with the archive's next restart.
 9. **Whether a peer the owner controls belongs on a map of strangers**, given that Decision 8's bar
    counts only non-owner peers.
 
