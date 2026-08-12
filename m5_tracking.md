@@ -124,6 +124,13 @@ burst, and each one also costs the far end a bundle rebuild.
 
 ### Carried actions that belong to no package
 
+- **The genealogy tree (owner-requested, 2026-08-12, built — 41eef26).** `/api/species/tree` +
+  a page tab: the living species as leaves, ancestors reduced to branching points, chains
+  collapsed. Derived entirely from A30/B9's parent-species field the ledger already carried —
+  no wire change. On the live rig: 11 of 12 living species connectable, deepest lineage 40
+  generations, 2,407 recorded species reduce to a 15-node tree. Rides the next archive restart
+  (the pending batch's successor); until then the endpoint exists only in HEAD.
+
 - **Keep the living deployment running, and treat it as M5's first participant.** Every upgrade
   the milestone ships has to move it, and it is the only peer whose before and after are fully
   observable. (`m5_considerations.md`, *Next Steps* 3.)
