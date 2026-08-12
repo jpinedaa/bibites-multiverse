@@ -162,7 +162,7 @@ func TestEveryServedSurfaceIsGzippedExactlyWhenAsked(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	for _, path := range []string{"/", "/api/status", "/api/hops", "/api/species",
-		"/api/species/history?key=Izus+velox", "/api/history"} {
+		"/api/species/tree", "/api/species/history?key=Izus+velox", "/api/history"} {
 		t.Run(path, func(t *testing.T) {
 			plainResp, plain := rawGet(t, ts.URL+path, "")
 			if enc := plainResp.Header.Get("Content-Encoding"); enc != "" {

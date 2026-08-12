@@ -84,6 +84,24 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(view)
 	})
+	// The genealogy rides its OWN endpoint, for the third time and the same
+	// reason (§17, B14): /api/status is what MetricsLog.Append serializes
+	// verbatim into the durable sample file once a minute, and this view is
+	// DERIVED — every edge in it is already in the ledger, and every leaf is
+	// already in the census /api/status carries. Hanging it off the status
+	// payload would write a recomputable tree to disk once a minute forever and
+	// widen the one file whose width is a disk budget (§20, B20). It is also a
+	// view most readers never open, which is a second reason not to make every
+	// reader of every other view pay for it.
+	//
+	// The reduction happens on THIS side (tree.go rule 2), so the page and
+	// ringstat cannot disagree about who is related to whom.
+	mux.HandleFunc("/api/species/tree", func(w http.ResponseWriter, r *http.Request) {
+		view := a.deny.ApplySpeciesTree(a.SpeciesTreeView())
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(view)
+	})
 	mux.HandleFunc("/api/species/history", func(w http.ResponseWriter, r *http.Request) {
 		key, ok := speciesKeyParam(r)
 		if !ok {
@@ -280,6 +298,48 @@ tr.spdet>td{background:var(--cell);white-space:normal;padding:10px 12px}
 tr.spdet>td>div{position:sticky;left:0;max-width:calc(100vw - 72px)}
 .detgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr))}
 .detbox{border-left:2px solid var(--line);padding-left:10px;min-width:0}
+
+/* ---- the genealogy ----
+   An INDENTED tree, one row per node, drawn as SVG. Indentation and elbow
+   connectors carry the shape, which is why nothing here has to solve label
+   placement: every node owns a row, so no two labels can ever collide, and the
+   thing stays readable from ten species to sixty. A classic dendrogram centres
+   each ancestor between its children and then has nowhere to put that
+   ancestor's name.
+
+   It scrolls INSIDE its own box, like the map and the tables, because a long
+   species name is 64 bytes a peer chose and must not be able to push the page
+   sideways. */
+.treewrap{overflow:auto;max-height:min(76vh,900px);border:1px solid var(--line);
+border-radius:4px;background:var(--cell)}
+svg.tree{display:block}
+svg.tree .link{fill:none;stroke:var(--line);stroke-width:1.5}
+svg.tree .tnode{cursor:default}
+svg.tree .tnode:hover .nm{fill:var(--hot)}
+svg.tree .hit{fill:transparent}
+svg.tree .tnode:hover .hit{fill:rgba(90,169,230,.08)}
+/* white-space:pre on the NAME, for contract-a.md §17 A36's reason: SVG text
+   collapses a run of spaces exactly as HTML does, and a doubled space inside a
+   species name is the owning world's spelling, not noise. */
+/* The class selectors are deliberately NOT element-qualified: the name is a
+   <tspan> inside a <text> and so is every annotation beside it, so "text.meta"
+   would match nothing. One <text> per row lets the annotations FLOW after a name
+   whose width nothing here measures. */
+svg.tree text{font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+svg.tree text.nm{fill:var(--text);white-space:pre}
+svg.tree .anc text.nm{fill:var(--dim);font-size:11px}
+svg.tree .meta{fill:var(--dim);font-size:10.5px}
+svg.tree .gen{fill:var(--dim);font-size:9.5px}
+svg.tree .tbadge{font-size:9.5px;letter-spacing:.06em}
+svg.tree .tbadge.warn{fill:var(--warn)}
+svg.tree .tbadge.lane{fill:var(--lane)}
+svg.tree .ring{fill:none;stroke:var(--dim);stroke-width:1.5}
+.treelegend{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;color:var(--dim);
+margin:0 0 10px}
+.treelegend i.ringi{display:inline-block;width:9px;height:9px;border:1.5px solid var(--dim);
+border-radius:50%;vertical-align:-1px;margin-right:5px}
+.treestat{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;margin-bottom:10px}
+.treestat span b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
 .detbox h3{margin:0 0 5px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
 font-weight:400}
 .detbox .big{font-size:19px;font-variant-numeric:tabular-nums}
@@ -306,8 +366,9 @@ border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px;flex-wr
 .card .kv .lk,.card .kv .lu{font-size:10px;letter-spacing:.03em;opacity:.6}
 .card .exl{margin-top:4px}
 /* The shared creature definition lives in a zero-sized SVG at the top of the
-   document rather than inside the map, because THREE tabs draw it now and the
-   map's SVG is thrown away and rebuilt whenever the map's shape changes. */
+   document rather than inside the map, because THREE tabs draw it now — the map,
+   the species index and the family tree — and the map's SVG is thrown away and
+   rebuilt whenever the map's shape changes. */
 .glyphdefs{position:absolute;width:0;height:0;overflow:hidden}
 h2{font-size:12px;margin:0 0 10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
 display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;min-width:0}
@@ -517,6 +578,8 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
     <span class="sub">worlds, lanes, crossings</span></button>
   <button type="button" class="tab" role="tab" data-tab="species" aria-selected="false">species
     <span class="sub">what is alive, and where</span></button>
+  <button type="button" class="tab" role="tab" data-tab="tree" aria-selected="false">tree
+    <span class="sub">how the living are related</span></button>
   <button type="button" class="tab" role="tab" data-tab="settings" aria-selected="false">settings
     <span class="sub">what each world was told to do</span></button>
 </nav>
@@ -617,6 +680,31 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   </section>
 </div>
 
+<div class="panel" id="p-tree" role="tabpanel" hidden>
+  <section>
+    <h2><span class="term" data-t="genealogy">how the living are related</span>
+      <span class="note muted">Every species alive right now, joined at the ancestors where
+        their lines part. The ancestry is what the
+        <span class="term" data-t="crossings">migration record</span> shows: when a creature
+        crosses, the world it left names its species <em>and that species&rsquo; parent
+        species</em>, and this is one generation of that per crossing, chained. So a lineage
+        that has never crossed a lane has nothing here to connect it &mdash;
+        <span class="term" data-t="noancestry">that is stated per species, never guessed</span>.
+        Only <span class="term" data-t="branchpoint">branch points</span> are drawn: a run of
+        extinct ancestors with no living branch on it
+        <span class="term" data-t="collapsed">collapses to one edge</span> that says how many
+        generations it stood for. Nothing here is resolved against any world&rsquo;s own
+        registry &mdash; this is what the record says.</span></h2>
+    <div class="treestat" id="trstat"></div>
+    <p class="treelegend">
+      <span><i class="bibi"></i>alive &mdash; a leaf, or a living ancestor</span>
+      <span><i class="ringi"></i>an ancestor alive nowhere that is reporting</span>
+      <span>&plus;<b>n</b> on an edge &mdash; extinct generations collapsed into it</span>
+    </p>
+    <div class="treewrap" id="trbox"></div>
+  </section>
+</div>
+
 <div class="panel" id="p-settings" role="tabpanel" hidden>
   <section>
     <h2><span class="term" data-t="ceilings">what the map itself is running with</span>
@@ -661,11 +749,16 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   short <span class="term" data-t="flow">flow window</span>, not over all time. The
   <span class="term" data-t="settings">settings</span> a world reports are
   <span class="term" data-t="readonly">read-only</span> here: this page changes nothing, anywhere.
-  The three views share one poll and each has a link of its own &mdash;
-  <code>#map</code>, <code>#species</code>, <code>#settings</code>. JSON:
+  The <span class="term" data-t="genealogy">family tree</span> is what the migration record
+  shows and nothing else: lineages that have never crossed a lane are not connected here, and
+  the count of those is printed on the tab rather than left for a reader to notice.
+  The four views share one poll and each has a link of its own &mdash;
+  <code>#map</code>, <code>#species</code>, <code>#tree</code>, <code>#settings</code>. JSON:
   <code>/api/status</code> (live), <code>/api/hops</code> (the last minute of crossings,
   bounded in time and in count, and kept out of the durable sample file on purpose),
   <code>/api/species</code> (what is alive, joined to the crossing record),
+  <code>/api/species/tree</code> (the same alive set, reduced to its branch points &mdash;
+  its own endpoint for the same reason, so a derived tree is not written to disk once a minute),
   <code>/api/species/history?key=</code> and <code>/api/history</code> (downsampled,
   <code>?hours=</code>, <code>?buckets=</code>).
   <div class="motion" id="motion">
@@ -732,7 +825,11 @@ var G = {
  everywhere:["everywhere","This species is alive in every world that is currently reporting a census. It only claims that when at least two worlds are reporting: with one world answering, 'everywhere' and 'endemic' are the same sentence, and saying both would dress a single world's list up as a finding about the map."],
  excluded:["never exported","This species is on at least one world's exclusion list, which means that world never lets one of them out through a lane. It explains something otherwise baffling: a world can be full of a kind that never appears on any road out of it. The rule belongs to that world alone and is applied inside its own game — no other world, and nothing on this page, enforces or can enforce it. A species can be excluded by one world and travel freely from another."],
  speciesgenomes:["distinct genomes","How many genuinely different genetic makeups of this species have crossed a lane. Two creatures of one species are rarely identical; this counts the distinct ones the archive has fingerprints for. A big number beside a small population means a kind that is changing fast."],
- parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. It is shown and nothing more — there is no family tree here, because the register that gives a species its parent lives inside one copy of the game and only that copy can read it."],
+ parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. One crossing carries one generation of this, and the TREE tab is what happens when you chain them: if this species' parent has a parent of its own, recorded by some other crossing, the record joins them up. Nothing is resolved against any world's own register — the register lives inside one copy of the game and only that copy can read it — so what a family tree here says is what the record says, which is a smaller and more honest claim."],
+ genealogy:["the family tree","Every species alive right now, arranged by who came from whom. The information comes from one place: when a creature walks out of a world, that world names the creature's species AND the species it split off from. One crossing tells you one generation. Thousands of crossings, chained together, tell you the shape of the family — and on this map that shape runs about forty generations deep. What is drawn is only the part that still matters: the living species, and the ancestors where two or more living lines part company. Everything else is left out, and where a whole run of ancestors is left out the edge says how many."],
+ branchpoint:["a branch point","An ancestor that is drawn even though nothing of its kind is alive anywhere, because two or more living species descend from it by different children. It is the answer to 'how are these two related' — the most recent point their lines were the same. An ancestor with only ONE living line below it is not a branch point and is not drawn: it would be a step in a corridor with no doors."],
+ collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. So the number is the difference between the two."],
+ noancestry:["no recorded ancestry","This species is alive, and no crossing of it has ever named a parent species — so the record cannot say where it came from, and it is drawn on its own. That is not a fault in the species and not a fault in the map: ancestry here is a by-product of TRAVEL, and a kind that has stayed home has left no record to carry it. A separate note is used for a species whose ancestry IS recorded but whose whole family has died out; those two are different facts and are never given the same label."],
  settings:["settings","What a world was TOLD to do, as opposed to what it is doing. Everything else on this page is a measurement or a receipt; these are the knobs behind them — how often it saves, which species it refuses to export, whether its edges wrap. They are the reason a number elsewhere looks the way it does, and they are read-only here on purpose."],
  readonly:["read-only","This page shows settings and changes none of them. Changing another machine's world from a web page is a much bigger thing than showing one — it needs a login, a rule about who may change what, an answer for what happens when two people change the same thing at once, and a record of who changed it — and none of that is a small extension of showing a value. It is deliberately left for later."],
  savepolicy:["save policy","Three numbers that together answer 'what happens to this world if its machine stops'. How many minutes between saves — where 0 means the timer is OFF, which is a real setting and not a missing one, and is the explanation for a world that never shows a save. How many old saves it keeps beside the live one. And whether it saves when the game is closed."],
@@ -750,6 +847,7 @@ var G = {
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
     "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
     "rawname","endemic","everywhere","excluded","crossings","speciesgenomes","parentspecies",
+    "genealogy","branchpoint","collapsed","noancestry",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges","ceilings","floor",
@@ -1335,8 +1433,16 @@ function laneTitle(l, g){
    every client reads (contract-b-m4.md §13 item 7). It is NOT sanitized
    upstream and it never will be: contract-a.md §17 A36 guarantees the opposite,
    because a repaired label names a species the player cannot find in their own
-   game. The wire's answer is a byte count, a UTF-8 decode and a cap. THE
-   RENDERER'S ANSWER IS ITS OWN, and it is this:
+   game. The wire's answer is a byte count, a UTF-8 decode and a cap.
+
+   THREE FIELDS ARRIVE THIS WAY AND THE THIRD IS EASY TO FORGET. Beside the
+   census names and the exclusion entries, an ANCESTOR'S NAME on the family tree
+   is a "parentGenericName" off a migration envelope (contract-a.md §16 A30) —
+   the same 64 attacker-chosen bytes, arriving by a different route, and the one
+   name on this page that no census ever vouches for. It is drawn inside this
+   fence for that reason and by the same means.
+
+   THE RENDERER'S ANSWER IS ITS OWN, and it is this:
 
      NO NAME EVER BECOMES MARKUP. Names reach the DOM through textContent and
      through createElementNS + setAttribute, and through nothing else. The
@@ -1868,6 +1974,263 @@ function speciesDetail(row){
   wrap.appendChild(note);
   tr.appendChild(td);
   return tr;
+}
+
+/* -------------------------------------------------------------- the TREE tab
+   The genealogy, drawn as SVG built entirely by createElementNS. It is inside
+   this fence because EVERY LABEL ON IT IS AN ATTACKER-CHOSEN NAME, and one of
+   them arrives by a route nothing else on this page reads: an ancestor's label
+   is a "parentGenericName" off a migration envelope (contract-a.md §16 A30),
+   which is exactly as unsanitized as a census name and has exactly the same
+   guarantee that it will stay that way. Names land as textContent on <text> and
+   <tspan> and by no other route.
+
+   ONE ROW PER NODE, indentation for depth, elbow connectors for the joins. The
+   reason is label placement: a classic dendrogram centres an ancestor between
+   its children and then has nowhere to put that ancestor's own name, while a
+   row per node cannot collide with itself at any species count. The server has
+   already reduced the tree and ordered the nodes in DFS pre-order (tree.go),
+   so a parent is always drawn before its children and one pass is enough. */
+var TRX = null;
+
+var TR_ROWH = 26, TR_INDENT = 24, TR_PADL = 16, TR_PADT = 18;
+
+/* svgEl and trText keep the two safe primitives in one place: an element is
+   created, never parsed, and a string becomes a text node on a <tspan>. */
+function svgEl(tag, cls){
+  var e = document.createElementNS(SVGNS, tag);
+  if (cls) e.setAttribute("class", cls);
+  return e;
+}
+function trSpan(parent, cls, text, dx){
+  var s = svgEl("tspan", cls);
+  if (dx) s.setAttribute("dx", String(dx));
+  s.textContent = String(text);
+  parent.appendChild(s);
+  return s;
+}
+
+/* The counts line: the derivation's own account of how far it reaches. It is
+   NUMBERS ONLY and no name appears in it, but it is built out of nodes anyway,
+   because the rule for this region is that markup is never assigned here — one
+   exception is how a region stops being a fence. */
+function treeStats(x){
+  var host = document.getElementById("trstat");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  if (!x || !x.haveStatus){
+    host.appendChild(unkEl("the relay has broadcast no map yet"));
+    return;
+  }
+  function stat(term, label, value, extra){
+    var s = el("span", "muted");
+    s.appendChild(term ? termEl("span", term, label) : document.createTextNode(label));
+    s.appendChild(document.createTextNode(" "));
+    s.appendChild(el("b", null, value));
+    if (extra) s.appendChild(document.createTextNode(extra));
+    host.appendChild(s);
+  }
+  stat("alive", "alive", x.alive);
+  stat(null, "joined by the record", x.connected);
+  if (x.isolated > 0){
+    var s = el("span", "muted");
+    s.appendChild(termEl("span", "noancestry", "standing alone"));
+    s.appendChild(document.createTextNode(" "));
+    s.appendChild(el("b", null, x.isolated));
+    // THE TWO REASONS A LEAF STANDS ALONE, split, because they are different
+    // facts: no ancestry recorded at all, versus a recorded family that is
+    // extinct. Reporting one number for both would let a reader conclude the
+    // record knows less than it does.
+    s.appendChild(document.createTextNode(" (" + x.unrecorded +
+      " with no ancestry recorded, " + (x.isolated - x.unrecorded) +
+      " whose recorded family is gone)"));
+    host.appendChild(s);
+  }
+  stat("branchpoint", "branch points drawn", x.ancestors);
+  if (x.collapsed > 0) stat("collapsed", "generations collapsed", x.collapsed);
+  stat(null, "the record's deepest line", x.maxDepth, " generation(s)");
+  // The reach of the whole record behind the reduced tree, so the tab is honest
+  // about being a small view of a big thing.
+  var r = el("span", "muted");
+  r.appendChild(document.createTextNode("the crossing record holds "));
+  r.appendChild(el("b", null, x.ledgerSpecies));
+  r.appendChild(document.createTextNode(" species, "));
+  r.appendChild(el("b", null, x.ledgerEdges));
+  r.appendChild(document.createTextNode(" of them with a parent named — almost all extinct, " +
+    "which is why only what is alive is drawn"));
+  host.appendChild(r);
+  if (x.cycleGuard > 0 || x.walkCapped > 0 || x.nodesCapped){
+    var g = el("span");
+    g.appendChild(unkEl("the record holds " +
+      (x.cycleGuard > 0 ? x.cycleGuard + " ancestry loop(s) " : "") +
+      (x.walkCapped > 0 ? x.walkCapped + " over-long line(s) " : "") +
+      (x.nodesCapped ? "more nodes than this view draws " : "") +
+      "— guarded, and drawn as far as it was safe to"));
+    host.appendChild(g);
+  }
+}
+
+/* trTip is one node's tooltip, as strings in the SP registry — the same registry
+   the map's species runs use, filled by showTip with textContent. */
+function trTip(n){
+  var lines = [];
+  if (n.alive){
+    lines.push(n.population + " alive right now" + (n.eggs ? ", " + n.eggs + " egg(s)" : "") +
+      " in " + (n.worlds || []).length + " world(s): S" + (n.worlds || []).join(", S"));
+  } else {
+    // §10.1's rule, on the one node type that could most easily be misread as a
+    // resident: it is NOT alive, and the sentence says so before anything else.
+    lines.push("Not alive in any world that is reporting a census. It is drawn because " +
+      n.leaves + " living species descend from it by different lines — it is where those " +
+      "lines part.");
+  }
+  if (n.alive && n.leaves > 1){
+    lines.push("It is also an ancestor here: " + (n.leaves - 1) +
+      " other living species descend from it.");
+  }
+  if (n.ancestryKnown){
+    lines.push("The record traces it back " + n.ancestryDepth + " generation(s).");
+  } else {
+    lines.push("No crossing of it has ever named a parent species, so the record cannot say " +
+      "where it came from.");
+  }
+  if (n.isolated){
+    lines.push(n.ancestryKnown
+      ? "Nothing else alive on this map descends from any of those ancestors, so it stands on " +
+        "its own here — its family is recorded and its family is extinct."
+      : "It stands on its own here. Ancestry on this map is a by-product of travel, and a " +
+        "kind that has stayed home leaves no record to carry it.");
+  }
+  if (n.collapsed > 0){
+    lines.push("The edge above it stands for " + n.collapsed +
+      " extinct generation(s) with no living branch on them.");
+  }
+  lines.push(n.crossings + " recorded crossing(s)" +
+    (n.genomes ? ", " + n.genomes + " distinct genome(s)" : "") + ".");
+  lines.push(n.nameFrom === "census"
+    ? "Spelled as the world holding it spells it now."
+    : "Spelled as its descendants' crossing records named it — no census names it, because " +
+      "nothing of its kind is alive.");
+  return {title: String(n.name), body: lines.join(" ")};
+}
+
+function renderTree(x){
+  TRX = x;
+  treeStats(x);
+  var host = document.getElementById("trbox");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  // The tree's tooltips are rebuilt with the tree. They share SP with the map's
+  // species runs and are prefixed so neither can clear the other's entries.
+  for (var old in SP){ if (old.indexOf("tr") === 0) delete SP[old]; }
+
+  if (!x || !x.haveStatus){
+    host.appendChild(el("div", "muted", "waiting for the map"));
+    return;
+  }
+  var nodes = x.nodes || [];
+  if (!nodes.length){
+    host.appendChild(el("div", "muted",
+      "no world is reporting a species right now, so there is nothing to relate"));
+    return;
+  }
+
+  var svg = svgEl("svg", "tree");
+  var links = svgEl("g", "links");
+  svg.appendChild(links);
+
+  var pos = {}, maxDepth = 0, i;
+  for (i=0;i<nodes.length;i++) if (nodes[i].depth > maxDepth) maxDepth = nodes[i].depth;
+  var height = TR_PADT + nodes.length * TR_ROWH + 10;
+  // A generous label allowance rather than a measured one: measuring text means
+  // laying it out first, and the box scrolls, so an over-wide canvas costs a
+  // scrollbar and an under-wide one clips a name.
+  var width = TR_PADL + maxDepth * TR_INDENT + 760;
+  svg.setAttribute("width", String(width));
+  svg.setAttribute("height", String(height));
+
+  for (i=0;i<nodes.length;i++){
+    var n = nodes[i];
+    var x0 = TR_PADL + n.depth * TR_INDENT;
+    var y0 = TR_PADT + i * TR_ROWH;
+    pos[n.key] = {x: x0, y: y0};
+
+    // The elbow to the parent. The server emits DFS pre-order, so the parent's
+    // position is always already known; a node whose parent is missing is drawn
+    // without a connector rather than skipped.
+    var p = n.parent ? pos[n.parent] : null;
+    if (p){
+      var sx = p.x + 5;
+      var path = svgEl("path", "link");
+      path.setAttribute("d", "M" + sx + " " + (p.y + 8) + " V" + y0 + " H" + (x0 - 4));
+      links.appendChild(path);
+      if (n.collapsed > 0){
+        // The collapse, marked ON the edge it stands for.
+        var gt = svgEl("text", "gen");
+        gt.setAttribute("x", String(sx + 3));
+        gt.setAttribute("y", String(y0 - 4));
+        gt.setAttribute("data-t", "collapsed");
+        gt.textContent = "+" + n.collapsed;
+        links.appendChild(gt);
+      }
+    }
+
+    var g = svgEl("g", "tnode" + (n.alive ? "" : " anc"));
+    // data-s registers the row's tooltip; the key is generated here and the
+    // NAME never becomes part of a selector or an attribute value.
+    var tk = "tr" + i;
+    SP[tk] = trTip(n);
+    g.setAttribute("data-s", tk);
+
+    var hit = svgEl("rect", "hit");
+    hit.setAttribute("x", "0");
+    hit.setAttribute("y", String(y0 - TR_ROWH/2 + 4));
+    hit.setAttribute("width", String(width));
+    hit.setAttribute("height", String(TR_ROWH - 2));
+    g.appendChild(hit);
+
+    if (n.alive){
+      // The same creature glyph the map draws, in the same per-species colour,
+      // so a species reads the same on all three views.
+      var u = svgEl("use");
+      u.setAttribute("href", "#bib");
+      u.setAttribute("transform", "translate(" + (x0 + 6) + " " + (y0 + 1) + ") scale(0.85)");
+      u.style.fill = speciesColor(n.key);
+      g.appendChild(u);
+    } else {
+      var ring = svgEl("circle", "ring");
+      ring.setAttribute("cx", String(x0 + 5));
+      ring.setAttribute("cy", String(y0 + 1));
+      ring.setAttribute("r", "4");
+      g.appendChild(ring);
+    }
+
+    var text = svgEl("text", "nm");
+    text.setAttribute("x", String(x0 + 16));
+    text.setAttribute("y", String(y0 + 5));
+    // THE RAW SPELLING, as its source holds it (contract-a.md §17 A36 for a
+    // census name, §16 A34 for a record's). CSS keeps its spaces.
+    trSpan(text, null, n.name);
+    if (n.alive){
+      var where = (n.worlds || []).length ? "  S" + (n.worlds || []).join(" S") : "";
+      trSpan(text, "meta", "· " + n.population + " alive" +
+        (n.eggs ? " +" + n.eggs + "e" : "") + where, 10);
+    } else {
+      trSpan(text, "meta", "· extinct here · " + n.leaves + " living lines below", 10);
+    }
+    if (n.isolated){
+      // The two reasons, never conflated — and the label a reader sees is the
+      // one that is true of THIS species.
+      var b = trSpan(text, "tbadge warn",
+        n.ancestryKnown ? "NO LIVING RELATIVE" : "NO RECORDED ANCESTRY", 10);
+      b.setAttribute("data-t", n.ancestryKnown ? "genealogy" : "noancestry");
+    } else if (n.alive && n.leaves > 1){
+      trSpan(text, "tbadge lane", "ALSO AN ANCESTOR", 10);
+    }
+    g.appendChild(text);
+    svg.appendChild(g);
+  }
+  host.appendChild(svg);
 }
 
 /* ----------------------------------------------------------- the SETTINGS tab
@@ -2537,7 +2900,7 @@ function censusless(d){
 
    THE TAB IS IN THE URL HASH, which is what makes "#species" a link somebody
    can send and a reload land where the reader was. */
-var TABS = ["map","species","settings"], TAB = "map", lastStatus = null;
+var TABS = ["map","species","tree","settings"], TAB = "map", lastStatus = null;
 
 function tabFromHash(){
   var h = (location.hash || "").replace(/^#/, "");
@@ -2569,6 +2932,11 @@ function showTab(name, push){
   }
   if (lastStatus) render(lastStatus);
   if (name === "species"){ if (SPX) renderSpecies(SPX); tickSpecies(); }
+  // The tree is redrawn from the answer it already has so the tab is never
+  // blank while its fetch is in flight, then refreshed. Its geometry needs no
+  // laid-out box — every coordinate is computed, not measured — so unlike the
+  // map it does not have to be rebuilt on becoming visible.
+  if (name === "tree"){ if (TRX) renderTree(TRX); tickTree(); }
   if (name === "map") tickHistory();
   if (push && location.hash !== "#"+name) location.hash = "#"+name;
 }
@@ -2766,6 +3134,22 @@ async function tick(){
   // derived from a file the browser must never be handed, so they cost the
   // archive a little work and are worth nothing to a tab nobody is looking at.
   if (TAB === "species") await tickSpecies();
+  // And so does the genealogy, for the same two reasons: it is derived from a
+  // ledger the browser must never be handed, and it is worth nothing to a tab
+  // nobody is looking at.
+  if (TAB === "tree") await tickTree();
+}
+
+async function tickTree(){
+  try {
+    var r = await fetch("api/species/tree", {cache:"no-store"});
+    renderTree(await r.json());
+  } catch(e){
+    var host = document.getElementById("trbox");
+    if (host && !host.firstChild){
+      host.appendChild(el("div", "bad", "genealogy endpoint unreachable"));
+    }
+  }
 }
 
 async function tickSpecies(){
