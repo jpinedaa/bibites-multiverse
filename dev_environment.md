@@ -2648,6 +2648,22 @@ with the sidecars paused it had not returned after a minute. **`statuspage` is t
 to source through** — one curl to the local archive, 0.5 s — and it leaves every function
 (`start_relay`, `start_archive`, `start_sidecar`, `kill_pid`) defined just the same.
 
+**The far end took the B26 trip on 2026-08-12 ~11:56Z, and the warning stream is over.** The
+rebuilt bundle verified against its published sha256, the exe it carries
+(`cae0f90bb75df6869951bdcfafc512131d675775adf800e3c3ba40543fba2518`) verified before and after
+the copy, and the swap ran the sidecar-only pair the morning's first trip installed — the game
+(headless) never restarted, the mod reattached by itself, and the world's time scale was
+untouched because only a game restart resets it. Reclaimed at (2,1) in ~0.1 s, custody recovered
+`outbound=5 inbound=0` with zero discarded bytes, pacing engaged at 25/50. The two things the
+trip was for, both confirmed against live traffic: **zero** `ignoring unknown type` lines across
+the first 21 outbound migrations (the pre-B26 sidecar logged one per migration, ~159/min), and
+**26 `receiptSessionId` entries in `data-slot-6/journal/journal.log`** — the receipt loop closes
+at the far end too, read from the journal as designed. The outgoing exe is kept beside the
+install as `multiverse-sidecar.exe.pre-receipts.bak` (`ac14bb69…`), the far end's rollback for
+this window. The warning-heavy log generation (43.9 MB grown in ~2.5 h without rotation) is
+archived generation-stamped as `sidecar-slot6-20260812-075624.log`; the far end still has **no
+log rotation** until `setup-farend.ps1` grows the flags, so that debt stands.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
