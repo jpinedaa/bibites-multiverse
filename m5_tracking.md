@@ -251,6 +251,11 @@ only fleet that rehearses `contract-b/4`. Every constraint below is on record in
   there**; a second send twenty seconds later takes. A restarted game can land on a *different*
   BepInEx log file than the one it left, so a line mark taken before the quit is meaningless and a
   `wait_log` against it hangs — `/api/status` is per-slot and rotation-proof.
+- **Standing owner grant (2026-08-12): zero-gap archive restarts for page-view verification are
+  pre-authorized** — "as soon as you can and as many times as you need." The pattern stays the
+  proven one (pause the five local sidecars → restart the archive inside the pause → resume with
+  the zero-discarded gate); the grant removes the per-restart ask, not the discipline. Size the
+  pause from ~48 k records/s replay.
 - **Archive restarts are expensive and permanent — and the cost grows with the ledger.** The
   replay scales with ledger size (~93 s at 3.7 M records on 2026-08-10, **~150 s at 6.24 M on
   2026-08-11**; size any budget from today's ledger, not from a recorded figure), during which
