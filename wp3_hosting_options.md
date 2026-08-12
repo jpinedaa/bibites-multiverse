@@ -203,12 +203,13 @@ be slower than 40,000/s, not faster. The rate has since been measured again on 8
 **36,900–48,600 records/s**, the low end being a run whose genome-store metadata was still cold.
 A fresh cloud instance is always the cold case.
 
-**One denominator warning before any of this is re-derived.** `/api/status`'s `ledgerRecords` is
-**not** `wc -l` on the ledger: `RecordGenome` lines are appended without incrementing the counter
-(`go/internal/archive/archive.go:1219` against the three `recordCount++` sites), so the counter
-drifts below the file from every restart onward — 8,060,891 against 8,156,869 lines on 2026-08-12,
-1.2% low **[rig experiment, 2026-08-12]**. Every per-record figure here is denominated in **lines
-actually replayed**, which is what the memory is spent on.
+**One denominator warning before any of this is re-derived.** `/api/status`'s `ledgerRecords` was
+**not** `wc -l` on the ledger: `RecordGenome` lines were appended without incrementing the counter,
+so the counter drifted below the file from every restart onward — 8,060,891 against 8,156,869 lines
+on 2026-08-12, 1.2% low **[rig experiment, 2026-08-12]**. **Fixed the same day** — the live path
+now counts a `GENOME` append like every other record — but the running deployment carries the
+artifact until its next restart, and so does every archive built before that. Every per-record
+figure here is denominated in **lines actually replayed**, which is what the memory is spent on.
 
 #### The measured answer: `GOMEMLIMIT` works, and it is not the fix
 
@@ -257,8 +258,14 @@ The deployment was read and never written; it kept running throughout.
    through the same code that applies them, left the same aggregates, and
    passed the archive package's tests unchanged; it is about 80 lines across two functions in one
    package and changes no contract, no wire type and no file format. **This, not `GOMEMLIMIT`, is
-   the answer to the $96 question.** *(Measured on a patched build in a scratch tree. It is not in
-   `bin/`, not committed, and nobody has yet written a test that pins the streaming path itself.)*
+   the answer to the $96 question.** *(Measured on a patched build in a scratch tree.)*
+   **IMPLEMENTED 2026-08-12**: `ScanLedger` is the replay primitive, `ReadLedger` is the
+   materialising wrapper over it for the callers that want a slice, and `New` and `List` are both
+   on the stream. Two tests pin it — one proving the scan and the materialising read agree
+   record-for-record and damage-for-damage on a ledger carrying both a spliced line and a torn
+   tail, and one measuring the heap, which reproduces the shape at package scale: **41 B/record
+   streamed against 1,007 B/record materialising, 24× apart** on a 100,000-record synthetic
+   ledger. It is not yet deployed — the archive binary carries it into the next batched restart.
 6. **Swap is not an alternative, and the peak is not a spike.** RSS stayed within 0.1% of its
    high-water mark for **150 seconds after the replay ended** before Go's scavenger returned
    anything. A box that meets its peak in swap is thrashing a live heap that the collector is

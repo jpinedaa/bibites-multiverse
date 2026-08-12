@@ -55,6 +55,21 @@ type Status struct {
 	// damage is PERMANENT and the operator who eventually asks why
 	// `ledgerRecords` and `wc -l` disagree is not the operator who read the log.
 	LedgerSkipped int `json:"ledgerSkippedLines,omitempty"`
+	// The retention horizon of §23, B33/B34, and what it has done. All four are
+	// omitted on an archive with no horizon, which is the default and is every
+	// archive that has not been told one — an ABSENT genomeHorizonMs is how a
+	// reader knows nothing is being pruned, and §10.1's rule that unknown is a
+	// value is why it is absent rather than 0.
+	//
+	// GenomesEvicted and GenomesEvictedBytes are process totals like every other
+	// counter here. GapsExpired counts gap entries retired from retry because
+	// their crossing aged past the horizon: it is Risk 7's "record the
+	// abandonment as a fact the operator can count", and it is the number that
+	// says the fetch queue finally has a drain.
+	GenomeHorizonMs     int64 `json:"genomeHorizonMs,omitempty"`
+	GenomesEvicted      int   `json:"genomesEvicted,omitempty"`
+	GenomesEvictedBytes int64 `json:"genomesEvictedBytes,omitempty"`
+	GapsExpired         int   `json:"genomeGapsExpired,omitempty"`
 	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
 	// over. A rate with no window on it is not a measurement.
 	FlowWindowMs int64 `json:"flowWindowMs"`
@@ -278,6 +293,11 @@ func (a *Archive) StatusView() Status {
 		Records:        a.recordCount,
 		LedgerSkipped:  a.ledgerSkipped,
 		FlowWindowMs:   flowWindow.Milliseconds(),
+
+		GenomeHorizonMs:     a.cfg.GenomeHorizon.Milliseconds(),
+		GenomesEvicted:      a.evict.evicted,
+		GenomesEvictedBytes: a.evict.bytes,
+		GapsExpired:         a.evict.gapsExpired,
 
 		AchievedWindowMs: achievedWindow.Milliseconds(),
 	}

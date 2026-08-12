@@ -35,8 +35,9 @@
 #                         the one on disk — which is also how a deploy hook that
 #                         silently stopped running is caught.
 #   replay headroom       the tripwire the hosting options document asked for:
-#                         ~1.30 KB of peak RAM per ledger record, so an archive
-#                         eventually cannot restart. It is better to learn that
+#                         0.18 KB of peak RAM per ledger record while replaying
+#                         and 0.30 KB held resident afterwards, so an archive
+#                         eventually outgrows its box. It is better to learn that
 #                         from an alert than from a restart.
 #   genome gaps           Risk 7. The archive's arrears on genome capture, and
 #                         the part a departed stranger takes with them is
@@ -396,24 +397,43 @@ check_cert() {
 
 check_replay_headroom() {
   [ -s "$STATUS_JSON" ] || return 0
-  local records peak_mb mem_kb swap_kb avail_mb ratio
+  local records peak_mb resident_mb worst_mb worst_what mem_kb swap_kb avail_mb ratio
   records="$(jq -r '.ledgerRecords // 0' "$STATUS_JSON" 2>/dev/null)"
   case "$records" in ''|*[!0-9]*) return ;; esac
-  # 1.30 KB of peak per record during replay, measured twice twelve-fold apart
-  # and linear both times (wp3_hosting_options.md, "the archive's memory").
-  peak_mb=$(( records * 1330 / 1048576 ))
+  # TWO models, because the box has to satisfy both and they trade places.
+  #
+  #   184 B/record  peak while replaying. This is the STREAMING archive's, the
+  #                 one this kit ships (measured 2026-08-12 on a copy of the
+  #                 deployment's own 8.16 M-record ledger). An archive built
+  #                 BEFORE that date materialised the whole ledger and peaked at
+  #                 ~1330 B/record — seven times this — so a box running an old
+  #                 binary is not covered by this check and the fix is the
+  #                 upgrade.
+  #   300 B/record  held resident for the rest of the day, from the living
+  #                 deployment, twice at twelvefold different scale.
+  #
+  # Since the replay was fixed the RESIDENT term is the larger one, so this
+  # alerts on the larger of the two rather than on the replay alone: an archive
+  # that restarts fine and then cannot hold what it replayed is the same outage.
+  # SIZING.md §4.
+  peak_mb=$(( records * 184 / 1048576 ))
+  resident_mb=$(( records * 300 / 1048576 ))
+  worst_mb=$peak_mb; worst_what="replay peak"
+  if [ "$resident_mb" -gt "$peak_mb" ]; then
+    worst_mb=$resident_mb; worst_what="resident set"
+  fi
   mem_kb="$(awk '/^MemTotal:/  {print $2}' /proc/meminfo)"
   swap_kb="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
   avail_mb=$(( (mem_kb + swap_kb) / 1024 ))
   [ "$avail_mb" -gt 0 ] || return 0
-  ratio="$(awk -v p="$peak_mb" -v a="$avail_mb" 'BEGIN{printf "%.2f", p/a}')"
+  ratio="$(awk -v p="$worst_mb" -v a="$avail_mb" 'BEGIN{printf "%.2f", p/a}')"
 
   if awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h)}'; then
-    report replay CRIT "the archive can no longer be sure of restarting: $records ledger records project a ~${peak_mb} MB replay peak against ${avail_mb} MB of RAM+swap (ratio $ratio). THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. The three fixes are GOMEMLIMIT, swap, and the retention rule: SIZING.md."
+    report replay CRIT "the archive can no longer be sure of fitting on this box: $records ledger records project a ~${worst_mb} MB ${worst_what} (replay peak ~${peak_mb} MB, resident ~${resident_mb} MB) against ${avail_mb} MB of RAM+swap (ratio $ratio). THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. If the binding term is the resident set, GOMEMLIMIT and swap do not fix it: the fixes are a bigger instance and the retention rule. SIZING.md."
   elif awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h*0.75)}'; then
-    report replay WARN "replay peak projects to ~${peak_mb} MB against ${avail_mb} MB RAM+swap (ratio $ratio). Decide the retention rule or add swap before it crosses $MV_REPLAY_HEADROOM."
+    report replay WARN "the archive's ${worst_what} projects to ~${worst_mb} MB against ${avail_mb} MB RAM+swap (ratio $ratio). Decide the retention rule or size up before it crosses $MV_REPLAY_HEADROOM."
   else
-    report replay OK "~${peak_mb} MB projected peak, ${avail_mb} MB available (ratio $ratio)"
+    report replay OK "~${worst_mb} MB projected ${worst_what}, ${avail_mb} MB available (ratio $ratio)"
   fi
 }
 

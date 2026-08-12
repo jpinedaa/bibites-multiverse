@@ -705,7 +705,8 @@ var G = {
  archive:["archive","The program serving this page. It listens to everything the relay broadcasts, keeps a permanent record of every migration and a copy of every genome, and never asks a world for anything — so watching can never slow the traffic down."],
  envelope:["envelope","One message carrying one creature between two worlds. The counts here are the envelopes this archive was copied on."],
  epoch:["epoch","A counter the relay bumps every time the map itself changes. If it jumps, a world joined, left or moved."],
- genomegap:["genome gap","A genome the archive knows exists — it has the fingerprint — but has not managed to fetch a copy of yet. It keeps the fingerprint forever, so it can still fetch it tomorrow."],
+ genomegap:["genome gap","A genome the archive knows exists — it has the fingerprint — but has not managed to fetch a copy of yet. It keeps the fingerprint forever. Whether it can still fetch a copy tomorrow depends on the retention horizon below: with no horizon set, yes, indefinitely; with one set, the asking stops once the crossing is older than the horizon, because a copy fetched after that would be deleted again on the next sweep."],
+ horizon:["retention horizon","How long a copy of a genome is kept after it was last stored or last read. THE RECORD OF WHAT HAPPENED IS KEPT FOREVER AND IS NEVER AFFECTED BY THIS — every crossing, every fingerprint, every family link stays. What ages out is the genetic material itself, which is the bulky part, and only if nobody asked for it inside the horizon. This row is absent entirely when no horizon is set, which is the default: then nothing is ever deleted."],
  flow:["flow window","The per-minute rates on this page are measured over the last few minutes, not over all time, so they describe what is happening now."],
  alive:["alive right now","The species list is built from what the worlds are reporting THIS SECOND, and from nothing else. A kind that lived here yesterday and died out is not on it, however many times it crossed a lane while it was here. That is a deliberate refusal: a list built from crossings would be a list of travellers and their ancestors, which is a different thing from a list of residents and reads as though extinct kinds were still alive."],
  crossings:["crossings","How many times this archive has recorded a creature of this species walking from one world into another, since the archive started keeping records. It is a count of TRIPS, not of creatures: one restless creature crossing ten times counts ten. A species with no crossings is not a species that never moves — it may simply have arisen after the last time anything of its kind travelled."],
@@ -732,7 +733,7 @@ var G = {
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges",
-    "unknown","exactlyonce","relay","archive","epoch","genomegap","flow"];
+    "unknown","exactlyonce","relay","archive","epoch","genomegap","horizon","flow"];
   var h = "";
   for (var i=0;i<keys.length;i++){
     var g = G[keys[i]];
@@ -2596,8 +2597,19 @@ function renderMap(d){
          + Math.round((d.flowWindowMs||300000)/60000)+" min)")
     + kv(t("genomegap","genome gaps"), d.genomeGaps)
     + kv("ledger records", d.ledgerRecords)
-    // Absent unless the ledger is damaged, which is permanent when it happens:
-    // the count is the difference between this row and wc -l on the file.
+    // Absent entirely unless a retention horizon is set, which is the default:
+    // an absent row is how a reader knows nothing is being pruned, and 0 would
+    // read as "a horizon that deletes nothing" instead. The ledger line beside
+    // it is not decoration — it is the whole of what this feature does not do.
+    + (d.genomeHorizonMs
+         ? kv(t("horizon","genome retention horizon"),
+              (d.genomeHorizonMs/86400000).toFixed(1)+" days"
+              + ' <span class="muted">(the ledger is kept forever)</span>')
+           + kv("genome copies pruned past it",
+                (d.genomesEvicted||0)+" ("
+                + ((d.genomesEvictedBytes||0)/1048576).toFixed(1)+" MiB)")
+           + kv("gaps retired past it", d.genomeGapsExpired||0)
+         : "")
     + (d.ledgerSkippedLines
          ? kv("ledger lines unreadable and skipped",
               '<span class="bad">'+d.ledgerSkippedLines+"</span>")

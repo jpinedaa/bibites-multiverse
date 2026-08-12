@@ -20,7 +20,7 @@ package archive
 //     was made all-or-nothing after the 2026-08-08 full disk and the ledger was
 //     not, and the two rules were only brought back together on 2026-08-09. Both
 //     halves of the discipline now live here — Append leaves no torn record, and
-//     ReadLedger reads past one rather than stopping at it.
+//     ScanLedger reads past one rather than stopping at it.
 //  3. It has no schema to migrate. The lineage graph M6 will want is a
 //     different shape from anything M4 could guess, and a ledger replays into
 //     whatever shape that turns out to be.
@@ -310,8 +310,25 @@ type LedgerDamage struct {
 // Any is true when the ledger held a complete line that could not be replayed.
 func (d LedgerDamage) Any() bool { return d.Lines > 0 }
 
-// ReadLedger replays every record in dir's ledger, in write order, and reports
-// what it could not read.
+// ScanLedger replays every record in dir's ledger, in write order, hands each
+// one to fn, and reports what it could not read.
+//
+// IT HANDS THE RECORD OVER AND FORGETS IT, and that is the whole point: a replay
+// costs one record of memory rather than a ledger of it. Materialising the file
+// first — which is what this function did until 2026-08-12, and what ReadLedger
+// still does for the callers that genuinely want a slice — put the ENTIRE ledger
+// in one live []Record while New walked it, so the peak was the file by
+// construction and no collector setting could get under it. Measured on the
+// deployment's own 8,156,868-record ledger (wp3_hosting_options.md, "The
+// measured answer"): 1,030–1,286 B of peak RSS per record materialising against
+// **184 B streaming** — 5.6–7.0× lower, about 1.1× the state the replay
+// actually retains, with no GOMEMLIMIT and no measurable wall-clock cost. That
+// is the difference between an archive that can restart on an 8 GB box for
+// three weeks and one that can restart for six months.
+//
+// fn is called once per record, in file order, on the caller's goroutine. It
+// MUST NOT retain the Record beyond what it needs; New keeps the aggregates and
+// drops the record, which is why the peak is flat.
 //
 // A LINE THAT DOES NOT PARSE IS SKIPPED, NEVER STOPPED AT. Until 2026-08-09 this
 // loop broke at the first such line, silently: the 776-byte record the full disk
@@ -336,18 +353,17 @@ func (d LedgerDamage) Any() bool { return d.Lines > 0 }
 // position, and a skipped line simply never contributes. The one honest cost is
 // that a skipped record is not in the dedup set, so if a peer re-sends exactly
 // that migration or NACK it is recorded a second time.
-func ReadLedger(dir string) ([]Record, LedgerDamage, error) {
+func ScanLedger(dir string, fn func(Record)) (LedgerDamage, error) {
 	var dmg LedgerDamage
 	f, err := os.Open(filepath.Join(dir, ledgerName))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, dmg, nil
+		return dmg, nil
 	}
 	if err != nil {
-		return nil, dmg, err
+		return dmg, err
 	}
 	defer f.Close()
 
-	var out []Record
 	r := bufio.NewReaderSize(f, 1<<20)
 	for {
 		line, err := readLine(r)
@@ -365,17 +381,36 @@ func ReadLedger(dir string) ([]Record, LedgerDamage, error) {
 					dmg.Bytes += int64(len(line))
 					break
 				}
-				out = append(out, rec)
+				fn(rec)
 			}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return out, dmg, err
+			return dmg, err
 		}
 	}
-	return out, dmg, nil
+	return dmg, nil
+}
+
+// ReadLedger is ScanLedger materialised: the same replay, the same skip-with-
+// accounting, collected into one slice for the callers that genuinely want the
+// records rather than a pass over them — Archive.Records, and the tests.
+//
+// IT IS NOT THE REPLAY PATH AND MUST NOT BECOME ONE AGAIN. The slice is the
+// whole ledger, live at once; on the deployment's ledger that is gigabytes and
+// it is why an 8 GB box lost the ability to restart the archive around day 26.
+// Anything that walks the records once and keeps an aggregate — New, List —
+// belongs on ScanLedger. A caller that returns the slice to a human, on a
+// ledger it did not size first, is choosing the old peak deliberately.
+//
+// A read that fails partway returns the records it reached, the damage it
+// counted so far, and the error, exactly as the scan reports them.
+func ReadLedger(dir string) ([]Record, LedgerDamage, error) {
+	var out []Record
+	dmg, err := ScanLedger(dir, func(rec Record) { out = append(out, rec) })
+	return out, dmg, err
 }
 
 // maxLedgerLine bounds one line: a whole frame, and room for the record the

@@ -57,6 +57,17 @@ func runMain(args []string, stderr io.Writer) int {
 		"GENOME_REQUESTs this archive will send per answering peer per minute (contract-b-m4.md "+
 			"§3.3, §10). 0 keeps the contract default. It is the limit a public archive is most "+
 			"likely to need to move, and it used to need a rebuild")
+	// Decision 3's retention horizon (§23, B33). OFF is the contract's default
+	// and the deployment is what turns it on.
+	genomeHorizon := fs.Duration("genome-horizon",
+		envDuration("MULTIVERSE_GENOME_HORIZON", 0),
+		"how long a genome BLOB is kept in <data-dir>/genomes after it was last stored or last "+
+			"served, as a Go duration (720h is the hosted run's 30 days). 0 — THE DEFAULT — keeps "+
+			"every blob forever, which is what this archive has always done (contract-b-m4.md "+
+			"§23, B33). IT NEVER TOUCHES THE LEDGER: migrations.jsonl is kept forever at every "+
+			"setting, and a pruned hash stays a lineage node that answers exactly like a hash no "+
+			"peer ever served. The same horizon retires a genome gap whose crossing is older "+
+			"than it (§23, B34)")
 	// DQ7's operator-side render deny list (§22, B30).
 	denyList := fs.String("deny-list", env("MULTIVERSE_ARCHIVE_DENY_LIST", ""),
 		"file of species names and peer:<peerId> entries this archive's PAGE AND JSON refuse to "+
@@ -100,6 +111,7 @@ func runMain(args []string, stderr io.Writer) int {
 		MetricsInterval:   *metricsInterval,
 		RequestsPerMinute: *maxGenomeRPM,
 		DenyListFile:      *denyList,
+		GenomeHorizon:     *genomeHorizon,
 	})
 	if err != nil {
 		log.Error("archive: startup failed", "err", err)
@@ -234,6 +246,22 @@ func held(ok bool) string {
 		return "[held]"
 	}
 	return "[MISSING]"
+}
+
+// envDuration is the environment half of the retention horizon (§23, B33). An
+// unusable value falls back to the flag's default — 0, which keeps everything —
+// because the safe direction for a knob that DELETES is off. A negative value
+// is refused for the same reason.
+func envDuration(name string, fallback time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		return fallback
+	}
+	return d
 }
 
 // envInt is the environment half of a §3.3 knob. An unusable value falls back

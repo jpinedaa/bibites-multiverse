@@ -90,11 +90,12 @@ ended is kinder than a connection refused, and it costs nothing.
 
 ## 4. What becomes of the durable files
 
-**Five files. This is the section Decision 3 is consumed in, and it has two arms
-because the rule was not yet chosen when the kit was built.** `MV_RETENTION` in
-`deploy.env` selects one. Whichever it is, **it is announced before anybody
-joins** — a participant is entitled to know what becomes of the record of their
-world before they contribute to it.
+**Five files. This is the section Decision 3 is consumed in.** `MV_RETENTION` in
+`deploy.env` selects an arm, and **the owner answered on 2026-08-12: arm B,
+`prune-genomes`, with a 720-hour horizon.** Both arms are kept below because the
+variable still selects and a later run may answer differently. Whichever it is,
+**it is announced before anybody joins** — a participant is entitled to know what
+becomes of the record of their world before they contribute to it.
 
 ### Both arms, unconditionally
 
@@ -136,15 +137,25 @@ Three shapes, and the announcement names which:
 | Rule | What is kept | What goes |
 |---|---|---|
 | `bounded-ledger` | The genome store whole; the ledger to the stated horizon | Ledger records older than the horizon, at `<END>` + 7 |
-| `prune-genomes` | The ledger whole; genomes to the stated horizon | Genome objects last referenced before the horizon |
+| **`prune-genomes`** — the chosen one | The ledger whole and forever; genomes to the stated horizon | Genome blobs not stored or served inside the horizon. **These go continuously, during the run** — see rule 2 — so by the ending the store already holds a horizon's worth and there is little left to do here |
 | `graduate` | Whatever M7's catalog seeds from, extracted before the rest goes | The live archive as a live archive |
 
 Rules for all three, and they are what keep a prune from being a betrayal:
 
 1. **The horizon is announced before anybody joins**, not decided at the end.
-2. **Nothing is pruned while the service is running.** The prune is a wind-down
-   act performed on a copy, at `<END>` + 7, after the final snapshot. `§10`'s
-   no-eviction rule holds for the whole of the run without exception.
+2. **THE LEDGER IS NEVER PRUNED WHILE THE SERVICE IS RUNNING, AND THE GENOME
+   STORE MAY BE.** This split is `contract-b-m4.md` §23, B33, and it is the one
+   rule in this section that changed after the kit was built. `migrations.jsonl`
+   keeps §10's no-eviction rule for the whole of the run without exception, at
+   every setting of every knob: a ledger prune is a wind-down act performed on a
+   copy, at `<END>` + 7, after the final snapshot. A genome **blob** under a set
+   `MV_ARCHIVE_GENOME_HORIZON` is different — the archive evicts it during the
+   run, on its own pass — because a horizon that only applied at the ending would
+   buy no disk during the run, which is the whole reason to have one. **That is
+   why the horizon is announced rather than merely recorded**: it takes something
+   away while people are still playing, and rule 1 is what makes it honest.
+   A hash whose blob is gone stays a lineage node in the record, permanently
+   (§10, §23 B34).
 3. **The prune is a filter into a new file, never an edit of the live one.** The
    original stays in the final snapshot.
 4. **What was pruned is stated by count**, in the closing message. "We kept N

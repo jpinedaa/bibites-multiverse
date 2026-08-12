@@ -74,22 +74,35 @@ restart deliberately, and **batches**: one restart for five participants.
 
 **Cost: a full ledger replay, and it grows with the ledger.**
 
-    replay seconds  ≈  ledger records ÷ ~40,000 per second
-    peak memory     ≈  ledger records × 1.30 KB
+    replay seconds  ≈  ledger records ÷ 37,000–49,000 per second
+    peak memory     ≈  ledger records × 0.18 KB
 
-The 40,000/s is the development host's, it **will be slower on a cloud vCPU**,
-and it is corroborated by the living deployment's own two measurements: **~93 s
-at 3.7 M records** on 2026-08-10 and **~150 s at 6.24 M records** on 2026-08-11 —
-41,600/s, and growing in absolute terms by the day. Every recorded replay figure
-expires the day after it is written: measure from `wc -l` on the day.
+The rate is the development host's 16 cores. It **will be slower on a 2-vCPU
+cloud bundle**, and the low end of the range is the cold case — a run whose
+genome-store metadata was not yet in page cache, which is what a fresh instance
+always is. It is corroborated by the living deployment's own measurements:
+**~93 s at 3.7 M records** on 2026-08-10 and **~150 s at 6.24 M records** on
+2026-08-11 — 41,600/s, and growing in absolute terms by the day. Every recorded
+replay figure expires the day after it is written: measure from `wc -l` on the
+day.
+
+**The memory figure changed on 2026-08-12 and the time did not.** The replay
+streams the ledger rather than reading it into one list first, which cut the peak
+from 1,030–1,286 B per record to **184 B** — 5.6–7.0× — at no measurable
+wall-clock cost. What that buys is below; what it does not buy is a faster
+restart, and the restart's real cost to the map was always the clock.
 
 At the exit-test bar that is roughly:
 
 | Day of the run | Records | Replay | Peak RAM |
 |---|---|---|---|
-| 7 | 1.7 M | ~45 s | 2.2 GB |
-| 30 | 7.3 M | ~3 min | 9.4 GB |
-| 90 | 21.8 M | **~9 min** | **28 GB** |
+| 7 | 1.7 M | ~45 s | 0.3 GB |
+| 30 | 7.3 M | ~3 min | 1.3 GB |
+| 90 | 21.8 M | **~9 min** | **4.0 GB** |
+
+Those are the *peaks*. The archive still has to **hold** 0.30 KB per record for
+the rest of the day — 6.5 GB at day 90 — so on this build the resident set, not
+the replay, is what sizes the box (`SIZING.md` §4).
 
 **AND AN ARCHIVE RESTART ON A LIVE MAP COSTS A LEDGER GAP EQUAL TO ITS DOWNTIME.**
 The archive is a subscriber. While it is replaying it is not subscribed, and
@@ -163,7 +176,8 @@ losing the relay costs the map.
 1. Read `monitor.sh --verbose`. If **replay** is already CRIT, **do not restart
    the archive** — it may not come back. Fix that first (`SIZING.md` §7).
 2. Measure the replay: `wc -l /var/lib/multiverse/archive/migrations.jsonl` ÷
-   40,000 is the optimistic floor.
+   49,000 is the optimistic floor and ÷ 37,000 is the honest one, both on a
+   16-core host. Announce the honest one.
 3. `sudo systemctl start multiverse-backup.service` — a fresh identity snapshot.
 4. For anything touching the archive: a Lightsail snapshot by hand.
 5. Announce, if it is case 2, 3 or 4.
@@ -213,14 +227,23 @@ in `ANNOUNCEMENT.md` for the documentation slots to consume.
 
 ## 5. The replay is on a clock, and the clock is the run
 
-The last thing this policy has to say is the uncomfortable one. **Replay time and
-replay memory both grow linearly with the ledger, for the whole announced
-period.** A restart that costs 45 seconds in week one costs nine minutes in month
-three, and somewhere past that the archive stops being able to restart at all on
-the memory it has.
+The last thing this policy has to say is the uncomfortable one. **Replay time
+grows linearly with the ledger, for the whole announced period.** A restart that
+costs 45 seconds in week one costs nine minutes in month three, and every one of
+those minutes is a hole in the record the width of the outage (§1.3).
 
 That is not a bug to fix inside the run. It is the shape of an append-only record
 that nothing may evict from, and it is precisely why Decision 3 exists and why
-its deadline is D24's announced ending. This policy's job is to make the cost
-visible in advance — `monitor.sh`'s **replay** check — rather than discovered
-during an outage.
+its deadline is D24's announced ending.
+
+**Replay *memory* used to be the other half of this sentence, and on 2026-08-12
+it stopped being.** It grew the same way, and past about day 26 an 8 GB box could
+no longer restart the archive at all — that one *was* a bug, in the shape of the
+replay rather than in the size of the ledger, and it was fixed inside the run:
+the replay streams, the peak fell 5.6–7.0×, and the wall moved to day 180. What
+binds an 8 GB box now is holding the archive all day, at day 110, which is past
+the announced ending. **Two things follow for an operator.** An instance still
+running an archive built before that date has the old wall and the upgrade is the
+fix, not the knobs. And this policy's job is unchanged: make the cost visible in
+advance — `monitor.sh`'s **replay** check — rather than discovered during an
+outage.

@@ -114,6 +114,17 @@ type Config struct {
 	// render. Empty for none, which is every archive that has never needed one.
 	// It suppresses THE VIEW AND NEVER THE RECORD — see denylist.go.
 	DenyListFile string
+
+	// GenomeHorizon is Decision 3's retention horizon (§23, B33): how long a
+	// genome BLOB is kept after it was last stored or last served. ZERO IS OFF
+	// AND IS THE DEFAULT — nothing evicts, which is M4's behaviour exactly — and
+	// the deployment sets 720h. It never touches the ledger: the record of what
+	// crossed is kept forever, and the same horizon retires a gap whose crossing
+	// has aged past it (§23, B34). See eviction.go.
+	GenomeHorizon time.Duration
+	// EvictionInterval is how often one bounded eviction pass runs. Defaults to
+	// a minute; it exists so a test does not have to wait one.
+	EvictionInterval time.Duration
 }
 
 func (c *Config) applyDefaults() {
@@ -168,8 +179,14 @@ type fetch struct {
 	migrationID string
 	entityID    int32
 	firstSeen   time.Time
-	attempts    int
-	nextAt      time.Time
+	// crossedAt is the recordedAt of the migration that needs this genome, and
+	// it is the ONLY clock the retention horizon may retire a gap on (§23, B34).
+	// firstSeen above is this process's own clock — the replay sets it to the
+	// moment of the restart — so a gap measured on it would grow younger every
+	// time the archive is restarted and would never age out at all.
+	crossedAt time.Time
+	attempts  int
+	nextAt    time.Time
 	// asked records the peers that answered unknown_hash for this hash, so the
 	// ring is walked one peer at a time rather than re-asking the same one.
 	asked map[string]bool
@@ -262,6 +279,11 @@ type Archive struct {
 	outstanding map[string]*fetch
 	sessionGen  int64
 	closed      bool
+	// evict is the retention horizon's cursor and its counters (§23, B33/B34).
+	// It is the zero value, and every path that reads it returns early, on an
+	// archive with no horizon — which is every archive by default. See
+	// eviction.go.
+	evict evictState
 
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
@@ -320,10 +342,55 @@ func New(cfg Config) (*Archive, error) {
 	// nor forgets a gap. "Keep the hash forever" (§10): a hash with no genome
 	// is still a lineage node, and a fetch that failed for a year can succeed
 	// tomorrow.
-	records, damage, err := ReadLedger(cfg.DataDir)
+	//
+	// THE REPLAY STREAMS. Each record is applied as it is parsed and then
+	// dropped, so the cost of a restart is the aggregates below plus one record
+	// — not the ledger. Reading the file into a []Record first and walking it
+	// afterwards is what made the peak the size of the file (ScanLedger's
+	// comment has the measurement); everything in this loop was already
+	// fold-shaped, so the fix was to stop holding what it had finished with.
+	//
+	// now is the replay's clock, taken once. It was taken between the read and
+	// the apply loop when those were two passes, which on a multi-million-record
+	// ledger was already minutes into the restart; the gaps a replay discovers
+	// are all due on the first tick either way.
+	now := time.Now()
+	damage, err := ScanLedger(cfg.DataDir, func(rec Record) {
+		a.recordCount++
+		if rec.MigrationID != "" {
+			// Rebuild the key the live path uses, not a lookalike. A NACK
+			// dedups on migrationId+code (§14, B7), so replaying it under
+			// migrationId alone would never match and every re-copied NACK
+			// would be recorded a second time after a restart.
+			a.seen[rec.Type+"/"+dedupKey(rec.Type, rec.MigrationID, rec.Code)] = true
+		}
+		if rec.Type != RecordMigration {
+			return
+		}
+		// The lane counters are rebuilt from the ledger, so a restart does not
+		// reset the flow the operator was reading.
+		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.ExitEdge, rec.RecordedAt)
+		// And so is the species aggregate, ON THIS ONE PASS. It is the whole
+		// reason the species tab can answer "how often has this species ever
+		// crossed" without reading the ledger again: the replay the archive
+		// already performs at startup is the only full scan there is, and every
+		// later answer is a map lookup (species.go, rule 1).
+		a.observeSpeciesLocked(rec)
+		if rec.Lineage == nil {
+			return
+		}
+		for _, h := range hashesOf(rec) {
+			// The CROSSING's own time, not the replay's: a horizon that measured
+			// from the restart would re-queue a backlog it retired yesterday, and
+			// pay for it in resident memory as well as in work (§23, B34).
+			a.trackLocked(h, rec.SourcePeer, rec.MigrationID, rec.EntityID,
+				time.UnixMilli(rec.RecordedAt), now)
+		}
+	})
 	if err != nil {
 		return nil, err
 	}
+	a.ledgerSkipped = damage.Lines
 	if n := ledger.Repaired(); n > 0 {
 		// A write the previous process never finished. Nothing durable was lost
 		// — the record was never ACKed — but an operator reading `wc -l` against
@@ -340,46 +407,17 @@ func New(cfg Config) (*Archive, error) {
 		a.log.Error("archive: the ledger holds line(s) that do not parse; replay SKIPPED them "+
 			"and kept every record behind them",
 			"skippedLines", damage.Lines, "skippedBytes", damage.Bytes,
-			"records", len(records), "ledger", ledger.Path())
+			"records", a.recordCount, "ledger", ledger.Path())
 	}
 	if damage.TornTail > 0 {
 		a.log.Warn("archive: ignored an unfinished record at the end of the ledger",
 			"bytes", damage.TornTail, "ledger", ledger.Path())
 	}
-	now := time.Now()
-	a.recordCount = len(records)
-	a.ledgerSkipped = damage.Lines
-	for _, rec := range records {
-		if rec.MigrationID != "" {
-			// Rebuild the key the live path uses, not a lookalike. A NACK
-			// dedups on migrationId+code (§14, B7), so replaying it under
-			// migrationId alone would never match and every re-copied NACK
-			// would be recorded a second time after a restart.
-			a.seen[rec.Type+"/"+dedupKey(rec.Type, rec.MigrationID, rec.Code)] = true
-		}
-		if rec.Type != RecordMigration {
-			continue
-		}
-		// The lane counters are rebuilt from the ledger, so a restart does not
-		// reset the flow the operator was reading.
-		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.ExitEdge, rec.RecordedAt)
-		// And so is the species aggregate, ON THIS ONE PASS. It is the whole
-		// reason the species tab can answer "how often has this species ever
-		// crossed" without reading the ledger again: the replay the archive
-		// already performs at startup is the only full scan there is, and every
-		// later answer is a map lookup (species.go, rule 1).
-		a.observeSpeciesLocked(rec)
-		if rec.Lineage == nil {
-			continue
-		}
-		for _, h := range hashesOf(rec) {
-			a.trackLocked(h, rec.SourcePeer, rec.MigrationID, rec.EntityID, now)
-		}
-	}
 	if n := len(a.pending); n > 0 {
 		a.log.Warn("archive: resumed with genomes still missing", "gaps", n,
-			"records", len(records))
+			"records", a.recordCount)
 	}
+	a.logRetiredAtStartup()
 	return a, nil
 }
 
@@ -419,6 +457,8 @@ func (a *Archive) Start(ctx context.Context) error {
 	go func() { defer a.wg.Done(); a.tickLoop() }()
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); a.metricsLoop() }()
+	// Nothing at all unless a horizon was configured (§23, B33). See eviction.go.
+	a.startEviction()
 	a.log.Info("archive: started", "relay", a.cfg.RelayURL, "dataDir", a.cfg.DataDir,
 		"ledger", a.ledger.Path(), "metrics", a.metrics.Path(), "statusPage", a.HTTPAddr())
 	return nil
@@ -769,7 +809,8 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	// replay pass identical input to identical code.
 	a.observeSpeciesLocked(rec)
 	for _, h := range hashesOf(rec) {
-		a.trackLocked(h, p.SourcePeer, p.MigrationID, p.EntityID, now)
+		a.trackLocked(h, p.SourcePeer, p.MigrationID, p.EntityID,
+			time.UnixMilli(rec.RecordedAt), now)
 	}
 	a.mu.Unlock()
 	return true
@@ -873,7 +914,14 @@ func (a *Archive) markSeen(typ, key string) bool {
 
 // trackLocked notes a hash the archive may not hold. A hash it already has is
 // not tracked; a hash it does not is a gap until some peer serves it.
-func (a *Archive) trackLocked(hash, sourcePeer, migrationID string, entityID int32, now time.Time) {
+//
+// crossedAt is the recordedAt of the migration that wants the genome, and it is
+// what the retention horizon measures (§23, B34). A crossing already past the
+// horizon is NOT QUEUED AT ALL: the only blob a fetch could win is one the next
+// eviction pass would delete, so the work is spent by construction. That check
+// is what keeps a restart from re-queueing a backlog this archive has already
+// drained — the replay hands every hash in the ledger to this function.
+func (a *Archive) trackLocked(hash, sourcePeer, migrationID string, entityID int32, crossedAt, now time.Time) {
 	if hash == "" || a.genomes.Has(hash) {
 		return
 	}
@@ -883,12 +931,19 @@ func (a *Archive) trackLocked(hash, sourcePeer, migrationID string, entityID int
 		}
 		return
 	}
+	// Checked AFTER the pending lookup on purpose: a hash an old crossing shares
+	// with a recent one is still wanted, and the recent crossing's entry keeps it.
+	if a.gapPastHorizonLocked(crossedAt, now) {
+		a.evict.gapsExpired++
+		return
+	}
 	a.pending[hash] = &fetch{
 		hash:        hash,
 		sourcePeer:  sourcePeer,
 		migrationID: migrationID,
 		entityID:    entityID,
 		firstSeen:   now,
+		crossedAt:   crossedAt,
 		nextAt:      now.Add(a.cfg.FirstAttemptDelay),
 		asked:       map[string]bool{},
 	}
@@ -975,6 +1030,13 @@ func (a *Archive) pumpChunk(now time.Time, scanBudget, sendBudget int) (scanned,
 			// Resolved by some other path: retire it and do NOT push it back.
 			a.clearInFlightLocked(f)
 			delete(a.pending, hash)
+			continue
+		}
+		if a.gapPastHorizonLocked(f.crossedAt, now) {
+			// Aged out (§23, B34). Also not pushed back: this is the drain the
+			// queue never had, and it runs inside the same bounded, yielding walk
+			// as everything else in this pass.
+			a.retireGapLocked(f, now)
 			continue
 		}
 		a.pendingOrder = append(a.pendingOrder, hash)
@@ -1215,6 +1277,13 @@ func (a *Archive) onGenomeResponse(env wire.Envelope) bool {
 	}
 	a.mu.Lock()
 	delete(a.pending, resp.GenomeHash)
+	// A GENOME line is a ledger record and is counted like one. It was not until
+	// 2026-08-12, and the omission made `ledgerRecords` drift BELOW `wc -l` from
+	// the first fetch after every boot — 8,060,891 against 8,156,869 lines on the
+	// deployment, 1.2% low — because the startup replay counts these lines and
+	// the live path did not. The counter and the file now answer the same
+	// question, and `ledgerSkipped` is once again the whole of the difference.
+	a.recordCount++
 	a.mu.Unlock()
 	_ = a.ledger.Append(Record{
 		Type:       RecordGenome,
@@ -1262,17 +1331,17 @@ type Migration struct {
 // listing that quietly omits a crossing is the shape of the 2026-08-08 loss:
 // the caller prints it.
 func List(dir string) ([]Migration, LedgerDamage, error) {
-	records, damage, err := ReadLedger(dir)
-	if err != nil {
-		return nil, damage, err
-	}
 	store, err := bb8.OpenStore(dir + "/genomes")
 	if err != nil {
-		return nil, damage, err
+		return nil, LedgerDamage{}, err
 	}
 	byID := map[string]*Migration{}
-	order := make([]*Migration, 0, len(records))
-	for _, rec := range records {
+	var order []*Migration
+	// Streamed for the same reason New is (ScanLedger): the join below keeps
+	// only the migrations, so holding the ACKs and NACKs — half the file — in a
+	// second slice while it runs bought nothing. `list` on a live ledger is a
+	// command an operator types on the box that is also serving the map.
+	damage, err := ScanLedger(dir, func(rec Record) {
 		switch rec.Type {
 		case RecordMigration:
 			m := &Migration{Record: rec, Outcome: "pending"}
@@ -1297,6 +1366,9 @@ func List(dir string) ([]Migration, LedgerDamage, error) {
 				m.Outcome = "refused " + rec.Code
 			}
 		}
+	})
+	if err != nil {
+		return nil, damage, err
 	}
 	sort.SliceStable(order, func(i, j int) bool { return order[i].RecordedAt < order[j].RecordedAt })
 	out := make([]Migration, 0, len(order))

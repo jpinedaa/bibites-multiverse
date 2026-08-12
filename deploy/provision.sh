@@ -256,9 +256,9 @@ phase_swap() {
   step "swap (the memory verdict's second half)"
   if [ "${MV_SWAP_GB}" = 0 ] || [ -z "${MV_SWAP_GB}" ]; then
     say "MV_SWAP_GB=0 — none configured."
-    say "This is the right answer ONLY if the retention rule bounds the ledger, or if"
-    say "the GOMEMLIMIT experiment showed the replay peak fits in RAM. The archive's"
-    say "replay wants ~1.30 KB per ledger record: see SIZING.md, and monitor.sh's"
+    say "This is the verdict, not a default: the streamed replay wants ~0.18 KB per"
+    say "ledger record and the archive then HOLDS ~0.30 KB, so on this build swap"
+    say "buys time against a peak that no longer binds. See SIZING.md; monitor.sh's"
     say "replay-headroom check is what tells you when this stops being true."
     return 0
   fi
@@ -376,8 +376,12 @@ MULTIVERSE_LOG_FILE=$MV_LOGDIR/archive.log
 MULTIVERSE_LOG_ROTATE_MB=$MV_LOG_ROTATE_MB
 MULTIVERSE_LOG_KEEP=$MV_LOG_KEEP
 MULTIVERSE_LOG_LEVEL=$MV_LOG_LEVEL
-# Decision 3's verdict, as Go sees it. Empty means unset, which is today's
-# behaviour. See SIZING.md.
+# Decision 3's retention horizon (§23, B33). Empty or 0 evicts nothing, which is
+# the contract's default; 720h is the announced 30 days. It prunes genome BLOBS
+# and never the ledger. See deploy.env.example.
+MULTIVERSE_GENOME_HORIZON=${MV_ARCHIVE_GENOME_HORIZON:-}
+# The memory verdict, as Go sees it. Empty means unset; the kit ships 5GiB as a
+# ceiling against regression rather than as a fix. See SIZING.md §4.
 GOMEMLIMIT=${MV_ARCHIVE_GOMEMLIMIT:-}
 EOF
   say "wrote /etc/multiverse/archive.env"

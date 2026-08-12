@@ -87,13 +87,14 @@ func testHash(i int) string {
 
 // seedGaps tracks n hashes as pending. A sourcePeer of "" means nextPeerLocked
 // finds nobody to ask, which is the cheap way to make an entry eligible without
-// putting anything on the wire.
+// putting anything on the wire. The crossing is dated now, so these gaps are
+// inside any retention horizon a test sets (§23, B34).
 func seedGaps(a *Archive, n int, sourcePeer string, now time.Time) []string {
 	hashes := make([]string, n)
 	a.mu.Lock()
 	for i := 0; i < n; i++ {
 		hashes[i] = testHash(i)
-		a.trackLocked(hashes[i], sourcePeer, fmt.Sprintf("m-%d", i), int32(i), now)
+		a.trackLocked(hashes[i], sourcePeer, fmt.Sprintf("m-%d", i), int32(i), now, now)
 	}
 	a.mu.Unlock()
 	return hashes
@@ -371,7 +372,7 @@ func TestTheBoundedWalkKeepsTheRetryLadder(t *testing.T) {
 	now := time.Now()
 	h := testHash(1)
 	a.mu.Lock()
-	a.trackLocked(h, "", "m-1", 1, now)
+	a.trackLocked(h, "", "m-1", 1, now, now)
 	a.ready = true
 	a.mu.Unlock()
 

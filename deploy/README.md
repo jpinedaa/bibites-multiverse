@@ -46,15 +46,28 @@ decision about publishing the status page (`nginx/multiverse-20-status.conf`).
 
 ## 2. What is parameterized, and on what
 
-Four things were not settled when the kit was built. Every one of them is a
-variable in `deploy.env` and **none of them changes a command**.
+Four things were not settled when the kit was built; **two of them closed on
+2026-08-12 and two are left.** Every one of them is a variable in `deploy.env`
+and **none of them changes a command**.
 
 | Waiting on | Variables | What it changes |
 |---|---|---|
 | **The domain** — the owner is registering a name | `MV_DOMAIN`, `MV_CERT_EXTRA_NAMES`, `MV_ACME_EMAIL` | The certificate, the advertised URL in every join string, nginx's `server_name`, the loopback pin in `/etc/hosts`. **Permanent for the run**: the URL is baked into every join string and D25's channel pushes nothing, so changing it later is a message to people who may be unreachable |
-| **The retention rule** — Decision 3, waiting on the `GOMEMLIMIT` experiment | `MV_RETENTION` | Which Lightsail bundle; the backup tier; which arm of `WIND-DOWN.md` is announced; D6's graduation call |
-| **The memory verdict** — the same experiment | `MV_ARCHIVE_GOMEMLIMIT`, `MV_ARCHIVE_MEMORY_HIGH`, `MV_SWAP_GB`, `MV_BUNDLE` | `GOMEMLIMIT` in the archive's environment; a systemd `MemoryHigh` drop-in; whether a swap file is created; `monitor.sh`'s replay tripwire, which reads real RAM either way |
 | **The alert channel** | `MV_ALERT_KIND`, `MV_ALERT_URL`, `MV_ALERT_COMMAND` | Where `monitor.sh` sends. Default `ntfy`, which needs no account |
+
+**The memory verdict is settled and filled in.** `MV_ARCHIVE_GOMEMLIMIT=5GiB`,
+`MV_ARCHIVE_MEMORY_HIGH` empty, `MV_SWAP_GB=0` — because the replay was fixed
+rather than tuned: it streams the ledger instead of materialising it, at 184 B of
+peak per record against 1,030–1,286 B. `SIZING.md` §4 has the numbers and
+`deploy.env.example` has the reasoning beside each value.
+
+**The retention rule is settled and filled in.** Decision 3, answered by the
+owner on 2026-08-12: `MV_RETENTION=prune-genomes` with
+`MV_ARCHIVE_GENOME_HORIZON=720h`. **The ledger is kept forever** and genome blobs
+are pruned to a thirty-day horizon, which makes Risk 7 a stated policy instead of
+an accident and is announced before anybody joins. It buys disk and egress, not
+RAM: the resident set still grows with ledger records, so the box is still sized
+from `SIZING.md` §4. `MV_BUNDLE` stays open because nothing has been bought.
 
 Two more that are decided and still variables, because a port is not a constant:
 `MV_RELAY_PORT=443` (the owner's call) and `MV_STATUS_PORT=8443`.
@@ -77,8 +90,9 @@ scp -r deploy ubuntu@<instance-ip>:/home/ubuntu/multiverse-kit
 # ---- on the INSTANCE -------------------------------------------------------
 ssh ubuntu@<instance-ip>
 
-# 3. The parameter file. Fill in MV_DOMAIN, MV_ACME_EMAIL, MV_RETENTION,
-#    MV_ALERT_URL and the two period dates.
+# 3. The parameter file. Fill in MV_DOMAIN, MV_ACME_EMAIL, MV_ALERT_URL,
+#    MV_BUNDLE and the two period dates. The retention rule and the memory
+#    verdict already carry their answers.
 sudo install -d -m 0750 /etc/multiverse
 sudo install -m 0640 /home/ubuntu/multiverse-kit/deploy.env.example \
                      /etc/multiverse/deploy.env
@@ -210,17 +224,22 @@ here can do any of it**, and none of it has been done.
    ledger the announced run can cost $0 in compute** — worth exploiting and worth
    not depending on. Verify before announcing anything. *(Prices and terms from
    `wp3_hosting_options.md`, fetched 2026-08-11; re-check at purchase.)*
-3. **Run the `GOMEMLIMIT` experiment** — it is one rig run against a copy of
-   today's ledger, it does not touch the living deployment, and it decides step 4
-   and whether the service survives its own restart policy. Then **set
-   `MV_RETENTION`**, which is Decision 3 and is required to exist by the end of
-   the milestone whatever the answer.
+3. **Nothing — Decision 3 is answered.** `MV_RETENTION=prune-genomes`,
+   `MV_ARCHIVE_GENOME_HORIZON=720h`: the ledger is kept forever and genome blobs
+   are pruned to thirty days. The replay experiment that used to gate this step
+   reported on 2026-08-12 and removed the memory constraint rather than answering
+   the question, so the rule was decided on what participants are promised.
+   **What is left here is the bundle**, and pruning blobs does not shrink the
+   resident set — read step 4 against `SIZING.md` §4, not against the disk table.
 4. **Create the instance.** Lightsail → Create instance → **Linux/Unix** →
    **OS Only → Ubuntu 24.04 LTS** → region **US East**. Bundle per step 3:
    **$12 (2 GB / 60 GB / 3 TB)** if the rule bounds the ledger; **$44 (8 GB /
-   160 GB / 5 TB)** for *keep everything* — and understand that the $44 box holds
-   the archive resident through day 110 but stops being able to **replay** around
-   day 26 unless `GOMEMLIMIT` or swap is proven first. `SIZING.md` §5.
+   160 GB / 5 TB)** for a ledger that grows all run — which on the streaming
+   archive holds the archive resident through day 110 and can still **restart**
+   it at day 180, so it carries the announced period whole. Lightsail resizes
+   through a snapshot, so starting small and moving up on `monitor.sh`'s replay
+   tripwire is a legitimate plan that converts a sizing error into a bill.
+   `SIZING.md` §5.
 5. **Attach a static IP.** Lightsail → Networking → Create static IP → attach.
    **Do this before the A record**: a Lightsail instance's default public address
    changes when it is stopped and started.
@@ -303,6 +322,7 @@ rig's own constraint:
 | **The archive subscribes with the bootstrap-minted `subscribe` credential** read from `MULTIVERSE_CREDENTIAL_FILE` | `relayConnected: true`, `haveStatus: true` |
 | **A certificate rotation is survived with no restart and no signal** — the premise the whole TLS design rests on | Replaced both PEMs under the running relay; the served fingerprint changed on the next handshake and `/healthz` never faltered |
 | **`monitor.sh`'s thirteen checks run, escalate and recover** — including the lane-bypass persistence counter firing on exactly the third consecutive pass, and the replay projection reproducing the options document's model (7.43 M records → ~9.4 GB peak) | A synthetic `/api/status` server and a synthetic state directory |
+| ↳ **The replay check's constants changed on 2026-08-12 and have NOT been re-rehearsed.** It now projects both terms and alerts on the larger, so the same 7.43 M records project ~2.1 GB (resident) rather than ~9.4 GB. The escalate-and-recover behaviour around it is untouched | — |
 | **`monitor.sh`'s error counter survives the numbered log rotation** | Appended errors, rotated `relay.log` → `relay.log.1`, confirmed no double count and no missed lines |
 | **`backup.sh` produces, prunes and round-trips** — identity snapshots with checksums, `MV_BACKUP_KEEP` pruning, gzip of the ledger that `gunzip | diff` matches, the hardlink genome snapshot, and the `auto` guard correctly refusing to copy a ledger onto a filesystem below its free-space floor | Synthetic data directory |
 

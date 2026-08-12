@@ -84,6 +84,14 @@ Planned restarts are announced. Unplanned ones get an explanation afterwards.
 down before the run starts, and the reminders begin 30 days out. Your own
 journal, your own saves and your own genomes are yours and stay on your machine
 whatever happens to the map's copy.
+
+**One thing the map does delete, and it is stated up front.** The record of every
+crossing — who crossed, when, between which worlds, and the ancestry — is kept
+for the whole run and beyond. The **genome files** behind it are kept for
+**30 days** and then removed from the map's copy. So an organism that crossed
+two months ago is still in the record with its family tree; the map may no longer
+be able to hand you its genome. Yours is on your own machine, where it always
+was.
 ```
 
 **Also in `join.md`:** three occurrences of `<relay-host>` (the example join

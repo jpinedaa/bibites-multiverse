@@ -2617,11 +2617,17 @@ than instantly, and **the seconds in that sentence are stale as soon as they are
 is the thing this breaks first**: it was 60 s and would have failed a healthy bring-up, it was
 300 s from 2026-08-10, and one day of ledger growth took that from 3× headroom to
 2× — **it has been 600 s since the crossing of 2026-08-11**. Size it from the ledger and raise it
-rather than believing a timeout here. The second: `ledgerRecords` still runs
-**below** `wc -l` and drifts further every hour,
-because the live counter only increments on migration, ACK and NACK records while a `GENOME`
-append (`archive.go`, `RecordGenome`) is counted at boot replay and never during the run.
-**Sizing the ledger from the file, not the counter, is the safe habit.**
+rather than believing a timeout here. The second: `ledgerRecords` ran
+**below** `wc -l` and drifted further every hour,
+because the live counter only incremented on migration, ACK and NACK records while a `GENOME`
+append (`archive.go`, `RecordGenome`) was counted at boot replay and never during the run —
+8,060,891 against 8,156,869 lines on 2026-08-12, 1.2% low. **Fixed 2026-08-12**: the live path
+counts a `GENOME` line like every other record, so from that build onward the counter and the
+file answer the same question and `ledgerSkippedLines` is the whole of the difference. **The
+running deployment keeps the artifact until the archive is next restarted** — the fix is in the
+binary, not in the file — and every archive built before that date has it forever, so
+**sizing the ledger from the file, not the counter, remains the safe habit** and is the only
+safe one against a build you did not check.
 
 ### Watch items
 
