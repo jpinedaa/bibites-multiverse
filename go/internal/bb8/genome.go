@@ -106,6 +106,75 @@ type projSynapse struct {
 	weight  string
 }
 
+// dialect selects the three paths §3 reads a genome through. The dialect is
+// chosen by the presence of the top-level body key, exactly as
+// SaveSystem.LoadBibiteOrEggFromData keys off egg.
+//
+// It is one function because TWO readers now need the same selection and the
+// blob is the one thing in this system nobody controls: the hash of §5, and
+// BrainStats below. A second copy of the rule would be a second opinion about
+// which JSON path a brain lives at, and the two would disagree on exactly the
+// dialect nobody tested.
+func dialect(root map[string]json.RawMessage) (genes, nodes, synapses json.RawMessage, err error) {
+	if _, saved := root["body"]; !saved {
+		return root["genes"], root["nodes"], root["synapses"], nil
+	}
+	// The saved dialect, and BOTH halves are attempted whichever fails: a blob
+	// with a broken gene wrapper still has the brain a counter can read, and the
+	// error is only what stops the HASH.
+	if wrapper, wErr := object(root["genes"]); wErr != nil {
+		err = unhashable("saved dialect: $.genes is not an object")
+	} else {
+		genes = wrapper["genes"]
+	}
+	brain, bErr := object(root["brain"])
+	if bErr != nil {
+		if err == nil {
+			err = unhashable("saved dialect: $.brain is not an object")
+		}
+		return genes, nil, nil, err
+	}
+	return genes, brain["Nodes"], brain["Synapses"], err
+}
+
+// Brain is the cheap shape of one genome's brain: how many neurons it holds and
+// how many synapses join them.
+//
+// It is DELIBERATELY not a projection and not a hash. The two numbers are
+// lengths of the two arrays §3 already locates, so reading them costs one JSON
+// decode of a blob the store already holds and cannot fail in any way that
+// matters: an unreadable blob is an ABSENT answer, never an error and never a
+// zero (a brain with no neurons is not a thing this game produces, so 0 is the
+// same absence).
+type Brain struct {
+	Neurons  int `json:"neurons"`
+	Synapses int `json:"synapses"`
+}
+
+// BrainStats counts one genome's brain. The bool is false for a payload this
+// implementation cannot read at all, which every caller renders as nothing.
+func BrainStats(payload string) (Brain, bool) {
+	if payload == "" {
+		return Brain{}, false
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &root); err != nil || root == nil {
+		return Brain{}, false
+	}
+	// The dialect's own error is IGNORED here on purpose: it reports what stops
+	// a hash, and a gene object this counter never reads is not a reason to
+	// refuse a brain it can see.
+	_, nodesRaw, synapsesRaw, _ := dialect(root)
+	nodes, err := array(nodesRaw)
+	if err != nil || len(nodes) == 0 {
+		return Brain{}, false
+	}
+	// A blob with no synapse array is a brain with no synapses, which is the
+	// same reading Canonical takes.
+	synapses, _ := array(synapsesRaw)
+	return Brain{Neurons: len(nodes), Synapses: len(synapses)}, true
+}
+
 // Canonical returns the canonical UTF-8 byte string of genome-hash.md §5 — one
 // line, no whitespace, no trailing newline.
 func Canonical(payload, gameVersion string) (string, error) {
@@ -117,25 +186,9 @@ func Canonical(payload, gameVersion string) (string, error) {
 		return "", unhashable("payload is not a JSON object")
 	}
 
-	// §3: the dialect is selected by the presence of the top-level body key,
-	// exactly as SaveSystem.LoadBibiteOrEggFromData keys off egg.
-	var genesRaw, nodesRaw, synapsesRaw json.RawMessage
-	if _, saved := root["body"]; saved {
-		wrapper, err := object(root["genes"])
-		if err != nil {
-			return "", unhashable("saved dialect: $.genes is not an object")
-		}
-		genesRaw = wrapper["genes"]
-		brain, err := object(root["brain"])
-		if err != nil {
-			return "", unhashable("saved dialect: $.brain is not an object")
-		}
-		nodesRaw = brain["Nodes"]
-		synapsesRaw = brain["Synapses"]
-	} else {
-		genesRaw = root["genes"]
-		nodesRaw = root["nodes"]
-		synapsesRaw = root["synapses"]
+	genesRaw, nodesRaw, synapsesRaw, err := dialect(root)
+	if err != nil {
+		return "", err
 	}
 
 	genes, err := object(genesRaw)

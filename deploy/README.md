@@ -193,9 +193,9 @@ listener on a box whose disk the same process is filling.
   only**, rate limited to 5 r/s with a burst of 20 and 8 concurrent connections
   per address, with no compression of its own so the archive's gzip negotiation
   survives intact.
-- **The boundary, named.** Public: the seven read-only handlers — `/`,
+- **The boundary, named.** Public: the nine read-only handlers — `/`,
   `/healthz`, `/api/status`, `/api/hops`, `/api/species`, `/api/species/history`,
-  `/api/history`. Nothing there mutates and nothing there is a secret, because
+  `/api/species/tree`, `/api/species/trends`, `/api/history`. Nothing there mutates and nothing there is a secret, because
   nothing on this wire is: what the page shows is what the relay already
   broadcasts to every peer, and `join.md` states that in full before anybody
   joins. Not public: the archive's own listener, the relay's admin path, the data

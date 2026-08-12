@@ -670,3 +670,208 @@ func TestRingstatRendersTheSameTwoViews(t *testing.T) {
 		t.Fatalf("the species view listed something no world reports:\n%s", sp)
 	}
 }
+
+// TestTheTrendAnswerFoldsEveryLivingSpeciesInOnePass is the sparkline column's
+// whole reason to exist as its own endpoint.
+//
+// The obvious way to draw a trend beside forty living species is forty requests
+// to /api/species/history, which is forty bounded tail reads of the sample file
+// on a tab a reader leaves open. This folds the whole living set in ONE pass
+// over ONE read — and it keeps the two readings the rest of this file keeps
+// apart: a bucket where a world reported a census WITHOUT this species is a
+// zero, and a bucket where no world reported one at all is UNKNOWN.
+func TestTheTrendAnswerFoldsEveryLivingSpeciesInOnePass(t *testing.T) {
+	now := int64(10_000_000)
+	window := time.Hour
+	// HistoryMinBuckets is the floor every reader of this file is clamped to, so
+	// the fixture asks for exactly it and fills the first three.
+	buckets := HistoryMinBuckets
+	bucketMs := window.Milliseconds() / int64(buckets)
+	from := now - bucketMs*int64(buckets)
+
+	samples := []Status{
+		{
+			GeneratedAtMs: from + bucketMs/2, // bucket 0
+			Slots: []SlotView{
+				{Slot: 1, StatsKnown: true, SpeciesKnown: true, Live: true,
+					Species: []contractb.CensusEntry{entry("Izus", "copedylanus", 12, 0),
+						entry("Other", "thing", 3, 0)}},
+				{Slot: 2, StatsKnown: true, SpeciesKnown: true, Live: true,
+					Species: []contractb.CensusEntry{entry("Izus ", "copedylanus", 8, 0)}},
+			},
+		},
+		{
+			GeneratedAtMs: from + bucketMs + bucketMs/2, // bucket 1: reported, none held
+			Slots: []SlotView{
+				{Slot: 1, StatsKnown: true, SpeciesKnown: true, Live: true,
+					Species: []contractb.CensusEntry{entry("Other", "thing", 5, 0)}},
+			},
+		},
+		{
+			GeneratedAtMs: from + 2*bucketMs + bucketMs/2, // bucket 2: nobody reported a census
+			Slots: []SlotView{
+				{Slot: 1, StatsKnown: true, SpeciesKnown: false, Live: true},
+				{Slot: 2, StatsKnown: false, Live: false},
+			},
+		},
+	}
+
+	tr := BuildSpeciesTrends(samples, []string{"Izus copedylanus", "Other thing", "Gone away"},
+		now, window, buckets)
+	if tr.Buckets != buckets || tr.Samples != 3 {
+		t.Fatalf("the answer covers %d buckets over %d samples, want %d and 3",
+			tr.Buckets, tr.Samples, buckets)
+	}
+	if len(tr.Species) != 3 {
+		t.Fatalf("the answer holds %d species, want the three asked for", len(tr.Species))
+	}
+	byKey := map[string]SpeciesTrend{}
+	for _, s := range tr.Species {
+		byKey[s.Key] = s
+	}
+	izus := byKey["Izus copedylanus"]
+	if izus.Points[0] == nil || *izus.Points[0] != 20 {
+		t.Fatalf("bucket 0 = %v, want the two worlds summed under ONE compared spelling",
+			izus.Points[0])
+	}
+	// A world that reported and held none of it is a ZERO, and it is a reading.
+	if izus.Points[1] == nil || *izus.Points[1] != 0 {
+		t.Fatalf("bucket 1 = %v, want a measured zero", izus.Points[1])
+	}
+	// A bucket in which NO world was in a position to count is UNKNOWN, and a
+	// sparkline has to break there rather than draw a line through it.
+	if izus.Points[2] != nil {
+		t.Fatalf("bucket 2 = %v, want unknown — no world reported a census in it",
+			*izus.Points[2])
+	}
+	for i := 3; i < buckets; i++ {
+		if izus.Points[i] != nil {
+			t.Fatalf("bucket %d = %v, want unknown — no sample fell in it", i, *izus.Points[i])
+		}
+	}
+	// The scale is PER SPECIES: these are shapes drawn 84 pixels wide beside rows
+	// of wildly different abundance, and one shared scale would flatten every
+	// rare species into a straight line.
+	if izus.Max != 20 || byKey["Other thing"].Max != 5 {
+		t.Fatalf("per-species maxima are %d and %d, want 20 and 5",
+			izus.Max, byKey["Other thing"].Max)
+	}
+	if izus.Last == nil || *izus.Last != 0 {
+		t.Fatalf("last = %v, want the newest KNOWN value", izus.Last)
+	}
+	// A species nothing in the window ever knew about carries a whole row of
+	// unknowns rather than a row of zeroes.
+	for i, p := range byKey["Gone away"].Points {
+		if p != nil && *p != 0 {
+			t.Fatalf("an unseen species has %d in bucket %d", *p, i)
+		}
+	}
+	if byKey["Gone away"].Max != 0 {
+		t.Fatalf("an unseen species has a maximum of %d", byKey["Gone away"].Max)
+	}
+}
+
+// TestTheTrendEndpointIsAliveOnlyAndBounded pins the endpoint around that
+// function: the key set is the LIVING CENSUS UNION and the request's bounds are
+// clamped exactly as /api/history's are.
+func TestTheTrendEndpointIsAliveOnlyAndBounded(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
+		Slots: []contractb.SlotInfo{
+			slot(1, 0, 0, true, census(20, 0, entry("Izus", "copedylanus", 20, 0))),
+			slot(2, 1, 0, true, census(4, 0, entry("Other", "thing", 4, 0))),
+		},
+	}
+	a := newViewFixture(t, status, time.Second)
+	a.mu.Lock()
+	// A species that has crossed a great deal and is alive nowhere. It is in the
+	// ledger aggregate and it must NOT be in this answer: the same refusal the
+	// flat index makes.
+	a.observeSpeciesLocked(migration(time.Now().UnixMilli(), 1, 2, "E", "Extinct", "one", "h1"))
+	a.mu.Unlock()
+
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	body := get(t, srv.URL+"/api/species/trends?hours=24&buckets=32")
+	var tr SpeciesTrends
+	if err := json.Unmarshal([]byte(body), &tr); err != nil {
+		t.Fatalf("decode: %v\n%s", err, body)
+	}
+	if len(tr.Species) != 2 {
+		t.Fatalf("the answer holds %d species, want the two that are ALIVE: %s", len(tr.Species), body)
+	}
+	if strings.Contains(body, "Extinct") {
+		t.Fatalf("a species alive nowhere was given a trend line:\n%s", body)
+	}
+	if tr.Buckets != 32 {
+		t.Fatalf("buckets = %d, want the 32 asked for", tr.Buckets)
+	}
+	// Clamped, like every other reader of that file: a caller may ask for a
+	// different window and may not ask for an unbounded answer.
+	var wide SpeciesTrends
+	if err := json.Unmarshal([]byte(get(t, srv.URL+"/api/species/trends?hours=9000&buckets=99999")),
+		&wide); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if wide.Buckets != HistoryMaxBuckets {
+		t.Fatalf("buckets = %d, want the clamp at %d", wide.Buckets, HistoryMaxBuckets)
+	}
+	if wide.ToMs-wide.FromMs > HistoryMaxWindow.Milliseconds() {
+		t.Fatalf("the window spans %d ms, past the clamp", wide.ToMs-wide.FromMs)
+	}
+}
+
+// TestTheLatestGenomeHashIsTrackedPerSpecies is the one string the brain shape
+// is read through, and it belongs to the same single writer as every other
+// counter in this file — one call site for the replay, one for the live path.
+func TestTheLatestGenomeHashIsTrackedPerSpecies(t *testing.T) {
+	dir := t.TempDir()
+	ledger, err := OpenLedger(dir)
+	if err != nil {
+		t.Fatalf("OpenLedger: %v", err)
+	}
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	recs := []Record{
+		migration(base, 1, 2, "E", "Izus", "copedylanus", "h-old"),
+		migration(base+2000, 1, 2, "E", "Izus", "copedylanus", "h-new"),
+		// An OLDER record arriving later does not overwrite a newer answer.
+		migration(base+1000, 1, 2, "E", "Izus", "copedylanus", "h-middle"),
+		// A crossing carrying no genome at all leaves the answer alone.
+		{Type: RecordMigration, RecordedAt: base + 3000, MigrationID: "m-nogenome",
+			SourceSlot: 1, DestSlot: 2,
+			Species: &wire.Species{GenericName: "Izus", SpecificName: "copedylanus"}},
+	}
+	for _, rec := range recs {
+		if err := ledger.Append(rec); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// THE LIVE PATH and THE REPLAY must agree, because they are the same
+	// function called from two places.
+	live := newViewFixture(t, contractb.PeerStatus{}, time.Second)
+	live.mu.Lock()
+	for _, rec := range recs {
+		live.observeSpeciesLocked(rec)
+	}
+	got := live.species.byKey["Izus copedylanus"].genomeHash
+	live.mu.Unlock()
+	if got != "h-new" {
+		t.Fatalf("the live path holds %q, want the LATEST genome the record named", got)
+	}
+
+	replayed, err := New(Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = replayed.Close() })
+	replayed.mu.Lock()
+	rebuilt := replayed.species.byKey["Izus copedylanus"].genomeHash
+	replayed.mu.Unlock()
+	if rebuilt != got {
+		t.Fatalf("the replay rebuilt %q against the live path's %q", rebuilt, got)
+	}
+}

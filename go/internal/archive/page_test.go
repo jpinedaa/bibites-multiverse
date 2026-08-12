@@ -7,29 +7,44 @@ import (
 	"multiverse/internal/contractb"
 )
 
-// TestPageHasFourTabsOverOnePoll is the structural half of the Species, Tree and
+// TestPageHasThreeTabsOverOnePoll is the structural half of the Species and
 // Settings tabs. A Go test cannot run the page's JavaScript, so it asserts the
-// MACHINERY four views over one poll need, and the two properties that make
-// the tabs usable rather than merely present:
+// MACHINERY three views over one poll need, and the properties that make the
+// tabs usable rather than merely present:
 //
 //	THE TAB IS IN THE URL HASH, so "#species" is a link somebody can send and a
-//	reload lands where the reader was.
+//	reload lands where the reader was — including "#tree", which was the
+//	genealogy's own tab before it and the census list became one drawing and is
+//	still a link somebody sent.
 //
-//	THE STATUS POLL IS SHARED. One timer fetches /api/status for all four; a
-//	tab that wanted its own would ask the archive for the same frame four
+//	THE STATUS POLL IS SHARED. One timer fetches /api/status for all three; a
+//	tab that wanted its own would ask the archive for the same frame three
 //	times, and the header's numbers would disagree with themselves.
-func TestPageHasFourTabsOverOnePoll(t *testing.T) {
+func TestPageHasThreeTabsOverOnePoll(t *testing.T) {
 	page := statusPageHTML
 
 	for _, want := range []string{
-		`<nav class="tabs"`, `data-tab="map"`, `data-tab="species"`, `data-tab="tree"`,
-		`data-tab="settings"`,
-		`id="p-map"`, `id="p-species"`, `id="p-tree"`, `id="p-settings"`,
+		`<nav class="tabs"`, `data-tab="map"`, `data-tab="species"`, `data-tab="settings"`,
+		`id="p-map"`, `id="p-species"`, `id="p-settings"`,
 		"function showTab", "function tabFromHash", "function wireTabs",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the tab machinery is missing %q", want)
 		}
+	}
+	// THE TWO OLD TABS ARE GONE, and gone means gone: no panel, no button, no
+	// second renderer for the same alive union.
+	for _, forbidden := range []string{`data-tab="tree"`, `id="p-tree"`, `id="spbody"`,
+		`id="sptab"`, "function renderSpecies", "function renderTree", "function speciesRow",
+		"function speciesDetail"} {
+		if strings.Contains(page, forbidden) {
+			t.Fatalf("the merged view left %q behind; two renderings of one alive union is two "+
+				"places for it to be wrong", forbidden)
+		}
+	}
+	// The old genealogy link still lands on the view the genealogy went into.
+	if !strings.Contains(page, `if (h === "tree") return "species";`) {
+		t.Fatal("#tree is not redirected to the merged view; it is a link somebody sent")
 	}
 	// The hash is both read and written, and a hashchange under an open page
 	// moves the view — that is what makes the back button work.
@@ -43,20 +58,30 @@ func TestPageHasFourTabsOverOnePoll(t *testing.T) {
 		t.Fatal("the shared status poll is gone")
 	}
 	if strings.Count(page, `fetch("api/status"`) != 1 {
-		t.Fatal("more than one place fetches the status frame; four tabs share ONE poll")
+		t.Fatal("more than one place fetches the status frame; three tabs share ONE poll")
 	}
-	// The species index rides that same cycle rather than a timer of its own.
-	if !strings.Contains(page, `if (TAB === "species") await tickSpecies();`) {
-		t.Fatal("the species index does not ride the shared poll")
-	}
-	// And so does the genealogy, gated on its own tab: it is derived from a
-	// ledger the browser is never handed, so it costs the archive work and is
-	// worth nothing to a tab nobody has open.
-	if !strings.Contains(page, `if (TAB === "tree") await tickTree();`) {
-		t.Fatal("the genealogy does not ride the shared poll, or is not gated on its tab")
+	// The species view rides that same cycle rather than a timer of its own, and
+	// is gated on its own tab: it is derived from a ledger the browser is never
+	// handed, so it costs the archive work and is worth nothing to a tab nobody
+	// has open.
+	if !strings.Contains(page, `if (TAB === "species") await tickLife();`) {
+		t.Fatal("the species view does not ride the shared poll, or is not gated on its tab")
 	}
 	if strings.Count(page, `fetch("api/species/tree"`) != 1 {
-		t.Fatal("the genealogy is fetched from more than one place")
+		t.Fatal("the species view is fetched from more than one place")
+	}
+	// ONE TREND REQUEST FOR EVERY ROW, on a slow timer of its own. Per-species
+	// history requests would be one bounded read of the sample file per species
+	// on a tab a reader leaves open.
+	if strings.Count(page, `fetch("api/species/trends`) != 1 {
+		t.Fatal("the trend column is not fetched exactly once for the whole view")
+	}
+	if strings.Contains(page, `fetch("api/species/history`) {
+		t.Fatal("the page fetches a per-species history again; the trend column exists so that " +
+			"forty sparklines cost one request")
+	}
+	if !strings.Contains(page, "tickTrends(); setInterval(tickTrends, 60000);") {
+		t.Fatal("the trend column is polled on the two-second cycle, or not at all")
 	}
 	// And the two map-only feeds are gated on the map being visible: a hidden
 	// panel has no laid-out geometry to animate along.
@@ -79,66 +104,242 @@ func TestPageHasFourTabsOverOnePoll(t *testing.T) {
 	}
 }
 
-// TestSpeciesTabIsAliveOnlyAndSaysSo covers the species tab's rendering and the
-// one claim it must not make. The index is the CENSUS UNION: a species that
-// crossed a lane a hundred times and is extinct everywhere is not on it, and
-// the page has to say that in its own words rather than leave a reader to
-// discover it.
-func TestSpeciesTabIsAliveOnlyAndSaysSo(t *testing.T) {
+// TestTheSpeciesViewIsAliveOnlyAndSaysSo covers the merged view's rendering and
+// the one claim it must not make. The rows are the CENSUS UNION: a species that
+// crossed a lane a hundred times and is extinct everywhere is not a row of its
+// own, and the page has to say that in its own words rather than leave a reader
+// to discover it.
+func TestTheSpeciesViewIsAliveOnlyAndSaysSo(t *testing.T) {
 	page := statusPageHTML
 	region := speciesRegion(t)
 
 	for _, want := range []string{
-		"function renderSpecies", "function speciesRow", "function speciesDetail",
-		"function speciesGlyph", "function spSorted", "function spMatches",
-		`id="spq"`, `id="spsort"`, `id="spbody"`, `fetch("api/species"`,
+		"function renderLife", "function lfRow", "function lfDetail", "function lfDetailLines",
+		"function lfRows", "function lfMatches", "function lfBar", "function lfEdge",
+		"function lfMini", "function lfSpark", "function lfAxis", "function lfTip",
+		"function lfStats", "function lfCount", "function lfScale", "function lfCols",
 	} {
-		if !strings.Contains(page, want) {
-			t.Fatalf("the species tab is missing %q", want)
+		if !strings.Contains(region, want) {
+			t.Fatalf("the species view is missing %q", want)
 		}
 	}
-	// Sortable on three keys, searchable, and population descending by default.
-	for _, want := range []string{`value="pop"`, `value="crossings"`, `value="name"`} {
+	for _, want := range []string{`id="lfq"`, `id="lfsort"`, `id="lfbox"`, `id="lfstat"`,
+		`id="lfcount"`, `fetch("api/species/tree"`} {
 		if !strings.Contains(page, want) {
-			t.Fatalf("the species index cannot be sorted by %q", want)
+			t.Fatalf("the species view is missing %q", want)
 		}
 	}
-	if !strings.Contains(page, `spSort = "pop"`) {
-		t.Fatal("the species index does not default to population descending")
-	}
-	// The three badges, each with a glossary entry behind it.
-	for _, want := range []string{`"exc",`, `"every",`, `"endem",`,
-		" endemic:[", " everywhere:[", " excluded:["} {
+	// THE FLAT RANKING SURVIVES AS A SORT of the same rows. The family order is
+	// the default, because it is the thing the flat table could not say.
+	for _, want := range []string{`value="family"`, `value="pop"`} {
 		if !strings.Contains(page, want) {
-			t.Fatalf("a species badge or its glossary entry is missing: %q", want)
+			t.Fatalf("the species view cannot be ordered by %q", want)
+		}
+	}
+	if !strings.Contains(page, `lfSort = "family"`) {
+		t.Fatal("the species view does not default to the family order")
+	}
+	// A flat ranking draws no parent edges: rows in abundance order are not in
+	// family order, and a line between two of them would say nothing.
+	if !strings.Contains(region, "return {list: flat, joined: false};") {
+		t.Fatal("the population ranking still claims its rows are joined")
+	}
+	// The three census badges, each with a glossary entry behind it.
+	for _, want := range []string{`"NEVER EXPORTED"`, `"EVERYWHERE"`, `"ENDEMIC"`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a census badge is missing from the merged row: %q", want)
+		}
+	}
+	for _, want := range []string{" endemic:[", " everywhere:[", " excluded:["} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("a badge's glossary entry is missing: %q", want)
 		}
 	}
 	// The alive-only rule is stated on the page, in the glossary and in the
 	// section's own note.
 	if !strings.Contains(page, " alive:[") {
-		t.Fatal("the glossary never explains that the index is alive-only")
+		t.Fatal("the glossary never explains that the view is alive-only")
 	}
 	if !strings.Contains(page, "species alive right now") {
 		t.Fatal("the species section does not say the list is what is alive")
 	}
-	// The detail: the ledger annotations, and the honesty note about how far
-	// back the record actually reaches.
-	for _, want := range []string{"distinct genomes", "parent species", "recent crossings",
-		"function speciesHistoryReach", "function fillSpeciesSparks",
-		`fetch("api/species/history?key="`} {
-		if !strings.Contains(page, want) {
-			t.Fatalf("the species detail is missing %q", want)
+	// THE CENSUS FACTS ARE ON THE ROW, which is the whole of the merge: the
+	// per-world counts and eggs the flat table showed are read here.
+	for _, want := range []string{"worlds[i].bibites", "worlds[i].eggs", "n.population",
+		"n.eggs", "n.spellings", "n.recent", "n.parentName", "n.excludedBy"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the merged row never reads %q; the flat census tab showed it", want)
 		}
 	}
 	// The glyph is the SAME creature the map draws, drawn by reference.
 	if !strings.Contains(region, `u.setAttribute("href", "#bib")`) {
-		t.Fatal("the species tab draws its own creature instead of the shared glyph")
+		t.Fatal("the species view draws its own creature instead of the shared glyph")
 	}
 	// One species is one colour everywhere, from the same hash of the same
 	// compared spelling the map uses.
-	if !strings.Contains(region, "speciesColor(row.key)") {
-		t.Fatal("the species tab colours a row from something other than the compared name; " +
-			"a species must be the same colour on every tab")
+	if !strings.Contains(region, "speciesColor(n.key)") {
+		t.Fatal("the species view colours a row from something other than the compared name; " +
+			"a species must be the same colour on every view")
+	}
+	// AND THE GLYPH IS THE ONLY THING WEARING IT. A swatch beside it, or a bar
+	// tinted to match, repeats one fact twice and invites a reader to look for a
+	// second meaning in the second mark. ONE call site inside the view, and the
+	// bar's own fill is a page colour rather than a species one.
+	view := region[strings.Index(region, "function renderLife"):]
+	if n := strings.Count(region, "speciesColor(n.key)"); n != 1 {
+		t.Fatalf("the merged row colours %d things by species; the glyph is the sole colour "+
+			"carrier", n)
+	}
+	if strings.Contains(view, "speciesColor") {
+		t.Fatal("something in the drawing other than the row's glyph is coloured by species")
+	}
+	if strings.Contains(page, ".spglyph{") || strings.Contains(page, "function speciesGlyph") ||
+		strings.Contains(region, `el("i", "sw")`) {
+		t.Fatal("the species row still carries the swatch the glyph replaced")
+	}
+	for _, want := range []string{"svg.life .lfbar.live{fill:var(--text)",
+		"svg.life .lfbar.ext{fill:var(--dim)"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the lifespan bar is not drawn in a page colour (%q); a bar tinted to the "+
+				"species repeats what the glyph already said", want)
+		}
+	}
+}
+
+// TestTheSpeciesViewDrawsTheRecordAgainstTime is the merged view's own idea: the
+// horizontal axis is wall-clock time and a species is a bar on it.
+//
+// A BAR IS THE SPAN OF THE RECORD AND NOT A LIFESPAN, and that is the one thing
+// this drawing can be misread as. The page must take both ends from the server's
+// own layout data (so a terminal renderer and a browser cannot disagree), must
+// draw a living species to the right-hand edge rather than to its last crossing,
+// and must say all of it in words as well as in marks.
+func TestTheSpeciesViewDrawsTheRecordAgainstTime(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// The two ends and the axis are the SERVER'S numbers, not the page's.
+	for _, want := range []string{"n.spanFromMs", "n.spanToMs", "n.spanDerived",
+		"x.spanStartMs", "x.spanEndMs"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the drawing does not read the published layout datum %q", want)
+		}
+	}
+	// A living species runs to the edge of the picture; an extinct one stops.
+	if !strings.Contains(region, "var x1 = n.alive ? sc.x(sc.t1) : sc.x(n.spanToMs || n.spanFromMs);") {
+		t.Fatal("a living species' bar does not run to now, or an extinct one does")
+	}
+	// The join is the CHILD's first-seen point, which is the only x-coordinate on
+	// the drawing that means anything.
+	if !strings.Contains(region, "var jx = sc.x(n.spanFromMs);") {
+		t.Fatal("the parent edge does not drop at the child's first-seen point")
+	}
+	// THE COLLAPSED RUN IS A DOTTED LEAD-IN WHOSE LENGTH COUNTS GENERATIONS, and
+	// the number is printed beside it anyway — a length a reader has to measure
+	// is not a number, and a length on a time axis that is not time has to say so.
+	if !strings.Contains(region,
+		"return Math.max(LF_CHAINMIN, Math.min(LF_CHAINMAX, gens * LF_GENPX));") {
+		t.Fatal("the collapsed run's length is not a bounded multiple of the generations it " +
+			"stands for")
+	}
+	for _, want := range []string{"var LF_GENPX = 5, LF_CHAINMIN = 12, LF_CHAINMAX = 130;",
+		"lfChainLen(n.collapsed)", `svgEl("path", "chain")`, `gt.textContent = "+" + n.collapsed;`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the collapsed edge is missing %q", want)
+		}
+	}
+	if !strings.Contains(page, "generations and not time") {
+		t.Fatal("the glossary never says the dotted length is generations rather than time")
+	}
+	// The record's floor is a BOUNDARY on the picture, not only a caption.
+	for _, want := range []string{`svgEl("line", "floor")`, `svgEl("rect", "prefloor")`,
+		"x.ancestrySinceMs && x.ancestrySinceMs > sc.t0"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the record's floor is not drawn as a boundary: %q missing", want)
+		}
+	}
+	// And the axis is UTC and dated, because it is a fixed point weeks back and a
+	// local rendering would put two readers a day apart on the same fact.
+	for _, want := range []string{"function trDay", "function trClock", "function lfStep"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the time axis is missing %q", want)
+		}
+	}
+	// SAID IN WORDS TOO. The bar is the record's span, and the page says so on
+	// the tab, in every row's tooltip and in the glossary.
+	if !strings.Contains(page, " lifespan:[") {
+		t.Fatal("the glossary never explains what the bar is and is not")
+	}
+	if !strings.Contains(region, "The bar runs from the first crossing this archive recorded of it") {
+		t.Fatal("a row's tooltip never says what its bar measures")
+	}
+	if !strings.Contains(region, "when the RECORD of it stops, not when it died.") {
+		t.Fatal("the tooltip never holds the record's end apart from the species' end")
+	}
+	// A derived start is drawn as the inference it is, and never as a reading.
+	if !strings.Contains(region, `n.spanDerived ? " derived" : ""`) {
+		t.Fatal("a bar whose start was inferred from a descendant is drawn like a recorded one")
+	}
+}
+
+// TestTheSpeciesViewDrawsTheMiniMapAndTheBrain covers the two marks that are not
+// time: where a species lives, and how big its brain is.
+//
+// THE GRID IS THE MAP'S OWN SHAPE. Six dots in two rows because this map is
+// three by two — never because six is how many worlds there are — so the page
+// reads the published grid rather than a constant.
+//
+// THE BRAIN IS ABSENT WHEN IT IS ABSENT. A genome pruned past the retention
+// horizon leaves no ring at all, which cannot be misread as a small brain the
+// way a thin bar could.
+func TestTheSpeciesViewDrawsTheMiniMapAndTheBrain(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// The grid comes from the answer, and both of its dimensions are used.
+	for _, want := range []string{"var m = (x && x.map) || {}", "m.width", "m.height",
+		"c.col", "c.row", "c.reporting", "cells.length"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the mini-map does not read the map's own shape: %q missing", want)
+		}
+	}
+	// Row 0 is the BOTTOM row of the map and it is the bottom row here too.
+	if !strings.Contains(region, "(rows - 1 - c.row) * pitch") {
+		t.Fatal("the mini-map does not put row 0 at the bottom, as the map does")
+	}
+	// THREE STATES, THREE FACTS: alive there, reported-and-absent, and a world
+	// reporting no census at all — which is unknown and never an absence.
+	if !strings.Contains(region,
+		`have[c.slot] ? "wdot on"`) || !strings.Contains(region, `(c.reporting ? "wdot off" : "wdot unk")`) {
+		t.Fatal("the mini-map collapses 'not there' and 'we were not told' into one dot")
+	}
+	if !strings.Contains(page, "svg.life .wdot.unk{fill:none;stroke:var(--warn)") {
+		t.Fatal("the unknown dot is not drawn as an unknown")
+	}
+	// The brain: a ring sized from the two published figures, and NOTHING when
+	// they are absent.
+	for _, want := range []string{"function lfBrainR", "n.neurons", "n.synapses",
+		"var LF_BRAIN_R0 = 2.4, LF_BRAIN_R1 = 6.4, LF_BRAIN_FULL = 600;",
+		"if (w <= 0) return 0;", `svgEl("circle", "brain")`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the brain ring is missing %q", want)
+		}
+	}
+	if !strings.Contains(region, "var r = lfBrainR(n);\n  if (r > 0){") {
+		t.Fatal("a species with no stored genome is still given a ring; absent must draw nothing")
+	}
+	if !strings.Contains(region, "no copy of its latest genome is held here") {
+		t.Fatal("the expanded row never says WHY a brain is missing; a pruned genome is not a " +
+			"brain of no neurons")
+	}
+	// Both carry a glossary entry, like every other piece of jargon here.
+	for _, want := range []string{" brainsize:[", " minimap:[", " trend:["} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the glossary never explains %q", want)
+		}
+	}
+	if !strings.Contains(page, `"minimap","trend","brainsize",`) {
+		t.Fatal("the new glossary entries exist but are never listed, so nobody can read them")
 	}
 }
 
@@ -310,21 +511,20 @@ func TestExclusionNamesNeverBecomeMarkup(t *testing.T) {
 				"from it); the escaping rule is enforced by a property over that fence", want)
 		}
 	}
-	// And so is the whole species index, which draws census names by another
+	// And so is the whole species view, which draws census names by another
 	// route than the map does.
-	for _, want := range []string{"function renderSpecies", "function speciesRow",
-		"function speciesDetail"} {
+	for _, want := range []string{"function renderLife", "function lfRow", "function lfDetail"} {
 		if !strings.Contains(region, want) {
-			t.Fatalf("the species index is rendered outside the fence: %q", want)
+			t.Fatalf("the species view is rendered outside the fence: %q", want)
 		}
 	}
-	// The two functions that DO build markup for the species detail live outside
-	// the fence, and the reason they are allowed to is that neither is ever
-	// handed a name. Pin that: nothing in them touches a name-bearing field.
+	// NOTHING AFTER THE FENCE TOUCHES A NAME-BEARING FIELD. The rest of the page
+	// still builds HTML strings, which is fine — what it must never do is put a
+	// name in one.
 	page := statusPageHTML
 	outside := page[strings.Index(page, "SPECIES CENSUS — END"):]
 	for _, forbidden := range []string{"row.name", "row.spellings", ".genericName",
-		".specificName", "migrationExclude"} {
+		".specificName", "migrationExclude", "n.spellings", "n.parentName"} {
 		if strings.Contains(outside, forbidden) {
 			t.Fatalf("code after the fence touches %q; every name-bearing field belongs "+
 				"inside the region where markup may not be assigned", forbidden)
@@ -348,8 +548,8 @@ func TestExclusionNamesNeverBecomeMarkup(t *testing.T) {
 // genealogy renderer belongs inside the fence, and this asserts that it is.
 func TestAncestorNamesNeverBecomeMarkup(t *testing.T) {
 	region := speciesRegion(t)
-	for _, want := range []string{"function renderTree", "function trTip", "function treeStats",
-		"function trSpan", "function svgEl"} {
+	for _, want := range []string{"function renderLife", "function lfTip", "function lfStats",
+		"function lfDetailLines", "function trSpan", "function svgEl"} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the genealogy is drawn OUTSIDE the fenced region (%q missing from it); "+
 				"an ancestor's name is attacker-chosen text and reaches the DOM as a text "+
@@ -363,29 +563,39 @@ func TestAncestorNamesNeverBecomeMarkup(t *testing.T) {
 	}
 	page := statusPageHTML
 	outside := page[strings.Index(page, "SPECIES CENSUS — END"):]
-	for _, forbidden := range []string{"n.name", "n.nameFrom", "n.key", "trTip("} {
+	for _, forbidden := range []string{"n.name", "n.nameFrom", "n.key", "lfTip(",
+		"lfDetailLines("} {
 		if strings.Contains(outside, forbidden) {
 			t.Fatalf("code after the fence touches %q; the genealogy's name-bearing fields "+
 				"belong inside the region where markup may not be assigned", forbidden)
 		}
 	}
+	// EVERY NAME THIS VIEW DRAWS goes through one of two calls, and both build a
+	// text node: the label and its badges, and the expanded row's lines — where
+	// the parent species and the other worlds' spellings are printed.
+	if !strings.Contains(region, "var s = trSpan(text, seg.c || null, seg.t);") {
+		t.Fatal("the expanded row does not build its segments through trSpan")
+	}
 	// And the raw spelling is PRESERVED rather than tidied: SVG text collapses a
 	// run of spaces exactly as HTML does, and 13% of the rig's names carry stray
 	// whitespace (contract-a.md §17, A36).
-	if !strings.Contains(page, "svg.tree text.nm{fill:var(--text);white-space:pre}") {
-		t.Fatal("the tree's names do not preserve their own whitespace")
+	for _, want := range []string{"svg.life text.nm{fill:var(--text);white-space:pre}",
+		"svg.life .det{fill:var(--text);font-size:11px;white-space:pre}"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("a name this view draws does not preserve its own whitespace: %q", want)
+		}
 	}
 }
 
-// TestTheTreeTabStatesItsOwnLimit is the page half of tree.go rule 3.
+// TestTheSpeciesViewStatesItsOwnLimit is the page half of tree.go rule 3.
 //
 // The derivation is honest and PARTIAL: ancestry here is a by-product of travel,
 // so a lineage that has never crossed a lane is not connected. That is a
 // legitimate property of the record and a misleading one to leave implicit — a
 // reader looking at a species standing on its own must be told which of the two
-// reasons put it there, and the tab must publish the count rather than wait to
+// reasons put it there, and the view must publish the count rather than wait to
 // be asked.
-func TestTheTreeTabStatesItsOwnLimit(t *testing.T) {
+func TestTheSpeciesViewStatesItsOwnLimit(t *testing.T) {
 	page := statusPageHTML
 	region := speciesRegion(t)
 
@@ -443,7 +653,7 @@ func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
 
 	// The badge, on a ROOT the record reaches above, with the depth in it.
 	for _, want := range []string{
-		`if (!n.parent && n.ancestryKnown && n.ancestryDepth > 0)`,
+		`if (joined && !n.parent && n.ancestryKnown && n.ancestryDepth > 0)`,
 		`"THE RECORD BEGINS HERE · "`, `" GENERATIONS ABOVE"`, `" GENERATION ABOVE"`,
 		`"tbadge rec"`, `rb.setAttribute("data-t", "recordfloor")`,
 	} {
@@ -455,14 +665,14 @@ func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
 	// THREE STATES, THREE LABELS, and the new one must not be either warning: a
 	// root whose ancestry IS recorded is not a gap in the record, and a reader
 	// who sees the same colour and the same voice will read them as one thing.
-	if !strings.Contains(page, "svg.tree .tbadge.rec{fill:var(--dim)}") {
+	if !strings.Contains(page, "svg.life .tbadge.rec{fill:var(--dim)}") {
 		t.Fatal("the root badge has no style of its own, or wears the warning colour the two " +
 			"standing-alone badges wear")
 	}
 	// The badge's text is STATIC WORDS AND ONE INTEGER. Every other label on this
 	// view is 64 attacker-chosen bytes; this one cannot be, and the check is
 	// structural rather than a matter of escaping it correctly.
-	start := strings.Index(region, "if (!n.parent && n.ancestryKnown")
+	start := strings.Index(region, "if (joined && !n.parent && n.ancestryKnown")
 	stmt := region[start:]
 	if end := strings.Index(stmt, "rb.setAttribute"); end > 0 {
 		stmt = stmt[:end]

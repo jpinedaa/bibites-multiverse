@@ -297,6 +297,15 @@ func (d *DenyList) ApplySpeciesIndex(idx SpeciesIndex) SpeciesIndex {
 	copy(rows, idx.Species)
 	for i := range rows {
 		r := &rows[i]
+		// THE PARENT NAME IS A SECOND SPECIES' NAME on this row, and it is denied
+		// or not on ITS OWN account: a row whose parent is suppressed keeps
+		// everything about itself and loses only the name it was quoting.
+		if r.Parent != "" {
+			pg, ps, _ := strings.Cut(r.Parent, " ")
+			if d.DeniesSpecies(pg, ps) {
+				r.Parent = Suppressed
+			}
+		}
 		generic, specific, _ := strings.Cut(r.Key, " ")
 		if !d.DeniesSpecies(generic, specific) {
 			// A row a denied PEER holds is still that species' row: the same
@@ -313,7 +322,13 @@ func (d *DenyList) ApplySpeciesIndex(idx SpeciesIndex) SpeciesIndex {
 		r.Key = Suppressed + "#" + strconv.FormatUint(fingerprint(r.Key), 16)
 		r.Name = Suppressed
 		r.Spellings = nil
-		r.Parent = ""
+		// A MARKER AND NOT AN ERASURE, here as everywhere else in this file: this
+		// field used to be blanked, and a blank one reads on the page as "no
+		// crossing of it ever named a parent" — a statement about the record that
+		// the record does not make. A suppressed row that HAD a parent says so.
+		if r.Parent != "" {
+			r.Parent = Suppressed
+		}
 	}
 	idx.Species = rows
 	return idx
@@ -339,14 +354,31 @@ func (d *DenyList) ApplySpeciesTree(t SpeciesTree) SpeciesTree {
 	// it in one pass would leave a node's own Parent pointing at a key that had
 	// not been renamed yet.
 	rename := map[string]string{}
+	denied := false
 	for i := range t.Nodes {
 		generic, specific, _ := strings.Cut(t.Nodes[i].Key, " ")
 		if d.DeniesSpecies(generic, specific) {
 			rename[t.Nodes[i].Key] = Suppressed + "#" +
 				strconv.FormatUint(fingerprint(t.Nodes[i].Key), 16)
+			denied = true
+			continue
+		}
+		// THE PARENT NAME IS A SECOND SPECIES' NAME, and it is the one field of
+		// this view whose suppression does not follow from the node's own key. The
+		// merged view prints it on every expanded row — a collapsed edge and a
+		// root are exactly where it says something the drawing cannot — so a
+		// suppression that reached the label and not this would publish the name
+		// it was asked to remove, one row lower.
+		//
+		// A node's alternative SPELLINGS need no test of their own: they are other
+		// raw spellings of this same key, so they are denied precisely when it is.
+		if pn := t.Nodes[i].ParentName; pn != "" {
+			if pg, ps, _ := strings.Cut(pn, " "); d.DeniesSpecies(pg, ps) {
+				denied = true
+			}
 		}
 	}
-	if len(rename) == 0 {
+	if !denied {
 		return t
 	}
 	nodes := make([]TreeNode, len(t.Nodes))
@@ -359,9 +391,18 @@ func (d *DenyList) ApplySpeciesTree(t SpeciesTree) SpeciesTree {
 			// The provenance goes with the name. Saying a suppressed label came
 			// from a census would be a statement about a name nobody can read.
 			n.NameFrom = ""
+			n.Spellings = nil
+			if n.ParentName != "" {
+				n.ParentName = Suppressed
+			}
 		}
 		if to, ok := rename[n.Parent]; ok {
 			n.Parent = to
+		}
+		if n.ParentName != "" {
+			if pg, ps, _ := strings.Cut(n.ParentName, " "); d.DeniesSpecies(pg, ps) {
+				n.ParentName = Suppressed
+			}
 		}
 	}
 	roots := make([]string, len(t.Roots))
@@ -372,6 +413,35 @@ func (d *DenyList) ApplySpeciesTree(t SpeciesTree) SpeciesTree {
 		}
 	}
 	t.Nodes, t.Roots = nodes, roots
+	return t
+}
+
+// ApplySpeciesTrends suppresses the names the shared trend answer is keyed on.
+//
+// A KEY IS A NAME HERE TOO, spelled normalized, and it is also the JOIN the page
+// draws each row's trend line by. So it is REWRITTEN to the same derived id
+// ApplySpeciesIndex and ApplySpeciesTree produce rather than blanked: the shape
+// of a suppressed species' population is not a name, the row it belongs beside
+// is drawn anyway, and two suppressed species must not collapse onto one line.
+func (d *DenyList) ApplySpeciesTrends(t SpeciesTrends) SpeciesTrends {
+	if d.Empty() {
+		return t
+	}
+	var out []SpeciesTrend
+	for i := range t.Species {
+		generic, specific, _ := strings.Cut(t.Species[i].Key, " ")
+		if !d.DeniesSpecies(generic, specific) {
+			continue
+		}
+		if out == nil {
+			out = make([]SpeciesTrend, len(t.Species))
+			copy(out, t.Species)
+		}
+		out[i].Key = Suppressed + "#" + strconv.FormatUint(fingerprint(t.Species[i].Key), 16)
+	}
+	if out != nil {
+		t.Species = out
+	}
 	return t
 }
 

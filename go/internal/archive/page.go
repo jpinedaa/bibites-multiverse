@@ -90,9 +90,13 @@ func (a *Archive) httpHandler() http.Handler {
 	// DERIVED — every edge in it is already in the ledger, and every leaf is
 	// already in the census /api/status carries. Hanging it off the status
 	// payload would write a recomputable tree to disk once a minute forever and
-	// widen the one file whose width is a disk budget (§20, B20). It is also a
-	// view most readers never open, which is a second reason not to make every
-	// reader of every other view pay for it.
+	// widen the one file whose width is a disk budget (§20, B20).
+	//
+	// IT IS ALSO THE SPECIES VIEW NOW, which is why it carries the census facts
+	// the flat index carries: the page draws ONE tab from it (tree.go's header).
+	// That is a payload the page fetches instead of two, not in addition to them
+	// — and /api/species below is untouched, because ringstat reads it and a
+	// terminal table is a different answer to a different question.
 	//
 	// The reduction happens on THIS side (tree.go rule 2), so the page and
 	// ringstat cannot disagree about who is related to whom.
@@ -101,6 +105,24 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(view)
+	})
+	// The shared trend answer: every living species' recent shape in ONE bounded
+	// read of the sample file. It rides its own endpoint rather than the tree's
+	// because the two have different costs and different cadences — the tree is
+	// an in-memory derivation polled every two seconds, and this reads a file and
+	// is polled once a minute. Hanging it off the tree would put a disk read on
+	// the two-second cadence for a line that changes once a minute.
+	mux.HandleFunc("/api/species/trends", func(w http.ResponseWriter, r *http.Request) {
+		window, buckets := historyParams(r)
+		tr, err := a.SpeciesTrendsView(window, buckets)
+		if err != nil {
+			http.Error(w, `{"error":"trends unavailable"}`, http.StatusInternalServerError)
+			a.log.Warn("archive: species trends read failed", "err", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(a.deny.ApplySpeciesTrends(tr))
 	})
 	mux.HandleFunc("/api/species/history", func(w http.ResponseWriter, r *http.Request) {
 		key, ok := speciesKeyParam(r)
@@ -259,98 +281,105 @@ color:var(--dim);margin-top:2px}
    them turns a clean bar into a sideways-scrolling one. */
 @media (max-width:560px){.tabs .tab .sub{display:none}.tabs .tab{padding:13px 8px}}
 
-/* ---- the species index ---- */
+/* ---- the species view: one drawing, on a time axis ----
+   ONE ROW PER SPECIES, and the row is the unit of everything: the label column
+   is fixed and clipped, the mini-map and the count and the trend line sit in
+   their own columns, and the plot on the right carries the bar. A row per node
+   is what makes label placement a non-problem at any species count — a classic
+   dendrogram centres an ancestor between its children and then has nowhere to
+   put that ancestor's name.
+
+   It scrolls INSIDE its own box, like the map and the tables, because a long
+   species name is 64 bytes a peer chose and must not be able to push the page
+   sideways. */
 .spctl{display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .spctl input,.spctl select{font:inherit;font-size:12px;color:var(--text);background:var(--cell);
 border:1px solid var(--line);border-radius:4px;padding:5px 8px;min-width:0}
 .spctl input{flex:1 1 200px;max-width:340px}
 .spctl label{font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center}
-table#sptab{min-width:760px}
-tr.sprow{cursor:pointer}
-tr.sprow:hover td{background:rgba(90,169,230,.08)}
-tr.sprow.open td{background:rgba(90,169,230,.13)}
-td.spname{white-space:nowrap;min-width:230px}
-/* pre, not nowrap, on the NAME ITSELF: HTML collapses a run of spaces, and a
-   doubled space inside a species name is the exact thing contract-a.md §17 A36
-   says the page must print as the owning world holds it. It is not a
-   curiosity — a measured 13% of the rig's names carry stray whitespace. */
-td.spname .nm{font-weight:700;white-space:pre}
-td.spname .alt{color:var(--dim);font-size:11px;margin-left:6px;white-space:pre}
-.chip.exl{white-space:pre-wrap}
-.spglyph{width:15px;height:12px;vertical-align:-2px;margin-right:5px}
-.badge{display:inline-block;font-size:10px;letter-spacing:.06em;text-transform:uppercase;
-border:1px solid var(--line);border-radius:9px;padding:0 7px;margin-left:6px;vertical-align:1px;
-white-space:nowrap}
-.badge.exc{color:var(--warn);border-color:var(--warn)}
-.badge.every{color:var(--live);border-color:var(--live)}
-.badge.endem{color:var(--lane);border-color:var(--lane)}
 .chip{display:inline-block;font-size:11px;background:var(--cell);border:1px solid var(--line);
 border-radius:4px;padding:1px 6px;margin:0 5px 3px 0;white-space:nowrap}
 .chip b{font-variant-numeric:tabular-nums}
-.chip.egg{color:var(--dim)}
-.chip.exl{color:var(--warn);border-color:var(--warn);white-space:normal;word-break:break-word}
-td.spwhere{white-space:normal;min-width:190px}
-tr.spdet>td{background:var(--cell);white-space:normal;padding:10px 12px}
-/* The detail lives inside a table with a 760px floor, so on a phone it would
-   otherwise sit off the right-hand edge of a box the reader has to scroll. It
-   sticks to the left of that scroll instead and takes the viewport's width, so
-   opening a row on a phone shows the detail rather than hiding it. */
-tr.spdet>td>div{position:sticky;left:0;max-width:calc(100vw - 72px)}
-.detgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(240px,100%),1fr))}
-.detbox{border-left:2px solid var(--line);padding-left:10px;min-width:0}
-
-/* ---- the genealogy ----
-   An INDENTED tree, one row per node, drawn as SVG. Indentation and elbow
-   connectors carry the shape, which is why nothing here has to solve label
-   placement: every node owns a row, so no two labels can ever collide, and the
-   thing stays readable from ten species to sixty. A classic dendrogram centres
-   each ancestor between its children and then has nowhere to put that
-   ancestor's name.
-
-   It scrolls INSIDE its own box, like the map and the tables, because a long
-   species name is 64 bytes a peer chose and must not be able to push the page
-   sideways. */
-.treewrap{overflow:auto;max-height:min(76vh,900px);border:1px solid var(--line);
+.chip.exl{color:var(--warn);border-color:var(--warn);white-space:pre-wrap;word-break:break-word}
+.lifewrap{overflow:auto;max-height:min(78vh,1000px);border:1px solid var(--line);
 border-radius:4px;background:var(--cell)}
-svg.tree{display:block}
-svg.tree .link{fill:none;stroke:var(--line);stroke-width:1.5}
-svg.tree .tnode{cursor:default}
-svg.tree .tnode:hover .nm{fill:var(--hot)}
-svg.tree .hit{fill:transparent}
-svg.tree .tnode:hover .hit{fill:rgba(90,169,230,.08)}
+svg.life{display:block}
+svg.life .hit{fill:transparent}
+svg.life .lfrow{cursor:pointer}
+svg.life .lfrow:hover .hit{fill:rgba(90,169,230,.08)}
+svg.life .lfrow.open .hit{fill:rgba(90,169,230,.10)}
+svg.life .lfrow:hover .nm{fill:var(--hot)}
 /* white-space:pre on the NAME, for contract-a.md §17 A36's reason: SVG text
    collapses a run of spaces exactly as HTML does, and a doubled space inside a
-   species name is the owning world's spelling, not noise. */
-/* The class selectors are deliberately NOT element-qualified: the name is a
+   species name is the owning world's spelling, not noise.
+   The class selectors are deliberately NOT element-qualified: the name is a
    <tspan> inside a <text> and so is every annotation beside it, so "text.meta"
    would match nothing. One <text> per row lets the annotations FLOW after a name
    whose width nothing here measures. */
-svg.tree text{font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-svg.tree text.nm{fill:var(--text);white-space:pre}
-svg.tree .anc text.nm{fill:var(--dim);font-size:11px}
-svg.tree .meta{fill:var(--dim);font-size:10.5px}
-svg.tree .gen{fill:var(--dim);font-size:9.5px}
-svg.tree .tbadge{font-size:9.5px;letter-spacing:.06em}
-svg.tree .tbadge.warn{fill:var(--warn)}
-svg.tree .tbadge.lane{fill:var(--lane)}
+svg.life text{font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+svg.life text.nm{fill:var(--text);white-space:pre}
+svg.life .anc text.nm{fill:var(--dim);font-size:11px}
+svg.life .meta{fill:var(--dim);font-size:10.5px}
+svg.life .gen{fill:var(--dim);font-size:9.5px}
+svg.life text.pop{fill:var(--text);font-size:11.5px;font-variant-numeric:tabular-nums}
+svg.life .eggs{fill:var(--dim);font-size:9.5px}
+svg.life .tbadge{font-size:9.5px;letter-spacing:.06em}
+svg.life .tbadge.warn{fill:var(--warn)}
+svg.life .tbadge.lane{fill:var(--lane)}
+svg.life .tbadge.live{fill:var(--live)}
 /* The root badge is DELIBERATELY NOT the warning colour the two standing-alone
    badges wear: "the record reaches 31 generations above this and stops" is a
    statement about the record's own edge, not a gap in it, and a reader who sees
    amber twice will read the two as the same kind of thing. */
-svg.tree .tbadge.rec{fill:var(--dim)}
-svg.tree .ring{fill:none;stroke:var(--dim);stroke-width:1.5}
+svg.life .tbadge.rec{fill:var(--dim)}
+svg.life .ring{fill:none;stroke:var(--dim);stroke-width:1.5}
+/* THE BAR IS NOT COLOURED BY SPECIES. The glyph carries the colour and nothing
+   else does: a bar tinted to match it would repeat one fact twice and leave a
+   reader looking for a second meaning in it. Alive is bright, an ancestor
+   nothing is alive of is dim and thinner, and a bar whose start was inferred
+   from a descendant is outlined rather than filled. */
+svg.life .lfbar.live{fill:var(--text);opacity:.82}
+svg.life .lfbar.ext{fill:var(--dim);opacity:.55}
+svg.life .lfbar.derived{fill:none;stroke:var(--dim);stroke-width:1;stroke-dasharray:3 2}
+svg.life .undated{fill:none;stroke:var(--warn);stroke-width:1.4}
+/* The brain ring sits at the end of the bar and is never filled: it is a size,
+   not a quantity of anything you could add up. */
+svg.life .brain{fill:none;stroke:var(--lane);stroke-width:1.3;cursor:help}
+svg.life .link{fill:none;stroke:var(--line);stroke-width:1.5}
+svg.life .chain{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:2 3}
+svg.life .wdot{stroke-width:1.1}
+svg.life .wdot.on{fill:var(--text);stroke:none}
+svg.life .wdot.off{fill:none;stroke:var(--line)}
+svg.life .wdot.unk{fill:none;stroke:var(--warn);stroke-dasharray:1.5 1.5}
+svg.life .trend{fill:none;stroke:var(--live);stroke-width:1.4;stroke-linejoin:round}
+svg.life .trendbase{stroke:var(--line);stroke-width:1}
+svg.life .grid{stroke:var(--line);stroke-width:1;opacity:.5}
+svg.life .tick,svg.life .colhd{fill:var(--dim);font-size:10px;letter-spacing:.04em}
+svg.life .nowline{stroke:var(--live);stroke-width:1;opacity:.55}
+/* The record's floor: everything left of it is crossings that named no parent at
+   all, which is why no edge in the drawing can start there. */
+svg.life .floor{stroke:var(--warn);stroke-width:1.2;stroke-dasharray:4 3;opacity:.8}
+svg.life .floorlbl{fill:var(--warn);font-size:9.5px;cursor:help}
+svg.life .prefloor{fill:var(--hole);opacity:.10}
+svg.life .detbg{fill:var(--bg);opacity:.55}
+svg.life .det{fill:var(--text);font-size:11px;white-space:pre}
+svg.life .det .dk{fill:var(--dim)}
+svg.life .det .unk{fill:var(--warn);font-style:italic}
 .treelegend{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;color:var(--dim);
 margin:0 0 10px}
 .treelegend i.ringi{display:inline-block;width:9px;height:9px;border:1.5px solid var(--dim);
 border-radius:50%;vertical-align:-1px;margin-right:5px}
+.treelegend i.ringi.braini{border-color:var(--lane)}
+.treelegend i.bari{display:inline-block;width:22px;height:7px;background:var(--text);opacity:.82;
+border-radius:2px;vertical-align:-1px;margin-right:5px}
+.treelegend i.chaini{display:inline-block;width:22px;height:0;border-top:1.2px dotted var(--dim);
+vertical-align:middle;margin-right:5px}
+.treelegend i.doti{display:inline-block;width:7px;height:7px;background:var(--text);
+border-radius:50%;vertical-align:0;margin-right:5px}
 .treestat{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;margin-bottom:10px}
 .treestat span b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
-.detbox h3{margin:0 0 5px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);
-font-weight:400}
-.detbox .big{font-size:19px;font-variant-numeric:tabular-nums}
 .detline{font-size:11.5px;color:var(--dim);margin:2px 0}
 .detline b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
-.detnote{font-size:11px;color:var(--dim);margin-top:8px;font-style:italic}
 
 /* ---- the settings cards ---- */
 .cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))}
@@ -371,9 +400,9 @@ border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px;flex-wr
 .card .kv .lk,.card .kv .lu{font-size:10px;letter-spacing:.03em;opacity:.6}
 .card .exl{margin-top:4px}
 /* The shared creature definition lives in a zero-sized SVG at the top of the
-   document rather than inside the map, because THREE tabs draw it now — the map,
-   the species index and the family tree — and the map's SVG is thrown away and
-   rebuilt whenever the map's shape changes. */
+   document rather than inside the map, because TWO tabs draw it — the map's
+   cells and hop glyphs, and every living row of the species view — and the map's
+   SVG is thrown away and rebuilt whenever the map's shape changes. */
 .glyphdefs{position:absolute;width:0;height:0;overflow:hidden}
 h2{font-size:12px;margin:0 0 10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
 display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;min-width:0}
@@ -582,9 +611,7 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   <button type="button" class="tab" role="tab" data-tab="map" aria-selected="true">map
     <span class="sub">worlds, lanes, crossings</span></button>
   <button type="button" class="tab" role="tab" data-tab="species" aria-selected="false">species
-    <span class="sub">what is alive, and where</span></button>
-  <button type="button" class="tab" role="tab" data-tab="tree" aria-selected="false">tree
-    <span class="sub">how the living are related</span></button>
+    <span class="sub">what is alive, where, and where it came from</span></button>
   <button type="button" class="tab" role="tab" data-tab="settings" aria-selected="false">settings
     <span class="sub">what each world was told to do</span></button>
 </nav>
@@ -656,57 +683,51 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
 <div class="panel" id="p-species" role="tabpanel" hidden>
   <section>
     <h2><span class="term" data-t="alive">species alive right now</span>
-      <span class="note muted">every species any world is
+      <span class="note muted">Every species any world is
         <span class="term" data-t="census">reporting</span> in its census, joined across the
-        map &mdash; a species that used to live here and does not now is not on this list, and
-        what has <span class="term" data-t="crossings">crossed</span> is an annotation on a row
-        the census put there, never a row of its own</span></h2>
-    <div class="spctl">
-      <input id="spq" type="search" autocomplete="off" spellcheck="false"
-             placeholder="search a species…" aria-label="search species">
-      <label for="spsort">sort
-        <select id="spsort">
-          <option value="pop">population</option>
-          <option value="crossings">crossings</option>
-          <option value="name">name</option>
-        </select>
-      </label>
-      <span class="muted" id="spcount"></span>
-    </div>
-    <div class="tw"><table id="sptab"><thead><tr>
-      <th><span class="term" data-t="species">species</span></th>
-      <th class="num"><span class="term" data-t="population">alive</span></th>
-      <th><span class="term" data-t="world">worlds</span></th>
-      <th class="num"><span class="term" data-t="egg">eggs</span></th>
-      <th class="num"><span class="term" data-t="crossings">crossings</span></th>
-      <th>last</th>
-      <th>first seen</th></tr></thead>
-    <tbody id="spbody"></tbody></table></div>
-  </section>
-</div>
-
-<div class="panel" id="p-tree" role="tabpanel" hidden>
-  <section>
-    <h2><span class="term" data-t="genealogy">how the living are related</span>
-      <span class="note muted">Every species alive right now, joined at the ancestors where
-        their lines part. The ancestry is what the
-        <span class="term" data-t="crossings">migration record</span> shows: when a creature
-        crosses, the world it left names its species <em>and that species&rsquo; parent
-        species</em>, and this is one generation of that per crossing, chained. So a lineage
+        map, drawn against TIME &mdash; a bar runs from the first
+        <span class="term" data-t="crossings">crossing</span> this archive recorded of that
+        species to the last, or to the right-hand edge while it is still alive. It is the span
+        of the RECORD and <span class="term" data-t="lifespan">not a lifespan</span>. A species
+        that used to live here and does not now is not a row of its own: it is drawn only where
+        two living lines <span class="term" data-t="branchpoint">part at it</span>.
+        The ancestry is what the migration record shows &mdash; when a creature crosses, the
+        world it left names its species <em>and that species&rsquo; parent species</em>, and
+        this is one generation of that per crossing, chained. So a lineage
         that has never crossed a lane has nothing here to connect it &mdash;
         <span class="term" data-t="noancestry">that is stated per species, never guessed</span>.
-        Only <span class="term" data-t="branchpoint">branch points</span> are drawn: a run of
-        extinct ancestors with no living branch on it
-        <span class="term" data-t="collapsed">collapses to one edge</span> that says how many
-        generations it stood for. Nothing here is resolved against any world&rsquo;s own
+        A run of extinct ancestors with no living branch on it
+        <span class="term" data-t="collapsed">collapses to one dotted edge</span> that says how
+        many generations it stood for. Nothing here is resolved against any world&rsquo;s own
         registry &mdash; this is what the record says.</span></h2>
-    <div class="treestat" id="trstat"></div>
+    <div class="spctl">
+      <input id="lfq" type="search" autocomplete="off" spellcheck="false"
+             placeholder="search a species…" aria-label="search species">
+      <label for="lfsort">order
+        <select id="lfsort">
+          <option value="family">family</option>
+          <option value="pop">population</option>
+        </select>
+      </label>
+      <span class="muted" id="lfcount"></span>
+    </div>
+    <div class="treestat" id="lfstat"></div>
     <p class="treelegend">
-      <span><i class="bibi"></i>alive &mdash; a leaf, or a living ancestor</span>
+      <span><i class="bibi"></i>alive &mdash; a leaf, or a living ancestor; the glyph&rsquo;s
+        colour is the species and nothing else here is coloured</span>
       <span><i class="ringi"></i>an ancestor alive nowhere that is reporting</span>
-      <span>&plus;<b>n</b> on an edge &mdash; extinct generations collapsed into it</span>
+      <span><i class="bari"></i>first recorded crossing &rarr; last, or &rarr; now while alive</span>
+      <span><i class="chaini"></i>&plus;<b>n</b> &mdash; extinct generations collapsed; the
+        dotted length counts <span class="term" data-t="collapsed">generations, not time</span></span>
+      <span><i class="ringi braini"></i><span class="term" data-t="brainsize">brain size</span>
+        &mdash; bigger ring, more neurons and synapses</span>
+      <span><i class="doti"></i><span class="term" data-t="minimap">where it lives</span>,
+        on the map&rsquo;s own grid</span>
+      <span><span class="term" data-t="trend">the 24 h line</span> &mdash; its population
+        across the map</span>
+      <span>click a row for its worlds, its record and its parent</span>
     </p>
-    <div class="treewrap" id="trbox"></div>
+    <div class="lifewrap" id="lfbox"></div>
   </section>
 </div>
 
@@ -756,16 +777,22 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   <span class="term" data-t="readonly">read-only</span> here: this page changes nothing, anywhere.
   The <span class="term" data-t="genealogy">family tree</span> is what the migration record
   shows and nothing else: lineages that have never crossed a lane are not connected here, and
-  the count of those is printed on the tab rather than left for a reader to notice.
-  The four views share one poll and each has a link of its own &mdash;
-  <code>#map</code>, <code>#species</code>, <code>#tree</code>, <code>#settings</code>. JSON:
+  the count of those is printed on the tab rather than left for a reader to notice. A
+  <span class="term" data-t="lifespan">bar</span> is the span of that record and not a lifespan.
+  The three views share one poll and each has a link of its own &mdash;
+  <code>#map</code>, <code>#species</code>, <code>#settings</code>; <code>#tree</code> was the
+  genealogy&rsquo;s own tab before it and the census list became one drawing, and it still lands
+  there. JSON:
   <code>/api/status</code> (live), <code>/api/hops</code> (the last minute of crossings,
   bounded in time and in count, and kept out of the durable sample file on purpose),
-  <code>/api/species</code> (what is alive, joined to the crossing record),
-  <code>/api/species/tree</code> (the same alive set, reduced to its branch points &mdash;
-  its own endpoint for the same reason, so a derived tree is not written to disk once a minute),
-  <code>/api/species/history?key=</code> and <code>/api/history</code> (downsampled,
-  <code>?hours=</code>, <code>?buckets=</code>).
+  <code>/api/species/tree</code> (what is alive, joined to the crossing record and reduced to its
+  branch points &mdash; its own endpoint so a derived tree is not written to disk once a minute),
+  <code>/api/species</code> (the same alive set as a flat index, which is what
+  <code>ringstat</code> reads),
+  <code>/api/species/trends</code> (every living species&rsquo; recent population shape in one
+  answer, which is what the trend column is drawn from),
+  <code>/api/species/history?key=</code> (one species, split per world) and
+  <code>/api/history</code> (downsampled, <code>?hours=</code>, <code>?buckets=</code>).
   <div class="motion" id="motion">
     <span class="term" data-t="motion">motion</span>
     <button type="button" class="mbtn" data-m="auto">auto</button>
@@ -830,10 +857,14 @@ var G = {
  everywhere:["everywhere","This species is alive in every world that is currently reporting a census. It only claims that when at least two worlds are reporting: with one world answering, 'everywhere' and 'endemic' are the same sentence, and saying both would dress a single world's list up as a finding about the map."],
  excluded:["never exported","This species is on at least one world's exclusion list, which means that world never lets one of them out through a lane. It explains something otherwise baffling: a world can be full of a kind that never appears on any road out of it. The rule belongs to that world alone and is applied inside its own game — no other world, and nothing on this page, enforces or can enforce it. A species can be excluded by one world and travel freely from another."],
  speciesgenomes:["distinct genomes","How many genuinely different genetic makeups of this species have crossed a lane. Two creatures of one species are rarely identical; this counts the distinct ones the archive has fingerprints for. A big number beside a small population means a kind that is changing fast."],
- parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. One crossing carries one generation of this, and the TREE tab is what happens when you chain them: if this species' parent has a parent of its own, recorded by some other crossing, the record joins them up. Nothing is resolved against any world's own register — the register lives inside one copy of the game and only that copy can read it — so what a family tree here says is what the record says, which is a smaller and more honest claim."],
+ parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. One crossing carries one generation of this, and the drawing on this tab is what happens when you chain them: if this species' parent has a parent of its own, recorded by some other crossing, the record joins them up, and the line dropping onto this species' bar is that join. Nothing is resolved against any world's own register — the register lives inside one copy of the game and only that copy can read it — so what a family tree here says is what the record says, which is a smaller and more honest claim."],
  genealogy:["the family tree","Every species alive right now, arranged by who came from whom. The information comes from one place: when a creature walks out of a world, that world names the creature's species AND the species it split off from. One crossing tells you one generation. Thousands of crossings, chained together, tell you the shape of the family — and on this map that shape runs about forty generations deep. What is drawn is only the part that still matters: the living species, and the ancestors where two or more living lines part company. Everything else is left out, and where a whole run of ancestors is left out the edge says how many."],
  branchpoint:["a branch point","An ancestor that is drawn even though nothing of its kind is alive anywhere, because two or more living species descend from it by different children. It is the answer to 'how are these two related' — the most recent point their lines were the same. An ancestor with only ONE living line below it is not a branch point and is not drawn: it would be a step in a corridor with no doors."],
- collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. So the number is the difference between the two."],
+ collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE dotted edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. So the number is the difference between the two. The dotted run has a LENGTH, and that length counts generations and not time: everything else on this drawing is measured against the clock along the top, and this one mark is not, which is why it is dotted and why the number is printed beside it."],
+ lifespan:["the bar, and what it is not","A species' bar starts at the first crossing THIS ARCHIVE RECORDED of it and ends at the last one, or at the right-hand edge while the species is still alive somewhere. It is not a lifespan and this page never calls it one. A kind can have lived for days before anything of it walked into another world, and a kind whose bar stopped last Tuesday may be alive and simply staying at home — what stopped is the record, and the only honest thing a record can draw is itself. The one place the drawing goes beyond that is an ancestor no crossing of its own was ever recorded for: its bar begins at its earliest recorded DESCENDANT, because that descendant's crossing named it as a parent, so the record does support 'it existed by then' and supports nothing earlier. Those bars are drawn hollow."],
+ brainsize:["brain size","The ring at the end of a species' bar. Every creature carries a brain — a little network of neurons wired together by synapses — and this is how big the newest one of that species the archive has a copy of actually is: a bigger ring is more neurons and more synapses. It is drawn from ONE genome per species, the latest the crossing record named, and it is read out of the copy in the archive's own store. WHERE THERE IS NO RING THERE IS NO ANSWER, which is not the same as a small brain: the copy may never have arrived, or may have been deleted once it was older than the retention horizon. The record of the crossing stays forever either way; the genetic material is the part that ages out."],
+ minimap:["where it lives","The little grid of dots beside a species, laid out the way the map itself is laid out — this map is three worlds wide and two high, so it is three dots by two, and a different map would draw a different grid. A filled dot is a world where this species is alive right now. A hollow dot is a world that sent its census and did not name it. A dashed amber dot is a world reporting no census at all, which is UNKNOWN and never 'not there'. A seat nobody has claimed is drawn as nothing."],
+ trend:["the 24-hour line","A small line of this species' population across the whole map over the last day, from the archive's own sample file — the shape, not the numbers. A gap in the line is a stretch where no world reported a census, which is unknown and never a zero. Every one of these lines comes from a single answer covering every living species at once, so the column costs one request rather than one per species. This record began when the archive did, so a short line is a short record and not a young species."],
  recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive holds that named a parent at all — anything older than it is a crossing that named none. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw."],
  noancestry:["no recorded ancestry","This species is alive, and no crossing of it has ever named a parent species — so the record cannot say where it came from, and it is drawn on its own. That is not a fault in the species and not a fault in the map: ancestry here is a by-product of TRAVEL, and a kind that has stayed home has left no record to carry it. A separate note is used for a species whose ancestry IS recorded but whose whole family has died out; those two are different facts and are never given the same label."],
  settings:["settings","What a world was TOLD to do, as opposed to what it is doing. Everything else on this page is a measurement or a receipt; these are the knobs behind them — how often it saves, which species it refuses to export, whether its edges wrap. They are the reason a number elsewhere looks the way it does, and they are read-only here on purpose."],
@@ -853,7 +884,8 @@ var G = {
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
     "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
     "rawname","endemic","everywhere","excluded","crossings","speciesgenomes","parentspecies",
-    "genealogy","branchpoint","collapsed","noancestry","recordfloor",
+    "genealogy","lifespan","branchpoint","collapsed","noancestry","recordfloor",
+    "minimap","trend","brainsize",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges","ceilings","floor",
@@ -1722,32 +1754,44 @@ function buildHopGlyph(name, toSlot){
 }
 
 /* ------------------------------------------------------------ the SPECIES tab
-   Everything below draws names — species names from six censuses, and, on the
-   settings cards, the entries of six exclusion lists. An exclusion entry is the
-   same class of text as a census name and arrives on the same unauthenticated
-   stats block (contract-b-m4.md §13 item 7, §19 B18), so it is handled inside
-   this fence for exactly the same reason, and by the same means: NOTHING HERE
-   ASSIGNS MARKUP. Every element is created, every string lands as a text node.
+   Everything below draws names — species names from six censuses, the names of
+   their recorded ancestors, and, on the settings cards, the entries of six
+   exclusion lists. An ancestor's label is not a census name: no world is
+   reporting the species, so the only spelling the archive has is a
+   parentGenericName off a migration envelope (contract-a.md §16 A30), which is
+   the same 64 attacker-chosen bytes arriving by another route. An exclusion entry
+   is the same class of text again (contract-b-m4.md §13 item 7, §19 B18). All
+   three are handled inside this fence for the same reason and by the same means:
+   NOTHING HERE ASSIGNS MARKUP. Every element is created, every string lands as a
+   text node.
 
-   The consequence is that these two views build their whole DOM by hand rather
-   than by templating a string, which is more code and is the point: the safe
-   path is the only path, so one careless concatenation cannot appear later. */
+   The consequence is that these views build their whole DOM by hand rather than
+   by templating a string, which is more code and is the point: the safe path is
+   the only path, so one careless concatenation cannot appear later.
 
-var SPX = null, spOpenKey = null, spQuery = "", spSort = "pop", spHist = {};
+   ONE VIEW, NOT TWO. This tab was a flat census table and a separate family
+   tree. They listed the same species from the same census in two orders, and a
+   reader who wanted "how many of this one, and where did it come from" had to
+   hold one tab in their head while reading the other. They are one drawing now:
 
-/* One creature glyph at label size, in this species' own colour — the same
-   definition the map draws, so a species reads the same on both tabs. */
-function speciesGlyph(colour){
-  var svg = document.createElementNS(SVGNS, "svg");
-  svg.setAttribute("class", "spglyph");
-  svg.setAttribute("viewBox", "-8 -5 16 10");
-  svg.setAttribute("aria-hidden", "true");
-  var u = document.createElementNS(SVGNS, "use");
-  u.setAttribute("href", "#bib");
-  if (colour) u.style.fill = colour; else u.setAttribute("class", "bib unclassed");
-  svg.appendChild(u);
-  return svg;
-}
+     TIME RUNS LEFT TO RIGHT. A species is a BAR from the first crossing this
+     archive recorded of it to the last, or to the right-hand edge while it is
+     alive. That is deliberately NOT a lifespan — it is the span of the RECORD,
+     and every label here says so.
+
+     THE CENSUS FACTS SIT ON THE BAR. Population, the worlds holding it and how
+     many in each, eggs, the three badges: the things the flat table said, said
+     on the row whose shape says when and from whom.
+
+     THE GLYPH IS THE ONLY COLOURED THING. One species is one colour, and it is
+     worn by the creature and by nothing else — no swatch, no coloured chip, no
+     tinted bar repeating what the glyph already said. */
+
+var LFX = null, lfOpenKey = null, lfQuery = "", lfSort = "family";
+/* The shared trend answer, keyed by species, and what it says about its own
+   reach. Both are null until the first slow poll lands, and a row with no
+   entry draws no line — never a flat one, which would be a claim. */
+var LFTREND = null, LFTRENDMETA = null;
 
 function el(tag, cls, text){
   var e = document.createElement(tag);
@@ -1764,244 +1808,11 @@ function termEl(tag, term, text){
   return e;
 }
 
-function spBadge(cls, text, term){
-  var b = el("span", "badge " + cls, text);
-  if (term) b.setAttribute("data-t", term);
-  return b;
-}
-
 /* An unknown, in the page's own voice: "?" in the warning colour. §10.1's rule
    has no exception on this tab either. */
 function unkEl(text){ return el("span", "unknown", text == null ? "?" : text); }
 
-function spMatches(row, q){
-  if (!q) return true;
-  if (row.key.toLowerCase().indexOf(q) >= 0) return true;
-  if (String(row.name).toLowerCase().indexOf(q) >= 0) return true;
-  var alt = row.spellings || [];
-  for (var i=0;i<alt.length;i++) if (String(alt[i]).toLowerCase().indexOf(q) >= 0) return true;
-  return false;
-}
-
-function spSorted(list){
-  var out = list.slice(0);
-  out.sort(function(a,b){
-    if (spSort === "name") return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
-    if (spSort === "crossings"){
-      if (b.crossings !== a.crossings) return b.crossings - a.crossings;
-      return b.population - a.population;
-    }
-    if (b.population !== a.population) return b.population - a.population;
-    return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
-  });
-  return out;
-}
-
-/* renderSpecies paints the whole index. It rebuilds the body every poll, which
-   is affordable because the list is bounded by the census that produced it —
-   at most 32 species a world — and which keeps the expanded row's own numbers
-   as fresh as the row above it. */
-function renderSpecies(x){
-  SPX = x;
-  var body = document.getElementById("spbody");
-  if (!body) return;
-  while (body.firstChild) body.removeChild(body.firstChild);
-
-  var count = document.getElementById("spcount");
-  if (count){
-    while (count.firstChild) count.removeChild(count.firstChild);
-    if (!x || !x.haveStatus){
-      count.appendChild(unkEl("the relay has broadcast no map yet"));
-    } else {
-      count.appendChild(document.createTextNode(
-        x.species.length + " alive across " + x.reportingSlots + " reporting world(s)"));
-      if (x.censuslessSlots > 0){
-        count.appendChild(document.createTextNode(" · "));
-        count.appendChild(unkEl(x.censuslessSlots + " world(s) report no census"));
-      }
-      if (x.truncatedSlots > 0){
-        count.appendChild(document.createTextNode(" · "));
-        count.appendChild(unkEl(x.truncatedSlots + " census(es) capped at 32; the rest is unreported"));
-      }
-    }
-  }
-  if (!x || !x.species || !x.species.length){
-    var tr0 = el("tr"), td0 = el("td", "muted",
-      (x && x.haveStatus) ? "no world is reporting a species right now" : "waiting for the map");
-    td0.setAttribute("colspan", "7");
-    tr0.appendChild(td0); body.appendChild(tr0);
-    return;
-  }
-
-  var list = spSorted(x.species), shown = 0;
-  for (var i=0;i<list.length;i++){
-    var row = list[i];
-    if (!spMatches(row, spQuery)) continue;
-    shown++;
-    body.appendChild(speciesRow(row));
-    if (spOpenKey === row.key) body.appendChild(speciesDetail(row));
-  }
-  if (!shown){
-    var tr1 = el("tr"), td1 = el("td", "muted", "no species matches that search");
-    td1.setAttribute("colspan", "7");
-    tr1.appendChild(td1); body.appendChild(tr1);
-  }
-}
-
-function speciesRow(row){
-  var tr = el("tr", "sprow" + (spOpenKey === row.key ? " open" : ""));
-  tr.setAttribute("data-k", row.key);
-
-  var name = el("td", "spname");
-  var colour = speciesColor(row.key);
-  var sw = el("i", "sw");
-  sw.style.background = colour;
-  name.appendChild(sw);
-  name.appendChild(speciesGlyph(colour));
-  // THE RAW SPELLING, as the reporting world holds it (contract-a.md §17 A36).
-  name.appendChild(el("span", "nm", row.name));
-  var alt = row.spellings || [];
-  if (alt.length){
-    // A second spelling of one species is a real difference between two worlds,
-    // not noise to be tidied away, so every one of them is shown.
-    name.appendChild(el("span", "alt", "also spelt " + alt.join(" / ")));
-  }
-  if (row.excluded){
-    name.appendChild(spBadge("exc",
-      "never exported" + (row.excludedBy && row.excludedBy.length
-        ? " by S" + row.excludedBy.join(", S") : ""), "excluded"));
-  }
-  if (row.everywhere) name.appendChild(spBadge("every", "everywhere", "everywhere"));
-  if (row.endemic) name.appendChild(spBadge("endem", "endemic", "endemic"));
-  tr.appendChild(name);
-
-  tr.appendChild(el("td", "num", row.population));
-
-  var where = el("td", "spwhere");
-  var worlds = row.worlds || [];
-  for (var i=0;i<worlds.length;i++){
-    var c = el("span", "chip");
-    c.appendChild(document.createTextNode("S" + worlds[i].slot + ":"));
-    c.appendChild(el("b", null, worlds[i].bibites));
-    if (worlds[i].eggs) c.appendChild(el("span", "egg", " +" + worlds[i].eggs + "e"));
-    where.appendChild(c);
-  }
-  tr.appendChild(where);
-
-  tr.appendChild(el("td", "num", row.eggs));
-  tr.appendChild(el("td", "num", row.crossings));
-
-  var last = el("td");
-  if (row.lastAgeMs == null) last.appendChild(unkEl("never here"));
-  else last.appendChild(document.createTextNode(ms(row.lastAgeMs) + " ago"));
-  tr.appendChild(last);
-
-  var first = el("td");
-  if (!row.firstMs) first.appendChild(unkEl("—"));
-  else first.appendChild(document.createTextNode(ms(Date.now() - row.firstMs) + " ago"));
-  tr.appendChild(first);
-  return tr;
-}
-
-/* The detail row. Everything in it comes from the ledger aggregate the index
-   already carried, except the sparklines, which are fetched once per species
-   and cached: the sample file is read on the server, downsampled there, and
-   arrives as buckets — the page never sees the file and never counts a census
-   itself. */
-function speciesDetail(row){
-  var tr = el("tr", "spdet"), td = el("td");
-  td.setAttribute("colspan", "7");
-  // ONE wrapper, because the sticky rule that keeps this readable on a phone
-  // hangs off it: the table it sits in has a 760px floor and scrolls sideways,
-  // and a detail pinned to the left of that scroll is a detail a phone reader
-  // can actually see.
-  var wrap = el("div", "detwrap");
-  td.appendChild(wrap);
-
-  var grid = el("div", "detgrid");
-
-  var b1 = el("div", "detbox");
-  b1.appendChild(termEl("h3", "speciesgenomes", "distinct genomes"));
-  b1.appendChild(el("div", "big", row.genomes + (row.genomesAtLeast ? "+" : "")));
-  b1.appendChild(el("div", "detline", "different genetic makeups of this species " +
-    "that have crossed a lane"));
-  grid.appendChild(b1);
-
-  var b2 = el("div", "detbox");
-  b2.appendChild(termEl("h3", "parentspecies", "parent species"));
-  if (row.parent){
-    var p = el("div", "detline");
-    p.appendChild(el("b", null, row.parent));
-    b2.appendChild(p);
-    b2.appendChild(el("div", "detline", "as the world that named it reported at the time — " +
-      "shown, never resolved"));
-  } else {
-    var pu = el("div", "detline");
-    pu.appendChild(unkEl("none recorded"));
-    b2.appendChild(pu);
-    b2.appendChild(el("div", "detline",
-      "no crossing of this species has carried a parent name"));
-  }
-  grid.appendChild(b2);
-
-  var b3 = el("div", "detbox");
-  b3.appendChild(termEl("h3", "crossings", "recent crossings"));
-  var rec = row.recent || [];
-  if (!rec.length){
-    var ru = el("div", "detline");
-    ru.appendChild(unkEl("none recorded"));
-    b3.appendChild(ru);
-  } else {
-    for (var i=0;i<rec.length;i++){
-      var line = el("div", "detline");
-      line.appendChild(el("b", null, "S" + rec[i].fromSlot +
-        (rec[i].exitEdge ? " " + rec[i].exitEdge : "") + " → S" + rec[i].toSlot));
-      line.appendChild(document.createTextNode("  " + ms(rec[i].ageMs) + " ago"));
-      b3.appendChild(line);
-    }
-    b3.appendChild(el("div", "detline",
-      "the newest " + rec.length + " of " + row.crossings + " — a sample, not the whole"));
-  }
-  grid.appendChild(b3);
-  wrap.appendChild(grid);
-
-  var sparks = el("div", "sparks");
-  sparks.setAttribute("id", "spspark");
-  var h = spHist[row.key];
-  if (h) fillSpeciesSparks(sparks, h);
-  else sparks.appendChild(el("span", "muted", "loading this species' history…"));
-  wrap.appendChild(sparks);
-
-  var note = el("div", "detnote");
-  note.appendChild(document.createTextNode(
-    "population of this species per world, from the archive's own sample file. " +
-    "A gap in a line is a world that reported no census in that bucket — unknown, never a zero — " +
-    "and a flat zero is a world that reported and held none. " + speciesHistoryReach(h)));
-  wrap.appendChild(note);
-  tr.appendChild(td);
-  return tr;
-}
-
-/* -------------------------------------------------------------- the TREE tab
-   The genealogy, drawn as SVG built entirely by createElementNS. It is inside
-   this fence because EVERY LABEL ON IT IS AN ATTACKER-CHOSEN NAME, and one of
-   them arrives by a route nothing else on this page reads: an ancestor's label
-   is a "parentGenericName" off a migration envelope (contract-a.md §16 A30),
-   which is exactly as unsanitized as a census name and has exactly the same
-   guarantee that it will stay that way. Names land as textContent on <text> and
-   <tspan> and by no other route.
-
-   ONE ROW PER NODE, indentation for depth, elbow connectors for the joins. The
-   reason is label placement: a classic dendrogram centres an ancestor between
-   its children and then has nowhere to put that ancestor's own name, while a
-   row per node cannot collide with itself at any species count. The server has
-   already reduced the tree and ordered the nodes in DFS pre-order (tree.go),
-   so a parent is always drawn before its children and one pass is enough. */
-var TRX = null;
-
-var TR_ROWH = 26, TR_INDENT = 24, TR_PADL = 16, TR_PADT = 18;
-
-/* svgEl and trText keep the two safe primitives in one place: an element is
+/* svgEl and trSpan keep the two safe primitives in one place: an element is
    created, never parsed, and a string becomes a text node on a <tspan>. */
 function svgEl(tag, cls){
   var e = document.createElementNS(SVGNS, tag);
@@ -2009,11 +1820,12 @@ function svgEl(tag, cls){
   return e;
 }
 /* trDay is a calendar day from an epoch-millisecond stamp, in UTC and in ISO
-   order. Everything else on this page is an AGE — "4h 12m ago" — because
-   everything else is about now; the record's floor is a fixed point weeks back,
-   where an age in hours is unreadable and a local rendering would put two
-   readers a day apart on the same fact. */
+   order. Ages — "4h 12m ago" — are how everything about NOW is written here;
+   the time axis and the record's floor are fixed points weeks back, where an age
+   in hours is unreadable and a local rendering would put two readers a day apart
+   on the same fact. */
 function trDay(msv){ return new Date(msv).toISOString().slice(0,10); }
+function trClock(msv){ return new Date(msv).toISOString().slice(5,16).replace("T", " "); }
 
 function trSpan(parent, cls, text, dx){
   var s = svgEl("tspan", cls);
@@ -2023,12 +1835,174 @@ function trSpan(parent, cls, text, dx){
   return s;
 }
 
-/* The counts line: the derivation's own account of how far it reaches. It is
-   NUMBERS ONLY and no name appears in it, but it is built out of nodes anyway,
-   because the rule for this region is that markup is never assigned here — one
-   exception is how a region stops being a fence. */
-function treeStats(x){
-  var host = document.getElementById("trstat");
+/* ---- the drawing's geometry.
+
+   COLUMNS, then a plot. The label column is fixed and CLIPPED, because a species
+   name is 64 bytes somebody else chose and a name allowed to run into the plot
+   would draw itself over the timeline. The full name is always in the row's
+   tooltip, which cannot be overflowed.
+
+   The whole thing scrolls inside its own box, like the map and the tables. */
+var LF_ROWH = 24, LF_PADT = 44, LF_DETL = 15, LF_DETPAD = 12;
+var LF_GLYPHX = 14, LF_NAMEX = 30, LF_NAMEW = 366, LF_MINIX = 408;
+var LF_DOT = 9, LF_SPARKW = 84, LF_PLOTW = 700;
+/* The bar: thin for an ancestor nothing is alive of, thicker for a living
+   species, and the same thickness for every species of a kind. THICKNESS IS NOT
+   THE BRAIN — see lfBrainR. */
+var LF_BARH = 8, LF_ANCH = 4;
+/* A collapsed run of generations, drawn as a dotted lead-in whose LENGTH COUNTS
+   GENERATIONS AND NOT TIME. Five pixels a generation, floored so one generation
+   is still visible and capped so forty do not cross the whole picture; the
+   number is printed beside it either way, because a length a reader has to
+   measure is not a number. */
+var LF_GENPX = 5, LF_CHAINMIN = 12, LF_CHAINMAX = 130;
+function lfChainLen(gens){
+  return Math.max(LF_CHAINMIN, Math.min(LF_CHAINMAX, gens * LF_GENPX));
+}
+/* THE BRAIN, as a ring at the end of the bar — the end, because the stats come
+   from the LATEST genome of that species the record named, so they describe what
+   it is now and not what it was when it first crossed.
+
+   A ring and not a thickness: thickness has to have a value for every bar, and
+   most of the honest answers here are ABSENT — a genome pruned past the
+   retention horizon, or never fetched, has no brain to draw. An absent ring is
+   nothing at all, which cannot be misread as a small brain. */
+var LF_BRAIN_R0 = 2.4, LF_BRAIN_R1 = 6.4, LF_BRAIN_FULL = 600;
+function lfBrainR(n){
+  var w = (n.neurons || 0) + (n.synapses || 0);
+  if (w <= 0) return 0;
+  var f = Math.log(1 + w) / Math.log(1 + LF_BRAIN_FULL);
+  if (f > 1) f = 1;
+  return LF_BRAIN_R0 + f * (LF_BRAIN_R1 - LF_BRAIN_R0);
+}
+
+/* The column x positions, derived from the MAP'S OWN SHAPE rather than from a
+   constant: this rig is 3 wide and 2 high and the next one is not, so the
+   mini-map's width is the map's width and everything right of it moves. */
+function lfCols(x){
+  var m = (x && x.map) || {};
+  // THE MAP'S REAL WIDTH, with no cap of its own: a wider map makes a wider
+  // column and a wider drawing, which scrolls. Clamping it here would drop the
+  // right-hand worlds off every species' mini-map without saying so, which is
+  // the one thing this page does not do to a reader.
+  var cols = Math.max(1, m.width || 1);
+  var miniW = Math.max(30, cols * LF_DOT);
+  var pop = LF_MINIX + miniW + 52;
+  var spark = pop + 16;
+  var plot = spark + LF_SPARKW + 24;
+  return {mini: LF_MINIX, miniW: miniW, pop: pop, spark: spark, plot: plot,
+          w: plot + LF_PLOTW + 30};
+}
+
+/* The time axis: a linear scale from the earliest thing the record dates (or the
+   record's own ancestry floor, whichever is older — the server publishes the
+   answer so the floor is always inside the picture) to now. */
+function lfScale(x, cols){
+  var t0 = x.spanStartMs || 0, t1 = x.spanEndMs || x.generatedAtMs || Date.now();
+  if (!(t1 > t0)) t1 = t0 + 1;
+  return {t0: t0, t1: t1, x: function(msv){
+    var f = (msv - t0) / (t1 - t0);
+    if (f < 0) f = 0; else if (f > 1) f = 1;
+    return cols.plot + f * LF_PLOTW;
+  }};
+}
+var LF_STEPS = [3600000, 10800000, 21600000, 43200000, 86400000, 172800000,
+                604800000, 1209600000, 2592000000];
+function lfStep(span){
+  for (var i=0;i<LF_STEPS.length;i++) if (span / LF_STEPS[i] <= 7) return LF_STEPS[i];
+  return LF_STEPS[LF_STEPS.length-1];
+}
+
+function lfMatches(n){
+  if (!lfQuery) return true;
+  if (String(n.key).toLowerCase().indexOf(lfQuery) >= 0) return true;
+  if (String(n.name).toLowerCase().indexOf(lfQuery) >= 0) return true;
+  var alt = n.spellings || [];
+  for (var i=0;i<alt.length;i++){
+    if (String(alt[i]).toLowerCase().indexOf(lfQuery) >= 0) return true;
+  }
+  return false;
+}
+
+/* Which rows are drawn, in which order, and whether the joins between them mean
+   anything.
+
+   FAMILY is the server's own DFS pre-order, so a parent is always above its
+   children and one pass places every edge. BY POPULATION is a flat ranking of
+   what is ALIVE — the answer the old census table gave — and it draws no edges
+   at all, because rows in abundance order are not in family order and a line
+   between two of them would cross half the drawing to say nothing.
+
+   A SEARCH KEEPS THE FAMILY. A matching row brings its ancestors with it, so a
+   filtered tree is still a tree rather than a set of orphans. */
+function lfRows(x){
+  var nodes = (x && x.nodes) || [], i;
+  if (lfSort === "pop"){
+    var flat = [];
+    for (i=0;i<nodes.length;i++){
+      if (nodes[i].alive && lfMatches(nodes[i])) flat.push(nodes[i]);
+    }
+    flat.sort(function(a,b){
+      if (b.population !== a.population) return b.population - a.population;
+      return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
+    });
+    return {list: flat, joined: false};
+  }
+  if (!lfQuery) return {list: nodes.slice(0), joined: true};
+  var byKey = {}, keep = {};
+  for (i=0;i<nodes.length;i++) byKey[nodes[i].key] = nodes[i];
+  for (i=0;i<nodes.length;i++){
+    if (!lfMatches(nodes[i])) continue;
+    var cur = nodes[i], guard = 0;
+    while (cur && !keep[cur.key] && guard++ < 600){
+      keep[cur.key] = true;
+      cur = cur.parent ? byKey[cur.parent] : null;
+    }
+  }
+  var out = [];
+  for (i=0;i<nodes.length;i++) if (keep[nodes[i].key]) out.push(nodes[i]);
+  return {list: out, joined: true};
+}
+
+/* The two counts lines. Neither carries a name, and both are built out of nodes
+   anyway, because the rule for this region is that markup is never assigned in
+   it — one exception is how a region stops being a fence. */
+function lfCount(x){
+  var host = document.getElementById("lfcount");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  if (!x || !x.haveStatus){
+    host.appendChild(unkEl("the relay has broadcast no map yet"));
+    return;
+  }
+  host.appendChild(document.createTextNode(
+    x.alive + " alive across " + x.reportingSlots + " reporting world(s)"));
+  if (x.censuslessSlots > 0){
+    host.appendChild(document.createTextNode(" · "));
+    host.appendChild(unkEl(x.censuslessSlots + " world(s) report no census"));
+  }
+  if (x.truncatedSlots > 0){
+    host.appendChild(document.createTextNode(" · "));
+    host.appendChild(unkEl(x.truncatedSlots + " census(es) capped at 32; the rest is unreported"));
+  }
+  if (x.ledgerOverflow > 0){
+    host.appendChild(document.createTextNode(" · "));
+    host.appendChild(unkEl(x.ledgerOverflow + " species past the aggregate's bound, untracked"));
+  }
+  // HOW SHORT THE TREND IS, SAID OUT LOUD. The sampled record began when this
+  // archive did, which on the running rig is days rather than months, and a
+  // 24-hour trend with two hours of samples in it looks exactly like a species
+  // that arrived two hours ago. An empty column says so rather than reading as
+  // "nothing happened".
+  if (LFTRENDMETA && !LFTRENDMETA.samples){
+    host.appendChild(document.createTextNode(" · "));
+    host.appendChild(unkEl("no sample covers the last day yet, so no trend is drawn — " +
+      "this record began when the archive did"));
+  }
+}
+
+function lfStats(x){
+  var host = document.getElementById("lfstat");
   if (!host) return;
   while (host.firstChild) host.removeChild(host.firstChild);
   if (!x || !x.haveStatus){
@@ -2075,7 +2049,7 @@ function treeStats(x){
   // THE RECORD'S OWN FLOOR, which is the answer to the question every root
   // provokes. It is a maintained timestamp and not a scan (species.go
   // edgeFirstMs), and it is absent rather than zero when no record has ever
-  // named a parent.
+  // named a parent. The drawing marks the same instant as a line.
   if (x.ancestrySinceMs){
     var f = el("span", "muted");
     f.appendChild(termEl("span", "recordfloor", "ancestry recorded since"));
@@ -2096,13 +2070,19 @@ function treeStats(x){
   }
 }
 
-/* trTip is one node's tooltip, as strings in the SP registry — the same registry
+/* lfTip is one row's tooltip, as strings in the SP registry — the same registry
    the map's species runs use, filled by showTip with textContent. */
-function trTip(n){
+function lfTip(n){
   var lines = [];
   if (n.alive){
+    var where = [];
+    var worlds = n.worlds || [];
+    for (var i=0;i<worlds.length;i++){
+      where.push("S" + worlds[i].slot + ": " + worlds[i].bibites +
+        (worlds[i].eggs ? " (+" + worlds[i].eggs + " egg(s))" : ""));
+    }
     lines.push(n.population + " alive right now" + (n.eggs ? ", " + n.eggs + " egg(s)" : "") +
-      " in " + (n.worlds || []).length + " world(s): S" + (n.worlds || []).join(", S"));
+      " in " + worlds.length + " world(s) — " + where.join(", "));
   } else {
     // §10.1's rule, on the one node type that could most easily be misread as a
     // resident: it is NOT alive, and the sentence says so before anything else.
@@ -2113,6 +2093,25 @@ function trTip(n){
   if (n.alive && n.leaves > 1){
     lines.push("It is also an ancestor here: " + (n.leaves - 1) +
       " other living species descend from it.");
+  }
+  // THE BAR, said in words, because a bar on a time axis is the one mark here a
+  // reader will otherwise read as a lifespan.
+  if (n.spanFromMs){
+    lines.push("The bar runs from the first crossing this archive recorded of it — " +
+      trClock(n.spanFromMs) + " UTC, " + ms(Date.now() - n.spanFromMs) + " ago" +
+      (n.spanDerived ? ", which is its earliest recorded DESCENDANT rather than itself: no " +
+        "crossing of this species was ever recorded" : "") + " — " +
+      (n.alive ? "to now, because it is alive."
+               : "to the last one, " + trClock(n.spanToMs || n.spanFromMs) + " UTC. That is " +
+                 "when the RECORD of it stops, not when it died."));
+  } else {
+    lines.push("No crossing of it has ever been recorded, so the drawing can date neither " +
+      "end of it.");
+  }
+  if (n.neurons){
+    lines.push("Brain: " + n.neurons + " neurons and " + n.synapses + " synapses, from the " +
+      "latest genome of it this archive holds a copy of. The ring at the end of the bar is " +
+      "that size.");
   }
   if (n.ancestryKnown){
     lines.push("The record traces it back " + n.ancestryDepth + " generation(s).");
@@ -2138,8 +2137,9 @@ function trTip(n){
         "kind that has stayed home leaves no record to carry it.");
   }
   if (n.collapsed > 0){
-    lines.push("The edge above it stands for " + n.collapsed +
-      " extinct generation(s) with no living branch on them.");
+    lines.push("The dotted lead-in above it stands for " + n.collapsed +
+      " extinct generation(s) with no living branch on them. Its LENGTH counts generations, " +
+      "not time.");
   }
   lines.push(n.crossings + " recorded crossing(s)" +
     (n.genomes ? ", " + n.genomes + " distinct genome(s)" : "") + ".");
@@ -2150,132 +2150,457 @@ function trTip(n){
   return {title: String(n.name), body: lines.join(" ")};
 }
 
-function renderTree(x){
-  TRX = x;
-  treeStats(x);
-  var host = document.getElementById("trbox");
+/* The expanded row: what the flat census table used to put in a detail panel.
+   One array of lines, built once, so the height the layout reserves and the
+   lines the drawing emits cannot disagree. Each line is a list of segments, and
+   a segment carrying a NAME is a segment like any other — it becomes a tspan. */
+function lfDetailLines(n){
+  var out = [], i;
+  if (n.alive){
+    var worlds = n.worlds || [], seg = [{t: "worlds", c: "dk", term: "world"}];
+    if (!worlds.length) seg.push({t: "  none reporting", c: "unk"});
+    for (i=0;i<worlds.length;i++){
+      seg.push({t: "  S" + worlds[i].slot + " " + worlds[i].bibites +
+        (worlds[i].eggs ? " +" + worlds[i].eggs + "e" : "")});
+    }
+    out.push(seg);
+    var alt = n.spellings || [];
+    if (alt.length){
+      // A second spelling of one species is a real difference between two
+      // worlds, not noise to be tidied away, so every one of them is shown.
+      var sp = [{t: "also spelt", c: "dk", term: "rawname"}];
+      for (i=0;i<alt.length;i++) sp.push({t: "  " + alt[i]});
+      out.push(sp);
+    }
+  }
+  var rec = [{t: "record", c: "dk", term: "crossings"},
+             {t: "  " + n.crossings + " crossing(s)"}];
+  if (n.genomes){
+    rec.push({t: " · "});
+    rec.push({t: n.genomes + " distinct genome(s)", term: "speciesgenomes"});
+  }
+  if (n.spanFromMs){
+    rec.push({t: " · first " + ms(Date.now() - n.spanFromMs) + " ago"});
+    if (!n.alive && n.spanToMs){
+      rec.push({t: " · last " + ms(Date.now() - n.spanToMs) + " ago"});
+    }
+  }
+  out.push(rec);
+  // THE BRAIN, and its absence. An absent one says WHY rather than printing a
+  // zero: the archive keeps the fingerprint of every genome forever and the copy
+  // only while the retention horizon allows.
+  var brain = [{t: "brain", c: "dk", term: "brainsize"}];
+  if (n.neurons){
+    brain.push({t: "  " + n.neurons + " neurons · " + n.synapses + " synapses"});
+    brain.push({t: "  (from the latest genome of it this archive holds)", c: "dk"});
+  } else {
+    brain.push({t: "  no copy of its latest genome is held here", c: "unk"});
+  }
+  out.push(brain);
+  var par = [{t: "parent species", c: "dk", term: "parentspecies"}];
+  if (n.parentName){
+    par.push({t: "  " + n.parentName});
+    par.push({t: "  as the world that named it reported at the time — shown, never resolved",
+              c: "dk"});
+  } else {
+    par.push({t: "  none recorded", c: "unk"});
+  }
+  out.push(par);
+  var recent = n.recent || [];
+  for (i=0;i<recent.length && i<4;i++){
+    out.push([{t: i === 0 ? "recent lanes" : "", c: "dk", term: i === 0 ? "crossings" : null},
+              {t: "  S" + recent[i].fromSlot + (recent[i].exitEdge ? " " + recent[i].exitEdge : "") +
+                  " → S" + recent[i].toSlot + "  " + ms(recent[i].ageMs) + " ago"}]);
+  }
+  if (recent.length){
+    out.push([{t: "", c: "dk"},
+              {t: "  the newest " + recent.length + " of " + n.crossings +
+                  " — a sample, not the whole", c: "dk"}]);
+  }
+  return out;
+}
+function lfDetailHeight(n){
+  return lfDetailLines(n).length * LF_DETL + LF_DETPAD;
+}
+
+/* The per-species MINI-MAP: one dot per seat, in the map's own arrangement,
+   filled where this species lives. THE GRID IS THE MAP'S, published by the
+   server from the same status frame the rows came from — six dots in two rows
+   because THIS map is three by two, never because six is how many worlds there
+   are.
+
+   Three states and they are three different facts (§10.1): filled is alive
+   there, hollow is a world that reported a census without it, and the warning
+   ring is a world reporting no census at all — unknown, never absence. A seat
+   nobody claimed is a hole and is drawn as nothing. */
+function lfMini(g, x, n, top, cols){
+  var m = (x && x.map) || {}, cells = m.cells || [];
+  if (!cells.length || !n.alive) return;
+  var rows = Math.max(1, m.height || 1);
+  var pitch = Math.min(LF_DOT - 1, Math.max(4, (LF_ROWH - 8) / rows));
+  var have = {}, worlds = n.worlds || [], i;
+  for (i=0;i<worlds.length;i++) have[worlds[i].slot] = worlds[i];
+  for (i=0;i<cells.length;i++){
+    var c = cells[i];
+    // A seat whose column is outside the map's own published width is a
+    // malformed frame, not a world this drawing has room for.
+    if (c.col * LF_DOT >= cols.miniW) continue;
+    var d = svgEl("circle", have[c.slot] ? "wdot on"
+                                         : (c.reporting ? "wdot off" : "wdot unk"));
+    d.setAttribute("cx", String(cols.mini + c.col * LF_DOT + LF_DOT / 2));
+    // Row 0 is the BOTTOM row of the map, and it is the bottom row here too.
+    d.setAttribute("cy", String(top + 8 + (rows - 1 - c.row) * pitch));
+    d.setAttribute("r", "2.6");
+    g.appendChild(d);
+  }
+}
+
+/* The trend line: this species' population across the whole map over the last
+   day, from the ONE answer that carries every living species (/api/species/trends).
+   It is a SHAPE and carries no numbers, so it carries no name either. */
+function lfSpark(g, n, top, cols){
+  if (!n.alive || !LFTREND) return;
+  var tr = LFTREND[n.key];
+  if (!tr || !tr.points || !tr.points.length) return;
+  var pts = tr.points, max = Math.max(1, tr.max), n2 = pts.length;
+  var base = top + LF_ROWH - 7, h = 13, d = "", open = false;
+  for (var i=0;i<n2;i++){
+    if (pts[i] == null){ open = false; continue; }
+    var px = cols.spark + (n2 < 2 ? LF_SPARKW / 2 : (i / (n2 - 1)) * LF_SPARKW);
+    var py = base - (pts[i] / max) * h;
+    d += (open ? " L " : " M ") + px.toFixed(1) + " " + py.toFixed(1);
+    open = true;
+  }
+  if (!d) return;
+  var line = svgEl("path", "trend");
+  line.setAttribute("d", d.trim());
+  g.appendChild(line);
+  var b = svgEl("line", "trendbase");
+  b.setAttribute("x1", String(cols.spark)); b.setAttribute("x2", String(cols.spark + LF_SPARKW));
+  b.setAttribute("y1", String(base + 1)); b.setAttribute("y2", String(base + 1));
+  g.appendChild(b);
+}
+
+/* One species' bar, and the brain ring at the end of it. */
+function lfBar(g, n, top, sc){
+  var cy = top + LF_ROWH / 2 - 1;
+  if (!n.spanFromMs){
+    // Nothing the record dates. A living species still gets a mark, at now,
+    // because it IS here — what is missing is when it started, not whether.
+    if (!n.alive) return;
+    var dot = svgEl("circle", "undated");
+    dot.setAttribute("cx", String(sc.x(sc.t1) - 3));
+    dot.setAttribute("cy", String(cy));
+    dot.setAttribute("r", "3.2");
+    g.appendChild(dot);
+    return;
+  }
+  var x0 = sc.x(n.spanFromMs);
+  var x1 = n.alive ? sc.x(sc.t1) : sc.x(n.spanToMs || n.spanFromMs);
+  if (x1 - x0 < 2.5) x1 = x0 + 2.5;
+  var h = n.alive ? LF_BARH : LF_ANCH;
+  var bar = svgEl("rect", "lfbar" + (n.alive ? " live" : " ext") +
+                          (n.spanDerived ? " derived" : ""));
+  bar.setAttribute("x", String(x0));
+  bar.setAttribute("y", String(cy - h / 2));
+  bar.setAttribute("width", String(x1 - x0));
+  bar.setAttribute("height", String(h));
+  bar.setAttribute("rx", "1.5");
+  g.appendChild(bar);
+  var r = lfBrainR(n);
+  if (r > 0){
+    var ring = svgEl("circle", "brain");
+    ring.setAttribute("cx", String(x1 + r + 2));
+    ring.setAttribute("cy", String(cy));
+    ring.setAttribute("r", r.toFixed(1));
+    ring.setAttribute("data-t", "brainsize");
+    g.appendChild(ring);
+  }
+}
+
+/* The join to the parent: a drop from the parent's row to this one AT THIS
+   SPECIES' FIRST-SEEN POINT, which is the instant the record first says this
+   kind exists. Where the edge stands for a run of collapsed generations, a
+   dotted lead-in runs back from that point and the number is printed on it. */
+function lfEdge(links, n, rowY, cols, sc){
+  var py = rowY[n.parent], cy = rowY[n.key];
+  if (py == null || cy == null || !n.spanFromMs) return;
+  var jx = sc.x(n.spanFromMs);
+  var drop = svgEl("path", "link");
+  drop.setAttribute("d", "M" + jx.toFixed(1) + " " + py + " V" + cy);
+  links.appendChild(drop);
+  if (n.collapsed > 0){
+    var from = Math.max(cols.plot - 18, jx - lfChainLen(n.collapsed));
+    var chain = svgEl("path", "chain");
+    chain.setAttribute("d", "M" + from.toFixed(1) + " " + cy + " H" + jx.toFixed(1));
+    links.appendChild(chain);
+    var gt = svgEl("text", "gen");
+    gt.setAttribute("x", from.toFixed(1));
+    gt.setAttribute("y", String(cy - 4));
+    gt.setAttribute("data-t", "collapsed");
+    gt.textContent = "+" + n.collapsed;
+    links.appendChild(gt);
+  }
+}
+
+/* One row: the label column, the mini-map, the count, the trend and the bar. */
+function lfRow(x, n, top, cols, sc, i, joined){
+  var g = svgEl("g", "lfrow" + (n.alive ? "" : " anc") +
+                     (lfOpenKey === n.key ? " open" : ""));
+  var tk = "lf" + i;
+  // data-s registers the row's tooltip; the key is generated here and the NAME
+  // never becomes part of a selector.
+  SP[tk] = lfTip(n);
+  g.setAttribute("data-s", tk);
+  g.setAttribute("data-k", n.key);
+
+  var open = lfOpenKey === n.key;
+  var hit = svgEl("rect", "hit");
+  hit.setAttribute("x", "0");
+  hit.setAttribute("y", String(top));
+  hit.setAttribute("width", String(cols.w));
+  hit.setAttribute("height", String(LF_ROWH - 1 + (open ? lfDetailHeight(n) : 0)));
+  g.appendChild(hit);
+
+  if (n.alive){
+    // The same creature glyph the map draws, in the same per-species colour, and
+    // it is THE ONLY COLOURED THING ON THE ROW.
+    var u = svgEl("use");
+    u.setAttribute("href", "#bib");
+    u.setAttribute("transform",
+      "translate(" + LF_GLYPHX + " " + (top + 12) + ") scale(0.85)");
+    u.style.fill = speciesColor(n.key);
+    g.appendChild(u);
+  } else {
+    var ring = svgEl("circle", "ring");
+    ring.setAttribute("cx", String(LF_GLYPHX));
+    ring.setAttribute("cy", String(top + 12));
+    ring.setAttribute("r", "4");
+    g.appendChild(ring);
+  }
+
+  var text = svgEl("text", "nm");
+  // Depth as a small indent, so the family reads in the label column too. It is
+  // capped: forty generations of indentation would push every name off the left
+  // of its own column.
+  var indent = joined ? Math.min(n.depth || 0, 6) * 9 : 0;
+  text.setAttribute("x", String(LF_NAMEX + indent));
+  text.setAttribute("y", String(top + 16));
+  text.setAttribute("clip-path", "url(#lfclip)");
+  // THE RAW SPELLING, as its source holds it (contract-a.md §17 A36 for a census
+  // name, §16 A34 for a record's). CSS keeps its spaces.
+  trSpan(text, null, n.name);
+  if (!n.alive){
+    trSpan(text, "meta", "· extinct here · " + n.leaves + " living lines below", 8);
+  } else {
+    if (n.excluded){
+      var xb = trSpan(text, "tbadge warn", "NEVER EXPORTED" +
+        (n.excludedBy && n.excludedBy.length ? " S" + n.excludedBy.join(" S") : ""), 8);
+      xb.setAttribute("data-t", "excluded");
+    }
+    if (n.everywhere){
+      trSpan(text, "tbadge live", "EVERYWHERE", 8).setAttribute("data-t", "everywhere");
+    }
+    if (n.endemic){
+      trSpan(text, "tbadge lane", "ENDEMIC", 8).setAttribute("data-t", "endemic");
+    }
+  }
+  if (n.isolated){
+    // The two reasons, never conflated — and the label a reader sees is the one
+    // that is true of THIS species.
+    var b = trSpan(text, "tbadge warn",
+      n.ancestryKnown ? "NO LIVING RELATIVE" : "NO RECORDED ANCESTRY", 8);
+    b.setAttribute("data-t", n.ancestryKnown ? "genealogy" : "noancestry");
+  } else if (n.alive && n.leaves > 1){
+    trSpan(text, "tbadge lane", "ALSO AN ANCESTOR", 8);
+  }
+  // A ROOT WITH ANCESTORS ABOVE IT. Nothing is drawn above this row, and without
+  // a label that reads as "the family starts here" — which for most roots on
+  // this map is false by dozens of generations. The record traces them; the
+  // reduction collapsed them because not one has a living branch. The badge is
+  // STATIC TEXT AND ONE INTEGER: no part of it is a name, so the fence's rule is
+  // met by construction rather than by escaping.
+  if (joined && !n.parent && n.ancestryKnown && n.ancestryDepth > 0){
+    var rb = trSpan(text, "tbadge rec", "THE RECORD BEGINS HERE · " + n.ancestryDepth +
+      (n.ancestryDepth === 1 ? " GENERATION ABOVE" : " GENERATIONS ABOVE"), 8);
+    rb.setAttribute("data-t", "recordfloor");
+  }
+  g.appendChild(text);
+
+  lfMini(g, x, n, top, cols);
+
+  if (n.alive){
+    var pop = svgEl("text", "pop");
+    pop.setAttribute("x", String(cols.pop));
+    pop.setAttribute("y", String(top + 16));
+    pop.setAttribute("text-anchor", "end");
+    trSpan(pop, null, String(n.population));
+    if (n.eggs) trSpan(pop, "eggs", "+" + n.eggs + "e", 3);
+    g.appendChild(pop);
+  }
+
+  lfSpark(g, n, top, cols);
+  lfBar(g, n, top, sc);
+  if (open) lfDetail(g, n, top + LF_ROWH, cols);
+  return g;
+}
+
+function lfDetail(g, n, top, cols){
+  var lines = lfDetailLines(n), i, j;
+  var box = svgEl("rect", "detbg");
+  box.setAttribute("x", "0");
+  box.setAttribute("y", String(top - 2));
+  box.setAttribute("width", String(cols.w));
+  box.setAttribute("height", String(lines.length * LF_DETL + LF_DETPAD - 4));
+  g.appendChild(box);
+  for (i=0;i<lines.length;i++){
+    var text = svgEl("text", "det");
+    text.setAttribute("x", String(LF_NAMEX + 8));
+    text.setAttribute("y", String(top + 11 + i * LF_DETL));
+    for (j=0;j<lines[i].length;j++){
+      var seg = lines[i][j];
+      if (!seg.t) continue;
+      var s = trSpan(text, seg.c || null, seg.t);
+      if (seg.term) s.setAttribute("data-t", seg.term);
+    }
+    g.appendChild(text);
+  }
+}
+
+/* The axis, the record's floor and the column headings — everything that is
+   drawn once for the whole picture rather than per row. */
+function lfAxis(x, cols, sc, height){
+  var g = svgEl("g", "axis");
+  var span = sc.t1 - sc.t0, step = lfStep(span);
+  var first = Math.ceil(sc.t0 / step) * step;
+  for (var tms = first; tms <= sc.t1; tms += step){
+    var px = sc.x(tms);
+    var line = svgEl("line", "grid");
+    line.setAttribute("x1", String(px)); line.setAttribute("x2", String(px));
+    line.setAttribute("y1", String(LF_PADT - 16)); line.setAttribute("y2", String(height - 6));
+    g.appendChild(line);
+    var lbl = svgEl("text", "tick");
+    lbl.setAttribute("x", String(px));
+    lbl.setAttribute("y", String(LF_PADT - 22));
+    lbl.setAttribute("text-anchor", "middle");
+    lbl.textContent = step >= 86400000 ? trDay(tms).slice(5) : trClock(tms);
+    g.appendChild(lbl);
+  }
+  // THE RECORD'S FLOOR, as a boundary rather than a footnote: everything left of
+  // this line is crossings that carried no parent at all, so no edge in this
+  // drawing can begin there. It is the reason a root is a root.
+  if (x.ancestrySinceMs && x.ancestrySinceMs > sc.t0){
+    var fx = sc.x(x.ancestrySinceMs);
+    var shade = svgEl("rect", "prefloor");
+    shade.setAttribute("x", String(cols.plot));
+    shade.setAttribute("y", String(LF_PADT - 16));
+    shade.setAttribute("width", String(Math.max(0, fx - cols.plot)));
+    shade.setAttribute("height", String(height - 6 - (LF_PADT - 16)));
+    g.appendChild(shade);
+    var fl = svgEl("line", "floor");
+    fl.setAttribute("x1", String(fx)); fl.setAttribute("x2", String(fx));
+    fl.setAttribute("y1", String(LF_PADT - 16)); fl.setAttribute("y2", String(height - 6));
+    g.appendChild(fl);
+    var flt = svgEl("text", "floorlbl");
+    flt.setAttribute("x", String(fx + 4));
+    flt.setAttribute("y", String(LF_PADT - 6));
+    flt.setAttribute("data-t", "recordfloor");
+    flt.textContent = "ancestry recorded from here";
+    g.appendChild(flt);
+  }
+  var now = svgEl("line", "nowline");
+  now.setAttribute("x1", String(cols.plot + LF_PLOTW)); now.setAttribute("x2", String(cols.plot + LF_PLOTW));
+  now.setAttribute("y1", String(LF_PADT - 16)); now.setAttribute("y2", String(height - 6));
+  g.appendChild(now);
+  var nowt = svgEl("text", "tick");
+  nowt.setAttribute("x", String(cols.plot + LF_PLOTW));
+  nowt.setAttribute("y", String(LF_PADT - 22));
+  nowt.setAttribute("text-anchor", "end");
+  nowt.textContent = "now";
+  g.appendChild(nowt);
+
+  function head(px, label, anchor, term){
+    var h = svgEl("text", "colhd");
+    h.setAttribute("x", String(px));
+    h.setAttribute("y", String(LF_PADT - 6));
+    if (anchor) h.setAttribute("text-anchor", anchor);
+    if (term) h.setAttribute("data-t", term);
+    h.textContent = label;
+    return g.appendChild(h);
+  }
+  head(LF_NAMEX, "species", null, "species");
+  head(cols.mini, "where", null, "world");
+  head(cols.pop, "alive", "end", "population");
+  head(cols.spark, "24 h", null, "trend");
+  return g;
+}
+
+/* renderLife paints the whole view. It rebuilds every poll, which is affordable
+   because the node set is bounded by the census that produced it — at most 32
+   species a world — and which keeps an expanded row's numbers as fresh as the
+   row above it. */
+function renderLife(x){
+  LFX = x;
+  lfCount(x);
+  lfStats(x);
+  var host = document.getElementById("lfbox");
   if (!host) return;
   while (host.firstChild) host.removeChild(host.firstChild);
-  // The tree's tooltips are rebuilt with the tree. They share SP with the map's
+  // This view's tooltips are rebuilt with it. They share SP with the map's
   // species runs and are prefixed so neither can clear the other's entries.
-  for (var old in SP){ if (old.indexOf("tr") === 0) delete SP[old]; }
+  for (var old in SP){ if (old.indexOf("lf") === 0) delete SP[old]; }
 
   if (!x || !x.haveStatus){
     host.appendChild(el("div", "muted", "waiting for the map"));
     return;
   }
-  var nodes = x.nodes || [];
-  if (!nodes.length){
-    host.appendChild(el("div", "muted",
-      "no world is reporting a species right now, so there is nothing to relate"));
+  var pick = lfRows(x), list = pick.list, i;
+  if (!list.length){
+    host.appendChild(el("div", "muted", lfQuery
+      ? "no species matches that search"
+      : "no world is reporting a species right now, so there is nothing to relate"));
     return;
   }
 
-  var svg = svgEl("svg", "tree");
+  var cols = lfCols(x);
+  var tops = [], y = LF_PADT;
+  for (i=0;i<list.length;i++){
+    tops.push(y);
+    y += LF_ROWH + (lfOpenKey === list[i].key ? lfDetailHeight(list[i]) : 0);
+  }
+  var height = y + 16;
+
+  var svg = svgEl("svg", "life");
+  svg.setAttribute("width", String(cols.w));
+  svg.setAttribute("height", String(height));
+  // ONE clip for every label, bounding X only: a name may be as long as its
+  // author made it and still cannot reach the plot.
+  var defs = svgEl("defs");
+  var clip = svgEl("clipPath");
+  clip.setAttribute("id", "lfclip");
+  var cr = svgEl("rect");
+  cr.setAttribute("x", String(LF_NAMEX - 4));
+  cr.setAttribute("y", "0");
+  cr.setAttribute("width", String(LF_NAMEW));
+  cr.setAttribute("height", String(height));
+  clip.appendChild(cr);
+  defs.appendChild(clip);
+  svg.appendChild(defs);
+
+  var sc = lfScale(x, cols);
+  svg.appendChild(lfAxis(x, cols, sc, height));
+
   var links = svgEl("g", "links");
   svg.appendChild(links);
-
-  var pos = {}, maxDepth = 0, i;
-  for (i=0;i<nodes.length;i++) if (nodes[i].depth > maxDepth) maxDepth = nodes[i].depth;
-  var height = TR_PADT + nodes.length * TR_ROWH + 10;
-  // A generous label allowance rather than a measured one: measuring text means
-  // laying it out first, and the box scrolls, so an over-wide canvas costs a
-  // scrollbar and an under-wide one clips a name.
-  var width = TR_PADL + maxDepth * TR_INDENT + 760;
-  svg.setAttribute("width", String(width));
-  svg.setAttribute("height", String(height));
-
-  for (i=0;i<nodes.length;i++){
-    var n = nodes[i];
-    var x0 = TR_PADL + n.depth * TR_INDENT;
-    var y0 = TR_PADT + i * TR_ROWH;
-    pos[n.key] = {x: x0, y: y0};
-
-    // The elbow to the parent. The server emits DFS pre-order, so the parent's
-    // position is always already known; a node whose parent is missing is drawn
-    // without a connector rather than skipped.
-    var p = n.parent ? pos[n.parent] : null;
-    if (p){
-      var sx = p.x + 5;
-      var path = svgEl("path", "link");
-      path.setAttribute("d", "M" + sx + " " + (p.y + 8) + " V" + y0 + " H" + (x0 - 4));
-      links.appendChild(path);
-      if (n.collapsed > 0){
-        // The collapse, marked ON the edge it stands for.
-        var gt = svgEl("text", "gen");
-        gt.setAttribute("x", String(sx + 3));
-        gt.setAttribute("y", String(y0 - 4));
-        gt.setAttribute("data-t", "collapsed");
-        gt.textContent = "+" + n.collapsed;
-        links.appendChild(gt);
-      }
+  var rowY = {};
+  for (i=0;i<list.length;i++) rowY[list[i].key] = tops[i] + LF_ROWH / 2 - 1;
+  if (pick.joined){
+    for (i=0;i<list.length;i++){
+      if (list[i].parent) lfEdge(links, list[i], rowY, cols, sc);
     }
-
-    var g = svgEl("g", "tnode" + (n.alive ? "" : " anc"));
-    // data-s registers the row's tooltip; the key is generated here and the
-    // NAME never becomes part of a selector or an attribute value.
-    var tk = "tr" + i;
-    SP[tk] = trTip(n);
-    g.setAttribute("data-s", tk);
-
-    var hit = svgEl("rect", "hit");
-    hit.setAttribute("x", "0");
-    hit.setAttribute("y", String(y0 - TR_ROWH/2 + 4));
-    hit.setAttribute("width", String(width));
-    hit.setAttribute("height", String(TR_ROWH - 2));
-    g.appendChild(hit);
-
-    if (n.alive){
-      // The same creature glyph the map draws, in the same per-species colour,
-      // so a species reads the same on all three views.
-      var u = svgEl("use");
-      u.setAttribute("href", "#bib");
-      u.setAttribute("transform", "translate(" + (x0 + 6) + " " + (y0 + 1) + ") scale(0.85)");
-      u.style.fill = speciesColor(n.key);
-      g.appendChild(u);
-    } else {
-      var ring = svgEl("circle", "ring");
-      ring.setAttribute("cx", String(x0 + 5));
-      ring.setAttribute("cy", String(y0 + 1));
-      ring.setAttribute("r", "4");
-      g.appendChild(ring);
-    }
-
-    var text = svgEl("text", "nm");
-    text.setAttribute("x", String(x0 + 16));
-    text.setAttribute("y", String(y0 + 5));
-    // THE RAW SPELLING, as its source holds it (contract-a.md §17 A36 for a
-    // census name, §16 A34 for a record's). CSS keeps its spaces.
-    trSpan(text, null, n.name);
-    if (n.alive){
-      var where = (n.worlds || []).length ? "  S" + (n.worlds || []).join(" S") : "";
-      trSpan(text, "meta", "· " + n.population + " alive" +
-        (n.eggs ? " +" + n.eggs + "e" : "") + where, 10);
-    } else {
-      trSpan(text, "meta", "· extinct here · " + n.leaves + " living lines below", 10);
-    }
-    if (n.isolated){
-      // The two reasons, never conflated — and the label a reader sees is the
-      // one that is true of THIS species.
-      var b = trSpan(text, "tbadge warn",
-        n.ancestryKnown ? "NO LIVING RELATIVE" : "NO RECORDED ANCESTRY", 10);
-      b.setAttribute("data-t", n.ancestryKnown ? "genealogy" : "noancestry");
-    } else if (n.alive && n.leaves > 1){
-      trSpan(text, "tbadge lane", "ALSO AN ANCESTOR", 10);
-    }
-    // A ROOT WITH ANCESTORS ABOVE IT. Nothing is drawn above this row, and
-    // without a label that reads as "the family starts here" — which for most
-    // roots on this map is false by dozens of generations. The record traces
-    // them; the reduction collapsed them because not one has a living branch.
-    // The badge is STATIC TEXT AND ONE INTEGER: no part of it is a name, so the
-    // fence's rule is met by construction rather than by escaping.
-    if (!n.parent && n.ancestryKnown && n.ancestryDepth > 0){
-      var rb = trSpan(text, "tbadge rec", "THE RECORD BEGINS HERE · " + n.ancestryDepth +
-        (n.ancestryDepth === 1 ? " GENERATION ABOVE" : " GENERATIONS ABOVE"), 10);
-      rb.setAttribute("data-t", "recordfloor");
-    }
-    g.appendChild(text);
-    svg.appendChild(g);
+  }
+  for (i=0;i<list.length;i++){
+    svg.appendChild(lfRow(x, list[i], tops[i], cols, sc, i, pick.joined));
   }
   host.appendChild(svg);
 }
@@ -2525,58 +2850,6 @@ function relayCard(d){
   return card;
 }
 /* ============================= SPECIES CENSUS — END ======================== */
-
-/* speciesHistoryReach and fillSpeciesSparks are the ONLY parts of the species
-   detail that live outside the fence, and they are outside it because they
-   build markup strings — which is exactly why NEITHER OF THEM IS EVER HANDED A
-   NAME. What they draw is slot numbers, counts and SVG paths; the species they
-   describe is identified to them by nothing at all, because the caller has
-   already fetched the right series. */
-/* HOW SHORT IS SHORT, SAID OUT LOUD. This record began when this archive did,
-   which on the running rig is days rather than months, and a 24-hour chart with
-   two hours of data in it looks exactly like a species that arrived two hours
-   ago. The sentence below is what stops a reader drawing that conclusion.
-
-   It is an UPPER BOUND and it says so: what is known is which BUCKET the oldest
-   sample fell in, not where in that bucket it sat, so the honest statement is
-   "no further back than", never a precise age this data cannot support. */
-function speciesHistoryReach(H){
-  if (!H) return "";
-  if (!H.samples) return "No sample covers this window at all yet — this record began when the "
-    + "archive did, and a chart with nothing on it is a short record, not an absent species.";
-  for (var i=0;i<H.total.length;i++){
-    if (H.total[i].n > 0){
-      var from = Date.now() - H.total[i].tMs;
-      return "The sampled record reaches back no further than " + ms(from)
-        + " — earlier buckets are empty because nothing was recorded then, not because "
-        + "nothing happened.";
-    }
-  }
-  return "";
-}
-
-function fillSpeciesSparks(box, H){
-  if (!H || !H.slots || !H.slots.length){
-    box.innerHTML = '<span class="muted">no per-world history for this species yet</span>';
-    return;
-  }
-  var span = Math.round((H.toMs - H.fromMs)/3600000);
-  var spanTxt = span >= 1 ? span+"h" : Math.round((H.toMs-H.fromMs)/60000)+"m";
-  var max = Math.max(1, H.max), h = "", i;
-  var totMax = 1;
-  for (i=0;i<H.total.length;i++) if (H.total[i].v != null && H.total[i].v > totMax) totMax = H.total[i].v;
-  var totLast = null;
-  for (i=H.total.length-1;i>=0;i--) if (H.total[i].v != null){ totLast = H.total[i].v; break; }
-  h += sparkCard(t("population","whole map"), "this species, every world summed, "+spanTxt,
-    totLast==null ? '<span class="unknown">unknown</span>' : totLast, H.total, totMax, {wide:true});
-  for (i=0;i<H.slots.length;i++){
-    var s = H.slots[i];
-    var dead = s.points.length ? s.points[s.points.length-1].dark : false;
-    h += sparkCard(t("slot","slot "+s.slot), (s.peerId||"")+" · "+spanTxt,
-      s.last==null ? '<span class="unknown">unknown</span>' : s.last, s.points, max, {dead:dead});
-  }
-  box.innerHTML = h;
-}
 
 /* Per-poll paint: only the things that actually change. Rebuilding the SVG every
    two seconds would restart every animation, and the flow would never be seen. */
@@ -2943,14 +3216,21 @@ function censusless(d){
    the map being visible. A hidden panel has no laid-out geometry to animate
    along, and a crossing drawn into a box nobody is looking at is work spent to
    be invisible; the seen-set is re-primed on the way back so a tab switch never
-   replays the last minute as though it were happening now.
+   replays the last minute as though it were happening now. The species view's
+   trend column is gated the same way and polled a great deal more slowly: it is
+   the one fetch on this tab that reads the durable sample file, and it changes
+   about once a minute.
 
    THE TAB IS IN THE URL HASH, which is what makes "#species" a link somebody
    can send and a reload land where the reader was. */
-var TABS = ["map","species","tree","settings"], TAB = "map", lastStatus = null;
+var TABS = ["map","species","settings"], TAB = "map", lastStatus = null;
 
 function tabFromHash(){
   var h = (location.hash || "").replace(/^#/, "");
+  // #tree was the genealogy's own tab before the two views merged. It is still a
+  // link somebody sent, so it lands where the genealogy went rather than
+  // silently on the map.
+  if (h === "tree") return "species";
   return TABS.indexOf(h) >= 0 ? h : "map";
 }
 
@@ -2978,12 +3258,11 @@ function showTab(name, push){
     hopsPrimed = false;
   }
   if (lastStatus) render(lastStatus);
-  if (name === "species"){ if (SPX) renderSpecies(SPX); tickSpecies(); }
-  // The tree is redrawn from the answer it already has so the tab is never
-  // blank while its fetch is in flight, then refreshed. Its geometry needs no
-  // laid-out box — every coordinate is computed, not measured — so unlike the
+  // The species view is redrawn from the answer it already has so the tab is
+  // never blank while its fetch is in flight, then refreshed. Its geometry needs
+  // no laid-out box — every coordinate is computed, not measured — so unlike the
   // map it does not have to be rebuilt on becoming visible.
-  if (name === "tree"){ if (TRX) renderTree(TRX); tickTree(); }
+  if (name === "species"){ if (LFX) renderLife(LFX); tickLife(); tickTrends(); }
   if (name === "map") tickHistory();
   if (push && location.hash !== "#"+name) location.hash = "#"+name;
 }
@@ -3000,46 +3279,30 @@ function showTab(name, push){
   });
 })();
 
-/* The species tab's own controls. A click on a row opens its detail; a click on
-   a term inside that row is a tooltip and nothing else, or every badge would
-   collapse the row it explains. */
-function openSpecies(key){
-  spOpenKey = (spOpenKey === key) ? null : key;
-  if (spOpenKey) loadSpeciesHistory(spOpenKey);
-  if (SPX) renderSpecies(SPX);
+/* The species view's own controls. A click on a row opens its detail; the row
+   also carries the tooltip, so opening one dismisses the tip that was over it
+   rather than leaving it pointing at an element this redraw has replaced. */
+function openLife(key){
+  lfOpenKey = (lfOpenKey === key) ? null : key;
+  hideTip();
+  if (LFX) renderLife(LFX);
 }
 
-async function loadSpeciesHistory(key){
-  var cached = spHist[key];
-  if (cached && (Date.now() - cached.at) < 60000) return;
-  try {
-    var r = await fetch("api/species/history?key=" + encodeURIComponent(key)
-      + "&hours=24&buckets=60", {cache:"no-store"});
-    var H = await r.json();
-    H.at = Date.now();
-    spHist[key] = H;
-  } catch(e){
-    spHist[key] = {at: Date.now(), slots: [], total: [], samples: 0, fromMs: 0, toMs: 0};
-  }
-  if (spOpenKey === key && SPX) renderSpecies(SPX);
-}
-
-(function wireSpecies(){
-  var body = document.getElementById("spbody");
-  if (body) body.addEventListener("click", function(ev){
-    if (ev.target.closest && ev.target.closest("[data-t],[data-s]")) return;
-    var tr = ev.target.closest ? ev.target.closest("tr.sprow") : null;
-    if (tr) openSpecies(tr.getAttribute("data-k"));
+(function wireLife(){
+  var box = document.getElementById("lfbox");
+  if (box) box.addEventListener("click", function(ev){
+    var g = ev.target.closest ? ev.target.closest(".lfrow") : null;
+    if (g) openLife(g.getAttribute("data-k"));
   });
-  var q = document.getElementById("spq");
+  var q = document.getElementById("lfq");
   if (q) q.addEventListener("input", function(){
-    spQuery = q.value.toLowerCase();
-    if (SPX) renderSpecies(SPX);
+    lfQuery = q.value.toLowerCase();
+    if (LFX) renderLife(LFX);
   });
-  var s = document.getElementById("spsort");
+  var s = document.getElementById("lfsort");
   if (s) s.addEventListener("change", function(){
-    spSort = s.value;
-    if (SPX) renderSpecies(SPX);
+    lfSort = s.value;
+    if (LFX) renderLife(LFX);
   });
 })();
 
@@ -3176,43 +3439,46 @@ async function tick(){
   } catch(e){
     $("#link").innerHTML = '<span class="bad">status endpoint unreachable</span>';
   }
-  // The species index rides the SAME cycle rather than a timer of its own, and
-  // it is only asked for while its tab is open: its ledger annotations are
-  // derived from a file the browser must never be handed, so they cost the
-  // archive a little work and are worth nothing to a tab nobody is looking at.
-  if (TAB === "species") await tickSpecies();
-  // And so does the genealogy, for the same two reasons: it is derived from a
-  // ledger the browser must never be handed, and it is worth nothing to a tab
-  // nobody is looking at.
-  if (TAB === "tree") await tickTree();
+  // The species view rides the SAME cycle rather than a timer of its own, and
+  // it is only asked for while its tab is open: it is derived from a ledger the
+  // browser must never be handed, so it costs the archive a little work and is
+  // worth nothing to a tab nobody is looking at.
+  if (TAB === "species") await tickLife();
 }
 
-async function tickTree(){
+async function tickLife(){
   try {
     var r = await fetch("api/species/tree", {cache:"no-store"});
-    renderTree(await r.json());
+    renderLife(await r.json());
   } catch(e){
-    var host = document.getElementById("trbox");
+    var host = document.getElementById("lfbox");
     if (host && !host.firstChild){
-      host.appendChild(el("div", "bad", "genealogy endpoint unreachable"));
+      host.appendChild(el("div", "bad", "species endpoint unreachable"));
     }
   }
 }
 
-async function tickSpecies(){
+/* The trend column rides its OWN and much slower timer, and asks for ONE answer
+   covering every living species. It is the only fetch on this page that reads
+   the durable sample file for this tab, and it changes about once a minute — so
+   polling it on the two-second cycle would be a bounded file read every two
+   seconds for a line that has not moved. A failure leaves the trend column
+   empty and every other thing on the row exactly as it was. */
+async function tickTrends(){
+  if (TAB !== "species") return;
   try {
-    var r = await fetch("api/species", {cache:"no-store"});
-    renderSpecies(await r.json());
+    var r = await fetch("api/species/trends?hours=24&buckets=32", {cache:"no-store"});
+    var T = await r.json();
+    var byKey = {}, list = T.species || [];
+    for (var i=0;i<list.length;i++) byKey[list[i].key] = list[i];
+    LFTREND = byKey;
+    LFTRENDMETA = {samples: T.samples, truncated: T.truncated, buckets: T.buckets,
+                   fromMs: T.fromMs, toMs: T.toMs};
   } catch(e){
-    var body = document.getElementById("spbody");
-    if (body && !body.firstChild){
-      var tr = document.createElement("tr"), td = document.createElement("td");
-      td.className = "bad";
-      td.setAttribute("colspan", "7");
-      td.textContent = "species endpoint unreachable";
-      tr.appendChild(td); body.appendChild(tr);
-    }
+    LFTREND = null;
+    LFTRENDMETA = null;
   }
+  if (LFX && TAB === "species") renderLife(LFX);
 }
 /* The hop feed is polled SEPARATELY from the status view, which is the shape of
    B14's decision and not an accident: /api/status is what the archive
@@ -3336,6 +3602,9 @@ tick(); setInterval(tick, 2000);
 // crossing is DRAWN, never whether this page knows one happened.
 tickHops(); setInterval(tickHops, 1500);
 tickHistory(); setInterval(tickHistory, 60000);
+// The trend column, on the same slow cadence and for the same reason: one
+// bounded read of the sample file, feeding every row at once.
+tickTrends(); setInterval(tickTrends, 60000);
 </script>
 </body>
 </html>

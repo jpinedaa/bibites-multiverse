@@ -4,10 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"multiverse/internal/bb8"
 	"multiverse/internal/contractb"
 	"multiverse/internal/wire"
 )
@@ -849,5 +853,439 @@ func TestAMarkupSpeciesNameNeverBecomesMarkupInTheGenealogy(t *testing.T) {
 	root, ok := byKey[wire.SpeciesKey(nasty, "root")]
 	if !ok || !strings.Contains(root.Name, nasty) || root.NameFrom != "record" {
 		t.Fatalf("the ancestor's raw name did not survive as data: %+v", root)
+	}
+}
+
+// ---------------------------------------------------------- the merged view
+
+// TestTheLifespanGeometryIsTheRecordsOwnSpan is the layout the drawing is built
+// from, tested as DATA rather than as pixels: the page maps these two numbers
+// onto one linear scale and nothing else about a bar is decided in the browser.
+//
+// THE FIXTURE IS A FAMILY WITH KNOWN DATES, and it is arranged so that every
+// rule about a bar's ends is exercised by a node that needs it:
+//
+//	Beta crossed BEFORE anything named a parent, so its bar starts before the
+//	record's own ancestry floor and before its parent's bar. That is not
+//	repaired: the record says what it says, and clamping a child up to its
+//	parent would draw a picture the ledger does not support.
+//
+//	Ghost never crossed at all. It exists only because two of its children's
+//	crossings named it, so its bar begins at the EARLIEST OF THEM — a bound the
+//	record genuinely carries — and is marked derived so the page can draw it as
+//	the inference it is.
+//
+//	Alpha is extinct, so its bar STOPS at its last recorded crossing. The living
+//	species have no right-hand end at all, because a bar that stopped at their
+//	last crossing would say they died when they merely stopped travelling.
+func TestTheLifespanGeometryIsTheRecordsOwnSpan(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(60, 0,
+			entry("Beta", "one", 30, 0), entry("Gamma", "two", 20, 0),
+			entry("Delta", "four", 10, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-3 * time.Hour).UnixMilli()
+
+	a.mu.Lock()
+	// A parented crossing by a species with no living descendant. It is the
+	// OLDEST ancestry the record holds and it is drawn nowhere — which is exactly
+	// why the axis has to be told about it, or the floor would sit off the left
+	// edge of every picture that has one.
+	a.observeSpeciesLocked(child(base+500, "Dead", "end", "Long", "gone"))
+	// Beta's first crossing, carrying no parent at all.
+	a.observeSpeciesLocked(migration(base+1000, 1, 2, "E", "Beta", "one", "h-beta-early"))
+	a.observeSpeciesLocked(child(base+2000, "Alpha", "nullus", "Ghost", "none"))
+	a.observeSpeciesLocked(migration(base+4000, 1, 2, "E", "Alpha", "nullus", "h-alpha-late"))
+	a.observeSpeciesLocked(child(base+5000, "Beta", "one", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+6000, "Gamma", "two", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+7000, "Delta", "four", "Ghost", "none"))
+	a.mu.Unlock()
+
+	view := a.SpeciesTreeView()
+	byKey := treeNodes(t, view)
+
+	// The rows, in the order the renderer lays them out: DFS pre-order, busiest
+	// branch first. The array index IS the row.
+	want := []string{"Ghost none", "Alpha nullus", "Beta one", "Gamma two", "Delta four"}
+	if len(view.Nodes) != len(want) {
+		t.Fatalf("the view holds %d rows, want %d: %+v", len(view.Nodes), len(want), view.Nodes)
+	}
+	for i, key := range want {
+		if view.Nodes[i].Key != key {
+			t.Fatalf("row %d is %q, want %q — the row order is the layout", i, view.Nodes[i].Key, key)
+		}
+	}
+
+	for _, tc := range []struct {
+		key      string
+		from, to int64
+		derived  bool
+	}{
+		// A living species: from its first recorded crossing, and NO right-hand
+		// end.
+		{"Beta one", base + 1000, 0, false},
+		{"Gamma two", base + 6000, 0, false},
+		{"Delta four", base + 7000, 0, false},
+		// Extinct: first crossing to last, and it stops there.
+		{"Alpha nullus", base + 2000, base + 4000, false},
+		// Never crossed: its earliest dated descendant, and a point rather than a
+		// span, because the record dates nothing else about it.
+		{"Ghost none", base + 2000, base + 2000, true},
+	} {
+		n := byKey[tc.key]
+		if n.SpanFromMs != tc.from || n.SpanToMs != tc.to || n.SpanDerived != tc.derived {
+			t.Fatalf("%s spans %d..%d (derived %v), want %d..%d (derived %v)",
+				tc.key, n.SpanFromMs, n.SpanToMs, n.SpanDerived, tc.from, tc.to, tc.derived)
+		}
+	}
+
+	// THE JOIN IS THE CHILD'S OWN START. A parent edge drops at the instant the
+	// record first says the child exists, which is the one x-coordinate on the
+	// drawing that means something — and the page reads it off the child rather
+	// than being told a third number.
+	if byKey["Beta one"].SpanFromMs >= byKey["Alpha nullus"].SpanFromMs {
+		t.Fatal("the fixture no longer has a child whose record predates its parent's; that " +
+			"shape is the reason nothing here is clamped")
+	}
+
+	// THE AXIS. It starts at the oldest thing the picture must hold — here the
+	// record's ancestry floor, carried by a species that is not drawn at all —
+	// and ends now.
+	if view.AncestrySinceMs != base+500 {
+		t.Fatalf("ancestrySinceMs = %d, want %d", view.AncestrySinceMs, base+500)
+	}
+	if view.SpanStartMs != base+500 {
+		t.Fatalf("spanStartMs = %d, want the record's floor at %d — a floor drawn off the left "+
+			"edge is a boundary no reader can see", view.SpanStartMs, base+500)
+	}
+	if view.SpanEndMs != view.GeneratedAtMs {
+		t.Fatalf("spanEndMs = %d, want now (%d)", view.SpanEndMs, view.GeneratedAtMs)
+	}
+	if view.SpanStartMs >= view.SpanEndMs {
+		t.Fatal("the axis has no width")
+	}
+
+	// AND ON THE WIRE, because a distinction a client cannot see is not one.
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	var served SpeciesTree
+	if err := json.Unmarshal([]byte(get(t, srv.URL+"/api/species/tree")), &served); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if served.SpanStartMs != view.SpanStartMs || served.SpanEndMs == 0 {
+		t.Fatalf("the axis did not survive the wire: %d..%d", served.SpanStartMs, served.SpanEndMs)
+	}
+	if treeNodes(t, served)["Ghost none"].SpanDerived != true {
+		t.Fatal("the derived flag did not survive the wire; without it the page would draw an " +
+			"inference as a reading")
+	}
+}
+
+// TestAnUndatedLivingSpeciesHasNoBarAndSaysSo is the fourth shape of the same
+// rule, and the one that must not be filled in. A species alive right now that
+// has never crossed a lane has no recorded crossing at all — so the record dates
+// neither end of it, and the honest layout datum is ZERO rather than "now" or
+// "the beginning of the axis".
+func TestAnUndatedLivingSpeciesHasNoBarAndSaysSo(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(20, 0,
+			entry("Homebody", "one", 10, 0), entry("Beta", "two", 10, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	a.mu.Lock()
+	a.observeSpeciesLocked(child(base, "Beta", "two", "Alpha", "nullus"))
+	a.mu.Unlock()
+
+	byKey := treeNodes(t, a.SpeciesTreeView())
+	home := byKey["Homebody one"]
+	if home.SpanFromMs != 0 || home.SpanToMs != 0 || home.SpanDerived {
+		t.Fatalf("a species the record has never dated was given a bar: %+v", home)
+	}
+	if !home.Alive || !home.Isolated || home.AncestryKnown {
+		t.Fatalf("the undated species lost the rest of its answer: %+v", home)
+	}
+}
+
+// TestTheMergedViewCarriesTheCensusFactsOnItsLeaves is the merge itself.
+//
+// This view IS the species list now, so a living leaf has to carry what the flat
+// census tab carried — the per-world counts, the eggs, the badges, the other
+// spellings, the recent lanes and the parent the record named. A merge that
+// dropped them would be a merge that lost half of what it merged, and the reader
+// would be back to holding one tab in their head while reading another.
+//
+// AND AN ANCESTOR CARRIES NONE OF IT, which is §10.1's rule on the node type
+// most easily misread as a resident: it has no population because it has none.
+func TestTheMergedViewCarriesTheCensusFactsOnItsLeaves(t *testing.T) {
+	one := slot(1, 0, 0, true, census(30, 4,
+		entry("Beta ", "one", 20, 3), entry("Gamma", "two", 10, 1)))
+	one.Stats.MigrationExclude = &wire.ExcludeList{Names: []string{"Beta one"}}
+	two := slot(2, 1, 0, true, census(5, 1, entry("Beta", "one", 5, 1)))
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
+		Slots: []contractb.SlotInfo{one, two},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	a.mu.Lock()
+	a.observeSpeciesLocked(child(base, "Beta", "one", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+1000, "Gamma", "two", "Alpha", "nullus"))
+	a.mu.Unlock()
+
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	var view SpeciesTree
+	if err := json.Unmarshal([]byte(get(t, srv.URL+"/api/species/tree")), &view); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byKey := treeNodes(t, view)
+
+	beta := byKey["Beta one"]
+	if beta.Population != 25 || beta.Eggs != 4 {
+		t.Fatalf("the leaf lost the census union's totals: %+v", beta)
+	}
+	// PER WORLD, with the counts — this is what the row's expanded detail draws
+	// and what its mini-map is filled from.
+	if len(beta.Worlds) != 2 {
+		t.Fatalf("the leaf carries %d worlds, want 2: %+v", len(beta.Worlds), beta.Worlds)
+	}
+	if beta.Worlds[0].Slot != 1 || beta.Worlds[0].Bibites != 20 || beta.Worlds[0].Eggs != 3 {
+		t.Fatalf("world 1's own counts are missing: %+v", beta.Worlds[0])
+	}
+	if beta.Worlds[1].Slot != 2 || beta.Worlds[1].Bibites != 5 {
+		t.Fatalf("world 2's own counts are missing: %+v", beta.Worlds[1])
+	}
+	// The three badges of §19 B19, and the second raw spelling, which is a real
+	// difference between two worlds rather than noise to tidy away.
+	if !beta.Everywhere || beta.Endemic {
+		t.Fatalf("the leaf lost its everywhere/endemic badges: %+v", beta)
+	}
+	if !beta.Excluded || len(beta.ExcludedBy) != 1 || beta.ExcludedBy[0] != 1 {
+		t.Fatalf("the leaf lost the exclusion that explains why it never travels: %+v", beta)
+	}
+	if len(beta.Spellings) != 1 || beta.Spellings[0] != "Beta one" {
+		t.Fatalf("the leaf lost the other world's spelling of it: %+v", beta.Spellings)
+	}
+	if beta.Name != "Beta  one" {
+		t.Fatalf("the raw spelling was repaired: %q", beta.Name)
+	}
+	if len(beta.Recent) == 0 || beta.Recent[0].FromSlot != 1 {
+		t.Fatalf("the leaf lost the sample of lanes it uses: %+v", beta.Recent)
+	}
+	if beta.ParentName != "Alpha nullus" {
+		t.Fatalf("the leaf lost the parent the record named: %q", beta.ParentName)
+	}
+	gamma := byKey["Gamma two"]
+	if !gamma.Endemic || gamma.Everywhere || gamma.Excluded {
+		t.Fatalf("a one-world species is not endemic here: %+v", gamma)
+	}
+
+	alpha := byKey["Alpha nullus"]
+	if alpha.Alive || alpha.Population != 0 || len(alpha.Worlds) != 0 ||
+		len(alpha.Recent) != 0 || alpha.Everywhere || alpha.Endemic {
+		t.Fatalf("an extinct ancestor is dressed as a resident: %+v", alpha)
+	}
+	// The whole-view counts the merged tab prints where the flat one used to.
+	if view.LedgerRecords != 0 && view.LedgerSpecies == 0 {
+		t.Fatalf("the merged view lost the record's own size: %+v", view)
+	}
+}
+
+// TestTheMiniMapGridIsTheMapsOwnShape covers the six dots beside each living
+// species — and the reason they are published rather than assumed.
+//
+// SIX DOTS IN TWO ROWS BECAUSE THIS MAP IS THREE BY TWO, never because there
+// happen to be six worlds. The grid is the map's, from the same status frame the
+// leaves came from, and the three states a dot can have are three different
+// facts: alive there, reported-and-absent, and a world reporting no census at
+// all — which is unknown and never an absence (§10.1).
+func TestTheMiniMapGridIsTheMapsOwnShape(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 3, Height: 2}, SlotCount: 5,
+		Slots: []contractb.SlotInfo{
+			slot(1, 0, 0, true, census(10, 0, entry("Beta", "one", 10, 0))),
+			slot(2, 1, 0, true, census(5, 0, entry("Gamma", "two", 5, 0))),
+			// Reporting stats and NO census: unknown in every dot of its column.
+			slot(3, 2, 0, true, &contractb.PeerStats{Population: contractb.IntPtr(7)}),
+			slot(4, 0, 1, true, census(3, 0, entry("Beta", "one", 3, 0))),
+			// Dark, and still a seat on the map.
+			slot(5, 1, 1, false, nil),
+			// (2,1) is a HOLE: no world has claimed it, and it is drawn as nothing.
+		},
+	}
+	a := newViewFixture(t, status, time.Second)
+	view := a.SpeciesTreeView()
+
+	if view.Map.Width != 3 || view.Map.Height != 2 {
+		t.Fatalf("the grid is %dx%d, want the map's own 3x2", view.Map.Width, view.Map.Height)
+	}
+	if len(view.Map.Cells) != 5 {
+		t.Fatalf("the grid holds %d cells, want the five seats — a hole is drawn as nothing, "+
+			"not as an empty dot: %+v", len(view.Map.Cells), view.Map.Cells)
+	}
+	byslot := map[int]TreeCell{}
+	for _, c := range view.Map.Cells {
+		byslot[c.Slot] = c
+	}
+	if c := byslot[4]; c.Col != 0 || c.Row != 1 {
+		t.Fatalf("slot 4 sits at (%d,%d), want the map's (0,1)", c.Col, c.Row)
+	}
+	if !byslot[1].Reporting || !byslot[1].Live {
+		t.Fatalf("a reporting world is not marked as one: %+v", byslot[1])
+	}
+	// A world with stats and no census is NOT reporting a census, and the page
+	// draws that dot as unknown rather than as "this species is not there".
+	if byslot[3].Reporting {
+		t.Fatalf("a world reporting no census is marked as reporting: %+v", byslot[3])
+	}
+	if byslot[5].Reporting || byslot[5].Live {
+		t.Fatalf("a dark world is not marked dark: %+v", byslot[5])
+	}
+
+	// And the dots a species fills are its own census worlds, by slot.
+	beta := treeNodes(t, view)["Beta one"]
+	if len(beta.Worlds) != 2 || beta.Worlds[0].Slot != 1 || beta.Worlds[1].Slot != 4 {
+		t.Fatalf("the leaf's worlds are not the ones holding it: %+v", beta.Worlds)
+	}
+}
+
+// TestTheBrainShapeComesFromOneStoredGenomePerSpecies is the genealogy's newest
+// figure and the one with the most ways to be wrong.
+//
+// THE HASH IS TRACKED, NOT SEARCHED FOR. species.go keeps the LATEST genome hash
+// each species' crossings carried — one string, maintained by the same single
+// writer as every other counter there — so this view names a genome without
+// reading the ledger. The blob behind it is parsed ONCE PER HASH and never per
+// request.
+//
+// AND AN ABSENCE IS AN ABSENCE. A species whose blob the store does not hold —
+// pruned past the retention horizon, or never fetched — carries no figures at
+// all. Never a zero, never an error, and never a view that fails because a
+// genome aged out.
+func TestTheBrainShapeComesFromOneStoredGenomePerSpecies(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(30, 0,
+			entry("Beta", "one", 10, 0), entry("Gamma", "two", 10, 0),
+			entry("Ghostly", "three", 10, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+
+	small := bb8.HashPrefix + strings.Repeat("a", 64)
+	big := bb8.HashPrefix + strings.Repeat("b", 64)
+	gone := bb8.HashPrefix + strings.Repeat("c", 64)
+	store := func(hash string, neurons, synapses int) {
+		t.Helper()
+		nodes, syn := "", ""
+		for i := 0; i < neurons; i++ {
+			if i > 0 {
+				nodes += ","
+			}
+			nodes += `{"Index":` + strconv.Itoa(i) + `,"Type":0}`
+		}
+		for i := 0; i < synapses; i++ {
+			if i > 0 {
+				syn += ","
+			}
+			syn += `{"NodeIn":0,"NodeOut":1,"Inov":` + strconv.Itoa(i) + `,"Weight":1.0}`
+		}
+		blob := `{"genes":{"SizeRatio":1.0},"nodes":[` + nodes + `],"synapses":[` + syn +
+			`],"version":"0.6.3.1"}`
+		if err := a.genomes.Put(hash, "0.6.3.1", blob); err != nil {
+			t.Fatalf("store %s: %v", hash, err)
+		}
+	}
+	store(small, 3, 2)
+	store(big, 40, 90)
+
+	a.mu.Lock()
+	// Beta's LATEST genome is the big one; the older, smaller one must not win.
+	a.observeSpeciesLocked(migration(base, 1, 2, "E", "Beta", "one", small))
+	a.observeSpeciesLocked(migration(base+1000, 1, 2, "E", "Beta", "one", big))
+	a.observeSpeciesLocked(migration(base+2000, 1, 2, "E", "Gamma", "two", small))
+	// Ghostly's genome is one the store does not hold.
+	a.observeSpeciesLocked(migration(base+3000, 1, 2, "E", "Ghostly", "three", gone))
+	a.mu.Unlock()
+
+	byKey := treeNodes(t, a.SpeciesTreeView())
+	if n := byKey["Beta one"]; n.Neurons != 40 || n.Synapses != 90 {
+		t.Fatalf("Beta's brain is %d/%d, want the LATEST genome's 40/90", n.Neurons, n.Synapses)
+	}
+	if n := byKey["Gamma two"]; n.Neurons != 3 || n.Synapses != 2 {
+		t.Fatalf("Gamma's brain is %d/%d, want 3/2", n.Neurons, n.Synapses)
+	}
+	ghost := byKey["Ghostly three"]
+	if ghost.Neurons != 0 || ghost.Synapses != 0 {
+		t.Fatalf("a species whose genome the store does not hold reported a brain: %+v", ghost)
+	}
+	if ghost.Population != 10 || ghost.Crossings != 1 {
+		t.Fatalf("the missing blob cost the row the rest of its answer: %+v", ghost)
+	}
+
+	// PARSED ONCE PER HASH, EVER. The blob is removed from the store and the same
+	// answer comes back — which is the property that keeps a two-second poll off
+	// the disk, and the reason the cache is keyed on content.
+	hex := bb8.HashHex(big)
+	if err := os.Remove(filepath.Join(a.genomes.Dir(), hex[:2], hex+".json")); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if n := treeNodes(t, a.SpeciesTreeView())["Beta one"]; n.Neurons != 40 {
+		t.Fatalf("the brain shape was re-read from the store on a second poll: %+v", n)
+	}
+	// And a hash the store never held is cached as an absence rather than
+	// stat()ed on every poll.
+	a.brains.mu.Lock()
+	e, cached := a.brains.byHash[gone]
+	a.brains.mu.Unlock()
+	if !cached || e.known {
+		t.Fatalf("a missing blob is not remembered as missing (%v/%+v); it would be looked up "+
+			"again every two seconds forever", cached, e)
+	}
+}
+
+// TestTheFlatIndexOutlivesTheTabItDrew is the removal's other half.
+//
+// The page's census tab is gone and /api/species is NOT: ringstat reads it
+// (cmd/ringstat, FetchSpecies), a terminal table is a different medium with a
+// different answer, and an endpoint is a contract with whoever is calling it
+// rather than a private detail of one renderer. So the flat index keeps its
+// shape, keeps its ledger annotations, and the terminal view still renders from
+// it.
+func TestTheFlatIndexOutlivesTheTabItDrew(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
+		Slots: []contractb.SlotInfo{
+			slot(1, 0, 0, true, census(20, 2, entry("Beta", "one", 20, 2))),
+			slot(2, 1, 0, true, census(5, 0, entry("Beta", "one", 5, 0))),
+		},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	a.mu.Lock()
+	a.observeSpeciesLocked(child(base, "Beta", "one", "Alpha", "nullus"))
+	a.mu.Unlock()
+
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	idx, err := FetchSpecies(srv.URL, 5*time.Second)
+	if err != nil {
+		t.Fatalf("FetchSpecies: %v", err)
+	}
+	if len(idx.Species) != 1 || idx.Species[0].Population != 25 || idx.Species[0].Crossings != 1 {
+		t.Fatalf("the flat index lost its shape when the tab that drew it went: %+v", idx.Species)
+	}
+	if idx.Species[0].Parent != "Alpha nullus" || len(idx.Species[0].Worlds) != 2 {
+		t.Fatalf("the flat index lost its annotations: %+v", idx.Species[0])
+	}
+	// And the terminal renderer still draws from it.
+	var out strings.Builder
+	RenderSpecies(&out, a.StatusView(), &idx)
+	if !strings.Contains(out.String(), "Beta one") {
+		t.Fatalf("ringstat's species table no longer renders:\n%s", out.String())
 	}
 }

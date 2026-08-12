@@ -324,3 +324,60 @@ func blob(genes, nodes, synapses string) string {
 		`"brain":{"Nodes":[` + nodes + `],"Synapses":[` + synapses + `]},` +
 		`"version":"0.6.3.1"}`
 }
+
+// TestBrainStatsCountsBothDialectsAndRefusesNothingElse covers the two numbers
+// the archive's genealogy draws a species' brain from.
+//
+// They are LENGTHS OF THE TWO ARRAYS §3 already locates, so the one thing worth
+// pinning is that they are located the same way the hash locates them — the
+// saved dialect and the wire dialect both, through the one dialect() both
+// callers share. A blob this parser cannot read is an ABSENT answer and never a
+// zero: a brain of no neurons is not a thing the game produces, and a caller
+// that got 0 back would draw a claim nobody made.
+func TestBrainStatsCountsBothDialectsAndRefusesNothingElse(t *testing.T) {
+	// The saved dialect, from the spec's own worked example: two nodes, one
+	// synapse.
+	if b, ok := BrainStats(workedExample); !ok || b.Neurons != 2 || b.Synapses != 1 {
+		t.Fatalf("saved dialect: %+v ok=%v, want 2 neurons and 1 synapse", b, ok)
+	}
+	// The wire dialect — no top-level body key — is read at its own paths.
+	wire := `{"genes":{"SizeRatio":1.0},` +
+		`"nodes":[{"Type":0,"Index":0},{"Type":1,"Index":1},{"Type":3,"Index":2}],` +
+		`"synapses":[{"NodeIn":0,"NodeOut":2,"Weight":1.0},` +
+		`{"NodeIn":1,"NodeOut":2,"Weight":-1.0}],"version":"0.6.3.1"}`
+	if b, ok := BrainStats(wire); !ok || b.Neurons != 3 || b.Synapses != 2 {
+		t.Fatalf("wire dialect: %+v ok=%v, want 3 neurons and 2 synapses", b, ok)
+	}
+	// A brain with no synapse array at all is a brain with no synapses, which is
+	// the same reading Canonical takes.
+	if b, ok := BrainStats(`{"genes":{},"nodes":[{"Index":0}],"version":"1"}`); !ok ||
+		b.Neurons != 1 || b.Synapses != 0 {
+		t.Fatalf("a brain with no synapses: %+v ok=%v", b, ok)
+	}
+	// A BROKEN GENE WRAPPER STILL HAS A BRAIN. The gene object is what stops the
+	// HASH; this counter never reads it, and refusing over it would lose a brain
+	// that is plainly there.
+	brainOnly := `{"body":{},"genes":7,"brain":{"Nodes":[{"Index":0},{"Index":1}],` +
+		`"Synapses":[{"NodeIn":0,"NodeOut":1,"Weight":1.0}]},"version":"0.6.3.1"}`
+	if _, err := Canonical(brainOnly, ""); err == nil {
+		t.Fatal("the fixture is meant to be unhashable")
+	}
+	if b, ok := BrainStats(brainOnly); !ok || b.Neurons != 2 || b.Synapses != 1 {
+		t.Fatalf("a blob whose genes are broken lost its readable brain: %+v ok=%v", b, ok)
+	}
+	// And every absence is an absence rather than a zero.
+	for name, payload := range map[string]string{
+		"empty":               "",
+		"not JSON":            "{",
+		"not an object":       "[1,2,3]",
+		"no node array":       `{"genes":{},"synapses":[],"version":"1"}`,
+		"empty node array":    `{"genes":{},"nodes":[],"version":"1"}`,
+		"nodes not an array":  `{"genes":{},"nodes":{"Index":0},"version":"1"}`,
+		"saved with no brain": `{"body":{},"genes":{"genes":{}},"version":"1"}`,
+	} {
+		if b, ok := BrainStats(payload); ok {
+			t.Fatalf("%s returned an answer (%+v); an unreadable blob has NO brain, and a "+
+				"caller must be able to draw nothing rather than nothing-as-zero", name, b)
+		}
+	}
+}

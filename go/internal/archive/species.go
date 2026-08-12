@@ -1,14 +1,21 @@
 package archive
 
-// The species half of the operator surface: the SPECIES TAB (contract-b-m4.md
-// §10.1, §16 B12, §19 B19).
+// The species half of the operator surface: the LEDGER AGGREGATE behind every
+// species view, and the FLAT INDEX of /api/species (contract-b-m4.md §10.1,
+// §16 B12, §19 B19).
+//
+// The page draws the merged view of tree.go now, and this index is still served
+// and still read: ringstat renders it (cmd/ringstat), an endpoint is a contract
+// with whoever is calling it rather than a private detail of one renderer, and a
+// terminal table is a different medium with a different answer. Both are built
+// from the aggregate below, so the two cannot disagree about who is alive.
 //
 // It answers one question the map cannot — "what lives in this multiverse, and
 // which of it travels" — by joining two sources that must never be confused
 // with each other:
 //
 //	THE CENSUS says who is ALIVE, right now, in each world. It is the only
-//	source for the index itself: THE TAB LISTS CURRENTLY-ALIVE SPECIES AND
+//	source for the index itself: THE INDEX LISTS CURRENTLY-ALIVE SPECIES AND
 //	NOTHING ELSE. A species that crossed a lane four hours ago and is extinct
 //	everywhere today is a ledger fact, not a resident, and putting it in a list
 //	of what lives here would be exactly the mis-reading D11 and §10.1 forbid:
@@ -120,7 +127,7 @@ type speciesAgg struct {
 	// under the A34 comparison key. THE RAW FORM IS THE LABEL AND THE KEY IS THE
 	// EDGE, which is rule 2 applied to one more field.
 	//
-	// Two readers use these and they use them differently. The species tab
+	// Two readers use these and they use them differently. The flat index
 	// SHOWS parent and resolves nothing (contract-a.md §16, A31: the registry a
 	// name resolves against is inside a game process). The genealogy of tree.go
 	// treats parentKey as ONE EDGE OF A GRAPH — still no resolution, because an
@@ -136,6 +143,21 @@ type speciesAgg struct {
 	parent     string
 	parentKey  string
 	parentAtMs int64
+	// genomeHash is the LATEST genome hash any crossing of this species carried,
+	// and genomeAtMs when. ONE STRING PER SPECIES, maintained by this same
+	// single writer, for the same reason parent is: the genealogy publishes a
+	// brain shape per species, the material to compute it from is in the
+	// content-addressed store, and the alternative — finding a genome for a
+	// species at request time — is a walk of the ledger per poll, which is the
+	// shape rule 1 refuses.
+	//
+	// LATEST, not first, and not "the one the store still holds". A species'
+	// newest genome is the one that describes what it is now, and whether a copy
+	// of it survives is a question for the store and the retention horizon
+	// (§23, B33) — this aggregate records what CROSSED, and an answer the store
+	// cannot back is absent at the view, never wrong here.
+	genomeHash string
+	genomeAtMs int64
 }
 
 // speciesLedger is the whole aggregate.
@@ -210,6 +232,14 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 			e.genomesTruncated = true
 		} else {
 			e.genomes[fingerprint(rec.Lineage.GenomeHash)] = struct{}{}
+		}
+		// The FULL hash of the newest crossing, kept once. The fingerprint set
+		// above is a count and is deliberately unjoinable (see speciesAgg.genomes);
+		// this is one hash a reader of the store can actually open, and the
+		// genealogy uses it to say how big this species' brain is.
+		if rec.RecordedAt >= e.genomeAtMs {
+			e.genomeHash = rec.Lineage.GenomeHash
+			e.genomeAtMs = rec.RecordedAt
 		}
 	}
 	if rec.Species.ParentGenericName != "" {
@@ -359,12 +389,19 @@ type SpeciesIndex struct {
 	Species        []SpeciesRow `json:"species"`
 }
 
-// SpeciesIndexView builds the whole species tab. It takes the archive's lock
-// twice, briefly, and touches no disk.
+// SpeciesIndexView builds the whole flat species index. It takes the archive's
+// lock twice, briefly, and touches no disk.
 func (a *Archive) SpeciesIndexView() SpeciesIndex {
 	// StatusView takes the lock itself, so it is called first and finished
 	// with before the aggregate is read. Two short holds, never a nested one.
-	view := a.StatusView()
+	return a.speciesIndexFrom(a.StatusView())
+}
+
+// speciesIndexFrom is the index over ONE status frame, so a caller that needs
+// both this and something else derived from the same frame — the genealogy needs
+// the map's own grid — reads the frame once and cannot end up describing two
+// different instants in one answer.
+func (a *Archive) speciesIndexFrom(view Status) SpeciesIndex {
 	nowMs := time.Now().UnixMilli()
 
 	out := SpeciesIndex{
@@ -528,11 +565,20 @@ type SpeciesHistory struct {
 type speciesHistoryCache struct {
 	mu      sync.Mutex
 	entries map[string]speciesHistoryEntry
+	// trends is the same bound over the same file for the whole-map trend
+	// answer. It shares this lock because it shares the read: two readers of the
+	// same tail must not queue behind two different mutexes.
+	trends map[string]speciesTrendsEntry
 }
 
 type speciesHistoryEntry struct {
 	at  time.Time
 	val SpeciesHistory
+}
+
+type speciesTrendsEntry struct {
+	at  time.Time
+	val SpeciesTrends
 }
 
 // BuildSpeciesHistory downsamples one species out of a slice of samples. It is
@@ -691,6 +737,244 @@ func (a *Archive) SpeciesHistoryView(key string, window time.Duration, buckets i
 	}
 	a.speciesHistory.entries[ck] = speciesHistoryEntry{at: time.Now(), val: h}
 	return h, nil
+}
+
+// ---------------------------------------------------------- species trends
+//
+// ONE READ FOR EVERY SPARKLINE. The genealogy draws a trend line beside every
+// living species, and the obvious way to feed it — /api/species/history once per
+// species — is a bounded tail read of the sample file PER SPECIES, forty of them
+// on the running rig, on a tab a reader leaves open. This is the same
+// downsampling over the same file, with the whole living set folded in ONE pass,
+// and it is the reason the trend column costs one request rather than forty.
+//
+// It is a SHAPE AND NOT A READING, and the payload says so by being small: one
+// value per bucket per species, the map-wide total of that species, and no
+// per-world split at all. A reader who wants the per-world answer opens the
+// species' own history, which still exists and still says which worlds were
+// silent. The two must not be confused: a null here is the same unknown the rest
+// of this file means by it, and a 0 is still a census that reported none.
+
+// speciesTrendMax bounds how many species one trends answer carries. The census
+// caps each world at 32 species and there are six worlds, so the living union
+// cannot exceed 192 by construction; this is that bound written down rather than
+// assumed, and a request that hits it says so.
+const speciesTrendMax = 192
+
+// SpeciesTrend is one species' map-wide population over the window.
+type SpeciesTrend struct {
+	Key string `json:"key"`
+	// Points is one value per bucket, null where no world knew a value in that
+	// bucket. It is a bare array rather than a list of objects because the bucket
+	// times are the same for every species in the answer and are published once,
+	// at the top — forty species times forty buckets is where a payload gets away
+	// from you.
+	Points []*int `json:"points"`
+	// Max is this species' own largest known value, and Last the newest known
+	// one. The scale is PER SPECIES here, unlike History's shared one: these are
+	// shapes drawn 84 pixels wide beside rows of wildly different abundance, and
+	// a shared scale would flatten every rare species into a straight line.
+	Max  int  `json:"max"`
+	Last *int `json:"last,omitempty"`
+}
+
+// SpeciesTrends is /api/species/trends: every living species' recent shape, in
+// one answer.
+type SpeciesTrends struct {
+	GeneratedAtMs int64 `json:"generatedAtMs"`
+	FromMs        int64 `json:"fromMs"`
+	ToMs          int64 `json:"toMs"`
+	BucketMs      int64 `json:"bucketMs"`
+	Buckets       int   `json:"buckets"`
+	Samples       int   `json:"samples"`
+	Truncated     bool  `json:"truncated"`
+	// Capped says the living union was larger than speciesTrendMax and the rest
+	// carry no trend. A truncated answer a reader cannot see is a wrong answer.
+	Capped  bool           `json:"capped,omitempty"`
+	Species []SpeciesTrend `json:"species"`
+}
+
+// BuildSpeciesTrends downsamples every key in one pass. It is pure, like
+// BuildHistory and BuildSpeciesHistory, and for the same reason.
+func BuildSpeciesTrends(samples []Status, keys []string, nowMs int64,
+	window time.Duration, buckets int) SpeciesTrends {
+
+	if window < HistoryMinWindow {
+		window = HistoryMinWindow
+	}
+	if window > HistoryMaxWindow {
+		window = HistoryMaxWindow
+	}
+	if buckets < HistoryMinBuckets {
+		buckets = HistoryMinBuckets
+	}
+	if buckets > HistoryMaxBuckets {
+		buckets = HistoryMaxBuckets
+	}
+	bucketMs := window.Milliseconds() / int64(buckets)
+	if bucketMs < 1 {
+		bucketMs = 1
+	}
+	fromMs := nowMs - bucketMs*int64(buckets)
+
+	out := SpeciesTrends{
+		GeneratedAtMs: nowMs,
+		FromMs:        fromMs,
+		ToMs:          fromMs + bucketMs*int64(buckets),
+		BucketMs:      bucketMs,
+		Buckets:       buckets,
+		Species:       []SpeciesTrend{},
+	}
+
+	wanted := make(map[string]int, len(keys))
+	ordered := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k == "" {
+			continue
+		}
+		if _, dup := wanted[k]; dup {
+			continue
+		}
+		if len(ordered) >= speciesTrendMax {
+			out.Capped = true
+			break
+		}
+		wanted[k] = len(ordered)
+		ordered = append(ordered, k)
+	}
+	if len(ordered) == 0 {
+		return out
+	}
+
+	// One accumulator grid: species-major, bucket-minor. It is bounded by
+	// speciesTrendMax * HistoryMaxBuckets and is thrown away with this call.
+	accs := make([][]bucketAcc, len(ordered))
+	for i := range accs {
+		accs[i] = make([]bucketAcc, buckets)
+	}
+
+	sorted := append([]Status(nil), samples...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].GeneratedAtMs < sorted[j].GeneratedAtMs
+	})
+	// perSample is reused across samples so the pass allocates nothing per
+	// sample: it holds this sample's total per species and whether any world was
+	// in a position to know it.
+	total := make([]int, len(ordered))
+	known := make([]bool, len(ordered))
+	for _, s := range sorted {
+		if s.GeneratedAtMs < fromMs {
+			continue
+		}
+		idx := int((s.GeneratedAtMs - fromMs) / bucketMs)
+		if idx < 0 || idx >= buckets {
+			continue
+		}
+		out.Samples++
+		for i := range total {
+			total[i], known[i] = 0, false
+		}
+		for _, sv := range s.Slots {
+			if !sv.StatsKnown || !sv.SpeciesKnown {
+				// UNKNOWN, not zero: that world told us nothing about its species
+				// in this sample, which is a different fact from telling us it
+				// has none. A species is only KNOWN in this sample because some
+				// world was in a position to count it.
+				continue
+			}
+			for i := range known {
+				known[i] = true
+			}
+			for _, e := range sv.Species {
+				if at, ok := wanted[censusEntryKey(e)]; ok {
+					total[at] += e.Bibites
+				}
+			}
+		}
+		for i := range ordered {
+			accs[i][idx].n++
+			if known[i] {
+				accs[i][idx].sum += total[i]
+				accs[i][idx].have++
+			}
+		}
+	}
+
+	for i, key := range ordered {
+		tr := SpeciesTrend{Key: key, Points: make([]*int, buckets)}
+		for b := 0; b < buckets; b++ {
+			p := accs[i][b].point(fromMs + int64(b)*bucketMs)
+			tr.Points[b] = p.Value
+			if p.Value != nil {
+				if *p.Value > tr.Max {
+					tr.Max = *p.Value
+				}
+				v := *p.Value
+				tr.Last = &v
+			}
+		}
+		out.Species = append(out.Species, tr)
+	}
+	return out
+}
+
+// SpeciesTrendsView answers one /api/species/trends request. The KEY SET IS THE
+// LIVING CENSUS UNION and nothing else — the same refusal the flat index makes:
+// a species that died out is not drawn a trend line here, however far it
+// travelled.
+func (a *Archive) SpeciesTrendsView(window time.Duration, buckets int) (SpeciesTrends, error) {
+	ck := "trends|" + window.String() + "|" + strconv.Itoa(buckets)
+	a.speciesHistory.mu.Lock()
+	defer a.speciesHistory.mu.Unlock()
+	if a.speciesHistory.trends == nil {
+		a.speciesHistory.trends = map[string]speciesTrendsEntry{}
+	}
+	if e, ok := a.speciesHistory.trends[ck]; ok && time.Since(e.at) < historyCacheFor {
+		return e.val, nil
+	}
+	// StatusView takes the archive's lock itself and is finished with before the
+	// file is read: the disk is never touched with that lock held.
+	keys := aliveKeys(a.StatusView())
+	samples, truncated, err := ReadMetricsTail(a.metrics.Path(), historyTailBytes)
+	if err != nil {
+		return SpeciesTrends{}, err
+	}
+	tr := BuildSpeciesTrends(samples, keys, time.Now().UnixMilli(), window, buckets)
+	tr.Truncated = truncated
+	if len(a.speciesHistory.trends) >= speciesHistoryCacheMax {
+		oldest, oldestAt := "", time.Time{}
+		for k, e := range a.speciesHistory.trends {
+			if oldestAt.IsZero() || e.at.Before(oldestAt) {
+				oldest, oldestAt = k, e.at
+			}
+		}
+		delete(a.speciesHistory.trends, oldest)
+	}
+	a.speciesHistory.trends[ck] = speciesTrendsEntry{at: time.Now(), val: tr}
+	return tr, nil
+}
+
+// aliveKeys is the living census union as comparison keys, in the census's own
+// slot order. It is the same union SpeciesIndexView builds, expressed through
+// the same key helper, so the trend column cannot describe a different set of
+// species from the rows it sits beside.
+func aliveKeys(view Status) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, sv := range view.Slots {
+		if !sv.StatsKnown || !sv.SpeciesKnown {
+			continue
+		}
+		for _, e := range sv.Species {
+			key := censusEntryKey(e)
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, key)
+		}
+	}
+	return out
 }
 
 // censusEntryKey is the one place the archive turns a census entry into a

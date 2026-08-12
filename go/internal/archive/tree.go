@@ -1,8 +1,28 @@
 package archive
 
-// The GENEALOGY of what is alive: the species tab's third view, and the one
-// thing the flat index cannot say — WHICH LIVING SPECIES ARE RELATED, AND WHERE
-// THEIR LINES MEET.
+// The SPECIES VIEW: what is alive, when each kind was first and last seen
+// crossing, and where their lines meet. It is ONE view now — it was two, a flat
+// census list and a separate family tree, and they are merged here.
+//
+// WHY THEY MERGED. The two views listed the same species from the same census in
+// two different orders, and a reader who wanted "how many of this one, and where
+// did it come from" had to hold one tab in their head while reading the other.
+// Worse, they made the same claim twice and could drift: two renderings of one
+// alive union is two places for it to be wrong. The merged view puts the census
+// facts ON the family — population, per-world counts, eggs and the three badges
+// sit on the row whose bar says when that species was first recorded and which
+// bar it descends from — and the flat ranking survives as a SORT of the same
+// rows rather than as a second surface. /api/species is untouched and still
+// serves the flat index: ringstat reads it, and a terminal table is a different
+// medium with a different answer.
+//
+// THE DRAWING IS A TIME AXIS, which is the other half of the merge. Horizontal
+// is wall-clock time, from the oldest thing the record dates to now; a species
+// is a BAR from its first recorded crossing to its last, or to the right-hand
+// edge while it is alive; a parent edge drops from the parent's bar to the
+// child's at the child's first-seen point. That turns "who came from whom" and
+// "when" into one picture, and it makes the record's own floor a line on it
+// rather than a footnote.
 //
 // WHERE THE ANCESTRY COMES FROM, AND WHY NOTHING HERE IS A GUESS. A migration
 // envelope carries an OPTIONAL species block, and that block has carried the
@@ -47,7 +67,15 @@ package archive
 //     always used — one call site for the replay, one for the live path, no
 //     third view of the same fact (species.go rule 1). The state stays
 //     O(species); the streamed replay holds no record after it has folded it.
-//     This file reads the aggregate and touches no disk at all.
+//     This file reads the aggregate and never reads the ledger.
+//
+//     IT DOES TOUCH ONE FILE, ONCE PER GENOME HASH, and the exception is worth
+//     naming because rule 1 used to say "no disk at all". The brain shape drawn
+//     on each species is parsed from ONE stored blob per species — the latest
+//     hash the record named, kept as one more string by the same single writer —
+//     and the parse is cached on that hash for the life of the process, outside
+//     every lock. So it is bounded by the drawn node set, not by the record, and
+//     a poll after the first costs nothing. See brain.go.
 //
 //  2. THE REDUCTION IS SERVER-SIDE. Three reasons and they compound: the page
 //     and ringstat render the SAME JSON, so one reduction in one place is what
@@ -133,9 +161,35 @@ type TreeNode struct {
 	// Population, Eggs and Worlds are the census's, and are present only for a
 	// living node. An ancestor has no population because it has none — that is
 	// why it is an ancestor and not a leaf.
-	Population int   `json:"population,omitempty"`
-	Eggs       int   `json:"eggs,omitempty"`
-	Worlds     []int `json:"worlds,omitempty"`
+	//
+	// WORLDS CARRIES THE COUNTS, not just the slots, because THIS VIEW IS THE
+	// SPECIES LIST NOW. The flat census tab it replaced showed a chip per world
+	// with that world's own bibites and eggs, and a merged view that dropped them
+	// would be a merge that lost half of what it merged. It is also what the
+	// per-species mini-map is filled from, against the grid published below.
+	Population int            `json:"population,omitempty"`
+	Eggs       int            `json:"eggs,omitempty"`
+	Worlds     []SpeciesWorld `json:"worlds,omitempty"`
+	// The rest of what the census tab showed about a living species, carried here
+	// for the same reason: Spellings is every OTHER raw spelling alive under this
+	// key right now (two worlds that write one species differently are one
+	// species and two labels), and the three badges are §19 B19's.
+	Spellings  []string `json:"spellings,omitempty"`
+	Excluded   bool     `json:"excluded,omitempty"`
+	ExcludedBy []int    `json:"excludedBy,omitempty"`
+	Everywhere bool     `json:"everywhere,omitempty"`
+	Endemic    bool     `json:"endemic,omitempty"`
+	// Recent is the newest recorded crossings of this species: lane and age. A
+	// SAMPLE, bounded by speciesRecentMax, never a count — the count is
+	// Crossings.
+	Recent []SpeciesCrossing `json:"recent,omitempty"`
+	// ParentName is the RAW parent species name the record last carried for this
+	// node, shown and never resolved (contract-a.md §16, A31). It is not the same
+	// thing as Parent below: Parent is an edge in the REDUCED tree and is empty
+	// on a root, while this is what the record says about the generation
+	// immediately above — which is exactly the fact a collapsed edge or a root
+	// hides.
+	ParentName string `json:"parentName,omitempty"`
 
 	// Parent is the key of this node's parent IN THE REDUCED TREE, "" for a
 	// root, and Collapsed is how many generations the edge swallowed — 0 for a
@@ -181,6 +235,65 @@ type TreeNode struct {
 	FirstMs   int64 `json:"firstMs,omitempty"`
 	LastMs    int64 `json:"lastMs,omitempty"`
 	Genomes   int   `json:"genomes,omitempty"`
+
+	// ---- THE LIFESPAN BAR, which is what this view draws on a time axis.
+	//
+	// SpanFromMs and SpanToMs are the two ends of one node's bar in wall-clock
+	// milliseconds, and they are DERIVED HERE rather than on the page for tree.go
+	// rule 2's reason: the page and any terminal renderer must not disagree about
+	// where a bar begins.
+	//
+	//	SpanFromMs is this node's FIRST RECORDED CROSSING. It is not a birth date
+	//	and this view never calls it one: it is the first time this archive was
+	//	copied on a creature of this species leaving a world.
+	//
+	//	SpanToMs is 0 for a LIVING species, which the renderer draws as a bar
+	//	running to the right-hand edge — to now. For a species alive nowhere that
+	//	is reporting, it is the LAST recorded crossing, and the bar stops there.
+	//
+	//	SpanDerived marks a node whose own record holds no crossing at all — an
+	//	ancestor named only as some child's parent. Its bar begins at its EARLIEST
+	//	DATED DESCENDANT, which is a bound the record genuinely supports (that
+	//	child's crossing named it, so it existed by then) and is drawn differently
+	//	because it is an inference and not a reading.
+	SpanFromMs  int64 `json:"spanFromMs,omitempty"`
+	SpanToMs    int64 `json:"spanToMs,omitempty"`
+	SpanDerived bool  `json:"spanDerived,omitempty"`
+
+	// ---- THE BRAIN, from ONE stored genome per species (brain.go).
+	//
+	// Neurons and Synapses are the shape of the LATEST genome of this species the
+	// crossing record named, as the content-addressed store holds it. Both are
+	// ABSENT when the store does not hold that blob — pruned past the retention
+	// horizon, never fetched, or a shape this parser cannot read — and absent
+	// renders as nothing at all. It is never an error and never a zero: a brain
+	// this archive cannot see is not a brain of no neurons.
+	Neurons  int `json:"neurons,omitempty"`
+	Synapses int `json:"synapses,omitempty"`
+}
+
+// TreeCell is one seat on the map, for the per-species mini-map beside each
+// living row. The grid is published because the SHAPE OF THE MAP IS NOT A
+// CONSTANT: this rig is 3×2 and the next one is not, and a renderer that drew
+// six dots in two rows because this one has six worlds would be wrong the first
+// time a seat is added.
+type TreeCell struct {
+	Slot int `json:"slot"`
+	Col  int `json:"col"`
+	Row  int `json:"row"`
+	// Reporting is whether this world contributed a census to the union above. A
+	// world that is live but silent is UNKNOWN in every dot of its column, never
+	// an absence of the species (§10.1), and the renderer marks it as such.
+	Reporting bool `json:"reporting"`
+	Live      bool `json:"live"`
+}
+
+// TreeMap is the seats the mini-map is drawn on. A (col,row) with no cell is a
+// HOLE — a square inside the map no world has claimed — and is drawn as nothing.
+type TreeMap struct {
+	Width  int        `json:"width"`
+	Height int        `json:"height"`
+	Cells  []TreeCell `json:"cells"`
 }
 
 // SpeciesTree is /api/species/tree: the reduced genealogy of everything alive.
@@ -224,6 +337,31 @@ type SpeciesTree struct {
 	// named a parent, which is an absent caption and never a date.
 	AncestrySinceMs int64 `json:"ancestrySinceMs,omitempty"`
 
+	// ---- THE TIME AXIS every bar is drawn against.
+	//
+	// SpanStartMs is the left-hand edge: the earliest thing this drawing has to
+	// hold, which is the oldest bar start OR the record's own ancestry floor,
+	// whichever is older — so the floor is always INSIDE the picture and can be
+	// drawn as the boundary it is. SpanEndMs is now.
+	//
+	// They are published rather than left to the renderer to infer, because a
+	// renderer inferring them from the nodes alone would put the floor off the
+	// left edge on every map whose oldest bar is younger than the floor.
+	SpanStartMs int64 `json:"spanStartMs,omitempty"`
+	SpanEndMs   int64 `json:"spanEndMs,omitempty"`
+
+	// Map is the grid the per-species mini-maps are drawn on. It is the census's
+	// own seats, from the same status frame the leaves came from.
+	Map TreeMap `json:"map"`
+
+	// LedgerOverflow is how many species the aggregate refused to track after
+	// speciesAggMax, carried here because THIS VIEW IS THE SPECIES LIST NOW and a
+	// truncated aggregate a reader cannot see is a wrong answer.
+	LedgerOverflow int `json:"ledgerOverflow,omitempty"`
+	// LedgerRecords is how many records the whole ledger holds, the same number
+	// the flat index published.
+	LedgerRecords int `json:"ledgerRecords"`
+
 	// The guards of rule 4, published rather than swallowed. MaxDepth is the
 	// deepest walk performed, WalkCapped how many hit treeWalkMax, CycleGuard
 	// how many met a node twice, and NodesCapped whether the reduced tree hit
@@ -249,6 +387,11 @@ type treeFacts struct {
 	// raw is a spelling for a node the census does not name: the one its
 	// descendants' records carried. "" when only the census names it.
 	raw string
+	// parent is this node's own recorded parent name, raw, and genomeHash the
+	// latest genome any crossing of it carried. Both are copies of one string
+	// each, taken under the lock and read after it.
+	parent     string
+	genomeHash string
 }
 
 // SpeciesTreeView builds the reduced genealogy. It takes the archive's lock
@@ -259,14 +402,20 @@ type treeFacts struct {
 // to order the result, where A is the living species (bounded by the census: 32
 // a world), D the ancestor depth (bounded by treeWalkMax) and N the reduced
 // nodes (bounded by treeNodeMax, and by A in any real tree). On the running rig
-// that is twelve walks of forty steps. Nothing here is proportional to the
-// ledger, which is the property rule 1 exists to keep.
+// that is twelve walks of forty steps. Plus, on the first poll after a species'
+// genome hash moves, one small file read and one JSON decode per such species —
+// never on a later poll, never per request, and never for a hash the store does
+// not hold. Nothing here is proportional to the ledger, which is the property
+// rule 1 exists to keep.
 func (a *Archive) SpeciesTreeView() SpeciesTree {
-	// SpeciesIndexView takes the lock itself, so it is finished with before the
-	// walk takes it again. Two short holds, never a nested one — and reusing the
-	// index rather than re-deriving the alive union is rule 2's discipline
-	// applied to this file: there is ONE statement of which species are alive.
-	idx := a.SpeciesIndexView()
+	// ONE status frame, and the index derived from it. Both take the lock
+	// themselves and are finished with before the walk takes it again — two short
+	// holds, never a nested one — and reusing the index rather than re-deriving
+	// the alive union is rule 2's discipline applied to this file: there is ONE
+	// statement of which species are alive, and now also one statement of which
+	// map they are alive on.
+	status := a.StatusView()
+	idx := a.speciesIndexFrom(status)
 	nowMs := time.Now().UnixMilli()
 
 	out := SpeciesTree{
@@ -277,9 +426,25 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		CensuslessSlots: idx.CensuslessSlots,
 		TruncatedSlots:  idx.TruncatedSlots,
 		LedgerSpecies:   idx.LedgerSpecies,
+		LedgerOverflow:  idx.LedgerOverflow,
+		LedgerRecords:   idx.LedgerRecords,
 		Alive:           len(idx.Species),
+		SpanEndMs:       nowMs,
 		Roots:           []string{},
 		Nodes:           []TreeNode{},
+		Map:             TreeMap{Cells: []TreeCell{}},
+	}
+	// The grid the mini-maps are drawn on, from the SAME status frame the leaves
+	// came from — never from a second read, which could describe a map the rows
+	// above it do not belong to.
+	if status.HaveStatus {
+		out.Map.Width, out.Map.Height = status.Map.Width, status.Map.Height
+		for _, sv := range status.Slots {
+			out.Map.Cells = append(out.Map.Cells, TreeCell{
+				Slot: sv.Slot, Col: sv.Position.Col, Row: sv.Position.Row,
+				Reporting: sv.StatsKnown && sv.SpeciesKnown, Live: sv.Live,
+			})
+		}
 	}
 
 	// aliveOrder is the index's own order — population descending, key ascending
@@ -332,6 +497,7 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 			}
 			f.crossings, f.firstMs, f.lastMs, f.genomes =
 				e.crossings, e.firstMs, e.lastMs, len(e.genomes)
+			f.parent, f.genomeHash = e.parent, e.genomeHash
 			p := e.parentKey
 			if p == "" {
 				break
@@ -446,13 +612,16 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		if row := aliveRow[k]; row != nil {
 			n.Alive = true
 			// A LIVING NODE'S LABEL IS THE CENSUS'S, raw, exactly as the index
-			// shows it — so a species reads the same on both views.
+			// shows it — so a species reads the same on every view.
 			n.Name, n.NameFrom = row.Name, "census"
 			n.Population, n.Eggs = row.Population, row.Eggs
-			n.Worlds = make([]int, 0, len(row.Worlds))
-			for _, w := range row.Worlds {
-				n.Worlds = append(n.Worlds, w.Slot)
-			}
+			// THE WHOLE CENSUS ROW, because this view is the species list now.
+			n.Worlds = append([]SpeciesWorld(nil), row.Worlds...)
+			n.Spellings = row.Spellings
+			n.Excluded, n.ExcludedBy = row.Excluded, row.ExcludedBy
+			n.Everywhere, n.Endemic = row.Everywhere, row.Endemic
+			n.Recent = row.Recent
+			n.ParentName = row.Parent
 			n.Crossings, n.FirstMs, n.LastMs = row.Crossings, row.FirstMs, row.LastMs
 			n.Genomes = row.Genomes
 		} else {
@@ -469,6 +638,7 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 			if f != nil {
 				n.Crossings, n.FirstMs, n.LastMs = f.crossings, f.firstMs, f.lastMs
 				n.Genomes = f.genomes
+				n.ParentName = f.parent
 			}
 		}
 		nodes[k] = &built{node: n}
@@ -614,6 +784,74 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		}
 		out.Roots = append(out.Roots, k)
 		emit(k, 0, seen)
+	}
+
+	// ---- THE LIFESPAN BARS, in one backwards pass.
+	//
+	// out.Nodes is DFS pre-order, so EVERY CHILD SITS AFTER ITS PARENT and a walk
+	// from the end has already seen a node's whole subtree by the time it reaches
+	// the node. That is what lets an undated ancestor inherit its earliest dated
+	// descendant's start without a recursion, without a memo and without a
+	// visited set — the ordering the emit above produced is the guard.
+	childFrom := make(map[string]int64, len(out.Nodes))
+	for i := len(out.Nodes) - 1; i >= 0; i-- {
+		n := &out.Nodes[i]
+		switch {
+		case n.FirstMs > 0:
+			// THE RECORD'S OWN ANSWER, always preferred: this node crossed a lane
+			// and the archive was copied on it.
+			n.SpanFromMs = n.FirstMs
+		case childFrom[n.Key] > 0:
+			// A node no crossing of its own ever dated. Its bar begins where its
+			// earliest dated descendant does, because that descendant's crossing
+			// NAMED IT as a parent — so the record does support "it existed by
+			// then", and supports nothing earlier.
+			n.SpanFromMs, n.SpanDerived = childFrom[n.Key], true
+		}
+		// A LIVING SPECIES HAS NO RIGHT-HAND END. 0 says so, and the renderer
+		// draws to the edge of the picture rather than to its last crossing —
+		// which would say it stopped when it merely stopped travelling.
+		if !n.Alive {
+			if n.LastMs > n.SpanFromMs {
+				n.SpanToMs = n.LastMs
+			} else {
+				n.SpanToMs = n.SpanFromMs
+			}
+		}
+		if n.SpanFromMs > 0 && n.Parent != "" {
+			if cur, ok := childFrom[n.Parent]; !ok || n.SpanFromMs < cur {
+				childFrom[n.Parent] = n.SpanFromMs
+			}
+		}
+		if n.SpanFromMs > 0 && (out.SpanStartMs == 0 || n.SpanFromMs < out.SpanStartMs) {
+			out.SpanStartMs = n.SpanFromMs
+		}
+	}
+	// THE FLOOR IS ALWAYS INSIDE THE PICTURE. It is where the record's ancestry
+	// begins, and a drawing that put it off the left edge would leave every root
+	// badge pointing at something the reader cannot see.
+	if out.AncestrySinceMs > 0 &&
+		(out.SpanStartMs == 0 || out.AncestrySinceMs < out.SpanStartMs) {
+		out.SpanStartMs = out.AncestrySinceMs
+	}
+	if out.SpanStartMs == 0 || out.SpanStartMs >= out.SpanEndMs {
+		// Nothing here is dated, or every date is in the future — which is a
+		// clock, not a genealogy. An hour of axis is drawn rather than a degenerate
+		// one, and every bar in it is absent anyway.
+		out.SpanStartMs = out.SpanEndMs - int64(time.Hour/time.Millisecond)
+	}
+
+	// ---- THE BRAIN, one stored blob per species, parsed once per hash ever.
+	// This is the only part of this view that can touch the disk, it does so
+	// outside every lock, and an absence is an absence (brain.go).
+	for i := range out.Nodes {
+		f := facts[out.Nodes[i].Key]
+		if f == nil || f.genomeHash == "" {
+			continue
+		}
+		if b, ok := a.brainFor(f.genomeHash); ok {
+			out.Nodes[i].Neurons, out.Nodes[i].Synapses = b.Neurons, b.Synapses
+		}
 	}
 
 	for i := range out.Nodes {

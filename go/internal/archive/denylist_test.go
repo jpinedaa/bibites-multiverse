@@ -314,8 +314,12 @@ func TestTheDenyListReachesEverySurfaceTheArchiveServes(t *testing.T) {
 	// The genealogy too: an ancestor's name arrives by a different route (a
 	// migration envelope's parentGenericName) and a suppression that reached
 	// every OTHER surface would leave the one nothing else on the page reads.
+	// And the shared trend answer, which is KEYED ON NAMES and is the newest
+	// surface — a species' population shape is not a name, but the key it is
+	// filed under is one.
 	for _, path := range []string{"/api/status", "/api/species", "/api/hops",
-		"/api/species/history?key=Cyanea+velox", "/api/species/tree"} {
+		"/api/species/history?key=Cyanea+velox", "/api/species/tree",
+		"/api/species/trends"} {
 		body := get(t, ts.URL+path)
 		if strings.Contains(body, "velox") {
 			t.Fatalf("%s still renders the denied name:\n%s", path, body)
@@ -328,6 +332,47 @@ func TestTheDenyListReachesEverySurfaceTheArchiveServes(t *testing.T) {
 	// The undenied species is untouched everywhere.
 	if !strings.Contains(get(t, ts.URL+"/api/species"), "Izus") {
 		t.Fatal("the species index lost a name nobody denied")
+	}
+}
+
+// TestTheDenyListSuppressesAQuotedParentName covers the one name-bearing field
+// that is not the row's own: BOTH the flat index and the merged view print the
+// raw parent species a record named, and a species is denied or not on its own
+// account. So a row nobody denied, quoting a species somebody did, must lose the
+// quote and keep everything else — which is the difference between suppressing a
+// name and suppressing a row.
+func TestTheDenyListSuppressesAQuotedParentName(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "deny.txt")
+	write(t, file, "Alpha nullus\n")
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(20, 0,
+			entry("Beta", "one", 10, 0), entry("Gamma", "two", 10, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	deny, err := NewDenyList(file)
+	if err != nil {
+		t.Fatalf("NewDenyList: %v", err)
+	}
+	a.deny = deny
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	a.mu.Lock()
+	// Only ONE of the two descends from the denied species, so the other is the
+	// control: nothing about it may change.
+	a.observeSpeciesLocked(child(base, "Beta", "one", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+1, "Gamma", "two", "Delta", "two"))
+	a.mu.Unlock()
+
+	ts := httptest.NewServer(a.httpHandler())
+	t.Cleanup(ts.Close)
+	for _, path := range []string{"/api/species", "/api/species/tree"} {
+		body := get(t, ts.URL+path)
+		if strings.Contains(body, "Alpha") {
+			t.Fatalf("%s prints the denied species as another row's parent:\n%s", path, body)
+		}
+		if !strings.Contains(body, "Beta") || !strings.Contains(body, "Delta two") {
+			t.Fatalf("%s suppressed a row instead of the name it quoted:\n%s", path, body)
+		}
 	}
 }
 

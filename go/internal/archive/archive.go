@@ -296,6 +296,10 @@ type Archive struct {
 	// same reason and bounded in entries as well as in age: a reader clicking
 	// through species must not re-read the sample file per click.
 	speciesHistory speciesHistoryCache
+	// The genealogy's brain-shape cache, kept apart from both for the third time
+	// and the same reason: it reads the genome store, and it is keyed on content
+	// so one hash is parsed once for the life of the process. See brain.go.
+	brains brainCache
 }
 
 type rateWindow struct {
