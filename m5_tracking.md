@@ -130,6 +130,14 @@ burst, and each one also costs the far end a bundle rebuild.
 - **Run `phase5far` while there is still one far end that answers the phone.** It has never been
   run; it needs two commands typed at the second computer, and D9 forbids the rig to send them.
   After M5 every peer is a peer the rig cannot drive. (*Next Steps* 4, *Inherited threads*.)
+  **2026-08-12: armed and found uncalibratable as written** — its hardcoded §15 A20 pair (burst 5,
+  2.0/sim-min) predates both the 2026-08-07 default raise (100/50) and the map's evolved migration
+  pressure (slot 6 measures 132.5 inbound/min at 6.5×; ~20/min with every sender at 1×, ten times
+  the drain bound). A pin rehearsal on slot 6 dammed 33 in 45 s and was reverted before the
+  64-entry queue cap. The far sidecar now paces its own outbound, so the burst-on-rejoin urgency
+  behind the thread is gone; what remains is either parametrising the phase's rate/burst/bound and
+  running it calibrated, or closing the thread on today's evidence. Details in
+  `dev_environment.md` (*The far end took its owed swap*, *phase5far cannot run as written*).
 
 ## Orchestration protocol
 

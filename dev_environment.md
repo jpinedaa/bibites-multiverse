@@ -2455,6 +2455,71 @@ replaced. It is not `bibites-multiverse-prewp45-bin/`, which is a roll older, an
 `~/.multiverse-rollback-bin/`, which is pre-crossing. It retires on the usual rule: when the map has
 run a day on the new binaries.
 
+**The far end took its owed swap on 2026-08-12 ~09:17Z, and Windows took the stop half without
+asking.** An overnight reboot (03:04:48 local; both processes gone at 03:00, the sidecar logging
+`shutting down` then `shutdown timed out` as Windows killed it after 5 s) had slot 6 dark for
+2 h 17 m before the operator's window opened — so the swap itself was a file copy over a stopped
+install, not a stop/start, and the far machine auto-starts nothing after a reboot: a dark slot 6
+on a quiet morning is Windows Update until proven otherwise. The bundle verified (`4ab0f476…`),
+the exe it carries verified in place
+(`ac14bb691603eb7f61757e0f0dd1d1954cd35f53a381c4a3485d37ae35aab374`), and what it replaced was
+**`63b1de8b…`** — the 01:28Z WP4/WP5-without-pacing build — kept beside the install as
+`multiverse-sidecar.exe.pre-pacing.bak`, which is the far end's rollback now. On start the new
+sidecar was granted `slot=6 reason=reclaimed position={Col:2 Row:1}` within a second, recovered
+custody `outbound=0 inbound=5` with **zero discarded bytes** (the damage line is an ERROR that
+prints only when `discardedBytes>0` — `go/internal/sidecar/sidecar.go` — so its absence is the
+pass), and printed the line the swap was for: `pacing this sidecar's own outbound frames under the
+relay's published ceiling` with `publishedFramesPerSecond=50 pacedFramesPerSecond=25
+pacedBurstFrames=12`. `--diagnose` read the live connection through the data dir — peak 12
+frames/s against the ceiling of 50, 0 bulk frames deferred, every declared edge open to a live
+peer — and `--my-slot` renders the slot, the custody depths and the whole map from the same door.
+The mod reattached by itself every time the sidecar returned (~25 s to `contract A: mod
+connected`), and the relay re-pushed every un-ACKed payload into `duplicate MIGRATION_PAYLOAD,
+delivering nothing`: exactly-once held across three sidecar generations in one morning. One
+gotcha re-proved: the world restarts at its persisted default timescale, so `timescale 6.5` was
+re-sent and confirmed via the cmd file after the game came back.
+
+**A rejoin after hours dark spends its first minute purging, and the relay will drop it once for
+that.** The first reconnect purged **23,974 expired tombstones** in one synchronous sweep, the
+connection went quiet for 52 s, the relay closed it, and the second connect re-granted
+`reason=reclaimed` and stayed. Read the pattern — `slot granted`, silence, `send failed:
+connection closed`, `slot granted` again — as the purge, not as a 4007 shed: the pacing build
+never bursts, and the journal is untouched by it.
+
+**The installed far-end scripts cannot swap a sidecar under a running game; that gap is plugged
+locally and still owed upstream.** `stop-slot6.ps1` stops the game unconditionally before its
+`-GameOnly` branch is consulted, and the full `start-slot6.ps1` starts a second game against one
+already running. The swap ran hand-mirrored sidecar-only halves instead, installed beside the
+originals as `start-sidecar-only.ps1` / `stop-sidecar-only.ps1` in
+`C:\Users\j_jor\multiverse-farend\`. `setup-farend.ps1` should grow the same pair so the next far
+end gets them from the template.
+
+**A fixed archive name plus `-Force` destroyed 107 MB of history in one line.** The first
+sidecar-only start archived the pre-swap log to a literal `…-20260812-preswap.log`; run again the
+same morning, its `Move-Item -Force` replaced that archive with the two-minute log of the
+generation in between. The 03:00 reboot evidence survives (quoted above, and
+`sidecar-slot6-20260812-swapproof.log` holds the swap-validation generation); the Aug 11
+21:27 → Aug 12 03:00 bulk does not. **Generation-stamp every archive name and never pass
+`-Force` to an archive move** — the installed script now does the former and omits the latter.
+
+**`phase5far` cannot run as written against today's map, and arming it is how we know.** Its dam
+and drain arithmetic hardcodes the OLD §15 A20 pair — burst 5, 2.0 per simulated minute — which
+`run-m4.sh` phase 6 keeps honest locally by pinning those numbers on its dam slot with
+`--inbound-rate`/`--inbound-burst` **and** slowing every sim first. Neither survives contact with
+the live map: slot 6 measured **132.5 inbound/min at 6.5×** (168 arrivals in a 76 s steady
+window, 09:32–09:34Z), so even with every sender at 1× the ~20/min that remains is ten times the
+drain bound's release rate, and the sidecar's 64-entry inbound queue trips OVERLOADED mid-phase. A
+two-minute pin rehearsal (09:29–09:31Z, rate 2.0 burst 5, world at 1×) dammed 33 organisms in
+45 s — the §9.4 mechanism, observed cross-machine — and was reverted before the cap; slot 6 runs
+the shipped defaults again. The honest paths from here: **(a)** parametrise the phase's rate,
+burst and bound (`FAR_PACE_RATE`/`FAR_PACE_BURST` in `allowed(t)`), calibrate them against the
+measured slowed-sender arrival rate, pin slot 6 the way phase 6 pins its dam, and finally run the
+thread out; or **(b)** leave the carried thread open and record that today's reboot supplied the
+dark-and-rejoin half unobserved — route-around held (the map ran 18/20 `peer_live` shapes while
+slot 6 was dark before, and did again), custody survived with zero discarded bytes, and the drain
+was paced by the very build the swap installed. The choice is the operator's; nothing about it
+blocks M5.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
