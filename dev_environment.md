@@ -2543,7 +2543,7 @@ window was expected to carry was not in the tree at all** — WP4's `limits` tab
 | The ledger gap | **ZERO, and not by a narrow margin** — see the accounting below |
 | The relay | TERM to healthy in **0.9 s**; slot 6 reclaimed **0.4 s** after the listener came up |
 | The five sidecars | every one `reason=reclaimed`, own coordinate, **zero discarded journal bytes**, pacing line present (`pacedFramesPerSecond=25 pacedBurstFrames=12`). Start to grant: **0.8 s, 0.8 s, 1.9 s, 1.8 s, 1.6 s** |
-| Observation | 32 samples, 11:37:32Z–11:46:12Z: **24/24** lanes and **6/6** live in every one, `holes` **0**, `heldDepth` **0** and `timeoutBounces` **0** throughout; `custodyDepth` 5–32 and `pacedDepth` 0–7, both falling every time they rose; population 377–442; ~2,290 ledger records a minute. **Zero** new `level=ERROR` and **zero** sheds on the relay and all five sidecars — the archive's single `ERROR` is the old damaged ledger line, re-reported at replay |
+| Observation | 44 samples, 11:37:32Z–11:49:32Z: **24/24** lanes and **6/6** live in every one, `holes` **0**, `heldDepth` **0** and `timeoutBounces` **0** throughout; `custodyDepth` 3–37 and `pacedDepth` 0–7, both falling every time they rose; population 340–442; ~2,290 ledger records a minute. **Zero** new `level=ERROR` and **zero** sheds on the relay and all five sidecars — the archive's single `ERROR` is the old damaged ledger line, re-reported at replay |
 
 **The zero-gap accounting is the point of the pause, and it is an argument about what *could* have
 happened, not about how fast the archive was.** With all five local sidecars down and slot 6's
