@@ -2795,6 +2795,152 @@ worse than the rig is. And the journals **shrank at the restart** (slot 1, 36.9 
 no `compacted the journal` line anywhere: that is `internal/journal` still compacting at `Open`, as
 it always has, and it is a rewrite of live entries, not a discard.
 
+### The stratigraphic-lifespan window, 2026-08-12 — the merged view goes live, and two defects with it
+
+**The third archive-only pause of the day, run under the owner's standing grant, and the first one
+whose point was a PAGE rather than an endpoint.** It carried the merged stratigraphic lifespan view
+(`5f2dc83` — the species tab and the tree tab become one drawing against time) and the root badges
+(`bdb5efb`). The relay was not restarted and its `relaySessionId` is still
+`27005d53-02f0-4447-985f-67b0d03e2c86`; the five games, the mod and slot 6 were untouched. **The
+view is live and it is right about the map — and the browser sweep it was restarted for found two
+rendering defects, neither of them patched.** They are below, with their evidence, and they are the
+next arc's work; the grant already covers the re-restart that lands the fix.
+
+| | |
+|---|---|
+| Crossings paused | **5m 02.2s** — no local sidecar was up between **21:58:13.18Z** and **22:03:15.4Z**; all five had reclaimed by **22:03:29.6Z**. The worlds simulated throughout |
+| The archive | down **21:59:19.927Z → 22:03:11.409Z (3m 51.5s)**, entirely inside that pause. Replay of **9,511,821 records / 3.18 GB** took **231 s** |
+| Replay memory | **VmHWM 1,928,848 kB (1.84 GiB)** against the outgoing process's 2,282,392 kB — the streamed profile again, on a ledger 7% larger than the archive-views window's |
+| Replay speed | **41.2 k records/s**, against that window's 47.8 k and the debt window's 57 k. **The slide is real and it is now three points on one host** — size the next paused window from **41 k/s**, and see below |
+| The ledger gap | **ZERO**, with the widest margins of the three — see the accounting below |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, pacing line present (`pacedFramesPerSecond=25 pacedBurstFrames=12`), and `--diagnose` **PASS journal-replay … zero discarded bytes** on all five. TERM to exit: **5.1 / 5.4 / 1.3 / 0.14 / 0.16 s**. Start to healthy: **2.1 / 2.2 / 1.7 / 2.5 / 5.7 s** |
+| Observation | 8 samples, 22:04:26Z–22:06:58Z, then a `rig-check --wire` at 22:13Z: `holes`, `heldDepth` and `timeoutBounces` **0** throughout; `custodyDepth` 61–112 and `pacedDepth` 22–42, both falling every time they rose; population 258–301. **Zero** new `level=ERROR` and **zero** sheds across the relay, the five sidecars and the archive — the archive's single `ERROR` is the old damaged ledger line (`skippedLines=1 skippedBytes=776`), re-reported at replay |
+
+**The zero-gap accounting, and the widest margins yet.** The last ledger record of any kind before
+the archive stopped was an `ACK` at **21:58:12.743Z** — **67.2 s** before the TERM and **0.43 s
+BEFORE the last local sidecar had exited**, so the ledger was already still while the pause was
+still closing. The first record after the archive returned was a `MIGRATION`, slot 5 → slot 2 on
+its south edge, at **22:03:46.775Z**, **35.9 s** after it re-subscribed and **17.1 s** after the
+last sidecar was back. The ledger file was **byte-frozen at 3,176,865,744 bytes** for the whole
+outage. And the relay says the same thing the archive-views window's did: it logged **nothing at
+all** between its last `client gone` at **21:58:13.182Z** and the archive's return at
+**22:03:10.887Z** — no forward, no hold, no shed. Take the long margin when the pause is cheap; it
+cost 60 s of `sleep` and it makes the argument readable without opening the relay log.
+
+**The counter and the file still answer the same question.** Measured on the frozen ledger:
+**`wc -l` 9,511,822, `ledgerRecords` 9,511,821, `ledgerSkippedLines` 1, difference 0** — and the
+counter read the same value either side of the 3 s `wc`, which is what makes the pair exact. The
+`wc` itself was 3 s rather than the archive-views window's 25 s, because the replay had just walked
+the whole file into page cache.
+
+**Gzip, the ceilings and the horizon, all unchanged.** `/api/status` **13,045 → 1,227 bytes
+(10.63×)** with `Vary: Accept-Encoding`, `/healthz` identity at 3 bytes when gzip is offered. All
+eight `limits` keys are still published and `minContractVersion` is still absent. `genomeHorizonMs`,
+`genomesEvicted`, `genomesEvictedBytes` and `genomeGapsExpired` are **all four absent**: the
+relaunch went through the rig's own `start_archive` with `ARCHIVE_HTTP=0.0.0.0:8796` preserved and
+**no** new environment.
+
+**A SHARED INTERNAL PACKAGE MAKES MOVERS OUT OF COMMANDS THE CHANGE WAS NOT ABOUT.** The
+archive-views window taught the stamp-stripped comparison; this one adds the half it did not need.
+`bin/` was not one revision but two — `archive` and `ringstat` at `eeff267`, the other four at
+`bde0f1c` — so the comparison has to run **per binary against ITS OWN installed revision**, and
+`-trimpath -buildvcs=false` builds of all three revisions found **four** movers where the window was
+about one: `archive` and `ringstat` as expected, and **`sidecar` and `worldstat` as well**, because
+`5f2dc83` lifted `Canonical`'s dialect selection into a shared `bb8.dialect()` and added
+`bb8.BrainStats` for the brain rings, and both of those commands link `internal/bb8`. Reading the
+diff settles what the digest cannot: `Canonical` keeps the same three error paths and the same
+outcome on each, so neither command's behaviour moved. **Only `archive` and `ringstat` were moved
+over `bin/`**; the sidecar and worldstat were deliberately left at `bde0f1c` so the window stayed
+archive-only and the five live peers restarted on the very bytes they had been running. **A mover
+is not automatically a thing to install** — and a plain `go build -o ../bin/ ./cmd/...` after this
+would quietly install two of them, so run it inside a window that means to.
+
+**The rollback set is `/mnt/wsl/data/slv-2026-08-12/rollback-bin/`** — `archive.RUNNING`
+(`3af843a8…`, copied from `/proc/2266682/exe`), `archive.bin` and `ringstat` (`6f458a5d…`). The two
+archive copies were the same bytes again, as in the archive-views window, but they are still taken
+and compared rather than assumed. It retires on the usual rule.
+
+**THE REPLAY IS STILL SLOWING, AND THE TREE IS NO LONGER THE ONLY SUSPECT.** 57 k/s at 8.44 M
+records, 47.8 k/s at 8.87 M, **41.2 k/s at 9.51 M** — the ledger grew 13% since the middle point
+and the per-record cost grew another 16%, on the same host in the same afternoon. The archive-views
+window named the tree's per-record `observeSpeciesLocked` maintenance as the prime suspect; this
+window adds per-record work of its own to the same path (the merged view's spans and the per-node
+lifespan bounds are maintained there too), so the honest reading is that **the species derivation as
+a whole now costs about 40% of the replay it did two windows ago**. That is not yet a fault and no
+gate failed, but it is a third point on a straight line, and the next archive change is where it is
+worth measuring rather than assuming — a 12 M-record ledger at this rate is a five-minute pause.
+
+**Slot 6's game went away 33 minutes before the pause, and that is the far end's own event.** The
+relay logged `peer=slot-6 … modConnected=false exportEdges=[]` at **21:25:03Z**, with its sidecar
+still connected — so this window ran against a five-game map, and the shape after the resume is the
+one this file already documents for a dark slot 6: **18/20 lanes open, slot 3's north and south
+closed with `peer_mod_absent`, and slot 4's west and slot 5's east re-paired as bypasses**. Slot 6's
+sidecar sits on 22–28 inbound deliveries it cannot hand to a game, which is custody working. It is
+not the orchestrator's to fix (D9), and it makes the zero-gap argument stronger rather than weaker:
+a slot whose mod is gone cannot export at all. **It also moved under the pre-flight** — `rig-check
+--wire` was at the bar before the build, and the far end changed between that check and the pause,
+so a pre-flight is a fact about a moment and the post-resume bar has to be read against what the map
+IS.
+
+**THE BROWSER VERDICT: the view is right about the map, and two things it draws cannot be read.**
+Everything the merged view claims about this rig checks out against `/api/status` — 20 rows with the
+species glyph as the only coloured thing, bars on a time axis with `now` at the right edge, 18 parent
+drops, 3 dotted collapsed lead-ins labelled `+7 +1 +8` against the stat line's "generations collapsed
+16", 16 sparklines against 16 series from `/api/species/trends`, and mini-maps cross-checked four
+ways (`joeyclanahani` S1 4 / S2 14 / S3 9 / S4 15 / S5 20, `garnariensis` slot 3 alone,
+`Todae hernandius` slot 5 alone, `Basic bibite` slot 2 alone) with **slot 6 drawn as an unknown dot
+and never an empty one**. A row opens to `worlds`, `record` (`41164 crossing(s) · 4625 distinct
+genome(s) · first 4h 11m ago`), `brain` and `parent species … shown, never resolved`. The population
+toggle re-ranks the 16 living species and draws **no** edges, as designed; search keeps a match's
+connecting ancestor and answers "no species matches that search"; `#tree` lands on the species tab;
+the map and settings tabs are unchanged, ceilings card and all. **Zero console messages of any
+kind.** The two defects:
+
+- **THE ROOT BADGES ARE CLIPPED OUT OF VIEW — the whole of `bdb5efb` is unreadable on the page.**
+  Every label rides in one `<text class="nm" clip-path="url(#lfclip)">`, the clip is
+  `LF_NAMEX-4 = 26` wide by `LF_NAMEW = 366` so its right edge is **x 392**, and the badges are
+  `tspan`s appended to that same run with **no width budget at all**. Measured live:
+  `Basic bibite`'s `NO RECORDED ANCESTRY` spans **x 367 → 493** and is painted as **"NO R"**;
+  `Zhiluus tardisitguyus`'s `THE RECORD BEGINS HERE · 31 GENERATIONS ABOVE` spans **x 425 → 708**
+  and is **invisible entirely**, because it begins 33 px past the clip. `ALSO AN ANCESTOR` loses its
+  tail on both rows that carry it, and every ancestor's `· extinct here · N living lines below` is
+  cut mid-word. The mitigation the code comments promise — "the full name is always in the row's
+  tooltip" — **does not exist**: the row group has no `<title>` and no `aria-label`, so nothing on
+  the page can recover the clipped text. Both badges are correct in the DOM and in
+  `/api/species/tree`; only the drawing loses them.
+- **THE AMBER ANCESTRY FLOOR BOUNDARY IS NEVER DRAWN.** `tree.go` clamps `SpanStartMs` down to
+  `AncestrySinceMs` under the comment "THE FLOOR IS ALWAYS INSIDE THE PICTURE"; `lfAxis` then guards
+  the line with `x.ancestrySinceMs > sc.t0` where `sc.t0` **is** `spanStartMs`. Equal is not
+  strictly greater, so on the normal case — the floor older than every bar, which is what the server
+  guarantees — `.floor`, `.floorlbl` and `.prefloor` are **all three absent from the DOM**. Measured
+  live, both are `1786079662896` (2026-08-07T05:14:22.896Z) against an earliest bar 14 s later. The
+  textual floor still prints in the stat line ("ancestry recorded since 2026-08-07 UTC"), so what is
+  missing is exactly the boundary. `>=`, and a zero-width shade allowed to be zero-width, is the
+  whole fix.
+
+**A third, softer one: the drawing is 1344 px wide no matter how wide the window is.**
+`LF_PLOTW` 700 plus the fixed columns is a constant, and `#lfbox` is the window minus 83, so the
+picture **fits only at a window ≥ 1427 px**. At 1280 the box is 1197, `scrollLeft` is 0 and there is
+no scroll-to-now, so **147 px — the `now` end of every living bar, which is the point of the
+view — sit past the right edge** until the reader finds the inner scrollbar. The outer rule is
+respected and worth recording: at 500 px `documentElement.scrollWidth == clientWidth == 485`, **no
+horizontal page scroll**, and every overflowing element is inside `.lifewrap`.
+
+**The brain ring blinks, and that is the genome gaps showing through.** Sampled ten times over a
+minute, between **2 and 6** of ~20 rows carried a ring and the membership changed on nearly every
+poll; only `Sheeplasius godopedrus` (extinct here, so its latest genome is frozen) and
+`Basic bibite` (which never exports) were stable. With **154 k+ `genomeGaps`** outstanding, a
+species that crosses often rotates its newest genome hash faster than the archive can fetch the
+blob, and the row's own detail says so in words — `brain  no copy of its latest genome is held
+here`. That is §10.1 working exactly as written, but **a reader must not expect the ring to be a
+property of a row**; it is a property of this minute.
+
+**One smaller thing.** `save-health` came back `WARN` on slots 2, 3 and 4 immediately after the
+window — 2336, 2670 and 4072 ms against the 2000 ms stall budget — and was clean again later. The
+archive's 3.18 GB replay is production load on this host in exactly the way `go test ./...` is
+(*A controlled reproduction of the 18:39Z storm*), so a save that overruns inside a replay window is
+dated to the replay, not to the game.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
