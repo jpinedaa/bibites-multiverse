@@ -1,0 +1,23 @@
+[Unit]
+# DQ2, second item: "Monitoring that speaks when nobody is looking. The status
+# page is excellent and it is a pull surface. A map that went to zero peers at
+# 03:00 is currently discovered by someone opening a browser."
+Description=Bibites Multiverse service checks, and the alert that reaches a person
+Documentation=file:///opt/multiverse/deploy/monitor.sh
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=multiverse
+Group=multiverse
+ExecStart=/opt/multiverse/deploy/monitor.sh
+# A check run that cannot finish in two minutes is itself a symptom; the next
+# tick will try again.
+TimeoutStartSec=120
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+ReadWritePaths=/var/lib/multiverse/monitor

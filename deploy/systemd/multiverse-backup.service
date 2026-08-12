@@ -1,0 +1,25 @@
+[Unit]
+# DQ2, third item: "Backup of the two irreplaceable things. The relay's ring.json
+# is the slot-to-identity binding for every participant... The archive's three
+# durable files are the record itself, and D11 makes them the seed of M7. Neither
+# is reproducible from anywhere else."
+Description=Bibites Multiverse durable-file backup
+Documentation=file:///opt/multiverse/deploy/backup.sh
+After=multiverse-archive.service
+
+[Service]
+Type=oneshot
+User=multiverse
+Group=multiverse
+ExecStart=/opt/multiverse/deploy/backup.sh
+# The daily tier compresses a ledger that reaches tens of gigabytes. It runs at
+# the lowest useful priority so it never competes with a crossing.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3h
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+LockPersonality=true
+ReadWritePaths=/var/lib/multiverse/backup /var/lib/multiverse/monitor
