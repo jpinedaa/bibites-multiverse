@@ -130,10 +130,15 @@ burst, and each one also costs the far end a bundle rebuild.
   **three rendering defects, fix in flight batched with the seed-stock hiding**: the root badges
   clip unreadably out of the label column (bdb5efb is live-but-invisible), the ancestry-floor
   boundary never draws (`>` where `>=` — equal is not strictly inside), and the plot is fixed
-  1344 px (now-edge off-screen below 1427 px windows). Watch note: the brain ring blinks —
-  latest-hash rotates faster than blobs are fetched at 154 k+ genomeGaps. Replay-rate series now
-  57 → 47.8 → 41.2 k rec/s across the day's three windows: the per-record view maintenance is
-  the standing suspect, worth a look before the ledger doubles.
+  1344 px (now-edge off-screen below 1427 px windows). **All three defects + the seed hiding verified live 2026-08-12 22:54Z**
+  (979d72b landed; 0ff9873 the fourth zero-gap window) — badges readable, floor drawn, plot
+  elastic, seed hidden with a free reveal, brain ring stabilized (latest-READ genome, one
+  membership set across ten polls). Replay-rate reading CORRECTED: 57 → 47.8 → 41.2 → 47.3 k/s
+  — the series tracks host load too; size pauses from ~45 k/s and treat it as noisy. **One open
+  owner call from the sweep:** the axis's left edge is pinned by the ancestry FLOOR (08-07),
+  which is four days older than every drawn bar — so ~67% of the plot is empty and hiding the
+  seed changed nothing. Options: axis fits the oldest drawn bar with the floor as an off-axis
+  caption, or keep the boundary inside and accept the empty space.
 - **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
   stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
   bars — **replacing both the species tab and the tree tab with one merged view**. Included:
