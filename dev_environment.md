@@ -29,7 +29,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | The plugin | `0.6.4` (`MultiversePlugin.Version`), **deployed to the five local games 2026-08-11 in the crossing window** — the **public-release build**, and the first that speaks **`contract-a/2.4`**: it presents a bearer token on the Contract A upgrade (§21 A47), reading the path in `MULTIVERSE_CONTRACT_A_TOKEN_FILE`; it reports `blobDroppedForSize` on `parents[]` (A49); and it handles the sidecar's `4007` close for an export set the map cannot use (A50). Underneath it is unchanged: `0.6.3`'s `SavePhases`, which times `SaveSystem.CreateSave` from the inside and puts the decomposition on every `[M4-SAVE]` line (*Watch items*, first item, and it is measurement only — a span it cannot resolve reads `0` rather than failing the save); `0.6.2`'s headless-speed work (`MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device — *A world can be at the wrong time scale*, in Gotchas); `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping); and the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. **The minor moved this time, and it did not for `0.6.2` or `0.6.3`** — those added no wire field, which is why the five local slots published `0.6.3` against `contract-a/2.3` through 2026-08-10. **Slot 6 crossed the evening of 2026-08-11** (far end, ~01:19Z 08-12): it took the `0.6.4` bundle (`32f41f8`) onto `contract-a/2.4` / `wss://…/contract-b/v4`, and its sidecar was brought current to the WP4/WP5 rebuild (`4dd2ac1`) ~9 min later — so slot 6 now publishes `0.6.4` / `contract-a/2.4` like the five local slots, and the whole map is on one version. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | **`contract-b/4.0`**, running on the living deployment since the crossing of **2026-08-11** — the M5 public-release set (§22, B22–B32). The three that changed how this rig is *operated*: **B22** replaces the one shared LAN token with a per-peer credential bound to the `peerId`, verifiers in `<relay-data-dir>/peers.json`; **B23** puts TLS at the relay's front door, so the whole listener is `wss://` including loopback; and **B32** moves the path to **`/contract-b/v4`** and crosses the fleet in lockstep. Beside them: B24's published capacity table, B25's optional `--min-contract-version` floor (left **unset** here), B26's forward acknowledgements, B27's `subscribe` grant for the archive, B28's authenticated admin path, B29's placement-under-churn rules and B30/B31's escaping and game-version rules. Under all of it, unchanged: the world-settings readout (§19), §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, **§20's disk budget (B20)** — timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — and §21's genome-pump bounds (B21). It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`, and since 2026-08-10 it **measures** each world's achieved time scale beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas). Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` — **except against a live map**, where a running sidecar holds `bin/sidecar` open and an in-place build fails with `ETXTBSY`, so the build goes to a scratch directory on the same filesystem and is renamed over the binary instead. That is a crossing's P0.3 and P3 (`e2e/crossing/RUNBOOK.md`) and it is equally the shape of every rolling sidecar roll since (*The living deployment*) |
+| The Go side | **`contract-b/4.0`**, running on the living deployment since the crossing of **2026-08-11** — the M5 public-release set (§22, B22–B32), plus **§23's B33/B34 genome-retention horizon** and the archive batch, both live since the batched debt window of **2026-08-12** (*The living deployment*). The three that changed how this rig is *operated*: **B22** replaces the one shared LAN token with a per-peer credential bound to the `peerId`, verifiers in `<relay-data-dir>/peers.json`; **B23** puts TLS at the relay's front door, so the whole listener is `wss://` including loopback; and **B32** moves the path to **`/contract-b/v4`** and crosses the fleet in lockstep. Beside them: B24's published capacity table (published on the wire and logged at startup, **not** yet on the archive's `/api/status`), B25's optional `--min-contract-version` floor (left **unset** here), **B26's forward receipt** — the relay emits one per forward and the sending sidecar records it durably against its journal entry, running on the deployment since 2026-08-12 — B27's `subscribe` grant for the archive, B28's authenticated admin path, B29's placement-under-churn rules and B30/B31's escaping and game-version rules, B30 also being the archive's operator-side render deny list (`--deny-list`, **unset** here). The archive itself now **streams** its ledger replay rather than holding it — 8.44 M records replay in ~148 s at a **1.53 GiB** peak, against ~7.86 GiB for the same work before — **gzips** its HTTP surface under standard `Accept-Encoding` negotiation (9.15× on `/api/status`, identity below a 1,400-byte floor), counts a `GENOME` line as the ledger record it is so `ledgerRecords` matches `wc -l` minus only the lines replay could not parse, and takes a **genome horizon** (`--genome-horizon` / `MULTIVERSE_GENOME_HORIZON`) that is **unset on this rig** — an absent `genomeHorizonMs` on the status page is how a reader knows nothing is being pruned. Under all of it, unchanged: the world-settings readout (§19), §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, **§20's disk budget (B20)** — timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — and §21's genome-pump bounds (B21). It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`, and since 2026-08-10 it **measures** each world's achieved time scale beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas). Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` — **except against a live map**, where a running sidecar holds `bin/sidecar` open and an in-place build fails with `ETXTBSY`, so the build goes to a scratch directory on the same filesystem and is renamed over the binary instead. That is a crossing's P0.3 and P3 (`e2e/crossing/RUNBOOK.md`) and it is equally the shape of every rolling sidecar roll since (*The living deployment*) |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -2375,7 +2375,7 @@ what belongs here is only that the deployment took it and stayed up.
 | The new gates | `<data-dir>/listen.addr` **and `<data-dir>/sidecar-process.json`** present on all five after restart, the second carrying pid, start time, peer id and listen address; `--my-slot` answered each slot's real state, exit 0 on all five; every `/proc/<pid>/exe` digest **SAME** as `bin/sidecar` with no `(deleted)` |
 | The pacing line | present at every reconnect, `pacedFramesPerSecond=25 pacedBurstFrames=12` against a published ceiling of 50 — the previous roll's change, read back on this one |
 | The games | **not restarted.** No mod change, so no `deploy.sh` and no time-scale re-send. `modVersion` **0.6.4** and `contractAVersion` **contract-a/2.4** throughout |
-| The archive and the relay | **not restarted**, deliberately. `ringstat.go` changed under `385991f`'s termsafe refactor and is behaviour-identical, so the archive and `ringstat` wait for their own batched restart — which is still also what WP4's `limits` table waits on |
+| The archive and the relay | **not restarted**, deliberately. `ringstat.go` changed under `385991f`'s termsafe refactor and is behaviour-identical, so the archive and `ringstat` wait for their own batched restart — taken later the same day (*The batched debt window*). WP4's `limits` table was expected to ride with it and **did not**: it turned out never to have been implemented, and that window records why |
 | Observation | 11 samples at 30 s, 04:34:48Z–04:40:22Z: `heldDepth` **0** and `timeoutBounces` **0** in every one; `custodyDepth` 3–20 and `pacedDepth` 0–5, both falling every time they rose; ~990–1 070 migrations a minute; population 368–432. **Zero** new `level=ERROR`, **zero** sheds and **zero** discarded bytes on all five sidecars and on the relay |
 
 **The one thing that went wrong was the restart environment, not the binary, and it is the lesson
@@ -2523,6 +2523,130 @@ dark-and-rejoin half unobserved — route-around held (the map ran 18/20 `peer_l
 slot 6 was dark before, and did again), custody survived with zero discarded bytes, and the drain
 was paced by the very build the swap installed. The choice is the operator's; nothing about it
 blocks M5.
+
+### The batched debt window, 2026-08-12 — one pause, every banked rollout
+
+**The window the two sidecar-only rolls kept deferring to: the archive and the relay restarted
+together, inside a deliberate pause of the five local sidecars, so that the archive's replay cost
+the ledger nothing.** It carried B26's forward receipt (the relay emits, the sidecar records) and
+the whole archive batch — gzip on the HTTP surface, the streamed ledger replay, and the
+`ledgerRecords` counter fix, plus two *capabilities* that arrive switched off on this rig: the
+render deny list (`--deny-list`) and the genome-retention horizon (`--genome-horizon`). The five
+games and the mod were untouched; slot 6 is the owner's and was not touched either. **One item the
+window was expected to carry was not in the tree at all** — WP4's `limits` table; see below.
+
+| | |
+|---|---|
+| Crossings paused | **5m 21s** — no local sidecar was up between **11:28:39.1Z** and **11:33:59.7Z**. The worlds simulated throughout; the mods closed their edges and held |
+| The archive | down **11:29:38.2Z → 11:32:07.5Z (2m 29s)**, entirely inside that pause. Replay of **8,441,773 records / 2.7 GB** took **148 s** |
+| Replay memory | **VmHWM 1,599,064 kB (1.53 GiB)** against the outgoing process's **8,244,952 kB (7.86 GiB)** — the streamed replay is a **5.2× cut in peak**, and it cost no wall time at all: **57 k records/s**, against the crossing's 128 s for 6.24 M records (**49 k/s**) on the old model |
+| The ledger gap | **ZERO, and not by a narrow margin** — see the accounting below |
+| The relay | TERM to healthy in **0.9 s**; slot 6 reclaimed **0.4 s** after the listener came up |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, **zero discarded journal bytes**, pacing line present (`pacedFramesPerSecond=25 pacedBurstFrames=12`). Start to grant: **0.8 s, 0.8 s, 1.9 s, 1.8 s, 1.6 s** |
+| Observation | 32 samples, 11:37:32Z–11:46:12Z: **24/24** lanes and **6/6** live in every one, `holes` **0**, `heldDepth` **0** and `timeoutBounces` **0** throughout; `custodyDepth` 5–32 and `pacedDepth` 0–7, both falling every time they rose; population 377–442; ~2,290 ledger records a minute. **Zero** new `level=ERROR` and **zero** sheds on the relay and all five sidecars — the archive's single `ERROR` is the old damaged ledger line, re-reported at replay |
+
+**The zero-gap accounting is the point of the pause, and it is an argument about what *could* have
+happened, not about how fast the archive was.** With all five local sidecars down and slot 6's
+sidecar left up but with no live neighbour, **no crossing can complete**, so the archive's outage
+had nothing to miss. The ledger says so directly: the last record of any kind before the archive
+stopped was a `GENOME` at **11:28:47.0Z** — **51 s before** the TERM — and the first after it
+returned was a `GENOME` at **11:33:16.2Z**, **69 s after** it re-subscribed. The last real crossing
+before the window was `MIGRATION` slot 6 → 5 at **11:28:40.5Z**; the first after was slot 2 → 1 at
+**11:35:06.4Z**, once both ends of that lane were back. The archive's outage sits inside a hole in
+which nothing was written *because nothing could be*, with **59 s of margin before and 112 s
+after**. This is the crossing's result re-proved on a ledger a third larger, and it is now the
+pattern for any archive restart: pause the senders first and the gap is empty by construction.
+**The counter-example is in this file**: the unpaused restart of 2026-08-10 (*The archive's ledger
+recovery*) cost the ledger **1,940 crossings** in 100 seconds, because the map went on crossing
+while its only subscriber was away. Those two windows are the same operation with and without the
+pause, and the pause is cheap — the worlds never stop simulating, they only stop *exchanging*.
+
+**`ledgerRecords` and `wc -l` finally answer the same question, and the counter JUMPED because of
+it.** Before the window the page read **8,294,368** against **8,415,926** lines — **121,558 low,
+1.44%** — because the startup replay counted `GENOME` lines and the live path did not, so the
+counter drifted below the file from the first genome fetch after every boot. **This is the artifact
+named on 2026-08-10** (*The archive's ledger recovery*, which measured 166,214 `GENOME` lines of
+pure counting artifact inside that restart's apparent shortfall); what was diagnosed there is
+fixed here, and a shortfall computed from the counter and `wc -l` is now a real one. With the map paused
+the ledger is frozen, which makes the reconciliation exact rather than a race against an appending
+file: **`wc -l` 8,441,774, `ledgerRecords` 8,441,773, `ledgerSkippedLines` 1, difference 0.** The
+jump is the fix landing, not new records. The one skipped line is old, permanent damage in an
+append-only file and is *the whole* of the difference — it is also the window's only `level=ERROR`
+line, and it is the archive saying so on purpose.
+
+**Gzip is negotiated, and only negotiated.** `/api/status` answers `Content-Encoding: gzip` with
+`Vary: Accept-Encoding` to a client that asks, **1,687 bytes against 15,430 — 9.15×** — and plain
+identity JSON with the same `Vary` to one that does not. `/healthz` stays identity in both cases:
+it is three bytes, well under the 1,400-byte floor the compressor commits above.
+
+**The genome horizon is OFF here, and the page proves it by omission.** `genomeHorizonMs` is
+**absent** from `/api/status`, as are `genomesEvicted`, `genomesEvictedBytes` and
+`genomeGapsExpired`. That is the contract default and §10.1's rule that unknown is a value: an
+absent horizon is how a reader knows nothing is being pruned. The rig was restarted through the
+launch path with `ARCHIVE_HTTP=0.0.0.0:8796` preserved and **no** new environment, so
+`MULTIVERSE_GENOME_HORIZON` is unset. The hosted deployment is where `720h` goes on.
+
+**B26's receipt closed its loop on the first traffic, and the journals are the evidence.** Every
+one of the five sidecar journals held **zero** lines carrying `receiptSessionId` before the window
+and hundreds within ten minutes after it — **slot 1: 460, slot 2: 360, slot 3: 488, slot 4: 264,
+slot 5: 112** — each carrying `forwardReceipts`, `receiptDestSlot`, `receiptForwardedAt` and the
+new relay's own `relaySessionId` `27005d53-02f0-4447-985f-67b0d03e2c86`. The session is the
+load-bearing field: a receipt is a fact about *this* relay generation. Nothing is logged on the
+happy path by design — a single receipt is journalled silently and only a *second* one under the
+same `migrationId` says anything — so **the journal, not the log, is where a receipt is read.**
+
+**The rollout order was honoured by the shape of the window rather than by sequencing.** B26 is
+safe in a mixed fleet both ways, but a pre-B26 sidecar logs one unknown-type warning per outbound
+migration once the relay ships receipts, so the order is sidecars first. Here the five local
+sidecars were *down* while the receipt-emitting relay started and came back on the new build, so no
+old local sidecar ever met a receipt.
+
+**Slot 6 did meet one, and its warning rate is larger than "harmless" — because the far end has no
+log rotation.** Its sidecar is pre-B26 against a receipt-emitting relay, so it now logs
+`contract B: ignoring unknown type type=FORWARD_RECEIPT` once per **outbound** migration. Measured
+on the live map, slot 6 sends **158.8 hops/min** out of its four lanes, so that is **~159
+warnings/min ≈ 107 B each ≈ 0.97 MB/hour, 23 MB/day, 0.68 GB per 30 days**. The assumption that
+this is bounded by log rotation **does not hold at the far end**: `setup-farend.ps1` starts the
+sidecar with `-RedirectStandardError` to a plain file and passes **no** `--log-file`,
+`--log-rotate-mb` or `--log-keep`, so slot 6's `sidecar-slot6.log` grows without limit and will
+bury its own diagnostics before it fills anything. It is not urgent and it is not silent: the
+single pending trip fixes it, because the rebuilt bundle carries the B26-aware sidecar. Until then,
+read slot 6's log from the tail. **`setup-farend.ps1` should pass the rotation flags the local rig
+has always passed** — the same template gap as the missing sidecar-only start/stop pair.
+
+**WP4's `limits` table did NOT arrive with this window, because it is not built.** The WP7 roll
+recorded that the `limits` table was waiting on the archive's batched restart; this *was* that
+restart, and the table is still absent from `/api/status`. The reason is not the rollout: the
+relay publishes its capacity table on the wire and logs it at startup (`maxFramesPerSecond:50`,
+`maxBytesPerSecond:4194304`, and six more), and `contractb.PeerStatus` carries a required `Limits`
+field that the archive *stores* — but the archive's `StatusView` has no `limits` member and the
+`archive` package contains **no reference to `Limits` at all**. Nothing was deferred and nothing
+regressed; the exposure was simply never implemented. It needs a field on `StatusView`, populated
+from the stored `PeerStatus`, and it will cost another archive restart — which now means another
+paused window, so it should ride with the next archive change rather than alone.
+
+**The bundle was rebuilt so the one pending trip carries HEAD, and the far end still owes exactly
+ONE swap.** `farend/dist/farend-bundle.zip` is now **6,814,671 bytes**, sha256
+`01284f64f7ddc7ecb4e79dee9c065a66fdf4f6d21baa1f1278bcf6bc0e18e207`, carrying
+`multiverse-sidecar.exe` `cae0f90b…` (was `ac14bb69…`) and the same `BibitesMultiverse.dll` at mod
+`0.6.4`. **The rolls still do not compound into separate trips**: one swap now delivers pacing,
+`--diagnose`, `--my-slot` *and* B26 together, and it is the swap that ends slot 6's warning stream.
+
+**The rollback set for this window is `/mnt/wsl/data/bdw-2026-08-12/rollback-bin/`.** It holds the
+whole outgoing set — `relay` (`89a12c97…`), `sidecar` (`1870ef6f…`), `multiverse-sidecar.exe`
+(`ac14bb69…`), `fakemod`, `ringstat`, `worldstat` — plus **`archive.RUNNING` (`e8b13a3d…`), copied
+out of `/proc/<pid>/exe`**, which is the archive that was actually running: `bin/archive` had
+already been replaced by a later build than the live process, so the file in `bin/` was *not* the
+rollback. **Copy a live binary from `/proc/<pid>/exe`, not from `bin/`** — on a rig where builds
+land between restarts they are not the same thing. It retires on the usual rule, when the map has
+run a day on the new binaries.
+
+**One operational trap cost a minute of the pause: the rig cannot be sourced as a library through
+its `status` verb while the map is down.** `source e2e/run-m4-lan.sh status` shells out to
+`game.sh status`, which greps the multi-hundred-megabyte BepInEx logs across the Windows 9p mount;
+with the sidecars paused it had not returned after a minute. **`statuspage` is the read-only verb
+to source through** — one curl to the local archive, 0.5 s — and it leaves every function
+(`start_relay`, `start_archive`, `start_sidecar`, `kill_pid`) defined just the same.
 
 ### Bringing it back after a reboot
 
