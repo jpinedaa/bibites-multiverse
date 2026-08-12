@@ -29,7 +29,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | The plugin | `0.6.4` (`MultiversePlugin.Version`), **deployed to the five local games 2026-08-11 in the crossing window** — the **public-release build**, and the first that speaks **`contract-a/2.4`**: it presents a bearer token on the Contract A upgrade (§21 A47), reading the path in `MULTIVERSE_CONTRACT_A_TOKEN_FILE`; it reports `blobDroppedForSize` on `parents[]` (A49); and it handles the sidecar's `4007` close for an export set the map cannot use (A50). Underneath it is unchanged: `0.6.3`'s `SavePhases`, which times `SaveSystem.CreateSave` from the inside and puts the decomposition on every `[M4-SAVE]` line (*Watch items*, first item, and it is measurement only — a span it cannot resolve reads `0` rather than failing the save); `0.6.2`'s headless-speed work (`MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device — *A world can be at the wrong time scale*, in Gotchas); `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping); and the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. **The minor moved this time, and it did not for `0.6.2` or `0.6.3`** — those added no wire field, which is why the five local slots published `0.6.3` against `contract-a/2.3` through 2026-08-10. **Slot 6 crossed the evening of 2026-08-11** (far end, ~01:19Z 08-12): it took the `0.6.4` bundle (`32f41f8`) onto `contract-a/2.4` / `wss://…/contract-b/v4`, and its sidecar was brought current to the WP4/WP5 rebuild (`4dd2ac1`) ~9 min later — so slot 6 now publishes `0.6.4` / `contract-a/2.4` like the five local slots, and the whole map is on one version. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | **`contract-b/4.0`**, running on the living deployment since the crossing of **2026-08-11** — the M5 public-release set (§22, B22–B32), plus **§23's B33/B34 genome-retention horizon** and the archive batch, both live since the batched debt window of **2026-08-12** (*The living deployment*). The three that changed how this rig is *operated*: **B22** replaces the one shared LAN token with a per-peer credential bound to the `peerId`, verifiers in `<relay-data-dir>/peers.json`; **B23** puts TLS at the relay's front door, so the whole listener is `wss://` including loopback; and **B32** moves the path to **`/contract-b/v4`** and crosses the fleet in lockstep. Beside them: B24's published capacity table (published on the wire and logged at startup, **not** yet on the archive's `/api/status`), B25's optional `--min-contract-version` floor (left **unset** here), **B26's forward receipt** — the relay emits one per forward and the sending sidecar records it durably against its journal entry, running on the deployment since 2026-08-12 — B27's `subscribe` grant for the archive, B28's authenticated admin path, B29's placement-under-churn rules and B30/B31's escaping and game-version rules, B30 also being the archive's operator-side render deny list (`--deny-list`, **unset** here). The archive itself now **streams** its ledger replay rather than holding it — 8.44 M records replay in ~148 s at a **1.53 GiB** peak, against ~7.86 GiB for the same work before — **gzips** its HTTP surface under standard `Accept-Encoding` negotiation (9.15× on `/api/status`, identity below a 1,400-byte floor), counts a `GENOME` line as the ledger record it is so `ledgerRecords` matches `wc -l` minus only the lines replay could not parse, and takes a **genome horizon** (`--genome-horizon` / `MULTIVERSE_GENOME_HORIZON`) that is **unset on this rig** — an absent `genomeHorizonMs` on the status page is how a reader knows nothing is being pruned. Under all of it, unchanged: the world-settings readout (§19), §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, **§20's disk budget (B20)** — timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — and §21's genome-pump bounds (B21). It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`, and since 2026-08-10 it **measures** each world's achieved time scale beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas). Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` — **except against a live map**, where a running sidecar holds `bin/sidecar` open and an in-place build fails with `ETXTBSY`, so the build goes to a scratch directory on the same filesystem and is renamed over the binary instead. That is a crossing's P0.3 and P3 (`e2e/crossing/RUNBOOK.md`) and it is equally the shape of every rolling sidecar roll since (*The living deployment*) |
+| The Go side | **`contract-b/4.0`**, running on the living deployment since the crossing of **2026-08-11** — the M5 public-release set (§22, B22–B32), plus **§23's B33/B34 genome-retention horizon** and the archive batch, both live since the batched debt window of **2026-08-12** (*The living deployment*). The three that changed how this rig is *operated*: **B22** replaces the one shared LAN token with a per-peer credential bound to the `peerId`, verifiers in `<relay-data-dir>/peers.json`; **B23** puts TLS at the relay's front door, so the whole listener is `wss://` including loopback; and **B32** moves the path to **`/contract-b/v4`** and crosses the fleet in lockstep. Beside them: B24's published capacity table (published on the wire, logged at startup, and **on the archive's `/api/status` as `limits` since the archive-views window of 2026-08-12**), B25's optional `--min-contract-version` floor (left **unset** here, so `minContractVersion` is absent from that same page), **B26's forward receipt** — the relay emits one per forward and the sending sidecar records it durably against its journal entry, running on the deployment since 2026-08-12 — B27's `subscribe` grant for the archive, B28's authenticated admin path, B29's placement-under-churn rules and B30/B31's escaping and game-version rules, B30 also being the archive's operator-side render deny list (`--deny-list`, **unset** here). The archive itself now **streams** its ledger replay rather than holding it — 8.44 M records replay in ~148 s at a **1.53 GiB** peak, against ~7.86 GiB for the same work before — **gzips** its HTTP surface under standard `Accept-Encoding` negotiation (9.15× on `/api/status`, identity below a 1,400-byte floor), counts a `GENOME` line as the ledger record it is so `ledgerRecords` matches `wc -l` minus only the lines replay could not parse, and takes a **genome horizon** (`--genome-horizon` / `MULTIVERSE_GENOME_HORIZON`) that is **unset on this rig** — an absent `genomeHorizonMs` on the status page is how a reader knows nothing is being pruned. Under all of it, unchanged: the world-settings readout (§19), §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, **§20's disk budget (B20)** — timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — and §21's genome-pump bounds (B21). It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`, and since the archive-views window of 2026-08-12 it also derives the **genealogy of everything alive** on its own `/api/species/tree` — kept off `/api/status` on purpose, because a derived tree must not be written into the durable sample file once a minute (§20 B20), and since 2026-08-10 it **measures** each world's achieved time scale beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas). Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` — **except against a live map**, where a running sidecar holds `bin/sidecar` open and an in-place build fails with `ETXTBSY`, so the build goes to a scratch directory on the same filesystem and is renamed over the binary instead. That is a crossing's P0.3 and P3 (`e2e/crossing/RUNBOOK.md`) and it is equally the shape of every rolling sidecar roll since (*The living deployment*) |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -2648,6 +2648,136 @@ its `status` verb while the map is down.** `source e2e/run-m4-lan.sh status` she
 with the sidecars paused it had not returned after a minute. **`statuspage` is the read-only verb
 to source through** — one curl to the local archive, 0.5 s — and it leaves every function
 (`start_relay`, `start_archive`, `start_sidecar`, `kill_pid`) defined just the same.
+
+### The archive-views window, 2026-08-12 — the published limits and the genealogy tree go live
+
+**The same pattern as the debt window above, at a quarter of its scope: only the archive package
+had moved, so only the archive was restarted, and the five local sidecars were paused for the one
+reason that they are ever paused — to make its ledger gap zero by construction.** It carried the
+two views that landed after that window: **B24's published limits and B25's floor on
+`/api/status`** (`e6d7911`, the exposure the debt window found had never been built) and the
+**derived genealogy of everything alive on `/api/species/tree`** (`41eef26`). The relay was **not**
+restarted, so its `relaySessionId` is unchanged and B26's receipts never broke stride; the five
+games, the mod and slot 6 were untouched.
+
+| | |
+|---|---|
+| Crossings paused | **4m 57.0s** — no local sidecar was up between **16:23:20.107Z** and **16:28:17.151Z**. The worlds simulated throughout |
+| The archive | down **16:23:20.208Z → 16:26:26.497Z (3m 06.3s)**, entirely inside that pause. Replay of **8,873,505 records / 2.96 GB** took **186 s** |
+| Replay memory | **VmHWM 1,716,880 kB (1.64 GiB)**, against the outgoing process's 2,214,924 kB — the streamed profile, on a ledger 5% larger than the debt window's |
+| Replay speed | **47.8 k records/s against that window's 57 k/s** — 16% slower per record. See below; this is the tree's price |
+| The ledger gap | **ZERO** — see the accounting below |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, **zero discarded journal bytes**, mod back, pacing line present (`pacedFramesPerSecond=25 pacedBurstFrames=12`). TERM to exit: **0.15 / 0.13 / 0.09 / 0.13 / 0.08 s**. Start to grant: **1.23 / 1.74 / 0.76 / 1.46 / 1.42 s** |
+| Observation | 20 samples, 16:28:51Z–16:33:29Z: **6/6** live and **24/24** lanes in every sample but the first, taken 28 s after the resume with the edges still reopening (12/16); `holes`, `heldDepth` and `timeoutBounces` **0** throughout; `custodyDepth` 2–38 and `pacedDepth` 0–14, both falling every time they rose. **Zero** new `level=ERROR` and **zero** sheds across the relay, the five sidecars and the archive — the archive's single `ERROR` is the old damaged ledger line (`skippedLines=1`, `skippedBytes=776`), re-reported at replay |
+
+**The zero-gap accounting, and why its margins are thinner than the debt window's.** The last
+ledger record of any kind before the archive stopped was a `MIGRATION`, slot 6 → slot 3 on its
+north edge, at **16:23:20.157Z** — **51 ms** before the TERM and **58 ms after the last local
+sidecar had already exited**, which is exactly what an in-flight frame looks like at a pause
+boundary. The first record after the archive returned was a `NACK` at **16:26:35.900Z**, **9.4 s**
+after it re-subscribed; the first `MIGRATION` was slot 5 → slot 6 at **16:28:37.500Z**, once both
+ends of a lane were back. The ledger file was **byte-frozen at 2,964,162,941 bytes** for the whole
+outage. So the margins are **0.49 s before and 9.4 s after**, against the debt window's 59 s and
+112 s, because this window TERMed the archive a tenth of a second after the pause completed
+instead of a minute later. **The margin is not what makes the gap zero — the structure is**, and
+here the relay says so directly: it logged **nothing at all** between its last `client gone` at
+**16:23:20.347Z** and the archive's return. No forward, no hold, no shed. With every local peer
+disconnected and all four of slot 6's neighbours dark, no forward was possible. The organisms that
+*were* in flight are accounted for on both sides rather than lost: the five sidecars recovered
+outbound custody **1 / 1 / 1 / 0 / 2** and inbound **0 / 1 / 1 / 2 / 0** from their journals, slot
+1 re-forwarded `526c11e0` (recorded at 16:23:19.225Z, before the pause) at 16:28:17.374Z, and slot
+3 resumed a bounded hold on `e64547f2` with **13 ms accrued**. **A short margin with an empty relay
+log is a stronger proof than a long margin alone**, but take the long one anyway when the pause is
+cheap: it costs nothing to wait a minute before the TERM, and it makes the argument readable
+without the relay log.
+
+**The counter still answers the same question as the file.** Measured on the frozen ledger, with
+the map paused so the reconciliation is exact rather than a race: **`wc -l` 8,873,507,
+`ledgerRecords` 8,873,506, `ledgerSkippedLines` 1, difference 0.** The counter read the same value
+before and after the 25 s `wc`, which is what makes the pair exact.
+
+**`limits` is on the page, and the relay never changed.** Eight keys, key for key against the
+envelope this same relay generation logged at startup: `maxConnectionsPerPeer` 2,
+`maxConnectionsPerAddress` 8, `maxFramesPerSecond` 50, `maxFrameBytes` 8388608,
+`maxBytesPerSecond` 4194304, `maxClaimsPerMinute` 12, `maxGenomeRequestsPerMinute` 30,
+`maxSubscribers` 4. `minContractVersion` is **absent**, which is B25's default and the relay's real
+answer — its startup line reads `minContractVersion=<none>`. The before-and-after is the whole
+point of the amendment: the *new* `ringstat --settings` run against the *old* page printed
+"ceilings: unknown — this map publishes none, which means a relay older than the published table",
+and against the new page it prints all eight in §3.3's order. **Nothing about the relay moved
+between those two runs.** The UNKNOWN was the archive's blindness, and §10.1's rule is what kept it
+from being read as "no ceilings".
+
+**The tree serves the real thing, and it is a view of the LIVE census — so it must not be read
+while the map is paused.** With all six slots reporting: **18 nodes, 16 parent edges, 2 roots**
+(`Zhiluus tardisitguyus` and `Basic bibite`), **14 leaves, all 14 alive**, `alive` 15, `connected`
+14, `isolated` 1, `unrecorded` 1, `ancestors` 3, `collapsed` 14, `maxDepth` **40**, reduced from
+`ledgerSpecies` **2,430** and `ledgerEdges` **2,022**; `reportingSlots` 6, `censuslessSlots` 0,
+`truncatedSlots` 0, and no `walkCapped`, `cycleGuard` or `nodesCapped`. **5,667 bytes** identity,
+**680 gzipped**. The commit's honest shapes are all live at once: a forest rather than one root, and
+`Basic bibite` alive as its own isolated root, counted as `unrecorded` — the seeded species the
+record connects to nothing because nothing ever migrated carrying it as a parent. **Measured
+*inside* the pause the same endpoint served a truthful but useless tree** — 7 nodes, 1 root, 5
+alive, `reportingSlots` **1** — because only slot 6 was still reporting a census. That is not a
+fault and it is the reader's trap this endpoint carries: the tree's leaves are whoever is alive
+*now*, so a paused or half-dark map draws a small tree, and the gate has to be taken after the
+resume.
+
+**Gzip, and the horizon, unchanged.** `/api/status` 15,241 → **1,687 bytes (9.03×)**, the new
+`/api/species/tree` 2,340 → **680 bytes (3.44×)**, both with `Vary: Accept-Encoding`, and
+`/healthz` identity in both directions at 3 bytes. `genomeHorizonMs` is still **absent**, as are
+`genomesEvicted`, `genomesEvictedBytes` and `genomeGapsExpired`: the relaunch went through the
+rig's own `start_archive` with `ARCHIVE_HTTP=0.0.0.0:8796` preserved and **no** new environment.
+
+**THE TREE COSTS REPLAY TIME, AND THAT IS THE ONE NUMBER THAT MOVED THE WRONG WAY.** 8.87 M records
+in 186 s is **47.8 k/s**, against 8.44 M in 148 s — **57 k/s** — three hours earlier on the same
+host. The ledger grew 5%; the wall grew 25%. The suspect is the tree itself: its parent edge is
+maintained per record inside `observeSpeciesLocked`, which the streamed replay calls on every
+record, so O(1) per record is still a new constant on 8.9 M of them. It is not a fault and no gate
+failed, but **the replay estimate for the next paused window should be sized from 48 k/s, not
+57 k/s**, and if the rate keeps sliding it is worth measuring rather than assuming.
+
+**A DIGEST COMPARISON AGAINST `bin/` CANNOT TELL YOU WHAT CHANGED ON THIS RIG.** `build()` runs
+`CGO_ENABLED=0 go build`, which leaves `-buildvcs=auto` on, so every binary embeds
+`vcs.revision` — and every digest therefore moves the moment HEAD moves, whether or not one line of
+its code did. `bin/` was built from `bde0f1c` and HEAD was `eeff267`, so a plain digest comparison
+reported **all six binaries changed** when only the archive package had been touched. The comparison
+that answers the question strips both the stamp and the source path from both sides: extract the
+old revision (`git archive bde0f1c go/ | tar -x -C <scratch>`), build it and HEAD with
+`CGO_ENABLED=0 go build -trimpath -buildvcs=false`, and compare those. That gave **`archive` and
+`ringstat`, and nothing else** — `relay`, `sidecar`, `fakemod` and `worldstat` byte-identical — and
+only those two were moved over `bin/`. Two smaller traps sit under it: a `go build` without
+`CGO_ENABLED=0` is a different binary again, so a comparison built with the wrong flags is
+meaningless; and the binaries actually **installed** must be the rig's own flavour, stamp included,
+so that `go version -m bin/archive` keeps answering which commit is running.
+
+**The rollback set is `/mnt/wsl/data/avw-2026-08-12/rollback-bin/`** — `archive.RUNNING`
+(`1e30b66e…`, copied from `/proc/2149599/exe`), `archive.bin` and `ringstat` (`7609d23b…`). **This
+time `bin/archive` and the running process were the same bytes**, so the debt window's trap did not
+recur — but the two copies are taken and compared rather than assumed, which is the only way to
+know. It retires on the usual rule.
+
+**One reading is misleading for five minutes after any archive restart, and it looks alarming.**
+`flowWindowMs` is **300,000**, and `perMinute` is measured over that whole window whether or not the
+window has any history in it, so a fresh archive divides a few seconds of hops by five minutes. The
+first sample after the resume read **29/min** on a map that had been doing 647/min. It climbed
+monotonically — 29, 75, 123, … 917 — for exactly as long as the window took to fill, and none of
+that curve is traffic. **Read `perMinute` no sooner than five minutes after the archive comes back**;
+before then, `ledgerRecords` between two samples is the honest rate. Once it had filled it settled at
+**~920/min against the 647/min read before the window**, which is a real change and **not** something
+an archive restart can cause — the archive moves no organisms. It is the `achievedTimeScale` readout
+explaining itself: population fell 466 → ~385, slot 3's world emptied from 114 to 47 and its achieved
+scale doubled from 4.1 to 8.8, and **a world that simulates more minutes per wall minute exports more
+organisms per wall minute**. The rate is spread evenly over all six slots (131–167/min each, slot 6 at
+167 against the 158.8 measured for it in the window above), which is what rules out one sick lane.
+
+**Two smaller things worth keeping.** `bin/sidecar --diagnose --data-dir <dir>` is the mechanical
+form of the zero-discarded-bytes gate — it prints `PASS journal-replay … zero discarded bytes`, and
+it passed on all five — but **pass it `--credential-file` too**, or its `credential` check fails on
+a rig that keeps secrets in `~/.multiverse/` rather than in the data directory, and the report reads
+worse than the rig is. And the journals **shrank at the restart** (slot 1, 36.9 MB → 28.4 MB) with
+no `compacted the journal` line anywhere: that is `internal/journal` still compacting at `Open`, as
+it always has, and it is a rewrite of live entries, not a discard.
 
 ### Bringing it back after a reboot
 
