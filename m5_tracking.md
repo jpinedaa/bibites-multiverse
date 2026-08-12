@@ -124,6 +124,14 @@ burst, and each one also costs the far end a bundle rebuild.
 
 ### Carried actions that belong to no package
 
+- **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build in flight):** the
+  stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
+  bars — **replacing both the species tab and the tree tab with one merged view**. Included:
+  per-leaf 3×2 mini-maps, population sparklines (from `/api/species/history`), collapsed chains
+  as dotted lines with length ∝ generations, brain-complexity styling from each species' latest
+  stored genome (bb8-parsed, cached per hash), the glyph as the sole colour carrier (no
+  redundant swatches), the root/floor badges carried over. **Rejected: crossing pulses,
+  map↔tree cross-links, time scrubber, SVG export, radial layout.**
 - **The genealogy tree (owner-requested, 2026-08-12, built — 41eef26).** `/api/species/tree` +
   a page tab: the living species as leaves, ancestors reduced to branching points, chains
   collapsed. Derived entirely from A30/B9's parent-species field the ledger already carried —
