@@ -81,8 +81,11 @@ each right after the 2026-08-10 switch, against the 1.27–2.07 GB the same five
 The far end takes the same two flags through `start-slot6.ps1 -Headless`, and the five local
 worlds take them from `e2e/run-m4-lan.sh`, which exports `BIBITES_EXTRA_ARGS` for every game
 it starts: **the five local worlds have run headless since 2026-08-10**, and slot 6 ran that
-way from 2026-08-09 23:15Z to 2026-08-10 00:58Z and is drawn again since — the flip is proven
-in both directions and belongs to a start, not to the installation (*The living deployment*).
+way from 2026-08-09 23:15Z to 2026-08-10 00:58Z, drawn from then until 2026-08-12 ~11:08Z, and
+**headless again since** — the flip is proven in both directions, three flips deep, and belongs
+to a start, not to the installation (*The living deployment*). The 08-12 flip used the clean
+sequence: `quit` via the cmd file (the on-quit save rotates), `start-slot6.ps1 -GameOnly
+-Headless` against the sidecar left running, then the time-scale re-send.
 Exactly one thing is lost, and it is not the simulation —
 see *A headless world's save thumbnail is blank* in Gotchas.
 
@@ -259,8 +262,9 @@ e2e/run-m4-lan.sh all        # up, phase1..8 (phase5far is excluded: it blocks o
 
 **The LAN rig passed the M4 exit test on 2026-08-06, and it is running now.** It came back
 up after the test and holds the living deployment: six worlds, periodic saves every 2 minutes
-here and every 10 on the far end, **all six headless and the five local ones targeting ×100
-since 2026-08-10**. It has since survived two host reboots, on 2026-08-08 and
+here and every 10 on the far end, **all six headless** (the five local since 2026-08-10; slot 6
+drawn 2026-08-10 → 2026-08-12 ~11:08Z and headless again since) **and the five local ones
+targeting ×100 since 2026-08-10**. It has since survived two host reboots, on 2026-08-08 and
 2026-08-09, and was brought back by hand both times; on **2026-08-11 it crossed to
 `contract-b/4.0`** in a 7m18s window, which is the third planned outage it has been through and
 the only one that changed the wire (*The living deployment → The crossing to `contract-b/4.0`*).
