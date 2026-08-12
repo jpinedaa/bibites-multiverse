@@ -1,6 +1,9 @@
 package archive
 
 import (
+	"encoding/json"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -295,6 +298,179 @@ func TestCensusIsAStatAndObeysEveryRuleForOne(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("ringstat never printed %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestPublishedCeilingsCarryOrStayUnknown covers contract-b-m4.md §22, B24 and
+// B25 on the archive's side of the wire: the relay publishes the capacity table
+// it is RUNNING WITH and its admission floor on every PEER_STATUS (§6.5), and
+// this view carries both to /api/status so a reader can render a peer's
+// behaviour against the ceilings it is measured on (§10.1's B24 rule).
+//
+// THE VALUES ARE THE WIRE'S, NOT THIS BUILD'S. Every published value in the
+// fixture differs from the constant contractb ships, because every one of them
+// is a knob (D20) and a relay that has been retuned publishes what it runs with.
+// A view that answered from its own table would pass a test built on defaults
+// and lie on every retuned map.
+//
+// AND THE TWO ABSENCES ARE DIFFERENT FACTS. An absent table is a relay that
+// predates B24 — UNKNOWN, and never "no ceilings". An absent floor is B25's own
+// default and the relay's real answer: no minimum.
+func TestPublishedCeilingsCarryOrStayUnknown(t *testing.T) {
+	published := map[string]int64{
+		contractb.LimitMaxConnectionsPerPeer:      3,
+		contractb.LimitMaxConnectionsPerAddress:   16,
+		contractb.LimitMaxFramesPerSecond:         120,
+		contractb.LimitMaxFrameBytes:              2097152,
+		contractb.LimitMaxBytesPerSecond:          1048576,
+		contractb.LimitMaxClaimsPerMinute:         6,
+		contractb.LimitMaxGenomeRequestsPerMinute: 90,
+		contractb.LimitMaxSubscribers:             2,
+		// A ceiling THIS BUILD HAS NEVER HEARD OF. The relay published it, so the
+		// view carries it: the archive renders the published table and does not
+		// restate a table of its own.
+		"maxMoonsPerFortnight": 7,
+	}
+	stats := &contractb.PeerStats{Population: contractb.IntPtr(10)}
+	status := contractb.PeerStatus{
+		Epoch: 58, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
+		Slots:  []contractb.SlotInfo{slot(1, 0, 0, true, stats), slot(2, 1, 0, true, stats)},
+		Limits: map[string]int64{}, MinContractVersion: "contract-b/4.2",
+	}
+	for k, v := range published {
+		status.Limits[k] = v
+	}
+
+	view := newViewFixture(t, status, time.Second).StatusView()
+	if view.MinContractVersion != "contract-b/4.2" {
+		t.Fatalf("minContractVersion = %q, want the floor the relay published",
+			view.MinContractVersion)
+	}
+	if len(view.Limits) != len(published) {
+		t.Fatalf("the view publishes %d ceilings, want the %d the relay did: %v",
+			len(view.Limits), len(published), view.Limits)
+	}
+	for k, want := range published {
+		if got, ok := view.Limits[k]; !ok || got != want {
+			t.Fatalf("ceiling %q = %v (present %v), want %d byte-faithful from the wire",
+				k, got, ok, want)
+		}
+	}
+	// The one that would hurt most if a default were substituted: this map runs at
+	// 120 frames a second and contractb ships 50.
+	if view.Limits[contractb.LimitMaxFramesPerSecond] == contractb.DefaultMaxFramesPerSecond {
+		t.Fatal("the view answered from the SHIPPED table; the published table is the values " +
+			"the relay is running with, and every one of them is a knob")
+	}
+	// The table is a COPY. A later broadcast replaces the frame under a view that
+	// has already been handed out, and a reader that mutates what it was given
+	// must not reach the archive's own state.
+	view.Limits[contractb.LimitMaxSubscribers] = 999
+	if again := newViewFixture(t, status, time.Second).StatusView(); again.Limits[contractb.LimitMaxSubscribers] != 2 {
+		t.Fatalf("the view handed out the frame's own map: maxSubscribers is now %d",
+			again.Limits[contractb.LimitMaxSubscribers])
+	}
+
+	// A PRE-B24 RELAY publishes neither, and neither is invented here.
+	older := contractb.PeerStatus{
+		Epoch: 12, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, stats)},
+	}
+	bare := newViewFixture(t, older, time.Second).StatusView()
+	if bare.Limits != nil || bare.MinContractVersion != "" {
+		t.Fatalf("a relay that published nothing got %v / %q invented for it",
+			bare.Limits, bare.MinContractVersion)
+	}
+	b, err := json.Marshal(bare)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, absent := range []string{`"limits"`, `"minContractVersion"`} {
+		if strings.Contains(string(b), absent) {
+			t.Fatalf("%s is on the frame of a relay that publishes none; absent means "+
+				"UNKNOWN and an empty object would read as a table with holes in it", absent)
+		}
+	}
+
+	// A PRESENT EMPTY OBJECT is the same reading as absence and not a stronger
+	// one: §3.3 is explicit that a table with a hole in it is not a table.
+	empty := older
+	empty.Limits = map[string]int64{}
+	if v := newViewFixture(t, empty, time.Second).StatusView(); v.Limits != nil {
+		t.Fatalf("an empty published object became a table: %v", v.Limits)
+	}
+
+	// The terminal tool renders the SAME Status, so the two operator surfaces
+	// cannot quote different ceilings at each other.
+	out := &strings.Builder{}
+	RenderSettings(out, view)
+	got := out.String()
+	for _, want := range []string{"contract-b/4.2", "maxFramesPerSecond", "120",
+		"maxMoonsPerFortnight"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("ringstat --settings never printed %q:\n%s", want, got)
+		}
+	}
+	out.Reset()
+	RenderSettings(out, bare)
+	got = out.String()
+	if !strings.Contains(got, "unknown") || !strings.Contains(got, "every compatible version") {
+		t.Fatalf("ringstat --settings did not name the two absences:\n%s", got)
+	}
+}
+
+// TestPublishedCeilingsSurviveTheServedFrame is the same table one HTTP hop
+// later, on both halves of the negotiation. The page reads it off /api/status
+// and the gzip wrapper is a transport change and nothing else (compress.go), so
+// an integer that arrived on the wire has to leave as the same integer whether
+// or not a browser asked for a coding.
+func TestPublishedCeilingsSurviveTheServedFrame(t *testing.T) {
+	stats := &contractb.PeerStats{Population: contractb.IntPtr(10)}
+	status := contractb.PeerStatus{
+		Epoch: 58, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots:              []contractb.SlotInfo{slot(1, 0, 0, true, stats)},
+		MinContractVersion: "contract-b/4.2",
+		Limits:             contractb.DefaultLimits().Published(),
+	}
+	a := newViewFixture(t, status, time.Second)
+	ts := httptest.NewServer(a.httpHandler())
+	t.Cleanup(ts.Close)
+
+	for _, enc := range []string{"", "gzip"} {
+		resp, body := rawGet(t, ts.URL+"/api/status", enc)
+		if resp.Header.Get("Content-Encoding") == "gzip" {
+			body = gunzip(t, body)
+		}
+		// UseNumber, because the check is that the frame carries the INTEGERS the
+		// relay published: a ceiling that came back as 8.388608e+06 would still
+		// compare equal as a float and would not be the value the close reason
+		// quotes.
+		var frame struct {
+			MinContractVersion string                 `json:"minContractVersion"`
+			Limits             map[string]json.Number `json:"limits"`
+		}
+		dec := json.NewDecoder(strings.NewReader(string(body)))
+		dec.UseNumber()
+		if err := dec.Decode(&frame); err != nil {
+			t.Fatalf("Accept-Encoding %q: the served frame does not decode: %v", enc, err)
+		}
+		if frame.MinContractVersion != "contract-b/4.2" {
+			t.Fatalf("Accept-Encoding %q: the floor did not survive the hop: %q",
+				enc, frame.MinContractVersion)
+		}
+		for k, want := range contractb.DefaultLimits().Published() {
+			got, ok := frame.Limits[k]
+			if !ok {
+				t.Fatalf("Accept-Encoding %q: the served table has a hole at %q", enc, k)
+			}
+			if got.String() != strconv.FormatInt(want, 10) {
+				t.Fatalf("Accept-Encoding %q: %q served as %s, want %d", enc, k, got, want)
+			}
+		}
+		if len(frame.Limits) != len(contractb.PublishedLimitKeys) {
+			t.Fatalf("Accept-Encoding %q: the served table has %d keys, want §3.3's %d",
+				enc, len(frame.Limits), len(contractb.PublishedLimitKeys))
 		}
 	}
 }

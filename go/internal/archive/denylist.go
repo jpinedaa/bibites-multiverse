@@ -319,6 +319,62 @@ func (d *DenyList) ApplySpeciesIndex(idx SpeciesIndex) SpeciesIndex {
 	return idx
 }
 
+// ApplySpeciesTree suppresses the genealogy's node labels.
+//
+// THE TREE'S SHAPE SURVIVES AND ONLY THE NAMES GO, which is the same trade every
+// other surface here makes: a suppressed species still has the ancestry it has,
+// and deleting the node would silently reparent its children under a grandparent
+// they never descended from — a lie about the record, told to hide a name.
+//
+// A KEY IS A NAME HERE TOO, spelled normalized, and it is ALSO AN EDGE: Parent
+// and Roots reference it. So a suppressed key is REWRITTEN, exactly as
+// ApplySpeciesIndex rewrites it, and the rewrite is then applied to every
+// reference in one pass — otherwise a page would resolve a parent link back to
+// the plaintext key the suppression was meant to remove.
+func (d *DenyList) ApplySpeciesTree(t SpeciesTree) SpeciesTree {
+	if d.Empty() {
+		return t
+	}
+	// One pass to decide the renames, a second to apply them everywhere. Doing
+	// it in one pass would leave a node's own Parent pointing at a key that had
+	// not been renamed yet.
+	rename := map[string]string{}
+	for i := range t.Nodes {
+		generic, specific, _ := strings.Cut(t.Nodes[i].Key, " ")
+		if d.DeniesSpecies(generic, specific) {
+			rename[t.Nodes[i].Key] = Suppressed + "#" +
+				strconv.FormatUint(fingerprint(t.Nodes[i].Key), 16)
+		}
+	}
+	if len(rename) == 0 {
+		return t
+	}
+	nodes := make([]TreeNode, len(t.Nodes))
+	copy(nodes, t.Nodes)
+	for i := range nodes {
+		n := &nodes[i]
+		if to, ok := rename[n.Key]; ok {
+			n.Key = to
+			n.Name = Suppressed
+			// The provenance goes with the name. Saying a suppressed label came
+			// from a census would be a statement about a name nobody can read.
+			n.NameFrom = ""
+		}
+		if to, ok := rename[n.Parent]; ok {
+			n.Parent = to
+		}
+	}
+	roots := make([]string, len(t.Roots))
+	copy(roots, t.Roots)
+	for i := range roots {
+		if to, ok := rename[roots[i]]; ok {
+			roots[i] = to
+		}
+	}
+	t.Nodes, t.Roots = nodes, roots
+	return t
+}
+
 // ApplySpeciesHistory suppresses the name a history answer echoes back.
 func (d *DenyList) ApplySpeciesHistory(h SpeciesHistory) SpeciesHistory {
 	if d.Empty() {

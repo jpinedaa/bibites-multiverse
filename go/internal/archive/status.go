@@ -36,18 +36,44 @@ type Status struct {
 	ArchivePeerID  string `json:"archivePeerId"`
 	// StatusAgeMs is how old the PEER_STATUS behind this view is. A view with no
 	// status at all reports HaveStatus false and nothing else is trustworthy.
-	HaveStatus  bool                 `json:"haveStatus"`
-	StatusAgeMs int64                `json:"statusAgeMs"`
-	Epoch       int64                `json:"epoch"`
-	Map         contractb.MapShape   `json:"map"`
-	SlotCount   int                  `json:"slotCount"`
-	Observers   int                  `json:"observers"`
-	Slots       []SlotView           `json:"slots"`
-	Holes       []contractb.Position `json:"holes"`
-	Lanes       []LaneView           `json:"lanes"`
-	Totals      Totals               `json:"totals"`
-	Gaps        int                  `json:"genomeGaps"`
-	Records     int                  `json:"ledgerRecords"`
+	HaveStatus  bool               `json:"haveStatus"`
+	StatusAgeMs int64              `json:"statusAgeMs"`
+	Epoch       int64              `json:"epoch"`
+	Map         contractb.MapShape `json:"map"`
+	SlotCount   int                `json:"slotCount"`
+	Observers   int                `json:"observers"`
+	// WHAT THE RELAY ITSELF IS RUNNING WITH, carried off the same PEER_STATUS
+	// every slot below is (contract-b-m4.md §6.5; §22, B24 and B25). They are the
+	// only values on this view that are AUTHORITATIVE RATHER THAN REPORTED: a
+	// stats field is a peer's claim about itself, and these two are the relay's
+	// own configuration, which changes only when the relay restarts. §10.1's B24
+	// rule is why they are here at all — a peer's frame or claim rate is only
+	// readable against the ceiling it is measured on, and a lastRefusal of
+	// contract_version_below_minimum is only actionable beside the floor that
+	// refused it.
+	//
+	// They age with the frame that carried them and have no clock of their own,
+	// exactly as Epoch and Map do: StatusAgeMs dates all of it, and a view with
+	// HaveStatus false carries neither.
+	//
+	// BOTH ARE omitempty AND THE TWO ABSENCES ARE DIFFERENT FACTS. An absent
+	// Limits reads as UNKNOWN and never as "no ceilings" — the only relay it can
+	// come from is one that predates B24. An absent MinContractVersion is the
+	// relay's real answer rather than a gap: NO MINIMUM, which is B25's default
+	// and the only honest one for a deployment that has made no floor decision.
+	MinContractVersion string `json:"minContractVersion,omitempty"`
+	// Limits is the published table exactly as it arrived, key for key: nothing
+	// here renames a key, drops one this build has never heard of, or fills one
+	// in from contractb's shipped defaults. The relay publishes what IT IS
+	// RUNNING WITH, and a default substituted into that table would be the one
+	// number on this page nobody could check.
+	Limits  map[string]int64     `json:"limits,omitempty"`
+	Slots   []SlotView           `json:"slots"`
+	Holes   []contractb.Position `json:"holes"`
+	Lanes   []LaneView           `json:"lanes"`
+	Totals  Totals               `json:"totals"`
+	Gaps    int                  `json:"genomeGaps"`
+	Records int                  `json:"ledgerRecords"`
 	// LedgerSkipped is how many ledger lines the startup replay could not parse
 	// and read past — a record of what happened that the archive can no longer
 	// account for. Omitted when 0, which is every healthy archive; it is here
@@ -269,6 +295,27 @@ func (l *lane) recentHops(nowMs int64) int {
 	return len(l.recent)
 }
 
+// publishedLimits copies §3.3's table out of the frame it arrived on.
+//
+// It COPIES because this view outlives the lock and a later PEER_STATUS replaces
+// the frame under it, and it copies rather than interprets: every key the relay
+// published survives, including one this build has never heard of, because the
+// archive renders the published table and does not restate a table of its own.
+//
+// An empty object is treated as no object. §3.3 is explicit that a published
+// table with a hole in it is not a table, so `{}` is UNKNOWN — the same reading
+// as absence, and still never "no ceilings".
+func publishedLimits(src map[string]int64) map[string]int64 {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]int64, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
 // StatusView builds the whole operator view. It holds the archive's lock for the
 // duration and touches nothing on the migration path.
 func (a *Archive) StatusView() Status {
@@ -286,13 +333,21 @@ func (a *Archive) StatusView() Status {
 		Map:            a.status.Map,
 		SlotCount:      a.status.SlotCount,
 		Observers:      a.status.Observers,
-		Slots:          []SlotView{},
-		Holes:          a.status.Holes(),
-		Lanes:          []LaneView{},
-		Gaps:           len(a.pending),
-		Records:        a.recordCount,
-		LedgerSkipped:  a.ledgerSkipped,
-		FlowWindowMs:   flowWindow.Milliseconds(),
+		// The relay's own two published values, carried straight off the frame.
+		// NOTHING IS REMEMBERED ACROSS FRAMES here, which is where this differs
+		// from the sidecar's adoption of the same table: a sidecar PACES itself
+		// from the ceiling and must not lose one mid-session, while this view only
+		// renders the last broadcast, and a view that stitched two frames together
+		// would be showing a table beside a map that no single frame ever carried.
+		MinContractVersion: a.status.MinContractVersion,
+		Limits:             publishedLimits(a.status.Limits),
+		Slots:              []SlotView{},
+		Holes:              a.status.Holes(),
+		Lanes:              []LaneView{},
+		Gaps:               len(a.pending),
+		Records:            a.recordCount,
+		LedgerSkipped:      a.ledgerSkipped,
+		FlowWindowMs:       flowWindow.Milliseconds(),
 
 		GenomeHorizonMs:     a.cfg.GenomeHorizon.Milliseconds(),
 		GenomesEvicted:      a.evict.evicted,

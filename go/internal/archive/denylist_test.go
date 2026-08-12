@@ -311,8 +311,11 @@ func TestTheDenyListReachesEverySurfaceTheArchiveServes(t *testing.T) {
 	ts := httptest.NewServer(a.httpHandler())
 	t.Cleanup(ts.Close)
 
+	// The genealogy too: an ancestor's name arrives by a different route (a
+	// migration envelope's parentGenericName) and a suppression that reached
+	// every OTHER surface would leave the one nothing else on the page reads.
 	for _, path := range []string{"/api/status", "/api/species", "/api/hops",
-		"/api/species/history?key=Cyanea+velox"} {
+		"/api/species/history?key=Cyanea+velox", "/api/species/tree"} {
 		body := get(t, ts.URL+path)
 		if strings.Contains(body, "velox") {
 			t.Fatalf("%s still renders the denied name:\n%s", path, body)

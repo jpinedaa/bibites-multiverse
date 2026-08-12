@@ -115,12 +115,26 @@ type speciesAgg struct {
 	// recent is the newest crossings, oldest first, bounded by
 	// speciesRecentMax.
 	recent []SpeciesCrossing
-	// parent is the RAW parent species name the lineage annex last recorded for
-	// this species, "" when none ever did. It is SHOWN AND NOTHING ELSE: no
-	// tree, no ancestry walk, no resolution. The registry a species name
-	// resolves against lives inside a game process and only the mod can see it
-	// (contract-a.md §16, A31).
+	// parent is the RAW parent species name the migration envelope last recorded
+	// for this species, "" when none ever did, and parentKey is the same name
+	// under the A34 comparison key. THE RAW FORM IS THE LABEL AND THE KEY IS THE
+	// EDGE, which is rule 2 applied to one more field.
+	//
+	// Two readers use these and they use them differently. The species tab
+	// SHOWS parent and resolves nothing (contract-a.md §16, A31: the registry a
+	// name resolves against is inside a game process). The genealogy of tree.go
+	// treats parentKey as ONE EDGE OF A GRAPH — still no resolution, because an
+	// edge between two names this archive was told about is not a claim about
+	// any world's registry; it is a claim about what the record says, which is
+	// the only thing this archive ever claims.
+	//
+	// LATEST WRITER WINS, on the archive's own clock. A species has one parent
+	// species in the game's model (Species.parentSpecies is a single reference),
+	// so a second answer is a correction and not a second edge — and taking the
+	// newest is what lets a world that re-derived its own tree be believed
+	// instead of argued with.
 	parent     string
+	parentKey  string
 	parentAtMs int64
 }
 
@@ -131,6 +145,13 @@ type speciesLedger struct {
 	// full. It is published, because a truncated aggregate a reader cannot see
 	// is a wrong answer.
 	overflow int
+	// edges is how many tracked species carry a parent name — maintained here
+	// rather than counted per request, because the genealogy publishes it on
+	// every poll and a walk of the whole aggregate to produce one integer is the
+	// shape rule 1 exists to refuse. It counts a species ONCE, when it first
+	// gains an edge: a later correction replaces that species' parent and does
+	// not add a second.
+	edges int
 }
 
 func newSpeciesLedger() *speciesLedger {
@@ -178,8 +199,23 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 		}
 	}
 	if rec.Species.ParentGenericName != "" && rec.RecordedAt >= e.parentAtMs {
-		e.parent = rec.Species.ParentGenericName + " " + rec.Species.ParentSpecificName
-		e.parentAtMs = rec.RecordedAt
+		pkey := wire.SpeciesKey(rec.Species.ParentGenericName, rec.Species.ParentSpecificName)
+		// A SELF-PARENT IS DROPPED AT INGEST, which is the cheapest place a cycle
+		// can be refused and the only one where it costs nothing. It is not a
+		// hypothetical shape — the two halves are attacker-chosen strings and the
+		// key is normalized, so a name and its own parent CAN normalize together
+		// without either world intending it. The record still says what it said;
+		// this aggregate simply holds no edge from a species to itself, so no
+		// reader has to cope with one. tree.go guards the longer cycles this
+		// cannot see.
+		if pkey != "" && pkey != key {
+			if e.parentKey == "" {
+				a.species.edges++
+			}
+			e.parent = rec.Species.ParentGenericName + " " + rec.Species.ParentSpecificName
+			e.parentKey = pkey
+			e.parentAtMs = rec.RecordedAt
+		}
 	}
 	e.recent = append(e.recent, SpeciesCrossing{
 		AtMs: rec.RecordedAt, FromSlot: rec.SourceSlot, ToSlot: rec.DestSlot,
