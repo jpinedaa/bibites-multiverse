@@ -25,7 +25,11 @@ options:
    4.5% of one core. The archive's *steady state* is cheap too. But its startup replay wants
    **1.3 KB of RAM per ledger record**, and DQ2's whole argument is that on a hosted service
    restarts stop being rare. At the exit-test bar over the full three months that is a
-   **28 GB** replay on today's implementation.
+   **28 GB** replay on today's implementation. Measured since **[rig experiment, 2026-08-12]**:
+   `GOMEMLIMIT` takes about a third off that peak for no measurable wall clock and is worth
+   setting on any instance bought, but it does not reach day 90 —
+   **the ledger is materialised in memory before it is applied, and streaming it instead takes
+   5.6–7.0× off the peak for about 80 lines of one package.**
 2. **The status page is the largest single egress term**, and it is bigger than the game
    traffic. It serves ~20 KB every 2 s and ~49 KB every 1.5 s, **uncompressed as measured**, per
    open browser tab. That is ~3.7 GB/day/tab at this rig's rate. Gzip negotiation has since been
@@ -173,9 +177,14 @@ This is the finding that changes the recommendation.
 | Archive resident, 7.43 M records, 2026-08-11 **[rig]** | 2.26 GB | **0.30 KB** |
 | Replay high-water, 3.70 M records, 2026-08-10 **[record]** | 5.2 GB | 1.41 KB |
 | Replay high-water, ~6.4 M records, 2026-08-11 **[rig]** | 8.24 GB | **1.30 KB** |
+| Replay high-water, 8.16 M records, 2026-08-12 **[rig experiment, 2026-08-12]** | 8.40–10.49 GB | **1.03–1.29 KB** |
 
-Two independent pairs, twelve-fold apart in scale, both linear. The model:
-**0.30 KB resident per record, 1.30 KB peak during replay.**
+Two independent pairs, twelve-fold apart in scale, both linear, **and the fourth row has since been
+reproduced directly**: three replays of a copy of today's ledger peaked between 1.03 and 1.29 KB per
+record, with the model's 1.30 at the top of the range. The model stands:
+**0.30 KB resident per record, 1.30 KB peak during replay** — and *sizing must use the top of that
+range*, because the spread is not noise in the measurement, it is the collector choosing a different
+heap goal on each run (see the matrix below).
 
 Applied to the sizing table, at the exit-test bar (S = 5, 242,000 records/day):
 
@@ -190,24 +199,107 @@ Applied to the sizing table, at the exit-test bar (S = 5, 242,000 records/day):
 Replay time comes from the documented rate of **~40,000 records/s on this host** **[record]**, and
 `dev_environment.md` is emphatic that every recorded replay figure expires the day after it is
 written — size it from `wc -l` on the day, never from a quotation. On a smaller cloud vCPU it will
-be slower than 40,000/s, not faster.
+be slower than 40,000/s, not faster. The rate has since been measured again on 8.16 M records:
+**36,900–48,600 records/s**, the low end being a run whose genome-store metadata was still cold.
+A fresh cloud instance is always the cold case.
 
-**Three honest things follow.**
+**One denominator warning before any of this is re-derived.** `/api/status`'s `ledgerRecords` is
+**not** `wc -l` on the ledger: `RecordGenome` lines are appended without incrementing the counter
+(`go/internal/archive/archive.go:1219` against the three `recordCount++` sites), so the counter
+drifts below the file from every restart onward — 8,060,891 against 8,156,869 lines on 2026-08-12,
+1.2% low **[rig experiment, 2026-08-12]**. Every per-record figure here is denominated in **lines
+actually replayed**, which is what the memory is spent on.
+
+#### The measured answer: `GOMEMLIMIT` works, and it is not the fix
+
+**[rig experiment, 2026-08-12.]** A copy of the deployment's `migrations.jsonl` — 2,726,784,283
+bytes, **8,156,868 records replayed** — taken at 08:13Z into a scratch directory and replayed there
+by an archive built from `HEAD`, with the genome store read through a symlink, no relay to dial and
+the status page on a scratch port. `nice -n 19`, one run at a time, page cache warm unless noted.
+The deployment was read and never written; it kept running throughout.
+
+| Setting | Runs | Replay wall | Peak RSS (`VmHWM`) | Peak per record | CPU spent replaying | RSS 3 min later |
+|---|---|---|---|---|---|---|
+| **no `GOMEMLIMIT`** — what the deployment does today | 3 | 168–221 s | **8.40–10.49 GB** | 1,030–1,286 B | 196–256 s (**1.16 cores**) | 5.3–6.4 GB |
+| `GOMEMLIMIT=5GiB` — about 2× the retained set | 3 | 173–200 s | **5.88–6.30 GB** | 721–772 B | 255–300 s (1.4–1.5 cores) | 4.4–4.6 GB |
+| `GOMEMLIMIT=4GiB` — about 1.5× | 1 | 283 s | 5.80 GB | 711 B | **1,408 s (4.97 cores)** | 2.3 GB |
+| `GOMEMLIMIT=3GiB` — aggressive | 1 | **403 s** | 4.90 GB | 600 B | **2,534 s (6.28 cores)** | 2.1 GB |
+| **a streaming replay**, no `GOMEMLIMIT` | 2 | 189–201 s | **1.50 GB** | **184 B** | 258–271 s (1.35 cores) | 1.3–1.4 GB |
+
+**Six things follow, in the order they matter.**
+
+1. **`GOMEMLIMIT` is real and it should be set.** At 5 GiB it turns a peak that wandered between
+   **8.40 and 10.49 GB** across three runs of the identical file into one that sat between **5.88
+   and 6.30 GB** — a 25–44% cut depending on which pair is compared, and, more usefully, a
+   *predictable* number, since an unpredictable peak has to be sized against its worst case anyway.
+   It cost **no measurable wall clock** (−9% to +14% across matched pairs, inside this host's
+   run-to-run noise) and **17–39% more CPU**. That is a good trade on any machine and it is one line
+   in a service unit.
+2. **It does not reach day 90.** 772 B/record × 21.8 M records is **16.8 GB**. The $44 bundle has 8.
+3. **Below ~2× the retained set the trade turns ruinous, in exactly the resource a cheap instance
+   has least of.** 4 GiB bought a 1.4% better peak for **7× the CPU**; 3 GiB bought 17% for **13×**.
+   Those runs demanded 5–6.3 cores, which a 16-core host absorbs in parallel and a **2-vCPU bundle
+   cannot**: 1,408 CPU-seconds is **≥ 12 minutes** of wall clock on two vCPUs and 2,534 is **≥ 21**,
+   against about three today. The archive serves nothing for every second of it. At 5 GiB the CPU
+   still fits inside two vCPUs (1.5 cores), so the winner is *the loosest limit that helps*, not the
+   tightest one that fits.
+4. **There is a floor, and no collector setting goes under it.** The most aggressive run that
+   completed still peaked at 4.90 GB — **600 B/record, 3.6× the state the replay retains** — because
+   `ReadLedger` (`go/internal/archive/store.go:339`) materialises the **entire ledger as one
+   `[]Record`** and `New` walks the slice afterwards. The whole file is live at once by
+   construction, so there is nothing for a collector to reclaim.
+5. **The floor is a shape, not a size, and the shape is cheap to change.** A prototype that streams
+   the replay — `ScanLedger(dir, func(Record))`, with `New`'s existing loop body as the callback —
+   peaked at **1.50 GB, 184 B/record — 5.6× lower than the baseline run of the identical build, and
+   7.0× lower than the worst baseline seen — and about 1.1× the state it retains**, with
+   no `GOMEMLIMIT` at all. Both streaming runs peaked within 0.3% of each other, against the
+   baseline's 25% spread: a small heap is a predictable one. It replayed the same 8,156,868 records
+   through the same code that applies them, left the same aggregates, and
+   passed the archive package's tests unchanged; it is about 80 lines across two functions in one
+   package and changes no contract, no wire type and no file format. **This, not `GOMEMLIMIT`, is
+   the answer to the $96 question.** *(Measured on a patched build in a scratch tree. It is not in
+   `bin/`, not committed, and nobody has yet written a test that pins the streaming path itself.)*
+6. **Swap is not an alternative, and the peak is not a spike.** RSS stayed within 0.1% of its
+   high-water mark for **150 seconds after the replay ended** before Go's scavenger returned
+   anything. A box that meets its peak in swap is thrashing a live heap that the collector is
+   walking, for minutes.
+
+**What each answer buys**, at the exit-test bar (S = 5, 242,000 records/day, from an empty ledger on
+day one). The day is when the *replay* stops fitting; resident is the separate line above:
+
+| Replay implementation | Peak/record | Day-90 peak | 2 GB | 4 GB | 8 GB |
+|---|---|---|---|---|---|
+| today's, no `GOMEMLIMIT` | 1,286 B | **28.0 GB** | day 6 | day 13 | **day 26** |
+| today's, `GOMEMLIMIT=5GiB` | 772 B | 16.8 GB | day 11 | day 21 | **day 43** |
+| today's, `GOMEMLIMIT` at the floor, at 5–6 cores | 600 B | 13.1 GB | day 14 | day 28 | day 55 |
+| **streaming replay** | 184 B | **4.0 GB** | day 45 | day 90 | **day 180** |
+
+**Read the last row against the resident line and the whole shape of the problem changes.** With a
+streaming replay the replay stops being the binding constraint at all: resident crosses 8 GB at day
+110 and the replay would not cross it until day 180, so **the $44 bundle becomes restartable for the
+entire announced period** — and it is the *retention rule*, not the collector, that decides
+everything again. Note also that the streaming build's retained set right after replay was
+**0.16 KB/record**, half the 0.30 KB the deployment shows: part of what the running archive holds is
+its own replay, which it never fully gives back. That halving is **not** claimed as a resident
+model — no streamed archive has yet served live traffic for a day — so keep sizing resident from the
+deployment's own 0.30 KB/record until one has.
+
+**Three things still follow, and the third is still the biggest.**
 
 - **Steady state is not the constraint.** 0.045 cores for the relay and 0.18 for the archive, at
   eleven times a real map's rate, means the *running* map fits on almost anything.
-- **~77% of the replay peak is garbage, not state** — 1.30 KB peak against 0.30 KB retained. Go's
-  collector is not being asked to run during a tight replay loop. **`GOMEMLIMIT` is a
-  one-environment-variable lever that has never been tried here**, and trying it costs one rig run
-  against a copy of today's ledger. This is the cheapest experiment in the document and it should
-  happen before any instance is bought. It is *not* a certainty: trading RSS for GC CPU could turn
-  a 9-minute replay into a 25-minute one, and the archive serves nothing until it finishes.
+- **~77% of the replay peak is garbage, not state** — the measurement that says so is above. Go's
+  collector is not being asked to run during a tight replay loop, and when it is asked, it collects
+  what it can and then hits the ledger-sized slice it cannot.
 - **Decision 3 is the instance-sizing decision.** Retained memory grows forever at 0.30 KB/record
   because nothing may evict from the ledger (`contract-b-m4.md` §10). A retention rule that bounds
   the ledger — any of the three options Decision 3 names — puts the whole service on a 2 GB box.
-  *Keep everything* puts it on an 8 GB box that cannot restart in month three without
-  `GOMEMLIMIT`, swap, or both. **The gap between those two is about $96 over the period, and it is
-  the difference between a service that restarts and one that does not.**
+  *Keep everything* puts it on an 8 GB box that **cannot restart in month three on today's
+  implementation, and `GOMEMLIMIT` alone does not change that** — it moves the wall from day 26 to
+  day 43. **The gap between those two is about $96 over the period, and it is the difference between
+  a service that restarts and one that does not** — but the measurement has now added a third
+  option that costs neither: fix the replay's shape and the $44 bundle carries *keep everything* for
+  the whole run.
 
 ### The other term nobody has priced: the status page
 
@@ -372,9 +464,9 @@ for a modest run.
 
 | # | Option | Compute (3 mo) | Disk (3 mo) | IPv4 (3 mo) | Egress (3 mo) | **3-month total** | RAM verdict |
 |---|---|---|---|---|---|---|---|
-| 1 | **Lightsail $12** — 2 vCPU, 2 GB, 60 GB SSD, 3 TB transfer | $36.00 | incl. | incl. | incl. | **$36.00** — or **$0** on the 90-day trial | 2 GB: archive resident crosses it at **day 28** |
-| 2 | **Lightsail $24** — 2 vCPU, 4 GB, 80 GB SSD, 4 TB | $72.00 | incl. | incl. | incl. | **$72.00** | 4 GB: crossed at **day 55** |
-| 3 | **Lightsail $44** — 2 vCPU, 8 GB, 160 GB SSD, 5 TB | $132.00 | incl. | incl. | incl. | **$132.00** | 8 GB: survives 90 days resident; **cannot replay after ~day 26** without `GOMEMLIMIT` or swap |
+| 1 | **Lightsail $12** — 2 vCPU, 2 GB, 60 GB SSD, 3 TB transfer | $36.00 | incl. | incl. | incl. | **$36.00** — or **$0** on the 90-day trial | 2 GB: resident crosses it at **day 28**, but the **replay** crosses it at **day 6** — day 11 with `GOMEMLIMIT`, day 45 streamed |
+| 2 | **Lightsail $24** — 2 vCPU, 4 GB, 80 GB SSD, 4 TB | $72.00 | incl. | incl. | incl. | **$72.00** | 4 GB: resident at **day 55**, replay at **day 13** — day 21 with `GOMEMLIMIT`, day 90 streamed |
+| 3 | **Lightsail $44** — 2 vCPU, 8 GB, 160 GB SSD, 5 TB | $132.00 | incl. | incl. | incl. | **$132.00** | 8 GB: survives 90 days resident; **cannot replay after ~day 26**. `GOMEMLIMIT` moves that to **day 43**, not to 90; a streaming replay moves it to **day 180** **[rig experiment, 2026-08-12]** |
 | 4 | **EC2 t4g.small** (ARM) + 60 GB gp3 | $36.79 | $14.40 | $10.95 | ~$5 | **~$67** | as row 1 |
 | 5 | **EC2 t4g.medium** (ARM, 4 GB) + 80 GB gp3 | $73.59 | $19.20 | $10.95 | ~$5 | **~$109** | as row 2 |
 | 6 | **GCE e2-micro, Always Free** + 30 GB standard PD | **$0** | **$0** | ~$11 | $0 on Standard Tier | **~$11** | 1 GB. **Relay only — it cannot host the archive at any interesting ledger size** |
@@ -411,7 +503,7 @@ Price provenance, all **[web, 2026-08-11]** unless marked:
   anything, and note that only **one** bundle per account is covered, so a second instance for a
   cloud world (Part 2) is not free.
 
-### The single recommendation, and its condition
+### The single recommendation, and the condition that has now been discharged
 
 > **Amazon Lightsail, US East, one instance running relay and archive together, on a domain the
 > owner registers. Which bundle depends on Decision 3, and that is the point.**
@@ -423,14 +515,33 @@ Price provenance, all **[web, 2026-08-11]** unless marked:
 - **If the rule is *keep everything*** — which Decision 3 explicitly allows — take the **$44
   bundle**: 8 GB, 160 GB, 5 TB, **$132 for the period**. And understand what is being bought: 8 GB
   holds the archive *resident* through day 110, but on today's implementation it stops being able
-  to *replay* at around day 26. **That instance is not restartable in month three unless
-  `GOMEMLIMIT` or swap is proven first.**
+  to *replay* at around day 26 — **day 43 with `GOMEMLIMIT`, which is still inside the announced
+  period.** Buying this bundle without changing the replay buys a machine that holds the archive and
+  cannot restart it in month three.
 
-**The condition, stated as a gate rather than a caveat: measure the archive's replay memory against
-a copy of today's ledger, with and without `GOMEMLIMIT`, before buying anything.** It is one rig
-run, it does not touch the living deployment, and it decides a ~$96 difference and whether the
-service survives its own restart policy. WP3's done-when already requires a written restart policy;
-this is the measurement that policy has to be written from.
+**The condition was a gate, and the gate has been run** — the replay-memory matrix above,
+**[rig experiment, 2026-08-12]**, against a copy of the ledger and never the deployment. Its answer,
+in the order the money depends on it:
+
+- **Set `GOMEMLIMIT` on whatever is bought.** `GOMEMLIMIT=5GiB` on an 8 GB instance, or ~75% of RAM
+  on any other, in the service unit beside the binary. It took **a third off the replay peak for no
+  measurable wall clock**, and it converts an out-of-memory kill into a slow start, which is the
+  trade an unattended box should always take. **Do not tighten it past ~2× the retained set**: at
+  1.5× the same run cost 7× the CPU, and on two vCPUs that is the difference between a three-minute
+  restart and a twelve-minute one.
+- **`GOMEMLIMIT` does not make *keep everything* survive its own restart policy**, so it does not
+  by itself justify the extra $96. It moves the wall from day 26 to day 43.
+- **The thing that does is a change to the archive, not to the invoice.** The replay materialises
+  the whole ledger in memory before applying any of it; streaming it instead measured a
+  **5.6–7.0× lower peak**, and puts the $44 bundle past day 180 and the $12 bundle at day 45. It
+  is ~80 lines in one package with no contract implication, and it is now the cheapest item on this
+  page. **Land it before day one and the bundle question goes back to being about disk and
+  traffic.**
+
+WP3's done-when already requires a written restart policy. It can now be written from measurements
+instead of from a model: **restart cost is ~3 minutes and ~10 GB today, ~3 minutes and ~6 GB with
+`GOMEMLIMIT`, and it grows linearly with the ledger** — size it from `wc -l` on the day, never from
+this page.
 
 **Why not GCP.** Nothing disqualifies it, and if the owner has existing GCP familiarity that is a
 real cost saving this document cannot price. But at every RAM tier it is more expensive, its egress
@@ -746,9 +857,12 @@ Three stages. Each one is separately abandonable, and each one names what it pro
 
 ### Stage 1 — the core service. This is WP3 proper.
 
-**Before buying anything:** measure the archive's replay memory against a copy of today's ledger,
-with and without `GOMEMLIMIT`. One rig run, no effect on the living deployment, and it decides the
-bundle.
+**The measurement this stage used to wait on is done** **[rig experiment, 2026-08-12]**:
+`GOMEMLIMIT=5GiB` takes about a third off the replay peak for no measurable wall clock and belongs
+in the service unit, and it moves *keep everything* on an 8 GB instance from day 26 to day 43 — not
+to 90.
+**What the bundle waits on now is Decision 3 and one ~80-line change to the archive's replay**,
+which takes 5.6–7.0× off the peak and puts the same instance past day 180.
 
 | | |
 |---|---|
@@ -807,6 +921,8 @@ Ordered by how much else depends on them.
    notice against 30 seconds. It does not know what the owner already knows how to operate, and
    that is worth more than the difference.
 3. **The bundle**, once (1) is answered: $12 with a bounded ledger, $44 with *keep everything*.
+   With *keep everything*, the $44 bundle is only restartable through month three if the replay is
+   streamed first (measured 2026-08-12); `GOMEMLIMIT` alone gets it to day 43.
 4. **The name.** A registered domain (~$5 for the period) or free dynamic DNS ($0). Either works;
    the cloud's own hostname does not. **It is effectively permanent once the first join string is
    minted.**
@@ -834,9 +950,13 @@ Ordered by how much else depends on them.
 - **Does the itch.io Linux build's `BibitesAssembly.dll` match the Windows one?** Downloadable and
   checkable in minutes; not done here because this document was scoped to buy nothing and install
   nothing.
-- **Will `GOMEMLIMIT` bring the archive's replay peak down, and at what cost in replay time?**
-  One rig run against a copy of today's ledger. **This is the single highest-value experiment named
-  anywhere in this document.**
+- ~~**Will `GOMEMLIMIT` bring the archive's replay peak down, and at what cost in replay time?**~~
+  **Closed 2026-08-12** by the matrix in *The term nobody has priced*: yes — about a third off the
+  peak at `GOMEMLIMIT=5GiB` for no measurable wall clock and 17–39% more CPU, ruinous below ~2× the
+  retained set, and **not enough to reach day 90**. It left a bigger question in its place, one
+  that is not open so much as unowned: **the replay materialises the whole ledger before applying
+  it, and streaming it instead measured a 5.6–7.0× lower peak in ~80 lines.** That change belongs
+  to whoever owns `go/internal/archive/store.go`; this document only measured it.
 
 ## Sources
 
@@ -867,5 +987,6 @@ Project sources, cited inline by document and section: `m5_tracking.md`, `m5_con
 (DQ2, DQ3, Decisions 2/3/4/8, Risks 3/5/7/9/10, WP3–WP5), `dev_environment.md` (*Versions*,
 *The disk budget*, *The living deployment*, *Watch items*, *Gotchas*),
 `contracts/contract-a.md` (D2, §7.3), `contracts/contract-b-m4.md` (§9, §10, B21–B32),
-`go/internal/peercred/peercred.go`, `go/internal/archive/page.go`, `go/internal/relay/relay.go`,
-`bibites-mod/game.sh`.
+`go/internal/peercred/peercred.go`, `go/internal/archive/page.go`,
+`go/internal/archive/store.go` (`ReadLedger`) and `go/internal/archive/archive.go` (`New`'s replay),
+`go/internal/relay/relay.go`, `bibites-mod/game.sh`.
