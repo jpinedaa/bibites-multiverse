@@ -74,6 +74,19 @@ and the URL path moves with it to **`/contract-b/v4`** (B32). Contract A's match
 **minor** `contract-a/2.4` with its path unchanged at `/contract-a/v2` — one wave, two honest
 answers from two documents' own tests. Affected body text carries an `(amended — §22, Bx)` or `(added — §22, Bx)`
 marker, and **§22 wins over the body and over §14 to §21 wherever they disagree.**
+**Amended:** 2026-08-12, amendment set **B33–B34** (**§23**), from the owner's answer to
+`m5_considerations.md`'s **Decision 3** — *the migration ledger is kept forever; genome blobs are
+pruned to a horizon*. §10's own closing paragraph demanded this: it states that **nothing here
+may evict** and that a retention rule contradicting it is a change to D11 rather than a
+configuration of it. The change is narrow by construction — **the ledger's rule is untouched**,
+and the **genome store** gains an operator-set retention horizon that is **unset by default**,
+which the deployment turns on. The same horizon retires a genome gap whose crossing has aged
+past it, which is the drain §21's queue never had (Risk 7). **No message, field, enum, code or
+routing input changes**, and the wire consequence was already defined: a pruned hash answers
+`unknown_hash` exactly as a hash the holder never had (§6.10). §4's own test therefore answers
+**neither major nor minor** and the identifier **stays at `contract-b/4.0`**. Contract A takes
+**no** set: no rule of that wire changes. Affected body text carries an `(amended — §23, Bx)`
+marker, and **§23 wins over the body and over §14 to §22 wherever they disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -143,7 +156,7 @@ applies the same three tests that split `contract-b-m3.md` off and answers *in t
 >    moved in M4; none of them moves here.
 > 3. **Is the old text still needed as it stands?** No. Unlike M3's ring, M4's wire has no
 >    exit-test record that a `contract-b/4.0` reading would falsify: the M4 record cites this
->    file, and §14–§22 preserve every earlier identifier beside the marked body text, which is
+>    file, and §14–§23 preserve every earlier identifier beside the marked body text, which is
 >    exactly how a reader who needs `contract-b/3.5` finds it.
 >
 > **A major version bump is not by itself a reason to split a file**, and this is the second
@@ -2701,7 +2714,10 @@ write retries under the **same** name and leaves the same corpse again: on 2026-
 full disk turned one `ENOSPC` into **15,119 zero-byte scratch files** across the
 deployment's six stores, every one an inode spent on nothing at the moment inodes and
 blocks were what the rig had run out of. The archive's own store is bounded by neither
-tunable above — it is the record, and nothing evicts from it (§20, B20).
+tunable above — it is the record, and nothing evicts from it (§20, B20). **Since Decision 3 it
+may be given a retention horizon instead of a cap** (amended — §23, B33): still no
+least-recently-served **cap** and no byte budget, but an operator-set age past which a **blob**
+is pruned — **unset by default**, and never, at any setting, applied to the ledger.
 
 **Fetch behaviour, archive side.**
 
@@ -2713,7 +2729,7 @@ tunable above — it is the record, and nothing evicts from it (§20, B20).
 | Rate limit | At most `genomeRequestsPerMinute` (30) requests from one requester to one peer. The answering sidecar enforces the same limit and answers `rate_limited` above it. **It is a published knob under `contract-b/4.0`, not a compiled constant** (amended — §22, B24): §3.3 names it `maxGenomeRequestsPerMinute`, the relay publishes the value it is running with (§6.2, §6.5), and an operator can retune it from the metric that measures it (D20). Nothing about the limit's behaviour changes; what changes is that it can be moved without a rebuild, which on a public archive is the difference between a support answer and a release. |
 | Pace it, and bound the pass (added — §21, B21) | The rate above is **not** a budget. One pass of the queue examines at most `genomeScanPerTick` gaps, round-robin over a stable order and resumed where the last pass stopped; releases the requester's own lock every `genomeScanChunkSize` gaps, so its read loop is never starved; and sends at most `genomeRequestsPerTick` requests, carrying at most `genomeInFlightPerPeer` unanswered to any one peer. **None of it changes when a gap is retried** — see §21 for the incident that made a 64,736-entry backlog cost 7,789 ledger records. |
 | Retry schedule | 1 minute, 5 minutes, 30 minutes, 6 hours, then daily. Reset the ladder when the map's membership changes — a peer that just came back may hold what nobody had. |
-| Keep the hash forever | A hash with no genome is a permanent, useful record: it is still a lineage-graph node, and a fetch that failed for a year can succeed tomorrow. |
+| Keep the hash forever | A hash with no genome is a permanent, useful record: it is still a lineage-graph node, and a fetch that failed for a year can succeed tomorrow. **The hash, and no longer always the asking** (amended — §23, B34): where a retention horizon is set, a gap whose **crossing** is older than it is retired from the retry set and counted as `genomeGapsExpired`, because the only blob such a fetch could win is one the next eviction pass would delete. The **record** is untouched — the hash stays a lineage node, stays in the gap report and stays `[MISSING]` in the read path — and with no horizon set the ladder runs forever exactly as this row has always said. |
 | Verify | Recompute the hash of every fetched blob (§6.10). |
 | Report | The gap report lists every hash no peer has served, with its first-seen time and attempt count. It is the archive's honest statement of what it does not have. |
 
@@ -2753,6 +2769,15 @@ ratifies that the *deciding* happens in M5 and D24's announced ending is its dea
 this document states is the constraint that decision has to live inside — **nothing here may
 evict**, and a retention rule that contradicts that is a change to D11 rather than a
 configuration of it.
+
+**The decision landed on 2026-08-12, and it is that change, on one half** (amended — §23, B33).
+The owner's answer is *the ledger forever, the genome blobs to a horizon*, so **§23 is the
+recorded amendment this paragraph asked for**: the ledger's never-evict rule stands exactly as
+written above and D11 is untouched, while the **genome store** gains an operator-set retention
+horizon that is **unset by default at this contract's level** and turned on by a deployment.
+The growth arithmetic stays WP3's deliverable and now has a second number beside it — the age at
+which the bytes stop accumulating. Risk 7 becomes a **policy**: a genome nobody fetched inside
+the horizon is permanently unfetchable, and the archive counts what it abandoned (§23, B34).
 
 ### 10.1 What the status page may claim, and what it must call unknown
 
@@ -2946,6 +2971,7 @@ crossing" is now one of those claims.
 | `genomeInFlightPerPeer` | `8` | requester | **New after M4** (added — §21, B21). Unanswered `GENOME_REQUEST`s one requester may be carrying to one peer at any instant, independent of the rate. At `genomeRequestTimeoutMs` it still admits more than `genomeRequestsPerMinute` permits, so it too never binds before the rate does. |
 | `genomeCacheRetentionDays` | `30` | sidecar | Genome cache lifetime, least-recently-served. |
 | `genomeCacheMaxBytes` | `2147483648` | sidecar | 2 GiB cap on `<data-dir>/genomes/`. |
+| `genomeRetentionHorizon` | *unset* | archive | **New after `contract-b/4.0`** (added — §23, B33). Decision 3's retention horizon: how long a genome **blob** is kept after it was last stored or last served, as a duration. **Unset means nothing evicts, and that is the default** — the M4 behaviour this document specified until §23, and the safe direction for a knob that deletes. A deployment turns it on: `--genome-horizon`, `MULTIVERSE_GENOME_HORIZON`, `720h` on the M5 hosted run. It applies to the **genome store only**; `migrations.jsonl` is kept forever at every setting. The **same** value retires a gap whose crossing is older than it (§23, B34) — one number, two mechanisms, or the archive re-fetches what it just evicted. |
 | `journalCompactMinutes` | `15` | sidecar | **New after M4** (added — §20, B20). How often the journal is rewritten to the entries it still holds. `--journal-compact-minutes`, `MULTIVERSE_JOURNAL_COMPACT_MINUTES`. |
 | `logRotateMb` | `100` | all | **New after M4** (added — §20, B20). Size at which a process rotates its own log. `--log-file` names the file, `--log-rotate-mb` the cap, and a negative value disables rotation. With no `--log-file` the process logs to stderr and bounds nothing, which is the pre-M4 behaviour and still the default. |
 | `logKeep` | `5` | all | **New after M4** (added — §20, B20). Rotated generations kept beside `--log-file`. The disk ceiling for one process is `logRotateMb × (logKeep + 1)`. |
@@ -2977,6 +3003,12 @@ rig.
 and nothing may evict from them (§10). They grow with traffic, not with uptime,
 and an operator has to size a disk for them. `metrics.jsonl` grows with time at
 one sample per `metricsInterval` per slot, which is small but also monotone.
+**The ledger, permanently; the genome store, unless an operator says otherwise**
+(amended — §23, B33). `migrations.jsonl` is unbounded by rule and always will be.
+The genome store is unbounded by **default** — `genomeRetentionHorizon` is unset
+— and an operator who sets one converts that term from a total into a steady
+state of one horizon's worth of blobs. It is the only line of this paragraph a
+configuration can move.
 
 The **delivery rate limit** is a Contract A tunable, because it paces a Contract A message:
 `inboundRatePerSimMinute`, `inboundRateBurst` and `pacingIdleGraceMs` are in
@@ -3965,7 +3997,7 @@ whatever the operator's shell redirect caught.
 | A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
 | A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
 | A failed append leaves no bytes behind, and a replay says what it could not read (the ledger's half added 2026-08-09) | Every append-only file here — a sidecar's journal, the archive's `migrations.jsonl` — MUST truncate back to its pre-write length when an append fails or lands **short**, so no fragment is left for the next append to splice a whole record onto, and MUST drop an unterminated final line before appending again. A replay MUST report what it could not read rather than ending in silence. Where the file is rewritten as a matter of course — the journal, which compacts at `Open` — a replay MAY stop at the damage and report the history it discarded behind it. Where the file is **never** rewritten — the archive's ledger, whose contents nothing may evict (§10) — a replay MUST **skip** the damaged line and keep every record behind it, because the damage is permanent and stopping would make the loss grow with the file, without bound, forever. |
-| What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. |
+| What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. **Two of the three still are, and the genome store is now the operator's choice** (amended — §23, B33): `migrations.jsonl` and `metrics.jsonl` are unbounded exactly as this row says, and the **genome store** grows without bound only while `genomeRetentionHorizon` is unset — which is its default, so this row remains true of every deployment that has not decided otherwise. Where a horizon **is** set, the store's steady state is the horizon's worth of blobs and the sizing question becomes a rate rather than a total. Nothing changes for the ledger, at any setting. |
 
 **What the outage cost, as evidence for *A failed write cleans up after itself*.** When the volume filled,
 every genome write in the rig failed inside `os.WriteFile` — after the file
@@ -4778,3 +4810,111 @@ only the major; the **relay**, additionally, for the retired paths and their `40
 **operator**, for minting the credentials before the old wire stops, for one deploy window
 rather than six, and for reading the far end's return out of `relay.log` rather than assuming
 it.
+
+## 23. The archive's retention horizon (2026-08-12)
+
+**Decision 3 was answered by the owner on 2026-08-12**, and it is the one M5 decision this
+document had already written a place for. §10's closing paragraph — *And one limit that is now
+on somebody else's timetable* (added — §22, B27) — states the constraint the answer had to live
+inside: **nothing here may evict**, and *"a retention rule that contradicts that is a change to
+D11 rather than a configuration of it."* The answer contradicts it on exactly one of the two
+halves, so this is that change, recorded and bounded:
+
+> **The migration ledger is kept forever. The genome BLOBS are pruned to a horizon**, default
+> 30 days on the hosted deployment, a knob everywhere.
+
+**The narrowness is the whole design.** D11's rule about the **record** is untouched — every
+crossing, every hash, every lineage node, every species block and every `GENOME` line naming
+who served what is still permanent, and nothing in this set gives any component a way to remove
+one. What gains a horizon is the **bytes**: the content-addressed store under
+`<data-dir>/genomes/`, whose entries are a cache of blobs the ledger already describes. The
+archive's lineage graph keeps all of its nodes and ages out some of its leaves' contents, which
+is the shape `m5_considerations.md`'s Decision 3 paragraph and `m5_tracking.md`'s row both
+record.
+
+**Two amendments, B33 and B34**, continuing the `B` series for the reason §14 gives. They are
+not separable and §23 is one set for that reason: an eviction pass without B34's rule re-fetches
+what it has just deleted, forever, and B34's rule without a horizon has no number to measure.
+
+**This set does not change the wire.** No message type, no field, no enum value, no NACK code,
+no close code, no change to custody, dedup, the hold, the fan-out, hashing, routing or admission
+control — and no change to what any peer sends or accepts. **§4's test therefore answers neither
+major nor minor, and the identifier stays at `contract-b/4.0`.** The wire consequence is stated
+rather than added, and §6.10 had already defined it: a holder that does not hold a hash answers
+`found: false, reason: "unknown_hash"`, which that section calls **"a normal answer, not an
+error"** and whose listed causes already include *"the source may have restarted and lost its
+cache"*. A pruned hash is that case, reached deliberately. And on this deployment it is not even
+reachable from the wire: the archive is a **read-only subscriber** (§5.1, §22 B27) that answers
+no `GENOME_REQUEST` at all, so its pruning is observable only in its own gap report and on its
+own status page. A peer running with a horizon and a peer without one are indistinguishable to
+every other party on the map, which is the same test §20 and §21 applied to their own sets.
+
+**What it costs, stated once, out loud.** Risk 7 stops being a hazard and becomes a **policy**:
+*a genome nobody fetched inside the horizon is permanently unfetchable.* D11's *known limit*
+framing already prepares a reader for a record that is incomplete by construction, and this
+makes one class of that incompleteness deliberate and dated instead of accidental. §22's B30
+line is unchanged and is worth reading beside this one: **M5 promises removal from the view and
+does not promise removal from the record** — a horizon prunes blobs by age and is not a takedown
+mechanism, has no way to name a peer, a species or a hash, and must never be offered as one.
+
+### B33 — The genome store gains an operator-set retention horizon, off by default; the ledger's rule is untouched (§10, §12, §20 B20, §22 B27)
+
+*`m5_considerations.md` Decision 3, answered 2026-08-12. Milestone-internal — no D-row of its
+own — and it moves D6: the catalog inherits a complete graph whose leaves age out.*
+
+**Gap.** §10 said the archive's store "is bounded by neither tunable above — it is the record,
+and nothing evicts from it", §20's B20 named it in *What stays unbounded is named*, and §22's
+B27 put the sizing problem on the hoster's timetable. All three were written when the archive
+was one person's, on one volume, for six worlds. A public archive's genome store grows with peer
+count **and** with crossing rate, the operator who hosts it has signed for a bounded run (D24),
+and the 2026-08-08 ENOSPC outage is what running out looks like. The decision the owner faced
+was: keep everything and buy the disk, or keep the record and let the bytes age.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **The ledger never evicts, at any setting** | `migrations.jsonl` keeps every record forever, and no configuration of this horizon may touch one. That includes the `GENOME` line naming a blob that has since been pruned: **the record of what the archive held outlives what it holds**, so "we had it, `peer-lan-slot4` served it, it aged out" stays answerable. D11 is unchanged and §20 B20's rule that a replay must read past permanent damage still applies to a file nothing rewrites. |
+| **The genome store gains a horizon, and it is OFF at the contract level** | `genomeRetentionHorizon` (§12) is **unset by default**, and unset means M4's behaviour exactly: nothing evicts, no pass runs, no counter appears. A **deployment** turns it on — the M5 hosted run sets `720h` — which keeps the default on the side where a mistake costs disk rather than data. An implementation MUST refuse a negative value and MUST treat an unparsable one as unset, for the same reason. |
+| **The horizon is measured from last stored or last served** | Not from the crossing, and not from the file's creation. The store already refreshes an entry's mtime on a re-store and on every read (§10's least-recently-served cache rule), so the horizon runs from the last time anybody wanted the blob. **A blob served inside the horizon keeps its whole horizon** — it is never evicted mid-horizon — and a store that measured from first write would delete a genome served an hour ago. |
+| **A pass is bounded in work, and it yields** | §21's B21 discipline, applied to a sweep instead of a fetch, and mandatory for the same reason. One pass MUST examine a bounded number of shards and entries, remove a bounded number, resume where the last pass stopped over a **stable** order, and release the store's own lock at least every chunk of removals. The archive's fetch pump calls into that store **while holding the lock its relay read loop needs**, so a sweep that held the store's lock across a whole pass would starve the read loop through the far end of the same chain — and a subscriber that stops reading is one the relay closes. That incident cost 7,789 crossings. |
+| **A removal happens under the store's own lock, with the age re-read inside it** | Reading a directory is not deciding: an entry listed as old may have been served before the delete lands. The deletion MUST take the lock the store's own reads and writes take, and MUST re-read the entry's age inside it, or the "never evicted mid-horizon" rule above holds only for blobs nobody wanted. |
+| **The scratch files go on the same walk** | §20's B20 requires the store's expiry sweep to collect abandoned `<hash>.json.tmp` files, and the archive's store **never had a sweep to do it with**. The pass collects them as it passes, under the same age rule that made `staleTmpAge` safe. |
+| **A pass says what it removed** | Count and bytes, in the log, and as counters on §10.1's status surface beside `genomeGaps`. An operator MUST be able to tell **"a horizon is set and nothing has aged out yet"** from **"this archive prunes nothing"**, so the horizon itself is published: absent means off, which is §10.1's unknown-is-a-value rule applied to a knob. |
+| **The wire is untouched, and §6.10 is why** | A pruned hash answers exactly like a hash the holder never had: `found: false, reason: "unknown_hash"`, already a normal answer with a lost cache already among its causes. No field, no type, no enum value, no code — see this section's version note. |
+
+**Enforced by:** the **archive**, for the bounded, resumable, lock-yielding pass, for the
+mtime axis, for keeping the ledger out of it entirely and for publishing what it removed; the
+**genome store**, for taking its own lock around a removal and re-reading the age inside it;
+and the **operator**, for choosing the horizon deliberately and for knowing that the number they
+choose is the age at which this system stops being able to answer "what did that organism look
+like".
+
+### B34 — A gap older than the horizon stops being retried, and the retirement is counted (§10, §21 B21, Risk 7)
+
+*`m5_considerations.md` Risk 7's first mitigation, taken — "bound the ladder and record the
+abandonment as a fact the operator can count, instead of retrying forever".*
+
+**Gap.** §10's fetch table says *"Keep the hash forever"* and *"a fetch that failed for a year
+can succeed tomorrow"*, and its retry ladder therefore has no bottom. Risk 7 is what that costs
+when a peer leaves for good: a throughput-limited backlog becomes a permanent one, and §21's
+incident is what a permanent backlog does to a subscriber at the ×100 crossing rate. **Under
+B33 the retry becomes worse than futile**: a blob won past the horizon is one the very next
+eviction pass deletes. The queue finally has a drain, and it only exists if both mechanisms read
+the same number.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **One horizon, both mechanisms** | The gap queue and the store MUST use the **same** horizon. Two numbers, or a horizon on one side only, produce an archive that re-fetches what it just evicted — indefinitely, at the fetch rate, for every departed peer's backlog. |
+| **The gap's clock is the crossing's recorded time** | Not the moment this process first noticed the gap. A requester's "first seen" is set by its own replay and therefore **resets at every restart**, so a retention rule built on it would make every gap younger than the last reboot and would never retire one. The archive already records `recordedAt` on every migration; that is the crossing's own time and it survives everything. |
+| **A retired gap leaves the queue and stays in the record** | Retirement removes the entry from the **retry set** and from nothing else. §10's *keep the hash forever* is a rule about the ledger and is untouched: the hash is still a lineage node, still in the gap report, still `[MISSING]` in the read path. **What stops is the asking.** |
+| **A replay MUST NOT re-queue a crossing already past the horizon** | The startup replay hands every hash in the ledger to the tracker, so without this rule an archive rebuilds its whole retired backlog on every restart and pays for it in resident memory as well as in work — which is the term `wp3_hosting_options.md` measures against the box's RAM. |
+| **Retirement is a fact the operator can count** | `genomeGapsExpired` on §10.1's status surface, in the style of `genomeGaps` beside it, plus a summary in the log. Risk 7's accepted cost is a lineage graph with holes for departed peers; a counter is the difference between a stated policy and a silence. |
+| **Off by default, again** | With no horizon set, nothing is retired and the ladder of §10 runs exactly as it always has, forever. B21's bounds are untouched in either case: retirement happens **inside** the same bounded, yielding, round-robin walk and adds no unbounded work to a pass. |
+
+**Enforced by:** the **archive**, as the only requester on this wire, for measuring a gap on the
+crossing's own clock, for retiring inside the bounded walk rather than in a pass of its own, and
+for counting what it abandoned; and the **operator**, for reading `genomeGapsExpired` as the
+number that says how much of the map's genetic record has passed out of reach.
