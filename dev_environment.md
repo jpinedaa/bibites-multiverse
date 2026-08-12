@@ -2803,8 +2803,10 @@ whose point was a PAGE rather than an endpoint.** It carried the merged stratigr
 (`bdb5efb`). The relay was not restarted and its `relaySessionId` is still
 `27005d53-02f0-4447-985f-67b0d03e2c86`; the five games, the mod and slot 6 were untouched. **The
 view is live and it is right about the map — and the browser sweep it was restarted for found two
-rendering defects, neither of them patched.** They are below, with their evidence, and they are the
-next arc's work; the grant already covers the re-restart that lands the fix.
+rendering defects, neither of them patched.** They are below, with their evidence. **Both — and the
+softer third under them, and the blinking ring — closed in `979d72b` and were verified on the live
+page the same evening**; see *The genealogy-fix window* below, which also records what the floor
+fix did NOT change.
 
 | | |
 |---|---|
@@ -2870,6 +2872,12 @@ a whole now costs about 40% of the replay it did two windows ago**. That is not 
 gate failed, but it is a third point on a straight line, and the next archive change is where it is
 worth measuring rather than assuming — a 12 M-record ledger at this rate is a five-minute pause.
 
+**CORRECTION, taken the same evening: the fourth point broke this line.** 9.58 M records replayed
+at **47.3 k/s** — a 0.7% bigger ledger, 12% faster in wall clock — against a commit that adds no
+per-record work at all. The line was over-read, and this series measures host load at least as much
+as it measures the derivation. See *The genealogy-fix window* below: size from **~45 k/s** and treat
+the figure as noisy rather than as a trend.
+
 **Slot 6's game went away 33 minutes before the pause, and that is the far end's own event.** The
 relay logged `peer=slot-6 … modConnected=false exportEdges=[]` at **21:25:03Z**, with its sidecar
 still connected — so this window ran against a five-game map, and the shape after the resume is the
@@ -2897,6 +2905,8 @@ the map and settings tabs are unchanged, ceilings card and all. **Zero console m
 kind.** The two defects:
 
 - **THE ROOT BADGES ARE CLIPPED OUT OF VIEW — the whole of `bdb5efb` is unreadable on the page.**
+  *(Fixed in `979d72b`: the badges take their own line under their own wider clip, and the row's
+  `<title>` is now real. Verified live — see below.)*
   Every label rides in one `<text class="nm" clip-path="url(#lfclip)">`, the clip is
   `LF_NAMEX-4 = 26` wide by `LF_NAMEW = 366` so its right edge is **x 392**, and the badges are
   `tspan`s appended to that same run with **no width budget at all**. Measured live:
@@ -2908,7 +2918,10 @@ kind.** The two defects:
   tooltip" — **does not exist**: the row group has no `<title>` and no `aria-label`, so nothing on
   the page can recover the clipped text. Both badges are correct in the DOM and in
   `/api/species/tree`; only the drawing loses them.
-- **THE AMBER ANCESTRY FLOOR BOUNDARY IS NEVER DRAWN.** `tree.go` clamps `SpanStartMs` down to
+- **THE AMBER ANCESTRY FLOOR BOUNDARY IS NEVER DRAWN.** *(Fixed in `979d72b` with the `>=` and a
+  zero-width shade allowed to be zero-width; drawn and verified live below. Note that the clamp this
+  entry describes is also why hiding the seed stock tightens no axis — same section.)* `tree.go`
+  clamps `SpanStartMs` down to
   `AncestrySinceMs` under the comment "THE FLOOR IS ALWAYS INSIDE THE PICTURE"; `lfAxis` then guards
   the line with `x.ancestrySinceMs > sc.t0` where `sc.t0` **is** `spanStartMs`. Equal is not
   strictly greater, so on the normal case — the floor older than every bar, which is what the server
@@ -2918,7 +2931,9 @@ kind.** The two defects:
   missing is exactly the boundary. `>=`, and a zero-width shade allowed to be zero-width, is the
   whole fix.
 
-**A third, softer one: the drawing is 1344 px wide no matter how wide the window is.**
+**A third, softer one: the drawing is 1344 px wide no matter how wide the window is.** *(Fixed in
+`979d72b` — the plot is elastic, floors at `LF_PLOTMIN` 280, and a resize repaints; verified at 500,
+1280 and 1600 px below.)*
 `LF_PLOTW` 700 plus the fixed columns is a constant, and `#lfbox` is the window minus 83, so the
 picture **fits only at a window ≥ 1427 px**. At 1280 the box is 1197, `scrollLeft` is 0 and there is
 no scroll-to-now, so **147 px — the `now` end of every living bar, which is the point of the
@@ -2933,13 +2948,168 @@ poll; only `Sheeplasius godopedrus` (extinct here, so its latest genome is froze
 species that crosses often rotates its newest genome hash faster than the archive can fetch the
 blob, and the row's own detail says so in words — `brain  no copy of its latest genome is held
 here`. That is §10.1 working exactly as written, but **a reader must not expect the ring to be a
-property of a row**; it is a property of this minute.
+property of a row**; it is a property of this minute. *(Stabilised in `979d72b`: the ring is drawn
+from the newest genome of that species the archive has been able to READ, not the newest hash it has
+seen. Ten polls, one membership set — see below. The backlog itself is unchanged, so a row the
+archive holds no blob for still says so in words.)*
 
 **One smaller thing.** `save-health` came back `WARN` on slots 2, 3 and 4 immediately after the
 window — 2336, 2670 and 4072 ms against the 2000 ms stall budget — and was clean again later. The
 archive's 3.18 GB replay is production load on this host in exactly the way `go test ./...` is
 (*A controlled reproduction of the 18:39Z storm*), so a save that overruns inside a replay window is
 dated to the replay, not to the game.
+
+### The genealogy-fix window, 2026-08-12 — three defects close, and the axis turns out to be pinned by something else
+
+**The fourth archive-only pause of the day, run under the owner's standing grant, and the first one
+whose point was to VERIFY rather than to land.** It carried `979d72b`: the seed stock out of the
+default drawing, the stratigraphic window's three rendering defects, and the brain ring's
+stabilisation. The relay was not restarted and its `relaySessionId` is still
+`27005d53-02f0-4447-985f-67b0d03e2c86`; the five games, the mod and slot 6 were untouched. **All
+four fixes verify on the live page, and the sweep found no new rendering defect — but it did find
+that the change the seed-hiding was FOR does not happen on this map**, for a reason that is nobody's
+bug and is below.
+
+| | |
+|---|---|
+| Crossings paused | **4m 33.9s** — no local sidecar was up between **22:49:29.93Z** and **22:54:03.87Z**; all five had reclaimed by **22:54:12.01Z**. The worlds simulated throughout |
+| The archive | down **22:50:36.796Z → 22:53:59.324Z (3m 22.5s)**, entirely inside that pause. Replay of **9,579,220 records / 3.20 GB** took **202.5 s** |
+| Replay memory | **VmHWM 1,879,668 kB (1.79 GiB)** against the outgoing process's 2,513,544 kB — the streamed profile, and slightly *lower* than the stratigraphic window's on a slightly larger ledger |
+| Replay speed | **47.3 k records/s**, against 41.2 k three hours earlier. **The slide reversed on a ledger 0.7% bigger** — see below; this is the fourth point and it breaks the line the third one drew |
+| The ledger gap | **ZERO**, margins 67.1 s before and 4.8 s after |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, pacing line present (`pacedFramesPerSecond=25 pacedBurstFrames=12`), and `--diagnose` **PASS journal-replay … zero discarded bytes** on all five. TERM to exit: **80 / 78 / 53 / 75 / 76 ms**. Start to grant: **2.06 / 1.76 / 1.10 / 2.10 / 1.77 s**. Custody recovered outbound/inbound **9/0, 0/16, 16/0, 6/1, 15/0** |
+| Observation | 12 samples, 22:55:40Z–23:01:41Z, then a `rig-check --wire` at 23:05Z: `holes`, `heldDepth` and `timeoutBounces` **0** throughout, lanes **18/20** in every sample; `custodyDepth` 58–98 and `pacedDepth` 22–41, both falling every time they rose; population 228–264. **Zero** new `level=ERROR` and **zero** sheds across the relay, the five sidecars and the archive — the archive's single `ERROR` is the old damaged ledger line (`skippedLines=1 skippedBytes=776`), re-reported at replay |
+
+**The zero-gap accounting, and a detail the earlier windows did not have to name.** The last
+CROSSING record before the archive stopped was an `ACK` at **22:49:29.726Z** — **67.1 s** before the
+TERM and **0.21 s BEFORE the last local sidecar had exited**, the same shape the stratigraphic
+window measured. But the last record of **any** kind was a `GENOME` at **22:50:28.752Z**,
+`servedBy=slot-6`, only 8.0 s before the TERM: **slot 6's sidecar stays connected through a local
+pause and keeps serving genome blobs, so the ledger is not still during the pause — it is still
+during the OUTAGE**, which is the interval the gate is actually about. It was: **zero records carry
+a `recordedAt` inside 22:50:36.796Z → 22:53:59.324Z**, and the file was **byte-frozen at
+3,199,213,777 bytes** across it. The first record after the return was a `NACK` at 22:54:04.129Z
+(4.8 s after it answered) and the first `MIGRATION` slot 5 → slot 2 at 22:54:43.876Z. The relay says
+the same as ever: inside the outage it logged **exactly two lines, both about the archive itself** —
+its own `client gone` at 22:50:38.097Z and `client connected` at 22:53:59.221Z. No forward, no hold,
+no shed.
+
+**The counter, gzip and the ceilings, all unchanged.** On the frozen ledger: **`wc -l` 9,579,221,
+`ledgerRecords` 9,579,220, `ledgerSkippedLines` 1, difference 0**, with the counter reading the same
+value either side of a 2.1 s `wc`. Gzip after the resume: `/api/status` **18,172 → 2,298 (7.91×)**,
+`/api/species/tree` **11,275 → 2,193 (5.14×)**, both with `Vary: Accept-Encoding`, `/healthz`
+identity at 3 bytes. All eight `limits` keys published, `minContractVersion` absent, and
+`genomeHorizonMs`, `genomesEvicted`, `genomesEvictedBytes` and `genomeGapsExpired` all four absent:
+the relaunch went through `start_archive` with `ARCHIVE_HTTP=0.0.0.0:8796` preserved and **no** new
+environment. **Take the tree's gzip figure after the resume, never inside the pause** — measured
+while paused it was 824 bytes, below the 1,400-byte identity floor, because a paused map draws the
+small useless tree the archive-views window warned about.
+
+**THE STAMP-STRIPPED COMPARISON NEEDS A SECOND BASELINE, NOT JUST A BETTER ONE.** `bin/` was two
+revisions again (`archive` and `ringstat` at `5f2dc83`, the other four at `bde0f1c`), and comparing
+each binary against its own installed revision reported **four** movers — `archive`, `ringstat`,
+`sidecar` and `worldstat` — exactly as the stratigraphic window predicted, because the sidecar and
+worldstat still carry that window's uninstalled `internal/bb8` delta. That answer is true and
+useless: it cannot tell a mover *this* commit made from one banked earlier. **Build the previous
+HEAD too and compare `5f2dc83 → 979d72b`**, which gives the question its real answer — `archive` and
+`ringstat` **only**, with `sidecar`, `worldstat`, `relay` and `fakemod` byte-identical — matching a
+diff that touches six files, all of them in `go/internal/archive`. Two baselines, two questions:
+*what is stale on this rig* and *what did this change move*. Only the two were installed; the
+sidecar and worldstat stay at `bde0f1c` and the five live peers restarted on the very bytes they had
+been running.
+
+**The rollback set is `/mnt/wsl/data/gfw-2026-08-12/rollback-bin/`** — `archive.RUNNING`
+(`9e57a303…`, copied from `/proc/2466790/exe`), `archive.bin` and `ringstat` (`b0296614…`). The two
+archive copies were the same bytes for the third window running, and are still taken and compared
+rather than assumed. It retires on the usual rule.
+
+**THE REPLAY RATE SERIES BROKE ITS OWN LINE, AND THE THIRD POINT WAS OVER-READ.** 57 k/s at 8.44 M
+records, 47.8 k at 8.87 M, 41.2 k at 9.51 M — and now **47.3 k at 9.58 M**, a ledger 0.7% larger
+replayed **12% faster in wall clock** (202.5 s against 231 s) on the same host the same evening.
+This commit adds **no** per-record work to check it against: it touches no replay-path function at
+all — `observeSpeciesLocked` is untouched, the seed-stock rule is evaluated in `speciesIndexFrom` on
+the view path, and `brain.go` parses on demand. So the fourth point is not a code change and the
+third one was not purely a ledger-size cost. **The honest reading is that this series measures host
+load at least as much as it measures the derivation**, and the stratigraphic window's "three points
+on one straight line" over-read it — that window's own `save-health` WARNs on three slots say the
+host was busier then. **Size the next paused window from ~45 k/s and treat the number as noisy**;
+if the cost of the species derivation is ever worth a decision, measure it on a quiet host against a
+fixed ledger, not by differencing production windows.
+
+**THE BROWSER VERDICT: all four fixes are live and correct on the page.** Swept at a 1280 px window,
+`#tree`, with **zero console messages of any kind** and **no page-level horizontal scroll on any
+tab**.
+
+- **The seed stock is out of the drawing, and the way back in is free.** 14 rows drawn and
+  `Basic bibite` absent; the stat line reads *"1 seed species hidden — excluded from migration on
+  every world where it lives · show"*. `show` gives 15 rows and flips the notice to *"…shown … ·
+  hide"*. Searching `basic` reveals the hidden row on its own; `todae` gives 4 rows — the three
+  matches **plus** their connecting ancestor — and does **not** drag the seed in; a miss still says
+  *"no species matches that search"*; clearing restores 14 with the seed hidden. The claim that the
+  reveal costs no second request holds under a decisive test: **10 toggles inside a second cost 0
+  HTTP requests, against 3 in an equal idle second** (the page polls ~1.5 s, so a single-click
+  measurement will catch an ambient poll and mean nothing). The revealed row carries **SEED STOCK ·
+  NEVER EXPORTED S1 S2 S3 S4 S5**, then **ENDEMIC**, then **NO RECORDED ANCESTRY** — the badge that
+  used to paint as `NO R` — all three complete.
+- **The badges are readable, and the tooltip the old comment promised now exists.** They ride in
+  their own `text.bdg` on their own line (y 77 against the name's 60) under their own clip
+  `#lfbclip` (x 26, width 574, right edge **600**) instead of the name's `#lfclip` (right edge 392).
+  The widest badge line on the map — the root's `· extinct here · 9 living lines below` +
+  `THE RECORD BEGINS HERE · 31 GENERATIONS ABOVE` — ends at **x 562.9, 37.1 px inside its clip**,
+  and every other badge line has more room than that. Every row group opens with a real
+  `<title>`.
+- **The amber floor is drawn.** `line.floor` at x 614 in `rgb(226,185,59)` with `.floorlbl`
+  *"ancestry recorded from here"* beside it, and `.prefloor` present as a **zero-width** rect —
+  which is the fix: `>=`, and a shade allowed to be zero wide.
+- **The plot is elastic and `now` is on screen.** At 1280 the svg is 1196 and the wrapper's
+  `scrollWidth == clientWidth == 1197`, so `now` at x 1166 needs no scrolling — against the old
+  fixed 1344 that put 147 px past the edge. A resize repaints: 1600 → svg 1516. At 500 px it floors
+  at `LF_PLOTMIN` 280 and takes an inner scrollbar, while
+  `documentElement.scrollWidth == clientWidth == 485` and **`.lifewrap` is the only overflowing
+  element on the page** — the outer rule is still respected.
+- **The brain ring has stopped blinking.** Ten polls over 30 s: **exactly 3 of 14 rows carried a
+  ring every single time, the same three, one distinct membership set** — against 2–6 of ~20 rows
+  changing on nearly every poll before. The ringed set is exactly the set of nodes carrying
+  `neurons`/`synapses`, the open row now says *"(from the latest genome of it this archive holds)"*,
+  and a species the archive has read no blob for still says *"no copy of its latest genome is held
+  here"*. `genomeGaps` is still **~153 k**, so the backlog did not go away — the ring stopped being
+  a property of this minute.
+- **Everything the previous sweep passed still passes.** Mini-maps match the census slot-for-slot on
+  all 8 living rows, on the map's own grid with **row 0 at the bottom** — read them in that
+  orientation or the cross-check will look wrong — with slot 6 the **unknown** dot on every row and
+  never an empty one. Dotted lead-ins `+7 +1 +8` sum to 16 against `collapsed` 16; 9 sparklines for
+  9 living drawn rows; the population toggle re-ranks to 8 rows and draws **zero** edges and zero
+  chains, and `family` restores the order exactly; a row opens to `worlds`, `record`, `brain` and
+  `parent species … shown, never resolved`; `#tree` and `#species` both land on the species tab and
+  `#map`/`#settings` are unchanged, ceilings card and all eight limits included.
+
+**AND THE ONE THING THAT DID NOT FOLLOW: hiding the seed changed no axis at all, because the axis was
+never the seed's to set.** `tree.go` computes two left edges — `SpanStartMs` over the drawn bars and
+`SpanStartSeedMs` with the seed's in — and then clamps **both** down to `AncestrySinceMs` under
+"THE FLOOR IS ALWAYS INSIDE THE PICTURE", which is what fix (d) needs in order to have a boundary to
+draw. On this map the floor is **2026-08-07T05:14:22.896Z** and the oldest drawn bar starts
+**2026-08-11T01:11:11.818Z**, so the clamp wins and all three values are the same int64:
+`spanStartMs == spanStartSeedMs == ancestrySinceMs`. Measured on the page, revealing the seed moved
+**no tick by a pixel**. The consequence is visible: the plot runs x 614 → 1166 and the earliest bar
+begins at x 982.6, so **368.6 px of 552 — 66.8% of the drawing — is empty**, and every bar the view
+is about is packed into the right third. The seed's full-width bar used to occupy that space; now
+nothing does. **The seed was never what stretched the axis** — the floor was, and the floor is fixed
+at the record's beginning while living species turn over every few hours, so **this gap widens for
+as long as the map runs**. Nothing here is a bug: `tree.go` does exactly what its comment says, the
+second axis is correct and merely inert on a map where the seed's first crossing (05:14:36.853Z) is
+*younger* than the floor (05:14:22.896Z), and no gate failed. It is a design collision between two
+rules that were written separately, and **it is the owner's call**, not a patch to make quietly: the
+choices are to let the drawn axis start at the oldest drawn bar and render the floor as an
+off-picture caption rather than a boundary, or to keep the boundary and accept a drawing that is
+mostly empty and getting emptier.
+
+**Two smaller things.** `ringstat --species` does **not** hide the seed and should not — it prints
+`Basic bibite` with `never-exported endemic`, which is the operator's view of the same fact the page
+calls SEED STOCK; the vocabularies differ between the two surfaces. And `perMinute` did its
+documented five-minute climb again after the restart — 130.8 → 808.2 across the 12 samples — then
+settled at **821/min against the 695.6/min read before the window**, which is the achieved-time-scale
+readout explaining itself once more (slot 1 at 31.0, slot 2 4.5 → 6.9) and not something an archive
+restart can cause.
 
 ### Bringing it back after a reboot
 
