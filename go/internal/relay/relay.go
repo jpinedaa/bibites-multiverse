@@ -168,6 +168,14 @@ type Server struct {
 	// forwarded is the §5.2 record: the migrationIds this PROCESS has attempted
 	// to write to some peer's connection, with the time of the first attempt.
 	forwarded map[string]time.Time
+	// receiptsSent and receiptsDropped count B26's frame (§6.12). They are the
+	// operator's reading of a term that is one frame per migration and therefore
+	// grows with exactly the thing a public map grows, and the harness's input
+	// for frames-per-migration at rate. A drop is benign — a missing receipt is
+	// silence — so it is COUNTED rather than acted on.
+	receiptsSent       int64
+	receiptsDropped    int64
+	lastReceiptDropLog time.Time
 	// inherited names the peer ids that took a slot by operator handover, so
 	// their first grant says so (§6.4's "handover" reason). It is consumed once.
 	inherited map[string]bool
@@ -1821,8 +1829,83 @@ func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bo
 		s.log.Warn("relay: forward failed after the attempt was recorded",
 			"peer", dest.id, "migrationId", id.MigrationID, "err", err)
 	}
+	// §6.12, B26: ONE RECEIPT PER FORWARD, at the write. It is emitted AFTER the
+	// forward has been enqueued and never before it, because "the relay MUST NOT
+	// delay, block or fail a forward on account of a receipt it could not send"
+	// is a rule about ordering as much as about failure.
+	s.sendForwardReceipt(p, id.MigrationID, routing.DestSlot)
 	s.fanOut(frame)
 	return true
+}
+
+// sendForwardReceipt is B26's whole relay-side obligation (§5.2, §6.12).
+//
+// ONE FORWARD, ONE RECEIPT. A re-forward or a re-route of the same migrationId
+// produces another, because it is a statement about a WRITE and not about a
+// migration — a sender holding two under one migrationId has forwarded twice,
+// which is a fact about its own retries and never a duplicated organism.
+//
+// IT GOES TO THE SENDER'S OWN CONNECTION and nowhere else. That is not an
+// optimisation: §5.1's fan-out set is unchanged and a subscriber is NOT copied,
+// because a receipt is a fact about one sender's journal rather than about the
+// migration, and every other frame this relay copies is the second kind.
+//
+// BEST EFFORT, THROUGH TrySend. A full outbound queue drops the receipt and the
+// connection stays up (§6.12's *Bounded* row): the sender's entry stays `sent`,
+// which is exactly where the receipt would have kept it. Nothing here can fail a
+// forward, and nothing here is retried.
+func (s *Server) sendForwardReceipt(sender *peer, migrationID string, destSlot int) {
+	if migrationID == "" {
+		// A frame the relay cannot name is a frame no journal can join a receipt
+		// to. §5.2's record skips it for the same reason.
+		return
+	}
+	now := time.Now().UnixMilli()
+	frame := mustFrame(s.log, contractb.TypeForwardReceipt, contractb.ForwardReceipt{
+		MigrationID: migrationID,
+		DestSlot:    destSlot,
+		// The session in force AT THE WRITE, so the sender learns the SCOPE of
+		// the fact along with the fact (§5.2). It is constant for the life of
+		// this process, which is precisely what makes it the scope.
+		RelaySessionID: s.sessionID,
+		ForwardedAt:    now,
+	})
+	if frame == nil {
+		return
+	}
+	err := sender.conn.TrySend(frame)
+	s.mu.Lock()
+	if err == nil {
+		s.receiptsSent++
+	} else {
+		s.receiptsDropped++
+	}
+	dropped := s.receiptsDropped
+	shout := err != nil && time.Since(s.lastReceiptDropLog) > time.Minute
+	if shout {
+		s.lastReceiptDropLog = time.Now()
+	}
+	s.mu.Unlock()
+	if shout {
+		// At most one line a minute, because the failure is benign by design and
+		// a line per migration would be the expensive half of a cheap frame.
+		s.log.Warn("relay: dropping FORWARD_RECEIPTs for a sender whose outbound queue is full; "+
+			"the forwards themselves are untouched",
+			"peer", sender.id, "droppedTotal", dropped,
+			"meaning", "a missing receipt is silence, and silence is never proof in this contract; "+
+				"the sender's entry stays `sent`, which is where the receipt would have kept it "+
+				"(contract-b-m4.md §6.12, §22 B26)")
+	}
+}
+
+// ReceiptCounts is how many FORWARD_RECEIPTs this process has enqueued and how
+// many it has dropped for a full outbound queue. It is what an operator reads
+// against the crossing rate, and what the cost harness measures a per-migration
+// frame count from.
+func (s *Server) ReceiptCounts() (sent, dropped int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.receiptsSent, s.receiptsDropped
 }
 
 // nackNoDelivery answers the SENDER rather than dropping the frame. A dropped

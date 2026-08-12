@@ -129,6 +129,11 @@ type Sidecar struct {
 	// bouncedTimeoutTotal is monotonic and reset only by losing the journal.
 	bouncedTimeoutTotal int
 	duplicateSuspected  int
+	// receiptsRecorded counts the FORWARD_RECEIPTs this process has journaled
+	// (contract-b-m4.md §6.12, §22 B26). It is process-local and deliberately NOT
+	// on the stats block: §6.3.1 is a published shape and B26 added no field to
+	// it. It exists for this sidecar's own log line and for the cost harness.
+	receiptsRecorded int64
 	// genomeServed counts GENOME_REQUESTs answered per requester in the current
 	// minute (contract-b-m4.md §10's rate limit, answering side).
 	genomeServed map[string]*rateWindow
@@ -376,6 +381,16 @@ func (s *Sidecar) RelaySessionID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.relaySessionID
+}
+
+// ReceiptsRecorded is how many FORWARD_RECEIPTs this process has journaled
+// (§6.12, §22 B26). It is the sender's own count of forwards the relay
+// acknowledged, and it is a measurement rather than a state: nothing routes,
+// refuses, holds or re-routes on it.
+func (s *Sidecar) ReceiptsRecorded() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.receiptsRecorded
 }
 
 // PacedFramesPerSecond is the outbound rate this sidecar is holding itself to
@@ -1439,6 +1454,18 @@ type InflightEntry struct {
 	RelaySession string
 	JournaledAt  time.Time
 	Note         string
+	// The FORWARD_RECEIPT block (§6.12, §22 B26). It is the reason this report
+	// can now say WHETHER the relay ever wrote this frame instead of leaving the
+	// operator to infer it from a handoff state that means "unknowably".
+	//
+	// ForwardReceipts of 0 is NOT a statement that nothing was forwarded. A
+	// missing receipt is silence, and silence is never proof in this contract;
+	// the printed report says so in as many words, because this is the one
+	// surface where a person is about to act on the difference.
+	ForwardReceipts  int
+	ReceiptSession   string
+	ReceiptDestSlot  int
+	ReceiptForwarded time.Time
 }
 
 // ListInflight answers the question the relay CANNOT: which entries name this
@@ -1476,6 +1503,16 @@ func ListInflight(dataDir string, destSlot int, holdTimeout time.Duration) ([]In
 			RelaySession: st.RelaySessionID,
 			JournaledAt:  time.UnixMilli(st.Entry.JournaledAt),
 			Note:         st.Note,
+
+			ForwardReceipts: st.ForwardReceipts,
+			ReceiptSession:  st.ReceiptSessionID,
+			ReceiptDestSlot: st.ReceiptDestSlot,
+			ReceiptForwarded: func() time.Time {
+				if st.ReceiptForwardedAtMs == 0 {
+					return time.Time{}
+				}
+				return time.UnixMilli(st.ReceiptForwardedAtMs)
+			}(),
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].JournaledAt.Before(out[j].JournaledAt) })
