@@ -17,7 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"multiverse/internal/termsafe"
 )
 
 // FetchStatus reads one Status from an archive's HTTP endpoint.
@@ -550,17 +551,7 @@ func dur(ms int64) string {
 // is printing somebody else's chosen text, so the sanitizer belongs here rather
 // than at each call site: a new column added next year gets it for free, and
 // forgetting it is not one of the available mistakes.
-func trunc(s string, n int) string {
-	s = safeTerm(s)
-	if len(s) <= n {
-		return s
-	}
-	cut := n - 1
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…"
-}
+func trunc(s string, n int) string { return termsafe.Clip(s, n) }
 
 // safeTerm is B30's escaping obligation for THE TERMINAL, which §22 binds
 // identically to the page: "escape for the surface rendered into — HTML, an
@@ -568,45 +559,9 @@ func trunc(s string, n int) string {
 // never render one as markup. ringstat's terminal is a rendering surface with
 // its own injection story."
 //
-// A terminal's markup is the control character. A species name of up to 64
-// bytes is attacker-chosen text (§10.1's inventory), and a name carrying ESC
-// can move the cursor, repaint the screen, retitle the window or — on some
-// terminals — put text into the user's input buffer. So every C0 control, DEL,
-// every C1 control and every byte that is not valid UTF-8 becomes U+FFFD.
-//
-// IT REPLACES RATHER THAN DROPS, on purpose: a dropped byte makes two different
-// names print identically, and an operator comparing a page against a terminal
-// has to be able to see that something was there.
-func safeTerm(s string) string {
-	if s == "" {
-		return s
-	}
-	safe := true
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || r == utf8.RuneError {
-			safe = false
-			break
-		}
-	}
-	if safe && utf8.ValidString(s) {
-		return s
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for i, r := range s {
-		if r == utf8.RuneError {
-			// Either a real U+FFFD or an invalid byte; both render as the same
-			// mark, which is the honest answer for a byte nothing can display.
-			_, size := utf8.DecodeRuneInString(s[i:])
-			_ = size
-			b.WriteRune('�')
-			continue
-		}
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
-			b.WriteRune('�')
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
+// The rule itself now lives in internal/termsafe, because WP7 added a SECOND
+// terminal surface printing text this project did not author — the sidecar's
+// own-slot view and `--diagnose`, which render peer ids, game versions, close
+// reasons and `lastRefusal` on the participant's own machine. A rule
+// re-implemented per surface is a rule eventually implemented once too few.
+func safeTerm(s string) string { return termsafe.Text(s) }

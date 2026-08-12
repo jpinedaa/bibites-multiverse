@@ -553,6 +553,15 @@ func (s *Sidecar) onHeartbeat(sess *modSession, env wire.Envelope) bool {
 		sess.haveEggCount, sess.eggCount = true, *hb.EggCount
 	}
 	sess.haveSimTime, sess.simulatedTime = true, *hb.SimulatedTime
+	if sess == s.mod {
+		// The ACHIEVED time scale (observe.go). The applied scale two lines above
+		// is what the game's governor allowed; this is what the world actually
+		// produced, and the two come apart precisely when the machine cannot keep
+		// up. THE CLOCK IS THE WALL CLOCK: cfg.Clock exists so §9.3's bounded
+		// hold can be tested over simulated hours, and a rate measured against a
+		// clock that jumps a day is not a rate.
+		s.achieved.observe(sess.sessionID, time.Now(), *hb.SimulatedTime)
+	}
 	if hb.LastSave != nil {
 		save := *hb.LastSave
 		sess.lastSave = &save

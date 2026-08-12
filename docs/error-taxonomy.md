@@ -6,7 +6,8 @@ public failure is one where the machine that suffers is not the machine at fault
 taxonomy that lists causes and stops there sends a stranger looking for a problem that is not
 on their computer (`m5_considerations.md`, DQ8).
 
-**Status: WP7's spine, with WP2's, WP4's and WP6's texture landed.** Every entry below is taken
+**Status: WP7's spine, with WP2's, WP4's and WP6's texture landed and WP7's own slots closed.**
+Every entry below is taken
 from the wire as WP1 published it — `contracts/contract-a.md` at `contract-a/2.4` and
 `contracts/contract-b-m4.md` at `contract-b/4.0` — and every wording, value and log line that
 belongs to the credential and TLS work (WP2), to the capacity table, the admin path and the
@@ -157,11 +158,35 @@ never re-delivered — it stays in the journal until somebody releases it.
 | `AIN-MALFORMED_MESSAGE` | permanent | A field failed validation. A sidecar defect | Report it, then release the held entry | **you** (report) |
 | `AIN-SHUTTING_DOWN` | transient | The game is unloading or quitting | Wait. Delivery resumes after the next handshake | **nobody** |
 
-> **SLOT — WP7, later arc (`--diagnose` and the participant view).** The exact commands a
-> participant types to list and release a held entry, and what the release prints before it
-> acts. `contract-b-m4.md` §7.5 and §9.3 fix the behaviour — list, then release with
-> `bounce` or `drop`, with the duplication risk printed first — and the packaged wording is
-> not written yet.
+**Listing and releasing a held entry** happens on the machine that owns the journal and nowhere
+else, because the relay cannot enumerate journals that are on other people's computers
+(`contract-b-m4.md` §7.5, §9.3). Two commands, and **the sidecar must be stopped for both**: the
+journal is a single-writer file.
+
+```
+multiverse-sidecar --data-dir <path> --list-inflight [--dest-slot <n>]
+multiverse-sidecar --data-dir <path> --release-inflight <migrationId> bounce|drop
+```
+
+The list prints, per entry, the migration id, the entity, the direction and status, the
+destination slot and exit edge, the durable handoff state, and **the accrued hold with the time
+left on it** — the clock that runs only while the destination is dark and this sidecar can see
+it.
+
+**The release prints the risk before it acts**, and waits for a typed `YES` unless `--yes` is
+passed. The words are the release's own:
+
+> An entry in handoff "sent" or "held" WAS written to a live relay connection, so the far sidecar
+> may already hold custody of this organism. If it does, and it returns and replays its own
+> journal after you bounce this one home, **THE MAP HOLDS TWO COPIES.** That is the one exception
+> at-most-once carries (§9.3), and this command is one of the two ways to fire it deliberately.
+>
+> An entry in handoff "pending" or "refused" was never handed to anybody, or was refused before
+> custody moved. Bouncing one of those cannot duplicate anything.
+
+A `drop` says the other half in its own line — *the organism is GONE from this map. D2 accepts
+loss; it never accepts duplication, and a drop is a loss you chose.* Neither act is reversible,
+which is why the warning comes first.
 
 ---
 
@@ -329,6 +354,8 @@ writes it at startup, then a configuration summary:
 | `LOCAL-JOURNALTORN` | On sidecar start, in `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log`: `sidecar: the journal was damaged and replay stopped early; custody history after the torn record is GONE`, carrying `discardedBytes` and the journal's path | The journal was torn — ordinarily by a full disk, sometimes by a hard kill. **Complete records behind the tear were thrown away.** The healthy reading is zero bytes on every start, and a healthy start logs nothing at all here | Free disk, then report the byte count. The number is evidence and it is not recoverable afterwards | **you** |
 | `LOCAL-DISK` | Writes fail; the sidecar reports journal errors; the machine fills | The genome cache, the journal and the logs grow, and **no rule in this system will ever shrink the durable ones**. A full disk here has previously left thousands of zero-byte scratch files behind, spending inodes at the moment inodes were what had run out | Free space and keep it free. On a packaged install everything this software writes is under `%LOCALAPPDATA%\BibitesMultiverse` — `data\` is the journal and the genome cache, `logs\` the sidecar's log — plus your worlds, which the game keeps under `%USERPROFILE%\AppData\LocalLow\The Bibites` and whose count is `MULTIVERSE_SAVE_KEEP`. Size the disk against a record that only grows | **you** |
 | `LOCAL-PARTIALSAVE` | A `.partial.zip` beside the world's save files at rest | A run died mid-save. The previous good save is untouched — the order is write, verify, rotate, prune, and a failure at any step leaves the live save alone | Safe to delete; the mod deletes it itself next time it saves | **nobody** |
+| `LOCAL-TWOSIDECARS` | Two sidecar processes are running against one data directory. `--diagnose`'s `stale-process` check names both process ids | **The journal is a single-writer file**, and two processes appending to one custody log is how custody history is lost. It is the local twin of the disk failure above: nothing refuses, nothing logs an error, and the damage is only visible at the next replay | Stop one of them. On a packaged install `Stop-Multiverse.ps1` stops the one this install started; a second copy started by hand is the one to find | **you** |
+| `LOCAL-STALEPID` | `<data-dir>\sidecar-process.json` names a process that is not running. `--diagnose` warns; nothing else notices | A sidecar was killed rather than stopped, and its process record outlived it. **Pid numbers are reused after a reboot**, so a record nobody removed is a record nobody should trust — and it is what makes a status query claim the thing is running when it is not | None: the next start overwrites it, and a clean stop removes it. It is worth knowing rather than fixing | **nobody** |
 
 ---
 
@@ -389,10 +416,15 @@ Written down because each one has already cost somebody an evening somewhere.
 
 ## 8. What to send when you ask for help
 
+**The short version: send `multiverse-sidecar --diagnose --json`.** It carries all five of the
+things below that a machine can know, it prints no secret at any verbosity, and the shape is
+stable across releases so a report from an old build is still readable. What it cannot know is
+what you were doing at the time.
+
 A support conversation that starts with these five things skips a round trip:
 
 1. **The taxonomy id**, if you found one. It is the whole of "what happened" in eight
-   characters.
+   characters. `--diagnose` prints one against every failure and warning it reports.
 2. **Four versions**: the game's, the mod's, the sidecar's, and the contract versions each
    wire reported. Two of them are on the map's own page, for every world at once.
 3. **The close code and its reason string**, verbatim. No side parses a reason string; it is
@@ -412,9 +444,16 @@ Every marked to-do in this document, with the package that owns it.
 
 | Slot | What is missing | Owner |
 |---|---|---|
-| §2.4 | The commands that list and release a held entry, and what the release prints before it acts | **WP7**, later arc |
 | §3.2 `B-4003c` | Where the map publishes the game build it is currently on, so a refused peer can read it rather than ask | **WP3** |
-| Whole document | The exit codes `--diagnose` maps each entry to | **WP7**, later arc |
+
+**WP7's own two are closed by its implementation arc.** §2.4 now names the two commands, states
+that the sidecar must be stopped for both, and quotes the duplication warning the release prints
+before it acts. And **`--diagnose` maps this whole document onto three exit codes, not one per
+entry**: `0` when nothing failed, `1` when something did, `2` when the diagnostic itself could
+not run. A code per taxonomy entry was the shape the slot imagined and it is the wrong one — the
+id is already in the output, in the machine-readable form as a field, and an exit code that
+carried it would be an unstable integer that changes whenever a table is reordered. The
+[specification](sidecar-diagnose-spec.md) §1 fixes the codes and the JSON.
 
 **WP6's two slots are closed.** §1 now names the release's one archive and its checksum chain,
 quotes the checksum and unblock commands, adds the four refusals the package itself invents

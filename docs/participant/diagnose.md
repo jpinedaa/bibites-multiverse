@@ -3,16 +3,41 @@
 **Four things to do, in this order.** Each one answers a different question, and doing them out
 of order is how an evening gets spent on the wrong machine.
 
-1. **Read what the map thinks of your world.** It is one page, and it is about you.
+1. **Read what the map thinks of your world**, with `multiverse-sidecar --my-slot`.
 2. **Run `multiverse-sidecar --diagnose`.** It runs the checks a person used to have to run.
 3. **Look the symptom up in the taxonomy.** Every refusal there names its remedy *and* who has
    to apply it.
 4. **Ask, with the five things a question needs.**
 
+**Both commands are the sidecar you already have**, run from the folder you installed from, and
+both need to be told which world they are about:
+
+```powershell
+cd <the folder you unpacked the release into>
+$data = "$env:LOCALAPPDATA\BibitesMultiverse\data"     # unless you passed -DataRoot
+
+.\multiverse-sidecar.exe --my-slot   --data-dir $data
+.\multiverse-sidecar.exe --diagnose  --data-dir $data
+```
+
+Everything below writes them short. **They read; they do not start anything**, and you can run
+either one while your world is running.
+
 ## 1. Read what the map thinks of your world
 
-The map publishes a page, and your world is on it beside everybody else's. You do not need an
-operator to read it to you.
+```
+multiverse-sidecar --my-slot
+```
+
+**Your own sidecar answers this, not the map.** It already knows everything the map has said
+about your world — it was told, on the same broadcast every other peer gets — so this asks the
+map for nothing, works when the map's own page is unreachable, and is about you rather than about
+a grid of six worlds. Add `--json` for the machine-readable form.
+
+The map also publishes a page with every world on it, including yours, and it is worth reading
+when the question is about somebody else's world rather than your own.
+
+> **SLOT — WP3 (the hosted deployment).** The page's address.
 
 What to read, and what a healthy reading looks like:
 
@@ -23,13 +48,12 @@ What to read, and what a healthy reading looks like:
 | Your **queue depths** — in custody, paced, held | Small, and moving | A paced depth that never falls names a delivery rate set too low. Read it against your own configured rate, which is published beside it |
 | Your **last save** | Recent, against your own save interval | An absent save with a save interval of zero is a world with its save timer off — a reading, not a gap |
 | Your **speed** | The applied speed and the achieved speed are close | When they come apart, your machine cannot meet the speed you asked for, and **the gap is the news**. Every rate about your world is wrong by that factor |
-| Your **last refusal** | Absent | Present means the relay refused this world for a stated reason, and it is on the page rather than only in a log so that a stale world does not read as a dead one. It names one of three things: an incompatible game version, a wire version below the map's floor, or `capacity:` and the limit that fired. **Two refusals deliberately never appear here** — a rejected credential, which reaches no slot at all, and an eviction, which has no shape of its own. An empty field is not proof that nothing was refused |
+| Your **last refusal** | Absent | Present means the relay refused this world for a stated reason, and it is published to every peer rather than only logged, so that a stale world does not read as a dead one. It names one of three things: an incompatible game version, a wire version below the map's floor, or `capacity:` and the limit that fired. **Two refusals deliberately never appear here** — a rejected credential, which reaches no slot at all, and an eviction, which has no shape of its own. An empty field is not proof that nothing was refused |
+| The **other worlds** | Live, with a game connected, on your build | This is the row nobody could read before. When your lanes are quiet and your own world looks healthy, the cause is usually here, and it is on somebody else's machine |
 
-> **SLOT — WP3 (the hosted deployment).** The page's address.
->
-> **SLOT — WP7, later arc.** The participant's own view of their slot. Every field above
-> already exists on the wire; presenting them as *your world's* answer rather than as one cell
-> in an operator's grid is the work.
+**`--my-slot` shows and does not judge.** It prints the readings; `--diagnose` is what says
+whether one of them is a fault, and who has to act. If your sidecar is not running, `--my-slot`
+has nothing to read and says so — run `--diagnose`, which answers a dozen questions without it.
 
 ## 2. Run `--diagnose`
 
@@ -43,21 +67,41 @@ the wire version against the map's floor, your slot, your game's connection, you
 against the map's shape, your lanes, your world's speed, your journal, your save health, your
 disk headroom, and your neighbours' versions.
 
-**Three things it will not do**, and they are guarantees rather than limitations:
+**Four things it will not do**, and they are guarantees rather than limitations:
 
-- **It changes nothing.** It never rotates a credential, restarts a game, sets a speed or
-  writes to your journal.
-- **It never prints a secret**, in whole or in prefix.
+- **It changes nothing.** It never rotates a credential, restarts a game, sets a speed, claims a
+  slot or writes to your journal. It makes exactly one write anywhere: an empty file in your data
+  directory, removed at once, because whether a directory can be written to is not a thing you
+  can find out by looking at it.
+- **It never prints a secret**, in whole or in prefix. It prints the *path* each one is read
+  from, which is the fact you can act on. **The whole report is safe to send.**
 - **It runs without the map.** With no relay to reach, the checks that need one report
   *unknown* and say which check they were waiting on — they do not fail, and they do not
   quietly pass.
+- **It runs beside your sidecar without disturbing it.** It reads your running sidecar's own
+  state rather than opening a second connection to the map, and it never asks you to stop
+  anything.
 
-Every failure it reports names a taxonomy id and who must act. The specification it is built
-from is [`../sidecar-diagnose-spec.md`](../sidecar-diagnose-spec.md), which lists every check
-and its pass criterion.
+**Each line is one check**: the verdict, the check's name, and one sentence. Under anything that
+is not a pass come the evidence, the remedy, the taxonomy id and **who must act**. It ends with
+the counts and what its exit code means.
 
-> **SLOT — WP7, later arc.** The command's exact output, its exit codes and its machine-readable
-> form. The spec proposes all three; the implementation fixes them.
+| It exits | When |
+|---|---|
+| `0` | Nothing failed. Warnings and unknowns may be present, and on a healthy machine several always are |
+| `1` | Something failed |
+| `2` | The command itself could not run — no data directory, or `--check` naming something that is not a check. It has told you nothing |
+
+**An unknown is not a failure and not a pass.** It is a question nobody could answer yet, and it
+names what it was waiting on.
+
+Useful arguments: `--json` for the machine-readable form to paste into a support conversation,
+`--check <name>,<name>` to report only some of them, and `--timeout` to bound each probe on a slow
+link. **On a packaged install it needs nothing else**: your game folder and the support matrix
+come from the `install-record.json` the installer left in your data root, which is also how it
+knows where to look for the mod's log. The specification it is built from is
+[`../sidecar-diagnose-spec.md`](../sidecar-diagnose-spec.md), which lists every check, its pass
+criterion and the taxonomy entry its failure points at.
 
 ## 3. Look it up
 
@@ -107,10 +151,18 @@ side of a shared failure**.
 organisms your sidecar holds live in a file on your machine, and there is no protocol that
 moves them and no operator command that reads them. When the question is *which* organisms are
 held and what they are, the operator's honest answer is **"ask the peer"**, and the peer is
-you. The commands that list and release held entries run on your machine and nowhere else.
+you. Two commands answer it, on your machine and nowhere else, and **both need your sidecar
+stopped** because the journal takes one writer:
 
-> **SLOT — WP7, later arc.** Those commands' packaged names and the duplication warning the
-> release prints before it acts.
+```
+multiverse-sidecar --list-inflight
+multiverse-sidecar --release-inflight <migrationId> bounce|drop
+```
+
+The release prints the entry, then the duplication risk, and waits for a typed `YES` **before it
+acts**. [leave.md](leave.md) gives both commands in full, and
+[`../error-taxonomy.md`](../error-taxonomy.md) §2.4 gives the warning's exact words and why
+bouncing an entry the far side may already hold is the one exception at-most-once carries.
 
 ## Next
 

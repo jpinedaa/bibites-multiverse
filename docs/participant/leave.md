@@ -41,13 +41,26 @@ is what makes the map tidy rather than permanently expectant.
 
 **Before you go, drain your journal.** Your sidecar may be holding organisms it took custody of
 and has not been able to hand on — held entries, waiting on a destination that is dark. Custody
-is local: **nobody else can do this for you, and no operator command can reach it.** List them,
-then release each one, choosing whether it goes home to the world it came from or is dropped.
-The release prints its consequences before it acts, including the one case where a bounce can
-produce a duplicate.
+is local: **nobody else can do this for you, and no operator command can reach it.**
 
-> **SLOT — WP7, later arc.** The packaged names of the list and release commands, and the exact
-> wording of the duplication warning.
+**Stop your sidecar first** — `.\Stop-Multiverse.ps1` — because the journal takes one writer and
+both commands refuse while it is running. Then list what is left, and release each entry, choosing
+whether it goes home to the world it came from or is dropped:
+
+```powershell
+cd <the folder you unpacked the release into>
+$data = "$env:LOCALAPPDATA\BibitesMultiverse\data"     # unless you passed -DataRoot
+
+.\multiverse-sidecar.exe --list-inflight    --data-dir $data
+.\multiverse-sidecar.exe --release-inflight <migrationId> bounce|drop --data-dir $data
+```
+
+The list gives you the migration id, the organism, where it was going, and how long its hold
+clock has accrued. The release prints the entry and then **the duplication risk, before it acts**,
+and waits for you to type `YES`: an entry that was already written to a live relay connection may
+already be held by the far side, and bouncing that one home can leave the map holding two copies.
+An entry that was never handed to anybody cannot duplicate. A `drop` is a loss you chose, and it
+says so. The exact wording is in [`../error-taxonomy.md`](../error-taxonomy.md) §2.4.
 
 **If you simply stop and never say anything**, nothing breaks — but the map keeps a place for
 you indefinitely. Your neighbours route around you forever, your position is never filled by

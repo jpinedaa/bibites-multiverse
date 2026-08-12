@@ -3,6 +3,7 @@ package sidecar
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -94,6 +95,35 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			"(contract-a.md §8, heartbeatTimeoutMs). 0 keeps the 13-second default. "+
 			"Raise it when [M4-SAVE] stalls approach it; lower it to detect a dead "+
 			"mod sooner, at the cost of a 4004 for every save that overruns")
+	// WP7's support surface. Both are READ-ONLY and both exit without starting
+	// anything: --diagnose runs the twenty-one checks of
+	// docs/sidecar-diagnose-spec.md, and --my-slot prints what this world's own
+	// sidecar and the map say about it. Either runs beside a sidecar that is
+	// already up, and neither disturbs it.
+	diagnose := fs.Bool("diagnose", false,
+		"run the support checks against this data directory and exit. Read-only, prints no "+
+			"secret, and works with no map to reach: exit 0 when nothing failed, 1 when "+
+			"something did, 2 when the diagnostic itself could not run")
+	mySlot := fs.Bool("my-slot", false,
+		"print what your own slot's liveness, lanes, queue depths, speed and last save are, "+
+			"then exit. It reads the running sidecar on this machine and asks the map for "+
+			"nothing")
+	asJSON := fs.Bool("json", false,
+		"with --diagnose or --my-slot: emit the machine-readable form instead of the human one. "+
+			"Its shape is stable across releases, so a report from an old build is still readable")
+	only := fs.String("check", "",
+		"with --diagnose: report only these checks, comma-separated. It filters the REPORT and "+
+			"not the work — a check's precondition is still evaluated, or its answer would mean "+
+			"nothing — and the exit code then reflects what was reported")
+	timeout := fs.Duration("timeout", DefaultDiagnoseTimeout,
+		"with --diagnose: the bound on EACH probe it makes — the local read, the relay connect "+
+			"and the TLS handshake. A diagnostic that hangs is a diagnostic nobody runs twice")
+	gameDir := fs.String("game-dir", env("MULTIVERSE_GAME_DIR", ""),
+		"with --diagnose: the game folder, for the mod log and the game build. A packaged "+
+			"install names it in install-record.json and needs no flag")
+	matrixFile := fs.String("support-matrix", env("MULTIVERSE_SUPPORT_MATRIX", ""),
+		"with --diagnose: the support-matrix.json to look this machine's game build up in. A "+
+			"packaged install keeps its copy in the folder it was installed from")
 	listInflight := fs.Bool("list-inflight", false,
 		"print the journal entries this sidecar still holds custody of, then exit "+
 			"(contract-b-m4.md §7.5). Answers what the relay cannot.")
@@ -122,6 +152,30 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	// THE TWO READ-ONLY COMMANDS RUN BEFORE THE LOGGER IS OPENED, and that
+	// ordering is a rule rather than a tidy-up. --log-file has an environment
+	// default (MULTIVERSE_LOG_FILE), so a participant who runs --diagnose with
+	// the environment their start script sets would otherwise have the
+	// diagnostic OPEN AND POSSIBLY ROTATE the running sidecar's own log — a
+	// write, on a file another process owns, from a command whose first promise
+	// is that it changes nothing. Neither command logs; both write to stdout.
+	if *diagnose {
+		return diagnoseCommand(diagnoseArgs{
+			dataDir:            *dataDir,
+			relayURL:           *relayURL,
+			contractATokenFile: *contractATokenFile,
+			credentialFile:     *credentialFile,
+			gameDir:            *gameDir,
+			matrixFile:         *matrixFile,
+			only:               *only,
+			timeout:            *timeout,
+			asJSON:             *asJSON,
+		}, stdout, stderr)
+	}
+	if *mySlot {
+		return mySlotCommand(*dataDir, *timeout, *asJSON, stdout, stderr)
 	}
 
 	logger, logCloser, err := logging.New(stderr, logging.Options{
@@ -244,6 +298,106 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		cfg.Logger.Warn("sidecar: shutdown timed out")
 	}
 	return 0
+}
+
+// diagnoseArgs is what the flag surface resolved for --diagnose.
+type diagnoseArgs struct {
+	dataDir            string
+	relayURL           string
+	contractATokenFile string
+	credentialFile     string
+	gameDir            string
+	matrixFile         string
+	only               string
+	timeout            time.Duration
+	asJSON             bool
+}
+
+// diagnoseCommand runs the checks and maps the report onto the exit codes.
+//
+// EXIT 2 IS FOR THE DIAGNOSTIC ITSELF, never for anything it found: a run that
+// exits 2 has told the caller nothing, so the only things that produce it are a
+// missing data directory argument and a --check naming something that is not a
+// check. Everything a machine's state can do to this command comes back as 0 or
+// 1 with a report attached.
+func diagnoseCommand(a diagnoseArgs, stdout, stderr io.Writer) int {
+	if strings.TrimSpace(a.dataDir) == "" {
+		fmt.Fprintf(stderr, "sidecar: --diagnose needs --data-dir (or MULTIVERSE_DATA_DIR)\n")
+		return ExitCannotRun
+	}
+	var checks []string
+	for _, id := range strings.Split(a.only, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			checks = append(checks, id)
+		}
+	}
+	if bad := UnknownCheckIDs(checks); len(bad) > 0 {
+		fmt.Fprintf(stderr, "sidecar: --check names no such check: %s\n", strings.Join(bad, ", "))
+		fmt.Fprintf(stderr, "the checks are: %s\n", strings.Join(CheckIDs, ", "))
+		return ExitCannotRun
+	}
+	// Whether a credential is configured, and NEVER what it is. LoadSecret is
+	// the same resolution the running sidecar does — the file, then the
+	// environment variable — so the check reports on the credential this install
+	// would actually present.
+	secret, err := peercred.LoadSecret(a.credentialFile)
+	configured := err == nil && secret != ""
+
+	rep := Diagnose(DiagnoseOptions{
+		DataDir:            a.dataDir,
+		RelayURL:           a.relayURL,
+		ContractATokenFile: a.contractATokenFile,
+		CredentialFile:     a.credentialFile,
+		SecretConfigured:   configured,
+		GameDir:            a.gameDir,
+		MatrixFile:         a.matrixFile,
+		Only:               checks,
+		Timeout:            a.timeout,
+	})
+	if a.asJSON {
+		if err := WriteDiagnosisJSON(stdout, rep); err != nil {
+			fmt.Fprintf(stderr, "sidecar: %v\n", err)
+			return ExitCannotRun
+		}
+		return rep.Exit
+	}
+	RenderDiagnosis(stdout, rep)
+	return rep.Exit
+}
+
+// mySlotCommand prints the participant's own-slot view (ownslot.go).
+//
+// It exits 0 whenever it printed a view and 1 when there was none to print, and
+// it deliberately makes NO judgement: judging is --diagnose's job, and a view
+// that graded itself would be a second, quieter diagnostic that nobody
+// specified.
+func mySlotCommand(dataDir string, timeout time.Duration, asJSON bool, stdout, stderr io.Writer) int {
+	if strings.TrimSpace(dataDir) == "" {
+		fmt.Fprintf(stderr, "sidecar: --my-slot needs --data-dir (or MULTIVERSE_DATA_DIR)\n")
+		return ExitCannotRun
+	}
+	if timeout <= 0 {
+		timeout = DefaultDiagnoseTimeout
+	}
+	res := fetchOwnSlot(dataDir, timeout)
+	if !res.OK {
+		fmt.Fprintf(stderr, "sidecar: there is no live view to read for %s.\n%s\n", dataDir, res.Why)
+		fmt.Fprintf(stderr, "This view is your own sidecar's answer about your own world, so it "+
+			"needs that sidecar to be running.\nRun `multiverse-sidecar --diagnose --data-dir %s` "+
+			"for the checks that answer without it.\n", dataDir)
+		return ExitFail
+	}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(res.View); err != nil {
+			fmt.Fprintf(stderr, "sidecar: %v\n", err)
+			return ExitCannotRun
+		}
+		return ExitOK
+	}
+	RenderOwnSlot(stdout, res.View)
+	return ExitOK
 }
 
 // listInflightCommand answers §7.5's third question — WHICH entries name this

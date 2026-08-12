@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -64,6 +65,7 @@ func (s *Sidecar) relayLoop() {
 			s.capacityShedTotal++
 			total := s.capacityShedTotal
 			s.mu.Unlock()
+			s.recordRelayFault(FaultCapacity, closeReason(err), capacitySheds)
 			// The relay's close reason NAMES THE LIMIT AND ITS VALUE, so the log
 			// line carries it verbatim rather than paraphrasing: it is the only
 			// place this machine's operator can read what they are over.
@@ -85,6 +87,7 @@ func (s *Sidecar) relayLoop() {
 		case isUnauthorized(err):
 			authFailures++
 			capacitySheds = 0
+			s.recordRelayFault(FaultUnauthorized, err.Error(), authFailures)
 			// §3.1 asks the log line to name THE REMEDY AND WHO MUST ACT, because
 			// this is a refusal nobody at this end can clear.
 			s.log.Error("contract B: the relay refused THIS PEER'S CREDENTIAL with HTTP 401",
@@ -99,6 +102,7 @@ func (s *Sidecar) relayLoop() {
 			// action that makes an unverifiable certificate safe.
 			authFailures = 0
 			capacitySheds = 0
+			s.recordRelayFault(FaultTLS, err.Error(), 0)
 			s.log.Error("contract B: the relay's TLS certificate did not verify; NOT CONNECTING",
 				"relay", s.cfg.RelayURL, "err", err,
 				"remedy", "the relay operator renews or fixes the certificate, or this machine's "+
@@ -108,6 +112,14 @@ func (s *Sidecar) relayLoop() {
 		default:
 			authFailures = 0
 			capacitySheds = 0
+			if err != nil && !errors.Is(err, context.Canceled) {
+				// Every other close and transport error, classified as one kind
+				// and told apart by its reason: B-4003b's identity mismatch,
+				// B-4003d's version floor, B-4003c's game version and B-4005's
+				// drain are one code with four reason strings, and the reason
+				// string is where the relay explains itself (§3.2).
+				s.recordRelayFault(FaultClosed, faultReason(err), 0)
+			}
 		}
 		if time.Since(started) >= contractb.StableSession {
 			// §3, contract-a.md §13 A8: the ladder resets only after a session
@@ -156,6 +168,21 @@ func closeReason(err error) string {
 		return ce.Reason
 	}
 	return ""
+}
+
+// faultReason is what the observation record keeps for a session that ended
+// some other way: the close code and the relay's own reason where there is one,
+// and the error text where there is not. A reason string is written for a person
+// and no side parses one, so it is carried verbatim (§3.2).
+func faultReason(err error) string {
+	var ce websocket.CloseError
+	if errors.As(err, &ce) {
+		if ce.Reason == "" {
+			return fmt.Sprintf("close %d", int(ce.Code))
+		}
+		return fmt.Sprintf("close %d %q", int(ce.Code), ce.Reason)
+	}
+	return err.Error()
 }
 
 // isCertificateFailure recognises a TLS verification failure, so B23's refusal
@@ -234,6 +261,11 @@ func (s *Sidecar) relaySession() error {
 	// HANDSHAKE_ACK. The only frame that goes out before it is the HANDSHAKE
 	// below, which is one frame and cannot breach anything.
 	s.sendPace.reset()
+	// The wire measurement is per connection, exactly as the relay's own meter
+	// is: a peak carried across a reconnect would be read against a ceiling
+	// nobody was holding at the time.
+	s.sent.reset()
+	s.relayConnectedAt = s.now()
 	s.peerEpoch = 0
 	s.neighbours = map[string]*contractb.Neighbour{}
 	s.status = contractb.PeerStatus{}
@@ -307,6 +339,7 @@ func (s *Sidecar) dropRelay() {
 	s.relayConn = nil
 	s.relayReady = false
 	s.relaySessionID = ""
+	s.relayConnectedAt = time.Time{}
 	s.neighbours = map[string]*contractb.Neighbour{}
 	s.status = contractb.PeerStatus{}
 	// §8: with the link down the sidecar knows nothing about its neighbours, so
@@ -343,6 +376,10 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 			// put anything but its HANDSHAKE on the wire.
 			paced := s.sendPace.configure(ack.Limits, time.Now())
 			pace := s.sendPace
+			// Kept verbatim for the own-slot view and for `--diagnose`'s limits
+			// check: the table is what THIS relay is running with, and a reading
+			// is only meaningful beside the ceiling it is counted against.
+			s.adoptPublishedLocked(ack.Limits, ack.MinContractVersion)
 			s.mu.Unlock()
 			slot := 0
 			if ack.AssignedSlot != nil {
@@ -426,6 +463,7 @@ func (s *Sidecar) onSectorGrant(env wire.Envelope) bool {
 	if !grant.Granted {
 		s.log.Error("contract B: placement claim refused", "reason", grant.Reason)
 		s.mu.Lock()
+		s.recordGrantLocked(false, grant.Reason, 0)
 		s.slot = 0
 		s.neighbours = map[string]*contractb.Neighbour{}
 		s.mapShape = grant.Map
@@ -437,6 +475,7 @@ func (s *Sidecar) onSectorGrant(env wire.Envelope) bool {
 	s.mu.Lock()
 	newSlot := s.slot != grant.Slot
 	moved := grant.Position != nil && s.position != *grant.Position
+	s.recordGrantLocked(true, grant.Reason, grant.Slot)
 	s.slot = grant.Slot
 	if grant.Position != nil {
 		s.position = *grant.Position
@@ -564,6 +603,7 @@ func (s *Sidecar) onPeerStatus(env wire.Envelope) bool {
 	// the published number actually moved.
 	repaced := s.sendPace.configure(status.Limits, time.Now())
 	pace := s.sendPace
+	s.adoptPublishedLocked(status.Limits, status.MinContractVersion)
 	if status.You.Slot != nil {
 		s.slot = *status.You.Slot
 	}
@@ -1040,6 +1080,11 @@ func (s *Sidecar) sendRelayLocked(typ string, data any) bool {
 		s.log.Warn("contract B: send failed", "type", typ, "err", err)
 		return false
 	}
+	// What this connection ACTUALLY put on the wire, counted the way the far end
+	// counts it (observe.go). It is measured after the send rather than after
+	// the admit because a frame the writer refused never reached the relay's
+	// meter either.
+	s.sent.observe(time.Now(), len(frame))
 	return true
 }
 
@@ -1103,5 +1148,9 @@ func (s *Sidecar) refreshClaim() {
 		claim.ExportEdges = []string{}
 		claim.BorderEdges = []string{}
 	}
+	// maxClaimsPerMinute is the one limit the relay keeps PER PEER rather than
+	// per connection, so this peer's own count of what it sent is comparable
+	// with the ceiling the relay publishes (contract-b-m4.md §3.3).
+	s.claims.observe(time.Now())
 	s.sendRelayLocked(contractb.TypeSectorClaim, claim)
 }

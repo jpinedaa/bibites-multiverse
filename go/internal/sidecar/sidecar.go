@@ -101,6 +101,22 @@ type Sidecar struct {
 	// monotonic and it is the measure the rejoin-burst finding is read against:
 	// a drain that spends frames and sheds nothing leaves it at zero.
 	capacityShedTotal int
+	// The observation record of observe.go: what a diagnostic reads instead of
+	// dialling the relay a second time (docs/sidecar-diagnose-spec.md §1).
+	relayFault       *relayFault
+	relayConnectedAt time.Time
+	lastGrant        *grantRecord
+	// publishedLimits and minContractVersion are the relay's own configuration
+	// as it published it, kept verbatim. Absence is UNKNOWN and never "no
+	// ceiling" (contract-b-m4.md §6.2).
+	publishedLimits    map[string]int64
+	minContractVersion string
+	sent               sentMeter
+	claims             claimMeter
+	achieved           achievedRate
+	// startedAt is this process's own start, reported beside its pid so a stale
+	// process record can be told from a live one.
+	startedAt time.Time
 
 	// Custody scheduling, in memory. The durable half lives in the journal.
 	sched        map[string]*sched
@@ -183,6 +199,8 @@ func New(cfg Config) (*Sidecar, error) {
 	// journal.Open has just compacted, so the periodic compaction's clock
 	// starts here rather than at the epoch.
 	s.lastCompact = cfg.Clock()
+	s.startedAt = time.Now()
+	s.sent = newSentMeter()
 	s.pace = newPacer(cfg.InboundRatePerSimMinute, cfg.InboundRateBurst)
 	// §7.4: peerId is persisted outside the journal. Losing it makes the peer a
 	// stranger that takes a second slot and strands its old one — which is why
@@ -248,11 +266,18 @@ func (s *Sidecar) Start(ctx context.Context) error {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	// WP7's own-slot view (ownslot.go). Read-only, loopback, and unauthenticated
+	// for the reasons written there.
+	mux.HandleFunc(OwnSlotPath, s.serveOwnSlot)
 	s.httpSrv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	// Publish the resolved address so a caller that asked for port 0 can find
 	// it without parsing logs.
 	_ = os.WriteFile(filepath.Join(s.cfg.DataDir, "listen.addr"), []byte(ln.Addr().String()+"\n"), 0o644)
+	// And the process record `--diagnose`'s stale-process check reads. It is
+	// written after the listener binds, so a record that exists names a process
+	// that got as far as serving (ownslot.go).
+	s.writeProcessRecord(ln.Addr().String())
 
 	s.wg.Add(1)
 	go func() { defer s.wg.Done(); _ = s.httpSrv.Serve(ln) }()
@@ -420,6 +445,11 @@ func (s *Sidecar) Close() error {
 		cancel()
 	}
 	s.wg.Wait()
+	// A CLEAN shutdown removes its own process record. What is left behind after
+	// a kill is exactly the stale record `--diagnose` warns about, and leaving it
+	// is the honest outcome: pid numbers are reused, so a record nobody removed
+	// is a record nobody should trust.
+	s.removeProcessRecord()
 	return s.jr.Close()
 }
 

@@ -20,7 +20,7 @@ learned, and it stays where it is. Nothing in `docs/` is a copy of it.
 | [`participant/leave.md`](participant/leave.md) | a participant | What does stopping mean, what does leaving mean, and what becomes of my world and its place on the map? |
 | [`support-matrix.md`](support-matrix.md) | a participant **and** the operator | Which mod and sidecar build goes with which game version, how to look your own build up, and what a map with two game builds on it does |
 | [`error-taxonomy.md`](error-taxonomy.md) | a participant **and** the operator | Every refusal this system can hand somebody, with the remedy **and who must act** |
-| [`sidecar-diagnose-spec.md`](sidecar-diagnose-spec.md) | whoever implements `--diagnose` | Each check, its pass criterion, and the taxonomy entry a failure points at |
+| [`sidecar-diagnose-spec.md`](sidecar-diagnose-spec.md) | whoever implements or reviews `--diagnose` | Each check, its pass criterion, and the taxonomy entry a failure points at — plus the exit codes, the JSON schema, and the participant's own-slot view `--my-slot` |
 | [`defaults-audit.md`](defaults-audit.md) | a reviewer, and the operator | Every default the release ships with, what a bare install does with it, and the verdict |
 
 **Two of these travel with the release rather than only living here.** `support-matrix.md`'s
@@ -53,9 +53,13 @@ join string's printed form, the published capacity table, the admin path's parti
 effects and the lineage-gap and export-edge texture are now quoted from what ships. **WP6's are
 closed too**: the artifact names, the checksum and unblock commands, the installer's own output
 and refusals, the uninstall, the support matrix's location and lookup, the participant-facing
-name of every shipped setting, and the two log files a packaged install writes. What remains is
-owned by **WP3** (the hosted deployment), **WP8** (the bands only a playtest can measure) and
-WP7's own later arcs. Each document collects its own slots in a table at the end.
+name of every shipped setting, and the two log files a packaged install writes. **WP7's own are
+closed by its implementation arc**: `--diagnose`'s exit codes, output and JSON schema, the
+approaching-a-limit band, the commands that list and release a held entry, and
+`multiverse-sidecar --my-slot` — the participant's own view of their own world, which is a
+sidecar-local command rather than a page, for the reasons the specification's §8 gives. What
+remains is owned by **WP3** (the hosted deployment) and **WP8** (the bands only a playtest can
+measure). Each document collects its own slots in a table at the end.
 
 ## Where the authority lives
 

@@ -244,6 +244,11 @@ var ErrNotFound = errors.New("journal: migration not found")
 // ErrDuplicate is returned when Create is called for an id that already exists.
 var ErrDuplicate = errors.New("journal: migration already journaled")
 
+// ErrReadOnly is returned by every mutating method of a journal opened with
+// OpenReadOnly. A diagnostic holds one while the owning sidecar is running, and
+// the single-writer rule is what keeps that safe.
+var ErrReadOnly = errors.New("journal: opened read-only")
+
 // testHookPreRename runs inside compact, after the scratch file is fsynced and
 // before it is renamed into place — the one instant a crash has to be harmless.
 // It is nil everywhere except the test that SIGKILLs a process there.
@@ -257,6 +262,9 @@ type Journal struct {
 	states map[string]*State
 	seq    uint64
 	closed bool
+	// readOnly is set by OpenReadOnly. There is no write handle behind it, so
+	// every mutating path refuses rather than dereferencing a nil file.
+	readOnly bool
 	// discarded is how many bytes replay threw away behind a torn line. It is
 	// 0 for every healthy journal and a reason to shout for any other.
 	discarded int64
@@ -278,6 +286,29 @@ func (j *Journal) tailBytes(offset int64) int64 {
 		return 0
 	}
 	return info.Size() - offset
+}
+
+// OpenReadOnly replays the journal in dir and returns it WITHOUT compacting it,
+// WITHOUT creating anything, and WITHOUT a write handle. It is what a diagnostic
+// opens.
+//
+// THE ORDINARY Open IS NOT A READ. It creates the directory, it rewrites the log
+// to its live set, and it holds the file open for append — three things a tool
+// that promises to change nothing may not do, and the last of which is why
+// --list-inflight has always had to say "the sidecar must be stopped". Replay
+// alone needs none of them: the log is append-only, so a reader that stops at
+// the last complete record it can see has read a consistent prefix of it even
+// while the owning process is writing the next one.
+//
+// The Journal it returns answers every read — List, Get, CountPending,
+// Discarded, Size — and refuses every write with ErrReadOnly rather than
+// corrupting a file another process owns.
+func OpenReadOnly(dir string) (*Journal, error) {
+	j := &Journal{dir: dir, states: map[string]*State{}, readOnly: true}
+	if err := j.replay(); err != nil {
+		return nil, err
+	}
+	return j, nil
 }
 
 // Open loads (and compacts) the journal in dir, creating dir when needed.
@@ -526,6 +557,9 @@ func (j *Journal) Compact() (before, after int64, err error) {
 	if j.closed {
 		return 0, 0, os.ErrClosed
 	}
+	if j.readOnly {
+		return 0, 0, ErrReadOnly
+	}
 	before = j.size()
 	if err := j.compact(); err != nil {
 		return before, before, err
@@ -556,6 +590,18 @@ func (j *Journal) size() int64 {
 	}
 	return info.Size()
 }
+
+// Size is the log file's length on disk, and Path is where it is. Both are for
+// a reader — a diagnostic reporting what this machine has written, and what it
+// would have to say if the disk filled.
+func (j *Journal) Size() int64 {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.size()
+}
+
+// Path is the journal log's path.
+func (j *Journal) Path() string { return j.path() }
 
 // Live is the number of entries a compaction would keep.
 func (j *Journal) Live() int {
@@ -674,6 +720,9 @@ func syncDir(dir string) error { return fsutil.SyncDir(dir) }
 // still must not ACK; what changes is that the failure costs this record only,
 // instead of every record written after it.
 func (j *Journal) append(rec record) error {
+	if j.readOnly {
+		return ErrReadOnly
+	}
 	b, err := json.Marshal(rec)
 	if err != nil {
 		return err
