@@ -132,7 +132,15 @@ burst, and each one also costs the far end a bundle rebuild.
   archive-views window, f983213 — same zero-gap pattern, archive-only, 4m57s pause; the limits
   view went live in the same restart). Served shape at go-live: 18 nodes, 2 roots, 14 living
   leaves. Replay note: 47.8 k rec/s vs the prior 57 k — the tree's per-record maintenance is the
-  prime suspect; size future paused windows from 48 k/s.
+  prime suspect; size future paused windows from 48 k/s. **The record's floor, investigated
+  2026-08-12** (the owner asked why Basic bibite is not the ultimate ancestor): all life on the
+  map genuinely descends from the seed stock, but the first 19.5 h / 203,168 crossings predate
+  A30's species blocks, and nameless arrivals founded 408 permanently parentless species — the
+  living family's true recorded top is `Livilus yodexxus`, extinct since 08-07 and so forever
+  unlinkable. No fabricated edges; a root-badge labelling fix is in flight. Also observed: 143
+  species carry conflicting parents across worlds (resolved last-write-wins by `recordedAt`) —
+  a deep chain can shift between polls; surfaced-if-cheap in the same fix, otherwise a watch
+  note.
 
 - **Keep the living deployment running, and treat it as M5's first participant.** Every upgrade
   the milestone ships has to move it, and it is the only peer whose before and after are fully
