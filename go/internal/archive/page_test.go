@@ -426,3 +426,93 @@ func TestTheTreeTabStatesItsOwnLimit(t *testing.T) {
 		t.Fatal("the parent-species glossary entry still denies the tab that now exists")
 	}
 }
+
+// TestTheTreeBadgesARootThatIsNotTheBeginning is the page half of tree.go rule
+// 3's second paragraph, and it exists because of a question the drawing provoked:
+// why is the game's own starting species not at the top of this tree?
+//
+// A ROOT DRAWN WITH NO MARK READS AS AN ORIGIN. The reduction stops at the
+// highest node with a living branch, so a root usually has ancestors — 31 of them
+// for `Zhiluus tardisitguyus` on the running rig — that the record holds and the
+// drawing collapses. The honest answer is a LABEL SAYING SO, never an invented
+// edge down to a species no crossing ever linked, and the label must not be the
+// one worn by a species the record can say nothing about at all.
+func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// The badge, on a ROOT the record reaches above, with the depth in it.
+	for _, want := range []string{
+		`if (!n.parent && n.ancestryKnown && n.ancestryDepth > 0)`,
+		`"THE RECORD BEGINS HERE · "`, `" GENERATIONS ABOVE"`, `" GENERATION ABOVE"`,
+		`"tbadge rec"`, `rb.setAttribute("data-t", "recordfloor")`,
+	} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the tree never badges a root that has recorded ancestry above it: %q "+
+				"missing", want)
+		}
+	}
+	// THREE STATES, THREE LABELS, and the new one must not be either warning: a
+	// root whose ancestry IS recorded is not a gap in the record, and a reader
+	// who sees the same colour and the same voice will read them as one thing.
+	if !strings.Contains(page, "svg.tree .tbadge.rec{fill:var(--dim)}") {
+		t.Fatal("the root badge has no style of its own, or wears the warning colour the two " +
+			"standing-alone badges wear")
+	}
+	// The badge's text is STATIC WORDS AND ONE INTEGER. Every other label on this
+	// view is 64 attacker-chosen bytes; this one cannot be, and the check is
+	// structural rather than a matter of escaping it correctly.
+	start := strings.Index(region, "if (!n.parent && n.ancestryKnown")
+	stmt := region[start:]
+	if end := strings.Index(stmt, "rb.setAttribute"); end > 0 {
+		stmt = stmt[:end]
+	}
+	for _, forbidden := range []string{"n.name", "n.key", "n.nameFrom", "row.name"} {
+		if strings.Contains(stmt, forbidden) {
+			t.Fatalf("the root badge interpolates %q; its text is static plus a number, and "+
+				"no name may enter it", forbidden)
+		}
+	}
+	if !strings.Contains(stmt, "n.ancestryDepth") {
+		t.Fatal("the root badge prints no generation count; the number is the whole of what " +
+			"it adds over silence")
+	}
+
+	// The tooltip says what the badge MEANS: those ancestors are recorded and
+	// collapsed, and the run ends at the record's edge rather than at an origin.
+	for _, want := range []string{
+		"Nothing is drawn above it because not one of those ",
+		"the run ends where the RECORD ends rather than where the family did",
+	} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the root's tooltip never explains its badge: %q missing", want)
+		}
+	}
+
+	// And the tab prints the record's own floor, which is the other half of the
+	// answer: the chain stops where the archive's ancestry starts.
+	for _, want := range []string{"function trDay", "x.ancestrySinceMs",
+		`termEl("span", "recordfloor", "ancestry recorded since")`,
+		"the oldest crossing kept here that names a parent"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the tree tab never states the record's floor: %q missing", want)
+		}
+	}
+	// It is a DATE and not a zero: an archive that has never been told a parent
+	// prints no clause at all rather than the epoch.
+	if !strings.Contains(region, "if (x.ancestrySinceMs){") {
+		t.Fatal("the floor clause is not gated on there being a floor")
+	}
+
+	// The jargon carries a glossary entry, and the entry is the one that answers
+	// the owner's question outright.
+	if !strings.Contains(page, " recordfloor:[") {
+		t.Fatal("the glossary never explains the root badge")
+	}
+	if !strings.Contains(page, `"noancestry","recordfloor",`) {
+		t.Fatal("the glossary entry exists but is never listed, so nobody can read it")
+	}
+	if !strings.Contains(page, "is not the root of this tree") {
+		t.Fatal("the glossary never answers why the game's starting species is not the root")
+	}
+}

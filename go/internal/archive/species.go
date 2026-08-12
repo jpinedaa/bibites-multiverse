@@ -152,6 +152,20 @@ type speciesLedger struct {
 	// gains an edge: a later correction replaces that species' parent and does
 	// not add a second.
 	edges int
+	// edgeFirstMs is the recordedAt of the EARLIEST record that ever carried a
+	// usable parent species — the FLOOR OF THE WHOLE GENEALOGY. Nothing older
+	// than it can ever be an edge, however many crossings the ledger holds
+	// before it, because the parent-species field arrived with contract-a.md
+	// §16 A30 and the record predates it: on the running rig the first 19.5
+	// hours of crossings carry no species block at all. It is what lets the tree
+	// say WHY a chain of ancestors stops where it stops, instead of leaving a
+	// reader to conclude the top of it is the first creature that ever lived.
+	//
+	// It is ONE INT64, maintained by the same single writer as every other
+	// counter here and rebuilt by the same replay, because the alternative — a
+	// walk of the aggregate per poll to produce one caption — is exactly the
+	// shape rule 1 refuses. 0 means no record has ever named a parent.
+	edgeFirstMs int64
 }
 
 func newSpeciesLedger() *speciesLedger {
@@ -198,7 +212,7 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 			e.genomes[fingerprint(rec.Lineage.GenomeHash)] = struct{}{}
 		}
 	}
-	if rec.Species.ParentGenericName != "" && rec.RecordedAt >= e.parentAtMs {
+	if rec.Species.ParentGenericName != "" {
 		pkey := wire.SpeciesKey(rec.Species.ParentGenericName, rec.Species.ParentSpecificName)
 		// A SELF-PARENT IS DROPPED AT INGEST, which is the cheapest place a cycle
 		// can be refused and the only one where it costs nothing. It is not a
@@ -209,12 +223,23 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 		// reader has to cope with one. tree.go guards the longer cycles this
 		// cannot see.
 		if pkey != "" && pkey != key {
-			if e.parentKey == "" {
-				a.species.edges++
+			// THE FLOOR IS A MINIMUM OVER EVERY SUCH RECORD, and it is taken
+			// outside the latest-writer test below on purpose: a record that
+			// loses that test is an OLDER answer about one species' parent, and
+			// an older answer is precisely what moves a floor down.
+			if rec.RecordedAt > 0 &&
+				(a.species.edgeFirstMs == 0 || rec.RecordedAt < a.species.edgeFirstMs) {
+				a.species.edgeFirstMs = rec.RecordedAt
 			}
-			e.parent = rec.Species.ParentGenericName + " " + rec.Species.ParentSpecificName
-			e.parentKey = pkey
-			e.parentAtMs = rec.RecordedAt
+			// LATEST WRITER WINS for the edge itself; see speciesAgg.parent.
+			if rec.RecordedAt >= e.parentAtMs {
+				if e.parentKey == "" {
+					a.species.edges++
+				}
+				e.parent = rec.Species.ParentGenericName + " " + rec.Species.ParentSpecificName
+				e.parentKey = pkey
+				e.parentAtMs = rec.RecordedAt
+			}
 		}
 	}
 	e.recent = append(e.recent, SpeciesCrossing{

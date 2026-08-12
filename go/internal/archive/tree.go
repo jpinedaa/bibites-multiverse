@@ -67,6 +67,18 @@ package archive
 //     record to carry a parent name, so it is not connected here, and the view
 //     publishes how many of the living species that is.
 //
+//     A DRAWN ROOT IS NOT A CLAIM OF ORIGIN, and this is the shape that reads
+//     as one. The reduction stops at the highest node with a living branch, so
+//     a root very often has AncestryKnown true and AncestryDepth in the
+//     dozens — `Zhiluus tardisitguyus` sits under 31 recorded generations, all
+//     collapsed because not one of them has another living descendant. Above
+//     THAT is the floor of the record itself (AncestrySinceMs): the parent
+//     field arrived with §16 A30 and the ledger is older than it, so the top of
+//     every chain is where the RECORD begins, never where the family did. The
+//     view publishes both numbers and the page badges the root with them,
+//     because the alternative a reader reaches for otherwise is an invented
+//     edge down to the game's first species — and this file fabricates nothing.
+//
 //  4. A DERIVED EDGE IS GUARDED. The measured ledger holds no cycle and no
 //     self-parent across 2 407 species, but the two names an edge is built from
 //     are attacker-chosen strings normalized into a key, and "measured clean
@@ -204,6 +216,13 @@ type SpeciesTree struct {
 	// bigger tree than the one below — because below is only what is alive.
 	LedgerSpecies int `json:"ledgerSpecies"`
 	LedgerEdges   int `json:"ledgerEdges"`
+	// AncestrySinceMs is the derivation's FLOOR: the recordedAt of the earliest
+	// crossing this archive holds that named a parent species at all
+	// (species.go's edgeFirstMs). It is the other half of a root's badge — the
+	// badge says the record reaches N generations above this node and stops, and
+	// this says WHEN the record it stops at begins. 0 when no record has ever
+	// named a parent, which is an absent caption and never a date.
+	AncestrySinceMs int64 `json:"ancestrySinceMs,omitempty"`
 
 	// The guards of rule 4, published rather than swallowed. MaxDepth is the
 	// deepest walk performed, WalkCapped how many hit treeWalkMax, CycleGuard
@@ -283,9 +302,10 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 	facts := map[string]*treeFacts{}
 	a.mu.Lock()
 	out.LedgerSpecies = len(a.species.byKey)
-	// Both are maintained counters, not walks: nothing in this function is
+	// All three are maintained counters, not walks: nothing in this function is
 	// proportional to the size of the aggregate, let alone to the ledger.
 	out.LedgerEdges = a.species.edges
+	out.AncestrySinceMs = a.species.edgeFirstMs
 	for _, key := range aliveOrder {
 		// visited is PER WALK and is rule 4's real guard: a cycle among extinct
 		// ancestors is met on the second visit and the walk stops there, keeping

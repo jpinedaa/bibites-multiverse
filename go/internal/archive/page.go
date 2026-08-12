@@ -333,6 +333,11 @@ svg.tree .gen{fill:var(--dim);font-size:9.5px}
 svg.tree .tbadge{font-size:9.5px;letter-spacing:.06em}
 svg.tree .tbadge.warn{fill:var(--warn)}
 svg.tree .tbadge.lane{fill:var(--lane)}
+/* The root badge is DELIBERATELY NOT the warning colour the two standing-alone
+   badges wear: "the record reaches 31 generations above this and stops" is a
+   statement about the record's own edge, not a gap in it, and a reader who sees
+   amber twice will read the two as the same kind of thing. */
+svg.tree .tbadge.rec{fill:var(--dim)}
 svg.tree .ring{fill:none;stroke:var(--dim);stroke-width:1.5}
 .treelegend{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;color:var(--dim);
 margin:0 0 10px}
@@ -829,6 +834,7 @@ var G = {
  genealogy:["the family tree","Every species alive right now, arranged by who came from whom. The information comes from one place: when a creature walks out of a world, that world names the creature's species AND the species it split off from. One crossing tells you one generation. Thousands of crossings, chained together, tell you the shape of the family — and on this map that shape runs about forty generations deep. What is drawn is only the part that still matters: the living species, and the ancestors where two or more living lines part company. Everything else is left out, and where a whole run of ancestors is left out the edge says how many."],
  branchpoint:["a branch point","An ancestor that is drawn even though nothing of its kind is alive anywhere, because two or more living species descend from it by different children. It is the answer to 'how are these two related' — the most recent point their lines were the same. An ancestor with only ONE living line below it is not a branch point and is not drawn: it would be a step in a corridor with no doors."],
  collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. So the number is the difference between the two."],
+ recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive holds that named a parent at all — anything older than it is a crossing that named none. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw."],
  noancestry:["no recorded ancestry","This species is alive, and no crossing of it has ever named a parent species — so the record cannot say where it came from, and it is drawn on its own. That is not a fault in the species and not a fault in the map: ancestry here is a by-product of TRAVEL, and a kind that has stayed home has left no record to carry it. A separate note is used for a species whose ancestry IS recorded but whose whole family has died out; those two are different facts and are never given the same label."],
  settings:["settings","What a world was TOLD to do, as opposed to what it is doing. Everything else on this page is a measurement or a receipt; these are the knobs behind them — how often it saves, which species it refuses to export, whether its edges wrap. They are the reason a number elsewhere looks the way it does, and they are read-only here on purpose."],
  readonly:["read-only","This page shows settings and changes none of them. Changing another machine's world from a web page is a much bigger thing than showing one — it needs a login, a rule about who may change what, an answer for what happens when two people change the same thing at once, and a record of who changed it — and none of that is a small extension of showing a value. It is deliberately left for later."],
@@ -847,7 +853,7 @@ var G = {
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
     "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
     "rawname","endemic","everywhere","excluded","crossings","speciesgenomes","parentspecies",
-    "genealogy","branchpoint","collapsed","noancestry",
+    "genealogy","branchpoint","collapsed","noancestry","recordfloor",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges","ceilings","floor",
@@ -2002,6 +2008,13 @@ function svgEl(tag, cls){
   if (cls) e.setAttribute("class", cls);
   return e;
 }
+/* trDay is a calendar day from an epoch-millisecond stamp, in UTC and in ISO
+   order. Everything else on this page is an AGE — "4h 12m ago" — because
+   everything else is about now; the record's floor is a fixed point weeks back,
+   where an age in hours is unreadable and a local rendering would put two
+   readers a day apart on the same fact. */
+function trDay(msv){ return new Date(msv).toISOString().slice(0,10); }
+
 function trSpan(parent, cls, text, dx){
   var s = svgEl("tspan", cls);
   if (dx) s.setAttribute("dx", String(dx));
@@ -2059,6 +2072,19 @@ function treeStats(x){
   r.appendChild(document.createTextNode(" of them with a parent named — almost all extinct, " +
     "which is why only what is alive is drawn"));
   host.appendChild(r);
+  // THE RECORD'S OWN FLOOR, which is the answer to the question every root
+  // provokes. It is a maintained timestamp and not a scan (species.go
+  // edgeFirstMs), and it is absent rather than zero when no record has ever
+  // named a parent.
+  if (x.ancestrySinceMs){
+    var f = el("span", "muted");
+    f.appendChild(termEl("span", "recordfloor", "ancestry recorded since"));
+    f.appendChild(document.createTextNode(" "));
+    f.appendChild(el("b", null, trDay(x.ancestrySinceMs)));
+    f.appendChild(document.createTextNode(
+      " UTC — the oldest crossing kept here that names a parent"));
+    host.appendChild(f);
+  }
   if (x.cycleGuard > 0 || x.walkCapped > 0 || x.nodesCapped){
     var g = el("span");
     g.appendChild(unkEl("the record holds " +
@@ -2090,6 +2116,16 @@ function trTip(n){
   }
   if (n.ancestryKnown){
     lines.push("The record traces it back " + n.ancestryDepth + " generation(s).");
+    // WHAT THE ROOT BADGE MEANS, on the node that wears it: those generations
+    // are recorded and not drawn, and the chain stops at the record's own edge
+    // rather than at the beginning of anything.
+    if (!n.parent){
+      lines.push("Nothing is drawn above it because not one of those " + n.ancestryDepth +
+        " ancestors has another living branch on this map, so the whole run is folded into " +
+        "this row — and the run ends where the RECORD ends rather than where the family did: " +
+        "no crossing of the species at the top of it ever named a parent, and the earliest " +
+        "crossing here that named one at all is dated on the tab.");
+    }
   } else {
     lines.push("No crossing of it has ever named a parent species, so the record cannot say " +
       "where it came from.");
@@ -2226,6 +2262,17 @@ function renderTree(x){
       b.setAttribute("data-t", n.ancestryKnown ? "genealogy" : "noancestry");
     } else if (n.alive && n.leaves > 1){
       trSpan(text, "tbadge lane", "ALSO AN ANCESTOR", 10);
+    }
+    // A ROOT WITH ANCESTORS ABOVE IT. Nothing is drawn above this row, and
+    // without a label that reads as "the family starts here" — which for most
+    // roots on this map is false by dozens of generations. The record traces
+    // them; the reduction collapsed them because not one has a living branch.
+    // The badge is STATIC TEXT AND ONE INTEGER: no part of it is a name, so the
+    // fence's rule is met by construction rather than by escaping.
+    if (!n.parent && n.ancestryKnown && n.ancestryDepth > 0){
+      var rb = trSpan(text, "tbadge rec", "THE RECORD BEGINS HERE · " + n.ancestryDepth +
+        (n.ancestryDepth === 1 ? " GENERATION ABOVE" : " GENERATIONS ABOVE"), 10);
+      rb.setAttribute("data-t", "recordfloor");
     }
     g.appendChild(text);
     svg.appendChild(g);

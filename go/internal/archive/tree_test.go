@@ -294,6 +294,198 @@ func TestAnIsolatedLivingSpeciesIsDrawnAndLabelled(t *testing.T) {
 	}
 }
 
+// TestADrawnRootIsNotAClaimOfOrigin is the second half of rule 3, and it is the
+// shape a reader misreads by default.
+//
+// The reduction stops at the highest node with a living branch, so the row at the
+// top of the drawing very often has ancestors — dozens of them — that the record
+// holds and the tree does not draw, because not one of them has another living
+// descendant. Drawn with no mark at all that row says "the family begins here",
+// which on the running rig is wrong by 31 generations for `Zhiluus tardisitguyus`.
+//
+// THE FIX IS A LABEL AND NEVER AN EDGE. The view already carries the two facts a
+// label needs, and this pins that they stay TOLD APART on every root: a root the
+// record reaches above (AncestryKnown, with a depth) and a root it does not
+// (`Basic bibite`) are different answers and the page badges them differently.
+func TestADrawnRootIsNotAClaimOfOrigin(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(46, 0,
+			entry("Beta", "one", 20, 0), entry("Gamma", "two", 10, 0),
+			// Alive, and no crossing of it has ever named a parent.
+			entry("Basic", "bibite", 11, 0),
+			// Alive, with a recorded family that is entirely extinct.
+			entry("Lone", "one", 5, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	a.mu.Lock()
+	// Two living lines part at Alpha — and Alpha has a recorded line of its own
+	// above it, two generations of it, with nothing alive on either.
+	a.observeSpeciesLocked(child(base, "Beta", "one", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+1, "Gamma", "two", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+2, "Alpha", "nullus", "Older", "still"))
+	a.observeSpeciesLocked(child(base+3, "Older", "still", "Elder", "one"))
+	// A living species under three extinct generations, none of them shared.
+	a.observeSpeciesLocked(child(base+4, "Lone", "one", "Gone", "first"))
+	a.observeSpeciesLocked(child(base+5, "Gone", "first", "Gone", "second"))
+	a.observeSpeciesLocked(child(base+6, "Gone", "second", "Gone", "third"))
+	// And one that has crossed plenty and never carried a parent block.
+	a.observeSpeciesLocked(migration(base+7, 1, 2, "E", "Basic", "bibite", "h-basic"))
+	a.mu.Unlock()
+
+	view := a.SpeciesTreeView()
+	byKey := treeNodes(t, view)
+	if len(view.Roots) != 3 || view.Roots[0] != "Alpha nullus" {
+		t.Fatalf("roots = %v, want three with the two-leaf family first", view.Roots)
+	}
+
+	// THE BADGED ROOT. It is drawn at the top and the record reaches two
+	// generations past it; both are on the node, so the page can say so.
+	alpha := byKey["Alpha nullus"]
+	if alpha.Parent != "" || !alpha.Root || alpha.Isolated {
+		t.Fatalf("the branch point is not the drawn root it is: %+v", alpha)
+	}
+	if !alpha.AncestryKnown || alpha.AncestryDepth != 2 {
+		t.Fatalf("the root's own recorded ancestry is %v/%d, want known and 2 generations — "+
+			"the number the badge prints is the difference between 'the family begins here' "+
+			"and 'the drawing does'", alpha.AncestryKnown, alpha.AncestryDepth)
+	}
+	// The collapsed run ABOVE a root is not an edge and is not counted as one:
+	// there is no kept node up there for an edge to reach.
+	if alpha.Collapsed != 0 || view.Collapsed != 0 {
+		t.Fatalf("the run above the root was counted as a collapsed edge: node=%d view=%d",
+			alpha.Collapsed, view.Collapsed)
+	}
+	// Nothing above it was invented into the node set. The honest answer is a
+	// label on a root, never an edge down to a species nobody recorded.
+	for _, gone := range []string{"Older still", "Elder one", "Gone first", "Gone second",
+		"Gone third"} {
+		if _, ok := byKey[gone]; ok {
+			t.Fatalf("%q was drawn; an ancestor with one living line below it is a step in a "+
+				"corridor with no doors", gone)
+		}
+	}
+
+	// THE OTHER TWO ROOTS, which must not borrow each other's label. Both stand
+	// alone; only one of them is a species the record cannot place.
+	lone := byKey["Lone one"]
+	if !lone.Isolated || !lone.AncestryKnown || lone.AncestryDepth != 3 {
+		t.Fatalf("a species with a recorded and extinct family is not carrying it: %+v", lone)
+	}
+	basic := byKey["Basic bibite"]
+	if !basic.Isolated || basic.AncestryKnown || basic.AncestryDepth != 0 {
+		t.Fatalf("a species no record names a parent for is claimed to have ancestry: %+v",
+			basic)
+	}
+	if view.Isolated != 2 || view.Unrecorded != 1 {
+		t.Fatalf("isolated=%d unrecorded=%d, want 2 and 1 — one stands alone because the "+
+			"record holds nothing, the other because its whole family is gone",
+			view.Isolated, view.Unrecorded)
+	}
+}
+
+// TestTheRecordsAncestryFloorIsPublishedAndMaintained is the caption under the
+// badge above, and the reason a root's depth is not a mystery.
+//
+// The chain above a root ends where the RECORD ends. This archive's ledger is
+// older than the parent-species field itself (contract-a.md §16 A30): on the
+// running rig the first 19.5 hours of crossings carry no species block at all, so
+// no edge can exist before the first one that does. That instant is published, it
+// is ONE MAINTAINED TIMESTAMP rather than a walk of the aggregate, and it survives
+// a restart the same way every other counter here does.
+func TestTheRecordsAncestryFloorIsPublishedAndMaintained(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(20, 0,
+			entry("Beta", "one", 10, 0), entry("Gamma", "two", 10, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+
+	a.mu.Lock()
+	// A crossing an hour before any ancestry was ever recorded. It is a record,
+	// it is counted, and it is NOT a floor: nothing in it could ever be an edge.
+	a.observeSpeciesLocked(migration(base-3600000, 1, 2, "E", "Beta", "one", "h-early"))
+	a.observeSpeciesLocked(child(base+1000, "Beta", "one", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+2000, "Gamma", "two", "Alpha", "nullus"))
+	a.mu.Unlock()
+
+	view := a.SpeciesTreeView()
+	if view.AncestrySinceMs != base+1000 {
+		t.Fatalf("ancestrySinceMs = %d, want %d — the floor is the first crossing that NAMED "+
+			"a parent, not the first crossing", view.AncestrySinceMs, base+1000)
+	}
+
+	// A later record does not move a floor.
+	a.mu.Lock()
+	a.observeSpeciesLocked(child(base+9000, "Gamma", "two", "Beta", "one"))
+	a.mu.Unlock()
+	if again := a.SpeciesTreeView(); again.AncestrySinceMs != base+1000 {
+		t.Fatalf("a later crossing moved the floor to %d", again.AncestrySinceMs)
+	}
+	// An OLDER one does, even though it loses the latest-writer test for the edge
+	// itself: an older answer about a parent is exactly what lowers a floor.
+	a.mu.Lock()
+	a.observeSpeciesLocked(child(base+500, "Gamma", "two", "Alpha", "nullus"))
+	a.mu.Unlock()
+	lowered := a.SpeciesTreeView()
+	if lowered.AncestrySinceMs != base+500 {
+		t.Fatalf("ancestrySinceMs = %d, want %d — a record older than the floor and carrying "+
+			"a parent is the floor", lowered.AncestrySinceMs, base+500)
+	}
+	if byKey := treeNodes(t, lowered); byKey["Gamma two"].Parent != "Beta one" {
+		t.Fatalf("the older record overwrote the newer edge: %+v", byKey["Gamma two"])
+	}
+
+	// ON THE WIRE, because a distinction a client cannot see is not a distinction:
+	// the page prints this date under the tree.
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	body := get(t, srv.URL+"/api/species/tree")
+	if !strings.Contains(body, `"ancestrySinceMs":`) {
+		t.Fatalf("the endpoint does not publish the record's floor:\n%s", body)
+	}
+	var served SpeciesTree
+	if err := json.Unmarshal([]byte(body), &served); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if served.AncestrySinceMs != base+500 {
+		t.Fatalf("served floor = %d, want %d", served.AncestrySinceMs, base+500)
+	}
+
+	// AND IT IS REBUILT BY THE REPLAY, like every other maintained counter — a
+	// restart must not tell an operator the record's ancestry started today.
+	dir := t.TempDir()
+	ledger, err := OpenLedger(dir)
+	if err != nil {
+		t.Fatalf("OpenLedger: %v", err)
+	}
+	for _, rec := range []Record{
+		migration(base-3600000, 1, 2, "E", "Beta", "one", "h-early"),
+		child(base+1000, "Beta", "one", "Alpha", "nullus"),
+		child(base+2000, "Gamma", "two", "Alpha", "nullus"),
+	} {
+		if err := ledger.Append(rec); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	if err := ledger.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	restarted, err := New(Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+	restarted.mu.Lock()
+	floor := restarted.species.edgeFirstMs
+	restarted.mu.Unlock()
+	if floor != base+1000 {
+		t.Fatalf("the replay rebuilt the floor as %d, want %d", floor, base+1000)
+	}
+}
+
 // TestTheGenealogyIsMaintainedWithoutARescan is rule 1, and it is the rule that
 // keeps this view affordable on a ledger of 8.8 million records.
 //
