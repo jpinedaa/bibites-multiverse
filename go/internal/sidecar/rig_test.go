@@ -163,6 +163,11 @@ type testRelay struct {
 	// which B23 keeps for exactly this case: a single-machine rehearsal.
 	tlsCert string
 	tlsKey  string
+	// limits is §3.3's table as this relay runs it (§22, B24). The zero value
+	// takes every shipped default through Limits.ApplyDefaults, so a test that
+	// cares about ONE ceiling names only that one — and a test that names one
+	// is testing a knob rather than a constant.
+	limits contractb.Limits
 }
 
 // secret mints (or returns) this peer's credential secret against the relay's
@@ -176,6 +181,22 @@ func (r *testRelay) subscribeSecret(peerID string) string {
 }
 
 func startRelay(t *testing.T) *testRelay { return startRelayWithTLS(t, "", "") }
+
+// startRelayWithLimits is startRelay running a NON-DEFAULT capacity table, which
+// is the only way to tell a peer that reads the published number from one that
+// was compiled against 50 (contract-b-m4.md §3.3, §22 B24).
+func startRelayWithLimits(t *testing.T, limits contractb.Limits) *testRelay {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("relay listen: %v", err)
+	}
+	r := &testRelay{t: t, addr: ln.Addr().String(), dataDir: t.TempDir(),
+		creds: newTestCreds(t), limits: limits}
+	r.serve(ln)
+	t.Cleanup(r.kill)
+	return r
+}
 
 // startRelayWithTLS is startRelay with B23's own listener in front of it, so a
 // client test can exercise the wss:// path the shipped rig will run on.
@@ -205,6 +226,7 @@ func (r *testRelay) serve(ln net.Listener) {
 		PeerTimeout:    3 * time.Second,
 		StatusCoalesce: 40 * time.Millisecond,
 		StatsBroadcast: 500 * time.Millisecond,
+		Limits:         r.limits,
 	})
 	if err != nil {
 		r.t.Fatalf("relay new: %v", err)

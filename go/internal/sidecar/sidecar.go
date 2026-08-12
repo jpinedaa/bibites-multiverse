@@ -93,6 +93,14 @@ type Sidecar struct {
 	// is the only way to name WHY a closed edge is closed.
 	status    contractb.PeerStatus
 	peerEpoch int64
+	// sendPace is B24's client half: this connection's own outbound rate, taken
+	// as a fraction of the ceiling the relay published on HANDSHAKE_ACK
+	// (contract-b-m4.md §3.3, §6.2, §22 B24). It is reset on every session.
+	sendPace sendPace
+	// capacityShedTotal counts every close 4007 this process has taken. It is
+	// monotonic and it is the measure the rejoin-burst finding is read against:
+	// a drain that spends frames and sheds nothing leaves it at zero.
+	capacityShedTotal int
 
 	// Custody scheduling, in memory. The durable half lives in the journal.
 	sched        map[string]*sched
@@ -343,6 +351,33 @@ func (s *Sidecar) RelaySessionID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.relaySessionID
+}
+
+// PacedFramesPerSecond is the outbound rate this sidecar is holding itself to
+// on the current session, and 0 when the relay published no ceiling to hold
+// itself to (contract-b-m4.md §3.3, §6.2, §22 B24). It is a FRACTION of the
+// published maxFramesPerSecond, never a compiled rate, so an operator who moves
+// the relay's knob moves this with it.
+func (s *Sidecar) PacedFramesPerSecond() float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sendPace.framesPerSecond()
+}
+
+// PacedDeferrals is how many bulk frames the pacer has held back on the current
+// session. Rising with no capacity shed is the fix working; see CapacitySheds.
+func (s *Sidecar) PacedDeferrals() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sendPace.deferred
+}
+
+// CapacitySheds is how many times this process has been closed with 4007 for a
+// published capacity limit (§3.2, §3.3).
+func (s *Sidecar) CapacitySheds() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.capacityShedTotal
 }
 
 // Stats is the peer stats block of §6.3.1 as this sidecar would send it.
@@ -988,6 +1023,16 @@ func (s *Sidecar) exportOpenLocked(edge string, simSize float64) (destSlot int, 
 // ---------------------------------------------------------------- custody
 
 func (s *Sidecar) forwardLocked(st *journal.State, now time.Time) bool {
+	// B24's client half, asked before the payload is built (contract-b-m4.md
+	// §3.3, §6.2, §22 B24). A drain offers every open entry on every tick, so
+	// this gate is what keeps a deferred forward from costing a multi-megabyte
+	// encode; sendRelayLocked still makes the real decision. THE ENTRY IS LEFT
+	// EXACTLY AS IT WAS — no journal write, no handoff change, no schedule move —
+	// so the next tick offers it again and the backlog drains slower rather than
+	// shorter. The wall clock is the one the relay's meter runs on.
+	if !s.sendPace.readyForBulk(time.Now()) {
+		return false
+	}
 	payload := contractb.MigrationPayload{
 		MigrationID: st.Entry.MigrationID,
 		Kind:        st.Entry.Kind,

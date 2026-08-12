@@ -60,11 +60,16 @@ func (s *Sidecar) relayLoop() {
 		case isCapacityShed(err):
 			capacitySheds++
 			authFailures = 0
+			s.mu.Lock()
+			s.capacityShedTotal++
+			total := s.capacityShedTotal
+			s.mu.Unlock()
 			// The relay's close reason NAMES THE LIMIT AND ITS VALUE, so the log
 			// line carries it verbatim rather than paraphrasing: it is the only
 			// place this machine's operator can read what they are over.
 			s.log.Error("contract B: the relay SHED THIS CONNECTION for capacity (close 4007)",
 				"reason", closeReason(err), "consecutiveSheds", capacitySheds,
+				"capacityShedTotal", total,
 				"remedy", "read the limits object on HANDSHAKE_ACK and PEER_STATUS and bring this "+
 					"peer under it, or ask the relay's operator to raise that knob and restart",
 				"whoMustAct", "this machine's operator first; the relay's operator owns the knob "+
@@ -224,6 +229,11 @@ func (s *Sidecar) relaySession() error {
 	s.mu.Lock()
 	s.relayConn = conn
 	s.relayReady = true
+	// The limits object is the relay's own configuration and this is a new
+	// connection, so the pacer starts UNCONFIGURED and stays that way until
+	// HANDSHAKE_ACK. The only frame that goes out before it is the HANDSHAKE
+	// below, which is one frame and cannot breach anything.
+	s.sendPace.reset()
 	s.peerEpoch = 0
 	s.neighbours = map[string]*contractb.Neighbour{}
 	s.status = contractb.PeerStatus{}
@@ -327,6 +337,12 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 			s.relaySessionID = ack.RelaySessionID
 			s.mapShape = ack.Map
 			s.slotCount = ack.SlotCount
+			// §6.2: "A peer reads it at connect and MUST respect it." This is
+			// where the published ceiling becomes this connection's own outbound
+			// rate — at the first frame the relay sends, before this sidecar has
+			// put anything but its HANDSHAKE on the wire.
+			paced := s.sendPace.configure(ack.Limits, time.Now())
+			pace := s.sendPace
 			s.mu.Unlock()
 			slot := 0
 			if ack.AssignedSlot != nil {
@@ -336,6 +352,7 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 				"assignedSlot", slot, "assignedPosition", ack.AssignedPosition,
 				"map", ack.Map, "slotCount", ack.SlotCount,
 				"relaySessionId", ack.RelaySessionID, "relayClock", ack.ReceivedAt)
+			s.logSendPace(paced, pace, "HANDSHAKE_ACK")
 		}
 		return true
 	case contractb.TypeSectorGrant:
@@ -367,6 +384,34 @@ func (s *Sidecar) handleRelayFrame(conn *wsutil.Conn, frame []byte) bool {
 	default:
 		s.log.Warn("contract B: ignoring unknown type", "type", env.Type)
 		return true
+	}
+}
+
+// logSendPace says, once per change, what ceiling this sidecar read and what
+// rate it adopted under it. It is the line an operator needs when a drain looks
+// slow: the pace is a fraction of a number the RELAY published, so the remedy is
+// that relay's knob and a restart, and there is nothing to change at this end.
+func (s *Sidecar) logSendPace(changed bool, p sendPace, where string) {
+	if changed {
+		s.log.Info("contract B: pacing this sidecar's own outbound frames under the relay's "+
+			"published ceiling",
+			"from", where,
+			"publishedFramesPerSecond", p.publishedFrames, "pacedFramesPerSecond", p.frames.rate,
+			"pacedBurstFrames", p.frames.capacity,
+			"publishedBytesPerSecond", p.publishedBytes, "pacedBytesPerSecond", p.bytes.rate,
+			"why", "a peer reads limits at connect and MUST respect it; a client that bursts a "+
+				"journal backlog at the relay is shed with 4007 and comes back to the same "+
+				"backlog (contract-b-m4.md §3.3, §6.2, §22 B24)")
+		return
+	}
+	if !p.on && where == "HANDSHAKE_ACK" {
+		// Absence reads as UNKNOWN, never as "no ceilings" (§6.2). The behaviour
+		// is M4's — send as the journal hands frames over — and the two-4007s pin
+		// of §3.2 is still underneath it.
+		s.log.Warn("contract B: the relay published NO limits object; sending unpaced",
+			"relay", s.cfg.RelayURL,
+			"meaning", "this relay predates §22 B24, so no ceiling is known and none is invented; "+
+				"the two-4007s backoff pin is the only protection left (§3.2)")
 	}
 }
 
@@ -512,6 +557,13 @@ func (s *Sidecar) onPeerStatus(env wire.Envelope) bool {
 	s.mapShape = status.Map
 	s.slotCount = status.SlotCount
 	s.status = status
+	// §3.3: limits ride HANDSHAKE_ACK at connect and PEER_STATUS thereafter, and
+	// the pacer follows whichever frame carries them. In practice the table
+	// changes only when the relay restarts — which drops this connection anyway —
+	// so this is the belt to the handshake's braces, and it stays silent unless
+	// the published number actually moved.
+	repaced := s.sendPace.configure(status.Limits, time.Now())
+	pace := s.sendPace
 	if status.You.Slot != nil {
 		s.slot = *status.You.Slot
 	}
@@ -526,6 +578,7 @@ func (s *Sidecar) onPeerStatus(env wire.Envelope) bool {
 	}
 	s.publishEdgesLocked(false)
 	s.mu.Unlock()
+	s.logSendPace(repaced, pace, "PEER_STATUS")
 	s.log.Debug("contract B: map status", "epoch", status.Epoch, "map", status.Map,
 		"slotCount", status.SlotCount, "observers", status.Observers)
 	return true
@@ -970,6 +1023,17 @@ func (s *Sidecar) sendRelayLocked(typ string, data any) bool {
 	frame, err := wire.Encode(wire.ProtocolB, typ, time.Now().UnixMilli(), data)
 	if err != nil {
 		s.log.Error("contract B: encode failed", "type", typ, "err", err)
+		return false
+	}
+	// B24's client half (§3.3, §6.2). THE CLOCK HERE IS THE WALL CLOCK AND NOT
+	// s.now(): the ceiling being respected is a real-time meter on a real socket
+	// at the far end, and cfg.Clock exists so §9.3's bounded hold can be tested
+	// over simulated hours. Reading an injectable clock here would let a test
+	// that jumps a day starve a live connection, or one that freezes stop it.
+	if !s.sendPace.admit(time.Now(), len(frame), paceBulk(typ)) {
+		// DELAYED, NEVER DROPPED. The journal entry behind this frame is
+		// untouched, so tickOutbound offers it again on the next tick — this is
+		// the drain running at the published rate, not a failure.
 		return false
 	}
 	if err := s.relayConn.Send(frame); err != nil {
