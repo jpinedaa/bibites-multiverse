@@ -124,7 +124,17 @@ burst, and each one also costs the far end a bundle rebuild.
 
 ### Carried actions that belong to no package
 
-- **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build in flight):** the
+- **The genealogy view: LIVE 2026-08-12 22:03Z** (built 5f2dc83; third zero-gap window of the
+  day, e5ff428 — 9.51 M records replayed at 41.2 k/s, VmHWM 1.84 GiB). The live sweep verified
+  the merged view end to end (mini-maps cross-checked 4 ways, zero console errors) and found
+  **three rendering defects, fix in flight batched with the seed-stock hiding**: the root badges
+  clip unreadably out of the label column (bdb5efb is live-but-invisible), the ancestry-floor
+  boundary never draws (`>` where `>=` — equal is not strictly inside), and the plot is fixed
+  1344 px (now-edge off-screen below 1427 px windows). Watch note: the brain ring blinks —
+  latest-hash rotates faster than blobs are fetched at 154 k+ genomeGaps. Replay-rate series now
+  57 → 47.8 → 41.2 k rec/s across the day's three windows: the per-record view maintenance is
+  the standing suspect, worth a look before the ledger doubles.
+- **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
   stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
   bars — **replacing both the species tab and the tree tab with one merged view**. Included:
   per-leaf 3×2 mini-maps, population sparklines (from `/api/species/history`), collapsed chains
