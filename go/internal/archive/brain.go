@@ -45,6 +45,12 @@ import (
 // of the whole drawn set.
 const brainCacheMax = 2048
 
+// brainSpeciesMax bounds the LAST-KNOWN shape kept per species (brainForSpecies).
+// It is keyed on a species rather than on content, so it grows with the drawn set
+// rather than with time; the reduced tree holds at most treeNodeMax nodes, so this
+// is twice the whole drawn set.
+const brainSpeciesMax = 1024
+
 type brainCache struct {
 	mu sync.Mutex
 	// byHash holds both answers and misses; known says which.
@@ -52,6 +58,12 @@ type brainCache struct {
 	// order is insertion order, for the oldest-out eviction. A cache with no
 	// eviction is the unbounded thing this bound exists to prevent.
 	order []string
+	// bySpecies is the newest shape this process has managed to READ for a
+	// species, whatever hash it came from, with speciesOrder as its own
+	// oldest-out order. See brainForSpecies for why the drawing wants this and
+	// not only the latest hash.
+	bySpecies    map[string]bb8.Brain
+	speciesOrder []string
 }
 
 type brainEntry struct {
@@ -97,4 +109,68 @@ func (a *Archive) brainFor(hash string) (bb8.Brain, bool) {
 	}
 	a.brains.byHash[hash] = entry
 	return entry.brain, entry.known
+}
+
+// brainForSpecies is what the genealogy actually draws: the shape of this
+// species' LATEST RECORDED genome when the store holds that blob, and otherwise
+// THE NEWEST SHAPE THIS PROCESS HAS MANAGED TO READ FOR THE SAME SPECIES.
+//
+// WHY IT IS NOT "THE LATEST HASH OR NOTHING". The hash species.go keeps moves
+// with every crossing, and on a rig carrying a genome-fetch backlog — 154 000
+// gaps when this was measured — an actively-travelling species rotates its latest
+// hash faster than the archive fetches the blob behind it. Ring membership then
+// changed from poll to poll and the mark BLINKED, which reads as a brain
+// appearing and disappearing rather than as a fetch that has not landed yet.
+//
+// IT IS ALSO THE FIGURE THE PAGE ALREADY DESCRIBES. The row's tooltip, the
+// expanded row and the glossary all call it "the newest genome of it this archive
+// holds a copy of" — which is this rule and not the other one. The latest hash is
+// what the RECORD names; the newest readable copy is what an archive can honestly
+// draw, and the two differ exactly while a fetch is outstanding.
+//
+// A MISS ON BOTH IS STILL AN ABSENCE, and an absence still draws nothing (rule
+// 2). Nothing here invents a shape, and nothing here holds one for a species the
+// store has never given this process a readable genome for.
+//
+// THE KNOWN LAG, named rather than left to be discovered. A miss is cached (rule
+// 2), so a blob that arrives AFTER its hash was first looked up is not re-read for
+// that hash: the drawn shape then stays on the newest genome that was readable
+// when it was asked for, until a later hash of the same species is first seen
+// present. That is a stale reading of a real genome of that species rather than a
+// wrong one, it is what the page's words already promise, and the alternative is a
+// store lookup per drawn species per poll — the cost rule 1 exists to refuse.
+func (a *Archive) brainForSpecies(key, hash string) (bb8.Brain, bool) {
+	if b, ok := a.brainFor(hash); ok {
+		a.rememberBrain(key, b)
+		return b, true
+	}
+	if key == "" {
+		return bb8.Brain{}, false
+	}
+	a.brains.mu.Lock()
+	defer a.brains.mu.Unlock()
+	b, ok := a.brains.bySpecies[key]
+	return b, ok
+}
+
+// rememberBrain records the newest readable shape of one species, oldest-out at
+// the bound. It takes the same lock brainFor uses and never holds it over a read.
+func (a *Archive) rememberBrain(key string, b bb8.Brain) {
+	if key == "" {
+		return
+	}
+	a.brains.mu.Lock()
+	defer a.brains.mu.Unlock()
+	if a.brains.bySpecies == nil {
+		a.brains.bySpecies = map[string]bb8.Brain{}
+	}
+	if _, ok := a.brains.bySpecies[key]; !ok {
+		if len(a.brains.speciesOrder) >= brainSpeciesMax {
+			oldest := a.brains.speciesOrder[0]
+			a.brains.speciesOrder = append(a.brains.speciesOrder[:0], a.brains.speciesOrder[1:]...)
+			delete(a.brains.bySpecies, oldest)
+		}
+		a.brains.speciesOrder = append(a.brains.speciesOrder, key)
+	}
+	a.brains.bySpecies[key] = b
 }

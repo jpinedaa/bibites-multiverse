@@ -330,6 +330,28 @@ type SpeciesRow struct {
 	// (contract-a.md §19, A42).
 	Excluded   bool  `json:"excluded"`
 	ExcludedBy []int `json:"excludedBy,omitempty"`
+	// SeedStock is the SEED-TEMPLATE rule, and it is a JOIN of the two fields
+	// above with Worlds: this species is named on the migrationExclude of EVERY
+	// world it is currently alive in, so there is no world left it could ever
+	// leave from. The game's own starting template is what the rule describes —
+	// `Basic bibite` is excluded on every world of the running rig by policy
+	// (contract-a.md §19 A39) — and it is stated as a RULE rather than as a name
+	// so the next seed species satisfies it without a code change.
+	//
+	// IT IS NOT A LOUDER "EXCLUDED". Excluded says at least one world refuses to
+	// export it, and is a statement about ExcludedBy's worlds alone (contract-a.md
+	// §19, A42); this says the refusal is UNANIMOUS AMONG ITS HOLDERS, which is
+	// the only form of the fact a view can act on.
+	//
+	// A SPECIES ALIVE NOWHERE IS NEVER SEED STOCK. An empty set of holders is not
+	// a unanimous one, and the ancestors the genealogy keeps are kept: they are
+	// drawn because living lines part at them, which is a fact about the record
+	// and not about any world's export policy.
+	//
+	// AND A WORLD THAT PUBLISHED NO LIST IS NOT A WORLD THAT EXCLUDES IT. The
+	// absent/empty distinction of SlotView.MigrationExcludeKnown reaches here
+	// unchanged (§10.1): unknown is unknown, never a refusal.
+	SeedStock bool `json:"seedStock"`
 	// Everywhere: alive in every world that is reporting a census. It is only
 	// claimed when at least two worlds report — with one reporting world
 	// "everywhere" and "endemic" are the same sentence, and printing both would
@@ -513,6 +535,12 @@ func (a *Archive) speciesIndexFrom(view Status) SpeciesIndex {
 		if slots, ok := excludedBy[key]; ok {
 			row.Excluded = true
 			row.ExcludedBy = slots
+			// The seed-stock rule, evaluated HERE — with the exclusion lists and
+			// the census union both in hand — and nowhere else. The genealogy
+			// copies the answer onto its living nodes rather than re-deriving it,
+			// so the two views cannot disagree about which species can never
+			// leave (§16 B12's discipline for anything that joins these sources).
+			row.SeedStock = excludedWhereverAlive(row.Worlds, slots)
 		}
 		out.Species = append(out.Species, *row)
 	}
@@ -975,6 +1003,30 @@ func aliveKeys(view Status) []string {
 		}
 	}
 	return out
+}
+
+// excludedWhereverAlive is SpeciesRow.SeedStock's rule, written once: every
+// world holding this species names it on that world's own exclusion list.
+//
+// BOTH EMPTY CASES ARE FALSE, and neither is an accident of the loop. No holders
+// means the species is alive nowhere reporting — an ancestor, and the vacuous
+// "every one of no worlds excludes it" is exactly the reading that would hide the
+// branch points the genealogy exists to draw. No excluding worlds means nothing
+// refuses it at all.
+func excludedWhereverAlive(worlds []SpeciesWorld, excludedBy []int) bool {
+	if len(worlds) == 0 || len(excludedBy) == 0 {
+		return false
+	}
+	by := make(map[int]bool, len(excludedBy))
+	for _, slot := range excludedBy {
+		by[slot] = true
+	}
+	for _, w := range worlds {
+		if !by[w.Slot] {
+			return false
+		}
+	}
+	return true
 }
 
 // censusEntryKey is the one place the archive turns a census entry into a

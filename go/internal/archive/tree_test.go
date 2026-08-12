@@ -1289,3 +1289,292 @@ func TestTheFlatIndexOutlivesTheTabItDrew(t *testing.T) {
 		t.Fatalf("ringstat's species table no longer renders:\n%s", out.String())
 	}
 }
+
+// TestSeedStockIsTheSpeciesEveryWorldHoldingItRefusesToExport is the seed-template
+// rule, and it is a RULE rather than a name on purpose.
+//
+// The game seeds a world with a starting species, and the operator's policy
+// (contract-a.md §19 A39) puts that species on every world's migrationExclude —
+// so it is alive everywhere, travels nowhere, and has no living descendant here.
+// A merged view that draws it draws a full-width bar that participates in nothing
+// else on the picture. The view needs to be able to leave it out, and the only
+// honest way to name it is by what makes it what it is: EVERY WORLD HOLDING IT
+// REFUSES TO EXPORT IT.
+//
+// THE THREE SHAPES THAT MUST NOT BE CONFUSED, all of them in this fixture:
+//
+//	Excluded EVERYWHERE IT LIVES — seed stock.
+//
+//	Excluded by SOME world that holds it — not seed stock, and this is the common
+//	case: a species one world holds back travels freely out of another (§19 A42).
+//
+//	ALIVE NOWHERE — an ancestor. Never seed stock, whatever any list says: an
+//	empty set of holders is not a unanimous one, and the branch points this view
+//	exists to draw would be the first thing such a reading deleted.
+func TestSeedStockIsTheSpeciesEveryWorldHoldingItRefusesToExport(t *testing.T) {
+	one := slot(1, 0, 0, true, census(60, 0,
+		entry("Basic", "bibite", 40, 0), entry("Beta", "one", 20, 0)))
+	one.Stats.MigrationExclude = &wire.ExcludeList{Names: []string{"Basic bibite", "Beta one"}}
+	two := slot(2, 1, 0, true, census(40, 0,
+		entry("Basic", "bibite", 30, 0), entry("Beta", "one", 10, 0)))
+	two.Stats.MigrationExclude = &wire.ExcludeList{Names: []string{"Basic bibite"}}
+	// A world that publishes NO exclusion list at all. It holds neither of the two
+	// above, so it says nothing about either — but it is here because the next
+	// phase moves a species into it.
+	three := slot(3, 2, 0, true, census(5, 0, entry("Gamma", "two", 5, 0)))
+
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 3, Height: 1}, SlotCount: 3,
+		Slots: []contractb.SlotInfo{one, two, three},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+	a.mu.Lock()
+	// Beta and Gamma part at Alpha, which is alive nowhere: the ancestor case.
+	a.observeSpeciesLocked(child(base+1000, "Beta", "one", "Alpha", "nullus"))
+	a.observeSpeciesLocked(child(base+2000, "Gamma", "two", "Alpha", "nullus"))
+	a.observeSpeciesLocked(migration(base+3000, 1, 2, "E", "Basic", "bibite", "h-basic"))
+	a.mu.Unlock()
+
+	byKey := treeNodes(t, a.SpeciesTreeView())
+	view := a.SpeciesTreeView()
+	for _, tc := range []struct {
+		key  string
+		seed bool
+		why  string
+	}{
+		{"Basic bibite", true, "it is alive in S1 and S2 and both of them refuse to export it"},
+		{"Beta one", false, "S1 excludes it and S2 does not, so it can still leave S2"},
+		{"Gamma two", false, "no world it lives in has published an exclusion list at all"},
+		{"Alpha nullus", false, "it is alive nowhere; an ancestor is never seed stock"},
+	} {
+		n, ok := byKey[tc.key]
+		if !ok {
+			t.Fatalf("%s is not in the tree at all", tc.key)
+		}
+		if n.SeedStock != tc.seed {
+			t.Fatalf("%s: seedStock = %v, want %v — %s", tc.key, n.SeedStock, tc.seed, tc.why)
+		}
+	}
+	// EXCLUDED AND SEED STOCK ARE TWO DIFFERENT FACTS, and the weaker one survives
+	// on the row that carries the stronger.
+	if basic := byKey["Basic bibite"]; !basic.Excluded || len(basic.ExcludedBy) != 2 {
+		t.Fatalf("the seed species lost the exclusion badge it is built from: %+v", basic)
+	}
+	// COUNTED, NOT DISAPPEARED. It is one of the living species, it is in Alive,
+	// and the count of seed stock is published beside it so a renderer that leaves
+	// the row out can say how many it left out.
+	if view.SeedStock != 1 {
+		t.Fatalf("seedStock count = %d, want 1", view.SeedStock)
+	}
+	if view.Alive != 3 {
+		t.Fatalf("alive = %d, want 3 — hiding a row is a renderer's business and never a "+
+			"count's", view.Alive)
+	}
+
+	// ONE RULE, EVALUATED ONCE. The flat index /api/species is where the exclusion
+	// lists and the census union meet, so the answer is computed there and the tree
+	// copies it — and the two views cannot disagree about which species can never
+	// leave.
+	idx := a.SpeciesIndexView()
+	for _, row := range idx.Species {
+		if row.SeedStock != byKey[row.Key].SeedStock {
+			t.Fatalf("%s reads seedStock=%v on the flat index and %v on the tree; the rule is "+
+				"evaluated in one place", row.Key, row.SeedStock, byKey[row.Key].SeedStock)
+		}
+	}
+
+	// AND ON THE WIRE, because a mark a client cannot see is not one — and because
+	// the hiding is a VIEW's decision: the node travels complete, so revealing it
+	// costs a repaint and never a second request.
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	var served SpeciesTree
+	if err := json.Unmarshal([]byte(get(t, srv.URL+"/api/species/tree")), &served); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	sn := treeNodes(t, served)["Basic bibite"]
+	if !sn.SeedStock || served.SeedStock != 1 {
+		t.Fatalf("the seed mark did not survive the wire: node %+v, count %d", sn, served.SeedStock)
+	}
+	if sn.Population != 70 || sn.Crossings != 1 {
+		t.Fatalf("the seed node travels short of the rest of its answer: %+v", sn)
+	}
+	if !strings.Contains(get(t, srv.URL+"/api/species"), `"seedStock":true`) {
+		t.Fatal("the flat index does not publish the seed mark; ringstat and any other reader " +
+			"of it would have to re-derive a policy from an exclusion list")
+	}
+
+	// THE SAME SPECIES IN ONE MORE WORLD, and that world has published no
+	// exclusion list. Unknown is not a refusal (§10.1), so the unanimity is gone
+	// and so is the mark.
+	three.Stats = census(35, 0, entry("Gamma", "two", 5, 0), entry("Basic", "bibite", 30, 0))
+	wider := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 3, Height: 1}, SlotCount: 3,
+		Slots: []contractb.SlotInfo{one, two, three},
+	}
+	b := newViewFixture(t, wider, time.Second)
+	for _, row := range b.SpeciesIndexView().Species {
+		if row.Key == "Basic bibite" && row.SeedStock {
+			t.Fatalf("a world that has told us nothing about its exclusions was read as a world "+
+				"that excludes: %+v", row)
+		}
+	}
+}
+
+// TestTheAxisIsFittedToTheSpeciesItDraws is the geometry half of the same
+// decision, and it is the reason hiding the row is worth anything at all.
+//
+// A seed species has been in the record since the record began. If its bar sets
+// the left edge, every bar that IS drawn is squeezed into the right-hand sliver of
+// a picture scaled to a species nobody is looking at. So the published axis is the
+// axis of the DRAWN rows — and the record's own ancestry floor still pins itself
+// inside it, because the floor is a boundary a reader has to be able to see.
+//
+// AND THE WIDER AXIS IS PUBLISHED TOO. Revealing the seed stock has to stretch the
+// drawing rather than clamp a bar against its left edge, and it has to do that
+// from the answer the page is already holding.
+func TestTheAxisIsFittedToTheSpeciesItDraws(t *testing.T) {
+	excl := &wire.ExcludeList{Names: []string{"Basic bibite"}}
+	one := slot(1, 0, 0, true, census(50, 0,
+		entry("Basic", "bibite", 40, 0), entry("Beta", "one", 10, 0)))
+	one.Stats.MigrationExclude = excl
+	two := slot(2, 1, 0, true, census(20, 0,
+		entry("Basic", "bibite", 15, 0), entry("Beta", "one", 5, 0)))
+	two.Stats.MigrationExclude = excl
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
+		Slots: []contractb.SlotInfo{one, two},
+	}
+	a := newViewFixture(t, status, time.Second)
+
+	hour := time.Hour.Milliseconds()
+	base := time.Now().UnixMilli() - 6*hour
+	a.mu.Lock()
+	// The seed species crossed first, six hours ago, and nothing else here is
+	// anywhere near that old.
+	a.observeSpeciesLocked(migration(base, 1, 2, "E", "Basic", "bibite", "h-basic"))
+	// The record's ancestry floor, two hours later, carried by a species that is
+	// drawn nowhere.
+	a.observeSpeciesLocked(child(base+2*hour, "Dead", "end", "Long", "gone"))
+	// And the one species this drawing is actually about.
+	a.observeSpeciesLocked(migration(base+4*hour, 1, 2, "E", "Beta", "one", "h-beta"))
+	a.mu.Unlock()
+
+	view := a.SpeciesTreeView()
+	if view.AncestrySinceMs != base+2*hour {
+		t.Fatalf("ancestrySinceMs = %d, want %d", view.AncestrySinceMs, base+2*hour)
+	}
+	if view.SpanStartMs != base+2*hour {
+		t.Fatalf("spanStartMs = %d, want the floor at %d: the seed species' six-hour-old bar "+
+			"must not set the left edge of a picture it is not drawn on, and the floor must "+
+			"stay inside it", view.SpanStartMs, base+2*hour)
+	}
+	if view.SpanStartSeedMs != base {
+		t.Fatalf("spanStartSeedMs = %d, want the seed bar's own start at %d — without it a "+
+			"reader who reveals the row gets a bar clamped against the left edge",
+			view.SpanStartSeedMs, base)
+	}
+	if !(view.SpanStartSeedMs < view.SpanStartMs) {
+		t.Fatal("the two axes are the same; the fixture no longer has a seed species older " +
+			"than everything drawn, which is the whole shape under test")
+	}
+	// THE NODE IS STILL THERE AND STILL DATED. Nothing is dropped server-side: the
+	// bar the page may reveal is in the answer, complete.
+	if n := treeNodes(t, view)["Basic bibite"]; !n.SeedStock || n.SpanFromMs != base {
+		t.Fatalf("the seed node lost its bar to the axis it was kept out of: %+v", n)
+	}
+
+	// THE FLOOR IS EQUAL TO THE LEFT EDGE, which is the ordinary case and not a
+	// corner: the axis is clamped down to the floor whenever nothing drawn is
+	// older. The page's boundary test has to be >= for exactly this reason.
+	if view.SpanStartMs != view.AncestrySinceMs {
+		t.Fatalf("the fixture no longer produces the equal case (%d vs %d), which is the one "+
+			"the running rig has", view.SpanStartMs, view.AncestrySinceMs)
+	}
+
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	var served SpeciesTree
+	if err := json.Unmarshal([]byte(get(t, srv.URL+"/api/species/tree")), &served); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if served.SpanStartMs != view.SpanStartMs || served.SpanStartSeedMs != view.SpanStartSeedMs {
+		t.Fatalf("the two axes did not survive the wire: %d / %d",
+			served.SpanStartMs, served.SpanStartSeedMs)
+	}
+}
+
+// TestTheBrainRingKeepsTheNewestShapeItCouldRead is the ring's own honesty rule,
+// corrected by what the running rig does to it.
+//
+// The record names a LATEST genome per species and the store holds a copy of some
+// of them. With a fetch backlog — 154 000 genome gaps when this was measured — an
+// actively-travelling species rotates its latest hash faster than the archive
+// fetches the blob behind it, so a ring drawn strictly from the latest hash
+// BLINKED: present on one poll, gone on the next, back on the third. That reads as
+// a brain that comes and goes rather than as a fetch that has not landed.
+//
+// So the figure is the newest genome of that species this archive HAS BEEN ABLE TO
+// READ, which is what the page's tooltip and the glossary have always called it.
+// An absence is still an absence: a species no readable genome has ever been held
+// for draws nothing at all.
+func TestTheBrainRingKeepsTheNewestShapeItCouldRead(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(20, 0,
+			entry("Beta", "one", 10, 0), entry("Ghostly", "three", 10, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	base := time.Now().Add(-time.Hour).UnixMilli()
+
+	held := bb8.HashPrefix + strings.Repeat("a", 64)
+	pending := bb8.HashPrefix + strings.Repeat("b", 64)
+	never := bb8.HashPrefix + strings.Repeat("c", 64)
+	blob := `{"genes":{"SizeRatio":1.0},"nodes":[{"Index":0,"Type":0},{"Index":1,"Type":0},` +
+		`{"Index":2,"Type":0}],"synapses":[{"NodeIn":0,"NodeOut":1,"Inov":0,"Weight":1.0},` +
+		`{"NodeIn":1,"NodeOut":2,"Inov":1,"Weight":1.0}],"version":"0.6.3.1"}`
+	if err := a.genomes.Put(held, "0.6.3.1", blob); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	a.mu.Lock()
+	a.observeSpeciesLocked(migration(base, 1, 2, "E", "Beta", "one", held))
+	a.observeSpeciesLocked(migration(base+1000, 1, 2, "E", "Ghostly", "three", never))
+	a.mu.Unlock()
+	if n := treeNodes(t, a.SpeciesTreeView())["Beta one"]; n.Neurons != 3 || n.Synapses != 2 {
+		t.Fatalf("Beta's brain is %d/%d, want the stored genome's 3/2", n.Neurons, n.Synapses)
+	}
+
+	// A NEWER CROSSING WHOSE BLOB HAS NOT ARRIVED. The record's latest hash moves;
+	// the readable answer does not, and the ring stays put.
+	a.mu.Lock()
+	a.observeSpeciesLocked(migration(base+2000, 1, 2, "E", "Beta", "one", pending))
+	a.mu.Unlock()
+	n := treeNodes(t, a.SpeciesTreeView())["Beta one"]
+	if n.Neurons != 3 || n.Synapses != 2 {
+		t.Fatalf("the ring blinked out when the record named a genome the store has not "+
+			"fetched yet: %d/%d, want 3/2", n.Neurons, n.Synapses)
+	}
+	// AND AN ABSENCE IS STILL AN ABSENCE. Nothing is invented for a species no
+	// readable genome was ever held for.
+	if g := treeNodes(t, a.SpeciesTreeView())["Ghostly three"]; g.Neurons != 0 || g.Synapses != 0 {
+		t.Fatalf("a species with no readable genome was given a brain: %+v", g)
+	}
+
+	// AND THE LAST-KNOWN SHAPE NEVER FREEZES THE ANSWER. The next genome the store
+	// can actually give up wins immediately: this is a fallback for a hash whose
+	// blob is not here, not a preference for old readings.
+	newer := bb8.HashPrefix + strings.Repeat("d", 64)
+	if err := a.genomes.Put(newer, "0.6.3.1",
+		`{"genes":{"SizeRatio":1.0},"nodes":[{"Index":0,"Type":0}],"synapses":[],`+
+			`"version":"0.6.3.1"}`); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	a.mu.Lock()
+	a.observeSpeciesLocked(migration(base+3000, 1, 2, "E", "Beta", "one", newer))
+	a.mu.Unlock()
+	if n := treeNodes(t, a.SpeciesTreeView())["Beta one"]; n.Neurons != 1 || n.Synapses != 0 {
+		t.Fatalf("a readable newer genome did not win: %+v", n)
+	}
+}

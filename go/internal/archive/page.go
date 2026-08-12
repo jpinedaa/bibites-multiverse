@@ -323,6 +323,9 @@ svg.life .meta{fill:var(--dim);font-size:10.5px}
 svg.life .gen{fill:var(--dim);font-size:9.5px}
 svg.life text.pop{fill:var(--text);font-size:11.5px;font-variant-numeric:tabular-nums}
 svg.life .eggs{fill:var(--dim);font-size:9.5px}
+/* The badge line under a name. It is its own text run, outside the name's clip,
+   because the badges used to ride inside it and were cut off there. */
+svg.life text.bdg{fill:var(--dim);font-size:9.5px}
 svg.life .tbadge{font-size:9.5px;letter-spacing:.06em}
 svg.life .tbadge.warn{fill:var(--warn)}
 svg.life .tbadge.lane{fill:var(--lane)}
@@ -378,6 +381,11 @@ vertical-align:middle;margin-right:5px}
 border-radius:50%;vertical-align:0;margin-right:5px}
 .treestat{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;margin-bottom:10px}
 .treestat span b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
+/* The one control on this line. It undoes a filter the view applied on its own,
+   so it has to look like something you can press rather than like more prose. */
+.treestat .seedbtn{font:inherit;font-size:11px;color:var(--dim);background:var(--cell);
+border:1px solid var(--line);border-radius:4px;padding:1px 8px;margin-left:2px;cursor:pointer}
+.treestat .seedbtn:hover{color:var(--text);border-color:var(--dim)}
 .detline{font-size:11.5px;color:var(--dim);margin:2px 0}
 .detline b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
 
@@ -856,6 +864,7 @@ var G = {
  endemic:["endemic","This species lives in exactly one world. It may have been born there and never left, or it may be the last holdout of something that used to be everywhere — the crossing count beside it is the hint. Endemic is not a warning; most new species start this way."],
  everywhere:["everywhere","This species is alive in every world that is currently reporting a census. It only claims that when at least two worlds are reporting: with one world answering, 'everywhere' and 'endemic' are the same sentence, and saying both would dress a single world's list up as a finding about the map."],
  excluded:["never exported","This species is on at least one world's exclusion list, which means that world never lets one of them out through a lane. It explains something otherwise baffling: a world can be full of a kind that never appears on any road out of it. The rule belongs to that world alone and is applied inside its own game — no other world, and nothing on this page, enforces or can enforce it. A species can be excluded by one world and travel freely from another."],
+ seedstock:["seed stock","The kind a world was seeded with, and the one kind on this map that goes nowhere: EVERY world it lives in has it on the list of species that world refuses to export, so while that stays true nothing of it can leave anywhere. That is a stronger fact than 'never exported', which only says SOME world refuses it — a species one world holds back can still travel freely out of another. Its bar would run the full width of the drawing from the moment the record starts and say nothing about the map, so the rows leave it out by default and the timeline is measured without it; the line above says how many are out and offers to show them, and a search for one finds it whether or not they are shown. It is a rule and not a name: any species every one of its worlds refuses to export reads the same way, and a species alive nowhere is never seed stock — the ancestors this drawing keeps are kept."],
  speciesgenomes:["distinct genomes","How many genuinely different genetic makeups of this species have crossed a lane. Two creatures of one species are rarely identical; this counts the distinct ones the archive has fingerprints for. A big number beside a small population means a kind that is changing fast."],
  parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. One crossing carries one generation of this, and the drawing on this tab is what happens when you chain them: if this species' parent has a parent of its own, recorded by some other crossing, the record joins them up, and the line dropping onto this species' bar is that join. Nothing is resolved against any world's own register — the register lives inside one copy of the game and only that copy can read it — so what a family tree here says is what the record says, which is a smaller and more honest claim."],
  genealogy:["the family tree","Every species alive right now, arranged by who came from whom. The information comes from one place: when a creature walks out of a world, that world names the creature's species AND the species it split off from. One crossing tells you one generation. Thousands of crossings, chained together, tell you the shape of the family — and on this map that shape runs about forty generations deep. What is drawn is only the part that still matters: the living species, and the ancestors where two or more living lines part company. Everything else is left out, and where a whole run of ancestors is left out the edge says how many."],
@@ -883,7 +892,8 @@ var G = {
 (function buildGlossary(){
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
     "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
-    "rawname","endemic","everywhere","excluded","crossings","speciesgenomes","parentspecies",
+    "rawname","endemic","everywhere","excluded","seedstock","crossings","speciesgenomes",
+    "parentspecies",
     "genealogy","lifespan","branchpoint","collapsed","noancestry","recordfloor",
     "minimap","trend","brainsize",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
@@ -1785,7 +1795,21 @@ function buildHopGlyph(name, toSlot){
 
      THE GLYPH IS THE ONLY COLOURED THING. One species is one colour, and it is
      worn by the creature and by nothing else — no swatch, no coloured chip, no
-     tinted bar repeating what the glyph already said. */
+     tinted bar repeating what the glyph already said.
+
+     THE LABELS AND THE BADGES ARE TWO LINES, not one. A name is 64 bytes
+     somebody else chose, so it is clipped to its column; the badges are the
+     page's own words and are drawn under it with room to be read. They shared
+     the name's clip once and were cut off by it, which made a row with something
+     to say look like a row with nothing.
+
+     AND THE PLOT IS ELASTIC. Everything left of it is text and dots with the
+     widths they have; the timeline takes what the box leaves, because the right
+     edge of it is NOW and that is the one mark nobody should have to scroll to.
+
+     ONE SET OF ROWS IS LEFT OUT BY DEFAULT: the seed stock, which is a species
+     every world holding it refuses to export. It is marked by the server, it is
+     counted on the tab, and the notice that counts it will put it back. */
 
 var LFX = null, lfOpenKey = null, lfQuery = "", lfSort = "family";
 /* The shared trend answer, keyed by species, and what it says about its own
@@ -1845,7 +1869,21 @@ function trSpan(parent, cls, text, dx){
    The whole thing scrolls inside its own box, like the map and the tables. */
 var LF_ROWH = 24, LF_PADT = 44, LF_DETL = 15, LF_DETPAD = 12;
 var LF_GLYPHX = 14, LF_NAMEX = 30, LF_NAMEW = 366, LF_MINIX = 408;
-var LF_DOT = 9, LF_SPARKW = 84, LF_PLOTW = 700;
+/* LF_PLOTW is the plot's width when nothing can be measured — a hidden panel has
+   no width to fit. When the box CAN be measured the plot takes whatever it
+   leaves, down to LF_PLOTMIN, because the most important pixel on this drawing is
+   the right-hand edge: it is NOW, and every living bar ends there. A fixed 700
+   put it 147px past the right edge of a 1280-wide window with the box scrolled to
+   0, so the one mark a reader is looking for was the one mark off the screen. */
+var LF_DOT = 9, LF_SPARKW = 84, LF_PLOTW = 700, LF_PLOTMIN = 280, LF_PLOTPAD = 30;
+/* Room kept for the box's own vertical scrollbar. The width is measured on a box
+   that has not been filled yet, so the scrollbar that the fill puts there is not
+   in the measurement — and a drawing sized to the whole box then overflows it by
+   exactly that much and grows a horizontal scrollbar to say so. */
+var LF_SCROLLW = 16;
+/* The badge line's own height and its left inset. A row that carries no badge is
+   not made taller for one. */
+var LF_BADGEH = 13, LF_BADGEX = 6;
 /* The bar: thin for an ancestor nothing is alive of, thicker for a living
    species, and the same thickness for every species of a kind. THICKNESS IS NOT
    THE BRAIN — see lfBrainR. */
@@ -1890,20 +1928,37 @@ function lfCols(x){
   var pop = LF_MINIX + miniW + 52;
   var spark = pop + 16;
   var plot = spark + LF_SPARKW + 24;
+  // THE PLOT FILLS WHAT THE BOX LEAVES. The columns to its left are text and
+  // dots and have the widths they have; the timeline is the elastic one, so the
+  // drawing is as wide as its container and the now edge is on the screen
+  // without anybody scrolling to it. A box that cannot be measured — a panel
+  // still hidden — gets the default, and the resize that follows repaints it.
+  var host = document.getElementById("lfbox");
+  var avail = host ? host.clientWidth : 0;
+  var plotw = avail > 0
+    ? Math.max(LF_PLOTMIN, avail - plot - LF_PLOTPAD - LF_SCROLLW)
+    : LF_PLOTW;
   return {mini: LF_MINIX, miniW: miniW, pop: pop, spark: spark, plot: plot,
-          w: plot + LF_PLOTW + 30};
+          plotw: plotw, w: plot + plotw + LF_PLOTPAD};
 }
 
 /* The time axis: a linear scale from the earliest thing the record dates (or the
    record's own ancestry floor, whichever is older — the server publishes the
-   answer so the floor is always inside the picture) to now. */
-function lfScale(x, cols){
-  var t0 = x.spanStartMs || 0, t1 = x.spanEndMs || x.generatedAtMs || Date.now();
+   answer so the floor is always inside the picture) to now.
+
+   TWO PUBLISHED LEFT EDGES, and the drawing picks the one that fits what it is
+   actually drawing: spanStartMs is the axis without the seed stock, which is the
+   default set of rows, and spanStartSeedMs is the axis with it. Revealing a seed
+   species STRETCHES the axis instead of clamping its bar against the left edge —
+   and it does that from the answer already in hand, with no second request. */
+function lfScale(x, cols, seed){
+  var t0 = (seed ? (x.spanStartSeedMs || x.spanStartMs) : x.spanStartMs) || 0;
+  var t1 = x.spanEndMs || x.generatedAtMs || Date.now();
   if (!(t1 > t0)) t1 = t0 + 1;
   return {t0: t0, t1: t1, x: function(msv){
     var f = (msv - t0) / (t1 - t0);
     if (f < 0) f = 0; else if (f > 1) f = 1;
-    return cols.plot + f * LF_PLOTW;
+    return cols.plot + f * cols.plotw;
   }};
 }
 var LF_STEPS = [3600000, 10800000, 21600000, 43200000, 86400000, 172800000,
@@ -1911,6 +1966,32 @@ var LF_STEPS = [3600000, 10800000, 21600000, 43200000, 86400000, 172800000,
 function lfStep(span){
   for (var i=0;i<LF_STEPS.length;i++) if (span / LF_STEPS[i] <= 7) return LF_STEPS[i];
   return LF_STEPS[LF_STEPS.length-1];
+}
+
+/* ---- THE SEED STOCK, and why a row is not there.
+
+   A SEED SPECIES IS ONE EVERY WORLD HOLDING IT REFUSES TO EXPORT. The server
+   evaluates that against the exclusion lists it holds and marks the node
+   (species.go, tree.go) — the policy is the archive's data and re-deriving it
+   here would be a second opinion waiting to drift. On this map it is the game's
+   own starting template: a bar the full width of the picture, running since the
+   record began, with no living descendant and no part in anything the rest of the
+   drawing is about. It took over the timeline and answered nothing.
+
+   SO IT IS LEFT OUT OF THE ROWS AND OUT OF THE AXIS, and SAID. A filter a reader
+   cannot see is a filter that makes the view wrong, so the count is on the stat
+   line with the reason beside it and a control that undoes it. The state is this
+   variable and nothing else: no request, no storage, no query string — a reload
+   is back to the default.
+
+   A SEARCH BEATS THE FILTER. Typing a name that matches a seed species produces
+   the row. Answering "no species matches that search" about a species this view
+   is holding back would be the view lying about its own contents, and that is a
+   worse surprise than a row appearing. */
+var lfSeedShown = false;
+function lfSeedHidden(n){
+  if (!n.seedStock || lfSeedShown) return false;
+  return !(lfQuery && lfMatches(n));
 }
 
 function lfMatches(n){
@@ -1934,22 +2015,49 @@ function lfMatches(n){
    between two of them would cross half the drawing to say nothing.
 
    A SEARCH KEEPS THE FAMILY. A matching row brings its ancestors with it, so a
-   filtered tree is still a tree rather than a set of orphans. */
+   filtered tree is still a tree rather than a set of orphans.
+
+   THE SEED FILTER RUNS IN BOTH ORDERS, and the two counts it returns are what
+   the stat line reports: how many rows it took out, and how many seed rows are
+   drawn anyway — by the toggle, or because the reader searched for one. They are
+   counted from the rows this call actually produced rather than from the
+   server's total, because the notice describes THIS drawing.
+
+   IT TAKES THE ROW OUT AND NOTHING ELSE. Should a hidden seed species ever be
+   some drawn row's parent — it is not on this map, where nothing descends from
+   the starting template in the record, but the rule is a rule — that child keeps
+   its place and its indentation and simply has no line dropping onto it, which is
+   what every row in the population order looks like anyway. Reparenting it onto a
+   grandparent it never descended from would be a lie about the record told to
+   tidy a picture, and this file does not tell those. */
 function lfRows(x){
-  var nodes = (x && x.nodes) || [], i;
+  var nodes = (x && x.nodes) || [], i, hid = 0, seed = 0;
+  function drop(n){
+    if (!lfSeedHidden(n)) { if (n.seedStock) seed++; return false; }
+    hid++;
+    return true;
+  }
   if (lfSort === "pop"){
     var flat = [];
     for (i=0;i<nodes.length;i++){
-      if (nodes[i].alive && lfMatches(nodes[i])) flat.push(nodes[i]);
+      if (!nodes[i].alive || !lfMatches(nodes[i])) continue;
+      if (drop(nodes[i])) continue;
+      flat.push(nodes[i]);
     }
     flat.sort(function(a,b){
       if (b.population !== a.population) return b.population - a.population;
       return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
     });
-    return {list: flat, joined: false};
+    return {list: flat, joined: false, hid: hid, seed: seed};
   }
-  if (!lfQuery) return {list: nodes.slice(0), joined: true};
-  var byKey = {}, keep = {};
+  var byKey = {}, keep = {}, out = [];
+  if (!lfQuery){
+    for (i=0;i<nodes.length;i++){
+      if (drop(nodes[i])) continue;
+      out.push(nodes[i]);
+    }
+    return {list: out, joined: true, hid: hid, seed: seed};
+  }
   for (i=0;i<nodes.length;i++) byKey[nodes[i].key] = nodes[i];
   for (i=0;i<nodes.length;i++){
     if (!lfMatches(nodes[i])) continue;
@@ -1959,9 +2067,14 @@ function lfRows(x){
       cur = cur.parent ? byKey[cur.parent] : null;
     }
   }
-  var out = [];
-  for (i=0;i<nodes.length;i++) if (keep[nodes[i].key]) out.push(nodes[i]);
-  return {list: out, joined: true};
+  for (i=0;i<nodes.length;i++){
+    if (!keep[nodes[i].key]) continue;
+    // A seed species dragged in as some matching row's ANCESTOR is still hidden:
+    // lfSeedHidden spares the row the search itself matched and no other.
+    if (drop(nodes[i])) continue;
+    out.push(nodes[i]);
+  }
+  return {list: out, joined: true, hid: hid, seed: seed};
 }
 
 /* The two counts lines. Neither carries a name, and both are built out of nodes
@@ -2001,7 +2114,7 @@ function lfCount(x){
   }
 }
 
-function lfStats(x){
+function lfStats(x, hid, seed){
   var host = document.getElementById("lfstat");
   if (!host) return;
   while (host.firstChild) host.removeChild(host.firstChild);
@@ -2032,6 +2145,30 @@ function lfStats(x){
       " with no ancestry recorded, " + (x.isolated - x.unrecorded) +
       " whose recorded family is gone)"));
     host.appendChild(s);
+  }
+  // THE ONE SET OF ROWS THIS VIEW LEAVES OUT ON PURPOSE, counted out loud and
+  // undoable. x.seedStock is the server's own count of living seed species and
+  // gates the whole clause: no seed stock in the answer, no notice, whatever any
+  // filter here believes. The numbers in the sentence are this drawing's — how
+  // many rows went, or how many are up — because that is what the reader is
+  // looking at. NOTHING IN IT IS A NAME: static words and integers only, which is
+  // why the badge line and this line can both be built without escaping anything.
+  if (x.seedStock > 0 && (hid > 0 || seed > 0)){
+    var sd = el("span", "muted");
+    sd.appendChild(el("b", null, hid > 0 ? hid : seed));
+    sd.appendChild(document.createTextNode(" "));
+    sd.appendChild(termEl("span", "seedstock",
+      hid > 0 ? "seed species hidden"
+              : (lfSeedShown ? "seed species shown" : "seed species shown by your search")));
+    sd.appendChild(document.createTextNode(
+      " — excluded from migration on every world where it lives"));
+    if (hid > 0 || lfSeedShown){
+      sd.appendChild(document.createTextNode(" · "));
+      var btn = el("button", "seedbtn", hid > 0 ? "show" : "hide");
+      btn.setAttribute("type", "button");
+      sd.appendChild(btn);
+    }
+    host.appendChild(sd);
   }
   stat("branchpoint", "branch points drawn", x.ancestors);
   if (x.collapsed > 0) stat("collapsed", "generations collapsed", x.collapsed);
@@ -2093,6 +2230,14 @@ function lfTip(n){
   if (n.alive && n.leaves > 1){
     lines.push("It is also an ancestor here: " + (n.leaves - 1) +
       " other living species descend from it.");
+  }
+  // WHY THIS ROW IS NORMALLY NOT HERE, said on the row itself: a reader who
+  // revealed it, or who found it by searching, arrives at it without having read
+  // the notice on the tab.
+  if (n.seedStock){
+    lines.push("Seed stock: every world it lives in refuses to export it, so nothing of it can " +
+      "leave anywhere while that holds. This view leaves such a species out of its rows and out " +
+      "of the time axis by default, and says on the tab that it did.");
   }
   // THE BAR, said in words, because a bar on a time axis is the one mark here a
   // reader will otherwise read as a lifespan.
@@ -2343,6 +2488,68 @@ function lfEdge(links, n, rowY, cols, sc){
   }
 }
 
+/* THE BADGES, as a list, drawn on a LINE OF THEIR OWN under the name.
+
+   THEY USED TO RIDE THE NAME'S OWN TEXT RUN — inside the clip that stops a
+   64-byte name somebody else chose from reaching the plot — so the clip cut the
+   badges off too. Measured on the running rig: "NO RECORDED ANCESTRY" painted as
+   "NO R", "THE RECORD BEGINS HERE · 31 GENERATIONS ABOVE" was invisible in its
+   entirety, and every "· extinct here · n living lines below" lost its tail. A
+   label a reader cannot read is worse than no label, because the row then looks
+   unremarkable rather than unexplained.
+
+   So the name keeps the clip and the badges get their own run, their own clip
+   with the whole label region to spread across, and their own 13 pixels of row —
+   which a row carrying no badge is not charged for.
+
+   EVERY ENTRY IS STATIC WORDS AND INTEGERS. No name enters this list, which is
+   what lets it be drawn outside the name's clip at all, and it is the same
+   structural property the root badge always had rather than a new promise. */
+function lfBadges(n, joined){
+  var out = [];
+  if (!n.alive){
+    out.push({t: "· extinct here · " + n.leaves + " living lines below", c: "meta"});
+  } else {
+    var by = (n.excludedBy && n.excludedBy.length) ? " S" + n.excludedBy.join(" S") : "";
+    // SEED STOCK SUBSUMES THE EXCLUSION BADGE rather than sitting beside it:
+    // "excluded somewhere" is the weaker half of what this row already says, and
+    // printing both would read as two findings about one policy.
+    if (n.seedStock){
+      out.push({t: "SEED STOCK · NEVER EXPORTED" + by, c: "tbadge warn", term: "seedstock"});
+    } else if (n.excluded){
+      out.push({t: "NEVER EXPORTED" + by, c: "tbadge warn", term: "excluded"});
+    }
+    if (n.everywhere) out.push({t: "EVERYWHERE", c: "tbadge live", term: "everywhere"});
+    if (n.endemic) out.push({t: "ENDEMIC", c: "tbadge lane", term: "endemic"});
+  }
+  if (n.isolated){
+    // The two reasons, never conflated — and the label a reader sees is the one
+    // that is true of THIS species.
+    out.push({t: n.ancestryKnown ? "NO LIVING RELATIVE" : "NO RECORDED ANCESTRY",
+              c: "tbadge warn", term: n.ancestryKnown ? "genealogy" : "noancestry"});
+  } else if (n.alive && n.leaves > 1){
+    out.push({t: "ALSO AN ANCESTOR", c: "tbadge lane"});
+  }
+  // A ROOT WITH ANCESTORS ABOVE IT. Nothing is drawn above this row, and without
+  // a label that reads as "the family starts here" — which for most roots on this
+  // map is false by dozens of generations. The record traces them; the reduction
+  // collapsed them because not one has a living branch.
+  if (joined && !n.parent && n.ancestryKnown && n.ancestryDepth > 0){
+    out.push({t: "THE RECORD BEGINS HERE · " + n.ancestryDepth +
+      (n.ancestryDepth === 1 ? " GENERATION ABOVE" : " GENERATIONS ABOVE"),
+      c: "tbadge rec", term: "recordfloor"});
+  }
+  return out;
+}
+function lfBadgeH(n, joined){ return lfBadges(n, joined).length ? LF_BADGEH : 0; }
+
+/* One row's whole height: the row itself, the badge line when it has one, and the
+   detail when it is open. It is one function so the height the layout reserves
+   and the marks the drawing emits cannot disagree. */
+function lfRowH(n, joined, open){
+  return LF_ROWH + lfBadgeH(n, joined) + (open ? lfDetailHeight(n) : 0);
+}
+
 /* One row: the label column, the mini-map, the count, the trend and the bar. */
 function lfRow(x, n, top, cols, sc, i, joined){
   var g = svgEl("g", "lfrow" + (n.alive ? "" : " anc") +
@@ -2353,13 +2560,24 @@ function lfRow(x, n, top, cols, sc, i, joined){
   SP[tk] = lfTip(n);
   g.setAttribute("data-s", tk);
   g.setAttribute("data-k", n.key);
+  // THE FULL NAME, AS THE ROW'S OWN TITLE. The label below is clipped — a name is
+  // 64 bytes somebody else chose — and the promise that "the full name is always
+  // in the row's tooltip" used to mean this page's hover tip and nothing a
+  // browser, a keyboard or a screen reader could reach. An SVG <title> is that
+  // promise kept: it is the accessible name of the group, and it is a TEXT NODE
+  // on a created element like every other name in this region.
+  var ttl = svgEl("title");
+  ttl.textContent = String(n.name);
+  g.appendChild(ttl);
 
   var open = lfOpenKey === n.key;
+  var badges = lfBadges(n, joined);
+  var badgeH = badges.length ? LF_BADGEH : 0;
   var hit = svgEl("rect", "hit");
   hit.setAttribute("x", "0");
   hit.setAttribute("y", String(top));
   hit.setAttribute("width", String(cols.w));
-  hit.setAttribute("height", String(LF_ROWH - 1 + (open ? lfDetailHeight(n) : 0)));
+  hit.setAttribute("height", String(LF_ROWH - 1 + badgeH + (open ? lfDetailHeight(n) : 0)));
   g.appendChild(hit);
 
   if (n.alive){
@@ -2390,42 +2608,20 @@ function lfRow(x, n, top, cols, sc, i, joined){
   // THE RAW SPELLING, as its source holds it (contract-a.md §17 A36 for a census
   // name, §16 A34 for a record's). CSS keeps its spaces.
   trSpan(text, null, n.name);
-  if (!n.alive){
-    trSpan(text, "meta", "· extinct here · " + n.leaves + " living lines below", 8);
-  } else {
-    if (n.excluded){
-      var xb = trSpan(text, "tbadge warn", "NEVER EXPORTED" +
-        (n.excludedBy && n.excludedBy.length ? " S" + n.excludedBy.join(" S") : ""), 8);
-      xb.setAttribute("data-t", "excluded");
-    }
-    if (n.everywhere){
-      trSpan(text, "tbadge live", "EVERYWHERE", 8).setAttribute("data-t", "everywhere");
-    }
-    if (n.endemic){
-      trSpan(text, "tbadge lane", "ENDEMIC", 8).setAttribute("data-t", "endemic");
-    }
-  }
-  if (n.isolated){
-    // The two reasons, never conflated — and the label a reader sees is the one
-    // that is true of THIS species.
-    var b = trSpan(text, "tbadge warn",
-      n.ancestryKnown ? "NO LIVING RELATIVE" : "NO RECORDED ANCESTRY", 8);
-    b.setAttribute("data-t", n.ancestryKnown ? "genealogy" : "noancestry");
-  } else if (n.alive && n.leaves > 1){
-    trSpan(text, "tbadge lane", "ALSO AN ANCESTOR", 8);
-  }
-  // A ROOT WITH ANCESTORS ABOVE IT. Nothing is drawn above this row, and without
-  // a label that reads as "the family starts here" — which for most roots on
-  // this map is false by dozens of generations. The record traces them; the
-  // reduction collapsed them because not one has a living branch. The badge is
-  // STATIC TEXT AND ONE INTEGER: no part of it is a name, so the fence's rule is
-  // met by construction rather than by escaping.
-  if (joined && !n.parent && n.ancestryKnown && n.ancestryDepth > 0){
-    var rb = trSpan(text, "tbadge rec", "THE RECORD BEGINS HERE · " + n.ancestryDepth +
-      (n.ancestryDepth === 1 ? " GENERATION ABOVE" : " GENERATIONS ABOVE"), 8);
-    rb.setAttribute("data-t", "recordfloor");
-  }
   g.appendChild(text);
+
+  // The badge line, under the name, in its own clip and its own run.
+  if (badges.length){
+    var bt = svgEl("text", "bdg");
+    bt.setAttribute("x", String(LF_NAMEX + indent + LF_BADGEX));
+    bt.setAttribute("y", String(top + LF_ROWH + 9));
+    bt.setAttribute("clip-path", "url(#lfbclip)");
+    for (var bi=0;bi<badges.length;bi++){
+      var s = trSpan(bt, badges[bi].c || null, badges[bi].t, bi ? 10 : 0);
+      if (badges[bi].term) s.setAttribute("data-t", badges[bi].term);
+    }
+    g.appendChild(bt);
+  }
 
   lfMini(g, x, n, top, cols);
 
@@ -2441,7 +2637,7 @@ function lfRow(x, n, top, cols, sc, i, joined){
 
   lfSpark(g, n, top, cols);
   lfBar(g, n, top, sc);
-  if (open) lfDetail(g, n, top + LF_ROWH, cols);
+  if (open) lfDetail(g, n, top + LF_ROWH + badgeH, cols);
   return g;
 }
 
@@ -2489,7 +2685,16 @@ function lfAxis(x, cols, sc, height){
   // THE RECORD'S FLOOR, as a boundary rather than a footnote: everything left of
   // this line is crossings that carried no parent at all, so no edge in this
   // drawing can begin there. It is the reason a root is a root.
-  if (x.ancestrySinceMs && x.ancestrySinceMs > sc.t0){
+  //
+  // THE TEST IS >= AND THE DIFFERENCE IS THE WHOLE MARK. The server clamps the
+  // axis down to the floor so the floor is always inside the picture — so on
+  // every map whose oldest drawn bar is younger than the floor, the two are
+  // EXACTLY EQUAL, which is the running rig's own case. A strict > drew the
+  // boundary on no map at all: it appeared only when something was older than the
+  // floor, which is precisely when it matters least. At equality the line sits on
+  // the axis's left edge and the shaded run before it is empty, which is the
+  // truth: nothing in this picture predates the record's ancestry.
+  if (x.ancestrySinceMs && x.ancestrySinceMs >= sc.t0){
     var fx = sc.x(x.ancestrySinceMs);
     var shade = svgEl("rect", "prefloor");
     shade.setAttribute("x", String(cols.plot));
@@ -2509,11 +2714,12 @@ function lfAxis(x, cols, sc, height){
     g.appendChild(flt);
   }
   var now = svgEl("line", "nowline");
-  now.setAttribute("x1", String(cols.plot + LF_PLOTW)); now.setAttribute("x2", String(cols.plot + LF_PLOTW));
+  now.setAttribute("x1", String(cols.plot + cols.plotw));
+  now.setAttribute("x2", String(cols.plot + cols.plotw));
   now.setAttribute("y1", String(LF_PADT - 16)); now.setAttribute("y2", String(height - 6));
   g.appendChild(now);
   var nowt = svgEl("text", "tick");
-  nowt.setAttribute("x", String(cols.plot + LF_PLOTW));
+  nowt.setAttribute("x", String(cols.plot + cols.plotw));
   nowt.setAttribute("y", String(LF_PADT - 22));
   nowt.setAttribute("text-anchor", "end");
   nowt.textContent = "now";
@@ -2541,8 +2747,12 @@ function lfAxis(x, cols, sc, height){
    row above it. */
 function renderLife(x){
   LFX = x;
+  // THE ROWS ARE CHOSEN FIRST, because the counts line describes THIS drawing:
+  // how many rows the seed filter took out of it, and how many seed rows are on
+  // it anyway.
+  var pick = lfRows(x), list = pick.list, i;
   lfCount(x);
-  lfStats(x);
+  lfStats(x, pick.hid, pick.seed);
   var host = document.getElementById("lfbox");
   if (!host) return;
   while (host.firstChild) host.removeChild(host.firstChild);
@@ -2554,7 +2764,6 @@ function renderLife(x){
     host.appendChild(el("div", "muted", "waiting for the map"));
     return;
   }
-  var pick = lfRows(x), list = pick.list, i;
   if (!list.length){
     host.appendChild(el("div", "muted", lfQuery
       ? "no species matches that search"
@@ -2566,7 +2775,7 @@ function renderLife(x){
   var tops = [], y = LF_PADT;
   for (i=0;i<list.length;i++){
     tops.push(y);
-    y += LF_ROWH + (lfOpenKey === list[i].key ? lfDetailHeight(list[i]) : 0);
+    y += lfRowH(list[i], pick.joined, lfOpenKey === list[i].key);
   }
   var height = y + 16;
 
@@ -2585,9 +2794,23 @@ function renderLife(x){
   cr.setAttribute("height", String(height));
   clip.appendChild(cr);
   defs.appendChild(clip);
+  // A SECOND CLIP FOR THE BADGE LINE, wider: it has the whole label region to
+  // spread across and still may not reach the plot.
+  var bclip = svgEl("clipPath");
+  bclip.setAttribute("id", "lfbclip");
+  var br = svgEl("rect");
+  br.setAttribute("x", String(LF_NAMEX - 4));
+  br.setAttribute("y", "0");
+  br.setAttribute("width", String(Math.max(60, cols.plot - LF_NAMEX - 10)));
+  br.setAttribute("height", String(height));
+  bclip.appendChild(br);
+  defs.appendChild(bclip);
   svg.appendChild(defs);
 
-  var sc = lfScale(x, cols);
+  // THE AXIS FITS WHAT IS DRAWN. A revealed seed species stretches it to the
+  // wider published edge; with none on the picture it stays fitted to the rows
+  // that are.
+  var sc = lfScale(x, cols, pick.seed > 0);
   svg.appendChild(lfAxis(x, cols, sc, height));
 
   var links = svgEl("g", "links");
@@ -3288,6 +3511,19 @@ function openLife(key){
   if (LFX) renderLife(LFX);
 }
 
+/* The seed-stock reveal. IT IS A REDRAW AND NOTHING ELSE: the rows are already in
+   the answer this page is holding — the server marks them and sends them — so
+   showing them costs one repaint and a wider axis, and never a request. Nothing
+   is stored either: the state is a variable, and a reload is back to the default.
+   That is deliberate rather than unfinished. A hidden row is the view's own
+   opinion about one poll, not a preference worth outliving the page. */
+function toggleSeed(){
+  lfSeedShown = !lfSeedShown;
+  hideTip();
+  if (LFX) renderLife(LFX);
+}
+
+var lfResizeT = 0;
 (function wireLife(){
   var box = document.getElementById("lfbox");
   if (box) box.addEventListener("click", function(ev){
@@ -3303,6 +3539,24 @@ function openLife(key){
   if (s) s.addEventListener("change", function(){
     lfSort = s.value;
     if (LFX) renderLife(LFX);
+  });
+  // The reveal control is rebuilt with the stat line every poll, so the listener
+  // is on the line rather than on the button.
+  var st = document.getElementById("lfstat");
+  if (st) st.addEventListener("click", function(ev){
+    var b = ev.target.closest ? ev.target.closest(".seedbtn") : null;
+    if (b) toggleSeed();
+  });
+  // THE DRAWING IS AS WIDE AS ITS BOX, so a resize changes the geometry without
+  // changing a single fact. It repaints from the answer already held — no poll is
+  // pulled forward and none is needed — and it is coalesced, because a drag
+  // across a screen fires this by the hundred.
+  window.addEventListener("resize", function(){
+    if (lfResizeT) clearTimeout(lfResizeT);
+    lfResizeT = setTimeout(function(){
+      lfResizeT = 0;
+      if (LFX && TAB === "species") renderLife(LFX);
+    }, 150);
   });
 })();
 

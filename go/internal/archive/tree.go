@@ -60,6 +60,16 @@ package archive
 // says how many generations it swallowed. On the running rig that turns a
 // 2 400-node history into a 15-node tree, and the 15 are the answer.
 //
+// ONE MORE THING THIS VIEW MARKS AND DOES NOT DO. A SEED SPECIES — one that
+// every world holding it refuses to export — is flagged (TreeNode.SeedStock) and
+// is otherwise treated exactly like any other living leaf: counted, walked,
+// keeping its ancestry and its bar. What the flag buys is a renderer that can
+// leave the game's starting template out of its rows and out of its time axis
+// without asking the archive a second question, and put it back without asking a
+// third. The rule itself lives in species.go, where the exclusion lists are; the
+// only thing this file derives from it is the axis, because the axis is geometry
+// and geometry is published here (rule 2).
+//
 // FOUR RULES, each a decision this file records:
 //
 //  1. NO SCAN, EVER, AND NO NEW STATE THAT GROWS WITH THE RECORD. The edge is
@@ -179,6 +189,19 @@ type TreeNode struct {
 	ExcludedBy []int    `json:"excludedBy,omitempty"`
 	Everywhere bool     `json:"everywhere,omitempty"`
 	Endemic    bool     `json:"endemic,omitempty"`
+	// SeedStock is species.go's seed-template rule, COPIED and never re-derived:
+	// this species is excluded from migration on every world it is alive in, so
+	// nothing of it can leave anywhere. The page hides such a row by default and
+	// says it did — the game's starting template is a full-width bar that has no
+	// living descendant and takes part in nothing the rest of the drawing is
+	// about.
+	//
+	// THE NODE STILL TRAVELS. Hiding is a view's decision and it must be
+	// reversible without another request, so the row is here, complete, marked.
+	// The policy is evaluated where the exclusion lists are (species.go) because
+	// the archive holds them and a page re-deriving policy from a census is a
+	// second opinion waiting to drift.
+	SeedStock bool `json:"seedStock,omitempty"`
 	// Recent is the newest recorded crossings of this species: lane and age. A
 	// SAMPLE, bounded by speciesRecentMax, never a count — the count is
 	// Crossings.
@@ -262,12 +285,17 @@ type TreeNode struct {
 
 	// ---- THE BRAIN, from ONE stored genome per species (brain.go).
 	//
-	// Neurons and Synapses are the shape of the LATEST genome of this species the
-	// crossing record named, as the content-addressed store holds it. Both are
-	// ABSENT when the store does not hold that blob — pruned past the retention
-	// horizon, never fetched, or a shape this parser cannot read — and absent
-	// renders as nothing at all. It is never an error and never a zero: a brain
-	// this archive cannot see is not a brain of no neurons.
+	// Neurons and Synapses are the shape of THE NEWEST GENOME OF THIS SPECIES THIS
+	// ARCHIVE HAS BEEN ABLE TO READ — the latest hash the record named while the
+	// store holds that blob, and the newest one it did hold while a fetch for the
+	// newer hash is outstanding. That is the figure the page has always described,
+	// and it is the one that does not blink on a rig with a fetch backlog
+	// (brainForSpecies).
+	//
+	// Both are ABSENT when no genome of this species has ever been readable —
+	// pruned past the retention horizon, never fetched, or a shape this parser
+	// cannot read — and absent renders as nothing at all. It is never an error and
+	// never a zero: a brain this archive cannot see is not a brain of no neurons.
 	Neurons  int `json:"neurons,omitempty"`
 	Synapses int `json:"synapses,omitempty"`
 }
@@ -318,6 +346,11 @@ type SpeciesTree struct {
 	Connected  int `json:"connected"`
 	Isolated   int `json:"isolated"`
 	Unrecorded int `json:"unrecorded"`
+	// SeedStock is how many of the living species satisfy the seed-template rule
+	// (TreeNode.SeedStock). It is COUNTED IN ALIVE and in every other count above:
+	// the view hides no row here and hides no row from a count anywhere, and the
+	// renderer that leaves one out of the drawing says so with this number.
+	SeedStock int `json:"seedStock"`
 	// Ancestors is how many non-living nodes were kept as branch points, and
 	// Collapsed the total generations every edge swallowed between them.
 	Ancestors int `json:"ancestors"`
@@ -340,15 +373,27 @@ type SpeciesTree struct {
 	// ---- THE TIME AXIS every bar is drawn against.
 	//
 	// SpanStartMs is the left-hand edge: the earliest thing this drawing has to
-	// hold, which is the oldest bar start OR the record's own ancestry floor,
-	// whichever is older — so the floor is always INSIDE the picture and can be
-	// drawn as the boundary it is. SpanEndMs is now.
+	// hold, which is the oldest DRAWN bar start OR the record's own ancestry
+	// floor, whichever is older — so the floor is always INSIDE the picture and
+	// can be drawn as the boundary it is. SpanEndMs is now.
 	//
-	// They are published rather than left to the renderer to infer, because a
-	// renderer inferring them from the nodes alone would put the floor off the
-	// left edge on every map whose oldest bar is younger than the floor.
-	SpanStartMs int64 `json:"spanStartMs,omitempty"`
-	SpanEndMs   int64 `json:"spanEndMs,omitempty"`
+	// THE SEED STOCK IS NOT IN IT. A seed species is excluded from migration
+	// everywhere it lives, has been in the record since the record began, and its
+	// bar is not drawn by default — so letting it set the left edge would scale
+	// every bar that IS drawn against a span nothing on the picture participates
+	// in. The axis fits the participants; the floor still pins itself inside.
+	//
+	// SpanStartSeedMs is that same edge computed with the seed stock's bars in
+	// it, published so a page that reveals them stretches the axis rather than
+	// clamping their start against the left edge — and does it from the answer it
+	// already holds, with no second request. It is never later than SpanStartMs.
+	//
+	// All of them are published rather than left to the renderer to infer,
+	// because a renderer inferring them from the nodes alone would put the floor
+	// off the left edge on every map whose oldest bar is younger than the floor.
+	SpanStartMs     int64 `json:"spanStartMs,omitempty"`
+	SpanStartSeedMs int64 `json:"spanStartSeedMs,omitempty"`
+	SpanEndMs       int64 `json:"spanEndMs,omitempty"`
 
 	// Map is the grid the per-species mini-maps are drawn on. It is the census's
 	// own seats, from the same status frame the leaves came from.
@@ -620,6 +665,10 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 			n.Spellings = row.Spellings
 			n.Excluded, n.ExcludedBy = row.Excluded, row.ExcludedBy
 			n.Everywhere, n.Endemic = row.Everywhere, row.Endemic
+			// COPIED, NOT RE-DERIVED: the index owns the seed-stock rule and this
+			// node carries its answer. An ancestor is never marked, because it is
+			// alive nowhere and the rule is about where a species lives.
+			n.SeedStock = row.SeedStock
 			n.Recent = row.Recent
 			n.ParentName = row.Parent
 			n.Crossings, n.FirstMs, n.LastMs = row.Crossings, row.FirstMs, row.LastMs
@@ -823,22 +872,43 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 				childFrom[n.Parent] = n.SpanFromMs
 			}
 		}
-		if n.SpanFromMs > 0 && (out.SpanStartMs == 0 || n.SpanFromMs < out.SpanStartMs) {
-			out.SpanStartMs = n.SpanFromMs
+		if n.SpanFromMs > 0 {
+			// TWO EDGES OUT OF ONE PASS. The seed edge holds everything the
+			// answer contains; the drawn edge skips the rows a default reader is
+			// not shown, which is the whole point of hiding them (SpanStartMs).
+			if out.SpanStartSeedMs == 0 || n.SpanFromMs < out.SpanStartSeedMs {
+				out.SpanStartSeedMs = n.SpanFromMs
+			}
+			if !n.SeedStock &&
+				(out.SpanStartMs == 0 || n.SpanFromMs < out.SpanStartMs) {
+				out.SpanStartMs = n.SpanFromMs
+			}
 		}
 	}
-	// THE FLOOR IS ALWAYS INSIDE THE PICTURE. It is where the record's ancestry
-	// begins, and a drawing that put it off the left edge would leave every root
-	// badge pointing at something the reader cannot see.
-	if out.AncestrySinceMs > 0 &&
-		(out.SpanStartMs == 0 || out.AncestrySinceMs < out.SpanStartMs) {
-		out.SpanStartMs = out.AncestrySinceMs
+	// THE FLOOR IS ALWAYS INSIDE THE PICTURE, whichever picture is drawn. It is
+	// where the record's ancestry begins, and a drawing that put it off the left
+	// edge would leave every root badge pointing at something the reader cannot
+	// see. It pins both edges, so revealing the seed stock cannot push it out
+	// either.
+	if out.AncestrySinceMs > 0 {
+		if out.SpanStartMs == 0 || out.AncestrySinceMs < out.SpanStartMs {
+			out.SpanStartMs = out.AncestrySinceMs
+		}
+		if out.SpanStartSeedMs == 0 || out.AncestrySinceMs < out.SpanStartSeedMs {
+			out.SpanStartSeedMs = out.AncestrySinceMs
+		}
 	}
 	if out.SpanStartMs == 0 || out.SpanStartMs >= out.SpanEndMs {
 		// Nothing here is dated, or every date is in the future — which is a
 		// clock, not a genealogy. An hour of axis is drawn rather than a degenerate
 		// one, and every bar in it is absent anyway.
 		out.SpanStartMs = out.SpanEndMs - int64(time.Hour/time.Millisecond)
+	}
+	if out.SpanStartSeedMs == 0 || out.SpanStartSeedMs > out.SpanStartMs {
+		// The revealed axis is never NARROWER than the drawn one: it holds a
+		// superset of the same bars, so anything else is a degenerate case above
+		// having moved one edge and not the other.
+		out.SpanStartSeedMs = out.SpanStartMs
 	}
 
 	// ---- THE BRAIN, one stored blob per species, parsed once per hash ever.
@@ -849,7 +919,10 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		if f == nil || f.genomeHash == "" {
 			continue
 		}
-		if b, ok := a.brainFor(f.genomeHash); ok {
+		// PER SPECIES, NOT PER HASH. A species whose latest hash is still being
+		// fetched keeps the newest shape this process has actually read of it,
+		// rather than losing its ring until the blob lands — see brainForSpecies.
+		if b, ok := a.brainForSpecies(out.Nodes[i].Key, f.genomeHash); ok {
 			out.Nodes[i].Neurons, out.Nodes[i].Synapses = b.Neurons, b.Synapses
 		}
 	}
@@ -859,6 +932,9 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		if !n.Alive {
 			out.Ancestors++
 			continue
+		}
+		if n.SeedStock {
+			out.SeedStock++
 		}
 		if n.Isolated {
 			out.Isolated++

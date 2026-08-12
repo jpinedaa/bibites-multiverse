@@ -141,7 +141,7 @@ func TestTheSpeciesViewIsAliveOnlyAndSaysSo(t *testing.T) {
 	}
 	// A flat ranking draws no parent edges: rows in abundance order are not in
 	// family order, and a line between two of them would say nothing.
-	if !strings.Contains(region, "return {list: flat, joined: false};") {
+	if !strings.Contains(region, "return {list: flat, joined: false,") {
 		t.Fatal("the population ranking still claims its rows are joined")
 	}
 	// The three census badges, each with a glossary entry behind it.
@@ -252,11 +252,21 @@ func TestTheSpeciesViewDrawsTheRecordAgainstTime(t *testing.T) {
 		t.Fatal("the glossary never says the dotted length is generations rather than time")
 	}
 	// The record's floor is a BOUNDARY on the picture, not only a caption.
+	//
+	// AND THE TEST IS >=, WHICH IS THE WHOLE MARK. The server clamps the axis down
+	// to the floor so the floor is always inside the picture, so on every map whose
+	// oldest drawn bar is younger than the floor the two are EXACTLY EQUAL — the
+	// running rig's own case, where a strict > drew the boundary on no map at all.
 	for _, want := range []string{`svgEl("line", "floor")`, `svgEl("rect", "prefloor")`,
-		"x.ancestrySinceMs && x.ancestrySinceMs > sc.t0"} {
+		"x.ancestrySinceMs && x.ancestrySinceMs >= sc.t0"} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the record's floor is not drawn as a boundary: %q missing", want)
 		}
+	}
+	if strings.Contains(region, "x.ancestrySinceMs > sc.t0") {
+		t.Fatal("the floor is gated on a STRICT >; the axis is clamped down to the floor, so " +
+			"equality is the common case and a strict test hides the boundary exactly when it " +
+			"is the boundary")
 	}
 	// And the axis is UTC and dated, because it is a fixed point weeks back and a
 	// local rendering would put two readers a day apart on the same fact.
@@ -655,7 +665,7 @@ func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
 	for _, want := range []string{
 		`if (joined && !n.parent && n.ancestryKnown && n.ancestryDepth > 0)`,
 		`"THE RECORD BEGINS HERE · "`, `" GENERATIONS ABOVE"`, `" GENERATION ABOVE"`,
-		`"tbadge rec"`, `rb.setAttribute("data-t", "recordfloor")`,
+		`c: "tbadge rec", term: "recordfloor"`,
 	} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the tree never badges a root that has recorded ancestry above it: %q "+
@@ -674,7 +684,7 @@ func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
 	// structural rather than a matter of escaping it correctly.
 	start := strings.Index(region, "if (joined && !n.parent && n.ancestryKnown")
 	stmt := region[start:]
-	if end := strings.Index(stmt, "rb.setAttribute"); end > 0 {
+	if end := strings.Index(stmt, "return out;"); end > 0 {
 		stmt = stmt[:end]
 	}
 	for _, forbidden := range []string{"n.name", "n.key", "n.nameFrom", "row.name"} {
@@ -724,5 +734,251 @@ func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
 	}
 	if !strings.Contains(page, "is not the root of this tree") {
 		t.Fatal("the glossary never answers why the game's starting species is not the root")
+	}
+}
+
+// TestTheSeedStockIsHiddenAndSaidSo is the page half of the seed-template rule.
+//
+// The one set of rows this view leaves out on purpose is the seed stock — a
+// species every world holding it refuses to export, which on this map is the
+// game's own starting template: a full-width bar since the record began, no living
+// descendant, no part in anything else on the drawing. It took over the timeline
+// and answered nothing.
+//
+// FOUR PROPERTIES MAKE THAT HONEST RATHER THAN A LIE BY OMISSION:
+//
+//	THE POLICY IS THE SERVER'S. The page reads a mark on the node; it never
+//	re-derives a world's export policy from an exclusion list.
+//
+//	THE FILTER SAYS SO. The count is on the stat line with the reason beside it
+//	and a control that undoes it. A filter a reader cannot see makes the view
+//	wrong.
+//
+//	THE REVEAL IS A REDRAW. The rows are already in the answer, so showing them
+//	costs a repaint and a wider axis — never a request.
+//
+//	A SEARCH BEATS THE FILTER. "No species matches that search" about a species
+//	this view is holding back would be the view lying about its own contents.
+func TestTheSeedStockIsHiddenAndSaidSo(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// The mark is READ, never derived: the page tests a published field and does
+	// not look at anybody's exclusion list to decide.
+	for _, want := range []string{"function lfSeedHidden", "var lfSeedShown = false;",
+		"n.seedStock", "x.seedStock", "lfSeedHidden(n)"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the seed filter is missing %q", want)
+		}
+	}
+	// THE FILTER RUNS IN BOTH ORDERS, and the counts it reports are this drawing's.
+	if !strings.Contains(region, "function drop(n)") ||
+		!strings.Contains(region, "return {list: flat, joined: false, hid: hid, seed: seed};") ||
+		!strings.Contains(region, "return {list: out, joined: true, hid: hid, seed: seed};") {
+		t.Fatal("the seed filter does not run over both the family order and the population " +
+			"ranking, or does not report what it took out")
+	}
+	// A SEARCH REVEALS THE ROW rather than hiding it and reporting nothing found.
+	if !strings.Contains(region, "return !(lfQuery && lfMatches(n));") {
+		t.Fatal("a search that matches a seed species does not reveal it")
+	}
+	// THE NOTICE: the count, the reason, and the control — in the page's own voice.
+	for _, want := range []string{`"seed species hidden"`, `"seed species shown"`,
+		`"seed species shown by your search"`,
+		`" — excluded from migration on every world where it lives"`,
+		`el("button", "seedbtn", hid > 0 ? "show" : "hide")`,
+		`termEl("span", "seedstock",`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the stat line never says a row was left out: %q missing", want)
+		}
+	}
+	// NOTHING IN THE NOTICE IS A NAME. It is static words, two integers and a
+	// glossary term — the same structural property the root badge has, checked the
+	// same way, because this line is built in the fenced region and drawn as text
+	// nodes either way.
+	start := strings.Index(region, "if (x.seedStock > 0 && (hid > 0 || seed > 0)){")
+	if start < 0 {
+		t.Fatal("the notice is not gated on the server's own count of seed species")
+	}
+	notice := region[start:]
+	if end := strings.Index(notice, "host.appendChild(sd);"); end > 0 {
+		notice = notice[:end]
+	}
+	for _, forbidden := range []string{"n.name", "n.key", "row.name", "nameFrom", "spellings"} {
+		if strings.Contains(notice, forbidden) {
+			t.Fatalf("the seed notice interpolates %q; its text is static plus integers", forbidden)
+		}
+	}
+	// THE REVEAL IS A REDRAW AND NOT A REQUEST, and the state outlives nothing.
+	toggle := page[strings.Index(page, "function toggleSeed()"):]
+	toggle = toggle[:strings.Index(toggle, "var lfResizeT")]
+	if !strings.Contains(toggle, "lfSeedShown = !lfSeedShown;") ||
+		!strings.Contains(toggle, "renderLife(LFX)") {
+		t.Fatal("the reveal does not repaint from the answer already held")
+	}
+	if strings.Contains(toggle, "fetch") {
+		t.Fatal("revealing a hidden row fetches; the rows are already in the answer the page " +
+			"is holding, which is why the server marks them instead of dropping them")
+	}
+	if strings.Contains(region, "localStorage") || strings.Contains(region, "sessionStorage") {
+		t.Fatal("the species view persists something; the seed state is a variable and a " +
+			"reload is meant to be back at the default")
+	}
+	// The control is rebuilt with the line every poll, so the listener is on the
+	// line rather than on the button.
+	if !strings.Contains(page, `ev.target.closest(".seedbtn")`) {
+		t.Fatal("the reveal control is not wired, or is wired to an element the next poll " +
+			"replaces")
+	}
+	// THE AXIS STRETCHES WITH IT, from the second published edge and not from a
+	// number the page invented.
+	for _, want := range []string{"x.spanStartSeedMs", "function lfScale(x, cols, seed)",
+		"lfScale(x, cols, pick.seed > 0)"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the axis does not follow the rows that are drawn: %q missing", want)
+		}
+	}
+	// The row that is revealed says why it is normally not there, on the row and in
+	// the glossary.
+	if !strings.Contains(region, `"SEED STOCK · NEVER EXPORTED"`) {
+		t.Fatal("a revealed seed row carries no badge saying what it is")
+	}
+	if !strings.Contains(region, "Seed stock: every world it lives in refuses to export it") {
+		t.Fatal("a revealed seed row's tooltip never explains why it is normally absent")
+	}
+	if !strings.Contains(page, " seedstock:[") {
+		t.Fatal("the glossary never explains what seed stock is")
+	}
+	if !strings.Contains(page, `"excluded","seedstock",`) {
+		t.Fatal("the glossary entry exists but is never listed, so nobody can read it")
+	}
+	// And it is held APART from the weaker fact it is built on: excluded somewhere
+	// is not excluded everywhere it lives.
+	if !strings.Contains(page, "a species one world holds back can still travel freely out of "+
+		"another") {
+		t.Fatal("the glossary does not hold 'never exported' apart from 'seed stock'")
+	}
+}
+
+// TestTheRowsLabelsAreReadable is a regression, and it is the kind that a
+// structural test can actually hold: the badges were drawn INSIDE the clip that
+// bounds a species name.
+//
+// A name is 64 bytes somebody else chose, so the label column is clipped or a name
+// draws itself over the timeline. The badges rode in that same text run with no
+// width budget of their own, and the clip cut them off: measured on the running
+// rig, "NO RECORDED ANCESTRY" painted as "NO R" and "THE RECORD BEGINS HERE · 31
+// GENERATIONS ABOVE" was invisible in its entirety. A row with something to say
+// looked like a row with nothing.
+//
+// So the badges are a LINE OF THEIR OWN, with their own clip and their own height,
+// and the name run holds the name and nothing else.
+func TestTheRowsLabelsAreReadable(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	for _, want := range []string{"function lfBadges", "function lfBadgeH", "function lfRowH",
+		`svgEl("text", "bdg")`, `bt.setAttribute("clip-path", "url(#lfbclip)")`,
+		`bclip.setAttribute("id", "lfbclip")`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the badges have no line of their own: %q missing", want)
+		}
+	}
+	// THE NAME RUN HOLDS THE NAME. Nothing else goes into the clipped element.
+	if !strings.Contains(region, "trSpan(text, null, n.name);\n  g.appendChild(text);") {
+		t.Fatal("something other than the name is still appended to the clipped label run")
+	}
+	if strings.Contains(region, `trSpan(text, "tbadge`) ||
+		strings.Contains(region, `trSpan(text, "meta"`) {
+		t.Fatal("a badge is still drawn inside the name's clip, which is what cut it off")
+	}
+	// THE BADGE CLIP IS THE LABEL REGION, bounded by the plot: a badge may be as
+	// long as this page's own words and still cannot reach the timeline.
+	if !strings.Contains(region, "Math.max(60, cols.plot - LF_NAMEX - 10)") {
+		t.Fatal("the badge line is unbounded, or is not bounded by where the plot starts")
+	}
+	// THE ROW IS TALLER FOR IT, and only when it has one. One function answers
+	// both the layout and the drawing, so the height reserved and the marks emitted
+	// cannot disagree.
+	for _, want := range []string{"return LF_ROWH + lfBadgeH(n, joined) + (open ? lfDetailHeight(n) : 0);",
+		"y += lfRowH(list[i], pick.joined, lfOpenKey === list[i].key);",
+		"lfDetail(g, n, top + LF_ROWH + badgeH, cols)",
+		`String(LF_ROWH - 1 + badgeH + (open ? lfDetailHeight(n) : 0))`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the row reserves no room for its badge line: %q missing", want)
+		}
+	}
+	// Every badge that was measured clipped is still drawn, and still says the
+	// thing it said.
+	for _, want := range []string{`"NO RECORDED ANCESTRY"`, `"NO LIVING RELATIVE"`,
+		`"ALSO AN ANCESTOR"`, `"THE RECORD BEGINS HERE · "`, `"NEVER EXPORTED"`,
+		`"· extinct here · "`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a badge went missing with the clip: %q", want)
+		}
+	}
+	// AND THE PROMISED TOOLTIP IS REAL. The comment said the full name is always in
+	// the row's tooltip; that used to mean this page's own hover tip and nothing a
+	// browser, a keyboard or a screen reader could reach.
+	if !strings.Contains(region, `var ttl = svgEl("title");`) ||
+		!strings.Contains(region, "ttl.textContent = String(n.name);") {
+		t.Fatal("the row carries no title element, so the clipped name is nowhere a browser " +
+			"or a screen reader can read it")
+	}
+	if !strings.Contains(page, "svg.life text.bdg{") {
+		t.Fatal("the badge line has no style of its own")
+	}
+}
+
+// TestTheTimelineFitsItsBoxAndKeepsNowInIt is the third rendering defect: the
+// drawing was a fixed 1344 pixels wide and only fitted a window of 1427 or more.
+// At 1280 the right-hand end of every living bar — NOW, which is where every
+// living bar ends and the one mark a reader is looking for — sat 147 pixels past
+// the right edge of a box scrolled to zero.
+//
+// The columns left of the plot are text and dots and have the widths they have.
+// The timeline is the elastic one.
+func TestTheTimelineFitsItsBoxAndKeepsNowInIt(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	for _, want := range []string{"var host = document.getElementById(\"lfbox\");",
+		"var avail = host ? host.clientWidth : 0;",
+		"Math.max(LF_PLOTMIN, avail - plot - LF_PLOTPAD - LF_SCROLLW)",
+		"w: plot + plotw + LF_PLOTPAD"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the plot is not measured against its own box: %q missing", want)
+		}
+	}
+	// The scale and the now line are drawn against the measured width, not the
+	// constant. The constant survives as the answer for a box nothing has laid out
+	// yet — a panel still hidden — and the resize that follows repaints it.
+	if !strings.Contains(region, "return cols.plot + f * cols.plotw;") {
+		t.Fatal("the time scale still maps onto a fixed plot width")
+	}
+	if strings.Contains(region, "f * LF_PLOTW") || strings.Contains(region, "cols.plot + LF_PLOTW") {
+		t.Fatal("something is still drawn against the fixed plot width")
+	}
+	if !strings.Contains(region, "String(cols.plot + cols.plotw)") {
+		t.Fatal("the now line is not at the right-hand end of the measured plot")
+	}
+	// A RESIZE REPAINTS FROM THE ANSWER ALREADY HELD. It changes geometry and not
+	// one fact, so it pulls no poll forward — and it is coalesced, because a drag
+	// across a screen fires it by the hundred.
+	resize := page[strings.Index(page, `window.addEventListener("resize"`):]
+	resize = resize[:strings.Index(resize, "})();")]
+	for _, want := range []string{"clearTimeout(lfResizeT)", "renderLife(LFX)",
+		`TAB === "species"`} {
+		if !strings.Contains(resize, want) {
+			t.Fatalf("the resize repaint is missing %q", want)
+		}
+	}
+	if strings.Contains(resize, "fetch") {
+		t.Fatal("a resize fetches; nothing about the data changed")
+	}
+	// The box still scrolls in both directions when even the minimum does not fit,
+	// which is this page's rule for wide content everywhere.
+	if !strings.Contains(page, ".lifewrap{overflow:auto") {
+		t.Fatal("the drawing no longer scrolls inside its own box")
 	}
 }
