@@ -265,10 +265,28 @@ only fleet that rehearses `contract-b/4`. Every constraint below is on record in
   outbound under the published `limits` from `HANDSHAKE_ACK` — half-ceiling rate, quarter-ceiling
   burst, a control reserve — plus bulk gated on the handshake ack (which also closed a §5.2
   empty-session-stamp defect). Rolled onto all five local sidecars 02:20–02:23Z with zero
-  discarded bytes and 24/24 lanes throughout; **zero sheds since**. Debt: **slot 6 still runs the
-  unpaced sidecar** — bundle `e2d70650…` carries the fix, sidecar-only swap at the operator's
-  leisure; until applied, slot 6 is the one peer that will burst on a future rejoin. Log-reading
-  caution: grep for `SHED THIS CONNECTION`, not `4007` (id substrings alias).
+  discarded bytes and 24/24 lanes throughout. **Amended 2026-08-12 ~11:03Z: two sheds on a PACED
+  sidecar (slot 1), both inside the rendered-slot-1 pause-freeze window** — the game froze at
+  `timeScale 0` (a drawn-UI pause path, see the rendered-instance gotcha), the backlog built
+  behind the stalled mod, and the drain burst read peak 51/s despite the 25/s+12 pacer. Root
+  cause of the over-budget burst NOT established (candidates: NACK/bounce storm + control
+  traffic compressing into one meter window); zero sheds on slots 2–5 ever, zero on slot 1
+  outside that window, nothing lost (bounces went home). Watch: paced ≠ shed-proof when the mod
+  stalls. Debt: **slot 6 still runs the unpaced sidecar** — the far-end bundle carries the fix,
+  sidecar-only swap at the operator's leisure. Log-reading caution: grep for
+  `SHED THIS CONNECTION`, not `4007` (id substrings alias).
+- **A RENDERED instance can freeze at `timeScale 0` and never self-recover (2026-08-12).** Slot
+  1, drawn for a 20-minute session: the min-FPS servo re-arms as expected (achieved 21.8 → 5.6),
+  but ~7 s after the first periodic save the world hit `TimeController.paused` — a drawn-UI
+  pause path (`SaveController.LockControls` et al.) that headless instances cannot reach — and
+  froze for 7m20s (`pacedDepth` capped, custody 244, duplicate retransmits). The servo cannot
+  unpause (`CheckMinFPS` is gated on `!paused`). **Remedy, one command, worked first try:**
+  `send <n> timescale 100` routes through `ForcePlay` and clears the pause stack. Intermittent
+  (the second save did not reproduce it). Slot 6 is the standing rendered instance — if it ever
+  reads `timeScale 0` with static `simulatedTime`, this is the first suspect, and the remedy is
+  the far-end operator's to type. Also from the same session: the first-timescale-send trap did
+  NOT fire on either launch (fifth and sixth clean readings — the re-send-at-1 remains
+  mandatory, the second-send correction increasingly looks historical).
 
 Full readings and their evidence are in `dev_environment.md`, *The living deployment → Watch
 items*. What follows is only why each one touches this milestone.
