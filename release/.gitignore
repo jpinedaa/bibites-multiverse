@@ -1,0 +1,13 @@
+# The built artifacts. DELIBERATELY NOT TRACKED, and the reasoning is worth
+# keeping because this repository does track a binary elsewhere.
+#
+# farend/dist/farend-bundle.zip is committed because the far end takes it out of
+# a clone: the repository is that artifact's only distribution channel. A public
+# release has a distribution channel of its own — the release page — so a
+# tracked copy here would be a second, silently drifting one, at about 7 MB per
+# rebuild in history that nothing reads.
+#
+# What IS tracked in release/ is everything a rebuild needs: the installer, the
+# uninstaller, the in-archive README, the release-page text, the build script
+# and the install/uninstall test. `make-release.sh` reproduces dist/ from them.
+dist/

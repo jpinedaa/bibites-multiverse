@@ -71,12 +71,21 @@ losing it costs a handover.
 does not hold another, and presenting yours for a role it does not carry is refused rather than
 quietly downgraded.
 
-**The package may ask for the same two things somewhere else** — a settings file instead of a
-command line. What does not change is the shape: an identity, and a secret in a file only you
-can read.
+**The packaged installer does both of those for you**, and it does them the same way. Run
+`.\Install-BibitesMultiverse.ps1` and it asks for the join string at the keyboard **with the
+typing hidden**; paste the whole `one line` form. It splits the two halves at the last dot,
+checks the secret's shape before writing anything, and stores the secret half — alone — in
+`%LOCALAPPDATA%\BibitesMultiverse\peer-secret.txt`, with the permissions set so only your account
+can read it. The identity half and the relay address go into the generated
+`Start-Multiverse.ps1` as `--peer-id` and `--relay`; **the secret is never in that file, in any
+command line, or in any log.** `-JoinStringFile .\join.txt` is there if you would rather not
+type it, and the installer then tells you to delete that file — it will not delete a file you
+gave it.
 
-> **SLOT — WP6 (the package).** Where a participant puts it during install, and how they change
-> it later.
+**To change it later** — a slot handover, or a move to a different map — run the installer again
+with the new join string. It rewrites the credential file and the start script; your world, your
+saves and your journal are untouched by that. **Your own copy is the only copy**: nothing can
+reprint the secret, so there is no "show it to me again" anywhere in the software.
 
 ## What happens on your first claim
 

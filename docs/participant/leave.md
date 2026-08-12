@@ -36,7 +36,7 @@ is what makes the map tidy rather than permanently expectant.
 | Your slot number | **Retired forever.** Slot numbers are never reused, and that is what makes the next line safe |
 | Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so no retry can ever succeed. One the relay can prove it never handed anywhere goes home at once; one that may already have reached your sidecar before you went waits out its hold first, because the point of the wait is exactly that possibility |
 | Your neighbours | Their lanes re-pair around the hole. No slot number changes and no other position moves |
-| Your world | Yours. The saves are on your disk, and the uninstall leaves your game as it found it |
+| Your world | Yours. The saves are on your disk, and `Uninstall-BibitesMultiverse.ps1` leaves your game as it found it — see [install.md](install.md). It keeps your journal unless you pass `-RemoveWorldData`, and it never goes near your worlds |
 | Your credential | **Still authenticates until the operator drops it** — a release retires a *reservation*, not an identity. What is gone is your place: connect again and the map treats you as a newcomer, at a new slot number and wherever the ordinary placement rules put you. Your old slot number is never reused. There is nothing to revoke on your side |
 
 **Before you go, drain your journal.** Your sidecar may be holding organisms it took custody of

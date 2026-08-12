@@ -18,8 +18,16 @@ learned, and it stays where it is. Nothing in `docs/` is a copy of it.
 | [`participant/join.md`](participant/join.md) | a participant | What is a join string, what happens on my first claim, where do I land, and what does joining publish about my world? |
 | [`participant/diagnose.md`](participant/diagnose.md) | a participant | Something is wrong. What do I read, in what order, and what do I send when I ask for help? |
 | [`participant/leave.md`](participant/leave.md) | a participant | What does stopping mean, what does leaving mean, and what becomes of my world and its place on the map? |
+| [`support-matrix.md`](support-matrix.md) | a participant **and** the operator | Which mod and sidecar build goes with which game version, how to look your own build up, and what a map with two game builds on it does |
 | [`error-taxonomy.md`](error-taxonomy.md) | a participant **and** the operator | Every refusal this system can hand somebody, with the remedy **and who must act** |
 | [`sidecar-diagnose-spec.md`](sidecar-diagnose-spec.md) | whoever implements `--diagnose` | Each check, its pass criterion, and the taxonomy entry a failure points at |
+| [`defaults-audit.md`](defaults-audit.md) | a reviewer, and the operator | Every default the release ships with, what a bare install does with it, and the verdict |
+
+**Two of these travel with the release rather than only living here.** `support-matrix.md`'s
+machine-readable block is copied into the release archive as `support-matrix.json` — the same
+bytes — so the words the installer refuses an unsupported game build with are the words on the
+page. `defaults-audit.md` is linked from the release page, because what a bare install does is
+something a reader decides on before running it.
 
 ## The rule the taxonomy exists for
 
@@ -42,10 +50,12 @@ Several entries carry a **slot**: a marked to-do naming the work package that fi
 was drafted against WP1's contracts while the packages that invent what a participant actually
 sees were still being built. **WP2's and WP4's are closed**: the credential refusals and the
 join string's printed form, the published capacity table, the admin path's participant-visible
-effects and the lineage-gap and export-edge texture are now quoted from what ships. What
-remains is owned by **WP3** (the hosted deployment), **WP6** (the package), **WP8** (the bands
-only a playtest can measure) and this package's own later arcs. Each document collects its own
-slots in a table at the end.
+effects and the lineage-gap and export-edge texture are now quoted from what ships. **WP6's are
+closed too**: the artifact names, the checksum and unblock commands, the installer's own output
+and refusals, the uninstall, the support matrix's location and lookup, the participant-facing
+name of every shipped setting, and the two log files a packaged install writes. What remains is
+owned by **WP3** (the hosted deployment), **WP8** (the bands only a playtest can measure) and
+WP7's own later arcs. Each document collects its own slots in a table at the end.
 
 ## Where the authority lives
 

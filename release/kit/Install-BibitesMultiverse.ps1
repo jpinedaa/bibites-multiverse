@@ -1,0 +1,973 @@
+<#
+.SYNOPSIS
+    Install the Bibites Multiverse mod and its sidecar, and join a public map
+    with the join string a map operator handed you.
+
+.DESCRIPTION
+    Runs on Windows PowerShell 5.1 and on PowerShell 7. It needs no compiler, no
+    SDK, no runtime and nothing from a developer's toolchain, and it needs no
+    administrator rights. It never starts the game.
+
+    What it does, in order:
+
+      1. verifies every file in this folder against MANIFEST.sha256, then clears
+         the mark of the web from the files it verified - and from nothing else;
+      2. finds Steam's copy of The Bibites;
+      3. checks your game build against support-matrix.json and STOPS if there is
+         no entry for it, in the matrix's own words;
+      4. installs BepInEx, if it is not already there;
+      5. copies the plugin into BepInEx\plugins;
+      6. splits your join string and stores the secret half in a file only you
+         can read;
+      7. imports a certificate authority ONLY if you gave it one with -CaFile,
+         which a public map does not need;
+      8. states the settings this install ships with, including the export
+         default;
+      9. writes Start-Multiverse.ps1, Stop-Multiverse.ps1 and the record the
+         uninstall reads.
+
+    IT WILL NEVER ASK YOU TO TURN A SECURITY CONTROL OFF. No part of this
+    package prints an -ExecutionPolicy Bypass, an --insecure- flag, or an
+    instruction to skip certificate verification. If any tool or page in this
+    project asks you for one of those, that is the defect and reporting it is
+    the right response.
+
+    WHAT A BARE INSTALL DOES. Your world exports on ALL FOUR EDGES. Nothing
+    configured means the whole perimeter, not silence. Step 8 states it again on
+    your screen, with what each shipped setting costs you.
+
+.PARAMETER JoinStringFile
+    A file whose first non-empty line is the one-line join string your map's
+    operator handed you:
+
+        multiverse-join/1 wss://<relay-host>/contract-b/v4 <peerId>.<secret>
+
+    Leave it out and the installer asks for the join string at the keyboard,
+    with the typing hidden. THERE IS DELIBERATELY NO -JoinString PARAMETER: a
+    secret on a command line is in every process listing on this machine and in
+    your shell history. The wire itself has the same rule - no flag anywhere
+    takes a secret literally.
+
+.PARAMETER RelayUrl
+    Only needed if your operator gave you the two halves separately rather than
+    as a one-line join string. It must be a wss:// address; this wire is always
+    encrypted and there is no plain fallback.
+
+.PARAMETER CaFile
+    ONLY for a private or LAN map whose relay uses its own certificate
+    authority. A public map's relay presents a certificate your machine already
+    trusts, so leave this out and NOTHING is imported into any trust store.
+    Given one, the installer prints what trusting it means, imports it into your
+    own user store, and records the thumbprint so the uninstall can take it out
+    again.
+
+.PARAMETER GameDir
+    The game folder, if Steam keeps it somewhere this script does not find.
+
+.PARAMETER DataRoot
+    Where this install keeps its journal, its credential, its logs and its
+    record. Defaults to %LOCALAPPDATA%\BibitesMultiverse.
+
+.PARAMETER World
+    The name of the world this install runs. Defaults to Multiverse. The game
+    seeds it on the first start.
+
+.PARAMETER ExportEdges
+    The edges your world exports through. THE DEFAULT IS ALL FOUR and the
+    installer writes the value explicitly, so a future change to the mod's own
+    default cannot silently move what your world does.
+
+.PARAMETER ExcludeSpecies
+    Species that never leave your world. Defaults to the game's starter species,
+    'Basic bibite', which keeps founder stock off a shared map's lanes.
+
+.PARAMETER NoMigrationExclusion
+    Turn the exclusion policy off entirely. It takes its own switch on purpose:
+    an empty -ExcludeSpecies is refused rather than silently disabling the
+    policy, because that is a change a shared map notices and a census does not.
+
+.EXAMPLE
+    .\Install-BibitesMultiverse.ps1
+    Asks for your join string with the typing hidden, and installs.
+
+.EXAMPLE
+    .\Install-BibitesMultiverse.ps1 -JoinStringFile .\join.txt -World MyWorld
+
+.EXAMPLE
+    .\Install-BibitesMultiverse.ps1 -JoinStringFile .\join.txt -CaFile .\ca.crt
+    A private or LAN map, whose relay signs its own certificate.
+#>
+[CmdletBinding()]
+param(
+    [string]$JoinStringFile = '',
+    [string]$RelayUrl = '',
+    [string]$CaFile = '',
+    [string]$GameDir = '',
+    [string]$DataRoot = '',
+    [string]$World = 'Multiverse',
+    [string]$ExportEdges = 'E,N,W,S',
+    [string]$ExcludeSpecies = 'Basic bibite',
+    [switch]$NoMigrationExclusion,
+    [int]$SidecarPort = 8787,
+    [double]$SaveMinutes = 10,
+    [int]$SaveKeep = 6,
+    [ValidateSet('on', 'off')][string]$SaveOnQuit = 'on',
+    [switch]$SkipCaImport
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version 2.0
+
+$Release      = 'm5.0'
+$Here         = Split-Path -Parent $MyInvocation.MyCommand.Path
+$ManifestName = 'MANIFEST.sha256'
+$MatrixName   = 'support-matrix.json'
+$PluginName   = 'BibitesMultiverse.dll'
+$SidecarName  = 'multiverse-sidecar.exe'
+$PluginGuid   = 'dev.multiverse.bibites'
+$StartName    = 'Start-Multiverse.ps1'
+$StopName     = 'Stop-Multiverse.ps1'
+$RecordName   = 'install-record.json'
+
+function Say  { param([string]$m) Write-Host "     $m" }
+function Step { param([string]$m) Write-Host ""; Write-Host "==== $m" }
+function Stop-Setup {
+    param([string]$m, [string]$Id = '')
+    Write-Host ""
+    if ($Id) { Write-Host "STOP [$Id]: $m" -ForegroundColor Red }
+    else     { Write-Host "STOP: $m" -ForegroundColor Red }
+    Write-Host ""
+    Write-Host "     Every refusal this project can hand you is listed, with its remedy and who"
+    Write-Host "     has to apply it, in docs/error-taxonomy.md on the release page."
+    exit 1
+}
+
+function Get-Sha256 {
+    param([string]$Path)
+    return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+}
+
+# ---------------------------------------------------------------- 1. the kit
+
+Step "1 of 9 - check this package against its own manifest"
+
+$manifestPath = Join-Path $Here $ManifestName
+if (-not (Test-Path $manifestPath)) {
+    Stop-Setup ("$ManifestName is missing, so nothing here can be checked. Unpack the release " +
+                "archive again, whole.") 'INS-CHECKSUM'
+}
+
+$verified = New-Object System.Collections.ArrayList
+foreach ($line in (Get-Content -Path $manifestPath)) {
+    $text = $line.Trim()
+    if (-not $text -or $text.StartsWith('#')) { continue }
+    $m = [regex]::Match($text, '^([0-9A-Fa-f]{64})\s+\*?(.+)$')
+    if (-not $m.Success) { Stop-Setup "$ManifestName has a line this installer cannot read: $text" 'INS-CHECKSUM' }
+    $want = $m.Groups[1].Value.ToUpperInvariant()
+    $rel  = $m.Groups[2].Value.Trim()
+    $file = Join-Path $Here $rel
+    if (-not (Test-Path $file)) {
+        Stop-Setup ("$rel is named in $ManifestName and is not in this folder. The package is " +
+                    "incomplete; unpack the release archive again, whole.") 'INS-CHECKSUM'
+    }
+    $got = Get-Sha256 $file
+    if ($got -ne $want) {
+        Write-Host ""
+        Write-Host "$rel is not the published file." -ForegroundColor Red
+        Say "expected SHA-256: $want"
+        Say "this copy       : $got"
+        Stop-Setup ("Delete the whole folder and the archive, download the archive again from the " +
+                    "release page, and check the archive's own checksum against the page BEFORE " +
+                    "unpacking it. If it fails twice, report it and do not run it.") 'INS-CHECKSUM'
+    }
+    [void]$verified.Add($file)
+}
+Say ("{0} files match {1}." -f $verified.Count, $ManifestName)
+
+# The mark of the web, and why this is the honest place to clear it. Windows
+# marks every file that came out of a downloaded archive. The mark is a real
+# control and this installer does not switch it off wholesale: it clears the
+# mark from EXACTLY the files it has just checked against the manifest, by name,
+# and from nothing else in this folder or anywhere on this machine.
+$unblocked = 0
+foreach ($file in $verified) {
+    try {
+        if (Get-Item -Path $file -Stream 'Zone.Identifier' -ErrorAction SilentlyContinue) {
+            Unblock-File -Path $file
+            $unblocked++
+        }
+    } catch {
+        Say "could not clear the mark of the web on $file - $($_.Exception.Message)"
+    }
+}
+if ($unblocked -gt 0) {
+    Say "cleared the mark of the web from $unblocked of them, by name, after checking each one."
+} else {
+    Say "none of them carries the mark of the web; nothing to clear."
+}
+
+# ---------------------------------------------------------------- 2. the game
+
+Step "2 of 9 - find The Bibites"
+
+function Get-GameProcessesIn {
+    # Windows keeps the plugin file open while the game runs, and the copy in
+    # step 5 then fails with an unreadable IOException. The check is on the
+    # game folder this install writes to rather than on the process name: one
+    # machine may hold more than one copy of the game, and only the copy being
+    # written to has to be closed. A process whose path cannot be read counts,
+    # because the safe answer to "I cannot tell" is to stop.
+    param([string]$Path)
+    $hit = New-Object System.Collections.ArrayList
+    foreach ($process in @(Get-Process -Name 'The Bibites' -ErrorAction SilentlyContinue)) {
+        $exe = ''
+        try { $exe = $process.Path } catch { $exe = '' }
+        if (-not $exe) { [void]$hit.Add('(a copy of the game this account cannot inspect)'); continue }
+        if ($exe.StartsWith($Path, [System.StringComparison]::OrdinalIgnoreCase)) { [void]$hit.Add($exe) }
+    }
+    return $hit
+}
+
+function Get-SteamRoots {
+    $roots = New-Object System.Collections.ArrayList
+
+    foreach ($key in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam',
+                       'HKLM:\SOFTWARE\Valve\Steam')) {
+        try {
+            $item = Get-ItemProperty -Path $key -ErrorAction Stop
+        } catch {
+            continue
+        }
+        foreach ($name in @('InstallPath', 'SteamPath')) {
+            $value = $null
+            if ($item.PSObject.Properties.Match($name).Count -gt 0) { $value = $item.$name }
+            if ($value) { [void]$roots.Add(([string]$value).Replace('/', '\')) }
+        }
+    }
+
+    foreach ($guess in @("${env:ProgramFiles(x86)}\Steam", "$env:ProgramFiles\Steam",
+                         "$env:SystemDrive\Steam")) {
+        if ($guess) { [void]$roots.Add($guess) }
+    }
+
+    # A second drive is normal. Every extra Steam library is listed in the
+    # library index of the first one.
+    $extra = New-Object System.Collections.ArrayList
+    foreach ($root in $roots) {
+        $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
+        if (-not (Test-Path $vdf)) { continue }
+        foreach ($line in (Get-Content -Path $vdf)) {
+            $m = [regex]::Match($line, '"path"\s+"(.+?)"')
+            if ($m.Success) { [void]$extra.Add($m.Groups[1].Value.Replace('\\', '\')) }
+        }
+    }
+    foreach ($e in $extra) { [void]$roots.Add($e) }
+
+    return ($roots | Where-Object { $_ } | Select-Object -Unique)
+}
+
+function Find-GameDir {
+    foreach ($root in (Get-SteamRoots)) {
+        $candidate = Join-Path $root 'steamapps\common\The Bibites'
+        if (Test-Path (Join-Path $candidate 'The Bibites.exe')) { return $candidate }
+    }
+    return ''
+}
+
+if (-not $GameDir) { $GameDir = Find-GameDir }
+if (-not $GameDir) {
+    Stop-Setup ("Steam has no copy of The Bibites on this machine, or it is somewhere this script " +
+                "does not know to look. Install the game, or run this script again with " +
+                "-GameDir 'D:\path\to\The Bibites'.")
+}
+if (-not (Test-Path (Join-Path $GameDir 'The Bibites.exe'))) {
+    Stop-Setup "There is no 'The Bibites.exe' in $GameDir."
+}
+$GameDir = (Resolve-Path $GameDir).Path
+Say "game directory: $GameDir"
+
+$runningHere = @(Get-GameProcessesIn $GameDir)
+if ($runningHere.Count -gt 0) {
+    foreach ($exe in $runningHere) { Say "running: $exe" }
+    Stop-Setup ("The Bibites is running from that folder, and Windows holds the plugin file " +
+                "open while it is. Close the game, then run this script again. Nothing was " +
+                "installed.")
+}
+
+# ---------------------------------------------------------------- 3. the matrix
+
+Step "3 of 9 - check this game build against the support matrix"
+
+$matrixPath = Join-Path $Here $MatrixName
+if (-not (Test-Path $matrixPath)) { Stop-Setup "The package is incomplete: $MatrixName is missing." 'INS-CHECKSUM' }
+$matrix = Get-Content -Path $matrixPath -Raw | ConvertFrom-Json
+
+$assembly = Join-Path $GameDir 'The Bibites_Data\Managed\BibitesAssembly.dll'
+if (-not (Test-Path $assembly)) { Stop-Setup "The game assembly is missing: $assembly" }
+$assemblySha = Get-Sha256 $assembly
+
+$entry = $null
+foreach ($candidate in @($matrix.entries)) {
+    if ($candidate.assemblySha256.ToUpperInvariant() -eq $assemblySha) { $entry = $candidate; break }
+}
+
+if (-not $entry) {
+    Write-Host ""
+    Write-Host "The game on this machine is not a build this release supports." -ForegroundColor Red
+    Write-Host ""
+    # The matrix's own words, quoted from support-matrix.json rather than
+    # written here, so the page a reader looks the refusal up on and the tool
+    # that refuses cannot drift apart.
+    foreach ($chunk in ($matrix.refusal -split '(?<=\.) ')) { Say $chunk }
+    Write-Host ""
+    Say "this machine's BibitesAssembly.dll: $assemblySha"
+    Say "the builds this release supports:"
+    foreach ($candidate in @($matrix.entries)) {
+        Say ("  game {0}  (Steam app {1}, buildid {2})  mod {3}, sidecar {4}" -f `
+             $candidate.gameVersion, $candidate.steamAppId, $candidate.steamBuildId, `
+             $candidate.mod, $candidate.sidecar)
+        Say ("      SHA-256 {0}" -f $candidate.assemblySha256)
+    }
+    Write-Host ""
+    Say "The full matrix, and what a map with two game builds on it does, is in"
+    Say "docs/support-matrix.md on the release page."
+    Stop-Setup "the game build is not in the support matrix; NOTHING was installed." 'INS-GAMEBUILD'
+}
+
+Say ("game version {0} (Steam app {1}, buildid {2}) - supported by this release" -f `
+     $entry.gameVersion, $entry.steamAppId, $entry.steamBuildId)
+Say ("this release: mod {0}, sidecar {1}, wire {2} and {3}" -f `
+     $entry.mod, $entry.sidecar, $entry.contractB, $entry.contractA)
+Say ("tested against: {0}" -f $entry.tested)
+
+# ---------------------------------------------------------------- 4. BepInEx
+
+Step ("4 of 9 - BepInEx {0}" -f $entry.bepInEx)
+
+$bepInExZipName = "BepInEx_win_x64_$($entry.bepInEx).zip"
+$bepInExCore    = Join-Path $GameDir 'BepInEx\core\BepInEx.dll'
+$bepInExOurs    = $false
+$bepInExPaths   = New-Object System.Collections.ArrayList
+
+if (Test-Path $bepInExCore) {
+    Say "BepInEx is already installed here; left exactly as it is."
+    Say "The uninstall will not touch it either - it removes only what it put there."
+} else {
+    $zip = Join-Path $Here $bepInExZipName
+    if (-not (Test-Path $zip)) { Stop-Setup "The package is incomplete: $bepInExZipName is missing." 'INS-CHECKSUM' }
+
+    # Every path the archive holds, recorded BEFORE it is unpacked, so the
+    # uninstall removes those files and nothing that was already here.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+    try {
+        foreach ($zipEntry in $archive.Entries) {
+            if (-not $zipEntry.Name) { continue }
+            $rel = $zipEntry.FullName.Replace('/', '\')
+            if (Test-Path (Join-Path $GameDir $rel)) {
+                Say "left alone (already here): $rel"
+                continue
+            }
+            [void]$bepInExPaths.Add($rel)
+        }
+    } finally {
+        $archive.Dispose()
+    }
+
+    Expand-Archive -Path $zip -DestinationPath $GameDir -Force
+    if (-not (Test-Path $bepInExCore)) { Stop-Setup "BepInEx did not unpack into $GameDir." }
+    $bepInExOurs = $true
+    Say ("BepInEx {0} installed into the game directory ({1} files)." -f $entry.bepInEx, $bepInExPaths.Count)
+    Say "The first game start after this is slower: BepInEx writes its configuration then."
+}
+
+# ---------------------------------------------------------------- 5. the plugin
+
+Step "5 of 9 - the multiverse plugin"
+
+$pluginSrc = Join-Path $Here $PluginName
+if (-not (Test-Path $pluginSrc)) { Stop-Setup "The package is incomplete: $PluginName is missing." 'INS-CHECKSUM' }
+$sidecarSrc = Join-Path $Here $SidecarName
+if (-not (Test-Path $sidecarSrc)) { Stop-Setup "The package is incomplete: $SidecarName is missing." 'INS-CHECKSUM' }
+
+$pluginDir  = Join-Path $GameDir 'BepInEx\plugins'
+$pluginDst  = Join-Path $pluginDir $PluginName
+$pluginHeld = Test-Path $pluginDst
+New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+Copy-Item -Path $pluginSrc -Destination $pluginDst -Force
+$pluginSha = Get-Sha256 $pluginDst
+if ($pluginHeld) { Say "$PluginName replaced in $pluginDir (an earlier install was here)" }
+else             { Say "$PluginName -> $pluginDir" }
+Say ("mod version {0}, SHA-256 {1}" -f $entry.mod, $pluginSha.Substring(0, 16))
+
+if (-not $DataRoot) { $DataRoot = Join-Path $env:LOCALAPPDATA 'BibitesMultiverse' }
+New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
+$DataRoot = (Resolve-Path $DataRoot).Path
+$dataDir  = Join-Path $DataRoot 'data'
+$logDir   = Join-Path $DataRoot 'logs'
+New-Item -ItemType Directory -Force -Path $dataDir, $logDir | Out-Null
+Say "this install's own files live in $DataRoot"
+
+# ---------------------------------------------------------------- 6. the join string
+
+Step "6 of 9 - your join string"
+
+function Read-JoinString {
+    param([string]$File)
+    if ($File) {
+        if (-not (Test-Path $File)) { Stop-Setup "No join string file at $File." }
+        foreach ($line in (Get-Content -Path $File)) {
+            $candidate = $line.Trim()
+            if ($candidate -and -not $candidate.StartsWith('#')) { return $candidate }
+        }
+        Stop-Setup "$File holds no join string. Its first non-empty line must be the one your operator sent."
+    }
+    Write-Host ""
+    Say "Paste the join string your map's operator handed you. It looks like this:"
+    Say "    multiverse-join/1 wss://<relay-host>/contract-b/v4 <your-world>.<secret>"
+    Say "The typing is hidden, because the second half of it is the whole of your"
+    Say "world's identity on that map. Nothing echoes it and no log ever prints it."
+    Write-Host ""
+    $secure = Read-Host -Prompt '     join string' -AsSecureString
+    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try {
+        return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr).Trim()
+    } finally {
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+
+$joinString = Read-JoinString $JoinStringFile
+if (-not $joinString) { Stop-Setup "No join string was given, so this world has no identity on any map." }
+
+$credential = ''
+$fields = @($joinString -split '\s+' | Where-Object { $_ })
+if ($fields.Count -eq 3 -and $fields[0] -eq 'multiverse-join/1') {
+    $RelayUrl   = $fields[1]
+    $credential = $fields[2]
+} elseif ($fields.Count -eq 1) {
+    $credential = $fields[0]
+    if (-not $RelayUrl) {
+        Stop-Setup ("That is the identity half on its own, with no relay address. Either paste the " +
+                    "whole one-line join string - it starts with 'multiverse-join/1' - or run this " +
+                    "script again with -RelayUrl wss://<relay-host>/contract-b/v4.")
+    }
+} else {
+    Stop-Setup ("That is not a join string this installer can read. The one-line form is three " +
+                "parts: 'multiverse-join/1', the wss:// relay address, and your identity and " +
+                "secret joined by a dot. Ask your operator to send the 'one line' from the block " +
+                "their relay printed.")
+}
+
+if ($RelayUrl -notmatch '^wss://[^\s]+$') {
+    if ($RelayUrl -match '^ws://') {
+        Stop-Setup ("The relay address is ws://, which is not encrypted. This wire is always " +
+                    "wss:// and there is no fallback anywhere in this software: a relay that " +
+                    "answers ws:// off loopback refuses the connection rather than serving it. " +
+                    "Ask your operator for the wss:// address.")
+    }
+    Stop-Setup "The relay address '$RelayUrl' is not a wss:// URL."
+}
+
+# The two halves split on the LAST dot: an identity may legally contain one and a
+# secret may not. This is exactly the wire's own rule (contract-b-m4.md §3.1).
+$dot = $credential.LastIndexOf('.')
+if ($dot -le 0 -or $dot -eq $credential.Length - 1) {
+    Stop-Setup ("The identity half and the secret half are joined by a dot, and this value has no " +
+                "usable one. Paste the whole 'one line' your operator sent.")
+}
+$peerId = $credential.Substring(0, $dot)
+$secret = $credential.Substring($dot + 1)
+
+if ($secret.Length -lt 32 -or $secret.Length -gt 256) {
+    Stop-Setup ("The secret half is $($secret.Length) characters. It must be 32 to 256. Nothing was " +
+                "written; ask your operator to re-send the join string exactly as their relay printed it.")
+}
+if ($secret -notmatch '^[\x21-\x7e]+$') {
+    Stop-Setup "The secret half must be printable ASCII with no spaces. Nothing was written."
+}
+if ($peerId -notmatch '^[\x21-\x7e]+$') {
+    Stop-Setup "The identity half must be printable ASCII with no spaces. Nothing was written."
+}
+
+$credentialPath = Join-Path $DataRoot 'peer-secret.txt'
+# Written fresh every time: re-writing over an already protected file makes the
+# permission change below need a privilege an ordinary account does not have.
+Remove-Item -Path $credentialPath -Force -ErrorAction SilentlyContinue
+Set-Content -Path $credentialPath -Value $secret -Encoding ASCII
+
+$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+try {
+    $acl = New-Object System.Security.AccessControl.FileSecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'FullControl', 'Allow')))
+    (Get-Item -Path $credentialPath).SetAccessControl($acl)
+    Say "the secret half is in $credentialPath, readable by $me only"
+} catch {
+    Say "the secret half is in $credentialPath"
+    Say "WARNING: the permissions could not be tightened: $($_.Exception.Message)"
+    Say "The file is inside your own profile, which other accounts cannot read by default."
+}
+$secret = ''
+Say "your world's identity on this map: $peerId"
+Say "the relay it dials: $RelayUrl"
+Write-Host ""
+Say "IF YOU LOSE THAT SECRET there is no software recovery: the relay keeps a verifier"
+Say "and cannot print it again. The only way back is to ask the operator for a slot"
+Say "handover, which mints a fresh one. Your slot, your position and everything"
+Say "addressed to you survive that - see docs/participant/leave.md."
+if ($JoinStringFile) {
+    Write-Host ""
+    Say "Delete $JoinStringFile now. It still holds the secret in clear text, and this"
+    Say "installer will not delete a file you gave it."
+}
+
+# ---------------------------------------------------------------- 7. the certificate
+
+Step "7 of 9 - the relay's certificate"
+
+$caImported   = $false
+$caThumbprint = ''
+$caStored     = ''
+
+if (-not $CaFile) {
+    Say "NOTHING WAS IMPORTED INTO ANY TRUST STORE, and nothing needs to be."
+    Say "A public map's relay presents a certificate signed by an authority Windows"
+    Say "already trusts, so your machine checks it the same way it checks a bank's."
+    Say "Your sidecar verifies that certificate on every connection, and there is no"
+    Say "switch anywhere in this software that skips the check."
+    Say "-CaFile exists for a private or LAN map only. If your operator sent you a"
+    Say "ca.crt, run this installer again with -CaFile .\ca.crt."
+} else {
+    if (-not (Test-Path $CaFile)) { Stop-Setup "No certificate file at $CaFile." }
+    try {
+        $ca = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 `
+            ((Resolve-Path $CaFile).Path)
+    } catch {
+        Stop-Setup "$CaFile is not a certificate this machine can read: $($_.Exception.Message)"
+    }
+    $caThumbprint = $ca.Thumbprint
+    Say "subject    : $($ca.Subject)"
+    Say "thumbprint : $caThumbprint"
+    Say "valid until: $($ca.NotAfter.ToString('u'))"
+    if ($ca.NotAfter -lt (Get-Date)) {
+        Stop-Setup "That authority expired on $($ca.NotAfter.ToString('u')). Ask your operator for a current one."
+    }
+
+    $caStored = Join-Path $DataRoot 'relay-ca.crt'
+    Copy-Item -Path $CaFile -Destination $caStored -Force
+
+    Write-Host ""
+    Say "WHAT YOU ARE AGREEING TO, because this is the one step that reaches outside"
+    Say "the game. This authority goes into YOUR OWN user store - Cert:\CurrentUser\Root"
+    Say "- not the machine's. It needs no administrator rights and it affects no other"
+    Say "account. While it is there, programs running as you trust anything it signs."
+    Say "It was made by one map's operator for one relay. Take it out whenever you like:"
+    Say "    .\Uninstall-BibitesMultiverse.ps1"
+    Say "or by hand:"
+    Say "    Get-ChildItem Cert:\CurrentUser\Root | Where-Object Thumbprint -eq '$caThumbprint' | Remove-Item"
+    Write-Host ""
+
+    $already = @(Get-ChildItem 'Cert:\CurrentUser\Root' -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Thumbprint -eq $caThumbprint }).Count -gt 0
+    if ($already) {
+        Say "already trusted here; nothing was imported, and the uninstall will leave it alone."
+    } elseif ($SkipCaImport) {
+        Say "-SkipCaImport was given, so nothing was imported. Your sidecar will refuse to"
+        Say "connect until this authority is trusted. Import it yourself with:"
+        Say "    Import-Certificate -FilePath '$caStored' -CertStoreLocation Cert:\CurrentUser\Root"
+    } else {
+        $importError = ''
+        try {
+            Import-Certificate -FilePath $caStored -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+        } catch {
+            $importError = $_.Exception.Message
+        }
+        $caImported = @(Get-ChildItem 'Cert:\CurrentUser\Root' -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Thumbprint -eq $caThumbprint }).Count -gt 0
+        if ($caImported) {
+            Say "imported into Cert:\CurrentUser\Root and read back by thumbprint."
+        } else {
+            Write-Host "The authority was NOT imported." -ForegroundColor Red
+            if ($importError) { Say "reason: $importError" }
+            Say "Nothing else is wrong: the plugin and the sidecar are installed. Your sidecar"
+            Say "verifies the relay's certificate against this machine's trust store and will"
+            Say "not connect until this authority is in it. There is no switch that skips the"
+            Say "check, on purpose. Import it by hand:"
+            Say "    Import-Certificate -FilePath '$caStored' -CertStoreLocation Cert:\CurrentUser\Root"
+        }
+    }
+}
+
+# ---------------------------------------------------------------- 8. the settings
+
+Step "8 of 9 - the settings this install ships with"
+
+$edgeList = @($ExportEdges -split '[,; \t]+' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
+if ($edgeList.Count -eq 0) {
+    Stop-Setup ("-ExportEdges names no edge. Use E, N, W or S, comma separated - normally 'E,N,W,S'. " +
+                "If you want this world off the map entirely, do not join it: an install with no " +
+                "join string connects to nothing.")
+}
+foreach ($e in $edgeList) {
+    if ($e -notin @('E', 'N', 'W', 'S')) { Stop-Setup "-ExportEdges holds '$e'. Use E, N, W or S." }
+}
+if (($edgeList | Select-Object -Unique).Count -ne $edgeList.Count) {
+    Stop-Setup "-ExportEdges repeats an edge: '$ExportEdges'."
+}
+$ExportEdges = [string]::Join(',', $edgeList)
+
+if ($NoMigrationExclusion) {
+    $ExcludeSpecies = ''
+} elseif (-not $ExcludeSpecies) {
+    Stop-Setup ("-ExcludeSpecies is empty, which would turn the exclusion policy off. That is a " +
+                "real choice and it takes its own switch: pass -NoMigrationExclusion if you mean it.")
+}
+
+Write-Host ""
+Write-Host "  WHAT A BARE INSTALL DOES, STATED ONCE:" -ForegroundColor Cyan
+Write-Host "  YOUR WORLD EXPORTS ON ALL FOUR EDGES. Nothing configured means the whole" -ForegroundColor Cyan
+Write-Host "  perimeter, not silence. Every edge is a door that works both ways: organisms" -ForegroundColor Cyan
+Write-Host "  leave your world on every side and arrive from every side." -ForegroundColor Cyan
+Write-Host ""
+Say "This install was set up with export edges: $ExportEdges"
+if ($ExportEdges -eq 'E,N,W,S') {
+    Say "which is the shipped default. It is written out explicitly all the same, so that"
+    Say "a future change to the mod's own default cannot silently move what your world does."
+} else {
+    Say "which is a subset you asked for. The edges you left out run no capture band; your"
+    Say "world still RECEIVES on all four, because an arrival was never gated by this list."
+}
+Write-Host ""
+Say "The settings this install runs with, and what each one spends:"
+Write-Host ""
+Say "  export edges       $ExportEdges"
+if ($ExportEdges -eq 'E,N,W,S') {
+    Say "                     your world is a full member of the map in every direction"
+} else {
+    Say "                     your world exports on those edges only, and receives on all four"
+}
+if ($ExcludeSpecies) {
+    Say "  species that       '$ExcludeSpecies'"
+    Say "  never leave        keeps founder stock off a shared map's lanes"
+} else {
+    Write-Host "       species that       NONE - the exclusion policy is OFF" -ForegroundColor Yellow
+    Write-Host "       never leave        you asked for -NoMigrationExclusion. Your world will export" -ForegroundColor Yellow
+    Write-Host "                          starter stock onto a shared map, and the map's census shows" -ForegroundColor Yellow
+    Write-Host "                          that as entirely normal while it happens." -ForegroundColor Yellow
+}
+Say "  saves              every $SaveMinutes minutes, keeping $SaveKeep"
+Say "                     $SaveKeep copies of your world on your disk. The interval is also how"
+Say "                     often your world pauses to write itself out"
+Say "  save on quit       $SaveOnQuit"
+Say "                     your world is written out when the game closes, so stopping is not losing"
+Write-Host ""
+Say "All four are set explicitly in $StartName, and you can edit them there. The"
+Say "names in that file are the mod's own: MULTIVERSE_EXPORT_EDGES,"
+Say "MULTIVERSE_MIGRATION_EXCLUDE, MULTIVERSE_SAVE_MINUTES, MULTIVERSE_SAVE_KEEP"
+Say "and MULTIVERSE_SAVE_ON_QUIT."
+
+# ---------------------------------------------------------------- 9. the scripts
+
+Step "9 of 9 - write $StartName, $StopName and the uninstall's record"
+
+$sidecarExe = Join-Path $Here $SidecarName
+$saveOnQuitValue = if ($SaveOnQuit -eq 'on') { 'true' } else { 'false' }
+
+$startBody = @'
+# Written by Install-BibitesMultiverse.ps1. Start this world on the map: the
+# sidecar first, then the game.
+#
+#   .\@@STARTNAME@@             the sidecar, then the game
+#   .\@@STARTNAME@@ -GameOnly   the game only, against a sidecar already running
+#   .\@@STARTNAME@@ -Headless   the world runs with nothing drawn. The simulation
+#                               is unchanged; only the picture is gone
+#
+# THE ORDER MATTERS. The sidecar mints the local token the game's mod presents,
+# into its own data directory, the first time it starts. So the sidecar goes
+# first and the game follows.
+[CmdletBinding()]
+param([switch]$GameOnly, [switch]$Headless)
+$ErrorActionPreference = 'Stop'
+
+$GameDir     = '@@GAMEDIR@@'
+$DataRoot    = '@@DATAROOT@@'
+$RelayUrl    = '@@RELAYURL@@'
+$SidecarExe  = '@@SIDECAREXE@@'
+$PeerId      = '@@PEERID@@'
+$World       = '@@WORLD@@'
+$SidecarPort = '@@SIDECARPORT@@'
+
+$dataDir        = Join-Path $DataRoot 'data'
+$logDir         = Join-Path $DataRoot 'logs'
+$credentialFile = Join-Path $DataRoot 'peer-secret.txt'
+$log            = Join-Path $logDir 'sidecar.log'
+New-Item -ItemType Directory -Force -Path $dataDir, $logDir | Out-Null
+
+# The mod reads its whole configuration from the environment of the game
+# process, which a Windows process inherits from this script.
+#
+# EVERY ONE OF THESE IS SET EXPLICITLY, INCLUDING THE ONES THAT MATCH THE MOD'S
+# OWN DEFAULT. An unset MULTIVERSE_EXPORT_EDGES already means all four edges;
+# writing it out anyway is what keeps a future change to that default from
+# silently moving what this world does. Edit the values here.
+$env:MULTIVERSE_EXPORT_EDGES      = '@@EXPORTEDGES@@'
+$env:MULTIVERSE_MIGRATION_EXCLUDE = '@@EXCLUDESPECIES@@'
+$env:MULTIVERSE_SAVE_MINUTES      = '@@SAVEMINUTES@@'
+$env:MULTIVERSE_SAVE_KEEP         = '@@SAVEKEEP@@'
+$env:MULTIVERSE_SAVE_ON_QUIT      = '@@SAVEONQUIT@@'
+$env:MULTIVERSE_SIDECAR_PORT      = $SidecarPort
+$env:MULTIVERSE_WORLD             = $World
+$env:MULTIVERSE_PORTAL            = 'true'
+$env:MULTIVERSE_PORTAL_FLOURISHES = 'true'
+# The link between the game and the sidecar runs on this machine's loopback and
+# is authenticated: the sidecar mints this file at its first start, readable by
+# you only, and the game presents its contents on every connection. It is NOT
+# the map credential - different secret, different file, different wire - and
+# the mod never writes its value to any log.
+$env:MULTIVERSE_CONTRACT_A_TOKEN_FILE = Join-Path $dataDir 'contract-a.token'
+
+$sidecarPidFile = Join-Path $DataRoot 'sidecar.pid'
+$gamePidFile    = Join-Path $DataRoot 'game.pid'
+
+$gameLaunch = @{
+    FilePath         = (Join-Path $GameDir 'The Bibites.exe')
+    WorkingDirectory = $GameDir
+    PassThru         = $true
+}
+if ($Headless) { $gameLaunch['ArgumentList'] = @('-batchmode', '-nographics') }
+
+if ($GameOnly) {
+    if (-not (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue)) {
+        Write-Host "-GameOnly needs the sidecar already running. It is not." -ForegroundColor Red
+        Write-Host "Run .\@@STARTNAME@@ with no switch."
+        exit 1
+    }
+    if (Get-Process -Name 'The Bibites' -ErrorAction SilentlyContinue) {
+        Write-Host "The game is already running."
+        exit 1
+    }
+    $game = Start-Process @gameLaunch
+    Set-Content -Path $gamePidFile -Value $game.Id -Encoding ASCII
+    Write-Host "game started (pid $($game.Id)) against the running sidecar; it loads '$World' by itself."
+    Write-Host "The sidecar delivers everything it took custody of while the world was away, paced."
+    exit 0
+}
+
+if (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue) {
+    Write-Host "A sidecar is already running. Run .\@@STOPNAME@@ first,"
+    Write-Host "or .\@@STARTNAME@@ -GameOnly to start only the game."
+    exit 1
+}
+if (-not (Test-Path $credentialFile)) {
+    Write-Host "There is no credential at $credentialFile." -ForegroundColor Red
+    Write-Host "Run .\Install-BibitesMultiverse.ps1 again with your join string."
+    exit 1
+}
+
+Remove-Item -Path $log, "$log.out" -ErrorAction SilentlyContinue
+# --credential-file carries the SECRET HALF only. The identity half is
+# --peer-id, and the relay refuses any connection whose credential does not
+# authenticate the identity it claims.
+$sidecarArgs = @(
+    '--listen',          "127.0.0.1:$SidecarPort",
+    '--relay',           $RelayUrl,
+    '--peer-id',         $PeerId,
+    '--data-dir',        $dataDir,
+    '--credential-file', $credentialFile
+)
+$sidecar = Start-Process -FilePath $SidecarExe -PassThru -WindowStyle Hidden -WorkingDirectory $DataRoot -ArgumentList $sidecarArgs -RedirectStandardError $log -RedirectStandardOutput "$log.out"
+Set-Content -Path $sidecarPidFile -Value $sidecar.Id -Encoding ASCII
+Write-Host "sidecar started (pid $($sidecar.Id)) -> $RelayUrl"
+Write-Host "waiting for the map to grant this world a place ..."
+
+$deadline = (Get-Date).AddSeconds(60)
+$granted  = $null
+$refused  = $null
+while ((Get-Date) -lt $deadline) {
+    if (Test-Path $log) {
+        $granted = Select-String -Path $log -Pattern 'contract B: slot granted' -SimpleMatch | Select-Object -Last 1
+        if ($granted) { break }
+        $refused = Select-String -Path $log -Pattern 'placement claim refused', 'HTTP 401', 'certificate did not verify', 'below this relay' |
+                   Select-Object -Last 1
+        if ($refused) { break }
+    }
+    if ($sidecar.HasExited) { break }
+    Start-Sleep -Milliseconds 500
+}
+
+if ($granted) {
+    Write-Host ""
+    Write-Host "YOU ARE ON THE MAP:" -ForegroundColor Green
+    Write-Host "  $($granted.Line)"
+} else {
+    Write-Host ""
+    Write-Host "The map did not grant a place." -ForegroundColor Red
+    if ($refused) { Write-Host "  $($refused.Line)" }
+    if (Test-Path $log) { Get-Content -Path $log -Tail 20 | ForEach-Object { Write-Host "  $_" } }
+    Write-Host ""
+    Write-Host "  The five usual causes, in order:"
+    Write-Host "   1. The relay is not reachable from here - a name that does not resolve, or a"
+    Write-Host "      network that does not carry the connection. Neither is on the map's side."
+    Write-Host "   2. 'the relay's TLS certificate did not verify'. On a public map that is a"
+    Write-Host "      certificate problem the operator has to fix; on a private map it means the"
+    Write-Host "      authority is not trusted here yet - re-run the installer with -CaFile."
+    Write-Host "   3. HTTP 401: this credential is not the one the relay holds for $PeerId. Ask"
+    Write-Host "      the operator for a slot handover; a join string cannot be reprinted."
+    Write-Host "   4. Your wire version is below the minimum this map admits. Install the newest"
+    Write-Host "      release; nobody on the relay's side can push it to you."
+    Write-Host "   5. Your game build is not the one this map is on. Only the operator can see"
+    Write-Host "      which build that is."
+    Write-Host ""
+    Write-Host "  Each of those is an entry in docs/error-taxonomy.md, with who has to act."
+    Write-Host "  The game was NOT started. Run .\@@STOPNAME@@, then try again."
+    exit 1
+}
+
+$game = Start-Process @gameLaunch
+Set-Content -Path $gamePidFile -Value $game.Id -Encoding ASCII
+Write-Host ""
+Write-Host "game started (pid $($game.Id)); it loads the world '$World' by itself,"
+Write-Host "and seeds it on the first start. It saves itself every @@SAVEMINUTES@@ minutes."
+Write-Host "logs: $log  and  $GameDir\BepInEx\LogOutput.log"
+Write-Host "Leave both running. Run .\@@STOPNAME@@ when you are done."
+'@
+
+$stopBody = @'
+# Written by Install-BibitesMultiverse.ps1. Stop this world: the game first,
+# then the sidecar.
+#
+#   .\@@STOPNAME@@             the game and the sidecar
+#   .\@@STOPNAME@@ -GameOnly   the game only. The sidecar stays up, keeps this
+#                              world's place on the map and keeps taking custody
+#                              of everything that arrives while the world is away
+#
+# Stopping costs nothing and needs nobody. Your place on the map is keyed on
+# your world's identity and never expires; your neighbours route around you
+# while you are away. See docs/participant/leave.md.
+[CmdletBinding()]
+param([switch]$GameOnly)
+$ErrorActionPreference = 'SilentlyContinue'
+
+$DataRoot = '@@DATAROOT@@'
+
+function Stop-Recorded {
+    param([string]$File, [string]$Name)
+    if (Test-Path $File) {
+        $id = (Get-Content -Path $File | Select-Object -First 1)
+        if ($id) {
+            Stop-Process -Id ([int]$id) -Force
+            Write-Host "stopped $Name (pid $id)"
+        }
+        Remove-Item -Path $File -Force
+    }
+}
+
+Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game'
+Stop-Process -Name 'The Bibites' -Force
+Start-Sleep -Seconds 1
+
+if ($GameOnly) {
+    Write-Host "the world is down; the sidecar keeps its place and its journal."
+    Write-Host "Arrivals accumulate there and are delivered, paced, when the world comes back."
+    exit 0
+}
+
+Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'the sidecar'
+Stop-Process -Name 'multiverse-sidecar' -Force
+Start-Sleep -Seconds 1
+
+$left = @(Get-Process -Name 'The Bibites', 'multiverse-sidecar' -ErrorAction SilentlyContinue)
+Write-Host ("processes still running: {0} (want 0)" -f $left.Count)
+Write-Host "The journal in $DataRoot\data is kept. Do not delete it: it is this machine's"
+Write-Host "record of every organism it is holding for somebody."
+'@
+
+function Expand-Template {
+    param([string]$Body)
+    return $Body.Replace('@@GAMEDIR@@',        $GameDir).
+                 Replace('@@DATAROOT@@',       $DataRoot).
+                 Replace('@@RELAYURL@@',       $RelayUrl).
+                 Replace('@@SIDECAREXE@@',     $sidecarExe).
+                 Replace('@@PEERID@@',         $peerId).
+                 Replace('@@WORLD@@',          $World).
+                 Replace('@@EXPORTEDGES@@',    $ExportEdges).
+                 Replace('@@EXCLUDESPECIES@@', $ExcludeSpecies).
+                 Replace('@@SAVEMINUTES@@',    [string]$SaveMinutes).
+                 Replace('@@SAVEKEEP@@',       [string]$SaveKeep).
+                 Replace('@@SAVEONQUIT@@',     $saveOnQuitValue).
+                 Replace('@@SIDECARPORT@@',    [string]$SidecarPort).
+                 Replace('@@STARTNAME@@',      $StartName).
+                 Replace('@@STOPNAME@@',       $StopName)
+}
+
+$startPath = Join-Path $Here $StartName
+$stopPath  = Join-Path $Here $StopName
+Set-Content -Path $startPath -Value (Expand-Template $startBody) -Encoding ASCII
+Set-Content -Path $stopPath  -Value (Expand-Template $stopBody)  -Encoding ASCII
+Say "wrote $startPath"
+Say "wrote $stopPath"
+
+# The record the uninstall reads. It names every path this installer created or
+# replaced, with the hash it left behind, so the uninstall can remove exactly
+# what was added and leave anything a later hand changed.
+$bepInExRecorded = @()
+foreach ($rel in $bepInExPaths) {
+    $full = Join-Path $GameDir $rel
+    if (Test-Path $full) {
+        $bepInExRecorded += [pscustomobject]@{ path = $rel; sha256 = (Get-Sha256 $full) }
+    }
+}
+
+$record = [ordered]@{
+    record        = 'bibites-multiverse/install-record/1'
+    release       = $Release
+    installedUtc  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    kitDir        = $Here
+    gameDir       = $GameDir
+    dataRoot      = $DataRoot
+    peerId        = $peerId
+    relayUrl      = $RelayUrl
+    plugin        = [ordered]@{
+        path            = $pluginDst
+        sha256          = $pluginSha
+        replacedExisting = $pluginHeld
+        configFile      = (Join-Path $GameDir "BepInEx\config\$PluginGuid.cfg")
+    }
+    bepInEx       = [ordered]@{
+        installedByThisInstaller = $bepInExOurs
+        version                  = $entry.bepInEx
+        files                    = $bepInExRecorded
+    }
+    certificate   = [ordered]@{
+        imported   = $caImported
+        thumbprint = $caThumbprint
+        storedCopy = $caStored
+    }
+    generated     = @($startPath, $stopPath)
+    credential    = $credentialPath
+    dataDir       = $dataDir
+    logDir        = $logDir
+}
+$recordPath = Join-Path $DataRoot $RecordName
+$record | ConvertTo-Json -Depth 6 | Set-Content -Path $recordPath -Encoding ASCII
+Say "wrote $recordPath - the uninstall reads it, and removes only what is named in it"
+
+# ---------------------------------------------------------------- done
+
+Write-Host ""
+Write-Host "Setup is complete." -ForegroundColor Green
+Say "map          : $RelayUrl"
+Say "your world   : $peerId   world file: $World"
+Say "game         : $GameDir"
+Say "export edges : $ExportEdges   (all four is the shipped default)"
+if ($ExcludeSpecies) { Say "never leaves : $ExcludeSpecies" } else { Say "never leaves : nothing - the exclusion policy is OFF" }
+Say "saves        : every $SaveMinutes minutes, keeping $SaveKeep, save on quit $SaveOnQuit"
+Say "your files   : $DataRoot"
+if ($caImported) { Say "certificate  : $caThumbprint imported into your own user store" }
+else             { Say "certificate  : nothing imported into any trust store" }
+Write-Host ""
+Say "Next: run  .\$StartName"
+Say "Later: .\$StopName to stop, and the uninstall script here to remove all of it."
+Write-Host ""
+Say "The four pages written for you, on the release page: install, join, diagnose, leave."

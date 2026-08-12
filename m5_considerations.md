@@ -422,6 +422,21 @@ defaults:**
 | `MULTIVERSE_MIGRATION_EXCLUDE` | Defaults to `Basic bibite` (`MigrationExclusion.cs:55`), read on presence, so an explicitly empty value disables the policy | D18 chose that default to keep founder stock off the lanes. A stranger who sets the variable empty floods a public map with seed genomes, and the census will show it as normal |
 | `MULTIVERSE_SAVE_*` | `SaveMinutes` 10, `SaveKeep` 6, `SaveOnQuit` true (`MultiverseConfig.cs:80-81`, `104-106`) | Six retained saves of a world is a footprint on a disk the player did not budget, and the save interval is also the stall cadence — see Risk 3. **These three are now what the owner's own deployment runs** (2026-08-10): the rig's `2`/`4` override is gone, so the audit and the rig finally measure the same numbers |
 
+**RUN 2026-08-12, and the answers are in `docs/defaults-audit.md`** — which is published beside
+the release, because what a bare install does is something a reader decides on before running it.
+Two of the four verdicts differ from what this table expected. **Row 1 is closed in code, not in
+packaging**: WP2's B23 made `--insecure-no-token` *refuse any bind that is not loopback*, so
+"nothing enforces test-rig-only" is no longer true and DQ4's *make it impossible* is the branch
+that was taken. **Row 4's footprint is smaller than feared and now measured**: 330–470 KB per
+save on this project's own worlds, so about 2.4–2.9 MB for the six kept and the live one — the
+interval's other half, the stall cadence, is the part that still costs something. Row 2 stays at
+the packaging layer's edge — no archive is shipped to a participant — and becomes a **finding for
+WP3**, whose bring-up is the one that would copy `ARCHIVE_HTTP=0.0.0.0:8796` onto a public host.
+Row 3 is fixed in the packaging: an empty exclusion is now unreachable by accident, and turning
+the policy off takes a switch that prints what it costs. The audit leaves one code-level finding
+open, reported rather than fixed: with the policy off, the mod says so at `LogInfo`, where a
+disabled policy is the one configuration state worth a `WARN`.
+
 ## Design Question 5 — Version compatibility is layered, and a fleet the owner cannot reach
 
 **Two version axes, and the owner's decision puts them on two different layers.** This section
@@ -437,7 +452,10 @@ version."* Read as a design, it is two tests that never meet:
 - **The machine's test — a support matrix, not a fleet pin.** Each operator needs a sidecar
   and mod build compatible with the game version *they* run. The project publishes a matrix
   over game versions, and the test is settled on the operator's own machine before anything
-  dials the relay.
+  dials the relay. **Published 2026-08-12 as `docs/support-matrix.md`** (WP6), with one row —
+  game 0.6.3.1, mod 0.6.4, sidecar m5.0 — the layered statement above it and the partition
+  behaviour below it. Its machine-readable block travels into the release archive unchanged, so
+  the installer's per-machine refusal is worded by the matrix rather than beside it.
 
 **This supersedes the fleet-wide same-game-version rule.** `system_decomposition.md`'s relay
 listed "reject mismatched game/mod versions" at connect and now gates on the contract version;

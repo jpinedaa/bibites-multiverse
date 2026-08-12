@@ -85,7 +85,10 @@ broke it, but because they are the only party who can see both ends.
 2. **Four versions**: game, mod, sidecar, and the wire versions each side reported.
 3. **The close code and its reason string**, verbatim. Nothing parses a reason string; it is
    written for a person, and it is where the map explains itself.
-4. **The log lines either side of it.**
+4. **The log lines either side of it.** A packaged install writes exactly two logs: the game and
+   the mod to `<game folder>\BepInEx\LogOutput.log`, which is **truncated on every launch**, so
+   copy it before you restart the game; and the sidecar to
+   `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log`. Neither ever contains your credential.
 5. **Your world's identity and slot.** Both are public.
 
 **Never send a credential or a token.** A message that contains one turns a support question
