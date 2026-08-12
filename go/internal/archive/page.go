@@ -28,7 +28,10 @@ import (
 // can never drift apart.
 
 // httpHandler serves the operator surface: the page, its JSON, and a health
-// probe.
+// probe. Every one of them goes out through gzipped (compress.go), which is
+// negotiation and nothing else: a client that asks for gzip gets it, a client
+// that does not gets the same bytes it always got, and no payload on this mux
+// changes shape either way.
 func (a *Archive) httpHandler() http.Handler {
 	mux := http.NewServeMux()
 	// DQ7's deny list is applied HERE, at the serving boundary, and on every one
@@ -123,7 +126,7 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(statusPageHTML))
 	})
-	return mux
+	return gzipped(mux)
 }
 
 // historyParams reads ?hours= and ?buckets=, and clamps both. A reader may ask
