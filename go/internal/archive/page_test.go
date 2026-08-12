@@ -3,6 +3,8 @@ package archive
 import (
 	"strings"
 	"testing"
+
+	"multiverse/internal/contractb"
 )
 
 // TestPageHasThreeTabsOverOnePoll is the structural half of the Species and
@@ -203,6 +205,73 @@ func TestSettingsTabIsReadOnlyAndSaysUnknown(t *testing.T) {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the settings tab never says %q; absent and empty are different facts", want)
 		}
+	}
+}
+
+// TestSettingsTabDrawsThePublishedCeilings covers contract-b-m4.md §22, B24 and
+// B25 on the page: the relay publishes the capacity table it is RUNNING WITH and
+// its admission floor on every PEER_STATUS, and §10.1's B24 rule is that they
+// render BESIDE the behaviour they bound — a world's message rate is only
+// readable against the ceiling it is measured on.
+//
+// They are drawn on the settings tab, which is where this page keeps what
+// something was TOLD to do, and they are the one thing on that tab that is
+// AUTHORITATIVE rather than reported: every world card is that world's claim
+// about itself, and this card is the relay's own configuration.
+func TestSettingsTabDrawsThePublishedCeilings(t *testing.T) {
+	page := statusPageHTML
+
+	for _, want := range []string{`id="mapcard"`, "function relayCard", "function limitKV",
+		"function limitValue", "d.limits", "d.minContractVersion", "var LIMITS = ["} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the map's own card is missing %q", want)
+		}
+	}
+	// Every one of §3.3's eight keys is named, by the spelling the wire uses —
+	// which is the spelling a close 4007 quotes back.
+	for _, key := range contractb.PublishedLimitKeys {
+		if !strings.Contains(page, `"`+key+`"`) {
+			t.Fatalf("the card never names the published ceiling %q", key)
+		}
+	}
+	// NO DEFAULT IS SUBSTITUTED ANYWHERE. Every limit is a knob, the relay
+	// publishes what it runs with, and a shipped value drawn in place of an
+	// unpublished one would be the only number on this page nobody could check.
+	// The two byte ceilings are the tell: they appear nowhere in this document.
+	for _, forbidden := range []string{"8388608", "4194304"} {
+		if strings.Contains(page, forbidden) {
+			t.Fatalf("the page carries the shipped default %s; the published table is the "+
+				"values the RELAY is running with", forbidden)
+		}
+	}
+	// The two absences are different facts and the page makes both.
+	for _, want := range []string{"no minimum — any compatible version",
+		"this map publishes no ceilings"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the card never says %q; an unpublished table is UNKNOWN and an "+
+				"unpublished floor is the relay's own answer", want)
+		}
+	}
+	// Both have a glossary entry, like every other piece of jargon on the page.
+	for _, want := range []string{" ceilings:[", " floor:["} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the glossary never explains %q", want)
+		}
+	}
+	// A published key is the relay's own string arriving in a broadcast, so the
+	// card is built where markup may not be assigned — the same fence the census
+	// names are drawn inside.
+	region := speciesRegion(t)
+	for _, want := range []string{"function relayCard", "function limitKV", "function limitValue"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("%q is OUTSIDE the fenced region; a published key reaches the DOM as a "+
+				"text node or not at all", want)
+		}
+	}
+	// And the settings tab actually draws it, on the shared poll like everything
+	// else on this page.
+	if !strings.Contains(page, "mhost.appendChild(relayCard(d || {}))") {
+		t.Fatal("renderSettings never draws the map's own card")
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"multiverse/internal/contractb"
 	"multiverse/internal/termsafe"
 )
 
@@ -233,6 +234,7 @@ func RenderSettings(w io.Writer, s Status) {
 	fmt.Fprintf(w, "map %dx%d   %d slot(s)   epoch %d   state %s old\n",
 		s.Map.Width, s.Map.Height, s.SlotCount, s.Epoch, dur(s.StatusAgeMs))
 	fmt.Fprintf(w, "READ-ONLY: what each world was told to do. This tool changes nothing.\n\n")
+	renderPublished(w, s)
 	if len(s.Slots) == 0 {
 		fmt.Fprintln(w, "no slots reserved yet")
 		return
@@ -278,6 +280,60 @@ func RenderSettings(w io.Writer, s Status) {
 		"older sidecar. It is NEVER the value the game ships with. 'save OFF' is a\n"+
 		"reading: that world's save timer is off, which is why it may never report a\n"+
 		"last save. these settings are read-only everywhere in this system.\n")
+}
+
+// renderPublished prints WHAT THE MAP ITSELF IS RUNNING WITH, above the worlds
+// that are measured against it (contract-b-m4.md §22, B24 and B25). It is the
+// same two values the settings tab draws, off the same Status, so the terminal
+// and the page cannot disagree about the ceilings either of them quotes.
+//
+// They are the only lines in this view that are AUTHORITATIVE rather than
+// reported — a world's setting is that world's claim about itself, and these are
+// the relay's own configuration — and the two absences are DIFFERENT FACTS:
+//
+//	NO TABLE is a relay older than the table (B24). It reads UNKNOWN, never as
+//	"this map has no ceilings", and never as the defaults this build ships with.
+//
+//	NO FLOOR is the relay's real answer (B25): every compatible version is
+//	admitted, which is the default and a decision rather than a gap.
+func renderPublished(w io.Writer, s Status) {
+	floor := s.MinContractVersion
+	if floor == "" {
+		floor = "none — every compatible version is admitted"
+	}
+	fmt.Fprintf(w, "the map itself: oldest helper version admitted: %s\n", safeTerm(floor))
+	if len(s.Limits) == 0 {
+		fmt.Fprintf(w, "  ceilings: unknown — this map publishes none, which means a relay older\n"+
+			"  than the published table. It is NOT a map without ceilings.\n\n")
+		return
+	}
+	fmt.Fprintln(w, "  ceilings every world here is measured against, as the relay publishes them:")
+	seen := map[string]bool{}
+	for _, k := range contractb.PublishedLimitKeys {
+		seen[k] = true
+		v, ok := s.Limits[k]
+		if !ok {
+			// A published table with a hole in it is not a table (§3.3): a key
+			// this map did not publish is an unknown ceiling, and this tool has a
+			// default for it that it must not print.
+			fmt.Fprintf(w, "  %-28s unknown\n", k)
+			continue
+		}
+		fmt.Fprintf(w, "  %-28s %d\n", k, v)
+	}
+	// A relay may publish a ceiling this build has never heard of, and dropping
+	// it would be this tool deciding what the table contains.
+	extra := make([]string, 0, len(s.Limits))
+	for k := range s.Limits {
+		if !seen[k] {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	for _, k := range extra {
+		fmt.Fprintf(w, "  %-28s %d\n", trunc(safeTerm(k), 28), s.Limits[k])
+	}
+	fmt.Fprintln(w)
 }
 
 // RenderSpecies is the SPECIES view in the terminal: every species alive

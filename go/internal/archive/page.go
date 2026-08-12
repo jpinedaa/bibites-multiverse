@@ -298,6 +298,12 @@ border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px;flex-wr
 .cardsub{font-size:11px;color:var(--dim);margin:6px 0 3px;letter-spacing:.08em;text-transform:uppercase}
 .card .kv{border-bottom:1px dotted var(--line)}
 .card .kv .u{color:var(--warn);font-style:italic}
+/* Two quiet annotations on a ceiling's row: the wire's own name for it, beside
+   the plain-English one, because that is the string a disconnection message
+   quotes back — "maxFramesPerSecond 50 exceeded" — and a reader should not need
+   a translation table; and the human unit beside a byte count, which never
+   replaces the exact number that message quotes. */
+.card .kv .lk,.card .kv .lu{font-size:10px;letter-spacing:.03em;opacity:.6}
 .card .exl{margin-top:4px}
 /* The shared creature definition lives in a zero-sized SVG at the top of the
    document rather than inside the map, because THREE tabs draw it now and the
@@ -613,6 +619,18 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
 
 <div class="panel" id="p-settings" role="tabpanel" hidden>
   <section>
+    <h2><span class="term" data-t="ceilings">what the map itself is running with</span>
+      <span class="note muted">The <span class="term" data-t="relay">relay</span>&rsquo;s own
+        configuration, as it publishes it on every broadcast: the
+        <span class="term" data-t="ceilings">ceilings</span> every world here is measured
+        against and the oldest helper version this map
+        <span class="term" data-t="floor">admits</span>. Everything else on this tab is what a
+        world SAYS about itself; these two are the relay&rsquo;s own numbers, so they are
+        authoritative &mdash; and a map that publishes no ceilings at all is
+        <span class="unknown">unknown</span>, never a map without any.</span></h2>
+    <div class="cards" id="mapcard"><span class="muted">loading&hellip;</span></div>
+  </section>
+  <section>
     <h2><span class="term" data-t="settings">what each world was told to do</span>
       <span class="note muted"><b>Read-only.</b> This page renders what each world reports
         about its own configuration and offers no way to change any of it; a control surface
@@ -723,7 +741,9 @@ var G = {
  modversion:["mod version","The version of the small plugin running inside that copy of the game. It is a label, not a promise: what a world can actually report is decided field by field, by whether the field arrives. Use it to tell two machines apart, not to predict what one of them can do."],
  contractaversion:["protocol version","Which version of the language the game plugin and its helper program are speaking. It is the single most useful thing on this page for reading a gap: when a world shows '?' where its neighbours show a number, this says whether that world's plugin is simply too old to have anything to say."],
  simsize:["world size","How big that world is, as its own game reports it — the distance from the middle to an edge. Worlds of different sizes are wired together happily; it only means a creature crosses a small one faster."],
- exportedges:["export edges","The sides of a world that have a capture band running on them: the sides a creature can leave by. Every side can receive an arrival; these are the ones that can send. Which of them actually has a road to somewhere is the map's business, not the world's."]
+ exportedges:["export edges","The sides of a world that have a capture band running on them: the sides a creature can leave by. Every side can receive an arrival; these are the ones that can send. Which of them actually has a road to somewhere is the map's business, not the world's."],
+ ceilings:["the map's ceilings","How much traffic the relay in the middle lets one world put on the wire: messages a second, bytes a second, the size of a single message, how often a world may claim its seat, how many genomes it may ask a neighbour for in a minute, and how many watchers like this page may listen at once. THE RELAY PUBLISHES THE NUMBERS IT IS ACTUALLY RUNNING WITH — every one of them is a knob its operator can turn, so these are the real ceilings and not the values this page was built with. A world that goes over one is disconnected on its own and nothing else changes: its neighbours reach past it exactly as they do for any world that goes dark, and the message it is disconnected with names which ceiling it crossed and by how much. A map that publishes none is running a relay older than the table itself — unknown, and never 'there are no limits'."],
+ floor:["oldest version admitted","The oldest version of the helper program this map still lets in. One below it is refused at the door and told both numbers, so it reads as an out-of-date machine rather than as a dead world. Most maps set none, and none is a real answer rather than a missing one: every compatible version is admitted."]
 };
 
 (function buildGlossary(){
@@ -732,7 +752,7 @@ var G = {
     "rawname","endemic","everywhere","excluded","crossings","speciesgenomes","parentspecies",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
-    "contractaversion","simsize","exportedges",
+    "contractaversion","simsize","exportedges","ceilings","floor",
     "unknown","exactlyonce","relay","archive","epoch","genomegap","horizon","flow"];
   var h = "";
   for (var i=0;i<keys.length;i++){
@@ -1872,6 +1892,14 @@ function fmtBool(v, yes, no){
 }
 
 function renderSettings(d){
+  // The map's own card first: a world's numbers are only readable against the
+  // ceilings they are measured on, and the relay is the only party that knows
+  // what those are.
+  var mhost = document.getElementById("mapcard");
+  if (mhost){
+    while (mhost.firstChild) mhost.removeChild(mhost.firstChild);
+    mhost.appendChild(relayCard(d || {}));
+  }
   var host = document.getElementById("setcards");
   if (!host) return;
   while (host.firstChild) host.removeChild(host.firstChild);
@@ -1975,6 +2003,115 @@ function settingsCard(v){
     }
   }
   card.appendChild(exl);
+  return card;
+}
+
+/* ------------------------------------------------- what the MAP is running with
+   The relay's own two published values, off the same broadcast every world's
+   stats ride (contract-b-m4.md §6.5; §22, B24 and B25). They are drawn on the
+   settings tab because that is where this page keeps what something was TOLD to
+   do rather than what it is doing — and beside the world cards on purpose: a
+   world's message rate is only readable against the ceiling it is measured on.
+
+   They are the one thing on this tab that is AUTHORITATIVE rather than reported.
+   A world's card is that world's claim about itself; these are the relay's own
+   configuration, published as the values it is RUNNING with, and this page never
+   substitutes a default for one — the numbers below are knobs an operator may
+   have turned, and a shipped default drawn in their place would be the only
+   figure here nobody could check.
+
+   THE TWO ABSENCES ARE DIFFERENT FACTS AND ARE DRAWN DIFFERENTLY. No table at
+   all is a relay older than the table, which is UNKNOWN and never "no ceilings".
+   No floor is the relay's real answer, which is that it admits every compatible
+   version.
+
+   It is built inside the fence and out of nodes, like every other card here:
+   a published key is the relay's string, and the safe path is the only one. */
+var LIMITS = [
+  ["maxConnectionsPerPeer", "connections one world may hold"],
+  ["maxConnectionsPerAddress", "connections from one machine"],
+  ["maxFramesPerSecond", "messages a second"],
+  ["maxFrameBytes", "biggest single message"],
+  ["maxBytesPerSecond", "bytes a second"],
+  ["maxClaimsPerMinute", "seat claims a minute"],
+  ["maxGenomeRequestsPerMinute", "genome requests a minute"],
+  ["maxSubscribers", "watchers like this page"]
+];
+
+/* A byte ceiling in the unit a person reads, beside the exact number a
+   disconnection message quotes. Neither replaces the other. */
+function limitValue(key, n){
+  var v = el("span", null, String(n));
+  if (key.indexOf("Bytes") >= 0 && n >= 1048576){
+    var mib = n/1048576;
+    v.appendChild(el("span", "lu",
+      "  (" + (mib === Math.round(mib) ? String(mib) : mib.toFixed(1)) + " MiB)"));
+  }
+  return v;
+}
+
+function limitKV(card, label, key, valueNode){
+  var row = el("div", "kv");
+  // A ceiling this page has no plain-English name for is drawn as its wire name
+  // alone: an invented label would be this page guessing at what it means.
+  var k = el("span", "muted", label ? label + " " : "");
+  k.appendChild(el("code", "lk", key));
+  row.appendChild(k);
+  var v = el("span");
+  v.appendChild(valueNode);
+  row.appendChild(v);
+  card.appendChild(row);
+}
+
+function relayCard(d){
+  var card = el("div", "card");
+  var hd = el("div", "cardhd");
+  var left = el("span");
+  left.appendChild(el("span", "slot", "the map"));
+  hd.appendChild(left);
+  hd.appendChild(el("span", d.relayConnected ? "ok" : "bad",
+    d.relayConnected ? "relay linked" : "relay link DOWN"));
+  card.appendChild(hd);
+
+  card.appendChild(el("div", "cardsub", "helpers this map admits"));
+  var floor = el("span");
+  if (d.minContractVersion) floor.appendChild(txt(d.minContractVersion));
+  // ABSENT IS THE ANSWER, NOT A GAP: a map with no floor admits every compatible
+  // version, and that is a decision rather than something nobody has said yet.
+  else floor.appendChild(el("span", "muted", "no minimum — any compatible version"));
+  setKV(card, "floor", "oldest version", floor);
+
+  card.appendChild(el("div", "cardsub", "ceilings every world here is measured against"));
+  var lim = d.limits, keys = lim ? Object.keys(lim) : [];
+  if (!keys.length){
+    var u = el("div", "detline");
+    u.appendChild(unkEl("this map publishes no ceilings — its relay is older than the " +
+      "published table. Unknown, and never “this map has no limits”"));
+    card.appendChild(u);
+    return card;
+  }
+  var seen = {};
+  for (var i=0;i<LIMITS.length;i++){
+    var k = LIMITS[i][0];
+    seen[k] = true;
+    // A table with a hole in it is not a table: a key this map did not publish is
+    // an unknown ceiling, never the value this page ships knowing.
+    limitKV(card, LIMITS[i][1], k,
+      (lim[k] == null) ? unkEl() : limitValue(k, lim[k]));
+  }
+  // A relay may publish a ceiling this page has never heard of. Dropping it would
+  // be this page deciding what the table contains, which is exactly the thing the
+  // published table exists to stop.
+  keys.sort();
+  for (var j=0;j<keys.length;j++){
+    if (seen[keys[j]]) continue;
+    limitKV(card, "", keys[j], limitValue(keys[j], lim[keys[j]]));
+  }
+  var note = el("div", "detline",
+    "these are the relay's own numbers, not this page's — every one is a knob its " +
+    "operator can turn, and a world over one is disconnected on its own while the rest " +
+    "of the map runs on");
+  card.appendChild(note);
   return card;
 }
 /* ============================= SPECIES CENSUS — END ======================== */

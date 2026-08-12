@@ -1271,7 +1271,8 @@ half-million-line ledger is never re-read to answer a request. Measured on 2026-
 RSS went from 146 MB to **170 MB**, with a transient peak near 690 MB while the pass ran. That
 rollout widened each `metrics.jsonl` sample by **~640 bytes (+7.6 %)** — the settings block for
 five publishing worlds — and the achieved-speed readout added **~393 bytes (+2.7 %)** on
-2026-08-10, on a file that samples `/api/status` verbatim.
+2026-08-10, on a file that samples `/api/status` verbatim. The published-limits view added
+**~255 bytes (+3.2 %)** on 2026-08-12 (live from the next archive restart), same mechanism.
 
 **But the pass is the cost of a restart, and it grows with the ledger.** Re-measured on
 2026-08-10 against **3,700,672 records (1.22 GB)**: the replay took **~93 s** with a transient
