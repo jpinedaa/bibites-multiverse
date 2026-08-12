@@ -249,6 +249,15 @@ only fleet that rehearses `contract-b/4`. Every constraint below is on record in
 
 ## Standing watch items that interact with M5 work
 
+- **The rejoin-burst finding, from slot 6's own crossing (2026-08-11 ~21:40 local).** Draining an
+  evening's backlog, slot 6 tripped `maxFramesPerSecond 50` **eighteen times, every peak exactly
+  51/s** — a shed/reconnect cycle (`4007` → ~30 s backoff → reclaim → burst → shed) that converged
+  only because each window drained frames before the shed. Nothing sidecar-side paces outbound
+  frames against the published `limits` object, though §3.3 says a peer "must be built against"
+  it; WP4 added only the defensive two-4007s pin. **A stranger returning after a long absence
+  will cycle exactly like this.** Fix dispatched 2026-08-11: sidecar outbound pacing against the
+  published limit. `heldDepth` 42 during the churn was transient and drained.
+
 Full readings and their evidence are in `dev_environment.md`, *The living deployment → Watch
 items*. What follows is only why each one touches this milestone.
 
