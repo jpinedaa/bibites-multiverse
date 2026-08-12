@@ -3111,6 +3111,26 @@ settled at **821/min against the 695.6/min read before the window**, which is th
 readout explaining itself once more (slot 1 at 31.0, slot 2 4.5 → 6.9) and not something an archive
 restart can cause.
 
+**The 21:25:03Z far-end event has a name now: the headless game crashed in the engine, and the
+first headless crash on record cost six simulated minutes and nothing else.** Windows Application
+Error 1000 at 21:25:01Z: `The Bibites.exe` faulted in **`UnityPlayer.dll`** (6000.0.44.7313),
+exception `0xc0000005`, offset `0x7350d2`, ~10.3 h into the headless run — no mod frame, no
+operator, no Steam action (the last content-log commit for app 2736860 is 2026-08-01, and
+`BibitesAssembly.dll` still matches the bundle's pin `12455E48…` byte for byte, checked before
+the restart was allowed). The BepInEx log simulates normally to the last line; there was **no
+quit save** — the last periodic save landed at 21:19:23Z (and logged `BUDGET_EXCEEDED`,
+stallMs 2022 against the 2000 budget, its own standing watch item) — so the world resumed from
+six minutes back, which is what D14's cadence prices a crash at. The sidecar held slot 6
+throughout (custody 28, paced 22 at the deepest, oldest waiting 2h11m), the world came back
+headless at 23:38Z through `start-slot6.ps1 -GameOnly -Headless`, the mod reattached (gen=5),
+the time scale was re-sent, and the backlog drained to zero inside two minutes. Exactly-once
+held: the un-ACKed inbound replayed as duplicates and delivered nothing twice. One session
+mystery kept honest: this session's `Player.log` never flushed (mtime frozen at the 11:07Z
+start), so the engine's own account of the fault is only in WER — the far end's crash forensics
+are the event log and the sidecar log, not Unity's. Also observed while diagnosing: an
+unexplained clean `world unloaded`/reattach cycle at 19:07:49Z (gen 3 → 4) the world survived
+without a mark; noted, not chased.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
