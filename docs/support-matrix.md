@@ -1,19 +1,25 @@
 # The support matrix
 
-**Which mod and sidecar build goes with which build of The Bibites.** This is a **per-machine**
-question, settled on your own computer before anything dials a map. It is never a statement
-about the map, and no entry here decides whether you may join one.
+**Which mod and sidecar build goes with which build of The Bibites, on which platform.** This is
+a **per-machine** question, settled on your own computer before anything dials a map. It is never
+a statement about the map, and no entry here decides whether you may join one.
 
 **This page is published beside every release** and the installer inside the release reads the
 same table — the machine-readable copy at the end of this document is the one it reads, and it
-is copied into the release archive as `support-matrix.json` unchanged.
+is copied into **both** release archives as `support-matrix.json` unchanged. The Windows kit and
+the Linux kit read the same bytes and refuse in the same words.
+
+**A row is keyed on a game version *and* a platform**, because the two builds of one game version
+are not the same file. `0.6.3.1` on Windows and `0.6.3.1` on Linux differ by 512 bytes in
+`BibitesAssembly.dll`, so one hash cannot stand for both, and an installer that matched a hash
+without knowing which platform it was on would be guessing.
 
 ## Two version tests that never meet (D22)
 
 | The test | Who applies it | What it decides |
 |---|---|---|
 | **The wire version** — `contract-b/4.0` between your sidecar and the relay | The **relay**, at your first connection | Whether you are a member of that map. It is the only version question the map has an opinion about |
-| **The game version** — the build of The Bibites your Steam copy is on | **Your own machine**, through this matrix and the installer's check | Whether a mod and sidecar build exists that works with your game at all |
+| **The game version** — the build of The Bibites this machine runs, from Steam on Windows or from itch.io on Linux | **Your own machine**, through this matrix and the installer's check | Whether a mod and sidecar build exists that works with your game at all |
 
 The mod is a Harmony patch against a named game assembly, so the second test cannot be
 delegated: a build the mod was not compiled against can fail to load, or load and behave
@@ -22,27 +28,62 @@ skips it.
 
 ## The matrix
 
-| Game version | Steam build | Mod | Sidecar | BepInEx | Wire | Tested against |
-|---|---|---|---|---|---|---|
-| **0.6.3.1** | app `2736860`, buildid `22383127` | `0.6.4` | `m5.0` | `5.4.23.3` | `contract-b/4.0`, `contract-a/2.4` | The project's own six-world deployment, continuously, since 2026-08-11 |
+| Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
+|---|---|---|---|---|---|---|---|---|
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.4` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.0`, `contract-a/2.4` | The project's own six-world deployment, continuously, since 2026-08-11 |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.4` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.0`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
 
-**`0.6.3.1` is the only tested build**, and the row says what "tested" means for it rather than
-leaving the word to the reader. A build that is not in the table is not "probably fine": it is
-untested, and the installer treats untested as unsupported.
+**`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
+means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
+same weight and the table does not pretend they do:** the Windows row is weeks of continuous
+six-world running; the Linux row is one rehearsal session on one machine on one day. A build that
+is not in the table is not "probably fine": it is untested, and the installer treats untested as
+unsupported.
 
-The identity check is on the **SHA-256 of `The Bibites_Data\Managed\BibitesAssembly.dll`**, not
-on a version string, because a version string is a value the build can reuse and a hash is not:
+**What makes the Linux row trustworthy for the thing the mod actually does** is not session
+length. The mod is Harmony patches against named types, and a full decompile of both builds,
+diffed, puts **every** difference between them in three places the mod never touches: the native
+file-dialog shim (`StandaloneFileBrowserWindows` becomes `StandaloneFileBrowserLinux`), three
+"reveal the save folder" calls that become no-ops, and Unity's own type bookkeeping. **All six
+types the mod patches or reads are byte-identical across the two builds**, and all ten patch
+targets are present on both sides.
 
-| Game version | `BibitesAssembly.dll` SHA-256 |
+The identity check is on the **SHA-256 of `BibitesAssembly.dll`**, not on a version string,
+because a version string is a value the build can reuse and a hash is not. **The key is the pair
+(game version, platform)** — the same version has two hashes:
+
+| Game version | Platform | `BibitesAssembly.dll` SHA-256 |
+|---|---|---|
+| 0.6.3.1 | Windows | `12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE` |
+| 0.6.3.1 | Linux | `5B145A0A941C3560888BAFBB320D984D7290A63467C9F65022FDB02878847ECA` |
+
+The 512-byte difference between them is one PE alignment unit and it is the file-dialog shim.
+**Each installer looks up only its own platform's rows**, so a hash that belongs to the other
+platform is `INS-GAMEBUILD` rather than a confusing match.
+
+### Where the Linux build in that row came from
+
+Recorded so that "the itch.io build" is an artifact somebody can check rather than a phrase:
+
+| | |
 |---|---|
-| 0.6.3.1 | `12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE` |
+| Page | `thebibites.itch.io/the-bibites`, the Linux download |
+| Upload id | `16838443` |
+| Archive | `TheBibites-0.6.3.1-Linux.zip`, 79 773 740 bytes, 185 files |
+| Archive SHA-256 | `E15695D7944B4DED9E6D29A21518D00E9689C1A2B8CEB7288D51651ADCE57F4E` |
+
+**itch.io download links are per-purchase and time-limited**, so the link is not a fact this page
+can publish; the upload id and the archive's checksum are. If your download's checksum differs
+from the value above, the store has published a new build and the row below the change is the one
+to read: your `BibitesAssembly.dll` hash is the test, not the file you downloaded it in.
 
 ## Looking your own build up
 
-Three ways, in the order of least effort:
+Four ways, in the order of least effort:
 
-1. **Let the installer do it.** It is the first thing `Install-BibitesMultiverse.ps1` checks
-   after it finds your game, and it prints the build it found either way.
+1. **Let the installer do it.** It is the first thing the installer checks after it finds your
+   game — `Install-BibitesMultiverse.ps1` on Windows, `install-bibites-multiverse.sh` on Linux —
+   and it prints the build it found either way.
 2. **Read it in Windows PowerShell**, without installing anything:
 
    ```powershell
@@ -50,10 +91,24 @@ Three ways, in the order of least effort:
        "$env:ProgramFiles(x86)\Steam\steamapps\common\The Bibites\The Bibites_Data\Managed\BibitesAssembly.dll").Hash
    ```
 
-   Compare the result with the table above. Your Steam library may be on another drive; the
+   Compare the result with the Windows row above. Your Steam library may be on another drive; the
    installer finds it for you.
-3. **Read it out of the game's own log** once the mod is installed. The plugin logs
-   `Application.version = 0.6.3.1` at startup, in `<game folder>\BepInEx\LogOutput.log`.
+3. **Read it on Linux** with `sha256sum`, which is in coreutils and is already on your machine:
+
+   ```sh
+   sha256sum "<game folder>/The Bibites_Data/Managed/BibitesAssembly.dll"
+   ```
+
+   `sha256sum` prints lower case and the table is upper case; they are the same value. The game
+   folder is wherever you unpacked the itch.io archive — there is no registry and no library index
+   to find it in, so the two usual answers are the itch app's own install root,
+   `~/.config/itch/apps/the-bibites`, and wherever you put it by hand. The installer looks in the
+   first, and asks you for the second.
+4. **Read it out of the game's own log** once the mod is installed. The plugin logs
+   `Application.version = 0.6.3.1` at startup, in `<game folder>/BepInEx/LogOutput.log` — and on
+   Linux, **read the warning about that file in [`error-taxonomy.md`](error-taxonomy.md)
+   (`LOCAL-LOGSHRED`) before you trust what it says**, because more than one game instance run out
+   of one game folder shreds it.
 
 ## When your build is not in the table
 
@@ -69,11 +124,20 @@ verbatim by the installer so that the page and the tool cannot drift apart:
 
 That refusal is `INS-GAMEBUILD` in [`error-taxonomy.md`](error-taxonomy.md). **Nothing was
 installed** when it fires: the check runs before BepInEx, before the plugin and before your
-credential is written anywhere.
+credential is written anywhere. The words above are the whole of the refusal and neither installer
+adds to them; what each one prints *around* them is your own hash, your platform, and the rows this
+release has — so a Windows hash on a Linux machine reads as the mistake it is rather than as a
+mystery.
 
 **Steam updates the game on its own schedule and this project cannot defer that for you.** The
 honest reading of an off-matrix build is *wait for a release*, and the release is how this
 project moves its fleet: it pushes nothing to anybody (D25).
+
+**On Linux the update problem is the other way round.** The itch.io download updates nothing by
+itself — you have the archive you unpacked until you deliberately fetch another — so an off-matrix
+Linux build is almost always a build somebody *chose*, and the way back is the archive whose
+checksum this page publishes. The two platforms fail in opposite directions and the remedy is the
+same sentence.
 
 ## What a map with two game builds on it does
 
@@ -104,6 +168,11 @@ against it. The sequence is always the same, and the middle step is the one that
 2. The new build is run on the project's own deployment.
 3. A release is published, and **this table gains a row in the same act**.
 
+**A platform is a row, not a footnote.** A game version that has been run on Windows and not on
+Linux gets the Windows row and not the Linux one, however small the difference between the two
+files is measured to be. The mod being the same IL on both platforms is an argument for *expecting*
+the second row to be earnable, never for writing it before somebody earned it.
+
 **There is no push.** A release page updates nobody's install: you download the new release when
 your build needs it. The relay-side minimum wire version is raised only *after* the release that
 satisfies it exists.
@@ -112,30 +181,61 @@ satisfies it exists.
 
 ## The machine-readable copy
 
-**The installer reads this block, byte for byte.** `release/make-release.sh` extracts everything
-between the two markers and writes it into the release archive as `support-matrix.json`, so the
-words the installer prints on a refusal are the words on this page and cannot drift from them.
-Edit the block and the table above together.
+**Both installers read this block, byte for byte.** `release/make-release.sh` extracts everything
+between the two markers and writes it into **each** release archive as `support-matrix.json`, so
+the words an installer prints on a refusal are the words on this page and cannot drift from them.
+Edit the block and the tables above together.
+
+**Every entry carries the same keys**, with no key that exists on one row and not another. That is
+a rule and not an accident: both installers walk the whole list to print what the release supports,
+and a row with a missing field is a reader that has to guess. Store-specific identity therefore
+lives in one human-readable `storeBuild` string rather than in `steamAppId` / `itchUploadId` pairs
+that only half the rows would have.
+
+| Key | What it is |
+|---|---|
+| `platform` | `Windows` or `Linux`. **With `gameVersion` this is the key of a row**; each installer filters the list to its own platform before it matches a hash |
+| `store` | Where that build comes from — `Steam`, `itch.io` |
+| `storeBuild` | That store's own name for the build, as a string meant for a person |
+| `bepInExFlavour` | Which BepInEx archive the row's installer unpacks: `win_x64` or `linux_x64`. The version is `bepInEx` and is the same on both |
+| `tested` | What "tested" means **for that row**. The two rows do not say the same thing |
 
 <!-- SUPPORT-MATRIX-JSON-BEGIN -->
 ```json
 {
-  "matrix": "bibites-multiverse/support-matrix/1",
+  "matrix": "bibites-multiverse/support-matrix/2",
   "release": "m5.0",
   "published": "2026-08-12",
+  "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
   "entries": [
     {
       "gameVersion": "0.6.3.1",
-      "steamAppId": "2736860",
-      "steamBuildId": "22383127",
+      "platform": "Windows",
+      "store": "Steam",
+      "storeBuild": "app 2736860, buildid 22383127",
       "assemblySha256": "12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE",
       "mod": "0.6.4",
       "sidecar": "m5.0",
       "bepInEx": "5.4.23.3",
+      "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.0",
       "tested": "the project's own six-world deployment, continuously, since 2026-08-11"
+    },
+    {
+      "gameVersion": "0.6.3.1",
+      "platform": "Linux",
+      "store": "itch.io",
+      "storeBuild": "upload 16838443, archive sha256 E15695D7944B4DED9E6D29A21518D00E9689C1A2B8CEB7288D51651ADCE57F4E",
+      "assemblySha256": "5B145A0A941C3560888BAFBB320D984D7290A63467C9F65022FDB02878847ECA",
+      "mod": "0.6.4",
+      "sidecar": "m5.0",
+      "bepInEx": "5.4.23.3",
+      "bepInExFlavour": "linux_x64",
+      "contractA": "contract-a/2.4",
+      "contractB": "contract-b/4.0",
+      "tested": "one 14-minute authenticated headless session on 2026-08-12 against a scratch relay; all six patched types byte-identical to the Windows build"
     }
   ]
 }

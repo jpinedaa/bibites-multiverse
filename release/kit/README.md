@@ -1,11 +1,16 @@
-# Bibites Multiverse — install kit
+# Bibites Multiverse — install kit (Windows)
 
 **This folder joins one Bibites world to a shared map.** Organisms leave your world through its
 edges and arrive in other people's; theirs arrive in yours. Your world stays on your machine and
 stays yours.
 
 **You need:** Windows, Steam, and The Bibites. **You do not need:** a compiler, an SDK, a
-runtime, or anything from a developer's toolchain. Nothing here will ever ask you to turn a
+runtime, or anything from a developer's toolchain.
+
+**This is the Windows archive.** The game's native Linux build from itch.io has its own,
+`bibites-multiverse-m5.0-linux-x64.zip`, with a bash kit in place of this one. The mod inside the
+two is the same file; the sidecar, the mod framework and the scripts are not. The support matrix
+lists both. Nothing here will ever ask you to turn a
 security control off — no execution-policy bypass, no `--insecure` flag, no skipped certificate
 check. If any part of this package asks you for one of those, that is a defect and reporting it
 is the right response.

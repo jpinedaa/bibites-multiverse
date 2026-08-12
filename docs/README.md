@@ -18,16 +18,23 @@ learned, and it stays where it is. Nothing in `docs/` is a copy of it.
 | [`participant/join.md`](participant/join.md) | a participant | What is a join string, what happens on my first claim, where do I land, and what does joining publish about my world? |
 | [`participant/diagnose.md`](participant/diagnose.md) | a participant | Something is wrong. What do I read, in what order, and what do I send when I ask for help? |
 | [`participant/leave.md`](participant/leave.md) | a participant | What does stopping mean, what does leaving mean, and what becomes of my world and its place on the map? |
-| [`support-matrix.md`](support-matrix.md) | a participant **and** the operator | Which mod and sidecar build goes with which game version, how to look your own build up, and what a map with two game builds on it does |
+| [`support-matrix.md`](support-matrix.md) | a participant **and** the operator | Which mod and sidecar build goes with which game version **on which platform**, how to look your own build up, and what a map with two game builds on it does |
 | [`error-taxonomy.md`](error-taxonomy.md) | a participant **and** the operator | Every refusal this system can hand somebody, with the remedy **and who must act** |
 | [`sidecar-diagnose-spec.md`](sidecar-diagnose-spec.md) | whoever implements or reviews `--diagnose` | Each check, its pass criterion, and the taxonomy entry a failure points at — plus the exit codes, the JSON schema, and the participant's own-slot view `--my-slot` |
 | [`defaults-audit.md`](defaults-audit.md) | a reviewer, and the operator | Every default the release ships with, what a bare install does with it, and the verdict |
 
 **Two of these travel with the release rather than only living here.** `support-matrix.md`'s
-machine-readable block is copied into the release archive as `support-matrix.json` — the same
-bytes — so the words the installer refuses an unsupported game build with are the words on the
-page. `defaults-audit.md` is linked from the release page, because what a bare install does is
+machine-readable block is copied into **both** release archives as `support-matrix.json` — the
+same bytes — so the words either installer refuses an unsupported game build with are the words on
+the page. `defaults-audit.md` is linked from the release page, because what a bare install does is
 something a reader decides on before running it.
+
+**Every page here covers two platforms**: the Steam copy on Windows and the native Linux build
+from itch.io. Where a command, a path or a refusal differs, the page gives both rather than
+treating one as the real one — and where something exists on one platform only, the page marks it
+(`INS-MARKOFWEB` and `INS-EXECPOLICY` on Windows; `INS-NOTEXECUTABLE`, `INS-LINUXDEPS` and
+`LOCAL-LOGSHRED` on Linux). The support matrix is honest about the two rows not carrying equal
+weight.
 
 ## The rule the taxonomy exists for
 

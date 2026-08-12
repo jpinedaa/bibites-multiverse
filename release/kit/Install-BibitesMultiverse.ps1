@@ -306,8 +306,13 @@ $assembly = Join-Path $GameDir 'The Bibites_Data\Managed\BibitesAssembly.dll'
 if (-not (Test-Path $assembly)) { Stop-Setup "The game assembly is missing: $assembly" }
 $assemblySha = Get-Sha256 $assembly
 
+# A matrix row is keyed on (game version, PLATFORM): one game version has one
+# file per platform and they do not share a hash. This installer is the Windows
+# one, so it looks up the Windows rows and nothing else - a Linux hash here is
+# INS-GAMEBUILD rather than a confusing match.
 $entry = $null
 foreach ($candidate in @($matrix.entries)) {
+    if ($candidate.platform -ne 'Windows') { continue }
     if ($candidate.assemblySha256.ToUpperInvariant() -eq $assemblySha) { $entry = $candidate; break }
 }
 
@@ -320,22 +325,25 @@ if (-not $entry) {
     # that refuses cannot drift apart.
     foreach ($chunk in ($matrix.refusal -split '(?<=\.) ')) { Say $chunk }
     Write-Host ""
+    Say "this machine's platform           : Windows"
     Say "this machine's BibitesAssembly.dll: $assemblySha"
     Say "the builds this release supports:"
     foreach ($candidate in @($matrix.entries)) {
-        Say ("  game {0}  (Steam app {1}, buildid {2})  mod {3}, sidecar {4}" -f `
-             $candidate.gameVersion, $candidate.steamAppId, $candidate.steamBuildId, `
-             $candidate.mod, $candidate.sidecar)
+        Say ("  game {0}  {1}/{2} ({3})  mod {4}, sidecar {5}" -f `
+             $candidate.gameVersion, $candidate.platform, $candidate.store, `
+             $candidate.storeBuild, $candidate.mod, $candidate.sidecar)
         Say ("      SHA-256 {0}" -f $candidate.assemblySha256)
     }
     Write-Host ""
+    Say "A row is a game build AND a platform. If one of the rows above matches your hash on"
+    Say "another platform, that is the release archive to download rather than this one."
     Say "The full matrix, and what a map with two game builds on it does, is in"
     Say "docs/support-matrix.md on the release page."
     Stop-Setup "the game build is not in the support matrix; NOTHING was installed." 'INS-GAMEBUILD'
 }
 
-Say ("game version {0} (Steam app {1}, buildid {2}) - supported by this release" -f `
-     $entry.gameVersion, $entry.steamAppId, $entry.steamBuildId)
+Say ("game version {0} on {1}/{2} ({3}) - supported by this release" -f `
+     $entry.gameVersion, $entry.platform, $entry.store, $entry.storeBuild)
 Say ("this release: mod {0}, sidecar {1}, wire {2} and {3}" -f `
      $entry.mod, $entry.sidecar, $entry.contractB, $entry.contractA)
 Say ("tested against: {0}" -f $entry.tested)
@@ -344,7 +352,7 @@ Say ("tested against: {0}" -f $entry.tested)
 
 Step ("4 of 9 - BepInEx {0}" -f $entry.bepInEx)
 
-$bepInExZipName = "BepInEx_win_x64_$($entry.bepInEx).zip"
+$bepInExZipName = "BepInEx_$($entry.bepInExFlavour)_$($entry.bepInEx).zip"
 $bepInExCore    = Join-Path $GameDir 'BepInEx\core\BepInEx.dll'
 $bepInExOurs    = $false
 $bepInExPaths   = New-Object System.Collections.ArrayList

@@ -12,13 +12,22 @@ raised only after the release that satisfies it exists.
 
 | Path | What it is |
 |---|---|
-| `kit/Install-BibitesMultiverse.ps1` | The installer a stranger runs. Windows PowerShell 5.1 and PowerShell 7; no toolchain, no administrator rights |
-| `kit/Uninstall-BibitesMultiverse.ps1` | Removes what the installer recorded, hash-checked, and nothing else |
-| `kit/README.md` | The page inside the archive |
+| `kit/Install-BibitesMultiverse.ps1` | The Windows installer a stranger runs. Windows PowerShell 5.1 and PowerShell 7; no toolchain, no administrator rights |
+| `kit/Uninstall-BibitesMultiverse.ps1` | Removes what the Windows installer recorded, hash-checked, and nothing else |
+| `kit/README.md` | The page inside the Windows archive |
+| `kit/install-bibites-multiverse.sh` | The Linux installer. bash, and `sha256sum`/`awk`/`unzip`/`file`; no toolchain, no root, and no `jq` or `python` — its JSON reader is 40 lines of awk, shared with the uninstaller |
+| `kit/uninstall-bibites-multiverse.sh` | Removes what the Linux installer recorded, hash-checked, and nothing else |
+| `kit/README-linux.md` | The page inside the Linux archive, staged into it as `README.md` |
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
-| `make-release.sh` | Builds `dist/` — the archive, `SHA256SUMS`, and the page with its checksums |
-| `test-install-uninstall.ps1` | The proof that the uninstall leaves the game as it found it |
+| `make-release.sh` | Builds `dist/` — **both** archives, one `SHA256SUMS` covering them, and the page with its checksums |
+| `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
+| `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
 | `dist/` | Build output. **Not tracked** — see `.gitignore`, which says why |
+
+**Two archives, one mod.** The plugin in both is the same file, byte for byte — platform-independent
+IL — and `make-release.sh` refuses to build if the two copies ever disagree. What differs is the
+sidecar (cross-compiled twice from one `go/`), the BepInEx flavour (`win_x64` against `linux_x64`),
+and the kit.
 
 The two documents that ship *beside* the release rather than inside it are
 [`../docs/support-matrix.md`](../docs/support-matrix.md) — which the installer reads, as JSON
@@ -53,28 +62,52 @@ host runs the living deployment.
 
 **It refuses to build a release nobody has run.** Before it packages anything it requires:
 
-1. `bibites-mod/libs/BibitesAssembly.dll` to be the game build `docs/support-matrix.md` names;
+1. `bibites-mod/libs/BibitesAssembly.dll` to be the game build `docs/support-matrix.md`'s
+   **Windows** row names — that is the reference assembly the mod is compiled against;
 2. the plugin it builds to be **byte-identical** to the one in `farend/dist/farend-bundle.zip` —
-   the tracked artifact set the living fleet runs;
-3. the cross-compiled sidecar to be byte-identical to the same bundle's copy;
+   the tracked artifact set the living fleet runs — and the copy staged into each of the two
+   archives to be that same file;
+3. the cross-compiled Windows sidecar to be byte-identical to the same bundle's copy;
 4. and, when this machine's game directory is readable, the deployed plugin to agree as well.
+
+It also checks two things the two-platform matrix made checkable: that **every matrix entry
+carries the same keys** and that no two rows share a `(gameVersion, platform)` pair — because both
+installers walk the whole list, and PowerShell under `Set-StrictMode` throws on a property one row
+happens not to have. And when an unpacked Linux game is readable (`LINUX_GAME_DIR`, defaulting to
+the rehearsal's copy), it checks the Linux row's hash against a real file.
+
+**The Linux sidecar is the one artifact with no byte-identity reference**, and the script says so
+rather than inventing one: the fleet is Windows, so the bundle holds nothing to compare against.
+What stands in its place is the check that already gates the Windows build — `go/` identical,
+commit for commit, to the tree the deployment's sidecar was built from. Same source, second target.
 
 A mismatch stops the build and names which side moved. The fix is never to loosen the check: it
 is to deploy, rebuild the far-end bundle, and release from there.
 
-The archive is built deterministically — fixed timestamps, sorted entries, no extra attributes —
-so rebuilding from the tag reproduces the checksum on the page.
+Both archives are built deterministically — fixed timestamps, sorted entries, no extra attributes
+— so rebuilding from the tag reproduces the checksums on the page. The Linux one keeps its mode
+bits, and the build reads them back out of the finished zip: a kit whose scripts arrive without
+the executable bit is a refusal no page explains.
 
 ## Testing the install and the uninstall
 
 ```sh
 release/test-install-uninstall.ps1     # run it through powershell.exe
+release/test-install-uninstall.sh --game-assembly <the LINUX BibitesAssembly.dll>
 ```
 
-It builds a sandbox game directory, runs the real installer against it with a sandbox data root,
+Each builds a sandbox game directory, runs the real installer against it with a sandbox data root,
 runs the real uninstaller, and requires the tree to be **hash-for-hash identical** to what it was
-before the install. It touches no Steam copy of the game, no trust store, and no live process.
-Run it after any change to either script.
+before the install — the Linux one requires the permissions to match as well. Neither touches a
+real copy of the game, a trust store, or a live process. Run them after any change to either kit.
+
+**The Linux proof needs no release build**: with no `--kit-dir` it stages a kit out of this
+checkout — the two real scripts, the matrix extracted from `docs/support-matrix.md`, the real
+BepInEx archive, and stand-ins for the plugin and the sidecar, neither of which it ever executes.
+It covers the same five scenarios as the PowerShell one plus two that only exist here: **the other
+platform's build of the same game version**, which must refuse because a row is keyed on
+(game version, platform) and cannot be tested from Windows; and **a kit file that fails its
+manifest**, which must refuse before anything is made executable.
 
 ## Publishing — the four steps, by hand
 
@@ -86,18 +119,22 @@ Run it after any change to either script.
 2. **Tag the commit the artifacts were built from**, and push the tag:
    `git tag m5.0 && git push origin m5.0`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
-3. **Create the release** with `dist/RELEASE-PAGE.md` as its body and both files from `dist/` as
-   its assets:
+3. **Create the release** with `dist/RELEASE-PAGE.md` as its body and all three files from `dist/`
+   as its assets:
    ```sh
    gh release create m5.0 \
        release/dist/bibites-multiverse-m5.0-windows-x64.zip \
+       release/dist/bibites-multiverse-m5.0-linux-x64.zip \
        release/dist/SHA256SUMS \
        --title "Bibites Multiverse m5.0" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
-4. **Read the published page as a stranger would**, in a browser, and check the two things that
-   matter most about its shape: the checksum and the mark-of-the-web steps are **above** the
-   download link, and the download link's file matches the checksum beside it.
+4. **Read the published page as a stranger would**, in a browser, and check the three things that
+   matter most about its shape: the checksum step is **above** the download links; each download
+   link's file matches the checksum beside it; and **the Linux row does not read as an
+   afterthought** — a reader on that platform should meet the checksum-then-executable-bit
+   ordering, the launcher difference and the one-instance-per-game-folder warning without having
+   to read the Windows sections first.
 
 **A fifth step, if the repository is private:** the page's documentation links resolve only for
 somebody who can read the repository. Make it public, or the four participant pages have to

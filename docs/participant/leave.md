@@ -11,6 +11,13 @@ This page says what each one does to your world, to your slot, and to the organi
 
 **Just stop.** Close the game, stop the sidecar, turn the machine off. Nothing has to be told.
 
+**One thing worth doing rather than just pulling the plug**: let the game finish quitting, so
+save-on-quit runs. `Stop-Multiverse.ps1` and `stop-multiverse.sh` both do it for you, and the
+Linux one waits up to twenty seconds for that save before it insists — a clean quit with its save
+has measured at about two seconds. A world killed outright loses everything since its last save,
+which is a loss of *your* progress and never of anybody's organisms: custody lives in the journal,
+not in the world file.
+
 | What | What happens |
 |---|---|
 | Your slot and position | **Yours.** The reservation is keyed on your world's identity, never on a connection, and **it never expires** |
@@ -36,16 +43,17 @@ is what makes the map tidy rather than permanently expectant.
 | Your slot number | **Retired forever.** Slot numbers are never reused, and that is what makes the next line safe |
 | Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so no retry can ever succeed. One the relay can prove it never handed anywhere goes home at once; one that may already have reached your sidecar before you went waits out its hold first, because the point of the wait is exactly that possibility |
 | Your neighbours | Their lanes re-pair around the hole. No slot number changes and no other position moves |
-| Your world | Yours. The saves are on your disk, and `Uninstall-BibitesMultiverse.ps1` leaves your game as it found it — see [install.md](install.md). It keeps your journal unless you pass `-RemoveWorldData`, and it never goes near your worlds |
+| Your world | Yours. The saves are on your disk, and the uninstall — `Uninstall-BibitesMultiverse.ps1`, or `./uninstall-bibites-multiverse.sh` — leaves your game as it found it, which a test proves against a sandbox game tree rather than a page asserting it. See [install.md](install.md). It keeps your journal unless you pass `-RemoveWorldData` / `--remove-world-data`, and it never goes near your worlds |
 | Your credential | **Still authenticates until the operator drops it** — a release retires a *reservation*, not an identity. What is gone is your place: connect again and the map treats you as a newcomer, at a new slot number and wherever the ordinary placement rules put you. Your old slot number is never reused. There is nothing to revoke on your side |
 
 **Before you go, drain your journal.** Your sidecar may be holding organisms it took custody of
 and has not been able to hand on — held entries, waiting on a destination that is dark. Custody
 is local: **nobody else can do this for you, and no operator command can reach it.**
 
-**Stop your sidecar first** — `.\Stop-Multiverse.ps1` — because the journal takes one writer and
-both commands refuse while it is running. Then list what is left, and release each entry, choosing
-whether it goes home to the world it came from or is dropped:
+**Stop your sidecar first** — `.\Stop-Multiverse.ps1`, or `./stop-multiverse.sh` on Linux —
+because the journal takes one writer and both commands refuse while it is running. Then list what
+is left, and release each entry, choosing whether it goes home to the world it came from or is
+dropped:
 
 ```powershell
 cd <the folder you unpacked the release into>
@@ -53,6 +61,14 @@ $data = "$env:LOCALAPPDATA\BibitesMultiverse\data"     # unless you passed -Data
 
 .\multiverse-sidecar.exe --list-inflight    --data-dir $data
 .\multiverse-sidecar.exe --release-inflight <migrationId> bounce|drop --data-dir $data
+```
+
+```sh
+cd <the folder you unpacked the release into>
+data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless you passed --data-root
+
+./multiverse-sidecar --list-inflight    --data-dir "$data"
+./multiverse-sidecar --release-inflight <migrationId> bounce|drop --data-dir "$data"
 ```
 
 The list gives you the migration id, the organism, where it was going, and how long its hold

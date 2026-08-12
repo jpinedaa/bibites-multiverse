@@ -47,30 +47,61 @@ the sidecar on the same machine. §3 the map wire, between the sidecar and the r
 lanes. §5 failures with no code at all. §6 refusals an operator causes on purpose. §7 things
 that look like refusals and are not. §8 what to send when you ask for help. §9 the slots.
 
+**Two platforms, and the document says which entries are which.** This release supports the Steam
+copy on Windows and the native Linux build from itch.io. Most entries are the same on both and are
+written with the command spelled for each; the handful that exist on one platform only are marked
+in their own row — `INS-MARKOFWEB` and `INS-EXECPOLICY` on Windows, `INS-NOTEXECUTABLE` and
+`INS-LINUXDEPS` on Linux, and in §5 the pair that matters most: **`LOCAL-STARVATION` on Windows
+and `LOCAL-LOGSHRED` on Linux are the same act with opposite symptoms.** One loses an instance
+loudly; the other keeps every instance and destroys the evidence quietly.
+
 ---
 
 ## 1. Install, before anything dials
 
 `INS-*` entries happen on the participant's machine before any wire exists. **Every wording below
-is quoted from what the package ships** — the installer, the uninstaller and the release page of
+is quoted from what the package ships** — the installers, the uninstallers and the release page of
 `m5.0`.
 
-**The release carries one archive**, `bibites-multiverse-m5.0-windows-x64.zip`, with `SHA256SUMS`
-beside it, and inside it a `MANIFEST.sha256` covering each of the seven files. The chain is
-deliberate: the page's checksum covers the archive, the archive's manifest covers the files, and
+**The release carries two archives**, `bibites-multiverse-m5.0-windows-x64.zip` and
+`bibites-multiverse-m5.0-linux-x64.zip`, with one `SHA256SUMS` covering both, and inside each a
+`MANIFEST.sha256` covering its own seven files. The chain is deliberate and it is the same on both
+platforms: the page's checksum covers the archive, the archive's manifest covers the files, and
 the installer verifies the manifest before it touches anything.
+
+**Three entries below are Windows-only and two are Linux-only**, and the table says which rather
+than making a reader work it out. Everything else applies to both, with the command spelled for
+each.
 
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
-| `INS-CHECKSUM` | `(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-m5.0-windows-x64.zip).Hash` does not equal the value on the release page — or the installer's step 1 stops with *"…is not the published file"* and prints both hashes | The download is not the published artifact — a truncated transfer, a mirror, or something worse | Delete it and download again from the release page. If it fails twice, stop and report it; do not run it | **you** |
-| `INS-MARKOFWEB` | Windows refuses to run the installer, or the scripts fail as blocked files | Everything unpacked from a downloaded zip carries the mark of the web | `Unblock-File .\bibites-multiverse-m5.0-windows-x64.zip` — **on the archive, after its checksum passes, before unpacking** — or right-click → Properties → Unblock. The release page states it above the download link, deliberately (D25). If you already unpacked, the installer clears the mark from the files it verified, by name, and from nothing else | **you** |
-| `INS-EXECPOLICY` | *"…cannot be loaded because running scripts is disabled on this system"* | This release is not code-signed, and a fresh Windows PowerShell runs no script at all | Use PowerShell 7, whose default on Windows is already `RemoteSigned`; or `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`, which still refuses unsigned scripts that carry the mark of the web and is undone with `-ExecutionPolicy Undefined`. **Nothing here will ask you for `Bypass`** | **you** |
-| `INS-GAMEBUILD` | The installer stops after step 3, prints your `BibitesAssembly.dll` hash and the builds the release supports, and ends with *"the game build is not in the support matrix; NOTHING was installed."* | The support matrix has no mod and sidecar build for the game version installed on this machine (D22) | The refusal quotes the matrix's own words: *"This release supports one game build, and the game on this machine is not it… Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists."* The matrix is [`support-matrix.md`](support-matrix.md), beside the release, and travels in the archive as `support-matrix.json`. **Nothing about the map can fix this**, and joining anyway is not an option the installer offers | **you** |
+| `INS-CHECKSUM` | `(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-m5.0-windows-x64.zip).Hash` — or `sha256sum bibites-multiverse-m5.0-linux-x64.zip` — does not equal the value on the release page; or the installer's step 1 stops with *"…is not the published file"* and prints both hashes | The download is not the published artifact — a truncated transfer, a mirror, or something worse | Delete it and download again from the release page. If it fails twice, stop and report it; do not run it | **you** |
+| `INS-MARKOFWEB` **(Windows only)** | Windows refuses to run the installer, or the scripts fail as blocked files | Everything unpacked from a downloaded zip carries the mark of the web | `Unblock-File .\bibites-multiverse-m5.0-windows-x64.zip` — **on the archive, after its checksum passes, before unpacking** — or right-click → Properties → Unblock. The release page states it above the download link, deliberately (D25). If you already unpacked, the installer clears the mark from the files it verified, by name, and from nothing else. **There is no Linux counterpart and none is invented**: nothing arrives quarantined there. What the Linux installer does in the same step is set the executable bit on exactly the files it just verified — the same ordering, on the control that platform actually has | **you** |
+| `INS-EXECPOLICY` **(Windows only)** | *"…cannot be loaded because running scripts is disabled on this system"* | This release is not code-signed, and a fresh Windows PowerShell runs no script at all | Use PowerShell 7, whose default on Windows is already `RemoteSigned`; or `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`, which still refuses unsigned scripts that carry the mark of the web and is undone with `-ExecutionPolicy Undefined`. **Nothing here will ask you for `Bypass`** | **you** |
+| `INS-NOTEXECUTABLE` **(Linux only)** | `./install-bibites-multiverse.sh` answers *permission denied* | The archive reached this machine without its mode bits — unpacked by a tool that drops them, or carried through a filesystem that has none | `bash install-bibites-multiverse.sh` runs it once, and **its own step 1 sets the bit on the rest**, after the checksum and by name. This is the Linux analogue of `INS-EXECPOLICY` in position only: nothing is being switched off, and no policy changes | **you** |
+| `INS-LINUXDEPS` **(Linux only)** | Step 0 stops with *"this machine is missing a program this package needs. NOTHING was installed."* and lists them | One of `sha256sum`, `awk`, `unzip` or `file` is absent. The last is **BepInEx's own launcher's** dependency, not this installer's: `run_bepinex.sh` uses it to check the game binary's architecture, and without it the install would look complete and the game would never start | `sudo apt install unzip file` on Debian or Ubuntu. **This is not `INS-NOTOOLCHAIN`** — no compiler, SDK or runtime is involved, and the check runs before anything is installed precisely so the cost is one command rather than a broken install | **you** |
+| `INS-GAMEBUILD` | The installer stops after step 3, prints your platform, your `BibitesAssembly.dll` hash and the builds the release supports, and ends with *"the game build is not in the support matrix; NOTHING was installed."* | The support matrix has no mod and sidecar build for **this game version on this platform** (D22) | The refusal quotes the matrix's own words: *"This release supports one game build, and the game on this machine is not it… Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists."* The matrix is [`support-matrix.md`](support-matrix.md), beside the release, and travels in **both** archives as `support-matrix.json`. **A row is keyed on (game version, platform)** and each installer looks up only its own platform's rows, so this also fires on the *right* game run from the *wrong* archive — and then one of the rows it prints will match your hash, which is the archive you wanted. **Nothing about the map can fix this**, and joining anyway is not an option either installer offers | **you** |
 | `INS-NOTOOLCHAIN` | The installer asks for a compiler, an SDK, or a runtime you do not have | This should not happen. WP6's bar is an install with no build toolchain | Report it. Do not install a toolchain to work around it | **you** |
-| `INS-JOINSTRING` | The installer stops on the join string: not three parts, no usable dot, a secret outside 32–256 printable ASCII characters, or a `ws://` relay address | The value pasted is not the one-line join string the operator's relay printed | Ask for the `one line` from that block, verbatim. A `ws://` address is refused rather than accepted quietly: this wire is always `wss://` and no part of this software falls back. **Nothing was written** — the credential file is written after every one of these checks | **you** |
-| `INS-UNINSTALL-BUSY` | `Uninstall-BibitesMultiverse.ps1` stops with *"The Bibites is running from…"* or *"This install's sidecar is running"* | Windows holds the plugin open while the game runs | Close that game, or run `.\Stop-Multiverse.ps1`. **Nothing was removed.** Both checks are on this install's own paths, so a second copy of the game elsewhere does not block it | **you** |
+| `INS-JOINSTRING` | The installer stops on the join string: not three parts, no usable dot, a secret outside 32–256 printable ASCII characters, or a `ws://` relay address | The value pasted is not the one-line join string the operator's relay printed | Ask for the `one line` from that block, verbatim. A `ws://` address is refused rather than accepted quietly: this wire is always `wss://` and no part of this software falls back. **Nothing was written** — the credential file is written after every one of these checks. Neither installer has an option that takes the secret on a command line, on both platforms for the same reason | **you** |
+| `INS-UNINSTALL-BUSY` | The uninstall stops with *"The Bibites is running from…"* or *"This install's sidecar is running"* | On Windows the platform holds the plugin open while the game runs. **On Linux it does not, and the refusal is kept anyway**: removing a file the running game has already mapped into memory is a way to crash a world mid-save, so the Linux uninstall refuses for a reason the platform does not force on it | Close that game, or run `.\Stop-Multiverse.ps1` / `./stop-multiverse.sh`. **Nothing was removed.** Both checks are on this install's own paths, so a second copy of the game elsewhere does not block it. On Linux the check reads `/proc`, so a game **another user** is running out of your game folder is a case it cannot see and says so | **you** |
 | `INS-UNINSTALL-CHANGED` | The uninstall's ledger says *"CHANGED since the install, so it is left alone"* against a path | A file the installer put there is no longer the file it put there | Nothing, usually — this is the uninstall refusing to delete somebody else's work. Remove it by hand if you know what changed it | **you** |
-| `INS-UNINSTALL-NORECORD` | *"No install record at …, so this script cannot tell what it put on this machine and refuses to guess"* | `install-record.json` is missing from the data directory | Pass `-DataRoot` if you moved it. **Nothing was removed**, and the uninstall will not fall back to guessing at paths | **you** |
+| `INS-UNINSTALL-NORECORD` | *"No install record at …, so this script cannot tell what it put on this machine and refuses to guess"* | `install-record.json` is missing from the data directory | Pass `-DataRoot` / `--data-root` if you moved it. **Nothing was removed**, and the uninstall will not fall back to guessing at paths | **you** |
+
+**Where each install keeps its own files**, because half the remedies above name a directory:
+
+| | Windows | Linux |
+|---|---|---|
+| This install's data root | `%LOCALAPPDATA%\BibitesMultiverse` | `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse` |
+| Your worlds — **never touched** | `%USERPROFILE%\AppData\LocalLow\The Bibites\The Bibites` | `${XDG_CONFIG_HOME:-$HOME/.config}/unity3d/The Bibites/The Bibites` |
+| The mod's log | `<game folder>\BepInEx\LogOutput.log` | `<game folder>/BepInEx/LogOutput.log` — **and read `LOCAL-LOGSHRED` in §5 before you trust it** |
+
+**One thing the Linux installer never does, stated here because its absence is the news:** it
+writes to no system trust store. A private map's certificate authority is trusted through
+`SSL_CERT_FILE` in the generated start script, for that one process — nothing under `/etc/ssl` or
+`/usr/local/share/ca-certificates` is written and `update-ca-certificates` is never run. So the
+Linux uninstall has no trust store to clean and no `--keep-certificate` flag, and **the Windows
+`Uninstall-BibitesMultiverse.ps1` half of `INS-UNINSTALL-*` that removes a certificate has no
+Linux counterpart at all**. Deleting the copy and the start script is the whole of the removal.
 
 ---
 
@@ -329,10 +360,10 @@ is the participant-facing form, not a copy of the runbook.
 
 **Two logs, and a packaged install puts them in exactly two places:**
 
-| Log | Where a packaged install writes it |
-|---|---|
-| The game and the mod | `<game folder>\BepInEx\LogOutput.log`, rotating to `.1`–`.4`. **Truncated on every launch**, so copy it before restarting the game if it holds the evidence |
-| The sidecar | `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log`, with `sidecar.log.out` beside it |
+| Log | On Windows | On Linux |
+|---|---|---|
+| The game and the mod | `<game folder>\BepInEx\LogOutput.log`, rotating to `.1`–`.4`. **Truncated on every launch**, so copy it before restarting the game if it holds the evidence | `<game folder>/BepInEx/LogOutput.log`, and **it never rotates**: there is no `.1`–`.4` on this platform, because the rotation is driven by a file lock Linux does not take. Truncated on every launch in the same way — and see `LOCAL-LOGSHRED` below before you trust its contents |
+| The sidecar | `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log`, with `sidecar.log.out` beside it | `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/logs/sidecar.log`, with `sidecar.log.out` beside it. The Linux start script also keeps `logs/game.out` — what the game itself printed to the terminal, which BepInEx's log does not carry |
 
 **Neither ever contains your credential.** The mod logs the *path* of the token file it reads and
 never its contents; no log in this system prints a secret at any level.
@@ -348,14 +379,15 @@ writes it at startup, then a configuration summary:
 | Id | Symptom | Meaning | Remedy | Who acts |
 |---|---|---|---|---|
 | `LOCAL-CONFIGRACE` | The game loads, the mod framework reports a clean start, and then **nothing**: the world never joins, and the map shows this slot live with no game behind it. `LogOutput.log` holds, at error level, `[M2] configuration failed — the multiverse client stays off:` and an exception | Two mod instances rewrote the same configuration file at once and one lost. **The symptom does not look like a configuration problem at all** | **Restart that one game instance.** The file is complete after the first winner writes it, so the race cannot recur | **you** |
-| `LOCAL-STARVATION` | The same symptom with **no `configuration failed` anywhere** — and, in a packaged install, **no `Bibites Multiverse 0.6.4 loaded` line either**, in a `LogOutput.log` the running game is otherwise writing. The slot reports no export edges | The mod framework hands out a fixed number of log files and then gives up — and an instance that gets no log file **does not merely lose its log: the mod never loads in it**. **The tell is an absence** | **Restart that one instance**, so its environment matches the others exactly. This is a several-worlds-on-one-machine failure; a participant running one world will not meet it. What a single-world install *can* see with the same absence is a plugin in the wrong folder or a BepInEx that never installed — check that `<game folder>\BepInEx\plugins\BibitesMultiverse.dll` is there, and re-run the installer if it is not | **you** |
+| `LOCAL-STARVATION` **(Windows)** | The same symptom with **no `configuration failed` anywhere** — and, in a packaged install, **no `Bibites Multiverse 0.6.4 loaded` line either**, in a `LogOutput.log` the running game is otherwise writing. The slot reports no export edges | The mod framework hands out a fixed number of log files and then gives up — and an instance that gets no log file **does not merely lose its log: the mod never loads in it**. **The tell is an absence.** The mechanism is an exclusive file lock, which is why this is the Windows shape: `LOCAL-LOGSHRED` below is what the same act does on Linux | **Restart that one instance**, so its environment matches the others exactly. This is a several-worlds-on-one-machine failure; a participant running one world will not meet it. What a single-world install *can* see with the same absence is a plugin in the wrong folder or a BepInEx that never installed — check that `<game folder>\BepInEx\plugins\BibitesMultiverse.dll` is there, and re-run the installer if it is not | **you** |
+| `LOCAL-LOGSHRED` **(Linux)** | **Nothing is wrong.** Every world runs, every one joins the map, every one saves. What is wrong is `LogOutput.log`: `file BepInEx/LogOutput.log` answers **`data`** rather than text, most of it is NUL bytes, and it holds one session header and a scattering of lines where it should hold one set per instance. Measured on the rehearsal: **227 402 bytes of which 200 557 were NUL**, one of five session headers, two of five `event=SAVED` lines | **More than one game instance is running out of one game folder, and they share that file.** Linux takes no exclusive lock, so all of them open the same log, each keeps its own file offset, and each truncates at launch. No rotated `LogOutput.log.1`–`.4` is ever created. **This is `LOCAL-STARVATION`'s inverted twin and it is worse to debug:** Windows loses one instance loudly, and the failure announces itself; Linux keeps every instance working and destroys the shared evidence window for all of them at once, silently, so the log is already gone when you first go looking for it | **One instance per game folder.** For a second world on the same machine, unpack a second copy of the game into its own folder and install into that — it costs disk and nothing else. **There is no per-instance log path to configure**: BepInEx 5's log file is `BepInEx/LogOutput.log` under the game folder it was loaded from, and moving it means moving the folder. Nothing is lost when this happens except the log, and no organism, save or slot is affected — but do not diagnose anything else from a shredded log, because what it says is not what happened | **you** |
 | `LOCAL-TIMESCALE` | Every rate reading about this world is wrong by a large factor, and nothing else looks broken | The world is running at a speed nobody intended. The game restores its own speed after a world settles, which can land **after** a speed command; and **the first speed command after a world load reports `1.00` and sticks there** — a second one twenty seconds later takes | Read the applied speed **and** the achieved speed for this world, and set it again if it is wrong. At a speed the machine cannot meet, the two numbers come apart, and the gap is the news | **you** |
-| `LOCAL-SAVESTALL` | The mod logs a save that exceeded its stall budget — an `[M4-SAVE]` line — and sometimes an `A-4004` close within a few seconds of it | A world save blocks the thread the heartbeat is composed on. The cost is a session churn and a short delivery pause — **arrivals are held in the journal for the whole silence, in order** — and not an organism | Usually none. If nearly every save does it, save less often: raise `MULTIVERSE_SAVE_MINUTES` in `Start-Multiverse.ps1`. A longer interval with more retained saves (`MULTIVERSE_SAVE_KEEP`) is a deeper history, not a shallower one, and it makes stalls rarer rather than shorter | **nobody**, then **you** |
-| `LOCAL-JOURNALTORN` | On sidecar start, in `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log`: `sidecar: the journal was damaged and replay stopped early; custody history after the torn record is GONE`, carrying `discardedBytes` and the journal's path | The journal was torn — ordinarily by a full disk, sometimes by a hard kill. **Complete records behind the tear were thrown away.** The healthy reading is zero bytes on every start, and a healthy start logs nothing at all here | Free disk, then report the byte count. The number is evidence and it is not recoverable afterwards | **you** |
-| `LOCAL-DISK` | Writes fail; the sidecar reports journal errors; the machine fills | The genome cache, the journal and the logs grow, and **no rule in this system will ever shrink the durable ones**. A full disk here has previously left thousands of zero-byte scratch files behind, spending inodes at the moment inodes were what had run out | Free space and keep it free. On a packaged install everything this software writes is under `%LOCALAPPDATA%\BibitesMultiverse` — `data\` is the journal and the genome cache, `logs\` the sidecar's log — plus your worlds, which the game keeps under `%USERPROFILE%\AppData\LocalLow\The Bibites` and whose count is `MULTIVERSE_SAVE_KEEP`. Size the disk against a record that only grows | **you** |
+| `LOCAL-SAVESTALL` | The mod logs a save that exceeded its stall budget — an `[M4-SAVE]` line — and sometimes an `A-4004` close within a few seconds of it | A world save blocks the thread the heartbeat is composed on. The cost is a session churn and a short delivery pause — **arrivals are held in the journal for the whole silence, in order** — and not an organism | Usually none. If nearly every save does it, save less often: raise `MULTIVERSE_SAVE_MINUTES` in the start script — `Start-Multiverse.ps1` or `start-multiverse.sh`. A longer interval with more retained saves (`MULTIVERSE_SAVE_KEEP`) is a deeper history, not a shallower one, and it makes stalls rarer rather than shorter | **nobody**, then **you** |
+| `LOCAL-JOURNALTORN` | On sidecar start, in this install's `logs\sidecar.log` (`%LOCALAPPDATA%\BibitesMultiverse` on Windows, `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse` on Linux): `sidecar: the journal was damaged and replay stopped early; custody history after the torn record is GONE`, carrying `discardedBytes` and the journal's path | The journal was torn — ordinarily by a full disk, sometimes by a hard kill. **Complete records behind the tear were thrown away.** The healthy reading is zero bytes on every start, and a healthy start logs nothing at all here | Free disk, then report the byte count. The number is evidence and it is not recoverable afterwards | **you** |
+| `LOCAL-DISK` | Writes fail; the sidecar reports journal errors; the machine fills | The genome cache, the journal and the logs grow, and **no rule in this system will ever shrink the durable ones**. A full disk here has previously left thousands of zero-byte scratch files behind, spending inodes at the moment inodes were what had run out | Free space and keep it free. On a packaged install everything this software writes is under one data root — `%LOCALAPPDATA%\BibitesMultiverse` on Windows, `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse` on Linux — where `data/` is the journal and the genome cache and `logs/` the sidecar's log, plus your worlds, which the game keeps in its own place (`%USERPROFILE%\AppData\LocalLow\The Bibites`, or `${XDG_CONFIG_HOME:-$HOME/.config}/unity3d/The Bibites/The Bibites`) and whose count is `MULTIVERSE_SAVE_KEEP`. Size the disk against a record that only grows | **you** |
 | `LOCAL-PARTIALSAVE` | A `.partial.zip` beside the world's save files at rest | A run died mid-save. The previous good save is untouched — the order is write, verify, rotate, prune, and a failure at any step leaves the live save alone | Safe to delete; the mod deletes it itself next time it saves | **nobody** |
-| `LOCAL-TWOSIDECARS` | Two sidecar processes are running against one data directory. `--diagnose`'s `stale-process` check names both process ids | **The journal is a single-writer file**, and two processes appending to one custody log is how custody history is lost. It is the local twin of the disk failure above: nothing refuses, nothing logs an error, and the damage is only visible at the next replay | Stop one of them. On a packaged install `Stop-Multiverse.ps1` stops the one this install started; a second copy started by hand is the one to find | **you** |
-| `LOCAL-STALEPID` | `<data-dir>\sidecar-process.json` names a process that is not running. `--diagnose` warns; nothing else notices | A sidecar was killed rather than stopped, and its process record outlived it. **Pid numbers are reused after a reboot**, so a record nobody removed is a record nobody should trust — and it is what makes a status query claim the thing is running when it is not | None: the next start overwrites it, and a clean stop removes it. It is worth knowing rather than fixing | **nobody** |
+| `LOCAL-TWOSIDECARS` | Two sidecar processes are running against one data directory. `--diagnose`'s `stale-process` check names both process ids | **The journal is a single-writer file**, and two processes appending to one custody log is how custody history is lost. It is the local twin of the disk failure above: nothing refuses, nothing logs an error, and the damage is only visible at the next replay | Stop one of them. On a packaged install the stop script — `Stop-Multiverse.ps1` or `stop-multiverse.sh` — stops the one this install started; a second copy started by hand is the one to find | **you** |
+| `LOCAL-STALEPID` | `<data-dir>/sidecar-process.json` names a process that is not running. `--diagnose` warns; nothing else notices | A sidecar was killed rather than stopped, and its process record outlived it. **Pid numbers are reused after a reboot**, so a record nobody removed is a record nobody should trust — and it is what makes a status query claim the thing is running when it is not | None: the next start overwrites it, and a clean stop removes it. It is worth knowing rather than fixing | **nobody** |
 
 ---
 
@@ -429,8 +461,12 @@ A support conversation that starts with these five things skips a round trip:
    wire reported. Two of them are on the map's own page, for every world at once.
 3. **The close code and its reason string**, verbatim. No side parses a reason string; it is
    written for a person, and it is the one place the map explains itself.
-4. **The log lines either side of it** — the sidecar's and the game's mod log.
-5. **Your world's identity** — the peer id and the slot. Both are public.
+4. **The log lines either side of it** — the sidecar's and the game's mod log. **On Linux, say
+   whether more than one game instance has ever run out of that game folder**, because if one has,
+   the mod log is not evidence: see `LOCAL-LOGSHRED`. `file BepInEx/LogOutput.log` answering
+   `data` rather than text settles it in one command.
+5. **Your world's identity** — the peer id and the slot. Both are public. **Your platform** is
+   worth a word too: two of the entries in §1 and one in §5 exist on one platform only.
 
 **Never send a credential or a token, in whole or in part.** No log in this system prints one,
 at any level, and no diagnostic asks for one. A message that contains one is a message that
@@ -455,13 +491,21 @@ id is already in the output, in the machine-readable form as a field, and an exi
 carried it would be an unstable integer that changes whenever a table is reordered. The
 [specification](sidecar-diagnose-spec.md) §1 fixes the codes and the JSON.
 
-**WP6's two slots are closed.** §1 now names the release's one archive and its checksum chain,
-quotes the checksum and unblock commands, adds the four refusals the package itself invents
+**WP6's two slots are closed.** §1 now names the release's archives and their checksum chain,
+quotes the checksum and unblock commands, adds the refusals the package itself invents
 (`INS-EXECPOLICY`, `INS-JOINSTRING` and the two uninstall refusals), and carries
-`INS-GAMEBUILD`'s text as the matrix words it. §5 names the two log files a packaged install
+`INS-GAMEBUILD`'s text as the matrix words it. §5 names the log files a packaged install
 writes, quotes the mod's `configuration failed` line and the sidecar's torn-journal line, gives
 the single-world form of the starvation tell, and names the save and disk settings as the player
-meets them in `Start-Multiverse.ps1`.
+meets them in the start script.
+
+**WP6's Linux extension is landed with it.** §1 gains `INS-NOTEXECUTABLE` and `INS-LINUXDEPS`,
+marks the two Windows-only entries as such, and re-states `INS-GAMEBUILD` on the matrix's new
+(game version, platform) key. §5 gains **`LOCAL-LOGSHRED`**, measured on the rehearsal rather than
+reasoned about: five instances out of one game directory, no rotated log at all, and 200 557 NUL
+bytes in a 227 402-byte file that `file` reports as `data`. It is entered beside
+`LOCAL-STARVATION` on purpose — the two are one act with opposite symptoms, and the pairing is the
+thing a reader needs.
 
 **WP2's and WP4's slots are closed** (0393698, dc9d01f, dfbd1dc). §3.1's and §3.2's refusal
 texture, the operator-side view of an impersonation refusal, the published capacity table, the

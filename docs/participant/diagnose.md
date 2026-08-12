@@ -20,8 +20,17 @@ $data = "$env:LOCALAPPDATA\BibitesMultiverse\data"     # unless you passed -Data
 .\multiverse-sidecar.exe --diagnose  --data-dir $data
 ```
 
-Everything below writes them short. **They read; they do not start anything**, and you can run
-either one while your world is running.
+```sh
+cd <the folder you unpacked the release into>
+data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless you passed --data-root
+
+./multiverse-sidecar --my-slot   --data-dir "$data"
+./multiverse-sidecar --diagnose  --data-dir "$data"
+```
+
+Everything below writes them short. **The flags are the same on both platforms**; what differs is
+the file name and where your data directory is. **They read; they do not start anything**, and you
+can run either one while your world is running.
 
 ## 1. Read what the map thinks of your world
 
@@ -43,7 +52,7 @@ What to read, and what a healthy reading looks like:
 
 | What | Healthy | What a bad reading means |
 |---|---|---|
-| Your slot is **live**, with a game connected | both true | Live with no game connected is the worst-looking symptom in this system and it has two very different causes — see `LOCAL-CONFIGRACE` and `LOCAL-STARVATION` in the taxonomy |
+| Your slot is **live**, with a game connected | both true | Live with no game connected is the worst-looking symptom in this system and it has two very different causes — see `LOCAL-CONFIGRACE` and `LOCAL-STARVATION` in the taxonomy. **On Linux the second of those does not happen**; what happens instead is `LOCAL-LOGSHRED`, where every world works and the log is the casualty |
 | Your **edges** | Every edge you declared reports a live peer | Each closed reason means something different, and only some of them are yours to fix — taxonomy §4 |
 | Your **queue depths** — in custody, paced, held | Small, and moving | A paced depth that never falls names a delivery rate set too low. Read it against your own configured rate, which is published beside it |
 | Your **last save** | Recent, against your own save interval | An absent save with a save interval of zero is a world with its save timer off — a reading, not a gap |
@@ -129,11 +138,26 @@ broke it, but because they are the only party who can see both ends.
 2. **Four versions**: game, mod, sidecar, and the wire versions each side reported.
 3. **The close code and its reason string**, verbatim. Nothing parses a reason string; it is
    written for a person, and it is where the map explains itself.
-4. **The log lines either side of it.** A packaged install writes exactly two logs: the game and
-   the mod to `<game folder>\BepInEx\LogOutput.log`, which is **truncated on every launch**, so
-   copy it before you restart the game; and the sidecar to
-   `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log`. Neither ever contains your credential.
-5. **Your world's identity and slot.** Both are public.
+4. **The log lines either side of it.** A packaged install writes exactly two logs, and both are
+   **truncated on every launch**, so copy them before you restart the game:
+
+   | | Windows | Linux |
+   |---|---|---|
+   | The game and the mod | `<game folder>\BepInEx\LogOutput.log` | `<game folder>/BepInEx/LogOutput.log` |
+   | The sidecar | `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log` | `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/logs/sidecar.log`, with `logs/game.out` beside it |
+
+   Neither ever contains your credential. **On Linux, check the mod log is still a log before you
+   send it:**
+
+   ```sh
+   file "<game folder>/BepInEx/LogOutput.log"
+   ```
+
+   If that answers `data` rather than text, more than one game instance has run out of that game
+   folder and the log has been shredded — see `LOCAL-LOGSHRED`. Say so when you send it; what it
+   contains is not what happened.
+5. **Your world's identity and slot.** Both are public. **Say which platform you are on**, too:
+   two install refusals and one local failure exist on one platform only.
 
 **Never send a credential or a token.** A message that contains one turns a support question
 into a slot handover.
@@ -158,6 +182,8 @@ stopped** because the journal takes one writer:
 multiverse-sidecar --list-inflight
 multiverse-sidecar --release-inflight <migrationId> bounce|drop
 ```
+
+Written out for your platform in [leave.md](leave.md); the flags are the same on both.
 
 The release prints the entry, then the duplication risk, and waits for a typed `YES` **before it
 acts**. [leave.md](leave.md) gives both commands in full, and
