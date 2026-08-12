@@ -1366,7 +1366,14 @@ everything", and ship the arithmetic to the hoster either way.*
 **RATIFIED 2026-08-10 as process — the recommendation, verbatim.** *The decision happens in
 M5.* An M5 work item produces the retention rule, and it produces one even if the rule is *keep
 everything*; the arithmetic ships to the hoster either way. What is ratified is that the answer
-exists by the end of the milestone, not what the answer is. **Milestone-internal** — no D-row
+exists by the end of the milestone, not what the answer is.
+**ANSWERED 2026-08-12 — the owner chose the middle option: keep the ledger forever, prune
+genome blobs to a horizon** (default 30 days, tunable), decided against
+`wp3_hosting_options.md`'s measured economics. The lineage record — who crossed, when, and the
+ancestry links — is permanent; a genome blob nobody fetched within the horizon becomes
+permanently unfetchable, which makes Risk 7 a stated policy rather than an accident. Nothing
+evicts today, so the horizon eviction is a new archive work item, and D6's graduation question
+is answered with the same call: the catalog inherits a complete graph whose leaves age out. **Milestone-internal** — no D-row
 of its own — but it moves D6: `system_decomposition.md`'s D6 row and the archive research row
 now record that the graduation call comes forward out of M7. WP3 carries the work; D24's
 announced ending is its deadline.
