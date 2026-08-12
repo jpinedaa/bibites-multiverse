@@ -29,7 +29,7 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 |---|---|
 | The Bibites | Steam app 2736860, buildid 22383127; game version `0.6.3.1` — first read out of `The Bibites_Data/globalgamemanagers` (`bundleVersion`), **confirmed at runtime 2026-08-02**: the plugin logs `Application.version = 0.6.3.1` at startup |
 | The plugin | `0.6.4` (`MultiversePlugin.Version`), **deployed to the five local games 2026-08-11 in the crossing window** — the **public-release build**, and the first that speaks **`contract-a/2.4`**: it presents a bearer token on the Contract A upgrade (§21 A47), reading the path in `MULTIVERSE_CONTRACT_A_TOKEN_FILE`; it reports `blobDroppedForSize` on `parents[]` (A49); and it handles the sidecar's `4007` close for an export set the map cannot use (A50). Underneath it is unchanged: `0.6.3`'s `SavePhases`, which times `SaveSystem.CreateSave` from the inside and puts the decomposition on every `[M4-SAVE]` line (*Watch items*, first item, and it is measurement only — a span it cannot resolve reads `0` rather than failing the save); `0.6.2`'s headless-speed work (`MinFpsGovernor`, which disarms the game's minimum-FPS servo in a process with no graphics device — *A world can be at the wrong time scale*, in Gotchas); `0.6.1`'s world-settings publication (§19 A42 — the exclusion list, the save interval, the keep count, save-on-quit and world wrapping); and the two-way-lane build's four-edge capture (§18 A38), migration exclusion list (A39) and two-lane portals. **The minor moved this time, and it did not for `0.6.2` or `0.6.3`** — those added no wire field, which is why the five local slots published `0.6.3` against `contract-a/2.3` through 2026-08-10. **Slot 6 crossed the evening of 2026-08-11** (far end, ~01:19Z 08-12): it took the `0.6.4` bundle (`32f41f8`) onto `contract-a/2.4` / `wss://…/contract-b/v4`, and its sidecar was brought current to the WP4/WP5 rebuild (`4dd2ac1`) ~9 min later — so slot 6 now publishes `0.6.4` / `contract-a/2.4` like the five local slots, and the whole map is on one version. The far-end bundle carries whatever DLL it was last built with; `farend/make-farend-bundle.sh` builds it fresh, so a bundle is only as current as its last rebuild |
-| The Go side | **`contract-b/4.0`**, running on the living deployment since the crossing of **2026-08-11** — the M5 public-release set (§22, B22–B32). The three that changed how this rig is *operated*: **B22** replaces the one shared LAN token with a per-peer credential bound to the `peerId`, verifiers in `<relay-data-dir>/peers.json`; **B23** puts TLS at the relay's front door, so the whole listener is `wss://` including loopback; and **B32** moves the path to **`/contract-b/v4`** and crosses the fleet in lockstep. Beside them: B24's published capacity table, B25's optional `--min-contract-version` floor (left **unset** here), B26's forward acknowledgements, B27's `subscribe` grant for the archive, B28's authenticated admin path, B29's placement-under-churn rules and B30/B31's escaping and game-version rules. Under all of it, unchanged: the world-settings readout (§19), §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, **§20's disk budget (B20)** — timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — and §21's genome-pump bounds (B21). It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`, and since 2026-08-10 it **measures** each world's achieved time scale beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas). Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` — **except during a crossing**, where a running sidecar holds `bin/sidecar` open and the build goes to a scratch directory on the same filesystem and is renamed in (`e2e/crossing/RUNBOOK.md` P0.3 and P3) |
+| The Go side | **`contract-b/4.0`**, running on the living deployment since the crossing of **2026-08-11** — the M5 public-release set (§22, B22–B32). The three that changed how this rig is *operated*: **B22** replaces the one shared LAN token with a per-peer credential bound to the `peerId`, verifiers in `<relay-data-dir>/peers.json`; **B23** puts TLS at the relay's front door, so the whole listener is `wss://` including loopback; and **B32** moves the path to **`/contract-b/v4`** and crosses the fleet in lockstep. Beside them: B24's published capacity table, B25's optional `--min-contract-version` floor (left **unset** here), B26's forward acknowledgements, B27's `subscribe` grant for the archive, B28's authenticated admin path, B29's placement-under-churn rules and B30/B31's escaping and game-version rules. Under all of it, unchanged: the world-settings readout (§19), §18's pacing and speed readout, §17's two-way lane walks, `--inbound-rate` and the `/api/hops` feed, **§20's disk budget (B20)** — timer journal compaction, size-based log rotation and all-or-nothing appends in both append-only logs — and §21's genome-pump bounds (B21). It is what fills the status page's **Species** and **Settings** tabs and `ringstat --species` / `--settings`, and since 2026-08-10 it **measures** each world's achieved time scale beside the applied one (`achievedTimeScale`; *A world can be at the wrong time scale*, in Gotchas). Built from `go/` into `bin/` by `e2e/run-m4-lan.sh build` — **except against a live map**, where a running sidecar holds `bin/sidecar` open and an in-place build fails with `ETXTBSY`, so the build goes to a scratch directory on the same filesystem and is renamed over the binary instead. That is a crossing's P0.3 and P3 (`e2e/crossing/RUNBOOK.md`) and it is equally the shape of every rolling sidecar roll since (*The living deployment*) |
 | Unity | 6000.0.44f1, **Mono** backend (not IL2CPP — Harmony and decompilation fully work) |
 | BepInEx | 5.4.23.3 (win x64), installed in the game directory |
 | .NET SDK | 8.0.423 in `~/.dotnet` (not on default PATH — scripts export it) |
@@ -749,8 +749,53 @@ reads an environment variable — `MULTIVERSE_LISTEN`, `MULTIVERSE_RELAY`,
 Sidecar and relay answer `GET /healthz` — **the relay's is `https://` now**, which is why the
 rigs carry a `RELAY_HEALTH` beside `RELAY_URL` — and each sidecar writes its resolved listen address
 to `<data-dir>/listen.addr`, which is how `--listen 127.0.0.1:0` stays usable from a script.
+Beside it, since WP7, it writes **`<data-dir>/sidecar-process.json`** once its listener is bound and
+removes it on a clean shutdown: pid, start time, peer id and listen address, which is how the two
+commands below find the running process and how `--diagnose` tells a stale pid from a live one. It
+is deliberately **not** called `sidecar.pid` — the packaged install's `Start-Multiverse.ps1` already
+writes a bare `sidecar.pid` one directory up, in the data *root*.
 The journal lives in `<data-dir>/journal/` and is the durable custody of decision D2 — keep
 it across a restart or the sidecar loses every organism it was holding.
+
+**Asking a sidecar about itself — `--my-slot` and `--diagnose`.** WP7's two support commands, live
+on this rig since the roll of 2026-08-12. Both are **read-only**, both print paths and never a
+secret, both exit without starting anything, and both work with the map unreachable. They are the
+participant's half of what `/api/status` and `ringstat` give an operator, and they are the first
+thing to reach for on one slot — reach for the status page when the question is about the map.
+
+```sh
+bin/sidecar --data-dir e2e/data-m4-lan/slot-2 --my-slot     # what does the map say about MY world?
+bin/sidecar --data-dir e2e/data-m4-lan/slot-2 --diagnose    # 21 checks; exit 0 clean, 1 a FAIL, 2 could not run
+```
+
+`--my-slot` prints this world's place, its map link, its game, its speed, its last save, its four
+lanes, its custody/paced/held depths and the whole map's liveness. It reads the running sidecar over
+`GET /my-slot`, a loopback, unauthenticated, read-only endpoint on the Contract A listener the
+sidecar already binds — **no wire message and no new port** — finding it through `listen.addr`.
+`--diagnose` runs the checks this document and the runbook otherwise do by hand and judges them
+`PASS`/`FAIL`/`WARN`/`UNKNOWN`/`SKIP`, with the remedy and **who must act** under anything that is
+not a pass; `--json` emits the same records as `multiverse-diagnose/1`. An `UNKNOWN` is an honest gap
+and never a pass — several are expected on a healthy machine, and each names what it was waiting on.
+`--my-slot` writes nothing at all, and the only write `--diagnose` makes is one empty temporary file
+in the data directory, which it removes — writability is the one thing a stat cannot answer, because
+a read-only mount and a full disk both look like a healthy directory.
+
+**Pass `--diagnose` the flags the process actually runs with, or it diagnoses a machine nobody
+has.** The checks report on the configuration they are given, so the bare form above uses the
+*default* relay (`ws://`) and no credential file, and duly reports `credential` as a `FAIL` and skips
+`relay-tls` — neither of which says anything about this deployment. On this rig the honest
+invocation carries the CA, the relay URL and the slot's own credential, and it exits 0:
+
+```sh
+SSL_CERT_FILE=e2e/tls-m4-lan/ca.crt bin/sidecar --data-dir e2e/data-m4-lan/slot-2 \
+  --relay wss://127.0.0.1:8795/contract-b/v4 \
+  --credential-file ~/.multiverse/peer-slot-2.secret --diagnose
+```
+
+Neither command disturbs the running sidecar — measured on the live deployment, with the peer's
+relay session, connection age and shed count identical across the run (*The living deployment → The
+two sidecar-only rolls of 2026-08-12*). The specification is `docs/sidecar-diagnose-spec.md` and the
+participant-facing pages are `docs/participant/`; both are written for a stranger, not for this rig.
 
 **Reading the archive.** M3 gives the archive one read path, and it is a subcommand of the
 same binary — the recorder does not have to be running:
@@ -2298,6 +2343,117 @@ to stop for good once the far end takes the bundle. The same file holds **two** 
 plaintext dials from **127.0.0.1** at 21:14:09Z, inside this window and from nothing this window
 ran; nothing on the rig dials `8795` over `http` — the collector reads only `8796` and every rig
 helper uses `https://…/healthz` — so they are noted and not accounted for.
+
+### The two sidecar-only rolls of 2026-08-12
+
+**Two more rolling windows in the small hours, both sidecar-only, and neither cost the map a
+moment.** The relay, the archive, the five games and the mod were untouched by both, so neither is
+in the class of the crossing: what a sidecar-only roll costs is one to three seconds per slot, one
+slot at a time, and the pattern is now the WP4 + WP5 window's with the relay step removed. The
+first carried the outbound pacing fix (`9b1592d`); the second carried WP7's `--diagnose` and
+`--my-slot` (`385991f`). **Slot 6 was live at both ends of both windows and was not touched** — the
+far end crossed on the evening of the 11th, and rolling it is its own operator's act.
+
+**The pacing roll, 02:20–02:23Z.** All five local sidecars onto the paced outbound sender, zero
+discarded journal bytes, 24/24 lanes throughout. Its measure is the thing that stopped: the last
+capacity shed anywhere on this rig is slot 1's at **02:15:37Z**, five minutes *before* the roll
+opened, with slot 5's run of seven ending at **01:43:54Z** — and there has been **none since**,
+through the WP7 window and the observation after it. The defect, its
+fleet-wide evidence and the far-end debt it left are in `m5_tracking.md`'s standing watch items;
+what belongs here is only that the deployment took it and stayed up.
+
+**The WP7 roll, 04:28:22Z → 04:34:14Z.** Five slots, one at a time, and nothing else.
+
+| | |
+|---|---|
+| Map down | **none.** `/api/status` read 6/6 live and 24/24 lanes at every check; only slot 5's own stats block was briefly absent, for the one sample between its grant and its next `PEER_STATUS` |
+| The five sidecars | every one `reason=reclaimed`, on its own coordinate, with **zero discarded journal bytes**. TERM to grant: slot 2 **1.8 s**, slot 3 **2.9 s**, slot 4 **2.9 s**, slot 5 **3.4 s** — and slot 1 **2m 05s**, which was operator error and not the build (below) |
+| The new gates | `<data-dir>/listen.addr` **and `<data-dir>/sidecar-process.json`** present on all five after restart, the second carrying pid, start time, peer id and listen address; `--my-slot` answered each slot's real state, exit 0 on all five; every `/proc/<pid>/exe` digest **SAME** as `bin/sidecar` with no `(deleted)` |
+| The pacing line | present at every reconnect, `pacedFramesPerSecond=25 pacedBurstFrames=12` against a published ceiling of 50 — the previous roll's change, read back on this one |
+| The games | **not restarted.** No mod change, so no `deploy.sh` and no time-scale re-send. `modVersion` **0.6.4** and `contractAVersion` **contract-a/2.4** throughout |
+| The archive and the relay | **not restarted**, deliberately. `ringstat.go` changed under `385991f`'s termsafe refactor and is behaviour-identical, so the archive and `ringstat` wait for their own batched restart — which is still also what WP4's `limits` table waits on |
+| Observation | 11 samples at 30 s, 04:34:48Z–04:40:22Z: `heldDepth` **0** and `timeoutBounces` **0** in every one; `custodyDepth` 3–20 and `pacedDepth` 0–5, both falling every time they rose; ~990–1 070 migrations a minute; population 368–432. **Zero** new `level=ERROR`, **zero** sheds and **zero** discarded bytes on all five sidecars and on the relay |
+
+**The one thing that went wrong was the restart environment, not the binary, and it is the lesson
+of the window.** Slot 1's replacement was launched with the running process's argv but not its
+environment, and the rig's CA trust is an *environment* variable — `export
+SSL_CERT_FILE="${SSL_CERT_FILE:-$TLS_CA}"`, `e2e/run-m4.sh` line 249, pointing at
+`e2e/tls-m4-lan/ca.crt`. Without it the sidecar dialled the relay, refused the certificate and said
+so exactly as B23 requires: `contract B: the relay's TLS certificate did not verify; NOT CONNECTING`,
+naming the remedy and stating that it would not skip verification, pin a certificate or fall back to
+`ws://`. It then sat on the reconnect ladder for **2m 05s** and eleven `ERROR` lines, all of that one
+message, until it was relaunched with the environment replayed from a live sibling's
+`/proc/<pid>/environ` — after which it reclaimed slot 1 at (0,0) on the first attempt. **Restarting
+one sidecar by hand means replaying `/proc/<pid>/cmdline` *and* `/proc/<pid>/environ`**; the argv
+alone looks complete and is not. Nothing was lost: zero discarded bytes across the whole slot-1
+disturbance, and the journal replayed its two inbound entries and flushed them.
+
+**`--diagnose` now answers its live half against the running deployment, and that is the whole
+point of the roll.** Run against slot 2 before the roll — the old build listening, with no
+`/my-slot` — it returned **6 pass, 1 fail, 0 warn, 13 unknown, 1 skip**, every unknown reading *a
+sidecar is listening at 127.0.0.1:8788 and does not serve `/my-slot`, so it is a build older than
+this one*. Run after, the thirteen collapsed to three: **15 pass, 1 fail, 0 warn, 3 unknown, 2
+skip**. The three that remain are honest gaps by design and not this rig's fault — `time-scale` and
+`disk-headroom` are WP8's and WP3's bands to publish, and `game-version` wants a
+`support-matrix.json` that only a packaged install has.
+
+**Read the flags before reading the verdict: a bare `--diagnose` diagnoses the configuration it is
+given, and on this rig that is not the configuration the rig runs.** The bare form's single `FAIL`
+is `credential`, and it is correct — no `--credential-file` was passed, so there was no credential
+to present — while `relay-tls` skipped because the *default* relay address is `ws://`. Given the
+five sidecars' own flags and environment the same build reports **17 pass, 0 fail, 0 warn, 3
+unknown, 1 skip, exit 0**, with `relay-tls` verifying the relay's certificate against
+`SSL_CERT_FILE` and `credential` reporting the session it actually holds. This is
+`docs/sidecar-diagnose-spec.md` §1 working as written — *the check reports on the configuration it
+is given* — rather than a defect, but an operator who runs the short form on this rig will read a
+`FAIL` that says nothing about the deployment:
+
+```sh
+SSL_CERT_FILE=e2e/tls-m4-lan/ca.crt bin/sidecar --data-dir e2e/data-m4-lan/slot-2 \
+  --relay wss://127.0.0.1:8795/contract-b/v4 \
+  --credential-file ~/.multiverse/peer-slot-2.secret --diagnose
+```
+
+**It disturbed nothing, and the evidence is the session it was asked about.** Across both
+`--diagnose` runs, slot 2's `pid`, `startedAtMs`, `connectedSinceMs`, `capacityShedTotal` and
+`relaySessionId` — `0eab5f24-40f9-4dcd-be06-1b44e4ee28f9` — were **identical** before and after, and
+`sidecar-2.log` gained **no** session-ended, claim, error or shed line across the window. The one
+write the specification allows is the temporary file in the data directory, and the relay saw one
+TCP connect that closed without sending anything.
+
+**A narrow shutdown race showed up on slot 4, once, and it fails in the safe direction.** A
+`MIGRATE_OUT` arrived from the mod **45 ms after** `sidecar: shutting down`, when the journal was
+already closed: `contract A: journal write failed … err="file already closed"`, answered with
+`MIGRATE_OUT_NACK code=JOURNAL_ERROR`. A NACK means custody was never taken, so the organism stayed
+in slot 4's world — nothing was lost and nothing was duplicated. The NACK itself could not reach the
+mod, because Contract A was already closing, which is also safe: the mod removes an organism only on
+an ACK. It is the first occurrence in every sidecar log this rig still holds, and it is the designed
+`AOUT-JOURNAL_ERROR` path rather than a new fault.
+
+**`ps` understates process age on this host, and the roll had to prove the relay's identity another
+way.** `ps -o etime,lstart` put the relay's start at ~21:42Z and the archive's at ~22:24Z; both are
+wrong, because the jiffies clock stops while the Windows host sleeps and every process started
+before a suspend therefore looks younger than it is. The relay's real start is **20:56:15.826Z** —
+its `relay: listening` line, the mtime of `e2e/run-m4-lan/m3-relay.pid`, and the
+`relaySessionId=0eab5f24` that every live peer still reports, all agreeing. **Age a process by its
+own startup line and its pid file, never by `ps`**; this is the same family of trap as the
+`/proc/<pid>/exe` inode comparison that `e2e/crossing/RUNBOOK.md` P6.2 already documents.
+
+**The bundle was re-taken, and the far end still owes exactly ONE swap.**
+`farend/dist/farend-bundle.zip` is now **6,807,249 bytes**, sha256
+`4ab0f47683b3a1ea0fb34757247b7199e6a8bdebee45f2e13a85e36de8e22bde`. It carries the new
+`multiverse-sidecar.exe` (`ac14bb69…`, was `28d2c7e6…`) and the **same** `BibitesMultiverse.dll`
+(`fae0d50c…`, mod 0.6.4), verified byte-identical to the plugin in the game's own
+`BepInEx/plugins/`. Slot 6 is one sidecar version behind and **wire-compatible** — neither roll
+moved a wire field — so its operator applies it at their leisure. **The two rolls do not compound
+into two trips**: one swap now delivers pacing, `--diagnose` and `--my-slot` together, and until it
+happens slot 6 remains the one peer that will burst on a rejoin.
+
+**The rollback set for this window is `/mnt/wsl/data/rollout-wp7-20260812/bin-rollback/`** —
+`sidecar` (`4857ded4…`) and `multiverse-sidecar.exe` (`28d2c7e6…`), the pacing-roll binaries these
+replaced. It is not `bibites-multiverse-prewp45-bin/`, which is a roll older, and not
+`~/.multiverse-rollback-bin/`, which is pre-crossing. It retires on the usual rule: when the map has
+run a day on the new binaries.
 
 ### Bringing it back after a reboot
 
