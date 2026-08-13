@@ -63,9 +63,13 @@ the number is a rate against a ledger that grows every hour.
   running sidecar holds `bin/sidecar` open — the build fails with `ETXTBSY`. P0.3 builds to a
   scratch directory and P3 renames.
 - **The scratch directory must be on `/mnt/wsl/data`**, not `/tmp`. `mv` is only atomic within
-  one filesystem; `/tmp` is on the 98 GB root and `bin/` is on the 251 GB `/mnt/wsl/data`
+  one filesystem; `/tmp` is on the 107 GB WSL root and `bin/` is on the 251 GB `/mnt/wsl/data`
   volume, so a `mv` between them is a copy plus an unlink and not the atomic replace the
-  rolling-binary rule depends on.
+  rolling-binary rule depends on. **Since the volume was reorganised on 2026-08-12 its scratch
+  tier is `/mnt/wsl/data/scratch/`**, and every path below says so. This window executed against
+  a `crossing-build/` directly under `/mnt/wsl/data/` — same filesystem, same rule — and the
+  repo was then at `/mnt/wsl/data/bibites-multiverse/`, reached through a `~/bibites-multiverse`
+  symlink that no longer exists.
 - **Slot 6, the relay and the collector are not this session's to drive.** The far end is a
   person's; the relay restart in this window is the owner's act, taken deliberately.
 - **Every build and test is `nice -n 19`.** Unniced load on this host reproduces the sidecar
@@ -154,7 +158,7 @@ leaves nothing to undo. Do them all before taking anything down.
 ### P0.1 — the rig is at the bar
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 e2e/crossing/rig-check.sh
 ```
 
@@ -170,7 +174,7 @@ are looking at afterwards.
 ### P0.2 — the checkout, and the rollback copies
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 git fetch
 git status --short          # expect only e2e/crossing/, .gitignore and the two farend/ files
 
@@ -203,17 +207,17 @@ version, so this crossing neither reads it differently nor writes it differently
 ### P0.3 — build the new binaries to scratch
 
 ```sh
-mkdir -p /mnt/wsl/data/crossing-build
-cd ~/bibites-multiverse/go
+mkdir -p /mnt/wsl/data/scratch/crossing-build
+cd /mnt/wsl/data/repos/bibites-multiverse/go
 nice -n 19 gofmt -l . && nice -n 19 go vet ./...            # both must print nothing
 nice -n 19 go test -p 1 ./...                               # the whole suite, serialised
-CGO_ENABLED=0 nice -n 19 go build -o /mnt/wsl/data/crossing-build/ ./cmd/...
-ls -l /mnt/wsl/data/crossing-build/
+CGO_ENABLED=0 nice -n 19 go build -o /mnt/wsl/data/scratch/crossing-build/ ./cmd/...
+ls -l /mnt/wsl/data/scratch/crossing-build/
 ```
 
 **Gate:** `go vet` and `gofmt` silent, the test suite green, and six binaries in
-`/mnt/wsl/data/crossing-build/`. `/mnt/wsl/data/crossing-build` is on the **same filesystem**
-as `bin/`, which is what makes P3's `mv` atomic.
+`/mnt/wsl/data/scratch/crossing-build/`. That directory is on the **same filesystem** as `bin/`,
+which is what makes P3's `mv` atomic.
 
 **`nice -n 19` on the test run is not optional.** `go test -p 1 ./...` unniced is the measured
 reproduction of the sidecar session storm.
@@ -221,7 +225,7 @@ reproduction of the sidecar session storm.
 ### P0.4 — mint the TLS material
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 e2e/crossing/mint-tls.sh
 ```
 
@@ -248,8 +252,8 @@ machine to run.
 ### P0.5 — mint the credentials against the EXISTING `ring.json`
 
 ```sh
-cd ~/bibites-multiverse
-ALLOW_LIVE_RELAY=1 RELAY_BIN=/mnt/wsl/data/crossing-build/relay \
+cd /mnt/wsl/data/repos/bibites-multiverse
+ALLOW_LIVE_RELAY=1 RELAY_BIN=/mnt/wsl/data/scratch/crossing-build/relay \
   e2e/crossing/mint-credentials.sh
 ```
 
@@ -260,7 +264,7 @@ it. Run it without the knob and every mint dies with `flag provided but not defi
 script used to swallow: `capture()` discards stderr, so the only symptom was seven *no join string
 was printed* warnings and an empty `peers.json`. **The script now probes the binary and refuses
 with that instruction**, so this cannot fail silently again — but the flag belongs on the command
-line, because P0.3 built the new relay to `/mnt/wsl/data/crossing-build/` precisely so that
+line, because P0.3 built the new relay to `/mnt/wsl/data/scratch/crossing-build/` precisely so that
 `bin/` could stay untouched until P3.
 
 `ALLOW_LIVE_RELAY=1` is required and is deliberate: the running **`contract-b/3.5`** relay
@@ -322,8 +326,8 @@ records, one `subscribe`, six `peer`. **Back `peers.json` up.** It is the third 
 beside `ring.json` and the archive's set.
 
 **Abort answer for the whole of P0:** nothing to undo. `peers.json` and `e2e/tls-m4-lan/` are
-files the running 3.5 relay does not read; `/mnt/wsl/data/crossing-build/` is off `bin/`; the
-patch is not applied. Walk away and the rig has not noticed.
+files the running 3.5 relay does not read; `/mnt/wsl/data/scratch/crossing-build/` is off `bin/`;
+the patch is not applied. Walk away and the rig has not noticed.
 
 ---
 
@@ -335,7 +339,7 @@ patch is not applied. Walk away and the rig has not noticed.
 it.
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 BEP="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx"
 DEST="e2e/logs-m4-lan/bepinex"; mkdir -p "$DEST"
 stamp="$(date +%Y%m%d-%H%M%S)"
@@ -405,13 +409,13 @@ paragraph above.
 ### P3 — put the new binaries in place
 
 ```sh
-cd ~/bibites-multiverse
-mv /mnt/wsl/data/crossing-build/relay   bin/relay
-mv /mnt/wsl/data/crossing-build/sidecar bin/sidecar
-mv /mnt/wsl/data/crossing-build/archive bin/archive
-mv /mnt/wsl/data/crossing-build/fakemod bin/fakemod
-mv /mnt/wsl/data/crossing-build/ringstat bin/ringstat
-mv /mnt/wsl/data/crossing-build/worldstat bin/worldstat
+cd /mnt/wsl/data/repos/bibites-multiverse
+mv /mnt/wsl/data/scratch/crossing-build/relay   bin/relay
+mv /mnt/wsl/data/scratch/crossing-build/sidecar bin/sidecar
+mv /mnt/wsl/data/scratch/crossing-build/archive bin/archive
+mv /mnt/wsl/data/scratch/crossing-build/fakemod bin/fakemod
+mv /mnt/wsl/data/scratch/crossing-build/ringstat bin/ringstat
+mv /mnt/wsl/data/scratch/crossing-build/worldstat bin/worldstat
 bin/relay --help 2>&1 | grep -E 'mint-credential|tls-cert|token-file' || true
 ```
 
@@ -421,7 +425,7 @@ one grep is the cheapest possible proof that the binary in `bin/` is the `contra
 ### P4 — apply the new-version launch material
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 git apply --check -p1 e2e/crossing/contract-b-4.patch && git apply -p1 e2e/crossing/contract-b-4.patch
 git diff --stat
 bash -n e2e/run-m4.sh && bash -n e2e/run-m4-lan.sh && echo "both parse"
@@ -460,7 +464,7 @@ One command, and it carries the whole regime — headless, ×100, `saveMinutes 1
 because `run-m4-lan.sh` assigns all four unconditionally after it sources the rehearsal.
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 ARCHIVE_HTTP=0.0.0.0:8796 ./e2e/run-m4-lan.sh up
 ```
 
@@ -512,7 +516,7 @@ history D2 promised is durable has been lost, and only a person can judge what i
 **P6.2 — every process is on the new binary.**
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 for f in e2e/run-m4-lan/m3-*.pid; do
   p="$(cat "$f")"; n="$(basename "$f" .pid)"; n="${n#m3-}"
   b="bin/${n%%-*}"
@@ -660,7 +664,7 @@ the two slot-6 rows are outstanding by design.**
 mod presents it on every dial:
 
 ```sh
-cd ~/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 BEP="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx"
 ls -la e2e/data-m4-lan/slot-*/contract-a.token       # five files, mode -rw-------
 grep -ha 'contract A token' "$BEP/LogOutput.log"* | sed 's/\r$//' | sort -u

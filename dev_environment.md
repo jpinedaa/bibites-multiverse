@@ -17,7 +17,8 @@ The full loop — edit, build, deploy, run, read logs — runs from WSL with no 
 | Far-end bundle (the second computer) | `farend/` — `setup-farend.ps1`, `README.md`, `make-farend-bundle.sh`. The build scratch and the BepInEx download cache under `farend/dist/` are **gitignored**; `farend/dist/farend-bundle.zip` itself is **tracked**, because the second computer takes it out of a clone rather than off a USB stick |
 | Rig runtime state — **gitignored** | `bin/` (built Go binaries), `e2e/data*/` (per-sidecar data dirs: journal, `peer-id`, remembered slot, genome cache — the D2 custody record of one machine's run), `e2e/relay-data*/` (the relay's `ring.json` slot reservations and, since 2026-08-11, its `peers.json` credential verifiers), `e2e/archive-data*/` (`migrations.jsonl` and the content-addressed genome store), `e2e/logs*/`, `e2e/run*/` (pid files). Each rig has its own suffixed set; the M4 LAN rig's are the `-m4-lan` ones and are the **living deployment's** |
 | Retired rigs — **gitignored** | `e2e/<name>.tar.zst`. A retired runtime dir is still the record of a run that happened, so it is compressed in place rather than deleted: `e2e/data.tar.zst` (the M2/M3 journals, and **the only copy of the M4 resume test's input** — `data/slot-1/journal/journal.log`, the real in-flight hop of 2026-08-04; extract before re-running that test), `e2e/logs-m3-lan.tar.zst`, `e2e/archive-data.tar.zst`, `e2e/data-m4.tar.zst`. Restore one with `tar --zstd -xf e2e/<name>.tar.zst -C e2e/` |
-| **The repo itself** | **Real location `/mnt/wsl/data/bibites-multiverse/`; `~/bibites-multiverse` is a symlink to it** (moved 2026-08-08 — see *The disk budget*). Every absolute path in every script, pid file and command line resolves through the symlink unchanged, so nothing had to be rewritten. `/mnt/wsl/data` is a separate 251 GB ext4 volume; the WSL root it left is 98 GB and shared with everything else on this machine |
+| **The repo itself** | **`/mnt/wsl/data/repos/bibites-multiverse/`. There is no symlink — `~/bibites-multiverse` was one and is gone.** The repo has moved twice: off the WSL root onto the data volume on **2026-08-08**, because the root filled and the deployment stopped writing genomes (see *The disk budget*), and into the volume's `repos/` tier on **2026-08-12**, when the owner reorganised `/mnt/wsl/data` into `repos/`, `worktrees/`, `scratch/`, `archives/` and `flow/`. Neither move rewrote anything — every script derives its own root from `${BASH_SOURCE[0]}` rather than holding a path, and a pid file only has to outlive one run. `/mnt/wsl/data` is a separate 251 GB ext4 volume, **85 GB used on 2026-08-13**; the WSL root it left is now `/dev/sdd`, **107 GB at 41%**, and is still shared with everything else on this machine |
+| Scratch, rollback sets and archives — **outside the repo, and outside git** | Under `/mnt/wsl/data/` beside the repo, since the 2026-08-12 reorganisation. **`scratch/`** holds each rollout window's rollback binaries and evidence (`bdw-`, `slv-`, `gfw-`, `avw-2026-08-12`, `rollout-pacing-20260811`, `rollout-wp7-20260812`), the crossing's build directory (`crossing-build/`) and the **Linux rehearsal's install-ready game directory** (`m5-linux-rehearsal/`, which `release/make-release.sh` and `release/test-install-uninstall.sh` read). **`archives/`** holds what was kept past its window: `bibites-multiverse-prewp45-bin/`, `bibites-salvage-20260808/`. **The dated entries under *The living deployment* name these at their pre-2026-08-12 paths, directly under `/mnt/wsl/data/` — insert the tier to read one.** Two sets live in `$HOME` and were untouched by the move: `~/.multiverse/` (the per-slot secrets) and `~/.multiverse-rollback-bin/` (the pre-crossing `contract-b/3.5` binaries) |
 | Secrets and TLS material — **never in the repo** | Per-peer credential secrets in `~/.multiverse/*.secret`, mode `600`; the relay's own key pair and CA in the **gitignored** `e2e/tls-m4-lan/`; each sidecar's minted `<data-dir>/contract-a.token`, mode `600`. The shared `~/.multiverse-token` is **retired since the crossing of 2026-08-11** and nothing reads it. See *Credentials, TLS, and the retired LAN token* below |
 | The relay's third durable file | `e2e/relay-data-m4-lan/peers.json` — the credential **verifiers** (salted SHA-256, never a secret) and their grants. **Back it up with `ring.json`**: a lost verifier store costs a slot handover per peer |
 | Decompiled game source | `decompiled/BibitesAssembly/` (654 files, grep this to find APIs) |
@@ -1466,24 +1467,34 @@ deliberately because they contain the outage.
 
 ### Where the rig lives now
 
-The whole repo was moved to `/mnt/wsl/data/bibites-multiverse/` on 2026-08-08 and
-`~/bibites-multiverse` is a symlink to it. Every absolute path — in `run-m4.sh`, in the pid
-files, in the running command lines — resolves through the symlink unchanged, so this was a
-move with no rewrite. `git status` from the symlinked path is clean and git is untroubled by
-it.
+**`/mnt/wsl/data/repos/bibites-multiverse/`, on the 251 GB data volume, reached by its real
+path.** It got there in two moves. The whole repo left the WSL root on **2026-08-08**, because
+the root filled and the deployment stopped writing genomes — the data volume is where a thing
+that grows 2.3 GB/day belongs, and *What still grows forever* is why that is a permanent answer
+rather than a reprieve. On **2026-08-12** the owner reorganised the volume itself into `repos/`,
+`worktrees/`, `scratch/`, `archives/` and `flow/`, and the repo moved into `repos/`. The
+`~/bibites-multiverse` symlink the first move left behind **did not survive the second** — use
+the real path; `git status` from it is clean and git was untroubled by either move.
+
+**Neither move needed a rewrite, and that property is worth keeping.** Every script derives its
+own root from `${BASH_SOURCE[0]}`, so a relocated checkout finds itself, and a pid file holds a
+path that only has to outlive one run. The 2026-08-12 move found exactly **two** files that had
+hardcoded an absolute path — `release/make-release.sh` and `release/test-install-uninstall.sh`,
+both reaching outside the repo for the Linux rehearsal's assets — and both are corrected to the
+new location. **Do not add a third.** A path that must point outside the repo belongs in a
+variable with a default, which is what those two already do.
 
 **`/mnt/wsl/data` must be mounted before the rig starts.** It is a separate WSL disk, and
-`/mnt/wsl` itself is a tmpfs, so when the volume is not attached the symlink **dangles**:
-every path under `~/bibites-multiverse` fails with *No such file or directory*, `git` cannot
-find the repo, and the rig cannot start at all. The symptom is unmistakable and it is not a
-rig bug. **The owner's mount setup is the fix** — there is deliberately no automation here,
-because a script that silently created the directory would put the custody journals on a
-tmpfs that a restart erases. It is **step 1** of the reboot ritual below, and no other step
-can run before it:
+`/mnt/wsl` itself is a tmpfs, so when the volume is not attached the repo path simply **does not
+exist**: every path under it fails with *No such file or directory*, `git` cannot find the repo,
+and the rig cannot start at all. The symptom is unmistakable and it is not a rig bug. **The
+owner's mount setup is the fix** — there is deliberately no automation here, because a script
+that silently created the directory would put the custody journals on a tmpfs that a restart
+erases. It is **step 1** of the reboot ritual below, and no other step can run before it:
 
 ```sh
-df -h /mnt/wsl/data          # /dev/sdX, 251G — if this is missing, stop and mount it
-ls ~/bibites-multiverse/     # must list the repo, not fail
+df -h /mnt/wsl/data                         # /dev/sdX, 251G — if this is missing, stop and mount it
+ls /mnt/wsl/data/repos/bibites-multiverse/  # must list the repo, not fail
 ```
 
 ## The living deployment
@@ -3139,7 +3150,8 @@ single largest term. The steps are ordered and step 1
 gates the rest.
 
 1. **Mount `/mnt/wsl/data`.** See *Where the rig lives now* above. Nothing — not `git`, not
-   the rig, not a path in a pid file — resolves while the symlink dangles.
+   the rig, not a path in a pid file — resolves while the volume is unattached; the repo path
+   does not exist at all.
 2. **Remove the previous run's pid files, after confirming each pid is dead.** A reboot
    leaves seven of them in `e2e/run-m4-lan/`: `m3-relay.pid`, `m3-archive.pid` and
    `m3-sidecar-1.pid` .. `m3-sidecar-5.pid` (the `m3-` prefix is inherited from
@@ -3149,7 +3161,7 @@ gates the rest.
    exactly the case this guards:**
 
    ```sh
-   cd ~/bibites-multiverse/e2e/run-m4-lan
+   cd /mnt/wsl/data/repos/bibites-multiverse/e2e/run-m4-lan
    for f in *.pid; do p=$(cat "$f"); kill -0 "$p" 2>/dev/null && echo "ALIVE $f $p" || rm -v "$f"; done
    ```
 
@@ -3209,7 +3221,7 @@ gates the rest.
    and curls `/api/status` — and costs ~0.5 GB/day (*The disk budget*).
 
    ```sh
-   cd ~/bibites-multiverse/e2e/baselines/m4-collector
+   cd /mnt/wsl/data/repos/bibites-multiverse/e2e/baselines/m4-collector
    setsid nohup ./collector.sh >> collector.log 2>&1 &
    ```
 
@@ -3823,17 +3835,24 @@ took it from 3.4 GB to 21 GB.
   rule**, and it is an owner's call of the same shape as the collector's: which generations are
   keepers, what prunes, and whether an archived generation should be compressed in place the way a
   retired rig directory is (`e2e/<name>.tar.zst`, *Layout*). **Watch the volume, not the
-  directory**: `/mnt/wsl/data` went 39 GB → 56 GB used across the window and has 195 GB free, so
-  the pressure is real but slow. At roughly 18 GB per crossing window and ~2.3 GB/day of ordinary
-  growth, this is the first term that would make the *three months* estimate in *The disk budget*
-  wrong.
+  directory**: `/mnt/wsl/data` went 39 GB → 56 GB used across the crossing window alone. At
+  roughly 18 GB per window and ~2.3 GB/day of ordinary growth, this is the first term that would
+  make the *three months* estimate in *The disk budget* wrong — **and the next two days measured
+  exactly that**. Read 2026-08-13: the volume is **85 GB used, 167 GB free**, and
+  `e2e/logs-m4-lan/bepinex/` alone is **28 GB** of the repo's 58. That is +29 GB in two days
+  against ~5 GB of ordinary growth, and the difference is the four rollout windows of 2026-08-12,
+  each of which archived the whole live BepInEx set again. **The pressure is not slow.** It is
+  paced by how often the map is rolled, which is a thing this project decides rather than
+  observes, so the rule is owed before the next batch of windows rather than before the volume
+  fills.
 
 ## Gotchas
 
-- **The rig lives on `/mnt/wsl/data`, reached through a symlink.** `~/bibites-multiverse`
-  is a symlink to `/mnt/wsl/data/bibites-multiverse`. If that volume is not mounted the
-  symlink dangles and every path fails with *No such file or directory* — see *The disk
-  budget*, *Where the rig lives now*.
+- **The rig lives on `/mnt/wsl/data`, at `/mnt/wsl/data/repos/bibites-multiverse`.** There is
+  no symlink any more: `~/bibites-multiverse` was one until the volume was reorganised on
+  2026-08-12, and anything still reaching for it fails. If the volume is not mounted the repo
+  path does not exist and every path under it fails with *No such file or directory* — see
+  *The disk budget*, *Where the rig lives now*.
 - **A full disk does not just stop the rig, it can silently truncate an append-only log's
   history.** One short write leaves an unparsable line mid-file and replay discards
   everything behind it. Fixed in the sidecar journal on 2026-08-08 (all-or-nothing appends,

@@ -108,7 +108,7 @@ if [ -z "$KIT_DIR" ]; then
   BEPINEX_VERSION="$(awk -F'"' '/"bepInEx":/ { print $4; exit }' "$KIT_DIR/support-matrix.json")"
   if [ -z "$BEPINEX_ZIP" ]; then
     for candidate in \
-      "/mnt/wsl/data/m5-linux-rehearsal/bepinex/BepInEx_linux_x64_${BEPINEX_VERSION}.zip" \
+      "/mnt/wsl/data/scratch/m5-linux-rehearsal/bepinex/BepInEx_linux_x64_${BEPINEX_VERSION}.zip" \
       "$REPO/farend/dist/cache/BepInEx_linux_x64_${BEPINEX_VERSION}.zip" \
       "$REPO/release/dist/build/BepInEx_linux_x64_${BEPINEX_VERSION}.zip"
     do

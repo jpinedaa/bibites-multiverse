@@ -60,7 +60,7 @@ STAGE_NAME="bibites-multiverse-${RELEASE}"
 # Linux matrix row's hash is verified against a real file at build time rather
 # than trusted. Absent, the build says so and goes on - a machine that builds the
 # release is not required to hold two copies of the game.
-LINUX_GAME_DIR="${LINUX_GAME_DIR:-/mnt/wsl/data/m5-linux-rehearsal/game}"
+LINUX_GAME_DIR="${LINUX_GAME_DIR:-/mnt/wsl/data/scratch/m5-linux-rehearsal/game}"
 
 export GOROOT="${GOROOT:-$HOME/go}"
 export PATH="$GOROOT/bin:$PATH"

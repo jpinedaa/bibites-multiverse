@@ -81,7 +81,7 @@ sequence below is what happens after that, and every command is literal.
 ```sh
 # ---- on the DEVELOPMENT machine -------------------------------------------
 # 1. Build both architectures and send them. No Go toolchain goes on the VPS.
-cd /mnt/wsl/data/bibites-multiverse
+cd /mnt/wsl/data/repos/bibites-multiverse
 deploy/ship.sh --host <instance-ip>          # or an ~/.ssh/config alias
 
 # 2. Send the kit itself.
