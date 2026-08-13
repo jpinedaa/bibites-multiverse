@@ -2930,8 +2930,10 @@ kind.** The two defects:
   the page can recover the clipped text. Both badges are correct in the DOM and in
   `/api/species/tree`; only the drawing loses them.
 - **THE AMBER ANCESTRY FLOOR BOUNDARY IS NEVER DRAWN.** *(Fixed in `979d72b` with the `>=` and a
-  zero-width shade allowed to be zero-width; drawn and verified live below. Note that the clamp this
-  entry describes is also why hiding the seed stock tightens no axis — same section.)* `tree.go`
+  zero-width shade allowed to be zero-width; drawn and verified live below. **Then superseded on
+  2026-08-13 by `2b1e705`**, which removed the clamp entirely — the axis fits the drawn bars, the
+  floor became a left-margin caption, and the gate went back to a strict `>` on a different
+  quantity. See the answered design collision at the end of the next section.)* `tree.go`
   clamps `SpanStartMs` down to
   `AncestrySinceMs` under the comment "THE FLOOR IS ALWAYS INSIDE THE PICTURE"; `lfAxis` then guards
   the line with `x.ancestrySinceMs > sc.t0` where `sc.t0` **is** `spanStartMs`. Equal is not
@@ -3109,10 +3111,22 @@ at the record's beginning while living species turn over every few hours, so **t
 as long as the map runs**. Nothing here is a bug: `tree.go` does exactly what its comment says, the
 second axis is correct and merely inert on a map where the seed's first crossing (05:14:36.853Z) is
 *younger* than the floor (05:14:22.896Z), and no gate failed. It is a design collision between two
-rules that were written separately, and **it is the owner's call**, not a patch to make quietly: the
-choices are to let the drawn axis start at the oldest drawn bar and render the floor as an
+rules that were written separately, and it was **the owner's call**, not a patch to make quietly: the
+choices were to let the drawn axis start at the oldest drawn bar and render the floor as an
 off-picture caption rather than a boundary, or to keep the boundary and accept a drawing that is
 mostly empty and getting emptier.
+
+**ANSWERED 2026-08-13 — the owner took the first option, and the clamp is gone** (commit
+`2b1e705`). `SpanStartMs` is now the oldest **drawn** bar and nothing else; `SpanStartSeedMs` is the
+same with the seed rows in, so revealing the seed stretches the axis to the seed's bar rather than
+to a floor older than both. The floor keeps every word it had — the stat line, the root badge — and
+gains a left-margin caption (*"the record reaches back to …"*), while the dashed boundary now draws
+**only** where the floor genuinely falls inside the drawn span, which is the case this section's
+measurement showed was not the ordinary one. The pre-floor shade is gone with the empty run it
+shaded. **So the `>=` of fix (d) is superseded by a strict `>` on a different quantity**: the gate
+is no longer "is the floor at or after the axis start" but "does the floor fall inside the bars we
+drew". Read the paragraphs above as the measurement that produced the decision, not as current
+behaviour.
 
 **Two smaller things.** `ringstat --species` does **not** hide the seed and should not — it prints
 `Basic bibite` with `never-exported endemic`, which is the operator's view of the same fact the page
