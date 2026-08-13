@@ -3520,6 +3520,149 @@ rather than assumed. The stamp-stripped comparison `22aca8f → f0a387a` reporte
 diff confined to `go/internal/archive`. The four unchanged binaries in `bin/` carry the older
 `91081ce` VCS stamp and are source-equivalent, because everything between those two commits is
 documentation plus `go/internal/archive`. It retires on the usual rule.
+
+### The link-time window, 2026-08-13 — every link lands on the clock, and the brain ring starts meaning something
+
+**The seventh archive-only pause under the owner's standing grant, and the fourth whose point was to
+VERIFY rather than to land.** It carried `7fbaaa6`: one rule for every link — it lands at the child's
+`spanFromMs` and LEAVES the parent at the latest moment the parent's own record supports — in four
+shapes (dotted `.chain` across a real gap when `collapsed>0`, solid `.link` when only the record is
+silent, no run where the child starts inside the parent's span, a 2.5 px floor for sub-pixel gaps,
+and a plain drop where the parent has no bar); the inversion drawn backwards in amber from the
+parent's bar START with a hollow `circle.revmark`; and the brain ring fitted to the drawn set
+(`lfBrainRange`) instead of against a fixed 600. `lfChainLen`, `LF_GENPX` and `LF_BRAIN_FULL` are
+deleted. The relay was not restarted, `relaySessionId` is still
+`13add949-c3ac-43d6-9431-f0f2b8a66253`, and the five games, the mod and slot 6 were untouched.
+**Every item verifies. No defect was found in the commit.**
+
+| | |
+|---|---|
+| Crossings paused | **3m 55.2s** driver bracket. No local sidecar was on the map between **22:40:22.496Z** and **22:44:10.271Z** (3m 47.8s); all five reclaimed by **22:44:16.283Z**, so the map was short of a full peer set for **3m 53.8s**. The worlds simulated throughout |
+| The archive | down **22:40:23.472Z → 22:44:07.880Z (224.41 s)**, entirely inside the pause. Replay of **10,620,376 records / 3.307 GiB** in **224.386 s** |
+| Replay speed | **47.3 k records/s** — the seventh point, back on the flat line and 11.6% below the sixth. The host was BUSIER, not slower: load average **8.29** against the sixth point's 4.5, on the same 45 GiB of buff/cache. The sixth point's caution holds in both directions |
+| Replay memory | **VmHWM 2,002,060 kB (1.909 GiB)** against the outgoing process's 2,515,136 kB. Against the last window that is **106.2 B/record** for the 290,783 records added — the first point ABOVE the streamed profile's ~47 B/record, on a 2 s-sampled peak. Read it again next window before reading anything into it |
+| The ledger gap | **ZERO**, margins 1.19 s before and 3.28 s after |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, pacing line present, and `--diagnose` **0 fail with PASS journal-replay … zero discarded bytes** on all five. TERM to exit: **257 / 177 / 190 / 193 / 162 ms**. Start to grant: **1390 / 1352 / 1695 / 1412 / 1405 ms**. Custody recovered outbound/inbound **0/5, 0/1, 5/0, 2/0, 0/1** |
+| Observation | 12 samples 22:45:10Z–22:47:12Z and two `rig-check --wire`. The FIRST sample, 54 s after the resume, read NOT AT THE BAR with `custodyDepth` 11 and `pacedDepth` 6 — the backlog draining, exactly the shape the note on the tool describes. Samples 2–12: **6/6** live and **24/24** lanes every time, `holes`, `unknown` and `timeoutBounces` **0** throughout, `custodyDepth` 6–27 falling every time it rose; population 320–408. **Zero** new `level=ERROR` and **zero** sheds across the relay, the five sidecars and the archive — the archive's single `ERROR` is the old damaged ledger line (`skippedLines=1 skippedBytes=776`), re-reported at replay |
+
+**The zero-gap accounting, proven by byte offset again.** The ledger was **byte-frozen at
+3,550,416,001 bytes** across the outage and the boundary is a record boundary by construction — byte
+N−1 is `\n`. The last record inside that prefix carries `recordedAt` **22:40:22.285Z**, 1.19 s before
+the archive exited, and the first byte written afterwards — offset 3,550,416,002 — carries
+**22:44:11.156Z**, 3.28 s after it resubscribed. **Zero records carry a `recordedAt` inside
+22:40:23.472Z → 22:44:07.880Z.** The relay is stronger than ever: **it logged exactly ZERO lines
+strictly inside the outage**, the two `client gone` / `client connected` lines for `archive-main`
+being its endpoints. Slot 6 never left and logged nothing.
+
+**THE GATES, ALL FOUR.** On the frozen ledger: **`wc -l` 10,620,377, `ledgerRecords` 10,620,376,
+`ledgerSkippedLines` 1, difference 0**, with the counter reading the same value either side of the
+`wc`. `/api/status` gzips **15,480 → 1,727 bytes (8.96×)**; the tree **7,783 → 1,642 (4.74×)**;
+`/healthz` stays identity at 3 bytes. All eight `limits` are on the page and all eight values are on
+the settings tab. **`genomeHorizonMs` and `minContractVersion` are both absent** — the horizon and
+the version floor are still off by omission.
+
+**THE BROWSER VERDICT: EVERY ITEM VERIFIES, AND THE CACHE TRAP WAS FORCED OPEN FIRST.** The sweep
+began with a cache-bypassing reload and PROVED the front end before measuring anything — the served
+bytes carry `lfLink`, `lfBrainRange`, `revmark`, `LF_RUNMIN`, `LF_REVY` and
+`.brain{…pointer-events:all}`, the live globals are `LF_RUNMIN` 2.5 / `LF_REVY` 8 / `LF_BRAIN_R0`
+2.4 / `LF_BRAIN_R1` 6.4, and `lfChainLen`, `LF_GENPX` and `LF_BRAIN_FULL` are `undefined` in the page
+and absent from the source. Swept at 1280 px, `#tree`, with **zero console messages on the whole
+sweep** and **no page-level horizontal scroll at any width**. The view repaints every **2001–2002 ms**.
+
+- **The gap runs are on the axis, to within the path's own rounding.** At 7.787 minutes per pixel:
+  `Sheeplasius dukworthgregorius` (collapsed 10) draws a DOTTED `.chain` across **40.055 h** —
+  **308.6 px measured against 308.629 expected, −0.029 px** — and `Todae raffius` (collapsed 9)
+  across **38.450 h** — **296.3 against 296.256, +0.044 px**. Both leave x **650.2**, which is
+  `Zhiluus tardisitguyus`'s bar right edge exactly. The residual is `toFixed(1)` in the `d`
+  attribute and nothing else. The 40.1 h of empty plot the commit message named is now the mark.
+- **The `+N` goes with the shape.** `+10` at x **804.8** and `+9` at **798.6**, each the exact
+  midpoint of its run, `text-anchor:middle`, `data-t="collapsed"`. The TUCKED case is not on this
+  census, so it was exercised through the page's own `lfLink`/`lfJoin`: a child starting inside a
+  living parent's span puts `+7` at `jx−4` with `text-anchor:end` against a plain drop; a 60 s gap
+  floors the run to **exactly 2.5 px** with the elbow at `min(5, run)` so it cannot hook back; a
+  parent with no bar drops plainly; and a real gap with `collapsed 0` draws a **SOLID** 128.6 px run
+  with no number on it.
+- **The inversion reads twice, as intended.** `Sheeplasius bananenbrotus` is first recorded **2 h
+  21 m 11 s BEFORE its parent**. Its group holds exactly `tw`, `rev` and `revmark` — **no ordinary
+  drop**. The link leaves the parent's bar START (958.828; the path starts at 959.3), runs back
+  **18.1 px against 18.130 expected**, **8 px above the child's bar** (`LF_REVY`), then down. The
+  ring is `fill:none` r 3 in amber `rgb(226,185,59)`; the run is amber, dashed `4px, 2px`; both
+  carry `data-t="beforeparent"` and both answer with the full glossary entry on hover.
+- **Every link's departure lies ON its parent's drawn bar.** Soaked across **six consecutive paints
+  — 72 links, zero off-bar** — 2 chain, 9 link and 1 rev on each.
+- **The brain ring finally encodes something, and says so.** Two measured brains on the drawn set
+  (100 and 103) take **2.4 px and 6.4 px — the full fitted span, 4.000 px apart**. The deleted
+  absolute scale would have drawn the same pair at **5.2847 and 5.3024 px, 0.0177 px apart**: the
+  new mark discriminates **226×** better on today's data. Revealing the seed re-fits it live —
+  `LFBRAIN` goes `{104,107,n2}` → `{51,107,n3}` and a ring moves **2.4 → 6.2 px** — and hiding
+  restores it. With one measured brain it correctly degenerates to mid-scale **4.4 px** and says so
+  in its own words. The ring's tooltip carries the real counts, the fitted range ("51 to 107 across
+  3 of them") and the re-fit caveat, and `pointer-events:all` is what makes it reachable.
+- **An absent genome is still no ring at all.** **12 of 14 drawn rows carry no ring**, and they are
+  exactly the rows with no measured genome.
+- **The lit lineage takes the whole link.** Focusing a row with a chain lights it `rgb(244,255,251)`
+  at **1.8 px** while every other group falls to **0.12**; the `rev` link and its ring go to
+  **opacity 1** with their row but KEEP their amber at 1.3 px, because `.rev` is deliberately not in
+  the `.ln.kin` recolour rule — the dimming rule is what makes a gap link part of its lineage, and
+  the colour is what says it is not ordinary descent.
+- **Everything the last sweep passed still passes.** Focus soaked 12 polls across 3 paint
+  generations — never on `<body>`, same key, kin constant at 14; row-to-row **1,214 samples over
+  6.12 s across 4 paint generations with zero dark, zero zero-kin and zero focus-on-body**; Enter
+  opened a row with 8 kin and held 3 polls, Space closed it and held 3 more; the seed button held
+  the focus 5 polls; the pointer leaving falls back to the keyboard's 8, lit; a searched-out row
+  lands the focus on **`#lfbox[tabindex="-1"]`**. Axis **leading gap 0.000 px**, earliest bar at
+  x 614 on a plot running 614 → 1151; `text.floorcap` at x 608 with `text-anchor:end` and
+  `data-t="recordfloor"`, `line.floor` and `rect.prefloor` absent. **Max bar overhang 0.000 px at
+  1280, 1600 and 500 px**, the five 2.5 px minimum bars sitting at x 1483.5 and ending at exactly
+  1486. Badges on their own line under `#lfbclip`, the widest ending at **x 569.3** with 44.7 px to
+  spare; mini-maps **78 dots over 13 living rows with zero mismatches** against `window.LFX`; 13
+  sparklines for 13 living rows; elastic width with `.lifewrap` the only overflowing element; the
+  search miss message; all four hash routes; the ceilings card with all eight limits; the legend's
+  new `revi` and `chaini` icons; the glossary's `beforeparent`, `collapsed`, `brainsize` and
+  `timeaxis`; the SVG `<title>` as the bare species name. The seed reveal still moves the axis — 13
+  rows and a first tick of 08-11 12:00 hidden, 14 rows with `Basic bibite` and a first tick of
+  **08-08** shown. `ringstat --species` still prints `Basic bibite` as `never-exported endemic` and
+  still does not hide it.
+
+**THREE MEASUREMENT TRAPS THIS SWEEP FOUND, EACH OF WHICH MANUFACTURES A FALSE DEFECT.** First, **do
+not recompute `lfCols` out of band to find the `now` line.** It reads `#lfbox.clientWidth` at call
+time, so a vertical scrollbar appearing between the paint and the measurement moves the answer by
+`LF_SCROLLW` = 16 px — which reported a **15 px bar overhang at 1600 px that does not exist**. The
+`now` line the drawing actually used is the SINGLE SHARED RIGHT EDGE of the living bars, and against
+it the overhang is 0.000 px. This is the same family as the last window's `/api/status` mini-map
+trap: never measure the drawing against a quantity re-derived after it was drawn. Second, **`grep
+shed` over these logs counts prose, not sheds**: the pacing INFO line quotes *"is shed with 4007"*
+inside its own `why=`, which reported 44/20/45/26/13 sheds on the five sidecars where the true count
+was **zero**. Count the relay's own `shedding a connection over a published capacity limit`. Third,
+**a synthetic `mouseout` cannot move the REAL cursor**, so the tooltip correctly returns after every
+repaint for whatever the physical pointer is parked over; that was confirmed by matching the tip's
+title against the row the page itself marks `self`, not by assuming. And a fourth, on the rig rather
+than the page: **`--diagnose` without `--credential-file` FAILS `credential` on every slot** — it
+reads the secret from the file the flag names, so a bare invocation is asking a different question.
+
+**The three WARNs are D14's, not this window's.** Slots 2, 3 and 5 reported `save-health` at 2026,
+2088 and **2510 ms** against the 2000 ms budget, against one such WARN last window. The standing
+watch item answers again.
+
+**One residual worth naming, and it is not this commit's.** The brain ring set is a function of the
+ARCHIVE PROCESS'S UPTIME, not of the record: `brains.bySpecies` is a per-process cache and a miss is
+cached per hash, so a restart empties it and — against a 159,683-entry genome-fetch backlog with
+species rotating their latest hash faster than the blobs land — only **2 of 14** rows had a ring 12
+minutes after this restart, where the last window saw 5 of 13 after hours of uptime. `brain.go` names
+this lag in its own comments and an absence still draws nothing, which is the honest answer. What
+`7fbaaa6` changes is only how visible it is: below two measured brains the fitted range degenerates
+to one mid-scale ring, and the ring's tooltip says exactly that.
+
+**The rollback set is `/mnt/wsl/data/scratch/ltw-2026-08-13/rollback-bin/`** — `archive.RUNNING`
+(`d02dfe50…`, copied from `/proc/111943/exe`), `archive.bin` and `ringstat` (`366c2f6f…`). The two
+archive copies were the same bytes for the sixth window running, and are still taken and compared
+rather than assumed. The stamp-stripped comparison `e113b81 → 7fbaaa6` reported **`archive` and
+`ringstat` only**, with `sidecar`, `worldstat`, `relay` and `fakemod` byte-identical, matching a Go
+diff confined to `go/internal/archive/page.go` and two test files. **The outgoing binary was stamped
+`f0a387a`, not the comparison base `e113b81`** — the two intervening commits change no Go file, so
+the running archive was source-equivalent to the base and the comparison answers the right question.
+The four unchanged binaries in `bin/` still carry the older `91081ce` VCS stamp and are
+source-equivalent for the same reason. It retires on the usual rule.
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
