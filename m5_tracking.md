@@ -134,11 +134,15 @@ burst, and each one also costs the far end a bundle rebuild.
   (979d72b landed; 0ff9873 the fourth zero-gap window) — badges readable, floor drawn, plot
   elastic, seed hidden with a free reveal, brain ring stabilized (latest-READ genome, one
   membership set across ten polls). Replay-rate reading CORRECTED: 57 → 47.8 → 41.2 → 47.3 k/s
-  — the series tracks host load too; size pauses from ~45 k/s and treat it as noisy. **One open
-  owner call from the sweep:** the axis's left edge is pinned by the ancestry FLOOR (08-07),
-  which is four days older than every drawn bar — so ~67% of the plot is empty and hiding the
-  seed changed nothing. Options: axis fits the oldest drawn bar with the floor as an off-axis
-  caption, or keep the boundary inside and accept the empty space.
+  — the series tracks host load too; size pauses from ~45 k/s and treat it as noisy. **The axis call was ANSWERED by the owner
+  2026-08-13** — the drawing fits the living record (2b1e705): the clamp is gone, the axis starts
+  at the oldest drawn bar, the floor became a left-margin caption keeping its stat line and root
+  badge, and the dashed boundary draws only where the floor truly falls inside the drawn span.
+  **Same commit made the ancestry legible** (owner: "hard to tell how the tree is"): the label
+  column steps by depth with `├─`-style brackets joining parent to child, hover/tab lights a
+  species' whole lineage and dims the rest, the parent drop elbows into the child's bar, the row
+  tooltip names the parent unopened, and three new glossary terms explain the drawing to a
+  first-time reader (`timeaxis`, `descends`, `lineage`).
 - **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
   stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
   bars — **replacing both the species tab and the tree tab with one merged view**. Included:
