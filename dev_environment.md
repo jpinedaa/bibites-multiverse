@@ -3252,6 +3252,155 @@ the **BepInEx log archive is now 29 GB**, against the 21 GB the crossing of 2026
 the fourth watch item has grown by another 8 GB with still no retention rule, and `lan_up` and
 `lan_down` each re-archive it inside the outage they open.
 
+### The genealogy-axis window, 2026-08-13 — the axis fits the record at last, and the keyboard's focus does not survive a repaint
+
+**The fifth archive-only pause under the owner's standing grant, and the second whose point was to
+VERIFY rather than to land.** It carried `2b1e705`: the ancestry-floor clamp removed so the drawn
+axis starts at the oldest DRAWN bar, the floor demoted from a boundary to a left-margin caption, and
+the ancestry-legibility work — a depth-stepped label column with brackets joining parent to child,
+hover/tab lineage highlighting, elbowed parent drops, the parent named in the row tooltip unopened,
+three new glossary terms and keyboard-focusable rows. The relay was not restarted, `relaySessionId`
+is still `13add949-c3ac-43d6-9431-f0f2b8a66253`, and the five games, the mod and slot 6 were
+untouched. **Everything the commit promised verifies on the live page. One thing it added is broken:
+a row can take the keyboard's focus but cannot keep it for longer than one poll.**
+
+| | |
+|---|---|
+| Crossings paused | **3m 39.5s** — no local sidecar was up between **19:32:41.974Z** and **19:36:21.485Z**. All five did not reclaim until **19:40:25.890Z**, so the map was short of peers for **7m 43.9s**; the extra 4m 04.4s was a driver defect and not the rig's, below. The worlds simulated throughout |
+| The archive | down **19:32:42.545Z → 19:36:19.288Z (216.74 s)**, entirely inside the pause. Replay of **10,190,383 records / 3.17 GiB** in **216.71 s** |
+| Replay speed | **47.0 k records/s** — the fifth point, on a ledger 6.4% larger than the fourth's 47.3 k. The line stays flat and noisy, which is the previous window's correction holding |
+| Replay memory | **VmHWM 1,965,544 kB (1.874 GiB)** against the outgoing process's 1,997,968 kB. Against the last window that is **140 B/record** for the 611 k records added — inside the streamed profile |
+| The ledger gap | **ZERO**, margins 0.83 s before and 2.46 s after |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, pacing line present, and `--diagnose` **PASS journal-replay … zero discarded bytes** on all five. TERM to exit: **57 / 88 / 89 / 67 / 88 ms**. Listening to grant: **32 / 33 / 37 / 35 / 35 ms**. Custody recovered outbound/inbound **1/0, –, 1/0, 1/0, 1/0**, plus one bounded hold resumed on slot 5 (`accruedHold=303ms`) |
+| Observation | 10 samples 19:58:55Z–20:02:33Z and two `rig-check --wire`: **6/6** live and **24/24** lanes in every one, `holes`, `heldDepth` and `timeoutBounces` **0** throughout, `custodyDepth` 4–17 and `pacedDepth` 0–2, both falling every time they rose; population 332–404. **Zero** new `level=ERROR` and **zero** sheds across the relay, the five sidecars and the archive — the archive's single `ERROR` is the old damaged ledger line (`skippedLines=1 skippedBytes=776`), re-reported at replay |
+
+**The zero-gap accounting, proven by byte offset rather than by scan.** The ledger was **byte-frozen
+at 3,404,573,645 bytes** across the outage, and the boundary records prove it by construction: the
+last record inside that prefix carries `recordedAt` **19:32:41.714Z**, and the very first byte
+written afterwards — offset 3,404,573,646 — carries **19:36:21.749Z**. **Zero records carry a
+`recordedAt` inside 19:32:42.545Z → 19:36:19.288Z.** This is cheaper than scanning 10 M records and
+it is exactly as strong, because the file only ever grows at its end. The relay says the same as
+ever: inside the outage it logged **exactly two lines, both about the archive itself** — its own
+`client gone` at 19:32:42.095Z and `client connected` at 19:36:19.289Z. Unlike the storage-move
+bring-up there was **no slot-6 rejoin window to close**: slot 6 never left, and it was alone on the
+map with no deliverable neighbour on any export edge, so it logged nothing at all.
+
+**THE AXIS NOW FITS THE RECORD IT DRAWS, AND THE MEASUREMENT IS UNAMBIGUOUS.** On the same map forty
+minutes apart: the old build put the earliest drawn bar at x 934.63 in a plot running 614 → 1166,
+**58.1% of the drawing empty**; HEAD puts it at **x 614.000**, the plot's own left edge, **0.00%
+empty**, with union coverage of the plot by bars at **552 of 552 px**. The served tree confirms the
+clamp is gone: `spanStartMs` 2026-08-07T15:08:55.782Z is now strictly greater than
+`ancestrySinceMs` 2026-08-07T05:14:22.896Z, where the previous window measured all three values as
+one int64. **And the two pre-fix readings turn out to be the same gap, not a growing one**: 368.6 px
+of a 5.74-day axis on 2026-08-12 and 320.6 px of a 6.60-day axis on 2026-08-13 are both **3.83
+days**, and both resolve to the same earliest bar at 2026-08-11T01:11:11.818Z. The percentage fell
+only because the floor-anchored axis kept growing underneath a constant gap — so the earlier
+section's "this gap widens" was right about duration and the ratio was the misleading half.
+
+**WHAT THE FIX DID NOT DO, WHICH IS WORTH SAYING PLAINLY.** The 100% coverage is carried by ONE
+long-lived species whose bar spans the whole axis; **12 of the 18 bars still start within 4 px of
+`now`**. What the change removed is the guaranteed dead band on the left, not the crowding on the
+right — that crowding is what the record actually holds on a map whose species turn over every few
+hours, and no drawing rule can fix it. **And the axis is no longer stable minute to minute**:
+because the drawn row set turns over each poll, the span was measured starting at ~08-11 at one poll
+and at 08-07T15:08 at another, four days of scale appearing and disappearing between repaints. The
+leading gap is 0 in both, so the invariant holds; the `timeaxis` glossary text does state that the
+axis re-fits itself as the rows change, so this is documented behaviour rather than a defect — but a
+reader watching the tab will see the horizontal scale jump.
+
+**THE BROWSER VERDICT: every item verifies.** Swept at 1280 px, `#tree`, with **one console message
+on the whole sweep** — a browser-initiated `favicon.ico` 404, not a page fault — and **no
+page-level horizontal scroll at any width**.
+
+- **The floor is a caption now, and the boundary correctly does not draw.** `text.floorcap` sits at
+  x 608 with `text-anchor:end`, entirely in the left margin outside the plot edge at 614, reading
+  *"the record reaches back to 2026-08-07 ·"* and carrying `data-t="recordfloor"`, so hovering it
+  opens THE RECORD BEGINS HERE. `line.floor` is **not drawn** and `rect.prefloor` is **absent** —
+  the zero-width shade of the old `>=` fix is gone with the run it shaded. The strict `>` is doing
+  the right thing on the ordinary case.
+- **The label column reads as a family.** Three depths at a 13 px step (name x **30 / 43 / 56**),
+  16 brackets, each a rail down from under the parent's glyph then a stub right into the child, with
+  **siblings sharing one rail** — three children of one parent all drawn from the same `M27 99`. The
+  glyph steps with the row, not just the text.
+- **One family lights, and it lights whole.** Hovering a mid-tree row puts `.lit` on the svg and
+  `.self` on the row, lights **12 rows** — itself, its root ancestor and its ten descendants — and
+  dims the other six. **11 of 16 link groups light, and every lit group carries BOTH marks**, the
+  label bracket and the plot drop, so no link ever lights by half. In the **population order**
+  nothing lights at all: 16 rows at one indent, zero links, zero brackets, zero chains, and a hover
+  produces no `.lit` and no kin. That gate is right, and it is the one that keeps a sort order from
+  making a claim about the record.
+- **The parent is named without opening the row.** There are two tooltips and only one carries it:
+  the SVG `<title>` is the full species name alone, which is the accessible name; the page's own tip
+  says *"Descends from Sheeplasius dukworthgregorius, which is the row the bracket beside the name
+  joins it to. The line dropping onto its bar is that same link, drawn at the moment the record first
+  named this species."*
+- **The three terms and the heading are all there.** `timeaxis`, `descends` and `lineage` are in the
+  legend and all three open and read, and the plot column finally has a heading — **"time, left to
+  right"** — which is itself term-linked to `timeaxis`.
+- **The seed reveal now moves the axis, which is the whole point of the second span.** Hidden: 18
+  rows, no `Basic bibite`, first tick 08-11 12:00. Revealed: 19 rows, the notice flips to *"…
+  shown … · hide"*, and the axis **stretches back to 08-08** on `spanStartSeedMs`
+  (05:14:36.853Z). The previous window measured this second axis as correct but inert; it is live.
+- **Everything the last sweep passed still passes.** Badges on their own line under `#lfbclip`, the
+  widest ending at x 569.3 with 30.7 px to spare; mini-maps matching the census slot-for-slot; 17
+  sparklines for 17 living rows; brain rings **stable across 8 polls — the same 8 of 17 rows every
+  time, one membership set**; elastic width at 1280 / 1600 / 500 with `now` always on screen and
+  `.lifewrap` the only overflowing element at the floor; search and its miss message; all four hash
+  routes; the ceilings card with all eight limits. `ringstat --species` still prints `Basic bibite`
+  as `never-exported endemic` and still does not hide it — the two vocabularies stay distinct.
+
+**THE ONE DEFECT, AND IT IS THIS COMMIT'S OWN AFFORDANCE.** **A row can take the keyboard's focus
+but cannot keep it for longer than one poll.** The species view repaints every **~2.0 s** (measured
+1809 / 2005 / 2006 ms) and every repaint replaces the whole SVG. `lfFocusKey` is assigned in exactly
+one place — the Enter/Space `keydown` handler, `page.go:3803` — and consumed and nulled at the end
+of `renderLife`, `page.go:3069-3072`. So focus survives the repaint that OPENING a row causes, which
+is all the code's own comment promises and which verifies (Enter opens the row and focus stays on
+it; Space closes it and focus stays), **but not the periodic repaint**: a row focused by Tab is on
+`<body>` within 2.5 s, and because `focusout` calls `lfDark()` the lit lineage goes out with it —
+measured 12 kin lit at focus, 0 kin and no `.lit` 2500 ms later. The keyboard half of *"hover a row,
+or tab to it"* is therefore usable only in two-second bursts, and a reader tabbing down the tree is
+returned to the top of the document roughly twice per row. The mouse half is unaffected, because
+hover re-fires on whatever element the pointer is over after the repaint. The same repaint also drops
+focus from the `show` button, but that is pre-existing — the button was already focusable and the
+rows were not.
+
+**Two smaller things, neither of them new.** A species whose recorded span is effectively a point
+gets a **2.5 px minimum bar**, so with its left edge at 1165.5 it ends at 1168.0 and overhangs the
+`now` line by 2.0 px; four rows did at the sample taken, and the **old build overhangs by the same
+2.2 px**, so it predates the change. And slot 5's `save-health` WARN (2273 ms against the 2000 ms
+budget) is D14's standing watch item answering again, not something this window caused.
+
+**THE BROWSER CACHE PRODUCED A FALSE NEGATIVE, AND THE NEXT SWEEP MUST NOT REPEAT IT.** The first
+page load after the restart served the old HTML and JS out of the browser cache while the new server
+data was already flowing — so the axis fix showed, because it rides `/api/species/tree`, and **none
+of the `page.go` work did**: no caption, no heading, no brackets, zero focusable rows. Read
+literally, that is a report that half the commit did not ship. **A `page.go` change is only visible
+after a cache-bypassing reload**, and any sweep that does not force one is measuring the previous
+build's front end against the current build's data.
+
+**A DRIVER DEFECT COST FIVE MINUTES OF DEGRADED MAP, AND THE TRAP IS ONE LINE DEEP.** `wait_grant`
+hands its mark to `wait_file`, which applies it as `tail -n +$((from + 1))` — a **line count**, and
+`file_mark()` produces it with `wc -l`. The driver passed **byte offsets** from `stat -c %s`, which
+point far past the end of the file, so every wait ran its full 60 s timeout even though every grant
+had already landed within 1.6 s of its sidecar starting. The resume took 5m 06s instead of about ten
+seconds and the map was short of peers for 7m 43.9s instead of 3m 39.5s. No gate failed, all five
+came back `reason=reclaimed` with zero discarded bytes, and nothing was lost — but the crossings
+that would have happened in those five minutes did not. **Use `file_mark`, never `stat -c %s`.**
+
+**And a log-reading caution that has not been written down before: rotation invalidates a byte
+mark.** `sidecar-1.log` crossed its 100 MB ceiling during this window, so a mark taken at
+101,346,359 bytes points past the end of the rotated file and a `tail -c +N` sweep of slot 1 returned
+nothing at all — an absence that reads exactly like a slot that logged nothing. Slot 1's lines for
+this window are in `sidecar-1.log.1`. Mark by line count, or search by timestamp across `*.log*`.
+
+**The rollback set is `/mnt/wsl/data/scratch/gaw-2026-08-13/rollback-bin/`** — `archive.RUNNING`
+(`e61936b6…`, copied from `/proc/46685/exe`), `archive.bin` and `ringstat` (`c8833f86…`). The two
+archive copies were the same bytes for the fourth window running, and are still taken and compared
+rather than assumed. The stamp-stripped comparison `91081ce → 22aca8f` reported **`archive` and
+`ringstat` only**, with `sidecar`, `worldstat`, `relay` and `fakemod` byte-identical, matching a Go
+diff confined to `go/internal/archive`; `bin/` was single-revision going in, so this window needed
+only the one baseline the last one had to add a second to. It retires on the usual rule.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
