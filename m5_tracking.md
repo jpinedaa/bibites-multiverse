@@ -143,6 +143,19 @@ burst, and each one also costs the far end a bundle rebuild.
   species' whole lineage and dims the rest, the parent drop elbows into the child's bar, the row
   tooltip names the parent unopened, and three new glossary terms explain the drawing to a
   first-time reader (`timeaxis`, `descends`, `lineage`).
+  **The view is FINISHED and verified live 2026-08-13** across two windows (652debf, c7692b7):
+  the axis measures **0.00% empty** against 58.1% on the same map minutes earlier — and the two
+  pre-fix readings proved to be the *same* 3.83-day gap, so "the gap widens" was right about
+  duration and wrong about the ratio. The one defect the first sweep found (keyboard focus dying
+  on the ~2 s repaint, taking the lit lineage with it) is fixed and soaked: a tabbed row held
+  focus and its family across **18 consecutive repaints**, row-to-row never blinked dark across
+  2,035 samples. Honest residual: 12 of 18 bars still start within 4 px of `now` (that is what
+  the record holds on a fast-turnover map, not a drawing fault) and the horizontal scale now
+  re-fits between polls. Process lessons recorded: force a cache-bypassing reload when verifying
+  `page.go`; use `file_mark`, never byte offsets, for rig waits; log rotation invalidates a byte
+  mark. One judgement to know: the page's gzip-floor test was relaxed 3× → 2× rather than
+  trimming explanatory prose to pass — the property guarded (a body that stopped compressing)
+  lands at ≤1.0×.
 - **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
   stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
   bars — **replacing both the species tab and the tree tab with one merged view**. Included:
