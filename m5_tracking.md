@@ -156,6 +156,17 @@ burst, and each one also costs the far end a bundle rebuild.
   mark. One judgement to know: the page's gzip-floor test was relaxed 3× → 2× rather than
   trimming explanatory prose to pass — the property guarded (a body that stopped compressing)
   lands at ≤1.0×.
+  **Two further owner observations closed 2026-08-13** (7fbaaa6, verified live c003e5c):
+  collapsed runs now sit ON the time axis across the interval they actually held the line
+  (measured 308.6 px against 308.629 expected for a 40.055 h run — the 40 h of empty plot IS the
+  mark now), and a child recorded before its parent (`Sheeplasius bananenbrotus`, 2h21m) draws
+  backwards in amber from the parent's bar start instead of an impossible geometry. The same
+  commit fitted the brain ring to the drawn set: **226× better discrimination** on today's data
+  (4.000 px spread against 0.0177), real counts on the ring's own tooltip, re-fit caveat written
+  down. **Standing residual, not a defect:** the brain ring depends on archive process uptime —
+  the genome cache empties on restart and the ~160 k fetch backlog refills it slowly, so only 2
+  of 14 rows had a ring 12 min after this restart. The fetch backlog is the lever, not the
+  rendering.
 - **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
   stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
   bars — **replacing both the species tab and the tree tab with one merged view**. Included:
