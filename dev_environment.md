@@ -2341,7 +2341,7 @@ operator's leisure; nothing in WP4 or WP5 moves the wire, so either way it is wi
 **The rollback set for this window is NOT `~/.multiverse-rollback-bin/`.** That set is the
 `contract-b/3.5` binaries and it predates the crossing, so restoring it would take the map back
 across a major. The pre-rollout `contract-b/4.0` binaries this window replaced were copied aside
-first, to **`/mnt/wsl/data/bibites-multiverse-prewp45-bin/`** (`relay`, `sidecar`, `archive`,
+first, to **`/mnt/wsl/data/archives/bibites-multiverse-prewp45-bin/`** (`relay`, `sidecar`, `archive`,
 `multiverse-sidecar.exe`) — that is the set a bad relay rolls back to, and it retires on the same
 rule the crossing's set does: when the map has run a day on the new binaries.
 
@@ -2465,7 +2465,7 @@ moved a wire field — so its operator applies it at their leisure. **The two ro
 into two trips**: one swap now delivers pacing, `--diagnose` and `--my-slot` together, and until it
 happens slot 6 remains the one peer that will burst on a rejoin.
 
-**The rollback set for this window is `/mnt/wsl/data/rollout-wp7-20260812/bin-rollback/`** —
+**The rollback set for this window is `/mnt/wsl/data/scratch/rollout-wp7-20260812/bin-rollback/`** —
 `sidecar` (`4857ded4…`) and `multiverse-sidecar.exe` (`28d2c7e6…`), the pacing-roll binaries these
 replaced. It is not `bibites-multiverse-prewp45-bin/`, which is a roll older, and not
 `~/.multiverse-rollback-bin/`, which is pre-crossing. It retires on the usual rule: when the map has
@@ -2644,7 +2644,7 @@ ONE swap.** `farend/dist/farend-bundle.zip` is now **6,814,671 bytes**, sha256
 `0.6.4`. **The rolls still do not compound into separate trips**: one swap now delivers pacing,
 `--diagnose`, `--my-slot` *and* B26 together, and it is the swap that ends slot 6's warning stream.
 
-**The rollback set for this window is `/mnt/wsl/data/bdw-2026-08-12/rollback-bin/`.** It holds the
+**The rollback set for this window is `/mnt/wsl/data/scratch/bdw-2026-08-12/rollback-bin/`.** It holds the
 whole outgoing set — `relay` (`89a12c97…`), `sidecar` (`1870ef6f…`), `multiverse-sidecar.exe`
 (`ac14bb69…`), `fakemod`, `ringstat`, `worldstat` — plus **`archive.RUNNING` (`e8b13a3d…`), copied
 out of `/proc/<pid>/exe`**, which is the archive that was actually running: `bin/archive` had
@@ -2778,7 +2778,7 @@ only those two were moved over `bin/`. Two smaller traps sit under it: a `go bui
 meaningless; and the binaries actually **installed** must be the rig's own flavour, stamp included,
 so that `go version -m bin/archive` keeps answering which commit is running.
 
-**The rollback set is `/mnt/wsl/data/avw-2026-08-12/rollback-bin/`** — `archive.RUNNING`
+**The rollback set is `/mnt/wsl/data/scratch/avw-2026-08-12/rollback-bin/`** — `archive.RUNNING`
 (`1e30b66e…`, copied from `/proc/2149599/exe`), `archive.bin` and `ringstat` (`7609d23b…`). **This
 time `bin/archive` and the running process were the same bytes**, so the debt window's trap did not
 recur — but the two copies are taken and compared rather than assumed, which is the only way to
@@ -2868,7 +2868,7 @@ archive-only and the five live peers restarted on the very bytes they had been r
 is not automatically a thing to install** — and a plain `go build -o ../bin/ ./cmd/...` after this
 would quietly install two of them, so run it inside a window that means to.
 
-**The rollback set is `/mnt/wsl/data/slv-2026-08-12/rollback-bin/`** — `archive.RUNNING`
+**The rollback set is `/mnt/wsl/data/scratch/slv-2026-08-12/rollback-bin/`** — `archive.RUNNING`
 (`3af843a8…`, copied from `/proc/2266682/exe`), `archive.bin` and `ringstat` (`6f458a5d…`). The two
 archive copies were the same bytes again, as in the archive-views window, but they are still taken
 and compared rather than assumed. It retires on the usual rule.
@@ -3029,7 +3029,7 @@ diff that touches six files, all of them in `go/internal/archive`. Two baselines
 sidecar and worldstat stay at `bde0f1c` and the five live peers restarted on the very bytes they had
 been running.
 
-**The rollback set is `/mnt/wsl/data/gfw-2026-08-12/rollback-bin/`** — `archive.RUNNING`
+**The rollback set is `/mnt/wsl/data/scratch/gfw-2026-08-12/rollback-bin/`** — `archive.RUNNING`
 (`9e57a303…`, copied from `/proc/2466790/exe`), `archive.bin` and `ringstat` (`b0296614…`). The two
 archive copies were the same bytes for the third window running, and are still taken and compared
 rather than assumed. It retires on the usual rule.
