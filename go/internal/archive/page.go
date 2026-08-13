@@ -390,6 +390,10 @@ svg.life .lfrow.self .nm{fill:var(--hot)}
    the tree and read the same lit line; the focus ring is the row's own tint
    rather than a browser outline around an SVG group nobody can see the edges of. */
 svg.life .lfrow:focus{outline:none}
+/* The box holds the focus only as a landing place, when the focused row stops
+   being drawn; a ring around the whole drawing would say far more than "you are
+   still here". The next Tab answers, by walking in at the first row. */
+.lifewrap:focus{outline:none}
 svg.life .lfrow:focus .hit{fill:rgba(90,169,230,.14)}
 svg.life .lfrow:focus .nm{fill:var(--hot)}
 svg.life .detbg{fill:var(--bg);opacity:.55}
@@ -775,7 +779,10 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
       <span>click a row &mdash; or tab to it and press Enter &mdash; for its worlds, its record
         and its parent</span>
     </p>
-    <div class="lifewrap" id="lfbox"></div>
+    <!-- tabindex="-1" is not a tab stop: it is where the focus lands when the
+         row that had it is no longer drawn, so a species leaving the census does
+         not send the reader back to the top of the page. -->
+    <div class="lifewrap" id="lfbox" tabindex="-1"></div>
   </section>
 </div>
 
@@ -1875,9 +1882,17 @@ var LFTREND = null, LFTRENDMETA = null;
    answer, because a search draws a subset and the lineage a reader sees lit must
    be the lineage in front of them.
 
-   lfFocusKey is the row the keyboard is on, carried across the repaint that
-   opening a row causes — otherwise Enter would open a row and throw the reader
-   back to the top of the document.
+   lfFocusKey is the row the keyboard is on, carried across EVERY paint and not
+   only the one that opening a row causes: this view repaints about every two
+   seconds and each paint replaces the whole drawing, so the element holding the
+   focus is destroyed under the reader's hands thirty times a minute. It is set
+   wherever the focus ARRIVES on a row — Tab, a click, the key that opens one, or
+   the paint putting it back — and cleared only when the focus genuinely leaves.
+
+   lfPainting is how that difference is told. A row losing the focus mid-paint is
+   this code taking its element away, not the reader walking off, and browsers
+   disagree about whether that even reports itself — so the paint says so rather
+   than the handler guessing.
 
    LFJOINED IS THE WHOLE AFFORDANCE'S GATE. In the population order this drawing
    draws no edges at all, because rows in abundance order are not in family order
@@ -1885,7 +1900,7 @@ var LFTREND = null, LFTRENDMETA = null;
    which a reader would read as "this species is related to nothing" — a claim
    about the record made out of a sort order. So in that order nothing lights. */
 var LFSVG = null, LFEL = {}, LFLN = {}, LFPAR = {}, LFKID = {}, LFJOINED = false,
-    lfFocusKey = null;
+    lfFocusKey = null, lfPainting = false;
 
 /* One species' whole line: every ancestor above it up to its root, and its whole
    subtree below. Both walks are guarded — the server's own tree is acyclic and
@@ -1925,6 +1940,13 @@ function lfDark(){
   LFSVG.setAttribute("class", "life");
   for (var k in LFEL) LFEL[k].g.setAttribute("class", LFEL[k].base);
   for (var j in LFLN) LFLN[j].g.setAttribute("class", LFLN[j].base);
+}
+/* WHAT THE DRAWING LOOKS LIKE WITH NO POINTER ON IT: the keyboard's row if a row
+   has the focus, dark if none does. The pointer leaving is not the focus leaving,
+   and a reader who tabbed to a row and then moved the mouse across the page must
+   not watch that row's family go out while the row still wears the focus ring. */
+function lfRest(){
+  if (lfFocusKey && LFEL[lfFocusKey]) lfLight(lfFocusKey); else lfDark();
 }
 
 function el(tag, cls, text){
@@ -2248,6 +2270,13 @@ function lfCount(x){
 function lfStats(x, hid, seed){
   var host = document.getElementById("lfstat");
   if (!host) return;
+  // THIS LINE IS REBUILT EVERY POLL TOO, and the one control on it is a real
+  // button — so the keyboard loses it the way the rows lose the focus, and the
+  // reader who just pressed it is the one most likely to press it again. Same
+  // rule as the drawing: the paint puts the focus back only where it took it.
+  var ae = document.activeElement,
+      keepBtn = !!(ae && ae.closest && ae.closest(".seedbtn") && host.contains(ae)),
+      newBtn = null;
   while (host.firstChild) host.removeChild(host.firstChild);
   if (!x || !x.haveStatus){
     host.appendChild(unkEl("the relay has broadcast no map yet"));
@@ -2298,6 +2327,7 @@ function lfStats(x, hid, seed){
       var btn = el("button", "seedbtn", hid > 0 ? "show" : "hide");
       btn.setAttribute("type", "button");
       sd.appendChild(btn);
+      newBtn = btn;
     }
     host.appendChild(sd);
   }
@@ -2336,6 +2366,7 @@ function lfStats(x, hid, seed){
       "— guarded, and drawn as far as it was safe to"));
     host.appendChild(g);
   }
+  if (keepBtn && newBtn && newBtn.focus) newBtn.focus();
 }
 
 /* lfTip is one row's tooltip, as strings in the SP registry — the same registry
@@ -2599,7 +2630,17 @@ function lfBar(g, n, top, sc){
   }
   var x0 = sc.x(n.spanFromMs);
   var x1 = n.alive ? sc.x(sc.t1) : sc.x(n.spanToMs || n.spanFromMs);
-  if (x1 - x0 < 2.5) x1 = x0 + 2.5;
+  // A span too short to see still gets a 2.5 px mark, and the mark is SLID LEFT
+  // rather than grown past the axis — a bar crossing the now line would claim the
+  // record reaches into a future it cannot have. Sliding keeps the mark visible
+  // where shrinking it to the edge would erase the newest rows entirely; it costs
+  // at most 2.5 px of left edge, on a width that is already a minimum and not a
+  // measurement.
+  if (x1 - x0 < 2.5){
+    x1 = x0 + 2.5;
+    var xend = sc.x(sc.t1);
+    if (x1 > xend){ x1 = xend; x0 = xend - 2.5; }
+  }
   var h = n.alive ? LF_BARH : LF_ANCH;
   var bar = svgEl("rect", "lfbar" + (n.alive ? " live" : " ext") +
                           (n.spanDerived ? " derived" : ""));
@@ -2958,6 +2999,40 @@ function lfAxis(x, cols, sc, height){
   return g;
 }
 
+/* THE KEYBOARD KEEPS ITS PLACE ACROSS A PAINT — every paint, not only the one
+   that opening a row causes. The paint that just finished replaced the element
+   the focus was on with an equivalent one, so the focus goes back on the row with
+   the same species key and its family is lit again, exactly as the reader left
+   it. The caller's "mine" is renderLife's decision, taken before the tear-down,
+   about whether the focus was in this drawing at all.
+
+   WHEN THE ROW IS GONE. The drawn set genuinely turns over — a species stops
+   being reported and its row is not in the next paint — and then there is no
+   equivalent element to go back to. Restoring nothing drops the focus on <body>,
+   which is the defect this fixes wearing a different hat: the reader is sent to
+   the top of the document for having read this tab. Moving to some OTHER row
+   would be worse still, because it would light another family and read as if the
+   reader had walked there. So the focus lands on the drawing's own box: no row is
+   focused, nothing is lit, and the reader's next Tab walks into the drawing at
+   its first row instead of starting the page again. */
+function lfRefocus(host, mine){
+  lfPainting = false;
+  if (!mine) return;
+  var ent = LFEL[lfFocusKey];
+  if (ent && ent.g.focus){
+    ent.g.focus();
+    // focus() is expected to fire focusin, which lights the line. The paint lights
+    // it itself as well: a browser that considers the row focused already fires
+    // nothing, and a focus ring on an unlit family is worse than one redundant
+    // pass over a set the census bounds.
+    lfLight(lfFocusKey);
+    return;
+  }
+  lfFocusKey = null;
+  lfDark();
+  if (host.focus) host.focus();
+}
+
 /* renderLife paints the whole view. It rebuilds every poll, which is affordable
    because the node set is bounded by the census that produced it — at most 32
    species a world — and which keeps an expanded row's numbers as fresh as the
@@ -2972,6 +3047,14 @@ function renderLife(x){
   lfStats(x, pick.hid, pick.seed);
   var host = document.getElementById("lfbox");
   if (!host) return;
+  // WHOSE FOCUS THIS IS, decided BEFORE the drawing is torn down. The paint may
+  // put the focus back only if the paint is what took it: a reader who has tabbed
+  // on to the search box, or clicked away entirely, must never be dragged back
+  // into the picture by a poll they did not ask for. No activeElement to report is
+  // read as "still here", which is the state this paint is about to rebuild.
+  var ae = document.activeElement,
+      mine = !!lfFocusKey && (!ae || ae === document.body || host.contains(ae));
+  lfPainting = true;
   while (host.firstChild) host.removeChild(host.firstChild);
   // This view's tooltips are rebuilt with it. They share SP with the map's
   // species runs and are prefixed so neither can clear the other's entries.
@@ -2983,12 +3066,14 @@ function renderLife(x){
 
   if (!x || !x.haveStatus){
     host.appendChild(el("div", "muted", "waiting for the map"));
+    lfRefocus(host, mine);
     return;
   }
   if (!list.length){
     host.appendChild(el("div", "muted", lfQuery
       ? "no species matches that search"
       : "no world is reporting a species right now, so there is nothing to relate"));
+    lfRefocus(host, mine);
     return;
   }
 
@@ -3062,14 +3147,7 @@ function renderLife(x){
   host.appendChild(svg);
   LFSVG = svg;
   LFJOINED = pick.joined;
-  // THE KEYBOARD KEEPS ITS PLACE. Opening a row with Enter repaints the whole
-  // drawing, which destroys the element the focus was on; without this the reader
-  // is returned to the top of the document for having used the keyboard, and the
-  // row they opened is somewhere below them unread.
-  if (lfFocusKey && LFEL[lfFocusKey] && LFEL[lfFocusKey].g.focus){
-    LFEL[lfFocusKey].g.focus();
-  }
-  lfFocusKey = null;
+  lfRefocus(host, mine);
 }
 
 /* ----------------------------------------------------------- the SETTINGS tab
@@ -3781,17 +3859,34 @@ var lfResizeT = 0;
   if (box){
     box.addEventListener("mouseover", function(ev){
       var g = rowOf(ev.target);
-      if (g) lfLight(g.getAttribute("data-k")); else lfDark();
+      if (g) lfLight(g.getAttribute("data-k")); else lfRest();
     });
-    box.addEventListener("mouseleave", lfDark);
+    box.addEventListener("mouseleave", lfRest);
     // THE KEYBOARD GETS THE SAME ANSWER. focusin/focusout bubble where focus and
     // blur do not, which is what lets one listener on the box serve every row.
+    //
+    // AND THE ROW THE FOCUS LANDS ON IS RECORDED HERE, not in the key that opens
+    // one: every way in is the same way in — Tab, a click, the paint putting the
+    // focus back — and the next paint is what needs to know.
     box.addEventListener("focusin", function(ev){
       var g = rowOf(ev.target);
-      if (g) lfLight(g.getAttribute("data-k"));
+      if (!g) return;
+      lfFocusKey = g.getAttribute("data-k");
+      lfLight(lfFocusKey);
     });
+    // A REPAINT IS NOT A BLUR. Only the reader leaving the drawing clears the
+    // keyboard's place; a row losing the focus because the paint took its element
+    // away is the paint's doing and lfRefocus is already putting it back. The
+    // second guard is the same event arriving after the removal instead of during
+    // it, which browsers do not agree about.
     box.addEventListener("focusout", function(ev){
-      if (rowOf(ev.target)) lfDark();
+      var g = rowOf(ev.target);
+      if (!g || lfPainting || g.isConnected === false) return;
+      // Row to row is not leaving either: the focusin that follows relights, and
+      // darkening in between only makes the drawing blink between two rows.
+      if (ev.relatedTarget && rowOf(ev.relatedTarget)) return;
+      lfFocusKey = null;
+      lfDark();
     });
     box.addEventListener("keydown", function(ev){
       if (ev.key !== "Enter" && ev.key !== " " && ev.key !== "Spacebar") return;

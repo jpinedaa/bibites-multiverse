@@ -936,7 +936,7 @@ func TestOneLineageLightsAndTheRestDims(t *testing.T) {
 		}
 	}
 	for _, want := range []string{`box.addEventListener("mouseover"`,
-		`box.addEventListener("mouseleave", lfDark)`, `box.addEventListener("focusin"`,
+		`box.addEventListener("mouseleave", lfRest)`, `box.addEventListener("focusin"`,
 		`box.addEventListener("focusout"`, `box.addEventListener("keydown"`,
 		`if (ev.key !== "Enter" && ev.key !== " " && ev.key !== "Spacebar") return;`} {
 		if !strings.Contains(page, want) {
@@ -944,13 +944,24 @@ func TestOneLineageLightsAndTheRestDims(t *testing.T) {
 				"missing", want)
 		}
 	}
-	// And the focus survives the repaint that opening a row causes, or using the
-	// keyboard would throw the reader back to the top of the document.
-	for _, want := range []string{"lfFocusKey = g.getAttribute(\"data-k\");",
-		"if (lfFocusKey && LFEL[lfFocusKey] && LFEL[lfFocusKey].g.focus){"} {
-		if !strings.Contains(page, want) {
-			t.Fatalf("the keyboard loses its place when a row opens: %q missing", want)
+	// THE POINTER LEAVING IS NOT THE FOCUS LEAVING. A reader who tabbed to a row and
+	// then moved the mouse across the page keeps the focus ring, so the family that
+	// ring belongs to must stay lit — the pointer's exit falls back to the
+	// keyboard's row rather than to darkness.
+	for _, want := range []string{"function lfRest",
+		"if (lfFocusKey && LFEL[lfFocusKey]) lfLight(lfFocusKey); else lfDark();"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the pointer leaving puts out a lineage the keyboard is still on: %q "+
+				"missing", want)
 		}
+	}
+	if !strings.Contains(page, "if (g) lfLight(g.getAttribute(\"data-k\")); else lfRest();") {
+		t.Fatal("the pointer moving off a row darkens a lineage the keyboard may still hold")
+	}
+	// And the focus survives the repaint — see TestTheKeyboardKeepsItsRowAcrossEvery
+	// Paint for the whole of it, which is every paint and not only this one.
+	if !strings.Contains(page, "lfFocusKey = g.getAttribute(\"data-k\");") {
+		t.Fatal("the key that opens a row does not record the row it opened")
 	}
 	// The affordance is explained where a reader will meet it, like every other
 	// mark on this drawing.
@@ -959,6 +970,141 @@ func TestOneLineageLightsAndTheRestDims(t *testing.T) {
 	}
 	if !strings.Contains(page, `<span class="term" data-t="lineage">hover a row, or tab to it</span>`) {
 		t.Fatal("the legend never tells a reader the affordance is there")
+	}
+}
+
+// TestTheKeyboardKeepsItsRowAcrossEveryPaint is the affordance's other half made
+// usable for longer than two seconds.
+//
+// The species view repaints about every two seconds and each paint replaces the
+// whole drawing, so the element holding the keyboard's focus is destroyed thirty
+// times a minute. The first version of this recorded the focused row in one place
+// only — the key that opens one — and nulled it at the end of the paint, so focus
+// survived the paint that OPENING a row causes and no other: a row reached with
+// Tab was on <body> within 2.5 s, its lit family went out with it, and a reader
+// walking down the tree was returned to the top of the document about twice a row.
+//
+// The rule this pins is the whole fix. The focus is recorded wherever it ARRIVES,
+// it is cleared only when the reader genuinely leaves, and the paint puts it back
+// on the row with the same species key — with that row's family lit again, because
+// a focus ring on a dark drawing is a different answer from the one the reader
+// left. What it must NOT do is take the focus that was never its own.
+func TestTheKeyboardKeepsItsRowAcrossEveryPaint(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// ASSIGNED WHERE THE FOCUS LANDS, not only where a row is opened. Tab, a click
+	// and the paint's own restore all arrive as focusin, and that is the one place
+	// that needs to know.
+	for _, want := range []string{`box.addEventListener("focusin", function(ev){`,
+		"lfFocusKey = g.getAttribute(\"data-k\");\n      lfLight(lfFocusKey);"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("a row taking the focus does not record it, so the next paint cannot "+
+				"give it back: %q missing", want)
+		}
+	}
+	// CLEARED ONLY ON A GENUINE BLUR. A row losing the focus because the paint took
+	// its element away is not the reader leaving — the paint says so with lfPainting
+	// while it is tearing the drawing down, and a row already out of the document is
+	// the same event arriving after the removal rather than during it. Row-to-row is
+	// not leaving either.
+	for _, want := range []string{"if (!g || lfPainting || g.isConnected === false) return;",
+		"if (ev.relatedTarget && rowOf(ev.relatedTarget)) return;",
+		"lfFocusKey = null;\n      lfDark();"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the paint's own tear-down reads as the reader walking away: %q missing",
+				want)
+		}
+	}
+	// The paint is what declares itself, on both sides of the tear-down.
+	for _, want := range []string{"lfPainting = true;", "lfPainting = false;",
+		"lfFocusKey = null, lfPainting = false;"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the paint never says it is painting, so the blur it causes is "+
+				"indistinguishable from the reader's: %q missing", want)
+		}
+	}
+	// AND NOT NULLED AT THE END OF A PAINT, which is the defect itself: it made the
+	// focus survive exactly one repaint and then let the next one drop it.
+	if strings.Contains(region, "  lfFocusKey = null;\n}") {
+		t.Fatal("the paint throws the keyboard's place away as it finishes, so the focus " +
+			"survives one repaint and no more")
+	}
+	// PUT BACK BY KEY, WITH THE FAMILY LIT. The element is new; the species key is
+	// what carries across.
+	for _, want := range []string{"function lfRefocus(host, mine){", "var ent = LFEL[lfFocusKey];",
+		"if (ent && ent.g.focus){", "ent.g.focus();", "lfLight(lfFocusKey);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the paint does not put the focus back on the row it just rebuilt: %q "+
+				"missing", want)
+		}
+	}
+	// ONLY IF THE PAINT IS WHAT TOOK IT. A reader who has tabbed on to the search
+	// box, or clicked away entirely, must never be dragged back into the drawing by
+	// a poll — so the decision is taken from activeElement BEFORE the tear-down, and
+	// the restore is gated on it.
+	for _, want := range []string{"var ae = document.activeElement,",
+		"mine = !!lfFocusKey && (!ae || ae === document.body || host.contains(ae));",
+		"if (!mine) return;"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a poll can steal the focus from wherever the reader actually is: %q "+
+				"missing", want)
+		}
+	}
+	// THE ROW THAT IS GONE. The drawn set genuinely turns over, and a species that
+	// stops being reported takes its row out of the next paint. Restoring nothing
+	// drops the focus on <body> — the defect again — and restoring some OTHER row
+	// would light another family and read as if the reader had walked there. The
+	// focus lands on the drawing's own box: nothing lit, no row claimed, and the
+	// next Tab walks in at the first row instead of at the top of the page.
+	for _, want := range []string{"lfFocusKey = null;\n  lfDark();\n  if (host.focus) host.focus();"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a row leaving the census sends the reader back to the top of the "+
+				"document: %q missing", want)
+		}
+	}
+	for _, want := range []string{`<div class="lifewrap" id="lfbox" tabindex="-1">`,
+		".lifewrap:focus{outline:none}"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the box cannot hold the focus it is given as a landing place: %q missing",
+				want)
+		}
+	}
+	// EVERY EXIT FROM THE PAINT RESTORES, including the two that draw a sentence
+	// instead of a drawing — otherwise a poll that finds no rows leaves lfPainting
+	// set and the next genuine blur is ignored for the life of the tab.
+	if got := strings.Count(region, "lfRefocus(host, mine);"); got != 3 {
+		t.Fatalf("the paint restores the focus on %d of its exits, not all 3", got)
+	}
+	// THE SAME REPAINT DROPS THE SEED-REVEAL BUTTON, and the same rule answers it:
+	// the stat line is rebuilt every poll too, so the button the reader just pressed
+	// is a different element a moment later.
+	for _, want := range []string{
+		`keepBtn = !!(ae && ae.closest && ae.closest(".seedbtn") && host.contains(ae)),`,
+		"newBtn = btn;", "if (keepBtn && newBtn && newBtn.focus) newBtn.focus();"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the reveal control loses the keyboard every poll: %q missing", want)
+		}
+	}
+}
+
+// TestTheShortestBarStaysInsideTheAxis pins the minimum mark's right edge to now.
+//
+// A species the record dates to effectively one instant would draw a bar of no
+// width, so it gets 2.5 px — a mark that says "here", not a duration. Grown to the
+// right from a first-seen point that is itself within 2.5 px of the axis end, that
+// mark crosses the now line and claims the record reaches into a future it cannot
+// have. It is slid left instead: the right edge lands on now, the mark keeps its
+// full width, and the newest rows — which are exactly the rows this case is about
+// — stay visible instead of being shrunk to nothing against the edge.
+func TestTheShortestBarStaysInsideTheAxis(t *testing.T) {
+	region := speciesRegion(t)
+	for _, want := range []string{"if (x1 - x0 < 2.5){", "x1 = x0 + 2.5;",
+		"var xend = sc.x(sc.t1);", "if (x1 > xend){ x1 = xend; x0 = xend - 2.5; }"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the shortest bar overhangs the now line, or is clamped to nothing: %q "+
+				"missing", want)
+		}
 	}
 }
 
