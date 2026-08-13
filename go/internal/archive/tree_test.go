@@ -950,15 +950,22 @@ func TestTheLifespanGeometryIsTheRecordsOwnSpan(t *testing.T) {
 			"shape is the reason nothing here is clamped")
 	}
 
-	// THE AXIS. It starts at the oldest thing the picture must hold — here the
-	// record's ancestry floor, carried by a species that is not drawn at all —
-	// and ends now.
+	// THE AXIS. It starts at the OLDEST DRAWN BAR — Beta's, at base+1000 — and ends
+	// now. The record's ancestry floor is half a second older, carried by a species
+	// this picture does not draw, and it does NOT pull the edge back with it: that
+	// clamp existed so the floor could be drawn as a boundary, and it paid for the
+	// boundary with a stretch of plot that holds nothing and grows.
 	if view.AncestrySinceMs != base+500 {
 		t.Fatalf("ancestrySinceMs = %d, want %d", view.AncestrySinceMs, base+500)
 	}
-	if view.SpanStartMs != base+500 {
-		t.Fatalf("spanStartMs = %d, want the record's floor at %d — a floor drawn off the left "+
-			"edge is a boundary no reader can see", view.SpanStartMs, base+500)
+	if view.SpanStartMs != base+1000 {
+		t.Fatalf("spanStartMs = %d, want the oldest drawn bar at %d — the axis fits the record "+
+			"it draws, and the floor is a caption at the margin rather than empty pixels inside "+
+			"it", view.SpanStartMs, base+1000)
+	}
+	if !(view.AncestrySinceMs < view.SpanStartMs) {
+		t.Fatal("the fixture no longer has a floor older than every drawn bar, which is the " +
+			"shape the caption exists for")
 	}
 	if view.SpanEndMs != view.GeneratedAtMs {
 		t.Fatalf("spanEndMs = %d, want now (%d)", view.SpanEndMs, view.GeneratedAtMs)
@@ -1428,8 +1435,9 @@ func TestSeedStockIsTheSpeciesEveryWorldHoldingItRefusesToExport(t *testing.T) {
 // A seed species has been in the record since the record began. If its bar sets
 // the left edge, every bar that IS drawn is squeezed into the right-hand sliver of
 // a picture scaled to a species nobody is looking at. So the published axis is the
-// axis of the DRAWN rows — and the record's own ancestry floor still pins itself
-// inside it, because the floor is a boundary a reader has to be able to see.
+// axis of the DRAWN rows and of nothing else — the record's ancestry floor does
+// not pin itself inside it either, for the same reason and with the same measured
+// cost (TestTheAxisStartsAtTheOldestDrawnBar).
 //
 // AND THE WIDER AXIS IS PUBLISHED TOO. Revealing the seed stock has to stretch the
 // drawing rather than clamp a bar against its left edge, and it has to do that
@@ -1465,10 +1473,10 @@ func TestTheAxisIsFittedToTheSpeciesItDraws(t *testing.T) {
 	if view.AncestrySinceMs != base+2*hour {
 		t.Fatalf("ancestrySinceMs = %d, want %d", view.AncestrySinceMs, base+2*hour)
 	}
-	if view.SpanStartMs != base+2*hour {
-		t.Fatalf("spanStartMs = %d, want the floor at %d: the seed species' six-hour-old bar "+
-			"must not set the left edge of a picture it is not drawn on, and the floor must "+
-			"stay inside it", view.SpanStartMs, base+2*hour)
+	if view.SpanStartMs != base+4*hour {
+		t.Fatalf("spanStartMs = %d, want the one drawn bar's own start at %d: the seed species' "+
+			"six-hour-old bar must not set the left edge of a picture it is not drawn on, and "+
+			"neither must the floor, which is drawn nowhere at all", view.SpanStartMs, base+4*hour)
 	}
 	if view.SpanStartSeedMs != base {
 		t.Fatalf("spanStartSeedMs = %d, want the seed bar's own start at %d — without it a "+
@@ -1485,12 +1493,13 @@ func TestTheAxisIsFittedToTheSpeciesItDraws(t *testing.T) {
 		t.Fatalf("the seed node lost its bar to the axis it was kept out of: %+v", n)
 	}
 
-	// THE FLOOR IS EQUAL TO THE LEFT EDGE, which is the ordinary case and not a
-	// corner: the axis is clamped down to the floor whenever nothing drawn is
-	// older. The page's boundary test has to be >= for exactly this reason.
-	if view.SpanStartMs != view.AncestrySinceMs {
-		t.Fatalf("the fixture no longer produces the equal case (%d vs %d), which is the one "+
-			"the running rig has", view.SpanStartMs, view.AncestrySinceMs)
+	// AND THE FLOOR IS OUTSIDE THE AXIS, which is the ordinary case and the reason
+	// the page captions it at the margin instead of drawing it: two hours of empty
+	// plot here, days of it on the running rig, and more of it every hour the map
+	// runs.
+	if !(view.AncestrySinceMs < view.SpanStartMs) {
+		t.Fatalf("the floor (%d) is not older than the left edge (%d); the fixture no longer "+
+			"produces the shape the caption exists for", view.AncestrySinceMs, view.SpanStartMs)
 	}
 
 	srv := httptest.NewServer(a.httpHandler())
@@ -1502,6 +1511,187 @@ func TestTheAxisIsFittedToTheSpeciesItDraws(t *testing.T) {
 	if served.SpanStartMs != view.SpanStartMs || served.SpanStartSeedMs != view.SpanStartSeedMs {
 		t.Fatalf("the two axes did not survive the wire: %d / %d",
 			served.SpanStartMs, served.SpanStartSeedMs)
+	}
+}
+
+// TestTheAxisStartsAtTheOldestDrawnBar is the axis rule itself, and it exists
+// because the rule it replaced was measured on the running rig and found to be
+// paying for a mark nobody could read.
+//
+// THE OLD RULE clamped both published edges down to AncestrySinceMs, the record's
+// ancestry floor, so the floor was always inside the picture and could be drawn as
+// a dashed boundary with a shaded run behind it. The floor is 2026-08-07 there and
+// the oldest DRAWN bar was days younger, so about two thirds of the plot was a
+// stretch with nothing in it — and the share grew every hour the map ran, because
+// one edge is a fixed date and the other travels with the record.
+//
+// THE NEW RULE is that the drawing fits the living record: the left edge is the
+// oldest drawn bar and nothing else. The floor is still published, still counted
+// on the stat line, and the page captions it at the left margin — a fact in words
+// where it was a boundary made of emptiness.
+//
+// ALL THREE POSITIONS OF THE FLOOR ARE HERE, because the rule has to be the same
+// rule in each: older than every drawn bar (the ordinary case, and the caption's),
+// exactly equal to the oldest (where a boundary line would land on the axis's own
+// edge and mark nothing), and inside the drawn span (where it is a real boundary
+// and the page still draws it — a species whose first crossing named no parent can
+// predate the oldest crossing that named one).
+func TestTheAxisStartsAtTheOldestDrawnBar(t *testing.T) {
+	hour := time.Hour.Milliseconds()
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(30, 0,
+			entry("Beta", "one", 20, 0), entry("Gamma", "two", 10, 0)))},
+	}
+	for _, tc := range []struct {
+		name string
+		// records is what the ledger holds, and floor/start what the view must
+		// publish, both as offsets in hours from the fixture's base.
+		records     func(base int64) []Record
+		floorH      int64
+		startH      int64
+		floorInside bool
+	}{
+		{
+			// THE ORDINARY CASE. The oldest ancestry the record holds belongs to a
+			// species with no living descendant — drawn nowhere — and it is an hour
+			// older than anything on the picture. The axis does not reach back for it.
+			name: "the floor is older than every drawn bar",
+			records: func(base int64) []Record {
+				return []Record{
+					child(base+1*hour, "Dead", "end", "Long", "gone"),
+					migration(base+2*hour, 1, 2, "E", "Beta", "one", "h-beta"),
+					migration(base+3*hour, 1, 2, "E", "Gamma", "two", "h-gamma"),
+				}
+			},
+			floorH: 1, startH: 2,
+		},
+		{
+			// EXACTLY EQUAL. Beta's own first crossing is the first crossing that
+			// ever named a parent, so the floor and the left edge are one instant.
+			// A boundary drawn here sits on the axis's own left edge and separates
+			// nothing from nothing, which is why the page's line is gated on a
+			// strict > and the caption carries this case instead.
+			name: "the floor is the oldest drawn bar",
+			records: func(base int64) []Record {
+				return []Record{
+					child(base+2*hour, "Beta", "one", "Alpha", "nullus"),
+					migration(base+3*hour, 1, 2, "E", "Gamma", "two", "h-gamma"),
+				}
+			},
+			floorH: 2, startH: 2,
+		},
+		{
+			// INSIDE THE SPAN. Beta crossed an hour before anything named a parent
+			// at all, so its bar starts left of the floor. This is the one shape
+			// where the floor is a boundary a reader can see — left of it, no line
+			// in this drawing can begin — and the page still draws it there.
+			name: "the floor is inside the drawn span",
+			records: func(base int64) []Record {
+				return []Record{
+					migration(base+1*hour, 1, 2, "E", "Beta", "one", "h-beta"),
+					child(base+2*hour, "Dead", "end", "Long", "gone"),
+					migration(base+3*hour, 1, 2, "E", "Gamma", "two", "h-gamma"),
+				}
+			},
+			floorH: 2, startH: 1, floorInside: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newViewFixture(t, status, time.Second)
+			base := time.Now().UnixMilli() - 6*hour
+			a.mu.Lock()
+			for _, rec := range tc.records(base) {
+				a.observeSpeciesLocked(rec)
+			}
+			a.mu.Unlock()
+
+			view := a.SpeciesTreeView()
+			if view.AncestrySinceMs != base+tc.floorH*hour {
+				t.Fatalf("ancestrySinceMs = %d, want %d — the fixture no longer places the "+
+					"floor where this case is about", view.AncestrySinceMs, base+tc.floorH*hour)
+			}
+			if view.SpanStartMs != base+tc.startH*hour {
+				t.Fatalf("spanStartMs = %d, want the oldest drawn bar at %d",
+					view.SpanStartMs, base+tc.startH*hour)
+			}
+			// THE FLOOR NEVER MOVES THE EDGE, in any of the three positions. That is
+			// the whole rule, and each case would have failed differently under the
+			// clamp: the first by an hour, the third not at all.
+			if (view.SpanStartMs < view.AncestrySinceMs) != tc.floorInside {
+				t.Fatalf("the floor at %d and the left edge at %d are not the arrangement "+
+					"this case is about (inside = %v)",
+					view.AncestrySinceMs, view.SpanStartMs, tc.floorInside)
+			}
+			// AND WITH NO SEED STOCK ON THE MAP THE TWO EDGES ARE ONE. The revealed
+			// axis holds a superset of the same bars and there is nothing extra to
+			// hold, so a difference here would be a floor pulling one edge and not
+			// the other — the exact defect the clamp used to hide.
+			if view.SpanStartSeedMs != view.SpanStartMs {
+				t.Fatalf("spanStartSeedMs = %d and spanStartMs = %d with no seed species on "+
+					"the map", view.SpanStartSeedMs, view.SpanStartMs)
+			}
+			if view.SpanEndMs != view.GeneratedAtMs || view.SpanStartMs >= view.SpanEndMs {
+				t.Fatalf("the axis is not %d..now: %d..%d",
+					view.SpanStartMs, view.SpanStartMs, view.SpanEndMs)
+			}
+		})
+	}
+}
+
+// TestTheRevealedAxisIsTheSeedBarAndNotTheFloor is the other half of the clamp's
+// removal, and the half that is easy to leave behind.
+//
+// SpanStartSeedMs exists so that revealing the seed stock STRETCHES the axis from
+// the answer already in hand. It was clamped down to the floor as well — so on a
+// map whose floor is older than the seed species' own first crossing, revealing the
+// row produced an axis reaching back to a date no bar on it reaches, which is the
+// same empty stretch the drawn axis had, in the picture that was supposed to be
+// fitted to the seed bar.
+func TestTheRevealedAxisIsTheSeedBarAndNotTheFloor(t *testing.T) {
+	excl := &wire.ExcludeList{Names: []string{"Basic bibite"}}
+	one := slot(1, 0, 0, true, census(50, 0,
+		entry("Basic", "bibite", 40, 0), entry("Beta", "one", 10, 0)))
+	one.Stats.MigrationExclude = excl
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{one},
+	}
+	a := newViewFixture(t, status, time.Second)
+
+	hour := time.Hour.Milliseconds()
+	base := time.Now().UnixMilli() - 8*hour
+	a.mu.Lock()
+	// THE FLOOR IS THE OLDEST THING HERE, and it belongs to a species drawn on
+	// neither picture.
+	a.observeSpeciesLocked(child(base, "Dead", "end", "Long", "gone"))
+	// The seed species, older than everything drawn and younger than the floor.
+	a.observeSpeciesLocked(migration(base+2*hour, 1, 2, "E", "Basic", "bibite", "h-basic"))
+	// And the one row a default reader sees.
+	a.observeSpeciesLocked(migration(base+5*hour, 1, 2, "E", "Beta", "one", "h-beta"))
+	a.mu.Unlock()
+
+	view := a.SpeciesTreeView()
+	if view.AncestrySinceMs != base {
+		t.Fatalf("ancestrySinceMs = %d, want %d", view.AncestrySinceMs, base)
+	}
+	if view.SpanStartMs != base+5*hour {
+		t.Fatalf("spanStartMs = %d, want the drawn bar at %d", view.SpanStartMs, base+5*hour)
+	}
+	if view.SpanStartSeedMs != base+2*hour {
+		t.Fatalf("spanStartSeedMs = %d, want the seed bar's own start at %d — the revealed "+
+			"axis is fitted to the rows it reveals, and the floor is two hours older than the "+
+			"oldest of them", view.SpanStartSeedMs, base+2*hour)
+	}
+	if !(view.AncestrySinceMs < view.SpanStartSeedMs) {
+		t.Fatal("the fixture no longer has a floor older than the seed bar, which is the one " +
+			"shape that tells the clamp apart from the rule")
+	}
+	// AND THE REVEALED AXIS IS STILL THE WIDER OF THE TWO, which is the invariant
+	// the page's reveal depends on: it stretches, never clamps a bar against an edge.
+	if !(view.SpanStartSeedMs < view.SpanStartMs) {
+		t.Fatalf("the revealed axis (%d) is not wider than the drawn one (%d)",
+			view.SpanStartSeedMs, view.SpanStartMs)
 	}
 }
 

@@ -115,9 +115,10 @@ func TestTheSpeciesViewIsAliveOnlyAndSaysSo(t *testing.T) {
 
 	for _, want := range []string{
 		"function renderLife", "function lfRow", "function lfDetail", "function lfDetailLines",
-		"function lfRows", "function lfMatches", "function lfBar", "function lfEdge",
+		"function lfRows", "function lfMatches", "function lfBar", "function lfJoin",
 		"function lfMini", "function lfSpark", "function lfAxis", "function lfTip",
 		"function lfStats", "function lfCount", "function lfScale", "function lfCols",
+		"function lfIndent", "function lfKin", "function lfLight", "function lfDark",
 	} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the species view is missing %q", want)
@@ -251,22 +252,57 @@ func TestTheSpeciesViewDrawsTheRecordAgainstTime(t *testing.T) {
 	if !strings.Contains(page, "generations and not time") {
 		t.Fatal("the glossary never says the dotted length is generations rather than time")
 	}
-	// The record's floor is a BOUNDARY on the picture, not only a caption.
-	//
-	// AND THE TEST IS >=, WHICH IS THE WHOLE MARK. The server clamps the axis down
-	// to the floor so the floor is always inside the picture, so on every map whose
-	// oldest drawn bar is younger than the floor the two are EXACTLY EQUAL — the
-	// running rig's own case, where a strict > drew the boundary on no map at all.
-	for _, want := range []string{`svgEl("line", "floor")`, `svgEl("rect", "prefloor")`,
-		"x.ancestrySinceMs && x.ancestrySinceMs >= sc.t0"} {
+	// THE AXIS IS THE SERVER'S, UNCLAMPED, and the drawing reads the left edge it
+	// publishes rather than reaching for the floor.
+	if !strings.Contains(region, "var t0 = (seed ? (x.spanStartSeedMs || x.spanStartMs) : x.spanStartMs) || 0;") {
+		t.Fatal("the left edge is not the published span start; the axis must fit the bars this " +
+			"drawing holds and nothing else")
+	}
+	// THE RECORD'S FLOOR IS A CAPTION AT THE MARGIN, because the axis starts at the
+	// oldest DRAWN bar now and the floor is older than that on any ordinary map.
+	// Reserving the space back to it left two thirds of the plot empty on the
+	// running rig, and emptier every hour: the floor is a fixed date and the bars
+	// are not. The fact stays in words; only the empty pixels went.
+	for _, want := range []string{`svgEl("text", "floorcap")`,
+		`"the record reaches back to " + trDay(x.ancestrySinceMs)`,
+		`fcap.setAttribute("data-t", "recordfloor")`,
+		`fcap.setAttribute("text-anchor", "end")`} {
 		if !strings.Contains(region, want) {
-			t.Fatalf("the record's floor is not drawn as a boundary: %q missing", want)
+			t.Fatalf("the record's floor is not captioned at the left margin: %q missing", want)
 		}
 	}
-	if strings.Contains(region, "x.ancestrySinceMs > sc.t0") {
-		t.Fatal("the floor is gated on a STRICT >; the axis is clamped down to the floor, so " +
-			"equality is the common case and a strict test hides the boundary exactly when it " +
-			"is the boundary")
+	// AND THE CAPTION COSTS NO DATE. It sits in the ticks' own row, so the leftmost
+	// tick label would straddle its line back over it; that label stands to the
+	// RIGHT of its line instead of being dropped, because the leftmost tick is the
+	// one a reader looks at to find where the axis begins.
+	if !strings.Contains(region, `px - tlbl.length * 3 < capRight + 4 ? "start" : "middle"`) {
+		t.Fatal("the leftmost tick label and the floor's caption share the same row with no rule " +
+			"between them; one of the two facts is printed over the other")
+	}
+	// AND THE SHADED RUN BEFORE IT IS GONE, along with the clamp that made it. It
+	// shaded the stretch the clamp reserved, which is the stretch that no longer
+	// exists.
+	if strings.Contains(page, "prefloor") {
+		t.Fatal("the page still draws the pre-floor shade; with the axis fitted to the drawn " +
+			"bars there is no reserved run for it to shade")
+	}
+	// THE LINE SURVIVES FOR THE CASE THAT EARNS IT: a floor that genuinely falls
+	// INSIDE the drawn span, which happens when a species whose first crossing
+	// named no parent predates the oldest crossing that named one. There it marks a
+	// stretch where no family line in this drawing can begin. The test is a STRICT
+	// > for exactly that reason — at equality the line would sit on the axis's own
+	// left edge and mark nothing.
+	for _, want := range []string{`svgEl("line", "floor")`,
+		"x.ancestrySinceMs && x.ancestrySinceMs > sc.t0"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the floor is no longer drawn where it really is inside the picture: %q "+
+				"missing", want)
+		}
+	}
+	if strings.Contains(region, "x.ancestrySinceMs >= sc.t0") {
+		t.Fatal("the floor line is gated on >=; the axis is no longer clamped down to the " +
+			"floor, so equality means the line lands on the left edge and marks nothing — the " +
+			"caption is what says it there")
 	}
 	// And the axis is UTC and dated, because it is a fixed point weeks back and a
 	// local rendering would put two readers a day apart on the same fact.
@@ -734,6 +770,271 @@ func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
 	}
 	if !strings.Contains(page, "is not the root of this tree") {
 		t.Fatal("the glossary never answers why the game's starting species is not the root")
+	}
+}
+
+// TestTheFamilyIsReadableDownTheLabelColumn is the answer to the owner's reading
+// of the live view: "the ancestry seems a bit hard to tell how the tree is".
+//
+// THE DRAWING SAID DESCENT IN ONE PLACE — a line dropping onto a bar somewhere out
+// in the plot, at the child's first-seen point. That position is the only honest
+// one it has, and it is also the reason the structure was unreadable: with fourteen
+// rows and bars scattered across days of axis, two related rows sit a hand's width
+// apart and the line between them crosses everything in between.
+//
+// SO DESCENT IS SAID TWICE, and the second saying is the one a reader scans: the
+// label column is a printed tree. Every row is indented by its depth — glyph
+// included, because a column of glyphs beside ragged text reads as a list — and a
+// bracket runs from under a parent's glyph down to each child, one rail per parent
+// and one stub per child. It uses no horizontal position that means anything, so it
+// works wherever the bars are.
+func TestTheFamilyIsReadableDownTheLabelColumn(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// The bracket itself, and the shape of it: down the rail, then a stub into the
+	// child's own glyph.
+	for _, want := range []string{`svgEl("path", "tw")`,
+		`"M" + gxp + " " + (py + 7) + " V" + cy + " H" + (gx - 5)`,
+		"svg.life .tw{fill:none;stroke:var(--line)"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the label column draws no parent-child bracket: %q missing", want)
+		}
+	}
+	// THE WHOLE ROW STEPS RIGHT, glyph and name and badges, from ONE function — so
+	// the bracket's stub and the thing it points at cannot drift apart.
+	for _, want := range []string{"function lfIndent",
+		"return joined ? Math.min(n.depth || 0, LF_MAXD) * LF_INDENT : 0;",
+		"var indent = lfIndent(n, joined);",
+		`"translate(" + (LF_GLYPHX + indent) + " " + (top + 12) + ") scale(0.85)"`,
+		`ring.setAttribute("cx", String(LF_GLYPHX + indent))`,
+		`text.setAttribute("x", String(LF_NAMEX + indent))`,
+		`bt.setAttribute("x", String(LF_NAMEX + indent + LF_BADGEX))`,
+		"rowInd[list[i].key] = lfIndent(list[i], pick.joined);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the row does not step right with its depth: %q missing", want)
+		}
+	}
+	// THE BRACKET IS DRAWN FOR A CHILD THE RECORD HAS NEVER DATED. The drop cannot
+	// be — it has no x — but the RELATIONSHIP is known, and a row whose bar is
+	// missing is exactly the row a reader wonders about most. So the bracket comes
+	// first in lfJoin and the drop sits behind the date's own gate.
+	join := region[strings.Index(region, "function lfJoin"):]
+	join = join[:strings.Index(join, "function lfBadges")]
+	tw, drop := strings.Index(join, `svgEl("path", "tw")`), strings.Index(join, "if (n.spanFromMs){")
+	if tw < 0 || drop < 0 || tw > drop {
+		t.Fatal("the bracket is drawn inside the date's gate; a child whose record holds no " +
+			"crossing still has a parent, and that is the row whose family a reader most needs " +
+			"drawn")
+	}
+	// THE DROP TURNS INTO THE BAR rather than crossing it: an elbow at the child's
+	// first-seen point, which is still the only x-coordinate this join can have.
+	for _, want := range []string{"var jx = sc.x(n.spanFromMs);", `" Q" + jx.toFixed(1)`} {
+		if !strings.Contains(join, want) {
+			t.Fatalf("the parent drop is not an elbow into the child's bar: %q missing", want)
+		}
+	}
+	// A LINK IS ONLY A LINK IF BOTH ENDS ARE DRAWN. A hidden seed parent, or a
+	// parent a search left out, leaves the child with no bracket — never a bracket
+	// to a row that is not there, and never a reparenting onto a grandparent.
+	if !strings.Contains(region, "if (!n.parent || rowY[n.parent] == null) continue;") {
+		t.Fatal("the drawing joins a child to a parent that may not be on it")
+	}
+	// And it is jargon, so it carries a glossary entry and a legend line like the
+	// rest of the drawing's marks.
+	if !strings.Contains(page, " descends:[") {
+		t.Fatal("the glossary never explains the bracket or the drop")
+	}
+	if !strings.Contains(page, `"lifespan","timeaxis","descends","lineage",`) {
+		t.Fatal("the new glossary entries are never listed, so nobody can read them")
+	}
+	for _, want := range []string{`<i class="twi"></i><span class="term" data-t="descends">`,
+		".treelegend i.twi{"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the legend never names the bracket: %q missing", want)
+		}
+	}
+}
+
+// TestOneLineageLightsAndTheRestDims is the other half of the same answer, and the
+// half that answers a question the drawing could not answer at all: HOW IS THIS ONE
+// RELATED.
+//
+// Point at a row — or reach it with the Tab key — and everything that is not its
+// ancestor or its descendant fades. It is a class change on elements already on the
+// screen: no request, no rebuild, and nothing moves, because the rest of the
+// drawing keeps its place. Hiding the other rows would reflow the picture under the
+// reader's eye and answer a different question.
+func TestOneLineageLightsAndTheRestDims(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// THE LINE IS BOTH DIRECTIONS: up to the root, and the whole subtree below.
+	for _, want := range []string{"function lfKin", "cur = LFPAR[cur]",
+		"var kids = LFKID[stack.pop()] || [];"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the lit line is not the whole line: %q missing", want)
+		}
+	}
+	// BOTH WALKS ARE GUARDED. The server's tree is acyclic and guarded (tree.go
+	// rule 4); this walks what the PAGE built, which is one more place a loop must
+	// not become a hang.
+	for _, want := range []string{"guard++ < 600", "guard++ < 4000"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a walk over the drawn tree is unguarded: %q missing", want)
+		}
+	}
+	// It is DIMMING and not hiding, and it is a class on things already drawn.
+	for _, want := range []string{"svg.life.lit .lfrow{opacity:.2}",
+		"svg.life.lit .lfrow.kin{opacity:1}", "svg.life.lit .ln{opacity:.12}",
+		"svg.life.lit .ln.kin{opacity:1}"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the lighting is not a dim over the drawing as it stands: %q missing", want)
+		}
+	}
+	for _, want := range []string{"function lfLight", "function lfDark",
+		`LFSVG.setAttribute("class", "life lit")`,
+		`(k === key ? " kin self" : (on[k] ? " kin" : ""))`,
+		`LFLN[k].base + (on[k] ? " kin" : "")`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("lighting a lineage is not a class change over the drawn rows: %q missing",
+				want)
+		}
+	}
+	// THE LINK IS LIT AS ONE THING. Both marks of a parent-child join — the bracket
+	// and the drop — live in one group keyed by the CHILD, so a lit lineage cannot
+	// light half a join.
+	for _, want := range []string{`var g = svgEl("g", "ln");`, `g.setAttribute("data-k", n.key);`,
+		`LFLN[n.key] = {g: lg, base: "ln"};`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a join is not one lightable unit: %q missing", want)
+		}
+	}
+	// NOTHING SURVIVES A REPAINT. The elements the next paint replaces are gone,
+	// and a stale entry would light a row that is not on the screen.
+	if !strings.Contains(region,
+		"LFSVG = null; LFEL = {}; LFLN = {}; LFPAR = {}; LFKID = {}; LFJOINED = false;") {
+		t.Fatal("the lighting's registries outlive the drawing they describe")
+	}
+	// AND NOTHING LIGHTS IN THE POPULATION ORDER, which draws no edges at all.
+	// Lighting one row and dimming every other there would be a claim about the
+	// record made out of a sort order: "this species is related to nothing".
+	for _, want := range []string{"if (!LFSVG || !LFJOINED || !LFEL[key]) return;",
+		"LFJOINED = pick.joined;"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the lighting is not gated on the drawing having drawn a family: %q missing",
+				want)
+		}
+	}
+	// THE KEYBOARD GETS THE SAME ANSWER, which is the whole reason this is not a
+	// :hover rule in the stylesheet: a row is focusable, announced by its <title>,
+	// lit on focus and opened with Enter or Space.
+	for _, want := range []string{`g.setAttribute("tabindex", "0");`,
+		`g.setAttribute("role", "button");`, "svg.life .lfrow:focus .hit{"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("a row cannot be reached or seen with the keyboard: %q missing", want)
+		}
+	}
+	for _, want := range []string{`box.addEventListener("mouseover"`,
+		`box.addEventListener("mouseleave", lfDark)`, `box.addEventListener("focusin"`,
+		`box.addEventListener("focusout"`, `box.addEventListener("keydown"`,
+		`if (ev.key !== "Enter" && ev.key !== " " && ev.key !== "Spacebar") return;`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the lineage affordance is not wired for pointer and keyboard both: %q "+
+				"missing", want)
+		}
+	}
+	// And the focus survives the repaint that opening a row causes, or using the
+	// keyboard would throw the reader back to the top of the document.
+	for _, want := range []string{"lfFocusKey = g.getAttribute(\"data-k\");",
+		"if (lfFocusKey && LFEL[lfFocusKey] && LFEL[lfFocusKey].g.focus){"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the keyboard loses its place when a row opens: %q missing", want)
+		}
+	}
+	// The affordance is explained where a reader will meet it, like every other
+	// mark on this drawing.
+	if !strings.Contains(page, " lineage:[") {
+		t.Fatal("the glossary never explains what the dimming means")
+	}
+	if !strings.Contains(page, `<span class="term" data-t="lineage">hover a row, or tab to it</span>`) {
+		t.Fatal("the legend never tells a reader the affordance is there")
+	}
+}
+
+// TestTheDrawingExplainsWhatItIs is the tooltip inventory, aimed at a reader who
+// has never seen this page: the axis is TIME, a bar is a species' recorded life, a
+// drop is DESCENDED FROM, a dotted lead-in is generations nobody is left of, the
+// caption at the left margin is how far back the record itself goes, and a species
+// with no ancestry has a reason.
+//
+// Every one of those is a term with a glossary entry behind it, because this page's
+// rule is that jargon it invents is jargon it explains — and the drawing itself is
+// the biggest piece of jargon on the tab.
+func TestTheDrawingExplainsWhatItIs(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// THE AXIS IS TIME, and until now nothing said so: the ticks named WHICH
+	// moments and left "left to right is time at all" to be inferred.
+	if !strings.Contains(region, `head(cols.plot, "time, left to right", null, "timeaxis");`) {
+		t.Fatal("the plot has no heading, so nothing on the drawing says the direction is time")
+	}
+	for _, want := range []string{" timeaxis:[", " descends:[", " lineage:["} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the glossary never explains %q", want)
+		}
+	}
+	// The axis entry has to hold the two things a reader gets wrong about it: the
+	// left edge is not the beginning of anything, and one mark on the drawing is not
+	// on the clock at all.
+	for _, want := range []string{"The left-hand edge is the OLDEST BAR ON THE PICTURE",
+		"whose length counts generations"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the time-axis entry never says %q", want)
+		}
+	}
+	// THE MARKS THAT CARRY A TERM ON THE DRAWING ITSELF, each hoverable where it is
+	// drawn: the caption at the margin, the collapsed lead-in, the brain ring.
+	for _, want := range []string{`fcap.setAttribute("data-t", "recordfloor")`,
+		`gt.setAttribute("data-t", "collapsed")`, `ring.setAttribute("data-t", "brainsize")`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a mark on the drawing carries no explanation: %q missing", want)
+		}
+	}
+	// THE ROW'S OWN TOOLTIP NAMES ITS PARENT, which used to need a click. The three
+	// arrangements are three sentences, because a bracket that skips a run of
+	// collapsed generations does not say what a direct one says.
+	for _, want := range []string{`lines.push("Descends from " + n.parentName`,
+		"which is the row the bracket beside the ",
+		"the bracket beside the name reaches past it to the nearest ancestor that IS drawn",
+		"line is alive on this map, so there is no row above this one to join it to."} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the row's tooltip never says who it descends from: %q missing", want)
+		}
+	}
+	// AND THE ABSENCES ARE EXPLAINED TOO, which is the case a first-time reader
+	// meets on this map: a species with no ancestry at all, and a bar the record
+	// cannot date.
+	for _, want := range []string{
+		"No crossing of it has ever named a parent species, so the record cannot say ",
+		"No crossing of it has ever been recorded, so the drawing can date neither ",
+		"The dotted lead-in above it stands for "} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("an absence on the drawing goes unexplained: %q missing", want)
+		}
+	}
+	// The legend names the bar itself, which is the mark most likely to be read as
+	// a lifespan by someone who has read nothing else.
+	if !strings.Contains(page, `<i class="bari"></i><span class="term" data-t="lifespan">a bar</span>`) {
+		t.Fatal("the legend's bar carries no term, so the one mark this drawing can be misread " +
+			"as has no explanation where it is named")
+	}
+	// And the keyboard route into the detail is on the legend, not only in the
+	// glossary: a reader who cannot use a mouse should not have to hover to find out
+	// that hovering is optional.
+	if !strings.Contains(page, "or tab to it and press Enter") {
+		t.Fatal("the legend never says a row can be opened from the keyboard")
 	}
 }
 

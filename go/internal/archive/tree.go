@@ -372,25 +372,40 @@ type SpeciesTree struct {
 
 	// ---- THE TIME AXIS every bar is drawn against.
 	//
-	// SpanStartMs is the left-hand edge: the earliest thing this drawing has to
-	// hold, which is the oldest DRAWN bar start OR the record's own ancestry
-	// floor, whichever is older — so the floor is always INSIDE the picture and
-	// can be drawn as the boundary it is. SpanEndMs is now.
+	// SpanStartMs is the left-hand edge: THE OLDEST DRAWN BAR'S START, and nothing
+	// else. SpanEndMs is now. The drawing fits the living record.
+	//
+	// IT WAS CLAMPED DOWN TO AncestrySinceMs ONCE, so the floor would always be
+	// inside the picture and could be drawn as a boundary there. Measured on the
+	// running rig, that reserved about two thirds of the plot for a stretch with
+	// nothing in it — the floor is a FIXED DATE and the oldest drawn bar is days
+	// younger — and the empty share grew every hour the map ran, because one edge
+	// moves with the record and the other does not. A boundary whose whole content
+	// is emptiness is not a boundary a reader learns anything from.
+	//
+	// SO THE FLOOR IS A FACT AND NOT A WIDTH. It is still published here, still
+	// counted on the stat line, and the page captions it at the LEFT MARGIN of the
+	// axis ("the record reaches back to …") and links that caption to the glossary
+	// entry that explains it. Where the floor genuinely falls INSIDE the drawn span
+	// — a species whose first crossing named no parent can predate the oldest
+	// crossing that named one — the page still draws it as the boundary it then is.
+	// Nothing about the fact is lost; only the empty pixels are.
 	//
 	// THE SEED STOCK IS NOT IN IT. A seed species is excluded from migration
 	// everywhere it lives, has been in the record since the record began, and its
 	// bar is not drawn by default — so letting it set the left edge would scale
 	// every bar that IS drawn against a span nothing on the picture participates
-	// in. The axis fits the participants; the floor still pins itself inside.
+	// in. The axis fits the participants.
 	//
 	// SpanStartSeedMs is that same edge computed with the seed stock's bars in
 	// it, published so a page that reveals them stretches the axis rather than
 	// clamping their start against the left edge — and does it from the answer it
 	// already holds, with no second request. It is never later than SpanStartMs.
 	//
-	// All of them are published rather than left to the renderer to infer,
-	// because a renderer inferring them from the nodes alone would put the floor
-	// off the left edge on every map whose oldest bar is younger than the floor.
+	// Both are published rather than left to the renderer to infer, because the
+	// renderer draws a SUBSET of the nodes and the two edges are the two subsets:
+	// a page inferring one edge from the rows it happens to be drawing could not
+	// stretch to the other without a second request.
 	SpanStartMs     int64 `json:"spanStartMs,omitempty"`
 	SpanStartSeedMs int64 `json:"spanStartSeedMs,omitempty"`
 	SpanEndMs       int64 `json:"spanEndMs,omitempty"`
@@ -885,19 +900,11 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 			}
 		}
 	}
-	// THE FLOOR IS ALWAYS INSIDE THE PICTURE, whichever picture is drawn. It is
-	// where the record's ancestry begins, and a drawing that put it off the left
-	// edge would leave every root badge pointing at something the reader cannot
-	// see. It pins both edges, so revealing the seed stock cannot push it out
-	// either.
-	if out.AncestrySinceMs > 0 {
-		if out.SpanStartMs == 0 || out.AncestrySinceMs < out.SpanStartMs {
-			out.SpanStartMs = out.AncestrySinceMs
-		}
-		if out.SpanStartSeedMs == 0 || out.AncestrySinceMs < out.SpanStartSeedMs {
-			out.SpanStartSeedMs = out.AncestrySinceMs
-		}
-	}
+	// AND THAT IS THE WHOLE AXIS. The record's ancestry floor is NOT pulled into
+	// it: it is older than everything drawn on any ordinary map, and clamping the
+	// edge down to it bought a boundary line at the price of a plot that was
+	// mostly empty and got emptier (SpanStartMs). The floor travels as the fact it
+	// is — AncestrySinceMs, above — and the page captions it at the margin.
 	if out.SpanStartMs == 0 || out.SpanStartMs >= out.SpanEndMs {
 		// Nothing here is dated, or every date is in the future — which is a
 		// clock, not a genealogy. An hour of axis is drawn rather than a degenerate

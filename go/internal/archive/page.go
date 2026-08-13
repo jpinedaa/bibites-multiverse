@@ -359,11 +359,39 @@ svg.life .trendbase{stroke:var(--line);stroke-width:1}
 svg.life .grid{stroke:var(--line);stroke-width:1;opacity:.5}
 svg.life .tick,svg.life .colhd{fill:var(--dim);font-size:10px;letter-spacing:.04em}
 svg.life .nowline{stroke:var(--live);stroke-width:1;opacity:.55}
-/* The record's floor: everything left of it is crossings that named no parent at
-   all, which is why no edge in the drawing can start there. */
+/* The record's floor. IT IS OFF THE LEFT EDGE ON AN ORDINARY MAP — the axis is
+   fitted to the oldest DRAWN bar and the floor is a fixed date days older — so it
+   is a CAPTION at the margin, in the quiet colour the ticks wear, and it costs no
+   pixels. The dashed line and its amber label are for the case where the floor
+   really does fall inside the drawn span, where it is a boundary a reader can
+   see: left of it, no edge in this drawing can begin. */
 svg.life .floor{stroke:var(--warn);stroke-width:1.2;stroke-dasharray:4 3;opacity:.8}
 svg.life .floorlbl{fill:var(--warn);font-size:9.5px;cursor:help}
-svg.life .prefloor{fill:var(--hole);opacity:.10}
+svg.life .floorcap{fill:var(--dim);font-size:9.5px;cursor:help}
+/* ---- THE FAMILY, DRAWN IN THE LABEL COLUMN.
+   A bracket per parent-child link: straight down from under the parent's own
+   glyph, then a stub right into the child's. Siblings lay their rails on the same
+   x, so a parent with three children reads as one rail with three stubs — and the
+   last stub is where the rail stops, which is the whole of what a "└" says. It is
+   the same --line the plot's drop is drawn in: one relationship, one colour, two
+   places. */
+svg.life .tw{fill:none;stroke:var(--line);stroke-width:1.2;stroke-linejoin:round}
+/* ---- ONE LINE, LIT. Hovering or tab-focusing a row dims every row that is not
+   its ancestor or its descendant, which is the fastest honest answer to "how is
+   this one related". Dimming rather than hiding: the rest of the drawing keeps
+   its place, so nothing moves under the reader's eye. */
+svg.life.lit .lfrow{opacity:.2}
+svg.life.lit .lfrow.kin{opacity:1}
+svg.life.lit .ln{opacity:.12}
+svg.life.lit .ln.kin{opacity:1}
+svg.life .ln.kin .link,svg.life .ln.kin .tw{stroke:var(--hot);stroke-width:1.8}
+svg.life .lfrow.self .nm{fill:var(--hot)}
+/* The keyboard's own mark. A row is focusable, so a reader with no mouse can walk
+   the tree and read the same lit line; the focus ring is the row's own tint
+   rather than a browser outline around an SVG group nobody can see the edges of. */
+svg.life .lfrow:focus{outline:none}
+svg.life .lfrow:focus .hit{fill:rgba(90,169,230,.14)}
+svg.life .lfrow:focus .nm{fill:var(--hot)}
 svg.life .detbg{fill:var(--bg);opacity:.55}
 svg.life .det{fill:var(--text);font-size:11px;white-space:pre}
 svg.life .det .dk{fill:var(--dim)}
@@ -377,6 +405,9 @@ border-radius:50%;vertical-align:-1px;margin-right:5px}
 border-radius:2px;vertical-align:-1px;margin-right:5px}
 .treelegend i.chaini{display:inline-block;width:22px;height:0;border-top:1.2px dotted var(--dim);
 vertical-align:middle;margin-right:5px}
+/* The bracket the label column draws between a parent row and a child row. */
+.treelegend i.twi{display:inline-block;width:9px;height:9px;border-left:1.2px solid var(--dim);
+border-bottom:1.2px solid var(--dim);vertical-align:1px;margin-right:5px}
 .treelegend i.doti{display:inline-block;width:7px;height:7px;background:var(--text);
 border-radius:50%;vertical-align:0;margin-right:5px}
 .treestat{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;margin-bottom:10px}
@@ -724,7 +755,15 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
       <span><i class="bibi"></i>alive &mdash; a leaf, or a living ancestor; the glyph&rsquo;s
         colour is the species and nothing else here is coloured</span>
       <span><i class="ringi"></i>an ancestor alive nowhere that is reporting</span>
-      <span><i class="bari"></i>first recorded crossing &rarr; last, or &rarr; now while alive</span>
+      <span><i class="bari"></i><span class="term" data-t="lifespan">a bar</span> &mdash; first
+        recorded crossing &rarr; last, or &rarr; now while alive</span>
+      <span><i class="twi"></i><span class="term" data-t="descends">descended from</span>
+        &mdash; the bracket in the name column, and the line dropping onto a bar where the
+        record first names that species</span>
+      <span><span class="term" data-t="timeaxis">the clock along the top</span> &mdash; left is
+        older, the right-hand edge is now</span>
+      <span><span class="term" data-t="lineage">hover a row, or tab to it</span> &mdash;
+        everything not in its family dims</span>
       <span><i class="chaini"></i>&plus;<b>n</b> &mdash; extinct generations collapsed; the
         dotted length counts <span class="term" data-t="collapsed">generations, not time</span></span>
       <span><i class="ringi braini"></i><span class="term" data-t="brainsize">brain size</span>
@@ -733,7 +772,8 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
         on the map&rsquo;s own grid</span>
       <span><span class="term" data-t="trend">the 24 h line</span> &mdash; its population
         across the map</span>
-      <span>click a row for its worlds, its record and its parent</span>
+      <span>click a row &mdash; or tab to it and press Enter &mdash; for its worlds, its record
+        and its parent</span>
     </p>
     <div class="lifewrap" id="lfbox"></div>
   </section>
@@ -869,12 +909,15 @@ var G = {
  parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. One crossing carries one generation of this, and the drawing on this tab is what happens when you chain them: if this species' parent has a parent of its own, recorded by some other crossing, the record joins them up, and the line dropping onto this species' bar is that join. Nothing is resolved against any world's own register — the register lives inside one copy of the game and only that copy can read it — so what a family tree here says is what the record says, which is a smaller and more honest claim."],
  genealogy:["the family tree","Every species alive right now, arranged by who came from whom. The information comes from one place: when a creature walks out of a world, that world names the creature's species AND the species it split off from. One crossing tells you one generation. Thousands of crossings, chained together, tell you the shape of the family — and on this map that shape runs about forty generations deep. What is drawn is only the part that still matters: the living species, and the ancestors where two or more living lines part company. Everything else is left out, and where a whole run of ancestors is left out the edge says how many."],
  branchpoint:["a branch point","An ancestor that is drawn even though nothing of its kind is alive anywhere, because two or more living species descend from it by different children. It is the answer to 'how are these two related' — the most recent point their lines were the same. An ancestor with only ONE living line below it is not a branch point and is not drawn: it would be a step in a corridor with no doors."],
+ timeaxis:["the clock along the top","This drawing is a CALENDAR, not a ranking. Every position across it is a real moment in UTC, the dates and times along the top are that clock, and the right-hand edge is NOW — which is why every living species' bar reaches it. The left-hand edge is the OLDEST BAR ON THE PICTURE and nothing more: it is not the beginning of the map, of the record, or of anything else, and the axis re-fits itself as the rows change, so revealing a hidden row can widen it. The record itself usually reaches further back than the left edge does, and the caption at the left margin says how far. One mark on the drawing is NOT on this clock: the dotted lead-in above a row, whose length counts generations. It is dotted for exactly that reason."],
+ descends:["descended from","Who came from whom, drawn twice, because the two halves answer different questions. IN THE NAME COLUMN a bracket joins a parent row to each of its children and the children are indented one step, so the shape of the family reads straight down the page even when the bars themselves are far apart. IN THE PLOT a line drops from the parent's row onto the child's bar at the moment the record FIRST NAMES that child — that is the one horizontal position the join can honestly have, and it is why a child's bar can start before its parent's own bar does when the parent only ever travelled later. A row with no bracket has no parent on this drawing: it is a root, and the badge on it says whether the record holds ancestors above it anyway."],
+ lineage:["one family, lit","Point at a row — or move to it with the Tab key — and everything that is not related to it fades: what stays lit is the line of ancestors above it, all the way to its root, and every species below it. It is the fastest answer to 'how is this one related to the rest', and it needs no click, changes nothing, and moves nothing on the page. Pressing Enter or Space on a focused row opens its detail, exactly as clicking it does."],
  collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE dotted edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. So the number is the difference between the two. The dotted run has a LENGTH, and that length counts generations and not time: everything else on this drawing is measured against the clock along the top, and this one mark is not, which is why it is dotted and why the number is printed beside it."],
  lifespan:["the bar, and what it is not","A species' bar starts at the first crossing THIS ARCHIVE RECORDED of it and ends at the last one, or at the right-hand edge while the species is still alive somewhere. It is not a lifespan and this page never calls it one. A kind can have lived for days before anything of it walked into another world, and a kind whose bar stopped last Tuesday may be alive and simply staying at home — what stopped is the record, and the only honest thing a record can draw is itself. The one place the drawing goes beyond that is an ancestor no crossing of its own was ever recorded for: its bar begins at its earliest recorded DESCENDANT, because that descendant's crossing named it as a parent, so the record does support 'it existed by then' and supports nothing earlier. Those bars are drawn hollow."],
  brainsize:["brain size","The ring at the end of a species' bar. Every creature carries a brain — a little network of neurons wired together by synapses — and this is how big the newest one of that species the archive has a copy of actually is: a bigger ring is more neurons and more synapses. It is drawn from ONE genome per species, the latest the crossing record named, and it is read out of the copy in the archive's own store. WHERE THERE IS NO RING THERE IS NO ANSWER, which is not the same as a small brain: the copy may never have arrived, or may have been deleted once it was older than the retention horizon. The record of the crossing stays forever either way; the genetic material is the part that ages out."],
  minimap:["where it lives","The little grid of dots beside a species, laid out the way the map itself is laid out — this map is three worlds wide and two high, so it is three dots by two, and a different map would draw a different grid. A filled dot is a world where this species is alive right now. A hollow dot is a world that sent its census and did not name it. A dashed amber dot is a world reporting no census at all, which is UNKNOWN and never 'not there'. A seat nobody has claimed is drawn as nothing."],
  trend:["the 24-hour line","A small line of this species' population across the whole map over the last day, from the archive's own sample file — the shape, not the numbers. A gap in the line is a stretch where no world reported a census, which is unknown and never a zero. Every one of these lines comes from a single answer covering every living species at once, so the column costs one request rather than one per species. This record began when the archive did, so a short line is a short record and not a young species."],
- recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive holds that named a parent at all — anything older than it is a crossing that named none. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw."],
+ recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive holds that named a parent at all — anything older than it is a crossing that named none. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw. THE DATE IS USUALLY OLDER THAN THE PICTURE, which is why it is printed at the left margin of the clock rather than drawn on it: the drawing is fitted to the oldest bar it actually holds, and reserving the space back to this date would leave most of the plot empty and more of it empty every hour. Where the date does fall inside the picture it is drawn there, as a dashed line, because then it separates a stretch where no family line can begin from one where they can."],
  noancestry:["no recorded ancestry","This species is alive, and no crossing of it has ever named a parent species — so the record cannot say where it came from, and it is drawn on its own. That is not a fault in the species and not a fault in the map: ancestry here is a by-product of TRAVEL, and a kind that has stayed home has left no record to carry it. A separate note is used for a species whose ancestry IS recorded but whose whole family has died out; those two are different facts and are never given the same label."],
  settings:["settings","What a world was TOLD to do, as opposed to what it is doing. Everything else on this page is a measurement or a receipt; these are the knobs behind them — how often it saves, which species it refuses to export, whether its edges wrap. They are the reason a number elsewhere looks the way it does, and they are read-only here on purpose."],
  readonly:["read-only","This page shows settings and changes none of them. Changing another machine's world from a web page is a much bigger thing than showing one — it needs a login, a rule about who may change what, an answer for what happens when two people change the same thing at once, and a record of who changed it — and none of that is a small extension of showing a value. It is deliberately left for later."],
@@ -894,7 +937,8 @@ var G = {
     "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
     "rawname","endemic","everywhere","excluded","seedstock","crossings","speciesgenomes",
     "parentspecies",
-    "genealogy","lifespan","branchpoint","collapsed","noancestry","recordfloor",
+    "genealogy","lifespan","timeaxis","descends","lineage",
+    "branchpoint","collapsed","noancestry","recordfloor",
     "minimap","trend","brainsize",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
@@ -1817,6 +1861,72 @@ var LFX = null, lfOpenKey = null, lfQuery = "", lfSort = "family";
    entry draws no line — never a flat one, which would be a claim. */
 var LFTREND = null, LFTRENDMETA = null;
 
+/* ---- WHAT THE LAST PAINT PUT ON THE SCREEN, so one lineage can be lit without
+   repainting anything.
+
+   LFEL and LFLN hold the drawn rows and the drawn parent-child links by species
+   key, each with the class string it was built with — the BASE, which lighting
+   adds to and unlighting restores. Keeping the base beside the element is what
+   lets a row be lit and unlit without the code having to remember whether that
+   row was also open, also an ancestor, also anything else.
+
+   LFPAR and LFKID are the drawn tree itself: parent by key, children by key.
+   They are rebuilt from the rows this paint actually produced, never from the
+   answer, because a search draws a subset and the lineage a reader sees lit must
+   be the lineage in front of them.
+
+   lfFocusKey is the row the keyboard is on, carried across the repaint that
+   opening a row causes — otherwise Enter would open a row and throw the reader
+   back to the top of the document.
+
+   LFJOINED IS THE WHOLE AFFORDANCE'S GATE. In the population order this drawing
+   draws no edges at all, because rows in abundance order are not in family order
+   (lfRows). Lighting "the line" there would light one row and dim every other,
+   which a reader would read as "this species is related to nothing" — a claim
+   about the record made out of a sort order. So in that order nothing lights. */
+var LFSVG = null, LFEL = {}, LFLN = {}, LFPAR = {}, LFKID = {}, LFJOINED = false,
+    lfFocusKey = null;
+
+/* One species' whole line: every ancestor above it up to its root, and its whole
+   subtree below. Both walks are guarded — the server's own tree is acyclic and
+   guarded (tree.go rule 4), and this walks what the PAGE built, which is one more
+   place a loop must not become a hang. */
+function lfKin(key){
+  var on = {}, cur = key, guard = 0;
+  while (cur && !on[cur] && guard++ < 600){ on[cur] = true; cur = LFPAR[cur]; }
+  var stack = [key];
+  while (stack.length && guard++ < 4000){
+    var kids = LFKID[stack.pop()] || [];
+    for (var i=0;i<kids.length;i++){
+      if (!on[kids[i]]){ on[kids[i]] = true; stack.push(kids[i]); }
+    }
+  }
+  return on;
+}
+
+/* Light one lineage and dim the rest. It is a class change on elements already on
+   the screen: no request, no rebuild, nothing moves. THE DIMMING IS THE POINT —
+   hiding the other rows would reflow the drawing under the reader's eye and
+   answer a different question. */
+function lfLight(key){
+  if (!LFSVG || !LFJOINED || !LFEL[key]) return;
+  var on = lfKin(key), k;
+  LFSVG.setAttribute("class", "life lit");
+  for (k in LFEL){
+    LFEL[k].g.setAttribute("class", LFEL[k].base +
+      (k === key ? " kin self" : (on[k] ? " kin" : "")));
+  }
+  for (k in LFLN){
+    LFLN[k].g.setAttribute("class", LFLN[k].base + (on[k] ? " kin" : ""));
+  }
+}
+function lfDark(){
+  if (!LFSVG) return;
+  LFSVG.setAttribute("class", "life");
+  for (var k in LFEL) LFEL[k].g.setAttribute("class", LFEL[k].base);
+  for (var j in LFLN) LFLN[j].g.setAttribute("class", LFLN[j].base);
+}
+
 function el(tag, cls, text){
   var e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -1888,6 +1998,27 @@ var LF_BADGEH = 13, LF_BADGEX = 6;
    species, and the same thickness for every species of a kind. THICKNESS IS NOT
    THE BRAIN — see lfBrainR. */
 var LF_BARH = 8, LF_ANCH = 4;
+/* ---- THE FAMILY, READ DOWN THE LABEL COLUMN.
+
+   The drawing said who descends from whom in ONE place: a line dropping onto a
+   bar somewhere out in the plot. With fourteen rows and bars scattered across
+   days of axis, two related rows can be a hand's width apart and the drop between
+   them crosses everything in between — so the structure was there and unreadable.
+
+   So it is said TWICE, and the second saying is the one a reader scans: every row
+   is indented by its depth, and a bracket joins a parent's row down to each of its
+   children — one rail per parent, one stub per child, the last stub ending the
+   rail. That is the shape of a printed tree, and it works no matter where the bars
+   are, because it uses no horizontal position that means anything.
+
+   THE INDENT IS CAPPED. Forty generations of it would push every name off its own
+   column, so past LF_MAXD the rows stop stepping right; the bracket is still drawn
+   between the true parent and the true child, so what a reader sees is a family
+   that stops indenting rather than a family that changes shape. */
+var LF_INDENT = 13, LF_MAXD = 6;
+function lfIndent(n, joined){
+  return joined ? Math.min(n.depth || 0, LF_MAXD) * LF_INDENT : 0;
+}
 /* A collapsed run of generations, drawn as a dotted lead-in whose LENGTH COUNTS
    GENERATIONS AND NOT TIME. Five pixels a generation, floored so one generation
    is still visible and capped so forty do not cross the whole picture; the
@@ -2258,6 +2389,32 @@ function lfTip(n){
       "latest genome of it this archive holds a copy of. The ring at the end of the bar is " +
       "that size.");
   }
+  // WHO IT CAME FROM, WITHOUT OPENING THE ROW. The name of the parent species was
+  // only ever in the expanded detail, so the drawing's own subject — descent —
+  // was the one thing a reader had to click for. It is safe here for the reason
+  // every name on this view is safe: a tip is filled with textContent (showTip),
+  // never with markup.
+  //
+  // AND THE THREE CASES ARE THREE SENTENCES. A row whose bracket goes to its
+  // actual recorded parent is not the same as one whose bracket skips a run of
+  // extinct generations, and neither is the same as one whose parent is not on
+  // this drawing at all.
+  if (n.parentName){
+    if (n.collapsed > 0){
+      lines.push("The record names " + n.parentName + " as its parent species. Nothing of " +
+        "that one is alive and no other living line runs through it, so it is not a row here: " +
+        "the bracket beside the name reaches past it to the nearest ancestor that IS drawn, " +
+        n.collapsed + " generation(s) further up, and the dotted lead-in stands for the ones " +
+        "in between.");
+    } else if (n.parent){
+      lines.push("Descends from " + n.parentName + ", which is the row the bracket beside the " +
+        "name joins it to. The line dropping onto its bar is that same link, drawn at the " +
+        "moment the record first named this species.");
+    } else {
+      lines.push("The record names " + n.parentName + " as its parent species. Nothing of that " +
+        "line is alive on this map, so there is no row above this one to join it to.");
+    }
+  }
   if (n.ancestryKnown){
     lines.push("The record traces it back " + n.ancestryDepth + " generation(s).");
     // WHAT THE ROOT BADGE MEANS, on the node that wears it: those generations
@@ -2463,29 +2620,56 @@ function lfBar(g, n, top, sc){
   }
 }
 
-/* The join to the parent: a drop from the parent's row to this one AT THIS
-   SPECIES' FIRST-SEEN POINT, which is the instant the record first says this
-   kind exists. Where the edge stands for a run of collapsed generations, a
-   dotted lead-in runs back from that point and the number is printed on it. */
-function lfEdge(links, n, rowY, cols, sc){
+/* ONE PARENT-CHILD LINK, DRAWN IN BOTH PLACES, in one group of its own.
+
+   THE BRACKET, in the label column: down from under the parent's glyph to the
+   child's row, then a stub into the child's glyph. Siblings lay their rails on
+   the same x, so a parent with three children reads as one rail with three stubs
+   and the last stub ends it. It is drawn for EVERY link, including one whose
+   child the record has never dated — the relationship is known even when the
+   moment is not, and that is exactly the row a reader is most likely to wonder
+   about.
+
+   THE DROP, in the plot: from the parent's row onto the child's bar AT THIS
+   SPECIES' FIRST-SEEN POINT, which is the instant the record first says this kind
+   exists — the one horizontal position the join can honestly have. It turns into
+   the bar with a small elbow rather than crossing it, so that at a glance it
+   flows into the bar it belongs to instead of competing with it. Where the edge
+   stands for a run of collapsed generations, a dotted lead-in runs back from that
+   point and the number is printed on it.
+
+   THE GROUP IS THE UNIT OF LIGHTING. Both marks carry the child's key, so
+   lighting one lineage lights the whole link and never half of it. */
+function lfJoin(links, n, rowY, rowInd, cols, sc){
   var py = rowY[n.parent], cy = rowY[n.key];
-  if (py == null || cy == null || !n.spanFromMs) return;
-  var jx = sc.x(n.spanFromMs);
-  var drop = svgEl("path", "link");
-  drop.setAttribute("d", "M" + jx.toFixed(1) + " " + py + " V" + cy);
-  links.appendChild(drop);
-  if (n.collapsed > 0){
-    var from = Math.max(cols.plot - 18, jx - lfChainLen(n.collapsed));
-    var chain = svgEl("path", "chain");
-    chain.setAttribute("d", "M" + from.toFixed(1) + " " + cy + " H" + jx.toFixed(1));
-    links.appendChild(chain);
-    var gt = svgEl("text", "gen");
-    gt.setAttribute("x", from.toFixed(1));
-    gt.setAttribute("y", String(cy - 4));
-    gt.setAttribute("data-t", "collapsed");
-    gt.textContent = "+" + n.collapsed;
-    links.appendChild(gt);
+  if (py == null || cy == null) return null;
+  var g = svgEl("g", "ln");
+  g.setAttribute("data-k", n.key);
+  var gxp = LF_GLYPHX + (rowInd[n.parent] || 0), gx = LF_GLYPHX + (rowInd[n.key] || 0);
+  var tw = svgEl("path", "tw");
+  tw.setAttribute("d", "M" + gxp + " " + (py + 7) + " V" + cy + " H" + (gx - 5));
+  g.appendChild(tw);
+  if (n.spanFromMs){
+    var jx = sc.x(n.spanFromMs);
+    var drop = svgEl("path", "link");
+    drop.setAttribute("d", "M" + jx.toFixed(1) + " " + py + " V" + (cy - 5) +
+      " Q" + jx.toFixed(1) + " " + cy + " " + (jx + 5).toFixed(1) + " " + cy);
+    g.appendChild(drop);
+    if (n.collapsed > 0){
+      var from = Math.max(cols.plot - 18, jx - lfChainLen(n.collapsed));
+      var chain = svgEl("path", "chain");
+      chain.setAttribute("d", "M" + from.toFixed(1) + " " + cy + " H" + jx.toFixed(1));
+      g.appendChild(chain);
+      var gt = svgEl("text", "gen");
+      gt.setAttribute("x", from.toFixed(1));
+      gt.setAttribute("y", String(cy - 4));
+      gt.setAttribute("data-t", "collapsed");
+      gt.textContent = "+" + n.collapsed;
+      g.appendChild(gt);
+    }
   }
+  links.appendChild(g);
+  return g;
 }
 
 /* THE BADGES, as a list, drawn on a LINE OF THEIR OWN under the name.
@@ -2552,14 +2736,21 @@ function lfRowH(n, joined, open){
 
 /* One row: the label column, the mini-map, the count, the trend and the bar. */
 function lfRow(x, n, top, cols, sc, i, joined){
-  var g = svgEl("g", "lfrow" + (n.alive ? "" : " anc") +
-                     (lfOpenKey === n.key ? " open" : ""));
+  var base = "lfrow" + (n.alive ? "" : " anc") + (lfOpenKey === n.key ? " open" : "");
+  var g = svgEl("g", base);
   var tk = "lf" + i;
   // data-s registers the row's tooltip; the key is generated here and the NAME
   // never becomes part of a selector.
   SP[tk] = lfTip(n);
   g.setAttribute("data-s", tk);
   g.setAttribute("data-k", n.key);
+  // A ROW IS A CONTROL, so it is one for the keyboard too: focusable, announced
+  // by its <title>, opened with Enter or Space. Lighting its lineage happens on
+  // focus exactly as it happens on hover, which is the point — the affordance
+  // that answers "how is this one related" must not need a pointing device.
+  g.setAttribute("tabindex", "0");
+  g.setAttribute("role", "button");
+  LFEL[n.key] = {g: g, base: base};
   // THE FULL NAME, AS THE ROW'S OWN TITLE. The label below is clipped — a name is
   // 64 bytes somebody else chose — and the promise that "the full name is always
   // in the row's tooltip" used to mean this page's hover tip and nothing a
@@ -2580,28 +2771,28 @@ function lfRow(x, n, top, cols, sc, i, joined){
   hit.setAttribute("height", String(LF_ROWH - 1 + badgeH + (open ? lfDetailHeight(n) : 0)));
   g.appendChild(hit);
 
+  // THE WHOLE ROW STEPS RIGHT WITH ITS DEPTH, glyph included. It used to be the
+  // name alone, with every glyph in one column: that reads as a list with ragged
+  // text, not as a tree, and it left the brackets nothing to end on.
+  var indent = lfIndent(n, joined);
   if (n.alive){
     // The same creature glyph the map draws, in the same per-species colour, and
     // it is THE ONLY COLOURED THING ON THE ROW.
     var u = svgEl("use");
     u.setAttribute("href", "#bib");
     u.setAttribute("transform",
-      "translate(" + LF_GLYPHX + " " + (top + 12) + ") scale(0.85)");
+      "translate(" + (LF_GLYPHX + indent) + " " + (top + 12) + ") scale(0.85)");
     u.style.fill = speciesColor(n.key);
     g.appendChild(u);
   } else {
     var ring = svgEl("circle", "ring");
-    ring.setAttribute("cx", String(LF_GLYPHX));
+    ring.setAttribute("cx", String(LF_GLYPHX + indent));
     ring.setAttribute("cy", String(top + 12));
     ring.setAttribute("r", "4");
     g.appendChild(ring);
   }
 
   var text = svgEl("text", "nm");
-  // Depth as a small indent, so the family reads in the label column too. It is
-  // capped: forty generations of indentation would push every name off the left
-  // of its own column.
-  var indent = joined ? Math.min(n.depth || 0, 6) * 9 : 0;
   text.setAttribute("x", String(LF_NAMEX + indent));
   text.setAttribute("y", String(top + 16));
   text.setAttribute("clip-path", "url(#lfclip)");
@@ -2669,39 +2860,52 @@ function lfAxis(x, cols, sc, height){
   var g = svgEl("g", "axis");
   var span = sc.t1 - sc.t0, step = lfStep(span);
   var first = Math.ceil(sc.t0 / step) * step;
+  // The caption below shares the ticks' own row, right of everything and left of
+  // the plot. capRight is where it ends, so the one tick label whose left overhang
+  // would land on it can give way — see the anchor below. A number printed over
+  // another number is two facts a reader can read as neither.
+  var capRight = x.ancestrySinceMs && !(x.ancestrySinceMs > sc.t0) ? cols.plot - 6 : -1;
   for (var tms = first; tms <= sc.t1; tms += step){
     var px = sc.x(tms);
     var line = svgEl("line", "grid");
     line.setAttribute("x1", String(px)); line.setAttribute("x2", String(px));
     line.setAttribute("y1", String(LF_PADT - 16)); line.setAttribute("y2", String(height - 6));
     g.appendChild(line);
+    var tlbl = step >= 86400000 ? trDay(tms).slice(5) : trClock(tms);
     var lbl = svgEl("text", "tick");
     lbl.setAttribute("x", String(px));
     lbl.setAttribute("y", String(LF_PADT - 22));
-    lbl.setAttribute("text-anchor", "middle");
-    lbl.textContent = step >= 86400000 ? trDay(tms).slice(5) : trClock(tms);
+    // A label straddles its own grid line, EXCEPT where straddling it would reach
+    // back over the floor's caption: then it stands to the right of the line
+    // instead. Half its width is estimated from its length, which is exact enough
+    // for a monospace face and needs no laid-out node to measure. THE DATE IS NOT
+    // DROPPED — the leftmost tick is the one a reader looks at to find out where
+    // the axis begins, and the line under it is still the moment itself.
+    lbl.setAttribute("text-anchor",
+      px - tlbl.length * 3 < capRight + 4 ? "start" : "middle");
+    lbl.textContent = tlbl;
     g.appendChild(lbl);
   }
-  // THE RECORD'S FLOOR, as a boundary rather than a footnote: everything left of
-  // this line is crossings that carried no parent at all, so no edge in this
-  // drawing can begin there. It is the reason a root is a root.
+  // THE RECORD'S FLOOR, WHICH IS A FACT AND NOT A WIDTH.
   //
-  // THE TEST IS >= AND THE DIFFERENCE IS THE WHOLE MARK. The server clamps the
-  // axis down to the floor so the floor is always inside the picture — so on
-  // every map whose oldest drawn bar is younger than the floor, the two are
-  // EXACTLY EQUAL, which is the running rig's own case. A strict > drew the
-  // boundary on no map at all: it appeared only when something was older than the
-  // floor, which is precisely when it matters least. At equality the line sits on
-  // the axis's left edge and the shaded run before it is empty, which is the
-  // truth: nothing in this picture predates the record's ancestry.
-  if (x.ancestrySinceMs && x.ancestrySinceMs >= sc.t0){
+  // It used to be a boundary inside the picture, kept there by the server
+  // clamping the axis down to it. Measured on the running rig that left about two
+  // thirds of the plot empty and the empty share grew every hour — the floor is a
+  // fixed date and the bars are not — so the axis is fitted to the oldest DRAWN
+  // bar now (tree.go, SpanStartMs) and the floor is usually OLDER than the left
+  // edge. That is the ordinary case, and its honest drawing is a CAPTION at the
+  // left margin: the date, in the ticks' own quiet colour, in the row the ticks
+  // occupy, reading into the axis it precedes. It carries the same glossary term
+  // the badge and the stat line carry, so the fact is one fact in three places.
+  //
+  // AND WHERE IT REALLY IS INSIDE THE PICTURE it is still the boundary it was: a
+  // species whose first crossing named no parent can predate the oldest crossing
+  // that named one, and then everything left of the line is a stretch where no
+  // family line in this drawing can begin. The test is a STRICT > for that
+  // reason — at equality the line would sit exactly on the axis's left edge and
+  // mark nothing, and the caption says the same thing in words.
+  if (x.ancestrySinceMs && x.ancestrySinceMs > sc.t0){
     var fx = sc.x(x.ancestrySinceMs);
-    var shade = svgEl("rect", "prefloor");
-    shade.setAttribute("x", String(cols.plot));
-    shade.setAttribute("y", String(LF_PADT - 16));
-    shade.setAttribute("width", String(Math.max(0, fx - cols.plot)));
-    shade.setAttribute("height", String(height - 6 - (LF_PADT - 16)));
-    g.appendChild(shade);
     var fl = svgEl("line", "floor");
     fl.setAttribute("x1", String(fx)); fl.setAttribute("x2", String(fx));
     fl.setAttribute("y1", String(LF_PADT - 16)); fl.setAttribute("y2", String(height - 6));
@@ -2712,6 +2916,14 @@ function lfAxis(x, cols, sc, height){
     flt.setAttribute("data-t", "recordfloor");
     flt.textContent = "ancestry recorded from here";
     g.appendChild(flt);
+  } else if (x.ancestrySinceMs){
+    var fcap = svgEl("text", "floorcap");
+    fcap.setAttribute("x", String(capRight));
+    fcap.setAttribute("y", String(LF_PADT - 22));
+    fcap.setAttribute("text-anchor", "end");
+    fcap.setAttribute("data-t", "recordfloor");
+    fcap.textContent = "the record reaches back to " + trDay(x.ancestrySinceMs) + " ·";
+    g.appendChild(fcap);
   }
   var now = svgEl("line", "nowline");
   now.setAttribute("x1", String(cols.plot + cols.plotw));
@@ -2738,6 +2950,11 @@ function lfAxis(x, cols, sc, height){
   head(cols.mini, "where", null, "world");
   head(cols.pop, "alive", "end", "population");
   head(cols.spark, "24 h", null, "trend");
+  // THE PLOT'S OWN HEADING, which the drawing went without: the ticks say WHICH
+  // moments and nothing said that the direction is time at all. A first-time
+  // reader looking at a row of bars has to be told that much before anything else
+  // on this tab means what it says.
+  head(cols.plot, "time, left to right", null, "timeaxis");
   return g;
 }
 
@@ -2759,6 +2976,10 @@ function renderLife(x){
   // This view's tooltips are rebuilt with it. They share SP with the map's
   // species runs and are prefixed so neither can clear the other's entries.
   for (var old in SP){ if (old.indexOf("lf") === 0) delete SP[old]; }
+  // And so is everything the lighting holds: the elements this paint is about to
+  // replace are gone, and a stale entry would light a row that is no longer on
+  // the screen.
+  LFSVG = null; LFEL = {}; LFLN = {}; LFPAR = {}; LFKID = {}; LFJOINED = false;
 
   if (!x || !x.haveStatus){
     host.appendChild(el("div", "muted", "waiting for the map"));
@@ -2815,17 +3036,40 @@ function renderLife(x){
 
   var links = svgEl("g", "links");
   svg.appendChild(links);
-  var rowY = {};
-  for (i=0;i<list.length;i++) rowY[list[i].key] = tops[i] + LF_ROWH / 2 - 1;
+  var rowY = {}, rowInd = {};
+  for (i=0;i<list.length;i++){
+    rowY[list[i].key] = tops[i] + LF_ROWH / 2 - 1;
+    rowInd[list[i].key] = lfIndent(list[i], pick.joined);
+  }
   if (pick.joined){
     for (i=0;i<list.length;i++){
-      if (list[i].parent) lfEdge(links, list[i], rowY, cols, sc);
+      var n = list[i];
+      // A LINK IS A LINK ONLY IF BOTH ENDS ARE ON THIS DRAWING. The parent of a
+      // drawn row can be absent — a hidden seed species, or a row a search left
+      // out — and then the child keeps its place and its indent and simply has
+      // no bracket, which is what a root looks like anyway.
+      if (!n.parent || rowY[n.parent] == null) continue;
+      var lg = lfJoin(links, n, rowY, rowInd, cols, sc);
+      if (!lg) continue;
+      LFLN[n.key] = {g: lg, base: "ln"};
+      LFPAR[n.key] = n.parent;
+      (LFKID[n.parent] = LFKID[n.parent] || []).push(n.key);
     }
   }
   for (i=0;i<list.length;i++){
     svg.appendChild(lfRow(x, list[i], tops[i], cols, sc, i, pick.joined));
   }
   host.appendChild(svg);
+  LFSVG = svg;
+  LFJOINED = pick.joined;
+  // THE KEYBOARD KEEPS ITS PLACE. Opening a row with Enter repaints the whole
+  // drawing, which destroys the element the focus was on; without this the reader
+  // is returned to the top of the document for having used the keyboard, and the
+  // row they opened is somewhere below them unread.
+  if (lfFocusKey && LFEL[lfFocusKey] && LFEL[lfFocusKey].g.focus){
+    LFEL[lfFocusKey].g.focus();
+  }
+  lfFocusKey = null;
 }
 
 /* ----------------------------------------------------------- the SETTINGS tab
@@ -3526,10 +3770,40 @@ function toggleSeed(){
 var lfResizeT = 0;
 (function wireLife(){
   var box = document.getElementById("lfbox");
+  function rowOf(t){ return t && t.closest ? t.closest(".lfrow") : null; }
   if (box) box.addEventListener("click", function(ev){
-    var g = ev.target.closest ? ev.target.closest(".lfrow") : null;
+    var g = rowOf(ev.target);
     if (g) openLife(g.getAttribute("data-k"));
   });
+  // ---- ONE LINEAGE, LIT. Delegated on the box, so it survives every repaint
+  // without a listener being attached per row — and it costs one class change per
+  // drawn row, on a set bounded by the census.
+  if (box){
+    box.addEventListener("mouseover", function(ev){
+      var g = rowOf(ev.target);
+      if (g) lfLight(g.getAttribute("data-k")); else lfDark();
+    });
+    box.addEventListener("mouseleave", lfDark);
+    // THE KEYBOARD GETS THE SAME ANSWER. focusin/focusout bubble where focus and
+    // blur do not, which is what lets one listener on the box serve every row.
+    box.addEventListener("focusin", function(ev){
+      var g = rowOf(ev.target);
+      if (g) lfLight(g.getAttribute("data-k"));
+    });
+    box.addEventListener("focusout", function(ev){
+      if (rowOf(ev.target)) lfDark();
+    });
+    box.addEventListener("keydown", function(ev){
+      if (ev.key !== "Enter" && ev.key !== " " && ev.key !== "Spacebar") return;
+      var g = rowOf(ev.target);
+      if (!g) return;
+      // Space scrolls a page and Enter submits things; a row that has taken the
+      // focus has taken the key too.
+      if (ev.preventDefault) ev.preventDefault();
+      lfFocusKey = g.getAttribute("data-k");
+      openLife(lfFocusKey);
+    });
+  }
   var q = document.getElementById("lfq");
   if (q) q.addEventListener("input", function(){
     lfQuery = q.value.toLowerCase();
