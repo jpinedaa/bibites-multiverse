@@ -3156,6 +3156,102 @@ are the event log and the sidecar log, not Unity's. Also observed while diagnosi
 unexplained clean `world unloaded`/reattach cycle at 19:07:49Z (gen 3 → 4) the world survived
 without a mark; noted, not chased.
 
+### The storage-move outage, 2026-08-12/13 — 15h 38m dark, and the first bring-up from the moved repo
+
+**Nothing in the rig failed. It was stopped, cleanly, as a side effect of the owner reorganising
+WSL storage on 2026-08-12, and it stayed stopped for fifteen and a half hours because nothing
+watches it.** The repo moved from `/mnt/wsl/data/bibites-multiverse` to
+`/mnt/wsl/data/repos/bibites-multiverse` and `~/bibites-multiverse` did not follow — see
+*The rig lives on `/mnt/wsl/data`* in Gotchas. This is the first window in which the whole map went
+down and came back, and the first bring-up run entirely from the new path.
+
+**The stop was orderly, and that is why the accounting is clean.** Every process logged its own
+shutdown inside 400 ms at **03:08:07Z**: the five sidecars `sidecar: shutting down` at
+`.446/.479/.501/.528/.561`, the archive `archive: shutting down pendingGaps=153060` at `.615`, the
+relay `client gone` for all six peers at `.652–.653`. That is a SIGTERM sweep, not a kill and not a
+crash, so every journal and the ledger were flushed before anything exited.
+
+| | |
+|---|---|
+| Crossings paused | **15h 38m 08.1s** — last crossing record a `MIGRATION` slot 6 → slot 5 at **03:08:06.984Z**, first record after the return a `NACK` at **18:46:15.046Z**. The worlds did NOT simulate through it: this was a full outage, not one of the archive-only pauses above |
+| The archive | down **03:08:07.615Z → 18:45:48.194Z (15h 37m 40.6s)**. Replay of **10,110,396 records / 3.2 GB** in **≈113.6 s** — read the caveat below before adding that to the rate series |
+| The ledger gap | **ZERO**, margins 0.6 s before and 1.0 s after, plus one 100.1 s window that only the relay's own record can close |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, **zero discarded journal bytes**, pacing line present (`pacedFramesPerSecond=25 pacedBurstFrames=12`). Connect to grant: **14 / 11 / 24 / 16 / 14 ms**. Custody recovered outbound/inbound **–, 0/1, –, 0/2, 3/4** |
+| Slot 6 | **came back by itself** at **18:44:08.076Z**, 14 s after the relay bound, `modConnected=true simulationSize=2000`. Nobody here did anything and nobody there had to; its sidecar had been retrying across the whole outage |
+| Observation | 10 samples, 19:12:53Z–19:16:58Z: **6/6** live and **24/24** lanes in every one — the map is whole, so there is no bypass to read; `holes`, `heldDepth`, `timeoutBounces`, `pacedDepth` and `unknownSlots` **0** throughout; `custodyDepth` 4–12, falling every time it rose; population 369–389. **Zero** new `level=ERROR` and **zero** sheds across the relay, the five sidecars and the archive — the archive's single `ERROR` is the old damaged ledger line (`skippedLines=1 skippedBytes=776`), re-reported at replay |
+
+**The zero-gap accounting, and the one window no earlier one had.** The ledger was **byte-frozen at
+3,377,985,723 bytes** with its mtime still reading 2026-08-12 23:08 fifteen and a half hours later,
+and **zero records carry a `recordedAt` inside 03:08:07.176Z → 18:46:15.046Z**. The archive outlived
+every local sidecar's shutdown line by 54–169 ms going down and subscribed **1.047 s before** the
+first local peer was granted coming up. But **slot 6 rejoined the relay 100.1 s before the archive
+did** — an interval in which a live, mod-connected peer was on the map with no archive listening,
+which no archive-only pause ever had to answer for. **The relay's own record closes it: it logged
+exactly three lines in that window** — slot 6's connect, slot 6's placement claim, and the archive's
+connect. No forward, no hold, no shed, because slot 6 was ALONE on the map and every one of its
+export edges had no deliverable neighbour. **A peer with no neighbours cannot cross, so the gap is
+zero by construction as well as by the record** — and that is the general rule for any bring-up
+where the far end beats the archive back.
+
+**Seven migrations were in flight when the lights went out, and all seven came back.** The journals
+held ten entries between them — three local pairs (`70928458` 5→2, `1006d119` 5→4, `ea52d840` 5→4,
+each held at both ends) and four arrivals from slot 6 that only slot 5's journal was holding
+(`3d2627eb`, `a36ac72b`, `2a0321b5`, `d6524f0d`). Every one replayed with **zero discarded bytes**,
+and every one settled `done` at **19:02:12–19:02:15Z**, the moment each mod reattached. Fifteen and a
+half hours in custody, nothing lost, nothing bounced. **The recovery counts on the sidecars' own
+startup lines matched a pre-flight parse of the five journal files entry for entry**, which is the
+cheapest possible check that a journal survived an outage and is worth doing before the rig starts.
+
+**The starved instance was slot 1, and the remedy is unchanged.** *The five-instance ceiling, and the
+log-file starvation trap* fired for the third reboot running — and on a third different slot, so the
+"not slot-specific" reading holds. Both documented tells were present: `log=<unresolved>` from
+`game.sh status`, **261 MB against 514–553 MB** for its four siblings, no Contract A traffic at all,
+and slot 3's lanes reading `E->slot 2 (bypassing slot 1:peer_mod_absent)`. `game.sh stop m4slot1`
+followed by the rig's own `start_game 1` fixed exactly that one instance: it took
+`LogOutput.log.4` and **its mod connected 7 seconds later**, and the still-waiting `up` completed 6 s
+after that. The stall cost ~19 minutes of a 23-minute bring-up and nothing else.
+
+**Five `peer silent, dropping` events in the game-launch burst, and they are the 2026-08-10 storms in
+miniature.** All five local sidecars were dropped ~78 s after each connected, at 18:46:06.975Z through
+18:46:11.809Z, and all five reconnected with `reservationKept=true` and were re-granted
+`reason=reclaimed`. **Slot 6 took zero**, exactly as it did in the big storms — it is on another
+host. The relay's `PeerTimeout` is 15 s and a sidecar has almost nothing to do but answer it, so five
+of these inside the window where five Unity processes are launching says the host stopped scheduling
+Go on a loopback socket, not that anything misbehaved. No custody was at risk: no mod had attached
+yet, so there was nothing in flight to lose.
+
+**The replay time is NOT a point on the rate series, and this is the trap to avoid.** 10,110,396
+records in ≈113.6 s reads as ~89 k records/s against the 47.3 k measured on 2026-08-12 — a jump too
+good to believe, and it is not real. **The page cache was warm**: the pre-flight forensics ran
+`wc -l` over the whole 3.2 GB ledger four minutes earlier, on a host with 50 GB in `buff/cache`. The
+cold-cache series is unbroken and this window adds nothing to it. **Anything that reads the ledger
+before a bring-up invalidates that bring-up's replay measurement** — take the forensic read after the
+archive has started, or accept that the number is only a wait-timeout sanity check.
+
+**The time-scale trap did not fire, for the third bring-up running.** All five worlds answered
+`targetTimeScale=100.00 Time.timeScale=100.00` on the first send and again on the re-send 20 s later.
+`saveMinutes 10` / `saveKeep 6` on all six slots, slot 6 included. The sweep, not the correction,
+stays the deliverable.
+
+**What the move cost, which was nothing the rig could not absorb.** Every script derives its roots
+from `BASH_SOURCE`, so `REPO`, `E2E`, `BIN`, the TLS paths, the data dirs and the run dir all followed
+the repo without a single edit; `SSL_CERT_FILE` resolved to the new `ca.crt`; `ensure_credentials`
+passed against an intact `peers.json` (7 records) and minted nothing. **The one path that had to be
+proved from the other side of the boundary is `MULTIVERSE_CONTRACT_A_TOKEN_FILE`**, and it was, three
+ways: `wslpath -w`, a PowerShell `Test-Path` that returned `True`, and all five mods logging
+`\\wsl.localhost\Ubuntu\mnt\wsl\data\repos\bibites-multiverse\e2e\data-m4-lan\slot-N\contract-a.token`
+for real, none `<unset>`, all five on `contract-a/2.4` with no `401`. The only stale absolute paths
+anywhere are in `bibites-mod/obj/`, which dotnet regenerates and nothing on the rig reads. **The relay
+restarted, so `relaySessionId` is new** — `13add949-c3ac-43d6-9431-f0f2b8a66253`, replacing the
+`27005d53-…` that had survived every archive-only pause since 2026-08-11.
+
+**Two things left for the owner, both elevated or out of scope here.** There is **no `8796` portproxy**
+on this machine — the table has `8765` and `8795` only — so the status page is bound `0.0.0.0:8796`
+and still invisible from the second computer; *The status page on the LAN* has the two commands. And
+the **BepInEx log archive is now 29 GB**, against the 21 GB the crossing of 2026-08-11 left it at:
+the fourth watch item has grown by another 8 GB with still no retention rule, and `lan_up` and
+`lan_down` each re-archive it inside the outage they open.
+
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
