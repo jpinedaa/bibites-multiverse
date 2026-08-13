@@ -3401,6 +3401,125 @@ rather than assumed. The stamp-stripped comparison `91081ce → 22aca8f` reporte
 diff confined to `go/internal/archive`; `bin/` was single-revision going in, so this window needed
 only the one baseline the last one had to add a second to. It retires on the usual rule.
 
+
+### The keyboard-focus window, 2026-08-13 — the focus survives every repaint, and the record's last genealogy defect closes
+
+**The sixth archive-only pause under the owner's standing grant, and the third whose point was to
+VERIFY rather than to land.** It carried `f0a387a`: the keyboard's focused row and its lit lineage
+now survive every ~2 s repaint — `lfFocusKey` recorded on `focusin` wherever the focus arrives,
+cleared only on a genuine blur, restored by species key at the end of every paint and gated on
+`activeElement` so a poll cannot steal focus from the search box; the gone-row fallback lands on the
+drawing's own box; the seed-reveal button keeps its focus the same way; the pointer leaving falls
+back to the keyboard's row instead of darkness; and the 2.5 px minimum bar slides left rather than
+overhanging the `now` line. The relay was not restarted, `relaySessionId` is still
+`13add949-c3ac-43d6-9431-f0f2b8a66253`, and the five games, the mod and slot 6 were untouched.
+**Every item verifies, and the defect the previous window recorded is closed. Nothing new is broken.**
+
+| | |
+|---|---|
+| Crossings paused | **3m 25.9s** driver bracket. No local sidecar was on the map between **20:41:52.296Z** and **20:45:08.821Z** (3m 16.5s); all five reclaimed by **20:45:17.013Z**, so the map was short of a full peer set for **3m 24.7s**. The worlds simulated throughout |
+| The archive | down **20:41:52.950Z → 20:45:06.814Z (193.86 s)**, entirely inside the pause. Replay of **10,329,593 records / 3.214 GiB** in **193.19 s** |
+| Replay speed | **53.5 k records/s** — the sixth point, and the first to leave the flat line, 13.8% above the fifth on a ledger 1.4% larger. Read it as a CACHED replay rate: 46 GiB of buff/cache on a 62 GiB host and a load average of 4.5. The flat line is not refuted by one fast sample any more than it was established by one slow one |
+| Replay memory | **VmHWM 1,971,916 kB (1.881 GiB)** against the outgoing process's 2,456,552 kB. Against the last window that is **46.9 B/record** for the 139,210 records added — inside the streamed profile |
+| The ledger gap | **ZERO**, margins 0.80 s before and 26.9 s after |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, pacing line present, and `--diagnose` **0 fail with PASS journal-replay … zero discarded bytes** on all five. TERM to exit: **81 / 117 / 140 / 150 / 152 ms**. Start to grant: **1357 / 2020 / 2011 / 2010 / 2035 ms**. Custody recovered outbound/inbound **–, 0/1, 1/0, –, –** |
+| Observation | 10 samples 20:57:07Z–20:59:04Z and four `rig-check --wire`: **6/6** live and **24/24** lanes in every one, `holes`, `heldDepth` and `timeoutBounces` **0** throughout, `custodyDepth` 6–21 and `pacedDepth` 0–5, both falling every time they rose; population 358–395. **Zero** new `level=ERROR` and **zero** sheds across the relay, the five sidecars and the archive — the archive's single `ERROR` is the old damaged ledger line (`skippedLines=1 skippedBytes=776`), re-reported at replay |
+
+**THE DRIVER DEFECT THE LAST WINDOW PAID FOR DID NOT RECUR, AND THE FIX IS ONE FUNCTION CALL.** Marks
+were taken with `file_mark()` — line counts — and every `wait_grant` returned in **1.4 to 2.0 s**
+against the 60 s timeouts the byte offsets produced last time. The resume took **8.6 s** for all five
+instead of 5m 06s, and the whole pause came in at 3m 25.9s against 7m 43.9s. That is the entire
+difference between the two windows' cost to the map.
+
+**The zero-gap accounting, proven by byte offset again.** The ledger was **byte-frozen at
+3,451,312,398 bytes** across the outage and the boundary is a record boundary by construction — byte
+N−1 is `\n`. The last record inside that prefix carries `recordedAt` **20:41:52.154Z**, 0.80 s before
+the archive exited, and the first byte written afterwards — offset 3,451,312,399 — carries
+**20:45:33.709Z**, 26.9 s after it resubscribed. **Zero records carry a `recordedAt` inside
+20:41:52.950Z → 20:45:06.814Z.** The relay says the same as ever: inside the outage it logged
+**exactly two lines, both about the archive itself** — `client gone` at 20:41:52.428Z and `client
+connected` at 20:45:06.207Z. Slot 6 never left and logged nothing.
+
+**THE GATES, ALL FOUR.** On the frozen ledger the counter and the file still answer the same
+question: **`wc -l` 10,329,594, `ledgerRecords` 10,329,593, `ledgerSkippedLines` 1, difference 0**,
+with the counter reading the same value either side of the `wc`. `/api/status` gzips **15,520 → 1,724
+bytes (9.00×)** inside the pause and **23,309 → 2,568 (9.08×)** after the resume; the tree **13,435 →
+2,432 (5.52×)**; `/healthz` stays identity at 3 bytes. All eight `limits` are on the page and all
+eight values are on the settings tab. **`genomeHorizonMs` and `minContractVersion` are both absent** —
+the horizon and the version floor are still off by omission.
+
+**THE BROWSER VERDICT: EVERY ITEM VERIFIES, AND THE CACHE TRAP WAS FORCED OPEN FIRST.** The sweep
+began with a cache-bypassing reload and then PROVED the front end was the new one before measuring
+anything — the served HTML carries `lfRest`, `lfRefocus`, `lfPainting`, `.lifewrap:focus` and the
+`xend - 2.5` slide, and the live DOM has `#lfbox[tabindex="-1"]`. Swept at 1280 px, `#tree`, with
+**one console message on the whole sweep** — a browser-initiated `favicon.ico` 404 — and **no
+page-level horizontal scroll at any width**. The view repaints every **1993–2011 ms**.
+
+- **A row keeps the keyboard's focus, and keeps it indefinitely.** Tabbed to a root row lighting 10
+  of 13: after four polls the focus is still on a live element with the same species key, the svg is
+  still `life lit` and the same 10 rows are lit. **Soaked for 18 polls — 36 seconds, svg generations
+  248 through 265, the whole drawing replaced eighteen times** — never on `<body>`, never outside the
+  box, never a different key, never dark, kin constant. The drawn set turned over from 13 rows to 12
+  underneath it and the focus did not notice. The old build put the row on `<body>` within 2.5 s.
+- **Row to row does not blink.** A 5 ms sampler took **2,035 samples over 10.23 s across six paint
+  generations** and the drawing was **never** dark, the kin count **never** zero, the focus **never**
+  on `<body>`. Tab walked 10 kin → 8 kin → 3 kin with no dark sample in between, then held 3 through
+  three more repaints. `focusout`'s `relatedTarget` guard is doing exactly what it says.
+- **A poll does not steal the search box.** Five real `Shift+Tab`s from a row to `#lfq`; it then held
+  the focus and the typed text across five polls while the drawing correctly stayed **dark**. That is
+  the `mine` gate, read from `activeElement` before the tear-down, working in the direction that
+  matters.
+- **Enter and Space are unchanged, and now they last.** Enter opened the row with the focus and its 8
+  kin held, and it was still open, focused and lit three polls later; Space closed it with the same
+  8 kin, held four polls more. Under the old build the second poll ended both.
+- **The seed button holds too.** `show` kept the focus across five polls and was still the live
+  element inside `#lfstat` — the pre-existing loss the last window noted is closed with the rows'.
+- **The pointer leaving is not the focus leaving.** Keyboard on a row with 8 kin, pointer over
+  another row lights **its** 10 with the focus unmoved, pointer off the drawing falls back to the
+  keyboard's **8** — lit, not dark.
+- **The gone-row fallback lands where the comment says.** A focused row searched out of the drawn set
+  puts the focus on **`#lfbox`**, not `<body>`, with nothing lit — and the next Tab walks into the
+  drawing at its **first row**, lighting that row's family.
+- **No bar overhangs the `now` line any more.** `nowX` 1166, 13 bars, **max overhang 0.000 px on five
+  consecutive paints**, and the one 2.5 px minimum bar sits at **x 1163.5 ending at exactly 1166** —
+  slid left, still visible. 0.000 at 1600 px and 500 px as well. The last window's 2.0 px on four
+  rows is gone.
+- **Everything the last sweep passed still passes.** Axis **leading gap 0.00%**, earliest drawn bar at
+  **x 614.000** on a plot running 614 → 1166; `text.floorcap` at x 608 with `text-anchor:end` and
+  `data-t="recordfloor"`, `line.floor` not drawn and `rect.prefloor` absent; 11 brackets, 3 collapsed
+  chains, 11 twigs; badges on their own line under `#lfbclip`, the widest ending at **x 562.9** with
+  37.1 px to spare; mini-maps **72 dots over 12 rows with zero mismatches**; 12 sparklines for 12
+  living rows; brain rings **stable across 8 polls — one membership set, the same 5 of 13 every
+  time**; elastic width at 1280 / 1600 / 500 with `now` always on screen and `.lifewrap` the only
+  overflowing element; the search miss message; all four hash routes; the ceilings card with all
+  eight limits; the three glossary terms; the SVG `<title>` as the bare species name. The seed reveal
+  still moves the axis — 12 rows and a first tick of 08-11 12:00 hidden, 13 rows with `Basic bibite`
+  and a first tick of **08-08** shown. `ringstat --species` still prints `Basic bibite` as
+  `never-exported endemic` and still does not hide it.
+
+**TWO MEASUREMENT TRAPS THIS SWEEP FOUND, BOTH OF WHICH MANUFACTURE FALSE DEFECTS.** First, **a
+uid-addressed `hover` cannot beat a 2 s repaint**: every uid taken from an accessibility snapshot is
+stale by the time the call lands, and three attempts failed with *"no longer exists"* and *"did not
+become interactive"*. That is the tooling losing a race, not the page failing — row hover was
+verified by dispatching pointer events on live elements captured inside one script, which reaches the
+same listeners. Second, **do not check the mini-maps against a fresh `/api/status`**: the fetch races
+the poll that drew the rows and the census turns over between them, which reported two mismatches
+that were not there. Checked against `window.LFX` — the payload the drawing was actually built from —
+it is **72 dots, zero mismatches**. The same caution applies to `rig-check`: one pre-window sample
+read `unknown 6` with every per-slot field null and the next sixteen were clean, so a single sample
+can catch the page between status frames and is never a verdict on its own.
+
+**The one WARN is D14's, not this window's.** Slot 2's `save-health` reported 2273→**2626 ms** against
+the 2000 ms budget; last window it was slot 5. The standing watch item answers again.
+
+**The rollback set is `/mnt/wsl/data/scratch/gkw-2026-08-13/rollback-bin/`** — `archive.RUNNING`
+(`2b1b8f9c…`, copied from `/proc/86873/exe`), `archive.bin` and `ringstat` (`7e906f0d…`). The two
+archive copies were the same bytes for the fifth window running, and are still taken and compared
+rather than assumed. The stamp-stripped comparison `22aca8f → f0a387a` reported **`archive` and
+`ringstat` only**, with `sidecar`, `worldstat`, `relay` and `fakemod` byte-identical, matching a Go
+diff confined to `go/internal/archive`. The four unchanged binaries in `bin/` carry the older
+`91081ce` VCS stamp and are source-equivalent, because everything between those two commits is
+documentation plus `go/internal/archive`. It retires on the usual rule.
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
