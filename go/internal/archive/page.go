@@ -345,11 +345,24 @@ svg.life .lfbar.live{fill:var(--text);opacity:.82}
 svg.life .lfbar.ext{fill:var(--dim);opacity:.55}
 svg.life .lfbar.derived{fill:none;stroke:var(--dim);stroke-width:1;stroke-dasharray:3 2}
 svg.life .undated{fill:none;stroke:var(--warn);stroke-width:1.4}
-/* The brain ring sits at the end of the bar and is never filled: it is a size,
-   not a quantity of anything you could add up. */
-svg.life .brain{fill:none;stroke:var(--lane);stroke-width:1.3;cursor:help}
+/* The brain ring sits at the end of the bar and is never filled: it is a place on
+   a scale, not a quantity of anything you could add up. pointer-events:all is what
+   makes it answerable — an unfilled circle is only hittable on its own stroke, and
+   the smallest ring here is 2.4 px of radius, so the whole disc has to be the
+   target for the tooltip carrying its real numbers to be reachable at all. */
+svg.life .brain{fill:none;stroke:var(--lane);stroke-width:1.3;cursor:help;pointer-events:all}
 svg.life .link{fill:none;stroke:var(--line);stroke-width:1.5}
+/* The collapsed run. It is the SAME line as .link, dotted, because it is the same
+   relationship drawn across a stretch whose species are not on the picture — and
+   it is now on the clock like every other horizontal distance here, so the dots
+   say "nobody drawn held this" rather than "this length is not time". */
 svg.life .chain{fill:none;stroke:var(--dim);stroke-width:1.2;stroke-dasharray:2 3}
+/* A LINK THAT RUNS BACKWARDS, and the ring where it left its parent. Amber for
+   the reason everything amber on this page is amber: it is a mark to read twice
+   rather than a mark to read. The two are wider-dashed than the collapsed run so
+   the two dotted things on one drawing cannot be taken for each other. */
+svg.life .rev{fill:none;stroke:var(--warn);stroke-width:1.3;stroke-dasharray:4 2;cursor:help}
+svg.life .revmark{fill:none;stroke:var(--warn);stroke-width:1.3;cursor:help}
 svg.life .wdot{stroke-width:1.1}
 svg.life .wdot.on{fill:var(--text);stroke:none}
 svg.life .wdot.off{fill:none;stroke:var(--line)}
@@ -384,7 +397,10 @@ svg.life.lit .lfrow{opacity:.2}
 svg.life.lit .lfrow.kin{opacity:1}
 svg.life.lit .ln{opacity:.12}
 svg.life.lit .ln.kin{opacity:1}
-svg.life .ln.kin .link,svg.life .ln.kin .tw{stroke:var(--hot);stroke-width:1.8}
+/* The collapsed run lights with the rest of its link: on a link that crosses a
+   gap it IS the link, and a lineage lit with one of its edges left dim would be
+   the lighting answering a different question on that row than on every other. */
+svg.life .ln.kin .link,svg.life .ln.kin .tw,svg.life .ln.kin .chain{stroke:var(--hot);stroke-width:1.8}
 svg.life .lfrow.self .nm{fill:var(--hot)}
 /* The keyboard's own mark. A row is focusable, so a reader with no mouse can walk
    the tree and read the same lit line; the focus ring is the row's own tint
@@ -408,6 +424,8 @@ border-radius:50%;vertical-align:-1px;margin-right:5px}
 .treelegend i.bari{display:inline-block;width:22px;height:7px;background:var(--text);opacity:.82;
 border-radius:2px;vertical-align:-1px;margin-right:5px}
 .treelegend i.chaini{display:inline-block;width:22px;height:0;border-top:1.2px dotted var(--dim);
+vertical-align:middle;margin-right:5px}
+.treelegend i.revi{display:inline-block;width:22px;height:0;border-top:1.3px dashed var(--warn);
 vertical-align:middle;margin-right:5px}
 /* The bracket the label column draws between a parent row and a child row. */
 .treelegend i.twi{display:inline-block;width:9px;height:9px;border-left:1.2px solid var(--dim);
@@ -740,8 +758,9 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
         that has never crossed a lane has nothing here to connect it &mdash;
         <span class="term" data-t="noancestry">that is stated per species, never guessed</span>.
         A run of extinct ancestors with no living branch on it
-        <span class="term" data-t="collapsed">collapses to one dotted edge</span> that says how
-        many generations it stood for. Nothing here is resolved against any world&rsquo;s own
+        <span class="term" data-t="collapsed">collapses to one dotted edge</span>, drawn across
+        the stretch of time it held the line and labelled with how many generations that was.
+        Nothing here is resolved against any world&rsquo;s own
         registry &mdash; this is what the record says.</span></h2>
     <div class="spctl">
       <input id="lfq" type="search" autocomplete="off" spellcheck="false"
@@ -768,10 +787,14 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
         older, the right-hand edge is now</span>
       <span><span class="term" data-t="lineage">hover a row, or tab to it</span> &mdash;
         everything not in its family dims</span>
-      <span><i class="chaini"></i>&plus;<b>n</b> &mdash; extinct generations collapsed; the
-        dotted length counts <span class="term" data-t="collapsed">generations, not time</span></span>
+      <span><i class="chaini"></i>&plus;<b>n</b> &mdash; extinct generations collapsed, drawn
+        <span class="term" data-t="collapsed">across the stretch they held the line</span>;
+        the number is there because a count is not recoverable from a duration</span>
+      <span><i class="revi"></i><span class="term" data-t="beforeparent">recorded before its
+        parent</span> &mdash; the link runs backwards to where the child's own record starts</span>
       <span><i class="ringi braini"></i><span class="term" data-t="brainsize">brain size</span>
-        &mdash; bigger ring, more neurons and synapses</span>
+        &mdash; bigger ring, more neurons and synapses <em>than the other rows drawn</em>;
+        hover one for the numbers</span>
       <span><i class="doti"></i><span class="term" data-t="minimap">where it lives</span>,
         on the map&rsquo;s own grid</span>
       <span><span class="term" data-t="trend">the 24 h line</span> &mdash; its population
@@ -916,12 +939,13 @@ var G = {
  parentspecies:["parent species","The species this one was recorded as splitting off from, as the world that named it reported at the time. One crossing carries one generation of this, and the drawing on this tab is what happens when you chain them: if this species' parent has a parent of its own, recorded by some other crossing, the record joins them up, and the line dropping onto this species' bar is that join. Nothing is resolved against any world's own register — the register lives inside one copy of the game and only that copy can read it — so what a family tree here says is what the record says, which is a smaller and more honest claim."],
  genealogy:["the family tree","Every species alive right now, arranged by who came from whom. The information comes from one place: when a creature walks out of a world, that world names the creature's species AND the species it split off from. One crossing tells you one generation. Thousands of crossings, chained together, tell you the shape of the family — and on this map that shape runs about forty generations deep. What is drawn is only the part that still matters: the living species, and the ancestors where two or more living lines part company. Everything else is left out, and where a whole run of ancestors is left out the edge says how many."],
  branchpoint:["a branch point","An ancestor that is drawn even though nothing of its kind is alive anywhere, because two or more living species descend from it by different children. It is the answer to 'how are these two related' — the most recent point their lines were the same. An ancestor with only ONE living line below it is not a branch point and is not drawn: it would be a step in a corridor with no doors."],
- timeaxis:["the clock along the top","This drawing is a CALENDAR, not a ranking. Every position across it is a real moment in UTC, the dates and times along the top are that clock, and the right-hand edge is NOW — which is why every living species' bar reaches it. The left-hand edge is the OLDEST BAR ON THE PICTURE and nothing more: it is not the beginning of the map, of the record, or of anything else, and the axis re-fits itself as the rows change, so revealing a hidden row can widen it. The record itself usually reaches further back than the left edge does, and the caption at the left margin says how far. One mark on the drawing is NOT on this clock: the dotted lead-in above a row, whose length counts generations. It is dotted for exactly that reason."],
- descends:["descended from","Who came from whom, drawn twice, because the two halves answer different questions. IN THE NAME COLUMN a bracket joins a parent row to each of its children and the children are indented one step, so the shape of the family reads straight down the page even when the bars themselves are far apart. IN THE PLOT a line drops from the parent's row onto the child's bar at the moment the record FIRST NAMES that child — that is the one horizontal position the join can honestly have, and it is why a child's bar can start before its parent's own bar does when the parent only ever travelled later. A row with no bracket has no parent on this drawing: it is a root, and the badge on it says whether the record holds ancestors above it anyway."],
+ timeaxis:["the clock along the top","This drawing is a CALENDAR, not a ranking. Every position across it is a real moment in UTC, the dates and times along the top are that clock, and the right-hand edge is NOW — which is why every living species' bar reaches it. The left-hand edge is the OLDEST BAR ON THE PICTURE and nothing more: it is not the beginning of the map, of the record, or of anything else, and the axis re-fits itself as the rows change, so revealing a hidden row can widen it. The record itself usually reaches further back than the left edge does, and the caption at the left margin says how far. EVERY horizontal distance on this drawing is time and there is no exception to that any more: the dotted run that stands for collapsed generations is drawn across the real stretch those generations held the line, and the number printed on it is there only because a count cannot be recovered from a duration. Vertical distance, by contrast, means nothing at all — it is the order the rows are laid out in."],
+ descends:["descended from","Who came from whom, drawn twice, because the two halves answer different questions. IN THE NAME COLUMN a bracket joins a parent row to each of its children and the children are indented one step, so the shape of the family reads straight down the page even when the bars themselves are far apart. IN THE PLOT a line lands on the child's bar at the moment the record FIRST NAMES that child — that is the one horizontal position the join can honestly have. Where it LEAVES the parent is the other half of the same honesty: the last moment the parent's own record supports, which for most links is that same instant and is then a plain drop. Where the parent's record stopped first, the link travels along the child's row across the stretch between them, and where the child's record started FIRST it runs backwards in amber instead. A row with no bracket has no parent on this drawing: it is a root, and the badge on it says whether the record holds ancestors above it anyway."],
  lineage:["one family, lit","Point at a row — or move to it with the Tab key — and everything that is not related to it fades: what stays lit is the line of ancestors above it, all the way to its root, and every species below it. It is the fastest answer to 'how is this one related to the rest', and it needs no click, changes nothing, and moves nothing on the page. Pressing Enter or Space on a focused row opens its detail, exactly as clicking it does."],
- collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE dotted edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. So the number is the difference between the two. The dotted run has a LENGTH, and that length counts generations and not time: everything else on this drawing is measured against the clock along the top, and this one mark is not, which is why it is dotted and why the number is printed beside it."],
+ collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE dotted edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. THE DOTTED RUN IS ON THE CLOCK, exactly like every other horizontal distance here: it starts where the ancestor's own record stops and ends where the descendant's record starts, so where it sits and how long it is are the real stretch of time in which this line was carried only by species this drawing does not draw. That stretch used to be left blank — on this map it is forty hours wide — with a short mark beside it whose length counted generations instead, which put two different scales on one drawing. The number is still printed because a count of generations cannot be recovered from a duration: forty generations and one generation can cross the same forty hours. That is now the only thing the number is for. Where there is no such stretch — the ancestor is still alive, or the descendant's first crossing falls inside the ancestor's own span — nothing is drawn across, and the number stands on its own: the record says those generations sat somewhere inside a stretch the ancestor itself occupies, and it does not say where."],
+ beforeparent:["recorded before its parent","A species whose first recorded crossing is EARLIER than its parent's own. The relationship is real and both dates are the record's: ancestry here is a by-product of TRAVEL, so a species is first seen when it happens to walk into another world and not when it arose — and the younger of two kinds can easily be the first to make that trip. So the parent's bar can start hours after the child's, and the honest drawing of that is not a line dropping onto a stretch of the parent's row where the parent has no bar. This page will not invent a bar to tidy it up. Instead the link leaves the parent at the earliest moment the parent's record supports, which is the left end of its bar, marks that point with a ring, and runs BACKWARDS in amber to where the child's own record begins. Amber and backwards for the same reason: it is not ordinary descent, and it is the one link on this drawing that must be read twice."],
  lifespan:["the bar, and what it is not","A species' bar starts at the first crossing THIS ARCHIVE RECORDED of it and ends at the last one, or at the right-hand edge while the species is still alive somewhere. It is not a lifespan and this page never calls it one. A kind can have lived for days before anything of it walked into another world, and a kind whose bar stopped last Tuesday may be alive and simply staying at home — what stopped is the record, and the only honest thing a record can draw is itself. The one place the drawing goes beyond that is an ancestor no crossing of its own was ever recorded for: its bar begins at its earliest recorded DESCENDANT, because that descendant's crossing named it as a parent, so the record does support 'it existed by then' and supports nothing earlier. Those bars are drawn hollow."],
- brainsize:["brain size","The ring at the end of a species' bar. Every creature carries a brain — a little network of neurons wired together by synapses — and this is how big the newest one of that species the archive has a copy of actually is: a bigger ring is more neurons and more synapses. It is drawn from ONE genome per species, the latest the crossing record named, and it is read out of the copy in the archive's own store. WHERE THERE IS NO RING THERE IS NO ANSWER, which is not the same as a small brain: the copy may never have arrived, or may have been deleted once it was older than the retention horizon. The record of the crossing stays forever either way; the genetic material is the part that ages out."],
+ brainsize:["brain size","The ring at the end of a species' bar. Every creature carries a brain — a little network of neurons wired together by synapses — and this is how big the newest one of that species the archive has a copy of is, COMPARED WITH THE OTHER SPECIES ON THIS DRAWING. That comparison is the whole of what the size means, and it is worth being plain about: the smallest brain among the rows drawn right now is the smallest ring, the largest is the largest, and everything else is placed between them. It is not an absolute size, and two rings of the same size on two different days are not the same brain. The scale re-fits whenever the drawn set changes — a search, a revealed row, a species leaving the census — exactly as the clock along the top re-fits to the bars it holds. It is drawn that way because the alternative was measured and said nothing: against a fixed scale the species on this map differed by a seventh of a pixel, so a kind carrying a third more brain than its neighbour drew the same ring. HOVER A RING FOR THE REAL NUMBERS — the counts are what the size stopped carrying, and they are on the row's own tooltip too. It is drawn from ONE genome per species, the latest the crossing record named, read out of the copy in the archive's own store. WHERE THERE IS NO RING THERE IS NO ANSWER, which is not the same as a small brain: the copy may never have arrived, or may have been deleted once it was older than the retention horizon. On this map most species have no ring at all for the first of those reasons. The record of the crossing stays forever either way; the genetic material is the part that ages out."],
  minimap:["where it lives","The little grid of dots beside a species, laid out the way the map itself is laid out — this map is three worlds wide and two high, so it is three dots by two, and a different map would draw a different grid. A filled dot is a world where this species is alive right now. A hollow dot is a world that sent its census and did not name it. A dashed amber dot is a world reporting no census at all, which is UNKNOWN and never 'not there'. A seat nobody has claimed is drawn as nothing."],
  trend:["the 24-hour line","A small line of this species' population across the whole map over the last day, from the archive's own sample file — the shape, not the numbers. A gap in the line is a stretch where no world reported a census, which is unknown and never a zero. Every one of these lines comes from a single answer covering every living species at once, so the column costs one request rather than one per species. This record began when the archive did, so a short line is a short record and not a young species."],
  recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive holds that named a parent at all — anything older than it is a crossing that named none. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw. THE DATE IS USUALLY OLDER THAN THE PICTURE, which is why it is printed at the left margin of the clock rather than drawn on it: the drawing is fitted to the oldest bar it actually holds, and reserving the space back to this date would leave most of the plot empty and more of it empty every hour. Where the date does fall inside the picture it is drawn there, as a dashed line, because then it separates a stretch where no family line can begin from one where they can."],
@@ -945,7 +969,7 @@ var G = {
     "rawname","endemic","everywhere","excluded","seedstock","crossings","speciesgenomes",
     "parentspecies",
     "genealogy","lifespan","timeaxis","descends","lineage",
-    "branchpoint","collapsed","noancestry","recordfloor",
+    "branchpoint","collapsed","beforeparent","noancestry","recordfloor",
     "minimap","trend","brainsize",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
@@ -1863,6 +1887,13 @@ function buildHopGlyph(name, toSlot){
      counted on the tab, and the notice that counts it will put it back. */
 
 var LFX = null, lfOpenKey = null, lfQuery = "", lfSort = "family";
+/* THE ANSWER'S OWN NODES BY KEY, rebuilt with every paint. A link and a row's
+   tooltip are both about a PAIR of species now — where the parent's record stops
+   against where the child's starts — and neither can be drawn from the child
+   alone. It indexes every node the answer carries and not only the drawn ones,
+   because the server's reduction already rewrote a child's parent to the nearest
+   DRAWN ancestor, so a lookup by n.parent is a lookup of a row. */
+var LFBY = {};
 /* The shared trend answer, keyed by species, and what it says about its own
    reach. Both are null until the first slow poll lands, and a row with no
    entry draws no line — never a flat one, which would be a claim. */
@@ -2041,14 +2072,75 @@ var LF_INDENT = 13, LF_MAXD = 6;
 function lfIndent(n, joined){
   return joined ? Math.min(n.depth || 0, LF_MAXD) * LF_INDENT : 0;
 }
-/* A collapsed run of generations, drawn as a dotted lead-in whose LENGTH COUNTS
-   GENERATIONS AND NOT TIME. Five pixels a generation, floored so one generation
-   is still visible and capped so forty do not cross the whole picture; the
-   number is printed beside it either way, because a length a reader has to
-   measure is not a number. */
-var LF_GENPX = 5, LF_CHAINMIN = 12, LF_CHAINMAX = 130;
-function lfChainLen(gens){
-  return Math.max(LF_CHAINMIN, Math.min(LF_CHAINMAX, gens * LF_GENPX));
+/* ---- A LINK IS ON THE CLOCK, ALL OF IT.
+
+   A collapsed run used to be drawn as a dotted lead-in immediately left of the
+   child's bar whose LENGTH COUNTED GENERATIONS — five pixels each — and the page
+   said so in four places because it was the one mark on this drawing that was not
+   on the time axis. It was still wrong. The generations it stood for lived
+   somewhere, and where they lived was the blank stretch between the end of the
+   ancestor's bar and the start of the child's: on the running rig, 40.1 h of empty
+   plot with a 50 px mark beside it claiming the same run on a different scale. A
+   drawing that puts one distance on two scales cannot be read.
+
+   So there is no exception any more. Every horizontal distance here is time, and a
+   link is drawn across the real interval it spans:
+
+     IT LEAVES THE PARENT at the latest moment the parent's OWN record supports
+     that is not after the child's first-seen — the end of its bar when it is
+     extinct, and the right-hand edge when it is alive, which is to say the child's
+     own first-seen and no run at all.
+
+     IT LANDS at the child's first-seen point, which is the one horizontal
+     position a join can honestly have and is where it always landed.
+
+   THE NUMBER STAYS, and it is now the only thing it is for: a count of
+   generations is not recoverable from a duration. Forty generations and one
+   generation can cross the same forty hours.
+
+   lfLink is that geometry as DATA — a function of the two nodes' published spans
+   and the scale, and of nothing else, so what it answers is the record's. Three
+   shapes come out of it and lfJoin draws them. */
+/* The smallest run this drawing will draw. Ten generations across a four-minute
+   gap is a fraction of a pixel on three days of axis, and a mark nobody can see is
+   a mark that is not there — so a positive run is widened to 2.5 px. That is the
+   SAME tolerance, for the same reason, as the shortest bar (lfBar): it overstates
+   the interval by at most those pixels, and it is the only place either mark is
+   allowed to. */
+var LF_RUNMIN = 2.5;
+/* How far above the child's bar an INVERTED link runs back — see lfLink's third
+   case. It cannot run along the bar's own centreline the way a forward run does,
+   because the stretch it crosses is a stretch that bar already occupies. */
+var LF_REVY = 8;
+function lfLink(n, p, sc){
+  var jx = sc.x(n.spanFromMs);
+  var out = {jx: jx, lx: jx, run: 0, rev: false};
+  // NO PARENT BAR TO LEAVE. A parent no crossing of its own was ever recorded for
+  // is drawn as a mark at now and nothing else, so there is no stretch of its row
+  // for the link to contradict: it drops where it lands, as it always did.
+  if (!(p && p.spanFromMs)) return out;
+  if (n.spanFromMs < p.spanFromMs){
+    // THE RECORD SAW THE CHILD FIRST. Its own earliest crossing is earlier than
+    // its parent's, so a drop at the child's first-seen would come down on a
+    // stretch of the parent's row that has no bar in it. The earliest moment the
+    // parent's record supports is the start of its bar, so that is where the link
+    // leaves — and it then runs BACKWARDS, which is a fact about the record and is
+    // drawn as one.
+    out.rev = true;
+    out.lx = sc.x(p.spanFromMs);
+    out.run = out.lx - jx;
+    if (out.run < LF_RUNMIN){ out.run = LF_RUNMIN; out.lx = jx + LF_RUNMIN; }
+    return out;
+  }
+  // A LIVING PARENT HAS NO LAST MOMENT: its bar runs to the right-hand edge, so
+  // every child of it starts inside its span and there is no stretch to cross.
+  var lastMs = p.alive ? 0 : (p.spanToMs || p.spanFromMs);
+  if (lastMs && n.spanFromMs > lastMs){
+    out.lx = sc.x(lastMs);
+    out.run = jx - out.lx;
+    if (out.run < LF_RUNMIN){ out.run = LF_RUNMIN; out.lx = jx - LF_RUNMIN; }
+  }
+  return out;
 }
 /* THE BRAIN, as a ring at the end of the bar — the end, because the stats come
    from the LATEST genome of that species the record named, so they describe what
@@ -2057,14 +2149,81 @@ function lfChainLen(gens){
    A ring and not a thickness: thickness has to have a value for every bar, and
    most of the honest answers here are ABSENT — a genome pruned past the
    retention horizon, or never fetched, has no brain to draw. An absent ring is
-   nothing at all, which cannot be misread as a small brain. */
-var LF_BRAIN_R0 = 2.4, LF_BRAIN_R1 = 6.4, LF_BRAIN_FULL = 600;
+   nothing at all, which cannot be misread as a small brain. Nine of sixteen
+   species on the running rig have no ring for exactly that reason.
+
+   ITS SCALE IS FITTED TO WHAT IS DRAWN, and that is a change with a cost worth
+   stating. The ring used to be an ABSOLUTE size: (neurons + synapses) log-scaled
+   against a fixed 600, which is a range this data does not occupy. Measured on
+   the live tree, the seven species that have stats at all run 88 to 113 — 5.21 px
+   of radius to 5.36 px. A species carrying 29% more brain than another drew a ring
+   0.15 px bigger, which is to say the mark encoded nothing at all.
+
+   So the smallest brain among the species DRAWN RIGHT NOW is the smallest ring
+   and the largest is the largest, and everything between is placed on that span.
+   What is bought is a mark that varies with the thing it stands for. What is paid
+   is that a ring no longer means a size — it means a PLACE AMONG THE ROWS IN FRONT
+   OF YOU, and it re-fits when the drawn set turns over, exactly as the time axis
+   already does. That is said in the glossary, in the legend and on the ring's own
+   tooltip, which carries the real counts so the absolute answer is never more than
+   a hover away.
+
+   IT IS STILL LOGARITHMIC INSIDE THE FITTED RANGE. One species ten times the rest
+   would otherwise press every other ring flat against the floor, which is the same
+   failure this change exists to undo, one range in. */
+var LF_BRAIN_R0 = 2.4, LF_BRAIN_R1 = 6.4;
+/* The range the last paint fitted, and how many species it was fitted over. */
+var LFBRAIN = {lo: 0, hi: 0, n: 0};
+function lfBrainW(n){ return (n.neurons || 0) + (n.synapses || 0); }
+function lfBrainRange(list){
+  var out = {lo: 0, hi: 0, n: 0};
+  for (var i=0;i<list.length;i++){
+    var w = lfBrainW(list[i]);
+    if (w <= 0) continue;
+    if (!out.n || w < out.lo) out.lo = w;
+    if (!out.n || w > out.hi) out.hi = w;
+    out.n++;
+  }
+  return out;
+}
 function lfBrainR(n){
-  var w = (n.neurons || 0) + (n.synapses || 0);
+  var w = lfBrainW(n);
+  // NO COPY OF ITS GENOME, NO RING. Absence is drawn as nothing, never as the
+  // smallest ring on the drawing — the two answers are not the same answer.
   if (w <= 0) return 0;
-  var f = Math.log(1 + w) / Math.log(1 + LF_BRAIN_FULL);
-  if (f > 1) f = 1;
+  var b = LFBRAIN, mid = (LF_BRAIN_R0 + LF_BRAIN_R1) / 2;
+  // ONE MEASUREMENT IS NOT A COMPARISON, and neither is a set that is all one
+  // number. Both get the MIDDLE of the span: the largest ring would claim a
+  // biggest that nothing was measured against, the smallest would claim the
+  // reverse, and the middle claims neither. It is also what keeps the divisor off
+  // zero, which is the same case seen from the arithmetic.
+  if (b.n < 2 || !(b.hi > b.lo)) return mid;
+  var f = (Math.log(1 + w) - Math.log(1 + b.lo)) /
+          (Math.log(1 + b.hi) - Math.log(1 + b.lo));
+  if (f < 0) f = 0; else if (f > 1) f = 1;
   return LF_BRAIN_R0 + f * (LF_BRAIN_R1 - LF_BRAIN_R0);
+}
+/* The ring's own tooltip: the REAL numbers, which the drawing itself cannot carry
+   now that the mark is a comparison. It names where the numbers came from, and it
+   says the one thing the ring's size no longer says. */
+function lfBrainTip(n){
+  var b = LFBRAIN, w = lfBrainW(n), body =
+    n.neurons + " neurons and " + n.synapses + " synapses, from the latest genome of this " +
+    "species the archive holds a copy of.";
+  if (b.n < 2 || !(b.hi > b.lo)){
+    body += " It is the only brain measured on this drawing" +
+      (b.n > 1 ? " size — every species here that has a genome carries the same total" : "") +
+      ", so the ring is drawn mid-scale rather than claiming a biggest or a smallest.";
+  } else {
+    body += " The ring is sized against the species drawn RIGHT NOW — " + b.lo + " to " +
+      b.hi + " across " + b.n + " of them — so it says where this one sits among the rows in " +
+      "front of you and not how big a brain is." +
+      (w >= b.hi ? " It is the largest on this drawing."
+                 : (w <= b.lo ? " It is the smallest on this drawing." : "")) +
+      " Reveal a row, search, or let a species leave the census and the scale re-fits, the " +
+      "way the clock along the top does.";
+  }
+  return {title: "brain size", body: body};
 }
 
 /* The column x positions, derived from the MAP'S OWN SHAPE rather than from a
@@ -2418,7 +2577,8 @@ function lfTip(n){
   if (n.neurons){
     lines.push("Brain: " + n.neurons + " neurons and " + n.synapses + " synapses, from the " +
       "latest genome of it this archive holds a copy of. The ring at the end of the bar is " +
-      "that size.");
+      "where that sits AMONG THE SPECIES DRAWN RIGHT NOW rather than an absolute size, and it " +
+      "re-scales as those change — hover the ring itself for the range it was fitted to.");
   }
   // WHO IT CAME FROM, WITHOUT OPENING THE ROW. The name of the parent species was
   // only ever in the expanded detail, so the drawing's own subject — descent —
@@ -2435,11 +2595,11 @@ function lfTip(n){
       lines.push("The record names " + n.parentName + " as its parent species. Nothing of " +
         "that one is alive and no other living line runs through it, so it is not a row here: " +
         "the bracket beside the name reaches past it to the nearest ancestor that IS drawn, " +
-        n.collapsed + " generation(s) further up, and the dotted lead-in stands for the ones " +
-        "in between.");
+        n.collapsed + " generation(s) further up, and the +" + n.collapsed + " on the link " +
+        "counts the ones in between.");
     } else if (n.parent){
       lines.push("Descends from " + n.parentName + ", which is the row the bracket beside the " +
-        "name joins it to. The line dropping onto its bar is that same link, drawn at the " +
+        "name joins it to. The line landing on its bar is that same link, and it lands at the " +
         "moment the record first named this species.");
     } else {
       lines.push("The record names " + n.parentName + " as its parent species. Nothing of that " +
@@ -2470,9 +2630,36 @@ function lfTip(n){
         "kind that has stayed home leaves no record to carry it.");
   }
   if (n.collapsed > 0){
-    lines.push("The dotted lead-in above it stands for " + n.collapsed +
-      " extinct generation(s) with no living branch on them. Its LENGTH counts generations, " +
-      "not time.");
+    lines.push("The +" + n.collapsed + " on its link counts extinct generation(s) with no " +
+      "living branch on them. It is printed because a count cannot be read off a duration: " +
+      "one generation and forty of them can cross the same stretch of clock.");
+  }
+  // THE SHAPE OF ITS OWN LINK, IN WORDS, from the two dates the drawing itself
+  // used. Every horizontal distance on this view is time, so a mark that crosses a
+  // stretch can name the stretch — and where no mark is drawn, this says that
+  // rather than describing one that is not there.
+  var pn = n.parent ? LFBY[n.parent] : null;
+  if (pn && pn.spanFromMs && n.spanFromMs){
+    var pend = pn.spanToMs || pn.spanFromMs;
+    if (n.spanFromMs < pn.spanFromMs){
+      lines.push("ITS OWN RECORD STARTS BEFORE ITS PARENT'S, by " +
+        ms(pn.spanFromMs - n.spanFromMs) + ". The descent is real and both dates are the " +
+        "record's: a kind is first seen here when it happens to walk into another world, not " +
+        "when it arose, and this one made that trip first. So its link is drawn leaving the " +
+        "earliest point its parent's record supports — the left end of that bar, with a ring " +
+        "on it — and running BACKWARDS in amber to where this one's record begins, rather " +
+        "than dropping onto a stretch of its parent's row that has no bar in it.");
+    } else if (!pn.alive && n.spanFromMs > pend){
+      lines.push("The record of the row above stops " + ms(n.spanFromMs - pend) +
+        " before this one's begins, and the link is drawn across exactly that stretch" +
+        (n.collapsed > 0
+          ? " — dotted, because it is the collapsed generations that carried the line through it."
+          : "."));
+    } else if (n.collapsed > 0){
+      lines.push("Nothing is drawn across for those generations: the record of the row above " +
+        "still runs where this one's begins, so it does not say which part of that span they " +
+        "sat in, and the number is the whole of what is known.");
+    }
   }
   lines.push(n.crossings + " recorded crossing(s)" +
     (n.genomes ? ", " + n.genomes + " distinct genome(s)" : "") + ".");
@@ -2614,8 +2801,10 @@ function lfSpark(g, n, top, cols){
   g.appendChild(b);
 }
 
-/* One species' bar, and the brain ring at the end of it. */
-function lfBar(g, n, top, sc){
+/* One species' bar, and the brain ring at the end of it. The row's own index is
+   carried in so the ring can register a tooltip of its own without a species name
+   ever becoming part of a key. */
+function lfBar(g, n, top, sc, i){
   var cy = top + LF_ROWH / 2 - 1;
   if (!n.spanFromMs){
     // Nothing the record dates. A living species still gets a mark, at now,
@@ -2656,6 +2845,13 @@ function lfBar(g, n, top, sc){
     ring.setAttribute("cx", String(x1 + r + 2));
     ring.setAttribute("cy", String(cy));
     ring.setAttribute("r", r.toFixed(1));
+    // THE RING ANSWERS WITH THE NUMBERS ITS SIZE STOPPED CARRYING. Its own key is
+    // generated from the row index, like the row's; the glossary term stays behind
+    // it, so a paint that has not filled SP yet still explains the mark rather than
+    // saying nothing.
+    var bk = "lfb" + i;
+    SP[bk] = lfBrainTip(n);
+    ring.setAttribute("data-s", bk);
     ring.setAttribute("data-t", "brainsize");
     g.appendChild(ring);
   }
@@ -2671,17 +2867,36 @@ function lfBar(g, n, top, sc){
    moment is not, and that is exactly the row a reader is most likely to wonder
    about.
 
-   THE DROP, in the plot: from the parent's row onto the child's bar AT THIS
-   SPECIES' FIRST-SEEN POINT, which is the instant the record first says this kind
-   exists — the one horizontal position the join can honestly have. It turns into
-   the bar with a small elbow rather than crossing it, so that at a glance it
-   flows into the bar it belongs to instead of competing with it. Where the edge
-   stands for a run of collapsed generations, a dotted lead-in runs back from that
-   point and the number is printed on it.
+   THE LINK, in the plot: it leaves the parent and lands on the child's bar AT
+   THIS SPECIES' FIRST-SEEN POINT, which is the instant the record first says this
+   kind exists — the one horizontal position the join can honestly have. It turns
+   with a small elbow rather than crossing anything, so at a glance it flows into
+   the bar it belongs to instead of competing with it.
 
-   THE GROUP IS THE UNIT OF LIGHTING. Both marks carry the child's key, so
+   WHERE IT LEAVES IS lfLink'S ANSWER, and the three shapes are three different
+   readings of the record:
+
+     NO RUN — the child's first crossing falls inside the parent's own span, which
+     is every child of a living parent and most children of an extinct one. The
+     link is a plain drop at that point, exactly as it always was.
+
+     A FORWARD RUN — the parent's record stops before the child's begins. The link
+     leaves at the end of the parent's bar and travels along the child's row into
+     the start of its bar, across the real interval in which this line was carried
+     by nothing on the drawing. It is DOTTED when collapsed generations carried it,
+     and plain when the link is direct and it is only the record that is silent.
+
+     A BACKWARD RUN — the child's first crossing is EARLIER than its parent's. It
+     is drawn in the warning colour, above the child's bar rather than along it,
+     with a ring where it left the parent, because it is not ordinary descent and
+     must not be read as any.
+
+   THE +N GOES WITH THE SHAPE: centred over a run where there is one, and tucked
+   against the drop where there is not.
+
+   THE GROUP IS THE UNIT OF LIGHTING. Every mark carries the child's key, so
    lighting one lineage lights the whole link and never half of it. */
-function lfJoin(links, n, rowY, rowInd, cols, sc){
+function lfJoin(links, n, rowY, rowInd, sc){
   var py = rowY[n.parent], cy = rowY[n.key];
   if (py == null || cy == null) return null;
   var g = svgEl("g", "ln");
@@ -2691,19 +2906,43 @@ function lfJoin(links, n, rowY, rowInd, cols, sc){
   tw.setAttribute("d", "M" + gxp + " " + (py + 7) + " V" + cy + " H" + (gx - 5));
   g.appendChild(tw);
   if (n.spanFromMs){
-    var jx = sc.x(n.spanFromMs);
-    var drop = svgEl("path", "link");
-    drop.setAttribute("d", "M" + jx.toFixed(1) + " " + py + " V" + (cy - 5) +
-      " Q" + jx.toFixed(1) + " " + cy + " " + (jx + 5).toFixed(1) + " " + cy);
-    g.appendChild(drop);
+    var lay = lfLink(n, LFBY[n.parent], sc);
+    var jx = lay.jx, lx = lay.lx, lbx = jx - 4, lba = "end", lby = cy - 4;
+    if (lay.rev){
+      var ry = cy - LF_REVY;
+      var rv = svgEl("path", "rev");
+      rv.setAttribute("d", "M" + lx.toFixed(1) + " " + py + " V" + ry +
+        " H" + jx.toFixed(1) + " V" + (cy - 2));
+      rv.setAttribute("data-t", "beforeparent");
+      g.appendChild(rv);
+      var mk = svgEl("circle", "revmark");
+      mk.setAttribute("cx", lx.toFixed(1));
+      mk.setAttribute("cy", String(py));
+      mk.setAttribute("r", "3");
+      mk.setAttribute("data-t", "beforeparent");
+      g.appendChild(mk);
+      lbx = (lx + jx) / 2; lba = "middle"; lby = ry - 4;
+    } else if (lay.run > 0){
+      // The elbow never overshoots the run it turns into: a run at the 2.5 px
+      // floor would otherwise be drawn as a hook doubling back on itself.
+      var er = Math.min(5, lay.run);
+      var run = svgEl("path", n.collapsed > 0 ? "chain" : "link");
+      run.setAttribute("d", "M" + lx.toFixed(1) + " " + py + " V" + (cy - er).toFixed(1) +
+        " Q" + lx.toFixed(1) + " " + cy + " " + (lx + er).toFixed(1) + " " + cy +
+        " H" + jx.toFixed(1));
+      g.appendChild(run);
+      lbx = (lx + jx) / 2; lba = "middle";
+    } else {
+      var drop = svgEl("path", "link");
+      drop.setAttribute("d", "M" + jx.toFixed(1) + " " + py + " V" + (cy - 5) +
+        " Q" + jx.toFixed(1) + " " + cy + " " + (jx + 5).toFixed(1) + " " + cy);
+      g.appendChild(drop);
+    }
     if (n.collapsed > 0){
-      var from = Math.max(cols.plot - 18, jx - lfChainLen(n.collapsed));
-      var chain = svgEl("path", "chain");
-      chain.setAttribute("d", "M" + from.toFixed(1) + " " + cy + " H" + jx.toFixed(1));
-      g.appendChild(chain);
       var gt = svgEl("text", "gen");
-      gt.setAttribute("x", from.toFixed(1));
-      gt.setAttribute("y", String(cy - 4));
+      gt.setAttribute("x", lbx.toFixed(1));
+      gt.setAttribute("y", String(lby));
+      gt.setAttribute("text-anchor", lba);
       gt.setAttribute("data-t", "collapsed");
       gt.textContent = "+" + n.collapsed;
       g.appendChild(gt);
@@ -2868,7 +3107,7 @@ function lfRow(x, n, top, cols, sc, i, joined){
   }
 
   lfSpark(g, n, top, cols);
-  lfBar(g, n, top, sc);
+  lfBar(g, n, top, sc, i);
   if (open) lfDetail(g, n, top + LF_ROWH + badgeH, cols);
   return g;
 }
@@ -3039,10 +3278,20 @@ function lfRefocus(host, mine){
    row above it. */
 function renderLife(x){
   LFX = x;
+  // The pair index, before anything reads it: a link's geometry and a row's
+  // tooltip both need the parent node, and a stale one would date a link against
+  // a species that is no longer in the answer.
+  LFBY = {};
+  var all = (x && x.nodes) || [];
+  for (var bi=0;bi<all.length;bi++) LFBY[all[bi].key] = all[bi];
   // THE ROWS ARE CHOSEN FIRST, because the counts line describes THIS drawing:
   // how many rows the seed filter took out of it, and how many seed rows are on
   // it anyway.
   var pick = lfRows(x), list = pick.list, i;
+  // THE BRAIN RING'S SCALE, fitted to the rows this paint is about to draw and to
+  // nothing else — so it follows a search, the seed reveal and the census the same
+  // way the time axis does, and it is computed once rather than per row.
+  LFBRAIN = lfBrainRange(list);
   lfCount(x);
   lfStats(x, pick.hid, pick.seed);
   var host = document.getElementById("lfbox");
@@ -3134,7 +3383,7 @@ function renderLife(x){
       // out — and then the child keeps its place and its indent and simply has
       // no bracket, which is what a root looks like anyway.
       if (!n.parent || rowY[n.parent] == null) continue;
-      var lg = lfJoin(links, n, rowY, rowInd, cols, sc);
+      var lg = lfJoin(links, n, rowY, rowInd, sc);
       if (!lg) continue;
       LFLN[n.key] = {g: lg, base: "ln"};
       LFPAR[n.key] = n.parent;

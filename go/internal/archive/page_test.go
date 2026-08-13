@@ -230,27 +230,22 @@ func TestTheSpeciesViewDrawsTheRecordAgainstTime(t *testing.T) {
 	if !strings.Contains(region, "var x1 = n.alive ? sc.x(sc.t1) : sc.x(n.spanToMs || n.spanFromMs);") {
 		t.Fatal("a living species' bar does not run to now, or an extinct one does")
 	}
-	// The join is the CHILD's first-seen point, which is the only x-coordinate on
-	// the drawing that means anything.
+	// The join LANDS at the CHILD's first-seen point, which is the only x-coordinate
+	// on the drawing that means anything.
 	if !strings.Contains(region, "var jx = sc.x(n.spanFromMs);") {
-		t.Fatal("the parent edge does not drop at the child's first-seen point")
+		t.Fatal("the parent edge does not land at the child's first-seen point")
 	}
-	// THE COLLAPSED RUN IS A DOTTED LEAD-IN WHOSE LENGTH COUNTS GENERATIONS, and
-	// the number is printed beside it anyway — a length a reader has to measure
-	// is not a number, and a length on a time axis that is not time has to say so.
-	if !strings.Contains(region,
-		"return Math.max(LF_CHAINMIN, Math.min(LF_CHAINMAX, gens * LF_GENPX));") {
-		t.Fatal("the collapsed run's length is not a bounded multiple of the generations it " +
-			"stands for")
-	}
-	for _, want := range []string{"var LF_GENPX = 5, LF_CHAINMIN = 12, LF_CHAINMAX = 130;",
-		"lfChainLen(n.collapsed)", `svgEl("path", "chain")`, `gt.textContent = "+" + n.collapsed;`} {
-		if !strings.Contains(region, want) {
-			t.Fatalf("the collapsed edge is missing %q", want)
+	// AND EVERY HORIZONTAL DISTANCE ON THE DRAWING IS TIME. The collapsed run used
+	// to be the one exception — a lead-in whose LENGTH counted generations at five
+	// pixels each — which put two scales on one picture and left the interval those
+	// generations really occupied as blank plot. TestALinkIsDrawnOnTheClock below is
+	// the whole of the new rule; here it is enough that the old one is gone.
+	for _, gone := range []string{"LF_GENPX", "LF_CHAINMIN", "LF_CHAINMAX", "lfChainLen",
+		"generations and not time", "generations, not time", "counts generations"} {
+		if strings.Contains(page, gone) {
+			t.Fatalf("the page still carries the generations-not-time lead-in (%q); a length that "+
+				"is not time on an axis that is has no place left on this drawing", gone)
 		}
-	}
-	if !strings.Contains(page, "generations and not time") {
-		t.Fatal("the glossary never says the dotted length is generations rather than time")
 	}
 	// THE AXIS IS THE SERVER'S, UNCLAMPED, and the drawing reads the left edge it
 	// publishes rather than reaching for the floor.
@@ -328,6 +323,190 @@ func TestTheSpeciesViewDrawsTheRecordAgainstTime(t *testing.T) {
 	}
 }
 
+// TestALinkIsDrawnOnTheClock is the rule the collapsed lead-in used to be the one
+// exception to, and the two defects that exception hid.
+//
+// THE OLD MARK. A run of extinct generations with no living branch was drawn as a
+// dotted lead-in immediately left of the child's bar, whose LENGTH counted
+// generations at five pixels each — deliberately not on the clock, said so in the
+// glossary, in the legend, in the axis entry and in every affected row's tooltip.
+//
+// WHAT IT HID. Those generations lived somewhere, and where they lived was the
+// blank stretch between the end of the ancestor's bar and the start of the child's.
+// Measured on the running rig: `Sheeplasius dukworthgregorius` starts 40.1 h after
+// `Zhiluus tardisitguyus` ends and `Todae raffius` 38.4 h after the same bar, both
+// with a 50-odd-pixel mark beside them claiming that same run on another scale. A
+// drawing that puts one distance on two scales cannot be read at all.
+//
+// SO THERE IS ONE RULE NOW, and it is a rule about BOTH ENDS of a link:
+//
+//	IT LANDS at the child's first-seen point, as it always did — the one
+//	horizontal position a join can honestly have.
+//
+//	IT LEAVES the parent at the latest moment the PARENT'S OWN record supports
+//	that is not after that point. For a living parent, and for a child whose
+//	first crossing falls inside its parent's span, that is the same instant and
+//	the link is the same plain drop it always was.
+//
+// FOUR SHAPES COME OUT OF THAT, and each is a different thing the record is
+// saying. They are lfLink's answer, computed from the two nodes' published spans
+// and nothing else.
+//
+// THE NUMBER SURVIVES ALL OF THEM, and its job is now singular: a count of
+// generations cannot be recovered from a duration. Forty generations and one can
+// cross the same forty hours.
+func TestALinkIsDrawnOnTheClock(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// THE GEOMETRY IS ITS OWN FUNCTION, of the two nodes and the scale. A link that
+	// asked only the child could never have found either defect.
+	if !strings.Contains(region, "function lfLink(n, p, sc){") {
+		t.Fatal("the link's geometry is not derived from the parent as well as the child, so " +
+			"nothing on the drawing can know where the parent's record stops")
+	}
+	link := region[strings.Index(region, "function lfLink(n, p, sc){"):]
+	link = link[:strings.Index(link, "/* THE BRAIN")]
+
+	// CASE 1 — no parent bar at all. A parent no crossing of its own was recorded
+	// for has no drawn span to leave, so the link drops where it lands.
+	if !strings.Contains(link, "if (!(p && p.spanFromMs)) return out;") {
+		t.Fatal("a link whose parent the record never dated does not fall back to the plain drop")
+	}
+	// CASE 2 — the inversion: the child's own record starts first.
+	for _, want := range []string{"if (n.spanFromMs < p.spanFromMs){", "out.rev = true;",
+		"out.lx = sc.x(p.spanFromMs);"} {
+		if !strings.Contains(link, want) {
+			t.Fatalf("a child recorded before its parent is not given its own shape: %q missing", want)
+		}
+	}
+	// CASE 3 — a gap: the parent's record stops before the child's begins. A LIVING
+	// parent has no last moment, because its bar runs to the right-hand edge.
+	for _, want := range []string{"var lastMs = p.alive ? 0 : (p.spanToMs || p.spanFromMs);",
+		"if (lastMs && n.spanFromMs > lastMs){", "out.lx = sc.x(lastMs);",
+		"out.run = jx - out.lx;"} {
+		if !strings.Contains(link, want) {
+			t.Fatalf("the run across a gap is not the gap's own interval: %q missing", want)
+		}
+	}
+	// CASE 4 — a gap too short to see. It is widened to the SAME 2.5 px the shortest
+	// bar takes, which is the only overstatement either mark is allowed; the number
+	// carries the count regardless.
+	if !strings.Contains(region, "var LF_RUNMIN = 2.5;") ||
+		strings.Count(link, "if (out.run < LF_RUNMIN){ out.run = LF_RUNMIN;") != 2 {
+		t.Fatal("a sub-pixel run is not floored to a visible mark in both directions, so a run " +
+			"of ten generations across four minutes is drawn as nothing at all")
+	}
+	// AND NOTHING IS INVENTED WHERE THE RECORD SAYS NOTHING. A living parent, or a
+	// child starting inside its parent's span, leaves no interval this drawing can
+	// honestly claim — the generations sat somewhere in a stretch the parent itself
+	// occupies and the record does not say where — so no run is drawn and the number
+	// stands alone. That is the branch's fall-through, and the words say it too.
+	if !strings.Contains(page, "Where there is no such stretch — the ancestor is still alive, "+
+		"or the descendant's first crossing falls inside the ancestor's own span — nothing is "+
+		"drawn across") {
+		t.Fatal("the glossary never says that a collapsed run with no interval to occupy is not " +
+			"drawn as one")
+	}
+
+	// THE DRAWING OF EACH SHAPE. A collapsed run is dotted because the species that
+	// carried it are not on the picture; a direct link across the same gap is the
+	// plain line, because there is nothing undrawn about it.
+	join := region[strings.Index(region, "function lfJoin"):]
+	join = join[:strings.Index(join, "function lfBadges")]
+	for _, want := range []string{`svgEl("path", n.collapsed > 0 ? "chain" : "link")`,
+		`" Q" + lx.toFixed(1) + " " + cy + " " + (lx + er).toFixed(1) + " " + cy +`,
+		`" H" + jx.toFixed(1)`, "var er = Math.min(5, lay.run);"} {
+		if !strings.Contains(join, want) {
+			t.Fatalf("the run across a gap is not drawn from the parent's last moment into the "+
+				"child's bar: %q missing", want)
+		}
+	}
+	// THE NUMBER GOES WITH THE SHAPE: centred over a run, tucked against a drop.
+	for _, want := range []string{`lbx = (lx + jx) / 2; lba = "middle";`,
+		`var jx = lay.jx, lx = lay.lx, lbx = jx - 4, lba = "end", lby = cy - 4;`,
+		`gt.setAttribute("text-anchor", lba);`, `gt.textContent = "+" + n.collapsed;`} {
+		if !strings.Contains(join, want) {
+			t.Fatalf("the collapsed count does not follow the mark it counts: %q missing", want)
+		}
+	}
+	// THE BACKWARDS LINK, drawn ABOVE the child's bar rather than along it — the
+	// stretch it crosses is a stretch that bar already occupies — with a ring where
+	// it left the parent and the warning colour on both.
+	for _, want := range []string{`svgEl("path", "rev")`, `svgEl("circle", "revmark")`,
+		"var ry = cy - LF_REVY;", `"M" + lx.toFixed(1) + " " + py + " V" + ry +`,
+		`" H" + jx.toFixed(1) + " V" + (cy - 2)`,
+		`mk.setAttribute("cx", lx.toFixed(1));`} {
+		if !strings.Contains(join, want) {
+			t.Fatalf("the inverted link is not drawn as one: %q missing", want)
+		}
+	}
+	for _, want := range []string{"svg.life .rev{fill:none;stroke:var(--warn)",
+		"svg.life .revmark{fill:none;stroke:var(--warn)", "var LF_REVY = 8;"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the inverted link is not marked out from ordinary descent: %q missing", want)
+		}
+	}
+	// IT NEVER FABRICATES A PARENT BAR. The only x-coordinates the shape uses are
+	// the two published span starts and the parent's published end.
+	if strings.Contains(link, "spanDerived") {
+		t.Fatal("the page re-derives a span for the inversion; the server's numbers are already " +
+			"right — a child recorded before its parent is a true fact about the record, and " +
+			"spanDerived is the complementary case where the parent has no record of its own")
+	}
+
+	// THE PAIR INDEX. Both the link and the row's tooltip are about two species now,
+	// and it is rebuilt with every paint so a link cannot be dated against a species
+	// that has left the answer.
+	for _, want := range []string{"var LFBY = {};", "LFBY = {};",
+		"for (var bi=0;bi<all.length;bi++) LFBY[all[bi].key] = all[bi];"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the drawing has no index of the answer's own nodes: %q missing", want)
+		}
+	}
+
+	// SAID IN WORDS, in all four places the old exception was written into.
+	for _, want := range []string{" collapsed:[", " beforeparent:["} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the glossary never explains %q", want)
+		}
+	}
+	if !strings.Contains(page, `"branchpoint","collapsed","beforeparent","noancestry","recordfloor",`) {
+		t.Fatal("the new glossary entry is never listed, so nobody can read it")
+	}
+	for _, want := range []string{
+		"THE DOTTED RUN IS ON THE CLOCK, exactly like every other horizontal distance here",
+		"a count of generations cannot be recovered from a duration",
+		"A species whose first recorded crossing is EARLIER than its parent's own",
+		"This page will not invent a bar to tidy it up"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the glossary does not carry the rewritten rule: %q missing", want)
+		}
+	}
+	// The legend names both marks where they are named, and the backwards one has a
+	// swatch of its own so it cannot be taken for the dotted run.
+	for _, want := range []string{
+		`<span class="term" data-t="collapsed">across the stretch they held the line</span>`,
+		`<i class="revi"></i><span class="term" data-t="beforeparent">recorded before its`,
+		".treelegend i.revi{"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the legend does not name the marks it draws: %q missing", want)
+		}
+	}
+	// AND THE ROW SAYS WHICH STRETCH, from the same two dates the drawing used — or
+	// says that there is none, which is the case a mark cannot make.
+	for _, want := range []string{
+		`"The record of the row above stops " + ms(n.spanFromMs - pend) +`,
+		`" before this one's begins, and the link is drawn across exactly that stretch" +`,
+		`"Nothing is drawn across for those generations: the record of the row above " +`,
+		`"ITS OWN RECORD STARTS BEFORE ITS PARENT'S, by " +`,
+		"ms(pn.spanFromMs - n.spanFromMs)"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a row's tooltip does not describe its own link: %q missing", want)
+		}
+	}
+}
+
 // TestTheSpeciesViewDrawsTheMiniMapAndTheBrain covers the two marks that are not
 // time: where a species lives, and how big its brain is.
 //
@@ -363,9 +542,9 @@ func TestTheSpeciesViewDrawsTheMiniMapAndTheBrain(t *testing.T) {
 		t.Fatal("the unknown dot is not drawn as an unknown")
 	}
 	// The brain: a ring sized from the two published figures, and NOTHING when
-	// they are absent.
+	// they are absent. Its SCALE is TestTheBrainRingIsFittedToWhatIsDrawn's subject.
 	for _, want := range []string{"function lfBrainR", "n.neurons", "n.synapses",
-		"var LF_BRAIN_R0 = 2.4, LF_BRAIN_R1 = 6.4, LF_BRAIN_FULL = 600;",
+		"var LF_BRAIN_R0 = 2.4, LF_BRAIN_R1 = 6.4;",
 		"if (w <= 0) return 0;", `svgEl("circle", "brain")`} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the brain ring is missing %q", want)
@@ -386,6 +565,139 @@ func TestTheSpeciesViewDrawsTheMiniMapAndTheBrain(t *testing.T) {
 	}
 	if !strings.Contains(page, `"minimap","trend","brainsize",`) {
 		t.Fatal("the new glossary entries exist but are never listed, so nobody can read them")
+	}
+}
+
+// TestTheBrainRingIsFittedToWhatIsDrawn is a mark that encoded nothing, and the
+// cost of making it encode something.
+//
+// THE MEASUREMENT. The ring log-scaled (neurons + synapses) against a fixed 600
+// into radii of 2.4 to 6.4 px. On the live tree the seven species that have stats
+// at all run 88 to 113 — 5.21 px to 5.36 px. `Sheeplasius dasryanus` carries 29%
+// more brain than `Sheeplasius cyberdudei` and drew a ring 0.15 px bigger. A mark
+// whose whole range is a seventh of a pixel is not a small signal; it is no signal,
+// drawn as though it were one.
+//
+// THE FIX AND ITS PRICE. The scale is fitted to the species DRAWN RIGHT NOW, so
+// the smallest brain on the picture is the smallest ring and the largest is the
+// largest. That buys variation and it sells absoluteness: a ring is now a PLACE
+// AMONG THE ROWS IN FRONT OF YOU and it re-fits when those rows change, exactly as
+// the time axis already does. A page that took that quietly would be a page whose
+// marks mean whatever the last poll decided, so it is said in the glossary, on the
+// legend, on the row's tooltip and on the ring's own.
+//
+// THREE DEGENERATE SETS, EACH DECIDED RATHER THAN FALLEN INTO. One species with
+// stats is not a comparison; several species all carrying the same total is not a
+// comparison either, and is also a zero divisor. Both draw MID-SCALE — the largest
+// ring would claim a biggest nothing was measured against and the smallest would
+// claim the reverse. And a species with no stored genome still draws NO RING: the
+// one thing this change must not do is turn an absence into the smallest brain on
+// the map.
+func TestTheBrainRingIsFittedToWhatIsDrawn(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// THE RANGE IS COMPUTED OVER THE DRAWN ROWS, once a paint, and the rows are the
+	// ones the search, the seed filter and the census actually produced.
+	for _, want := range []string{"function lfBrainRange(list){", "var LFBRAIN = {lo: 0, hi: 0, n: 0};",
+		"LFBRAIN = lfBrainRange(list);", "function lfBrainW(n){ return (n.neurons || 0) + (n.synapses || 0); }"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the ring's scale is not fitted to the drawn set: %q missing", want)
+		}
+	}
+	if !strings.Contains(region, "var pick = lfRows(x), list = pick.list, i;\n") ||
+		strings.Index(region, "LFBRAIN = lfBrainRange(list);") <
+			strings.Index(region, "var pick = lfRows(x), list = pick.list, i;") {
+		t.Fatal("the range is fitted before the rows are chosen, so it describes a set that is " +
+			"not the one being drawn")
+	}
+	// THE FIXED CEILING IS GONE. It is the whole defect: a range the data does not
+	// occupy renders every difference in it as nothing.
+	if strings.Contains(page, "LF_BRAIN_FULL") {
+		t.Fatal("the ring is still scaled against a fixed ceiling; on this map that put every " +
+			"species within 0.15 px of every other")
+	}
+	// THE MAPPING: the drawn minimum onto the smallest radius, the drawn maximum
+	// onto the largest, logarithmically between so one outlier cannot flatten the
+	// rest — which is this same defect one range in.
+	for _, want := range []string{
+		"var f = (Math.log(1 + w) - Math.log(1 + b.lo)) /",
+		"(Math.log(1 + b.hi) - Math.log(1 + b.lo));",
+		"return LF_BRAIN_R0 + f * (LF_BRAIN_R1 - LF_BRAIN_R0);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the ring does not map the drawn range onto the whole radius span: %q missing",
+				want)
+		}
+	}
+	// BOTH DEGENERATE SETS, ONE ANSWER, NO DIVISION BY ZERO. n < 2 is the single
+	// species; !(hi > lo) is the set that is all one number and is also the zero
+	// divisor. Neither may be drawn as an extreme.
+	if !strings.Contains(region, "if (b.n < 2 || !(b.hi > b.lo)) return mid;") ||
+		!strings.Contains(region, "var b = LFBRAIN, mid = (LF_BRAIN_R0 + LF_BRAIN_R1) / 2;") {
+		t.Fatal("a drawing with one measured brain, or with several identical ones, either " +
+			"divides by zero or draws them all at an extreme")
+	}
+	// ABSENCE IS STILL ABSENCE. Nine of sixteen species on the running rig have no
+	// stored genome, and the gate that gives them no ring at all must come BEFORE
+	// anything that could hand them the minimum.
+	zero := strings.Index(region, "if (w <= 0) return 0;")
+	if zero < 0 || zero > strings.Index(region, "var b = LFBRAIN, mid =") {
+		t.Fatal("a species with no stored genome is not returned as nothing before the scale " +
+			"runs; an absent brain drawn as the smallest ring is a reading invented out of a gap")
+	}
+	if !strings.Contains(region, "var r = lfBrainR(n);\n  if (r > 0){") {
+		t.Fatal("a radius of zero is still drawn as a circle")
+	}
+
+	// THE NUMBERS THE SIZE STOPPED CARRYING, on the ring itself. Its key is
+	// generated from the row index — a species name never becomes part of one — and
+	// the glossary term stays behind it so the mark explains itself either way.
+	for _, want := range []string{"function lfBrainTip(n){", `var bk = "lfb" + i;`,
+		"SP[bk] = lfBrainTip(n);", `ring.setAttribute("data-s", bk);`,
+		`ring.setAttribute("data-t", "brainsize");`,
+		`n.neurons + " neurons and " + n.synapses + " synapses, from the latest genome of this "`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the ring carries no tooltip of its own: %q missing", want)
+		}
+	}
+	// A 2.4 px unfilled circle is hittable on its stroke alone, which is not a hit
+	// target. The whole disc has to answer or the tip is unreachable.
+	if !strings.Contains(page, "svg.life .brain{fill:none;stroke:var(--lane);stroke-width:1.3;"+
+		"cursor:help;pointer-events:all}") {
+		t.Fatal("the ring is not a pointer target, so the tooltip carrying its real numbers " +
+			"cannot be reached on the mark it belongs to")
+	}
+	// The tip says what the size means now, and names the range it was fitted to —
+	// including the degenerate one, where it says why it is mid-scale.
+	for _, want := range []string{
+		`" The ring is sized against the species drawn RIGHT NOW — " + b.lo + " to " +`,
+		`" It is the largest on this drawing."`,
+		`" It is the smallest on this drawing."`,
+		`", so the ring is drawn mid-scale rather than claiming a biggest or a smallest.";`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the ring's tooltip does not say what its size means: %q missing", want)
+		}
+	}
+
+	// AND THE COST IS WRITTEN DOWN where a reader meets the mark: the glossary, the
+	// legend, and the row's own tooltip.
+	for _, want := range []string{
+		"COMPARED WITH THE OTHER SPECIES ON THIS DRAWING",
+		"It is not an absolute size, and two rings of the same size on two different days are " +
+			"not the same brain.",
+		"the species on this map differed by a seventh of a pixel",
+		"HOVER A RING FOR THE REAL NUMBERS"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the glossary does not state what the ring now means or what that cost: "+
+				"%q missing", want)
+		}
+	}
+	if !strings.Contains(page, "&mdash; bigger ring, more neurons and synapses <em>than the "+
+		"other rows drawn</em>;") {
+		t.Fatal("the legend still calls the ring an absolute size")
+	}
+	if !strings.Contains(region, `"where that sits AMONG THE SPECIES DRAWN RIGHT NOW rather than an absolute size, and it "`) {
+		t.Fatal("a row's own tooltip still says the ring is that size")
 	}
 }
 
@@ -827,11 +1139,13 @@ func TestTheFamilyIsReadableDownTheLabelColumn(t *testing.T) {
 			"crossing still has a parent, and that is the row whose family a reader most needs " +
 			"drawn")
 	}
-	// THE DROP TURNS INTO THE BAR rather than crossing it: an elbow at the child's
-	// first-seen point, which is still the only x-coordinate this join can have.
-	for _, want := range []string{"var jx = sc.x(n.spanFromMs);", `" Q" + jx.toFixed(1)`} {
+	// THE LINK TURNS INTO THE BAR rather than crossing it: an elbow, and it lands at
+	// the child's first-seen point, which is still the only x-coordinate this join
+	// can have. Where it LEAVES the parent is lfLink's answer and is tested there.
+	for _, want := range []string{"var lay = lfLink(n, LFBY[n.parent], sc);",
+		"var jx = lay.jx, lx = lay.lx,", `" Q" + jx.toFixed(1)`} {
 		if !strings.Contains(join, want) {
-			t.Fatalf("the parent drop is not an elbow into the child's bar: %q missing", want)
+			t.Fatalf("the parent link is not an elbow into the child's bar: %q missing", want)
 		}
 	}
 	// A LINK IS ONLY A LINK IF BOTH ENDS ARE DRAWN. A hidden seed parent, or a
@@ -1132,18 +1446,20 @@ func TestTheDrawingExplainsWhatItIs(t *testing.T) {
 		}
 	}
 	// The axis entry has to hold the two things a reader gets wrong about it: the
-	// left edge is not the beginning of anything, and one mark on the drawing is not
-	// on the clock at all.
+	// left edge is not the beginning of anything, and — since the collapsed run came
+	// on to the clock — that there is no longer any mark on it that is not.
 	for _, want := range []string{"The left-hand edge is the OLDEST BAR ON THE PICTURE",
-		"whose length counts generations"} {
+		"EVERY horizontal distance on this drawing is time and there is no exception to that"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the time-axis entry never says %q", want)
 		}
 	}
 	// THE MARKS THAT CARRY A TERM ON THE DRAWING ITSELF, each hoverable where it is
-	// drawn: the caption at the margin, the collapsed lead-in, the brain ring.
+	// drawn: the caption at the margin, the collapsed run's number, the backwards
+	// link and the ring where it left its parent, the brain ring.
 	for _, want := range []string{`fcap.setAttribute("data-t", "recordfloor")`,
-		`gt.setAttribute("data-t", "collapsed")`, `ring.setAttribute("data-t", "brainsize")`} {
+		`gt.setAttribute("data-t", "collapsed")`, `rv.setAttribute("data-t", "beforeparent")`,
+		`mk.setAttribute("data-t", "beforeparent")`, `ring.setAttribute("data-t", "brainsize")`} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("a mark on the drawing carries no explanation: %q missing", want)
 		}
@@ -1165,7 +1481,7 @@ func TestTheDrawingExplainsWhatItIs(t *testing.T) {
 	for _, want := range []string{
 		"No crossing of it has ever named a parent species, so the record cannot say ",
 		"No crossing of it has ever been recorded, so the drawing can date neither ",
-		"The dotted lead-in above it stands for "} {
+		`"The +" + n.collapsed + " on its link counts extinct generation(s) with no "`} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("an absence on the drawing goes unexplained: %q missing", want)
 		}

@@ -990,6 +990,169 @@ func TestTheLifespanGeometryIsTheRecordsOwnSpan(t *testing.T) {
 	}
 }
 
+// TestTheRecordProducesEveryShapeALinkMustDraw is the server half of the page's
+// link geometry. The drawing puts EVERY horizontal distance on the clock now,
+// including the dotted run that stands for collapsed generations — it is drawn
+// from where the parent's own record stops to where the child's begins — and the
+// shape it takes is decided entirely by the three numbers published here. So the
+// four arrangements are pinned as LAYOUT DATA, on one fixture, in the shapes the
+// running rig really holds:
+//
+//	A GAP UNDER A COLLAPSED RUN. An extinct branch point whose record stopped
+//	38 hours before its next drawn descendant's began. That interval is exactly
+//	when the collapsed generations held the line, and until it was drawn it was
+//	blank plot with a fixed-length mark beside it on another scale.
+//
+//	A GAP UNDER A DIRECT LINK. The same silence with nothing collapsed in it —
+//	which the page draws as the same run, undotted, because nothing about it is
+//	undrawn.
+//
+//	A GAP TOO SHORT TO SEE. Four minutes across days of axis. The interval is
+//	real and sub-pixel, which is a floor for the drawing and not a licence to
+//	round it away here.
+//
+//	NO GAP AT ALL. A living parent has no last recorded moment — its bar runs
+//	to the right-hand edge — so every child of one starts inside its span and
+//	there is no interval any mark could honestly claim.
+//
+//	AND THE INVERSION. A child whose own first crossing PRECEDES its parent's.
+//	Ancestry here is a by-product of travel, so a species is first seen when it
+//	happens to cross a lane, and the younger kind can cross first. Both dates
+//	are the record's and the descent is real. Note where this does NOT go: the
+//	derived-span machinery fires only when a node's own record holds no crossing
+//	at all, and it already takes the earliest dated descendant. This is the
+//	complementary case — the parent HAS a crossing, later than its child's — and
+//	the honest answer is to publish both and draw the fact.
+func TestTheRecordProducesEveryShapeALinkMustDraw(t *testing.T) {
+	status := contractb.PeerStatus{
+		Epoch: 1, Map: contractb.MapShape{Width: 1, Height: 1}, SlotCount: 1,
+		Slots: []contractb.SlotInfo{slot(1, 0, 0, true, census(60, 0,
+			entry("Gap", "far", 10, 0), entry("Near", "leaf", 10, 0),
+			entry("Tiny", "leaf", 10, 0), entry("Live", "par", 10, 0),
+			entry("In", "kid", 10, 0), entry("Late", "par", 10, 0),
+			entry("Early", "kid", 10, 0)))},
+	}
+	a := newViewFixture(t, status, time.Second)
+	const hour = int64(3600000)
+	base := time.Now().Add(-60 * time.Hour).UnixMilli()
+
+	a.mu.Lock()
+	// The extinct branch point: two crossings of its own, two hours apart, and
+	// nothing of it in the census.
+	a.observeSpeciesLocked(migration(base, 1, 2, "E", "Old", "root", "h-old-a"))
+	a.observeSpeciesLocked(migration(base+2*hour, 1, 2, "E", "Old", "root", "h-old-b"))
+	// A chain of extinct generations under it, ending in a living species whose own
+	// record begins long after the branch point's ended.
+	a.observeSpeciesLocked(child(base+3*hour, "Mid", "one", "Old", "root"))
+	a.observeSpeciesLocked(child(base+4*hour, "Mid", "two", "Mid", "one"))
+	a.observeSpeciesLocked(child(base+5*hour, "Mid", "three", "Mid", "two"))
+	a.observeSpeciesLocked(child(base+40*hour, "Gap", "far", "Mid", "three"))
+	// A direct child across the same kind of silence, and one across four minutes.
+	a.observeSpeciesLocked(child(base+30*hour, "Near", "leaf", "Old", "root"))
+	a.observeSpeciesLocked(child(base+2*hour+240000, "Tiny", "leaf", "Old", "root"))
+	// A living parent, with a child that first crossed deep inside its span.
+	a.observeSpeciesLocked(migration(base+hour, 1, 2, "E", "Live", "par", "h-live"))
+	a.observeSpeciesLocked(child(base+50*hour, "In", "kid", "Live", "par"))
+	// And the inversion: the child crossed four hours before its parent ever did.
+	a.observeSpeciesLocked(child(base+45*hour, "Late", "par", "Live", "par"))
+	a.observeSpeciesLocked(child(base+41*hour, "Early", "kid", "Late", "par"))
+	a.mu.Unlock()
+
+	byKey := treeNodes(t, a.SpeciesTreeView())
+	need := func(k string) TreeNode {
+		t.Helper()
+		n, ok := byKey[k]
+		if !ok {
+			t.Fatalf("%q is not drawn; the fixture no longer holds the shape it exists for", k)
+		}
+		return n
+	}
+
+	// The parent every gap hangs off: extinct, and its record really does stop.
+	root := need("Old root")
+	if root.Alive || root.SpanFromMs != base || root.SpanToMs != base+2*hour {
+		t.Fatalf("Old root spans %d..%d (alive %v), want %d..%d extinct — the parent's LAST "+
+			"recorded moment is where a link across a gap leaves it",
+			root.SpanFromMs, root.SpanToMs, root.Alive, base, base+2*hour)
+	}
+
+	for _, tc := range []struct {
+		key       string
+		parent    string
+		collapsed int
+		gapMs     int64 // child's first-seen MINUS the parent's last recorded moment
+	}{
+		// A run of 38 h under three collapsed generations. Drawn dotted, because the
+		// species that carried the line through it are not on the picture.
+		{"Gap far", "Old root", 3, 38 * hour},
+		// The same silence with a direct link across it: 28 h, nothing collapsed.
+		{"Near leaf", "Old root", 0, 28 * hour},
+		// Four minutes. Real, positive, and a fraction of a pixel.
+		{"Tiny leaf", "Old root", 0, 240000},
+	} {
+		n := need(tc.key)
+		if n.Parent != tc.parent || n.Collapsed != tc.collapsed {
+			t.Fatalf("%s hangs off %q with %d collapsed, want %q with %d",
+				tc.key, n.Parent, n.Collapsed, tc.parent, tc.collapsed)
+		}
+		p := need(tc.parent)
+		got := n.SpanFromMs - (p.SpanToMs)
+		if got != tc.gapMs {
+			t.Fatalf("%s begins %d ms after %s's record stops, want %d — the run the page "+
+				"draws IS this interval", tc.key, got, tc.parent, tc.gapMs)
+		}
+		if got <= 0 {
+			t.Fatalf("%s has no gap to draw", tc.key)
+		}
+	}
+
+	// NO GAP AT ALL, and it is the LIVING parent that makes it so: SpanToMs is 0 for
+	// a species that is alive, which is the page's whole test for "this bar runs to
+	// the edge and every child of it starts inside it".
+	live, in := need("Live par"), need("In kid")
+	if !live.Alive || live.SpanToMs != 0 {
+		t.Fatalf("Live par is %v with an end at %d; a living species has no right-hand end",
+			live.Alive, live.SpanToMs)
+	}
+	if !(in.SpanFromMs > live.SpanFromMs) || in.Parent != "Live par" {
+		t.Fatalf("In kid at %d under %q does not start inside its living parent's span (%d)",
+			in.SpanFromMs, in.Parent, live.SpanFromMs)
+	}
+
+	// THE INVERSION, on the record's own numbers, with neither end inferred.
+	late, early := need("Late par"), need("Early kid")
+	if early.Parent != "Late par" {
+		t.Fatalf("Early kid hangs off %q, want Late par", early.Parent)
+	}
+	if !(early.SpanFromMs < late.SpanFromMs) {
+		t.Fatalf("Early kid begins at %d and its parent at %d; the fixture no longer holds a "+
+			"child the record saw first", early.SpanFromMs, late.SpanFromMs)
+	}
+	if late.SpanFromMs-early.SpanFromMs != 4*hour {
+		t.Fatalf("the inversion is %d ms, want %d", late.SpanFromMs-early.SpanFromMs, 4*hour)
+	}
+	if early.SpanDerived || late.SpanDerived {
+		t.Fatal("one end of the inversion is a DERIVED span; that machinery fires only where a " +
+			"node's own record holds no crossing, and it already takes the earliest dated " +
+			"descendant. An inversion is the opposite case and must reach the page as itself")
+	}
+
+	// AND ALL OF IT SURVIVES THE WIRE, because a distinction a client cannot see is
+	// not one it can draw.
+	srv := httptest.NewServer(a.httpHandler())
+	t.Cleanup(srv.Close)
+	var served SpeciesTree
+	if err := json.Unmarshal([]byte(get(t, srv.URL+"/api/species/tree")), &served); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	w := treeNodes(t, served)
+	if w["Gap far"].SpanFromMs-w["Old root"].SpanToMs != 38*hour ||
+		w["Late par"].SpanFromMs-w["Early kid"].SpanFromMs != 4*hour ||
+		w["Live par"].SpanToMs != 0 {
+		t.Fatalf("the shapes did not survive the wire: %+v", w)
+	}
+}
+
 // TestAnUndatedLivingSpeciesHasNoBarAndSaysSo is the fourth shape of the same
 // rule, and the one that must not be filled in. A species alive right now that
 // has never crossed a lane has no recorded crossing at all — so the record dates
