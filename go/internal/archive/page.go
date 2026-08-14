@@ -534,6 +534,17 @@ svg.brainp .ymax{fill:var(--dim);font-size:9.5px;font-variant-numeric:tabular-nu
 svg.brainp .cov{fill:var(--dim);opacity:.55}
 svg.brainp .covnone{fill:var(--warn);opacity:.85}
 svg.brainp .covbase{stroke:var(--line);stroke-width:1}
+/* WAITING IS NOT ABSENCE, and it wears neither of the two absences' clothes. The
+   drawn window can move — the seed stock revealed pulls its left edge back four
+   days — before the answer for the new window has arrived, and a stretch left
+   blank there is the strip's own mark for "no crossing was recorded here": a
+   claim about the map, made out of a request still in flight. So it is washed,
+   edged where the answer starts, and captioned. Dim, never the amber the two
+   real absences wear, and under everything: where there is an answer there is no
+   wash. */
+svg.brainp .pending{fill:var(--dim);opacity:.09}
+svg.brainp .pendedge{stroke:var(--dim);stroke-width:1;stroke-dasharray:2 3;opacity:.55}
+svg.brainp .pendlbl{fill:var(--dim);font-size:9.5px;font-style:italic;cursor:help}
 svg.brainp .hit{fill:transparent;cursor:help;pointer-events:all}
 svg.brainp .havemark{stroke:var(--warn);stroke-width:1.2;stroke-dasharray:4 3;opacity:.8}
 svg.brainp .havelbl{fill:var(--warn);font-size:9.5px;cursor:help}
@@ -936,9 +947,12 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
       <span><i class="bbandi"></i>the shaded band &mdash; the middle half of the genomes in
         that slice, a quarter above the line and a quarter below</span>
       <span><i class="bcovi"></i><span class="term" data-t="braincoverage">how much of it was
-        measured</span> &mdash; taller is more of that slice&rsquo;s genomes read</span>
+        measured</span> &mdash; taller is more of that slice&rsquo;s genomes read, on a
+        square-root scale, and never shorter than the amber tick for none of them</span>
       <span>a break in a line is a <span class="term" data-t="braingap">gap</span>, never a
         zero</span>
+      <span>a washed stretch is <span class="term" data-t="brainwaiting">waiting</span>, never
+        empty</span>
     </p>
   </section>
 </div>
@@ -1085,7 +1099,8 @@ var G = {
  brainsize:["brain size","The ring at the end of a species' bar. Every creature carries a brain \u2014 a little network of neurons wired together by synapses \u2014 and this is how big THE NEWEST GENOME OF THAT SPECIES THIS ARCHIVE EVER READ is, COMPARED WITH THE OTHER SPECIES ON THIS DRAWING. That comparison is the whole of what the size means, and it is worth being plain about: the smallest brain among the rows drawn right now is the smallest ring, the largest is the largest, and everything else is placed between them. It is not an absolute size, and two rings of the same size on two different days are not the same brain. The scale re-fits whenever the drawn set changes \u2014 a search, a revealed row, a species leaving the census \u2014 exactly as the clock along the top re-fits to the bars it holds. It is drawn that way because the alternative was measured and said nothing: against a fixed scale the species on this map differed by a seventh of a pixel, so a kind carrying a third more brain than its neighbour drew the same ring. HOVER A RING FOR THE REAL NUMBERS \u2014 the counts are what the size stopped carrying, and they are on the row's own tooltip too. EVER READ, NOT STILL HELD, and the difference matters most on the rows you would otherwise never see a ring on. The measurement is written down the moment a genome is read and is kept afterwards, so it outlives the copy it came from: an ancestor nothing is alive of keeps the last brain this archive managed to see of it, forever, even though nothing is fetching that species\u2019 genomes any more and every copy has since been deleted. The cost is that a ring can be OLD. Hover it \u2014 it says when the genome it was read from crossed, and a species extinct for three days carries a three-day-old reading drawn beside a living species\u2019 current one. Comparing them is fair (it is what a trend through time looks like on the tree itself) as long as you know which is which. WHERE THERE IS NO RING THERE IS NO ANSWER, which is not the same as a small brain: this archive has never once managed to read a genome of that species. The record of the crossing stays forever either way."],
  braintrend:["brains over time","The panel under the drawing. It is the same clock as the tree above it \u2014 same left edge, same right edge, same tick marks \u2014 and it shows how complicated the brains crossing this map have been getting. The top line is the MEDIAN NUMBER OF SYNAPSES in one genome: the middle genome of that slice of time, half above and half below. The shaded band around it is the middle half of that slice \u2014 a quarter of the genomes above the line, a quarter below \u2014 so a widening band is a population spreading out and a narrow one is a population agreeing with itself. WHAT IT IS MEASURED OVER: every distinct genome this archive holds a copy of whose crossing falls in that slice, counted ONCE each however many times that same creature travelled. Which genomes the archive happens to hold is not chosen by anything about the creature \u2014 the queue that fetches them walks a list ordered by the genome\u2019s own fingerprint, and the most travelled species on this map is over-represented among the copies held by about one part in a hundred \u2014 so this is a fair sample of what crossed and not a sample of what happened to be interesting. It is not a sample of what LIVES here: only creatures that travelled are in it."],
  hiddenneurons:["hidden neurons","The neurons a brain has BEYOND the ones every bibite is born with. Every brain on this map starts with the same fixed set of 48 \u2014 the senses it reads the world with and the muscles it acts with \u2014 and that 48 never varies: it is the smallest count in every one of the tens of thousands of genomes this archive has read. So the raw neuron number barely moves even while brains change enormously, and reading growth off it understates what happened by about sevenfold. This is the count above that floor, which is the part that is actually being invented: the interior of the brain."],
- braincoverage:["how much was measured","The strip of little columns along the bottom of the brain panel: for each slice of time, how much of what crossed this archive was able to look inside. A tall column is most of it; a short one is a few. AN AMBER TICK IS NOT A SHORT COLUMN \u2014 it means the record holds crossings in that slice and not one of their genomes was ever read, so there is no line there at all. An empty space is a slice with no crossing recorded in it. IT IS WORST AT THE RIGHT-HAND EDGE, which is the part you look at hardest, and that is not decay: a genome is asked for after its crossing is recorded and the answers arrive over the following days, so the newest slices are the ones still filling in. Measured on this map: about 42% of a slice is readable in its first six hours and about 97% after five days. The line over a thinly-measured slice rests on less evidence, and this is where you can see that rather than having to assume it."],
+ braincoverage:["how much was measured","The strip of little columns along the bottom of the brain panel: for each slice of time, how much of what crossed this archive was able to look inside. A tall column is most of it; a short one is a few. THE HEIGHTS ARE ON A SQUARE-ROOT SCALE and the shortest column is three pixels tall, which is two decisions worth knowing about. Coverage on this map runs from under half a per cent to about a third, so on a straight scale the whole range that actually happens would live in the bottom four pixels and the difference between a slice read once and a slice read a third of the way through would be invisible; the square root spends the strip on the range that occurs. And the floor keeps every column that means WE READ SOME OF IT taller than the amber tick that means we read none, which a straight scale did not: below about a fifth the mark for 'some' was drawing shorter than the mark for 'none'. Full height still means all of it, and the exact share is in the tooltip. AN AMBER TICK IS NOT A SHORT COLUMN \u2014 it means the record holds crossings in that slice and not one of their genomes was ever read, so there is no line there at all. An empty space is a slice with no crossing recorded in it. IT IS WORST AT THE RIGHT-HAND EDGE, which is the part you look at hardest, and that is not decay: a genome is asked for after its crossing is recorded and the answers arrive over the following days, so the newest slices are the ones still filling in. Measured on this map: about 42% of a slice is readable in its first six hours and about 97% after five days. The line over a thinly-measured slice rests on less evidence, and this is where you can see that rather than having to assume it."],
+ brainwaiting:["waiting, not empty","A washed stretch with a dashed edge on the brain panel, and a state of the REQUEST rather than a fact about the map. The panel asks for exactly the window the drawing above it is showing, so whenever that window moves — you reveal the seed stock and the left edge jumps back four days, you resize the box across a bucket — there is a stretch of clock that nothing has been measured for yet. It lasts about as long as one request. It is drawn because the alternative is worse: left blank, that stretch would be wearing the strip's own mark for a slice with no crossing recorded in it, and this panel would be asserting an absence in the record that it has simply not asked about. On this map that mistake was measured at 56% of the plot, over a stretch really holding 74 measured points and 433,627 crossings."],
  braingap:["a gap, not a zero","A break in either line means this archive measured no genome at all in that stretch, and it is drawn as a break on purpose. A zero would say the creatures on this map had no brains, which is a statement about the world made out of a hole in the record. Two quite different things make a hole: nothing crossed (the map was down \u2014 45 of this record\u2019s first 183 hours had no crossing at all, including one stretch of a whole day), or things crossed and none of their genomes were ever read. The strip below the lines tells you which."],
  minimap:["where it lives","The little grid of dots beside a species, laid out the way the map itself is laid out — this map is three worlds wide and two high, so it is three dots by two, and a different map would draw a different grid. A filled dot is a world where this species is alive right now. A hollow dot is a world that sent its census and did not name it. A dashed amber dot is a world reporting no census at all, which is UNKNOWN and never 'not there'. A seat nobody has claimed is drawn as nothing."],
  trend:["the 24-hour line","A small line of this species' population across the whole map over the last day, from the archive's own sample file — the shape, not the numbers. A gap in the line is a stretch where no world reported a census, which is unknown and never a zero. Every one of these lines comes from a single answer covering every living species at once, so the column costs one request rather than one per species. This record began when the archive did, so a short line is a short record and not a young species."],
@@ -1112,6 +1127,7 @@ var G = {
     "genealogy","lifespan","timeaxis","descends","lineage",
     "branchpoint","collapsed","beforeparent","noancestry","recordfloor",
     "minimap","trend","brainsize","braintrend","hiddenneurons","braincoverage","braingap",
+    "brainwaiting",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges","ceilings","floor",
@@ -3451,9 +3467,32 @@ function lfAxis(x, cols, sc, height){
    whose whole subject is size. A strip states it instead, in its own row, with
    the numbers in the tooltip. */
 var LFB = null, LFSCALE = null, LFCOLS = null;
+/* WHAT THE HELD ANSWER WAS ASKED FOR, and what is being asked for right now —
+   two questions, not two timestamps, because this panel re-asks on a change of
+   QUESTION and never on the clock moving. lfBrainAsk explains the rule. */
+var LFBFOR = null, LFBASK = null, LFBSEQ = 0, LFBT = 0, LFB_REASK = 200;
 var LFB_PADT = 18, LFB_SERH = 46, LFB_GAP = 15, LFB_COVH = 11, LFB_PADB = 16;
+/* THE TWO MARKS ON THE COVERAGE STRIP, AS ONE RELATION. The amber tick means
+   "crossings here and not one of them read"; a filled column means "some of it
+   was read". The filled column is therefore NEVER allowed to be shorter than the
+   tick, and the only way to keep that true is to write the two heights down
+   beside each other. lfbCovH is the rest of the argument. */
+var LFB_COVNONE = 2, LFB_COVMIN = 3;
 function lfBrainH(){
   return LFB_PADT + LFB_SERH*2 + LFB_GAP*2 + LFB_COVH + LFB_PADB;
+}
+/* A MINIMUM SIZE IS A FLOOR ON VISIBILITY, NOT A MEASUREMENT — and a floor
+   applied AFTER the scale has already clamped a mark to the axis end pushes that
+   mark straight back out past it, which is the one thing the clamp exists to
+   prevent. So every minimum in this panel goes through here, and here does what
+   the tree's own shortest bar does (lfBar): grow right if there is room, SLIDE
+   LEFT if there is not. Nothing this returns can end right of xend, at any width.
+   A mark past the now line would claim the record reaches into a future it
+   cannot have. */
+function lfbFloor(x0, x1, min, xend){
+  if (x1 - x0 < min) x1 = x0 + min;
+  if (x1 > xend){ x1 = xend; x0 = xend - min; }
+  return [x0, x1];
 }
 /* The requested resolution: about one bucket per four pixels of plot, inside the
    endpoint's own bounds. Finer than the aggregate's five minutes buys nothing —
@@ -3485,8 +3524,8 @@ function lfbRuns(pts, medk){
   }
   return runs;
 }
-function lfbSeries(g, B, sc, top, keys, cls, maxv){
-  var runs = lfbRuns(B.points || [], keys.med), r, i, p, x, d;
+function lfbSeries(g, pts, B, sc, top, keys, cls, maxv){
+  var runs = lfbRuns(pts || [], keys.med), r, i, p, x, d;
   var half = (B.bucketMs || 0) / 2;
   for (r=0;r<runs.length;r++){
     var run = runs[r];
@@ -3519,14 +3558,59 @@ function lfbSeries(g, B, sc, top, keys, cls, maxv){
       d += (i ? "L" : "M") + x.toFixed(2) + "," + lfbY(top, LFB_SERH, p[keys.med], maxv).toFixed(2);
     }
     if (run.length === 1){
+      // AND IT IS SLID LEFT RATHER THAN GROWN PAST THE AXIS. Two pixels is a
+      // floor on visibility and not a measurement, so a lone reading in the
+      // newest bucket — whose x is already clamped to the now line — must not
+      // buy its visibility with two pixels of a future the record cannot have.
       p = run[0];
-      d += "L" + (sc.x(p.tMs + half) + 2).toFixed(2) + "," +
-           lfbY(top, LFB_SERH, p[keys.med], maxv).toFixed(2);
+      var sy = lfbY(top, LFB_SERH, p[keys.med], maxv).toFixed(2);
+      var sx = lfbFloor(sc.x(p.tMs + half), sc.x(p.tMs + half), 2, sc.x(sc.t1));
+      d = "M" + sx[0].toFixed(2) + "," + sy + "L" + sx[1].toFixed(2) + "," + sy;
     }
     var line = svgEl("path", cls);
     line.setAttribute("d", d);
     g.appendChild(line);
   }
+}
+/* THE HEIGHT OF A FILLED COVERAGE COLUMN, and why it is not the fraction times
+   the strip. Two things were wrong with h = f × 11 on this record.
+
+   AN ORDERING FAILURE, first. The "crossings here and not one read" tick is 2 px
+   tall, so every slice under 18.2% drew a SHORTER mark for "we read some of it"
+   than the mark for "we read none of it" — 21 of 23 slices on the live map —
+   and the strip's own heights said the opposite of what the glossary teaches.
+   Nothing but colour separated the two facts.
+
+   A RESOLUTION FAILURE, second. Coverage here runs from under half a per cent to
+   about 37%, because a genome is asked for after its crossing is recorded and the
+   answers arrive over the following days. A linear map spends four of its eleven
+   pixels on the whole range that occurs and seven on a range nothing reaches, so
+   the difference between a slice read once and a slice a third read is a pixel.
+
+   So the column STARTS ABOVE THE TICK and carries the fraction as its square
+   root: 3 px for the first genome read, 11 px for all of them, and the thinly
+   measured stretch this map lives in gets most of the room instead of a pixel of
+   it. It stays monotone — more coverage is always a taller column — and full
+   height still means all of it. The strip is for reading the shape; the exact
+   number is in the tooltip, which is where a number belongs. */
+function lfbCovH(f){
+  if (!(f > 0)) return LFB_COVMIN;
+  if (f > 1) f = 1;
+  return LFB_COVMIN + Math.sqrt(f) * (LFB_COVH - LFB_COVMIN);
+}
+/* AND A COUNT THAT IS NOT ZERO NEVER PRINTS AS ZERO PER CENT. Math.round said
+   "0% of them" about 3 of 23 slices that plainly had readings — which is exactly
+   the claim the amber tick is reserved for, made in words about a slice that had
+   just been drawn as measured — and the same rounding would call a slice missing
+   three genomes in a thousand complete. Both ends are named in words instead, so
+   the sentence can never contradict the mark above it. */
+function lfbShare(n, seen){
+  if (!(seen > 0) || !(n > 0)) return "none";
+  if (n >= seen) return "100%";
+  var f = 100 * n / seen;
+  if (f < 0.5) return "less than 1%";
+  if (f > 99.5) return "almost all";
+  return Math.round(f) + "%";
 }
 /* The tooltip for one slice: what it is, what it rests on, and the numbers the
    drawing itself cannot carry. It names the sampling rule and the blindness of
@@ -3555,8 +3639,8 @@ function lfbTip(p, B){
   body += "Measured over " + p.n + " distinct genome" + (p.n === 1 ? "" : "s") +
     ", each counted once however often that creature travelled";
   if (p.seen > 0){
-    var pct = Math.min(100, Math.round(100 * p.n / p.seen));
-    body += ", out of " + p.seen + " the record says crossed — " + pct + "% of them";
+    body += ", out of " + p.seen + " the record says crossed — " +
+      lfbShare(p.n, p.seen) + " of them";
   }
   body += ". Which genomes this archive holds is decided by a queue ordered on the " +
     "genome's own fingerprint, so what is missing is missing for reasons that have " +
@@ -3564,6 +3648,48 @@ function lfbTip(p, B){
     "over-represented among the held copies by about one part in a hundred.";
   if (p.binned) body += " One reading in this slice was outside the range this panel keeps in detail.";
   return {title: "brains over time", body: body};
+}
+/* HOW FAR THE DRAWN WINDOW MAY RUN PAST THE HELD ANSWER BEFORE IT MATTERS —
+   one drawn bucket, and never less than the five minutes the fold itself keeps.
+   It is one number because it settles two questions that must not be allowed to
+   disagree: whether a stretch is drawn as unanswered, and whether the panel asks
+   again. A start that has moved by less than a bucket cannot move a mark by a
+   whole bucket, and the right-hand edge is NOW, which moves on every paint and
+   is the sixty-second poll's business rather than a new question. */
+function lfbTol(B){
+  var b = (B && B.bucketMs) || 0;
+  return b > 300000 ? b : 300000;
+}
+/* THE STRETCH NOTHING HAS BEEN ASKED ABOUT YET, which is not the same fact as
+   "the record holds no crossing here" and must never be drawn with the strip's
+   mark for it. The drawing's window moves — the seed stock revealed pulls the
+   left edge back 92 hours on this map — and for as long as one request takes,
+   more than half of this plot can be a question in flight. Left blank it reads
+   as the one absence the strip reserves for a stretch where nothing crossed at
+   all, over a stretch that in fact held 74 measured points; so it is drawn as
+   itself instead. No held answer at all is the whole plot pending. */
+function lfbPending(B, sc, plotL, plotR){
+  if (!B || !B.points || !B.points.length) return [[plotL, plotR]];
+  // An answer that does not overlap the drawing at all is the same state as no
+  // answer: the whole plot, once, rather than two washes over each other.
+  if (B.fromMs && B.toMs && (B.fromMs >= sc.t1 || B.toMs <= sc.t0)) return [[plotL, plotR]];
+  var out = [], tol = lfbTol(B);
+  if (B.fromMs && B.fromMs > sc.t0 + tol) out.push([plotL, sc.x(B.fromMs)]);
+  if (B.toMs && B.toMs < sc.t1 - tol) out.push([sc.x(B.toMs), plotR]);
+  return out;
+}
+/* AND THE SLICES THAT ACTUALLY FALL ON THIS CLOCK. A held answer whose window is
+   wider than the drawing's — the seed stock hidden again, a narrower box — has
+   slices off both ends, and sc.x clamps every one of them onto the plot edge:
+   dozens of columns stacked in a pixel, each claiming a coverage for a moment
+   that is not drawn. A slice that does not overlap what is drawn is not drawn. */
+function lfbVisible(B, sc){
+  var pts = (B && B.points) || [], out = [], bw = (B && B.bucketMs) || 0, i;
+  for (i=0;i<pts.length;i++){
+    if (pts[i].tMs + bw <= sc.t0 || pts[i].tMs >= sc.t1) continue;
+    out.push(pts[i]);
+  }
+  return out;
 }
 /* The panel itself. It is handed the SAME cols and the SAME scale the tree above
    it was drawn with, which is what makes "shares the axis" a fact rather than an
@@ -3598,6 +3724,58 @@ function lfBrainPanel(x, cols, sc){
   nw.setAttribute("x2", String(cols.plot + cols.plotw));
   nw.setAttribute("y1", "0"); nw.setAttribute("y2", String(height - LFB_PADB + 4));
   svg.appendChild(nw);
+
+  // ---- WAITING IS NOT ABSENCE, AND IT IS DRAWN. Every stretch of this plot the
+  // held answer does not reach is washed, edged and captioned, and carries a
+  // tooltip that says a request is in flight — because leaving it blank would
+  // spend the strip's own mark for "nothing crossed here" on a question that has
+  // simply not come back yet. It is drawn UNDER everything else: where there is
+  // an answer there is no wash, so nothing ever sits on top of a measurement.
+  var plotL = cols.plot, plotR = cols.plot + cols.plotw;
+  var held = !!(B && B.points && B.points.length);
+  var pend = lfbPending(B, sc, plotL, plotR), pi, pw;
+  for (pi=0;pi<pend.length;pi++){
+    pw = pend[pi][1] - pend[pi][0];
+    if (!(pw > 0.5)) continue;
+    var pr = svgEl("rect", "pending");
+    pr.setAttribute("x", pend[pi][0].toFixed(2)); pr.setAttribute("y", "0");
+    pr.setAttribute("width", pw.toFixed(2));
+    pr.setAttribute("height", String(height - LFB_PADB + 4));
+    svg.appendChild(pr);
+    // The dashed edge is where the answer starts, so a reader can see the
+    // boundary rather than infer it from a wash. A pending stretch that is the
+    // WHOLE plot has no boundary to draw and gets none.
+    if (held){
+      var pe = svgEl("line", "pendedge");
+      var ex = pend[pi][0] <= plotL + 0.01 ? pend[pi][1] : pend[pi][0];
+      pe.setAttribute("x1", ex.toFixed(2)); pe.setAttribute("x2", ex.toFixed(2));
+      pe.setAttribute("y1", "0"); pe.setAttribute("y2", String(height - LFB_PADB + 4));
+      svg.appendChild(pe);
+    }
+    var ph = svgEl("rect", "hit");
+    ph.setAttribute("x", pend[pi][0].toFixed(2)); ph.setAttribute("y", "0");
+    ph.setAttribute("width", pw.toFixed(2)); ph.setAttribute("height", String(height));
+    ph.setAttribute("data-s", "lfbpwait" + pi);
+    SP["lfbpwait" + pi] = {title: "brains over time", body: held
+      ? "Nothing has been measured for this stretch YET. The drawing's window " +
+        "moved — the seed stock revealed, or the box resized across a bucket — " +
+        "and the answer for the new window is still on its way. THIS IS NOT AN " +
+        "EMPTY STRETCH: an empty one on the strip below means the record holds no " +
+        "crossing at all there, which is a fact about the map, and this is a fact " +
+        "about a request. What is here will appear when the answer lands."
+      : "The first measurement for this window has not arrived yet. Nothing here " +
+        "is a statement about the record: the panel is drawing its clock and " +
+        "waiting for its answer."};
+    svg.appendChild(ph);
+    if (held && pw >= 90){
+      var pl = svgEl("text", "pendlbl");
+      pl.setAttribute("x", (pend[pi][0] + 4).toFixed(2));
+      pl.setAttribute("y", String(height - LFB_PADB + 14));
+      pl.setAttribute("data-t", "brainwaiting");
+      pl.textContent = "measuring this stretch — not asked for yet, not empty";
+      svg.appendChild(pl);
+    }
+  }
 
   if (!B || !B.points || !B.points.length){
     var w8 = svgEl("text", "none");
@@ -3640,8 +3818,12 @@ function lfBrainPanel(x, cols, sc){
     svg.appendChild(zr);
   }
   baseline(synTop); baseline(hidTop);
-  lfbSeries(svg, B, sc, synTop, {med:"medSyn", lo:"loSyn", hi:"hiSyn"}, "syn", maxSyn);
-  lfbSeries(svg, B, sc, hidTop, {med:"medHid", lo:"loHid", hi:"hiHid"}, "hid", maxHid);
+  // ONE SET OF SLICES FOR BOTH PICTURES: the lines, the strip and the tooltips
+  // are all the slices that fall on this clock, so a slice cannot be a hole in
+  // one of them and a mark in another.
+  var pts = lfbVisible(B, sc);
+  lfbSeries(svg, pts, B, sc, synTop, {med:"medSyn", lo:"loSyn", hi:"hiSyn"}, "syn", maxSyn);
+  lfbSeries(svg, pts, B, sc, hidTop, {med:"medHid", lo:"loHid", hi:"hiHid"}, "hid", maxHid);
   label(synTop, "syn", "braintrend", "median synapses per genome", maxSyn);
   // THE FLOOR IS ON THE PANEL, not only in the glossary. A reader who sees
   // "neurons" and a line near the bottom has to be told, in the picture, that 48
@@ -3660,35 +3842,42 @@ function lfBrainPanel(x, cols, sc){
   clbl.setAttribute("x", String(LF_NAMEX));
   clbl.setAttribute("y", String(covTop + LFB_COVH));
   clbl.setAttribute("data-t", "braincoverage");
-  clbl.textContent = "how much of it was measured";
+  clbl.textContent = "how much of it was measured (heights on a square-root scale)";
   svg.appendChild(clbl);
 
-  var pts = B.points, i, p, x0, x1, w;
+  // EVERY MINIMUM HERE GOES THROUGH lfbFloor. The newest column is a bucket the
+  // scale has already clamped to the now line, so a width floored afterwards ran
+  // up to a pixel past it — the same defect as the stub above, in the other
+  // mark. The half pixel is the gap between neighbouring columns.
+  var xend = sc.x(sc.t1), i, p, x0, x1, cx, hx;
   for (i=0;i<pts.length;i++){
     p = pts[i];
     x0 = sc.x(p.tMs); x1 = sc.x(p.tMs + B.bucketMs);
-    w = Math.max(1, x1 - x0 - 0.5);
+    cx = lfbFloor(x0, x1 - 0.5, 1, xend);
     if (p.n > 0 && p.seen > 0){
-      var f = Math.min(1, p.n / p.seen);
-      var h = Math.max(1, f * LFB_COVH);
+      var h = lfbCovH(p.n / p.seen);
       var bar = svgEl("rect", "cov");
-      bar.setAttribute("x", x0.toFixed(2)); bar.setAttribute("y", (covTop + LFB_COVH - h).toFixed(2));
-      bar.setAttribute("width", w.toFixed(2)); bar.setAttribute("height", h.toFixed(2));
+      bar.setAttribute("x", cx[0].toFixed(2)); bar.setAttribute("y", (covTop + LFB_COVH - h).toFixed(2));
+      bar.setAttribute("width", (cx[1] - cx[0]).toFixed(2)); bar.setAttribute("height", h.toFixed(2));
       svg.appendChild(bar);
     } else if (p.seen > 0){
       // CROSSINGS, AND NOT ONE OF THEM READ. A different absence from "nothing
-      // crossed", and it gets a different mark rather than the same emptiness.
+      // crossed", and it gets a different mark rather than the same emptiness —
+      // and a SHORTER one than any filled column, which is what lfbCovH's floor
+      // is there to guarantee.
       var tick = svgEl("rect", "covnone");
-      tick.setAttribute("x", x0.toFixed(2));
-      tick.setAttribute("y", String(covTop + LFB_COVH - 2));
-      tick.setAttribute("width", w.toFixed(2)); tick.setAttribute("height", "2");
+      tick.setAttribute("x", cx[0].toFixed(2));
+      tick.setAttribute("y", String(covTop + LFB_COVH - LFB_COVNONE));
+      tick.setAttribute("width", (cx[1] - cx[0]).toFixed(2));
+      tick.setAttribute("height", String(LFB_COVNONE));
       svg.appendChild(tick);
     }
     // One hit target per slice, over the whole panel, so a reader gets the
     // numbers from anywhere in the column rather than having to find the line.
+    hx = lfbFloor(x0, x1, 1, xend);
     var hit = svgEl("rect", "hit");
-    hit.setAttribute("x", x0.toFixed(2)); hit.setAttribute("y", "0");
-    hit.setAttribute("width", Math.max(1, x1 - x0).toFixed(2));
+    hit.setAttribute("x", hx[0].toFixed(2)); hit.setAttribute("y", "0");
+    hit.setAttribute("width", (hx[1] - hx[0]).toFixed(2));
     hit.setAttribute("height", String(height));
     hit.setAttribute("data-s", "lfbp" + i);
     SP["lfbp" + i] = lfbTip(p, B);
@@ -3882,6 +4071,11 @@ function renderLife(x){
   // recorded here rather than recomputed there.
   LFCOLS = cols; LFSCALE = sc;
   lfBrainPanel(x, cols, sc);
+  // AND THE PAINT IS WHAT TRIGGERS THE PANEL'S FETCH. The window this panel asks
+  // for does not exist until a drawing has been laid out, so the paint is the
+  // only thing that can know the question has changed — a timer can only know
+  // that time has passed.
+  lfBrainAsk();
   lfRefocus(host, mine);
 }
 
@@ -3893,6 +4087,51 @@ function lfBrainClear(){
   if (!host) return;
   while (host.firstChild) host.removeChild(host.firstChild);
   for (var old in SP){ if (old.indexOf("lfbp") === 0) delete SP[old]; }
+}
+
+/* WHAT THIS PANEL IS ASKING, as an object rather than a moment: the window's
+   START and the resolution. Those two are the whole of the question — the END is
+   NOW and is the same on every paint no matter what is drawn. */
+function lfBrainWant(sc, cols){
+  return {t0: Math.round(sc.t0), buckets: lfBrainBuckets(cols)};
+}
+function lfBrainSame(req, want){
+  return !!req && req.buckets === want.buckets &&
+    Math.abs(req.t0 - want.t0) <= lfbTol(LFB);
+}
+/* THE RE-FETCH RULE, AND WHY IT IS NOT "THE WINDOW CHANGED".
+
+   The drawing repaints about every two seconds and its right-hand edge IS now,
+   so "the drawn window changed" is TRUE ON EVERY PAINT and would be a fetch every
+   two seconds — a bounded read of the whole aggregate, thirty times a minute, to
+   move one edge by a pixel. What makes it a different QUESTION is one of two
+   things: the window's START moving, which happens when the seed stock is
+   revealed (92 hours on this map), when the oldest drawn species changes, or
+   when a search changes what is drawn; and the RESOLUTION changing, which
+   happens when the box is resized across a bucket boundary. Both are events a
+   reader caused. NOW ticking is not, and it is left to the sixty-second poll,
+   which is what that poll is for.
+
+   The tolerance on the start is lfbTol — one drawn bucket, floored at the fold's
+   own five minutes — so a start that drifts by less than the resolution it would
+   be drawn at does not re-ask; it is the SAME number the pending mark uses, so
+   the panel can never be waiting for something it has decided not to ask for.
+
+   AND IT IS DEBOUNCED, because a drag across a screen changes the bucket count
+   by the hundred: the trailing timer is restarted by every paint that still
+   wants a different answer and fires once the window has settled. Two hundred
+   milliseconds against the sixty seconds this replaces, and against the ~60,070
+   ms a cold load measured before the load-time call had a scale to ask with. */
+function lfBrainAsk(){
+  var sc = LFSCALE, cols = LFCOLS;
+  if (!sc || !cols) return;
+  var want = lfBrainWant(sc, cols);
+  if (lfBrainSame(LFBFOR, want) || lfBrainSame(LFBASK, want)){
+    if (LFBT){ clearTimeout(LFBT); LFBT = 0; }
+    return;
+  }
+  if (LFBT) clearTimeout(LFBT);
+  LFBT = setTimeout(function(){ LFBT = 0; tickBrains(); }, LFB_REASK);
 }
 
 /* ----------------------------------------------------------- the SETTINGS tab
@@ -4862,18 +5101,34 @@ async function tickTrends(){
    the trend column's two: its window is the DRAWING'S OWN two edges, so it can
    only be asked for once the drawing has been laid out at least once. A failure
    leaves the panel holding whatever it last drew and every other thing on this
-   tab exactly as it was. */
+   tab exactly as it was.
+
+   THE TIMER IS NOT THE TRIGGER, THOUGH — lfBrainAsk is, off the paint that lays
+   the window out. This is the refresh for the one edge that moves on its own:
+   NOW. What it must never be again is the FIRST ask, which is how a cold load
+   spent sixty seconds saying "waiting for the measurement" against an answer
+   that was one request away. */
 async function tickBrains(){
   if (TAB !== "species") return;
   var sc = LFSCALE, cols = LFCOLS;
   if (!sc || !cols) return;
+  var want = lfBrainWant(sc, cols);
+  LFBASK = want;
+  var mine = ++LFBSEQ;
   try {
-    var r = await fetch("api/species/brains?from=" + Math.round(sc.t0) +
-      "&to=" + Math.round(sc.t1) + "&buckets=" + lfBrainBuckets(cols), {cache:"no-store"});
-    LFB = await r.json();
+    var r = await fetch("api/species/brains?from=" + want.t0 +
+      "&to=" + Math.round(sc.t1) + "&buckets=" + want.buckets, {cache:"no-store"});
+    var B = await r.json();
+    // AN OVERTAKEN ANSWER IS DROPPED. A reply for a window the reader has already
+    // left would put the panel back on the wrong clock and set off another
+    // re-ask; the newest question is the only one worth an answer.
+    if (mine !== LFBSEQ) return;
+    LFB = B; LFBFOR = want;
   } catch(e){
+    if (mine === LFBSEQ) LFBASK = null;
     return;
   }
+  LFBASK = null;
   if (LFX && TAB === "species") renderLife(LFX);
 }
 /* The hop feed is polled SEPARATELY from the status view, which is the shape of
@@ -5001,10 +5256,13 @@ tickHistory(); setInterval(tickHistory, 60000);
 // The trend column, on the same slow cadence and for the same reason: one
 // bounded read of the sample file, feeding every row at once.
 tickTrends(); setInterval(tickTrends, 60000);
-// And the brain panel, on the same cadence and for the same reason. Its first
-// ask has to wait for a laid-out drawing to take its window from, which the tab
-// opening provides; until then it draws its clock and says it is waiting.
-tickBrains(); setInterval(tickBrains, 60000);
+// And the brain panel — where THE TIMER IS THE REFRESH AND NOT THE TRIGGER. Its
+// window comes from a laid-out drawing, so the paint asks for it (lfBrainAsk,
+// off renderLife) the moment there is one and again whenever the question
+// changes; a load-time call here could only ever find no scale and return, which
+// is what made a cold load wait a whole minute for an answer one request away.
+// This timer moves the one edge that moves by itself, which is NOW.
+setInterval(tickBrains, 60000);
 </script>
 </body>
 </html>

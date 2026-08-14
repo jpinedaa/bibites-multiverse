@@ -1823,15 +1823,66 @@ func TestTheBrainPanelSharesTheGenealogysAxis(t *testing.T) {
 	if !strings.Contains(page, "if (bp.scrollLeft !== box.scrollLeft) bp.scrollLeft = box.scrollLeft;") {
 		t.Fatal("the panel's horizontal scroll does not follow the drawing's")
 	}
-	// It rides its own slow timer and asks for the window the drawing is using.
+	// It asks for the window the drawing is using, and for that window ONLY —
+	// through the same object the paint took its own question from, so the
+	// request and the picture cannot be about two different windows.
 	if strings.Count(page, `fetch("api/species/brains`) != 1 {
 		t.Fatal("the brain panel is not fetched exactly once for the whole view")
 	}
-	if !strings.Contains(page, `"api/species/brains?from=" + Math.round(sc.t0) +`) {
-		t.Fatal("the panel does not ask for the window the drawing is actually drawing")
+	for _, want := range []string{
+		"function lfBrainWant(sc, cols){",
+		"return {t0: Math.round(sc.t0), buckets: lfBrainBuckets(cols)};",
+		`"api/species/brains?from=" + want.t0 +`,
+		`"&to=" + Math.round(sc.t1) + "&buckets=" + want.buckets`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the panel does not ask for the window the drawing is actually drawing: "+
+				"%q missing", want)
+		}
 	}
-	if !strings.Contains(page, "tickBrains(); setInterval(tickBrains, 60000);") {
+	if !strings.Contains(page, "setInterval(tickBrains, 60000);") {
 		t.Fatal("the panel is polled on the two-second cycle, or not at all")
+	}
+}
+
+// TestTheShortestBrainMarkStaysInsideTheAxis is
+// TestTheShortestBarStaysInsideTheAxis's property, applied to the two marks the
+// panel below the drawing floors: the stub a lone reading draws, and the newest
+// coverage column's minimum width.
+//
+// A MINIMUM SIZE IS A FLOOR ON VISIBILITY AND NOT A MEASUREMENT. The scale
+// already clamps every x to the axis, so a floor applied AFTERWARDS pushes the
+// mark straight back out past the clamp — a mark right of the now line claiming
+// the record reaches into a future it cannot have. Measured on the live map
+// before this: the stub ran to exactly 2.000 px past the now line and the newest
+// coverage column to 0.47 px past it, while the tree's own bars — which slide the
+// floor LEFT instead — were 0.000 px over at every width.
+func TestTheShortestBrainMarkStaysInsideTheAxis(t *testing.T) {
+	region := speciesRegion(t)
+
+	// ONE FLOOR FOR THE WHOLE PANEL, so the two marks cannot drift apart.
+	for _, want := range []string{"function lfbFloor(x0, x1, min, xend){",
+		"if (x1 - x0 < min) x1 = x0 + min;",
+		"if (x1 > xend){ x1 = xend; x0 = xend - min; }"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the panel's minimum sizes are not clamped to the axis end: %q missing", want)
+		}
+	}
+	// And both marks go through it, against the scale's own right-hand edge.
+	for _, want := range []string{
+		"var sx = lfbFloor(sc.x(p.tMs + half), sc.x(p.tMs + half), 2, sc.x(sc.t1));",
+		"var xend = sc.x(sc.t1)", "cx = lfbFloor(x0, x1 - 0.5, 1, xend);",
+		"hx = lfbFloor(x0, x1, 1, xend);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a floored mark on the panel still bypasses the clamp: %q missing", want)
+		}
+	}
+	// THE OLD ARITHMETIC IS GONE, both of it: the stub grown rightwards off the
+	// clamped x, and the width floored after the subtraction.
+	for _, gone := range []string{"(sc.x(p.tMs + half) + 2)", "Math.max(1, x1 - x0 - 0.5)",
+		"Math.max(1, x1 - x0)"} {
+		if strings.Contains(region, gone) {
+			t.Fatalf("the panel still floors a mark after clamping it: %q", gone)
+		}
 	}
 }
 
@@ -1854,7 +1905,7 @@ func TestTheBrainPanelDrawsCoverageAndGapsAsThemselves(t *testing.T) {
 	}
 	// The three coverage marks.
 	for _, want := range []string{`svgEl("rect", "cov")`, `svgEl("rect", "covnone")`,
-		"var f = Math.min(1, p.n / p.seen);"} {
+		"var h = lfbCovH(p.n / p.seen);"} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the coverage strip is missing %q", want)
 		}
@@ -1915,13 +1966,189 @@ func TestTheBrainPanelDrawsCoverageAndGapsAsThemselves(t *testing.T) {
 	}
 	// And the jargon carries glossary entries, listed so they can be read.
 	for _, want := range []string{" braintrend:[", " hiddenneurons:[", " braincoverage:[",
-		" braingap:["} {
+		" braingap:[", " brainwaiting:["} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the glossary never explains %q", want)
 		}
 	}
 	if !strings.Contains(page,
-		`"minimap","trend","brainsize","braintrend","hiddenneurons","braincoverage","braingap",`) {
+		`"minimap","trend","brainsize","braintrend","hiddenneurons","braincoverage","braingap",
+    "brainwaiting",`) {
 		t.Fatal("the panel's glossary entries exist but are never listed, so nobody can read them")
+	}
+}
+
+// TestTheBrainPanelReAsksWhenTheQUESTIONChanges is the second half of "it is
+// drawn on the tree's clock": a panel that shares an axis it cannot re-fetch for
+// is a panel that draws the WRONG window and says nothing about it.
+//
+// TWO FACES OF ONE DEFECT, both measured live. A cold load's only ask ran before
+// the first paint, so it always returned on "no scale yet" and the panel sat on
+// "waiting for the measurement" for 60,055 ms and 60,083 ms against a tree drawn
+// at 73 ms and 112 ms. And revealing the seed stock moves the axis back 92 hours
+// instantly, so for up to a minute 480.6 px of the 857 px plot — 56% of it —
+// drew nothing at all, which is the strip's own mark for "no crossing was
+// recorded in it", over a stretch really holding 74 measured points and 433,627
+// crossings.
+//
+// THE RULE THIS PINS. The paint is the trigger, because the paint is what knows
+// the window. The re-ask key is the WINDOW'S START and the RESOLUTION and NEVER
+// the right-hand edge, which is now and moves on every one of the ~30 paints a
+// minute. And while the answer is in flight the stretch it does not cover is
+// drawn as PENDING, which is a fact about a request and must not be able to be
+// read as the record's own emptiness.
+func TestTheBrainPanelReAsksWhenTheQUESTIONChanges(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// THE PAINT ASKS. It is the last thing renderLife does with the scale it has
+	// just recorded, so there is no state between the two to get out of step.
+	if !strings.Contains(region, "LFCOLS = cols; LFSCALE = sc;\n  lfBrainPanel(x, cols, sc);\n"+
+		"  // AND THE PAINT IS WHAT TRIGGERS THE PANEL'S FETCH.") {
+		t.Fatal("the paint that lays out the panel's window does not ask for it; only a timer " +
+			"does, which is how a cold load spent a minute saying it was waiting")
+	}
+	if !strings.Contains(region, "  lfBrainAsk();\n  lfRefocus(host, mine);") {
+		t.Fatal("the ask is not made by the paint")
+	}
+	// AND THE LOAD-TIME CALL IS GONE, because it could only ever find no scale.
+	if strings.Contains(page, "tickBrains(); setInterval") {
+		t.Fatal("the page still asks for the panel before there is a window to ask about; that " +
+			"call cannot succeed and its failure is what the 60-second wait was")
+	}
+	if !strings.Contains(page, "setInterval(tickBrains, 60000);") {
+		t.Fatal("the panel has no refresh for the one edge that moves by itself")
+	}
+	// THE KEY IS THE START AND THE RESOLUTION, AND NOT NOW.
+	for _, want := range []string{
+		"function lfBrainSame(req, want){",
+		"return !!req && req.buckets === want.buckets &&",
+		"Math.abs(req.t0 - want.t0) <= lfbTol(LFB);",
+		"if (lfBrainSame(LFBFOR, want) || lfBrainSame(LFBASK, want)){"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the re-fetch is not keyed on the question the panel is asking: %q missing",
+				want)
+		}
+	}
+	key := region[strings.Index(region, "function lfBrainWant(sc, cols){"):]
+	key = key[:strings.Index(key, "\nfunction lfBrainSame")]
+	if strings.Contains(key, "t1") || strings.Contains(key, "Date.now") {
+		t.Fatalf("the re-fetch key carries the right-hand edge, which is now: that is a fetch on "+
+			"every paint, about thirty a minute, to move one edge by a pixel:\n%s", key)
+	}
+	// AND IT IS DEBOUNCED, because a resize drag repaints by the hundred.
+	for _, want := range []string{"LFB_REASK = 200", "if (LFBT) clearTimeout(LFBT);",
+		"LFBT = setTimeout(function(){ LFBT = 0; tickBrains(); }, LFB_REASK);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the re-ask is not coalesced: %q missing", want)
+		}
+	}
+	// AN OVERTAKEN ANSWER IS DROPPED rather than painted over a window the reader
+	// has already left.
+	for _, want := range []string{"var mine = ++LFBSEQ;", "if (mine !== LFBSEQ) return;",
+		"LFB = B; LFBFOR = want;"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("two answers in flight can land in the wrong order: %q missing", want)
+		}
+	}
+	// WAITING IS DRAWN, AND IT IS NOT THE RECORD'S OWN EMPTINESS. One tolerance
+	// serves both the mark and the re-ask, so the panel cannot be waiting for
+	// something it has decided not to ask for.
+	for _, want := range []string{"function lfbTol(B){", "function lfbPending(B, sc, plotL, plotR){",
+		"if (B.fromMs && B.fromMs > sc.t0 + tol) out.push([plotL, sc.x(B.fromMs)]);",
+		"if (B.toMs && B.toMs < sc.t1 - tol) out.push([sc.x(B.toMs), plotR]);",
+		`svgEl("rect", "pending")`, `svgEl("line", "pendedge")`, `svgEl("text", "pendlbl")`,
+		`SP["lfbpwait" + pi] = {title: "brains over time", body: held`,
+		"THIS IS NOT AN "} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("a window with no answer yet is drawn as an empty record: %q missing", want)
+		}
+	}
+	if !strings.Contains(region, "if (!B || !B.points || !B.points.length) return [[plotL, plotR]];") {
+		t.Fatal("a panel with no answer at all does not draw the whole plot as pending")
+	}
+	// The wash is its own mark, in the dim the panel uses for structure — NEVER
+	// the amber the two real absences wear.
+	if !strings.Contains(page, "svg.brainp .pending{fill:var(--dim)") ||
+		strings.Contains(page, "svg.brainp .pending{fill:var(--warn)") {
+		t.Fatal("the pending wash wears the colour one of the two real absences wears")
+	}
+	// AND A STALE ANSWER'S SLICES ARE NOT CLAMPED ONTO THE EDGE OF A CLOCK THEY
+	// ARE NOT ABOUT, which would stack dozens of columns in a pixel, each of them
+	// a coverage claim about a moment that is not drawn.
+	for _, want := range []string{"function lfbVisible(B, sc){",
+		"if (pts[i].tMs + bw <= sc.t0 || pts[i].tMs >= sc.t1) continue;",
+		"var pts = lfbVisible(B, sc);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("slices off the drawn clock are still drawn on its edge: %q missing", want)
+		}
+	}
+}
+
+// TestTheCoverageStripReadsWhereThisRigActuallyLives is the third defect: the
+// strip's mark and the strip's number both broke down below 20% coverage, which
+// is where 65 of this record's 68 measured slices sit.
+//
+// THE HEIGHT ORDERING WAS INVERTED. max(1, f × 11) against a 2 px amber tick made
+// every slice under 18.2% draw a SHORTER mark for "we read some of it" than the
+// mark for "we read none of it" — 21 of 23 filled bars on the live map — so the
+// only thing separating the two facts was colour, and the glossary taught the
+// opposite of what the picture showed.
+//
+// AND THE NUMBER SAID THE ONE THING IT MUST NOT. Math.round made the tooltip
+// report "out of 6282 the record says crossed — 0% of them" on 3 of 23 slices
+// that plainly had readings, which is exactly the claim the amber tick is
+// reserved for, said in words about a slice drawn as measured.
+func TestTheCoverageStripReadsWhereThisRigActuallyLives(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// THE TWO HEIGHTS ARE WRITTEN DOWN TOGETHER, which is the only way the
+	// relation between them can be kept true.
+	if !strings.Contains(region, "var LFB_COVNONE = 2, LFB_COVMIN = 3;") {
+		t.Fatal("the two coverage marks' heights are not stated as one relation, so nothing " +
+			"stops the mark for 'some' shrinking under the mark for 'none' again")
+	}
+	for _, want := range []string{"function lfbCovH(f){", "if (!(f > 0)) return LFB_COVMIN;",
+		"return LFB_COVMIN + Math.sqrt(f) * (LFB_COVH - LFB_COVMIN);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the filled column's height is not floored above the tick: %q missing", want)
+		}
+	}
+	if strings.Contains(region, "Math.max(1, f * LFB_COVH)") {
+		t.Fatal("the filled column is still the fraction times the strip, which draws 21 of 23 " +
+			"of this map's measured slices shorter than the mark for nothing measured")
+	}
+	// The tick is drawn from the same constant rather than a literal that could
+	// drift away from it.
+	for _, want := range []string{`tick.setAttribute("y", String(covTop + LFB_COVH - LFB_COVNONE));`,
+		`tick.setAttribute("height", String(LFB_COVNONE));`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the amber tick's height is not the one the filled column is floored "+
+				"against: %q missing", want)
+		}
+	}
+	// THE SCALE IS ON THE PICTURE, not only in the glossary — the same rule the
+	// 48-neuron floor is on the panel for.
+	if !strings.Contains(region,
+		`clbl.textContent = "how much of it was measured (heights on a square-root scale)";`) {
+		t.Fatal("the strip never says its heights are not linear in the fraction")
+	}
+	if !strings.Contains(page, "THE HEIGHTS ARE ON A SQUARE-ROOT SCALE") {
+		t.Fatal("the glossary does not explain the scale or the floor it draws above")
+	}
+	// AND THE NUMBER. A non-zero count never prints as 0%, and a count that is not
+	// all of them never prints as 100%.
+	for _, want := range []string{"function lfbShare(n, seen){",
+		`if (n >= seen) return "100%";`, `if (f < 0.5) return "less than 1%";`,
+		`if (f > 99.5) return "almost all";`,
+		`lfbShare(p.n, p.seen) + " of them";`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the tooltip's share can still round a reading away: %q missing", want)
+		}
+	}
+	if strings.Contains(region, "Math.min(100, Math.round(100 * p.n / p.seen))") {
+		t.Fatal("the tooltip still rounds its share, which said '0% of them' about 3 of 23 " +
+			"slices with readings in hand")
 	}
 }
