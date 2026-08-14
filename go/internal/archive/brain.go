@@ -10,7 +10,39 @@ package archive
 // writer as every other counter there — so naming a genome for a species costs
 // nothing at request time. This file turns that one hash into two numbers.
 //
-// THREE RULES, and they are the whole design:
+// AND THE ANSWER IS NOW KEPT. The measurement used to live only in the two maps
+// below, which is to say only for as long as this process ran, and that made
+// three defects out of one design:
+//
+//	A RESTART EMPTIED THE PICTURE. Against the running rig's ~160 000-entry
+//	fetch backlog, 2 of 14 drawn rows carried a ring twelve minutes after a
+//	restart and 5 of 13 after hours of uptime — because the ring depended on
+//	this process having happened to read that species' genome since it booted.
+//
+//	AN EXTINCT ANCESTOR COULD NEVER GAIN ONE. Nothing is fetching a dead
+//	species' genomes any more, so the blob either arrived long ago (and the
+//	reading died with the last restart) or never will. The dimmed ancestor rows
+//	— the branch points, which are the whole reason the tree has interior nodes
+//	— were structurally ringless.
+//
+//	AND THE HORIZON MADE IT PERMANENT. Once an extinct species' blobs age past
+//	the 720 h retention horizon (§23, B33) the measurement is unobtainable
+//	forever, however long the archive runs.
+//
+// So the last measured shape of each species is PERSISTED (brainhist.go,
+// brainsave.go), folded at the same two write points as the time series, and
+// this file answers from it. A MEASUREMENT NOW OUTLIVES THE BLOB IT WAS READ
+// FROM, which is the same argument as capturing at arrival: the horizon prunes
+// the genome and does not prune the number.
+//
+// THAT CHANGES WHAT THE RING MEANS, and the page's words are changed with it.
+// The ring is no longer "the newest genome of that species this archive HOLDS A
+// COPY OF"; it is "the newest genome of it this archive EVER READ", which for a
+// long-extinct species may be days old and may describe a genome that no longer
+// exists anywhere. The measurement's own age travels with it so the row can say
+// so, and the tooltip says it in words.
+//
+// THREE RULES, and they are still the whole design:
 //
 //  1. ONE PARSE PER HASH, EVER, NOT ONE PER REQUEST. The genealogy is polled
 //     every two seconds while its tab is open. A parse per poll would put a file
@@ -27,7 +59,8 @@ package archive
 //     this archive cannot see is not a brain of size zero, and a view that failed
 //     because a genome aged out would be a view that breaks by design. The MISS
 //     IS CACHED TOO, which is what stops a pruned hash costing a stat() every
-//     two seconds.
+//     two seconds. A species this archive has NEVER read a genome for still draws
+//     no ring, persisted record or not.
 //
 //  3. IT NEVER TOUCHES THE LEDGER. Everything here is a map lookup plus, at most
 //     once per hash, one read of one small file the store already holds.
@@ -45,12 +78,6 @@ import (
 // of the whole drawn set.
 const brainCacheMax = 2048
 
-// brainSpeciesMax bounds the LAST-KNOWN shape kept per species (brainForSpecies).
-// It is keyed on a species rather than on content, so it grows with the drawn set
-// rather than with time; the reduced tree holds at most treeNodeMax nodes, so this
-// is twice the whole drawn set.
-const brainSpeciesMax = 1024
-
 type brainCache struct {
 	mu sync.Mutex
 	// byHash holds both answers and misses; known says which.
@@ -58,12 +85,6 @@ type brainCache struct {
 	// order is insertion order, for the oldest-out eviction. A cache with no
 	// eviction is the unbounded thing this bound exists to prevent.
 	order []string
-	// bySpecies is the newest shape this process has managed to READ for a
-	// species, whatever hash it came from, with speciesOrder as its own
-	// oldest-out order. See brainForSpecies for why the drawing wants this and
-	// not only the latest hash.
-	bySpecies    map[string]bb8.Brain
-	speciesOrder []string
 }
 
 type brainEntry struct {
@@ -96,6 +117,28 @@ func (a *Archive) brainFor(hash string) (bb8.Brain, bool) {
 
 	a.brains.mu.Lock()
 	defer a.brains.mu.Unlock()
+	a.putBrainLocked(hash, entry)
+	return entry.brain, entry.known
+}
+
+// fillBrainCache records a shape read from bytes the process was already holding
+// — the fetch that has just landed. It is what stops rule 2's cached MISS
+// outliving the arrival it was waiting for: without it, a hash looked up while
+// its blob was still outstanding stays a miss until the cache turns over, and
+// the genealogy stays on an older genome of that species for no reason but the
+// order two things happened in.
+func (a *Archive) fillBrainCache(hash string, b bb8.Brain) {
+	if hash == "" {
+		return
+	}
+	a.brains.mu.Lock()
+	defer a.brains.mu.Unlock()
+	a.putBrainLocked(hash, brainEntry{brain: b, known: true})
+}
+
+// putBrainLocked inserts or replaces one entry, oldest-out at the bound. The
+// caller holds the cache lock.
+func (a *Archive) putBrainLocked(hash string, e brainEntry) {
 	if a.brains.byHash == nil {
 		a.brains.byHash = map[string]brainEntry{}
 	}
@@ -107,13 +150,25 @@ func (a *Archive) brainFor(hash string) (bb8.Brain, bool) {
 		}
 		a.brains.order = append(a.brains.order, hash)
 	}
-	a.brains.byHash[hash] = entry
-	return entry.brain, entry.known
+	a.brains.byHash[hash] = e
 }
 
-// brainForSpecies is what the genealogy actually draws: the shape of this
-// species' LATEST RECORDED genome when the store holds that blob, and otherwise
-// THE NEWEST SHAPE THIS PROCESS HAS MANAGED TO READ FOR THE SAME SPECIES.
+// brainForSpecies is what the genealogy actually draws: THE NEWEST GENOME OF
+// THIS SPECIES THIS ARCHIVE HAS EVER READ, with the crossing it was read from.
+//
+// ONE SOURCE, AND IT IS THE PERSISTED RECORD. The species' latest named hash is
+// still parsed when the store holds it — that is the freshest reading there can
+// be — but the reading is CONTRIBUTED to the record rather than returned
+// directly, and the record is what answers. Two things follow, and both are the
+// point:
+//
+//	THE RING SURVIVES A RESTART, and an extinct ancestor keeps the last brain
+//	this archive ever managed to read for it, forever.
+//
+//	AND OUT-OF-ORDER READINGS CANNOT GO BACKWARDS. The record is latest-writer-
+//	wins on the CROSSING's clock (brainhist.go), so a blob fetched today for a
+//	crossing three days old never displaces a newer measurement, whichever order
+//	the two were read in.
 //
 // WHY IT IS NOT "THE LATEST HASH OR NOTHING". The hash species.go keeps moves
 // with every crossing, and on a rig carrying a genome-fetch backlog — 154 000
@@ -122,55 +177,29 @@ func (a *Archive) brainFor(hash string) (bb8.Brain, bool) {
 // changed from poll to poll and the mark BLINKED, which reads as a brain
 // appearing and disappearing rather than as a fetch that has not landed yet.
 //
-// IT IS ALSO THE FIGURE THE PAGE ALREADY DESCRIBES. The row's tooltip, the
-// expanded row and the glossary all call it "the newest genome of it this archive
-// holds a copy of" — which is this rule and not the other one. The latest hash is
-// what the RECORD names; the newest readable copy is what an archive can honestly
-// draw, and the two differ exactly while a fetch is outstanding.
-//
 // A MISS ON BOTH IS STILL AN ABSENCE, and an absence still draws nothing (rule
-// 2). Nothing here invents a shape, and nothing here holds one for a species the
-// store has never given this process a readable genome for.
+// 2). Nothing here invents a shape, and nothing here holds one for a species this
+// archive has never once read a readable genome of.
 //
-// THE KNOWN LAG, named rather than left to be discovered. A miss is cached (rule
-// 2), so a blob that arrives AFTER its hash was first looked up is not re-read for
-// that hash: the drawn shape then stays on the newest genome that was readable
-// when it was asked for, until a later hash of the same species is first seen
-// present. That is a stale reading of a real genome of that species rather than a
-// wrong one, it is what the page's words already promise, and the alternative is a
-// store lookup per drawn species per poll — the cost rule 1 exists to refuse.
-func (a *Archive) brainForSpecies(key, hash string) (bb8.Brain, bool) {
-	if b, ok := a.brainFor(hash); ok {
-		a.rememberBrain(key, b)
-		return b, true
-	}
+// The int64 is WHEN the returned measurement was recorded — the crossing its
+// genome was named on, not the moment it was read — because a measurement that
+// outlives its blob can be days old, and a row that showed it beside a living
+// species' current one without saying which was which would invite exactly the
+// wrong comparison.
+func (a *Archive) brainForSpecies(key, hash string, hashAtMs int64) (bb8.Brain, int64, bool) {
 	if key == "" {
-		return bb8.Brain{}, false
+		// No species to file a reading under. The hash alone still answers, for a
+		// caller that has one — but nothing is remembered, because a record with
+		// no key is a record nothing could ever read back.
+		b, ok := a.brainFor(hash)
+		return b, 0, ok
 	}
-	a.brains.mu.Lock()
-	defer a.brains.mu.Unlock()
-	b, ok := a.brains.bySpecies[key]
-	return b, ok
-}
-
-// rememberBrain records the newest readable shape of one species, oldest-out at
-// the bound. It takes the same lock brainFor uses and never holds it over a read.
-func (a *Archive) rememberBrain(key string, b bb8.Brain) {
-	if key == "" {
-		return
+	if b, ok := a.brainFor(hash); ok && hashAtMs > 0 {
+		a.observeSpeciesBrain(key, hashAtMs, hash, b)
 	}
-	a.brains.mu.Lock()
-	defer a.brains.mu.Unlock()
-	if a.brains.bySpecies == nil {
-		a.brains.bySpecies = map[string]bb8.Brain{}
+	r, ok := a.brainAgg.record(key)
+	if !ok {
+		return bb8.Brain{}, 0, false
 	}
-	if _, ok := a.brains.bySpecies[key]; !ok {
-		if len(a.brains.speciesOrder) >= brainSpeciesMax {
-			oldest := a.brains.speciesOrder[0]
-			a.brains.speciesOrder = append(a.brains.speciesOrder[:0], a.brains.speciesOrder[1:]...)
-			delete(a.brains.bySpecies, oldest)
-		}
-		a.brains.speciesOrder = append(a.brains.speciesOrder, key)
-	}
-	a.brains.bySpecies[key] = b
+	return bb8.Brain{Neurons: r.Neurons, Synapses: r.Synapses}, r.AtMs, true
 }

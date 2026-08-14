@@ -1,6 +1,7 @@
 package archive
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -553,9 +554,26 @@ func TestTheSpeciesViewDrawsTheMiniMapAndTheBrain(t *testing.T) {
 	if !strings.Contains(region, "var r = lfBrainR(n);\n  if (r > 0){") {
 		t.Fatal("a species with no stored genome is still given a ring; absent must draw nothing")
 	}
-	if !strings.Contains(region, "no copy of its latest genome is held here") {
-		t.Fatal("the expanded row never says WHY a brain is missing; a pruned genome is not a " +
-			"brain of no neurons")
+	// THE ABSENCE SAYS WHY, and it says the RIGHT why now that a measurement
+	// outlives the copy it was read from: not "no copy is held" — a copy being
+	// gone no longer removes the answer — but "no genome of it has ever been
+	// read here", which is the only thing that does.
+	if !strings.Contains(region, "no genome of it has ever been read here") {
+		t.Fatal("the expanded row never says WHY a brain is missing; a genome that was never " +
+			"readable is not a brain of no neurons")
+	}
+	if strings.Contains(page, "no copy of its latest genome is held here") {
+		t.Fatal("the expanded row still blames a missing COPY for a missing brain; the " +
+			"measurement is kept after the copy is pruned, so that is no longer the reason")
+	}
+	// AND A KEPT MEASUREMENT CARRIES ITS AGE. An ancestor extinct for days shows a
+	// days-old reading beside a living species' current one, and a row that did not
+	// say so would present two instants as one.
+	for _, want := range []string{"function lfBrainAge(n){", "n.brainAtMs",
+		`", " + dage + " old"`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the kept brain measurement never says how old it is: %q missing", want)
+		}
 	}
 	// Both carry a glossary entry, like every other piece of jargon here.
 	for _, want := range []string{" brainsize:[", " minimap:[", " trend:["} {
@@ -655,7 +673,8 @@ func TestTheBrainRingIsFittedToWhatIsDrawn(t *testing.T) {
 	for _, want := range []string{"function lfBrainTip(n){", `var bk = "lfb" + i;`,
 		"SP[bk] = lfBrainTip(n);", `ring.setAttribute("data-s", bk);`,
 		`ring.setAttribute("data-t", "brainsize");`,
-		`n.neurons + " neurons and " + n.synapses + " synapses, from the latest genome of this "`} {
+		`n.neurons + " neurons and " + n.synapses + " synapses, from the newest genome of this "`,
+		`"species this archive EVER READ"`} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the ring carries no tooltip of its own: %q missing", want)
 		}
@@ -696,7 +715,7 @@ func TestTheBrainRingIsFittedToWhatIsDrawn(t *testing.T) {
 		"other rows drawn</em>;") {
 		t.Fatal("the legend still calls the ring an absolute size")
 	}
-	if !strings.Contains(region, `"where that sits AMONG THE SPECIES DRAWN RIGHT NOW rather than an absolute size, and it "`) {
+	if !strings.Contains(region, `"The ring at the end of the bar is where that sits AMONG THE SPECIES DRAWN RIGHT NOW " +`) {
 		t.Fatal("a row's own tooltip still says the ring is that size")
 	}
 }
@@ -1743,5 +1762,166 @@ func TestTheTimelineFitsItsBoxAndKeepsNowInIt(t *testing.T) {
 	// which is this page's rule for wide content everywhere.
 	if !strings.Contains(page, ".lifewrap{overflow:auto") {
 		t.Fatal("the drawing no longer scrolls inside its own box")
+	}
+}
+
+// TestTheBrainPanelSharesTheGenealogysAxis is the geometry property the whole
+// panel rests on, asserted structurally because a Go test cannot run the page's
+// JavaScript (the render-verify shim runs it; this is what stops the shim's
+// subject being quietly removed).
+//
+// THE AXIS RE-FITS. tree.go publishes two left edges and the drawing picks one,
+// so "share the axis" cannot mean "draw the same window": it has to mean the
+// panel is drawn through THE SAME SCALE OBJECT the tree above it was drawn
+// through, in the same paint. Anything else is two clocks that agree until they
+// do not.
+func TestTheBrainPanelSharesTheGenealogysAxis(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// It is its own box, under the drawing, and it is not a row IN the drawing:
+	// an aggregate over every genome the archive could read is not a species, and
+	// a row would give it a species' affordances.
+	for _, want := range []string{`<div class="brainwrap" id="lfbrain"></div>`,
+		"function lfBrainPanel(x, cols, sc){", `svgEl("svg", "brainp")`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the brain panel is missing %q", want)
+		}
+	}
+	if strings.Index(page, `id="lfbox"`) > strings.Index(page, `id="lfbrain"`) {
+		t.Fatal("the panel is not below the drawing it shares a clock with")
+	}
+	// ONE PAINT, ONE cols, ONE sc. The panel is handed the same two objects the
+	// rows were drawn with rather than computing its own.
+	if !strings.Contains(region, "LFCOLS = cols; LFSCALE = sc;\n  lfBrainPanel(x, cols, sc);") {
+		t.Fatal("the panel is not painted from the drawing's own columns and scale in the " +
+			"same pass; two derivations of one axis is two places for it to be wrong")
+	}
+	// EVERY HORIZONTAL POSITION IN THE PANEL IS sc.x OF A REAL MILLISECOND. A
+	// mark placed by any other arithmetic is a mark on a second scale, which is
+	// the defect the collapsed-run mark on the tree already cost this page once.
+	panel := region[strings.Index(region, "function lfBrainPanel(x, cols, sc){"):]
+	panel = panel[:strings.Index(panel, "\n/* THE KEYBOARD KEEPS ITS PLACE")]
+	if strings.Contains(panel, "cols.plot + ") && !strings.Contains(panel,
+		"cols.plot + cols.plotw") {
+		t.Fatal("the panel positions something by arithmetic on the plot origin rather than " +
+			"through the shared scale")
+	}
+	for _, want := range []string{"sc.x(tms)", "sc.x(p.tMs)", "sc.x(p.tMs + B.bucketMs)",
+		"var span = sc.t1 - sc.t0, step = lfStep(span);"} {
+		if !strings.Contains(panel, want) {
+			t.Fatalf("the panel does not draw through the shared scale: %q missing", want)
+		}
+	}
+	// The ticks come from the SAME step function over the SAME span, so a vertical
+	// line through both pictures is one moment.
+	if !strings.Contains(panel, "var first = Math.ceil(sc.t0 / step) * step") {
+		t.Fatal("the panel's ticks are not the drawing's ticks")
+	}
+	// TWO BOXES, ONE CLOCK: on a window too narrow for the drawing both can scroll
+	// sideways, and two offsets would not be one clock.
+	if !strings.Contains(page, "if (bp.scrollLeft !== box.scrollLeft) bp.scrollLeft = box.scrollLeft;") {
+		t.Fatal("the panel's horizontal scroll does not follow the drawing's")
+	}
+	// It rides its own slow timer and asks for the window the drawing is using.
+	if strings.Count(page, `fetch("api/species/brains`) != 1 {
+		t.Fatal("the brain panel is not fetched exactly once for the whole view")
+	}
+	if !strings.Contains(page, `"api/species/brains?from=" + Math.round(sc.t0) +`) {
+		t.Fatal("the panel does not ask for the window the drawing is actually drawing")
+	}
+	if !strings.Contains(page, "tickBrains(); setInterval(tickBrains, 60000);") {
+		t.Fatal("the panel is polled on the two-second cycle, or not at all")
+	}
+}
+
+// TestTheBrainPanelDrawsCoverageAndGapsAsThemselves is the honesty half.
+//
+// Three facts have to stay three facts. A slice most of whose genomes were read;
+// a slice with crossings and NOT ONE genome ever read; and a slice with no
+// crossing at all. The second and third are both "no line" and they are not the
+// same thing, and neither is a zero.
+func TestTheBrainPanelDrawsCoverageAndGapsAsThemselves(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	// A run is a stretch with a reading in EVERY bucket, and only runs are drawn:
+	// nothing joins the readings either side of a hole.
+	if !strings.Contains(region, "function lfbRuns(pts, medk){") ||
+		!strings.Contains(region, "if (pts[i][medk] == null){ cur = null; continue; }") {
+		t.Fatal("the panel does not break its lines on a missing reading; a line drawn across " +
+			"the record's 24-hour outage is a measurement invented out of a gap")
+	}
+	// The three coverage marks.
+	for _, want := range []string{`svgEl("rect", "cov")`, `svgEl("rect", "covnone")`,
+		"var f = Math.min(1, p.n / p.seen);"} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the coverage strip is missing %q", want)
+		}
+	}
+	if !strings.Contains(region, "} else if (p.seen > 0){") {
+		t.Fatal("a slice with crossings and no measurement is drawn the same as a slice with " +
+			"no crossing at all; they are different absences")
+	}
+	// NO OPACITY RAMP ON THE SERIES. The worst-covered stretch is the newest one,
+	// which is the part a reader looks at hardest — fading it would hide the
+	// problem in the shape of admitting it.
+	if strings.Contains(region, `line.setAttribute("opacity"`) ||
+		strings.Contains(region, `band.setAttribute("opacity"`) {
+		t.Fatal("the series is faded by coverage; that makes the least certain stretch the " +
+			"faintest thing on the panel and confuses 'less certain' with 'smaller'")
+	}
+	// THE 48-NEURON FLOOR IS ON THE PICTURE, not only in the glossary. A reader
+	// who sees "neurons" and a low line has to be told, in the panel, that 48 of
+	// every count is fixed and is not drawn.
+	if !strings.Contains(region, `"median hidden neurons (every brain also has the same fixed " +`) {
+		t.Fatal("the panel never states the fixed neuron floor, so its second series can be " +
+			"read as a species with almost no brain")
+	}
+	// The page reads the floor off the answer rather than hard-coding 48, and the
+	// answer really does carry it.
+	if !strings.Contains(region, "(B.neuronFloor || 48)") {
+		t.Fatal("the panel hard-codes the neuron floor instead of reading the published one")
+	}
+	raw, err := json.Marshal(BrainHistory{NeuronFloor: BrainNeuronFloor})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"neuronFloor":48`) {
+		t.Fatalf("the endpoint does not publish the floor: %s", raw)
+	}
+	// Every slice answers with its own numbers, under a key that cannot collide
+	// with the brain RING's tooltips — which are keyed "lfb"+row on the same page.
+	for _, want := range []string{"function lfbTip(p, B){", `SP["lfbp" + i] = lfbTip(p, B);`,
+		`hit.setAttribute("data-s", "lfbp" + i);`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the panel's slices carry no tooltip: %q missing", want)
+		}
+	}
+	if !strings.Contains(region, `for (var old in SP){ if (old.indexOf("lfbp") === 0) delete SP[old]; }`) {
+		t.Fatal("the panel clears tooltip keys by a prefix that would swallow the brain " +
+			"rings' own entries")
+	}
+	// The tooltip says what the series is, what the sampling rule is, and that the
+	// missingness is species-blind — which is the whole argument for drawing a
+	// graph over a held sample at all.
+	for _, want := range []string{
+		`"Measured over " + p.n + " distinct genome"`,
+		`", each counted once however often that creature travelled"`,
+		`"genome's own fingerprint, so what is missing is missing for reasons that have " +`} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the slice tooltip does not explain what it is showing: %q missing", want)
+		}
+	}
+	// And the jargon carries glossary entries, listed so they can be read.
+	for _, want := range []string{" braintrend:[", " hiddenneurons:[", " braincoverage:[",
+		" braingap:["} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the glossary never explains %q", want)
+		}
+	}
+	if !strings.Contains(page,
+		`"minimap","trend","brainsize","braintrend","hiddenneurons","braincoverage","braingap",`) {
+		t.Fatal("the panel's glossary entries exist but are never listed, so nobody can read them")
 	}
 }

@@ -163,10 +163,9 @@ burst, and each one also costs the far end a bundle rebuild.
   backwards in amber from the parent's bar start instead of an impossible geometry. The same
   commit fitted the brain ring to the drawn set: **226× better discrimination** on today's data
   (4.000 px spread against 0.0177), real counts on the ring's own tooltip, re-fit caveat written
-  down. **Standing residual, not a defect:** the brain ring depends on archive process uptime —
-  the genome cache empties on restart and the ~160 k fetch backlog refills it slowly, so only 2
-  of 14 rows had a ring 12 min after this restart. The fetch backlog is the lever, not the
-  rendering.
+  down. **The standing residual — the ring depended on archive process uptime — is CLOSED by the
+  brain-history work below**, which persists each species' last measured brain instead of caching
+  it per process.
 - **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
   stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
   bars — **replacing both the species tab and the tree tab with one merged view**. Included:
@@ -195,6 +194,36 @@ burst, and each one also costs the far end a bundle rebuild.
   conflicting parents (last-write-wins by `recordedAt`; a deep chain can shift between polls)
   stay a WATCH NOTE — the aggregate does not count overwrites and a counter for a caption was
   refused.
+- **Brain complexity over time, and brains that outlive their genomes (owner-requested,
+  2026-08-13, built).** A panel BELOW the genealogy sharing its exact axis — same left and right
+  edges, same ticks, its own two y scales — drawing **median synapses per genome** and **median
+  hidden neurons** (the count above the fixed 48 every bibite brain is born with) with an
+  interquartile band and a coverage strip. New endpoint `/api/species/brains?from=&to=&buckets=`;
+  `/api/status` untouched, per the metrics rule.
+  **The measurement is MAINTAINED, not computed on demand**, and every part of that is forced:
+  a bucket is only ~42 % covered while it is new and ~97 % five days later (the fetch backlog
+  draining backwards), so the fold happens at GENOME ARRIVAL — `onGenomeResponse`, bytes already
+  in memory, keyed on the pending entry's own `crossedAt` — plus `onMigration` for hashes the
+  store already holds. There is deliberately **no full-history sweep**: `Store.Get` refreshes
+  mtime and eviction is ordered by mtime, so reading all 702 k blobs would postpone the 720 h
+  horizon for the whole store and hold its mutex for ~11 minutes. The aggregate is **persisted
+  and replayed** in `brains.jsonl` (append-and-compact, 5-minute buckets, ~111 B a bucket
+  measured) rather than re-derived at startup, which would add ~11 min to a 28 s replay; the
+  coverage denominator is NOT persisted — it comes from the ledger replay, which costs a measured
+  **1.47 s over 4.98 M records**. Loss of the sidecar is **"history starts now", never zeroes**.
+  **The same fold closes the ring's uptime residual above.** Each species' last measured brain is
+  persisted with the crossing it was read from, so an EXTINCT ancestor keeps the last brain this
+  archive ever saw of it — forever, past the retention horizon that deletes the genome — and a
+  restart no longer empties the picture. The ring's words changed with it: "the newest genome of
+  it this archive **ever read**", with the measurement's own age on the row and in the tooltip,
+  because an ancestor's reading can be days old beside a living species' current one. Absence is
+  still absence: a species never read draws no ring.
+  **Rejected:** a per-species brain overlay across the whole axis (empty before 08-07 05Z, 4–8
+  samples in a dozen buckets); an opacity ramp for coverage (it would fade the newest and
+  least-covered stretch, which is the part a reader looks at hardest).
+  On real rig blobs through the real pipeline: median synapses **4 → 45** and median hidden
+  neurons **0 → 10** across the record, with the two known dips reproduced and the record's
+  43 h of outages drawn as breaks in the line.
 
 - **Keep the living deployment running, and treat it as M5's first participant.** Every upgrade
   the milestone ships has to move it, and it is the only peer whose before and after are fully

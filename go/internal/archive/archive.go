@@ -35,6 +35,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -187,6 +188,22 @@ type fetch struct {
 	crossedAt time.Time
 	attempts  int
 	nextAt    time.Time
+	// migrant and speciesKey are what the BRAIN AGGREGATE needs when this blob
+	// lands, and they are carried here for the same reason crossedAt is: the
+	// arrival is the only moment the bytes are free, and by then the record that
+	// asked for them is long gone (brainhist.go rule 1).
+	//
+	// migrant is true when this hash is the MIGRANT'S OWN genome rather than a
+	// parent's. Only the migrant's is measured into the time series: a parent
+	// hash is the genome of the migrant's mother or father, which described an
+	// EARLIER organism, and folding it at the child's crossing time would drag
+	// older brains forward and flatten the very trend the panel exists to show.
+	// speciesKey is that migrant's A34 comparison key, and is empty for a parent
+	// hash — the species block names a TAXONOMIC parent species, not the species
+	// of the individual whose genome this is, and attributing one to the other
+	// would be a measurement no record supports.
+	migrant    bool
+	speciesKey string
 	// asked records the peers that answered unknown_hash for this hash, so the
 	// ring is walked one peer at a time rather than re-asking the same one.
 	asked map[string]bool
@@ -300,6 +317,17 @@ type Archive struct {
 	// and the same reason: it reads the genome store, and it is keyed on content
 	// so one hash is parsed once for the life of the process. See brain.go.
 	brains brainCache
+	// brainAgg is the MAINTAINED brain-complexity aggregate: the five-minute
+	// series the panel under the genealogy draws, and the persisted per-species
+	// measurement its rings are drawn from. It carries its own lock — a view
+	// copies a window of histograms out of it, and nothing that walks thousands
+	// of map entries may hold the lock the migration path takes — and brainSave
+	// is its durable half. See brainhist.go and brainsave.go.
+	brainAgg     *brainAgg
+	brainSave    *brainSidecar
+	brainSavedAt time.Time
+	brainHistMu  sync.Mutex
+	brainHist    map[string]brainHistoryEntry
 }
 
 type rateWindow struct {
@@ -341,6 +369,7 @@ func New(cfg Config) (*Archive, error) {
 		inFlight:    map[string]int{},
 		outstanding: map[string]*fetch{},
 		species:     newSpeciesLedger(),
+		brainAgg:    newBrainAgg(),
 	}
 	// Replay what is already recorded, so a restart neither duplicates a record
 	// nor forgets a gap. "Keep the hash forever" (§10): a hash with no genome
@@ -383,11 +412,20 @@ func New(cfg Config) (*Archive, error) {
 		if rec.Lineage == nil {
 			return
 		}
+		migrantHash, speciesKey := migrantHashOf(rec)
+		// THE COVERAGE DENOMINATOR, and the ONE half of the brain aggregate the
+		// replay rebuilds. It costs a map lookup per record and no disk at all:
+		// a crossing's genome hash is a fact the ledger already holds. The other
+		// half — what was inside the genome — is NOT re-derived here, because
+		// deriving it means reading and parsing every blob in the store; it comes
+		// out of the sidecar (brainhist.go rule 3), and an hour this archive holds
+		// no measurement for is a gap, never a zero.
+		a.observeBrainSeen(rec.RecordedAt, migrantHash)
 		for _, h := range hashesOf(rec) {
 			// The CROSSING's own time, not the replay's: a horizon that measured
 			// from the restart would re-queue a backlog it retired yesterday, and
 			// pay for it in resident memory as well as in work (§23, B34).
-			a.trackLocked(h, rec.SourcePeer, rec.MigrationID, rec.EntityID,
+			a.trackLocked(h, speciesKey, rec.SourcePeer, rec.MigrationID, rec.EntityID,
 				time.UnixMilli(rec.RecordedAt), now)
 		}
 	})
@@ -421,24 +459,88 @@ func New(cfg Config) (*Archive, error) {
 		a.log.Warn("archive: resumed with genomes still missing", "gaps", n,
 			"records", a.recordCount)
 	}
+	// THE BRAIN SIDECAR IS LOADED AFTER THE LEDGER REPLAY, and the order is a
+	// correctness requirement rather than a preference. The replay rebuilds the
+	// COVERAGE DENOMINATOR by walking the record forwards, which the aggregate
+	// deduplicates against a window at its own write frontier; loading the
+	// sidecar first would put that frontier at today and make every replayed
+	// crossing look like a late arrival, which is the one case the window cannot
+	// deduplicate. Loaded second, the sidecar only ever fills in the half the
+	// ledger cannot answer: what was inside each genome.
+	save, err := openBrainSidecar(cfg.DataDir, a.brainAgg)
+	if err != nil {
+		// A sidecar that cannot be opened is not a reason to refuse to run: the
+		// panel loses its history and every other thing this archive does is
+		// unaffected. It is logged at ERROR because a measurement that cannot be
+		// written is one that is being lost as it is made.
+		a.log.Error("archive: the brain history sidecar could not be opened; "+
+			"brain history will not be kept across this run",
+			"path", filepath.Join(cfg.DataDir, brainSidecarName), "err", err)
+	} else {
+		a.brainSave = save
+		a.brainAgg.mu.Lock()
+		// MEASURED buckets, not buckets: the ledger replay above has already put
+		// a bucket in the map for every five minutes that holds a crossing, and
+		// counting those would report a sidecar load that never happened.
+		loaded, lost := 0, a.brainAgg.lost
+		for _, b := range a.brainAgg.buckets {
+			if b.held > 0 {
+				loaded++
+			}
+		}
+		records := len(a.brainAgg.species)
+		a.brainAgg.mu.Unlock()
+		if lost {
+			// IT IS A LOSS AND IT IS SAID SO. The history starts now — never at
+			// zero — and the unreadable bytes are kept beside the new file.
+			a.log.Error("archive: the brain history sidecar could not be read; "+
+				"brain history STARTS NOW and the old file is kept as .unreadable",
+				"path", save.Path())
+		} else if loaded > 0 || records > 0 {
+			a.log.Info("archive: replayed the brain history sidecar",
+				"buckets", loaded, "speciesMeasured", records, "path", save.Path())
+		}
+	}
 	a.logRetiredAtStartup()
 	return a, nil
 }
 
-func hashesOf(rec Record) []string {
+// lineageHash is one wanted genome and WHOSE it is. The distinction costs a bool
+// and buys the brain aggregate its honesty: see fetch.migrant.
+type lineageHash struct {
+	hash string
+	// own is true for the migrant's own genome and false for a parent's.
+	own bool
+}
+
+func hashesOf(rec Record) []lineageHash {
 	if rec.Lineage == nil {
 		return nil
 	}
-	out := make([]string, 0, 1+len(rec.Lineage.Parents))
+	out := make([]lineageHash, 0, 1+len(rec.Lineage.Parents))
 	if rec.Lineage.GenomeHash != "" {
-		out = append(out, rec.Lineage.GenomeHash)
+		out = append(out, lineageHash{hash: rec.Lineage.GenomeHash, own: true})
 	}
 	for _, p := range rec.Lineage.Parents {
 		if p.GenomeHash != "" {
-			out = append(out, p.GenomeHash)
+			out = append(out, lineageHash{hash: p.GenomeHash})
 		}
 	}
 	return out
+}
+
+// migrantHashOf is the migrant's own genome hash and the species that carried
+// it, which is the pair the brain aggregate folds. Both are empty when the record
+// names neither.
+func migrantHashOf(rec Record) (hash, speciesKey string) {
+	if rec.Lineage == nil {
+		return "", ""
+	}
+	hash = rec.Lineage.GenomeHash
+	if rec.Species != nil {
+		speciesKey = wire.SpeciesKey(rec.Species.GenericName, rec.Species.SpecificName)
+	}
+	return hash, speciesKey
 }
 
 // Start dials the relay, starts the fetch scheduler, and — when HTTPListen is
@@ -521,6 +623,12 @@ func (a *Archive) Close() error {
 	a.wg.Wait()
 	if err := a.metrics.Close(); err != nil {
 		a.log.Warn("archive: metrics close failed", "err", err)
+	}
+	// The last save, so an orderly shutdown loses nothing at all. A hard kill
+	// loses at most brainSaveInterval of arrivals, and loses them as a GAP in the
+	// newest buckets rather than as a run of zeroes.
+	if err := a.brainSave.Close(a.brainAgg); err != nil {
+		a.log.Warn("archive: brain history close failed", "err", err)
 	}
 	return a.ledger.Close()
 }
@@ -812,11 +920,41 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 	// record the archive has just written, so the live path and the startup
 	// replay pass identical input to identical code.
 	a.observeSpeciesLocked(rec)
+	migrantHash, speciesKey := migrantHashOf(rec)
 	for _, h := range hashesOf(rec) {
-		a.trackLocked(h, p.SourcePeer, p.MigrationID, p.EntityID,
+		a.trackLocked(h, speciesKey, p.SourcePeer, p.MigrationID, p.EntityID,
 			time.UnixMilli(rec.RecordedAt), now)
 	}
+	// Whether the store ALREADY holds this crossing's genome, decided while the
+	// lock is held and acted on after it is released. A hash already in the store
+	// has no arrival left to fold at (brainhist.go rule 1), so this is the second
+	// of the aggregate's two write points.
+	heldAlready := migrantHash != "" && a.genomes.Has(migrantHash)
 	a.mu.Unlock()
+
+	// THE COVERAGE DENOMINATOR, folded off the lock: one more distinct genome the
+	// record says crossed in this five minutes, whether or not this archive can
+	// see inside it.
+	a.observeBrainSeen(rec.RecordedAt, migrantHash)
+	if heldAlready {
+		// The parse is cached on the hash for the life of the process (brain.go
+		// rule 1), so a genome that crosses two hundred times is read once — and
+		// it is read OUTSIDE a.mu, because nothing that reads a file may hold the
+		// lock the migration path takes (Risk 4).
+		//
+		// THIS ONE PATH DOES TOUCH AN MTIME, and brainhist.go rule 2 is emphatic
+		// about mtimes, so the difference is worth stating. bb8.Store.Get
+		// refreshes the blob's mtime, and eviction is ordered by it; what rule 2
+		// refuses is a SWEEP, which would refresh all 702 000 blobs and postpone
+		// the horizon for the whole store including everything long dead. This
+		// refreshes exactly the blob of a genome that is crossing right now, which
+		// is precisely what "last stored or last served" is for (bb8/evict.go).
+		// It is bounded by first-sighting of a hash — about 1.4 reads a second at
+		// the measured distinct-genome rate — and never by the size of the store.
+		if br, ok := a.brainFor(migrantHash); ok {
+			a.observeBrainHeld(rec.RecordedAt, speciesKey, migrantHash, br)
+		}
+	}
 	return true
 }
 
@@ -925,13 +1063,23 @@ func (a *Archive) markSeen(typ, key string) bool {
 // eviction pass would delete, so the work is spent by construction. That check
 // is what keeps a restart from re-queueing a backlog this archive has already
 // drained — the replay hands every hash in the ledger to this function.
-func (a *Archive) trackLocked(hash, sourcePeer, migrationID string, entityID int32, crossedAt, now time.Time) {
+func (a *Archive) trackLocked(h lineageHash, speciesKey, sourcePeer, migrationID string,
+	entityID int32, crossedAt, now time.Time) {
+
+	hash := h.hash
 	if hash == "" || a.genomes.Has(hash) {
 		return
 	}
 	if f, ok := a.pending[hash]; ok {
 		if f.sourcePeer == "" {
 			f.sourcePeer = sourcePeer
+		}
+		// A HASH NAMED AS A MIGRANT ANYWHERE IS A MIGRANT'S. The same genome can
+		// be a parent's on one record and the migrant's own on another — a
+		// creature whose parent also travelled — and the measurable one is the
+		// answer that wins, because the other is not an answer at all.
+		if h.own && !f.migrant {
+			f.migrant, f.speciesKey = true, speciesKey
 		}
 		return
 	}
@@ -941,7 +1089,7 @@ func (a *Archive) trackLocked(hash, sourcePeer, migrationID string, entityID int
 		a.evict.gapsExpired++
 		return
 	}
-	a.pending[hash] = &fetch{
+	f := &fetch{
 		hash:        hash,
 		sourcePeer:  sourcePeer,
 		migrationID: migrationID,
@@ -950,7 +1098,12 @@ func (a *Archive) trackLocked(hash, sourcePeer, migrationID string, entityID int
 		crossedAt:   crossedAt,
 		nextAt:      now.Add(a.cfg.FirstAttemptDelay),
 		asked:       map[string]bool{},
+		migrant:     h.own,
 	}
+	if h.own {
+		f.speciesKey = speciesKey
+	}
+	a.pending[hash] = f
 	a.pendingOrder = append(a.pendingOrder, hash)
 }
 
@@ -963,6 +1116,18 @@ func (a *Archive) tickLoop() {
 			return
 		case now := <-t.C:
 			a.pumpFetches(now)
+			// The brain aggregate's durable half, on the SAME timer and behind its
+			// own interval: an append of what moved since the last one, which at
+			// the measured arrival rate is the frontier bucket, whatever late
+			// arrivals landed, and a handful of species records. It rides this
+			// loop rather than a timer of its own because it is the same cadence
+			// of bounded, yielding maintenance work the pump already is.
+			if now.Sub(a.brainSavedAt) >= brainSaveInterval {
+				a.brainSavedAt = now
+				if err := a.brainSave.Save(a.brainAgg); err != nil {
+					a.log.Warn("archive: brain history save failed", "err", err)
+				}
+			}
 		}
 	}
 }
@@ -1234,8 +1399,19 @@ func (a *Archive) onGenomeResponse(env wire.Envelope) bool {
 	now := time.Now()
 	a.mu.Lock()
 	f := a.pending[resp.GenomeHash]
+	// The three facts the BRAIN AGGREGATE needs, copied out here — under the one
+	// lock that guards a fetch entry — because the decision they drive comes
+	// before the parse below. crossedAt is the recordedAt of the migration that
+	// wanted this genome, which is the bucket key, and it has been durable since
+	// the retention horizon needed it (§23, B34).
+	var crossedAtMs int64
+	var foldSpecies string
+	foldSeries := false
 	if f != nil {
 		a.clearInFlightLocked(f)
+		crossedAtMs = f.crossedAt.UnixMilli()
+		foldSeries = f.migrant
+		foldSpecies = f.speciesKey
 	}
 	a.mu.Unlock()
 
@@ -1279,6 +1455,20 @@ func (a *Archive) onGenomeResponse(env wire.Envelope) bool {
 		a.log.Error("archive: genome store write failed", "genomeHash", resp.GenomeHash, "err", err)
 		return true
 	}
+	// THE BRAIN, MEASURED HERE AND NOWHERE ELSE, and the reason this is the fold
+	// point is that the bytes are already in memory: no store read, no store
+	// mutex, no mtime touched, and therefore no effect at all on the retention
+	// horizon that orders eviction by mtime (brainhist.go rules 1 and 2). It runs
+	// OUTSIDE a.mu because BrainStats parses JSON — 470 µs on the measured corpus
+	// — and a parse under that lock is a parse the relay read loop waits behind.
+	//
+	// AND ONLY FOR A MIGRANT'S OWN GENOME. A parent's is measured for nothing (see
+	// fetch.migrant), so parsing it would be work spent to be discarded — and
+	// caching it would spend a slot of a bounded cache nothing ever reads.
+	brain, brainOK := bb8.Brain{}, false
+	if foldSeries {
+		brain, brainOK = bb8.BrainStats(resp.Body.BB8)
+	}
 	a.mu.Lock()
 	delete(a.pending, resp.GenomeHash)
 	// A GENOME line is a ledger record and is counted like one. It was not until
@@ -1289,6 +1479,15 @@ func (a *Archive) onGenomeResponse(env wire.Envelope) bool {
 	// question, and `ledgerSkipped` is once again the whole of the difference.
 	a.recordCount++
 	a.mu.Unlock()
+	if brainOK {
+		// THE PER-HASH PARSE CACHE IS FILLED, not merely consulted, and that
+		// closes brain.go's named lag: a miss cached while this blob was still
+		// outstanding would otherwise keep the genealogy on an older genome of the
+		// species until a LATER hash of it was first seen present. The bytes have
+		// just been read and hashed; there is nothing to re-read.
+		a.fillBrainCache(resp.GenomeHash, brain)
+		a.observeBrainHeld(crossedAtMs, foldSpecies, resp.GenomeHash, brain)
+	}
 	_ = a.ledger.Append(Record{
 		Type:       RecordGenome,
 		RecordedAt: now.UnixMilli(),

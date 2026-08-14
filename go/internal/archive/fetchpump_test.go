@@ -94,7 +94,7 @@ func seedGaps(a *Archive, n int, sourcePeer string, now time.Time) []string {
 	a.mu.Lock()
 	for i := 0; i < n; i++ {
 		hashes[i] = testHash(i)
-		a.trackLocked(hashes[i], sourcePeer, fmt.Sprintf("m-%d", i), int32(i), now, now)
+		a.trackLocked(lineageHash{hash: hashes[i], own: true}, "", sourcePeer, fmt.Sprintf("m-%d", i), int32(i), now, now)
 	}
 	a.mu.Unlock()
 	return hashes
@@ -372,7 +372,7 @@ func TestTheBoundedWalkKeepsTheRetryLadder(t *testing.T) {
 	now := time.Now()
 	h := testHash(1)
 	a.mu.Lock()
-	a.trackLocked(h, "", "m-1", 1, now, now)
+	a.trackLocked(lineageHash{hash: h, own: true}, "", "", "m-1", 1, now, now)
 	a.ready = true
 	a.mu.Unlock()
 

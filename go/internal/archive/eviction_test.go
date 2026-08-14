@@ -205,8 +205,8 @@ func TestTheFetchQueueRetiresAGapPastTheHorizon(t *testing.T) {
 
 	a.mu.Lock()
 	// 20 hours old at seed time: inside the horizon, so both are queued.
-	a.trackLocked(aged, "", "m-aged", 1, now.Add(-20*time.Hour), now)
-	a.trackLocked(current, "", "m-current", 2, now, now)
+	a.trackLocked(lineageHash{hash: aged, own: true}, "", "", "m-aged", 1, now.Add(-20*time.Hour), now)
+	a.trackLocked(lineageHash{hash: current, own: true}, "", "", "m-current", 2, now, now)
 	a.ready = true
 	a.mu.Unlock()
 	if got := a.PendingGaps(); got != 2 {
@@ -303,7 +303,7 @@ func TestNoHorizonEvictsNothingAndSaysNothing(t *testing.T) {
 
 	now := time.Now()
 	a.mu.Lock()
-	a.trackLocked(hashN(10), "", "m-ancient", 1, now.Add(-3650*24*time.Hour), now)
+	a.trackLocked(lineageHash{hash: hashN(10), own: true}, "", "", "m-ancient", 1, now.Add(-3650*24*time.Hour), now)
 	a.ready = true
 	a.mu.Unlock()
 	a.pumpFetches(now)

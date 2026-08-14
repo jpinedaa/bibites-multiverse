@@ -283,21 +283,30 @@ type TreeNode struct {
 	SpanToMs    int64 `json:"spanToMs,omitempty"`
 	SpanDerived bool  `json:"spanDerived,omitempty"`
 
-	// ---- THE BRAIN, from ONE stored genome per species (brain.go).
+	// ---- THE BRAIN, from ONE genome per species (brain.go).
 	//
 	// Neurons and Synapses are the shape of THE NEWEST GENOME OF THIS SPECIES THIS
-	// ARCHIVE HAS BEEN ABLE TO READ — the latest hash the record named while the
-	// store holds that blob, and the newest one it did hold while a fetch for the
-	// newer hash is outstanding. That is the figure the page has always described,
-	// and it is the one that does not blink on a rig with a fetch backlog
-	// (brainForSpecies).
+	// ARCHIVE EVER READ. Not "still holds a copy of": the measurement is persisted
+	// at the moment the genome is read (brainhist.go) and OUTLIVES THE BLOB, so an
+	// extinct ancestor keeps the last brain this archive managed to see of it even
+	// after the retention horizon has pruned every copy — which is the only way an
+	// ancestor can carry one at all, since nothing is fetching a dead species'
+	// genomes any more.
 	//
-	// Both are ABSENT when no genome of this species has ever been readable —
-	// pruned past the retention horizon, never fetched, or a shape this parser
-	// cannot read — and absent renders as nothing at all. It is never an error and
-	// never a zero: a brain this archive cannot see is not a brain of no neurons.
-	Neurons  int `json:"neurons,omitempty"`
-	Synapses int `json:"synapses,omitempty"`
+	// BrainAtMs is WHEN that genome crossed, and it is published because the
+	// answer can now be old: a species extinct for three days carries a
+	// three-day-old measurement, drawn beside a living species' current one. The
+	// comparison is legitimate — it is what a complexity trend looks like on the
+	// tree itself — but a reader must not be left to assume both were measured
+	// now, so the age is a fact on the row rather than an inference from it.
+	//
+	// All three are ABSENT when no genome of this species has ever been readable —
+	// never fetched, or a shape this parser cannot read — and absent renders as
+	// nothing at all. It is never an error and never a zero: a brain this archive
+	// cannot see is not a brain of no neurons.
+	Neurons   int   `json:"neurons,omitempty"`
+	Synapses  int   `json:"synapses,omitempty"`
+	BrainAtMs int64 `json:"brainAtMs,omitempty"`
 }
 
 // TreeCell is one seat on the map, for the per-species mini-map beside each
@@ -448,10 +457,13 @@ type treeFacts struct {
 	// descendants' records carried. "" when only the census names it.
 	raw string
 	// parent is this node's own recorded parent name, raw, and genomeHash the
-	// latest genome any crossing of it carried. Both are copies of one string
-	// each, taken under the lock and read after it.
+	// latest genome any crossing of it carried, with genomeAtMs the crossing it
+	// was named on. All three are copies taken under the lock and read after it;
+	// genomeAtMs travels because a reading contributed to the persisted record
+	// must be dated on the CROSSING's clock, not on the reader's.
 	parent     string
 	genomeHash string
+	genomeAtMs int64
 }
 
 // SpeciesTreeView builds the reduced genealogy. It takes the archive's lock
@@ -557,7 +569,7 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 			}
 			f.crossings, f.firstMs, f.lastMs, f.genomes =
 				e.crossings, e.firstMs, e.lastMs, len(e.genomes)
-			f.parent, f.genomeHash = e.parent, e.genomeHash
+			f.parent, f.genomeHash, f.genomeAtMs = e.parent, e.genomeHash, e.genomeAtMs
 			p := e.parentKey
 			if p == "" {
 				break
@@ -918,19 +930,28 @@ func (a *Archive) SpeciesTreeView() SpeciesTree {
 		out.SpanStartSeedMs = out.SpanStartMs
 	}
 
-	// ---- THE BRAIN, one stored blob per species, parsed once per hash ever.
-	// This is the only part of this view that can touch the disk, it does so
-	// outside every lock, and an absence is an absence (brain.go).
+	// ---- THE BRAIN, from the persisted per-species measurement, topped up by one
+	// stored blob per species parsed once per hash ever. This is the only part of
+	// this view that can touch the disk, it does so outside every lock, and an
+	// absence is an absence (brain.go).
+	//
+	// EVERY NODE IS ASKED, INCLUDING ONE THE RECORD NAMES NO GENOME FOR. It used
+	// to skip those, which was right while the answer could only come from a hash;
+	// it is wrong now that the answer is a kept measurement, because a species
+	// whose crossings have aged out of the aggregate — or whose latest hash the
+	// ledger no longer reaches — may still have been measured once, and that
+	// measurement is exactly what an ancestor's ring is for.
 	for i := range out.Nodes {
-		f := facts[out.Nodes[i].Key]
-		if f == nil || f.genomeHash == "" {
-			continue
+		hash, atMs := "", int64(0)
+		if f := facts[out.Nodes[i].Key]; f != nil {
+			hash, atMs = f.genomeHash, f.genomeAtMs
 		}
 		// PER SPECIES, NOT PER HASH. A species whose latest hash is still being
-		// fetched keeps the newest shape this process has actually read of it,
-		// rather than losing its ring until the blob lands — see brainForSpecies.
-		if b, ok := a.brainForSpecies(out.Nodes[i].Key, f.genomeHash); ok {
+		// fetched keeps the newest shape this archive has ever read of it, rather
+		// than losing its ring until the blob lands — see brainForSpecies.
+		if b, at, ok := a.brainForSpecies(out.Nodes[i].Key, hash, atMs); ok {
 			out.Nodes[i].Neurons, out.Nodes[i].Synapses = b.Neurons, b.Synapses
+			out.Nodes[i].BrainAtMs = at
 		}
 	}
 

@@ -124,6 +124,32 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(a.deny.ApplySpeciesTrends(tr))
 	})
+	// The brain-complexity series rides its OWN endpoint, for the fourth time and
+	// the same reason (§17, B14): /api/status is what MetricsLog.Append
+	// serializes verbatim into the durable sample file once a minute, and this is
+	// a series over a maintained aggregate with a durable file of its own. Hanging
+	// it off the status payload would write the same history twice, in two
+	// resolutions, forever.
+	//
+	// IT TAKES A WINDOW RATHER THAN AN HOUR COUNT, unlike every other history
+	// endpoint here, and that is what lets the panel share the genealogy's axis.
+	// That axis RE-FITS to the drawn set (tree.go, SpanStartMs/SpanStartSeedMs) —
+	// a search, a revealed seed row or a species leaving the census moves its left
+	// edge — so a series at a fixed resolution ending at now could not be drawn
+	// against it. The page sends the two edges it is actually drawing and gets the
+	// series re-aggregated onto them.
+	//
+	// NOTHING HERE CARRIES A SPECIES NAME, so the deny list has nothing to apply:
+	// the answer is bucket times, counts and distributions. That is a property of
+	// the payload rather than an exemption, and it is why this endpoint is the one
+	// on this mux that does not pass through d.Apply*.
+	mux.HandleFunc("/api/species/brains", func(w http.ResponseWriter, r *http.Request) {
+		from, to, buckets := brainParams(r)
+		view := a.BrainHistoryView(from, to, buckets)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(view)
+	})
 	mux.HandleFunc("/api/species/history", func(w http.ResponseWriter, r *http.Request) {
 		key, ok := speciesKeyParam(r)
 		if !ok {
@@ -198,6 +224,49 @@ func historyParams(r *http.Request) (time.Duration, int) {
 		buckets = HistoryMaxBuckets
 	}
 	return window, buckets
+}
+
+// brainParams reads ?from=, ?to= and ?buckets= for /api/species/brains, and
+// clamps all three. It takes two ABSOLUTE EDGES rather than an hour count
+// because the panel shares an axis that re-fits: the caller sends the window it
+// is actually drawing, not a duration ending at now.
+//
+// An absent or nonsensical window falls back to the aggregate's own default —
+// the last day — rather than to nothing, so a request with no query string is
+// still an answer somebody can look at.
+func brainParams(r *http.Request) (fromMs, toMs int64, buckets int) {
+	q := r.URL.Query()
+	toMs = time.Now().UnixMilli()
+	if v := q.Get("to"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			toMs = n
+		}
+	}
+	fromMs = toMs - HistoryDefaultWindow.Milliseconds()
+	if v := q.Get("from"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			fromMs = n
+		}
+	}
+	if fromMs >= toMs {
+		fromMs = toMs - HistoryDefaultWindow.Milliseconds()
+	}
+	if max := BrainMaxWindow.Milliseconds(); toMs-fromMs > max {
+		fromMs = toMs - max
+	}
+	buckets = HistoryDefaultBuckets
+	if v := q.Get("buckets"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			buckets = n
+		}
+	}
+	if buckets < BrainMinBuckets {
+		buckets = BrainMinBuckets
+	}
+	if buckets > BrainMaxBuckets {
+		buckets = BrainMaxBuckets
+	}
+	return fromMs, toMs, buckets
 }
 
 // maxSpeciesKeyBytes bounds ?key=. Two 64-byte halves and a joining space is
@@ -432,6 +501,52 @@ vertical-align:middle;margin-right:5px}
 border-bottom:1.2px solid var(--dim);vertical-align:1px;margin-right:5px}
 .treelegend i.doti{display:inline-block;width:7px;height:7px;background:var(--text);
 border-radius:50%;vertical-align:0;margin-right:5px}
+/* ---- THE BRAIN PANEL, under the drawing and sharing its x axis.
+   Its own box, directly below the tree's, with no border on top: the two read as
+   one picture with one clock and are two boxes only because the tree scrolls
+   vertically and this must not scroll away with it. Its horizontal scroll is
+   slaved to the tree's, so the shared axis stays shared even on a window too
+   narrow for the drawing. */
+.brainwrap{overflow-x:auto;overflow-y:hidden;border:1px solid var(--line);border-top:0;
+border-radius:0 0 4px 4px;background:var(--cell)}
+.lifewrap{border-radius:4px 4px 0 0}
+svg.brainp{display:block}
+svg.brainp text{font:10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--dim)}
+svg.brainp .grid{stroke:var(--line);stroke-width:1;opacity:.5}
+svg.brainp .nowline{stroke:var(--live);stroke-width:1;opacity:.55}
+svg.brainp .base{stroke:var(--line);stroke-width:1}
+/* The two series. Synapses wear the lane blue the brain ring already wears, so
+   the ring on a row and the line under it are plainly the same subject; hidden
+   neurons wear the live green. Neither is the warning colour: a rising line here
+   is not a fault. */
+svg.brainp .syn{fill:none;stroke:var(--lane);stroke-width:1.6;stroke-linejoin:round}
+svg.brainp .synband{fill:var(--lane);opacity:.16;stroke:none}
+svg.brainp .hid{fill:none;stroke:var(--live);stroke-width:1.6;stroke-linejoin:round}
+svg.brainp .hidband{fill:var(--live);opacity:.16;stroke:none}
+svg.brainp .plbl{font-size:10px;letter-spacing:.04em}
+svg.brainp .plbl.syn{fill:var(--lane);stroke:none}
+svg.brainp .plbl.hid{fill:var(--live);stroke:none}
+svg.brainp .ymax{fill:var(--dim);font-size:9.5px;font-variant-numeric:tabular-nums}
+/* Coverage. A filled column is the share of that slice's genomes this archive
+   could read; an amber tick at the floor is the OTHER absence — the record holds
+   crossings there and not one of their genomes was ever measured — and an empty
+   column is no crossing at all. Three different facts, three different marks. */
+svg.brainp .cov{fill:var(--dim);opacity:.55}
+svg.brainp .covnone{fill:var(--warn);opacity:.85}
+svg.brainp .covbase{stroke:var(--line);stroke-width:1}
+svg.brainp .hit{fill:transparent;cursor:help;pointer-events:all}
+svg.brainp .havemark{stroke:var(--warn);stroke-width:1.2;stroke-dasharray:4 3;opacity:.8}
+svg.brainp .havelbl{fill:var(--warn);font-size:9.5px;cursor:help}
+svg.brainp .none{fill:var(--dim);font-size:11px}
+.brainlegend{margin-top:8px}
+.treelegend i.bsyn{display:inline-block;width:22px;height:0;border-top:1.6px solid var(--lane);
+vertical-align:middle;margin-right:5px}
+.treelegend i.bhid{display:inline-block;width:22px;height:0;border-top:1.6px solid var(--live);
+vertical-align:middle;margin-right:5px}
+.treelegend i.bbandi{display:inline-block;width:22px;height:8px;background:var(--lane);
+opacity:.28;vertical-align:-1px;margin-right:5px}
+.treelegend i.bcovi{display:inline-block;width:5px;height:9px;background:var(--dim);
+opacity:.55;vertical-align:-1px;margin-right:5px}
 .treestat{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:11px;margin-bottom:10px}
 .treestat span b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
 /* The one control on this line. It undoes a filter the view applied on its own,
@@ -794,7 +909,8 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
         parent</span> &mdash; the link runs backwards to where the child's own record starts</span>
       <span><i class="ringi braini"></i><span class="term" data-t="brainsize">brain size</span>
         &mdash; bigger ring, more neurons and synapses <em>than the other rows drawn</em>;
-        hover one for the numbers</span>
+        the newest genome of it this archive <em>ever read</em>, which for an extinct line may
+        be days old &mdash; hover one for the numbers and its age</span>
       <span><i class="doti"></i><span class="term" data-t="minimap">where it lives</span>,
         on the map&rsquo;s own grid</span>
       <span><span class="term" data-t="trend">the 24 h line</span> &mdash; its population
@@ -806,6 +922,24 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
          row that had it is no longer drawn, so a species leaving the census does
          not send the reader back to the top of the page. -->
     <div class="lifewrap" id="lfbox" tabindex="-1"></div>
+    <!-- THE BRAIN PANEL. It is BELOW the drawing and not a row in it: an
+         aggregate over every genome the archive could read is not a species, and
+         giving it a row would give it a row's affordances — a name, a lineage, a
+         click that opens a detail about a creature. It shares the drawing's exact
+         left and right edges and its tick positions, and nothing else. -->
+    <div class="brainwrap" id="lfbrain"></div>
+    <p class="treelegend brainlegend" id="lfbrainlgd">
+      <span><i class="bsyn"></i><span class="term" data-t="braintrend">median synapses</span>
+        &mdash; per genome, in each slice of time</span>
+      <span><i class="bhid"></i><span class="term" data-t="hiddenneurons">median hidden
+        neurons</span> &mdash; the count ABOVE the fixed 48 every brain is born with</span>
+      <span><i class="bbandi"></i>the shaded band &mdash; the middle half of the genomes in
+        that slice, a quarter above the line and a quarter below</span>
+      <span><i class="bcovi"></i><span class="term" data-t="braincoverage">how much of it was
+        measured</span> &mdash; taller is more of that slice&rsquo;s genomes read</span>
+      <span>a break in a line is a <span class="term" data-t="braingap">gap</span>, never a
+        zero</span>
+    </p>
   </section>
 </div>
 
@@ -869,6 +1003,9 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   <code>ringstat</code> reads),
   <code>/api/species/trends</code> (every living species&rsquo; recent population shape in one
   answer, which is what the trend column is drawn from),
+  <code>/api/species/brains?from=&amp;to=&amp;buckets=</code> (how complicated the brains
+  crossing this map have been getting, over the held sample, re-aggregated onto whatever window
+  is asked for &mdash; which is what lets the panel share the family tree&rsquo;s own clock),
   <code>/api/species/history?key=</code> (one species, split per world) and
   <code>/api/history</code> (downsampled, <code>?hours=</code>, <code>?buckets=</code>).
   <div class="motion" id="motion">
@@ -945,7 +1082,11 @@ var G = {
  collapsed:["+n generations","A run of ancestors that all died out, with no living branch anywhere along it, drawn as ONE dotted edge with the number of generations it stood for. Drawing all of them would be a column of names nothing alive belongs to; leaving the number off would make a distant cousin look like a sibling. THE DOTTED RUN IS ON THE CLOCK, exactly like every other horizontal distance here: it starts where the ancestor's own record stops and ends where the descendant's record starts, so where it sits and how long it is are the real stretch of time in which this line was carried only by species this drawing does not draw. That stretch used to be left blank — on this map it is forty hours wide — with a short mark beside it whose length counted generations instead, which put two different scales on one drawing. The number is still printed because a count of generations cannot be recovered from a duration: forty generations and one generation can cross the same forty hours. That is now the only thing the number is for. Where there is no such stretch — the ancestor is still alive, or the descendant's first crossing falls inside the ancestor's own span — nothing is drawn across, and the number stands on its own: the record says those generations sat somewhere inside a stretch the ancestor itself occupies, and it does not say where."],
  beforeparent:["recorded before its parent","A species whose first recorded crossing is EARLIER than its parent's own. The relationship is real and both dates are the record's: ancestry here is a by-product of TRAVEL, so a species is first seen when it happens to walk into another world and not when it arose — and the younger of two kinds can easily be the first to make that trip. So the parent's bar can start hours after the child's, and the honest drawing of that is not a line dropping onto a stretch of the parent's row where the parent has no bar. This page will not invent a bar to tidy it up. Instead the link leaves the parent at the earliest moment the parent's record supports, which is the left end of its bar, marks that point with a ring, and runs BACKWARDS in amber to where the child's own record begins. Amber and backwards for the same reason: it is not ordinary descent, and it is the one link on this drawing that must be read twice."],
  lifespan:["the bar, and what it is not","A species' bar starts at the first crossing THIS ARCHIVE RECORDED of it and ends at the last one, or at the right-hand edge while the species is still alive somewhere. It is not a lifespan and this page never calls it one. A kind can have lived for days before anything of it walked into another world, and a kind whose bar stopped last Tuesday may be alive and simply staying at home — what stopped is the record, and the only honest thing a record can draw is itself. The one place the drawing goes beyond that is an ancestor no crossing of its own was ever recorded for: its bar begins at its earliest recorded DESCENDANT, because that descendant's crossing named it as a parent, so the record does support 'it existed by then' and supports nothing earlier. Those bars are drawn hollow."],
- brainsize:["brain size","The ring at the end of a species' bar. Every creature carries a brain — a little network of neurons wired together by synapses — and this is how big the newest one of that species the archive has a copy of is, COMPARED WITH THE OTHER SPECIES ON THIS DRAWING. That comparison is the whole of what the size means, and it is worth being plain about: the smallest brain among the rows drawn right now is the smallest ring, the largest is the largest, and everything else is placed between them. It is not an absolute size, and two rings of the same size on two different days are not the same brain. The scale re-fits whenever the drawn set changes — a search, a revealed row, a species leaving the census — exactly as the clock along the top re-fits to the bars it holds. It is drawn that way because the alternative was measured and said nothing: against a fixed scale the species on this map differed by a seventh of a pixel, so a kind carrying a third more brain than its neighbour drew the same ring. HOVER A RING FOR THE REAL NUMBERS — the counts are what the size stopped carrying, and they are on the row's own tooltip too. It is drawn from ONE genome per species, the latest the crossing record named, read out of the copy in the archive's own store. WHERE THERE IS NO RING THERE IS NO ANSWER, which is not the same as a small brain: the copy may never have arrived, or may have been deleted once it was older than the retention horizon. On this map most species have no ring at all for the first of those reasons. The record of the crossing stays forever either way; the genetic material is the part that ages out."],
+ brainsize:["brain size","The ring at the end of a species' bar. Every creature carries a brain \u2014 a little network of neurons wired together by synapses \u2014 and this is how big THE NEWEST GENOME OF THAT SPECIES THIS ARCHIVE EVER READ is, COMPARED WITH THE OTHER SPECIES ON THIS DRAWING. That comparison is the whole of what the size means, and it is worth being plain about: the smallest brain among the rows drawn right now is the smallest ring, the largest is the largest, and everything else is placed between them. It is not an absolute size, and two rings of the same size on two different days are not the same brain. The scale re-fits whenever the drawn set changes \u2014 a search, a revealed row, a species leaving the census \u2014 exactly as the clock along the top re-fits to the bars it holds. It is drawn that way because the alternative was measured and said nothing: against a fixed scale the species on this map differed by a seventh of a pixel, so a kind carrying a third more brain than its neighbour drew the same ring. HOVER A RING FOR THE REAL NUMBERS \u2014 the counts are what the size stopped carrying, and they are on the row's own tooltip too. EVER READ, NOT STILL HELD, and the difference matters most on the rows you would otherwise never see a ring on. The measurement is written down the moment a genome is read and is kept afterwards, so it outlives the copy it came from: an ancestor nothing is alive of keeps the last brain this archive managed to see of it, forever, even though nothing is fetching that species\u2019 genomes any more and every copy has since been deleted. The cost is that a ring can be OLD. Hover it \u2014 it says when the genome it was read from crossed, and a species extinct for three days carries a three-day-old reading drawn beside a living species\u2019 current one. Comparing them is fair (it is what a trend through time looks like on the tree itself) as long as you know which is which. WHERE THERE IS NO RING THERE IS NO ANSWER, which is not the same as a small brain: this archive has never once managed to read a genome of that species. The record of the crossing stays forever either way."],
+ braintrend:["brains over time","The panel under the drawing. It is the same clock as the tree above it \u2014 same left edge, same right edge, same tick marks \u2014 and it shows how complicated the brains crossing this map have been getting. The top line is the MEDIAN NUMBER OF SYNAPSES in one genome: the middle genome of that slice of time, half above and half below. The shaded band around it is the middle half of that slice \u2014 a quarter of the genomes above the line, a quarter below \u2014 so a widening band is a population spreading out and a narrow one is a population agreeing with itself. WHAT IT IS MEASURED OVER: every distinct genome this archive holds a copy of whose crossing falls in that slice, counted ONCE each however many times that same creature travelled. Which genomes the archive happens to hold is not chosen by anything about the creature \u2014 the queue that fetches them walks a list ordered by the genome\u2019s own fingerprint, and the most travelled species on this map is over-represented among the copies held by about one part in a hundred \u2014 so this is a fair sample of what crossed and not a sample of what happened to be interesting. It is not a sample of what LIVES here: only creatures that travelled are in it."],
+ hiddenneurons:["hidden neurons","The neurons a brain has BEYOND the ones every bibite is born with. Every brain on this map starts with the same fixed set of 48 \u2014 the senses it reads the world with and the muscles it acts with \u2014 and that 48 never varies: it is the smallest count in every one of the tens of thousands of genomes this archive has read. So the raw neuron number barely moves even while brains change enormously, and reading growth off it understates what happened by about sevenfold. This is the count above that floor, which is the part that is actually being invented: the interior of the brain."],
+ braincoverage:["how much was measured","The strip of little columns along the bottom of the brain panel: for each slice of time, how much of what crossed this archive was able to look inside. A tall column is most of it; a short one is a few. AN AMBER TICK IS NOT A SHORT COLUMN \u2014 it means the record holds crossings in that slice and not one of their genomes was ever read, so there is no line there at all. An empty space is a slice with no crossing recorded in it. IT IS WORST AT THE RIGHT-HAND EDGE, which is the part you look at hardest, and that is not decay: a genome is asked for after its crossing is recorded and the answers arrive over the following days, so the newest slices are the ones still filling in. Measured on this map: about 42% of a slice is readable in its first six hours and about 97% after five days. The line over a thinly-measured slice rests on less evidence, and this is where you can see that rather than having to assume it."],
+ braingap:["a gap, not a zero","A break in either line means this archive measured no genome at all in that stretch, and it is drawn as a break on purpose. A zero would say the creatures on this map had no brains, which is a statement about the world made out of a hole in the record. Two quite different things make a hole: nothing crossed (the map was down \u2014 45 of this record\u2019s first 183 hours had no crossing at all, including one stretch of a whole day), or things crossed and none of their genomes were ever read. The strip below the lines tells you which."],
  minimap:["where it lives","The little grid of dots beside a species, laid out the way the map itself is laid out — this map is three worlds wide and two high, so it is three dots by two, and a different map would draw a different grid. A filled dot is a world where this species is alive right now. A hollow dot is a world that sent its census and did not name it. A dashed amber dot is a world reporting no census at all, which is UNKNOWN and never 'not there'. A seat nobody has claimed is drawn as nothing."],
  trend:["the 24-hour line","A small line of this species' population across the whole map over the last day, from the archive's own sample file — the shape, not the numbers. A gap in the line is a stretch where no world reported a census, which is unknown and never a zero. Every one of these lines comes from a single answer covering every living species at once, so the column costs one request rather than one per species. This record began when the archive did, so a short line is a short record and not a young species."],
  recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive holds that named a parent at all — anything older than it is a crossing that named none. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw. THE DATE IS USUALLY OLDER THAN THE PICTURE, which is why it is printed at the left margin of the clock rather than drawn on it: the drawing is fitted to the oldest bar it actually holds, and reserving the space back to this date would leave most of the plot empty and more of it empty every hour. Where the date does fall inside the picture it is drawn there, as a dashed line, because then it separates a stretch where no family line can begin from one where they can."],
@@ -970,7 +1111,7 @@ var G = {
     "parentspecies",
     "genealogy","lifespan","timeaxis","descends","lineage",
     "branchpoint","collapsed","beforeparent","noancestry","recordfloor",
-    "minimap","trend","brainsize",
+    "minimap","trend","brainsize","braintrend","hiddenneurons","braincoverage","braingap",
     "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges","ceilings","floor",
@@ -2206,10 +2347,24 @@ function lfBrainR(n){
 /* The ring's own tooltip: the REAL numbers, which the drawing itself cannot carry
    now that the mark is a comparison. It names where the numbers came from, and it
    says the one thing the ring's size no longer says. */
+function lfBrainAge(n){
+  if (!n.brainAtMs) return "";
+  var age = (LFX && LFX.generatedAtMs ? LFX.generatedAtMs : Date.now()) - n.brainAtMs;
+  if (age < 0) age = 0;
+  return ms(age);
+}
 function lfBrainTip(n){
-  var b = LFBRAIN, w = lfBrainW(n), body =
-    n.neurons + " neurons and " + n.synapses + " synapses, from the latest genome of this " +
-    "species the archive holds a copy of.";
+  var b = LFBRAIN, w = lfBrainW(n), age = lfBrainAge(n), body =
+    n.neurons + " neurons and " + n.synapses + " synapses, from the newest genome of this " +
+    "species this archive EVER READ" +
+    // AND WHEN. The measurement is kept after the copy it came from is gone, so
+    // it can be days old — and an old reading drawn beside a current one must say
+    // which it is, or the row invites a comparison of two different instants
+    // presented as one.
+    (age ? " — a genome that crossed " + age + " ago" +
+      (n.alive ? "." : ", and nothing of this species is alive anywhere reporting, so no " +
+        "newer one can arrive.")
+        : ".");
   if (b.n < 2 || !(b.hi > b.lo)){
     body += " It is the only brain measured on this drawing" +
       (b.n > 1 ? " size — every species here that has a genome carries the same total" : "") +
@@ -2575,10 +2730,14 @@ function lfTip(n){
       "end of it.");
   }
   if (n.neurons){
+    var bage = lfBrainAge(n);
     lines.push("Brain: " + n.neurons + " neurons and " + n.synapses + " synapses, from the " +
-      "latest genome of it this archive holds a copy of. The ring at the end of the bar is " +
-      "where that sits AMONG THE SPECIES DRAWN RIGHT NOW rather than an absolute size, and it " +
-      "re-scales as those change — hover the ring itself for the range it was fitted to.");
+      "newest genome of it this archive ever read" +
+      (bage ? ", which crossed " + bage + " ago" : "") + ". The reading is kept after the copy " +
+      "it came from is gone, so an extinct line keeps the last brain that was ever seen of it. " +
+      "The ring at the end of the bar is where that sits AMONG THE SPECIES DRAWN RIGHT NOW " +
+      "rather than an absolute size, and it re-scales as those change — hover the ring itself " +
+      "for the range it was fitted to.");
   }
   // WHO IT CAME FROM, WITHOUT OPENING THE ROW. The name of the parent species was
   // only ever in the expanded detail, so the drawing's own subject — descent —
@@ -2706,15 +2865,19 @@ function lfDetailLines(n){
     }
   }
   out.push(rec);
-  // THE BRAIN, and its absence. An absent one says WHY rather than printing a
-  // zero: the archive keeps the fingerprint of every genome forever and the copy
-  // only while the retention horizon allows.
+  // THE BRAIN, its AGE, and its absence. The reading outlives the copy it was
+  // taken from, so it carries its own date: an ancestor extinct for days shows a
+  // days-old measurement, and a row that showed it without saying so would put two
+  // different instants side by side as if they were one. An absent one says WHY
+  // rather than printing a zero — this archive has never once read a genome of it.
   var brain = [{t: "brain", c: "dk", term: "brainsize"}];
   if (n.neurons){
+    var dage = lfBrainAge(n);
     brain.push({t: "  " + n.neurons + " neurons · " + n.synapses + " synapses"});
-    brain.push({t: "  (from the latest genome of it this archive holds)", c: "dk"});
+    brain.push({t: "  (the newest genome of it ever read here" +
+      (dage ? ", " + dage + " old" : "") + ")", c: "dk"});
   } else {
-    brain.push({t: "  no copy of its latest genome is held here", c: "unk"});
+    brain.push({t: "  no genome of it has ever been read here", c: "unk"});
   }
   out.push(brain);
   var par = [{t: "parent species", c: "dk", term: "parentspecies"}];
@@ -3238,6 +3401,321 @@ function lfAxis(x, cols, sc, height){
   return g;
 }
 
+/* ------------------------------------------- BRAINS OVER TIME, UNDER THE TREE
+
+   WHAT IT IS. One panel, below the drawing, sharing the drawing's exact left and
+   right edges and its tick positions and NOTHING else: its own y scales, its own
+   box, its own answer from its own endpoint. It says how complicated the brains
+   crossing this map have been getting, which is the one question the tree itself
+   cannot answer — a tree draws WHO, and this draws WHAT THEY ARE MADE OF.
+
+   WHY IT IS NOT A ROW IN THE TREE. An aggregate over every genome the archive
+   could read is not a species. Given a row it would inherit a row's affordances —
+   a name, a place in a family, a lineage that lights, a click that opens a detail
+   about a creature — and every one of those would be a lie about what it is.
+
+   WHY IT SHARES THE AXIS AND HOW. The tree's clock RE-FITS to what is drawn
+   (tree.go: spanStartMs, spanStartSeedMs), so a series at a fixed resolution
+   ending at now could not be laid against it. The panel is drawn from lfScale —
+   the SAME function, the same cols, the same instance — and the series is fetched
+   for the two edges that scale actually has, re-aggregated server-side onto them.
+   Every x here is sc.x of a real millisecond, which is the property the geometry
+   is tested on.
+
+   THE TWO SERIES, AND WHY THEY ARE STACKED RATHER THAN OVERLAID. Median synapses
+   per genome and median HIDDEN neurons — the count above the fixed 48 every brain
+   is born with. They are the two that move: against time, the synapse median runs
+   8.1 to 42.1 over this record and the hidden-neuron median 1.0 to 8.6, while the
+   RAW neuron count runs 49.0 to 56.6 because 48 of it never varies at all. Two
+   series in two units cannot honestly share one y scale — the smaller would be
+   pressed flat — and putting two scales on one plot invites a reader to read
+   meaning into where the lines cross, which would be meaning that is not there.
+   So they are two small multiples, one above the other, each fitted to its own
+   range, over one shared clock. Nothing crosses anything.
+
+   THE BAND IS THE MIDDLE HALF, not the extremes, and that is a choice with a
+   reason. A slice holds a few hundred genomes; its minimum hidden-neuron count is
+   0 in almost every slice (some genome is at the floor) and its maximum is one
+   mutant, so a min-to-max band would draw a flat floor and a spiky ceiling and
+   would encode THE PRESENCE OF OUTLIERS rather than the spread of the population.
+   The quartile band moves with the population, which is what makes a widening or
+   a narrowing legible. The extremes are not lost: they are in the tooltip.
+
+   COVERAGE IS ITS OWN STRIP, not an opacity ramp on the lines. The archive holds
+   about 42% of a slice's genomes in that slice's first six hours and about 97%
+   after five days — the fetch backlog draining backwards — so the WORST-covered
+   part of this picture is its right-hand edge, which is the part a reader looks
+   at hardest. An opacity ramp would therefore make the newest and least certain
+   stretch the faintest thing on the panel, hiding the problem in the shape of
+   admitting it, and it would conflate "less certain" with "smaller" on a plot
+   whose whole subject is size. A strip states it instead, in its own row, with
+   the numbers in the tooltip. */
+var LFB = null, LFSCALE = null, LFCOLS = null;
+var LFB_PADT = 18, LFB_SERH = 46, LFB_GAP = 15, LFB_COVH = 11, LFB_PADB = 16;
+function lfBrainH(){
+  return LFB_PADT + LFB_SERH*2 + LFB_GAP*2 + LFB_COVH + LFB_PADB;
+}
+/* The requested resolution: about one bucket per four pixels of plot, inside the
+   endpoint's own bounds. Finer than the aggregate's five minutes buys nothing —
+   the server cannot invent detail the fold never kept — and the answer says what
+   resolution it actually holds. */
+function lfBrainBuckets(cols){
+  var n = Math.round((cols && cols.plotw ? cols.plotw : LF_PLOTW) / 4);
+  if (n < 8) n = 8;
+  if (n > 720) n = 720;
+  return n;
+}
+function lfbY(top, h, v, maxv){
+  if (!(maxv > 0)) return top + h;
+  var f = v / maxv;
+  if (f < 0) f = 0; else if (f > 1) f = 1;
+  return top + h - f*h;
+}
+/* A RUN IS A STRETCH WITH A READING IN EVERY BUCKET. Runs are drawn and the
+   spaces between them are not: a gap in the record is a break in the line, never
+   a segment joining the two readings either side of it. Joining them would draw a
+   straight ascent across the 24-hour outage this record holds and invite it to be
+   read as a measurement. */
+function lfbRuns(pts, medk){
+  var runs = [], cur = null;
+  for (var i=0;i<pts.length;i++){
+    if (pts[i][medk] == null){ cur = null; continue; }
+    if (!cur){ cur = []; runs.push(cur); }
+    cur.push(pts[i]);
+  }
+  return runs;
+}
+function lfbSeries(g, B, sc, top, keys, cls, maxv){
+  var runs = lfbRuns(B.points || [], keys.med), r, i, p, x, d;
+  var half = (B.bucketMs || 0) / 2;
+  for (r=0;r<runs.length;r++){
+    var run = runs[r];
+    // The band first, under the line.
+    d = "";
+    for (i=0;i<run.length;i++){
+      p = run[i];
+      if (p[keys.hi] == null) { d = ""; break; }
+      x = sc.x(p.tMs + half);
+      d += (i ? "L" : "M") + x.toFixed(2) + "," + lfbY(top, LFB_SERH, p[keys.hi], maxv).toFixed(2);
+    }
+    if (d){
+      for (i=run.length-1;i>=0;i--){
+        p = run[i];
+        var lo = p[keys.lo] == null ? p[keys.med] : p[keys.lo];
+        x = sc.x(p.tMs + half);
+        d += "L" + x.toFixed(2) + "," + lfbY(top, LFB_SERH, lo, maxv).toFixed(2);
+      }
+      var band = svgEl("path", cls + "band");
+      band.setAttribute("d", d + "Z");
+      g.appendChild(band);
+    }
+    // Then the median. A ONE-BUCKET RUN IS STILL DRAWN — as a two-pixel stub,
+    // because a lone reading between two outages is a reading and a polyline of
+    // one point renders as nothing at all.
+    d = "";
+    for (i=0;i<run.length;i++){
+      p = run[i];
+      x = sc.x(p.tMs + half);
+      d += (i ? "L" : "M") + x.toFixed(2) + "," + lfbY(top, LFB_SERH, p[keys.med], maxv).toFixed(2);
+    }
+    if (run.length === 1){
+      p = run[0];
+      d += "L" + (sc.x(p.tMs + half) + 2).toFixed(2) + "," +
+           lfbY(top, LFB_SERH, p[keys.med], maxv).toFixed(2);
+    }
+    var line = svgEl("path", cls);
+    line.setAttribute("d", d);
+    g.appendChild(line);
+  }
+}
+/* The tooltip for one slice: what it is, what it rests on, and the numbers the
+   drawing itself cannot carry. It names the sampling rule and the blindness of
+   the missingness in words, because a reader who has just been shown a coverage
+   of 43% deserves to be told in the same breath why the 43% is still a fair
+   sample of the 100%. */
+function lfbTip(p, B){
+  var when = trClock(p.tMs), mins = Math.round((B.bucketMs||0)/60000);
+  var body = when + "Z, the " + (mins >= 60
+    ? (mins/60 >= 2 ? Math.round(mins/60) + " hours" : "hour")
+    : mins + " minutes") + " starting there.\n";
+  if (p.medSyn == null && p.medHid == null){
+    body += p.seen
+      ? "The record holds " + p.seen + " genome" + (p.seen === 1 ? "" : "s") +
+        " crossing in it and this archive has never managed to read one of them, " +
+        "so there is no line here. That is a gap and not a zero."
+      : "No crossing at all was recorded in it — the map was down, or nothing " +
+        "travelled. That is a gap and not a zero.";
+    return {title: "brains over time", body: body};
+  }
+  body += "Median synapses " + p.medSyn + (p.loSyn != null
+    ? " (middle half " + p.loSyn + "–" + p.hiSyn + ", range " + p.minSyn + "–" + p.maxSyn + ")" : "") + ".\n";
+  body += "Median hidden neurons " + p.medHid + (p.loHid != null
+    ? " (middle half " + p.loHid + "–" + p.hiHid + ", range " + p.minHid + "–" + p.maxHid + ")" : "") +
+    " — above the fixed " + (B.neuronFloor || 48) + " every brain is born with.\n";
+  body += "Measured over " + p.n + " distinct genome" + (p.n === 1 ? "" : "s") +
+    ", each counted once however often that creature travelled";
+  if (p.seen > 0){
+    var pct = Math.min(100, Math.round(100 * p.n / p.seen));
+    body += ", out of " + p.seen + " the record says crossed — " + pct + "% of them";
+  }
+  body += ". Which genomes this archive holds is decided by a queue ordered on the " +
+    "genome's own fingerprint, so what is missing is missing for reasons that have " +
+    "nothing to do with the creature: the most travelled species here is " +
+    "over-represented among the held copies by about one part in a hundred.";
+  if (p.binned) body += " One reading in this slice was outside the range this panel keeps in detail.";
+  return {title: "brains over time", body: body};
+}
+/* The panel itself. It is handed the SAME cols and the SAME scale the tree above
+   it was drawn with, which is what makes "shares the axis" a fact rather than an
+   intention. */
+function lfBrainPanel(x, cols, sc){
+  var host = document.getElementById("lfbrain");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  // "lfbp", NOT "lfb": the brain RING's tooltips are keyed "lfb"+row and are
+  // written by the paint that has just finished. A prefix that swallowed them
+  // would empty every ring's numbers the instant this panel drew.
+  for (var old in SP){ if (old.indexOf("lfbp") === 0) delete SP[old]; }
+  var B = LFB;
+  var height = lfBrainH();
+  var svg = svgEl("svg", "brainp");
+  svg.setAttribute("width", String(cols.w));
+  svg.setAttribute("height", String(height));
+
+  // THE SAME TICKS, from the same step over the same span, so a vertical line
+  // through both pictures means one moment.
+  var span = sc.t1 - sc.t0, step = lfStep(span);
+  var first = Math.ceil(sc.t0 / step) * step, tms, px;
+  for (tms = first; tms <= sc.t1; tms += step){
+    px = sc.x(tms);
+    var gl = svgEl("line", "grid");
+    gl.setAttribute("x1", String(px)); gl.setAttribute("x2", String(px));
+    gl.setAttribute("y1", "0"); gl.setAttribute("y2", String(height - LFB_PADB + 4));
+    svg.appendChild(gl);
+  }
+  var nw = svgEl("line", "nowline");
+  nw.setAttribute("x1", String(cols.plot + cols.plotw));
+  nw.setAttribute("x2", String(cols.plot + cols.plotw));
+  nw.setAttribute("y1", "0"); nw.setAttribute("y2", String(height - LFB_PADB + 4));
+  svg.appendChild(nw);
+
+  if (!B || !B.points || !B.points.length){
+    var w8 = svgEl("text", "none");
+    w8.setAttribute("x", String(LF_NAMEX));
+    w8.setAttribute("y", String(LFB_PADT + 14));
+    w8.textContent = "brains over time: waiting for the measurement";
+    svg.appendChild(w8);
+    host.appendChild(svg);
+    return;
+  }
+
+  var synTop = LFB_PADT, hidTop = LFB_PADT + LFB_SERH + LFB_GAP;
+  var covTop = hidTop + LFB_SERH + LFB_GAP;
+  var maxSyn = B.maxSyn > 0 ? B.maxSyn : 1, maxHid = B.maxHid > 0 ? B.maxHid : 1;
+
+  function baseline(top){
+    var b = svgEl("line", "base");
+    b.setAttribute("x1", String(cols.plot)); b.setAttribute("x2", String(cols.plot + cols.plotw));
+    b.setAttribute("y1", String(top + LFB_SERH)); b.setAttribute("y2", String(top + LFB_SERH));
+    svg.appendChild(b);
+  }
+  function label(top, cls, term, text, ymax){
+    var lb = svgEl("text", "plbl " + cls);
+    lb.setAttribute("x", String(LF_NAMEX));
+    lb.setAttribute("y", String(top + 9));
+    lb.setAttribute("data-t", term);
+    lb.textContent = text;
+    svg.appendChild(lb);
+    var mx = svgEl("text", "ymax");
+    mx.setAttribute("x", String(cols.plot - 6));
+    mx.setAttribute("y", String(top + 8));
+    mx.setAttribute("text-anchor", "end");
+    mx.textContent = String(ymax);
+    svg.appendChild(mx);
+    var zr = svgEl("text", "ymax");
+    zr.setAttribute("x", String(cols.plot - 6));
+    zr.setAttribute("y", String(top + LFB_SERH));
+    zr.setAttribute("text-anchor", "end");
+    zr.textContent = "0";
+    svg.appendChild(zr);
+  }
+  baseline(synTop); baseline(hidTop);
+  lfbSeries(svg, B, sc, synTop, {med:"medSyn", lo:"loSyn", hi:"hiSyn"}, "syn", maxSyn);
+  lfbSeries(svg, B, sc, hidTop, {med:"medHid", lo:"loHid", hi:"hiHid"}, "hid", maxHid);
+  label(synTop, "syn", "braintrend", "median synapses per genome", maxSyn);
+  // THE FLOOR IS ON THE PANEL, not only in the glossary. A reader who sees
+  // "neurons" and a line near the bottom has to be told, in the picture, that 48
+  // of every count here is fixed and is not drawn — otherwise the second series
+  // reads as a species with almost no brain.
+  label(hidTop, "hid", "hiddenneurons",
+    "median hidden neurons (every brain also has the same fixed " +
+    (B.neuronFloor || 48) + ")", maxHid);
+
+  // ---- THE COVERAGE STRIP.
+  var cb = svgEl("line", "covbase");
+  cb.setAttribute("x1", String(cols.plot)); cb.setAttribute("x2", String(cols.plot + cols.plotw));
+  cb.setAttribute("y1", String(covTop + LFB_COVH)); cb.setAttribute("y2", String(covTop + LFB_COVH));
+  svg.appendChild(cb);
+  var clbl = svgEl("text", "plbl");
+  clbl.setAttribute("x", String(LF_NAMEX));
+  clbl.setAttribute("y", String(covTop + LFB_COVH));
+  clbl.setAttribute("data-t", "braincoverage");
+  clbl.textContent = "how much of it was measured";
+  svg.appendChild(clbl);
+
+  var pts = B.points, i, p, x0, x1, w;
+  for (i=0;i<pts.length;i++){
+    p = pts[i];
+    x0 = sc.x(p.tMs); x1 = sc.x(p.tMs + B.bucketMs);
+    w = Math.max(1, x1 - x0 - 0.5);
+    if (p.n > 0 && p.seen > 0){
+      var f = Math.min(1, p.n / p.seen);
+      var h = Math.max(1, f * LFB_COVH);
+      var bar = svgEl("rect", "cov");
+      bar.setAttribute("x", x0.toFixed(2)); bar.setAttribute("y", (covTop + LFB_COVH - h).toFixed(2));
+      bar.setAttribute("width", w.toFixed(2)); bar.setAttribute("height", h.toFixed(2));
+      svg.appendChild(bar);
+    } else if (p.seen > 0){
+      // CROSSINGS, AND NOT ONE OF THEM READ. A different absence from "nothing
+      // crossed", and it gets a different mark rather than the same emptiness.
+      var tick = svgEl("rect", "covnone");
+      tick.setAttribute("x", x0.toFixed(2));
+      tick.setAttribute("y", String(covTop + LFB_COVH - 2));
+      tick.setAttribute("width", w.toFixed(2)); tick.setAttribute("height", "2");
+      svg.appendChild(tick);
+    }
+    // One hit target per slice, over the whole panel, so a reader gets the
+    // numbers from anywhere in the column rather than having to find the line.
+    var hit = svgEl("rect", "hit");
+    hit.setAttribute("x", x0.toFixed(2)); hit.setAttribute("y", "0");
+    hit.setAttribute("width", Math.max(1, x1 - x0).toFixed(2));
+    hit.setAttribute("height", String(height));
+    hit.setAttribute("data-s", "lfbp" + i);
+    SP["lfbp" + i] = lfbTip(p, B);
+    svg.appendChild(hit);
+  }
+
+  // ---- WHERE THE MEASUREMENT BEGINS, drawn the way the genealogy draws its own
+  // floor. It is usually off the left edge and costs nothing; when a sidecar has
+  // been lost it is recent, and then it is the most important mark on the panel.
+  if (B.haveFromMs && B.haveFromMs > sc.t0 && B.haveFromMs < sc.t1){
+    var hx = sc.x(B.haveFromMs);
+    var hl = svgEl("line", "havemark");
+    hl.setAttribute("x1", String(hx)); hl.setAttribute("x2", String(hx));
+    hl.setAttribute("y1", "0"); hl.setAttribute("y2", String(height - LFB_PADB + 4));
+    svg.appendChild(hl);
+    var ht = svgEl("text", "havelbl");
+    ht.setAttribute("x", String(hx + 4));
+    ht.setAttribute("y", String(height - LFB_PADB + 14));
+    ht.setAttribute("data-t", "braingap");
+    ht.textContent = B.lost
+      ? "brains measured from here (the earlier record was lost)"
+      : "brains measured from here";
+    svg.appendChild(ht);
+  }
+  host.appendChild(svg);
+}
+
 /* THE KEYBOARD KEEPS ITS PLACE ACROSS A PAINT — every paint, not only the one
    that opening a row causes. The paint that just finished replaced the element
    the focus was on with an equivalent one, so the focus goes back on the row with
@@ -3315,6 +3793,7 @@ function renderLife(x){
 
   if (!x || !x.haveStatus){
     host.appendChild(el("div", "muted", "waiting for the map"));
+    lfBrainClear();
     lfRefocus(host, mine);
     return;
   }
@@ -3322,6 +3801,7 @@ function renderLife(x){
     host.appendChild(el("div", "muted", lfQuery
       ? "no species matches that search"
       : "no world is reporting a species right now, so there is nothing to relate"));
+    lfBrainClear();
     lfRefocus(host, mine);
     return;
   }
@@ -3396,7 +3876,23 @@ function renderLife(x){
   host.appendChild(svg);
   LFSVG = svg;
   LFJOINED = pick.joined;
+  // THE PANEL IS PAINTED FROM THE SAME cols AND THE SAME sc, in the same pass, so
+  // it cannot be drawn against a clock the tree above it is no longer using. They
+  // are also what the panel's own fetch asks for its window, which is why they are
+  // recorded here rather than recomputed there.
+  LFCOLS = cols; LFSCALE = sc;
+  lfBrainPanel(x, cols, sc);
   lfRefocus(host, mine);
+}
+
+/* The panel when there is no drawing to sit under. It is emptied rather than
+   left holding the last picture: a clock with no tree above it is a clock a
+   reader has no way to read. */
+function lfBrainClear(){
+  var host = document.getElementById("lfbrain");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  for (var old in SP){ if (old.indexOf("lfbp") === 0) delete SP[old]; }
 }
 
 /* ----------------------------------------------------------- the SETTINGS tab
@@ -4056,7 +4552,7 @@ function showTab(name, push){
   // never blank while its fetch is in flight, then refreshed. Its geometry needs
   // no laid-out box — every coordinate is computed, not measured — so unlike the
   // map it does not have to be rebuilt on becoming visible.
-  if (name === "species"){ if (LFX) renderLife(LFX); tickLife(); tickTrends(); }
+  if (name === "species"){ if (LFX) renderLife(LFX); tickLife(); tickTrends(); tickBrains(); }
   if (name === "map") tickHistory();
   if (push && location.hash !== "#"+name) location.hash = "#"+name;
 }
@@ -4165,6 +4661,16 @@ var lfResizeT = 0;
     var b = ev.target.closest ? ev.target.closest(".seedbtn") : null;
     if (b) toggleSeed();
   });
+  // TWO BOXES, ONE CLOCK. The drawing and the panel under it are separate boxes
+  // only because the drawing scrolls vertically and the panel must not scroll away
+  // with it. On a window too narrow for the drawing they can both scroll
+  // sideways, and two clocks at two offsets would not be one clock — so the
+  // panel's horizontal offset follows the drawing's. It is one-way: the drawing is
+  // where a reader is working.
+  var bp = document.getElementById("lfbrain");
+  if (box && bp) box.addEventListener("scroll", function(){
+    if (bp.scrollLeft !== box.scrollLeft) bp.scrollLeft = box.scrollLeft;
+  }, {passive:true});
   // THE DRAWING IS AS WIDE AS ITS BOX, so a resize changes the geometry without
   // changing a single fact. It repaints from the answer already held — no poll is
   // pulled forward and none is needed — and it is coalesced, because a drag
@@ -4352,6 +4858,24 @@ async function tickTrends(){
   }
   if (LFX && TAB === "species") renderLife(LFX);
 }
+/* The brain panel rides its own slow timer too, and for a third reason on top of
+   the trend column's two: its window is the DRAWING'S OWN two edges, so it can
+   only be asked for once the drawing has been laid out at least once. A failure
+   leaves the panel holding whatever it last drew and every other thing on this
+   tab exactly as it was. */
+async function tickBrains(){
+  if (TAB !== "species") return;
+  var sc = LFSCALE, cols = LFCOLS;
+  if (!sc || !cols) return;
+  try {
+    var r = await fetch("api/species/brains?from=" + Math.round(sc.t0) +
+      "&to=" + Math.round(sc.t1) + "&buckets=" + lfBrainBuckets(cols), {cache:"no-store"});
+    LFB = await r.json();
+  } catch(e){
+    return;
+  }
+  if (LFX && TAB === "species") renderLife(LFX);
+}
 /* The hop feed is polled SEPARATELY from the status view, which is the shape of
    B14's decision and not an accident: /api/status is what the archive
    serializes verbatim into its durable metrics file once a minute, and a
@@ -4477,6 +5001,10 @@ tickHistory(); setInterval(tickHistory, 60000);
 // The trend column, on the same slow cadence and for the same reason: one
 // bounded read of the sample file, feeding every row at once.
 tickTrends(); setInterval(tickTrends, 60000);
+// And the brain panel, on the same cadence and for the same reason. Its first
+// ask has to wait for a laid-out drawing to take its window from, which the tab
+// opening provides; until then it draws its clock and says it is waiting.
+tickBrains(); setInterval(tickBrains, 60000);
 </script>
 </body>
 </html>
