@@ -166,6 +166,23 @@ burst, and each one also costs the far end a bundle rebuild.
   down. **The standing residual — the ring depended on archive process uptime — is CLOSED by the
   brain-history work below**, which persists each species' last measured brain instead of caching
   it per process.
+- **The brain-complexity panel (owner-requested 2026-08-13, DONE and verified 2026-08-14).** A
+  panel under the genealogy on the genealogy's own clock: median synapses and median hidden
+  neurons per genome with an interquartile band and a coverage strip (86aa7a4, panel defects
+  fixed 10919b8, verified 9184eae/98592cb). The measurement folds at **genome arrival** — where
+  the bytes are already in hand and the crossing that wanted them is known — never by sweeping
+  the store, which would have refreshed every blob's mtime and postponed the retention horizon
+  for the whole archive. It is **persisted** (`<data-dir>/brains.jsonl`, ~6.9 MB/day,
+  append-and-compact, header unrewritten across three restarts) and replayed, not recomputed.
+  **The owner's second insight — persist per-species too — closed a standing defect**: an
+  extinct ancestor now keeps the last brain the archive ever read of it, so rings survive both
+  the blob's pruning and a restart (2 of 14 rows ringed after a restart → 13 of 17 in ten
+  minutes). Wording follows: "ever read", with the measurement's age. **What the data says:
+  median synapses 8 → 42 over the week (×5.1), synapses per neuron 0.16 → 0.74, median hidden
+  neurons 1 → 8.6 (×8.6) — Spearman 0.971 against time.** Raw neuron count understates ×7
+  because 48 neurons are a fixed floor. Coverage is 81% and the missingness is species- and
+  content-blind, which is what makes the sample defensible; the 45 hours the rig was down draw
+  as gaps.
 - **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
   stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
   bars — **replacing both the species tab and the tree tab with one merged view**. Included:
