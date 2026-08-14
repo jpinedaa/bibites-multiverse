@@ -3723,7 +3723,9 @@ the CROSSING's time, so a 161 k genome-fetch backlog backfills buckets days olde
 mark and **"brains measured from here"**, nothing is drawn back to the beginning, and **not one
 drawn point sits on either baseline**: the pre-history region is absent, never zero.
 
-**THREE DEFECTS, ALL IN THE PANEL, NONE IN THE PERSISTENCE.** First, **the minimum-size floors are
+**THREE DEFECTS, ALL IN THE PANEL, NONE IN THE PERSISTENCE — and all three are CLOSED by
+`10919b8`, verified live in *The brain-panel-fix window, 2026-08-14* below.** First, **the
+minimum-size floors are
 applied after the x-clamp, so marks spill right of `now`** — a lone reading in the newest bucket
 draws its stub from the clamped 1151 to **1153, exactly 2.000 px past the `now` line** (seen live,
 then reproduced through the page's own `lfBrainPanel`), and the newest coverage column's 1 px
@@ -3778,6 +3780,119 @@ were the same bytes for the seventh window running. The stamp-stripped compariso
 outgoing binary was stamped `7fbaaa6` exactly** — the comparison base, with no intervening commits
 to reason about for once. The four unchanged binaries in `bin/` still carry the older `91081ce`
 stamp and are source-equivalent by the same comparison. It retires on the usual rule.
+
+### The brain-panel-fix window, 2026-08-14 — the panel stops overrunning its axis, asking late, and lying about small numbers
+
+**The ninth archive-only pause under the owner's standing grant, and the sixth whose point was to
+VERIFY rather than to land.** It carried `10919b8`, which is `page.go` and nothing else: the three
+defects the 2026-08-13 sweep found in the brain panel, fixed. The relay was not restarted,
+`relaySessionId` is still `13add949-c3ac-43d6-9431-f0f2b8a66253`, and the five games, the mod and
+slot 6 were untouched. **All three close. No new defect was found in any of the seven checks.**
+The three listed as open in *The brain-trend window* above are closed by this one.
+
+| | |
+|---|---|
+| Crossings paused | **237.3 s** driver bracket, 02:12:48.452Z → 02:16:45.760Z |
+| The archive | down **02:12:50.392Z → 02:16:30.207Z (219.815 s)**, entirely inside the pause |
+| Replay | **11,113,376 records / 3.463 GiB in 219.721 s** |
+| Replay speed | **50.6 k records/s** — the ninth point, **5.1 % below the warm eighth on a ledger 1.91 % larger**, at loadavg 6.93. The ledger was measured **100.00 % page-cache resident** before the pause (`mincore`, 907,581 of 907,581 pages), so this is a WARM point and belongs beside pass 2's 53.3 k, not pass 1's cold 44.5 k |
+| Replay memory | **VmHWM 2,059,388 kB (1.964 GiB)** against the outgoing 2,763,584 kB. Against last window that is **61.2 B/record** for the 208,357 added — the third consecutive point on the slope and the LOWEST of the three (97.7 → 61.2), so the slope is real but not linear |
+| The ledger gap | **ZERO**, byte-frozen at 3,719,034,158, margins **0.635 s / 4.739 s** |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, **zero discarded bytes** on all five, confirmed twice — by the absence of the log line and by `--diagnose journal-replay` PASS on 1..5. TERM→exit 316/238/158/179/171 ms; start→grant 2330/2342/2686/2675/2694 ms |
+
+**A MINIMUM SIZE IS NO LONGER A LICENCE TO LEAVE THE AXIS.** At **twelve widths** — 1600, 1440,
+1420, 1320, 1280, 1220, 1120, 1020, 960, 900, 700 and 500 px — every rectangle, every path and
+every line in the panel ends at or inside the now line: **maximum overhang 0.000 px, every class,
+every width**. Both conditions were reproduced through the page's own `lfBrainPanel` and scored
+against what the old arithmetic would have drawn for the same data. A lone reading in the newest
+bucket now draws `[1149.00, 1151.00]` — **0.000 px past**, keeping its full two pixels by SLIDING
+LEFT — where the old code drew `1153.000`, **exactly the +2.000 px the last window measured**. The
+newest coverage column over a sliver bucket draws `[1150.00, 1151.00]` — **0.000 px past** — where
+the old floor pushed it to `1151.939`, **the +0.94 px the last window measured**. `lfbFloor` has
+exactly three call sites (the 2 px stub, the 1 px column, the 1 px hit target) and there is no raw
+minimum on an x-coordinate left anywhere in the panel.
+
+**THE PAINT ASKS, AND A COLD LOAD IS THREE HUNDRED AND NINETY MILLISECONDS.** Two full cold loads,
+each on its own cache-buster: the panel held data at **387.2 ms and 393.0 ms**, against the
+**59,980 ms and 59,970 ms** the last window measured. That is 153× and 155×. The panel's clock is
+drawn at 121 ms, the request goes out at 356 ms, the answer lands at 393 ms, and neither load ever
+drew "waiting for the measurement".
+
+**AND THE STRETCH NOBODY HAS ASKED ABOUT IS DRAWN AS ITSELF.** On the same 857 px plot the last
+window measured 480.6 px of false emptiness on, revealing the seed stock pulls the start back
+**91.94 hours** and, at **+27 ms**, draws **476.92 px — 55.65 % of the plot — as PENDING**: one dim
+grey wash (`rgb(139,149,163)` at 0.09 opacity, never the amber `rgb(226,185,59)`), one dashed edge,
+the caption *"measuring this stretch — not asked for yet, not empty"* carrying the glossary term
+`brainwaiting`, and one hit target whose tooltip says it is a fact about a request. **The plot
+wearing the strip's own "no crossing at all was recorded" mark: 0.00 px, 0.000 %** — it was
+**480.6 px, 56 %, for up to a minute.** The whole move settles in **236 ms**. Hiding the seed again
+is clean the other way: the held answer is then wider than the drawing, `lfbVisible` drops the
+slices that are off the clock, and there is no wash and no stack of clamped columns on the left
+edge.
+
+**NOW TICKING IS NOT A QUESTION.** With the window otherwise unchanged: **12 repaints in 15.53 s —
+zero requests**, and **15 repaints in 30.05 s — zero requests**, while `now` moved 18.7 s and 32.7 s
+across 9 and 16 distinct right-hand edges. Over 75 s there is **exactly one**, at +37.9 s, which is
+the standing sixty-second poll doing the job that poll exists for. A **seed reveal costs exactly
+one** request, at **+206 ms** — the debounce. A **resize across a bucket boundary** (214 → 174)
+**costs exactly one**. The network panel says the same thing independently: one
+`/api/species/brains` against seven `/api/status` and seven `/api/species/tree` on one load.
+
+**THE STRIP FINALLY WORKS WHERE THIS RIG LIVES.** At 900 px the panel draws 68 slices — 38 filled,
+17 amber ticks, 13 with no crossing recorded — and coverage runs **0.19 % to 35.70 %, median
+1.28 %, with 37 of 38 under a fifth**. The old `max(1, f × 11)` drew **37 of those 38 SHORTER than
+the 2 px "we read none" tick**; the new `3 + √f × 8` draws **0**, over a range of 3.35–7.78 px
+instead of 1.00–3.93, and it stays monotone. `Math.round` said **"0 % of them"** about **11 of the
+38**; `lfbShare` says it about **none of them** — `0/10` is "none", `1/1000` and `3/1000` are "less
+than 1%", `5/1000` is "1%", `999/1000` is "almost all", `1000/1000` is "100%". Across 147 slice
+tooltips at 1440 px with the seed shown, **zero say "0 %"**. The square-root scale is stated on the
+picture and in the glossary.
+
+**EVERYTHING ELSE IS WHERE THE LAST WINDOW LEFT IT.** The axis is shared to the float at all twelve
+widths — **`maxTickDelta` 0.000 px** every time, equal SVG widths, equal now line — and at 700 px,
+where both boxes overflow, the slaving tracked in 5 of 5 samples and is correctly ONE-WAY.
+**10 of 11 rows ringed** at +18 minutes, **two of them EXTINCT ancestors** — `Hellbeardus
+saintpierrevincentius` at 60 neurons and 49 synapses and `Grimmnikitai teriaultfelixus` at 61 and
+44 — and an absence is still an absence: `Zhiluus tardisitguyus` draws none, as before either
+restart. `Basic bibite` still carries its 48/3 reading, now 151.5 hours old. `brains.jsonl` is
+**byte-identical for its first 534,994 bytes** across this restart and its header — written at
+00:30:52.994Z — has now survived **three** archive restarts without a rewrite; a fixed window
+entirely before the restart still returns 34 of 48 buckets with a median. The standing PASS list
+holds: 8 links with **0 departures off-bar**, 0 of 11 bars past `now`, **axis leading gap 0.000 %**,
+9 badges, 54 mini-map dots (39 on, 15 off, 0 unknown), 8 sparklines with 8 baselines, **focus kept
+on `lf0` in 30 of 30 samples across 5 repaints**, no console error, and no page-level horizontal
+scroll at any width.
+
+**NO DEFECT, AND FOUR THINGS WORTH WRITING DOWN.** First, **the last window's compaction projection
+was wrong** and is corrected here: the live set is **534** five-minute buckets and ~215 species, not
+~1,967 buckets, so `3 × live` puts the threshold at **949,224 B** and the first compaction about
+**seventy minutes** out rather than twelve hours. `s.bytes` is initialised from `info.Size()` at
+open, so a restart does not reset it, and the threshold rises only ~6 KB/h against ~288 KB/h of
+growth — the file settles rather than growing forever, which was the point. Second, fifty-two
+**0.01 px seams** between adjacent slice hit rectangles, 0.52 px across a 537 px plot, from
+`toFixed(2)` on neighbouring edges; no pointer can land in a hundredth of a pixel. Third, **a new
+measurement trap: a substring test for `"0% of them"` matches `"20% of them"`**, and it manufactured
+one false defect before the regex was anchored — the same family as the space-separated path data.
+Fourth, **the pending caption draws only above 90 px** of wash; below that the wash, the dashed edge
+and the tooltip all still draw, which is deliberate and is recorded so nobody reports it later.
+
+**AND A TRAP THE MEASUREMENT ITSELF HAS TO RESPECT.** A replay-rate number is meaningless without
+the page cache behind it, and the cache has to be MEASURED rather than argued about: `mincore` over
+an `mmap` reads nothing and answers exactly. It said **100.00 % resident** before this pause, which
+is what makes 50.6 k comparable to 53.3 k and not to 44.5 k.
+
+**D14 is quiet.** Zero `save-health` WARNs across all five slots, for the second window running. The
+resume flushed the usual one-shot burst — 10,066 / 9,068 / 0 / 10,780 / 10,013 `contract A: send
+failed` WARNs, every one inside a single minute, zero thereafter.
+
+**The rollback set is `/mnt/wsl/data/scratch/bpw-2026-08-14/rollback-bin/`** — `archive.RUNNING`
+(`3db00a35…`, copied from `/proc/188415/exe`), `archive.bin` and `ringstat`. The two archive copies
+were the same bytes for the eighth window running. The stamp-stripped comparison
+`86aa7a4 → 10919b8` reported **`archive` and `ringstat` only**, and only `cmd/archive` and
+`cmd/ringstat` import `internal/archive`, so the changed `page.go` reaches nothing else. **The
+outgoing binary was stamped `86aa7a4` exactly** — the comparison base, with no intervening commits,
+for the second window running. The four unchanged binaries in `bin/` still carry the older
+`91081ce` stamp and are source-equivalent by the same comparison. It retires on the usual rule.
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
