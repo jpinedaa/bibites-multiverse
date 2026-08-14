@@ -3663,6 +3663,121 @@ diff confined to `go/internal/archive/page.go` and two test files. **The outgoin
 the running archive was source-equivalent to the base and the comparison answers the right question.
 The four unchanged binaries in `bin/` still carry the older `91081ce` VCS stamp and are
 source-equivalent for the same reason. It retires on the usual rule.
+
+### The brain-trend window, 2026-08-13/14 — the brain panel goes live, and the sidecar's round trip is proven by restarting twice
+
+**The eighth archive-only pause under the owner's standing grant, the fifth whose point was to
+VERIFY rather than to land, and the first to spend TWO restarts on one commit** — because a
+persisted sidecar is only proven by making it survive a restart, and `brains.jsonl` did not exist
+before this window began. It carried `86aa7a4`: a maintained brain-history aggregate at five-minute
+buckets folded at genome ARRIVAL and at the already-held path, a coverage denominator rebuilt from
+the ledger replay, a persisted `<data-dir>/brains.jsonl` loaded AFTER the replay, per-species brains
+that outlive the blob they were read from, a new `/api/species/brains` endpoint, and a panel below
+the tree on the tree's own clock. The relay was not restarted, `relaySessionId` is still
+`13add949-c3ac-43d6-9431-f0f2b8a66253`, and the five games, the mod and slot 6 were untouched.
+**Every item verifies. Three defects were found, all in the new panel, none in the persistence.**
+
+| | Pass 1 — the movers | Pass 2 — the round trip |
+|---|---|---|
+| Crossings paused | **256.9 s** driver bracket, 00:26:47.559Z → 00:31:04.467Z | **218.0 s**, 00:49:56.289Z → 00:53:34.330Z |
+| The archive | down **00:26:49.278Z → 00:30:53.858Z (244.58 s)**, entirely inside the pause | down **00:49:57.654Z → 00:53:22.822Z (205.17 s)**, entirely inside |
+| Replay | **10,855,398 records / 3.382 GiB in 243.683 s** | **10,905,019 records / 3.397 GiB in 204.578 s** |
+| Replay speed | **44.5 k records/s** — the eighth point, 5.8 % below the seventh, on a host at load 9–10 with a page cache the day's feasibility pass had deliberately dropped | **53.3 k records/s** — **+19.7 % on a ledger 0.46 % larger, 23 minutes later.** The two passes are the cleanest cold/warm pair the record holds: nothing differs but that pass 1 had just walked the ledger |
+| Replay memory | **VmHWM 2,024,492 kB (1.931 GiB)** against the outgoing 2,515,136 kB. Against last window that is **97.7 B/record** for the 235,022 added — the SECOND consecutive point near 100 B/record against the streamed profile's ~47, so the slope is real and not a sampling artifact | **2,046,944 kB (1.952 GiB)** |
+| The ledger gap | **ZERO**, byte-frozen at 3,630,863,926, margins 0.92 s / 3.20 s | **ZERO**, frozen at 3,647,860,587, margins 1.13 s / 2.63 s |
+| The five sidecars | every one `reason=reclaimed`, own coordinate, **zero discarded bytes** on all five. TERM→exit 170/104/116/148/168 ms; start→grant 1752/2104/1720/1712/1739 ms | same, **zero discarded** on all five. TERM→exit 124/88/68/109/111 ms; start→grant 1707/1357/—/1684/1368 ms |
+
+**THE ROUND TRIP IS THE POINT, AND IT HOLDS.** Pass 2 logged `archive: replayed the brain history
+sidecar buckets=76 speciesMeasured=110`. Measured against the snapshot taken 4.7 minutes earlier:
+**43 of 43 drawn buckets carried across, with the medians identical in all 43**, `haveFromMs`
+unchanged at 08-11 14:30Z, and `persisted` flipping `false` → `true`. **14 of 17 rings survived**;
+the three that did not are the three species that left the census entirely, and `Todae smithus`'s
+record is still in the file byte-for-byte, so the measurement outlived its row as well as the
+process. `Basic bibite`'s 150-hour-old reading survived unchanged. The file is append-only across a
+restart: the header written at first open was never rewritten, and the file simply froze for the
+whole of the outage.
+
+**THE RINGS ARE A DIFFERENT PICTURE NOW.** The last window's residual — the ring set being a
+function of the archive PROCESS'S uptime — is closed. Where that window saw **2 of 14** rows ringed
+twelve minutes after a restart, this one saw **13 of 17 at +9.5 minutes and 17 of 18 at +23**, and
+an EXTINCT ancestor carried one: `Todae smithus`, 58 neurons and 41 synapses, with the tooltip
+reading *"…the newest genome of this species this archive EVER READ — a genome that crossed 27m 17s
+ago, and nothing of this species is alive anywhere reporting, so no newer one can arrive."* The row
+itself reads `brain 58 neurons · 39 synapses (the newest genome of it ever read here, 1m 21s old)`.
+An absence is still an absence: `Zhiluus tardisitguyus` drew no ring before the restart, after it,
+or after the second.
+
+**THE AXIS IS SHARED TO THE FLOAT.** At **1280, 1600, 900, 700 and 500 px** the panel's tick
+positions are bit-identical to the tree's — **`maxTickDelta` 0.000 px** every time — with equal SVG
+widths, an equal `now` line and the plot on the tree's own `[614, right]`. At 700 px, where both
+boxes overflow, `lfbrain.scrollLeft` tracked `lfbox.scrollLeft` in every sample and the slaving is
+correctly ONE-WAY. The coverage strip was cross-checked mark by mark against the data twice — **97
+points = 11 + 86 + 26 and 124 points = 34 + 64 + 26, zero mismatches both times**, every filled
+height exactly `max(1, n/seen × 11)` and every amber tick exactly 2 px. All three of its tooltips
+say the right thing, and the ring tips survive the panel's paint because the panel clears `lfbp*`
+and not `lfb*`.
+
+**WHERE THE HISTORY BEGINS IS NOT WHERE THE RESTART WAS, AND THAT IS CORRECT.** The fold is keyed on
+the CROSSING's time, so a 161 k genome-fetch backlog backfills buckets days older than the process —
+`haveFromMs` sat about fifteen hours before restart 1. The panel captions it with the amber dashed
+mark and **"brains measured from here"**, nothing is drawn back to the beginning, and **not one
+drawn point sits on either baseline**: the pre-history region is absent, never zero.
+
+**THREE DEFECTS, ALL IN THE PANEL, NONE IN THE PERSISTENCE.** First, **the minimum-size floors are
+applied after the x-clamp, so marks spill right of `now`** — a lone reading in the newest bucket
+draws its stub from the clamped 1151 to **1153, exactly 2.000 px past the `now` line** (seen live,
+then reproduced through the page's own `lfBrainPanel`), and the newest coverage column's 1 px
+minimum ends up to ~1 px past it (measured 0.47 px). The tree's own bars are 0.000 px at every
+width. Second, **the panel has no re-fetch trigger, only a 60 s timer, and this makes it assert
+something false.** The load-time call always aborts because `LFSCALE` is not set yet, so a cold load
+shows "waiting for the measurement" for **59.98 s and 59.97 s** on two measured loads; worse,
+changing the drawn span does not re-ask — revealing the seed moves `t0` back 92 h and for up to a
+minute **480.6 px of the 857 px plot (56 %) draws nothing at all**, which is exactly the strip's "no
+crossing at all was recorded" mark, over a stretch that really holds **74 measured points and
+433,627 crossings**. Third, **neither the coverage mark nor its number is built for the sub-20 %
+regime this rig lives in**: `max(1, f × 11)` makes **21 of 23 filled bars SHORTER than the 2 px
+amber tick** — every slice under **18.2 %** draws a smaller mark for "we read some" than for "we
+read none" — and `Math.round` makes the tooltip say **"0 % of them"** on 3 of 23 slices that plainly
+have readings, which is the one claim the amber tick is reserved for. Coverage itself recovered as
+the sidecar filled, from 0.46 % to **37.2 %** on the best slice, so the glossary's 42 %/97 % model
+is not contradicted; the near-zero readings were the cold-start artifact.
+
+**THE SIDECAR'S REAL COST.** One hour after it was created: **281,898 bytes (275.3 KiB) in 1,567
+lines — 1,006 species lines, 560 bucket lines, 170 distinct species**, growing at **4,676 B/min =
+274 KB/h = 6.4 MB/day** with a mean line of 180 B. It is the SPECIES lines that dominate, not the
+buckets: a record is re-appended every time a measurement moves, and this rig moves 170 of them
+constantly. No compaction fired — the trigger is 256 KiB AND three times `(512 B/bucket + 200
+B/species)`, which with ~1,967 buckets is **~2.96 MB**, about twelve hours out. The threshold grows
+~432 KB/day against ~6 MB/day of growth, so compaction recurs and the file settles near ~3 MB rather
+than growing forever.
+
+**FOUR MEASUREMENT TRAPS, EACH OF WHICH MANUFACTURES A FALSE DEFECT.** First, **`ps -o lstart` is
+wrong on this host and its error GROWS** — it reported the archive 76 s late and the five sidecars
+63 s late, and re-reading the same PID minutes later moved the answer by six seconds; taken at face
+value it says all five sidecars bounced fifty seconds after the resume. `stat -c %y /proc/<pid>` is
+accurate and agrees with the driver and with each sidecar's own single `listening` line. Second,
+**the page's SVG path data is SPACE-separated (`M1142.2 92`)** — a comma regex reports 52 of 52 link
+departures off-bar where the true count is zero. Third, **navigating to the same URL with only a
+different fragment is not a navigation**, so `ignoreCache` served the previous document; the archive
+sends `Cache-Control: no-store` on `/` and a query-string cache-buster forces it open — the front
+end must be PROVED, not assumed, before anything is measured. Fourth, **the wall clock stepped
+backwards 0.842 s once during pass 2's resume**, producing an impossible `-882 ms` start→grant for
+slot 3 and one out-of-order driver line; the sidecar's own log is ground truth and shows one clean
+restart, `reason=reclaimed`, own coordinate. And the resume flushes a **one-shot burst of ~9,000
+`contract A: send failed … connection closed` WARNs per slot**, confined to a single minute with
+zero thereafter — the same family as the custody replay burst, and the reason slot 4's `--diagnose`
+reports `mod-connected` FAIL for a few seconds before passing.
+
+**D14 is quiet.** Zero `save-health` WARNs across all five slots, against three last window.
+
+**The rollback set is `/mnt/wsl/data/scratch/btw-2026-08-13/rollback-bin/`** — `archive.RUNNING`
+(`21d15709…`, copied from `/proc/135265/exe`), `archive.bin` and `ringstat`. The two archive copies
+were the same bytes for the seventh window running. The stamp-stripped comparison
+`7fbaaa6 → 86aa7a4` reported **`archive` and `ringstat` only**, and only `cmd/archive` and
+`cmd/ringstat` import `internal/archive`, so the changed `tree.go` reaches nothing else. **The
+outgoing binary was stamped `7fbaaa6` exactly** — the comparison base, with no intervening commits
+to reason about for once. The four unchanged binaries in `bin/` still carry the older `91081ce`
+stamp and are source-equivalent by the same comparison. It retires on the usual rule.
 ### Bringing it back after a reboot
 
 Proven end to end twice, on 2026-08-08 and 2026-08-09, and once more as the second half of the
