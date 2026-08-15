@@ -44,6 +44,40 @@ func TestPublicFrontDoorAndLiveConsoleHaveSeparateJobs(t *testing.T) {
 	}
 }
 
+func TestPublicLiveSurfacesShareOneVisualLanguage(t *testing.T) {
+	pages := map[string]string{
+		"landing": landingPageHTML,
+		"map":     statusPageHTML,
+		"watch":   watchPageHTML,
+	}
+	for name, page := range pages {
+		for _, want := range []string{
+			`--bg:#0b1110`, `--line:#294038`, `--text:#eff7f3`,
+			`#66e0ac`, `#75bdf2`, `#e86c76`,
+			`class="brand" href="/" aria-label="Bibites Multiverse home"`,
+			`<span>Bibites Multiverse</span>`,
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s page is missing shared visual element %q", name, want)
+			}
+		}
+	}
+
+	for _, want := range []string{
+		`class="console-summary"`, `aria-label="Current map status"`,
+		`href="/watch">Watch live</a>`, `aria-current="page"`,
+	} {
+		if !strings.Contains(statusPageHTML, want) {
+			t.Errorf("live map is missing integrated navigation or status element %q", want)
+		}
+	}
+	for _, old := range []string{`--bg:#101215`, `--panel:#191d22`, `--line:#2a3038`} {
+		if strings.Contains(statusPageHTML, old) {
+			t.Errorf("live map still contains its retired standalone palette %q", old)
+		}
+	}
+}
+
 func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 	a := rigShapedArchive(t)
 	ts := httptest.NewServer(a.httpHandler())
