@@ -30,12 +30,13 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 | Network protocol | `contract-b/4.0` |
 | Windows package | GUI complete archive with the authorized portable game; an existing game is optional |
 | Linux package | Add-on archive for the native itch.io game |
-| Public-map setup | Automatic unique enrollment over HTTPS; no shared packaged credential |
+| Public-map setup | Both Windows archives include `public-map.json`; installation creates a unique credential over HTTPS |
 | Live console | Full-screen map fitting, visible-range brain charts, shared navigation, and a live homepage status light are deployed. |
 
 The release page provides checksums. The participant installer compares the game build with
 the support matrix before it changes the game directory. The Windows GUI starts the connected
 world after installation by default and keeps headless mode in the generated start script.
+The packaged public join configuration contains service addresses, not a shared world secret.
 
 ## Milestone state
 
