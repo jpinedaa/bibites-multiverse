@@ -62,7 +62,8 @@ Store that password in a protected host file or secret manager.
 Do not put it in Git, process arguments, or a public runbook.
 
 The HLS and metrics listeners use loopback.
-nginx applies public rate and connection limits.
+The HLS route uses a per-address connection limit.
+It has no request-rate limit because low-latency HLS sends many small part requests.
 
 MediaMTX keeps stream segments in memory.
 It does not create a recording.

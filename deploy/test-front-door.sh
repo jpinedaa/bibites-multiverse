@@ -37,6 +37,11 @@ grep -Fq 'limit_req  zone=mvenroll burst=3 nodelay;' "$front"
 grep -Fq 'location ^~ /stream/' "$front"
 grep -Fq 'proxy_pass http://127.0.0.1:8888/;' "$front"
 grep -Fq 'proxy_redirect ~^/(.*)$ /stream/$1;' "$front"
+grep -Fq 'limit_conn mvconn 24;' "$front"
+if grep -Fq 'zone=mvstream' "$front"; then
+  echo 'the HLS route contains an incompatible request-rate limit' >&2
+  exit 1
+fi
 grep -Fq 'location / {' "$front"
 grep -Fq 'proxy_pass http://127.0.0.1:8796;' "$front"
 grep -Fq 'limit_except GET HEAD' "$front"
