@@ -48,6 +48,39 @@ function Start-NativeProcess {
     return $process
 }
 
+function Remove-StaleSidecarListener {
+    param([string]$ExecutablePath, [int]$Port)
+
+    $listeners = @()
+    try {
+        $listeners = Get-NetTCPConnection -LocalAddress '127.0.0.1' `
+            -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    } catch {
+        return
+    }
+
+    $target = [System.IO.Path]::GetFileNameWithoutExtension($ExecutablePath)
+    foreach ($connection in @($listeners | Select-Object -ExpandProperty OwningProcess -Unique)) {
+        $process = Get-Process -Id $connection -ErrorAction SilentlyContinue
+        if (-not $process) { continue }
+
+        $path = ''
+        try { $path = $process.Path } catch {}
+        if ($path -and ($path -ieq $ExecutablePath)) {
+            Write-Host "Stopping stale sidecar process on port $Port (PID $connection)"
+            Stop-Process -Id $connection -Force -ErrorAction SilentlyContinue
+            $process.WaitForExit(5000) | Out-Null
+            continue
+        }
+
+        if ($process.Name -ieq $target) {
+            Write-Host "Stopping stale sidecar process on port $Port (PID $connection)"
+            Stop-Process -Id $connection -Force -ErrorAction SilentlyContinue
+            $process.WaitForExit(5000) | Out-Null
+        }
+    }
+}
+
 if ($ArgumentQuotingSelfTest) {
     $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('bibites-argv-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
@@ -171,6 +204,8 @@ $env:MULTIVERSE_CMD_FILE = Join-Path $state 'command.txt'
 # THE ORDER MATTERS. The sidecar mints the Contract A token the mod presents,
 # and the map grants this world its place before the world exists to draw.
 Remove-Item -LiteralPath $sidecarLog, "$sidecarLog.out" -Force -ErrorAction SilentlyContinue
+Remove-StaleSidecarListener -ExecutablePath $config.SidecarExe -Port ([int]$config.SidecarPort)
+
 $sidecarArguments = @(
     '--listen', "127.0.0.1:$($config.SidecarPort)",
     '--relay', $config.RelayUrl,
