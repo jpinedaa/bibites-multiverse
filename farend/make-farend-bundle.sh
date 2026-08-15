@@ -46,6 +46,10 @@ DIST="$FAREND/dist"
 CACHE="$DIST/cache"
 STAGE="$DIST/farend-bundle"
 ZIP="$DIST/farend-bundle.zip"
+# Go can omit VCS metadata when a linked worktree and its Git metadata are on
+# different filesystems. A release needs that provenance stamp. Set this to a
+# clean checkout of the same commit when the current worktree has that shape.
+SIDECAR_BUILD_REPO="${FAREND_SIDECAR_BUILD_REPO:-$REPO}"
 
 BEPINEX_VERSION=5.4.23.3
 BEPINEX_ZIP="BepInEx_win_x64_${BEPINEX_VERSION}.zip"
@@ -75,8 +79,26 @@ fi
 note "setup-farend.ps1 pins the same hash"
 
 step "the Windows sidecar"
+SOURCE_REV="$(git -C "$REPO" rev-parse HEAD)"
+[ -d "$SIDECAR_BUILD_REPO/go" ] \
+  || { echo "missing $SIDECAR_BUILD_REPO/go" >&2; exit 1; }
+BUILD_REV="$(git -C "$SIDECAR_BUILD_REPO" rev-parse HEAD)"
+[ "$BUILD_REV" = "$SOURCE_REV" ] \
+  || { echo "sidecar build checkout is $BUILD_REV, want $SOURCE_REV" >&2; exit 1; }
+[ -z "$(git -C "$SIDECAR_BUILD_REPO" status --porcelain)" ] \
+  || { echo "sidecar build checkout is dirty: $SIDECAR_BUILD_REPO" >&2; exit 1; }
 mkdir -p "$REPO/bin"
-( cd "$REPO/go" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o "$REPO/bin/multiverse-sidecar.exe" ./cmd/sidecar )
+( cd "$SIDECAR_BUILD_REPO/go" && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$REPO/bin/multiverse-sidecar.exe" ./cmd/sidecar )
+STAMP_REV="$(go version -m "$REPO/bin/multiverse-sidecar.exe" \
+  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+STAMP_DIRTY="$(go version -m "$REPO/bin/multiverse-sidecar.exe" \
+  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.modified=//p')"
+[ "$STAMP_REV" = "$SOURCE_REV" ] \
+  || { echo "sidecar VCS stamp is '${STAMP_REV:-missing}', want $SOURCE_REV" >&2; exit 1; }
+[ "$STAMP_DIRTY" = false ] \
+  || { echo "sidecar VCS stamp says modified=${STAMP_DIRTY:-missing}" >&2; exit 1; }
+note "VCS stamp: $STAMP_REV, modified=false"
 note "$(ls -l "$REPO/bin/multiverse-sidecar.exe" | awk '{print $5" bytes  "$NF}')"
 
 step "the plugin (fresh build)"
