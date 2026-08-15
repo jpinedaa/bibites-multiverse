@@ -110,7 +110,8 @@ Do not use the first participant session as the reboot test.
 
 ## Participant gate
 
-Before you issue a participant join string, publish these service facts:
+Before you enable automatic enrollment or issue a private-map join string, publish these service
+facts:
 
 - The announced period.
 - The retention rule and genome horizon.
@@ -120,8 +121,8 @@ Before you issue a participant join string, publish these service facts:
 
 Follow `ANNOUNCEMENT.md`, `RESTART-POLICY.md`, and `WIND-DOWN.md`.
 
-Create credentials in one planned batch.
-Back up the verifier store after issuance.
+Set finite automatic-enrollment limits. Test the HTTPS route without creating a credential.
+Back up the verifier store after automatic or manual enrollment begins.
 
 ## Private handoff record
 

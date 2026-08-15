@@ -2,16 +2,16 @@
 #
 # test-install-uninstall.sh
 #
-# Prove that the LINUX installer puts back exactly what it took, against a
-# sandbox game directory. The Windows half of this proof is
+# Prove that the LINUX installer puts back exactly what it took, against sandbox
+# copies of the real Linux game. The Windows half of this proof is
 # test-install-uninstall.ps1; the two cover the same scenarios and this one adds
 # the two that only exist on this platform.
 #
 # It runs the REAL install-bibites-multiverse.sh and
-# uninstall-bibites-multiverse.sh against a throwaway game tree under a
-# temporary directory, and compares the tree hash-for-hash AND mode-for-mode
-# before and after. It never touches a real copy of the game, a trust store, a
-# running process or the network.
+# uninstall-bibites-multiverse.sh against throwaway game copies under a temporary
+# directory. It compares each tree hash-for-hash AND mode-for-mode before and
+# after. It reads the source game but never changes it. It never touches a trust
+# store, a running process, or the network.
 #
 # Eight scenarios:
 #
@@ -38,7 +38,7 @@
 #      runtime without --game-dir, and uninstall only unchanged payload files.
 #
 # Usage:
-#   release/test-install-uninstall.sh --game-assembly <path to the LINUX BibitesAssembly.dll>
+#   release/test-install-uninstall.sh --real-game-dir <path to the LINUX game>
 #                                     [--windows-assembly <path>] [--bepinex-zip <path>]
 #                                     [--kit-dir <a staged archive>] [--keep-sandbox]
 #
@@ -53,6 +53,7 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KIT_SRC="$REPO/release/kit"
 MATRIX_DOC="$REPO/docs/support-matrix.md"
 
+REAL_GAME_DIR=''
 GAME_ASSEMBLY=''
 WINDOWS_ASSEMBLY="$REPO/bibites-mod/libs/BibitesAssembly.dll"
 BEPINEX_ZIP=''
@@ -61,7 +62,7 @@ KEEP_SANDBOX=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --game-assembly)    GAME_ASSEMBLY="$2";    shift 2 ;;
+    --real-game-dir)    REAL_GAME_DIR="$2";    shift 2 ;;
     --windows-assembly) WINDOWS_ASSEMBLY="$2"; shift 2 ;;
     --bepinex-zip)      BEPINEX_ZIP="$2";      shift 2 ;;
     --kit-dir)          KIT_DIR="$2";          shift 2 ;;
@@ -70,9 +71,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$GAME_ASSEMBLY" ] || { printf '%s needs --game-assembly\n' "$0" >&2; exit 2; }
+[ -n "$REAL_GAME_DIR" ] || { printf '%s needs --real-game-dir\n' "$0" >&2; exit 2; }
+[ -d "$REAL_GAME_DIR" ] || { printf 'no such directory: %s\n' "$REAL_GAME_DIR" >&2; exit 2; }
+REAL_GAME_DIR="$(cd "$REAL_GAME_DIR" && pwd)"
+[ -x "$REAL_GAME_DIR/The Bibites.x86_64" ] || { printf 'not a real Linux game: %s\n' "$REAL_GAME_DIR" >&2; exit 2; }
+GAME_ASSEMBLY="$REAL_GAME_DIR/The Bibites_Data/Managed/BibitesAssembly.dll"
 [ -f "$GAME_ASSEMBLY" ] || { printf 'no such file: %s\n' "$GAME_ASSEMBLY" >&2; exit 2; }
-GAME_ASSEMBLY="$(cd "$(dirname "$GAME_ASSEMBLY")" && pwd)/$(basename "$GAME_ASSEMBLY")"
 
 CHECKS=0
 FAILURES=0
@@ -152,16 +156,17 @@ snapshot() { # $1 root -> "<mode> <sha256> <relative path>" per file, sorted
         done )
 }
 
-new_sandbox_game() { # $1 path, $2 assembly
-  mkdir -p "$1/The Bibites_Data/Managed"
-  printf 'not a real game\n' > "$1/The Bibites.x86_64"
-  chmod 755 "$1/The Bibites.x86_64"
-  cp "$2" "$1/The Bibites_Data/Managed/BibitesAssembly.dll"
-  chmod 644 "$1/The Bibites_Data/Managed/BibitesAssembly.dll"
-  # The itch archive ships these beside the binary; they are here so that "the
-  # tree came back as it was" is a claim about more than two files.
-  printf 'unity player\n' > "$1/UnityPlayer.so"
-  printf 'a changelog the GAME shipped\n' > "$1/changelog.txt"
+new_sandbox_game() { # $1 path
+  local source base
+  mkdir -p "$1"
+  while IFS= read -r -d '' source; do
+    base="$(basename "$source")"
+    case "$base" in
+      BepInEx|run_bepinex.sh|libdoorstop.so|.doorstop_version) continue ;;
+    esac
+    cp -a "$source" "$1/"
+  done < <(find "$REAL_GAME_DIR" -mindepth 1 -maxdepth 1 -print0)
+  [ -x "$1/The Bibites.x86_64" ] || { printf 'real game copy lost its executable: %s\n' "$1" >&2; exit 2; }
 }
 
 new_join_file() { # $1 path -> prints the secret
@@ -185,7 +190,7 @@ run_script() { # $1.. the command -> sets OUT and RC
 scenario "A - a machine with no BepInEx"
 
 A_ROOT="$SANDBOX/A"; A_GAME="$A_ROOT/game"; A_DATA="$A_ROOT/data"
-new_sandbox_game "$A_GAME" "$GAME_ASSEMBLY"
+new_sandbox_game "$A_GAME"
 A_JOIN="$A_ROOT/join.txt"
 A_SECRET="$(new_join_file "$A_JOIN")"
 BEFORE_A="$(snapshot "$A_GAME")"
@@ -210,8 +215,8 @@ check "and it is executable, which is the checksum-then-chmod step's whole point
   "$(b test -x "$A_GAME/run_bepinex.sh")"
 check "libdoorstop.so is there" "$(b test -f "$A_GAME/libdoorstop.so")"
 check ".doorstop_version is there" "$(b test -f "$A_GAME/.doorstop_version")"
-check "the game's own changelog.txt was left alone, not replaced by BepInEx's" \
-  "$(b bash -c 'grep -q "a changelog the GAME shipped" "$1"' _ "$A_GAME/changelog.txt")"
+check "the game's own changelog.txt was left unchanged" \
+  "$(b cmp -s "$REAL_GAME_DIR/changelog.txt" "$A_GAME/changelog.txt")"
 check "the start script was written" "$(b test -f "$KIT_DIR/start-multiverse.sh")"
 check "the stop script was written" "$(b test -f "$KIT_DIR/stop-multiverse.sh")"
 check "both are executable" \
@@ -313,7 +318,7 @@ check "the stop script is gone" "$(b test ! -e "$KIT_DIR/stop-multiverse.sh")"
 scenario "B - a machine that already has BepInEx and another mod"
 
 B_ROOT="$SANDBOX/B"; B_GAME="$B_ROOT/game"; B_DATA="$B_ROOT/data"
-new_sandbox_game "$B_GAME" "$GAME_ASSEMBLY"
+new_sandbox_game "$B_GAME"
 mkdir -p "$B_GAME/BepInEx/core" "$B_GAME/BepInEx/plugins" "$B_GAME/BepInEx/config"
 printf 'somebody elses BepInEx\n' > "$B_GAME/BepInEx/core/BepInEx.dll"
 printf 'another mod\n'            > "$B_GAME/BepInEx/plugins/SomeOtherMod.dll"
@@ -348,7 +353,7 @@ check "the existing BepInEx is untouched" "$(b test -f "$B_GAME/BepInEx/core/Bep
 scenario "C - a plugin somebody changed after the install"
 
 C_ROOT="$SANDBOX/C"; C_GAME="$C_ROOT/game"; C_DATA="$C_ROOT/data"
-new_sandbox_game "$C_GAME" "$GAME_ASSEMBLY"
+new_sandbox_game "$C_GAME"
 C_JOIN="$C_ROOT/join.txt"; new_join_file "$C_JOIN" >/dev/null
 
 run_script bash "$INSTALLER" --game-dir "$C_GAME" --data-root "$C_DATA" --join-string-file "$C_JOIN"
@@ -367,8 +372,7 @@ check "the uninstall said so" "$(b contains 'CHANGED since the install' "$OUT")"
 scenario "D - a game build that is not in the support matrix"
 
 D_ROOT="$SANDBOX/D"; D_GAME="$D_ROOT/game"; D_DATA="$D_ROOT/data"
-mkdir -p "$D_GAME/The Bibites_Data/Managed"
-printf 'not a real game\n'        > "$D_GAME/The Bibites.x86_64"
+new_sandbox_game "$D_GAME"
 printf 'a different game build\n' > "$D_GAME/The Bibites_Data/Managed/BibitesAssembly.dll"
 D_JOIN="$D_ROOT/join.txt"; new_join_file "$D_JOIN" >/dev/null
 
@@ -388,7 +392,8 @@ scenario "E - the OTHER platform's build of the same game version"
 
 if [ -f "$WINDOWS_ASSEMBLY" ]; then
   E_ROOT="$SANDBOX/E"; E_GAME="$E_ROOT/game"; E_DATA="$E_ROOT/data"
-  new_sandbox_game "$E_GAME" "$WINDOWS_ASSEMBLY"
+  new_sandbox_game "$E_GAME"
+  cp "$WINDOWS_ASSEMBLY" "$E_GAME/The Bibites_Data/Managed/BibitesAssembly.dll"
   E_JOIN="$E_ROOT/join.txt"; new_join_file "$E_JOIN" >/dev/null
 
   run_script bash "$INSTALLER" --game-dir "$E_GAME" --data-root "$E_DATA" --join-string-file "$E_JOIN"
@@ -409,7 +414,7 @@ fi
 scenario "F - a private map, whose relay signs its own certificate"
 
 F_ROOT="$SANDBOX/F"; F_GAME="$F_ROOT/game"; F_DATA="$F_ROOT/data"
-new_sandbox_game "$F_GAME" "$GAME_ASSEMBLY"
+new_sandbox_game "$F_GAME"
 F_JOIN="$F_ROOT/join.txt"; new_join_file "$F_JOIN" >/dev/null
 F_CA="$F_ROOT/ca.crt"
 mkdir -p "$F_ROOT"
@@ -452,7 +457,7 @@ check "the copy of the authority is gone" "$(b test ! -e "$F_DATA/relay-ca.crt")
 scenario "G - a kit file that does not match MANIFEST.sha256"
 
 G_ROOT="$SANDBOX/G"; G_GAME="$G_ROOT/game"; G_DATA="$G_ROOT/data"; G_KIT="$G_ROOT/kit"
-new_sandbox_game "$G_GAME" "$GAME_ASSEMBLY"
+new_sandbox_game "$G_GAME"
 cp -r "$KIT_DIR" "$G_KIT"
 rm -f "$G_KIT/start-multiverse.sh" "$G_KIT/stop-multiverse.sh"
 printf 'somebody changed this after it was published\n' > "$G_KIT/BibitesMultiverse.dll"
@@ -478,10 +483,10 @@ mkdir -p "$H_KIT"
 cp -a "$KIT_DIR/." "$H_KIT/"
 rm -f "$H_KIT/start-multiverse.sh" "$H_KIT/stop-multiverse.sh"
 mkdir -p "$H_KIT/game"
-new_sandbox_game "$H_KIT/game" "$GAME_ASSEMBLY"
+new_sandbox_game "$H_KIT/game"
 H_SHA="$(sha256sum "$GAME_ASSEMBLY" | cut -d' ' -f1 | tr 'a-f' 'A-F')"
-printf 'test publisher license\n' > "$H_KIT/GAME-LICENSE.txt"
-printf '{\n  "format": "bibites-multiverse/game-payload/1",\n  "platform": "Linux",\n  "gameVersion": "test",\n  "assemblySha256": "%s",\n  "licenseFile": "GAME-LICENSE.txt"\n}\n' \
+printf 'test redistribution permission\n' > "$H_KIT/GAME-REDISTRIBUTION-NOTICE.txt"
+printf '{\n  "format": "bibites-multiverse/game-payload/1",\n  "platform": "Linux",\n  "gameVersion": "test",\n  "assemblySha256": "%s",\n  "redistributionNoticeFile": "GAME-REDISTRIBUTION-NOTICE.txt"\n}\n' \
   "$H_SHA" > "$H_KIT/game-payload.json"
 ( cd "$H_KIT" && find . -type f ! -name MANIFEST.sha256 -printf '%P\n' | LC_ALL=C sort \
     | while read -r f; do printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$f"; done \

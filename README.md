@@ -6,7 +6,7 @@
 
 **Artificial life, evolving across the network.**
 
-[![Installer status: 0.1.0 released](https://img.shields.io/badge/installer-0.1.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0)
+[![Installer status: 0.2.0 released](https://img.shields.io/badge/installer-0.2.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
@@ -28,10 +28,11 @@ Every participant keeps a separate game, clock, ecosystem, and save history. Thi
 synchronized mega-simulation. It is an evolutionary continent made from worlds that remain local.
 
 > [!IMPORTANT]
-> **Bibites Multiverse `0.1.0` is public.** Download the Windows or Linux add-on archive from the
-> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0). These editions
-> connect an existing game installation. Make sure that the SHA-256 matches before you extract it.
-> Do not download a Multiverse build from another source.
+> **Bibites Multiverse `0.2.0` is public.** The recommended Windows download includes an
+> authorized portable copy of *The Bibites*. Its GUI can use that copy or find an existing game.
+> The Linux download remains an add-on for the native itch.io game. Get both from the
+> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0), and check the
+> SHA-256 before extraction.
 
 ## About *The Bibites*
 
@@ -95,28 +96,30 @@ The result feels less like a multiplayer lobby and more like a continent with mo
 
 ## Install one world
 
-Release `0.1.0` turns the player setup into four steps:
+Release `0.2.0` turns the Windows setup into three steps:
 
-1. Get one private join string from the map operator.
-2. Download the archive for your platform and make sure that its checksum matches.
-3. Extract the archive and run its installer.
-4. Run the generated start script to open the sidecar and your world.
+1. Download the complete Windows archive and make sure that its checksum matches.
+2. Extract it and double-click `Install-BibitesMultiverse.cmd`.
+3. Keep the recommended options. The installer opens the included game after the map grants it a
+   place.
+
+The installer creates a unique public-map identity for this installation. It does not embed one
+shared join string. Private maps and the Linux add-on still use an operator-issued join string.
 
 After checksum and extraction, the platform commands are:
 
 | Platform | Supported game | Install | Start |
 |---|---|---|---|
-| Windows | *The Bibites* 0.6.3.1 from Steam | Double-click `Install-BibitesMultiverse.cmd` | `.\Start-Multiverse.ps1` |
+| Windows | Included portable *The Bibites* 0.6.3.1, or an existing Steam copy | Double-click `Install-BibitesMultiverse.cmd` | Starts after install by default; later use `.\Start-Multiverse.ps1` |
 | Linux | *The Bibites* 0.6.3.1 from itch.io | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
 Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
 without graphics. The simulation remains active.
 
-The installer finds the game and makes sure that its build is supported. It installs the mod,
-stores the credential, and creates the start and stop scripts. It needs no compiler, SDK,
-administrator account, or root access.
-
-Release `0.1.0` contains add-on packages. The installer finds an existing game automatically.
+The Windows GUI uses the included portable game by default. You can instead select an existing
+game; the GUI searches Steam and common install locations before it asks for a folder. The
+installer checks the build, installs the mod, stores the unique credential, and creates the start
+and stop scripts. It needs no compiler, SDK, or administrator account.
 
 [Read the full installation guide →](docs/participant/install.md)
 
@@ -186,7 +189,8 @@ duplicated organism because duplication changes the simulation permanently.
 
 ## Designed for players, not build machines
 
-- The package includes the mod, BepInEx, the sidecar, and native platform scripts.
+- The recommended Windows package includes the authorized portable game, the mod, BepInEx, the
+  sidecar, and the installer. The Linux package remains an add-on.
 - The installer refuses unsupported game builds before it changes the game folder.
 - The start script launches the sidecar before it launches the game.
 - The stop script closes both processes without removing the world or its saves.
@@ -199,7 +203,9 @@ A connected world crosses a real network boundary. The package keeps that bounda
 
 - Release archives carry SHA-256 checksums and an internal file manifest.
 - TLS protects traffic between every sidecar and the relay.
-- Join strings never belong in issue reports, screenshots, logs, or command lines.
+- Automatic enrollment creates the secret on your computer and sends it only to the HTTPS
+  enrollment endpoint. Private-map join strings never belong in issue reports, screenshots,
+  logs, or command lines.
 - The sidecar accepts mod traffic only from the same computer.
 - Your world and save files remain local.
 - The participant guides state what the public service records and retains.
@@ -255,6 +261,7 @@ Developer entry points:
 - [Release engineering](release/README.md)
 - [Mod-to-sidecar protocol](contracts/contract-a.md)
 - [Sidecar-to-relay protocol](contracts/contract-b-m4.md)
+- [Public installer enrollment](contracts/public-enrollment.md)
 
 ## License
 

@@ -576,7 +576,7 @@ inner_table "$LINUX_STAGE" "$LINUX_INNER_TABLE"
 COMPLETE_ROWS="$BUILD/complete-rows.md"
 : > "$COMPLETE_ROWS"
 if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
-  printf '| Windows complete | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
+  printf '| **Windows complete (recommended)** | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
     "$COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$COMPLETE_ZIP_NAME" "$COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
 fi
 if [ -n "$LINUX_GAME_PAYLOAD" ]; then
@@ -585,7 +585,7 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
 fi
 
 if [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; then
-  EDITION_NOTE='The package selects its edition automatically. Add-on packages find an existing game. Complete packages use their included game.'
+  EDITION_NOTE='The Windows GUI selects the included game by default and also offers an existing-game option. Add-on packages use an existing game.'
 else
   EDITION_NOTE='This release contains add-on packages only. The installer finds your existing game automatically. There is no edition choice during installation.'
 fi

@@ -47,6 +47,7 @@ The following values identify one deployment:
 - `MV_RETENTION` and `MV_ARCHIVE_GENOME_HORIZON`.
 - `MV_PERIOD_START` and `MV_PERIOD_END`.
 - `MV_ALERT_KIND`, `MV_ALERT_URL`, and `MV_ALERT_COMMAND`.
+- `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
 
 Never store the completed file in Git.
@@ -56,6 +57,7 @@ Store secret values in a secret manager or in protected files on the host.
 
 nginx owns the public HTTP and HTTPS ports.
 It sends `/contract-b/` WebSocket traffic to the relay on loopback.
+It sends only `POST /api/enroll` to the relay's public enrollment handler.
 It sends website requests to the archive on loopback.
 It sends `/stream/` requests to the optional HLS origin on loopback.
 
@@ -129,7 +131,22 @@ The alert test must reach its intended recipient.
 The backup list must contain the identity files and their checksums.
 The archive status must show an active relay subscription.
 
-## Join issuance
+## Public enrollment and manual join issuance
+
+The public Windows installer creates its secret and installation UUID locally. It sends them to
+`POST /api/enroll` over HTTPS. The relay stores a verifier and returns the derived identity and
+advertised WSS address. The endpoint is disabled by default in the relay binary. The deployment
+parameter file enables it with finite limits.
+
+Set `MV_PUBLIC_ENROLLMENT=0` and re-run the envfiles phase to stop new automatic identities. This
+does not revoke an existing credential. Review
+[`contracts/public-enrollment.md`](../contracts/public-enrollment.md) before changing a limit.
+
+The verification phase checks that GET cannot reach enrollment. Do not send a synthetic POST to a
+live service: a valid POST creates durable identity state. Test creation with a real installer and
+keep that installed identity.
+
+Private maps and manually named identities still use `issue-join.sh`.
 
 Credential creation requires a planned relay restart.
 Collect the approved peer identifiers before the restart.

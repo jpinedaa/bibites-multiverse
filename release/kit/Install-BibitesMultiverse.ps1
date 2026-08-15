@@ -393,7 +393,7 @@ if (-not $GameDir) {
                 "script again with -GameDir 'D:\path\to\The Bibites'.") 'INS-GAMEPATH'
 }
 if (-not (Test-Path (Join-Path $GameDir 'The Bibites.exe'))) {
-    Stop-Setup "There is no 'The Bibites.exe' in $GameDir."
+    Stop-Setup "There is no 'The Bibites.exe' in $GameDir." 'INS-GAMEPATH'
 }
 $GameDir = (Resolve-Path $GameDir).Path
 Say "game directory: $GameDir"
@@ -535,12 +535,12 @@ Step "6 of 9 - connect this installation to a map"
 function Read-JoinString {
     param([string]$File)
     if ($File) {
-        if (-not (Test-Path $File)) { Stop-Setup "No join string file at $File." }
+        if (-not (Test-Path $File)) { Stop-Setup "No join string file at $File." 'INS-JOINSTRING' }
         foreach ($line in (Get-Content -Path $File)) {
             $candidate = $line.Trim()
             if ($candidate -and -not $candidate.StartsWith('#')) { return $candidate }
         }
-        Stop-Setup "$File holds no join string. Its first non-empty line must be the one your operator sent."
+        Stop-Setup "$File holds no join string. Its first non-empty line must be the one your operator sent." 'INS-JOINSTRING'
     }
     Write-Host ""
     Say "Paste the join string your map's operator handed you. It looks like this:"
@@ -589,6 +589,7 @@ $publicMapPath = Join-Path $Here $PublicMapName
 $usePublicMap = (-not $JoinStringFile) -and (-not $RelayUrl) -and
                 (Test-Path -LiteralPath $publicMapPath -PathType Leaf)
 if ($usePublicMap) {
+    $pendingEnrollmentPath = Join-Path $DataRoot 'enrollment-pending.json'
     try {
         $publicMap = Get-Content -LiteralPath $publicMapPath -Raw | ConvertFrom-Json
     } catch {
@@ -614,9 +615,10 @@ if ($usePublicMap) {
     # A successful earlier install already owns an identity. Reuse it instead
     # of allocating another slot when the user changes or repairs the runtime.
     $existingRecordPath = Join-Path $DataRoot $RecordName
+    $existingRecordHeld = Test-Path -LiteralPath $existingRecordPath -PathType Leaf
+    $credentialHeld = Test-Path -LiteralPath $credentialPath -PathType Leaf
     $reusedIdentity = $false
-    if ((Test-Path -LiteralPath $existingRecordPath -PathType Leaf) -and
-        (Test-Path -LiteralPath $credentialPath -PathType Leaf)) {
+    if ($existingRecordHeld -and $credentialHeld) {
         try {
             $existingRecord = Get-Content -LiteralPath $existingRecordPath -Raw | ConvertFrom-Json
             $existingSecret = [string](Get-Content -LiteralPath $credentialPath | Select-Object -First 1)
@@ -625,6 +627,21 @@ if ($usePublicMap) {
                 [string]$existingRecord.relayUrl -eq $publicRelayUrl -and
                 [string]$existingRecord.peerId -match '^public-[0-9a-f]{32}$' -and
                 $existingSecret -match '^[0-9a-f]{64}$') {
+                if (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf) {
+                    try {
+                        $leftoverPending = Get-Content -LiteralPath $pendingEnrollmentPath -Raw | ConvertFrom-Json
+                        $leftoverPeerId = 'public-' + ([string]$leftoverPending.installId).Replace('-', '').ToLowerInvariant()
+                        if ($leftoverPending.format -ne 'bibites-multiverse/enrollment-pending/1' -or
+                            $leftoverPeerId -ne [string]$existingRecord.peerId -or
+                            [string]$leftoverPending.secret -ne $existingSecret) {
+                            throw 'the pending identity does not match the completed identity'
+                        }
+                    } catch {
+                        Stop-Setup ("The completed identity and $pendingEnrollmentPath disagree. " +
+                                    "Neither file was changed. Ask the operator before replacing " +
+                                    "this world identity.") 'INS-ENROLL'
+                    }
+                }
                 $RelayUrl = $publicRelayUrl
                 $credential = ([string]$existingRecord.peerId) + '.' + $existingSecret
                 $reusedIdentity = $true
@@ -636,7 +653,13 @@ if ($usePublicMap) {
     }
 
     if (-not $reusedIdentity) {
-        $pendingEnrollmentPath = Join-Path $DataRoot 'enrollment-pending.json'
+        if (($existingRecordHeld -or $credentialHeld) -and
+            -not (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf)) {
+            Stop-Setup ("This data root already contains part of a completed map identity, but " +
+                        "the installer cannot safely reuse it. Do not create a replacement over " +
+                        "the same world. Ask the operator for a slot handover, or use a different " +
+                        "-DataRoot for a new world.") 'INS-ENROLL'
+        }
         $installId = ''
         $enrollmentSecret = ''
         if (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf) {
@@ -707,7 +730,7 @@ if ($usePublicMap) {
     }
 } else {
     $joinString = Read-JoinString $JoinStringFile
-    if (-not $joinString) { Stop-Setup "No join string was given, so this world has no identity on any map." }
+    if (-not $joinString) { Stop-Setup "No join string was given, so this world has no identity on any map." 'INS-JOINSTRING' }
 
     $fields = @($joinString -split '\s+' | Where-Object { $_ })
     if ($fields.Count -eq 3 -and $fields[0] -eq 'multiverse-join/1') {
@@ -718,13 +741,13 @@ if ($usePublicMap) {
         if (-not $RelayUrl) {
             Stop-Setup ("That is the identity half on its own, with no relay address. Either paste the " +
                         "whole one-line join string - it starts with 'multiverse-join/1' - or run this " +
-                        "script again with -RelayUrl wss://<relay-host>/contract-b/v4.")
+                        "script again with -RelayUrl wss://<relay-host>/contract-b/v4.") 'INS-JOINSTRING'
         }
     } else {
         Stop-Setup ("That is not a join string this installer can read. The one-line form is three " +
                     "parts: 'multiverse-join/1', the wss:// relay address, and your identity and " +
                     "secret joined by a dot. Ask your operator to send the 'one line' from the block " +
-                    "their relay printed.")
+                    "their relay printed.") 'INS-JOINSTRING'
     }
 }
 
@@ -733,9 +756,9 @@ if ($RelayUrl -notmatch '^wss://[^\s]+$') {
         Stop-Setup ("The relay address is ws://, which is not encrypted. This wire is always " +
                     "wss:// and there is no fallback anywhere in this software: a relay that " +
                     "answers ws:// off loopback refuses the connection rather than serving it. " +
-                    "Ask your operator for the wss:// address.")
+                    "Ask your operator for the wss:// address.") 'INS-JOINSTRING'
     }
-    Stop-Setup "The relay address '$RelayUrl' is not a wss:// URL."
+    Stop-Setup "The relay address '$RelayUrl' is not a wss:// URL." 'INS-JOINSTRING'
 }
 
 # The two halves split on the LAST dot: an identity may legally contain one and a
@@ -743,20 +766,20 @@ if ($RelayUrl -notmatch '^wss://[^\s]+$') {
 $dot = $credential.LastIndexOf('.')
 if ($dot -le 0 -or $dot -eq $credential.Length - 1) {
     Stop-Setup ("The identity half and the secret half are joined by a dot, and this value has no " +
-                "usable one. Paste the whole 'one line' your operator sent.")
+                "usable one. Paste the whole 'one line' your operator sent.") 'INS-JOINSTRING'
 }
 $peerId = $credential.Substring(0, $dot)
 $secret = $credential.Substring($dot + 1)
 
 if ($secret.Length -lt 32 -or $secret.Length -gt 256) {
     Stop-Setup ("The secret half is $($secret.Length) characters. It must be 32 to 256. Nothing was " +
-                "written; ask your operator to re-send the join string exactly as their relay printed it.")
+                "written; ask your operator to re-send the join string exactly as their relay printed it.") 'INS-JOINSTRING'
 }
 if ($secret -notmatch '^[\x21-\x7e]+$') {
-    Stop-Setup "The secret half must be printable ASCII with no spaces. Nothing was written."
+    Stop-Setup "The secret half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING'
 }
 if ($peerId -notmatch '^[\x21-\x7e]+$') {
-    Stop-Setup "The identity half must be printable ASCII with no spaces. Nothing was written."
+    Stop-Setup "The identity half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING'
 }
 
 # Written fresh every time: re-writing over an already protected file makes the
@@ -765,10 +788,6 @@ Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
 Set-Content -LiteralPath $credentialPath -Value $secret -Encoding ASCII
 [void](Protect-UserFile $credentialPath 'the map credential')
 $secret = ''
-if ($usedAutomaticEnrollment -and $pendingEnrollmentPath) {
-    Remove-Item -LiteralPath $pendingEnrollmentPath -Force
-    Say 'removed the pending enrollment record after storing the credential'
-}
 Say "your world's identity on this map: $peerId"
 Say "the relay it dials: $RelayUrl"
 if (-not $usePublicMap) {
@@ -1031,7 +1050,7 @@ if (Get-RecordedProcess $sidecarPidFile) {
 }
 if (-not (Test-Path $credentialFile)) {
     Write-Host "There is no credential at $credentialFile." -ForegroundColor Red
-    Write-Host "Run .\Install-BibitesMultiverse.ps1 again with your join string."
+    Write-Host "Run .\Install-BibitesMultiverse.ps1 again."
     exit 1
 }
 
@@ -1082,8 +1101,9 @@ if ($granted) {
     Write-Host "   2. 'the relay's TLS certificate did not verify'. On a public map that is a"
     Write-Host "      certificate problem the operator has to fix; on a private map it means the"
     Write-Host "      authority is not trusted here yet - re-run the installer with -CaFile."
-    Write-Host "   3. HTTP 401: this credential is not the one the relay holds for $PeerId. Ask"
-    Write-Host "      the operator for a slot handover; a join string cannot be reprinted."
+    Write-Host "   3. HTTP 401: this credential is not the one the relay holds for $PeerId."
+    Write-Host "      Ask the operator for a slot handover. The relay stores only a verifier,"
+    Write-Host "      so neither public enrollment nor a join string can recover the secret."
     Write-Host "   4. Your wire version is below the minimum this map admits. Install the newest"
     Write-Host "      release; nobody on the relay's side can push it to you."
     Write-Host "   5. Your game build is not the one this map is on. Only the operator can see"
@@ -1229,6 +1249,11 @@ $record = [ordered]@{
 $recordPath = Join-Path $DataRoot $RecordName
 $record | ConvertTo-Json -Depth 6 | Set-Content -Path $recordPath -Encoding ASCII
 Say "wrote $recordPath - the uninstall reads it, and removes only what is named in it"
+if ($usePublicMap -and $pendingEnrollmentPath -and
+    (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf)) {
+    Remove-Item -LiteralPath $pendingEnrollmentPath -Force
+    Say 'removed the pending enrollment record after completing the install record'
+}
 
 # ---------------------------------------------------------------- done
 
@@ -1245,7 +1270,11 @@ Say "your files   : $DataRoot"
 if ($caImported) { Say "certificate  : $caThumbprint imported into your own user store" }
 else             { Say "certificate  : nothing imported into any trust store" }
 Write-Host ""
-Say "Next: run  .\$StartName"
+if ($StartAfterInstall) {
+    Say 'Next: the installer will connect this world and start the game now.'
+} else {
+    Say "Next: run  .\$StartName"
+}
 Say "Later: .\$StopName to stop, and the uninstall script here to remove all of it."
 Write-Host ""
 Say "The four pages written for you, on the release page: install, join, diagnose, leave."

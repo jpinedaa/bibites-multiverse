@@ -30,7 +30,7 @@ The release page you downloaded this from carries the archive's SHA-256 **above*
 link. Do that first if you have not already:
 
 ```sh
-sha256sum bibites-multiverse-0.1.0-linux-x64.zip
+sha256sum bibites-multiverse-0.2.0-linux-x64.zip
 ```
 
 **There is no mark of the web on Linux and this page will not invent a ritual to replace it.**
@@ -57,7 +57,7 @@ this machine and in your shell history. If you would rather not type it, put the
 string in a file and pass `--join-string-file ./join.txt` — then delete that file.
 
 The same installer handles both editions. In an add-on archive it finds the game or accepts
-`--game-dir`. In a complete archive it verifies `game-payload.json`, the included license, and
+`--game-dir`. In a complete archive it verifies `game-payload.json`, the redistribution notice, and
 every file under `game/`, then copies the payload into
 `<data root>/runtimes/<assembly-sha256>`. It **checks the selected game build against
 `support-matrix.json` and stops if there is no Linux entry**, installs BepInEx `linux_x64` and
@@ -184,5 +184,5 @@ system prints one, and no diagnostic asks for one.
 | `BepInEx_linux_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
 | `support-matrix.json` | The game builds this release supports, and the words it refuses with. **The same bytes the Windows archive carries** |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
-| `game-payload.json`, `GAME-LICENSE.txt`, `game/` | Files that occur only in a complete package |
+| `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, `game/` | Files that occur only in a complete package |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |

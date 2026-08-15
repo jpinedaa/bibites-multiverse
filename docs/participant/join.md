@@ -1,10 +1,39 @@
 # Join
 
-Joining a map is one thing you receive and one thing you do with it. This page is about the
-thing you receive — **the join string** — what happens the first time your world claims a
-place, and what other people can see about your world once it is there.
+The recommended Windows installer joins the public map automatically. A private map, and the
+current Linux package, use an operator-issued join string. Both paths produce the same two local
+values: one public world identity and one secret that only this installation should hold.
 
-## The join string
+This page explains both paths, what happens on the first claim, and what other people can see
+about your world once it is there.
+
+## Automatic public enrollment
+
+The Windows `0.2.0` package contains the public HTTPS enrollment address and the WSS relay address.
+It contains no join string and no shared secret.
+
+During installation, it does this:
+
+1. It creates a random secret and installation UUID on your computer.
+2. It protects a pending record so only your Windows account can read it.
+3. It sends the UUID, secret, and release number to the public enrollment endpoint over HTTPS.
+4. The relay stores a salted verifier and returns the derived public identity and relay address.
+   It does not return or log the secret.
+5. The installer stores the secret in `peer-secret.txt`, removes the pending record, and writes the
+   identity and relay address into the start script.
+
+The public identity is `public-` followed by the UUID without punctuation. It is not a secret and
+will appear on the public map after the first claim.
+
+**A retry does not create another identity.** If the request succeeds but the response is lost,
+the protected pending record keeps the same UUID and secret. The relay treats the exact retry as
+the same enrollment. A later repair or runtime change also reuses the installed identity.
+
+Enrollment has a total map limit and a per-network-address limit. If either limit is reached, the
+installer stops with `INS-ENROLL` and keeps the pending identity for a safe retry. Existing worlds
+remain connected when the operator disables new enrollment.
+
+## Private-map join strings
 
 **The map's operator mints it, their relay prints it once, and they hand it to you out of
 band.** There are no accounts, no email, no password and no reset flow. That is a deliberate
@@ -71,11 +100,11 @@ losing it costs a handover.
 does not hold another, and presenting yours for a role it does not carry is refused rather than
 quietly downgraded.
 
-**The packaged installer does both of those for you**, and it does them the same way on both
-platforms. Run `.\Install-BibitesMultiverse.ps1` — or `./install-bibites-multiverse.sh` on Linux —
-and it asks for the join string at the keyboard **with the typing hidden**; paste the whole
-`one line` form. It splits the two halves at the last dot, checks the secret's shape before
-writing anything, and stores the secret half — alone — in `peer-secret.txt` under this install's
+**The advanced Windows installer and the Linux installer apply the join string for you.** Run
+`.\Install-BibitesMultiverse.ps1 -JoinStringFile .\join.txt` for a private Windows map, or run
+`./install-bibites-multiverse.sh` on Linux. Without a public-map file, the Windows script asks for
+the join string **with the typing hidden**. It splits the two halves at the last dot, checks the
+secret's shape before writing anything, and stores the secret half — alone — in `peer-secret.txt` under this install's
 data root (`%LOCALAPPDATA%\BibitesMultiverse` on Windows,
 `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse` on Linux), with the permissions set so
 only your account can read it: an ACL naming you alone on Windows, mode `0600` on Linux, and the
@@ -86,10 +115,10 @@ identity half and the relay address go into the generated start script as `--pee
 type it, and the installer then tells you to delete that file — it will not delete a file you
 gave it.
 
-**To change it later** — a slot handover, or a move to a different map — run the installer again
-with the new join string. It rewrites the credential file and the start script; your world, your
-saves and your journal are untouched by that. **Your own copy is the only copy**: nothing can
-reprint the secret, so there is no "show it to me again" anywhere in the software.
+**To change a private-map identity later** — a slot handover, or a move to another map — run the
+advanced installer again with the new join-string file. It rewrites the credential file and the
+start script; your world, saves, and journal are untouched. **Your own copy is the only copy**:
+nothing can reprint the secret, so there is no "show it to me again" anywhere in the software.
 
 ## What happens on your first claim
 
@@ -175,7 +204,7 @@ anybody joins. It can be extended by announcement, and it will never be silently
 What ends is the shared map. Your world is on your machine and is unaffected.
 
 **Restarts are routine and they are short.** The relay restarts from time to time. It can
-restart to add a participant, apply a setting, or take a security update. **You do not need to
+restart to apply a setting or take a security update. **You do not need to
 do anything.** Your sidecar notices the disconnect, waits, reconnects, and reclaims your slot
 at your coordinate with `reason: "reclaimed"`. Your slot, position, and credential are unchanged.
 They live on disk, not in the running process.
@@ -202,7 +231,7 @@ Three refusals happen at the door, and each has a different actor:
 
 | What you see | What it means | Who fixes it |
 |---|---|---|
-| Your credential is refused | Wrong, missing or malformed. Your sidecar says so once per attempt, naming the remedy, and holds its retries at the ceiling after five — a wrong secret looks like a world that never joins rather than a machine hammering the map. Re-apply the join string; if it is lost, ask for a handover | **you**, then the operator |
+| Your credential is refused | Wrong, missing or malformed. Your sidecar says so once per attempt and holds its retries at the ceiling after five. The relay stores only a verifier, so a changed or lost final secret needs an operator handover on both public and private maps | **you**, then the operator |
 | Your wire version is below the map's minimum | Your build is older than the floor this map's operator published. **Upgrade from the published release** — nobody on the relay's side can push it to you | **you** |
 | Your game version is incompatible with the map's | The map is on a different game build. Read the live builds at `https://bibitesmultiverse.com/live`. The operator coordinates convergence | the operator |
 
