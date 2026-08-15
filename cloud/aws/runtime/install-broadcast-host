@@ -4,6 +4,7 @@ set -euo pipefail
 : "${AWS_REGION:?}"
 : "${DATA_VOLUME_ID:?}"
 : "${RELAY_PRIVATE_IP:?}"
+: "${RELAY_DOMAIN:?}"
 : "${STREAM_RTMP_ADDRESS:?}"
 : "${PUBLISH_PASSWORD_PARAMETER:?}"
 : "${WORLD_ID:?}"
@@ -54,8 +55,9 @@ for unit in bibites-sidecar@.service bibites-broadcast-xorg.service \
   install -m 0644 "/opt/bibites-runtime/$unit" "/etc/systemd/system/$unit"
 done
 
-sed -i '/[[:space:]]bibitesmultiverse\.com$/d' /etc/hosts
-printf '%s bibitesmultiverse.com\n' "$RELAY_PRIVATE_IP" >> /etc/hosts
+escaped_domain="${RELAY_DOMAIN//./\\.}"
+sed -i "/[[:space:]]${escaped_domain}$/d" /etc/hosts
+printf '%s %s\n' "$RELAY_PRIVATE_IP" "$RELAY_DOMAIN" >> /etc/hosts
 
 for name in MULTIVERSE_BROADCAST MULTIVERSE_BROADCAST_ZOOM \
   MULTIVERSE_BROADCAST_RESELECT_DELAY MULTIVERSE_BROADCAST_STATUS_FILE \

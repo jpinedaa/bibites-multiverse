@@ -4,6 +4,13 @@ set -euo pipefail
 profile="${AWS_PROFILE:-bibites-multiverse}"
 region="${AWS_REGION:-us-east-1}"
 stack="${BIBITES_STACK_NAME:-bibites-cloud-worlds}"
+: "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
+account="$(aws --profile "$profile" --region "$region" sts get-caller-identity \
+  --query Account --output text)"
+[ "$account" = "$BIBITES_AWS_ACCOUNT_ID" ] || {
+  echo "refusing AWS account $account; expected $BIBITES_AWS_ACCOUNT_ID" >&2
+  exit 1
+}
 instance="$(aws --profile "$profile" --region "$region" cloudformation describe-stacks \
   --stack-name "$stack" --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' --output text)"
 

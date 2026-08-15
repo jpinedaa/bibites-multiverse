@@ -17,7 +17,7 @@
 [Install](docs/participant/install.md) ·
 [Join](docs/participant/join.md) ·
 [Participant guide](docs/README.md) ·
-[Project status](m5_tracking.md)
+[Project status](STATUS.md)
 
 </div>
 
@@ -207,10 +207,11 @@ A connected world crosses a real network boundary. The package keeps that bounda
 Read [what joining publishes](docs/participant/join.md#what-joining-publishes-about-your-world)
 before you connect a world.
 
-## Public map status
+## Public experiment
 
-The hosted service is online at [bibitesmultiverse.com](https://bibitesmultiverse.com/).
-The first announced period runs from **August 14 through November 14, 2026**.
+The hosted entry point is [bibitesmultiverse.com](https://bibitesmultiverse.com/).
+The first announced service period runs from **August 14 through November 14, 2026**.
+Read the [project status](STATUS.md) for the release and milestone state.
 
 The homepage explains the experiment and shows a live summary. The
 [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
@@ -250,7 +251,7 @@ Developer entry points:
 
 - [System architecture](system_decomposition.md)
 - [Live broadcast design and operations](docs/live-broadcast.md)
-- [Development environment](dev_environment.md)
+- [Developer guide and technical findings](dev_environment.md)
 - [Release engineering](release/README.md)
 - [Mod-to-sidecar protocol](contracts/contract-a.md)
 - [Sidecar-to-relay protocol](contracts/contract-b-m4.md)

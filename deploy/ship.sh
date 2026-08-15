@@ -15,10 +15,8 @@
 # from go/, exactly as e2e/run-m3.sh does it. -trimpath is added so the shipped
 # binary carries no path from this machine.
 #
-# BOTH ARCHITECTURES, every time. Lightsail sells x86 and ARM bundles and the
-# bundle is not chosen yet; two 10 MB binaries cost nothing to carry and
-# provision.sh picks by `uname -m` on the far side. If the bundle is settled,
-# MV_ARCHS=amd64 halves the build.
+# Build both supported architectures by default. The provisioning script selects
+# the correct artifact with `uname -m`. Set MV_ARCHS to limit the build.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,14 +51,9 @@ command -v go >/dev/null || die "no go on PATH"
 step "build"
 say "go $(go version | awk '{print $3}')  from $ROOT/go"
 mkdir -p "$STAGE"
-# nice -n 19, because this machine is also the living deployment. Unniced load on
-# this host reproduces the sidecar session storm — on record twice, once as an
-# accident and once as a deliberate reproduction that dropped seven sidecar
-# sessions and three mods. A cross-compile is not a test suite, but the rule is
-# about the host and not about the workload.
-#
-# The output goes to deploy/stage/ and NEVER to bin/: five running sidecars hold
-# bin/sidecar open, and an in-place build there fails with ETXTBSY.
+# Use low scheduling priority because a development host can also run test worlds.
+# Write artifacts to deploy/stage/. A running process can keep a binary in bin/
+# open, which makes an in-place replacement fail with ETXTBSY.
 for arch in $ARCHS; do
   for cmd in relay archive ringstat; do
     out="$STAGE/${cmd}-linux-${arch}"

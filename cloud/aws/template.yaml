@@ -1,14 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Persistent Spot host for six headless Bibites Multiverse worlds
+Description: Persistent Spot host for headless Bibites Multiverse worlds
 
 Parameters:
   InstanceType:
     Type: String
-    Default: m6a.2xlarge
     AllowedPattern: '^[a-z0-9.-]+$'
   AvailabilityZone:
     Type: AWS::EC2::AvailabilityZone::Name
-    Default: us-east-1a
   SubnetId:
     Type: AWS::EC2::Subnet::Id
   VpcId:
@@ -41,12 +39,17 @@ Parameters:
     Default: worlds.json
   DataVolumeGiB:
     Type: Number
-    Default: 80
+    Default: 40
     MinValue: 40
   RelayPrivateIp:
     Type: String
-    Default: 172.26.12.110
     AllowedPattern: '^[0-9.]+$'
+  RelayDomain:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9.-]+$'
+  CredentialParameterPrefix:
+    Type: String
+    AllowedPattern: '^/[A-Za-z0-9_./-]+$'
   UbuntuAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
@@ -79,7 +82,7 @@ Resources:
                 Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/*
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/bibites-multiverse/cloud/*
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CredentialParameterPrefix}/*
 
   HostProfile:
     Type: AWS::IAM::InstanceProfile
@@ -167,6 +170,7 @@ Resources:
             export BEPINEX_SHA256='${BepInExSha256}'
             export MANIFEST_KEY='${ArtifactPrefix}/${ManifestFile}'
             export RELAY_PRIVATE_IP='${RelayPrivateIp}'
+            export RELAY_DOMAIN='${RelayDomain}'
             /opt/bibites-runtime/install-host
             systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true
 

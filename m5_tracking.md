@@ -1,473 +1,180 @@
-# M5 Implementation Tracking
+# M5 public-release record
 
-**Status, 2026-08-15 UTC: WP1, WP2, WP4, WP5, WP6, and WP7 are done. The WP3 public service is
-live at `bibitesmultiverse.com`, and its three-month announcement is integrated. WP6 now builds
-add-on and authorized complete editions. The public `0.1.0` release contains both add-on archives
-and `SHA256SUMS`. Fresh downloads passed the checksum and ZIP-integrity checks. Authorized complete
-editions remain publisher-gated. WP8 has not started.
-The public map is healthy and **full: six live worlds, no open map position** — slot 6 migrated off
-the laptop to the cloud worlds host on 2026-08-15 UTC, so every world the map has ever had now runs
-in one place and no simulation runs on anybody's desk. The operator issued no participant join
-string.**
+> [!NOTE]
+> This record was frozen after the `0.1.0` publication on 2026-08-15 UTC.
+> Read [`STATUS.md`](STATUS.md) for the public project state.
 
-This is the orchestrator's execution state for M5. `m5_considerations.md` is the milestone's
-design and it is ratified; this document is what is *done* against it, what is next, and the
-rules the doing has to follow. The two are meant to be read together and never to say the same
-thing twice.
+M5 changed Bibites Multiverse from a private development grid into a public experiment.
+This document records its decisions, delivered work, and test evidence.
 
-## What this document is, and how to use it
+This document is not a live tracker or an operator runbook. It does not contain current peer
+state, service health, join-string activity, resource inventory, costs, incidents, or rollout
+receipts.
 
-**Read this, then read the sections it points at.** A session that opens M5 needs four things
-before it dispatches anything: the decided state (below, compressed), the work-package order,
-the operating rules this project runs on, and the constraints the living deployment puts on
-every rollout. All four are here. Everything else — why a decision went the way it did, what a
-package must contain, what the exit test asks — stays in `m5_considerations.md`, and this
-document points rather than restates.
+## Scope and authority
 
-**The division of labour, stated so it survives:**
-
-| Question | Where the answer lives |
+| Question | Public source |
 |---|---|
-| Why is the wire going to `contract-b/4`? What must WP3 contain? What does the exit test require? | `m5_considerations.md` — decisions, work packages, exit test |
-| What is decided, project-wide, and what does it bind? | `system_decomposition.md` — D1–D25 and the milestone entries |
-| What does the rig do when you deploy to it? | `dev_environment.md` — *The living deployment*, *Watch items*, *Gotchas* |
-| Is WP4 started? What did it land? What is safe to start next? | **here** |
+| What is the current public phase? | [`STATUS.md`](STATUS.md) |
+| Why did M5 choose this design? | [`m5_considerations.md`](m5_considerations.md) |
+| What project decisions bind later work? | [`system_decomposition.md`](system_decomposition.md) |
+| What does each protocol require? | [`contracts/contract-a.md`](contracts/contract-a.md) and [`contracts/contract-b-m4.md`](contracts/contract-b-m4.md) |
+| What did M5 deliver? | The work-package record below |
 
-**This is a living document, and it is updated by integration rather than by appending.** When a
-package lands, its row changes state and its evidence goes with it; when a package changes
-shape, the row is rewritten rather than annotated with a correction underneath the old text. A
-finding that contradicts something already written here is surfaced and resolved, not stacked
-beside it. If an update would make a section too long or land in the wrong place, restructure
-the section. The same rule the project applies to every other document applies to this one, and
-the reason is the same: the next reader is a fresh session with no memory of the edit.
+The design document remains the source for arguments, risks, and package definitions.
+This record reports only the result and its public evidence.
 
-**One thing this document must never become** is a second copy of the design. If a status line
-starts explaining *why*, the explanation belongs in `m5_considerations.md` and the line belongs
-here as a pointer to it.
+## Decided state
 
-## The decided state, compressed
+The owner ratified nine decisions on 2026-08-10. The owner refined two compatibility decisions
+on 2026-08-11. Five decisions became D21 through D25 in the system design.
 
-Nine decisions were ratified on 2026-08-10, and two of them were refined by the owner on
-2026-08-11. Five became D21–D25 in `system_decomposition.md`; four are milestone-internal and
-live in `m5_considerations.md`, *Decisions for the Owner*. One line each — the argument is at
-the pointer.
-
-| What is settled | The call | Pointer |
+| Decision | Result | Design source |
 |---|---|---|
-| **D21** — the wire's version | Per-peer credentials and TLS ship **together** at **`contract-b/4`**, the credential bound to the `peerId`; Contract A's bearer token is the minor **`contract-a/2.4`**. Taken in WP1, pre-strangers, for D13's reason | DQ1, decision 1 |
-| **D22** — compatibility | **Layered.** The relay's membership test is the **contract** version; the game version is a per-machine matter answered by a published support matrix. Refined 2026-08-11: the bb8 payload stays opaque, cross-version loading is **assumed**, the envelope's game version is **diagnostic metadata** no *new* reader may parse into a capability decision | DQ5, decision 5 |
-| **D22, second call** — the shipped gates | **They stay.** `VERSION_UNSUPPORTED`, `mapwalk`'s `peer_incompatible`, close `4002` and §6.1's relay refusal are all kept and written down as named exceptions. **WP1 retires nothing.** The accepted behaviour is a **partition** along a version boundary after a staggered game update; the whole cross-version design space waits for that to become an operational problem | DQ5, *ANSWERED 2026-08-11* |
-| **D23** — the control surface | **Deferred to M6.** The operator surface stays read-only through the public release, and Risk 9 is the accepted cost, named and dated | Decision 2, Risk 9 |
-| **D24** — the hosting commitment | A **bounded, announced** run from **2026-08-14 through 2026-11-14**. The bound may be extended by announcement but is never silently shortened. The service is live on AWS Lightsail at `bibitesmultiverse.com`. Its wind-down procedure states what becomes of the identity and archive files | Decision 4, DQ2, `deploy/WIND-DOWN.md`, `deploy/HANDOFF-lightsail.md` |
-| **D25** — the channel | **GitHub Releases**, with published checksums and the `Unblock-File` story on the release page itself. It pushes nothing, so the fleet moves by publication plus a relay-side minimum contract version. It also carries decision 7's stated default: **D17's four edges, client on**, stated in the packaging documentation and the installer's own output | Decision 6, decision 7, DQ4 |
-| Archive retention (milestone-internal) | **ANSWERED by the owner 2026-08-12: the ledger is kept forever. Genome blobs are pruned to a horizon** (default 30 days, a knob). Risk 7 becomes policy: an unfetched genome past the horizon is permanently unfetchable, and the eviction feature is an archive arc. Bundle plan: start on the $12 Lightsail and resize on the monitor's RAM tripwire. **Corrected 2026-08-14**: day 45 was the streamed replay peak crossing 2 GB. The resident set is larger. `deploy/SIZING.md` §4 puts the 2 GB resident crossing near day 28 and the tripwire at WARN near day 18 and CRIT near day 24 | Decision 3, DQ3, Risk 5, Risk 7 |
-| The exit bar (milestone-internal) | **≥4 non-owner peers, ≥72 continuous hours, zero operator actions on any participant's machine.** Relay-side actions are allowed and counted | Decision 8, *Exit Test* |
-| The velocity floor (milestone-internal) | **Not built.** Instrumented during the playtest, and the measurement decides whether it is ever built. Contract Change 14 leaves the milestone; Risk 8 is the accepted cost for the duration | Decision 9, Risk 8 |
+| D21 — public wire | Per-peer credentials and TLS shipped together in `contract-b/4`. Contract A gained its bearer token in `contract-a/2.4`. | M5 decision 1 |
+| D22 — compatibility | Contract version is the network compatibility test. Game version remains diagnostic metadata for new readers. | M5 decision 5 |
+| D22 — retained gates | The four existing game-version gates stayed in place. The design defers cross-version loading until version skew causes a real problem. | M5 DQ5 |
+| D23 — control surface | M5 kept the public operator surface read-only. Write controls moved to M6. | M5 decision 2 |
+| D24 — service period | The first announced service period runs from August 14 through November 14, 2026. Any extension needs a public announcement. | M5 decision 4 |
+| D25 — release channel | GitHub Releases carries packages, checksums, security guidance, and the default configuration. | M5 decisions 6 and 7 |
+| Archive retention | The migration ledger stays permanent. Genome blobs use a configurable horizon with a 30-day hosted default. | M5 decision 3 |
+| Exit bar | The test needs four non-owner peers, 72 continuous hours, and no operator action on participant computers. | M5 decision 8 |
+| Velocity floor | M5 did not add a velocity floor. The public experiment measures whether one is necessary. | M5 decision 9 |
 
-**Nothing in M5 is gated on a signature any more.** Every package below is startable in
-dependency order.
+The exact protocol changes are in Contract A section 21 and Contract B sections 22 and 23.
 
 ## Work packages
 
-Eight packages, as `m5_considerations.md`, *Work Packages* defines them. **Delivers** is one
-line and is not the package's contents; **Done when** is the bar the package reports against.
-Neither replaces reading the package.
+The package names and completion bars come from `m5_considerations.md`, *Work Packages*.
+The states below are the frozen delivery state.
 
-| WP | Delivers | Depends on | Status | Done when |
-|---|---|---|---|---|
-| **WP1** — The contract amendments | The wire M5 ships: `contract-b/4`, `contract-a/2.4`, and the sixteen M5 rows of *Contract Changes Needed* | Nothing — its gate opened 2026-08-10 | **Done 2026-08-11.** Commit 35f208f landed item 16; commit 350988e landed the wave: `contract-b/4.0` as `contract-b-m4.md` §22 (B22–B32, in place, path `/contract-b/v4`), `contract-a/2.4` as `contract-a.md` §21 (A47–A52, path unchanged), `genome-hash.md` re-verified at `bb8-genome/1`. Every done-when clause met: row 13 assessed (A51 — stays open and moot), row 14 not written, D22's statement in B31 + A48 with the four gates as named exceptions, migration note in B32/A52. The two sets cross-cite by §- and amendment number | Both contracts published at their new versions; every M5 row applied, or assessed and recorded as closed (row 13); one worked example per changed or added message; D22's layered statement written with row 10a's diagnostic-only rule binding **new readers only** and the four shipped gates named as kept exceptions; the migration note for the living deployment written; item 16's stale-milestone corrections landed. Row 14 is **not** written |
-| **WP2** — Transport security | TLS on Contract B, per-peer credentials bound to `peerId`, the archive as an authorised subscriber, a bearer token on Contract A | WP1 | **Go side done 2026-08-11** (commit 0393698): B22 credentials + join strings (`peercred`, verifier store in `<data-dir>/peers.json`), B23 TLS with rotation-surviving reload and the off-loopback 426 rule, B25 version floor (default unset), B27 subscribe grant with the boundary tested as not-a-privileged-view, B32 path move with v2/v3 retired, A47 sidecar side (`modtoken`); Risk 1's adversarial test passes both halves (`TestRisk1_ValidCredentialWithAnotherPeersID`). **Mod side done** (dc9d01f: 0.6.4 sends the bearer token at `contract-a/2.4`; 53c2f1f batches A49's flag and A50's 4007 handling into the same undeployed build). **Local crossing DONE 2026-08-11 17:20Z** (window executed per `e2e/crossing/RUNBOOK.md`; commits 8e714ba, 32f41f8): 7 m 18 s map-down, five slots back at mod 0.6.4 / `contract-a/2.4` on `wss://…/contract-b/v4`, **zero** discarded journal bytes on all five, **zero** ledger gap (archive restarted inside the outage; re-subscribed 880 ms before the first sidecar), no custody burst (peak 4 vs the mod-deploy cycle's 55 — `down` takes the sidecars too, so journals replay flush). **Far-end crossing DONE 2026-08-12 ~01:19Z** (far end / slot 6, executed on the evening of the 11th): CA trusted into the far end's `Cert:\CurrentUser\Root` (thumbprint `C465F51E…094E`, `-SkipCaImport` for the non-interactive steps then the one human-gated import), slot 6 granted `reason=reclaimed` at (2,1) on `wss://…/contract-b/v4` (relay `m5.0`), mod **0.6.4** / `contract-a/2.4`, all four edges `peer_live`, zero heartbeat timeouts, and it held its reservation throughout so no `holdTimeoutMs` bounce fired. Its sidecar was then brought current to the WP4/WP5 build (`4dd2ac1`) at ~01:28Z — mod DLL unchanged at 0.6.4, so a sidecar-only swap | The functional path works **and Risk 1's adversarial test passes**: a peer presenting a valid credential with another peer's `peerId` is refused at the handshake and the legitimate peer observes nothing. The archive's visibility boundary is stated, not implied. The living deployment has crossed to `contract-b/4` in lockstep with zero discarded journal bytes |
-| **WP3** — The hosted deployment | The relay and archive as a *service*: VPS, DNS, ACME, supervision, monitoring, backup, restart policy — plus the forward receipt, D24's commitment and the retention rule | WP2 | **Public service live 2026-08-14/15. Account guard:** Put all Multiverse AWS resources in Jorge Pineda's personal account, `663615031964`. Use the `bibites-multiverse` profile. The default profile points to DERSec and is prohibited for this project. Before any mutating command, confirm that `aws --profile bibites-multiverse sts get-caller-identity` returns `663615031964`. That personal account runs Lightsail instance `bibites-multiverse` in `us-east-1a` on bundle `small_3_0` (2 vCPU, 2 GB RAM, 60 GB SSD). Static IP `3.229.27.163` was attached before Cloudflare received DNS-only A records for `bibitesmultiverse.com` and `status.bibitesmultiverse.com`. Let's Encrypt issued the two-name certificate on 2026-08-15 UTC. nginx owns HTTPS 443, publishes the website at `/`, and proxies `/contract-b/` to the loopback relay. On 2026-08-15, PR #1 deployed clean archive revision `87dc4a2`. It adds the landing page at `/`, the console at `/live`, and the front-door security headers. The archive-only restart began at 02:54:22 UTC and reconnected on the third one-second probe. All 14 service checks passed. Mobile Lighthouse scored 100 for accessibility, best practices, SEO, and agentic browsing. The map returned with five live slots, no dark slots, and one hole. Relay, archive, nginx, monitor, backup, and certificate renewal are enabled and healthy. A deliberate reboot proved recovery. The ntfy test reached the owner. The Lightsail alarm and its email contact are verified. The identity backup contains `ring.json` and `peers.json`. Restoring both from one snapshot was rehearsed with matching hashes and an archive reconnect. Automatic snapshots run at 05:00 UTC. The announced period is **2026-08-14 through 2026-11-14**. Its six documentation slots are filled. The operator issued no participant join string. The ledger is retained. Genome blobs use the 720-hour horizon. B26's forward receipt is deployed on the LAN rig, but its per-migration cost at a public map's rate remains WP8 evidence. Release `0.1.0` is public, and the repository is public | The hosted service restarts on exit and boot. Certificate renewal and a reboot are proven. Monitoring reaches a person. Identity backup and restore are proven. D24's period and wind-down are public before the first join. The forward receipt's cost-at-rate measurement remains an explicit WP8 deliverable |
-| **WP4** — Capacity, abuse limits, admin path | The published limit table, the authenticated admin path, the render deny list, and the three cheap contract closures | WP1, WP2 | **Implemented and rolled out 2026-08-11** (dfbd1dc): B24's eight limits as knobs, frame-level only (D1 guard test), published on both frames; B28's admin path as a separate listener over the admin grant (two-call confirm, ring-state hash, audit line; eviction deliberately shapeless — `4005`, pinned by test); B30's deny list + the markup-species-name CI test; A49/A50 sidecar halves (ledger now tells `blob_dropped_for_size` from `parent_gone`). Mod halves shipped earlier in the 0.6.4 batch (53c2f1f); closure 13 was WP1's (A51). **Rolled out to the living deployment 2026-08-11**, batched with WP5 and costing **no map outage** (*`dev_environment.md`, The living deployment → The WP4 + WP5 rollout*): relay restarted 20:56:15Z with the limit envelope on its startup line, five sidecars rolled one at a time 20:59:10Z–21:03:53Z, every one `reason=reclaimed` on its own coordinate with **zero discarded journal bytes**, `heldDepth`/`timeoutBounces` 0 throughout, A50's partial-case WARN silent as a full 3×2 predicts. `--admin-listen` was deliberately **not** passed, so B28's listener is compiled in and bound to nothing until an owner-level act turns it on. **The archive restart happened** (the 2026-08-12 debt window) — the deny-list capability shipped, deliberately unset on the rig. **The `limits` key on `/api/status` turned out never implemented** (this package built the wire half only; the window's verification caught it) — **closed 2026-08-12** (e6d7911): `limits` + `minContractVersion` ride the view key-for-key with the two absences kept distinct (pre-B24 relay = UNKNOWN, absent floor = "no minimum"), the settings tab gains the map's own card, ringstat prints the same values. Rides the next archive restart / the VPS provisioning; until then the published table is readable only in the relay's own log | Every limit is a knob, every peer-visible one is published on the stats block, and **every one is countable at the frame level** — D1 survives the package. Release, handover and eviction run over an authenticated path and keep the printed held-entry report. Contract Changes 11, 12 and 13 are closed |
-| **WP5** — Placement and route-around under churn | Auto-placement, the coalescing window, the slot-space policy — proven against a synthetic churn harness | WP1, WP2 | **Implemented and rolled out 2026-08-11** (9d3e388): B29's holes-before-growth narrowing (rig's 3×2 layout pinned claim-for-claim), the widening coalescing window (250→2000 ms, threshold 8), the quiet re-claim, the slot-space policy rendered identically at both doors. **Harness run to exhaustion: 50 M events in 5 m 42 s, seven invariants clean, `maxSlotEverIssued` exactly = placements (48.3 M returns cost zero addresses), no address re-issued, broadcasts 4 rounds per ~1,700 changes vs bound 22.** **Rolled out 2026-08-11** in the same relay restart as WP4 (20:56:15Z), relay-only as planned. Measured on the living deployment: `PEER_STATUS` **55.4/min → 43.9/min (−20.6%)**, and `maxSlotEverIssued=6` on a six-slot map read straight off the new slot-space startup line. **That reading is WP5's floor, not its measure** — DQ3's 64-re-claims-a-day peer *is* slot 6, slot 6 is dark, and the five local slots claim a handful of times an hour; what remains is the §14 B4 stats term the amendment does not bound. Re-measure when the far end rejoins. **2026-08-15: it has, by migrating — all six worlds are live on the cloud host, so that 43.9/min is a five-live-world reading and the six-slot figure is measurable now.** Two contract findings held for the owner: the rectangle never shrinks (skip lists grow with map *history* — Risk 4's neighbour, pinned by test) and B29's `borderEdges` is compared but never published (§6.3.1 gap) | Holes fill before an axis extends, and the axis rule is stated; the coalescing window and the `PEER_STATUS` broadcast bound are measured; `maxSlotEverIssued` growth is **tested rather than assumed**; the operator's answer for a position that will never be filled again is written; and the churn harness — join, leave, return, never return — has been **run to exhaustion before WP8 involves anybody** |
-| **WP6** — The package | A GitHub release a stranger can install from, with the defaults audit and the support matrix | WP2 (input: `farend/`) — **needs the game** | **Done 2026-08-15.** Every build creates Windows and Linux add-on archives that bind to an existing game. With an authorized game directory and license, the same builder can add a complete archive for either platform. The same installer detects the edition from its manifest-covered descriptor. A complete install copies the verified game into a versioned managed runtime. Uninstall removes unchanged managed files and preserves changed or added files. The Windows suite passes 65 checks. The Linux suite passes 109 checks. Complete release assembly remains publisher-gated: the builder refuses a game payload without a license and refuses unsupported, linked, or already modified input. WP3 supplied the period text. The 2026-08-15 rehearsal ran five local headless worlds at ×100 with the remote sixth world live. It used the current committed Go source. The clean far-end rebuild stamped its sidecar with commit `582fbdf` and `vcs.modified=false`. GitHub release [`v0.1.0`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0) publishes both `0.1.0` add-on archives and `SHA256SUMS`. Fresh downloads passed their checksum and ZIP-integrity checks | An installer with no build toolchain and no instruction to disable a security control. Published checksums and security guidance precede the downloads. The support matrix ships beside the release and is enforced. Add-on uninstall leaves the external game as it found it. Complete uninstall removes only unchanged managed payload files |
-| **WP7** — The support surface | The error taxonomy, `--diagnose`, the participant's view of their own slot, renderer escaping | WP1 — **needs the game** for the mod-side failure modes | **Done 2026-08-12, with hosted-document slots closed 2026-08-15 UTC.** `--diagnose` and `--my-slot` are implemented and live-verified. Every WP3 address, period, restart, and build-visibility slot is now filled. WP8 still owns its two measured warning bands. The participant `disk-headroom` multiple remains explicitly open. WP3 publishes the separate host-growth arithmetic | Every refusal names the remedy and actor. Diagnostics cover the hand-run checks. Participants can read their own slot. Renderer escaping has a CI test. Install, join, diagnose, and leave documentation is complete for publication |
-| **WP8** — The playtest | The exit test, the two instrumented watches, and `m5_findings.md` | WP2–WP7 — **needs the game on other people's machines** | **Not started** | The eight parts of *Exit Test* run against the ratified bar; the velocity-floor signature and the version-skew **partition** are counted rather than eyeballed; the payload assumption is reported as **untested**, never as stable; the record — per-peer archive growth, crossing rates, epoch rate, broadcast volume, disk arithmetic — is captured; and `m5_findings.md` is written. M3 and M4 both left this deliverable open |
+| WP | Delivered result | Frozen state |
+|---|---|---|
+| WP1 — contract amendments | Published `contract-a/2.4`, `contract-b/4.0`, and the M5 compatibility rules. Reverified `bb8-genome/1`. | Complete, 2026-08-11 |
+| WP2 — transport security | Added TLS, peer-bound credentials, archive subscriber authorization, and the Contract A bearer token. | Complete, 2026-08-11 |
+| WP3 — hosted publication | Published the website, relay, archive, service safeguards, announced period, and B26 forward receipt. | Complete, 2026-08-15 |
+| WP4 — capacity and abuse controls | Added configurable frame limits, the authenticated admin path, renderer escaping, and participant-visible limit data. | Complete, 2026-08-12 |
+| WP5 — placement under churn | Added holes-before-growth placement, quiet reclaim, bounded status coalescing, and a synthetic churn harness. | Complete, 2026-08-11 |
+| WP6 — participant packages | Published Windows and Linux add-on archives, checksums, support data, installers, and safe uninstallers. | Complete, 2026-08-15 |
+| WP7 — support surface | Added participant guides, error taxonomy, `--diagnose`, `--my-slot`, and renderer-escaping tests. | Complete, 2026-08-15 |
+| WP8 — public playtest | Measures the exit bar, traffic, version skew, archive growth, and velocity-floor evidence. | Open at freeze |
 
-### Recommended sequence
+At the freeze, WP8 was the only open package. A completed playtest belongs in
+`m5_findings.md`, with a link from `STATUS.md`.
 
-**1. WP1 alone.** *"Write WP1 before any code. M2 and M3 both paid for the alternative."* It is
-the root dependency: `contract-b/4` is the wire every other package builds on, and taking the
-major before strangers run the build is the whole of D21's reasoning. Nothing else should start
-while the wire is being written, because everything else would be built against a moving target.
+## Stable delivery evidence
 
-**2. WP2 next, with WP7's documentation spine beside it.** WP2 gates four of the remaining six
-packages. **WP7 is the only package that does not depend on WP2** — it depends on WP1 alone — so
-its taxonomy skeleton, its documentation set and `--diagnose`'s check list can be drafted in
-parallel. It cannot *finish* there: half the refusals the taxonomy has to cover are the ones
-WP2 invents, so WP7 closes after WP2 lands.
+### WP1 — contracts before code
 
-**3. After WP2 — WP3 in parallel with WP4, then WP5.** WP3, WP4 and WP5 declare no dependency on
-each other, but they are not equally parallel in practice. WP3 is off-rig work (a VPS, DNS,
-supervision), so it genuinely runs concurrently with anything. WP4 and WP5 both change relay
-behaviour and both want the living deployment to verify against, so **serialise those two
-against each other** rather than dispatching both at once — the rig is one map and two agents
-restarting the same relay is how a rollout becomes an incident. WP4 first is the cheaper order:
-its three contract closures (11, 12, 13) are additive and are the last moment they are cheap.
+M5 wrote the public protocol before it changed implementations. The final public identifiers are:
 
-**4. WP6 after WP4 and WP5 land.** The plan only requires WP2, and that is a judgment call this
-document is making rather than a constraint `m5_considerations.md` states: the package has to
-carry the final defaults, the published limit table and the support matrix, so packaging before
-WP4 and WP5 have settled the sidecar and the relay means packaging twice. It also needs the
-game, which makes it a rollout rather than an edit.
+- `contract-a/2.4` on the local mod-to-sidecar connection.
+- `contract-b/4.0` on `/contract-b/v4`.
+- `bb8-genome/1` for canonical genome identity.
 
-**5. WP7 closes before WP8.** The taxonomy has to cover every refusal WP2 and WP4 added, or the
-playtest discovers the gaps on strangers.
+The contract update retained the existing game-version gates as named exceptions.
+It also marked game-version fields as diagnostic data for new readers.
 
-**6. WP8 last, and only after the harness and the abuse cases have been rehearsed.** Risk 2's
-accepted cost is that the exit test **cannot be re-run cheaply** — it spends other people's
-goodwill each time — which is exactly why WP5's churn harness runs to exhaustion first and WP4's
-abuse cases are rehearsed against the rig before Part 5 is run against a live public relay.
+### WP2 — the coordinated protocol crossing
 
-**One rollout fact that shapes the middle of this sequence.** WP2 puts a bearer token on
-Contract A, which is a **mod** change, so the rig's crossing to `contract-b/4` is a five-games-down
-deploy and not a rolling sidecar change. Batch every other pending mod change into that same
-window — the constraints below price a mod deploy at about 100 seconds of downtime plus a custody
-burst, and each one also costs the far end a bundle rebuild.
+The local development grid crossed both protocol boundaries in one 7-minute 18-second window.
+The test reported zero discarded journal bytes and no archive ledger gap.
 
-### Carried actions that belong to no package
+The sequence proved four reusable rules:
 
-- **The genealogy view: LIVE 2026-08-12 22:03Z** (built 5f2dc83; third zero-gap window of the
-  day, e5ff428 — 9.51 M records replayed at 41.2 k/s, VmHWM 1.84 GiB). The live sweep verified
-  the merged view end to end (mini-maps cross-checked 4 ways, zero console errors) and found
-  **three rendering defects, fix in flight batched with the seed-stock hiding**: the root badges
-  clip unreadably out of the label column (bdb5efb is live-but-invisible), the ancestry-floor
-  boundary never draws (`>` where `>=` — equal is not strictly inside), and the plot is fixed
-  1344 px (now-edge off-screen below 1427 px windows). **All three defects + the seed hiding verified live 2026-08-12 22:54Z**
-  (979d72b landed; 0ff9873 the fourth zero-gap window) — badges readable, floor drawn, plot
-  elastic, seed hidden with a free reveal, brain ring stabilized (latest-READ genome, one
-  membership set across ten polls). Replay-rate reading CORRECTED: 57 → 47.8 → 41.2 → 47.3 k/s
-  — the series tracks host load too; size pauses from ~45 k/s and treat it as noisy. **The axis call was ANSWERED by the owner
-  2026-08-13** — the drawing fits the living record (2b1e705): the clamp is gone, the axis starts
-  at the oldest drawn bar, the floor became a left-margin caption keeping its stat line and root
-  badge, and the dashed boundary draws only where the floor truly falls inside the drawn span.
-  **Same commit made the ancestry legible** (owner: "hard to tell how the tree is"): the label
-  column steps by depth with `├─`-style brackets joining parent to child, hover/tab lights a
-  species' whole lineage and dims the rest, the parent drop elbows into the child's bar, the row
-  tooltip names the parent unopened, and three new glossary terms explain the drawing to a
-  first-time reader (`timeaxis`, `descends`, `lineage`).
-  **The view is FINISHED and verified live 2026-08-13** across two windows (652debf, c7692b7):
-  the axis measures **0.00% empty** against 58.1% on the same map minutes earlier — and the two
-  pre-fix readings proved to be the *same* 3.83-day gap, so "the gap widens" was right about
-  duration and wrong about the ratio. The one defect the first sweep found (keyboard focus dying
-  on the ~2 s repaint, taking the lit lineage with it) is fixed and soaked: a tabbed row held
-  focus and its family across **18 consecutive repaints**, row-to-row never blinked dark across
-  2,035 samples. Honest residual: 12 of 18 bars still start within 4 px of `now` (that is what
-  the record holds on a fast-turnover map, not a drawing fault) and the horizontal scale now
-  re-fits between polls. Process lessons recorded: force a cache-bypassing reload when verifying
-  `page.go`; use `file_mark`, never byte offsets, for rig waits; log rotation invalidates a byte
-  mark. One judgement to know: the page's gzip-floor test was relaxed 3× → 2× rather than
-  trimming explanatory prose to pass — the property guarded (a body that stopped compressing)
-  lands at ≤1.0×.
-  **Two further owner observations closed 2026-08-13** (7fbaaa6, verified live c003e5c):
-  collapsed runs now sit ON the time axis across the interval they actually held the line
-  (measured 308.6 px against 308.629 expected for a 40.055 h run — the 40 h of empty plot IS the
-  mark now), and a child recorded before its parent (`Sheeplasius bananenbrotus`, 2h21m) draws
-  backwards in amber from the parent's bar start instead of an impossible geometry. The same
-  commit fitted the brain ring to the drawn set: **226× better discrimination** on today's data
-  (4.000 px spread against 0.0177), real counts on the ring's own tooltip, re-fit caveat written
-  down. **The standing residual — the ring depended on archive process uptime — is CLOSED by the
-  brain-history work below**, which persists each species' last measured brain instead of caching
-  it per process.
-- **The brain-complexity panel (owner-requested 2026-08-13, DONE and verified 2026-08-14).** A
-  panel under the genealogy on the genealogy's own clock: median synapses and median hidden
-  neurons per genome with an interquartile band and a coverage strip (86aa7a4, panel defects
-  fixed 10919b8, verified 9184eae/98592cb). The measurement folds at **genome arrival** — where
-  the bytes are already in hand and the crossing that wanted them is known — never by sweeping
-  the store, which would have refreshed every blob's mtime and postponed the retention horizon
-  for the whole archive. It is **persisted** (`<data-dir>/brains.jsonl`, ~6.9 MB/day,
-  append-and-compact, header unrewritten across three restarts) and replayed, not recomputed.
-  **The owner's second insight — persist per-species too — closed a standing defect**: an
-  extinct ancestor now keeps the last brain the archive ever read of it, so rings survive both
-  the blob's pruning and a restart (2 of 14 rows ringed after a restart → 13 of 17 in ten
-  minutes). Wording follows: "ever read", with the measurement's age. **What the data says:
-  median synapses 8 → 42 over the week (×5.1), synapses per neuron 0.16 → 0.74, median hidden
-  neurons 1 → 8.6 (×8.6) — Spearman 0.971 against time.** Raw neuron count understates ×7
-  because 48 neurons are a fixed floor. Coverage is 81% and the missingness is species- and
-  content-blind, which is what makes the sample defensible; the 45 hours the rig was down draw
-  as gaps.
-- **The genealogy view's FINAL SHAPE, decided by the owner 2026-08-12 (build was dispatched on this):** the
-  stratigraphic lifespan tree — time on the horizontal axis, species as first-seen→last-seen
-  bars — **replacing both the species tab and the tree tab with one merged view**. Included:
-  per-leaf 3×2 mini-maps, population sparklines (from `/api/species/history`), collapsed chains
-  as dotted lines with length ∝ generations, brain-complexity styling from each species' latest
-  stored genome (bb8-parsed, cached per hash), the glyph as the sole colour carrier (no
-  redundant swatches), the root/floor badges carried over. **Rejected: crossing pulses,
-  map↔tree cross-links, time scrubber, SVG export, radial layout.**
-- **The genealogy tree (owner-requested, 2026-08-12, built — 41eef26).** `/api/species/tree` +
-  a page tab: the living species as leaves, ancestors reduced to branching points, chains
-  collapsed. Derived entirely from A30/B9's parent-species field the ledger already carried —
-  no wire change. On the live rig: 11 of 12 living species connectable, deepest lineage 40
-  generations, 2,407 recorded species reduce to a 15-node tree. **Live on the map since 2026-08-12 16:26Z** (the
-  archive-views window, f983213 — same zero-gap pattern, archive-only, 4m57s pause; the limits
-  view went live in the same restart). Served shape at go-live: 18 nodes, 2 roots, 14 living
-  leaves. Replay note: 47.8 k rec/s vs the prior 57 k — the tree's per-record maintenance is the
-  prime suspect; size future paused windows from 48 k/s. **The record's floor, investigated
-  2026-08-12** (the owner asked why Basic bibite is not the ultimate ancestor): all life on the
-  map genuinely descends from the seed stock, but the first 19.5 h / 203,168 crossings predate
-  A30's species blocks, and nameless arrivals founded 408 permanently parentless species — the
-  living family's true recorded top is `Livilus yodexxus`, extinct since 08-07 and so forever
-  unlinkable. No fabricated edges; the root-badge fix **landed** (bdb5efb): a root the
-  record reaches above wears "THE RECORD BEGINS HERE · N GENERATIONS ABOVE" distinct from the
-  amber no-ancestry badge, and the tab prints the record's floor ("ancestry recorded since
-  2026-08-07 UTC") from one maintained int64. Rides the next archive restart. The 143
-  conflicting parents (last-write-wins by `recordedAt`; a deep chain can shift between polls)
-  stay a WATCH NOTE — the aggregate does not count overwrites and a counter for a caption was
-  refused.
-- **Brain complexity over time, and brains that outlive their genomes (owner-requested,
-  2026-08-13, built).** A panel BELOW the genealogy sharing its exact axis — same left and right
-  edges, same ticks, its own two y scales — drawing **median synapses per genome** and **median
-  hidden neurons** (the count above the fixed 48 every bibite brain is born with) with an
-  interquartile band and a coverage strip. New endpoint `/api/species/brains?from=&to=&buckets=`;
-  `/api/status` untouched, per the metrics rule.
-  **The measurement is MAINTAINED, not computed on demand**, and every part of that is forced:
-  a bucket is only ~42 % covered while it is new and ~97 % five days later (the fetch backlog
-  draining backwards), so the fold happens at GENOME ARRIVAL — `onGenomeResponse`, bytes already
-  in memory, keyed on the pending entry's own `crossedAt` — plus `onMigration` for hashes the
-  store already holds. There is deliberately **no full-history sweep**: `Store.Get` refreshes
-  mtime and eviction is ordered by mtime, so reading all 702 k blobs would postpone the 720 h
-  horizon for the whole store and hold its mutex for ~11 minutes. The aggregate is **persisted
-  and replayed** in `brains.jsonl` (append-and-compact, 5-minute buckets, ~111 B a bucket
-  measured) rather than re-derived at startup, which would add ~11 min to a 28 s replay; the
-  coverage denominator is NOT persisted — it comes from the ledger replay, which costs a measured
-  **1.47 s over 4.98 M records**. Loss of the sidecar is **"history starts now", never zeroes**.
-  **The same fold closes the ring's uptime residual above.** Each species' last measured brain is
-  persisted with the crossing it was read from, so an EXTINCT ancestor keeps the last brain this
-  archive ever saw of it — forever, past the retention horizon that deletes the genome — and a
-  restart no longer empties the picture. The ring's words changed with it: "the newest genome of
-  it this archive **ever read**", with the measurement's own age on the row and in the tooltip,
-  because an ancestor's reading can be days old beside a living species' current one. Absence is
-  still absence: a species never read draws no ring.
-  **Rejected:** a per-species brain overlay across the whole axis (empty before 08-07 05Z, 4–8
-  samples in a dozen buckets); an opacity ramp for coverage (it would fade the newest and
-  least-covered stretch, which is the part a reader looks at hardest).
-  On real rig blobs through the real pipeline: median synapses **4 → 45** and median hidden
-  neurons **0 → 10** across the record, with the two known dips reproduced and the record's
-  43 h of outages drawn as breaks in the line.
+1. Mint peer credentials before the old network path closes.
+2. Start the new sidecars before game plugins that require Contract A tokens.
+3. Stop incompatible network versions from exchanging traffic.
+4. Make sure that journal replay succeeds. Then accept the rollout.
 
-- **Keep the living deployment running, and treat it as M5's first participant.** Every upgrade
-  the milestone ships has to move it, and it is the only peer whose before and after are fully
-  observable. (`m5_considerations.md`, *Next Steps* 3.)
-- **Run `phase5far` while there is still one far end that answers the phone.** It has never been
-  run; it needs two commands typed at the second computer, and D9 forbids the rig to send them.
-  After M5 every peer is a peer the rig cannot drive. (*Next Steps* 4, *Inherited threads*.)
-  **2026-08-12: armed and found uncalibratable as written** — its hardcoded §15 A20 pair (burst 5,
-  2.0/sim-min) predates both the 2026-08-07 default raise (100/50) and the map's evolved migration
-  pressure (slot 6 measures 132.5 inbound/min at 6.5×; ~20/min with every sender at 1×, ten times
-  the drain bound). A pin rehearsal on slot 6 dammed 33 in 45 s and was reverted before the
-  64-entry queue cap. The far sidecar now paces its own outbound, so the burst-on-rejoin urgency
-  behind the thread is gone; what remains is either parametrising the phase's rate/burst/bound and
-  running it calibrated, or closing the thread on today's evidence. Details in
-  `dev_environment.md` (*The far end took its owed swap*, *phase5far cannot run as written*).
-  **CLOSED 2026-08-15, by circumstance rather than by a run.** The thread's premise was "while
-  there is still one far end that answers the phone"; the far end has now been retired into the
-  cloud worlds host, so there is no second computer to type the two owner commands at and the
-  `-GameOnly` stop/start halves the phase waits on no longer exist. What the phase existed to prove
-  was in any case proven twice over on the way out: the far sidecar dammed 33 organisms in 45 s
-  under a deliberate pin (2026-08-12), and the map routed around slot 6 through a real multi-hour
-  dark window — an unplanned engine crash on 2026-08-12 and again during this migration — with
-  custody surviving at **zero** discarded journal bytes each time. A cloud-native equivalent would
-  now be a `systemctl stop bibites-game@slot-N` on the host, which is a different test with a
-  different arrangement; nobody should read this as the LAN phase having been run.
+The Contract A token changed the plugin DLL. A running game locks that DLL.
+This fact made the protocol crossing one coordinated game-stop window.
 
-## Orchestration protocol
+### WP3 — hosted publication
 
-These are the operating rules the session that produced this document proved. A fresh
-orchestrator inherits them whole.
+The public service appeared at
+[`bibitesmultiverse.com`](https://bibitesmultiverse.com/) before participant enrollment.
+The publication included these tests:
 
-**Opus 5 subagents do all substantive work; the main loop orchestrates, integrates and commits.**
-The orchestrator's job is to scope an arc, dispatch it, read the report, integrate the result and
-commit it. It does not do the work itself.
+- HTTPS and certificate renewal.
+- Process recovery after exit and host restart.
+- Monitoring delivery to a person.
+- Identity backup and restore with matching hashes.
+- Public period and wind-down text.
+- Website security headers and service probes.
 
-**One agent per coherent arc.** An arc is design **plus** implementation **plus** deployment
-**plus** verification **plus** the documentation the change owes — not a slice of each handed to
-a different agent. A package this size will be several arcs; each arc is one agent, and the
-agent owns its arc end to end so that the person who deployed it is the person who verifies it.
+The B26 forward receipt shipped with the service code.
+Its cost at public traffic rates remained WP8 evidence at the freeze.
 
-**Agents do not commit.** An agent reports the paths it changed and a proposed commit message;
-the orchestrator stages and commits. This is not ceremony — parallel sessions share this
-checkout, and concurrent staging is how one session's index picks up another's half-finished
-work.
+This record keeps the public outcome. It omits provider inventory, account identifiers,
+addresses, costs, current alarms, and operator receipts.
 
-**Committing, therefore:**
+### WP4 — limits and support controls
 
-- `git fetch` before staging, every time. Another session may have moved `origin/main`.
-- **Stage explicit paths.** Never `git add -A`, never `git add .`, never `git commit -a`.
-- Commit **sequentially**, one arc at a time, so the index is never shared between two writes.
-- Message style: **imperative, descriptive, one line of subject**, matching the log — *Ratify the
-  nine M5 decisions and mint D21-D25*, *Bound the archive's genome pump in work, burst and
-  concurrency*. **No AI attribution, no generated-by footer, no co-author line**, in the message
-  or in anything the change touches.
-- Group commits where the material separates cleanly: **contracts** in one, **implementation plus
-  rig plus documentation** in another, and the **far-end bundle** in its own, since that is a
-  binary artifact with its own rebuild rule.
+Every admission limit is configurable and countable from protocol frames.
+The relay publishes peer-visible limits without inspecting opaque organism data.
 
-**Documentation is integrated, not appended.** Read the whole target document before changing it;
-make targeted edits anchored on current content rather than whole-file writes; merge an addition
-into the entry that already covers it instead of adding a second version; surface and resolve a
-contradiction rather than leaving both readings standing; and revalidate the inbound and outbound
-cross-references after the edit. `dev_environment.md`, `system_decomposition.md` and the contracts
-are all documents another session may be editing at the same moment.
+The admin interface uses a separate authenticated listener. Its destructive calls require a
+confirmation value tied to current ring state. Renderer escaping has an automated test.
 
-**The stop rule.** Anything beyond a documented pattern — an unfamiliar failure, a deployment
-step no runbook describes, a rig state that does not match what `dev_environment.md` records —
-means **stop, leave the system as found, and report with evidence**. Do not improvise a recovery
-on a live deployment. An agent that stops with a clear account of what it saw has done its job;
-an agent that guesses has spent the deployment's evidence.
+### WP5 — churn harness
 
-## Live-rig constraints during M5
+The synthetic harness processed 50 million events in 5 minutes 42 seconds.
+Seven placement invariants stayed clean.
 
-**The rig keeps running through the whole milestone.** Six worlds, two machines, a relay, an
-archive and a collector that has been up since 2026-08-07. It is M5's first participant and the
-only fleet that rehearses `contract-b/4`. Every constraint below is on record in
-`dev_environment.md` and every one of them binds a rollout.
+The run showed these results:
 
-- **Heavy analysis and test runs go through `nice -n 19`.** `nice -n 19 go test -p 1 ./...` is the
-  measured form. Unniced load on this host reproduces the sidecar session storm — **it is on
-  record twice**, once as the 18:39Z–18:59Z episode and once as a deliberate reproduction at
-  21:25Z the same evening that dropped seven sidecar sessions and three mods. Serialising the
-  packages costs about 20 s of wall clock and buys the whole episode back. A churn episode dated
-  to one of these is not a deployment fault — but it must be said in the record.
-- **Build Go binaries to a scratch directory and `mv` over `bin/`.** Five running sidecars hold
-  `bin/sidecar` open, so an in-place `go build -o ../bin/` fails with `ETXTBSY`. The rename is
-  atomic and leaves every running process on its old inode until its own restart, which is what a
-  rolling change needs. Verify per slot by digest — `sha256sum /proc/<pid>/exe` against
-  `sha256sum bin/<name>`, plus `readlink`'s `(deleted)` suffix for a replaced binary; an inode
-  comparison cannot work on this host (measured 2026-08-11 — `dev_environment.md` has the why).
-- **Sidecar restarts are rolling: one at a time, and the gate is zero discarded journal bytes.**
-  The proven sequence per slot is `kill_pid sidecar-<n> -TERM`, wait for the process,
-  `start_sidecar <n>`, `wait_healthy`, `wait_grant`. Each sidecar must come back to **its own slot
-  and its own coordinate** with `reason=reclaimed`, replay its journal with **zero** discarded
-  bytes, and reopen all eight of its lanes. **The map should never leave its full lane count in any
-  sample** — 24/24 `peer_live` with six slots live, and **18/20 while slot 6 is dark**, because the
-  hole at (2,1) closes slot 3's north and south with `no_peer` and re-pairs four lanes as bypasses.
-  Count against what the map is, never against 24. Proven on the living deployment 2026-08-11: five
-  rolling restarts, zero discarded bytes on all five, the lane reading identical before and after.
-- **A mod deploy takes all five games down at once**, because `deploy.sh` copies into
-  `BepInEx/plugins/` and a running game locks the DLL. Budget ~100–110 s end to end: quit five,
-  `deploy.sh`, then `start_game` **one at a time**. Expect a **custody replay burst** on the way
-  back — `custodyDepth` 55 and `pacedDepth` 14 at its measured peak — draining to 0 in about four
-  minutes with nothing lost.
-- **Re-send the time scale after every world load, and read readiness off `/api/status`.** The
-  first `timescale` after a load answers `Time.timeScale=1.00` and **the reported scale sticks
-  there**; a second send twenty seconds later takes. A restarted game can land on a *different*
-  BepInEx log file than the one it left, so a line mark taken before the quit is meaningless and a
-  `wait_log` against it hangs — `/api/status` is per-slot and rotation-proof.
-- **Standing owner grant (2026-08-12): zero-gap archive restarts for page-view verification are
-  pre-authorized** — "as soon as you can and as many times as you need." The pattern stays the
-  proven one (pause the five local sidecars → restart the archive inside the pause → resume with
-  the zero-discarded gate); the grant removes the per-restart ask, not the discipline. Size the
-  pause from ~48 k records/s replay.
-- **Archive restarts are expensive and permanent — and the cost grows with the ledger.** The
-  replay scales with ledger size (~93 s at 3.7 M records on 2026-08-10, **~150 s at 6.24 M on
-  2026-08-11**; size any budget from today's ledger, not from a recorded figure), during which
-  the status page is dark and the crossings that happen are **never copied to the ledger** — the last measured restart cost **1,940 crossings**,
-  absent from the record forever. That is §5.1 working as designed: the traffic is untouched and
-  only the record has the gap. **Batch the reasons to restart the archive**; never restart it to
-  check something.
-- **`ARCHIVE_HTTP=0.0.0.0:8796` must be preserved** on every bring-up
-  (`ARCHIVE_HTTP=0.0.0.0:8796 ./e2e/run-m4-lan.sh up`). Without it the archive binds its compiled
-  `127.0.0.1:8796` and the second computer's operator loses their only view of the map.
-- **The far-end bundle is rebuilt after any mod or sidecar change.** `farend/dist/farend-bundle.zip`
-  is **tracked**, and its rule is that it carries what this machine runs: run
-  `farend/make-farend-bundle.sh` **after** `bibites-mod/deploy.sh` so the DLL in the zip is the one
-  deployed here. Re-taking the bundle is not optional after a `contract-b` change — a stale far-end
-  sidecar is what refuses an upgraded neighbour's exports. **The far end applies it at its
-  operator's leisure**, and whether it has applied it cannot be determined from here; the one
-  observable is a `client gone`/`client connected`/`reason=reclaimed` triple for `peer=slot-6` in
-  `relay.log`.
-- **Slot 6, the relay and the collector are not the orchestrator's to restart.** Slot 6 is the
-  second computer and D9 forbids the rig to drive it. The collector is gitignored, hand-launched
-  and relaunched by the owner after every reboot. A relay restart drops every peer's session at
-  once and is an owner-level act, not a debugging step.
-- **The BepInEx log-file starvation trap, on every five-game bring-up.** BepInEx hands out
-  `LogOutput.log` and `.1`–`.4` and then gives up; an instance that gets no log file **does not
-  merely lose its log — the mod never loads in it**, and it comes up `modConnected=false` with
-  `exportEdges=[]`. The tell is an *absence*: starvation writes nothing at all, where the config
-  race writes `configuration failed`. The remedy is to restart **that one instance** through the
-  rig's own `start_game <n>`, so the environment matches the other four exactly.
-- **Archive the BepInEx logs BEFORE any deploy.** `LogOutput.log` is truncated on launch, so a
-  deploy that skips `archive_bepinex_logs` destroys the evidence window it is being deployed to
-  measure. **It has happened once** — the `0.6.3` deploy cost roughly 33 saves' worth of history
-  between 16:26Z and 17:43Z on 2026-08-10, and the gap is permanent.
+- Returning peers did not spend new addresses.
+- The relay did not issue the same address twice.
+- Holes filled before an axis grew.
+- Status broadcasts stayed below the test bound.
 
-## Standing watch items that interact with M5 work
+The rectangle does not shrink. Long-lived maps therefore retain address history.
 
-- **The outbound-burst defect: found on slot 6's rejoin, proven fleet-wide, fixed and rolled out
-  (2026-08-11/12).** Slot 6's backlog drain tripped `maxFramesPerSecond 50` in a shed/reconnect
-  cycle — and the pre-roll log shows it was **never only a rejoin problem**: 19 sheds in 48
-  minutes across slot-6 (×11), slot-5 (×7) and slot-1 (×1), every peak exactly 51/s, slot 5
-  running the full backoff-ceiling cycle on the live map. The fix (9b1592d): the sidecar paces
-  outbound under the published `limits` from `HANDSHAKE_ACK` — half-ceiling rate, quarter-ceiling
-  burst, a control reserve — plus bulk gated on the handshake ack (which also closed a §5.2
-  empty-session-stamp defect). Rolled onto all five local sidecars 02:20–02:23Z with zero
-  discarded bytes and 24/24 lanes throughout. **Amended 2026-08-12 ~11:03Z: two sheds on a PACED
-  sidecar (slot 1), both inside the rendered-slot-1 pause-freeze window** — the game froze at
-  `timeScale 0` (a drawn-UI pause path, see the rendered-instance gotcha), the backlog built
-  behind the stalled mod, and the drain burst read peak 51/s despite the 25/s+12 pacer. Root
-  cause of the over-budget burst NOT established (candidates: NACK/bounce storm + control
-  traffic compressing into one meter window); zero sheds on slots 2–5 ever, zero on slot 1
-  outside that window, nothing lost (bounces went home). Watch: paced ≠ shed-proof when the mod
-  stalls. Debt CLEARED 2026-08-12: the far-end trip put slot 6 on the paced sidecar (a665042).
-  Log-reading caution: grep for `SHED THIS CONNECTION`, not `4007` (id substrings alias).
-- **A RENDERED instance can freeze at `timeScale 0` and never self-recover (2026-08-12).** Slot
-  1, drawn for a 20-minute session: the min-FPS servo re-arms as expected (achieved 21.8 → 5.6),
-  but ~7 s after the first periodic save the world hit `TimeController.paused` — a drawn-UI
-  pause path (`SaveController.LockControls` et al.) that headless instances cannot reach — and
-  froze for 7m20s (`pacedDepth` capped, custody 244, duplicate retransmits). The servo cannot
-  unpause (`CheckMinFPS` is gated on `!paused`). **Remedy, one command, worked first try:**
-  `send <n> timescale 100` routes through `ForcePlay` and clears the pause stack. Intermittent
-  (the second save did not reproduce it). Slot 6 is the standing rendered instance — if it ever
-  reads `timeScale 0` with static `simulatedTime`, this is the first suspect, and the remedy is
-  the far-end operator's to type. Also from the same session: the first-timescale-send trap did
-  NOT fire on either launch (fifth and sixth clean readings — the re-send-at-1 remains
-  mandatory, the second-send correction increasingly looks historical).
+### WP6 — packages
 
-Full readings and their evidence are in `dev_environment.md`, *The living deployment → Watch
-items*. What follows is only why each one touches this milestone.
+The release builder creates add-on archives for Windows and Linux.
+Authorized game payloads can also produce complete editions outside the public release.
 
-- **The 13-second heartbeat verdict is still accruing.** The raise from 3 500 ms landed
-  2026-08-10 and the first reading points the right way without being a rate — 3 saves over the
-  retired deadline, 0 sessions lost to them. WP2 and WP6 both ship into this: the timeout is a
-  sidecar-side number a stranger will inherit.
-- **The species-history serializer is the highest-value save-stall lever, and it is undesigned.**
-  `lineageMs` is **53% of `writeMs`** and flat against population, and the term compounds because
-  brains only get bigger. **43 of 76 saves still breach D14's 2 000 ms.** Risk 3's remaining
-  escalation — *a save path that does not block the tick* — is unspent, it is the only lever that
-  touches the stall rather than the cost, and it is **the owner's call, not a package's**. M5's
-  exposure is Risk 3: the cadence ships as a package default onto machines nobody here can retune.
-- **Slot 1 is the fragile world at ×100.** It oscillates 4–23 against its neighbours' 41–63, and
-  at an achieved 25–32× it lives several times more simulated time per wall second than the worlds
-  feeding it. Read it against `simulatedTime`, not wall clock. It is the world most likely to
-  distort a WP5 churn measurement taken on the live map.
-- **`genomeGaps` sits at ~117 000 (2026-08-11; was ~46 000–65 000 the day before) with no drain
-  window.** The rate cap is the mechanism and
-  the magnitude is not the finding — **the absence of a drain window is**. This is the number
-  **Risk 7** must be read against, not the 2 714 the item was opened on: after M5 a departed
-  stranger makes an entry permanent, and a monotone queue at this size is what §21's bounds exist
-  to stop making each archive reconnect more expensive than the last.
-- **The `8796` firewall rule and portproxy have no record of being run.** The owner steps exist in
-  `dev_environment.md` and the reboot ritual verifies only `8795`, so the status page is
-  effectively loopback-only from off this machine. **M5 makes the question moot rather than
-  answering it** — WP3 hosts the archive publicly behind a DNS name and TLS — but the connection is
-  worth carrying: the participant-facing view WP7 owes is the same page, and it has never actually
-  been reachable by anyone but the owner.
+The Windows install and uninstall suite passed 65 tests. The Linux suite passed 109 tests.
+Release `v0.1.0` published both add-on archives and `SHA256SUMS`.
+Fresh downloads passed checksum and ZIP-integrity tests.
 
-## Session-resume checklist
+### WP7 — participant support
 
-1. **`git fetch` first.** Parallel sessions share this checkout. Reconcile against `origin/main`
-   before staging anything, and stage explicit paths only.
-2. **Read the workspace and attention state if AI-viz is up.** That is where a standing picture of
-   in-flight work and anything awaiting the owner's answer lives.
-3. **Check rig health before any operation**, off `/api/status` rather than off a log: 6/6 slots
-   live and `modConnected`, 24/24 lanes `peer_live` with no bypass, `heldDepth` and
-   `timeoutBounces` at 0 — `pacedDepth` and `custodyDepth` fluctuate on a healthy map (2–42 and
-   22–58 measured at the bar on 2026-08-11; hard-fail only on the first two) — and the five
-   local slots reporting `saveMinutes 10`, `saveKeep 6` and `timeScale 100`. A slot reporting `2`/`4` came up from a stale environment and needs its game
-   restarted, not the rig. If the page does not answer, check whether the archive is inside its
-   replay before concluding anything — minutes, growing with the ledger (~150 s on 2026-08-11).
-4. **Check the memory directory is current** —
-   `/home/ubuntu/.claude/projects/-mnt-wsl-data-bibites-multiverse/memory/MEMORY.md` and what it
-   indexes — and update it if this document has moved past it.
-5. **Then read the work-package table above**, pick the next startable package by the recommended
-   sequence, and read that package in `m5_considerations.md` before dispatching an agent at it.
+The support surface names a remedy and responsible actor for each refusal.
+It includes installation, joining, diagnosis, leaving, support-matrix, and defaults guidance.
+
+The sidecar exposes two local support commands:
+
+- `--diagnose` examines the participant-visible setup and returns stable exit codes.
+- `--my-slot` shows one participant only their own world state.
+
+## Historical delivery order
+
+M5 used this dependency order:
+
+1. WP1 defined the protocols before implementation.
+2. WP2 and the WP7 documentation structure advanced together.
+3. WP3 and WP4 advanced together. WP5 followed against the settled relay.
+4. WP6 followed stable defaults and a stable support matrix.
+5. WP7 closed before the public playtest.
+6. WP8 followed the local churn and abuse rehearsals.
+
+This order remains useful for a future protocol major. It does not define a live rollout
+procedure.
+
+## Open public evidence at freeze
+
+At the freeze, the public experiment still needed to report these results:
+
+- The full M5 exit bar.
+- Crossing and epoch rates with non-owner peers.
+- Per-peer archive growth.
+- Forward-receipt cost at public traffic rates.
+- Broadcast volume under real churn.
+- Version-skew partition behavior.
+- Evidence for or against a migration velocity floor.
+- The opaque cross-version payload assumption, clearly marked as untested.
+
+The experiment can change the findings. It does not change the frozen delivery record.

@@ -392,8 +392,8 @@ lanhost() {
   note "Windows IPv4 addresses   :"
   printf '%s\n' "$winips" | sed 's/^/        /' >&2
   note ""
-  note "dev_environment.md records the LAN host as 192.168.1.227, confirmed by the far"
-  note "end itself. Pick that one unless this machine's addresses have changed — never a"
+  note "LAN_RELAY_HOST defaults to the historical M4 address 192.168.1.227. Pick it only"
+  note "if it still belongs to this machine — never pick a"
   note "172.x hypervisor address."
   note ""
   note "port proxies on this machine right now:"
@@ -416,8 +416,8 @@ lanhost() {
   note ""
   note "  # 3. forward it into WSL. RE-RUN THIS ONLY ON A DIFFERENCE: the portproxy and the"
   note "  #    firewall rule survive a reboot, and the WSL address above survived both of"
-  note "  #    2026-08-08 and 2026-08-09 (dev_environment.md, 'Bringing it back after a"
-  note "  #    reboot'). Compare the address above with the table above and re-add only if"
+  note "  #    the historical 2026-08-08 and 2026-08-09 reboots. Compare the address above"
+  note "  #    with the table above and re-add only if"
   note "  #    they disagree — re-running it blind drops the forward for as long as the"
   note "  #    two commands take. The LAN address does not change either way."
   note "  netsh interface portproxy delete v4tov4 listenport=$RELAY_PORT listenaddress=0.0.0.0"
@@ -544,8 +544,8 @@ lan_up() {
   start_archive
   # THE ARCHIVE REPLAYS THE WHOLE LEDGER BEFORE IT BINDS ANYTHING, and that wait
   # grows with the record. It was seconds when this line was written and it is
-  # ~93 s at 3.7M records / 1.22 GB (measured 2026-08-10, dev_environment.md
-  # *The archive's ledger recovery*), so the old 60 s would now fail a healthy
+  # ~93 s at 3.7M records / 1.22 GB, measured 2026-08-10. See dev_environment.md,
+  # *Archive replay and growth*. The old 60 s would now fail a healthy
   # bring-up. 300 s is ~3x today's replay; raise it again rather than believing
   # a timeout here, and size it from the ledger.
   note "waiting for the archive to replay $(du -h "$ARCHIVE_DATA/migrations.jsonl" 2>/dev/null | cut -f1) of ledger; it serves nothing until it finishes"
