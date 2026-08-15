@@ -101,9 +101,10 @@ func TestPublicLiveSurfacesShareOneVisualLanguage(t *testing.T) {
 
 func TestLandingCardLayoutKeepsRelatedContentTogether(t *testing.T) {
 	for _, want := range []string{
-		`.section{padding-block:80px}`,
-		`.principle h3{font-size:22px;margin:24px 0 10px}`,
-		`.flowitem b{display:block;margin:24px 0 7px}`,
+		`.section{padding-block:64px 0}`,
+		`.section:last-child{padding-bottom:64px}`,
+		`.principle h3{font-size:22px;margin:12px 0 10px}`,
+		`.flowitem b{display:block;margin:12px 0 7px}`,
 		`.faq{display:grid;grid-template-columns:1fr 1fr;align-items:start`,
 	} {
 		if !strings.Contains(landingPageHTML, want) {
