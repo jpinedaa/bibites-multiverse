@@ -34,7 +34,7 @@ raised only after the release that satisfies it exists.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The build creates an add-on archive for each platform. Release `0.2.2` publishes one executable
+The build creates an add-on archive for each platform. Release `0.2.3` publishes one executable
 Windows setup as the recommended Windows download. It publishes a complete Linux archive as the
 recommended Linux download. Both contain an authorized, unmodified game payload and a
 redistribution notice. The advanced Windows complete ZIP remains available.
@@ -160,16 +160,16 @@ embedded GUI.
 1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 2. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.2.2 && git push origin v0.2.2`. The page's links point into the tag, so the
+   `git tag v0.2.3 && git push origin v0.2.3`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, the Windows setup, and `SHA256SUMS`:
    ```sh
-   gh release create v0.2.2 \
-       release/dist/bibites-multiverse-0.2.2-*.zip \
-       release/dist/bibites-multiverse-0.2.2-*.exe \
+   gh release create v0.2.3 \
+       release/dist/bibites-multiverse-0.2.3-*.zip \
+       release/dist/bibites-multiverse-0.2.3-*.exe \
        release/dist/SHA256SUMS \
-       --title "Bibites Multiverse 0.2.2" \
+       --title "Bibites Multiverse 0.2.3" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 4. **Read the published page as a stranger would**, in a browser, and check the three things that

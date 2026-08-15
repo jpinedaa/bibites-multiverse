@@ -588,8 +588,8 @@ check "the two enrollment requests are byte-identical" \
 I_REQUEST_SECRET="$(sed -n '1s/.*"secret":"\([^"]*\)".*/\1/p' "$I_REQUESTS")"
 check "curl receives the secret through standard input, not its command line" \
   "$(b bash -c '! grep -qF "$2" "$1"' _ "$I_ARGS" "$I_REQUEST_SECRET")"
-check "the request identifies release 0.2.2" \
-  "$(b grep -qF '"release":"0.2.2"' "$I_REQUESTS")"
+check "the request identifies release 0.2.3" \
+  "$(b grep -qF '"release":"0.2.3"' "$I_REQUESTS")"
 check "the completed install removes the pending identity" \
   "$(b test ! -e "$I_DATA/enrollment-pending.json")"
 check "the completed credential is mode 0600" \
