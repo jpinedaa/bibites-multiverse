@@ -102,6 +102,10 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_LOG_ROTATE_MB:=100}"
 : "${MV_LOG_KEEP:=5}"
 : "${MV_LOG_LEVEL:=info}"
+: "${MV_PUBLIC_ENROLLMENT:=1}"
+: "${MV_PUBLIC_ENROLLMENT_MAX:=256}"
+: "${MV_PUBLIC_ENROLLMENT_PER_ADDRESS:=8}"
+: "${MV_PUBLIC_ENROLLMENT_WINDOW_HOURS:=24}"
 
 RELAY_DATA="$MV_STATE/relay"
 ARCHIVE_DATA="$MV_STATE/archive"
@@ -419,6 +423,10 @@ MULTIVERSE_RELAY_LISTEN=$MV_RELAY_BACKEND
 MULTIVERSE_RELAY_DATA_DIR=$RELAY_DATA
 MULTIVERSE_RELAY_ADVERTISE_URL=$ADVERTISE_URL
 MULTIVERSE_MIN_CONTRACT_VERSION=${MV_MIN_CONTRACT_VERSION:-}
+MULTIVERSE_PUBLIC_ENROLLMENT=$MV_PUBLIC_ENROLLMENT
+MULTIVERSE_PUBLIC_ENROLLMENT_MAX=$MV_PUBLIC_ENROLLMENT_MAX
+MULTIVERSE_PUBLIC_ENROLLMENT_PER_ADDRESS=$MV_PUBLIC_ENROLLMENT_PER_ADDRESS
+MULTIVERSE_PUBLIC_ENROLLMENT_WINDOW_HOURS=$MV_PUBLIC_ENROLLMENT_WINDOW_HOURS
 MULTIVERSE_LOG_FILE=$MV_LOGDIR/relay.log
 MULTIVERSE_LOG_ROTATE_MB=$MV_LOG_ROTATE_MB
 MULTIVERSE_LOG_KEEP=$MV_LOG_KEEP
@@ -751,6 +759,10 @@ phase_verify() {
   chk "status API over TLS"      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/status"
   chk "relay path rejects no credential" \
       "test \"\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://$MV_DOMAIN$CONTRACT_B_PATH)\" = 401"
+  chk "public enrollment rejects GET" \
+      "test \"\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://$MV_DOMAIN/api/enroll)\" = 403"
+  chk "public enrollment is enabled" \
+      "grep -qx 'MULTIVERSE_PUBLIC_ENROLLMENT=1' /etc/multiverse/relay.env"
   chk "relay backend is loopback only" "listener_is_loopback_only '$MV_RELAY_BACKEND'"
   chk "archive listener is loopback only" "listener_is_loopback_only '$MV_ARCHIVE_HTTP'"
   # Tested by READING IT AS $MV_USER, not by inspecting the mode: the mode can be

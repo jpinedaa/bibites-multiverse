@@ -204,7 +204,7 @@ that only half the rows would have.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/2",
-  "release": "0.1.0",
+  "release": "0.2.0",
   "published": "2026-08-15",
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",

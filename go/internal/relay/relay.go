@@ -64,8 +64,11 @@ type Options struct {
 	// handover mints a credential over the path, so the answer has to be able to
 	// carry a usable join string rather than half of one.
 	AdvertiseURL string
-	PingInterval time.Duration
-	PeerTimeout  time.Duration
+	// PublicEnrollment enables the HTTPS bootstrap endpoint for installers.
+	// It is disabled unless an operator sets explicit capacity limits.
+	PublicEnrollment PublicEnrollmentOptions
+	PingInterval     time.Duration
+	PeerTimeout      time.Duration
 	// ArchiveQueue is the per-subscriber copy queue (§5.1).
 	ArchiveQueue int
 	// StatusCoalesce is the minimum spacing between PEER_STATUS broadcasts and
@@ -107,6 +110,9 @@ type Server struct {
 	churnThreshold    int
 	statsBroadcast    time.Duration
 	forwardRetain     time.Duration
+	publicEnrollment  PublicEnrollmentOptions
+	enrollmentMu      sync.Mutex
+	enrollmentByAddr  map[string][]time.Time
 
 	// B24's two socket counters. They are outside s.mu deliberately: an upgrade
 	// must not queue behind a PEER_STATUS broadcast, and a connection storm is
@@ -276,6 +282,9 @@ func New(opts Options) (*Server, error) {
 				opts.MinContractVersion, wire.ProtocolB, err)
 		}
 	}
+	if err := opts.PublicEnrollment.applyDefaults(); err != nil {
+		return nil, err
+	}
 	opts.Limits.ApplyDefaults()
 	grid, err := LoadGrid(opts.DataDir)
 	if err != nil {
@@ -304,6 +313,8 @@ func New(opts Options) (*Server, error) {
 		coalesceWindow:    opts.StatusCoalesce,
 		statsBroadcast:    opts.StatsBroadcast,
 		forwardRetain:     opts.ForwardRecordRetention,
+		publicEnrollment:  opts.PublicEnrollment,
+		enrollmentByAddr:  map[string][]time.Time{},
 		sessionID:         wire.NewUUID(),
 		stop:              make(chan struct{}),
 		grid:              grid,
@@ -499,6 +510,9 @@ func (s *Server) Close() {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc(contractb.ContractBPath, s.serveWS)
+	if s.publicEnrollment.Enabled {
+		mux.HandleFunc(PublicEnrollmentPath, s.servePublicEnrollment)
+	}
 	// §3, and again at §22 B32: a relay MUST keep serving EVERY retired path and
 	// MUST close every connection on one immediately with 4000, so a sidecar left
 	// behind gets the defined loud error instead of a bare HTTP 404.

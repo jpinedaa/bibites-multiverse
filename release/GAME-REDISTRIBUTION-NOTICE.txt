@@ -1,0 +1,9 @@
+The Bibites redistribution notice
+
+The Bibites developer gave the Bibites Multiverse project permission to
+redistribute the game files in its bundled installer. The project maintainers
+confirmed this permission before release v0.2.0.
+
+The game remains the property of its copyright holder. This notice records the
+permission to distribute it with Bibites Multiverse. It does not change the
+license of the game or the Bibites Multiverse source code.

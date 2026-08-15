@@ -285,6 +285,21 @@ func (s *Store) Len() int {
 	return len(s.peers)
 }
 
+// CountPrefix reports how many credentials have an id that starts with prefix.
+// Public enrollment uses a reserved prefix, so its capacity limit does not
+// count operator, archive, or manually issued peer credentials.
+func (s *Store) CountPrefix(prefix string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	n := 0
+	for id := range s.peers {
+		if strings.HasPrefix(id, prefix) {
+			n++
+		}
+	}
+	return n
+}
+
 // GrantOf reports the grant held for peerID.
 func (s *Store) GrantOf(peerID string) (string, bool) {
 	s.mu.RLock()
@@ -325,6 +340,55 @@ func (s *Store) Mint(peerID, grant string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mintLocked(peerID, grant)
+}
+
+// Enroll stores a client-generated secret. A repeated call with the same
+// peerID, secret, and grant succeeds without changing the verifier. This makes
+// an HTTPS enrollment retry safe when the first response does not reach the
+// installer. A different secret or grant never replaces an existing record.
+func (s *Store) Enroll(peerID, secret, grant string) (bool, error) {
+	if peerID == "" {
+		return false, errors.New("peercred: enroll needs a peerId")
+	}
+	if !ValidGrant(grant) {
+		return false, fmt.Errorf("peercred: grant %q is not peer/subscribe/admin", grant)
+	}
+	if err := ValidSecret(secret); err != nil {
+		return false, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rec, ok := s.peers[peerID]; ok {
+		if rec.Grant != grant || !recordMatches(rec, secret) {
+			return false, fmt.Errorf("%w: %s", ErrExists, peerID)
+		}
+		return false, nil
+	}
+
+	salt := newSalt()
+	s.peers[peerID] = record{
+		PeerID:    peerID,
+		Grant:     grant,
+		Salt:      hex.EncodeToString(salt),
+		Verifier:  hex.EncodeToString(digest(salt, secret)),
+		CreatedAt: time.Now().UnixMilli(),
+	}
+	if err := s.saveLocked(); err != nil {
+		delete(s.peers, peerID)
+		return false, err
+	}
+	return true, nil
+}
+
+func recordMatches(rec record, secret string) bool {
+	salt, saltErr := hex.DecodeString(rec.Salt)
+	want, verifierErr := hex.DecodeString(rec.Verifier)
+	if saltErr != nil || verifierErr != nil {
+		return false
+	}
+	got := digest(salt, secret)
+	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
 func (s *Store) mintLocked(peerID, grant string) (string, error) {

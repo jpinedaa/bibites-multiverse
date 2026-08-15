@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
     Prove that the installer puts back exactly what it took, against a sandbox
-    game directory.
+    copy of the real Windows game.
 
 .DESCRIPTION
     Runs the REAL Install-BibitesMultiverse.ps1 and Uninstall-BibitesMultiverse.ps1
-    against a throwaway game tree under the temp directory, and compares the tree
-    hash-for-hash before and after. It never touches a Steam copy of the game, a
-    trust store, a running process or the network.
+    against throwaway copies of a real game under the temp directory, and
+    compares each tree hash-for-hash before and after. It reads the source game
+    but never changes it. It never touches a trust store, a running process or
+    the network.
 
     Six scenarios:
 
@@ -31,18 +32,18 @@
     the plugin, the sidecar, the BepInEx archive and support-matrix.json.
     Defaults to this script's own directory.
 
-.PARAMETER GameAssembly
-    A copy of the BibitesAssembly.dll whose SHA-256 is in support-matrix.json.
-    The sandbox game is built around it, so that the matrix check passes for the
-    same reason it passes on a real machine.
+.PARAMETER RealGameDir
+    An installed Windows game whose SHA-256 is in support-matrix.json. Each
+    positive scenario uses a complete copy of this game. Existing BepInEx files
+    are excluded from the clean copy.
 
 .EXAMPLE
-    .\test-install-uninstall.ps1 -KitDir .\kit -GameAssembly .\BibitesAssembly.dll
+    .\test-install-uninstall.ps1 -KitDir .\kit -RealGameDir 'C:\Program Files (x86)\Steam\steamapps\common\The Bibites'
 #>
 [CmdletBinding()]
 param(
     [string]$KitDir = '',
-    [Parameter(Mandatory = $true)][string]$GameAssembly,
+    [Parameter(Mandatory = $true)][string]$RealGameDir,
     [string]$CaFile = '',
     [switch]$KeepSandbox
 )
@@ -51,12 +52,19 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
 if (-not $KitDir) { $KitDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
-$KitDir       = (Resolve-Path $KitDir).Path
-$GameAssembly = (Resolve-Path $GameAssembly).Path
+$KitDir     = (Resolve-Path $KitDir).Path
+$RealGameDir = (Resolve-Path $RealGameDir).Path
+$realGameExe = Join-Path $RealGameDir 'The Bibites.exe'
+$GameAssembly = Join-Path $RealGameDir 'The Bibites_Data\Managed\BibitesAssembly.dll'
+foreach ($p in @($realGameExe, $GameAssembly)) {
+    if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { throw "not a real Windows game: $p" }
+}
 $launcher     = Join-Path $KitDir 'Install-BibitesMultiverse.cmd'
+$guiInstaller = Join-Path $KitDir 'Install-BibitesMultiverse-Gui.ps1'
+$gameFinder   = Join-Path $KitDir 'Find-BibitesGame.ps1'
 $installer    = Join-Path $KitDir 'Install-BibitesMultiverse.ps1'
 $uninstaller  = Join-Path $KitDir 'Uninstall-BibitesMultiverse.ps1'
-foreach ($p in @($launcher, $installer, $uninstaller)) {
+foreach ($p in @($launcher, $guiInstaller, $gameFinder, $installer, $uninstaller)) {
     if (-not (Test-Path $p)) { throw "not in -KitDir: $p" }
 }
 
@@ -82,11 +90,22 @@ function Scenario { param([string]$Name) Write-Host ""; Write-Host "==== $Name" 
 
 $launcherText = Get-Content -LiteralPath $launcher -Raw
 Check "the click launcher starts the PowerShell installer" `
-    ($launcherText -match 'Install-BibitesMultiverse\.ps1')
+    ($launcherText -match 'Install-BibitesMultiverse-Gui\.ps1')
 Check "the click launcher uses process-only RemoteSigned" `
     ($launcherText -match '(?i)-ExecutionPolicy RemoteSigned')
 Check "the click launcher never uses an execution-policy bypass" `
     (-not ($launcherText -match '(?i)ExecutionPolicy Bypass'))
+$guiText = Get-Content -LiteralPath $guiInstaller -Raw
+Check "the GUI selects start-after-install by default" `
+    ($guiText -match '\$startAfter\.Checked\s*=\s*\$true')
+Check "the GUI offers the included portable game" `
+    ($guiText -match 'Use the included portable game')
+Check "the GUI offers an existing game" `
+    ($guiText -match 'Use a game that is already installed')
+$probe = (& $guiInstaller -Probe | Out-String) | ConvertFrom-Json
+Check "the game search finds a real installed game" `
+    (Test-Path -LiteralPath (Join-Path ([string]$probe.foundGame) 'The Bibites.exe') -PathType Leaf)
+Check "the add-on package defaults to an existing game" ($probe.defaultRuntime -eq 'external')
 
 function Get-TreeSnapshot {
     param([string]$Root)
@@ -113,11 +132,15 @@ function Compare-Snapshot {
 }
 
 function New-SandboxGame {
-    param([string]$Path, [string]$Assembly)
-    $managed = Join-Path $Path 'The Bibites_Data\Managed'
-    New-Item -ItemType Directory -Force -Path $managed | Out-Null
-    Set-Content -Path (Join-Path $Path 'The Bibites.exe') -Value 'not a real game' -Encoding ASCII
-    Copy-Item -Path $Assembly -Destination (Join-Path $managed 'BibitesAssembly.dll') -Force
+    param([string]$Path)
+    New-Item -ItemType Directory -Force -Path $Path | Out-Null
+    $modOverlay = @('BepInEx', 'winhttp.dll', 'version.dll', 'doorstop_config.ini', '.doorstop_version')
+    Get-ChildItem -LiteralPath $RealGameDir -Force |
+        Where-Object { $_.Name -notin $modOverlay } |
+        Copy-Item -Destination $Path -Recurse -Force
+    if (-not (Test-Path -LiteralPath (Join-Path $Path 'The Bibites.exe') -PathType Leaf)) {
+        throw 'the real game copy has no The Bibites.exe'
+    }
 }
 
 function New-JoinFile {
@@ -146,7 +169,7 @@ Scenario "A - a machine with no BepInEx"
 $aRoot = Join-Path $sandbox 'A'
 $aGame = Join-Path $aRoot 'game'
 $aData = Join-Path $aRoot 'data'
-New-SandboxGame -Path $aGame -Assembly $GameAssembly
+New-SandboxGame -Path $aGame
 $aJoin = Join-Path $aRoot 'join.txt'
 $aSecret = New-JoinFile $aJoin
 
@@ -202,7 +225,9 @@ Set-Content -Path (Join-Path $aGame 'BepInEx\cache\chainloader.dat') -Value 'cac
 $startScript = Join-Path $KitDir 'Start-Multiverse.ps1'
 if (Test-Path $startScript) {
     $errors = $null
-    [void][System.Management.Automation.Language.Parser]::ParseFile($startScript, [ref]$null, [ref]$errors)
+    $tokens = $null
+    [void][System.Management.Automation.Language.Parser]::ParseInput(
+        (Get-Content -Raw -LiteralPath $startScript), [ref]$tokens, [ref]$errors)
     Check "the generated start script parses" (@($errors).Count -eq 0) (($errors | Out-String))
     $startText = Get-Content -Raw -LiteralPath $startScript
     foreach ($setting in @('MULTIVERSE_EXPORT_EDGES      = ''E,N,W,S''',
@@ -220,7 +245,9 @@ if (Test-Path $startScript) {
 $stopScript = Join-Path $KitDir 'Stop-Multiverse.ps1'
 if (Test-Path $stopScript) {
     $errors = $null
-    [void][System.Management.Automation.Language.Parser]::ParseFile($stopScript, [ref]$null, [ref]$errors)
+    $tokens = $null
+    [void][System.Management.Automation.Language.Parser]::ParseInput(
+        (Get-Content -Raw -LiteralPath $stopScript), [ref]$tokens, [ref]$errors)
     Check "the generated stop script parses" (@($errors).Count -eq 0) (($errors | Out-String))
     $stopText = Get-Content -Raw -LiteralPath $stopScript
     Check "the stop script stops only this install's recorded processes" `
@@ -251,7 +278,7 @@ Scenario "B - a machine that already has BepInEx and another mod"
 $bRoot = Join-Path $sandbox 'B'
 $bGame = Join-Path $bRoot 'game'
 $bData = Join-Path $bRoot 'data'
-New-SandboxGame -Path $bGame -Assembly $GameAssembly
+New-SandboxGame -Path $bGame
 New-Item -ItemType Directory -Force -Path (Join-Path $bGame 'BepInEx\core') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bGame 'BepInEx\plugins') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $bGame 'BepInEx\config') | Out-Null
@@ -287,7 +314,7 @@ Scenario "C - a plugin somebody changed after the install"
 $cRoot = Join-Path $sandbox 'C'
 $cGame = Join-Path $cRoot 'game'
 $cData = Join-Path $cRoot 'data'
-New-SandboxGame -Path $cGame -Assembly $GameAssembly
+New-SandboxGame -Path $cGame
 $cJoin = Join-Path $cRoot 'join.txt'
 [void](New-JoinFile $cJoin)
 
@@ -309,9 +336,8 @@ Scenario "D - a game build that is not in the support matrix"
 $dRoot = Join-Path $sandbox 'D'
 $dGame = Join-Path $dRoot 'game'
 $dData = Join-Path $dRoot 'data'
+New-SandboxGame -Path $dGame
 $managed = Join-Path $dGame 'The Bibites_Data\Managed'
-New-Item -ItemType Directory -Force -Path $managed | Out-Null
-Set-Content -Path (Join-Path $dGame 'The Bibites.exe') -Value 'not a real game' -Encoding ASCII
 Set-Content -Path (Join-Path $managed 'BibitesAssembly.dll') -Value 'a different game build' -Encoding ASCII
 $dJoin = Join-Path $dRoot 'join.txt'
 [void](New-JoinFile $dJoin)
@@ -333,7 +359,7 @@ if ($CaFile) {
     $eRoot = Join-Path $sandbox 'E'
     $eGame = Join-Path $eRoot 'game'
     $eData = Join-Path $eRoot 'data'
-    New-SandboxGame -Path $eGame -Assembly $GameAssembly
+    New-SandboxGame -Path $eGame
     $eJoin = Join-Path $eRoot 'join.txt'
     [void](New-JoinFile $eJoin)
 
@@ -371,15 +397,15 @@ Get-ChildItem -LiteralPath $KitDir -Force | Copy-Item -Destination $fKit -Recurs
 Remove-Item -LiteralPath (Join-Path $fKit 'Start-Multiverse.ps1'), `
                          (Join-Path $fKit 'Stop-Multiverse.ps1') -Force -ErrorAction SilentlyContinue
 $fPayload = Join-Path $fKit 'game'
-New-SandboxGame -Path $fPayload -Assembly $GameAssembly
+New-SandboxGame -Path $fPayload
 $fSha = (Get-FileHash -LiteralPath $GameAssembly -Algorithm SHA256).Hash.ToUpperInvariant()
-Set-Content -LiteralPath (Join-Path $fKit 'GAME-LICENSE.txt') -Value 'test publisher license' -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $fKit 'GAME-REDISTRIBUTION-NOTICE.txt') -Value 'test redistribution permission' -Encoding ASCII
 $descriptor = [ordered]@{
     format = 'bibites-multiverse/game-payload/1'
     platform = 'Windows'
     gameVersion = 'test'
     assemblySha256 = $fSha
-    licenseFile = 'GAME-LICENSE.txt'
+    redistributionNoticeFile = 'GAME-REDISTRIBUTION-NOTICE.txt'
 }
 $descriptor | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $fKit 'game-payload.json') -Encoding ASCII
 $manifestPath = Join-Path $fKit 'MANIFEST.sha256'
@@ -395,6 +421,9 @@ $fJoin = Join-Path $fRoot 'join.txt'
 [void](New-JoinFile $fJoin)
 $fInstaller = Join-Path $fKit 'Install-BibitesMultiverse.ps1'
 $fUninstaller = Join-Path $fKit 'Uninstall-BibitesMultiverse.ps1'
+$fProbe = (& (Join-Path $fKit 'Install-BibitesMultiverse-Gui.ps1') -Probe | Out-String) | ConvertFrom-Json
+Check "the complete package defaults to its included portable game" `
+    ($fProbe.hasBundledGame -eq $true -and $fProbe.defaultRuntime -eq 'bundled')
 
 $install = Invoke-Script $fInstaller @{ GameDir = $fPayload; DataRoot = $fData; JoinStringFile = $fJoin }
 Check "the complete edition refuses an external game path" ($install.ExitCode -eq 1) $install.Output

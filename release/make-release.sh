@@ -54,7 +54,7 @@ CACHE="$REPO/farend/dist/cache"
 PROJECT_LICENSE="$REPO/LICENSE"
 THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
 
-RELEASE=0.1.0
+RELEASE=0.2.0
 TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
@@ -77,23 +77,23 @@ export TZ=UTC
 ALLOW_DIRTY=0
 WINDOWS_GAME_PAYLOAD=''
 LINUX_GAME_PAYLOAD=''
-GAME_LICENSE=''
+GAME_REDISTRIBUTION_NOTICE=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --windows-game-dir) [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; WINDOWS_GAME_PAYLOAD="$2"; shift 2 ;;
     --linux-game-dir)   [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; LINUX_GAME_PAYLOAD="$2"; shift 2 ;;
-    --game-license)     [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; GAME_LICENSE="$2"; shift 2 ;;
-    *) printf 'usage: %s [--allow-dirty] [--windows-game-dir <dir>] [--linux-game-dir <dir>] [--game-license <file>]\n' "$0" >&2; exit 2 ;;
+    --game-redistribution-notice) [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; GAME_REDISTRIBUTION_NOTICE="$2"; shift 2 ;;
+    *) printf 'usage: %s [--allow-dirty] [--windows-game-dir <dir>] [--linux-game-dir <dir>] [--game-redistribution-notice <file>]\n' "$0" >&2; exit 2 ;;
   esac
 done
 
-if { [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; } && [ -z "$GAME_LICENSE" ]; then
-  printf 'complete packages require --game-license <applicable license file>\n' >&2
+if { [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; } && [ -z "$GAME_REDISTRIBUTION_NOTICE" ]; then
+  printf 'complete packages require --game-redistribution-notice <permission notice file>\n' >&2
   exit 2
 fi
-if [ -n "$GAME_LICENSE" ] && [ -z "$WINDOWS_GAME_PAYLOAD" ] && [ -z "$LINUX_GAME_PAYLOAD" ]; then
-  printf '%s has no effect without --windows-game-dir or --linux-game-dir\n' '--game-license' >&2
+if [ -n "$GAME_REDISTRIBUTION_NOTICE" ] && [ -z "$WINDOWS_GAME_PAYLOAD" ] && [ -z "$LINUX_GAME_PAYLOAD" ]; then
+  printf '%s has no effect without --windows-game-dir or --linux-game-dir\n' '--game-redistribution-notice' >&2
   exit 2
 fi
 
@@ -353,7 +353,10 @@ rm -rf "$DIST/stage" "$DIST/$ZIP_NAME" "$DIST/$LINUX_ZIP_NAME" \
 mkdir -p "$STAGE" "$LINUX_STAGE"
 
 cp "$RELDIR/kit/Install-BibitesMultiverse.ps1"   "$STAGE/"
+cp "$RELDIR/kit/Install-BibitesMultiverse-Gui.ps1" "$STAGE/"
 cp "$RELDIR/kit/Install-BibitesMultiverse.cmd"   "$STAGE/"
+cp "$RELDIR/kit/Find-BibitesGame.ps1"            "$STAGE/"
+cp "$RELDIR/kit/public-map.json"                  "$STAGE/"
 cp "$RELDIR/kit/Uninstall-BibitesMultiverse.ps1" "$STAGE/"
 cp "$RELDIR/kit/README.md"                       "$STAGE/"
 cp "$MATRIX_JSON"                                "$STAGE/support-matrix.json"
@@ -394,7 +397,7 @@ note "the Linux scripts parse, are LF, and carry their executable bit"
 # one long line. Done here rather than with unix2dos, which is not on every
 # machine: whether a tool happens to be installed must not change the archive's
 # checksum. THE LINUX KIT IS DELIBERATELY NOT IN THIS LIST.
-for f in Install-BibitesMultiverse.cmd Install-BibitesMultiverse.ps1 Uninstall-BibitesMultiverse.ps1 README.md LICENSE THIRD_PARTY_NOTICES.md; do
+for f in Install-BibitesMultiverse.cmd Install-BibitesMultiverse.ps1 Install-BibitesMultiverse-Gui.ps1 Find-BibitesGame.ps1 Uninstall-BibitesMultiverse.ps1 README.md LICENSE THIRD_PARTY_NOTICES.md; do
   python3 -c "
 import sys
 p = sys.argv[1]
@@ -417,7 +420,7 @@ validate_game_payload() { # $1 source, $2 platform, $3 executable, $4 assembly s
   [ "$got" = "$expected_sha" ] || die "$platform game payload assembly is $got, want matrix hash $expected_sha"
   bad="$(find "$source" -type l -print -quit)"
   [ -z "$bad" ] || die "$platform game payload contains a symbolic link: $bad"
-  for bad in BepInEx winhttp.dll doorstop_config.ini run_bepinex.sh libdoorstop.so .doorstop_version; do
+  for bad in BepInEx winhttp.dll version.dll doorstop_config.ini run_bepinex.sh libdoorstop.so .doorstop_version; do
     [ ! -e "$source/$bad" ] || die "$platform game payload is already modded ($bad exists). Use a clean source game directory."
   done
   if [ "$platform" = Linux ]; then
@@ -429,13 +432,13 @@ validate_game_payload() { # $1 source, $2 platform, $3 executable, $4 assembly s
 stage_complete() { # $1 add-on stage, $2 complete stage, $3 game source, $4 platform, $5 executable, $6 assembly sha
   local addon="$1" complete="$2" source="$3" platform="$4" executable="$5" expected_sha="$6"
   validate_game_payload "$source" "$platform" "$executable" "$expected_sha"
-  [ -f "$GAME_LICENSE" ] && [ -s "$GAME_LICENSE" ] && [ ! -L "$GAME_LICENSE" ] \
-    || die "game license must be a non-empty regular file, not a symbolic link: $GAME_LICENSE"
+  [ -f "$GAME_REDISTRIBUTION_NOTICE" ] && [ -s "$GAME_REDISTRIBUTION_NOTICE" ] && [ ! -L "$GAME_REDISTRIBUTION_NOTICE" ] \
+    || die "game redistribution notice must be a non-empty regular file, not a symbolic link: $GAME_REDISTRIBUTION_NOTICE"
   mkdir -p "$complete"
   cp -a "$addon/." "$complete/"
   mkdir -p "$complete/game"
   cp -a "$source/." "$complete/game/"
-  cp "$GAME_LICENSE" "$complete/GAME-LICENSE.txt"
+  cp "$GAME_REDISTRIBUTION_NOTICE" "$complete/GAME-REDISTRIBUTION-NOTICE.txt"
   python3 - "$complete/game-payload.json" "$platform" "$GAME_VERSION" "$expected_sha" <<'PY'
 import json, sys
 path, platform, version, assembly_sha = sys.argv[1:]
@@ -444,7 +447,7 @@ doc = {
     "platform": platform,
     "gameVersion": version,
     "assemblySha256": assembly_sha,
-    "licenseFile": "GAME-LICENSE.txt",
+    "redistributionNoticeFile": "GAME-REDISTRIBUTION-NOTICE.txt",
 }
 with open(path, "w", encoding="utf-8", newline="\n") as f:
     json.dump(doc, f, indent=2)
