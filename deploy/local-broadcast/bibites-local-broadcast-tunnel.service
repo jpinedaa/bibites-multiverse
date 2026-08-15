@@ -1,0 +1,9 @@
+[Unit]
+Description=Private RTMP tunnel for the local Bibites broadcast
+PartOf=bibites-local-broadcast.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/lib/bibites-local-broadcast/bin/run-tunnel
+Restart=always
+RestartSec=5

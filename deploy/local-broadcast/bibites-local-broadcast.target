@@ -1,0 +1,6 @@
+[Unit]
+Description=Local Bibites broadcast
+Wants=bibites-local-broadcast-tunnel.service
+
+[Install]
+WantedBy=default.target

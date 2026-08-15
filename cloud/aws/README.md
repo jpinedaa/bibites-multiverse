@@ -271,6 +271,11 @@ It does not read or copy the secret value.
 
 Review [`docs/live-broadcast.md`](../../docs/live-broadcast.md) before deployment.
 
+If GPU quota is not available, use the separate
+[`deploy/local-broadcast/`](../../deploy/local-broadcast/README.md) fallback.
+It runs a new offline exhibition world on a local Windows NVIDIA GPU.
+It is not the cloud GPU host or a Multiverse map world.
+
 ## Cost checks
 
 Do not use a quote recorded in this repository.

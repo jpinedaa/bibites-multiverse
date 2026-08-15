@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}/bibites-local-broadcast/broadcast.env"
+[ -r "$config" ] || { echo "missing $config" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "$config"
+
+account="$(aws --profile "$AWS_PROFILE" sts get-caller-identity --query Account --output text)"
+[ "$account" = "$BIBITES_AWS_ACCOUNT_ID" ] || { echo "wrong AWS account: $account" >&2; exit 1; }
+instance="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation describe-stacks \
+  --stack-name "$CLOUD_STACK" \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' --output text)"
+[ -n "$instance" ] && [ "$instance" != None ] || { echo 'the cloud host instance was not found' >&2; exit 1; }
+
+exec aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm start-session \
+  --target "$instance" --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters "{\"host\":[\"$STREAM_ORIGIN_PRIVATE_IP\"],\"portNumber\":[\"1935\"],\"localPortNumber\":[\"$STREAM_LOCAL_PORT\"]}"

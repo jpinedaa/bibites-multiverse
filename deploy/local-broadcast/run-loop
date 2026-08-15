@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -u
+
+runner="$HOME/.local/lib/bibites-local-broadcast/bin/run-windows"
+while :; do
+  "$runner"
+  sleep 10
+done

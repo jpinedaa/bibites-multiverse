@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}/bibites-local-broadcast/broadcast.env"
+[ -r "$config" ] || { echo "missing $config" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "$config"
+exec "$POWERSHELL_BIN" -NoProfile -ExecutionPolicy RemoteSigned -File "$WINDOWS_RUNNER"

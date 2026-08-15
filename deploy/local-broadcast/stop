@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+tmux -L bibites-broadcast kill-session -t bibites-local-broadcast >/dev/null 2>&1 || true
+"$HOME/.local/lib/bibites-local-broadcast/bin/stop-windows" || true
+systemctl --user stop bibites-local-broadcast.target

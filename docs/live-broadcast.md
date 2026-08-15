@@ -9,7 +9,7 @@ It does not describe a current deployment, quota request, resource identifier, a
 ## Data path
 
 ```text
-game world -> Xorg -> FFmpeg/NVENC -> private RTMP -> MediaMTX -> loopback HLS -> nginx -> viewers
+game world -> GPU capture -> hardware H.264 -> private RTMP -> MediaMTX -> loopback HLS -> nginx -> viewers
 ```
 
 The publisher sends one named stream to a private RTMP listener.
@@ -88,6 +88,21 @@ CloudFormation retains the volume after stack deletion.
 CAUTION: Stop and disable the source world before you create the snapshot.
 Two copies with one credential can create different descendants from one checkpoint.
 
+## Local Windows fallback
+
+Use [`deploy/local-broadcast/`](../deploy/local-broadcast/README.md) while cloud GPU quota is not available.
+This fallback runs a new offline exhibition world on a Windows NVIDIA GPU.
+It does not copy a map world, start a sidecar, or load a map credential.
+
+The installer creates private copies of the game and OBS below the Windows user profile.
+OBS captures the game process and uses NVENC to publish H.264.
+A WSL service opens a private RTMP tunnel through AWS Systems Manager.
+A dedicated `tmux` session supervises the Windows game and OBS processes.
+
+The computer must stay powered on, and the Windows user must stay logged in.
+Windows, WSL, display, or GPU restarts can interrupt the stream.
+Run the fallback start command again after a computer restart.
+
 ## Deployment inputs
 
 Keep these inputs in private operations storage:
@@ -158,6 +173,8 @@ sudo systemctl is-active multiverse-stream nginx
 sudo ss -ltnp | grep -E ':(1935|8888|9998) '
 sudo /opt/multiverse/deploy/provision.sh --only verify
 curl -fsS https://<service-domain>/watch
+curl -fsS -H 'Cookie: cookieCheck=1' \
+  'https://<service-domain>/stream/bibites/index.m3u8?cookieCheck=1'
 ```
 
 The expected listeners are:

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session='bibites-local-broadcast'
+systemctl --user start bibites-local-broadcast.target
+if ! tmux -L bibites-broadcast has-session -t "$session" 2>/dev/null; then
+  tmux -L bibites-broadcast new-session -d -s "$session" \
+    "$HOME/.local/lib/bibites-local-broadcast/bin/run-loop"
+fi
