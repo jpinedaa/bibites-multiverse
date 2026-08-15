@@ -81,6 +81,10 @@ It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`), the 
 the build side, never the player's side. Everything heavy runs under `nice -n 19`, because this
 host runs the living deployment.
 
+Go can omit VCS metadata when a linked worktree points to Git data on another filesystem. In that
+case, set `RELEASE_SIDECAR_BUILD_REPO` to a clean checkout of the same commit. The builder checks
+the revision and refuses a missing sidecar stamp.
+
 **It refuses to build a release nobody has run.** Before it packages anything it requires:
 
 1. `bibites-mod/libs/BibitesAssembly.dll` to be the game build `docs/support-matrix.md`'s

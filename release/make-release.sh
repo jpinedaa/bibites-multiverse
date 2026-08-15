@@ -54,6 +54,9 @@ BUNDLE="$REPO/farend/dist/farend-bundle.zip"
 CACHE="$REPO/farend/dist/cache"
 PROJECT_LICENSE="$REPO/LICENSE"
 THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
+# A linked worktree can make Go omit VCS metadata when its .git file points to
+# another filesystem. Use a clean checkout of this exact commit in that case.
+SIDECAR_BUILD_REPO="${RELEASE_SIDECAR_BUILD_REPO:-$REPO}"
 
 RELEASE=0.2.0
 TAG="v$RELEASE"
@@ -120,6 +123,19 @@ if [ -n "$DIRT" ]; then
   note "and MUST NOT be published."
 else
   note "clean at $(git -C "$REPO" rev-parse --short HEAD)"
+fi
+
+SOURCE_REV="$(git -C "$REPO" rev-parse HEAD)"
+[ -d "$SIDECAR_BUILD_REPO/go" ] \
+  || die "missing $SIDECAR_BUILD_REPO/go"
+SIDECAR_BUILD_REV="$(git -C "$SIDECAR_BUILD_REPO" rev-parse HEAD)"
+[ "$SIDECAR_BUILD_REV" = "$SOURCE_REV" ] \
+  || die "the sidecar build checkout is $SIDECAR_BUILD_REV, want $SOURCE_REV"
+if [ "$SIDECAR_BUILD_REPO" != "$REPO" ]; then
+  [ -z "$(git -C "$SIDECAR_BUILD_REPO" status --porcelain)" ] \
+    || die "the sidecar build checkout is dirty: $SIDECAR_BUILD_REPO"
+  [ -z "$DIRT" ] \
+    || die "a clean sidecar checkout cannot represent this dirty package rehearsal"
 fi
 
 # ------------------------------------------------------------------ the matrix
@@ -256,8 +272,12 @@ if [ -n "$(git -C "$REPO" status --porcelain -- go/)" ]; then
 fi
 note "go/ is identical to the tree the fleet's sidecar was built from"
 
-( cd "$REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-    go build -o "$BUILD/multiverse-sidecar.exe" ./cmd/sidecar )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$BUILD/multiverse-sidecar.exe" ./cmd/sidecar )
+BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar.exe" \
+  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+[ "$BUILT_REV" = "$SOURCE_REV" ] \
+  || die "the Windows sidecar VCS stamp is '${BUILT_REV:-missing}', want $SOURCE_REV"
 BUILT_SIDECAR_SHA="$(sha "$BUILD/multiverse-sidecar.exe")"
 if [ "$BUILT_SIDECAR_SHA" = "$(sha "$REF_SIDECAR")" ]; then
   note "byte-identical to the fleet's sidecar"
@@ -277,10 +297,14 @@ step "the Linux sidecar (cross-compiled)"
 # established is the thing that matters and it covers this build too — go/ is
 # identical, commit for commit, to the tree the deployment's sidecar was built
 # from. Same source, second target.
-( cd "$REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-    go build -o "$BUILD/multiverse-sidecar" ./cmd/sidecar )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$BUILD/multiverse-sidecar" ./cmd/sidecar )
+LINUX_BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar" \
+  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+[ "$LINUX_BUILT_REV" = "$SOURCE_REV" ] \
+  || die "the Linux sidecar VCS stamp is '${LINUX_BUILT_REV:-missing}', want $SOURCE_REV"
 note "$(sha "$BUILD/multiverse-sidecar")"
-note "same source as the fleet's sidecar ($REF_REV), built for linux/amd64"
+note "same source as the fleet's sidecar ($REF_REV), stamped $LINUX_BUILT_REV, built for linux/amd64"
 note "static: CGO is off, so it needs no libc of a particular vintage"
 
 # ------------------------------------------------------------------ the plugin
