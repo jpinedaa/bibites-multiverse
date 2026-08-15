@@ -13,7 +13,7 @@
 # after. It reads the source game but never changes it. It never touches a trust
 # store, a running process, or the network.
 #
-# Eight scenarios:
+# Nine scenarios:
 #
 #   A  a machine with no BepInEx. The installer adds it; the game then writes
 #      BepInEx's config, log and cache; the uninstall must leave the tree
@@ -36,6 +36,8 @@
 #      anything executable.
 #   H  a complete package. The same installer must create a versioned managed
 #      runtime without --game-dir, and uninstall only unchanged payload files.
+#   I  public-map enrollment on Linux. A failed response must keep one private
+#      pending identity. A retry must reuse it. A repair must not enroll again.
 #
 # Usage:
 #   release/test-install-uninstall.sh --real-game-dir <path to the LINUX game>
@@ -107,6 +109,7 @@ if [ -z "$KIT_DIR" ]; then
   cp "$KIT_SRC/install-bibites-multiverse.sh"   "$KIT_DIR/"
   cp "$KIT_SRC/uninstall-bibites-multiverse.sh" "$KIT_DIR/"
   [ -f "$KIT_SRC/README-linux.md" ] && cp "$KIT_SRC/README-linux.md" "$KIT_DIR/README.md"
+  cp "$KIT_SRC/public-map.json" "$KIT_DIR/"
   awk '/SUPPORT-MATRIX-JSON-BEGIN/{f=1;next} /SUPPORT-MATRIX-JSON-END/{f=0} f' "$MATRIX_DOC" \
     | sed '/^```/d' > "$KIT_DIR/support-matrix.json"
   [ -s "$KIT_DIR/support-matrix.json" ] || { printf 'no JSON block in %s\n' "$MATRIX_DOC" >&2; exit 2; }
@@ -141,6 +144,10 @@ fi
 KIT_DIR="$(cd "$KIT_DIR" && pwd)"
 INSTALLER="$KIT_DIR/install-bibites-multiverse.sh"
 UNINSTALLER="$KIT_DIR/uninstall-bibites-multiverse.sh"
+[ -f "$KIT_DIR/public-map.json" ] || {
+  printf 'the Linux kit has no public-map.json: %s\n' "$KIT_DIR" >&2
+  exit 2
+}
 
 printf 'sandbox: %s\n' "$SANDBOX"
 printf 'kit    : %s\n' "$KIT_DIR"
@@ -198,6 +205,8 @@ BEFORE_A="$(snapshot "$A_GAME")"
 run_script bash "$INSTALLER" --game-dir "$A_GAME" --data-root "$A_DATA" \
   --join-string-file "$A_JOIN" --world TestWorld
 check "the installer succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "the private join file overrides the packaged public map" \
+  "$(b contains "your world's identity on this map: test-world" "$OUT")"
 check "it states the all-four-edges default in its own output" \
   "$(b contains 'EXPORTS ON ALL FOUR EDGES' "$OUT")"
 check "it states that nothing was written to any trust store" \
@@ -521,6 +530,93 @@ check "the unchanged game executable was removed" "$(b test ! -e "$H_RUNTIME/The
 check "a user-added runtime file was kept" "$(b test -f "$H_RUNTIME/user-note.txt")"
 check "the uninstall explains why the non-empty runtime stays" \
   "$(b contains 'not empty, so it stays' "$OUT")"
+
+# ---------------------------------------------------------------- I
+
+scenario "I - automatic Linux enrollment, safe retry, and identity reuse"
+
+I_ROOT="$SANDBOX/I"; I_GAME="$I_ROOT/game"; I_DATA="$I_ROOT/data"
+I_FAKE_BIN="$I_ROOT/fake-bin"; I_REQUESTS="$I_ROOT/requests.jsonl"; I_ARGS="$I_ROOT/curl-args.txt"
+I_STATE="$I_ROOT/fail-first.state"
+new_sandbox_game "$I_GAME"
+mkdir -p "$I_FAKE_BIN"
+cat > "$I_FAKE_BIN/curl" <<'FAKE_CURL'
+#!/usr/bin/env bash
+set -eu
+body="$(cat)"
+printf '%s\n' "$body" >> "$FAKE_ENROLL_REQUESTS"
+printf '%s\n' "$*" >> "$FAKE_ENROLL_ARGS"
+if [ "${FAKE_ENROLL_FAIL_FIRST:-0}" = 1 ] && [ ! -e "$FAKE_ENROLL_STATE" ]; then
+  : > "$FAKE_ENROLL_STATE"
+  printf '%s\n' 'simulated lost enrollment response' >&2
+  exit 22
+fi
+install_id="$(printf '%s' "$body" | sed -n 's/.*"installId":"\([^"]*\)".*/\1/p')"
+[ -n "$install_id" ] || exit 65
+peer_id="public-$(printf '%s' "$install_id" | tr -d '-' | tr 'A-F' 'a-f')"
+printf '{"format":"bibites-multiverse/enrollment-response/1","relayUrl":"%s","peerId":"%s","created":true}\n' \
+  "$FAKE_ENROLL_RELAY_URL" "$peer_id"
+FAKE_CURL
+chmod 755 "$I_FAKE_BIN/curl"
+
+run_script env PATH="$I_FAKE_BIN:$PATH" \
+  FAKE_ENROLL_REQUESTS="$I_REQUESTS" FAKE_ENROLL_STATE="$I_STATE" \
+  FAKE_ENROLL_ARGS="$I_ARGS" \
+  FAKE_ENROLL_FAIL_FIRST=1 \
+  FAKE_ENROLL_RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4' \
+  bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_DATA"
+check "the lost response stops with INS-ENROLL" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the failed request keeps a pending identity" \
+  "$(b test -f "$I_DATA/enrollment-pending.json")"
+check "the pending identity is mode 0600" \
+  "$(b test "$(stat -c '%a' "$I_DATA/enrollment-pending.json" 2>/dev/null || true)" = 600)"
+check "the failed request writes no final credential" \
+  "$(b test ! -e "$I_DATA/peer-secret.txt")"
+
+run_script env PATH="$I_FAKE_BIN:$PATH" \
+  FAKE_ENROLL_REQUESTS="$I_REQUESTS" FAKE_ENROLL_STATE="$I_STATE" \
+  FAKE_ENROLL_ARGS="$I_ARGS" \
+  FAKE_ENROLL_FAIL_FIRST=1 \
+  FAKE_ENROLL_RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4' \
+  bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_DATA"
+check "the safe enrollment retry succeeds" "$(b test "$RC" -eq 0)" "$OUT"
+check "the retry reports that it reused the pending identity" \
+  "$(b contains 'retrying the pending public-map enrollment' "$OUT")"
+check "the two enrollment requests are byte-identical" \
+  "$(b bash -c 'test "$(sed -n "1p" "$1")" = "$(sed -n "2p" "$1")"' _ "$I_REQUESTS")"
+I_REQUEST_SECRET="$(sed -n '1s/.*"secret":"\([^"]*\)".*/\1/p' "$I_REQUESTS")"
+check "curl receives the secret through standard input, not its command line" \
+  "$(b bash -c '! grep -qF "$2" "$1"' _ "$I_ARGS" "$I_REQUEST_SECRET")"
+check "the request identifies release 0.2.1" \
+  "$(b grep -qF '"release":"0.2.1"' "$I_REQUESTS")"
+check "the completed install removes the pending identity" \
+  "$(b test ! -e "$I_DATA/enrollment-pending.json")"
+check "the completed credential is mode 0600" \
+  "$(b test "$(stat -c '%a' "$I_DATA/peer-secret.txt" 2>/dev/null || true)" = 600)"
+check "the install record names a public identity" \
+  "$(b grep -Eq '"peerId": "public-[0-9a-f]{32}"' "$I_DATA/install-record.json")"
+I_SECRET="$(cat "$I_DATA/peer-secret.txt")"
+I_REQUEST_COUNT="$(wc -l < "$I_REQUESTS" | tr -d ' ')"
+
+run_script env PATH="$I_FAKE_BIN:$PATH" \
+  FAKE_ENROLL_REQUESTS="$I_REQUESTS" FAKE_ENROLL_STATE="$I_STATE" \
+  FAKE_ENROLL_ARGS="$I_ARGS" \
+  FAKE_ENROLL_FAIL_FIRST=1 \
+  FAKE_ENROLL_RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4' \
+  bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_DATA"
+check "a repair reuses the completed public identity" "$(b test "$RC" -eq 0)" "$OUT"
+check "the repair reports identity reuse" \
+  "$(b contains "reusing this installation's existing public-map identity" "$OUT")"
+check "the repair sends no enrollment request" \
+  "$(b test "$(wc -l < "$I_REQUESTS" | tr -d ' ')" = "$I_REQUEST_COUNT")"
+check "the repair keeps the same secret" \
+  "$(b test "$(cat "$I_DATA/peer-secret.txt")" = "$I_SECRET")"
+
+run_script bash "$UNINSTALLER" --data-root "$I_DATA"
+check "the public-map install uninstalls" "$(b test "$RC" -eq 0)" "$OUT"
+check "the public-map credential is removed" \
+  "$(b test ! -e "$I_DATA/peer-secret.txt")"
 
 # ---------------------------------------------------------------- the verdict
 

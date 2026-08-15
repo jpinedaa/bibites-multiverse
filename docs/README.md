@@ -27,9 +27,9 @@ installer therefore uses the refusal text from the published page. `defaults-aud
 from the release page, because a reader must know what a bare install does before running it.
 
 **Every page here covers both platforms and the editions this release publishes.** The recommended
-Windows package includes an authorized portable game and can instead use an existing Steam copy.
-The native Linux package uses an existing itch.io game. A complete edition installs a versioned
-game runtime. Where a command, a path or a
+complete package for each platform includes an authorized game. The Windows GUI can instead use
+an existing Steam copy. The Linux add-on uses an existing itch.io copy. A complete edition
+installs a versioned game runtime. Where a command, a path or a
 refusal differs, the page gives each form. Where something exists on one platform only, the page marks it
 (`INS-MARKOFWEB` and `INS-EXECPOLICY` on Windows; `INS-NOTEXECUTABLE`, `INS-LINUXDEPS` and
 `LOCAL-LOGSHRED` on Linux). The support matrix is honest about the two rows not carrying equal
@@ -48,7 +48,7 @@ without one.
 
 ## Release state
 
-The `0.2.0` participant documents contain no work-package placeholders.
+The `0.2.1` participant documents contain no work-package placeholders.
 Track a new documentation gap in a GitHub issue. Update the affected page with its fix.
 
 ## Where the authority lives

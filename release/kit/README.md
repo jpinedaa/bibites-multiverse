@@ -9,8 +9,8 @@ it by default. You can instead use a supported game already on this machine. Thi
 includes `public-map.json`, the public join configuration. It contains the deployed service
 addresses and no secret. **You do not need:** a compiler, an SDK, or administrator rights.
 
-**This is a Windows archive.** The Linux release is a separate add-on archive, with a bash kit in
-place of this one. The mod is the same file in both packages. The sidecar, mod framework, and
+**This is a Windows archive.** Linux has separate complete and add-on archives, with a bash kit in
+place of this one. The mod is the same file in all packages. The sidecar, mod framework, and
 scripts are platform-specific. Nothing here will ever ask you to turn a
 security control off — no execution-policy bypass, no `--insecure` flag, no skipped certificate
 check. If any part of this package asks you for one of those, that is a defect and reporting it

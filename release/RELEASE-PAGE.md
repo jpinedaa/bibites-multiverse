@@ -6,11 +6,11 @@ Your game and saves stay on your computer.
 ## What you need
 
 - Windows: nothing else. The recommended package includes The Bibites `0.6.3.1`.
-- Linux: The Bibites `0.6.3.1` from itch.io and a private join string.
+- Linux: nothing else. The recommended package includes the native game.
 
-Both Windows archives include `public-map.json`, the public join configuration. It contains the
-deployed HTTPS enrollment and WSS relay addresses. During installation, the package creates a
-unique world identity and secret. It does not reuse one shared credential.
+Every participant archive includes `public-map.json`, the public join configuration. It contains
+the deployed HTTPS enrollment and WSS relay addresses. During installation, each package creates
+a unique world identity and secret. It does not reuse one shared credential.
 
 A private join string contains the map address, world identity, and secret. Do not post one in an
 issue, screenshot, or log.
@@ -38,11 +38,13 @@ after the map grants this installation a place.
 
 ## Linux
 
-1. Download and extract the Linux archive.
+1. Download and extract the **Linux complete** archive (recommended).
 2. Make sure that its SHA-256 matches the table.
 3. Run `./install-bibites-multiverse.sh` from the extracted directory.
 
-The Linux installer finds the native itch.io game and asks for the join string.
+The Linux installer uses the included native game and enrolls this installation automatically.
+The add-on archive finds an existing itch.io game. For a private map, pass
+`--join-string-file ./join.txt`.
 
 ## Defaults
 

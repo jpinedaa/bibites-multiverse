@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.2.0` on **2026-08-15**, against the code and
+strangers. This audit was updated for release `0.2.1` on **2026-08-15**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -13,9 +13,9 @@ part of it that affects a player is stated on the release page, in
 
 Somebody downloads a package for their platform, runs its installer, and changes nothing else.
 On Windows, that means the complete package, its included game, automatic public enrollment, and
-the selected start-after-install checkbox. On Linux, it means the add-on and its join-string
-prompt. The mod settings below stay identical on both platforms. Package and enrollment defaults
-are marked where they differ. Two facts shape every verdict:
+the selected start-after-install checkbox. On Linux, it means the complete package, its included
+game, and automatic public enrollment. The mod settings below stay identical on both platforms. Package and enrollment
+defaults are marked where they differ. Two facts shape every verdict:
 
 1. **The package ships no relay and no archive.** Every archive contains the installer, the
    uninstaller, the README, the mod, the sidecar, BepInEx, and the support matrix. A complete
@@ -33,7 +33,7 @@ are marked where they differ. Two facts shape every verdict:
 |---|---|---|---|
 | `--insecure-no-token` | The relay, not the package | Cannot reach it: no relay is shipped | **PASS** — and the *"nothing enforces test-rig-only"* half is closed in code, by a bind refusal WP2 added after DQ4 was written |
 | The archive's HTTP bind | The archive, not the package | Cannot reach it: no archive is shipped | **PASS at the packaging layer**, with a **finding for WP3**: the habit in the bring-up instructions, not the compiled default, is what would expose a public host |
-| Public installer enrollment | Relay and Windows complete package | Creates one unique credential over HTTPS and reuses it on retry | **PASS WITH FINITE LIMITS** — compiled off, explicitly enabled by the hosted deployment, bounded by nginx and relay limits, with verifiers stored instead of secrets |
+| Public installer enrollment | Relay and all participant packages | Creates one unique credential over HTTPS and reuses it on retry | **PASS WITH FINITE LIMITS** — compiled off, explicitly enabled by the hosted deployment, bounded by nginx and relay limits, with verifiers stored instead of secrets |
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
 
@@ -121,13 +121,14 @@ but not like this*.
 hosting example uses 256 automatic credentials and 8 new identities per network address in 24
 hours. nginx adds an outer limit of two requests per minute with a burst of three.
 
-**A bare Windows install.** The installer creates a random secret and UUID locally. It sends them
-to the exact HTTPS enrollment path. The relay stores a salted verifier and never returns the
-secret. An exact retry is idempotent. The installer also keeps a protected pending record until it
-stores the final credential. A response lost in transit therefore does not spend another identity.
+**A bare participant install.** Each installer creates a random secret and UUID locally. It sends
+them to the exact HTTPS enrollment path. The relay stores a salted verifier and never returns the
+secret. An exact retry is idempotent. Each installer keeps a private pending record until it
+stores the final credential and install record. A lost response therefore does not spend another
+identity. Windows uses an account ACL. Linux uses mode `0600`.
 
-**A bare Linux or private-map install.** Does not use this endpoint. It applies the join string
-that an operator issued.
+**A private-map install.** Does not use this endpoint. It applies the join string that an operator
+issued.
 
 **The cost.** Open enrollment lets any internet client request an identity. The finite total is a
 deliberate service-capacity control, and an abusive client can consume it. Disabling enrollment

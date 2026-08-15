@@ -18,7 +18,7 @@ The hosted nginx configuration denies them before they reach the relay.
 
 ## Packaged public join configuration
 
-The Windows archives include `public-map.json`:
+All participant archives include `public-map.json`:
 
 ```json
 {
@@ -40,7 +40,7 @@ installations.
   "format": "bibites-multiverse/enrollment-request/1",
   "installId": "9af42a17-6167-42e7-a6e8-c62cb8b95f4f",
   "secret": "<64 lower-case hexadecimal characters>",
-  "release": "0.2.0"
+  "release": "0.2.1"
 }
 ```
 
@@ -48,7 +48,7 @@ installations.
 |---|---|
 | `format` | Exact request format above |
 | `installId` | UUID text. The installer creates it once and keeps it for a retry |
-| `secret` | Client-generated Contract B secret: 32–256 printable ASCII characters with no spaces. The `0.2.0` installer uses 32 random bytes encoded as 64 lower-case hexadecimal characters |
+| `secret` | Client-generated Contract B secret: 32–256 printable ASCII characters with no spaces. The installers encode 32 random bytes as 64 lower-case hexadecimal characters |
 | `release` | Non-empty release identifier, at most 32 characters. It is diagnostic metadata, not an admission rule |
 
 Unknown fields, extra JSON values, malformed JSON, and bodies above 1 KiB are refused.
@@ -83,9 +83,10 @@ verifier and does not write another credential or consume another per-address en
 The same `installId` with a different secret receives `409 Conflict`. Enrollment never replaces an
 existing credential. Slot handover remains the only identity-replacement operation.
 
-The installer stores a protected pending record before its first request. It removes that record
-only after it stores `peer-secret.txt`. A lost HTTP response is therefore a retry, not a second
-identity.
+The installer stores a protected pending record before its first request. Windows applies an ACL
+for the current account. Linux applies mode `0600`. The installer removes the pending record only
+after it stores `peer-secret.txt` and the install record. A lost response is therefore a retry,
+not a second identity.
 
 ## Limits and errors
 
