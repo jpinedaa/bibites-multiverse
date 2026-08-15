@@ -1456,7 +1456,7 @@ lan_all() {
   note ""
   note "phase5far is NOT in this sequence. It needs a person at the second computer to run"
   note "two commands, and an unattended run must not block on one. Run it by hand:"
-  note "    e2e/run-m4-lan.sh phase5far"
+  note "    LAN_RELAY_HOST='$LAN_RELAY_HOST' e2e/run-m4-lan.sh phase5far"
   lan_phase8
 }
 

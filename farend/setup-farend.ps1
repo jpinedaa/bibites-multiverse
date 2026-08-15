@@ -612,37 +612,90 @@ param([switch]$GameOnly)
 $ErrorActionPreference = 'SilentlyContinue'
 
 $DataRoot = '@@DATAROOT@@'
+$GameExe = Join-Path '@@GAMEDIR@@' 'The Bibites.exe'
+$SidecarExe = '@@SIDECAREXE@@'
 
 function Stop-Recorded {
-    param([string]$File, [string]$Name)
-    if (Test-Path $File) {
-        $id = (Get-Content -Path $File | Select-Object -First 1)
-        if ($id) {
-            Stop-Process -Id ([int]$id) -Force
-            Write-Host "stopped $Name (pid $id)"
-        }
-        Remove-Item -Path $File -Force
+    param(
+        [string]$File,
+        [string]$Label,
+        [string]$ExpectedName,
+        [string]$ExpectedPath
+    )
+
+    if (-not (Test-Path -LiteralPath $File -PathType Leaf)) {
+        Write-Warning "No PID record exists for $Label. No process was stopped."
+        return
     }
+
+    try {
+        $record = (Get-Content -LiteralPath $File -ErrorAction Stop | Select-Object -First 1)
+    } catch {
+        Write-Warning "The PID record for $Label cannot be read. No process was stopped."
+        return
+    }
+
+    [int]$recordedId = 0
+    $validId = [int]::TryParse(([string]$record).Trim(), [ref]$recordedId)
+    if (-not $validId -or $recordedId -le 0) {
+        Write-Warning "The PID record for $Label is invalid. No process was stopped."
+        return
+    }
+
+    $process = Get-Process -Id $recordedId -ErrorAction SilentlyContinue
+    if (-not $process) {
+        Write-Warning "The PID record for $Label is stale. No process was stopped."
+        return
+    }
+
+    if ($process.ProcessName -ne $ExpectedName) {
+        Write-Warning "PID $recordedId is not $Label. No process was stopped."
+        return
+    }
+
+    try {
+        $actualPath = [IO.Path]::GetFullPath($process.Path)
+        $requiredPath = [IO.Path]::GetFullPath($ExpectedPath)
+    } catch {
+        Write-Warning "The executable path for PID $recordedId cannot be checked. No process was stopped."
+        return
+    }
+
+    if (-not [String]::Equals($actualPath, $requiredPath, [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Warning "PID $recordedId does not use the managed $Label executable. No process was stopped."
+        return
+    }
+
+    try {
+        Stop-Process -InputObject $process -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "The recorded $Label process could not be stopped. Its PID record was kept."
+        return
+    }
+
+    try {
+        Remove-Item -LiteralPath $File -Force -ErrorAction Stop
+    } catch {
+        Write-Warning "The $Label stopped, but its PID record could not be removed."
+    }
+    Write-Host "stopped $Label (pid $recordedId)"
 }
 
-Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game'
-Stop-Process -Name 'The Bibites' -Force
+Stop-Recorded (Join-Path $DataRoot 'game.pid') 'game' 'The Bibites' $GameExe
 Start-Sleep -Seconds 1
 
 if ($GameOnly) {
-    $sc = @(Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue)
-    Write-Host ("the world is down; sidecar processes still running: {0} (want 1)" -f $sc.Count)
+    Write-Host "Only the recorded game PID was in scope. The sidecar PID was not targeted."
     Write-Host "The sidecar keeps its slot and its journal. Arrivals accumulate there and"
     Write-Host "are delivered, paced, when the world comes back."
     exit 0
 }
 
-Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'the sidecar'
-Stop-Process -Name 'multiverse-sidecar' -Force
+Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'sidecar' 'multiverse-sidecar' $SidecarExe
 Start-Sleep -Seconds 1
 
-$left = @(Get-Process -Name 'The Bibites', 'multiverse-sidecar' -ErrorAction SilentlyContinue)
-Write-Host ("slot @@SLOT@@ processes still running: {0} (want 0)" -f $left.Count)
+Write-Host "Only valid recorded PIDs for slot @@SLOT@@ were in scope."
+Write-Host "A missing, stale, or mismatched record leaves unknown processes active."
 Write-Host "The journal in $DataRoot\data-slot-@@SLOT@@ is kept. Do not delete it: it is this"
 Write-Host "machine's record of every organism it is holding."
 '@

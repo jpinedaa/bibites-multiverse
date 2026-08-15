@@ -114,23 +114,50 @@ Use atomic replacements only after the test map stops.
 
 ## Phase 4: create test TLS and credentials
 
-Configure the TLS script with the selected test names and addresses.
-Then run it:
+If a remote peer uses the LAN, set the selected Windows LAN address explicitly.
+The following example uses the documentation address `192.0.2.10`:
 
 ```sh
-e2e/crossing/mint-tls.sh
+LAN_HOST=192.0.2.10 e2e/crossing/mint-tls.sh
 ```
 
 Make sure that the leaf certificate verifies against the test authority.
 Make sure that every dialed name is present in its Subject Alternative Name list.
 
 Point `RELAY_BIN` at the new relay build.
-Then run the credential script against the existing test slot register:
+Pass the same LAN address to the credential script:
+
+```sh
+LAN_RELAY_HOST=192.0.2.10 \
+  RELAY_BIN=<same-filesystem-build-dir>/relay \
+  e2e/crossing/mint-credentials.sh
+```
+
+If you already have the complete remote URL, set `FAR_URL` instead:
+
+```sh
+FAR_URL=wss://192.0.2.10:8795/contract-b/v4 \
+  RELAY_BIN=<same-filesystem-build-dir>/relay \
+  e2e/crossing/mint-credentials.sh
+```
+
+If every peer is local, mint loopback-only TLS and clear `FAR_PEER`:
+
+```sh
+e2e/crossing/mint-tls.sh
+FAR_PEER= RELAY_BIN=<same-filesystem-build-dir>/relay \
+  e2e/crossing/mint-credentials.sh
+```
+
+The check mode reads state without a LAN address:
 
 ```sh
 RELAY_BIN=<same-filesystem-build-dir>/relay \
-  e2e/crossing/mint-credentials.sh
+  e2e/crossing/mint-credentials.sh --check
 ```
+
+Check mode reports a missing remote URL, but it does not require one.
+A mint run requires `FAR_URL` or `LAN_RELAY_HOST` when `FAR_PEER` is set.
 
 The script must report an unchanged `ring.json` digest.
 It must create one credential for each peer and one `subscribe` credential for the archive.
