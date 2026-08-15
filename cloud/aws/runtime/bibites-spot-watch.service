@@ -1,0 +1,12 @@
+[Unit]
+Description=Save Bibites worlds on an EC2 Spot interruption notice
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/bibites-spot-watch
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

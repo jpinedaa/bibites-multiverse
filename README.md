@@ -13,6 +13,7 @@
 
 [Website](https://bibitesmultiverse.com/) ·
 [Live map](https://bibitesmultiverse.com/live) ·
+[Watch live](https://bibitesmultiverse.com/watch) ·
 [Install](docs/participant/install.md) ·
 [Join](docs/participant/join.md) ·
 [Participant guide](docs/README.md) ·
@@ -82,7 +83,7 @@ After checksum and extraction, the platform commands are:
 
 | Platform | Supported game | Install | Start |
 |---|---|---|---|
-| Windows | *The Bibites* 0.6.3.1 from Steam | `.\Install-BibitesMultiverse.ps1` | `.\Start-Multiverse.ps1` |
+| Windows | *The Bibites* 0.6.3.1 from Steam | Double-click `Install-BibitesMultiverse.cmd` | `.\Start-Multiverse.ps1` |
 | Linux | *The Bibites* 0.6.3.1 from itch.io | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
 Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
@@ -92,8 +93,7 @@ The installer finds the game and makes sure that its build is supported. It inst
 stores the credential, and creates the start and stop scripts. It needs no compiler, SDK,
 administrator account, or root access.
 
-The normal **add-on edition** connects an existing game installation. A **complete edition** can
-include the game only when the publisher permits distribution.
+Release `0.1.0` contains add-on packages. The installer finds an existing game automatically.
 
 [Read the full installation guide →](docs/participant/install.md)
 
@@ -159,10 +159,15 @@ The homepage explains the experiment and shows a live summary. The
 [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
 lineages, and world settings.
 
+The [watch page](https://bibitesmultiverse.com/watch) has one shared game camera.
+It follows the youngest living Bibite until that Bibite dies or leaves the world.
+The page reconnects automatically when the broadcast host is offline.
+
 ## Explore the experiment
 
 | Goal | Start here |
 |---|---|
+| Watch one Bibite live | [Open the shared broadcast](https://bibitesmultiverse.com/watch) |
 | Watch the public map and its evolutionary record | [Open the live map](https://bibitesmultiverse.com/live) |
 | Connect a world | [Read the participant guide](docs/README.md) |
 | Understand the architecture | [Read the system design](system_decomposition.md) |
@@ -179,6 +184,7 @@ Bug reports, documentation corrections, and reproducible experiment ideas are we
 | [`bibites-mod/`](bibites-mod/) | BepInEx and Harmony game plugin |
 | [`go/`](go/) | Sidecar, relay, archive, diagnostics, and protocol tests |
 | [`docs/`](docs/) | Participant guides, support matrix, and operator diagnostics |
+| [`cloud/aws/`](cloud/aws/) | Cloud-world and GPU-broadcast deployment |
 | [`contracts/`](contracts/) | Versioned mod and network protocols |
 | [`deploy/`](deploy/) | Public service provisioning, monitoring, backup, and recovery |
 | [`e2e/`](e2e/) | Multi-world test rigs and failure rehearsals |
@@ -186,6 +192,7 @@ Bug reports, documentation corrections, and reproducible experiment ideas are we
 Developer entry points:
 
 - [System architecture](system_decomposition.md)
+- [Live broadcast design and operations](docs/live-broadcast.md)
 - [Development environment](dev_environment.md)
 - [Release engineering](release/README.md)
 - [Mod-to-sidecar protocol](contracts/contract-a.md)

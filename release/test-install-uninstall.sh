@@ -471,7 +471,7 @@ check "no credential was written" "$(b test ! -e "$G_DATA/peer-secret.txt")"
 
 # ---------------------------------------------------------------- H
 
-scenario "H - a complete package with an authorized game payload"
+scenario "H - a complete package with a bundled game payload"
 
 H_ROOT="$SANDBOX/H"; H_KIT="$H_ROOT/kit"; H_DATA="$H_ROOT/data"
 mkdir -p "$H_KIT"

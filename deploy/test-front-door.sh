@@ -13,6 +13,7 @@ render() {
       -e 's|@@MV_RELAY_PORT@@|443|g' \
       -e 's|@@MV_RELAY_BACKEND@@|127.0.0.1:8795|g' \
       -e 's|@@MV_ARCHIVE_HTTP@@|127.0.0.1:8796|g' \
+      -e 's|@@MV_STREAM_HLS_BACKEND@@|127.0.0.1:8888|g' \
       -e "s|@@MV_TLSDIR@@|$TMP/tls|g" \
       -e "s|@@ACME_ROOT@@|$TMP/acme|g" \
       -e "s|/var/log/nginx|$TMP/logs|g" \
@@ -29,12 +30,16 @@ grep -Fq 'proxy_pass http://127.0.0.1:8795;' "$front"
 grep -Fq 'proxy_set_header Upgrade' "$front"
 grep -Fq 'proxy_set_header Connection' "$front"
 grep -Fq 'proxy_set_header X-Forwarded-For   $remote_addr;' "$front"
+grep -Fq 'location ^~ /stream/' "$front"
+grep -Fq 'proxy_pass http://127.0.0.1:8888/;' "$front"
+grep -Fq 'proxy_redirect ~^/(.*)$ /stream/$1;' "$front"
 grep -Fq 'location / {' "$front"
 grep -Fq 'proxy_pass http://127.0.0.1:8796;' "$front"
 grep -Fq 'limit_except GET HEAD' "$front"
 grep -Fq 'Strict-Transport-Security "max-age=31536000" always;' "$front"
 grep -Fq 'Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()" always;' "$front"
 grep -Fq 'Cross-Origin-Opener-Policy same-origin always;' "$front"
+grep -Fq "media-src 'self' blob:;" "$front"
 grep -Fq "Content-Security-Policy \"default-src 'self';" "$front"
 if grep -Eq '@@|MV_STATUS_PORT|8443' "$TMP/acme.conf" "$front"; then
   echo 'front-door render contains an obsolete value or unresolved placeholder' >&2

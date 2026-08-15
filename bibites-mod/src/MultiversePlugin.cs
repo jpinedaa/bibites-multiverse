@@ -58,6 +58,7 @@ namespace BibitesMultiverse
             StartWorldSaver(config);
             StartMultiverseClient(config);
             StartDevCommands(config);
+            StartSpectatorDirector();
             StartAutoTest();
         }
 
@@ -124,6 +125,28 @@ namespace BibitesMultiverse
             commands.CommandFile = commandFile;
             commands.FamilyReportSeconds = seconds;
             commands.FallbackWorldName = (config != null) ? config.WorldToLoad : string.Empty;
+        }
+
+        /// <summary>
+        /// The public broadcast camera is opt-in and affects selection and camera position only. It is
+        /// deliberately independent of the multiverse client: an offline rehearsal must be able to
+        /// prove rendering without joining the public map or changing any ecology.
+        /// </summary>
+        private void StartSpectatorDirector()
+        {
+            if (!SpectatorDirector.Requested())
+            {
+                return;
+            }
+
+            try
+            {
+                gameObject.AddComponent<SpectatorDirector>();
+            }
+            catch (Exception e)
+            {
+                Log.LogError($"{SpectatorDirector.Prefix} the spectator director could not be created — {e}");
+            }
         }
 
         /// <summary>The Contract A client: the world loader, the Harmony border hook and the transport.</summary>

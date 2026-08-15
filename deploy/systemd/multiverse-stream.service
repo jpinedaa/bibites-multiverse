@@ -1,0 +1,30 @@
+[Unit]
+Description=Bibites Multiverse live stream origin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=multiverse
+Group=multiverse
+ExecStart=/opt/multiverse/bin/mediamtx /etc/multiverse/mediamtx.yml
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictAddressFamilies=AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

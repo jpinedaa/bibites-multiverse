@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+log() { logger -t bibites-spot-watch -- "$*"; }
+
+token=''
+refresh_token() {
+  token="$(curl -fsS -m 2 -X PUT \
+    -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
+    http://169.254.169.254/latest/api/token)"
+}
+
+while true; do
+  [ -n "$token" ] || refresh_token || { sleep 5; continue; }
+  action="$(curl -fsS -m 2 -H "X-aws-ec2-metadata-token: $token" \
+    http://169.254.169.254/latest/meta-data/spot/instance-action 2>/dev/null || true)"
+  if [ -n "$action" ]; then
+    log "Spot interruption notice received: $action"
+
+    mapfile -t games < <(systemctl list-units --type=service --state=running \
+      'bibites-game@*.service' --no-legend | awk '{print $1}')
+    if [ "${#games[@]}" -gt 0 ]; then
+      # Stop in parallel. Each Unity process gets SIGTERM and runs save-on-quit;
+      # serial stops would spend the two-minute notice six times over.
+      systemctl stop --no-block "${games[@]}"
+      deadline=$(( $(date +%s) + 75 ))
+      while [ "$(date +%s)" -lt "$deadline" ]; do
+        any=0
+        for unit in "${games[@]}"; do
+          systemctl is-active --quiet "$unit" && any=1
+        done
+        [ "$any" -eq 0 ] && break
+        sleep 1
+      done
+    fi
+
+    mapfile -t sidecars < <(systemctl list-units --type=service --state=running \
+      'bibites-sidecar@*.service' --no-legend | awk '{print $1}')
+    [ "${#sidecars[@]}" -eq 0 ] || systemctl stop "${sidecars[@]}"
+    sync
+    log 'worlds saved and sidecars stopped; waiting for EC2 to stop the instance'
+    sleep infinity
+  fi
+  sleep 5
+done

@@ -1,0 +1,25 @@
+[Unit]
+Description=Headless Bibites world %i
+Wants=bibites-sidecar@%i.service
+Requires=bibites-xvfb.service
+After=bibites-sidecar@%i.service bibites-xvfb.service
+RequiresMountsFor=/srv/bibites
+
+[Service]
+Type=simple
+User=bibites
+Group=bibites
+ExecStartPre=/usr/local/libexec/bibites-wait-sidecar %i
+ExecStart=/usr/local/libexec/bibites-game %i
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=45
+NoNewPrivileges=true
+Environment=DISPLAY=:99
+RuntimeDirectory=bibites
+RuntimeDirectoryMode=0755
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

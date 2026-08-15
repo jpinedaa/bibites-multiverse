@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+world="${1:?world id required}"
+env_file="/srv/bibites/worlds/$world/world.env"
+[ -r "$env_file" ] || { echo "missing $env_file" >&2; exit 1; }
+# shellcheck source=/dev/null
+set -a; . "$env_file"; set +a
+
+args=(
+  --listen "127.0.0.1:$SIDECAR_PORT"
+  --relay "$RELAY_URL"
+  --peer-id "$PEER_ID"
+  --data-dir "$SIDECAR_DATA"
+  --credential-file "$CREDENTIAL_FILE"
+  --log-file "$SIDECAR_LOG"
+  --log-rotate-mb 100
+  --log-keep 5
+)
+[ -z "${PREFERRED_SLOT:-}" ] || args+=(--slot "$PREFERRED_SLOT")
+[ -z "${POSITION:-}" ] || args+=(--position "$POSITION")
+
+exec /srv/bibites/bin/multiverse-sidecar "${args[@]}"

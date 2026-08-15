@@ -16,6 +16,7 @@
 #
 #   units                 the supervisor gave up. Restart=always has a limit, and
 #                         the limit existing is what makes this check necessary.
+#   stream origin         the private ingest and loopback HLS listener answer.
 #   relay healthz         the map answers.
 #   archive healthz       the record is being written.
 #   relay connected       the archive is SUBSCRIBED. A connected-looking archive
@@ -96,6 +97,8 @@ set -a; . "$ENV_FILE"; set +a
 : "${MV_RELAY_PORT:=443}"
 : "${MV_RELAY_BACKEND:=127.0.0.1:8795}"
 : "${MV_ARCHIVE_HTTP:=127.0.0.1:8796}"
+: "${MV_STREAM_ORIGIN_ENABLED:=0}"
+: "${MV_STREAM_HLS_BACKEND:=127.0.0.1:8888}"
 : "${MV_EXPECTED_PEERS:=0}"
 : "${MV_STATUS_AGE_WARN_MS:=120000}"
 : "${MV_BYPASS_RUNS:=3}"
@@ -222,15 +225,28 @@ done
 
 check_units() {
   local u state bad=""
-  for u in multiverse-relay multiverse-archive nginx; do
+  local units=(multiverse-relay multiverse-archive nginx)
+  [ "$MV_STREAM_ORIGIN_ENABLED" = 1 ] && units+=(multiverse-stream)
+  for u in "${units[@]}"; do
     state="$(systemctl is-active "$u" 2>/dev/null || true)"
     [ "$state" = active ] || bad="$bad $u=$state"
   done
   if [ -n "$bad" ]; then
     report units CRIT "systemd is not running:$bad. If it says 'failed', the restart limit was reached — 'systemctl status' then RESTART-POLICY.md."
   else
-    report units OK "relay, archive and nginx active"
+    report units OK "${units[*]} active"
   fi
+}
+
+check_stream_origin() {
+  [ "$MV_STREAM_ORIGIN_ENABLED" = 1 ] || return 0
+  local code
+  code="$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+    "http://${MV_STREAM_HLS_BACKEND}/bibites/index.m3u8" 2>/dev/null || true)"
+  case "$code" in
+    200|302|404) report stream-origin OK "HLS answers on ${MV_STREAM_HLS_BACKEND}" ;;
+    *) report stream-origin CRIT "HLS does not answer on ${MV_STREAM_HLS_BACKEND} (HTTP ${code:-none})" ;;
+  esac
 }
 
 check_relay_healthz() {
@@ -512,6 +528,7 @@ check_reboot() {
 # ---------------------------------------------------------------- run
 
 check_units
+check_stream_origin
 check_relay_healthz
 if check_archive_healthz; then
   check_map

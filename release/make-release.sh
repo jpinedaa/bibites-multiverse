@@ -3,7 +3,7 @@
 #
 #   release/dist/bibites-multiverse-<release>-windows-x64.zip   the Windows download
 #   release/dist/bibites-multiverse-<release>-linux-x64.zip     the Linux download
-#   release/dist/*-complete.zip                                 optional authorized
+#   release/dist/*-complete.zip                                 optional complete
 #                                                               game-bundled editions
 #   release/dist/SHA256SUMS                                     all checksums
 #   release/dist/RELEASE-PAGE.md                                the page text,
@@ -89,7 +89,7 @@ while [ $# -gt 0 ]; do
 done
 
 if { [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; } && [ -z "$GAME_LICENSE" ]; then
-  printf 'complete packages require --game-license <publisher-provided license file>\n' >&2
+  printf 'complete packages require --game-license <applicable license file>\n' >&2
   exit 2
 fi
 if [ -n "$GAME_LICENSE" ] && [ -z "$WINDOWS_GAME_PAYLOAD" ] && [ -z "$LINUX_GAME_PAYLOAD" ]; then
@@ -353,6 +353,7 @@ rm -rf "$DIST/stage" "$DIST/$ZIP_NAME" "$DIST/$LINUX_ZIP_NAME" \
 mkdir -p "$STAGE" "$LINUX_STAGE"
 
 cp "$RELDIR/kit/Install-BibitesMultiverse.ps1"   "$STAGE/"
+cp "$RELDIR/kit/Install-BibitesMultiverse.cmd"   "$STAGE/"
 cp "$RELDIR/kit/Uninstall-BibitesMultiverse.ps1" "$STAGE/"
 cp "$RELDIR/kit/README.md"                       "$STAGE/"
 cp "$MATRIX_JSON"                                "$STAGE/support-matrix.json"
@@ -393,7 +394,7 @@ note "the Linux scripts parse, are LF, and carry their executable bit"
 # one long line. Done here rather than with unix2dos, which is not on every
 # machine: whether a tool happens to be installed must not change the archive's
 # checksum. THE LINUX KIT IS DELIBERATELY NOT IN THIS LIST.
-for f in Install-BibitesMultiverse.ps1 Uninstall-BibitesMultiverse.ps1 README.md LICENSE THIRD_PARTY_NOTICES.md; do
+for f in Install-BibitesMultiverse.cmd Install-BibitesMultiverse.ps1 Uninstall-BibitesMultiverse.ps1 README.md LICENSE THIRD_PARTY_NOTICES.md; do
   python3 -c "
 import sys
 p = sys.argv[1]
@@ -402,9 +403,9 @@ open(p, 'wb').write(data)
 " "$STAGE/$f"
 done
 
-# A complete archive is the add-on archive plus an authorized, unmodified game
+# A complete archive is the add-on archive plus a permitted, unmodified game
 # payload. Proprietary game bytes are never read from the repository and never
-# committed: the publisher-provided directory is an explicit build input. The
+# committed: the game directory is an explicit build input. The
 # same installer detects game-payload.json and selects the managed-runtime path.
 validate_game_payload() { # $1 source, $2 platform, $3 executable, $4 assembly sha
   local source="$1" platform="$2" executable="$3" expected_sha="$4" assembly got bad
@@ -417,7 +418,7 @@ validate_game_payload() { # $1 source, $2 platform, $3 executable, $4 assembly s
   bad="$(find "$source" -type l -print -quit)"
   [ -z "$bad" ] || die "$platform game payload contains a symbolic link: $bad"
   for bad in BepInEx winhttp.dll doorstop_config.ini run_bepinex.sh libdoorstop.so .doorstop_version; do
-    [ ! -e "$source/$bad" ] || die "$platform game payload is already modded ($bad exists). Use a clean publisher-provided game directory."
+    [ ! -e "$source/$bad" ] || die "$platform game payload is already modded ($bad exists). Use a clean source game directory."
   done
   if [ "$platform" = Linux ]; then
     [ -x "$source/$executable" ] || die "$source/$executable is not executable"
@@ -572,12 +573,18 @@ inner_table "$LINUX_STAGE" "$LINUX_INNER_TABLE"
 COMPLETE_ROWS="$BUILD/complete-rows.md"
 : > "$COMPLETE_ROWS"
 if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
-  printf '| [`%s`](https://github.com/%s/releases/download/%s/%s) | Windows complete: authorized game + Multiverse | %s | `%s` |\n' \
-    "$COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$COMPLETE_ZIP_NAME" "$COMPLETE_ZIP_SIZE" "$COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
+  printf '| Windows complete | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
+    "$COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$COMPLETE_ZIP_NAME" "$COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
 fi
 if [ -n "$LINUX_GAME_PAYLOAD" ]; then
-  printf '| [`%s`](https://github.com/%s/releases/download/%s/%s) | Linux complete: authorized game + Multiverse | %s | `%s` |\n' \
-    "$LINUX_COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$LINUX_COMPLETE_ZIP_NAME" "$LINUX_COMPLETE_ZIP_SIZE" "$LINUX_COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
+  printf '| Linux complete | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
+    "$LINUX_COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$LINUX_COMPLETE_ZIP_NAME" "$LINUX_COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
+fi
+
+if [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; then
+  EDITION_NOTE='The package selects its edition automatically. Add-on packages find an existing game. Complete packages use their included game.'
+else
+  EDITION_NOTE='This release contains add-on packages only. The installer finds your existing game automatically. There is no edition choice during installation.'
 fi
 
 PAGE="$DIST/RELEASE-PAGE.md"
@@ -597,6 +604,7 @@ fields = {
     '@@LINUX_ZIP_SIZE@@':   '$LINUX_ZIP_SIZE',
     '@@BUILT_UTC@@':  '$BUILT_UTC',
     '@@COMMIT@@':     '$COMMIT',
+    '@@EDITION_NOTE@@': '$EDITION_NOTE',
     '@@INNER_TABLE@@': open(inner, encoding='utf-8').read().rstrip('\n'),
     '@@LINUX_INNER_TABLE@@': open(linux_inner, encoding='utf-8').read().rstrip('\n'),
     # Rows already end in a newline. Empty means the SHA256SUMS row follows the

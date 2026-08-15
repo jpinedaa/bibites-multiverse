@@ -1,0 +1,14 @@
+[Unit]
+Description=Apply target time scale to Bibites world %i
+After=bibites-game@%i.service
+Requires=bibites-game@%i.service
+
+[Service]
+Type=oneshot
+User=bibites
+Group=bibites
+ExecStart=/usr/local/libexec/bibites-set-timescale %i
+TimeoutStartSec=12min
+
+[Install]
+WantedBy=multi-user.target

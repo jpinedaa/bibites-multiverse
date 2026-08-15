@@ -1,0 +1,23 @@
+[Unit]
+Description=Bibites live broadcast world
+Requires=bibites-broadcast-xorg.service
+Wants=bibites-sidecar@slot-1.service
+After=bibites-broadcast-xorg.service bibites-sidecar@slot-1.service
+RequiresMountsFor=/srv/bibites
+
+[Service]
+Type=simple
+User=bibites
+Group=bibites
+Environment=DISPLAY=:0
+ExecStartPre=/usr/local/libexec/bibites-wait-sidecar slot-1
+ExecStart=/usr/local/libexec/bibites-broadcast-game
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=45
+NoNewPrivileges=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

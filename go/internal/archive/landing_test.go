@@ -55,6 +55,7 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 	}{
 		{"/", "text/html", "Evolution has a map.", http.StatusOK},
 		{"/live", "text/html", "species", http.StatusOK},
+		{"/watch", "text/html", "Follow a life in progress.", http.StatusOK},
 		{"/favicon.svg", "image/svg+xml", "#66e0ac", http.StatusOK},
 		{"/social-card.svg", "image/svg+xml", "Evolution", http.StatusOK},
 		{"/robots.txt", "text/plain", "Sitemap: https://bibitesmultiverse.com/sitemap.xml", http.StatusOK},

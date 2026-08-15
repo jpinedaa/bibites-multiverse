@@ -29,7 +29,7 @@ DRY=0
 ONLY=""
 
 PHASES="preflight packages account directories swap binaries envfiles firewall
-        nginxacme tls nginxfront bootstrap systemd upgrades verify"
+        nginxacme tls nginxfront bootstrap systemd streamorigin upgrades verify"
 
 say()  { printf '     %s\n' "$*"; }
 step() { printf '\n==== %s\n' "$*"; }
@@ -92,6 +92,10 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_RELAY_PORT:=443}"
 : "${MV_RELAY_BACKEND:=127.0.0.1:8795}"
 : "${MV_ARCHIVE_HTTP:=127.0.0.1:8796}"
+: "${MV_STREAM_ORIGIN_ENABLED:=0}"
+: "${MV_STREAM_RTMP_ADDRESS:=}"
+: "${MV_STREAM_PUBLISH_CIDR:=}"
+: "${MV_STREAM_HLS_BACKEND:=127.0.0.1:8888}"
 : "${MV_ARCHIVE_PEER_ID:=archive-main}"
 : "${MV_ACME_MODE:=webroot}"
 : "${MV_SWAP_GB:=0}"
@@ -490,6 +494,12 @@ phase_firewall() {
   run ufw default allow outgoing
   run ufw allow 22/tcp comment 'SSH'
   run ufw allow "$MV_RELAY_PORT/tcp" comment 'multiverse HTTPS front door'
+  if [ "$MV_STREAM_ORIGIN_ENABLED" = 1 ]; then
+    [ -n "$MV_STREAM_RTMP_ADDRESS" ] || die "MV_STREAM_RTMP_ADDRESS is required when the stream origin is enabled"
+    [ -n "$MV_STREAM_PUBLISH_CIDR" ] || die "MV_STREAM_PUBLISH_CIDR is required when the stream origin is enabled"
+    run ufw allow from "$MV_STREAM_PUBLISH_CIDR" to "${MV_STREAM_RTMP_ADDRESS%:*}" \
+      port "${MV_STREAM_RTMP_ADDRESS##*:}" proto tcp comment 'private broadcast ingest'
+  fi
   if ufw status 2>/dev/null | grep -q '^8443/tcp'; then
     run ufw --force delete allow 8443/tcp
     say "removed the obsolete public status port 8443"
@@ -527,6 +537,7 @@ render_nginx() {
       -e "s|@@MV_RELAY_PORT@@|$MV_RELAY_PORT|g" \
       -e "s|@@MV_RELAY_BACKEND@@|$MV_RELAY_BACKEND|g" \
       -e "s|@@MV_ARCHIVE_HTTP@@|$MV_ARCHIVE_HTTP|g" \
+      -e "s|@@MV_STREAM_HLS_BACKEND@@|$MV_STREAM_HLS_BACKEND|g" \
       -e "s|@@MV_TLSDIR@@|$MV_TLSDIR|g" \
       -e "s|@@ACME_ROOT@@|$ACME_ROOT|g" \
       "$src" | write_file "$dst" 0644 root:root
@@ -679,6 +690,15 @@ EOF
   say "enabled at boot and started. RESTART-POLICY.md is what restarts them by hand."
 }
 
+# ---------------------------------------------------------------- stream origin
+
+phase_streamorigin() {
+  step "live stream origin"
+  local args=(--env-file "$ENV_FILE")
+  [ "$DRY" = 0 ] || args+=(--dry-run)
+  "$KIT_DIR/install-stream-origin.sh" "${args[@]}"
+}
+
 # ---------------------------------------------------------------- upgrades
 
 phase_upgrades() {
@@ -718,6 +738,10 @@ phase_verify() {
   }
   chk "relay unit active"        "systemctl is-active --quiet multiverse-relay"
   chk "archive unit active"      "systemctl is-active --quiet multiverse-archive"
+  if [ "$MV_STREAM_ORIGIN_ENABLED" = 1 ]; then
+    chk "stream origin unit active" "systemctl is-active --quiet multiverse-stream"
+    chk "stream HLS is loopback only" "listener_is_loopback_only '$MV_STREAM_HLS_BACKEND'"
+  fi
   chk "nginx active"             "systemctl is-active --quiet nginx"
   chk "monitor timer active"     "systemctl is-active --quiet multiverse-monitor.timer"
   chk "backup timer active"      "systemctl is-active --quiet multiverse-backup.timer"

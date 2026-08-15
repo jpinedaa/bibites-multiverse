@@ -127,7 +127,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
     <span>Bibites Multiverse</span>
   </a>
   <nav class="links" aria-label="Primary navigation">
-    <a href="#how">How it works</a><a href="#join">Join</a>
+    <a href="#how">How it works</a><a href="#join">Join</a><a href="/watch">Watch live</a>
     <a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>
     <a class="livepill" href="/live"><i class="dot" id="navdot"></i>Live map</a>
   </nav>
@@ -138,7 +138,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
       <p class="eyebrow">Public experiment · Aug 14–Nov 14, 2026</p>
       <h1>Evolution has a map.</h1>
       <p class="lede">Bibites Multiverse connects independent copies of <em>The Bibites</em> as neighboring ecosystems. Organisms cross between worlds. Evolution remains local, but its consequences can travel.</p>
-      <div class="actions"><a class="button primary" href="/live">Explore the live map&nbsp; →</a><a class="button secondary" href="#join">Run a world</a></div>
+      <div class="actions"><a class="button primary" href="/live">Explore the live map&nbsp; →</a><a class="button secondary" href="/watch">Watch a Bibite</a><a class="button secondary" href="#join">Run a world</a></div>
       <p class="promise">Every participant owns, runs, and saves a complete local world.</p>
     </div>
     <div class="topology" aria-hidden="true">
@@ -199,7 +199,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
     </div>
   </section>
 </main>
-<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://thebibites.itch.io/the-bibites">The Bibites</a></div></div></footer>
+<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/watch">Watch live</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://thebibites.itch.io/the-bibites">The Bibites</a></div></div></footer>
 <script>
 (function(){
   function n(v){ return v == null ? "unknown" : Number(v).toLocaleString(); }

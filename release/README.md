@@ -12,14 +12,15 @@ raised only after the release that satisfies it exists.
 
 | Path | What it is |
 |---|---|
-| `kit/Install-BibitesMultiverse.ps1` | The Windows installer a stranger runs. Windows PowerShell 5.1 and PowerShell 7; no toolchain, no administrator rights |
+| `kit/Install-BibitesMultiverse.cmd` | The Windows double-click launcher. It uses `RemoteSigned` for its process only |
+| `kit/Install-BibitesMultiverse.ps1` | The Windows installer and its advanced options |
 | `kit/Uninstall-BibitesMultiverse.ps1` | Removes what the Windows installer recorded, hash-checked, and nothing else |
 | `kit/README.md` | The page inside the Windows archive |
 | `kit/install-bibites-multiverse.sh` | The Linux installer. bash, and `sha256sum`/`awk`/`unzip`/`file`; no toolchain, no root, and no `jq` or `python` — its JSON reader is 40 lines of awk, shared with the uninstaller |
 | `kit/uninstall-bibites-multiverse.sh` | Removes what the Linux installer recorded, hash-checked, and nothing else |
 | `kit/README-linux.md` | The page inside the Linux archive, staged into it as `README.md` |
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
-| `make-release.sh` | Builds `dist/` — two add-on archives, optional authorized complete archives, one `SHA256SUMS`, and the release page |
+| `make-release.sh` | Builds two add-on archives, optional complete archives, `SHA256SUMS`, and the release page |
 | `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
 | `dist/` | Build output. **Not tracked** — see `.gitignore`, which says why |
@@ -28,8 +29,8 @@ raised only after the release that satisfies it exists.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The default build creates an add-on archive for each platform. An authorized build can also
-create a complete archive with an unmodified game payload and its separate license file.
+The default build creates an add-on archive for each platform. A permitted build can also create
+a complete archive with an unmodified game payload and its separate license file.
 Every archive contains the project `LICENSE` and `THIRD_PARTY_NOTICES.md` files.
 
 The two documents that ship *beside* the release rather than inside it are
@@ -59,14 +60,13 @@ machine's matrix entry rather than a rule about the map (D22).
 release/make-release.sh
 ```
 
-To build an authorized complete edition, add one or both game directories and the publisher's
-license file:
+To build a complete edition, add one or both game directories and the applicable license file:
 
 ```sh
 release/make-release.sh \
   --windows-game-dir <clean-windows-game> \
   --linux-game-dir <clean-linux-game> \
-  --game-license <publisher-provided-license>
+  --game-license <applicable-game-license>
 ```
 
 The complete editions are optional. The build rejects a payload that does not match the support

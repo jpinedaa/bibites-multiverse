@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${AWS_REGION:?}"
+: "${DATA_VOLUME_ID:?}"
+: "${RELAY_PRIVATE_IP:?}"
+: "${STREAM_RTMP_ADDRESS:?}"
+: "${PUBLISH_PASSWORD_PARAMETER:?}"
+: "${WORLD_ID:?}"
+
+log() { printf '[bibites-broadcast-install] %s\n' "$*"; }
+die() { printf '[bibites-broadcast-install] ERROR: %s\n' "$*" >&2; exit 1; }
+
+id bibites >/dev/null 2>&1 || useradd --system --create-home \
+  --home-dir /var/lib/bibites --shell /usr/sbin/nologin bibites
+command -v nvidia-smi >/dev/null || die 'the NVIDIA driver is not installed'
+nvidia-smi >/dev/null || die 'the NVIDIA GPU is not ready'
+ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_nvenc || die 'ffmpeg has no h264_nvenc encoder'
+
+serial="${DATA_VOLUME_ID//-/}"
+device=''
+for _ in $(seq 1 120); do
+  device="$(lsblk -ndo PATH,SERIAL | awk -v want="$serial" '$2 == want {print $1; exit}')"
+  [ -n "$device" ] && break
+  sleep 2
+done
+[ -n "$device" ] || die "data volume $DATA_VOLUME_ID did not appear"
+blkid "$device" >/dev/null 2>&1 || die 'the broadcast volume has no file system'
+uuid="$(blkid -s UUID -o value "$device")"
+install -d -m 0755 /srv/bibites
+grep -q "UUID=$uuid " /etc/fstab || printf 'UUID=%s /srv/bibites ext4 defaults,nofail 0 2\n' "$uuid" >> /etc/fstab
+mountpoint -q /srv/bibites || mount /srv/bibites
+
+root="/srv/bibites/worlds/$WORLD_ID"
+env_file="$root/world.env"
+[ -r "$env_file" ] || die "the snapshot does not contain $env_file"
+[ -x "$root/game/The Bibites.x86_64" ] || die "the snapshot does not contain the $WORLD_ID game"
+
+# The snapshot is a point-in-time copy. Only this one world runs on this host.
+# The source host must keep the matching services disabled before this point.
+install -m 0644 /opt/bibites-runtime/BibitesMultiverse.dll \
+  "$root/game/BepInEx/plugins/BibitesMultiverse.dll"
+chown bibites:bibites "$root/game/BepInEx/plugins/BibitesMultiverse.dll"
+install -m 0755 /opt/bibites-runtime/multiverse-sidecar /srv/bibites/bin/multiverse-sidecar
+
+install -d -m 0755 /usr/local/libexec
+for script in bibites-sidecar bibites-wait-sidecar bibites-set-timescale \
+  bibites-broadcast-game bibites-broadcast-stream bibites-broadcast-spot-watch; do
+  install -m 0755 "/opt/bibites-runtime/$script" "/usr/local/libexec/$script"
+done
+for unit in bibites-sidecar@.service bibites-broadcast-xorg.service \
+  bibites-broadcast-game.service bibites-broadcast-stream.service \
+  bibites-broadcast-timescale.service bibites-broadcast-spot-watch.service; do
+  install -m 0644 "/opt/bibites-runtime/$unit" "/etc/systemd/system/$unit"
+done
+
+sed -i '/[[:space:]]bibitesmultiverse\.com$/d' /etc/hosts
+printf '%s bibitesmultiverse.com\n' "$RELAY_PRIVATE_IP" >> /etc/hosts
+
+for name in MULTIVERSE_BROADCAST MULTIVERSE_BROADCAST_ZOOM \
+  MULTIVERSE_BROADCAST_RESELECT_DELAY MULTIVERSE_BROADCAST_STATUS_FILE \
+  MULTIVERSE_BROADCAST_HIDE_UI; do
+  sed -i "/^$name=/d" "$env_file"
+done
+cat >>"$env_file" <<EOF
+MULTIVERSE_BROADCAST='true'
+MULTIVERSE_BROADCAST_ZOOM='35'
+MULTIVERSE_BROADCAST_RESELECT_DELAY='2'
+MULTIVERSE_BROADCAST_STATUS_FILE='$root/broadcast-director.json'
+MULTIVERSE_BROADCAST_HIDE_UI='true'
+EOF
+chown bibites:bibites "$env_file"
+chmod 0600 "$env_file"
+
+publish_password="$(aws --region "$AWS_REGION" ssm get-parameter \
+  --name "$PUBLISH_PASSWORD_PARAMETER" --with-decryption \
+  --query Parameter.Value --output text)"
+[[ "$publish_password" =~ ^[0-9a-f]{64}$ ]] || die 'the publish password is malformed'
+install -d -m 0750 -o root -g bibites /etc/bibites-broadcast
+umask 077
+{
+  printf 'WORLD_ID=%q\n' "$WORLD_ID"
+  printf 'STREAM_RTMP_ADDRESS=%q\n' "$STREAM_RTMP_ADDRESS"
+  printf 'STREAM_PUBLISH_USER=broadcaster\n'
+  printf 'STREAM_PUBLISH_PASSWORD=%q\n' "$publish_password"
+} >/etc/bibites-broadcast/broadcast.env
+chown root:bibites /etc/bibites-broadcast/broadcast.env
+chmod 0640 /etc/bibites-broadcast/broadcast.env
+
+nvidia-xconfig --silent --allow-empty-initial-configuration \
+  --use-display-device=None --virtual=1280x720
+systemctl daemon-reload
+systemctl disable --now bibites-xvfb.service "bibites-game@$WORLD_ID.service" 2>/dev/null || true
+systemctl enable bibites-broadcast-xorg.service "bibites-sidecar@$WORLD_ID.service" \
+  bibites-broadcast-game.service bibites-broadcast-stream.service \
+  bibites-broadcast-spot-watch.service
+systemctl start bibites-broadcast-xorg.service
+systemctl start "bibites-sidecar@$WORLD_ID.service"
+systemctl start bibites-broadcast-game.service
+systemctl start --no-block bibites-broadcast-timescale.service
+systemctl start bibites-broadcast-stream.service bibites-broadcast-spot-watch.service
+log "broadcast host active for $WORLD_ID"

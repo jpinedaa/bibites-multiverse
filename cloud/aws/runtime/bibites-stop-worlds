@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Stop game processes together so save-on-quit does not serialize across worlds.
+set -euo pipefail
+
+mapfile -t timescales < <(systemctl list-units --type=service --state=active \
+  'bibites-timescale@*.service' --no-legend | awk '{print $1}')
+[ "${#timescales[@]}" -eq 0 ] || systemctl stop "${timescales[@]}"
+
+mapfile -t games < <(systemctl list-units --type=service --state=active \
+  'bibites-game@*.service' --no-legend | awk '{print $1}')
+[ "${#games[@]}" -eq 0 ] || systemctl stop "${games[@]}"
+
+mapfile -t sidecars < <(systemctl list-units --type=service --state=active \
+  'bibites-sidecar@*.service' --no-legend | awk '{print $1}')
+[ "${#sidecars[@]}" -eq 0 ] || systemctl stop "${sidecars[@]}"
+sync

@@ -192,6 +192,15 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(statusPageHTML))
 	})
+	mux.HandleFunc("/watch", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/watch" {
+			serveNotFound(w)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(watchPageHTML))
+	})
 	mux.HandleFunc("/map", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/live", http.StatusMovedPermanently)
 	})
@@ -217,6 +226,7 @@ func (a *Archive) httpHandler() http.Handler {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://bibitesmultiverse.com/</loc><priority>1.0</priority></url>
   <url><loc>https://bibitesmultiverse.com/live</loc><priority>0.8</priority></url>
+  <url><loc>https://bibitesmultiverse.com/watch</loc><priority>0.8</priority></url>
 </urlset>
 `))
 	})

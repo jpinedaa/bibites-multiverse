@@ -1,0 +1,23 @@
+[Unit]
+Description=Encode and publish the Bibites live broadcast
+Requires=bibites-broadcast-xorg.service bibites-broadcast-game.service
+After=bibites-broadcast-xorg.service bibites-broadcast-game.service network-online.target
+
+[Service]
+Type=simple
+User=bibites
+Group=bibites
+Environment=DISPLAY=:0
+ExecStart=/usr/local/libexec/bibites-broadcast-stream
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectProc=invisible
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/bibites-broadcast
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+log() { logger -t bibites-broadcast-spot-watch -- "$*"; }
+token=''
+while true; do
+  if [ -z "$token" ]; then
+    token="$(curl -fsS -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
+      http://169.254.169.254/latest/api/token 2>/dev/null || true)"
+    [ -n "$token" ] || { sleep 5; continue; }
+  fi
+  action="$(curl -fsS -m 2 -H "X-aws-ec2-metadata-token: $token" \
+    http://169.254.169.254/latest/meta-data/spot/instance-action 2>/dev/null || true)"
+  if [ -n "$action" ]; then
+    log "Spot interruption notice received: $action"
+    systemctl stop bibites-broadcast-stream.service
+    systemctl stop bibites-broadcast-game.service
+    systemctl stop 'bibites-sidecar@*.service'
+    sync
+    log 'the world is saved and the publisher is stopped'
+    sleep infinity
+  fi
+  sleep 5
+done

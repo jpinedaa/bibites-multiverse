@@ -1,0 +1,12 @@
+[Unit]
+Description=NVIDIA Xorg display for the Bibites broadcast
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/xorg/Xorg :0 -config /etc/X11/xorg.conf -noreset -nolisten tcp
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

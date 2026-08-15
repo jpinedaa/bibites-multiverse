@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply the target time scale to the broadcast world
+After=bibites-broadcast-game.service
+Requires=bibites-broadcast-game.service
+
+[Service]
+Type=oneshot
+User=bibites
+Group=bibites
+ExecStart=/usr/local/libexec/bibites-set-timescale slot-1
+TimeoutStartSec=12min

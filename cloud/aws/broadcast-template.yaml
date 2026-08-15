@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GPU Spot host for the shared Bibites Multiverse live broadcast
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: g4dn.xlarge
+    AllowedPattern: '^g[0-9][a-z0-9.]*$'
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-east-1a
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  ArtifactBucket:
+    Type: String
+  RuntimeKey:
+    Type: String
+  RuntimeSha256:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{64}$'
+  DataSnapshotId:
+    Type: AWS::EC2::Snapshot::Id
+  RelayPrivateIp:
+    Type: String
+    Default: 172.26.12.110
+    AllowedPattern: '^[0-9.]+$'
+  StreamRtmpAddress:
+    Type: String
+    Default: 172.26.12.110:1935
+    AllowedPattern: '^[0-9.]+:1935$'
+  PublishPasswordParameter:
+    Type: String
+    Default: /bibites-multiverse/broadcast/publish-password
+  WorldId:
+    Type: String
+    Default: slot-1
+    AllowedValues: [slot-1]
+  NvidiaAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id
+
+Resources:
+  HostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: No inbound access; administration uses SSM Session Manager
+      VpcId: !Ref VpcId
+
+  HostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadBroadcastBootstrap
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${RuntimeKey}
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PublishPasswordParameter}
+
+  HostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref HostRole]
+
+  DataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      Encrypted: true
+      SnapshotId: !Ref DataSnapshotId
+      VolumeType: gp3
+      Tags:
+        - {Key: Name, Value: bibites-broadcast-data}
+        - {Key: Project, Value: bibites-multiverse}
+        - {Key: Workload, Value: live-broadcast}
+
+  HostLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name: !Ref HostProfile
+        ImageId: !Ref NvidiaAmi
+        InstanceType: !Ref InstanceType
+        InstanceInitiatedShutdownBehavior: stop
+        InstanceMarketOptions:
+          MarketType: spot
+          SpotOptions:
+            InstanceInterruptionBehavior: stop
+            SpotInstanceType: persistent
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          InstanceMetadataTags: enabled
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: true
+            DeleteOnTermination: true
+            DeviceIndex: 0
+            Groups: [!Ref HostSecurityGroup]
+            SubnetId: !Ref SubnetId
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - {Key: Name, Value: bibites-live-broadcast}
+              - {Key: Project, Value: bibites-multiverse}
+              - {Key: Workload, Value: live-broadcast}
+        UserData:
+          Fn::Base64: !Sub |
+            #!/usr/bin/env bash
+            set -euxo pipefail
+            exec > >(tee -a /var/log/bibites-broadcast-bootstrap.log | logger -t bibites-broadcast-bootstrap -s 2>/dev/console) 2>&1
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y ffmpeg jq x11-xserver-utils
+            install -d -m 0755 /opt/bibites-runtime
+            aws --region ${AWS::Region} s3 cp \
+              s3://${ArtifactBucket}/${RuntimeKey} /tmp/bibites-runtime.tar.gz \
+              --only-show-errors
+            printf '%s  %s\n' '${RuntimeSha256}' /tmp/bibites-runtime.tar.gz | sha256sum -c -
+            tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime
+            chmod 0755 /opt/bibites-runtime/install-broadcast-host
+            export AWS_REGION='${AWS::Region}'
+            export DATA_VOLUME_ID='${DataVolume}'
+            export RELAY_PRIVATE_IP='${RelayPrivateIp}'
+            export STREAM_RTMP_ADDRESS='${StreamRtmpAddress}'
+            export PUBLISH_PASSWORD_PARAMETER='${PublishPasswordParameter}'
+            export WORLD_ID='${WorldId}'
+            /opt/bibites-runtime/install-broadcast-host
+            systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+
+  Host:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref HostLaunchTemplate
+        Version: !GetAtt HostLaunchTemplate.LatestVersionNumber
+
+  DataAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId: !Ref Host
+      VolumeId: !Ref DataVolume
+
+Outputs:
+  InstanceId:
+    Value: !Ref Host
+  DataVolumeId:
+    Value: !Ref DataVolume
+  PrivateIp:
+    Value: !GetAtt Host.PrivateIp
+  StatusCommand:
+    Value: !Sub aws ssm start-session --target ${Host} --region ${AWS::Region}

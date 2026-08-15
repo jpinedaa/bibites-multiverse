@@ -1,20 +1,15 @@
 # Install
 
-**What you need:** a join string and one edition for your platform. Choose **add-on** if you
-already have The Bibites — Steam on Windows or the native itch.io build on Linux. Choose
-**complete** when the release page offers it and you want the authorized game payload, its
-license, the mod, and the sidecar installed together. **What you do not need:** a compiler, an
-SDK, a runtime, administrator rights, root, or anything from a developer's toolchain.
+**What you need:** a join string and a supported copy of The Bibites. The current release contains
+add-on packages. The installer finds the game automatically. There is no edition choice during
+installation. **What you do not need:** a compiler, an SDK, administrator rights, or root.
 
-**Where it comes from.** The add-on archives are always built. Complete rows appear only when the
-publisher permits the game payload to be redistributed. `SHA256SUMS` sits beside all of them:
+`SHA256SUMS` sits beside both current packages:
 
-| Platform and edition | Archive | Game source |
+| Platform | Archive | Game source |
 |---|---|---|
-| Windows add-on | `bibites-multiverse-0.1.0-windows-x64.zip` | your existing Steam copy |
-| Windows complete | `bibites-multiverse-0.1.0-windows-x64-complete.zip` | the manifest-covered `game\` payload |
-| Linux add-on | `bibites-multiverse-0.1.0-linux-x64.zip` | your existing itch.io copy |
-| Linux complete | `bibites-multiverse-0.1.0-linux-x64-complete.zip` | the manifest-covered `game/` payload |
+| Windows | `bibites-multiverse-0.1.0-windows-x64.zip` | your existing Steam copy |
+| Linux | `bibites-multiverse-0.1.0-linux-x64.zip` | your existing itch.io copy |
 
 **The mod inside every archive is the same file**, byte for byte: it is platform-independent IL.
 What differs by platform is the sidecar, BepInEx flavour, and kit. A complete archive adds
@@ -60,15 +55,9 @@ decision rather than a ritual. If you unpacked first, the installer's own first 
 every file against the `MANIFEST.sha256` inside the archive and then clears the mark from exactly
 those files, by name, and from nothing else on your machine. That is `INS-MARKOFWEB`.
 
-**This release is not code-signed**, so a fresh Windows PowerShell will not run its scripts at
-all until you either use PowerShell 7 — whose default policy on Windows is already
-`RemoteSigned` — or allow your own account to run local scripts with
-`Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned`. That second one is a
-narrowing rather than an off switch: it still refuses any unsigned script carrying the mark of
-the web, it touches no other account, and
-`Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy Undefined` puts it back. **You will
-never be asked for `-ExecutionPolicy Bypass`**, by this page or by anything in the archive. The
-release page states the same two options and what signing would cost instead.
+Double-click `Install-BibitesMultiverse.cmd` after you extract the unblocked archive. The launcher
+uses `RemoteSigned` for its process only. It does not change the policy for your account or
+computer. The package never uses `ExecutionPolicy Bypass`.
 
 ### On Linux: there is no mark of the web, and no ritual replaces it
 
@@ -131,7 +120,8 @@ written anywhere.
 ## What the installer does
 
 ```powershell
-.\Install-BibitesMultiverse.ps1     # asks for your join string, with the typing hidden
+.\Install-BibitesMultiverse.cmd     # double-click this file
+.\Install-BibitesMultiverse.ps1     # advanced options
 .\Start-Multiverse.ps1              # the sidecar, then the game
 .\Stop-Multiverse.ps1               # the game, then the sidecar
 ```
@@ -148,10 +138,8 @@ same rule. `-JoinStringFile .\join.txt` — `--join-string-file ./join.txt` on L
 a file if you would rather not type it, and then delete that file, which the installer tells you
 to do and will not do for you.
 
-There is no edition switch. The complete archive's manifest-covered `game-payload.json` selects
-the managed-runtime path. Without that descriptor, the same installer discovers an existing game.
-Complete installs go below `<data root>/runtimes/<assembly-sha256>`; `-DataRoot` on Windows and
-`--data-root` on Linux choose a different root.
+There is no edition switch. The package contents select the mode. The current add-on packages
+discover an existing game automatically.
 
 **Both installers work in nine steps they name on your screen as they go**, and the steps are the
 same nine: check the package against `MANIFEST.sha256`; select the existing or bundled game

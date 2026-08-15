@@ -43,6 +43,34 @@ The upstream package also contains UnityDoorstop, HarmonyX, MonoMod, and Mono.Ce
 The [BepInEx 5.4.23.3 source page](https://github.com/BepInEx/BepInEx/tree/v5.4.23.3) identifies their versions and source repositories.
 Those components retain their own terms.
 
+## MediaMTX 1.20.0
+
+The hosted live-stream origin downloads MediaMTX 1.20.0 from the upstream
+release. That version uses the MIT License. See the
+[upstream source](https://github.com/bluenviron/mediamtx/tree/v1.20.0).
+
+> MIT License
+>
+> Copyright (c) 2019 aler9
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all
+> copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+> SOFTWARE.
+
 ## coder/websocket 1.8.15
 
 The Go binaries link to `github.com/coder/websocket` version 1.8.15.

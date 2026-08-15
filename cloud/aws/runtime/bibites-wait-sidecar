@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+world="${1:?world id required}"
+env_file="/srv/bibites/worlds/$world/world.env"
+# shellcheck source=/dev/null
+set -a; . "$env_file"; set +a
+
+deadline=$(( $(date +%s) + 180 ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  [ -s "$CONTRACT_A_TOKEN_FILE" ] && grep -Fq 'contract B: slot granted' "$SIDECAR_LOG" 2>/dev/null && exit 0
+  grep -Eq 'HTTP 401|certificate did not verify|placement claim refused|below this relay' "$SIDECAR_LOG" 2>/dev/null && {
+    tail -n 30 "$SIDECAR_LOG" >&2
+    exit 1
+  }
+  sleep 1
+done
+
+echo "$world: sidecar did not receive a slot grant within 180 seconds" >&2
+tail -n 30 "$SIDECAR_LOG" >&2 || true
+exit 1

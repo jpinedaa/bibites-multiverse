@@ -9,7 +9,7 @@ Every one of them has a file here:
 
 | DQ2's obligation | Where it lives |
 |---|---|
-| A supervisor — restart on exit, start on boot | `systemd/multiverse-{relay,archive}.service` |
+| A supervisor — restart on exit, start on boot | `systemd/multiverse-{relay,archive,stream}.service` |
 | Monitoring that speaks when nobody is looking | `monitor.sh` + `systemd/multiverse-monitor.{service,timer}` |
 | Backup of the irreplaceable files | `backup.sh` + `systemd/multiverse-backup.{service,timer}` |
 | A written restart policy | `RESTART-POLICY.md` |
@@ -28,16 +28,17 @@ decision about publishing the status page (`nginx/multiverse-20-status.conf`).
 |---|---|
 | `README.md` | This index, the execution order, and the owner's manual steps |
 | `deploy.env.example` | **The one parameter file.** Copy it and fill the owner-specific values |
-| `provision.sh` | Idempotent provisioning of a fresh Lightsail Ubuntu instance, in 15 named phases. `--dry-run`, `--only <phase>` |
+| `provision.sh` | Idempotent provisioning of a fresh Lightsail Ubuntu instance, in 16 named phases. `--dry-run`, `--only <phase>` |
+| `install-stream-origin.sh` | Installs verified MediaMTX, private RTMP ingest, and loopback HLS |
 | `ship.sh` | Runs on the **development** machine: cross-compiles both architectures and scps them over. The only script here that does not run on the instance |
 | `issue-join.sh` | Mints a participant's join string. Takes the relay restart issuance requires, deliberately and in a batch |
-| `monitor.sh` | Thirteen checks, five minutes apart, alerting a person on change. `--test` proves the channel |
+| `monitor.sh` | Fourteen checks, five minutes apart, alerting a person on change. `--test` proves the channel |
 | `backup.sh` | Three tiers: identity hourly, the record daily, and the offsite half documented. `--restore-help` prints the procedure |
 | `tls-deploy-hook.sh` | certbot deploy hook: installs the renewed pair and reloads nginx. No service restart |
 | `test-front-door.sh` | Renders the nginx templates and checks the shared HTTPS front door |
-| `systemd/*.service`, `systemd/*.timer` | Six units: two services, two timers and their oneshots |
+| `systemd/*.service`, `systemd/*.timer` | Seven units: three services, two timers, and their oneshots |
 | `nginx/multiverse-10-acme.conf` | Port 80: the ACME challenge and nothing else |
-| `nginx/multiverse-20-status.conf` | HTTPS 443: the website and the `/contract-b/` WebSocket proxy |
+| `nginx/multiverse-20-status.conf` | HTTPS 443: the website, `/stream/` HLS, and `/contract-b/` WebSocket proxy |
 | `SIZING.md` | Decision 3's arithmetic: the growth rule, the memory model, the tripwire and the sizing procedure |
 | `RESTART-POLICY.md` | WP3's written restart policy, built from the measured replay arithmetic |
 | `WIND-DOWN.md` | D24's ending as a stated event: the timeline, both retention arms, extension, and the publish-the-relay path |
@@ -69,6 +70,7 @@ the `small_3_0` bundle described in `SIZING.md` §4.
 
 The public front door is `MV_RELAY_PORT=443`. The private relay upstream is
 `MV_RELAY_BACKEND=127.0.0.1:8795`. The archive stays at `127.0.0.1:8796`.
+The HLS origin stays at `127.0.0.1:8888`.
 
 ## 3. Execution order, the day the instance exists
 
@@ -145,8 +147,9 @@ disk is not a running new binary, and the restart is a deliberate act with
 ## 4. The TLS design and shared HTTPS front door
 
 **nginx terminates TLS on port 443.** It sends `/contract-b/` WebSocket requests
-to the relay on `127.0.0.1:8795`. It sends all other HTTPS paths to the archive
-on `127.0.0.1:8796`.
+to the relay on `127.0.0.1:8795`. It sends `/stream/` to MediaMTX on
+`127.0.0.1:8888`. It sends all other HTTPS paths to the archive on
+`127.0.0.1:8796`.
 
 nginx replaces `X-Forwarded-For` with the direct client address. The relay
 trusts one forwarded address only when the direct peer is on loopback. This rule
@@ -201,7 +204,7 @@ listener on a box whose disk the same process is filling.
   nginx proxies `location /` wholesale, so a handler added to
   `go/internal/archive/page.go` is published the moment the binary ships; the
   rule, not the roster, is what a reviewer checks. At the commit this kit was
-  last read against, that is **sixteen** read-only handlers — `/`, `/live`,
+  last read against, that is **seventeen** read-only handlers — `/`, `/live`, `/watch`,
   `/map`, `/favicon.svg`, `/social-card.svg`, `/robots.txt`, `/sitemap.xml`,
   `/healthz`, `/api/status`, `/api/hops`, `/api/species`, `/api/species/tree`,
   `/api/species/trends`, `/api/species/brains`, `/api/species/history`,
@@ -213,11 +216,14 @@ listener on a box whose disk the same process is filling.
   `join.md` states that in full before anybody joins. Not public: the archive's
   own listener, the relay's admin path, the data directories, the verifier store,
   SSH.
-- **The cost, named.** The live console is the largest single egress term in the
-  service — larger than the game traffic — at ~32 GB/month per continuously open
-  browser tab uncompressed, ~4 GB gzipped. It is inside the bundle's included
-  transfer, and it is the first time this page has ever been reachable by anybody
-  but the owner.
+- **The stream has a separate write boundary.** Viewers can read `/stream/`.
+  The RTMP publisher uses `172.26.12.110:1935` through private VPC peering.
+  The host firewall permits only `172.31.0.0/16`. MediaMTX also requires a
+  random publish password. See `docs/live-broadcast.md`.
+- **The cost, named.** The stream is the largest egress term at approximately
+  810 GB per continuously open viewer-month. The live console uses approximately
+  32 GB uncompressed or 4 GB gzipped. Add a video CDN before the stream exceeds
+  the Lightsail transfer allowance.
 
 **B28's admin path stays off.** `MULTIVERSE_RELAY_ADMIN_LISTEN` is deliberately
 absent from the generated environment file; the listener is compiled in and bound
@@ -317,8 +323,8 @@ Static checks:
 
 | Check | Result |
 |---|---|
-| `bash -n` on all six scripts | clean |
-| `systemd-analyze verify` on all six units | clean on systemd 255 — the only notices are "command not found" for paths that exist on the instance and not here |
+| `bash -n` on all eight scripts | clean |
+| `systemd-analyze verify` on all seven units | clean on systemd 255 — the only notices are "command not found" for paths that exist on the instance and not here |
 | `test-front-door.sh` | clean render; it also runs `nginx -t` when nginx is available |
 | `nginx -t` | clean on the live Ubuntu 24.04 instance before reload |
 | `shellcheck` | **not run** — not installed here. The scripts are written to its rules: `set -uo pipefail` (`-e` only where a partial run would be worse than a stop), every expansion quoted, `read -r`, `$(...)`, no unquoted globs, arrays for argument lists, and one annotated `disable=SC2086` where the operator's value carries its own arguments |
@@ -333,11 +339,12 @@ rig's own constraint:
 | **The cross-compile is real.** `linux/amd64` and `linux/arm64`, both **statically linked** | `ship.sh --build-only`, then `file` |
 | **The generated environment files drive both binaries with no arguments at all** | Both started from `relay.env` / `archive.env` alone; `ExecStart` carries nothing |
 | **nginx serves the website and proxies `/contract-b/` on HTTPS 443** | off-box HTTPS and WebSocket-path checks |
+| **nginx serves one HLS stream below `/stream/`** | authenticated synthetic RTMP publish, then a public LL-HLS manifest with H.264/AAC |
 | **Both application listeners stay on loopback** | `ss`, provisioning verification, and an off-box port check |
 | **The bootstrap mint is what lets the relay start at all.** An empty credential store makes it refuse to serve and exit 1 — which is why `bootstrap` precedes `systemd` | Observed, then re-run in the correct order |
 | **The archive subscribes with the bootstrap-minted `subscribe` credential** read from `MULTIVERSE_CREDENTIAL_FILE` | `relayConnected: true`, `haveStatus: true` |
 | **Certificate renewal needs no service restart** | certbot deploy hook installs the pair and reloads nginx |
-| **`monitor.sh`'s thirteen checks run, escalate and recover** — including the lane-bypass persistence counter firing on exactly the third consecutive pass, and the replay projection reproducing the options document's model (7.43 M records → ~9.4 GB peak) | A synthetic `/api/status` server and a synthetic state directory |
+| **`monitor.sh`'s fourteen checks run, escalate and recover** — including the stream-origin listener and lane-bypass persistence | A synthetic `/api/status` server, the live HLS origin, and a synthetic state directory |
 | ↳ **The replay check's constants changed on 2026-08-12 and have NOT been re-rehearsed.** It now projects both terms and alerts on the larger, so the same 7.43 M records project ~2.1 GB (resident) rather than ~9.4 GB. The escalate-and-recover behaviour around it is untouched | — |
 | **`monitor.sh`'s error counter survives the numbered log rotation** | Appended errors, rotated `relay.log` → `relay.log.1`, confirmed no double count and no missed lines |
 | **`backup.sh` produces, prunes and round-trips** — identity snapshots with checksums, `MV_BACKUP_KEEP` pruning, gzip of the ledger that `gunzip | diff` matches, the hardlink genome snapshot, and the `auto` guard correctly refusing to copy a ledger onto a filesystem below its free-space floor | Synthetic data directory |
