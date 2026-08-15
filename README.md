@@ -124,23 +124,57 @@ Release `0.1.0` contains add-on packages. The installer finds an existing game a
 ## How it works
 
 ```mermaid
-flowchart LR
-    subgraph Local["Your computer"]
-        Game["The Bibites<br/>your world"]
-        Mod["Multiverse mod<br/>border events"]
-        Sidecar["Sidecar<br/>custody + reconnect"]
-        Game <--> Mod
-        Mod <-->|localhost| Sidecar
+%%{init: {"theme":"base","fontFamily":"Arial, sans-serif","flowchart":{"nodeSpacing":35,"rankSpacing":40,"diagramPadding":8},"themeVariables":{"background":"transparent","primaryTextColor":"#f6f8fa","textColor":"#f6f8fa","lineColor":"#8b949e","edgeLabelBackground":"#0d1117"}}}%%
+flowchart TB
+    accTitle: How Bibites Multiverse connects independent simulations
+    accDescr: A local game uses the mod and sidecar to exchange organisms through the public relay. The archive records events, while every world and save remains on its owner's computer.
+
+    subgraph PLAYER["YOUR COMPUTER · PRIVATE"]
+        direction TB
+        subgraph GAME_PROCESS["THE BIBITES PROCESS"]
+            direction LR
+            Game["The Bibites<br/>simulation + local saves"]
+            Mod["Multiverse mod<br/>detects border crossings"]
+            Game <-->|"in-process"| Mod
+        end
+        Sidecar["Sidecar<br/>durable custody + reconnect"]
+        Mod <-->|"localhost · Contract A"| Sidecar
     end
 
-    Sidecar <-->|encrypted WSS| Relay["Public relay<br/>placement + routing"]
-    Relay <-->|migrations| Neighbors["Neighbor worlds"]
-    Relay --> Archive["Public archive<br/>map + history"]
+    subgraph SERVICE["MULTIVERSE SERVICE · PUBLIC"]
+        direction LR
+        Relay["Relay<br/>placement + routing"]
+        Archive[("Archive<br/>live map + history")]
+        Relay -.->|"records events"| Archive
+    end
 
-    classDef local fill:#191d22,stroke:#4ec9a0,color:#e6e9ee
-    classDef public fill:#191d22,stroke:#5aa9e6,color:#e6e9ee
-    class Game,Mod,Sidecar local
-    class Relay,Neighbors,Archive public
+    subgraph PEERS["OTHER COMPUTERS · PRIVATE"]
+        Neighbors["Neighbor worlds<br/>independent simulations + saves"]
+    end
+
+    Sidecar <-->|"encrypted WSS<br/>Contract B"| Relay
+    Relay <-->|"routed migrants"| Neighbors
+
+    classDef game fill:#16251f,stroke:#4ec9a0,stroke-width:2px,color:#f6f8fa
+    classDef local fill:#102a30,stroke:#46c2c7,stroke-width:2px,color:#f6f8fa
+    classDef service fill:#13253b,stroke:#5aa9e6,stroke-width:2px,color:#f6f8fa
+    classDef archive fill:#251c36,stroke:#b18cff,stroke-width:2px,color:#f6f8fa
+    classDef peer fill:#2b2417,stroke:#e7b65c,stroke-width:2px,color:#f6f8fa
+
+    class Game game
+    class Mod,Sidecar local
+    class Relay service
+    class Archive archive
+    class Neighbors peer
+
+    style PLAYER fill:#0d1117,stroke:#4ec9a0,stroke-width:1px,color:#f6f8fa
+    style GAME_PROCESS fill:#111a17,stroke:#2d6a55,stroke-width:1px,color:#8b949e
+    style SERVICE fill:#0d1117,stroke:#5aa9e6,stroke-width:1px,color:#f6f8fa
+    style PEERS fill:#0d1117,stroke:#e7b65c,stroke-width:1px,color:#f6f8fa
+
+    linkStyle 0,1 stroke:#46c2c7,stroke-width:2px
+    linkStyle 2 stroke:#b18cff,stroke-width:2px
+    linkStyle 3,4 stroke:#5aa9e6,stroke-width:3px
 ```
 
 The mod detects border crossings. The sidecar records custody before it sends a migrant.
