@@ -38,26 +38,24 @@ VIAddVersionKey /LANG=1033 "CompanyName" "Bibites Multiverse"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Apache-2.0 project components"
 
 Section "Install"
-  ; $PLUGINSDIR is only created by InitPluginsDir or by the first NSIS plugin
-  ; call. This script uses no plugins (FileFunc.nsh and LogicLib.nsh are pure
-  ; macros), so without this line the variable is empty and extraction targets
-  ; the drive root — which fails without admin rights.
-  InitPluginsDir
+  ; Use a fixed temporary folder that never depends on InitPluginsDir timing.
+  StrCpy $R9 "$TEMP\bibites-multiverse-setup"
   Delete "$TEMP\bibites-multiverse-setup.log"
-  SetOutPath "$PLUGINSDIR\package"
+  CreateDirectory "$R9\package"
+  SetOutPath "$R9\package"
   File /r "${PACKAGE_DIR}\*.*"
 
   ${GetParameters} $R0
   ClearErrors
   ${GetOptions} $R0 "/PROBE" $R1
   ${IfNot} ${Errors}
-    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "$PLUGINSDIR\package\Install-BibitesMultiverse-Gui.ps1" -Probe' $R2
+    ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "$R9\package\Install-BibitesMultiverse-Gui.ps1" -Probe' $R2
     SetErrorLevel $R2
     Quit
   ${EndIf}
 
   CreateDirectory "$INSTDIR"
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "$PLUGINSDIR\package\Install-BibitesMultiverse-Gui.ps1" -InstallRoot "$INSTDIR"' $R2
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "$R9\package\Install-BibitesMultiverse-Gui.ps1" -InstallRoot "$INSTDIR"' $R2
   ${If} $R2 == 2
     SetErrorLevel 0
     Quit
