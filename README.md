@@ -46,36 +46,27 @@ The game includes lineage views, genetic analysis, creature engineering, and wor
 You can get *The Bibites* on [Steam](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
 or [itch.io](https://thebibites.itch.io/the-bibites).
 
+These screenshots come from real Multiverse saves loaded in the game.
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/assets/gameplay-ecosystem.webp" alt="Several living Bibites sharing one green simulation world">
+<br><sub><strong>A living ecosystem.</strong> Multiple Bibites share one local simulation.</sub>
+</td>
+<td width="50%">
+<img src="docs/assets/gameplay-bibite-closeup.webp" alt="A large living Bibite shown close-up in the game">
+<br><sub><strong>One Bibite up close.</strong> The game can follow an individual inside the wider population.</sub>
+</td>
+</tr>
+</table>
+
 The base game asks what can evolve inside one world. Bibites Multiverse asks a second question:
 
 > **What happens when evolution can leave home?**
 
 Bibites Multiverse is an independent community project. It is not affiliated with or endorsed by
 Omnia Studios.
-
-## See the Multiverse alive
-
-Nothing below is a mockup. The first two images come from running local worlds. The third image
-captures the public network at one moment.
-
-<table>
-<tr>
-<td width="50%">
-<img src="docs/assets/gameplay-ecosystem.webp" alt="Several living Bibites sharing one green simulation world">
-<br><sub><strong>Inside one world.</strong> A living neighborhood from a real Multiverse save.</sub>
-</td>
-<td width="50%">
-<img src="docs/assets/gameplay-bibite-closeup.webp" alt="A large living Bibite shown close-up in the game">
-<br><sub><strong>Evolution up close.</strong> A living Bibite from another independent world.</sub>
-</td>
-</tr>
-</table>
-
-<a href="https://bibitesmultiverse.com/live">
-<img src="docs/assets/live-multiverse-map.webp" width="100%" alt="Six live Bibites worlds connected by migration lanes with organisms moving between them">
-</a>
-
-<p align="center"><sub><strong>Across the network.</strong> Six independent worlds exchange organisms through live migration lanes.</sub></p>
 
 ## What the Multiverse adds
 
@@ -93,6 +84,14 @@ those simulations into migration routes.
 | The public archive follows migrations, lineage, species, and brain-complexity trends. | Each participant gets a separate credential that binds to one world. |
 
 The result feels less like a multiplayer lobby and more like a continent with moving life.
+
+### The network in motion
+
+<a href="https://bibitesmultiverse.com/live">
+<img src="docs/assets/live-multiverse-map.webp" width="100%" alt="Six live Bibites worlds connected by migration lanes with organisms moving between them">
+</a>
+
+<p align="center"><sub><strong>One captured moment.</strong> The public map shows six live worlds, their populations, active lanes, and organisms in transit.</sub></p>
 
 ## Install one world
 
