@@ -1,9 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using ManagementScripts;
 using Newtonsoft.Json.Linq;
+using SettingScripts;
 using SimulationScripts.BibiteScripts;
+using UIScripts.UIPanels;
 using UnityEngine;
 
 namespace BibitesMultiverse
@@ -13,8 +16,8 @@ namespace BibitesMultiverse
     /// that organism until it dies or leaves this world, and only then chooses again. A later birth
     /// does not steal the camera from the current subject.
     ///
-    /// This component changes selection and camera state only. It never moves, heals, kills, exports,
-    /// or otherwise mutates an organism or the simulation.
+    /// This component changes spectator presentation and can set the requested simulation speed. It
+    /// never moves, heals, kills, exports, or otherwise edits an organism.
     /// </summary>
     internal sealed class SpectatorDirector : MonoBehaviour
     {
@@ -24,22 +27,33 @@ namespace BibitesMultiverse
         internal const string EnvReselectDelay = "MULTIVERSE_BROADCAST_RESELECT_DELAY";
         internal const string EnvStatusFile = "MULTIVERSE_BROADCAST_STATUS_FILE";
         internal const string EnvHideUI = "MULTIVERSE_BROADCAST_HIDE_UI";
+        internal const string EnvTimeScale = "MULTIVERSE_BROADCAST_TIME_SCALE";
+        internal const string EnvPanels = "MULTIVERSE_BROADCAST_PANELS";
+        internal const string EnvPanelSeconds = "MULTIVERSE_BROADCAST_PANEL_SECONDS";
+        internal const string EnvShowFieldOfView = "MULTIVERSE_BROADCAST_SHOW_FOV";
 
         private const float DefaultZoom = 35f;
         private const float DefaultReselectDelay = 2f;
+        private const float DefaultPanelSeconds = 15f;
         private const float PollSeconds = 0.2f;
         private const float StatusSeconds = 2f;
 
+        private readonly List<BibitePanels> panelRotation = new List<BibitePanels>();
         private BibiteBody target;
         private float zoom;
         private float reselectDelay;
+        private float broadcastTimeScale;
+        private float panelSeconds;
         private float nextPoll;
         private float nextSelection;
         private float nextStatus;
+        private float nextPanel;
         private string statusFile;
         private string lastEndReason = "startup";
+        private string activePanel = string.Empty;
         private bool hideUI;
-        private bool uiApplied;
+        private bool showFieldOfView;
+        private int panelIndex;
         private int lastEntityId;
         private string lastSpecies = string.Empty;
         private DateTime selectedAtUtc;
@@ -55,12 +69,25 @@ namespace BibitesMultiverse
             reselectDelay = ReadFloat(EnvReselectDelay, DefaultReselectDelay, 0f);
             statusFile = (MultiverseConfig.Env(EnvStatusFile) ?? string.Empty).Trim();
             hideUI = ReadBool(EnvHideUI, false);
+            broadcastTimeScale = ReadFloat(EnvTimeScale, -1f, 0f);
+            panelSeconds = ReadFloat(EnvPanelSeconds, DefaultPanelSeconds, 2f);
+            showFieldOfView = ReadBool(EnvShowFieldOfView, true);
+            ReadPanels(MultiverseConfig.Env(EnvPanels));
+
+            if (hideUI && panelRotation.Count > 0)
+            {
+                MultiversePlugin.Log.LogWarning(
+                    $"{Prefix} {EnvHideUI}=true disables the configured panel rotation");
+            }
 
             MultiversePlugin.Log.LogInfo(
                 $"{Prefix} director armed — rule=youngest-until-death-or-departure " +
                 $"zoom={zoom.ToString("F1", CultureInfo.InvariantCulture)} " +
                 $"reselectDelay={reselectDelay.ToString("F1", CultureInfo.InvariantCulture)}s " +
-                $"hideUI={hideUI} statusFile={(statusFile.Length == 0 ? "<off>" : statusFile)}");
+                $"timeScale={(broadcastTimeScale < 0f ? "<unchanged>" : broadcastTimeScale.ToString("F2", CultureInfo.InvariantCulture))} " +
+                $"panels={PanelList()} panelSeconds={panelSeconds.ToString("F1", CultureInfo.InvariantCulture)} " +
+                $"showFOV={showFieldOfView} hideUI={hideUI} " +
+                $"statusFile={(statusFile.Length == 0 ? "<off>" : statusFile)}");
         }
 
         private void Update()
@@ -78,6 +105,7 @@ namespace BibitesMultiverse
             }
 
             ApplyUIChoice();
+            EnforceTimeScale();
 
             if (target != null && (target.dead || target.dying || target.destroyed))
             {
@@ -98,6 +126,7 @@ namespace BibitesMultiverse
             if (target != null)
             {
                 EnforceZoom();
+                EnforcePanel();
                 WriteStatus("following", string.Empty);
             }
             else
@@ -113,6 +142,7 @@ namespace BibitesMultiverse
             target = null;
             lastEntityId = 0;
             lastSpecies = string.Empty;
+            activePanel = string.Empty;
             lastEndReason = reason;
             nextSelection = Time.realtimeSinceStartup + reselectDelay;
             MultiversePlugin.Log.LogInfo(
@@ -174,6 +204,9 @@ namespace BibitesMultiverse
             lastSpecies = SpeciesName(youngest);
             selectedAtUtc = DateTime.UtcNow;
             lastEndReason = string.Empty;
+            panelIndex = 0;
+            nextPanel = 0f;
+            activePanel = string.Empty;
             EnforceZoom();
             nextStatus = 0f;
 
@@ -214,15 +247,58 @@ namespace BibitesMultiverse
 
         private void ApplyUIChoice()
         {
-            if (uiApplied || UserControl.Instance == null || UserControl.Instance.mainUI == null)
+            UserControl control = UserControl.Instance;
+            if (control != null && control.mainUI != null && control.mainUI.activeSelf == hideUI)
+            {
+                control.mainUI.SetActive(!hideUI);
+            }
+
+            if (UserSettings.ShowBibiteFOW.val != showFieldOfView)
+            {
+                UserSettings.ShowBibiteFOW.SetValue(showFieldOfView);
+            }
+        }
+
+        private void EnforceTimeScale()
+        {
+            if (broadcastTimeScale < 0f || TimeController.Instance == null)
             {
                 return;
             }
 
-            uiApplied = true;
-            if (hideUI)
+            if (!Mathf.Approximately(TimeController.targetTimeScale.val, broadcastTimeScale))
             {
-                UserControl.Instance.mainUI.SetActive(false);
+                WorldSeeder.SetTimeScale(broadcastTimeScale, Prefix);
+            }
+        }
+
+        private void EnforcePanel()
+        {
+            if (hideUI || panelRotation.Count == 0 || Time.realtimeSinceStartup < nextPanel)
+            {
+                return;
+            }
+
+            GUIManager manager = GUIManager.Instance;
+            if (manager == null || !manager.hasTarget)
+            {
+                return;
+            }
+
+            BibitePanels panel = panelRotation[panelIndex];
+            try
+            {
+                manager.OpenBibitePanel(panel, false);
+                activePanel = PanelName(panel);
+                panelIndex = (panelIndex + 1) % panelRotation.Count;
+                nextPanel = Time.realtimeSinceStartup + panelSeconds;
+                MultiversePlugin.Log.LogInfo(
+                    $"{Prefix} showing {activePanel} panel for entityId={lastEntityId}");
+            }
+            catch (Exception e)
+            {
+                nextPanel = Time.realtimeSinceStartup + 1f;
+                MultiversePlugin.Log.LogWarning($"{Prefix} could not show the {PanelName(panel)} panel: {e.Message}");
             }
         }
 
@@ -253,6 +329,10 @@ namespace BibitesMultiverse
                     ["ageHours"] = target != null ? target.age : 0f,
                     ["population"] = tracker?.bibites?.Count ?? 0,
                     ["zoom"] = zoom,
+                    ["panel"] = activePanel,
+                    ["fieldOfView"] = showFieldOfView,
+                    ["targetTimeScale"] = broadcastTimeScale,
+                    ["engineTimeScale"] = TimeController.engineTimeScale.val,
                     ["selectedAt"] = target != null ? selectedAtUtc.ToString("O", CultureInfo.InvariantCulture) : string.Empty,
                     ["updatedAt"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
                 };
@@ -271,6 +351,73 @@ namespace BibitesMultiverse
             catch (Exception e)
             {
                 MultiversePlugin.Log.LogWarning($"{Prefix} could not write {statusFile}: {e.Message}");
+            }
+        }
+
+        private void ReadPanels(string value)
+        {
+            string text = (value ?? string.Empty).Trim();
+            if (text.Length == 0)
+            {
+                return;
+            }
+
+            foreach (string entry in text.Split(','))
+            {
+                string name = entry.Trim().ToLowerInvariant().Replace('_', '-');
+                BibitePanels panel;
+                switch (name)
+                {
+                    case "brain":
+                        panel = BibitePanels.BrainPanel;
+                        break;
+                    case "biology":
+                    case "body":
+                        panel = BibitePanels.BiologyPanel;
+                        break;
+                    case "expanded-brain":
+                        panel = BibitePanels.ExpendedBrainPanel;
+                        break;
+                    default:
+                        MultiversePlugin.Log.LogWarning(
+                            $"{Prefix} {EnvPanels} contains unsupported panel '{entry.Trim()}'; ignoring it");
+                        continue;
+                }
+
+                if (!panelRotation.Contains(panel))
+                {
+                    panelRotation.Add(panel);
+                }
+            }
+        }
+
+        private string PanelList()
+        {
+            if (panelRotation.Count == 0)
+            {
+                return "<off>";
+            }
+
+            string[] names = new string[panelRotation.Count];
+            for (int index = 0; index < panelRotation.Count; index++)
+            {
+                names[index] = PanelName(panelRotation[index]);
+            }
+            return string.Join(",", names);
+        }
+
+        private static string PanelName(BibitePanels panel)
+        {
+            switch (panel)
+            {
+                case BibitePanels.BrainPanel:
+                    return "brain";
+                case BibitePanels.BiologyPanel:
+                    return "biology";
+                case BibitePanels.ExpendedBrainPanel:
+                    return "expanded-brain";
+                default:
+                    return panel.ToString();
             }
         }
 

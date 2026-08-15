@@ -128,9 +128,9 @@ namespace BibitesMultiverse
         }
 
         /// <summary>
-        /// The public broadcast camera is opt-in and affects selection and camera position only. It is
-        /// deliberately independent of the multiverse client: an offline rehearsal must be able to
-        /// prove rendering without joining the public map or changing any ecology.
+        /// The public broadcast camera is opt-in. It controls spectator presentation and can request
+        /// a simulation speed. It is deliberately independent of the multiverse client: an offline
+        /// rehearsal must prove rendering without joining the public map or editing any organism.
         /// </summary>
         private void StartSpectatorDirector()
         {

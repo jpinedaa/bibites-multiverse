@@ -41,7 +41,11 @@ The `SpectatorDirector` component uses this rule:
 The director uses the game selection API.
 `CameraManager` follows the selected object in `LateUpdate`.
 
-The director changes selection, camera zoom, and optional UI visibility.
+The director can also show the selected Bibite's panels and vision range.
+It can request a fixed simulation speed for a broadcast.
+Panel changes use real time, so the simulation speed does not affect their interval.
+
+The director changes selection, presentation, and the requested simulation speed.
 It does not move, feed, heal, kill, export, or edit a Bibite.
 
 These environment variables control it:
@@ -53,17 +57,28 @@ These environment variables control it:
 | `MULTIVERSE_BROADCAST_RESELECT_DELAY` | `2` | Wait before the next selection. |
 | `MULTIVERSE_BROADCAST_STATUS_FILE` | empty | Write the current subject as JSON. |
 | `MULTIVERSE_BROADCAST_HIDE_UI` | `false` | Hide the main game UI. |
+| `MULTIVERSE_BROADCAST_TIME_SCALE` | empty | Request a fixed simulation speed. |
+| `MULTIVERSE_BROADCAST_PANELS` | empty | Rotate through `brain`, `biology`, or `expanded-brain`. |
+| `MULTIVERSE_BROADCAST_PANEL_SECONDS` | `15` | Set the real-time interval between panels. |
+| `MULTIVERSE_BROADCAST_SHOW_FOV` | `true` | Show the selected Bibite's vision range. |
+
+The panel rotation stays off when `MULTIVERSE_BROADCAST_HIDE_UI` is `true`.
+
+The standard broadcast profile uses a zoom of `45` and a speed of `7.5`.
+It alternates the brain and biology panels every 15 seconds.
+It also shows the selected Bibite's vision range.
 
 ## Origin boundary
 
-`install-stream-origin.sh` installs a pinned MediaMTX release and checks its SHA-256 value.
+`install-stream-origin.sh` installs a pinned MediaMTX release.
+It compares the release SHA-256 value with the pinned value.
 
 The RTMP listener must use a private RFC1918 address.
 It must listen on port `1935`.
 The host firewall must accept port `1935` only from the publisher network.
 
 The publisher subnet needs an active private route to the relay and RTMP addresses.
-The deployment wrapper checks the effective subnet route table for both addresses.
+The deployment wrapper evaluates the effective subnet route table for both addresses.
 It rejects a public destination and a route that uses the default internet path.
 
 The publisher also needs a random 64-character hexadecimal password.
@@ -120,6 +135,9 @@ OBS captures the game process and uses NVENC to publish H.264.
 A WSL service opens a private RTMP tunnel through AWS Systems Manager.
 A dedicated `tmux` session supervises the Windows game and OBS processes.
 
+The fallback uses the standard broadcast profile.
+The website adds no separate simulation-speed label.
+
 The computer must stay powered on, and the Windows user must stay logged in.
 Windows, WSL, display, or GPU restarts can interrupt the stream.
 Run the fallback start command again after a computer restart.
@@ -145,7 +163,7 @@ Do not deploy the AWS broadcaster from this repository.
 `cloud/aws/deploy-broadcast.sh` performs read-only preflight checks and then stops.
 It does not send the source-host command or call CloudFormation.
 
-The preflight checks these properties:
+The preflight requires these properties:
 
 - The staged manifest disables `slot-1`.
 - The snapshot is complete, encrypted, and owned by the approved account.
@@ -216,5 +234,5 @@ The expected listeners are:
 - `127.0.0.1:8888` for HLS.
 - `127.0.0.1:9998` for MediaMTX metrics.
 
-Check the public HLS manifest from outside the origin network.
+Make sure that the public HLS manifest is available from outside the origin network.
 Do not expose the RTMP or metrics listener to the internet.

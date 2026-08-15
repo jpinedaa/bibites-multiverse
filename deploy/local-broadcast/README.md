@@ -6,6 +6,12 @@ Use it while the AWS account does not have enough cloud GPU quota.
 All website viewers receive the same stream.
 The spectator director follows one Bibite until it dies.
 It then selects the youngest living Bibite.
+The simulation runs at `7.5` times normal speed.
+
+The camera uses a zoom of `45`.
+It shows the selected Bibite's vision range.
+It alternates the brain and biology panels every 15 seconds.
+The website adds no separate simulation-speed label.
 
 Read the full [live broadcast design](../../docs/live-broadcast.md) before installation.
 
@@ -66,7 +72,7 @@ Start the tunnel, game, and OBS:
 ~/.local/lib/bibites-local-broadcast/bin/start
 ```
 
-Check the WSL supervisors:
+Make sure that the WSL supervisors are active:
 
 ```sh
 systemctl --user is-active bibites-local-broadcast-tunnel.service
@@ -81,7 +87,11 @@ powershell.exe -NoProfile -Command \
   | tr -d '\r' | jq
 ```
 
-Check the public page and HLS manifest:
+The status must report a zoom of `45` and a target time scale of `7.5`.
+The `panel` value alternates between `brain` and `biology`.
+The `fieldOfView` value must be `true`.
+
+Make sure that the public page and HLS manifest are available:
 
 ```sh
 curl -fsS https://<service-domain>/watch >/dev/null
@@ -95,7 +105,7 @@ Stop only the private broadcast processes:
 ~/.local/lib/bibites-local-broadcast/bin/stop
 ```
 
-The stop script checks the recorded process paths.
+The stop script compares the recorded process paths.
 It does not stop another Bibites or OBS process.
 
 ## Limits
