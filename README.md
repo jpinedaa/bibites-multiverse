@@ -1,134 +1,191 @@
 <div align="center">
 
+<img src="docs/assets/multiverse-hero.jpg" width="100%" alt="Five independent digital ecosystems linked by two-way organism migration paths">
+
 # Bibites Multiverse
 
 **One simulation is a world. Connect them, and evolution gets a map.**
 
-Bibites Multiverse connects separate copies of *The Bibites* as neighboring ecosystems.
-Organisms cross the edge of one simulation and enter the next.
-Every participant still owns, runs, and saves a complete local world.
+[![Installer status: release candidate](https://img.shields.io/badge/installer-release%20candidate-e2b93b)](m5_tracking.md)
+[![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
+[![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
+[![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
 
-[Releases](https://github.com/jpinedaa/bibites-multiverse/releases) ·
+[Live map](https://bibitesmultiverse.com/) ·
 [Install](docs/participant/install.md) ·
-[Join the map](docs/participant/join.md) ·
-[Participant guide](docs/README.md)
+[Join](docs/participant/join.md) ·
+[Participant guide](docs/README.md) ·
+[Project status](m5_tracking.md)
 
 </div>
 
----
+Bibites Multiverse connects independent copies of *The Bibites* as neighboring ecosystems.
+Organisms cross one simulation border and continue their lives in another world.
 
-## The edge is no longer the end
+Every participant keeps a separate game, clock, ecosystem, and save history. This is not one
+synchronized mega-simulation. It is an evolutionary continent made from worlds that remain local.
 
-In a normal simulation, the border is final. In the Multiverse, every border can become a migration route.
-
-```text
-                 north
-                   ↕
-     west  ↔  YOUR WORLD  ↔  east
-                   ↕
-                 south
-```
-
-A Bibite that crosses east can arrive in another person's world. Their climate, food, predators, and selection pressures take over from there.
-
-Their organisms can cross into your world too. Evolution remains local, but its consequences can travel.
-
-## One map, many independent worlds
-
-This project does not create one synchronized mega-simulation. Each participant controls a separate copy of *The Bibites*.
-
-- Your world keeps its own clock, speed, settings, and save files.
-- All four edges can carry organisms in both directions.
-- The map routes around worlds that go offline.
-- Returning participants reclaim their previous place.
-- The public archive follows migrations, lineage, species, and brain-complexity trends.
-
-The result feels less like a multiplayer lobby and more like an evolutionary continent.
-
-## How it works
-
-```text
-The Bibites
-    ↕  BepInEx + Harmony
-Multiverse mod
-    ↕  local WebSocket
-Participant sidecar
-    ↕  encrypted connection
-Central relay
-    ↕
-Neighboring worlds + public archive
-```
-
-The mod watches the simulation borders. The sidecar keeps durable custody of migrants and communicates with the relay.
-The relay assigns map positions, routes migrations, and records public history.
-
-Journaled handoffs and stable migration identities make retries safe. The system prefers a rare lost migration over a duplicated organism.
-
-For the complete design, read the [system decomposition](system_decomposition.md) and the [protocol contracts](contracts/).
-
-## Join the map
-
-Bibites Multiverse supports *The Bibites* 0.6.3.1 on these platforms:
-
-| Platform | Game distribution |
-| --- | --- |
-| Windows | Steam |
-| Native Linux | itch.io |
-
-1. Choose an edition on [GitHub Releases](https://github.com/jpinedaa/bibites-multiverse/releases).
-   Use the add-on edition with an existing game installation. Use a published complete edition
-   to install the game and Multiverse together.
-2. Download its archive and SHA-256 checksum.
-3. Follow the [installation guide](docs/participant/install.md) for your platform.
-4. Use the [join guide](docs/participant/join.md) to connect your world.
-
-The installers require no compiler, SDK, administrator account, or root access.
-
-If something goes wrong, start with the [diagnostic guide](docs/participant/diagnose.md). To disconnect cleanly, follow the [leave guide](docs/participant/leave.md).
-
-## Safety by design
-
-A connected simulation crosses a real trust boundary. The project makes that boundary visible.
-
-- Release archives include SHA-256 checksums.
-- TLS protects traffic between each sidecar and the relay.
-- Every participant receives separate credentials.
-- Secrets do not appear in process command lines.
-- The sidecar accepts local mod traffic only from the same machine.
-- Join and leave procedures state what the service publishes and retains.
-
-Read the [participant guide](docs/README.md) before connecting a world.
-
-## A map with an ending
-
-The first public map is a bounded experiment, not a promise of permanent hosting.
-Its published lifecycle includes advance reminders, a final map capture, and documented cleanup.
-
-Participants can leave at any time. The [leave guide](docs/participant/leave.md) explains local cleanup, credential revocation, and data expectations.
-
-## Build the Multiverse
-
-This repository contains the game mod, participant sidecar, central relay, release tooling, protocol contracts, and operating documentation.
-
-Useful starting points:
-
-- [System architecture](system_decomposition.md)
-- [Participant support surface](docs/README.md)
-- [Mod-to-sidecar protocol](contracts/contract-a.md)
-- [Sidecar-to-relay protocol](contracts/contract-b-m4.md)
-- [Release engineering](release/README.md)
-
-The project values observable behavior, explicit trust boundaries, and recovery that participants can understand.
+> [!IMPORTANT]
+> **The first public installer is in release preparation.** The Windows and Linux kits exist,
+> but [GitHub Releases](https://github.com/jpinedaa/bibites-multiverse/releases) is currently empty.
+> Do not download a Multiverse build from another source.
 
 ## About *The Bibites*
 
-*The Bibites* is an artificial-life simulation available from its creator on
-[Steam](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/) and
-[itch.io](https://thebibites.itch.io/the-bibites).
+[*The Bibites: Digital Life*](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
+is an artificial-life sandbox by Omnia Studios. Each bibite has genes and a neural-network brain
+that can change across generations.
 
-Bibites Multiverse is an independent community project. It is not affiliated with or endorsed by *The Bibites*.
+You create a world and set its physical and biological conditions. Natural selection does the
+rest: creatures learn to find food, compete, cooperate, specialize, and form new species.
+The game includes lineage views, genetic analysis, creature engineering, and world statistics.
+
+You can get *The Bibites* on [Steam](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
+or [itch.io](https://thebibites.itch.io/the-bibites).
+
+The base game asks what can evolve inside one world. Bibites Multiverse asks a second question:
+
+> **What happens when evolution can leave home?**
+
+Bibites Multiverse is an independent community project. It is not affiliated with or endorsed by
+Omnia Studios.
+
+## What the Multiverse adds
+
+<img src="docs/assets/multiverse-map.svg" width="100%" alt="Three independent Bibites worlds connected by two-way migration lanes and a public archive">
+
+Each player still runs a complete local simulation. The Multiverse turns the borders between
+those simulations into migration routes.
+
+| 🧬 Evolution can travel | 🗺️ Every world stays independent |
+|---|---|
+| A border crossing can become a migration into another ecosystem. | Your clock, settings, saves, and simulation remain on your machine. |
+| **↔️ Every edge is a route** | **🌐 The map survives churn** |
+| North, east, south, and west can send and receive organisms. | Offline worlds are bypassed. Returning worlds reclaim their prior positions. |
+| **📚 History remains visible** | **🔐 Each world has one identity** |
+| The public archive follows migrations, lineage, species, and brain-complexity trends. | Each participant gets a separate credential that binds to one world. |
+
+The result feels less like a multiplayer lobby and more like a continent with moving life.
+
+## Install one world
+
+The `m5.0` release turns the player setup into four steps:
+
+1. Get one private join string from the map operator.
+2. Download the archive for your platform and make sure that its checksum matches.
+3. Extract the archive and run its installer.
+4. Run the generated start script to open the sidecar and your world.
+
+After checksum and extraction, the platform commands are:
+
+| Platform | Supported game | Install | Start |
+|---|---|---|---|
+| Windows | *The Bibites* 0.6.3.1 from Steam | `.\Install-BibitesMultiverse.ps1` | `.\Start-Multiverse.ps1` |
+| Linux | *The Bibites* 0.6.3.1 from itch.io | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
+
+The installer finds the game and makes sure that its build is supported. It installs the mod,
+stores the credential, and creates the start and stop scripts. It needs no compiler, SDK,
+administrator account, or root access.
+
+The normal **add-on edition** connects an existing game installation. A **complete edition** can
+include the game only when the publisher permits distribution.
+
+[Read the full installation guide →](docs/participant/install.md)
+
+## How it works
+
+```mermaid
+flowchart LR
+    subgraph Local["Your computer"]
+        Game["The Bibites<br/>your world"]
+        Mod["Multiverse mod<br/>border events"]
+        Sidecar["Sidecar<br/>custody + reconnect"]
+        Game <--> Mod
+        Mod <-->|localhost| Sidecar
+    end
+
+    Sidecar <-->|encrypted WSS| Relay["Public relay<br/>placement + routing"]
+    Relay <-->|migrations| Neighbors["Neighbor worlds"]
+    Relay --> Archive["Public archive<br/>map + history"]
+
+    classDef local fill:#191d22,stroke:#4ec9a0,color:#e6e9ee
+    classDef public fill:#191d22,stroke:#5aa9e6,color:#e6e9ee
+    class Game,Mod,Sidecar local
+    class Relay,Neighbors,Archive public
+```
+
+The mod detects border crossings. The sidecar records custody before it sends a migrant.
+The relay assigns map positions and routes each migration. The archive records the public history.
+
+Stable migration identities make retries safe. The design prefers a rare lost migration over a
+duplicated organism because duplication changes the simulation permanently.
+
+[Read the system design →](system_decomposition.md)
+
+## Designed for players, not build machines
+
+- The package includes the mod, BepInEx, the sidecar, and native platform scripts.
+- The installer refuses unsupported game builds before it changes the game folder.
+- The start script launches the sidecar before it launches the game.
+- The stop script closes both processes without removing the world or its saves.
+- The uninstaller keeps changed files and removes only files that its install record owns.
+- Headless mode can run a world without graphics.
+
+## Trust boundary
+
+A connected world crosses a real network boundary. The package keeps that boundary explicit.
+
+- Release archives carry SHA-256 checksums and an internal file manifest.
+- TLS protects traffic between every sidecar and the relay.
+- Join strings never belong in issue reports, screenshots, logs, or command lines.
+- The sidecar accepts mod traffic only from the same computer.
+- Your world and save files remain local.
+- The participant guides state what the public service records and retains.
+
+Read [what joining publishes](docs/participant/join.md#what-joining-publishes-about-your-world)
+before you connect a world.
+
+## Public map status
+
+The hosted service is online at [bibitesmultiverse.com](https://bibitesmultiverse.com/).
+The first announced period runs from **August 14 through November 14, 2026**.
+
+The service is healthy and empty. No participant join string exists yet. Participant onboarding
+starts after the `m5.0` release passes its final fleet-identity gate and reaches GitHub Releases.
+
+## Explore the experiment
+
+| Goal | Start here |
+|---|---|
+| Watch the public map and its evolutionary record | [Open the live map](https://bibitesmultiverse.com/) |
+| Connect a world | [Read the participant guide](docs/README.md) |
+| Understand the architecture | [Read the system design](system_decomposition.md) |
+| Inspect the network protocol | [Read Contract B](contracts/contract-b-m4.md) |
+| Report a defect or propose an experiment | [Open a GitHub issue](https://github.com/jpinedaa/bibites-multiverse/issues) |
+
+Bug reports, documentation corrections, and reproducible experiment ideas are welcome.
+
+## Repository guide
+
+| Path | Purpose |
+|---|---|
+| [`release/`](release/) | Player installers, uninstallers, release assembly, and package tests |
+| [`bibites-mod/`](bibites-mod/) | BepInEx and Harmony game plugin |
+| [`go/`](go/) | Sidecar, relay, archive, diagnostics, and protocol tests |
+| [`docs/`](docs/) | Participant guides, support matrix, and operator diagnostics |
+| [`contracts/`](contracts/) | Versioned mod and network protocols |
+| [`deploy/`](deploy/) | Public service provisioning, monitoring, backup, and recovery |
+| [`e2e/`](e2e/) | Multi-world test rigs and failure rehearsals |
+
+Developer entry points:
+
+- [System architecture](system_decomposition.md)
+- [Development environment](dev_environment.md)
+- [Release engineering](release/README.md)
+- [Mod-to-sidecar protocol](contracts/contract-a.md)
+- [Sidecar-to-relay protocol](contracts/contract-b-m4.md)
 
 ## License
 
-Original Bibites Multiverse work is available under the [Apache License 2.0](LICENSE).
-Third-party components and game payloads retain their own terms. See the [third-party notices](THIRD_PARTY_NOTICES.md).
+Original Bibites Multiverse work uses the [Apache License 2.0](LICENSE). Third-party components
+and game payloads keep their own terms. See the [third-party notices](THIRD_PARTY_NOTICES.md).
