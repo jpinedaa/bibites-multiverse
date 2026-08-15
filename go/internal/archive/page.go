@@ -366,49 +366,74 @@ const statusPageHTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Bibites Multiverse — Live Map</title>
 <meta name="description" content="The live Bibites Multiverse map: connected worlds, migrations, living species, lineages, and reported settings.">
-<meta name="theme-color" content="#101215">
+<meta name="theme-color" content="#0b1110">
 <link rel="canonical" href="https://bibitesmultiverse.com/live">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
-:root{color-scheme:dark;--bg:#101215;--panel:#191d22;--line:#2a3038;--text:#e6e9ee;
---dim:#8b95a3;--live:#4ec9a0;--dark:#e05561;--hole:#3a424c;--warn:#e2b93b;--lane:#5aa9e6;
---flash:#7de3c0;--hot:#f4fffb;--cell:#14181d}
+:root{color-scheme:dark;--bg:#0b1110;--panel:#111a18;--panel2:#16221f;--line:#294038;
+--text:#eff7f3;--dim:#9aafa7;--live:#66e0ac;--dark:#e86c76;--hole:#53625d;
+--warn:#efbd57;--lane:#75bdf2;--flash:#87ebc2;--hot:#f4fffb;--cell:#0e1714;
+--ink:#07100d;--max:1440px}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);
-font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-.skiplink{position:fixed;left:10px;top:-80px;z-index:100;background:var(--text);color:var(--bg);
-padding:8px 11px;border-radius:5px;text-decoration:none}.skiplink:focus{top:10px}
-header{padding:12px 18px;border-bottom:1px solid var(--line);display:flex;
-gap:8px 18px;align-items:baseline;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:20}
-h1{font-size:15px;margin:0;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
-h1 a{color:inherit;text-decoration:none}h1 a:hover{text-decoration:underline;text-underline-offset:3px}
-.home{margin-left:auto;color:var(--dim);font-size:11px;text-decoration:none;white-space:nowrap}
-.home:hover{color:var(--text)}
+html{scroll-behavior:smooth}
+body{margin:0;background:
+radial-gradient(circle at 82% 2%,rgba(67,160,126,.17),transparent 30rem),
+radial-gradient(circle at 5% 24%,rgba(62,126,174,.11),transparent 28rem),var(--bg);
+color:var(--text);font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:inherit}.skiplink{position:fixed;left:12px;top:-80px;z-index:100;background:var(--text);
+color:var(--ink);padding:9px 13px;border-radius:7px;text-decoration:none}.skiplink:focus{top:12px}
+.consolehead{border-bottom:1px solid rgba(83,120,107,.34);background:rgba(11,17,16,.72)}
+.console-nav,.console-summary,.tabs,main,footer{width:min(calc(100% - 40px),var(--max));margin-inline:auto}
+.console-nav{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+.brand{display:inline-flex;align-items:center;gap:10px;text-decoration:none;font-weight:760;
+letter-spacing:-.02em}.mark{width:30px;height:22px;color:var(--live);filter:drop-shadow(0 0 9px rgba(102,224,172,.3))}
+.consolelinks{display:flex;align-items:center;gap:22px;font-size:14px;color:var(--dim)}
+.consolelinks a{text-decoration:none}.consolelinks a:hover,.consolelinks a:focus-visible{color:var(--text)}
+.livepill{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line);
+border-radius:999px;color:var(--text)!important;background:rgba(22,34,31,.75)}
+.navdot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 0 4px rgba(102,224,172,.1)}
+.console-summary{display:grid;grid-template-columns:minmax(280px,.85fr) minmax(520px,1.15fr);
+gap:46px;align-items:end;padding-block:54px 48px}
+.console-title .eyebrow{display:flex;align-items:center;gap:9px;margin:0 0 12px;color:var(--live);
+font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.13em;text-transform:uppercase}
+.console-title .eyebrow:before{content:"";width:26px;border-top:1px solid currentColor}
+h1{font-size:clamp(38px,5vw,64px);line-height:.98;letter-spacing:-.045em;margin:0}
+.summarycopy{max-width:560px;margin:17px 0 0;color:#bfd0c9;font-size:16px}
+.statusgrid{display:grid;grid-template-columns:1.35fr repeat(2,1fr);border:1px solid var(--line);
+border-radius:16px;overflow:hidden;background:rgba(17,26,24,.94);box-shadow:0 18px 55px rgba(0,0,0,.2)}
+.statusitem{min-width:0;min-height:92px;padding:18px 20px;display:flex;flex-direction:column;
+justify-content:center;border-left:1px solid var(--line)}
+.statusitem:first-child,.statusitem:nth-child(4){border-left:0}.statusitem:nth-child(n+4){border-top:1px solid var(--line)}
+.statusitem.age{grid-column:span 2}.statuskey{color:var(--dim);font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+letter-spacing:.1em;text-transform:uppercase;margin-bottom:6px}.hdr{min-width:0;color:var(--dim);font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+overflow-wrap:anywhere}.hdr b{font-size:20px;line-height:1.15;font-weight:740;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.statusitem:first-child .hdr{font-size:11px}
 .muted{color:var(--dim)}
-.hdr b{font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
 /* minmax(0,...) and min-width:0 all the way down: a grid or flex item defaults to
    min-width:auto, and one wide child then pushes the whole page sideways. The
    map and the tables scroll INSIDE their own box; the body never does. */
-main{padding:18px;display:grid;gap:18px;grid-template-columns:minmax(0,1fr)}
+main{padding-block:28px 70px;display:grid;gap:20px;grid-template-columns:minmax(0,1fr)}
 .panel{display:grid;gap:18px;grid-template-columns:minmax(0,1fr);min-width:0}
 .panel[hidden]{display:none}
-section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;
-min-width:0;overflow:hidden}
+section{background:linear-gradient(145deg,rgba(22,34,31,.93),rgba(17,26,24,.94));
+border:1px solid var(--line);border-radius:16px;padding:20px;min-width:0;overflow:hidden;
+box-shadow:0 16px 44px rgba(0,0,0,.13)}
 
 /* ---- the tab bar ----
-   Three views over ONE poll. It is sticky under the header because the header
-   carries the numbers that are true on every tab, and it scrolls sideways
-   rather than wrapping so a narrow phone gets three full-width tap targets
-   instead of two lines of half-height ones. */
-.tabs{position:sticky;top:0;z-index:19;display:flex;gap:0;background:var(--bg);
-border-bottom:1px solid var(--line);overflow-x:auto;-webkit-overflow-scrolling:touch}
-.tabs .tab{flex:1 1 0;min-width:104px;font:inherit;font-size:12px;letter-spacing:.12em;
-text-transform:uppercase;color:var(--dim);background:none;border:0;border-bottom:2px solid transparent;
-padding:12px 14px;cursor:pointer;white-space:nowrap}
-.tabs .tab:hover{color:var(--text)}
-.tabs .tab[aria-selected="true"]{color:var(--text);border-bottom-color:var(--lane)}
+   Three views over ONE poll. It stays visible after the page introduction and
+   scrolls sideways rather than wrapping, so a narrow phone keeps three useful
+   tap targets instead of two lines of half-height ones. */
+.tabs{position:sticky;top:0;z-index:19;display:flex;gap:6px;padding:8px;
+border:1px solid rgba(83,120,107,.38);border-radius:14px;background:rgba(11,17,16,.9);
+backdrop-filter:blur(16px);overflow-x:auto;-webkit-overflow-scrolling:touch;
+box-shadow:0 10px 34px rgba(0,0,0,.2);transform:translateY(-17px);margin-bottom:-17px}
+.tabs .tab{flex:1 1 0;min-width:104px;font:700 11px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+letter-spacing:.1em;text-transform:uppercase;color:var(--dim);background:transparent;border:1px solid transparent;
+border-radius:8px;padding:10px 14px;cursor:pointer;white-space:nowrap}
+.tabs .tab:hover{color:var(--text);background:rgba(22,34,31,.6)}
+.tabs .tab[aria-selected="true"]{color:var(--ink);border-color:var(--live);background:var(--live)}
 .tabs .tab .sub{display:block;font-size:10px;letter-spacing:.04em;text-transform:none;
-color:var(--dim);margin-top:2px}
+color:inherit;opacity:.68;margin-top:3px;font-weight:500}
 /* On a phone the three tap targets matter and the subtitles do not: keeping
    them turns a clean bar into a sideways-scrolling one. */
 @media (max-width:560px){.tabs .tab .sub{display:none}.tabs .tab{padding:13px 8px}}
@@ -426,15 +451,15 @@ color:var(--dim);margin-top:2px}
    sideways. */
 .spctl{display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .spctl input,.spctl select{font:inherit;font-size:12px;color:var(--text);background:var(--cell);
-border:1px solid var(--line);border-radius:4px;padding:5px 8px;min-width:0}
+border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
 .spctl input{flex:1 1 200px;max-width:340px}
 .spctl label{font-size:11px;color:var(--dim);display:flex;gap:6px;align-items:center}
 .chip{display:inline-block;font-size:11px;background:var(--cell);border:1px solid var(--line);
-border-radius:4px;padding:1px 6px;margin:0 5px 3px 0;white-space:nowrap}
+border-radius:999px;padding:2px 7px;margin:0 5px 3px 0;white-space:nowrap}
 .chip b{font-variant-numeric:tabular-nums}
 .chip.exl{color:var(--warn);border-color:var(--warn);white-space:pre-wrap;word-break:break-word}
 .lifewrap{overflow:auto;max-height:min(78vh,1000px);border:1px solid var(--line);
-border-radius:4px;background:var(--cell)}
+border-radius:10px;background:var(--cell)}
 svg.life{display:block}
 svg.life .hit{fill:transparent}
 svg.life .lfrow{cursor:pointer}
@@ -571,8 +596,8 @@ border-radius:50%;vertical-align:0;margin-right:5px}
    slaved to the tree's, so the shared axis stays shared even on a window too
    narrow for the drawing. */
 .brainwrap{overflow-x:auto;overflow-y:hidden;border:1px solid var(--line);border-top:0;
-border-radius:0 0 4px 4px;background:var(--cell)}
-.lifewrap{border-radius:4px 4px 0 0}
+border-radius:0 0 10px 10px;background:var(--cell)}
+.lifewrap{border-radius:10px 10px 0 0}
 svg.brainp{display:block}
 svg.brainp text{font:10px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:var(--dim)}
 svg.brainp .grid{stroke:var(--line);stroke-width:1;opacity:.5}
@@ -626,14 +651,14 @@ opacity:.55;vertical-align:-1px;margin-right:5px}
 /* The one control on this line. It undoes a filter the view applied on its own,
    so it has to look like something you can press rather than like more prose. */
 .treestat .seedbtn{font:inherit;font-size:11px;color:var(--dim);background:var(--cell);
-border:1px solid var(--line);border-radius:4px;padding:1px 8px;margin-left:2px;cursor:pointer}
+border:1px solid var(--line);border-radius:999px;padding:2px 9px;margin-left:2px;cursor:pointer}
 .treestat .seedbtn:hover{color:var(--text);border-color:var(--dim)}
 .detline{font-size:11.5px;color:var(--dim);margin:2px 0}
 .detline b{color:var(--text);font-variant-numeric:tabular-nums;font-weight:400}
 
 /* ---- the settings cards ---- */
 .cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))}
-.card{border:1px solid var(--line);border-radius:5px;background:var(--cell);padding:10px 12px;
+.card{border:1px solid var(--line);border-radius:12px;background:rgba(14,23,20,.82);padding:15px 16px;
 min-width:0;overflow:hidden}
 .cardhd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
 border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px;flex-wrap:wrap}
@@ -654,21 +679,24 @@ border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:6px;flex-wr
    cells and hop glyphs, and every living row of the species view — and the map's
    SVG is thrown away and rebuilt whenever the map's shape changes. */
 .glyphdefs{position:absolute;width:0;height:0;overflow:hidden}
-h2{font-size:12px;margin:0 0 10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);
-display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;min-width:0}
-h2 .note{text-transform:none;letter-spacing:0;font-size:11px}
+h2{font-size:16px;line-height:1.35;margin:0 0 16px;letter-spacing:-.01em;color:var(--text);
+display:flex;gap:8px 14px;align-items:flex-start;flex-wrap:wrap;min-width:0}
+h2:before{content:"";width:22px;margin-top:.67em;border-top:1px solid var(--live);flex:0 0 auto}
+h2 .note{flex:1 1 420px;text-transform:none;letter-spacing:0;font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .unknown{color:var(--warn);font-style:italic}
 .bad{color:var(--dark)}
 .ok{color:var(--live)}
 
 /* ---- the map ---- */
 .mapwrap{overflow-x:auto;overflow-y:hidden;max-width:100%}
+#mapbox{min-height:390px}
 #map{display:block;width:100%;height:auto;min-width:700px}
+#map text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .mapempty{min-height:390px;display:grid;place-items:center;text-align:center;border:1px dashed var(--hole);
-border-radius:5px;background:var(--cell);padding:34px}.mapempty .emptybib{display:block;width:54px;height:38px;
+border-radius:12px;background:var(--cell);padding:34px}.mapempty .emptybib{display:block;width:54px;height:38px;
 margin:0 auto 20px;color:var(--dim)}.mapempty b{display:block;font-size:18px;color:var(--text);margin-bottom:8px}
 .mapempty p{max-width:510px;margin:0 auto 18px;color:var(--dim);font-family:ui-sans-serif,system-ui,sans-serif}
-.mapempty a{display:inline-block;padding:7px 11px;border:1px solid var(--line);border-radius:5px;color:var(--text);text-decoration:none}
+.mapempty a{display:inline-block;padding:8px 12px;border:1px solid var(--line);border-radius:8px;color:var(--text);text-decoration:none}
 .mapempty a:hover{border-color:var(--lane)}
 .cellbg{fill:var(--cell);stroke:var(--line);stroke-width:1.5}
 .cell.live .cellbg{stroke:var(--live)}
@@ -719,7 +747,7 @@ margin:0 auto 20px;color:var(--dim)}.mapempty b{display:block;font-size:18px;col
 .egg.unclassed{stroke:var(--hole)}
 .cell.dark .bibs{opacity:.6}
 
-.laneunder{fill:none;stroke:var(--panel);stroke-width:9;stroke-linecap:round}
+.laneunder{fill:none;stroke:var(--cell);stroke-width:9;stroke-linecap:round}
 .lane{fill:none;stroke-width:2.4;stroke-linecap:round}
 .lane.open{stroke:var(--lane)}
 .lane.bypass{stroke:var(--warn);stroke-dasharray:10 7}
@@ -771,7 +799,7 @@ background:none}
 
 /* ---- history strip ---- */
 .sparks{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
-.spark{border:1px solid var(--line);border-radius:5px;padding:8px 10px 6px;background:var(--cell);
+.spark{border:1px solid var(--line);border-radius:11px;padding:11px 12px 9px;background:rgba(14,23,20,.82);
 min-width:0;overflow:hidden}
 .spark.wide{grid-column:span 2}
 @media (max-width:520px){.spark.wide{grid-column:span 1}}
@@ -793,8 +821,11 @@ color:var(--dim)}
 /* ---- tables ---- */
 .tw{overflow-x:auto;max-width:100%}
 table{width:100%;border-collapse:collapse;font-size:12px;min-width:520px}
-th,td{text-align:left;padding:4px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
-th{color:var(--dim);font-weight:400;letter-spacing:.06em}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--dim);font:700 10px/1.3 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+letter-spacing:.08em;text-transform:uppercase}
+td{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+tbody tr:hover{background:rgba(117,189,242,.045)}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 .closed{color:var(--dark)}
 .open{color:var(--lane)}
@@ -805,14 +836,14 @@ td.spx{white-space:normal;min-width:180px}
 border-radius:62% 38% 38% 62%/50%}
 .spmore{color:var(--dim)}
 .kv{display:flex;justify-content:space-between;gap:8px;font-size:12px;
-border-bottom:1px solid var(--line);padding:3px 0}
+border-bottom:1px solid var(--line);padding:5px 0}
 .kv span:last-child{color:var(--text);font-variant-numeric:tabular-nums}
 
 /* ---- glossary + tooltips ---- */
 .term{border-bottom:1px dotted var(--dim);cursor:help}
 text.term,tspan.term{text-decoration:underline dotted;cursor:help}
-#tip{position:fixed;z-index:60;max-width:320px;background:#0b0e11;border:1px solid var(--line);
-border-radius:6px;padding:9px 11px;font-size:12px;line-height:1.55;color:var(--text);
+#tip{position:fixed;z-index:60;max-width:320px;background:#07100d;border:1px solid var(--line);
+border-radius:10px;padding:11px 13px;font-size:12px;line-height:1.55;color:var(--text);
 box-shadow:0 10px 28px rgba(0,0,0,.6);display:none}
 #tip b{display:block;color:var(--lane);font-size:10.5px;letter-spacing:.1em;
 text-transform:uppercase;margin-bottom:4px;word-break:break-word}
@@ -828,7 +859,8 @@ grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
 .glossitem b{display:block;color:var(--lane);font-size:11px;letter-spacing:.08em;
 text-transform:uppercase;margin-bottom:3px}
 .glossitem span{color:var(--dim);font-size:12px;line-height:1.6}
-footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid var(--line)}
+footer{padding-block:28px 38px;color:var(--dim);font-size:11px;border-top:1px solid var(--line);
+font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 
 /* ---- the motion switch ----
    Small, and in the footer rather than the header, because it is a preference
@@ -836,11 +868,20 @@ footer{padding:12px 18px;color:var(--dim);font-size:11px;border-top:1px solid va
    at a glance, or a reader cannot tell which of the three is in force. */
 .motion{margin-top:10px;display:flex;gap:7px;align-items:baseline;flex-wrap:wrap}
 .motion .mbtn{font:inherit;font-size:11px;color:var(--dim);background:var(--cell);
-border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
+border:1px solid var(--line);border-radius:999px;padding:3px 10px;cursor:pointer}
 .motion .mbtn:hover{color:var(--text);border-color:var(--dim)}
-.motion .mbtn[aria-pressed="true"]{color:var(--bg);background:var(--lane);border-color:var(--lane)}
+.motion .mbtn[aria-pressed="true"]{color:var(--ink);background:var(--lane);border-color:var(--lane)}
 .motion .mwhy{font-size:11px;color:var(--dim)}
-@media (max-width:640px){main{padding:10px;gap:10px}section{padding:10px}header{padding:10px}}
+:focus-visible{outline:3px solid rgba(117,189,242,.75);outline-offset:3px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media (max-width:980px){.console-summary{grid-template-columns:1fr;gap:28px}.statusgrid{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:640px){.console-nav,.console-summary,.tabs,main,footer{width:min(calc(100% - 24px),var(--max))}
+.console-nav{min-height:62px}.consolelinks a:not(.livepill){display:none}.console-summary{padding-block:42px 35px}
+.summarycopy{font-size:14px}.statusgrid{grid-template-columns:1fr 1fr;border-radius:12px}.statusitem{min-height:82px;padding:14px}
+.statusitem:nth-child(n){border-left:0;border-top:1px solid var(--line)}.statusitem:nth-child(odd){border-left:1px solid var(--line)}
+.statusitem:first-child{border-top:0;border-left:0;grid-column:1/-1}.statusitem:nth-child(2){border-top:1px solid var(--line)}
+.statusitem.age{grid-column:span 1}.tabs{width:100%;border-left:0;border-right:0;border-radius:0;transform:none;margin-bottom:0;padding-inline:6px}
+main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;border-radius:12px}footer{padding-block:24px 32px}}
 </style>
 </head>
 <body>
@@ -856,14 +897,31 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
 <circle class="bibeye" cx="1.5" cy="-1.85" r="1"/>
 </g>
 </defs></svg>
-<header>
-  <h1><a href="/" aria-label="Bibites Multiverse home">multiverse</a></h1>
-  <span class="hdr muted" id="shape">&hellip;</span>
-  <span class="hdr muted"><span class="term" data-t="population">population</span> <b id="hpop">&mdash;</b></span>
-  <span class="hdr muted"><span class="term" data-t="migration">migrations</span> <b id="hmig">&mdash;</b></span>
-  <span class="hdr muted" id="link"></span>
-  <span class="hdr muted" id="age"></span>
-  <a class="home" href="/">about this project &rarr;</a>
+<header class="consolehead">
+  <div class="console-nav">
+    <a class="brand" href="/" aria-label="Bibites Multiverse home">
+      <svg class="mark" viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></svg>
+      <span>Bibites Multiverse</span>
+    </a>
+    <nav class="consolelinks" aria-label="Primary navigation">
+      <a href="/">About</a><a href="/watch">Watch live</a>
+      <a class="livepill" href="/live" aria-current="page"><i class="navdot"></i>Live map</a>
+    </nav>
+  </div>
+  <div class="console-summary">
+    <div class="console-title">
+      <p class="eyebrow">Live evolutionary geography</p>
+      <h1>Explore the Multiverse.</h1>
+      <p class="summarycopy">See every connected world, follow real migrations, and trace the species and lineages evolving across the map.</p>
+    </div>
+    <div class="statusgrid" aria-label="Current map status">
+      <div class="statusitem"><span class="statuskey">Map shape</span><span class="hdr" id="shape">&hellip;</span></div>
+      <div class="statusitem"><span class="statuskey"><span class="term" data-t="population">Population</span></span><span class="hdr"><b id="hpop">&mdash;</b></span></div>
+      <div class="statusitem"><span class="statuskey"><span class="term" data-t="migration">Migrations</span></span><span class="hdr"><b id="hmig">&mdash;</b></span></div>
+      <div class="statusitem"><span class="statuskey">Connection</span><span class="hdr" id="link"></span></div>
+      <div class="statusitem age"><span class="statuskey">Freshness</span><span class="hdr" id="age"></span></div>
+    </div>
+  </div>
 </header>
 <nav class="tabs" id="tabs" role="tablist" aria-label="views">
   <button type="button" class="tab" role="tab" id="tab-map" data-tab="map" aria-controls="p-map" aria-selected="true" tabindex="0">live map
