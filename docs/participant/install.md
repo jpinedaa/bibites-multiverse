@@ -121,7 +121,7 @@ archive on the right game is `INS-GAMEBUILD`, and the refusal prints the rows so
 archive you wanted.
 
 **The two rows are not equally proven, and the matrix page says so in the rows themselves.** The
-Windows one is weeks of continuous running on this project's own deployment; the Linux one is a
+Windows row covers a four-day continuous run on the six-world test deployment. The Linux row is a
 single 14-minute authenticated session on one machine, alongside a decompile of both builds that
 puts every difference between them outside the types the mod patches.
 

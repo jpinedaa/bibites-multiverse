@@ -23,6 +23,7 @@ Keep these records outside the public repository:
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
+| `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, and backup. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
@@ -133,7 +134,7 @@ The archive status must show an active relay subscription.
 
 ## Public enrollment and manual join issuance
 
-The public Windows installer creates its secret and installation UUID locally. It sends them to
+The public installers create each secret and installation UUID locally. They send them to
 `POST /api/enroll` over HTTPS. The relay stores a verifier and returns the derived identity and
 advertised WSS address. The endpoint is disabled by default in the relay binary. The deployment
 parameter file enables it with finite limits.

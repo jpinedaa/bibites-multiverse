@@ -2,10 +2,9 @@
 # Build farend/dist/farend-bundle.zip: the part of the far end's handover that is
 # the same for every deployment, and nothing it cannot use.
 #
-# Under M4 the second computer is map SLOT 6, at position (2,1) — a real world
-# with a real game, not a spare. The bundle is what makes it one, so a stale zip
-# is a stale member of the map: rebuild and commit it whenever the plugin, the
-# sidecar binary, setup-farend.ps1 or the $AssemblySha256 pin changes.
+# Under M4, the second computer was map SLOT 6 at position (2,1).
+# The bundle preserves that tested peer. Rebuild and commit it when the plugin,
+# sidecar, setup-farend.ps1, or $AssemblySha256 pin changes.
 #
 # The bundle holds five files — one install script, one document, three artifacts:
 #
@@ -32,8 +31,8 @@
 # zip, in its own commit. The build scratch (dist/farend-bundle/) and the cached
 # BepInEx download (dist/cache/) stay ignored.
 #
-# THIS RUNS AGAINST A LIVE DEPLOYMENT. It builds the plugin and reads the result
-# out of bibites-mod/bin/Release/; it never writes into the game's plugins folder,
+# THIS BUILDS AN M4 TEST ARTIFACT. It builds the plugin and reads the result out
+# of bibites-mod/bin/Release/. It never writes into the game's plugins folder,
 # so no game has to be stopped. That is why it does not call deploy.sh: deploy.sh
 # is build PLUS the copy into BepInEx/plugins, and only the copy is what a running
 # game can block (dev_environment.md). Deploying to THIS machine's games is a
@@ -154,7 +153,7 @@ The bundle is ready:
 
   $ZIP
 
-It is ONE of THREE files the second computer needs. Carry all three by hand:
+It is ONE of THREE files for the M4 test computer. Carry all three by hand:
 
   1. $ZIP
   2. e2e/tls-m4-lan/ca.crt, as ca.crt — the relay's certificate authority.
