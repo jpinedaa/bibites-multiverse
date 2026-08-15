@@ -23,6 +23,7 @@ Keep these records outside the public repository:
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
+| `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, and backup. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |

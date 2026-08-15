@@ -11,8 +11,12 @@ foreach ($line in Get-Content -LiteralPath $configPath) {
     if ($pair.Count -ne 2) { throw "Invalid configuration line in $configPath" }
     $config[$pair[0]] = $pair[1]
 }
-foreach ($name in @('GameDir', 'Obs', 'WorldName', 'PublishPort')) {
+foreach ($name in @('GameDir', 'Obs', 'WorldName', 'PublishPort', 'SidecarExe', 'DataRoot',
+                    'RelayUrl', 'PeerId', 'SidecarPort', 'ExportEdges', 'ExcludeSpecies')) {
     if (-not $config.ContainsKey($name) -or -not $config[$name]) { throw "Missing $name in $configPath" }
+}
+if ($config.ExportEdges -eq 'none') {
+    throw 'ExportEdges is none, which would take the broadcast world off the map'
 }
 
 $logs = Join-Path $root 'logs'
@@ -34,61 +38,118 @@ for ($attempt = 0; $attempt -lt 120; $attempt++) {
 }
 if (-not $connected) { throw 'The private RTMP tunnel did not open' }
 
-$env:MULTIVERSE_EXPORT_EDGES = 'none'
+# The broadcast world is an ordinary participant of the public map. The camera
+# is the only thing that makes it special, so every migration setting here is
+# the one a participant install writes.
+$dataDir = Join-Path $config.DataRoot 'data'
+$credentialFile = Join-Path $config.DataRoot 'peer-secret.txt'
+$sidecarLog = Join-Path $logs 'sidecar.log'
+New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+if (-not (Test-Path -LiteralPath $credentialFile)) {
+    throw "There is no map credential at $credentialFile. Run install.sh again."
+}
+
+$env:MULTIVERSE_EXPORT_EDGES = $config.ExportEdges
+$env:MULTIVERSE_MIGRATION_EXCLUDE = $config.ExcludeSpecies
+$env:MULTIVERSE_SIDECAR_PORT = $config.SidecarPort
+# The sidecar mints this token at its first start, and the mod presents it on
+# every Contract A connection. It is not the map credential.
+$env:MULTIVERSE_CONTRACT_A_TOKEN_FILE = Join-Path $dataDir 'contract-a.token'
 $env:MULTIVERSE_WORLD = $config.WorldName
 $env:MULTIVERSE_SAVE_MINUTES = '10'
 $env:MULTIVERSE_SAVE_KEEP = '6'
 $env:MULTIVERSE_SAVE_ON_QUIT = 'true'
-$env:MULTIVERSE_PORTAL = 'false'
-$env:MULTIVERSE_PORTAL_FLOURISHES = 'false'
+$env:MULTIVERSE_PORTAL = 'true'
+$env:MULTIVERSE_PORTAL_FLOURISHES = 'true'
 $env:MULTIVERSE_BROADCAST = 'true'
-$env:MULTIVERSE_BROADCAST_ZOOM = '45'
+$env:MULTIVERSE_BROADCAST_ZOOM = '75'
 $env:MULTIVERSE_BROADCAST_RESELECT_DELAY = '2'
 $env:MULTIVERSE_BROADCAST_STATUS_FILE = Join-Path $state 'director.json'
 $env:MULTIVERSE_BROADCAST_HIDE_UI = 'false'
 $env:MULTIVERSE_BROADCAST_TIME_SCALE = '7.5'
-$env:MULTIVERSE_BROADCAST_PANELS = 'brain,biology'
+$env:MULTIVERSE_BROADCAST_PANELS = 'brain,biology,biology'
 $env:MULTIVERSE_BROADCAST_PANEL_SECONDS = '15'
 $env:MULTIVERSE_BROADCAST_SHOW_FOV = 'true'
+$env:MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES = 'Basic bibite'
 $env:MULTIVERSE_MIN_FPS = 'off'
 $env:MULTIVERSE_CMD_FILE = Join-Path $state 'command.txt'
 
-$gameExe = Join-Path $config.GameDir 'The Bibites.exe'
-if (-not (Test-Path -LiteralPath $gameExe)) { throw "Missing $gameExe" }
-# Keep this launch free of command-line arguments. On the current Windows host,
-# Start-Process with Unity arguments bypasses executable-local DLL redirection
-# and silently starts the game without BepInEx.
-$game = Start-Process -FilePath $gameExe -WorkingDirectory $config.GameDir `
-    -PassThru
-Set-Content -LiteralPath (Join-Path $state 'game.pid') -Value $game.Id -NoNewline
-
-$handle = [IntPtr]::Zero
-for ($attempt = 0; $attempt -lt 180; $attempt++) {
-    $game.Refresh()
-    if ($game.HasExited) { throw "The Bibites exited with code $($game.ExitCode) before its window opened" }
-    if ($game.MainWindowHandle -ne [IntPtr]::Zero) {
-        $handle = $game.MainWindowHandle
-        break
-    }
-    Start-Sleep -Seconds 1
-}
-if ($handle -eq [IntPtr]::Zero) { throw 'The Bibites window did not open' }
-
-$obsArguments = @(
-    '--portable', '--multi', '--disable-updater', '--disable-missing-files-check',
-    '--minimize-to-tray', '--startstreaming',
-    '--profile', 'BibitesBroadcast', '--collection', 'BibitesBroadcast', '--scene', 'Broadcast'
+# THE ORDER MATTERS. The sidecar mints the Contract A token the mod presents,
+# and the map grants this world its place before the world exists to draw.
+Remove-Item -LiteralPath $sidecarLog, "$sidecarLog.out" -Force -ErrorAction SilentlyContinue
+$sidecarArguments = @(
+    '--listen', "127.0.0.1:$($config.SidecarPort)",
+    '--relay', $config.RelayUrl,
+    '--peer-id', $config.PeerId,
+    '--data-dir', $dataDir,
+    '--credential-file', $credentialFile
 )
-$obs = Start-Process -FilePath $config.Obs -WorkingDirectory (Split-Path -Parent $config.Obs) `
-    -ArgumentList $obsArguments -PassThru
-Set-Content -LiteralPath (Join-Path $state 'obs.pid') -Value $obs.Id -NoNewline
+$sidecar = Start-Process -FilePath $config.SidecarExe -WorkingDirectory $config.DataRoot `
+    -ArgumentList $sidecarArguments -WindowStyle Hidden -PassThru `
+    -RedirectStandardError $sidecarLog -RedirectStandardOutput "$sidecarLog.out"
+Set-Content -LiteralPath (Join-Path $state 'sidecar.pid') -Value $sidecar.Id -NoNewline
 
+# Everything below runs under one stop obligation. A sidecar left behind would
+# hold this world's Contract B connection against the next attempt of the
+# restart loop.
 try {
+    $granted = $null
+    for ($attempt = 0; $attempt -lt 120; $attempt++) {
+        $sidecar.Refresh()
+        if ($sidecar.HasExited) { throw "The sidecar exited with code $($sidecar.ExitCode) before the map answered" }
+        if (Test-Path -LiteralPath $sidecarLog) {
+            $granted = Select-String -LiteralPath $sidecarLog -Pattern 'contract B: slot granted' -SimpleMatch |
+                       Select-Object -Last 1
+            if ($granted) { break }
+            $refused = Select-String -LiteralPath $sidecarLog -SimpleMatch `
+                           -Pattern 'placement claim refused', 'HTTP 401', 'certificate did not verify', 'below this relay' |
+                       Select-Object -Last 1
+            if ($refused) { throw "The map refused this world: $($refused.Line)" }
+        }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $granted) {
+        throw "The map did not grant this world a place within 120 seconds; read $sidecarLog"
+    }
+    Write-Host $granted.Line
+
+    $gameExe = Join-Path $config.GameDir 'The Bibites.exe'
+    if (-not (Test-Path -LiteralPath $gameExe)) { throw "Missing $gameExe" }
+    # Keep this launch free of command-line arguments. On the current Windows host,
+    # Start-Process with Unity arguments bypasses executable-local DLL redirection
+    # and silently starts the game without BepInEx.
+    $game = Start-Process -FilePath $gameExe -WorkingDirectory $config.GameDir `
+        -PassThru
+    Set-Content -LiteralPath (Join-Path $state 'game.pid') -Value $game.Id -NoNewline
+
+    $handle = [IntPtr]::Zero
+    for ($attempt = 0; $attempt -lt 180; $attempt++) {
+        $game.Refresh()
+        if ($game.HasExited) { throw "The Bibites exited with code $($game.ExitCode) before its window opened" }
+        if ($game.MainWindowHandle -ne [IntPtr]::Zero) {
+            $handle = $game.MainWindowHandle
+            break
+        }
+        Start-Sleep -Seconds 1
+    }
+    if ($handle -eq [IntPtr]::Zero) { throw 'The Bibites window did not open' }
+
+    $obsArguments = @(
+        '--portable', '--multi', '--disable-updater', '--disable-missing-files-check',
+        '--minimize-to-tray', '--startstreaming',
+        '--profile', 'BibitesBroadcast', '--collection', 'BibitesBroadcast', '--scene', 'Broadcast'
+    )
+    $obs = Start-Process -FilePath $config.Obs -WorkingDirectory (Split-Path -Parent $config.Obs) `
+        -ArgumentList $obsArguments -PassThru
+    Set-Content -LiteralPath (Join-Path $state 'obs.pid') -Value $obs.Id -NoNewline
+
     while ($true) {
         $game.Refresh()
         $obs.Refresh()
+        $sidecar.Refresh()
         if ($game.HasExited) { throw "The Bibites exited with code $($game.ExitCode)" }
         if ($obs.HasExited) { throw "OBS exited with code $($obs.ExitCode)" }
+        if ($sidecar.HasExited) { throw "The sidecar exited with code $($sidecar.ExitCode)" }
         Start-Sleep -Seconds 2
     }
 } finally {

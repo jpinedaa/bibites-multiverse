@@ -465,6 +465,8 @@ border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
 border-radius:999px;padding:2px 7px;margin:0 5px 3px 0;white-space:nowrap}
 .chip b{font-variant-numeric:tabular-nums}
 .chip.exl{color:var(--warn);border-color:var(--warn);white-space:pre-wrap;word-break:break-word}
+.chip.bcast{color:var(--lane);border-color:var(--lane);text-decoration:none}
+.chip.bcast:hover,.chip.bcast:focus{color:var(--hot);border-color:var(--hot)}
 .lifewrap{overflow:auto;max-height:min(78vh,1000px);border:1px solid var(--line);
 border-radius:10px;background:var(--cell)}
 svg.life{display:block}
@@ -4403,6 +4405,18 @@ function settingsCard(v){
   // A peer id is another peer's chosen string; it is a text node here for the
   // same reason a species name is.
   left.appendChild(el("span", "peer", v.peerId));
+  // The one world the shared camera is pointed at, when the deployment has named
+  // one. It is a DEPLOYMENT claim and not this world's own: no frame on either
+  // wire says a world is being filmed. The badge is a link because "which world
+  // am I watching" and "show me that world" are the same question from opposite
+  // ends, and the two pages are otherwise unconnected.
+  if (v.broadcast){
+    var watch = el("a", "chip bcast", "broadcast world");
+    watch.href = "/watch";
+    watch.title = "the shared camera at /watch is showing this world";
+    left.appendChild(txt(" "));
+    left.appendChild(watch);
+  }
   hd.appendChild(left);
   var state = el("span", v.live ? (v.modConnected ? "ok" : "bad") : "bad",
     v.live ? (v.modConnected ? "live" : "no game") : "dark " + ms(v.darkForMs));

@@ -126,6 +126,14 @@ type Config struct {
 	// EvictionInterval is how often one bounded eviction pass runs. Defaults to
 	// a minute; it exists so a test does not have to wait one.
 	EvictionInterval time.Duration
+
+	// BroadcastPeerID is the peer id of the world the shared camera at /watch is
+	// pointed at. NOTHING ON THE WIRE CARRIES THIS: a world does not announce
+	// that it is being filmed, so the deployment that runs the publisher is the
+	// only party that knows, and it tells this archive here. Empty — the default
+	// — means no world is named, and both pages then say so rather than guess.
+	// It changes no placement, no routing and no record; it is display only.
+	BroadcastPeerID string
 }
 
 func (c *Config) applyDefaults() {

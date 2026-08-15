@@ -389,8 +389,8 @@ Review [`docs/live-broadcast.md`](../../docs/live-broadcast.md) before work on t
 
 If GPU quota is not available, use the separate
 [`deploy/local-broadcast/`](../../deploy/local-broadcast/README.md) fallback.
-It runs a new offline exhibition world on a local Windows NVIDIA GPU.
-It is not the cloud GPU host or a Multiverse map world.
+It runs one new map world on a local Windows NVIDIA GPU.
+That world enrolls its own identity, so it never copies the `slot-1` credential this stack moves.
 
 ## Cost checks
 

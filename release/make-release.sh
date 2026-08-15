@@ -15,20 +15,18 @@
 # game's Mono build carries identically on both platforms. What differs between
 # the archives is the sidecar (a native binary, cross-compiled twice), the mod
 # framework (BepInEx win_x64 against linux_x64), and the kit — PowerShell against
-# bash. This script copies the tested plugin from the tracked deployment bundle
-# into every staged edition.
+# bash. This script builds one plugin and copies it into every staged edition.
 #
 # IT PUBLISHES NOTHING. There is no gh, no git tag and no network call except the
 # two cached BepInEx downloads. Publishing is a separate, deliberate act — see
 # release/README.md for the four steps the owner performs by hand.
 #
-# WHAT IT PROVES BEFORE IT PACKAGES ANYTHING. A release that ships a mod or a
-# sidecar the project's own deployment does not run is a release nobody has
-# tested. So this script packages the exact plugin bytes from
-# farend/dist/farend-bundle.zip. It requires the local packages in the sidecar's
-# dependency graph to match the revision stamped into that bundle's sidecar.
-# Go's VCS metadata can make two otherwise identical builds differ as files. A
-# sidecar source mismatch stops the build and says which side moved.
+# WHAT IT CHECKS BEFORE IT PACKAGES ANYTHING. The tracked Windows bundle is a
+# packaging reference. This script requires the plugin to be byte-identical to
+# that copy. For the sidecar, it compares the repository files and module
+# versions selected by `go list` for cmd/sidecar at both revisions. Unrelated Go
+# commands do not affect this gate. These checks find stale package inputs. They
+# do not prove that either artifact ran on another computer.
 #
 # It also requires the game build to be the one docs/support-matrix.md names.
 # The matrix is the single source of that pin: the JSON block inside that
@@ -38,13 +36,12 @@
 # PREREQUISITES, on a machine that has the game:
 #   * bibites-mod/libs/, from bibites-mod/sync-game-refs.sh (the reference
 #     assemblies are the game's own and are never committed)
-#   * Go in $GOROOT — the same toolchain the rest of this repository uses. A
-#     PLAYER does not need it; this is the build side
-#   * zip, unzip, curl
+#   * the .NET SDK in ~/.dotnet and Go in $GOROOT — the same two the rest of this
+#     repository uses. A PLAYER needs neither; this is the build side
+#   * git, python3, tar, zip, unzip, curl
 #   * NSIS 3.09 or newer when you build the Windows complete edition
 #
-# Everything heavy runs under nice -n 19: this host runs a live six-world
-# deployment and unniced load on it has twice reproduced a sidecar session storm.
+# Everything heavy runs under nice -n 19 to limit interference with local tests.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -78,6 +75,8 @@ LINUX_GAME_DIR="${LINUX_GAME_DIR:-/mnt/wsl/data/scratch/m5-linux-rehearsal/game}
 
 export GOROOT="${GOROOT:-$HOME/go}"
 export PATH="$GOROOT/bin:$PATH"
+export DOTNET_ROOT="$HOME/.dotnet"
+export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
 export TZ=UTC
 
 ALLOW_DIRTY=0
@@ -234,9 +233,9 @@ else
   note "no unpacked Linux game at $LINUX_GAME_DIR; the Linux row's hash stands on its record"
 fi
 
-# ------------------------------------------------------------------ the fleet's own artifacts
+# ------------------------------------------------------------------ the tracked Windows artifacts
 
-step "what the living deployment runs (the byte-identity reference)"
+step "the tracked Windows bundle reference"
 [ -f "$BUNDLE" ] || die "missing $BUNDLE — it is tracked; this is not a clean clone"
 REF="$BUILD/ref"
 rm -rf "$REF"; mkdir -p "$REF"
@@ -250,37 +249,113 @@ note "sidecar $(sha "$REF_SIDECAR")"
 # ------------------------------------------------------------------ the sidecar
 
 step "the Windows sidecar (cross-compiled)"
-# A Go binary carries a VCS stamp — the commit, its time, and whether the tree
-# was dirty — so two builds of IDENTICAL SOURCE at two commits are different
-# files. Byte-comparing this one against the fleet's copy would therefore fail
-# for a documentation commit, which is not the thing worth failing on. What is
-# worth failing on is a SOURCE difference in a package the sidecar uses. The Go
-# dependency graph supplies that path set. Archive and relay-only packages do
-# not force an unrelated participant-sidecar rebuild.
+# A Go binary carries a VCS stamp. Thus, two builds from identical inputs at two
+# commits can differ as files. Compare the actual Windows sidecar inputs instead.
+# Generate the dependency graph at both revisions so that added, removed, and
+# build-tagged files are all included. Module identities cover external packages
+# selected by that graph. Standard-library packages use the same local toolchain
+# for both manifests.
 REF_REV="$(go version -m "$REF_SIDECAR" | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
-[ -n "$REF_REV" ] || die "the fleet's sidecar carries no VCS stamp; this check needs one"
-note "the fleet's sidecar was built from $REF_REV"
+[ -n "$REF_REV" ] || die "the bundled sidecar carries no VCS stamp; this check needs one"
+note "the bundled sidecar was built from $REF_REV"
 git -C "$REPO" cat-file -e "$REF_REV^{commit}" 2>/dev/null \
-  || die "commit $REF_REV is not in this clone, so the fleet's build cannot be compared to it"
-SIDECAR_SOURCE_PATHS=()
-while IFS= read -r package_dir; do
-  [ -z "$package_dir" ] && continue
-  case "$package_dir" in
-    "$REPO"/*) SIDECAR_SOURCE_PATHS+=("${package_dir#"$REPO/"}") ;;
-    *) die "go list returned a sidecar package outside this repository: $package_dir" ;;
-  esac
-done < <(cd "$REPO/go" && go list -deps \
-  -f '{{with .Module}}{{if .Main}}{{$.Dir}}{{end}}{{end}}' ./cmd/sidecar | LC_ALL=C sort -u)
-[ "${#SIDECAR_SOURCE_PATHS[@]}" -gt 0 ] || die "go list found no local sidecar source packages"
-if ! git -C "$REPO" diff --quiet "$REF_REV" HEAD -- "${SIDECAR_SOURCE_PATHS[@]}"; then
-  git -C "$REPO" diff --stat "$REF_REV" HEAD -- "${SIDECAR_SOURCE_PATHS[@]}" >&2
-  die "the sidecar's source has moved since the tested sidecar was built. Deploy and test
-   that change, rebuild farend/dist/farend-bundle.zip, and then build the release."
+  || die "commit $REF_REV is not in this clone, so the bundled build cannot be compared to it"
+
+sidecar_manifest() { # $1 checkout root, $2 manifest path, $3 go-list JSON path
+  local checkout="$1" manifest="$2" packages_json="$3"
+  (
+    cd "$checkout/go"
+    env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+      go list -buildvcs=false -deps -json ./cmd/sidecar
+  ) > "$packages_json"
+  python3 - "$checkout/go" "$packages_json" "$manifest" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+module_root = Path(sys.argv[1]).resolve()
+packages_text = Path(sys.argv[2]).read_text(encoding="utf-8")
+manifest_path = Path(sys.argv[3])
+decoder = json.JSONDecoder()
+packages = []
+offset = 0
+while offset < len(packages_text):
+    while offset < len(packages_text) and packages_text[offset].isspace():
+        offset += 1
+    if offset == len(packages_text):
+        break
+    package, offset = decoder.raw_decode(packages_text, offset)
+    packages.append(package)
+
+source_fields = (
+    "GoFiles", "CgoFiles", "CFiles", "CXXFiles", "MFiles", "HFiles",
+    "FFiles", "SFiles", "SwigFiles", "SwigCXXFiles", "SysoFiles", "EmbedFiles",
+)
+files = {}
+modules = set()
+main_module = None
+
+def module_identity(module):
+    replacement = module.get("Replace") or {}
+    return (
+        module.get("Path", ""), module.get("Version", ""), module.get("Sum", ""),
+        module.get("GoVersion", ""), replacement.get("Path", ""),
+        replacement.get("Version", ""), replacement.get("Sum", ""),
+        replacement.get("GoVersion", ""),
+    )
+
+for package in packages:
+    module = package.get("Module")
+    if not module:
+        continue
+    if not module.get("Main"):
+        modules.add(module_identity(module))
+        continue
+    identity = (module.get("Path", ""), module.get("GoVersion", ""))
+    if main_module is None:
+        main_module = identity
+    elif main_module != identity:
+        raise SystemExit("cmd/sidecar resolved more than one main-module identity")
+    package_dir = Path(package["Dir"]).resolve()
+    for field in source_fields:
+        for name in package.get(field) or ():
+            path = (package_dir / name).resolve()
+            try:
+                relative = path.relative_to(module_root)
+            except ValueError:
+                raise SystemExit(f"main-module input is outside {module_root}: {path}")
+            files[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+if main_module is None:
+    raise SystemExit("cmd/sidecar did not resolve to the main module")
+
+lines = ["main-module\t" + "\t".join(main_module)]
+lines.extend("module\t" + "\t".join(identity) for identity in sorted(modules))
+lines.extend(f"file\tgo/{path}\t{digest}" for path, digest in sorted(files.items()))
+manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+}
+
+REF_SOURCE="$BUILD/sidecar-ref-source"
+REF_ARCHIVE="$BUILD/sidecar-ref-source.tar"
+rm -rf "$REF_SOURCE" "$REF_ARCHIVE"
+mkdir -p "$REF_SOURCE"
+git -C "$REPO" archive --format=tar -o "$REF_ARCHIVE" "$REF_REV" -- go
+tar -xf "$REF_ARCHIVE" -C "$REF_SOURCE"
+
+REF_MANIFEST="$BUILD/sidecar-inputs-ref.txt"
+CURRENT_MANIFEST="$BUILD/sidecar-inputs-current.txt"
+sidecar_manifest "$REF_SOURCE" "$REF_MANIFEST" "$BUILD/sidecar-packages-ref.json"
+sidecar_manifest "$SIDECAR_BUILD_REPO" "$CURRENT_MANIFEST" "$BUILD/sidecar-packages-current.json"
+rm -rf "$REF_SOURCE" "$REF_ARCHIVE"
+
+if ! cmp -s "$REF_MANIFEST" "$CURRENT_MANIFEST"; then
+  diff -u "$REF_MANIFEST" "$CURRENT_MANIFEST" >&2 || true
+  die "the files or modules that build cmd/sidecar differ from the bundled sidecar source.
+   Rebuild farend/dist/farend-bundle.zip, repeat the relevant tests, and then build the release."
 fi
-if [ -n "$(git -C "$REPO" status --porcelain -- "${SIDECAR_SOURCE_PATHS[@]}")" ]; then
-  die "the sidecar's source has uncommitted changes, so the binary would not match a commit"
-fi
-note "${#SIDECAR_SOURCE_PATHS[@]} local sidecar package directories match the tested source"
+note "cmd/sidecar uses the same repository inputs and module versions as the bundled sidecar"
 
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/multiverse-sidecar.exe" ./cmd/sidecar )
@@ -290,10 +365,10 @@ BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar.exe" \
   || die "the Windows sidecar VCS stamp is '${BUILT_REV:-missing}', want $SOURCE_REV"
 BUILT_SIDECAR_SHA="$(sha "$BUILD/multiverse-sidecar.exe")"
 if [ "$BUILT_SIDECAR_SHA" = "$(sha "$REF_SIDECAR")" ]; then
-  note "byte-identical to the fleet's sidecar"
+  note "byte-identical to the bundled sidecar"
 else
   note "same source, different VCS stamp:"
-  note "  the fleet's copy records $REF_REV"
+  note "  the bundled copy records $REF_REV"
   note "  this build records        $(git -C "$REPO" rev-parse HEAD)"
   note "  $BUILT_SIDECAR_SHA"
 fi
@@ -301,12 +376,9 @@ fi
 # ------------------------------------------------------------------ the Linux sidecar
 
 step "the Linux sidecar (cross-compiled)"
-# THERE IS NO BYTE-IDENTITY REFERENCE FOR THIS ONE, and pretending otherwise
-# would be the dishonest move. The fleet is Windows: farend/dist/farend-bundle.zip
-# holds no linux binary to compare against. What the check above already
-# established is the thing that matters and it covers this build too — go/ is
-# identical, commit for commit, to the tree the deployment's sidecar was built
-# from. Same source, second target.
+# THERE IS NO BYTE-IDENTITY REFERENCE FOR THIS ONE. The bundle is Windows-only,
+# so it holds no Linux binary. The input-manifest comparison above covers the
+# Linux build too because both builds use the same Go package.
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/multiverse-sidecar" ./cmd/sidecar )
 LINUX_BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar" \
@@ -314,22 +386,31 @@ LINUX_BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar" \
 [ "$LINUX_BUILT_REV" = "$SOURCE_REV" ] \
   || die "the Linux sidecar VCS stamp is '${LINUX_BUILT_REV:-missing}', want $SOURCE_REV"
 note "$(sha "$BUILD/multiverse-sidecar")"
-note "same source as the fleet's sidecar ($REF_REV), stamped $LINUX_BUILT_REV, built for linux/amd64"
+note "same source as the bundled sidecar ($REF_REV), stamped $LINUX_BUILT_REV, built for linux/amd64"
 note "static: CGO is off, so it needs no libc of a particular vintage"
 
 # ------------------------------------------------------------------ the plugin
 
-step "the tested plugin"
-PLUGIN="$REF_PLUGIN"
-note "using the exact plugin bytes from the tracked deployment bundle"
+step "the plugin (fresh Release build)"
+nice -n 19 dotnet build "$REPO/bibites-mod/BibitesMultiverse.csproj" -c Release \
+  --nologo -v quiet -clp:ErrorsOnly
+PLUGIN="$REPO/bibites-mod/bin/Release/BibitesMultiverse.dll"
+[ -f "$PLUGIN" ] || die "the build produced no $PLUGIN"
+if [ "$(sha "$PLUGIN")" != "$(sha "$REF_PLUGIN")" ]; then
+  echo "!! this tree builds  $(sha "$PLUGIN")" >&2
+  echo "!! the bundle has    $(sha "$REF_PLUGIN")" >&2
+  die "the mod in this tree is not the mod in the tracked Windows bundle. Rebuild
+   farend/dist/farend-bundle.zip, repeat the tests, and then build the release."
+fi
+note "byte-identical to the bundled plugin"
 
 DEPLOYED="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll"
 if [ -f "$DEPLOYED" ]; then
   if [ "$(sha256sum <"$DEPLOYED" | cut -d' ' -f1)" != "$(sha "$PLUGIN")" ]; then
-    note "this machine's local game has a different plugin; it is not a release input"
-  else
-    note "byte-identical to the plugin deployed in this machine's game"
+    die "the plugin in this machine's game is a different build again.
+   Three copies must agree before a release: this tree, the far-end bundle, and the local game."
   fi
+  note "byte-identical to the plugin in this machine's game"
 else
   note "this machine's game directory is not readable from here; the bundle check stands alone"
 fi

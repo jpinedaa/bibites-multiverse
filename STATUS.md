@@ -30,8 +30,10 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 | Network protocol | `contract-b/4.0` |
 | Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
-| Public-map setup | Every participant archive includes `public-map.json`. Installation creates a unique credential over HTTPS |
-| Website | The homepage links the Windows setup, Linux complete package, and `v0.2.2` checksums. The live console provides map fitting, charts, shared navigation, and a homepage status light. |
+| Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
+| Homepage | Links the Windows setup, Linux complete package, and `v0.2.2` checksums |
+| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. |
+| Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges the same world and links back to the broadcast. |
 
 The release page provides checksums. The participant installer compares the game build with
 the support matrix before it changes the game directory. The Windows GUI starts the connected
@@ -60,7 +62,7 @@ Read the [system design](system_decomposition.md) for milestone scope. Read the
 
 - Read the [participant guide](docs/README.md) before you connect a world.
 - Open the [public map](https://bibitesmultiverse.com/live) to explore migrations and lineages.
-- The optional [shared broadcast](https://bibitesmultiverse.com/watch) is relevant only when a
-  publisher is available.
+- The optional [shared broadcast](https://bibitesmultiverse.com/watch) follows one participant
+  world on the map. It is relevant only when a publisher is available.
 - Use [GitHub issues](https://github.com/jpinedaa/bibites-multiverse/issues) for defects and
   experiment proposals.

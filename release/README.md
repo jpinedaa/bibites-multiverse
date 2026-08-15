@@ -30,7 +30,7 @@ raised only after the release that satisfies it exists.
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
 | `dist/` | Build output. **Not tracked** — see `.gitignore`, which says why |
 
-**Two platforms, one mod.** The plugin in every archive is the same file, byte for byte.
+**Two platforms, one mod.** The plugin in every package is the same file, byte for byte.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
@@ -48,16 +48,17 @@ extracted from that same file — and [`../docs/defaults-audit.md`](../docs/defa
 
 ## What this is not: `farend/`
 
-`farend/` is the **project's own second computer** — map slot 6, one known person, a LAN relay
-with its own certificate authority, a bundle carried by hand and a slot number baked into the
-script. It stays exactly as it is, and the living deployment still runs from it.
+`farend/` originated as the Windows bundle for the M4 two-computer test map.
+It uses map slot 6, a LAN relay, and a private certificate authority.
+The scripts preserve those test-map assumptions, but maintainers can rebuild the artifacts.
 
-This directory is the stranger-facing descendant of the same mechanics: the Steam search, the
-game-build gate, the BepInEx placement and the generated start and stop scripts are `farend`'s,
-proven. What changed is everything about the audience — automatic public enrollment or a
-private-map join string instead of a hand-carried token file, no slot and no position (the map places you), no certificate authority unless the map
-is private, and **no instruction to switch a security control off**, which is the one thing
-`farend/README.md` does and a public package may not (`m5_considerations.md`, DQ4).
+This directory is the participant-facing descendant of the same tested mechanics.
+These mechanics include Steam search, the game-build gate, BepInEx placement, and generated process scripts.
+The public package uses automatic enrollment or a private-map join-string file.
+The map assigns its slot and position.
+Only a private map can require a certificate authority.
+The public package never tells a participant to disable a security control.
+The M4-specific `farend/README.md` does not define public package policy (`m5_considerations.md`, DQ4).
 
 Where a fact belongs to both, the two are kept apart deliberately rather than shared: a change to
 this installer must not silently re-cut the far end's bundle, and the far end's pin is that
@@ -82,24 +83,30 @@ The build rejects a payload that does not match the support matrix or that alrea
 files. The project received permission to redistribute the game with this installer. The notice
 records that permission without changing the game's copyright or the source-code license.
 
-It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`) and Go. These are build
-dependencies, not player dependencies. Everything heavy runs under `nice -n 19`, because this host
-runs the living deployment. A Windows complete build also needs NSIS 3.09 or newer. Set
-`MAKENSIS` when the compiler is not on `PATH`.
+It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`), the .NET SDK, Go,
+Git, Python 3, `tar`, `zip`, `unzip`, and `curl`. These tools are only build inputs.
+Heavy commands run under `nice -n 19` to limit interference with other local work.
+A Windows complete build also needs NSIS 3.09 or newer. Set `MAKENSIS` when the compiler is not
+on `PATH`.
 
 Go can omit VCS metadata when a linked worktree points to Git data on another filesystem. In that
 case, set `RELEASE_SIDECAR_BUILD_REPO` to a clean checkout of the same commit. The builder checks
 the revision and refuses a missing sidecar stamp.
 
-**It refuses to build a release nobody has run.** Before it packages anything it requires:
+**The builder checks package consistency, not remote execution.** Before it packages anything,
+it checks these inputs:
 
-1. `bibites-mod/libs/BibitesAssembly.dll` to be the game build `docs/support-matrix.md`'s
-   **Windows** row names. This is the reference assembly the mod is compiled against.
-2. the plugin in every staged package to be the exact file from
-   `farend/dist/farend-bundle.zip`, which is the tracked artifact set the living fleet runs.
-3. the local Go packages in the sidecar's dependency graph to match the tested source. Homepage,
-   archive, and relay-only packages do not change the participant sidecar. VCS stamps can make two
-   builds from the same source differ as files.
+1. `bibites-mod/libs/BibitesAssembly.dll` must match the Windows row in `docs/support-matrix.md`.
+   The mod uses this file as its reference assembly.
+2. The plugin must be **byte-identical** to the one in `farend/dist/farend-bundle.zip`.
+   This comparison keeps the tracked Windows bundle and participant packages aligned.
+3. The repository inputs and module versions selected by `go list` for Windows `cmd/sidecar`
+   must match the source revision in the bundled sidecar. Unrelated Go commands do not affect
+   this comparison. VCS stamps can make two builds from the same inputs differ as files.
+4. If this machine's game directory is readable, the local plugin must also match.
+
+These comparisons do not prove that a bundle ran on another computer. Record runtime evidence
+separately after a real test or deployment.
 
 It also checks two things the two-platform matrix made checkable: that **every matrix entry
 carries the same keys** and that no two rows share a `(gameVersion, platform)` pair — because both
@@ -107,16 +114,17 @@ installers walk the whole list, and PowerShell under `Set-StrictMode` throws on 
 happens not to have. And when an unpacked Linux game is readable (`LINUX_GAME_DIR`, defaulting to
 the rehearsal's copy), it checks the Linux row's hash against a real file.
 
-**The Linux sidecar is the one artifact with no byte-identity reference**, and the script says so
-rather than inventing one: the fleet is Windows, so the bundle holds nothing to compare against.
-What stands in its place is the check that already gates the Windows build: the sidecar's local
-dependency graph is identical to the tested source. Same source, second target.
+**The Linux sidecar is the one artifact with no byte-identity reference.**
+The tracked bundle contains a Windows sidecar, so it has no Linux binary to compare.
+The input-manifest gate shows that both builds use the same sidecar source.
+It does not show that either binary ran successfully.
 
-A mismatch stops the build and names which side moved. The fix is never to loosen the check: it
-is to deploy, rebuild the far-end bundle, and release from there.
+A mismatch stops the build and names which side moved.
+If plugin or sidecar code changes, rebuild the far-end bundle. Then repeat its tests before release.
+Complete the required runtime test. Record its results separately.
 
-Every archive is built deterministically — fixed timestamps, sorted entries, no extra attributes
-— so rebuilding from the same tag and inputs reproduces the checksums on the page. Linux archives
+Every artifact is built deterministically with fixed timestamps and sorted entries. Rebuilding
+from the same tag and inputs reproduces the checksums on the page. Linux archives
 keep their mode bits, and the build reads them back out of the finished zip, including the game
 executable in a complete archive.
 

@@ -546,3 +546,80 @@ func TestSpeedAndPacingCarryOrStayUnknown(t *testing.T) {
 		t.Fatalf("a stale block still reported a speed and a cap: %+v", stale.Slots[0])
 	}
 }
+
+// TestBroadcastPeerIsNamedByTheDeploymentAndNeverGuessed covers the one fact on
+// this view that no frame on either wire carries: which world the shared camera
+// at /watch is pointed at. A world does not announce that it is being filmed, so
+// the deployment tells the archive and the archive publishes exactly that.
+//
+// The failure this guards is naming the WRONG world. An archive that was told
+// nothing must say nothing, and an archive told about a peer that is not on the
+// map must not promote some other slot into the role.
+func TestBroadcastPeerIsNamedByTheDeploymentAndNeverGuessed(t *testing.T) {
+	build := func(peer string) Status {
+		t.Helper()
+		a, err := New(Config{
+			DataDir: t.TempDir(), PeerID: "archive-test", RelayURL: "ws://test",
+			BroadcastPeerID: peer,
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		t.Cleanup(func() { _ = a.Close() })
+		slots := []contractb.SlotInfo{
+			slot(1, 0, 0, true, nil), slot(2, 1, 0, true, nil), slot(3, 0, 1, true, nil),
+		}
+		slots[0].PeerID, slots[1].PeerID, slots[2].PeerID = "slot-1", "public-cam", "slot-3"
+		a.mu.Lock()
+		a.status = contractb.PeerStatus{
+			Epoch: 7, Map: contractb.MapShape{Width: 2, Height: 2}, SlotCount: 3, Slots: slots,
+		}
+		a.statusAt = time.Now()
+		a.ready = true
+		a.mu.Unlock()
+		return a.StatusView()
+	}
+
+	// Told nothing: nothing is claimed, and no slot carries the flag.
+	silent := build("")
+	if silent.BroadcastPeerID != "" {
+		t.Fatalf("an archive told nothing named a broadcast world: %q", silent.BroadcastPeerID)
+	}
+	for _, v := range silent.Slots {
+		if v.Broadcast {
+			t.Fatalf("slot %d was flagged as the broadcast world with none configured", v.Slot)
+		}
+	}
+
+	// Told about a peer on the map: exactly that peer's slot carries the flag.
+	named := build("public-cam")
+	if named.BroadcastPeerID != "public-cam" {
+		t.Fatalf("broadcastPeerId = %q, want public-cam", named.BroadcastPeerID)
+	}
+	flagged := 0
+	for _, v := range named.Slots {
+		if !v.Broadcast {
+			continue
+		}
+		flagged++
+		if v.PeerID != "public-cam" || v.Slot != 2 {
+			t.Fatalf("the flag landed on slot %d peer %q", v.Slot, v.PeerID)
+		}
+	}
+	if flagged != 1 {
+		t.Fatalf("%d slots claim to be the broadcast world, want exactly 1", flagged)
+	}
+
+	// Told about a peer that is NOT on the map: the name is still published, so
+	// the page can say the world is away, and no slot is promoted into its place.
+	absent := build("public-gone")
+	if absent.BroadcastPeerID != "public-gone" {
+		t.Fatalf("broadcastPeerId = %q, want the configured value even when absent",
+			absent.BroadcastPeerID)
+	}
+	for _, v := range absent.Slots {
+		if v.Broadcast {
+			t.Fatalf("slot %d stood in for an absent broadcast world", v.Slot)
+		}
+	}
+}

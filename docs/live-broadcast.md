@@ -3,6 +3,10 @@
 The broadcast shows one shared game camera.
 All viewers receive the same encoded stream.
 
+The world under that camera is a participant of the public map.
+It runs its own sidecar, holds its own peer identity, and exchanges migrations with its neighbours.
+A Bibite the camera follows can therefore leave the world, and the camera then chooses another.
+
 The AWS GPU publisher is currently disabled by a security gate.
 The local Windows fallback remains available.
 No public procedure in this repository deploys the AWS publisher.
@@ -27,6 +31,57 @@ Viewers can send only `GET` and `HEAD` requests to the public stream path.
 
 The relay, archive, and headless worlds do not depend on the broadcaster.
 A broadcast failure does not stop the map.
+A broadcast world that stops is an ordinary absent world: its sidecar keeps its place, and its
+neighbours route around it.
+
+## Map identity
+
+The broadcast world joins the map through the same public enrollment as a participant world.
+Read [`contracts/public-enrollment.md`](../contracts/public-enrollment.md) for the endpoint.
+
+Three rules bind every broadcast publisher:
+
+1. A publisher that starts a new world enrolls its own identity. It never copies a live credential.
+2. A publisher that continues an existing world takes that world's identity only after the source
+   world is stopped and disabled. One identity runs in one place, because two copies of one
+   identity can create divergent descendants.
+3. An installer that cannot read its own completed identity stops. It does not enroll again,
+   because a second enrollment abandons the world's current place on the map.
+
+The identity and its secret stay outside this repository, below the publisher's user profile.
+
+## Naming the world on the pages
+
+The two public pages tell the reader which world is on camera.
+Neither page discovers this: no frame on either wire says that a world is being filmed.
+
+The deployment tells the archive with `--broadcast-peer`, or with
+`MULTIVERSE_BROADCAST_PEER` in `/etc/multiverse/archive.env`.
+`provision.sh` writes that value from `MV_BROADCAST_PEER_ID`.
+The peer id is a public identifier, not a secret.
+
+The archive then publishes two fields on `/api/status`:
+
+| Field | Meaning |
+|---|---|
+| `broadcastPeerId` | The peer id the deployment named. Absent when it named none |
+| `broadcast` on one slot | True for that peer's slot only |
+
+The broadcast page reads those fields and shows the slot number, the peer id, the position, and
+a symbol of the map rectangle with that world's cell lit.
+It uses the same `(column,row)` the live map prints, so a reader can hold the two pages together.
+It also links to the live map.
+
+The live map badges the same world in its settings card and links back to the broadcast page.
+
+Three states are unknown, and each says so instead of naming a world:
+
+1. The deployment named no world.
+2. The named world is not on the map at the moment.
+3. The archive is not answering.
+
+Naming the wrong world is worse than naming none.
+An operator who moves the camera to another world must change this value with it.
 
 ## Camera rule
 
@@ -46,6 +101,7 @@ It can request a fixed simulation speed for a broadcast.
 Panel changes use real time, so the simulation speed does not affect their interval.
 
 The director changes selection, presentation, and the requested simulation speed.
+An optional rule can also change template spawn targets.
 It does not move, feed, heal, kill, export, or edit a Bibite.
 
 These environment variables control it:
@@ -61,12 +117,18 @@ These environment variables control it:
 | `MULTIVERSE_BROADCAST_PANELS` | empty | Rotate through `brain`, `biology`, or `expanded-brain`. |
 | `MULTIVERSE_BROADCAST_PANEL_SECONDS` | `15` | Set the real-time interval between panels. |
 | `MULTIVERSE_BROADCAST_SHOW_FOV` | `true` | Show the selected Bibite's vision range. |
+| `MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES` | empty | Set named template spawn targets to zero. |
 
 The panel rotation stays off when `MULTIVERSE_BROADCAST_HIDE_UI` is `true`.
+Repeat a panel name to give that panel more time in each cycle.
 
-The standard broadcast profile uses a zoom of `45` and a speed of `7.5`.
-It alternates the brain and biology panels every 15 seconds.
+The spawn option does not remove existing Bibites or stop natural reproduction.
+A later world save records the zero target count.
+
+The standard broadcast profile uses a zoom of `75` and a speed of `7.5`.
+It shows the brain panel for 15 seconds and the biology panel for 30 seconds.
 It also shows the selected Bibite's vision range.
+It disables automatic spawns from the `Basic bibite` template.
 
 ## Origin boundary
 
@@ -127,15 +189,23 @@ Two copies with one credential can create different descendants from one checkpo
 ## Local Windows fallback
 
 Use [`deploy/local-broadcast/`](../deploy/local-broadcast/README.md) while cloud GPU quota is not available.
-This fallback runs a new offline exhibition world on a Windows NVIDIA GPU.
-It does not copy a map world, start a sidecar, or load a map credential.
+This fallback runs one new map world on a Windows NVIDIA GPU.
+It does not copy an existing map world or an existing map credential.
 
 The installer creates private copies of the game and OBS below the Windows user profile.
+It builds a Windows sidecar, enrolls one new identity with the public map, and keeps that
+identity for every later installation.
 OBS captures the game process and uses NVENC to publish H.264.
 A WSL service opens a private RTMP tunnel through AWS Systems Manager.
-A dedicated `tmux` session supervises the Windows game and OBS processes.
+A dedicated `tmux` session supervises the Windows sidecar, game, and OBS processes.
+
+The sidecar starts first, because it mints the Contract A token the mod presents and takes the
+world's place on the map before the game opens.
+The stop order is the reverse: OBS, then the game, then the sidecar.
 
 The fallback uses the standard broadcast profile.
+It exports all four edges and keeps `Basic bibite` out of migration, which is the participant
+default.
 The website adds no separate simulation-speed label.
 
 The computer must stay powered on, and the Windows user must stay logged in.
@@ -236,3 +306,18 @@ The expected listeners are:
 
 Make sure that the public HLS manifest is available from outside the origin network.
 Do not expose the RTMP or metrics listener to the internet.
+
+Run these checks after a publisher change, with the broadcast world's peer identity:
+
+```sh
+curl -fsS https://<service-domain>/api/status |
+  jq -e --arg peer '<broadcast-peer-id>' 'any(.slots[]?; .peerId == $peer and .live == true)'
+curl -fsS https://<service-domain>/api/status |
+  jq -e --arg peer '<broadcast-peer-id>' '.broadcastPeerId == $peer'
+```
+
+The broadcast world must appear on the map like any other world.
+A stream that runs while the map does not show that world is a publisher that lost its sidecar.
+
+The second check is the pages' own claim.
+A `broadcastPeerId` that names a different world makes both pages point at the wrong one.

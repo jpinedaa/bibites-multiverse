@@ -31,6 +31,7 @@ namespace BibitesMultiverse
         internal const string EnvPanels = "MULTIVERSE_BROADCAST_PANELS";
         internal const string EnvPanelSeconds = "MULTIVERSE_BROADCAST_PANEL_SECONDS";
         internal const string EnvShowFieldOfView = "MULTIVERSE_BROADCAST_SHOW_FOV";
+        internal const string EnvDisableSpawnTemplates = "MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES";
 
         private const float DefaultZoom = 35f;
         private const float DefaultReselectDelay = 2f;
@@ -39,6 +40,8 @@ namespace BibitesMultiverse
         private const float StatusSeconds = 2f;
 
         private readonly List<BibitePanels> panelRotation = new List<BibitePanels>();
+        private readonly HashSet<string> disabledSpawnTemplates =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private BibiteBody target;
         private float zoom;
         private float reselectDelay;
@@ -53,7 +56,9 @@ namespace BibitesMultiverse
         private string activePanel = string.Empty;
         private bool hideUI;
         private bool showFieldOfView;
+        private bool spawnRuleReported;
         private int panelIndex;
+        private int disabledSpawnSettings;
         private int lastEntityId;
         private string lastSpecies = string.Empty;
         private DateTime selectedAtUtc;
@@ -73,6 +78,7 @@ namespace BibitesMultiverse
             panelSeconds = ReadFloat(EnvPanelSeconds, DefaultPanelSeconds, 2f);
             showFieldOfView = ReadBool(EnvShowFieldOfView, true);
             ReadPanels(MultiverseConfig.Env(EnvPanels));
+            ReadSpawnTemplates(MultiverseConfig.Env(EnvDisableSpawnTemplates));
 
             if (hideUI && panelRotation.Count > 0)
             {
@@ -87,6 +93,7 @@ namespace BibitesMultiverse
                 $"timeScale={(broadcastTimeScale < 0f ? "<unchanged>" : broadcastTimeScale.ToString("F2", CultureInfo.InvariantCulture))} " +
                 $"panels={PanelList()} panelSeconds={panelSeconds.ToString("F1", CultureInfo.InvariantCulture)} " +
                 $"showFOV={showFieldOfView} hideUI={hideUI} " +
+                $"disabledSpawnTemplates={SpawnTemplateList()} " +
                 $"statusFile={(statusFile.Length == 0 ? "<off>" : statusFile)}");
         }
 
@@ -100,11 +107,14 @@ namespace BibitesMultiverse
 
             if (!GameBridge.SimulationReady())
             {
+                spawnRuleReported = false;
+                disabledSpawnSettings = 0;
                 WriteStatus("waiting_for_world", "simulation not ready");
                 return;
             }
 
             ApplyUIChoice();
+            DisableTemplateSpawning();
             EnforceTimeScale();
 
             if (target != null && (target.dead || target.dying || target.destroyed))
@@ -272,6 +282,55 @@ namespace BibitesMultiverse
             }
         }
 
+        private void DisableTemplateSpawning()
+        {
+            if (disabledSpawnTemplates.Count == 0)
+            {
+                disabledSpawnSettings = 0;
+                return;
+            }
+
+            ScenarioSettings scenario = ScenarioSettings.Instance;
+            if (scenario == null || scenario.bibites == null)
+            {
+                return;
+            }
+
+            int matched = 0;
+            int changed = 0;
+            foreach (BibiteSettings settings in scenario.bibites)
+            {
+                if (settings == null || !SpawnTemplateDisabled(settings))
+                {
+                    continue;
+                }
+
+                matched++;
+                if (settings.minimumNumber.val != 0)
+                {
+                    settings.minimumNumber.SetValue(0);
+                    changed++;
+                }
+            }
+
+            disabledSpawnSettings = matched;
+            if (!spawnRuleReported || changed > 0)
+            {
+                spawnRuleReported = true;
+                if (matched == 0)
+                {
+                    MultiversePlugin.Log.LogWarning(
+                        $"{Prefix} no configured spawn template matched {SpawnTemplateList()}");
+                }
+                else
+                {
+                    MultiversePlugin.Log.LogInfo(
+                        $"{Prefix} automatic template spawning disabled for {SpawnTemplateList()} " +
+                        $"(matched={matched} changed={changed}); existing Bibites and reproduction are unchanged");
+                }
+            }
+        }
+
         private void EnforcePanel()
         {
             if (hideUI || panelRotation.Count == 0 || Time.realtimeSinceStartup < nextPanel)
@@ -333,6 +392,8 @@ namespace BibitesMultiverse
                     ["fieldOfView"] = showFieldOfView,
                     ["targetTimeScale"] = broadcastTimeScale,
                     ["engineTimeScale"] = TimeController.engineTimeScale.val,
+                    ["disabledSpawnTemplates"] = SpawnTemplateList(),
+                    ["disabledSpawnSettings"] = disabledSpawnSettings,
                     ["selectedAt"] = target != null ? selectedAtUtc.ToString("O", CultureInfo.InvariantCulture) : string.Empty,
                     ["updatedAt"] = DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture)
                 };
@@ -384,11 +445,33 @@ namespace BibitesMultiverse
                         continue;
                 }
 
-                if (!panelRotation.Contains(panel))
+                panelRotation.Add(panel);
+            }
+        }
+
+        private void ReadSpawnTemplates(string value)
+        {
+            foreach (string entry in (value ?? string.Empty).Split(','))
+            {
+                string name = NormalizeTemplateName(entry);
+                if (name.Length > 0)
                 {
-                    panelRotation.Add(panel);
+                    disabledSpawnTemplates.Add(name);
                 }
             }
+        }
+
+        private bool SpawnTemplateDisabled(BibiteSettings settings)
+        {
+            string fileName = NormalizeTemplateName(settings.filePath);
+            string templateName = NormalizeTemplateName(settings.templateName);
+            return disabledSpawnTemplates.Contains(fileName) || disabledSpawnTemplates.Contains(templateName);
+        }
+
+        private static string NormalizeTemplateName(string value)
+        {
+            string text = (value ?? string.Empty).Trim();
+            return text.Length == 0 ? string.Empty : Path.GetFileNameWithoutExtension(text).Trim();
         }
 
         private string PanelList()
@@ -404,6 +487,13 @@ namespace BibitesMultiverse
                 names[index] = PanelName(panelRotation[index]);
             }
             return string.Join(",", names);
+        }
+
+        private string SpawnTemplateList()
+        {
+            return disabledSpawnTemplates.Count == 0
+                ? "<off>"
+                : string.Join(",", disabledSpawnTemplates);
         }
 
         private static string PanelName(BibitePanels panel)

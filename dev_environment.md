@@ -441,7 +441,7 @@ An absent optional field usually removes only derived data.
 A game-version mismatch still uses the retained refusal gates.
 Do not describe cross-version payload loading as proven.
 
-### The living deployment
+### Historical deployment evidence
 
 The M3 and M4 development grid provided historical evidence, not current operator state.
 Its durable results include:

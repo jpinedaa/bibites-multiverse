@@ -34,6 +34,13 @@ type Status struct {
 	RelayConnected bool   `json:"relayConnected"`
 	RelayURL       string `json:"relayUrl"`
 	ArchivePeerID  string `json:"archivePeerId"`
+
+	// BroadcastPeerID names the world the shared camera at /watch is pointed at,
+	// as the DEPLOYMENT declares it. It is not a wire fact: no world announces
+	// that somebody is filming it, and the archive is told rather than informed.
+	// Empty is the honest answer for a map with no broadcast, and it is the
+	// default: a page that guessed would be naming the wrong world.
+	BroadcastPeerID string `json:"broadcastPeerId,omitempty"`
 	// StatusAgeMs is how old the PEER_STATUS behind this view is. A view with no
 	// status at all reports HaveStatus false and nothing else is trustworthy.
 	HaveStatus  bool               `json:"haveStatus"`
@@ -120,6 +127,11 @@ type SlotView struct {
 	DarkSinceMs int64  `json:"darkSinceMs,omitempty"`
 	DarkForMs   int64  `json:"darkForMs,omitempty"`
 	LastRefusal string `json:"lastRefusal,omitempty"`
+
+	// Broadcast is true for the one world the deployment says /watch is showing.
+	// It is a DEPLOYMENT claim, not this world's own (see BroadcastPeerID), and
+	// it changes nothing about how the world is treated on the map.
+	Broadcast bool `json:"broadcast,omitempty"`
 
 	// StatsKnown is false when no stats block has arrived or the one that did is
 	// older than statsStaleMs. Every stat below is then UNKNOWN, and the page
@@ -355,6 +367,8 @@ func (a *Archive) StatusView() Status {
 		GapsExpired:         a.evict.gapsExpired,
 
 		AchievedWindowMs: achievedWindow.Milliseconds(),
+
+		BroadcastPeerID: a.cfg.BroadcastPeerID,
 	}
 	if out.HaveStatus {
 		out.StatusAgeMs = now.Sub(a.statusAt).Milliseconds()
@@ -375,6 +389,7 @@ func (a *Archive) StatusView() Status {
 			SimulationSize: si.SimulationSize,
 			ExportEdges:    si.ExportEdges,
 			LastRefusal:    si.LastRefusal,
+			Broadcast:      a.cfg.BroadcastPeerID != "" && si.PeerID == a.cfg.BroadcastPeerID,
 		}
 		if v.ExportEdges == nil {
 			v.ExportEdges = []string{}
