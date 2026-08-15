@@ -41,14 +41,14 @@ cp "$game_zip" "$dist/TheBibites-0.6.3.1-Linux.zip"
 cp "$bepinex_zip" "$dist/BepInEx_linux_x64_5.4.23.3.zip"
 runtime_sha="$(sha256sum "$dist/bibites-cloud-runtime.tar.gz" | awk '{print $1}')"
 
-cat > "$dist/artifacts.env" <<EOF
-GAME_FILE='TheBibites-0.6.3.1-Linux.zip'
-GAME_SHA256='$game_sha'
-BEPINEX_FILE='BepInEx_linux_x64_5.4.23.3.zip'
-BEPINEX_SHA256='$bepinex_sha'
-RUNTIME_FILE='bibites-cloud-runtime.tar.gz'
-RUNTIME_SHA256='$runtime_sha'
-EOF
+{
+  printf 'GAME_FILE=%q\n' 'TheBibites-0.6.3.1-Linux.zip'
+  printf 'GAME_SHA256=%q\n' "$game_sha"
+  printf 'BEPINEX_FILE=%q\n' 'BepInEx_linux_x64_5.4.23.3.zip'
+  printf 'BEPINEX_SHA256=%q\n' "$bepinex_sha"
+  printf 'RUNTIME_FILE=%q\n' 'bibites-cloud-runtime.tar.gz'
+  printf 'RUNTIME_SHA256=%q\n' "$runtime_sha"
+} > "$dist/artifacts.env"
 sha256sum "$dist"/*.zip "$dist"/*.tar.gz > "$dist/SHA256SUMS"
 printf 'built %s\n' "$dist/bibites-cloud-runtime.tar.gz"
 cat "$dist/SHA256SUMS"

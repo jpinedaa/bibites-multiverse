@@ -56,12 +56,12 @@ escaped_domain="${RELAY_DOMAIN//./\\.}"
 sed -i "/[[:space:]]${escaped_domain}$/d" /etc/hosts
 printf '%s %s\n' "$RELAY_PRIVATE_IP" "$RELAY_DOMAIN" >> /etc/hosts
 
-cat > /etc/bibites-cloud.conf <<EOF
-AWS_REGION='$AWS_REGION'
-ARTIFACT_BUCKET='$ARTIFACT_BUCKET'
-MANIFEST_KEY='$MANIFEST_KEY'
-RELAY_URL='wss://$RELAY_DOMAIN/contract-b/v4'
-EOF
+{
+  printf 'AWS_REGION=%q\n' "$AWS_REGION"
+  printf 'ARTIFACT_BUCKET=%q\n' "$ARTIFACT_BUCKET"
+  printf 'MANIFEST_KEY=%q\n' "$MANIFEST_KEY"
+  printf 'RELAY_URL=%q\n' "wss://$RELAY_DOMAIN/contract-b/v4"
+} > /etc/bibites-cloud.conf
 chmod 0644 /etc/bibites-cloud.conf
 
 stage="$(mktemp -d)"

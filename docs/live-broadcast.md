@@ -55,7 +55,12 @@ These environment variables control it:
 `install-stream-origin.sh` installs a pinned MediaMTX release and checks its SHA-256 value.
 
 The RTMP listener must use a private RFC1918 address.
+It must listen on port `1935`.
 The host firewall must accept port `1935` only from the publisher network.
+
+The publisher subnet needs an active private route to the relay and RTMP addresses.
+The deployment wrapper checks the effective subnet route table for both addresses.
+It rejects a public destination and a route that uses the default internet path.
 
 The publisher also needs a random 64-character hexadecimal password.
 Store that password in a protected host file or secret manager.
@@ -73,6 +78,7 @@ The archive remains the durable migration record.
 
 `cloud/aws/broadcast-template.yaml` defines the optional AWS GPU host.
 The selected instance must support NVIDIA NVENC.
+It must also support the `x86_64` architecture.
 
 The stack uses an AWS Deep Learning Base AMI with an NVIDIA driver.
 Xorg creates a virtual `1280x720` display.
@@ -136,6 +142,10 @@ Complete these steps after the account has enough GPU Spot quota:
 
 The deployment wrapper checks that the source services are stopped and disabled.
 It also checks that the staged manifest disables the selected world.
+
+The wrapper queries EC2 before deployment.
+It rejects an instance type that does not report `x86_64` support.
+It also rejects relay or RTMP addresses without approved private routes.
 
 The wrapper requires an existing SSM publish-password parameter.
 It does not read or copy the password value.

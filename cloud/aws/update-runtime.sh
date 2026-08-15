@@ -4,8 +4,11 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist="$repo/cloud/aws/dist"
+validation="$repo/cloud/aws/lib/validation.sh"
 [ -r "$dist/artifacts.env" ] || { echo 'run build-artifacts.sh first' >&2; exit 1; }
 [ -r "$dist/staged.env" ] || { echo 'run stage-artifacts.sh first' >&2; exit 1; }
+# shellcheck source=lib/validation.sh
+. "$validation"
 # shellcheck source=/dev/null
 . "$dist/artifacts.env"
 # shellcheck source=/dev/null
@@ -13,31 +16,211 @@ dist="$repo/cloud/aws/dist"
 : "${RUNTIME_OBJECT:?run stage-artifacts.sh again to create an immutable runtime object}"
 : "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
 
+bibites_require_account_id "$BIBITES_AWS_ACCOUNT_ID" BIBITES_AWS_ACCOUNT_ID
+bibites_require_region "$AWS_REGION" AWS_REGION
+bibites_require_s3_bucket "$ARTIFACT_BUCKET" ARTIFACT_BUCKET
+bibites_require_s3_prefix "$ARTIFACT_PREFIX" ARTIFACT_PREFIX
+bibites_require_s3_key "$RUNTIME_OBJECT" RUNTIME_OBJECT
+bibites_require_s3_filename "$RUNTIME_FILE" RUNTIME_FILE
+bibites_require_sha256 "$RUNTIME_SHA256" RUNTIME_SHA256
+bibites_require_s3_filename "$GAME_FILE" GAME_FILE
+bibites_require_sha256 "$GAME_SHA256" GAME_SHA256
+bibites_require_s3_filename "$BEPINEX_FILE" BEPINEX_FILE
+bibites_require_sha256 "$BEPINEX_SHA256" BEPINEX_SHA256
+[ "$RUNTIME_OBJECT" = "runtime/$RUNTIME_SHA256.tar.gz" ] || {
+  echo 'RUNTIME_OBJECT does not match the staged runtime digest' >&2
+  exit 1
+}
+runtime_key="$ARTIFACT_PREFIX/$RUNTIME_OBJECT"
+game_key="$ARTIFACT_PREFIX/$GAME_FILE"
+bepinex_key="$ARTIFACT_PREFIX/$BEPINEX_FILE"
+manifest_key="$ARTIFACT_PREFIX/worlds.json"
+for key in "$runtime_key" "$game_key" "$bepinex_key" "$manifest_key"; do
+  bibites_require_s3_key "$key" "runtime object key $key"
+done
+
 account="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" sts get-caller-identity \
   --query Account --output text)"
+bibites_require_account_id "$account" 'authenticated AWS account'
 [ "$account" = "$BIBITES_AWS_ACCOUNT_ID" ] || {
   echo "refusing AWS account $account; expected $BIBITES_AWS_ACCOUNT_ID" >&2
   exit 1
 }
 
 stack="${BIBITES_STACK_NAME:-bibites-cloud-worlds}"
+bibites_require_stack_name "$stack" BIBITES_STACK_NAME
 description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation \
   describe-stacks --stack-name "$stack" --output json)"
-instance="$(jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "InstanceId") | .OutputValue' \
-  <<<"$description")"
-volume="$(jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "DataVolumeId") | .OutputValue' \
-  <<<"$description")"
-relay_private_ip="$(jq -r '.Stacks[0].Parameters[] | select(.ParameterKey == "RelayPrivateIp") | .ParameterValue' \
-  <<<"$description")"
-relay_domain="$(jq -r '.Stacks[0].Parameters[] | select(.ParameterKey == "RelayDomain") | .ParameterValue' \
-  <<<"$description")"
+jq -e '
+  (.Stacks | length) == 1 and
+  (.Stacks[0].StackStatus | type == "string") and
+  (.Stacks[0].Outputs | type == "array") and
+  (.Stacks[0].Parameters | type == "array")
+' <<<"$description" >/dev/null || {
+  echo "stack $stack returned an incomplete description" >&2
+  exit 1
+}
 
-remote="set -euo pipefail; rm -rf /opt/bibites-runtime.new; install -d -m 0755 /opt/bibites-runtime.new; aws --region $AWS_REGION s3 cp s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$RUNTIME_OBJECT /tmp/bibites-runtime.tar.gz --only-show-errors; printf '$RUNTIME_SHA256  /tmp/bibites-runtime.tar.gz\\n' | sha256sum -c -; tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime.new; /opt/bibites-runtime.new/bibites-stop-worlds; rm -rf /opt/bibites-runtime; mv /opt/bibites-runtime.new /opt/bibites-runtime; env AWS_REGION=$AWS_REGION DATA_VOLUME_ID=$volume ARTIFACT_BUCKET=$ARTIFACT_BUCKET GAME_KEY=$ARTIFACT_PREFIX/$GAME_FILE GAME_SHA256=$GAME_SHA256 BEPINEX_KEY=$ARTIFACT_PREFIX/$BEPINEX_FILE BEPINEX_SHA256=$BEPINEX_SHA256 MANIFEST_KEY=$ARTIFACT_PREFIX/worlds.json RELAY_PRIVATE_IP=$relay_private_ip RELAY_DOMAIN=$relay_domain /opt/bibites-runtime/install-host"
-encoded="$(printf %s "$remote" | base64 -w0)"
-parameters="$(jq -nc --arg command "printf %s $encoded | base64 -d | bash" '{commands:[$command]}')"
+stack_output() {
+  local key="$1"
+  jq -er --arg key "$key" '
+    [.Stacks[0].Outputs[] | select(.OutputKey == $key) | .OutputValue] |
+    if length == 1 and (.[0] | type == "string") and .[0] != ""
+    then .[0]
+    else error("missing or duplicate stack output " + $key)
+    end
+  ' <<<"$description"
+}
+
+stack_parameter_optional() {
+  local key="$1"
+  jq -er --arg key "$key" '
+    [.Stacks[0].Parameters[] | select(.ParameterKey == $key) | .ParameterValue] |
+    if length == 0 then ""
+    elif length == 1 and (.[0] | type == "string") and .[0] != "" then .[0]
+    else error("empty or duplicate stack parameter " + $key)
+    end
+  ' <<<"$description"
+}
+
+instance="$(stack_output InstanceId)"
+volume="$(stack_output DataVolumeId)"
+relay_private_ip="$(stack_parameter_optional RelayPrivateIp)"
+stack_relay_domain="$(stack_parameter_optional RelayDomain)"
+
+bibites_require_resource_id "$instance" 'InstanceId stack output' i
+bibites_require_resource_id "$volume" 'DataVolumeId stack output' vol
+bibites_require_rfc1918_ipv4 "$relay_private_ip" 'RelayPrivateIp stack parameter'
+
+if [ -n "$stack_relay_domain" ]; then
+  relay_domain="$stack_relay_domain"
+  if [ -n "${BIBITES_RELAY_DOMAIN:-}" ] && [ "$BIBITES_RELAY_DOMAIN" != "$relay_domain" ]; then
+    echo 'BIBITES_RELAY_DOMAIN differs from the stack RelayDomain parameter' >&2
+    exit 1
+  fi
+else
+  : "${BIBITES_RELAY_DOMAIN:?legacy stack has no RelayDomain; set an explicit validated BIBITES_RELAY_DOMAIN}"
+  relay_domain="$BIBITES_RELAY_DOMAIN"
+fi
+bibites_require_hostname "$relay_domain" BIBITES_RELAY_DOMAIN
+
+volume_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-volumes \
+  --volume-ids "$volume" --output json)"
+jq -e --arg volume "$volume" --arg instance "$instance" '
+  (.Volumes | length) == 1 and
+  .Volumes[0].VolumeId == $volume and
+  any(.Volumes[0].Attachments[];
+    .InstanceId == $instance and .State == "attached")
+' <<<"$volume_description" >/dev/null || {
+  echo "$volume is not attached to $instance" >&2
+  exit 1
+}
+
+managed_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm \
+  describe-instance-information --filters "Key=InstanceIds,Values=$instance" --output json)"
+jq -e --arg instance "$instance" '
+  (.InstanceInformationList | length) == 1 and
+  .InstanceInformationList[0].InstanceId == $instance and
+  .InstanceInformationList[0].PingStatus == "Online" and
+  .InstanceInformationList[0].PlatformType == "Linux"
+' <<<"$managed_description" >/dev/null || {
+  echo "$instance is not an online Linux Systems Manager target" >&2
+  exit 1
+}
+
+read -r -d '' remote_script <<'REMOTE' || true
+set -euo pipefail
+[ "$#" -eq 13 ] || { echo 'runtime update received the wrong argument count' >&2; exit 1; }
+
+aws_region="$1"
+data_volume_id="$2"
+artifact_bucket="$3"
+runtime_key="$4"
+runtime_sha256="$5"
+game_key="$6"
+game_sha256="$7"
+bepinex_key="$8"
+bepinex_sha256="$9"
+manifest_key="${10}"
+relay_private_ip="${11}"
+relay_domain="${12}"
+runtime_root="${13}"
+
+archive="$(mktemp /tmp/bibites-runtime.XXXXXX.tar.gz)"
+new_runtime="$(mktemp -d /opt/bibites-runtime.new.XXXXXX)"
+old_runtime=/opt/bibites-runtime.previous
+cleanup() {
+  rm -f "$archive"
+  [ -z "${new_runtime:-}" ] || rm -rf "$new_runtime"
+}
+trap cleanup EXIT
+
+aws --region "$aws_region" s3 cp "s3://$artifact_bucket/$runtime_key" "$archive" \
+  --only-show-errors
+printf '%s  %s\n' "$runtime_sha256" "$archive" | sha256sum -c -
+tar -xzf "$archive" -C "$new_runtime"
+test -x "$new_runtime/install-host"
+test -x "$new_runtime/bibites-stop-worlds"
+test -r "$new_runtime/validate-world-manifest.jq"
+jq -n -f "$new_runtime/validate-world-manifest.jq" >/dev/null
+while IFS= read -r script; do
+  bash -n "$script"
+done < <(find "$new_runtime" -maxdepth 1 -type f -name 'bibites-*' -print)
+
+"$new_runtime/bibites-stop-worlds"
+rm -rf "$old_runtime"
+mv "$runtime_root" "$old_runtime"
+mv "$new_runtime" "$runtime_root"
+new_runtime=''
+
+if ! env \
+  AWS_REGION="$aws_region" \
+  DATA_VOLUME_ID="$data_volume_id" \
+  ARTIFACT_BUCKET="$artifact_bucket" \
+  GAME_KEY="$game_key" \
+  GAME_SHA256="$game_sha256" \
+  BEPINEX_KEY="$bepinex_key" \
+  BEPINEX_SHA256="$bepinex_sha256" \
+  MANIFEST_KEY="$manifest_key" \
+  RELAY_PRIVATE_IP="$relay_private_ip" \
+  RELAY_DOMAIN="$relay_domain" \
+  "$runtime_root/install-host"; then
+  rm -rf "$runtime_root.failed"
+  mv "$runtime_root" "$runtime_root.failed"
+  mv "$old_runtime" "$runtime_root"
+  echo 'runtime installation failed; the previous runtime was restored' >&2
+  exit 1
+fi
+rm -rf "$old_runtime"
+REMOTE
+
+remote_arguments=(
+  "$AWS_REGION"
+  "$volume"
+  "$ARTIFACT_BUCKET"
+  "$runtime_key"
+  "$RUNTIME_SHA256"
+  "$game_key"
+  "$GAME_SHA256"
+  "$bepinex_key"
+  "$BEPINEX_SHA256"
+  "$manifest_key"
+  "$relay_private_ip"
+  "$relay_domain"
+  /opt/bibites-runtime
+)
+encoded="$(printf '%s' "$remote_script" | base64 -w0)"
+printf -v quoted_arguments ' %q' "${remote_arguments[@]}"
+printf -v remote_command 'printf %%s %q | base64 -d | bash -s --%s' \
+  "$encoded" "$quoted_arguments"
+parameters="$(jq -nc --arg command "$remote_command" '{commands:[$command]}')"
 command_id="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm send-command \
   --instance-ids "$instance" --document-name AWS-RunShellScript --parameters "$parameters" \
   --comment 'Install staged Bibites cloud runtime' --query Command.CommandId --output text)"
+[[ "$command_id" =~ ^[0-9a-f-]{36}$ ]] || {
+  echo "Systems Manager returned an invalid command identifier: $command_id" >&2
+  exit 1
+}
 aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm wait command-executed \
   --command-id "$command_id" --instance-id "$instance" || true
 aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm get-command-invocation \

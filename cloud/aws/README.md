@@ -116,6 +116,27 @@ The public repository does not generate a live manifest.
 Put each secret half in the Parameter Store path named by `credentialParameter`.
 Do not place a complete join string in S3, a manifest, or a command argument.
 
+The schema validator accepts from 1 through 100 worlds.
+It applies these rules:
+
+- `id` and `peerId` use the public 64-character identifier alphabet.
+- `worldName` is a safe filename. It cannot contain a path separator or traversal segment.
+- `sidecarPort` is a unique integer from `1024` through `65535`.
+- `saveKey` is a safe S3 key that ends in `.zip`.
+- `credentialParameter` is a safe absolute Parameter Store path.
+- `position` uses `column,row`, with non-negative integer coordinates.
+- `preferredSlot` is a positive integer when present.
+- `targetTimeScale`, `saveMinutes`, and `saveKeep` use bounded numeric values.
+- `enabled` is a Boolean value when present.
+
+The validator rejects unknown fields and duplicate identity or placement values.
+Run its fixture checks after a schema change:
+
+```sh
+./cloud/aws/test-manifest-schema.sh
+./cloud/aws/test-validation.sh
+```
+
 ## Build artifacts
 
 Set paths to authorized local archives:
@@ -142,6 +163,34 @@ The stage script creates a private encrypted S3 bucket when necessary.
 It blocks public access and uploads the manifest, saves, game archive, BepInEx archive, and runtime.
 
 Record the bucket and object prefix in private operations storage.
+
+## Apply a manifest update
+
+Apply a private manifest change with this sequence:
+
+```sh
+./cloud/aws/stage-artifacts.sh
+./cloud/aws/sync-host.sh
+./cloud/aws/verify-host.sh
+```
+
+`stage-artifacts.sh` validates the manifest and every referenced save before an AWS mutation.
+It then replaces the mutable `worlds.json` object under the selected artifact prefix.
+
+`sync-host.sh` asks the existing host to download that object.
+The host applies the same schema validator before it changes world services.
+
+The reconciliation has these semantics:
+
+- A new enabled row creates its world directories, credential, initial save, and services.
+- A disabled row stops and disables its services. Its data remains on the retained volume.
+- A re-enabled row starts its existing world data again.
+- An existing save remains unchanged during the normal synchronization.
+- Updated environment or credential files affect a process after its next service start.
+- A removed row does not stop an existing world. Disable the row before a later removal.
+
+Keep a world disabled until its replacement or migration passes all checks.
+Never run two copies with the same save and credential.
 
 ## Deploy the headless host
 
@@ -171,6 +220,10 @@ Deploy and check the host:
 ./cloud/aws/deploy-backups.sh
 ./cloud/aws/verify-host.sh
 ```
+
+The runtime and default AMI require `x86_64`.
+The deployment wrapper queries EC2 and rejects an incompatible instance type.
+Use the wrapper instead of a direct CloudFormation deployment.
 
 The host template retains the data volume after stack deletion.
 This protection also leaves a storage charge.
@@ -244,6 +297,13 @@ Use an in-place runtime update for scripts, the plugin, or the sidecar:
 CAUTION: Do not deploy the host stack only to update runtime files.
 A launch-template change can replace the instance.
 
+The update wrapper validates every stack value before it stops a world.
+It also confirms that the data volume is attached and the Systems Manager target is online.
+
+An older stack can lack the `RelayDomain` parameter.
+For that stack only, set an explicit `BIBITES_RELAY_DOMAIN` before the update.
+The wrapper validates the fallback name before it sends a remote command.
+
 ## Backups and recovery
 
 `backup-template.yaml` creates daily encrypted EBS snapshots for tagged volumes.
@@ -268,6 +328,13 @@ FFmpeg uses NVENC for the shared H.264 stream.
 
 The deployment wrapper requires an existing publish-password parameter.
 It does not read or copy the secret value.
+
+The wrapper requires RFC1918 relay and RTMP addresses.
+The RTMP address must use port `1935`.
+It also checks the effective subnet route table for both destinations.
+
+Accepted routes use an RFC1918 destination through the local VPC, peering, a transit gateway,
+or a private virtual gateway. A default internet route does not pass this check.
 
 Review [`docs/live-broadcast.md`](../../docs/live-broadcast.md) before deployment.
 
