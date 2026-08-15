@@ -64,7 +64,7 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
   <h1>Follow a life in progress.</h1>
   <p class="lede">Everyone on this page watches the same Multiverse world. The camera chooses its youngest living Bibite, stays with it for the rest of its life here, then chooses again.</p>
   <div class="player">
-    <iframe id="player" title="Live Bibites game broadcast" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
+    <iframe id="player" title="Live Bibites game broadcast" allow="autoplay; fullscreen; picture-in-picture"></iframe>
     <div class="offline" id="offline" role="status" aria-live="polite">
       <div><svg viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/></svg>
       <b id="offtitle">Checking the broadcast…</b><span id="offcopy">The map continues running while this player connects.</span></div>
@@ -85,9 +85,23 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
   var dot=document.getElementById("dot"), status=document.getElementById("status");
   var title=document.getElementById("offtitle"), copy=document.getElementById("offcopy");
   var loaded=false, failures=0;
+  function reconnecting(){
+    cover.hidden=false;dot.className="dot offline-dot";status.textContent="Broadcast reconnecting";
+    title.textContent="The camera is between sessions.";
+    copy.textContent="This page will reconnect automatically. The Multiverse itself continues running.";
+  }
+  frame.addEventListener("load",function(){
+    setTimeout(function(){
+      try{
+        if(frame.contentDocument&&frame.contentDocument.querySelector("video")) return;
+        loaded=false;failures=2;reconnecting();
+      }catch(e){}
+    },600);
+  });
   async function check(){
     try{
       var response=await fetch("/stream/bibites/index.m3u8",{cache:"no-store"});
+      if(response.status===429&&loaded) return;
       if(!response.ok) throw new Error("offline");
       failures=0;
       if(!loaded){frame.src="/stream/bibites?controls=true&muted=true&autoplay=true&playsInline=true";loaded=true;}
@@ -95,9 +109,7 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
     }catch(e){
       failures++;
       if(failures<2) return;
-      cover.hidden=false;dot.className="dot offline-dot";status.textContent="Broadcast reconnecting";
-      title.textContent="The camera is between sessions.";
-      copy.textContent="This page will reconnect automatically. The Multiverse itself continues running.";
+      reconnecting();
     }
   }
   check();setInterval(check,5000);

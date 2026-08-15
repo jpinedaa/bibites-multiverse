@@ -16,6 +16,8 @@ func TestWatchPageIsOneSharedReadOnlyBroadcast(t *testing.T) {
 		"Death or departure",
 		`/stream/bibites/index.m3u8`,
 		`/stream/bibites?controls=true`,
+		`response.status===429&&loaded`,
+		`frame.contentDocument.querySelector("video")`,
 		"spectator camera, not a control surface",
 	} {
 		if !strings.Contains(watchPageHTML, want) {
@@ -27,6 +29,10 @@ func TestWatchPageIsOneSharedReadOnlyBroadcast(t *testing.T) {
 		if strings.Contains(watchPageHTML, forbidden) {
 			t.Fatalf("watch page exposes broadcast control material %q", forbidden)
 		}
+	}
+
+	if strings.Contains(watchPageHTML, "allowfullscreen") {
+		t.Fatal("watch page contains a redundant allowfullscreen attribute")
 	}
 }
 
