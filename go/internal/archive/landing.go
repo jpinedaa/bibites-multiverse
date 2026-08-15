@@ -1,10 +1,15 @@
 package archive
 
+import (
+	"fmt"
+	"strings"
+)
+
 // The public front door and the operator console are deliberately separate.
 // The front door answers a first visitor's questions and samples the same
 // read-only status endpoint as the console. The console remains the dense,
 // self-contained instrument used by participants and operators.
-const landingPageHTML = `<!doctype html>
+const landingPageTemplate = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -193,7 +198,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 
   <section class="shell section" id="join">
     <div class="joinbox">
-      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package for release 0.2.3 include <em>The Bibites</em> 0.6.3.1, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required.</p><div class="actions"><a class="button primary" href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.3/bibites-multiverse-0.2.3-windows-x64-setup.exe">Download for Windows</a><a class="button primary" href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.3/bibites-multiverse-0.2.3-linux-x64-complete.zip">Download for Linux</a><a class="button secondary" href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.3">Checksums and add-ons&nbsp; →</a></div></div>
+      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package for release __HOMEPAGE_RELEASE__ include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
       <aside class="trust"><h3>Clear boundaries</h3><ul><li>Your world and saves stay on your machine.</li><li>Automatic enrollment creates the secret on your machine.</li><li>The public page is read-only.</li><li>TLS protects traffic to the relay.</li><li>Published world data is explained before you join.</li><li>The shared run ends November 14 unless extended by announcement.</li></ul></aside>
     </div>
   </section>
@@ -237,6 +242,57 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 </script>
 </body>
 </html>`
+
+var landingPageHTML = renderLandingPage(Config{
+	HomepageRelease:     defaultHomepageRelease(),
+	HomepageRepo:        defaultHomepageRepo(),
+	HomepageGameVersion: defaultHomepageGameVersion(),
+})
+
+func renderLandingPage(cfg Config) string {
+	release := strings.TrimSpace(cfg.HomepageRelease)
+	if release == "" {
+		release = defaultHomepageRelease()
+	}
+	release = strings.TrimPrefix(release, "v")
+	if release == "" {
+		release = defaultHomepageRelease()
+	}
+	gameVersion := strings.TrimSpace(cfg.HomepageGameVersion)
+	if gameVersion == "" {
+		gameVersion = defaultHomepageGameVersion()
+	}
+	repo := normalizeHomepageRepo(cfg.HomepageRepo)
+	if repo == "" {
+		repo = defaultHomepageRepo()
+	}
+	releaseTag := "v" + release
+	baseURL := "https://github.com/" + repo
+	artifactBase := fmt.Sprintf("bibites-multiverse-%s", release)
+	return strings.NewReplacer(
+		"__HOMEPAGE_RELEASE__", release,
+		"__HOMEPAGE_GAME_VERSION__", gameVersion,
+		"__HOMEPAGE_WINDOWS__", baseURL+"/releases/download/"+releaseTag+"/"+artifactBase+"-windows-x64-setup.exe",
+		"__HOMEPAGE_LINUX__", baseURL+"/releases/download/"+releaseTag+"/"+artifactBase+"-linux-x64-complete.zip",
+		"__HOMEPAGE_TAG__", baseURL+"/releases/tag/"+releaseTag,
+	).Replace(landingPageTemplate)
+}
+
+func defaultHomepageRelease() string     { return "0.2.3" }
+func defaultHomepageRepo() string        { return "jpinedaa/bibites-multiverse" }
+func defaultHomepageGameVersion() string { return "0.6.3.1" }
+
+func normalizeHomepageRepo(repo string) string {
+	repo = strings.TrimSpace(repo)
+	repo = strings.TrimSuffix(repo, "/")
+	repo = strings.TrimPrefix(repo, "https://github.com/")
+	repo = strings.TrimPrefix(repo, "http://github.com/")
+	repo = strings.Trim(repo, "/")
+	if repo == "" {
+		return defaultHomepageRepo()
+	}
+	return repo
+}
 
 const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
 <rect width="64" height="64" rx="14" fill="#0b1110"/>

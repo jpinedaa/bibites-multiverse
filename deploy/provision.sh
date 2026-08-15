@@ -97,6 +97,9 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_STREAM_PUBLISH_CIDR:=}"
 : "${MV_STREAM_HLS_BACKEND:=127.0.0.1:8888}"
 : "${MV_ARCHIVE_PEER_ID:=archive-main}"
+: "${MV_HOMEPAGE_RELEASE:=0.2.3}"
+: "${MV_HOMEPAGE_REPO:=jpinedaa/bibites-multiverse}"
+: "${MV_HOMEPAGE_GAME_VERSION:=0.6.3.1}"
 : "${MV_ACME_MODE:=webroot}"
 : "${MV_SWAP_GB:=0}"
 : "${MV_LOG_ROTATE_MB:=100}"
@@ -456,6 +459,10 @@ MULTIVERSE_ARCHIVE_DENY_LIST=/etc/multiverse/deny-list
 # announces. Empty names no world, and both pages then say so. Display only: it
 # changes no placement, no routing and no record. See deploy.env.example.
 MULTIVERSE_BROADCAST_PEER=${MV_BROADCAST_PEER_ID:-}
+# Homepage links on the landing page, for the current release's file names.
+MULTIVERSE_HOMEPAGE_RELEASE=$MV_HOMEPAGE_RELEASE
+MULTIVERSE_HOMEPAGE_REPO=${MV_HOMEPAGE_REPO:-}
+MULTIVERSE_HOMEPAGE_GAME_VERSION=${MV_HOMEPAGE_GAME_VERSION:-}
 MULTIVERSE_LOG_FILE=$MV_LOGDIR/archive.log
 MULTIVERSE_LOG_ROTATE_MB=$MV_LOG_ROTATE_MB
 MULTIVERSE_LOG_KEEP=$MV_LOG_KEEP

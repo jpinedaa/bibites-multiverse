@@ -117,6 +117,7 @@ func TestLandingCardLayoutKeepsRelatedContentTogether(t *testing.T) {
 }
 
 func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
+	defaultLanding := landingPageHTML
 	for _, want := range []string{
 		"The Windows setup and Linux complete package for release 0.2.3",
 		"Each installer creates a unique world identity and keeps its secret on your machine.",
@@ -126,12 +127,31 @@ func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 		`href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.3">Checksums and add-ons`,
 		"Automatic enrollment creates the secret on your machine.",
 	} {
-		if !strings.Contains(landingPageHTML, want) {
+		if !strings.Contains(defaultLanding, want) {
 			t.Errorf("landing page is missing public package detail %q", want)
 		}
 	}
-	if strings.Contains(landingPageHTML, "Joining requires a private join string") {
+	if strings.Contains(defaultLanding, "Joining requires a private join string") {
 		t.Error("landing page still says that the public map requires a private join string")
+	}
+}
+
+func TestLandingPageUsesHomepageConfigOverrides(t *testing.T) {
+	page := renderLandingPage(Config{
+		HomepageRelease:     "0.9.9",
+		HomepageRepo:        "acme/example-bibites",
+		HomepageGameVersion: "9.9.9",
+	})
+	for _, want := range []string{
+		`The Windows setup and Linux complete package for release 0.9.9`,
+		`<em>The Bibites</em> 9.9.9, the mod, and the connector.`,
+		`href="https://github.com/acme/example-bibites/releases/download/v0.9.9/bibites-multiverse-0.9.9-windows-x64-setup.exe"`,
+		`href="https://github.com/acme/example-bibites/releases/download/v0.9.9/bibites-multiverse-0.9.9-linux-x64-complete.zip"`,
+		`href="https://github.com/acme/example-bibites/releases/tag/v0.9.9">Checksums and add-ons`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("landing page did not apply homepage config: missing %q", want)
+		}
 	}
 }
 

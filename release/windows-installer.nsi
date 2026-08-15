@@ -68,11 +68,19 @@ Section "Install"
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
+  SetShellVarContext current
   CreateDirectory "$SMPROGRAMS\Bibites Multiverse"
   StrCpy $R3 '-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -File "$INSTDIR\Start-Multiverse.ps1"'
   CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$DESKTOP\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Uninstall Bibites Multiverse.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0 SW_SHOWNORMAL
+  SetShellVarContext all
+  ClearErrors
+  CreateDirectory "$COMMONPROGRAMS\Bibites Multiverse"
+  IfErrors doneCommonShortcuts
+  CreateShortCut "$COMMONPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
+doneCommonShortcuts:
+  SetShellVarContext current
 
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "DisplayName" "Bibites Multiverse"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "DisplayVersion" "${PRODUCT_VERSION}"
@@ -93,10 +101,15 @@ Section "Uninstall"
   ${EndIf}
 
 cleanup:
+  SetShellVarContext current
   Delete "$DESKTOP\Bibites Multiverse.lnk"
   Delete "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk"
   Delete "$SMPROGRAMS\Bibites Multiverse\Uninstall Bibites Multiverse.lnk"
   RMDir "$SMPROGRAMS\Bibites Multiverse"
+  SetShellVarContext all
+  Delete "$COMMONPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk"
+  RMDir "$COMMONPROGRAMS\Bibites Multiverse"
+  SetShellVarContext current
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse"
   Delete "$INSTDIR\Uninstall-BibitesMultiverse.ps1"
   Delete "$INSTDIR\Uninstall.exe"

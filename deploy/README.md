@@ -50,6 +50,8 @@ The following values identify one deployment:
 - `MV_ALERT_KIND`, `MV_ALERT_URL`, and `MV_ALERT_COMMAND`.
 - `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
+- Homepage values for the public landing page links: `MV_HOMEPAGE_RELEASE`,
+  `MV_HOMEPAGE_REPO`, and `MV_HOMEPAGE_GAME_VERSION`.
 
 Never store the completed file in Git.
 Store secret values in a secret manager or in protected files on the host.
