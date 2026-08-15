@@ -119,7 +119,7 @@
 # LAN rig left a Windows-side port proxy behind:
 #
 #   netsh interface portproxy show v4tov4
-#   0.0.0.0   8790   ->   172.24.110.174   8790      (a WSL address that is gone)
+#   0.0.0.0   8790   ->   <stale-wsl-ip>   8790      (a WSL address that is gone)
 #
 # It listens on 0.0.0.0, so it shadows 127.0.0.1:8790 FOR WINDOWS PROCESSES ONLY.
 # The sidecar binds its own 8790 inside WSL and reports success; the game then

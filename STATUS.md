@@ -57,6 +57,7 @@ Read the [system design](system_decomposition.md) for milestone scope. Read the
 
 - Read the [participant guide](docs/README.md) before you connect a world.
 - Open the [public map](https://bibitesmultiverse.com/live) to explore migrations and lineages.
-- Open the [shared broadcast](https://bibitesmultiverse.com/watch) to watch one world.
+- The optional [shared broadcast](https://bibitesmultiverse.com/watch) is relevant only when a
+  publisher is available.
 - Use [GitHub issues](https://github.com/jpinedaa/bibites-multiverse/issues) for defects and
   experiment proposals.

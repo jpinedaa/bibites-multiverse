@@ -50,7 +50,7 @@
     other half - the peerId - is not a secret and is -PeerId below.
 
 .EXAMPLE
-    .\setup-farend.ps1 -RelayHost 192.168.1.227 -CaFile .\ca.crt `
+    .\setup-farend.ps1 -RelayHost '<relay-host>' -CaFile .\ca.crt `
         -PeerSecretFile .\peer-secret.txt
 #>
 [CmdletBinding()]
