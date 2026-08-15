@@ -873,6 +873,15 @@ serving.
 
 ## The far end — the second computer
 
+> **RETIRED 2026-08-15.** The laptop no longer runs a world. Slot 6's save moved to the cloud
+> worlds host and the laptop copy is stopped for good — **restarting it forks two histories from
+> one checkpoint** (*The cloud worlds host*). Its game and sidecar are down, no auto-launch exists
+> to bring them back (checked: no scheduled task, Startup entry, Run key or service), and its save
+> is preserved in place. What follows is kept because `setup-farend.ps1` is still what a *new* far
+> end would use, and because two debts below are still unpaid in that template: it starts the
+> sidecar with **no log rotation**, and it generates no sidecar-only stop/start pair, so its
+> `stop-slot6.ps1` cannot swap a sidecar under a running game without force-killing it.
+
 The second computer has no development environment (`m3_considerations.md` Risk 6). It gets
 **artifacts, not a build**, in one zip, and two PowerShell scripts. Everything it needs is
 made here:
@@ -1554,7 +1563,62 @@ A manual pre-restore snapshot also exists.
 The monitor reports all checks healthy on the empty map. Its test alert was delivered. The
 Lightsail status-check alarm exists, but its email destination still needs AWS verification.
 
+## The cloud worlds host
+
+The six simulations no longer run on anybody's desk. They run on one EC2 Spot host, and
+`cloud/aws/README.md` is that host's operator document — cost, data layout, safety rules, Session
+Manager access, spot-interruption behaviour and the recovery drill. This section records only what
+was **verified against AWS and the public map**, so the two documents do not say the same thing
+twice.
+
+| What | Live value, verified 2026-08-15 UTC |
+|---|---|
+| Stack | `bibites-cloud-worlds`, `CREATE_COMPLETE` |
+| Instance | `i-0a6ee98a24f27bfae` — `m6a.2xlarge`, **Spot**, `us-east-1a`, running |
+| Retained data volume | `vol-0d51c430a70521630` (`DeletionPolicy: Retain`) |
+| Account, Region, profile | `663615031964`, `us-east-1`, `bibites-multiverse` — the default profile is DERSec and is **prohibited** |
+| Relay | `wss://bibitesmultiverse.com/contract-b/v4`, the Lightsail host above |
+
+**Slot 6 was the last world to move, and it moved from the laptop on 2026-08-15 UTC.** The laptop
+game was closed through the mod's own `quit` verb — **not** `stop-slot6.ps1`, which force-kills
+with `Stop-Process -Force` and would have raced the final save. That quit wrote
+`[M4-SAVE] why=quit` at **02:54:11Z** (572,592 bytes, population 76, verified, within budget), and
+the save was left in place on the laptop with its six rotated copies. `cloud/aws/migrate-laptop-slot6.sh`
+at commit `54c21e2` ran from an isolated worktree: it refused to start while a Bibites process
+lived, checked the account, required the exact five-world manifest, uploaded the save, appended
+slot 6 without touching the other five, synchronised the host and waited on the public map. Slot 6
+was granted at (2,1) at ~**03:13:48Z**.
+
+**What was verified independently afterwards, rather than read off the script's own report:** the
+S3 object `cloud/v1/imports/M4-Slot6.zip` downloaded and re-hashed to
+`152c59a6c15223c642cbd820ab1970d2c7429d95cc4368626ac29fedfd399fef`, byte-identical to the laptop
+save; the host's strict gate (`bibites-cloud-ready 720` over SSM) passed with all six worlds
+`sidecar=active game=active`, `timeScale 100`, **zero** discarded journal bytes and **zero**
+capacity sheds; and a fresh `/api/status` read **3×2, slotCount 6, liveSlots 6, darkSlots 0**,
+every slot `live` and `modConnected`. Achieved scale sat at ×5–19 across the six — `100` is the
+target, not a promise, and the achieved figure tracks population exactly as it always has.
+
+**Two rules this migration is built on, and neither is advisory.** The laptop copy must **never**
+be restarted: the cloud world continues from that same checkpoint, and a second copy forks two
+descendant histories from one save. And the old sidecar journals were deliberately **not**
+migrated — they hold custody for the retired LAN relay, and replaying them into the public map
+would route old organisms into a different topology. Each cloud world got a fresh credential and
+a fresh journal; the worlds and their evolutionary history are what moved.
+
+**Three snags worth carrying.** The laptop had **no AWS configuration at all**, so the migration
+stopped and asked for one interactive login rather than guessing at credentials. `AGENTS.md` does
+not exist at `54c21e2` or on `main`, so `cloud/aws/README.md` is the document to read. And the S3
+object's `sha256` **user metadata reads null** although the content hash is correct — cosmetic
+today, but anything that later verifies by metadata instead of by content will find nothing there.
+
 ## The living deployment
+
+> **The LAN rig no longer carries the map.** All six worlds run on the cloud worlds host above.
+> The relay this section describes at `192.168.1.227:8795` is gone — the far end's last look at it
+> reported every lane `peer_unreachable` — and slot 6 left the laptop on 2026-08-15 UTC. What
+> follows is the record of the rig that carried the map from the M4 exit test to that migration.
+> The reboot drill below is still the drill for any rig of this shape, and the watch items are
+> still the things worth watching; the addresses are history.
 
 The M4 LAN rig has carried the same six worlds since the exit test of 2026-08-06 — across a
 full-disk outage, two host reboots, one far-end restart and, on 2026-08-11, a **major wire
