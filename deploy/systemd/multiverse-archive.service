@@ -18,9 +18,8 @@ WorkingDirectory=/var/lib/multiverse
 # EVERY setting the archive reads arrives here, and there is deliberately no
 # Environment= line in this unit: a literal here would be applied AFTER the file
 # and would silently win over deploy.env, which is the one home the kit promises.
-# provision.sh generates the file, including Decision 3's
-# MULTIVERSE_GENOME_HORIZON (720h as deployed; empty evicts nothing) and the
-# archive's GOMEMLIMIT.
+# provision.sh generates the file, including MULTIVERSE_GENOME_HORIZON and the
+# archive GOMEMLIMIT. An empty genome horizon evicts nothing.
 EnvironmentFile=/etc/multiverse/archive.env
 ExecStart=/opt/multiverse/bin/multiverse-archive
 
@@ -36,10 +35,9 @@ TimeoutStopSec=45
 NoNewPrivileges=true
 
 # The archive is the process that may legitimately want gigabytes: ~0.30 KB
-# resident per ledger record and ~0.18 KB peak during replay, which since the
-# replay was made streaming (2026-08-12) is the smaller of the two. Under
-# pressure it is the one to lose — losing it costs a ledger gap, losing the relay
-# costs the map.
+# resident per ledger record and ~0.18 KB peak during streaming replay. Under
+# pressure it is the one to lose. Losing it costs a ledger gap, but losing the
+# relay stops the map.
 OOMScoreAdjust=+200
 # THERE IS NO MemoryMax HERE, AND THAT IS DELIBERATE. A hard cap kills the
 # replay, and the replay is the one thing that must not fail. provision.sh writes

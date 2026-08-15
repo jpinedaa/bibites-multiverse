@@ -37,11 +37,10 @@ TLS_DIR="${TLS_DIR:-$E2E/tls-m4-lan}"
 #                    relay's listener is TLS for EVERY address including loopback
 #                    (crypto/tls wraps the net.Listener whole), so the local
 #                    clients dial wss://127.0.0.1 and verify this name.
-#   192.168.1.227    the far end's RelayHost. It is this machine's Windows LAN
-#                    address, recorded in dev_environment.md, *Owner steps*, and
-#                    confirmed by the far end itself on 2026-08-03. The Windows
-#                    portproxy forwards it into the WSL VM; the far end's TLS
-#                    client verifies the name it DIALLED, which is this one.
+#   192.168.1.227    the historical M4 far-end RelayHost. Override LAN_HOST for
+#                    another network. The Windows portproxy forwards it into
+#                    the WSL VM. The far-end TLS client verifies this dialled
+#                    name.
 #   172.24.110.174   the WSL address, the portproxy's connectaddress. Nothing
 #                    dials it by name today; it is here so that a debugging dial
 #                    from Windows against the VM directly does not fail on the

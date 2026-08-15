@@ -47,8 +47,8 @@ import (
 	"multiverse/internal/wire"
 )
 
-// The rig's own measured numbers, from wp3_hosting_options.md's measurement base
-// (2026-08-11 22:10Z). They are here so the harness can convert a per-migration
+// The measured numbers come from wp3_hosting_options.md's reference workload.
+// They let the harness convert a per-migration
 // cost into the per-day term the egress table is written in, and so that a
 // reader can see exactly which recorded figures the conversion rests on.
 const (
@@ -320,8 +320,8 @@ func TestB26TheReceiptsMeasuredPerMigrationCostAtRate(t *testing.T) {
 	oneReceipt := receiptFrameBytes(t, 6)
 	receiptBytes := len(oneReceipt)
 
-	// The payload the harness pushes is sized from the living deployment's own
-	// measurement — ~15.8 KB per crossing, the bb8 body plus its envelope — so
+	// The payload uses the reference measurement of approximately 15.8 KB for
+	// each crossing, including the bb8 body and its envelope. Thus,
 	// the ratio below is the ratio a hoster will actually see.
 	payloads := buildPayloadFrames(t, migrations, rigWireBytesPerCrossing)
 	payloadBytes := len(payloads[0])

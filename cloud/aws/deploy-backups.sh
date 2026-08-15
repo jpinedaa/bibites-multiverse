@@ -6,9 +6,14 @@ profile="${AWS_PROFILE:-bibites-multiverse}"
 region="${AWS_REGION:-us-east-1}"
 host_stack="${BIBITES_STACK_NAME:-bibites-cloud-worlds}"
 backup_stack="${BIBITES_BACKUP_STACK_NAME:-bibites-cloud-worlds-backups}"
+: "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
 
-account="$(aws --profile "$profile" sts get-caller-identity --query Account --output text)"
-[ "$account" = 663615031964 ] || { echo "refusing AWS account $account" >&2; exit 1; }
+account="$(aws --profile "$profile" --region "$region" sts get-caller-identity \
+  --query Account --output text)"
+[ "$account" = "$BIBITES_AWS_ACCOUNT_ID" ] || {
+  echo "refusing AWS account $account; expected $BIBITES_AWS_ACCOUNT_ID" >&2
+  exit 1
+}
 volume="$(aws --profile "$profile" --region "$region" cloudformation describe-stacks \
   --stack-name "$host_stack" \
   --query 'Stacks[0].Outputs[?OutputKey==`DataVolumeId`].OutputValue' --output text)"

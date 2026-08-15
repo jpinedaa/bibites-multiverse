@@ -31,8 +31,8 @@
 #                         route-around hides a dead peer, and now nobody is
 #                         watching. Persistence is the whole signal: one skip is
 #                         a reconnect, three runs of skips is a departure.
-#   free disk             WP3's done-when, and Risk 5. The 2026-08-08 ENOSPC
-#                         outage is what running out looks like.
+#   free disk             the archive stops writing correctly when its volume is
+#                         full. Alert before the service reaches that state.
 #   error lines           WP3's done-when. A rate, from the rotated logs.
 #   certificate           days left on the certificate THE LISTENER SERVES, not
 #                         the one on disk — which is also how a deploy hook that
@@ -50,7 +50,8 @@
 #   reboot required       a pending kernel. Unattended upgrades do NOT reboot
 #                         here, deliberately, so somebody has to know.
 #
-# THE ALERT CHANNEL, chosen for a one-person operator on a $12 VPS.
+# THE ALERT CHANNEL. Select one for each deployment and check that a person
+# receives its self-test.
 #
 #   ntfy (the default)  https://ntfy.sh/<a topic nobody can guess>. No account,
 #                       no signup, no key, no cost, and a phone app or a browser
@@ -66,11 +67,8 @@
 #   none                log only.
 #
 # WHAT NO CHANNEL HERE CAN DO. If the instance is off, nothing on the instance
-# sends anything, and silence is indistinguishable from health. Two answers, both
-# cheap: the daily heartbeat below, whose ABSENCE is the signal; and a Lightsail
-# metric alarm in the AWS console (instance status check -> email), which is the
-# only watcher that survives the box being dead. The console alarm is the owner's
-# one manual step; see README.md.
+# sends anything, and silence is indistinguishable from health. Use the daily
+# heartbeat below and a provider-side failed-instance alarm.
 set -uo pipefail
 
 ENV_FILE="${MV_ENV_FILE:-/etc/multiverse/deploy.env}"
@@ -369,7 +367,7 @@ check_disk() {
   [ -n "$days" ] && tail=" — about $days day(s) left at the last 24 h's growth"
 
   if [ "$free" -le "$MV_DISK_CRIT_PCT" ]; then
-    report disk CRIT "${free}% free (${availg} GB)$tail. The 2026-08-08 ENOSPC outage stopped every genome write and left durability damage. Grow the volume — Lightsail can do it online — or apply the retention rule."
+    report disk CRIT "${free}% free (${availg} GB)$tail. Grow the volume or apply the announced retention rule before writes fail."
   elif [ "$free" -le "$MV_DISK_WARN_PCT" ]; then
     report disk WARN "${free}% free (${availg} GB)$tail. SIZING.md has the arithmetic and the options."
   else
@@ -442,15 +440,9 @@ check_replay_headroom() {
   case "$records" in ''|*[!0-9]*) return ;; esac
   # TWO models, because the box has to satisfy both and they trade places.
   #
-  #   184 B/record  peak while replaying. This is the STREAMING archive's, the
-  #                 one this kit ships (measured 2026-08-12 on a copy of the
-  #                 deployment's own 8.16 M-record ledger). An archive built
-  #                 BEFORE that date materialised the whole ledger and peaked at
-  #                 ~1330 B/record — seven times this — so a box running an old
-  #                 binary is not covered by this check and the fix is the
-  #                 upgrade.
-  #   300 B/record  held resident for the rest of the day, from the living
-  #                 deployment, twice at twelvefold different scale.
+  #   184 B/record  peak while replaying with the streaming archive. The older
+  #                 materializing design measured approximately 1330 B/record.
+  #   300 B/record  held resident after replay in the reference workload.
   #
   # Since the replay was fixed the RESIDENT term is the larger one, so this
   # alerts on the larger of the two rather than on the replay alone: an archive

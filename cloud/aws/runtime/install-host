@@ -10,6 +10,7 @@ set -euo pipefail
 : "${BEPINEX_SHA256:?}"
 : "${MANIFEST_KEY:?}"
 : "${RELAY_PRIVATE_IP:?}"
+: "${RELAY_DOMAIN:?}"
 
 log() { printf '[bibites-install] %s\n' "$*"; }
 
@@ -49,16 +50,17 @@ fi
 grep -q '^/srv/bibites/swapfile ' /etc/fstab || printf '/srv/bibites/swapfile none swap sw 0 0\n' >> /etc/fstab
 swapon --show=NAME | grep -Fxq /srv/bibites/swapfile || swapon /srv/bibites/swapfile
 
-# Resolve the public certificate name to the Lightsail private address. VPC
-# peering makes this same-AZ route free and leaves TLS hostname verification intact.
-sed -i '/[[:space:]]bibitesmultiverse\.com$/d' /etc/hosts
-printf '%s bibitesmultiverse.com\n' "$RELAY_PRIVATE_IP" >> /etc/hosts
+# Resolve the certificate name to the private relay address. This route keeps
+# TLS hostname verification while traffic stays on the private network.
+escaped_domain="${RELAY_DOMAIN//./\\.}"
+sed -i "/[[:space:]]${escaped_domain}$/d" /etc/hosts
+printf '%s %s\n' "$RELAY_PRIVATE_IP" "$RELAY_DOMAIN" >> /etc/hosts
 
 cat > /etc/bibites-cloud.conf <<EOF
 AWS_REGION='$AWS_REGION'
 ARTIFACT_BUCKET='$ARTIFACT_BUCKET'
 MANIFEST_KEY='$MANIFEST_KEY'
-RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4'
+RELAY_URL='wss://$RELAY_DOMAIN/contract-b/v4'
 EOF
 chmod 0644 /etc/bibites-cloud.conf
 

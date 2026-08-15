@@ -1,243 +1,149 @@
 # Restart policy
 
-**DQ2's fourth obligation, in its own words:** *"A restart policy, written down.
-Which restarts are routine, what a participant should expect during one, and what
-the operator does first afterwards."*
+The relay and archive are separate services.
+A relay restart is usually short.
+An archive restart replays the ledger, and its cost grows with that ledger.
 
-Everything below is written from measurement, not from custom. The measurements
-are the living deployment's and the arithmetic is in `SIZING.md`.
+This policy describes reusable behavior.
+Private operations storage owns each restart window, approval, receipt, and incident record.
 
-**The one sentence to carry:** *restarting the relay is cheap and restarting the
-archive is not, they are separate acts, and the archive's cost grows every day of
-the run.*
+## Restart classes
 
----
+| Class | Effect | Notice |
+|---|---|---|
+| Certificate reload | nginx loads a renewed pair. The relay and archive continue. | No notice is normally necessary. |
+| Relay only | Peers disconnect, reconnect, and reclaim their slots. | Announce a planned restart. |
+| Archive only | The website stops while the archive replays the ledger. | Announce it and state the expected replay time. |
+| Host reboot | The relay and archive stop. The archive replays after boot. | Announce it and schedule it. |
+| Unplanned restart | The effect matches the failed service and includes diagnosis time. | Explain it after service returns. |
 
-## 1. The five kinds of restart
+## Certificate reload
 
-| # | What | Costs | Announce? |
-|---|---|---|---|
-| 1 | **Certificate rotation** | **Nothing. It is not a restart.** | No |
-| 2 | **Relay only** — issuing join strings, a limit change, a relay upgrade | Seconds. Every peer reconnects and re-claims its own slot | For a planned one, yes |
-| 3 | **Archive only** — a deny-list *file* edit is NOT this; a binary upgrade or a config change is | A full ledger replay, and **a hole in the record the width of the outage** | Yes |
-| 4 | **Both, or a reboot** — kernel updates | The archive's cost, without the ledger hole | Yes, and schedule it |
-| 5 | **Unplanned** — a crash, an OOM kill, ENOSPC | Whatever the above would have cost, plus the diagnosis | After the fact, always |
+`tls-deploy-hook.sh` installs the certificate and key through atomic replacements.
+It reloads nginx after both files are present.
 
-### 1. Certificate rotation is not a restart
+Existing WebSocket connections stay on the old nginx workers.
+New connections use the renewed certificate.
 
-B23's rotation row defines what a rotation costs a connected peer. The answer is
-nothing. `tls-deploy-hook.sh` installs both files and reloads nginx. The old
-nginx workers keep their existing WebSocket connections. New workers use the
-renewed pair. The relay and archive do not restart.
+The monitor compares the served certificate with the installed certificate.
+This check detects a deploy-hook failure before expiry.
 
-The hook writes each file through a temporary and renames it. It reloads nginx
-only after both files are installed.
+## Relay restart
 
-`monitor.sh`'s **cert** check compares the certificate the listener *serves*
-against the copy on disk, which is how a deploy hook that silently stopped
-running is caught before the certificate expires.
+The relay reads a small durable identity set at startup.
+It does not replay the archive ledger.
 
-### 2. The relay-only restart
+During a relay restart, each sidecar reconnects on its backoff schedule.
+The sidecar reclaims its existing slot and coordinate.
 
-**Cost: seconds.** The relay is 93 MB resident, flat, with no replay and no state
-to rebuild beyond reading `ring.json` and `peers.json`.
+The sidecar journal preserves unsent custody records.
+Some crossings can arrive later after the restart.
 
-**What a participant sees:** an ordinary disconnect. Their sidecar reconnects on
-its backoff ladder and re-claims its own slot with `reason: "reclaimed"`. Slot
-numbers, coordinates, reservations and credentials all survive — they are on
-disk, not in the process.
+Credential creation is a startup operation.
+Batch multiple new credentials into one planned relay restart.
+Back up `ring.json` and `peers.json` after the batch.
 
-**The one real cost, and it is worth stating plainly to participants:** a relay
-restart drops **every outstanding forwarded record**. Those entries fall back to
-the sender's bounded 24-hour hold instead of re-routing in seconds. Nothing is
-lost; some crossings are slow for a while. The living deployment's own crossing
-window measured the shape of this: taking the map down takes the sidecars with
-it, so their journals replay-flush and there is no custody burst — peak 4 against
-55 for a rolling deploy.
+## Archive restart
 
-> **This is the item WP3 is changing.** The forward receipt (B26) turns the
-> sender's own journal into the evidence, so a restart stops costing a 24-hour
-> hold. It ships alongside this kit. Until it is deployed, the sentence above is
-> the truth and belongs in the participant-facing statement.
+The archive replays every ledger record before it serves current views.
+Use current record count and a measured replay rate for the estimate.
 
-**When it is required:** issuing a join string. Minting is a startup command and
-a serving relay is a second writer of `peers.json`. `issue-join.sh` takes the
-restart deliberately, and **batches**: one restart for five participants.
+The reference benchmark produced these conservative memory factors:
 
-### 3. The archive-only restart — the expensive one
+- Resident state: approximately `0.30 KB` per ledger record.
+- Streaming replay peak: approximately `0.18 KB` per ledger record.
 
-**Cost: a full ledger replay, and it grows with the ledger.**
+The benchmark host replayed approximately 37,000 to 49,000 records each second.
+A smaller host can be slower.
 
-    replay seconds  ≈  ledger records ÷ 37,000–49,000 per second
-    peak memory     ≈  ledger records × 0.18 KB
+Use this estimate:
 
-The rate is the development host's 16 cores. It **will be slower on a 2-vCPU
-cloud bundle**, and the low end of the range is the cold case — a run whose
-genome-store metadata was not yet in page cache, which is what a fresh instance
-always is. It is corroborated by the living deployment's own measurements:
-**~93 s at 3.7 M records** on 2026-08-10 and **~150 s at 6.24 M records** on
-2026-08-11 — 41,600/s, and growing in absolute terms by the day. Every recorded
-replay figure expires the day after it is written: measure from `wc -l` on the
-day.
+```text
+replay_seconds = ledger_records / measured_records_per_second
+resident_bytes = ledger_records * 0.30 KB
+replay_peak_bytes = ledger_records * 0.18 KB
+```
 
-**The memory figure changed on 2026-08-12 and the time did not.** The replay
-streams the ledger rather than reading it into one list first, which cut the peak
-from 1,030–1,286 B per record to **184 B** — 5.6–7.0× — at no measurable
-wall-clock cost. What that buys is below; what it does not buy is a faster
-restart, and the restart's real cost to the map was always the clock.
+Measure the rate on the target host when possible.
+Do not use an old elapsed time as the estimate for a growing ledger.
 
-At the exit-test bar that is roughly:
+An archive that is not subscribed cannot record map activity.
+If the map continues during replay, the permanent record has a gap.
 
-| Day of the run | Records | Replay | Peak RAM |
-|---|---|---|---|
-| 7 | 1.7 M | ~45 s | 0.3 GB |
-| 30 | 7.3 M | ~3 min | 1.3 GB |
-| 90 | 21.8 M | **~9 min** | **4.0 GB** |
+If the record must remain complete, stop relay activity before the archive restart.
+Start the relay only after the archive subscribes again.
 
-Those are the *peaks*. The archive still has to **hold** 0.30 KB per record for
-the rest of the day — 6.5 GB at day 90 — so on this build the resident set, not
-the replay, is what sizes the box (`SIZING.md` §4).
+Batch archive changes into one restart.
+Do not restart the archive only to collect a diagnostic number.
 
-**AND AN ARCHIVE RESTART ON A LIVE MAP COSTS A LEDGER GAP EQUAL TO ITS DOWNTIME.**
-The archive is a subscriber. While it is replaying it is not subscribed, and
-every crossing that happens in that window is **never recorded by anybody** — no
-peer and no relay holds a copy of the archive's record. Nine minutes of replay on
-day 90 is nine minutes of the record that does not exist.
+## Host reboot
 
-**This is measured, not feared.** The living deployment's last archive restart
-cost **1,940 crossings, absent from the record forever**. That is §5.1 working
-exactly as designed — the traffic itself is untouched and only the record has the
-gap — and it is the reason the ordering below exists.
+Treat a reboot as a combined relay and archive restart.
 
-The avoidance is known and was executed once already: **restart the archive
-inside a map outage.** The 2026-08-11 crossing brought the relay down, restarted
-the archive inside the window, and the archive re-subscribed 880 ms before the
-first sidecar came back — **zero ledger gap**. If the archive must restart and
-the record matters, stop the relay first and start it last.
+Before a planned reboot:
 
-**Therefore: batch the reasons. Never restart the archive to collect one number.**
-`m5_tracking.md` already holds a debt against the archive's next restart (WP4's
-deny-list flag and the `limits` key on `/api/status`, plus the status page's
-gzip). Add to the debt; do not pay it twice.
+1. Read the full monitor result.
+2. Make sure that projected archive memory is below the critical threshold.
+3. Create and check an identity backup.
+4. Create the approved off-host backup or snapshot.
+5. Announce the window.
 
-**What does NOT need a restart:** the render deny list. `/etc/multiverse/deny-list`
-is re-read in place, so moderating costs an edit.
+Stop relay activity before the reboot when ledger continuity is required.
 
-**What the operator does while it replays:** nothing to the relay. The map is
-running, crossings are flowing, participants are unaffected except that the
-status page is unavailable. Watch the archive's log for the subscription line;
-`monitor.sh` will report `archive-healthz WARN` with "may still be replaying"
-rather than a false outage.
+After boot, check service enablement and archive subscription.
+Do not infer archive health from the process state alone.
 
-### 4. The reboot
+## Unplanned restart
 
-Security updates apply themselves; **reboots do not**, deliberately. An automatic
-03:00 reboot would replay the archive unannounced and cost a ledger gap. A
-pending kernel shows up in `monitor.sh`'s **reboot** check.
+systemd restarts failed services within configured rate limits.
+It stops retrying after repeated failures.
 
-The procedure:
+This limit prevents an archive replay failure from consuming the host indefinitely.
+The monitor must alert a person when a unit enters the failed state.
 
-1. Announce it. A kernel reboot is a case 3 restart with extra steps.
-2. Take a Lightsail snapshot by hand.
-3. `sudo systemctl stop multiverse-relay` — the map is now down, which is what
-   protects the ledger.
-4. `sudo reboot`
-5. Both units come back at boot (`WantedBy=multi-user.target`). The archive
-   replays with no map running, so nothing is missed.
-6. Run the post-restart checks in §3 below.
+The host protects relay availability under memory pressure.
+An archive failure loses record coverage, but a relay failure stops the map.
 
-### 5. The unplanned restart
+Do not improvise a destructive recovery on a live service.
+Capture logs and state first.
+Use the private incident runbook to resolve exact resources and commands.
 
-`Restart=always` with `RestartSec=5s` (relay) and `15s` (archive). The limits are
-deliberate: 10 restarts in 5 minutes for the relay, 6 in 10 minutes for the
-archive. **A process that exceeds them enters `failed` and systemd stops trying.**
+## Pre-restart checks
 
-That is not an oversight. An archive that cannot complete its replay would
-otherwise loop forever, saturating the box's single spare core and doing nothing.
-Something has to notice, and the thing that notices is `monitor.sh`'s **units**
-check, which alerts a person. **There is no auto-heal beyond systemd's own
-limits**, because a service that hides its failures from its operator is worse
-than one that stops.
+Complete these checks before a planned restart:
 
-Under memory pressure the kernel takes the archive first: `OOMScoreAdjust=-500`
-on the relay, `+200` on the archive. Losing the archive costs a ledger gap;
-losing the relay costs the map.
+1. Run `monitor.sh --verbose`.
+2. Check free disk space and projected memory.
+3. Count current ledger records.
+4. Estimate replay time with the target-host rate.
+5. Create and check the identity backup.
+6. Record the reason, approval, and rollback condition.
+7. Send the required notice.
 
----
+If projected archive memory is critical, do not restart the archive.
+Increase capacity or reduce the approved retained state first.
 
-## 2. Before any planned restart
+## Post-restart checks
 
-1. Read `monitor.sh --verbose`. If **replay** is already CRIT, **do not restart
-   the archive** — it may not come back. Fix that first (`SIZING.md` §7).
-2. Measure the replay: `wc -l /var/lib/multiverse/archive/migrations.jsonl` ÷
-   49,000 is the optimistic floor and ÷ 37,000 is the honest one, both on a
-   16-core host. Announce the honest one.
-3. `sudo systemctl start multiverse-backup.service` — a fresh identity snapshot.
-4. For anything touching the archive: a Lightsail snapshot by hand.
-5. Announce, if it is case 2, 3 or 4.
+Run these checks in order:
 
-## 3. The first five things afterwards
+1. Make sure that the required units are active.
+2. Check the relay health endpoint.
+3. Check that the archive reports `relayConnected: true`.
+4. Check that expected peers reclaimed their slots.
+5. Check that the verifier-store count is unchanged.
+6. Run `monitor.sh --verbose`.
+7. Record the actual outage and replay times.
 
-In this order, because each answers a question the next one assumes:
+An active archive without a relay subscription does not record crossings.
+Treat this state as a failed restart.
 
-1. `systemctl is-active multiverse-relay multiverse-archive` — both `active`.
-2. `curl -s https://<domain>/healthz` — the map answers.
-3. `curl -s http://127.0.0.1:8796/api/status | jq '{relayConnected, haveStatus, statusAgeMs}'`
-   — **`relayConnected: true` is the one that matters.** An archive that is
-   running and not subscribed records nothing and complains to nobody.
-4. `... | jq '.totals'` — every peer back, `liveSlots` at its pre-restart value.
-   Peers return on a backoff ladder, so give it a couple of minutes before
-   calling one missing.
-5. `jq '.peers | length' /var/lib/multiverse/relay/peers.json` — the verifier
-   store is intact. This is the check nobody thinks to run and the one whose
-   failure costs a handover per participant.
+## Participant statement
 
-Then: `monitor.sh --verbose`, and confirm the alert channel is not sitting on a
-stale CRIT.
+Tell participants that planned restarts can occur during the service period.
+Usually, the sidecar reconnects without participant action.
 
-## 4. What participants are told
+State that an archive restart can make the public page unavailable.
+State any permanent record gap after an unplanned archive outage.
 
-The text below is the participant-facing half this policy owes. It is reproduced
-in `ANNOUNCEMENT.md` for the documentation slots to consume.
-
-> **Restarts are routine and they are short.**
->
-> The map's relay restarts from time to time: to hand out a join string to a new
-> participant, to apply a setting, or to take a security update. **You do not
-> need to do anything.** Your sidecar notices the disconnect, waits, reconnects,
-> and re-claims your own slot at your own coordinate. Your slot number, your
-> position and your credential are unchanged — they live on disk, not in the
-> running process.
->
-> What you may notice: for a short while after a restart, organisms that were
-> mid-crossing take longer to arrive. They are not lost. They are held by *your*
-> machine and re-sent, and the hold is bounded at 24 hours.
->
-> A restart of the **archive** — the thing that draws the map's status page —
-> takes longer, and while it happens the page is unavailable. The map itself
-> keeps running the whole time; crossings continue.
->
-> Planned restarts are announced. Unplanned ones get an explanation afterwards.
-
-## 5. The replay is on a clock, and the clock is the run
-
-The last thing this policy has to say is the uncomfortable one. **Replay time
-grows linearly with the ledger, for the whole announced period.** A restart that
-costs 45 seconds in week one costs nine minutes in month three, and every one of
-those minutes is a hole in the record the width of the outage (§1.3).
-
-That is not a bug to fix inside the run. It is the shape of an append-only record
-that nothing may evict from, and it is precisely why Decision 3 exists and why
-its deadline is D24's announced ending.
-
-**Replay *memory* used to be the other half of this sentence, and on 2026-08-12
-it stopped being.** It grew the same way, and past about day 26 an 8 GB box could
-no longer restart the archive at all — that one *was* a bug, in the shape of the
-replay rather than in the size of the ledger, and it was fixed inside the run:
-the replay streams, the peak fell 5.6–7.0×, and the wall moved to day 180. What
-binds an 8 GB box now is holding the archive all day, at day 110, which is past
-the announced ending. **Two things follow for an operator.** An instance still
-running an archive built before that date has the old wall and the upgrade is the
-fix, not the knobs. And this policy's job is unchanged: make the cost visible in
-advance — `monitor.sh`'s **replay** check — rather than discovered during an
-outage.
+Do not include private hostnames, resource identifiers, or operational commands in the participant notice.

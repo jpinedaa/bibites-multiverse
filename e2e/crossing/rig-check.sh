@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Read the living deployment's whole state off /api/status and say whether it
-# meets the bar. READ-ONLY: one HTTP GET and nothing else.
+# Read one test rig's state from /api/status and report whether it meets the bar.
+# READ-ONLY: one HTTP GET and nothing else.
 #
-# It is the same check the session-resume checklist describes in prose
-# (m5_tracking.md), made mechanical so a crossing window is not gated on somebody
-# reading six numbers correctly at 2 a.m.
+# The historical protocol-crossing runbook uses this mechanical check.
+# It avoids a manual comparison of the status values.
 #
 #   e2e/crossing/rig-check.sh              # the pre-window bar: 6/6, 24/24
 #   e2e/crossing/rig-check.sh --expect 5   # during the window: 5 live is expected
@@ -118,16 +117,15 @@ for k in ("heldDepth", "timeoutBounces"):
 # custodyDepth and pacedDepth are NOT. Both flicker on a busy map — the live
 # deployment reads custody 24-29 and paced 2-8 at x100 while perfectly healthy —
 # and the reading that matters is a depth that never FALLS, which one sample
-# cannot show. m5_tracking.md's resume checklist asks for 0 on pacedDepth; that
-# was written against a quieter map and is reported here rather than enforced.
+# cannot show. An early M5 snapshot required 0 on pacedDepth. The measured rig
+# proved that a nonzero sample can be healthy, so this check reports it.
 for k in ("custodyDepth", "pacedDepth"):
     if t.get(k):
         print("note            %s is %s — normal on a busy map; the signal is a depth that "
               "never falls, not a non-zero sample" % (k, t.get(k)))
 
-# The regime the living deployment runs, per dev_environment.md: the five LOCAL
-# worlds at saveMinutes 10 / saveKeep 6 / timeScale 100. Slot 6's speed and
-# cadence are its own operator's and are not asserted.
+# The historical crossing rig used saveMinutes 10, saveKeep 6, and timeScale 100
+# for its five local worlds. This check does not assert slot 6's configuration.
 for s in live:
     if s.get("slot") == 6:
         continue
