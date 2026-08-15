@@ -79,6 +79,12 @@ expect_text "$installer" 'custody state without a durable peer identity'
 expect_text "$installer" '"$runtime_root/bin/start" {install_lock_fd}>&-'
 expect_text "$installer" '.modConnected == true'
 expect_text "$installer" '((.exportEdges // []) | sort) == ($edges | sort)'
+expect_text "$installer" 'hls_stream_ready "$public_manifest"'
+expect_text "$installer" '--cookie-jar "$cookie_jar"'
+expect_text "$installer" '$6 == "hlsSession"'
+expect_text "$installer" 'the latest completed HLS segment request failed'
+forbid_text "$installer" 'Cookie: cookieCheck=1'
+forbid_text "$installer" 'index.m3u8?cookieCheck=1'
 forbid_text "$installer" '--arg secret'
 expect_text "$runner" '$durablePeer -ne $config.PeerId'
 expect_text "$runner" 'ConvertTo-WindowsArgument'
@@ -308,6 +314,204 @@ jq -nc --arg peer "$fixture_peer" \
 status_has_ready_peer "$fixture_peer" "$expected_edges" <"$fixtures/ready.json" || \
   fail 'the ready peer fixture failed'
 
+# HLS readiness keeps the server session from the master through one completed segment.
+hls_relative_reference 'video1_stream.m3u8' playlist || \
+  fail 'the HLS reference rule rejected a relative child playlist'
+hls_relative_reference 'rendition/video1_stream.m3u8' playlist || \
+  fail 'the HLS reference rule rejected a child playlist directory'
+hls_relative_reference 'rendition/video1_seg10.mp4' segment || \
+  fail 'the HLS reference rule rejected a relative media segment'
+for unsafe_reference in \
+  'https://other.invalid/video1_stream.m3u8' \
+  '/video1_stream.m3u8' \
+  '../video1_stream.m3u8' \
+  'rendition/../video1_stream.m3u8' \
+  'video1_stream.m3u8?session=fixture' \
+  'video1 stream.m3u8'; do
+  if hls_relative_reference "$unsafe_reference" playlist; then
+    fail "the HLS reference rule accepted an unsafe child playlist: $unsafe_reference"
+  fi
+done
+if hls_relative_reference 'video1_seg10.exe' segment; then
+  fail 'the HLS reference rule accepted a non-media segment'
+fi
+
+hls_tmp="$fixtures/hls-tmp"
+hls_events="$fixtures/hls-events"
+hls_reason="$fixtures/hls-reason"
+hls_mock_error="$fixtures/hls-mock-error"
+hls_manifest='https://fixture.invalid/stream/bibites/index.m3u8'
+hls_root='https://fixture.invalid/stream/bibites'
+mkdir -p "$hls_tmp"
+
+run_hls_fixture() {
+  local mode="$1"
+  : >"$hls_events"
+  : >"$hls_reason"
+  rm -f "$hls_mock_error"
+  (
+    fixture_hls_mode="$mode"
+    fixture_hls_cookie_jar=''
+
+    mock_hls_fail() {
+      printf '%s\n' "$*" >"$hls_mock_error"
+      return 99
+    }
+
+    curl() {
+      local cookie_seen=0 cookie_arg='' cookie_jar_arg='' output_arg=''
+      local location_seen=0 url=''
+      while [ "$#" -gt 0 ]; do
+        case "$1" in
+          --fail|--silent|--show-error) shift ;;
+          --location) location_seen=1; shift ;;
+          --max-redirs|--connect-timeout|--max-time|--proto|--proto-redir)
+            [ "$#" -ge 2 ] || { mock_hls_fail "missing value for $1"; return 99; }
+            shift 2
+            ;;
+          --cookie)
+            [ "$#" -ge 2 ] || { mock_hls_fail 'missing cookie value'; return 99; }
+            cookie_seen=1
+            cookie_arg="$2"
+            shift 2
+            ;;
+          --cookie-jar)
+            [ "$#" -ge 2 ] || { mock_hls_fail 'missing cookie-jar value'; return 99; }
+            cookie_jar_arg="$2"
+            shift 2
+            ;;
+          --output)
+            [ "$#" -ge 2 ] || { mock_hls_fail 'missing output value'; return 99; }
+            output_arg="$2"
+            shift 2
+            ;;
+          https://*)
+            [ -z "$url" ] || { mock_hls_fail 'the HLS request has two URLs'; return 99; }
+            url="$1"
+            shift
+            ;;
+          *) mock_hls_fail "unexpected HLS curl argument: $1"; return 99 ;;
+        esac
+      done
+
+      [ -n "$url" ] || { mock_hls_fail 'the HLS request has no URL'; return 99; }
+      if [ "$url" = "$hls_manifest" ]; then
+        [ "$location_seen" -eq 1 ] || { mock_hls_fail 'the master request did not follow redirects'; return 99; }
+        [ "$cookie_seen" -eq 1 ] && [ -z "$cookie_arg" ] || {
+          mock_hls_fail 'the master request did not start an empty cookie engine'
+          return 99
+        }
+        [ -n "$cookie_jar_arg" ] && [ -n "$output_arg" ] || {
+          mock_hls_fail 'the master request omitted its cookie jar or output'
+          return 99
+        }
+        fixture_hls_cookie_jar="$cookie_jar_arg"
+        printf '# Netscape HTTP Cookie File\n' >"$cookie_jar_arg"
+        printf 'fixture.invalid\tFALSE\t/stream/bibites/\tTRUE\t0\tcookieCheck\t1\n' \
+          >>"$cookie_jar_arg"
+        if [ "$fixture_hls_mode" != missing-session ]; then
+          printf '#HttpOnly_fixture.invalid\tTRUE\t/stream/bibites/\tTRUE\t0\thlsSession\tfixture-session\n' \
+            >>"$cookie_jar_arg"
+        fi
+        if [ "$fixture_hls_mode" = invalid-child ]; then
+          printf '#EXTM3U\nhttps://other.invalid/video1_stream.m3u8\n' >"$output_arg"
+        else
+          printf '#EXTM3U\nvideo1_stream.m3u8\n' >"$output_arg"
+        fi
+        printf 'master\n' >>"$hls_events"
+        return 0
+      fi
+
+      if [ "$url" = "$hls_root/video1_stream.m3u8" ]; then
+        printf 'child\n' >>"$hls_events"
+        [ "$cookie_seen" -eq 1 ] && [ "$cookie_arg" = "$fixture_hls_cookie_jar" ] || {
+          mock_hls_fail 'the child request did not reuse the cookie jar'
+          return 99
+        }
+        grep -Fq $'\thlsSession\tfixture-session' "$cookie_arg" || {
+          mock_hls_fail 'the child request had no HLS session'
+          return 99
+        }
+        [ "$fixture_hls_mode" != child-failure ] || return 22
+        if [ "$fixture_hls_mode" = invalid-segment ]; then
+          printf '#EXTM3U\n../video1_seg10.mp4\n' >"$output_arg"
+        else
+          printf '#EXTM3U\nvideo1_seg9.mp4\nvideo1_seg10.mp4\n' >"$output_arg"
+        fi
+        return 0
+      fi
+
+      if [ "$url" = "$hls_root/video1_seg10.mp4" ]; then
+        printf 'segment\n' >>"$hls_events"
+        [ "$cookie_seen" -eq 1 ] && [ "$cookie_arg" = "$fixture_hls_cookie_jar" ] || {
+          mock_hls_fail 'the segment request did not reuse the cookie jar'
+          return 99
+        }
+        [ "$output_arg" = /dev/null ] || {
+          mock_hls_fail 'the segment request did not discard the media body'
+          return 99
+        }
+        [ "$fixture_hls_mode" != segment-failure ] || return 22
+        return 0
+      fi
+
+      mock_hls_fail "the HLS request used an unexpected URL: $url"
+      return 99
+    }
+
+    if TMPDIR="$hls_tmp" hls_stream_ready "$hls_manifest"; then
+      result=0
+    else
+      result=$?
+    fi
+    printf '%s' "$hls_probe_error" >"$hls_reason"
+    exit "$result"
+  )
+}
+
+assert_hls_fixture_clean() {
+  [ ! -s "$hls_mock_error" ] || fail "$(cat "$hls_mock_error")"
+  [ -z "$(find "$hls_tmp" -mindepth 1 -print -quit)" ] || \
+    fail 'the HLS readiness fixture kept temporary files'
+}
+
+run_hls_fixture success || fail 'the complete HLS session fixture failed'
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master child segment ' ] || \
+  fail 'the complete HLS session did not read the master, child, and segment'
+[ ! -s "$hls_reason" ] || fail 'the complete HLS session kept a failure reason'
+assert_hls_fixture_clean
+
+if run_hls_fixture missing-session; then fail 'HLS readiness accepted a missing session cookie'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master ' ] || \
+  fail 'the missing HLS session reached a child request'
+grep -Fq 'did not create a session cookie' "$hls_reason" || \
+  fail 'the missing HLS session reported the wrong failure'
+assert_hls_fixture_clean
+
+if run_hls_fixture child-failure; then fail 'HLS readiness accepted a failed child request'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master child ' ] || \
+  fail 'the failed HLS child reached a segment request'
+grep -Fq 'child playlist request failed' "$hls_reason" || \
+  fail 'the failed HLS child reported the wrong failure'
+assert_hls_fixture_clean
+
+if run_hls_fixture segment-failure; then fail 'HLS readiness accepted a failed segment request'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master child segment ' ] || \
+  fail 'the failed HLS segment fixture did not complete its request chain'
+grep -Fq 'latest completed HLS segment request failed' "$hls_reason" || \
+  fail 'the failed HLS segment reported the wrong failure'
+assert_hls_fixture_clean
+
+if run_hls_fixture invalid-child; then fail 'HLS readiness accepted an absolute child URL'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master ' ] || \
+  fail 'an unsafe HLS child reached another request'
+assert_hls_fixture_clean
+
+if run_hls_fixture invalid-segment; then fail 'HLS readiness accepted a parent segment path'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master child ' ] || \
+  fail 'an unsafe HLS segment reached a media request'
+assert_hls_fixture_clean
+
 if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
   for script in "$runner" "$stopper"; do
     windows_script="$(wslpath -w "$script")"
@@ -351,4 +555,4 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
     "$runner_windows" -ArgumentQuotingSelfTest
 fi
 
-printf 'broadcast presentation, identity, lock, ACL, argv, and readiness: PASS\n'
+printf 'broadcast presentation, identity, lock, ACL, argv, map, and HLS readiness: PASS\n'

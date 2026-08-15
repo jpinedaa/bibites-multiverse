@@ -167,13 +167,22 @@ Set `MV_BROADCAST_PEER_ID` to the value printed above, then run
 Read the [live broadcast design](../../docs/live-broadcast.md), *Naming the world on the pages*.
 Until then both pages say the world is unknown.
 
-Make sure that the public page and HLS manifest are available:
+Make sure that the public page and the complete HLS session are available.
+Run these commands from the repository root:
 
 ```sh
 curl -fsS https://<service-domain>/watch >/dev/null
-curl -fsS -H 'Cookie: cookieCheck=1' \
-  'https://<service-domain>/stream/bibites/index.m3u8?cookieCheck=1' >/dev/null
+(
+  source ./deploy/local-broadcast/install.sh
+  hls_stream_ready 'https://<service-domain>/stream/bibites/index.m3u8'
+)
 ```
+
+The HLS function keeps the cookies that MediaMTX returns during the master redirects.
+It reads the advertised child playlist and its latest completed segment with that session.
+A child request without `hlsSession` can return `401` while the stream is healthy.
+The function rejects an absolute reference or a parent-directory reference.
+It removes its temporary cookie and playlist files.
 
 Stop only the private broadcast processes:
 
