@@ -105,7 +105,12 @@ Check "the GUI offers an existing game" `
 $probe = (& $guiInstaller -Probe | Out-String) | ConvertFrom-Json
 Check "the game search finds a real installed game" `
     (Test-Path -LiteralPath (Join-Path ([string]$probe.foundGame) 'The Bibites.exe') -PathType Leaf)
-Check "the add-on package defaults to an existing game" ($probe.defaultRuntime -eq 'external')
+$expectedRuntime = if (Test-Path -LiteralPath (Join-Path $KitDir 'game-payload.json') -PathType Leaf) {
+    'bundled'
+} else {
+    'external'
+}
+Check "the GUI default matches the package edition" ($probe.defaultRuntime -eq $expectedRuntime)
 
 function Get-TreeSnapshot {
     param([string]$Root)
@@ -176,7 +181,8 @@ $aSecret = New-JoinFile $aJoin
 $beforeA = Get-TreeSnapshot $aGame
 
 $install = Invoke-Script $installer @{
-    GameDir = $aGame; DataRoot = $aData; JoinStringFile = $aJoin; World = 'TestWorld'
+    RuntimeSelection = 'external'; GameDir = $aGame; DataRoot = $aData
+    JoinStringFile = $aJoin; World = 'TestWorld'
 }
 Check "the installer succeeded" ($install.ExitCode -eq 0) $install.Output
 Check "it states the all-four-edges default in its own output" `
@@ -291,7 +297,9 @@ $bJoin = Join-Path $bRoot 'join.txt'
 [void](New-JoinFile $bJoin)
 $beforeB = Get-TreeSnapshot $bGame
 
-$install = Invoke-Script $installer @{ GameDir = $bGame; DataRoot = $bData; JoinStringFile = $bJoin }
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $bGame; DataRoot = $bData; JoinStringFile = $bJoin
+}
 Check "the installer succeeded" ($install.ExitCode -eq 0) $install.Output
 Check "it left the existing BepInEx alone" ($install.Output -match 'already installed here; left exactly as it is')
 $recordB = Get-Content -Raw -LiteralPath (Join-Path $bData 'install-record.json') | ConvertFrom-Json
@@ -318,7 +326,9 @@ New-SandboxGame -Path $cGame
 $cJoin = Join-Path $cRoot 'join.txt'
 [void](New-JoinFile $cJoin)
 
-$install = Invoke-Script $installer @{ GameDir = $cGame; DataRoot = $cData; JoinStringFile = $cJoin }
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $cGame; DataRoot = $cData; JoinStringFile = $cJoin
+}
 Check "the installer succeeded" ($install.ExitCode -eq 0) $install.Output
 
 $plugin = Join-Path $cGame 'BepInEx\plugins\BibitesMultiverse.dll'
@@ -342,7 +352,9 @@ Set-Content -Path (Join-Path $managed 'BibitesAssembly.dll') -Value 'a different
 $dJoin = Join-Path $dRoot 'join.txt'
 [void](New-JoinFile $dJoin)
 
-$install = Invoke-Script $installer @{ GameDir = $dGame; DataRoot = $dData; JoinStringFile = $dJoin }
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $dGame; DataRoot = $dData; JoinStringFile = $dJoin
+}
 Check "the installer refused" ($install.ExitCode -eq 1)
 Check "it refused with INS-GAMEBUILD" ($install.Output -match 'INS-GAMEBUILD')
 Check "it quoted the matrix's own refusal" ($install.Output -match 'This release supports one game build')
@@ -366,7 +378,7 @@ if ($CaFile) {
     # -SkipCaImport on purpose: this test never writes to a trust store, so the
     # branch is exercised up to the import and no further.
     $install = Invoke-Script $installer @{
-        GameDir = $eGame; DataRoot = $eData; JoinStringFile = $eJoin
+        RuntimeSelection = 'external'; GameDir = $eGame; DataRoot = $eData; JoinStringFile = $eJoin
         CaFile = (Resolve-Path $CaFile).Path; SkipCaImport = $true
     }
     Check "the installer succeeded" ($install.ExitCode -eq 0) $install.Output
