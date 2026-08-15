@@ -74,6 +74,14 @@ func runMain(args []string, stderr io.Writer) int {
 			"render, one per line, # for a comment. It suppresses THE VIEW AND NOT THE RECORD: "+
 			"the ledger goes on holding what happened, and nothing here evicts from it (D11, §10). "+
 			"The file is re-read in place, so moderating costs an edit and never a restart")
+	// Display only, and told rather than observed: no frame on either wire says
+	// which world a camera is pointed at.
+	broadcastPeer := fs.String("broadcast-peer", env("MULTIVERSE_BROADCAST_PEER", ""),
+		"peer id of the world the shared camera at /watch is showing. The live map badges that "+
+			"world and links to the broadcast, and the broadcast page names the world and draws "+
+			"its place in the grid. EMPTY IS THE DEFAULT and means no world is named: both pages "+
+			"then say the world is unknown rather than guess at one. It changes no placement, no "+
+			"routing and no record")
 	logLevel := fs.String("log-level", env("MULTIVERSE_LOG_LEVEL", "info"), "debug, info, warn or error")
 	logFile, logRotateMB, logKeep := logging.Flags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -112,6 +120,7 @@ func runMain(args []string, stderr io.Writer) int {
 		RequestsPerMinute: *maxGenomeRPM,
 		DenyListFile:      *denyList,
 		GenomeHorizon:     *genomeHorizon,
+		BroadcastPeerID:   strings.TrimSpace(*broadcastPeer),
 	})
 	if err != nil {
 		log.Error("archive: startup failed", "err", err)

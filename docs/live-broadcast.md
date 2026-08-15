@@ -50,6 +50,39 @@ Three rules bind every broadcast publisher:
 
 The identity and its secret stay outside this repository, below the publisher's user profile.
 
+## Naming the world on the pages
+
+The two public pages tell the reader which world is on camera.
+Neither page discovers this: no frame on either wire says that a world is being filmed.
+
+The deployment tells the archive with `--broadcast-peer`, or with
+`MULTIVERSE_BROADCAST_PEER` in `/etc/multiverse/archive.env`.
+`provision.sh` writes that value from `MV_BROADCAST_PEER_ID`.
+The peer id is a public identifier, not a secret.
+
+The archive then publishes two fields on `/api/status`:
+
+| Field | Meaning |
+|---|---|
+| `broadcastPeerId` | The peer id the deployment named. Absent when it named none |
+| `broadcast` on one slot | True for that peer's slot only |
+
+The broadcast page reads those fields and shows the slot number, the peer id, the position, and
+a symbol of the map rectangle with that world's cell lit.
+It uses the same `(column,row)` the live map prints, so a reader can hold the two pages together.
+It also links to the live map.
+
+The live map badges the same world in its settings card and links back to the broadcast page.
+
+Three states are unknown, and each says so instead of naming a world:
+
+1. The deployment named no world.
+2. The named world is not on the map at the moment.
+3. The archive is not answering.
+
+Naming the wrong world is worse than naming none.
+An operator who moves the camera to another world must change this value with it.
+
 ## Camera rule
 
 The `SpectatorDirector` component uses this rule:
@@ -92,7 +125,7 @@ Repeat a panel name to give that panel more time in each cycle.
 The spawn option does not remove existing Bibites or stop natural reproduction.
 A later world save records the zero target count.
 
-The standard broadcast profile uses a zoom of `50` and a speed of `7.5`.
+The standard broadcast profile uses a zoom of `75` and a speed of `7.5`.
 It shows the brain panel for 15 seconds and the biology panel for 30 seconds.
 It also shows the selected Bibite's vision range.
 It disables automatic spawns from the `Basic bibite` template.
@@ -274,12 +307,17 @@ The expected listeners are:
 Make sure that the public HLS manifest is available from outside the origin network.
 Do not expose the RTMP or metrics listener to the internet.
 
-Run this check after a publisher change, with the broadcast world's peer identity:
+Run these checks after a publisher change, with the broadcast world's peer identity:
 
 ```sh
 curl -fsS https://<service-domain>/api/status |
   jq -e --arg peer '<broadcast-peer-id>' 'any(.slots[]?; .peerId == $peer and .live == true)'
+curl -fsS https://<service-domain>/api/status |
+  jq -e --arg peer '<broadcast-peer-id>' '.broadcastPeerId == $peer'
 ```
 
 The broadcast world must appear on the map like any other world.
 A stream that runs while the map does not show that world is a publisher that lost its sidecar.
+
+The second check is the pages' own claim.
+A `broadcastPeerId` that names a different world makes both pages point at the wrong one.
