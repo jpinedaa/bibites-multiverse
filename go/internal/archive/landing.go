@@ -99,12 +99,12 @@ font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;t
 h2{font-size:clamp(36px,5vw,60px);line-height:1.03;letter-spacing:-.045em;margin:12px 0 18px}
 .sectionhd p{color:var(--muted);font-size:18px;margin:0}.principles{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
 .principle{min-height:220px;padding:28px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(145deg,var(--surface2),var(--surface))}
-.num{display:block;color:var(--green);font:12px ui-monospace,SFMono-Regular,Menlo,monospace}.principle h3{font-size:22px;margin:12px 0 10px}
+.principle h3{font-size:22px;margin:0 0 10px}
 .principle p{color:var(--muted);margin:0}.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:0;border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .flowitem{position:relative;padding:28px 24px;min-height:152px;background:rgba(17,26,24,.72)}
 .flowitem+.flowitem{border-left:1px solid var(--line)}.flowitem:not(:last-child):after{content:"→";position:absolute;right:-13px;top:32px;
 z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;background:var(--bg);color:var(--blue);text-align:center;line-height:24px}
-.flowitem b{display:block;margin:12px 0 7px}.flowitem span{color:var(--muted);font-size:14px}.flowitem .num{color:var(--green);font-size:12px}
+.flowitem b{display:block;margin:0 0 7px}.flowitem span{color:var(--muted);font-size:14px}
 .joinbox{display:grid;grid-template-columns:1.05fr .95fr;border:1px solid var(--line);border-radius:22px;overflow:hidden;background:var(--surface)}
 .joincopy{padding:50px}.joincopy h2{font-size:clamp(38px,5vw,64px)}.joincopy p{color:var(--muted);max-width:620px}
 .trust{padding:50px;background:linear-gradient(150deg,#172720,#101917)}.trust h3{margin:0 0 20px}.trust ul{margin:0;padding:0;list-style:none}
@@ -175,19 +175,19 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
   <section class="shell section" id="about">
     <div class="sectionhd"><span class="kicker">The idea</span><h2>One map. Many evolutionary pressures.</h2><p>This is not one synchronized mega-simulation. Each world develops on its own, and the borders between them become migration routes.</p></div>
     <div class="principles">
-      <article class="principle"><span class="num">01</span><h3>Independent worlds</h3><p>Every participant controls a separate game, with its own clock, climate, settings, food, predators, and save files.</p></article>
-      <article class="principle"><span class="num">02</span><h3>Real migration</h3><p>A Bibite that crosses an edge can enter another participant's ecosystem and meet a completely different selection pressure.</p></article>
-      <article class="principle"><span class="num">03</span><h3>Shared history</h3><p>The public archive follows crossings, population, species, lineages, and changes in brain complexity without controlling any world.</p></article>
+      <article class="principle"><h3>Independent worlds</h3><p>Every participant controls a separate game, with its own clock, climate, settings, food, predators, and save files.</p></article>
+      <article class="principle"><h3>Real migration</h3><p>A Bibite that crosses an edge can enter another participant's ecosystem and meet a completely different selection pressure.</p></article>
+      <article class="principle"><h3>Shared history</h3><p>The public archive follows crossings, population, species, lineages, and changes in brain complexity without controlling any world.</p></article>
     </div>
   </section>
 
   <section class="shell section" id="how">
     <div class="sectionhd"><span class="kicker">How it works</span><h2>A durable path between local simulations.</h2><p>The migration path is encrypted, retry-safe, and designed to prefer a rare loss over ever duplicating an organism.</p></div>
     <div class="flow" aria-label="System flow">
-      <div class="flowitem"><span class="num">01</span><b>The Bibites</b><span>A complete local simulation</span></div>
-      <div class="flowitem"><span class="num">02</span><b>Multiverse mod</b><span>Watches the world's borders</span></div>
-      <div class="flowitem"><span class="num">03</span><b>Participant sidecar</b><span>Keeps durable custody in transit</span></div>
-      <div class="flowitem"><span class="num">04</span><b>Relay + archive</b><span>Routes migrations and records history</span></div>
+      <div class="flowitem"><b>The Bibites</b><span>A complete local simulation</span></div>
+      <div class="flowitem"><b>Multiverse mod</b><span>Watches the world's borders</span></div>
+      <div class="flowitem"><b>Participant sidecar</b><span>Keeps durable custody in transit</span></div>
+      <div class="flowitem"><b>Relay + archive</b><span>Routes migrations and records history</span></div>
     </div>
   </section>
 
