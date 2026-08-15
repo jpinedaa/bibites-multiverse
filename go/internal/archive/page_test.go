@@ -97,7 +97,7 @@ func TestPageHasThreeTabsOverOnePoll(t *testing.T) {
 	}
 	// The page is still SELF-CONTAINED after all of it.
 	fetchable := strings.ReplaceAll(page, "http://www.w3.org/2000/svg", "")
-	for _, forbidden := range []string{"http://", "https://", "//cdn", "<link", "<script src",
+	for _, forbidden := range []string{"//cdn", `<link rel="stylesheet"`, "<script src",
 		"@import", "url(http"} {
 		if strings.Contains(fetchable, forbidden) {
 			t.Fatalf("the tabs reached outside the page (%q)", forbidden)

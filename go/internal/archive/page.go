@@ -183,16 +183,60 @@ func (a *Archive) httpHandler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
+	mux.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/live" {
+			serveNotFound(w)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(statusPageHTML))
 	})
+	mux.HandleFunc("/map", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/live", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/favicon.svg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write([]byte(faviconSVG))
+	})
+	mux.HandleFunc("/social-card.svg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write([]byte(socialCardSVG))
+	})
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write([]byte("User-agent: *\nAllow: /\nSitemap: https://bibitesmultiverse.com/sitemap.xml\n"))
+	})
+	mux.HandleFunc("/sitemap.xml", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://bibitesmultiverse.com/</loc><priority>1.0</priority></url>
+  <url><loc>https://bibitesmultiverse.com/live</loc><priority>0.8</priority></url>
+</urlset>
+`))
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			serveNotFound(w)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(landingPageHTML))
+	})
 	return gzipped(mux)
+}
+
+func serveNotFound(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write([]byte(notFoundPageHTML))
 }
 
 // historyParams reads ?hours= and ?buckets=, and clamps both. A reader may ask
@@ -310,7 +354,11 @@ const statusPageHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>multiverse map</title>
+<title>Bibites Multiverse — Live Map</title>
+<meta name="description" content="The live Bibites Multiverse map: connected worlds, migrations, living species, lineages, and reported settings.">
+<meta name="theme-color" content="#101215">
+<link rel="canonical" href="https://bibitesmultiverse.com/live">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
 :root{color-scheme:dark;--bg:#101215;--panel:#191d22;--line:#2a3038;--text:#e6e9ee;
 --dim:#8b95a3;--live:#4ec9a0;--dark:#e05561;--hole:#3a424c;--warn:#e2b93b;--lane:#5aa9e6;
@@ -318,9 +366,14 @@ const statusPageHTML = `<!doctype html>
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
 font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.skiplink{position:fixed;left:10px;top:-80px;z-index:100;background:var(--text);color:var(--bg);
+padding:8px 11px;border-radius:5px;text-decoration:none}.skiplink:focus{top:10px}
 header{padding:12px 18px;border-bottom:1px solid var(--line);display:flex;
 gap:8px 18px;align-items:baseline;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:20}
 h1{font-size:15px;margin:0;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+h1 a{color:inherit;text-decoration:none}h1 a:hover{text-decoration:underline;text-underline-offset:3px}
+.home{margin-left:auto;color:var(--dim);font-size:11px;text-decoration:none;white-space:nowrap}
+.home:hover{color:var(--text)}
 .muted{color:var(--dim)}
 .hdr b{font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
 /* minmax(0,...) and min-width:0 all the way down: a grid or flex item defaults to
@@ -601,6 +654,12 @@ h2 .note{text-transform:none;letter-spacing:0;font-size:11px}
 /* ---- the map ---- */
 .mapwrap{overflow-x:auto;overflow-y:hidden;max-width:100%}
 #map{display:block;width:100%;height:auto;min-width:700px}
+.mapempty{min-height:390px;display:grid;place-items:center;text-align:center;border:1px dashed var(--hole);
+border-radius:5px;background:var(--cell);padding:34px}.mapempty .emptybib{display:block;width:54px;height:38px;
+margin:0 auto 20px;color:var(--dim)}.mapempty b{display:block;font-size:18px;color:var(--text);margin-bottom:8px}
+.mapempty p{max-width:510px;margin:0 auto 18px;color:var(--dim);font-family:ui-sans-serif,system-ui,sans-serif}
+.mapempty a{display:inline-block;padding:7px 11px;border:1px solid var(--line);border-radius:5px;color:var(--text);text-decoration:none}
+.mapempty a:hover{border-color:var(--lane)}
 .cellbg{fill:var(--cell);stroke:var(--line);stroke-width:1.5}
 .cell.live .cellbg{stroke:var(--live)}
 .cell.dark .cellbg{stroke:var(--dark)}
@@ -775,6 +834,7 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
 </style>
 </head>
 <body>
+<a class="skiplink" href="#content">Skip to live map content</a>
 <!-- One creature, defined once for the whole document and drawn by reference by
      every tab: a teardrop body with a mouth notch bitten out of the nose and an
      eye. It faces EAST, which is the way organisms travel. The body sets no
@@ -787,23 +847,24 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
 </g>
 </defs></svg>
 <header>
-  <h1>multiverse</h1>
+  <h1><a href="/" aria-label="Bibites Multiverse home">multiverse</a></h1>
   <span class="hdr muted" id="shape">&hellip;</span>
   <span class="hdr muted"><span class="term" data-t="population">population</span> <b id="hpop">&mdash;</b></span>
   <span class="hdr muted"><span class="term" data-t="migration">migrations</span> <b id="hmig">&mdash;</b></span>
   <span class="hdr muted" id="link"></span>
   <span class="hdr muted" id="age"></span>
+  <a class="home" href="/">about this project &rarr;</a>
 </header>
 <nav class="tabs" id="tabs" role="tablist" aria-label="views">
-  <button type="button" class="tab" role="tab" data-tab="map" aria-selected="true">map
+  <button type="button" class="tab" role="tab" id="tab-map" data-tab="map" aria-controls="p-map" aria-selected="true" tabindex="0">live map
     <span class="sub">worlds, lanes, crossings</span></button>
-  <button type="button" class="tab" role="tab" data-tab="species" aria-selected="false">species
+  <button type="button" class="tab" role="tab" id="tab-species" data-tab="species" aria-controls="p-species" aria-selected="false" tabindex="-1">species
     <span class="sub">what is alive, where, and where it came from</span></button>
-  <button type="button" class="tab" role="tab" data-tab="settings" aria-selected="false">settings
+  <button type="button" class="tab" role="tab" id="tab-settings" data-tab="settings" aria-controls="p-settings" aria-selected="false" tabindex="-1">settings
     <span class="sub">what each world was told to do</span></button>
 </nav>
-<main>
-<div class="panel" id="p-map" role="tabpanel">
+<main id="content" tabindex="-1">
+<div class="panel" id="p-map" role="tabpanel" aria-labelledby="tab-map">
   <section>
     <h2>the map
       <span class="legend">
@@ -867,7 +928,7 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   <section><h2>totals</h2><div id="totals"></div></section>
 </div>
 
-<div class="panel" id="p-species" role="tabpanel" hidden>
+<div class="panel" id="p-species" role="tabpanel" aria-labelledby="tab-species" hidden>
   <section>
     <h2><span class="term" data-t="alive">species alive right now</span>
       <span class="note muted">Every species any world is
@@ -957,7 +1018,7 @@ border:1px solid var(--line);border-radius:4px;padding:2px 9px;cursor:pointer}
   </section>
 </div>
 
-<div class="panel" id="p-settings" role="tabpanel" hidden>
+<div class="panel" id="p-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
   <section>
     <h2><span class="term" data-t="ceilings">what the map itself is running with</span>
       <span class="note muted">The <span class="term" data-t="relay">relay</span>&rsquo;s own
@@ -1400,6 +1461,23 @@ function arcSeg(x1,y1,x2,y2,over,vertical,extra){
 function laneKey(l){ return l.fromSlot+l.edge; }
 
 function buildMap(d){
+  if (!d.haveStatus || !d.map || d.map.width < 1 || d.map.height < 1){
+    var emptyTitle = d.relayConnected
+      ? "The map is online and waiting for worlds."
+      : "The archive is online and waiting for the relay.";
+    var emptyBody = d.relayConnected
+      ? "No participant has claimed a visible seat yet. Worlds will appear here when they connect; this is an empty beginning, not a broken map."
+      : "The live map is temporarily unavailable. Participant worlds can continue running while this read-only archive reconnects.";
+    $("#mapbox").innerHTML = '<div class="mapempty" role="status">'
+      + '<div><svg class="emptybib" viewBox="-9 -7 19 14" aria-hidden="true">'
+      + '<path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/>'
+      + '<circle cx="1.5" cy="-1.85" r="1" fill="var(--cell)"/></svg>'
+      + '<b>'+emptyTitle+'</b>'
+      + '<p>'+emptyBody+'</p>'
+      + '<a href="/">Learn how the Multiverse works</a></div></div>';
+    mapSig = signature(d);
+    return;
+  }
   var w = Math.max(d.map.width,1), h = Math.max(d.map.height,1);
   var W = 2*MG + w*CW + (w-1)*GX, H = 2*MG + h*CH + (h-1)*GY;
   var byslot = {}, at = {};
@@ -4774,10 +4852,12 @@ function showTab(name, push){
   }
   var bs = document.querySelectorAll("#tabs .tab");
   for (i=0;i<bs.length;i++){
-    bs[i].setAttribute("aria-selected",
-      bs[i].getAttribute("data-tab") === name ? "true" : "false");
+    var selected = bs[i].getAttribute("data-tab") === name;
+    bs[i].setAttribute("aria-selected", selected ? "true" : "false");
+    bs[i].setAttribute("tabindex", selected ? "0" : "-1");
   }
-  document.title = "multiverse " + name;
+  document.title = "Bibites Multiverse — "
+    + (name === "map" ? "Live Map" : name === "species" ? "Species & Lineages" : "World Settings");
   if (name === "map"){
     // An SVG in a hidden panel has no geometry to measure — getTotalLength on
     // its lane paths is what every label position and every hop animation is
@@ -4801,6 +4881,20 @@ function showTab(name, push){
   if (bar) bar.addEventListener("click", function(ev){
     var b = ev.target.closest ? ev.target.closest(".tab") : null;
     if (b) showTab(b.getAttribute("data-tab"), true);
+  });
+  if (bar) bar.addEventListener("keydown", function(ev){
+    var b = ev.target.closest ? ev.target.closest(".tab") : null;
+    if (!b) return;
+    var bs = Array.prototype.slice.call(bar.querySelectorAll(".tab"));
+    var at = bs.indexOf(b), next = at;
+    if (ev.key === "ArrowRight") next = (at + 1) % bs.length;
+    else if (ev.key === "ArrowLeft") next = (at + bs.length - 1) % bs.length;
+    else if (ev.key === "Home") next = 0;
+    else if (ev.key === "End") next = bs.length - 1;
+    else return;
+    ev.preventDefault();
+    bs[next].focus();
+    showTab(bs[next].getAttribute("data-tab"), true);
   });
   window.addEventListener("hashchange", function(){
     var want = tabFromHash();

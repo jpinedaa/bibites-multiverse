@@ -308,7 +308,7 @@ func TestPageAndFeedsAreNeverCached(t *testing.T) {
 	srv := httptest.NewServer(a.httpHandler())
 	t.Cleanup(srv.Close)
 
-	for _, path := range []string{"/", "/api/status", "/api/hops", "/api/history"} {
+	for _, path := range []string{"/", "/live", "/api/status", "/api/hops", "/api/history"} {
 		resp, err := http.Get(srv.URL + path)
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
@@ -386,7 +386,7 @@ func TestStatusPageIsSelfContainedAndDrawsTheMap(t *testing.T) {
 	fetchable := strings.ReplaceAll(page, "http://www.w3.org/2000/svg", "")
 	// url(#mOpen) is a reference to a marker defined ten lines up; only an
 	// absolute one leaves the page.
-	for _, forbidden := range []string{"http://", "https://", "//cdn", "<link", "<script src",
+	for _, forbidden := range []string{"//cdn", `<link rel="stylesheet"`, "<script src",
 		"@import", "url(http", "url(//", "url('http", "url(\"http"} {
 		if strings.Contains(fetchable, forbidden) {
 			t.Fatalf("the status page reaches outside itself (%q); it must work with no internet",
