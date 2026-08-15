@@ -105,6 +105,39 @@ func TestPageHasThreeTabsOverOnePoll(t *testing.T) {
 	}
 }
 
+// TestTheLiveMapCanFillTheViewport pins the fullscreen control and its scaling
+// rule. Fullscreen changes presentation only: the same SVG viewBox must fit the
+// available rectangle without a minimum width or a new data request.
+func TestTheLiveMapCanFillTheViewport(t *testing.T) {
+	page := statusPageHTML
+	for _, want := range []string{
+		`class="mapstage" id="mapstage"`, `class="mapfull" id="mapfull"`,
+		`id="mapfulltext"`, `preserveAspectRatio="xMidYMid meet"`,
+		"function toggleMapFullscreen()", "function syncMapFullscreen()",
+		`stage.requestFullscreen || stage.webkitRequestFullscreen`,
+		`document.exitFullscreen || document.webkitExitFullscreen`,
+		`stage.classList.toggle("isfullscreen", active)`,
+		`document.addEventListener("fullscreenchange", syncMapFullscreen)`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the fullscreen map is missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		`.mapstage.isfullscreen{width:100vw;height:100vh`,
+		`.mapstage.isfullscreen .mapwrap{min-width:0;min-height:0;overflow:hidden`,
+		`.mapstage.isfullscreen #map{width:100%;height:100%;min-width:0`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the fullscreen map does not auto-fit its viewport: %q missing", want)
+		}
+	}
+	if !strings.Contains(page, `button.setAttribute("aria-pressed", active ? "true" : "false")`) ||
+		!strings.Contains(page, `? "Exit fullscreen live map" : "Show the live map in fullscreen"`) {
+		t.Fatal("the fullscreen control does not publish its current state and action")
+	}
+}
+
 // TestTheSpeciesViewIsAliveOnlyAndSaysSo covers the merged view's rendering and
 // the one claim it must not make. The rows are the CENSUS UNION: a species that
 // crossed a lane a hundred times and is extinct everywhere is not a row of its
@@ -1841,6 +1874,39 @@ func TestTheBrainPanelSharesTheGenealogysAxis(t *testing.T) {
 	}
 	if !strings.Contains(page, "setInterval(tickBrains, 60000);") {
 		t.Fatal("the panel is polled on the two-second cycle, or not at all")
+	}
+}
+
+// TestTheBrainPanelFitsEachVisibleRange makes small changes use the full height
+// of their own plot. The lower and upper edges are the server-published edges of
+// the shaded band. A constant series stays centered and invents no range.
+func TestTheBrainPanelFitsEachVisibleRange(t *testing.T) {
+	page := statusPageHTML
+	region := speciesRegion(t)
+
+	for _, want := range []string{
+		"function lfbY(top, h, v, minv, maxv){",
+		"var f = (v - minv) / (maxv - minv);",
+		`var minSyn = typeof B.minSyn === "number" ? B.minSyn : 0;`,
+		`var minHid = typeof B.minHid === "number" ? B.minHid : 0;`,
+		`"syn", minSyn, maxSyn);`, `"hid", minHid, maxHid);`,
+		`label(synTop, "syn", "braintrend", "median synapses per genome", minSyn, maxSyn);`,
+		`mn.textContent = String(ymin);`,
+	} {
+		if !strings.Contains(region, want) {
+			t.Fatalf("the brain panel does not fit its visible range: %q missing", want)
+		}
+	}
+	if !strings.Contains(region, "if (!(maxv > minv)) return top + h/2;") {
+		t.Fatal("a constant brain series is not centered")
+	}
+	if strings.Contains(region, "var f = v / maxv;") ||
+		strings.Contains(region, `zr.textContent = "0";`) {
+		t.Fatal("the brain plot still forces its vertical scale to start at zero")
+	}
+	if !strings.Contains(page,
+		"each graph uses its own visible minimum and maximum, printed beside the line") {
+		t.Fatal("the species tab does not explain its independent visible ranges")
 	}
 }
 

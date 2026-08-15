@@ -614,7 +614,7 @@ svg.brainp .hidband{fill:var(--live);opacity:.16;stroke:none}
 svg.brainp .plbl{font-size:10px;letter-spacing:.04em}
 svg.brainp .plbl.syn{fill:var(--lane);stroke:none}
 svg.brainp .plbl.hid{fill:var(--live);stroke:none}
-svg.brainp .ymax{fill:var(--dim);font-size:9.5px;font-variant-numeric:tabular-nums}
+svg.brainp .yrange{fill:var(--dim);font-size:9.5px;font-variant-numeric:tabular-nums}
 /* Coverage. A filled column is the share of that slice's genomes this archive
    could read; an amber tick at the floor is the OTHER absence — the record holds
    crossings there and not one of their genomes was ever measured — and an empty
@@ -688,10 +688,28 @@ h2 .note{flex:1 1 420px;text-transform:none;letter-spacing:0;font:11px/1.55 ui-m
 .ok{color:var(--live)}
 
 /* ---- the map ---- */
+.mapstage{position:relative}
+.maptools{display:flex;justify-content:flex-end;margin:0 0 8px}
+.mapfull{display:inline-flex;align-items:center;gap:7px;padding:7px 10px;color:var(--dim);
+background:var(--cell);border:1px solid var(--line);border-radius:8px;font:700 10px/1.2
+ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.08em;text-transform:uppercase;
+cursor:pointer}.mapfull:hover,.mapfull:focus-visible{color:var(--text);border-color:var(--lane)}
+.mapfull:focus-visible{outline:2px solid var(--lane);outline-offset:2px}.mapfull[hidden]{display:none}
+.mapfull svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;
+stroke-linecap:round;stroke-linejoin:round}.mapfull .contract{display:none}
 .mapwrap{overflow-x:auto;overflow-y:hidden;max-width:100%}
 #mapbox{min-height:390px}
 #map{display:block;width:100%;height:auto;min-width:700px}
 #map text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.mapstage.isfullscreen{width:100vw;height:100vh;padding:12px;background:var(--bg);
+display:grid;grid-template-rows:auto minmax(0,1fr)}
+.mapstage.isfullscreen .maptools{margin-bottom:8px}
+.mapstage.isfullscreen .mapfull .expand{display:none}
+.mapstage.isfullscreen .mapfull .contract{display:block}
+.mapstage.isfullscreen .mapwrap{min-width:0;min-height:0;overflow:hidden;display:grid;place-items:center}
+.mapstage.isfullscreen #mapbox{width:100%;height:100%;min-height:0;display:grid;place-items:center}
+.mapstage.isfullscreen #map{width:100%;height:100%;min-width:0;max-width:100%;max-height:100%}
+.mapstage.isfullscreen .mapempty{width:100%;height:100%;min-height:0}
 .mapempty{min-height:390px;display:grid;place-items:center;text-align:center;border:1px dashed var(--hole);
 border-radius:12px;background:var(--cell);padding:34px}.mapempty .emptybib{display:block;width:54px;height:38px;
 margin:0 auto 20px;color:var(--dim)}.mapempty b{display:block;font-size:18px;color:var(--text);margin-bottom:8px}
@@ -950,7 +968,19 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
         <span><i class="bibi unc"></i><span class="term" data-t="unclassed">no species record</span></span>
       </span>
     </h2>
-    <div class="mapwrap"><div id="mapbox"></div></div>
+    <div class="mapstage" id="mapstage">
+      <div class="maptools">
+        <button type="button" class="mapfull" id="mapfull" aria-pressed="false"
+                aria-label="Show the live map in fullscreen">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path class="expand" d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>
+            <path class="contract" d="M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"/>
+          </svg>
+          <span id="mapfulltext">fullscreen</span>
+        </button>
+      </div>
+      <div class="mapwrap"><div id="mapbox"></div></div>
+    </div>
   </section>
 
   <section>
@@ -1075,6 +1105,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
         neurons</span> &mdash; the count ABOVE the fixed 48 every brain is born with</span>
       <span><i class="bbandi"></i>the shaded band &mdash; the middle half of the genomes in
         that slice, a quarter above the line and a quarter below</span>
+      <span>each graph uses its own visible minimum and maximum, printed beside the line</span>
       <span><i class="bcovi"></i><span class="term" data-t="braincoverage">how much of it was
         measured</span> &mdash; taller is more of that slice&rsquo;s genomes read, on a
         square-root scale, and never shorter than the amber tick for none of them</span>
@@ -1554,7 +1585,7 @@ function buildMap(d){
     at[d.slots[i].position.col+","+d.slots[i].position.row] = d.slots[i];
   }
 
-  var s = '<svg id="map" viewBox="0 0 '+W+' '+H+'" role="img" '
+  var s = '<svg id="map" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" role="img" '
     + 'aria-label="the multiverse map: '+w+' by '+h+' grid of worlds and the lanes between them">'
     + '<defs>'
     + marker("mOpen","var(--lane)") + marker("mBypass","var(--warn)")
@@ -3595,6 +3626,12 @@ function lfAxis(x, cols, sc, height){
    So they are two small multiples, one above the other, each fitted to its own
    range, over one shared clock. Nothing crosses anything.
 
+   EACH RANGE FITS THE SHADED VALUES IN THIS WINDOW. Starting every plot at zero
+   compressed the changing part of a line into a few pixels. The lower edge is
+   the smallest lower quartile and the upper edge is the largest upper quartile,
+   so the complete band stays visible while changes in its median remain clear.
+   Both edges are printed on the plot. A constant series has one centered value.
+
    THE BAND IS THE MIDDLE HALF, not the extremes, and that is a choice with a
    reason. A slice holds a few hundred genomes; its minimum hidden-neuron count is
    0 in almost every slice (some genome is at the floor) and its maximum is one
@@ -3650,9 +3687,11 @@ function lfBrainBuckets(cols){
   if (n > 720) n = 720;
   return n;
 }
-function lfbY(top, h, v, maxv){
-  if (!(maxv > 0)) return top + h;
-  var f = v / maxv;
+function lfbY(top, h, v, minv, maxv){
+  // One value is a level and not a range. Put it in the middle instead of
+  // inventing a lower or upper bound that the answer did not publish.
+  if (!(maxv > minv)) return top + h/2;
+  var f = (v - minv) / (maxv - minv);
   if (f < 0) f = 0; else if (f > 1) f = 1;
   return top + h - f*h;
 }
@@ -3670,7 +3709,7 @@ function lfbRuns(pts, medk){
   }
   return runs;
 }
-function lfbSeries(g, pts, B, sc, top, keys, cls, maxv){
+function lfbSeries(g, pts, B, sc, top, keys, cls, minv, maxv){
   var runs = lfbRuns(pts || [], keys.med), r, i, p, x, d;
   var half = (B.bucketMs || 0) / 2;
   for (r=0;r<runs.length;r++){
@@ -3681,14 +3720,16 @@ function lfbSeries(g, pts, B, sc, top, keys, cls, maxv){
       p = run[i];
       if (p[keys.hi] == null) { d = ""; break; }
       x = sc.x(p.tMs + half);
-      d += (i ? "L" : "M") + x.toFixed(2) + "," + lfbY(top, LFB_SERH, p[keys.hi], maxv).toFixed(2);
+      d += (i ? "L" : "M") + x.toFixed(2) + "," +
+        lfbY(top, LFB_SERH, p[keys.hi], minv, maxv).toFixed(2);
     }
     if (d){
       for (i=run.length-1;i>=0;i--){
         p = run[i];
         var lo = p[keys.lo] == null ? p[keys.med] : p[keys.lo];
         x = sc.x(p.tMs + half);
-        d += "L" + x.toFixed(2) + "," + lfbY(top, LFB_SERH, lo, maxv).toFixed(2);
+        d += "L" + x.toFixed(2) + "," +
+          lfbY(top, LFB_SERH, lo, minv, maxv).toFixed(2);
       }
       var band = svgEl("path", cls + "band");
       band.setAttribute("d", d + "Z");
@@ -3701,7 +3742,8 @@ function lfbSeries(g, pts, B, sc, top, keys, cls, maxv){
     for (i=0;i<run.length;i++){
       p = run[i];
       x = sc.x(p.tMs + half);
-      d += (i ? "L" : "M") + x.toFixed(2) + "," + lfbY(top, LFB_SERH, p[keys.med], maxv).toFixed(2);
+      d += (i ? "L" : "M") + x.toFixed(2) + "," +
+        lfbY(top, LFB_SERH, p[keys.med], minv, maxv).toFixed(2);
     }
     if (run.length === 1){
       // AND IT IS SLID LEFT RATHER THAN GROWN PAST THE AXIS. Two pixels is a
@@ -3709,7 +3751,7 @@ function lfbSeries(g, pts, B, sc, top, keys, cls, maxv){
       // newest bucket — whose x is already clamped to the now line — must not
       // buy its visibility with two pixels of a future the record cannot have.
       p = run[0];
-      var sy = lfbY(top, LFB_SERH, p[keys.med], maxv).toFixed(2);
+      var sy = lfbY(top, LFB_SERH, p[keys.med], minv, maxv).toFixed(2);
       var sx = lfbFloor(sc.x(p.tMs + half), sc.x(p.tMs + half), 2, sc.x(sc.t1));
       d = "M" + sx[0].toFixed(2) + "," + sy + "L" + sx[1].toFixed(2) + "," + sy;
     }
@@ -3935,7 +3977,10 @@ function lfBrainPanel(x, cols, sc){
 
   var synTop = LFB_PADT, hidTop = LFB_PADT + LFB_SERH + LFB_GAP;
   var covTop = hidTop + LFB_SERH + LFB_GAP;
-  var maxSyn = B.maxSyn > 0 ? B.maxSyn : 1, maxHid = B.maxHid > 0 ? B.maxHid : 1;
+  var minSyn = typeof B.minSyn === "number" ? B.minSyn : 0;
+  var maxSyn = typeof B.maxSyn === "number" ? B.maxSyn : minSyn;
+  var minHid = typeof B.minHid === "number" ? B.minHid : 0;
+  var maxHid = typeof B.maxHid === "number" ? B.maxHid : minHid;
 
   function baseline(top){
     var b = svgEl("line", "base");
@@ -3943,41 +3988,47 @@ function lfBrainPanel(x, cols, sc){
     b.setAttribute("y1", String(top + LFB_SERH)); b.setAttribute("y2", String(top + LFB_SERH));
     svg.appendChild(b);
   }
-  function label(top, cls, term, text, ymax){
+  function label(top, cls, term, text, ymin, ymax){
     var lb = svgEl("text", "plbl " + cls);
     lb.setAttribute("x", String(LF_NAMEX));
     lb.setAttribute("y", String(top + 9));
     lb.setAttribute("data-t", term);
     lb.textContent = text;
     svg.appendChild(lb);
-    var mx = svgEl("text", "ymax");
+    var mx = svgEl("text", "yrange");
     mx.setAttribute("x", String(cols.plot - 6));
-    mx.setAttribute("y", String(top + 8));
     mx.setAttribute("text-anchor", "end");
     mx.textContent = String(ymax);
+    // A constant series has one value, not two equal endpoints. Put its only
+    // label beside its middle line. A real range labels both visible edges.
+    mx.setAttribute("y", String(ymax > ymin ? top + 8 : top + LFB_SERH/2 + 3));
     svg.appendChild(mx);
-    var zr = svgEl("text", "ymax");
-    zr.setAttribute("x", String(cols.plot - 6));
-    zr.setAttribute("y", String(top + LFB_SERH));
-    zr.setAttribute("text-anchor", "end");
-    zr.textContent = "0";
-    svg.appendChild(zr);
+    if (ymax > ymin){
+      var mn = svgEl("text", "yrange");
+      mn.setAttribute("x", String(cols.plot - 6));
+      mn.setAttribute("y", String(top + LFB_SERH));
+      mn.setAttribute("text-anchor", "end");
+      mn.textContent = String(ymin);
+      svg.appendChild(mn);
+    }
   }
   baseline(synTop); baseline(hidTop);
   // ONE SET OF SLICES FOR BOTH PICTURES: the lines, the strip and the tooltips
   // are all the slices that fall on this clock, so a slice cannot be a hole in
   // one of them and a mark in another.
   var pts = lfbVisible(B, sc);
-  lfbSeries(svg, pts, B, sc, synTop, {med:"medSyn", lo:"loSyn", hi:"hiSyn"}, "syn", maxSyn);
-  lfbSeries(svg, pts, B, sc, hidTop, {med:"medHid", lo:"loHid", hi:"hiHid"}, "hid", maxHid);
-  label(synTop, "syn", "braintrend", "median synapses per genome", maxSyn);
+  lfbSeries(svg, pts, B, sc, synTop, {med:"medSyn", lo:"loSyn", hi:"hiSyn"},
+    "syn", minSyn, maxSyn);
+  lfbSeries(svg, pts, B, sc, hidTop, {med:"medHid", lo:"loHid", hi:"hiHid"},
+    "hid", minHid, maxHid);
+  label(synTop, "syn", "braintrend", "median synapses per genome", minSyn, maxSyn);
   // THE FLOOR IS ON THE PANEL, not only in the glossary. A reader who sees
   // "neurons" and a line near the bottom has to be told, in the picture, that 48
   // of every count here is fixed and is not drawn — otherwise the second series
   // reads as a species with almost no brain.
   label(hidTop, "hid", "hiddenneurons",
     "median hidden neurons (every brain also has the same fixed " +
-    (B.neuronFloor || 48) + ")", maxHid);
+    (B.neuronFloor || 48) + ")", minHid, maxHid);
 
   // ---- THE COVERAGE STRIP.
   var cb = svgEl("line", "covbase");
@@ -4968,6 +5019,60 @@ function showTab(name, push){
     var want = tabFromHash();
     if (want !== TAB) showTab(want, false);
   });
+})();
+
+/* ------------------------------------------------------ fullscreen live map
+   The map is already one SVG with a viewBox, so fullscreen changes no map
+   geometry and fetches no data. The fullscreen stage gives that SVG the whole
+   viewport, removes the normal narrow-screen minimum width, and lets the SVG's
+   preserveAspectRatio fit every world and lane inside the available rectangle.
+   The button stays inside the fullscreen element so it remains available as an
+   exit. Escape and the button both pass through the same state sync. */
+function mapFullscreenElement(){
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function syncMapFullscreen(){
+  var stage = document.getElementById("mapstage");
+  var button = document.getElementById("mapfull");
+  if (!stage || !button) return;
+  var active = mapFullscreenElement() === stage;
+  stage.classList.toggle("isfullscreen", active);
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+  button.setAttribute("aria-label", active
+    ? "Exit fullscreen live map" : "Show the live map in fullscreen");
+  var text = document.getElementById("mapfulltext");
+  if (text) text.textContent = active ? "exit fullscreen" : "fullscreen";
+}
+
+function toggleMapFullscreen(){
+  var stage = document.getElementById("mapstage");
+  if (!stage) return;
+  var action;
+  if (mapFullscreenElement() === stage){
+    action = document.exitFullscreen || document.webkitExitFullscreen;
+    if (action) action = action.call(document);
+  } else {
+    action = stage.requestFullscreen || stage.webkitRequestFullscreen;
+    if (action) action = action.call(stage);
+  }
+  // A rejected request must not leave the toggle claiming a state the browser
+  // refused. Fullscreen failures are otherwise non-fatal: the map stays usable.
+  if (action && action.catch) action.catch(syncMapFullscreen);
+}
+
+(function wireMapFullscreen(){
+  var stage = document.getElementById("mapstage");
+  var button = document.getElementById("mapfull");
+  if (!stage || !button) return;
+  if (!stage.requestFullscreen && !stage.webkitRequestFullscreen){
+    button.hidden = true;
+    return;
+  }
+  button.addEventListener("click", toggleMapFullscreen);
+  document.addEventListener("fullscreenchange", syncMapFullscreen);
+  document.addEventListener("webkitfullscreenchange", syncMapFullscreen);
+  syncMapFullscreen();
 })();
 
 /* The species view's own controls. A click on a row opens its detail; the row
