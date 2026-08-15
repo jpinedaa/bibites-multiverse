@@ -49,6 +49,7 @@ backdrop-filter:blur(16px);border-bottom:1px solid rgba(83,120,107,.28)}
 letter-spacing:-.02em}.mark{width:30px;height:22px;color:var(--green);filter:drop-shadow(0 0 9px rgba(102,224,172,.3))}
 .links{display:flex;align-items:center;gap:22px;font-size:14px;color:var(--muted)}
 .links a{text-decoration:none}.links a:hover,.links a:focus-visible{color:var(--text)}
+.links a[aria-current="page"]{color:var(--text);font-weight:700}
 .livepill{display:inline-flex;align-items:center;gap:7px!important;padding:7px 11px;border:1px solid var(--line);
 border-radius:999px;color:var(--text)!important;background:rgba(22,34,31,.75)}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 0 4px rgba(239,189,87,.1)}
@@ -82,12 +83,17 @@ letter-spacing:.11em;text-transform:uppercase}.toposvg{position:absolute;inset:5
 animation:travel 5s ease-in-out infinite}.topology .caption{position:absolute;left:26px;right:26px;bottom:23px;
 display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:12px}
 @keyframes travel{0%,10%{offset-distance:0%;opacity:0}18%{opacity:1}72%{opacity:1}82%,100%{offset-distance:100%;opacity:0}}
+@keyframes statuspulse{0%,45%{box-shadow:0 0 0 5px rgba(102,224,172,.12)}75%,100%{box-shadow:0 0 0 12px rgba(102,224,172,0)}}
 .snapshot{position:relative;margin-top:-34px;border:1px solid var(--line);border-radius:16px;background:rgba(17,26,24,.96);
 box-shadow:0 20px 55px rgba(0,0,0,.24);display:grid;grid-template-columns:1.2fr repeat(3,1fr);overflow:hidden}
 .snapstate,.metric{min-height:118px;padding:22px 24px;display:flex;flex-direction:column;justify-content:center}
 .metric{border-left:1px solid var(--line)}.snapk{color:var(--muted);font:11px ui-monospace,SFMono-Regular,Menlo,monospace;
 letter-spacing:.1em;text-transform:uppercase}.snapv{margin-top:6px;font-size:28px;font-weight:760;letter-spacing:-.035em}
-.snapstate .snapv{font-size:18px;letter-spacing:-.01em}.snapnote{margin-top:3px;color:var(--muted);font-size:12px}
+.snapstate .snapv{font-size:18px;letter-spacing:-.01em}.statusvalue{display:flex;align-items:center;gap:10px}
+.statusdot{width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:var(--amber);box-shadow:0 0 0 5px rgba(239,189,87,.1)}
+.statusdot.ok{background:var(--green);box-shadow:0 0 0 5px rgba(102,224,172,.12);animation:statuspulse 2.4s ease-out infinite}
+.statusdot.down{background:var(--dark);box-shadow:0 0 0 5px rgba(232,108,118,.1)}
+.snapnote{margin-top:3px;color:var(--muted);font-size:12px}
 .section{padding-block:112px}.sectionhd{max-width:720px;margin-bottom:46px}.kicker{color:var(--green);
 font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase}
 h2{font-size:clamp(36px,5vw,60px);line-height:1.03;letter-spacing:-.045em;margin:12px 0 18px}
@@ -107,14 +113,17 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 .faq summary{cursor:pointer;font-weight:700}.faq p{color:var(--muted);margin:12px 0 2px}.foot{border-top:1px solid var(--line);padding-block:34px;color:var(--muted);font-size:13px}
 .footin{display:flex;justify-content:space-between;align-items:center;gap:24px}.footlinks{display:flex;flex-wrap:wrap;gap:18px}.foot a:hover{color:var(--text)}
 :focus-visible{outline:3px solid rgba(117,189,242,.75);outline-offset:3px}
-@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.tinybib{animation:none;offset-distance:65%;opacity:1}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.tinybib{animation:none;offset-distance:65%;opacity:1}.statusdot.ok{animation:none}}
 @media(max-width:900px){.hero{grid-template-columns:1fr;gap:48px;padding-top:72px}.topology{min-height:410px}.snapshot{grid-template-columns:1fr 1fr}
 .metric:nth-child(3){border-left:0;border-top:1px solid var(--line)}.metric:nth-child(4){border-top:1px solid var(--line)}.principles{grid-template-columns:1fr}
 .principle{min-height:210px}.principle h3{margin-top:36px}.flow{grid-template-columns:1fr 1fr}.flowitem:nth-child(3){border-left:0;border-top:1px solid var(--line)}
 .flowitem:nth-child(4){border-top:1px solid var(--line)}.joinbox{grid-template-columns:1fr}}
-@media(max-width:640px){.shell{width:min(calc(100% - 24px),var(--max))}.nav{min-height:62px}.links a:not(.livepill){display:none}
+@media(max-width:860px){.nav{min-height:62px;padding-block:10px;flex-wrap:wrap;gap:10px}.links{width:100%;gap:16px;overflow-x:auto;padding-bottom:3px}.links a{white-space:nowrap}}
+@media(max-width:640px){.shell{width:min(calc(100% - 24px),var(--max))}
+.links{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}
 .hero{min-height:auto;padding-block:60px 54px}.eyebrow{font-size:10px;letter-spacing:.08em;gap:8px}.eyebrow:before{width:20px}h1{font-size:clamp(49px,16vw,72px)}.lede{font-size:18px}.topology{min-height:340px;border-radius:18px}
 .snapshot{margin-top:-20px;grid-template-columns:1fr 1fr}.snapstate,.metric{min-height:96px;padding:17px}.snapv{font-size:23px}.snapstate .snapv{font-size:15px}
+.snapstate{grid-column:1/-1}.snapshot .metric{border-top:1px solid var(--line)}.snapshot .metric:nth-child(2),.snapshot .metric:nth-child(4){border-left:0}.snapshot .metric:nth-child(3){border-left:1px solid var(--line)}.snapshot .metric:nth-child(4){grid-column:1/-1}
 .section{padding-block:80px}.flow{grid-template-columns:1fr}.flowitem+.flowitem{border-left:0;border-top:1px solid var(--line)}
 .flowitem:not(:last-child):after{content:"↓";right:24px;top:auto;bottom:-13px}.joincopy,.trust{padding:30px 24px}.faq{grid-template-columns:1fr}.footin{align-items:flex-start;flex-direction:column}}
 </style>
@@ -127,7 +136,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
     <span>Bibites Multiverse</span>
   </a>
   <nav class="links" aria-label="Primary navigation">
-    <a href="#how">How it works</a><a href="#join">Join</a><a href="/watch">Watch live</a>
+    <a href="#how">How it works</a><a href="#join">Join</a><a href="/watch">Watch broadcast</a>
     <a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>
     <a class="livepill" href="/live"><i class="dot" id="navdot"></i>Live map</a>
   </nav>
@@ -138,7 +147,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
       <p class="eyebrow">Public experiment · Aug 14–Nov 14, 2026</p>
       <h1>Evolution has a map.</h1>
       <p class="lede">Bibites Multiverse connects independent copies of <em>The Bibites</em> as neighboring ecosystems. Organisms cross between worlds. Evolution remains local, but its consequences can travel.</p>
-      <div class="actions"><a class="button primary" href="/live">Explore the live map&nbsp; →</a><a class="button secondary" href="/watch">Watch a Bibite</a><a class="button secondary" href="#join">Run a world</a></div>
+      <div class="actions"><a class="button primary" href="/live">Explore the live map&nbsp; →</a><a class="button secondary" href="/watch">Watch broadcast</a><a class="button secondary" href="#join">Run a world</a></div>
       <p class="promise">Every participant owns, runs, and saves a complete local world.</p>
     </div>
     <div class="topology" aria-hidden="true">
@@ -157,7 +166,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
   </section>
 
   <section class="shell snapshot" aria-label="Live map snapshot">
-    <div class="snapstate"><span class="snapk">Map status</span><strong class="snapv" id="status" aria-live="polite">Checking the archive…</strong><span class="snapnote" id="age">Live, public, and read-only</span></div>
+    <div class="snapstate"><span class="snapk">Map status</span><span class="statusvalue"><i class="statusdot" id="statusdot" aria-hidden="true"></i><strong class="snapv" id="status" aria-live="polite">Checking the archive…</strong></span><span class="snapnote" id="age">Live, public, and read-only</span></div>
     <div class="metric"><span class="snapk">Connected worlds</span><strong class="snapv" id="worlds">—</strong><span class="snapnote">independent simulations</span></div>
     <div class="metric"><span class="snapk">Known population</span><strong class="snapv" id="population">—</strong><span class="snapnote">living Bibites</span></div>
     <div class="metric"><span class="snapk">Migrations</span><strong class="snapv" id="migrations">—</strong><span class="snapnote" id="rate">recorded crossings</span></div>
@@ -199,7 +208,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
     </div>
   </section>
 </main>
-<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/watch">Watch live</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://thebibites.itch.io/the-bibites">The Bibites</a></div></div></footer>
+<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/watch">Watch broadcast</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://thebibites.itch.io/the-bibites">The Bibites</a></div></div></footer>
 <script>
 (function(){
   function n(v){ return v == null ? "unknown" : Number(v).toLocaleString(); }
@@ -210,6 +219,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
       if(!r.ok) throw new Error("status");
       var d=await r.json(), t=d.totals||{}, linked=!!(d.relayConnected&&d.haveStatus);
       document.getElementById("navdot").className="dot"+(linked?" ok":"");
+      document.getElementById("statusdot").className="statusdot"+(linked?" ok":!d.relayConnected?" down":"");
       document.getElementById("worlds").textContent=n(t.liveSlots);
       document.getElementById("population").textContent=n(t.population);
       document.getElementById("migrations").textContent=n(t.migrations);
@@ -217,6 +227,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
       document.getElementById("age").textContent=d.haveStatus?"Updated "+age(d.statusAgeMs):"Waiting for the first relay status";
       document.getElementById("status").textContent=!d.relayConnected?"Archive disconnected":!d.haveStatus?"Waiting for the map":t.liveSlots===0?"Online · no worlds connected":"Online · migrations flowing";
     }catch(e){
+      document.getElementById("statusdot").className="statusdot down";
       document.getElementById("status").textContent="Live snapshot unavailable";
       document.getElementById("age").textContent="The map can continue while this page recovers";
     }
