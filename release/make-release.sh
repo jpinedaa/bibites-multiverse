@@ -23,10 +23,11 @@
 #
 # WHAT IT PROVES BEFORE IT PACKAGES ANYTHING. A release that ships a mod or a
 # sidecar the project's own deployment does not run is a release nobody has
-# tested. So this script builds both and then requires them to be BYTE-IDENTICAL
-# to the copies in farend/dist/farend-bundle.zip — the tracked artifact set the
-# living fleet runs, present in any clean clone. A mismatch stops the build and
-# says which side moved.
+# tested. So this script requires the plugin to be byte-identical to the copy in
+# farend/dist/farend-bundle.zip. It requires go/ to match the revision stamped
+# into that bundle's sidecar. Go's VCS metadata can make two otherwise identical
+# builds differ as files. A source or plugin mismatch stops the build and says
+# which side moved.
 #
 # It also requires the game build to be the one docs/support-matrix.md names.
 # The matrix is the single source of that pin: the JSON block inside that
