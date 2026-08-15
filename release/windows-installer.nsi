@@ -76,9 +76,9 @@ Section "Install"
   CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Uninstall Bibites Multiverse.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0 SW_SHOWNORMAL
   SetShellVarContext all
   ClearErrors
-  CreateDirectory "$COMMONPROGRAMS\Bibites Multiverse"
+  CreateDirectory "$SMPROGRAMS\Bibites Multiverse"
   IfErrors doneCommonShortcuts
-  CreateShortCut "$COMMONPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
+  CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
 doneCommonShortcuts:
   SetShellVarContext current
 
@@ -107,8 +107,8 @@ cleanup:
   Delete "$SMPROGRAMS\Bibites Multiverse\Uninstall Bibites Multiverse.lnk"
   RMDir "$SMPROGRAMS\Bibites Multiverse"
   SetShellVarContext all
-  Delete "$COMMONPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk"
-  RMDir "$COMMONPROGRAMS\Bibites Multiverse"
+  Delete "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk"
+  RMDir "$SMPROGRAMS\Bibites Multiverse"
   SetShellVarContext current
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse"
   Delete "$INSTDIR\Uninstall-BibitesMultiverse.ps1"
