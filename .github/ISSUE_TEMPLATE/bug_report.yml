@@ -1,0 +1,79 @@
+name: Bug report
+description: Report a reproducible error in Bibites Multiverse
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Never paste a join string, credential, private save, or personal data.
+        For a security vulnerability, use the private report link instead of this form.
+
+  - type: checkboxes
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the open issues for this error.
+          required: true
+        - label: I removed credentials, join strings, private saves, and personal data.
+          required: true
+
+  - type: dropdown
+    attributes:
+      label: Component
+      options:
+        - Game mod
+        - Sidecar
+        - Relay
+        - Archive or live map
+        - Installer or release package
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Version
+      description: Give the release tag or commit.
+      placeholder: m5.0
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Environment
+      description: Give the operating system, game distribution, and game version when applicable.
+      placeholder: Windows 11, Steam, The Bibites 0.6.3.1
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its effect.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Reproduction steps
+      description: Give the smallest repeatable sequence.
+      placeholder: |
+        1. Start ...
+        2. Connect ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Expected behavior
+      description: Describe the behavior that you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Diagnostic output
+      description: Paste the smallest relevant output after you remove private data.
+      render: text

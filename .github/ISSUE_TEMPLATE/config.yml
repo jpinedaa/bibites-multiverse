@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/jpinedaa/bibites-multiverse/security/advisories/new
+    about: Send a private security report.
+  - name: Participant documentation
+    url: https://github.com/jpinedaa/bibites-multiverse/tree/main/docs
+    about: Read the install, join, diagnosis, and leave guides.

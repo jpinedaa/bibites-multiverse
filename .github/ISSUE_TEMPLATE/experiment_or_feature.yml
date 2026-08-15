@@ -1,0 +1,51 @@
+name: Experiment or feature proposal
+description: Propose a measurable experiment or a focused feature
+title: "[Proposal]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the observation or participant need first. Then describe the proposed change.
+
+  - type: dropdown
+    attributes:
+      label: Proposal type
+      options:
+        - Artificial-life experiment
+        - Participant feature
+        - Archive or visualization
+        - Protocol or routing
+        - Operations
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Observation or need
+      description: Describe the evidence, question, or participant need.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Proposed change
+      description: Describe the smallest change that addresses the observation or need.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Measurement
+      description: State how the project can determine whether the change works.
+
+  - type: textarea
+    attributes:
+      label: Risks and alternatives
+      description: Describe compatibility, security, operational, or scientific tradeoffs.
+
+  - type: checkboxes
+    attributes:
+      label: Contribution
+      options:
+        - label: I can help implement or document this proposal.
