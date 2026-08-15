@@ -6,7 +6,7 @@
 
 **One simulation is a world. Connect them, and evolution gets a map.**
 
-[![Installer status: release candidate](https://img.shields.io/badge/installer-release%20candidate-e2b93b)](m5_tracking.md)
+[![Installer status: m5.0 released](https://img.shields.io/badge/installer-m5.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/m5.0)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
@@ -26,8 +26,9 @@ Every participant keeps a separate game, clock, ecosystem, and save history. Thi
 synchronized mega-simulation. It is an evolutionary continent made from worlds that remain local.
 
 > [!IMPORTANT]
-> **The first public installer is in release preparation.** The Windows and Linux kits exist,
-> but [GitHub Releases](https://github.com/jpinedaa/bibites-multiverse/releases) is currently empty.
+> **Bibites Multiverse `m5.0` is public.** Download the Windows or Linux add-on archive from the
+> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/m5.0). These editions
+> connect an existing game installation. Make sure that the SHA-256 matches before you extract it.
 > Do not download a Multiverse build from another source.
 
 ## About *The Bibites*
@@ -82,6 +83,9 @@ After checksum and extraction, the platform commands are:
 |---|---|---|---|
 | Windows | *The Bibites* 0.6.3.1 from Steam | `.\Install-BibitesMultiverse.ps1` | `.\Start-Multiverse.ps1` |
 | Linux | *The Bibites* 0.6.3.1 from itch.io | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
+
+Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
+without graphics. The simulation remains active.
 
 The installer finds the game and makes sure that its build is supported. It installs the mod,
 stores the credential, and creates the start and stop scripts. It needs no compiler, SDK,
