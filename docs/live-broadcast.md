@@ -316,6 +316,7 @@ curl -fsS https://<service-domain>/watch
 ```
 
 The HLS function keeps the server session from the master through the latest completed segment.
+The segment must return HTTP status `200` and contain at least one byte.
 It rejects an unsafe relative reference and removes its temporary files.
 
 The expected listeners are:

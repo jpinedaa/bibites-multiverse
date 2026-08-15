@@ -318,9 +318,9 @@ hls_probe_fail() {
 hls_stream_ready() {
   local manifest_url="$1"
   local probe_parent="${TMPDIR:-/tmp}"
-  local probe_dir cookie_jar master_file child_file
+  local probe_dir cookie_jar master_file child_file segment_file
   local manifest_dir child_reference child_url child_dir segment_reference segment_url
-  local first_line
+  local first_line segment_status
 
   hls_probe_error=''
   if [[ "$manifest_url" != https://*/index.m3u8 ]]; then
@@ -335,6 +335,7 @@ hls_stream_ready() {
   cookie_jar="$probe_dir/cookies"
   master_file="$probe_dir/master.m3u8"
   child_file="$probe_dir/child.m3u8"
+  segment_file="$probe_dir/segment"
 
   if ! curl --fail --silent --show-error --location --max-redirs 3 \
       --connect-timeout 5 --max-time 20 --proto '=https' --proto-redir '=https' \
@@ -387,9 +388,20 @@ hls_stream_ready() {
   fi
   child_dir="${child_url%/*}"
   segment_url="$child_dir/$segment_reference"
-  if ! curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
-      --proto '=https' --cookie "$cookie_jar" --output /dev/null "$segment_url"; then
+  if ! segment_status="$(
+    curl --silent --show-error --connect-timeout 5 --max-time 20 \
+      --proto '=https' --cookie "$cookie_jar" --output "$segment_file" \
+      --write-out '%{http_code}' "$segment_url"
+  )"; then
     hls_probe_fail "$probe_dir" 'the latest completed HLS segment request failed'
+    return 1
+  fi
+  if [ "$segment_status" != 200 ]; then
+    hls_probe_fail "$probe_dir" 'the latest completed HLS segment did not return HTTP 200'
+    return 1
+  fi
+  if [ ! -s "$segment_file" ]; then
+    hls_probe_fail "$probe_dir" 'the latest completed HLS segment was empty'
     return 1
   fi
 

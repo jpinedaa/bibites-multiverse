@@ -180,6 +180,7 @@ curl -fsS https://<service-domain>/watch >/dev/null
 
 The HLS function keeps the cookies that MediaMTX returns during the master redirects.
 It reads the advertised child playlist and its latest completed segment with that session.
+The segment must return HTTP status `200` and contain at least one byte.
 A child request without `hlsSession` can return `401` while the stream is healthy.
 The function rejects an absolute reference or a parent-directory reference.
 It removes its temporary cookie and playlist files.

@@ -82,7 +82,11 @@ expect_text "$installer" '((.exportEdges // []) | sort) == ($edges | sort)'
 expect_text "$installer" 'hls_stream_ready "$public_manifest"'
 expect_text "$installer" '--cookie-jar "$cookie_jar"'
 expect_text "$installer" '$6 == "hlsSession"'
+expect_text "$installer" "--write-out '%{http_code}'"
+expect_text "$installer" 'the latest completed HLS segment did not return HTTP 200'
+expect_text "$installer" 'the latest completed HLS segment was empty'
 expect_text "$installer" 'the latest completed HLS segment request failed'
+forbid_text "$installer" '--output /dev/null "$segment_url"'
 forbid_text "$installer" 'Cookie: cookieCheck=1'
 forbid_text "$installer" 'index.m3u8?cookieCheck=1'
 forbid_text "$installer" '--arg secret'
@@ -360,6 +364,7 @@ run_hls_fixture() {
 
     curl() {
       local cookie_seen=0 cookie_arg='' cookie_jar_arg='' output_arg=''
+      local write_out_arg=''
       local location_seen=0 url=''
       while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -383,6 +388,11 @@ run_hls_fixture() {
           --output)
             [ "$#" -ge 2 ] || { mock_hls_fail 'missing output value'; return 99; }
             output_arg="$2"
+            shift 2
+            ;;
+          --write-out)
+            [ "$#" -ge 2 ] || { mock_hls_fail 'missing write-out value'; return 99; }
+            write_out_arg="$2"
             shift 2
             ;;
           https://*)
@@ -447,11 +457,32 @@ run_hls_fixture() {
           mock_hls_fail 'the segment request did not reuse the cookie jar'
           return 99
         }
-        [ "$output_arg" = /dev/null ] || {
-          mock_hls_fail 'the segment request did not discard the media body'
+        [ -n "$output_arg" ] && [ "$output_arg" != /dev/null ] || {
+          mock_hls_fail 'the segment request did not store the media body'
+          return 99
+        }
+        [ "$write_out_arg" = '%{http_code}' ] || {
+          mock_hls_fail 'the segment request did not read the HTTP status'
           return 99
         }
         [ "$fixture_hls_mode" != segment-failure ] || return 22
+        if [ "$fixture_hls_mode" = segment-redirect ]; then
+          printf 'redirect body\n' >"$output_arg"
+          printf '302'
+          return 0
+        fi
+        if [ "$fixture_hls_mode" = segment-no-content ]; then
+          : >"$output_arg"
+          printf '204'
+          return 0
+        fi
+        if [ "$fixture_hls_mode" = segment-empty ]; then
+          : >"$output_arg"
+          printf '200'
+          return 0
+        fi
+        printf 'fixture media\n' >"$output_arg"
+        printf '200'
         return 0
       fi
 
@@ -500,6 +531,27 @@ if run_hls_fixture segment-failure; then fail 'HLS readiness accepted a failed s
   fail 'the failed HLS segment fixture did not complete its request chain'
 grep -Fq 'latest completed HLS segment request failed' "$hls_reason" || \
   fail 'the failed HLS segment reported the wrong failure'
+assert_hls_fixture_clean
+
+if run_hls_fixture segment-redirect; then fail 'HLS readiness accepted an HTTP 302 segment'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master child segment ' ] || \
+  fail 'the HTTP 302 HLS fixture did not complete its request chain'
+grep -Fq 'did not return HTTP 200' "$hls_reason" || \
+  fail 'the HTTP 302 HLS segment reported the wrong failure'
+assert_hls_fixture_clean
+
+if run_hls_fixture segment-no-content; then fail 'HLS readiness accepted an HTTP 204 segment'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master child segment ' ] || \
+  fail 'the HTTP 204 HLS fixture did not complete its request chain'
+grep -Fq 'did not return HTTP 200' "$hls_reason" || \
+  fail 'the HTTP 204 HLS segment reported the wrong failure'
+assert_hls_fixture_clean
+
+if run_hls_fixture segment-empty; then fail 'HLS readiness accepted an empty HTTP 200 segment'; fi
+[ "$(tr '\n' ' ' <"$hls_events")" = 'master child segment ' ] || \
+  fail 'the empty HTTP 200 HLS fixture did not complete its request chain'
+grep -Fq 'latest completed HLS segment was empty' "$hls_reason" || \
+  fail 'the empty HTTP 200 HLS segment reported the wrong failure'
 assert_hls_fixture_clean
 
 if run_hls_fixture invalid-child; then fail 'HLS readiness accepted an absolute child URL'; fi
