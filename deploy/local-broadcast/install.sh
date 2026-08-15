@@ -157,6 +157,16 @@ preflight_public_identity() {
   [ -f "$credential_file" ] && credential_held=1
   [ -f "$durable_peer_file" ] && durable_peer_held=1
   [ -f "$pending_file" ] && pending_held=1
+  if [ -e "$multiverse_data" ] && [ ! -d "$multiverse_data" ]; then
+    die "$multiverse_data is not a directory; no identity was changed"
+  fi
+  if [ "$durable_peer_held" -eq 0 ] && [ -d "$multiverse_data" ]; then
+    local durable_entry
+    durable_entry="$(find "$multiverse_data" -mindepth 1 -print -quit)" || \
+      die "$multiverse_data cannot be inspected; no identity was changed"
+    [ -z "$durable_entry" ] || \
+      die "$multiverse_data holds custody state without a durable peer identity; no identity was changed"
+  fi
 
   install_id=''
   secret=''
@@ -299,7 +309,7 @@ case "$world_name" in *[!A-Za-z0-9._-]*|'') die 'the world name contains an unsu
 for edge in ${export_edges//,/ }; do
   case "$edge" in E|N|W|S) ;; *) die "BIBITES_BROADCAST_EXPORT_EDGES holds '$edge'; use E, N, W or S" ;; esac
 done
-for command in aws curl dotnet flock go install jq nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux wslpath; do
+for command in aws curl dotnet find flock go install jq nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux wslpath; do
   command -v "$command" >/dev/null || die "missing command: $command"
 done
 acquire_install_lock
@@ -493,7 +503,9 @@ rm -f "$unit_root/bibites-local-broadcast-windows.service"
 systemctl --user daemon-reload
 systemctl --user disable bibites-local-broadcast.target >/dev/null 2>&1 || true
 if [ "$start" -eq 1 ]; then
-  "$runtime_root/bin/start"
+  # Keep the install lock in this process through verification. Do not pass the
+  # descriptor to the long-lived broadcaster processes that start creates.
+  "$runtime_root/bin/start" {install_lock_fd}>&-
   status_url="${relay_url/#wss:\/\//https://}"
   status_url="${status_url%/contract-b/v4}/api/status"
   for _ in $(seq 1 120); do

@@ -39,7 +39,7 @@ neighbours route around it.
 The broadcast world joins the map through the same public enrollment as a participant world.
 Read [`contracts/public-enrollment.md`](../contracts/public-enrollment.md) for the endpoint.
 
-Five rules bind every broadcast publisher:
+Six rules bind every broadcast publisher:
 
 1. A publisher that starts a new world enrolls its own identity. It never copies a live credential.
 2. A publisher that continues an existing world takes that world's identity only after the source
@@ -51,6 +51,7 @@ Five rules bind every broadcast publisher:
    publisher. This process includes the credential, recorded world, and durable sidecar peer ID.
 5. A pending record beside a completed identity must name the same peer ID and secret. The installer
    stops when either value differs.
+6. If custody data exists without a durable peer ID, the installer stops before enrollment.
 
 The identity and its secret stay outside this repository, below the publisher's user profile.
 The local installer gives the identity directory a protected Windows ACL.

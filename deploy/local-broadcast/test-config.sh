@@ -75,6 +75,8 @@ expect_text "$installer" 'GOOS=windows GOARCH=amd64'
 expect_text "$installer" 'SetAccessRuleProtection($true, $false)'
 expect_text "$installer" 'ACL includes an account other than the current Windows user'
 expect_text "$installer" 'another local broadcast installation is active'
+expect_text "$installer" 'custody state without a durable peer identity'
+expect_text "$installer" '"$runtime_root/bin/start" {install_lock_fd}>&-'
 expect_text "$installer" '.modConnected == true'
 expect_text "$installer" '((.exportEdges // []) | sort) == ($edges | sort)'
 forbid_text "$installer" '--arg secret'
@@ -196,6 +198,17 @@ rm -f "$durable_peer_file"
 if run_mocked_preflight >/dev/null 2>&1; then fail 'preflight accepted a missing durable peer id'; fi
 [ ! -s "$events" ] || fail 'missing durable peer id reached ACL or enrollment work'
 
+prepare_fixture orphaned-custody
+printf '%s\n' 'orphaned fixture' >"$multiverse_data/journal"
+orphaned_sha="$(sha256sum "$multiverse_data/journal" | awk '{print $1}')"
+if run_mocked_preflight >/dev/null 2>&1; then fail 'preflight accepted custody state without an identity'; fi
+[ ! -e "$pending_file" ] || fail 'orphaned custody state created a pending identity'
+[ ! -s "$events" ] || fail 'orphaned custody state reached ACL or enrollment work'
+[ "$(find "$multiverse_data" -mindepth 1 | wc -l)" -eq 1 ] || \
+  fail 'orphaned custody preflight wrote another data file'
+[ "$(sha256sum "$multiverse_data/journal" | awk '{print $1}')" = "$orphaned_sha" ] || \
+  fail 'orphaned custody preflight changed existing data'
+
 prepare_fixture mismatched-durable
 write_completed_fixture
 printf '%s\n' 'public-ffffffffffffffffffffffffffffffff' >"$durable_peer_file"
@@ -251,6 +264,29 @@ for _ in $(seq 1 100); do [ -f "$lock_ready" ] && break; sleep 0.05; done
 if ( acquire_install_lock ) >/dev/null 2>&1; then fail 'two installers acquired the same lock'; fi
 : >"$lock_release"
 wait "$lock_holder"
+
+# A long-lived runtime child must not inherit the installer lock descriptor.
+config_root="$fixtures/descendant-lock"
+descendant_ready="$fixtures/descendant-ready"
+descendant_release="$fixtures/descendant-release"
+descendant_done="$fixtures/descendant-done"
+(
+  acquire_install_lock
+  bash -c '
+    : >"$1"
+    while [ ! -f "$2" ]; do sleep 0.05; done
+    : >"$3"
+  ' _ "$descendant_ready" "$descendant_release" "$descendant_done" \
+    {install_lock_fd}>&- </dev/null >/dev/null 2>&1 &
+) &
+lock_parent=$!
+for _ in $(seq 1 100); do [ -f "$descendant_ready" ] && break; sleep 0.05; done
+[ -f "$descendant_ready" ] || fail 'the descendant lock fixture did not start'
+wait "$lock_parent"
+( acquire_install_lock ) || fail 'a long-lived runtime descendant inherited the install lock'
+: >"$descendant_release"
+for _ in $(seq 1 100); do [ -f "$descendant_done" ] && break; sleep 0.05; done
+[ -f "$descendant_done" ] || fail 'the descendant lock fixture did not stop'
 
 # Installer success requires the game connection and the configured export edges.
 expected_edges='["E","N","W","S"]'

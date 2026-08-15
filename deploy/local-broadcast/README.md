@@ -30,13 +30,14 @@ It never copies an existing world's credential, so it cannot create a divergent 
 world.
 
 A later installation reuses that identity. If the identity files are present but unreadable, the
-installer stops and changes nothing: a second enrollment would abandon this world's place on the
-map.
+installer stops before it changes the identity or runtime. A second enrollment can abandon this
+world's place on the map.
 
 The installer makes sure that the completed identity is valid before it stops the broadcaster.
 It uses an exact enrollment retry to make sure that the credential is valid.
 It also makes sure that the recorded world and durable sidecar peer ID match.
 If these values disagree, the installer stops before it replaces a runtime file.
+If custody data exists without a durable peer ID, the installer stops before enrollment.
 
 One installation lock covers the preflight, file updates, and optional start.
 A second installer stops while the first installer holds this lock.
@@ -44,7 +45,7 @@ A second installer stops while the first installer holds this lock.
 The installer applies a protected Windows ACL to the full identity directory.
 The ACL gives access to the current Windows user only.
 If the installer cannot apply this ACL, it does not contact the enrollment endpoint.
-It also stops if the ACL contains access for another account.
+It also stops if another account still has access after it applies the ACL.
 
 The installer can find a pending record beside a completed identity.
 It removes the pending record only when its peer ID and secret match the completed identity.
