@@ -7,9 +7,11 @@ dist="$repo/cloud/aws/dist"
 template="$repo/cloud/aws/broadcast-template.yaml"
 validation="$repo/cloud/aws/lib/validation.sh"
 manifest_validator="$repo/cloud/aws/runtime/validate-world-manifest.jq"
+source_checker="$repo/cloud/aws/source-world-stopped.sh"
 
 [ -r "$dist/artifacts.env" ] || { echo 'run build-artifacts.sh first' >&2; exit 1; }
 [ -r "$dist/staged.env" ] || { echo 'run stage-artifacts.sh first' >&2; exit 1; }
+[ -r "$source_checker" ] || { echo 'missing source-world safety check' >&2; exit 1; }
 
 # shellcheck source=lib/validation.sh
 . "$validation"
@@ -64,6 +66,10 @@ bibites_require_sha256 "$RUNTIME_SHA256" RUNTIME_SHA256
   echo "invalid world identifier: $world" >&2
   exit 1
 }
+[ "$world" = slot-1 ] || {
+  echo 'BIBITES_BROADCAST_WORLD_ID must be slot-1' >&2
+  exit 1
+}
 
 rtmp_ip="${BIBITES_STREAM_RTMP_ADDRESS%:1935}"
 [ "$BIBITES_STREAM_RTMP_ADDRESS" = "$rtmp_ip:1935" ] || {
@@ -93,7 +99,11 @@ jq -e --arg subnet "$BIBITES_SUBNET_ID" --arg vpc "$BIBITES_VPC_ID" \
   exit 1
 }
 
-bibites_require_x86_64_instance_type "$AWS_PROFILE" "$AWS_REGION" "$instance_type"
+instance_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 \
+  describe-instance-types --instance-types "$instance_type" --output json)"
+bibites_require_x86_64_instance_description "$instance_description" "$instance_type"
+bibites_require_nvidia_gpu_instance_description "$instance_description" "$instance_type"
+required_vcpus="$(bibites_instance_default_vcpus "$instance_description" "$instance_type")"
 
 route_table="$(bibites_effective_route_table "$AWS_PROFILE" "$AWS_REGION" \
   "$BIBITES_VPC_ID" "$BIBITES_SUBNET_ID")"
@@ -114,8 +124,9 @@ quota="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" service-quotas get-
   echo "Spot G-instance quota is malformed: $quota" >&2
   exit 1
 }
-awk -v value="$quota" 'BEGIN { exit !(value >= 4) }' || {
-  echo "Spot G-instance quota is $quota vCPUs; at least 4 vCPUs are required" >&2
+awk -v value="$quota" -v required="$required_vcpus" \
+  'BEGIN { exit !(value >= required) }' || {
+  echo "Spot G-instance quota is $quota vCPUs; $instance_type requires $required_vcpus" >&2
   exit 1
 }
 
@@ -132,13 +143,8 @@ jq -e --arg snapshot "$snapshot" --arg owner "$account" '
   exit 1
 }
 
-parameter_name="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm get-parameter \
-  --name "$BIBITES_PUBLISH_PASSWORD_PARAMETER" \
-  --query Parameter.Name --output text)"
-[ "$parameter_name" = "$BIBITES_PUBLISH_PASSWORD_PARAMETER" ] || {
-  echo 'Parameter Store returned an unexpected publish-password parameter' >&2
-  exit 1
-}
+bibites_require_default_secure_parameter "$AWS_PROFILE" "$AWS_REGION" \
+  "$BIBITES_PUBLISH_PASSWORD_PARAMETER"
 
 manifest="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
   "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/worlds.json" - --only-show-errors \
@@ -170,27 +176,36 @@ jq -e --arg instance "$source_instance" '
   exit 1
 }
 
-printf -v source_check \
-  '! systemctl is-active --quiet bibites-game@%q.service; ! systemctl is-active --quiet bibites-sidecar@%q.service; test "$(systemctl is-enabled bibites-game@%q.service 2>/dev/null || true)" = disabled; test "$(systemctl is-enabled bibites-sidecar@%q.service 2>/dev/null || true)" = disabled' \
-  "$world" "$world" "$world" "$world"
-parameters="$(jq -nc --arg command "$source_check" '{commands:[$command]}')"
+echo 'broadcast deployment is disabled because FFmpeg exposes the RTMP password in process arguments' >&2
+echo 'No remote source check or CloudFormation change was sent.' >&2
+exit 1
+
+source_check_encoded="$(base64 -w0 "$source_checker")"
+printf -v source_check 'printf %%s %q | base64 -d | bash -s -- %q' \
+  "$source_check_encoded" "$world"
+parameters="$(jq -nc --arg command "$source_check" \
+  '{commands:[$command],executionTimeout:["120"]}')"
 
 command_id="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm send-command \
   --instance-ids "$source_instance" --document-name AWS-RunShellScript \
-  --parameters "$parameters" --query Command.CommandId --output text)"
+  --parameters "$parameters" --timeout-seconds 60 \
+  --query Command.CommandId --output text)"
 [[ "$command_id" =~ ^[0-9a-f-]{36}$ ]] || {
   echo "Systems Manager returned an invalid command identifier: $command_id" >&2
   exit 1
 }
-aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm wait command-executed \
-  --command-id "$command_id" --instance-id "$source_instance" || true
-
-source_status="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm get-command-invocation \
-  --command-id "$command_id" --instance-id "$source_instance" --query Status --output text)"
-[ "$source_status" = Success ] || {
+set +e
+source_result="$(bibites_wait_ssm_invocation "$AWS_PROFILE" "$AWS_REGION" \
+  "$command_id" "$source_instance" 180 3)"
+source_wait_status=$?
+set -e
+if [ "$source_wait_status" -ne 0 ]; then
+  [ -z "$source_result" ] || jq \
+    '{status:.Status,stdout:.StandardOutputContent,stderr:.StandardErrorContent}' \
+    <<<"$source_result"
   echo "$world is active or enabled on the source host; refusing a duplicate deployment" >&2
   exit 1
-}
+fi
 
 aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation deploy \
   --stack-name "$stack" --template-file "$template" \

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: GPU Spot host for the shared Bibites Multiverse live broadcast
+Description: Fail-closed GPU Spot host interface for the Bibites Multiverse broadcast
 
 Parameters:
   InstanceType:
@@ -16,7 +16,7 @@ Parameters:
     Type: String
     MinLength: 3
     MaxLength: 63
-    AllowedPattern: '^[a-z0-9][a-z0-9.-]*[a-z0-9]$'
+    AllowedPattern: '^(?![0-9]+(\.[0-9]+){3}$)(?!.*\.\.)(?!.*\.\-)(?!.*\-\.)[a-z0-9][a-z0-9.-]*[a-z0-9]$'
   RuntimeKey:
     Type: String
     MinLength: 1
@@ -43,8 +43,7 @@ Parameters:
     AllowedPattern: '^/[A-Za-z0-9][A-Za-z0-9_.-]*(/[A-Za-z0-9][A-Za-z0-9_.-]*)*$'
   WorldId:
     Type: String
-    MaxLength: 64
-    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+    AllowedValues: [slot-1]
   NvidiaAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id
@@ -76,8 +75,19 @@ Resources:
                 Action: s3:GetObject
                 Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${RuntimeKey}
               - Effect: Allow
-                Action: ssm:GetParameter
-                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PublishPasswordParameter}
+                Action: cloudformation:SignalResource
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+              - Effect: Allow
+                Action: ec2:AttachVolume
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/${DataVolume}
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: bibites-multiverse
+              - Effect: Allow
+                Action: ec2:DescribeVolumes
+                Resource: '*'
 
   HostProfile:
     Type: AWS::IAM::InstanceProfile
@@ -131,14 +141,47 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/usr/bin/env bash
-            set -euxo pipefail
+            set -Eeuo pipefail
             exec > >(tee -a /var/log/bibites-broadcast-bootstrap.log | logger -t bibites-broadcast-bootstrap -s 2>/dev/console) 2>&1
+            instance_id=''
+            signal_bootstrap() {
+              rc=$?
+              trap - EXIT
+              status=FAILURE
+              [ "$rc" -eq 0 ] && status=SUCCESS
+              if command -v aws >/dev/null && [[ "$instance_id" =~ ^i-[0-9a-f]{8,17}$ ]]; then
+                if ! aws --region '${AWS::Region}' cloudformation signal-resource \
+                  --stack-name '${AWS::StackName}' --logical-resource-id Host \
+                  --unique-id "$instance_id" --status "$status"; then
+                  echo 'CloudFormation resource signaling failed' >&2
+                  [ "$rc" -ne 0 ] || rc=1
+                fi
+              fi
+              exit "$rc"
+            }
+            trap signal_bootstrap EXIT
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y ffmpeg jq x11-xserver-utils
+            apt-get install -y curl ffmpeg jq unzip x11-xserver-utils
+            if ! command -v aws >/dev/null; then
+              curl -fsS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+              rm -rf /tmp/aws
+              unzip -q /tmp/awscliv2.zip -d /tmp
+              /tmp/aws/install --update
+            fi
+            metadata_token="$(curl -fsS -X PUT \
+              -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
+              http://169.254.169.254/latest/api/token)"
+            instance_id="$(curl -fsS -H "X-aws-ec2-metadata-token: $metadata_token" \
+              http://169.254.169.254/latest/meta-data/instance-id)"
+            [[ "$instance_id" =~ ^i-[0-9a-f]{8,17}$ ]]
+            aws --region '${AWS::Region}' ec2 attach-volume \
+              --volume-id '${DataVolume}' --instance-id "$instance_id" --device /dev/sdf \
+              >/dev/null
+            aws --region '${AWS::Region}' ec2 wait volume-in-use --volume-ids '${DataVolume}'
             install -d -m 0755 /opt/bibites-runtime
-            aws --region ${AWS::Region} s3 cp \
-              s3://${ArtifactBucket}/${RuntimeKey} /tmp/bibites-runtime.tar.gz \
+            aws --region '${AWS::Region}' s3 cp \
+              's3://${ArtifactBucket}/${RuntimeKey}' /tmp/bibites-runtime.tar.gz \
               --only-show-errors
             printf '%s  %s\n' '${RuntimeSha256}' /tmp/bibites-runtime.tar.gz | sha256sum -c -
             tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime
@@ -155,17 +198,14 @@ Resources:
 
   Host:
     Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT45M
     Properties:
       LaunchTemplate:
         LaunchTemplateId: !Ref HostLaunchTemplate
         Version: !GetAtt HostLaunchTemplate.LatestVersionNumber
-
-  DataAttachment:
-    Type: AWS::EC2::VolumeAttachment
-    Properties:
-      Device: /dev/sdf
-      InstanceId: !Ref Host
-      VolumeId: !Ref DataVolume
 
 Outputs:
   InstanceId:

@@ -1,12 +1,16 @@
 # Live broadcast design
 
-The optional broadcast shows one shared game camera.
+The broadcast shows one shared game camera.
 All viewers receive the same encoded stream.
+
+The AWS GPU publisher is currently disabled by a security gate.
+The local Windows fallback remains available.
+No public procedure in this repository deploys the AWS publisher.
 
 This document describes the public architecture and camera behavior.
 It does not describe a current deployment, quota request, resource identifier, address, or price.
 
-## Data path
+## Target data path
 
 ```text
 game world -> GPU capture -> hardware H.264 -> private RTMP -> MediaMTX -> loopback HLS -> nginx -> viewers
@@ -63,8 +67,12 @@ The deployment wrapper checks the effective subnet route table for both addresse
 It rejects a public destination and a route that uses the default internet path.
 
 The publisher also needs a random 64-character hexadecimal password.
-Store that password in a protected host file or secret manager.
+Store the parameter as a `SecureString` with the default `aws/ssm` KMS key.
 Do not put it in Git, process arguments, or a public runbook.
+
+FFmpeg needs the authenticated RTMP URL as a process argument in the current design.
+That interface exposes the password to process inspection.
+For this reason, the public AWS publisher does not start FFmpeg.
 
 The HLS and metrics listeners use loopback.
 The HLS route uses a per-address connection limit.
@@ -76,21 +84,27 @@ The archive remains the durable migration record.
 
 ## GPU host
 
-`cloud/aws/broadcast-template.yaml` defines the optional AWS GPU host.
+`cloud/aws/broadcast-template.yaml` retains the proposed AWS GPU host interface.
 The selected instance must support NVIDIA NVENC.
 It must also support the `x86_64` architecture.
 
 The stack uses an AWS Deep Learning Base AMI with an NVIDIA driver.
 Xorg creates a virtual `1280x720` display.
 
-FFmpeg captures that display at 30 frames each second.
+In the target design, FFmpeg captures that display at 30 frames each second.
 NVENC produces a 2.5-Mbit/s H.264 stream with a two-second keyframe interval.
 
 The stack has no inbound security-group rules.
 Systems Manager provides the operator shell.
 
-The data volume starts from an approved EBS snapshot of one source world.
+The interface accepts only `slot-1` because its systemd dependencies use that slot.
+The data volume starts from an approved EBS snapshot of that source world.
 CloudFormation retains the volume after stack deletion.
+
+The host attaches the tagged volume during bootstrap.
+CloudFormation waits for a host installation signal before it reports success.
+The current installer exits with failure because the password transport is unresolved.
+The signal trap reports that failure to CloudFormation.
 
 CAUTION: Stop and disable the source world before you create the snapshot.
 Two copies with one credential can create different descendants from one checkpoint.
@@ -125,37 +139,40 @@ Keep these inputs in private operations storage:
 
 Do not add these live values to this document.
 
-## Deployment procedure
+## Deployment gate
 
-Complete these steps after the account has enough GPU Spot quota:
+Do not deploy the AWS broadcaster from this repository.
+`cloud/aws/deploy-broadcast.sh` performs read-only preflight checks and then stops.
+It does not send the source-host command or call CloudFormation.
 
-1. Build and stage the current runtime and private manifest.
-2. Disable the selected world in the staged manifest.
-3. Stop and disable that world on the source host.
-4. Create an EBS snapshot of the source data volume.
-5. Wait until the snapshot state is `completed`.
-6. Set the required `BIBITES_*` deployment variables.
-7. Run `cloud/aws/deploy-broadcast.sh`.
-8. Make sure that the source world remains disabled.
-9. Check the HLS manifest through the public front door.
-10. Open the broadcast page from a second network.
+The preflight checks these properties:
 
-The deployment wrapper checks that the source services are stopped and disabled.
-It also checks that the staged manifest disables the selected world.
+- The staged manifest disables `slot-1`.
+- The snapshot is complete, encrypted, and owned by the approved account.
+- The source stack resolves to one online Linux instance.
+- The instance type supports `x86_64` and reports an NVIDIA GPU.
+- The Spot quota covers the type's `DefaultVCpus` value.
+- The publish parameter is a default-key `SecureString`.
+- The relay and RTMP addresses use port and private-route rules.
 
-The wrapper queries EC2 before deployment.
-It rejects an instance type that does not report `x86_64` support.
-It also rejects relay or RTMP addresses without approved private routes.
+The route check selects the longest matching route.
+It rejects the destination if that effective route is blackholed or not approved.
+Approved targets are local, peering, transit gateway, and private virtual gateway routes.
 
-The wrapper requires an existing SSM publish-password parameter.
-It does not read or copy the password value.
+The wrapper reads parameter metadata only.
+It does not decrypt or copy the publish password.
 
-If deployment fails, do not start both copies.
-Remove or stop the failed copy before you restart the source world.
+`cloud/aws/source-world-stopped.sh` contains the final source-host proof.
+Its fixtures make each of the four state checks fail independently.
+The game and sidecar must both be inactive and disabled.
 
-## Availability
+Enable deployment only after a publisher can read credentials without putting them in arguments.
+The credential must also stay out of status output and logs.
+Do not add an override that bypasses this gate.
 
-A Spot interruption stops the publisher first.
+## Planned availability
+
+In the target design, a Spot interruption stops the publisher first.
 The watcher then stops the game and waits for save-on-quit.
 It stops the sidecar and flushes the volume.
 

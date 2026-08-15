@@ -89,7 +89,9 @@ jq -e --arg subnet "$BIBITES_SUBNET_ID" --arg vpc "$BIBITES_VPC_ID" \
   exit 1
 }
 
-bibites_require_x86_64_instance_type "$AWS_PROFILE" "$AWS_REGION" "$instance_type"
+instance_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 \
+  describe-instance-types --instance-types "$instance_type" --output json)"
+bibites_require_x86_64_instance_description "$instance_description" "$instance_type"
 
 missing=0
 while IFS= read -r parameter; do
@@ -101,9 +103,9 @@ while IFS= read -r parameter; do
       continue
       ;;
   esac
-  if ! aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm get-parameter \
-    --name "$parameter" --query Parameter.Name --output text >/dev/null 2>&1; then
-    echo "missing credential parameter: $parameter" >&2
+  if ! bibites_require_default_secure_parameter \
+    "$AWS_PROFILE" "$AWS_REGION" "$parameter"; then
+    echo "invalid credential parameter: $parameter" >&2
     missing=1
   fi
 done < <(jq -r '.worlds[].credentialParameter' "$dist/worlds.json")

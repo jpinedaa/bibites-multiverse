@@ -16,7 +16,7 @@ Parameters:
     Type: String
     MinLength: 3
     MaxLength: 63
-    AllowedPattern: '^[a-z0-9][a-z0-9.-]*[a-z0-9]$'
+    AllowedPattern: '^(?![0-9]+(\.[0-9]+){3}$)(?!.*\.\.)(?!.*\.\-)(?!.*\-\.)[a-z0-9][a-z0-9.-]*[a-z0-9]$'
   ArtifactPrefix:
     Type: String
     Default: cloud/v1
@@ -105,6 +105,20 @@ Resources:
               - Effect: Allow
                 Action: ssm:GetParameter
                 Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CredentialParameterPrefix}/*
+              - Effect: Allow
+                Action: cloudformation:SignalResource
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+              - Effect: Allow
+                Action: ec2:AttachVolume
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/${DataVolume}
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/Project: bibites-multiverse
+              - Effect: Allow
+                Action: ec2:DescribeVolumes
+                Resource: '*'
 
   HostProfile:
     Type: AWS::IAM::InstanceProfile
@@ -165,8 +179,25 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/usr/bin/env bash
-            set -euxo pipefail
+            set -Eeuo pipefail
             exec > >(tee -a /var/log/bibites-bootstrap.log | logger -t bibites-bootstrap -s 2>/dev/console) 2>&1
+            instance_id=''
+            signal_bootstrap() {
+              rc=$?
+              trap - EXIT
+              status=FAILURE
+              [ "$rc" -eq 0 ] && status=SUCCESS
+              if command -v aws >/dev/null && [[ "$instance_id" =~ ^i-[0-9a-f]{8,17}$ ]]; then
+                if ! aws --region '${AWS::Region}' cloudformation signal-resource \
+                  --stack-name '${AWS::StackName}' --logical-resource-id Host \
+                  --unique-id "$instance_id" --status "$status"; then
+                  echo 'CloudFormation resource signaling failed' >&2
+                  [ "$rc" -ne 0 ] || rc=1
+                fi
+              fi
+              exit "$rc"
+            }
+            trap signal_bootstrap EXIT
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y curl jq unzip xfsprogs xvfb
@@ -176,9 +207,19 @@ Resources:
               unzip -q /tmp/awscliv2.zip -d /tmp
               /tmp/aws/install --update
             fi
+            metadata_token="$(curl -fsS -X PUT \
+              -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
+              http://169.254.169.254/latest/api/token)"
+            instance_id="$(curl -fsS -H "X-aws-ec2-metadata-token: $metadata_token" \
+              http://169.254.169.254/latest/meta-data/instance-id)"
+            [[ "$instance_id" =~ ^i-[0-9a-f]{8,17}$ ]]
+            aws --region '${AWS::Region}' ec2 attach-volume \
+              --volume-id '${DataVolume}' --instance-id "$instance_id" --device /dev/sdf \
+              >/dev/null
+            aws --region '${AWS::Region}' ec2 wait volume-in-use --volume-ids '${DataVolume}'
             install -d -m 0755 /opt/bibites-runtime
-            aws --region ${AWS::Region} s3 cp \
-              s3://${ArtifactBucket}/${ArtifactPrefix}/${RuntimeFile} /tmp/bibites-runtime.tar.gz \
+            aws --region '${AWS::Region}' s3 cp \
+              's3://${ArtifactBucket}/${ArtifactPrefix}/${RuntimeFile}' /tmp/bibites-runtime.tar.gz \
               --only-show-errors
             printf '%s  %s\n' '${RuntimeSha256}' /tmp/bibites-runtime.tar.gz | sha256sum -c -
             tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime
@@ -198,17 +239,14 @@ Resources:
 
   Host:
     Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Count: 1
+        Timeout: PT45M
     Properties:
       LaunchTemplate:
         LaunchTemplateId: !Ref HostLaunchTemplate
         Version: !GetAtt HostLaunchTemplate.LatestVersionNumber
-
-  DataAttachment:
-    Type: AWS::EC2::VolumeAttachment
-    Properties:
-      Device: /dev/sdf
-      InstanceId: !Ref Host
-      VolumeId: !Ref DataVolume
 
 Outputs:
   InstanceId:
