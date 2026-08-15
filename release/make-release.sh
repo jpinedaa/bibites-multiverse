@@ -58,7 +58,7 @@ THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
 # another filesystem. Use a clean checkout of this exact commit in that case.
 SIDECAR_BUILD_REPO="${RELEASE_SIDECAR_BUILD_REPO:-$REPO}"
 
-RELEASE=0.2.0
+RELEASE=0.2.1
 TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
@@ -394,6 +394,7 @@ cp "$THIRD_PARTY_NOTICES"                        "$STAGE/THIRD_PARTY_NOTICES.md"
 cp "$RELDIR/kit/install-bibites-multiverse.sh"   "$LINUX_STAGE/"
 cp "$RELDIR/kit/uninstall-bibites-multiverse.sh" "$LINUX_STAGE/"
 cp "$RELDIR/kit/README-linux.md"                 "$LINUX_STAGE/README.md"
+cp "$RELDIR/kit/public-map.json"                  "$LINUX_STAGE/"
 cp "$MATRIX_JSON"                                "$LINUX_STAGE/support-matrix.json"
 # THE SAME FILE, not a second build of it. The plugin is platform-independent IL.
 cp "$PLUGIN"                                     "$LINUX_STAGE/BibitesMultiverse.dll"
@@ -558,12 +559,17 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
 fi
 
 for archive in "${ARCHIVE_NAMES[@]}"; do
-  unzip -Z1 "$DIST/$archive" | grep -qx "$STAGE_NAME/LICENSE" \
+  [ "$(unzip -Z1 "$DIST/$archive" "$STAGE_NAME/LICENSE")" = "$STAGE_NAME/LICENSE" ] \
     || die "$archive does not contain the Apache license"
-  unzip -Z1 "$DIST/$archive" | grep -qx "$STAGE_NAME/THIRD_PARTY_NOTICES.md" \
+  [ "$(unzip -Z1 "$DIST/$archive" "$STAGE_NAME/THIRD_PARTY_NOTICES.md")" = "$STAGE_NAME/THIRD_PARTY_NOTICES.md" ] \
     || die "$archive does not contain the third-party notices"
+  [ "$(unzip -Z1 "$DIST/$archive" "$STAGE_NAME/public-map.json")" = "$STAGE_NAME/public-map.json" ] \
+    || die "$archive does not contain the public join configuration"
+  [ "$(unzip -p "$DIST/$archive" "$STAGE_NAME/public-map.json" | sha256sum | cut -d' ' -f1)" = \
+    "$(sha "$RELDIR/kit/public-map.json")" ] \
+    || die "$archive contains a changed public join configuration"
 done
-note "every archive contains LICENSE and THIRD_PARTY_NOTICES.md"
+note "every archive contains LICENSE, THIRD_PARTY_NOTICES.md, and the public join configuration"
 
 note "$DIST/$ZIP_NAME  ($ZIP_SIZE)"
 note "sha256 $ZIP_SHA"
@@ -610,7 +616,7 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
 fi
 
 if [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; then
-  EDITION_NOTE='The Windows GUI selects the included game by default and also offers an existing-game option. Add-on packages use an existing game.'
+  EDITION_NOTE='Each complete package uses its included game by default. The Windows GUI can instead select an existing game. Add-on packages use an existing game.'
 else
   EDITION_NOTE='This release contains add-on packages only. The installer finds your existing game automatically. There is no edition choice during installation.'
 fi

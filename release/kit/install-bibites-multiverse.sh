@@ -3,7 +3,8 @@
 # install-bibites-multiverse.sh
 #
 # Install the Bibites Multiverse mod and its sidecar on the game's NATIVE LINUX
-# build, and join a public map with the join string a map operator handed you.
+# build. The public package enrolls this installation automatically. A private
+# map uses the join string that its operator gives you.
 #
 # It needs no compiler, no SDK, no runtime and nothing from a developer's
 # toolchain, and it needs no root. It never starts the game. It writes nothing
@@ -21,8 +22,8 @@
 #      no Linux entry for it, in the matrix's own words;
 #   4. installs BepInEx linux_x64, if it is not already there;
 #   5. copies the plugin into BepInEx/plugins;
-#   6. splits your join string and stores the secret half in a file only you
-#      can read;
+#   6. creates a unique public-map identity, or splits a private-map join
+#      string, and stores the secret in a file only you can read;
 #   7. arranges trust for a private map's certificate authority ONLY if you
 #      gave it one with --ca-file, which a public map does not need;
 #   8. states the settings this install ships with, including the export
@@ -56,10 +57,11 @@
 #
 set -euo pipefail
 
-RELEASE='0.2.0'
+RELEASE='0.2.1'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_NAME='MANIFEST.sha256'
 MATRIX_NAME='support-matrix.json'
+PUBLIC_MAP_NAME='public-map.json'
 PAYLOAD_DESCRIPTOR_NAME='game-payload.json'
 PLUGIN_NAME='BibitesMultiverse.dll'
 SIDECAR_NAME='multiverse-sidecar'
@@ -105,11 +107,14 @@ usage() {
   cat <<USAGE
 usage: ./$(basename "$0") [options]
 
-  --join-string-file <path>  A file whose first non-empty line is the one-line
+  --join-string-file <path>  Use a private map instead of the packaged public
+                             map. The first non-empty line must be the one-line
                              join string your map's operator handed you:
                                multiverse-join/1 wss://<relay-host>/contract-b/v4 <peerId>.<secret>
-                             Leave it out and the join string is asked for at the
-                             keyboard, with the typing hidden.
+                             Without this option, the packaged public map enrolls
+                             this installation automatically. A kit without
+                             public-map.json asks at the keyboard, with hidden
+                             typing.
                              THERE IS DELIBERATELY NO --join-string OPTION: a
                              secret on a command line is in every process listing
                              on this machine and in your shell history. The wire
@@ -240,13 +245,13 @@ flat_get() {
 
 # ---------------------------------------------------------------- 0. the tools
 
-step "0 of 9 - the four programs this needs"
+step "0 of 9 - the programs this needs"
 
 # Named rather than assumed, because "it needs no toolchain" is a promise this
 # package makes and a promise is worth checking. Three of these are on any Linux
 # that can unpack a zip; the fourth is BepInEx's, not this installer's.
 MISSING=''
-for tool in sha256sum awk unzip file; do
+for tool in sha256sum awk unzip file curl; do
   if command -v "$tool" >/dev/null 2>&1; then
     say "$tool: $(command -v "$tool")"
   else
@@ -260,8 +265,9 @@ if [ -n "$MISSING" ]; then
   say "already. unzip unpacks BepInEx. 'file' is used by BepInEx's OWN launcher,"
   say "run_bepinex.sh, to check the game binary's architecture - without it the game"
   say "will not start even though this install would look complete, so it is checked"
-  say "here, where nothing has been installed yet."
-  say "On Debian or Ubuntu:   sudo apt install unzip file"
+  say "here, where nothing has been installed yet. curl sends one HTTPS enrollment"
+  say "request when this package connects to the public map."
+  say "On Debian or Ubuntu:   sudo apt install unzip file curl"
   stop_setup "this machine is missing a program this package needs. NOTHING was installed." 'INS-LINUXDEPS'
 fi
 
@@ -666,52 +672,165 @@ say "this install's own files live in $DATA_ROOT"
 say "your WORLDS are not in there and never will be: the game keeps them under"
 say "\${XDG_CONFIG_HOME:-\$HOME/.config}/unity3d/The Bibites/The Bibites/Savefiles"
 
-# ---------------------------------------------------------------- 6. the join string
+# ---------------------------------------------------------------- 6. the map identity
 
-step "6 of 9 - your join string"
+step "6 of 9 - connect this installation to a map"
 
-JOIN_STRING=''
-if [ -n "$JOIN_STRING_FILE" ]; then
-  [ -f "$JOIN_STRING_FILE" ] || stop_setup "No join string file at $JOIN_STRING_FILE."
-  while IFS= read -r line || [ -n "$line" ]; do
-    candidate="$(printf '%s' "$line" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    case "$candidate" in ''|'#'*) continue ;; esac
-    JOIN_STRING="$candidate"; break
-  done < "$JOIN_STRING_FILE"
-  [ -n "$JOIN_STRING" ] || stop_setup \
-    "$JOIN_STRING_FILE holds no join string. Its first non-empty line must be the one your operator sent."
-else
-  [ -t 0 ] || stop_setup \
-    "There is no join string and no keyboard to ask at. Pass --join-string-file with the one line your operator sent. There is no --join-string option, deliberately."
-  printf '\n'
-  say "Paste the join string your map's operator handed you. It looks like this:"
-  say "    multiverse-join/1 wss://<relay-host>/contract-b/v4 <your-world>.<secret>"
-  say "The typing is hidden, because the second half of it is the whole of your"
-  say "world's identity on that map. Nothing echoes it and no log ever prints it."
-  printf '\n'
-  printf '     join string: '
-  IFS= read -r -s JOIN_STRING || JOIN_STRING=''
-  printf '\n'
-  JOIN_STRING="$(printf '%s' "$JOIN_STRING" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-fi
-[ -n "$JOIN_STRING" ] || stop_setup "No join string was given, so this world has no identity on any map."
-
+PUBLIC_MAP_PATH="$HERE/$PUBLIC_MAP_NAME"
+USE_PUBLIC_MAP=0
+PENDING_ENROLLMENT_PATH=''
+CREDENTIAL_PATH="$DATA_ROOT/peer-secret.txt"
 CREDENTIAL=''
-# shellcheck disable=SC2086
-set -- $JOIN_STRING
-if [ $# -eq 3 ] && [ "$1" = 'multiverse-join/1' ]; then
-  RELAY_URL="$2"
-  CREDENTIAL="$3"
-elif [ $# -eq 1 ]; then
-  CREDENTIAL="$1"
-  [ -n "$RELAY_URL" ] || stop_setup \
-    "That is the identity half on its own, with no relay address. Either paste the whole one-line join string - it starts with 'multiverse-join/1' - or run this script again with --relay-url wss://<relay-host>/contract-b/v4." \
-    'INS-JOINSTRING'
+
+if [ -z "$JOIN_STRING_FILE" ] && [ -z "$RELAY_URL" ] && [ -f "$PUBLIC_MAP_PATH" ]; then
+  USE_PUBLIC_MAP=1
+  PENDING_ENROLLMENT_PATH="$DATA_ROOT/enrollment-pending.json"
+  PUBLIC_MAP_FLAT="$(json_flatten "$PUBLIC_MAP_PATH")"
+  [ "$(flat_get "$PUBLIC_MAP_FLAT" format)" = 'bibites-multiverse/public-map/1' ] || \
+    stop_setup "$PUBLIC_MAP_NAME has an unsupported format." 'INS-ENROLL'
+  ENROLLMENT_URL="$(flat_get "$PUBLIC_MAP_FLAT" enrollmentUrl)"
+  PUBLIC_RELAY_URL="$(flat_get "$PUBLIC_MAP_FLAT" relayUrl)"
+  case "$ENROLLMENT_URL" in
+    https://?*) case "$ENROLLMENT_URL" in *[[:space:]]*) stop_setup "$PUBLIC_MAP_NAME does not contain a secure HTTPS enrollment address." 'INS-ENROLL' ;; esac ;;
+    *) stop_setup "$PUBLIC_MAP_NAME does not contain a secure HTTPS enrollment address." 'INS-ENROLL' ;;
+  esac
+  case "$PUBLIC_RELAY_URL" in
+    wss://?*) case "$PUBLIC_RELAY_URL" in *[[:space:]]*) stop_setup "$PUBLIC_MAP_NAME does not contain a secure WSS relay address." 'INS-ENROLL' ;; esac ;;
+    *) stop_setup "$PUBLIC_MAP_NAME does not contain a secure WSS relay address." 'INS-ENROLL' ;;
+  esac
+
+  EXISTING_RECORD_PATH="$DATA_ROOT/$RECORD_NAME"
+  EXISTING_RECORD_HELD=0
+  CREDENTIAL_HELD=0
+  [ -f "$EXISTING_RECORD_PATH" ] && EXISTING_RECORD_HELD=1
+  [ -f "$CREDENTIAL_PATH" ] && CREDENTIAL_HELD=1
+  REUSED_IDENTITY=0
+  if [ "$EXISTING_RECORD_HELD" -eq 1 ] && [ "$CREDENTIAL_HELD" -eq 1 ]; then
+    EXISTING_RECORD_FLAT="$(json_flatten "$EXISTING_RECORD_PATH")"
+    EXISTING_PEER_ID="$(flat_get "$EXISTING_RECORD_FLAT" peerId)"
+    EXISTING_RELAY_URL="$(flat_get "$EXISTING_RECORD_FLAT" relayUrl)"
+    EXISTING_SECRET="$(head -n1 "$CREDENTIAL_PATH" | tr -d '\r\n')"
+    if printf '%s' "$EXISTING_PEER_ID" | grep -Eq '^public-[0-9a-f]{32}$' &&
+       printf '%s' "$EXISTING_SECRET" | grep -Eq '^[0-9a-f]{64}$' &&
+       [ "$EXISTING_RELAY_URL" = "$PUBLIC_RELAY_URL" ]; then
+      if [ -f "$PENDING_ENROLLMENT_PATH" ]; then
+        LEFTOVER_FLAT="$(json_flatten "$PENDING_ENROLLMENT_PATH")"
+        LEFTOVER_INSTALL_ID="$(flat_get "$LEFTOVER_FLAT" installId)"
+        LEFTOVER_SECRET="$(flat_get "$LEFTOVER_FLAT" secret)"
+        LEFTOVER_PEER_ID="public-$(printf '%s' "$LEFTOVER_INSTALL_ID" | tr -d '-' | tr 'A-F' 'a-f')"
+        if [ "$(flat_get "$LEFTOVER_FLAT" format)" != 'bibites-multiverse/enrollment-pending/1' ] ||
+           [ "$LEFTOVER_PEER_ID" != "$EXISTING_PEER_ID" ] ||
+           [ "$LEFTOVER_SECRET" != "$EXISTING_SECRET" ]; then
+          stop_setup "The completed identity and $PENDING_ENROLLMENT_PATH disagree. Neither file was changed. Ask the operator before replacing this world identity." 'INS-ENROLL'
+        fi
+      fi
+      RELAY_URL="$PUBLIC_RELAY_URL"
+      CREDENTIAL="$EXISTING_PEER_ID.$EXISTING_SECRET"
+      REUSED_IDENTITY=1
+      say "reusing this installation's existing public-map identity"
+    fi
+  fi
+
+  if [ "$REUSED_IDENTITY" -eq 0 ]; then
+    if { [ "$EXISTING_RECORD_HELD" -eq 1 ] || [ "$CREDENTIAL_HELD" -eq 1 ]; } &&
+       [ ! -f "$PENDING_ENROLLMENT_PATH" ]; then
+      stop_setup "This data root contains part of a completed map identity, but the installer cannot safely reuse it. Use a different --data-root for a new world, or ask the operator for a slot handover." 'INS-ENROLL'
+    fi
+
+    INSTALL_ID=''
+    ENROLLMENT_SECRET=''
+    if [ -f "$PENDING_ENROLLMENT_PATH" ]; then
+      PENDING_FLAT="$(json_flatten "$PENDING_ENROLLMENT_PATH")"
+      [ "$(flat_get "$PENDING_FLAT" format)" = 'bibites-multiverse/enrollment-pending/1' ] || \
+        stop_setup "$PENDING_ENROLLMENT_PATH is not an enrollment record this installer can use. Remove it only if you want a different map identity." 'INS-ENROLL'
+      INSTALL_ID="$(flat_get "$PENDING_FLAT" installId)"
+      ENROLLMENT_SECRET="$(flat_get "$PENDING_FLAT" secret)"
+      say 'retrying the pending public-map enrollment'
+    else
+      [ -r /proc/sys/kernel/random/uuid ] || \
+        stop_setup 'This Linux system has no kernel UUID source. The installer did not contact the map.' 'INS-ENROLL'
+      INSTALL_ID="$(tr 'A-F' 'a-f' < /proc/sys/kernel/random/uuid | tr -d '\r\n')"
+      ENROLLMENT_SECRET="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+      ( umask 077
+        printf '{\n  "format": "bibites-multiverse/enrollment-pending/1",\n  "installId": "%s",\n  "secret": "%s"\n}\n' \
+          "$INSTALL_ID" "$ENROLLMENT_SECRET" > "$PENDING_ENROLLMENT_PATH"
+      )
+    fi
+
+    if ! printf '%s' "$INSTALL_ID" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' ||
+       ! printf '%s' "$ENROLLMENT_SECRET" | grep -Eq '^[0-9a-f]{64}$'; then
+      stop_setup "$PENDING_ENROLLMENT_PATH contains an invalid map identity. Remove it only if you want a different identity." 'INS-ENROLL'
+    fi
+    chmod 600 "$PENDING_ENROLLMENT_PATH"
+    PENDING_MODE="$(stat -c '%a' "$PENDING_ENROLLMENT_PATH" 2>/dev/null || echo '?')"
+    [ "$PENDING_MODE" = 600 ] || \
+      stop_setup "The installer could not protect $PENDING_ENROLLMENT_PATH. It did not contact the map. Use a --data-root on a filesystem with Unix permissions." 'INS-ENROLL'
+
+    EXPECTED_PEER_ID="public-$(printf '%s' "$INSTALL_ID" | tr -d '-')"
+    REQUEST_BODY="$(printf '{"format":"bibites-multiverse/enrollment-request/1","installId":"%s","secret":"%s","release":"%s"}' \
+      "$INSTALL_ID" "$ENROLLMENT_SECRET" "$RELEASE")"
+    say "requesting a unique identity from $ENROLLMENT_URL"
+    set +e
+    ENROLLMENT_RESPONSE="$(printf '%s' "$REQUEST_BODY" | curl --fail --silent --show-error \
+      --max-time 30 --header 'Content-Type: application/json' --data-binary @- "$ENROLLMENT_URL")"
+    CURL_RC=$?
+    set -e
+    REQUEST_BODY=''
+    if [ "$CURL_RC" -ne 0 ]; then
+      stop_setup "The public map did not create this installation's identity. The pending identity was kept, so running the installer again is a safe retry." 'INS-ENROLL'
+    fi
+    RESPONSE_FLAT="$(printf '%s' "$ENROLLMENT_RESPONSE" | json_flatten /dev/stdin)"
+    if [ "$(flat_get "$RESPONSE_FLAT" format)" != 'bibites-multiverse/enrollment-response/1' ] ||
+       [ "$(flat_get "$RESPONSE_FLAT" relayUrl)" != "$PUBLIC_RELAY_URL" ] ||
+       [ "$(flat_get "$RESPONSE_FLAT" peerId)" != "$EXPECTED_PEER_ID" ]; then
+      stop_setup 'The public map returned an enrollment response for a different identity or relay.' 'INS-ENROLL'
+    fi
+    RELAY_URL="$PUBLIC_RELAY_URL"
+    CREDENTIAL="$EXPECTED_PEER_ID.$ENROLLMENT_SECRET"
+  fi
 else
-  stop_setup "That is not a join string this installer can read. The one-line form is three parts: 'multiverse-join/1', the wss:// relay address, and your identity and secret joined by a dot. Ask your operator to send the 'one line' from the block their relay printed." \
-    'INS-JOINSTRING'
+  JOIN_STRING=''
+  if [ -n "$JOIN_STRING_FILE" ]; then
+    [ -f "$JOIN_STRING_FILE" ] || stop_setup "No join string file at $JOIN_STRING_FILE."
+    while IFS= read -r line || [ -n "$line" ]; do
+      candidate="$(printf '%s' "$line" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      case "$candidate" in ''|'#'*) continue ;; esac
+      JOIN_STRING="$candidate"; break
+    done < "$JOIN_STRING_FILE"
+    [ -n "$JOIN_STRING" ] || stop_setup \
+      "$JOIN_STRING_FILE holds no join string. Its first non-empty line must be the one your operator sent."
+  else
+    [ -t 0 ] || stop_setup \
+      "There is no join string and no keyboard to ask at. Pass --join-string-file with the one line your operator sent. There is no --join-string option, deliberately."
+    printf '\n'
+    say "Paste the join string your map's operator handed you. It looks like this:"
+    say "    multiverse-join/1 wss://<relay-host>/contract-b/v4 <your-world>.<secret>"
+    say "The typing is hidden, because the second half of it is the whole of your"
+    say "world's identity on that map. Nothing echoes it and no log ever prints it."
+    printf '\n'
+    printf '     join string: '
+    IFS= read -r -s JOIN_STRING || JOIN_STRING=''
+    printf '\n'
+    JOIN_STRING="$(printf '%s' "$JOIN_STRING" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  fi
+  [ -n "$JOIN_STRING" ] || stop_setup "No join string was given, so this world has no identity on any map."
+
+  # shellcheck disable=SC2086
+  set -- $JOIN_STRING
+  if [ $# -eq 3 ] && [ "$1" = 'multiverse-join/1' ]; then
+    RELAY_URL="$2"
+    CREDENTIAL="$3"
+  elif [ $# -eq 1 ]; then
+    CREDENTIAL="$1"
+    [ -n "$RELAY_URL" ] || stop_setup \
+      "That is the identity half on its own, with no relay address. Either paste the whole one-line join string - it starts with 'multiverse-join/1' - or run this script again with --relay-url wss://<relay-host>/contract-b/v4." \
+      'INS-JOINSTRING'
+  else
+    stop_setup "That is not a join string this installer can read. The one-line form is three parts: 'multiverse-join/1', the wss:// relay address, and your identity and secret joined by a dot. Ask your operator to send the 'one line' from the block their relay printed." \
+      'INS-JOINSTRING'
+  fi
+  set --
 fi
-set --
 
 case "$RELAY_URL" in
   ws://*) stop_setup "The relay address is ws://, which is not encrypted. This wire is always wss:// and there is no fallback anywhere in this software: a relay that answers ws:// off loopback refuses the connection rather than serving it. Ask your operator for the wss:// address." 'INS-JOINSTRING' ;;
@@ -733,7 +852,6 @@ fi
 case "$SECRET"  in *[![:print:]]*|*' '*) stop_setup "The secret half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING' ;; esac
 case "$PEER_ID" in *[![:print:]]*|*' '*) stop_setup "The identity half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING' ;; esac
 
-CREDENTIAL_PATH="$DATA_ROOT/peer-secret.txt"
 # Created empty and private BEFORE a byte of the secret is in it: a file that is
 # world-readable for the instant between the write and the chmod is a file that
 # was world-readable.
@@ -750,6 +868,9 @@ else
   say "filesystem with no Unix permissions, move --data-root somewhere that has them."
 fi
 SECRET=''
+CREDENTIAL=''
+ENROLLMENT_SECRET=''
+EXISTING_SECRET=''
 say "your world's identity on this map: $PEER_ID"
 say "the relay it dials: $RELAY_URL"
 printf '\n'
@@ -757,7 +878,7 @@ say "IF YOU LOSE THAT SECRET there is no software recovery: the relay keeps a ve
 say "and cannot print it again. The only way back is to ask the operator for a slot"
 say "handover, which mints a fresh one. Your slot, your position and everything"
 say "addressed to you survive that - see docs/participant/leave.md."
-if [ -n "$JOIN_STRING_FILE" ]; then
+if [ "$USE_PUBLIC_MAP" -eq 0 ] && [ -n "$JOIN_STRING_FILE" ]; then
   printf '\n'
   say "Delete $JOIN_STRING_FILE now. It still holds the secret in clear text, and this"
   say "installer will not delete a file you gave it."
@@ -848,7 +969,7 @@ for e in $(printf '%s' "$EXPORT_EDGES" | tr ',;' '  '); do
 done
 EDGE_LIST="$(printf '%s' "$EDGE_LIST" | sed -e 's/^ //')"
 [ -n "$EDGE_LIST" ] || stop_setup \
-  "--export-edges names no edge. Use E, N, W or S, comma separated - normally 'E,N,W,S'. If you want this world off the map entirely, do not join it: an install with no join string connects to nothing."
+  "--export-edges names no edge. Use E, N, W or S, comma separated - normally 'E,N,W,S'. If you want this world off the map, do not start it."
 EXPORT_EDGES="$(printf '%s' "$EDGE_LIST" | tr ' ' ',')"
 
 if [ "$NO_MIGRATION_EXCLUSION" -eq 1 ]; then
@@ -1028,7 +1149,7 @@ if running "$SIDECAR_PID_FILE"; then
 fi
 if [ ! -f "$CREDENTIAL_FILE" ]; then
   printf 'There is no credential at %s.\n' "$CREDENTIAL_FILE" >&2
-  printf 'Run ./install-bibites-multiverse.sh again with your join string.\n' >&2
+  printf 'Run ./install-bibites-multiverse.sh again. For a private map, pass --join-string-file.\n' >&2
   exit 1
 fi
 
@@ -1285,6 +1406,11 @@ RECORD_PATH="$DATA_ROOT/$RECORD_NAME"
   printf '}\n'
 } > "$RECORD_PATH"
 say "wrote $RECORD_PATH - the uninstall reads it, and removes only what is named in it"
+if [ "$USE_PUBLIC_MAP" -eq 1 ] && [ -n "$PENDING_ENROLLMENT_PATH" ] &&
+   [ -f "$PENDING_ENROLLMENT_PATH" ]; then
+  rm -f "$PENDING_ENROLLMENT_PATH"
+  say 'removed the pending enrollment record after completing the install record'
+fi
 
 # ---------------------------------------------------------------- done
 

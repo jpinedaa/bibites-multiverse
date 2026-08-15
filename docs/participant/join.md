@@ -1,15 +1,15 @@
 # Join
 
-The recommended Windows installer joins the public map automatically. A private map, and the
-current Linux package, use an operator-issued join string. Both paths produce the same two local
-values: one public world identity and one secret that only this installation should hold.
+The Windows and Linux installers join the public map automatically. A private map uses an
+operator-issued join string. Both paths produce the same two local values: one public world
+identity and one secret that only this installation must hold.
 
 This page explains both paths, what happens on the first claim, and what other people can see
 about your world once it is there.
 
 ## Automatic public enrollment
 
-Both Windows `0.2.0` archives contain `public-map.json`. This file is the public join
+All participant `0.2.1` archives contain `public-map.json`. This file is the public join
 configuration. It contains the deployed HTTPS enrollment address and WSS relay address. It does
 not contain a world identity or secret.
 
@@ -20,7 +20,7 @@ one world's identity and secret, so it cannot be shared by all installations.
 During installation, it does this:
 
 1. It creates a random secret and installation UUID on your computer.
-2. It protects a pending record so only your Windows account can read it.
+2. It protects a pending record for your account. Windows uses an ACL. Linux uses mode `0600`.
 3. It sends the UUID, secret, and release number to the public enrollment endpoint over HTTPS.
 4. The relay stores a salted verifier and returns the derived public identity and relay address.
    It does not return or log the secret.
@@ -105,20 +105,18 @@ losing it costs a handover.
 does not hold another, and presenting yours for a role it does not carry is refused rather than
 quietly downgraded.
 
-**The advanced Windows installer and the Linux installer apply the join string for you.** Run
-`.\Install-BibitesMultiverse.ps1 -JoinStringFile .\join.txt` for a private Windows map, or run
-`./install-bibites-multiverse.sh` on Linux. Without a public-map file, the Windows script asks for
-the join string **with the typing hidden**. It splits the two halves at the last dot, checks the
-secret's shape before writing anything, and stores the secret half — alone — in `peer-secret.txt` under this install's
-data root (`%LOCALAPPDATA%\BibitesMultiverse` on Windows,
-`${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse` on Linux), with the permissions set so
-only your account can read it: an ACL naming you alone on Windows, mode `0600` on Linux, and the
-Linux installer creates the file empty and private *before* a byte of the secret is in it. The
-identity half and the relay address go into the generated start script as `--peer-id` and
-`--relay`; **the secret is never in that file, in any command line, or in any log.**
-`-JoinStringFile .\join.txt` / `--join-string-file ./join.txt` is there if you would rather not
-type it, and the installer then tells you to delete that file — it will not delete a file you
-gave it.
+**Both advanced installers apply a private join string.** On Windows, run
+`.\Install-BibitesMultiverse.ps1 -JoinStringFile .\join.txt`. On Linux, run
+`./install-bibites-multiverse.sh --join-string-file ./join.txt`. The file overrides the packaged
+public-map configuration.
+
+Each installer splits the two halves at the last dot. It checks the secret before it writes the
+credential. It stores only the secret in `peer-secret.txt` under the data root. Windows applies
+an ACL for your account. Linux creates the file with mode `0600` before it writes the secret.
+
+The identity and relay address go into the generated start script as `--peer-id` and `--relay`.
+**The secret is never in that script, a command line, or a log.** Delete the join-string file
+after installation. The installer does not delete a file that you supplied.
 
 **To change a private-map identity later** — a slot handover, or a move to another map — run the
 advanced installer again with the new join-string file. It rewrites the credential file and the
