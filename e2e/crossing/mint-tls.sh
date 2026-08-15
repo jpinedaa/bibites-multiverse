@@ -15,6 +15,7 @@
 # The private keys never enter the repository. The only file that leaves this
 # machine is ca.crt, which is public by construction.
 #
+#   e2e/crossing/mint-tls.sh
 #   LAN_HOST=<windows-lan-ip> e2e/crossing/mint-tls.sh
 #   LAN_HOST=<windows-lan-ip> e2e/crossing/mint-tls.sh --renew-leaf
 #   LAN_HOST=<windows-lan-ip> TLS_DIR=/tmp/scratch e2e/crossing/mint-tls.sh
@@ -37,16 +38,20 @@ TLS_DIR="${TLS_DIR:-$E2E/tls-m4-lan}"
 #                    relay's listener is TLS for EVERY address including loopback
 #                    (crypto/tls wraps the net.Listener whole), so the local
 #                    clients dial wss://127.0.0.1 and verify this name.
-#   LAN_HOST         the Windows LAN IPv4 address for this run. The Windows
+#   LAN_HOST         the optional Windows LAN IPv4 address for this run. The Windows
 #                    portproxy forwards it into the WSL VM. The far-end TLS
-#                    client verifies this dialled address. This value is
-#                    required because the correct LAN interface is site-specific.
+#                    client verifies this dialled address. A loopback-only run
+#                    leaves this value empty.
 #   WSL_IP           the current WSL address and the portproxy connect address.
-#                    The script derives it from the host. Override it with
-#                    WSL_IP= to omit it.
+#                    The script uses it only when LAN_HOST is set. It derives the
+#                    default from the host. Override it with WSL_IP= to omit it.
 #   localhost        the same loopback under its name, for a hand dial.
 LAN_HOST="${LAN_HOST:-}"
-WSL_IP="${WSL_IP-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+if [ -n "$LAN_HOST" ]; then
+  WSL_IP="${WSL_IP-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+else
+  WSL_IP=""
+fi
 
 CA_DAYS="${CA_DAYS:-3650}"
 LEAF_DAYS="${LEAF_DAYS:-397}"
@@ -59,7 +64,6 @@ step() { printf '\n==== %s\n' "$*"; }
 die() { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
 
 command -v openssl >/dev/null || die "openssl is not on PATH"
-[ -n "$LAN_HOST" ] || die "LAN_HOST is required. Set it to this machine's Windows LAN IPv4 address."
 
 umask 077
 mkdir -p "$TLS_DIR"
@@ -84,7 +88,8 @@ fi
 # openssl needs it in both places: a CSR's SAN is not carried into the
 # certificate unless -copy_extensions or an explicit -extfile says so, and this
 # uses the explicit form so the list in force is the list written here.
-sans="IP:127.0.0.1,DNS:localhost,IP:$LAN_HOST"
+sans="IP:127.0.0.1,DNS:localhost"
+[ -n "$LAN_HOST" ] && sans="$sans,IP:$LAN_HOST"
 [ -n "$WSL_IP" ] && sans="$sans,IP:$WSL_IP"
 
 step "the names this certificate will carry"

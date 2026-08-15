@@ -117,8 +117,14 @@ Stop the peer with this command:
 .\stop-slot6.ps1
 ```
 
-The generated stop script uses `Stop-Process -Force` for the game and sidecar.
-It does not request a graceful game shutdown.
+The generated stop script reads the managed game and sidecar PID records.
+It makes sure that each PID uses the expected executable path.
+It then uses `Stop-Process -Force` for that recorded process.
+It never selects processes by name and does not request a graceful game shutdown.
+
+If a PID record is missing, stale, or mismatched, the script prints a warning.
+It leaves all unknown processes active.
+Investigate the warning before you stop any process by hand.
 
 CAUTION: If you must keep unsaved world changes, do not stop the peer.
 If recent changes must be kept, wait for the next `[M4-SAVE] event=SAVED` log entry.
@@ -127,6 +133,7 @@ The default save interval is 10 minutes.
 Thus, a forced stop can lose almost 10 minutes of world changes.
 
 The script does not delete the sidecar journal files.
+It does not stop another game or sidecar outside this managed peer.
 No command on another computer controls this peer.
 
 ## Pacing test
@@ -141,7 +148,7 @@ The arrival-pacing fixture can stop only the game while the sidecar keeps custod
 
 Keep the sidecar active between these commands.
 The sidecar stores arrivals and releases the backlog after the game returns.
-The `-GameOnly` command also forces the game to stop.
+The `-GameOnly` command force-stops only the game from its valid PID record.
 The same save-loss window applies.
 
 ## Common failures
