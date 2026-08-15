@@ -243,7 +243,10 @@ here can do any of it**, and none of it has been done.
 5. **Attach a static IP.** Lightsail → Networking → Create static IP → attach.
    **Do this before the A record**: a Lightsail instance's default public address
    changes when it is stopped and started.
-6. **Register the domain and point it.** Any registrar. Create an **A record**
+6. **Register the domain and point it.** The registrar comparison and the choice
+   — Cloudflare Registrar, Porkbun as the fallback — are in
+   `wp3_hosting_options.md`, *Which registrar to buy from, and which name to
+   buy*, and the purchase has its own handoff at `HANDOFF-domain.md`. Create an **A record**
    for the name at the static IP, TTL 300 while setting up. If an **AAAA** record
    exists it must point at the same instance, or the ACME validator will reach
    the wrong host over IPv6. **The name is permanent for the run.**

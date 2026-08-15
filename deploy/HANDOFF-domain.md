@@ -70,6 +70,14 @@ The join string is literally `multiverse-join/1 wss://<host>/contract-b/v4 <peer
 URL in its configuration, and the release channel — GitHub Releases — pushes nothing to anybody.
 Hence the standing instruction in that document: **treat the name as permanent for the run.**
 
+**Why this name and not one of the others.** It came off a shortlist of seven verified-available
+names in three families, and it was picked as the most literal and most searchable of them, at the
+cost of ten more characters in every join string. The shortlist, the RDAP method behind it, the
+names already known to be taken, and the trademark position — *"The Bibites"* is the developer's
+mark, and the owner decided on 2026-08-12 not to ask him — are all in `wp3_hosting_options.md`,
+*Which registrar to buy from, and which name to buy*. If the owner reopens the question mid-flow,
+that is the section to take him back to, along with §9E below.
+
 `status.bibitesmultiverse.com` is on the certificate because a second name costs nothing at
 issuance and cannot be added later without a re-issue. You do not need to do anything about it
 today beyond knowing it exists and will need its own A record later.
@@ -87,10 +95,15 @@ today beyond knowing it exists and will need its own A record later.
 | Requires an account | Yes — the registrar lives inside the Cloudflare dashboard | Yes |
 
 **Confirm the price on the screen before the owner pays.** The figures above were fetched from
-the web on 2026-08-14 and this repo does not carry a registrar price of its own; the only
-domain-cost line in the project is `wp3_hosting_options.md`'s planning estimate of ~$10–15/year
-amortised over the announced three months, which both registrars satisfy. If the screen says
-something materially different, say so and let the owner decide.
+the web on 2026-08-14 and re-verified the same day in `wp3_hosting_options.md`, *Which registrar
+to buy from, and which name to buy*, which now carries the full four-way comparison and the same
+numbers. They are still web prices and not an order screen. If the screen says something
+materially different, say so and let the owner decide.
+
+**One number from that comparison is worth saying out loud at the order screen.** Cloudflare's
+flat renewal means *no registrar markup*, not a frozen price: Verisign has announced a `.com`
+wholesale rise from $10.26 to **$10.97 effective 2026-11-01**, which an at-cost registrar passes
+straight through (~$11.15). It falls after the announced run ends and changes nothing today.
 
 **The nameserver lock-in is real and today it costs nothing.** Registrar and DNS become one
 account, and there is nothing to migrate: no zone exists, no record exists, nobody resolves this
@@ -103,13 +116,13 @@ registrar the owner has not chosen"*, and `provision.sh` refuses `MV_ACME_MODE=d
 guessing a provider. Registering at Cloudflare makes that plugin choosable later. It is not part
 of this handoff, it needs an API token (a secret), and nothing about it should be set up today.
 
-**A caveat this document owes you.** The task that produced this file described a full registrar
-comparison — Porkbun, Namecheap, Route 53, and why each loses — as living in
-`wp3_hosting_options.md`. **It does not.** That document compares *sources of a name* (a cloud
-hostname, free dynamic DNS, a registered domain) and prices DNS *zones* at Route 53 and Cloud
-DNS; it names no registrar and recommends none. The Cloudflare choice is therefore the owner's
-and this document's, not a decision recorded elsewhere in the repo. Do not cite
-`wp3_hosting_options.md` to the owner as the authority for it.
+**Where the full argument lives.** `wp3_hosting_options.md`, *Which registrar to buy from, and
+which name to buy*, holds the four-way comparison — Cloudflare, Porkbun, Namecheap, Route 53 —
+with prices, renewals, the nameserver coupling and why each of the other two loses. That
+subsection was written on 2026-08-14, after an earlier version of this handoff correctly reported
+that no such comparison existed; it exists now, and it is the authority you may cite to the
+owner. This section is its summary, not a second opinion — if the two ever disagree, that
+document is the one that gets corrected.
 
 ---
 
@@ -329,13 +342,18 @@ the changed path and a proposed commit message to the orchestrator. Do not run `
 
 **A. The name is taken (RDAP returns `200`).**
 Stop before any purchase. Tell the owner plainly: the name is gone, and here is what the RDAP
-record says about when it was registered and by whom, if it says anything. Then be honest about
-the next part: **this repo contains no shortlist of alternate names.** The task that produced this
-handoff believed one existed in `wp3_hosting_options.md`; it does not, and neither does any other
-file. So do not point at a list — ask the owner for candidates, run the same RDAP command against
-each (`https://rdap.verisign.com/com/v1/domain/<name>` for `.com`), and report which are `404`.
-Whatever he picks then has to be written into `deploy/deploy.env.example` lines 35 and 41 —
-**both**, since the second is `status.<domain>` — before anything else in the kit is run.
+record says about when it was registered and by whom, if it says anything. Then go to the
+shortlist — **there is one**, in `wp3_hosting_options.md`, *The name: how the shortlist was built,
+and what the method cannot tell you*. As of 2026-08-14 it lists six other names verified available
+at their registries: `bibiteverse.com`, `bibiteworlds.com`, `evoworlds.com`,
+`organismcrossing.com`, `bibites.org` and `bibites.world` — the last two on TLDs whose renewal
+economics differ, and the two concept names carrying none of the trademark exposure that document's
+*The name the project does not own* describes. **Re-run RDAP against every candidate before
+offering it**, because that list has the same shelf life as the check in §4:
+`curl -s -o /dev/null -w '%{http_code}\n' https://rdap.verisign.com/com/v1/domain/<name>.com`,
+`404` available and `200` taken. The choice is still the owner's, and whatever he picks has to be
+written into `deploy/deploy.env.example` lines 35 and 41 — **both**, since the second is
+`status.<domain>` — before anything else in the kit is run.
 
 **B. Cloudflare refuses to sell to a brand-new account.**
 This happens: registrars gate new or unverified accounts, and Cloudflare's own documentation notes
@@ -396,11 +414,13 @@ Stated rather than left to be discovered, in the style of `deploy/README.md` §7
 
 - **The live registrar UI was never opened.** Every label, menu name and page order in §5 is
   expectation. The snapshot on your screen outranks all of it.
-- **The prices are from the web on 2026-08-14**, not from this repo, and not from an order screen.
-  Confirm before the owner pays.
-- **No registrar comparison exists in this repository.** §3 says so at length; do not cite one.
-- **There is no shortlist of alternate names anywhere in this project.** §9A depends on the owner
-  supplying candidates.
+- **The prices are from the web on 2026-08-14**, and they are also in `wp3_hosting_options.md` as
+  of that date — but not from an order screen. Confirm before the owner pays.
+- **The registrar comparison and the name shortlist do exist**, both in `wp3_hosting_options.md`,
+  *Which registrar to buy from, and which name to buy*, written 2026-08-14. Earlier revisions of
+  this handoff said they did not; that was true when it was written and is not true now.
+- **The shortlist's availability was verified on 2026-08-14 and nothing else.** A `404` from RDAP
+  does not rule out a registry-reserved or premium-priced name, and §9A still has you re-check.
 - **Nothing here has been executed** except the RDAP availability check, which returned `404` on
   2026-08-14 — and that answer has a shelf life measured in minutes, which is why §4 makes you run
   it again.

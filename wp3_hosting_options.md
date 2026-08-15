@@ -1,6 +1,8 @@
 # WP3 Hosting Options — a costed set, for iteration
 
-**Status: an options document. Nothing here is decided.** It exists so that the hosting calls
+**Status: an options document. Nothing here is decided** — with one dated exception, *Which
+registrar to buy from, and which name to buy*, added 2026-08-14 to record the reasoning behind a
+choice the owner had already made and the repo already carries. It exists so that the hosting calls
 WP3 waits on can be made against arithmetic instead of against a feeling, and every option in it
 is written to be argued with. Where a number is a measurement it says so and says when; where it
 is a vendor's published price it says which page and what date; where it is a guess it is called
@@ -450,11 +452,11 @@ That single fact settles the three options:
 |---|---|---|
 | **The cloud's own hostname** | $0 | **Not viable.** Let's Encrypt refuses to issue for `*.compute.amazonaws.com` by policy **[web, 2026-08-11]**, and GCE assigns no public DNS name at all. It also ties the name to one instance, which is the exact thing you must not do. |
 | **Free dynamic DNS** (DuckDNS, no-ip) | **$0** | Owner-controlled A record, so the name survives a host move — which is the property that matters. DNS-01 issuance works. The costs are a third party's continued existence and terms over the announced period, and a name that reads as provisional in a join string handed to a stranger. |
-| **A registered domain** | **~$5** | ~$10–15/year at a registrar **[training]** amortised over 3 months, plus a zone: Route 53 **$0.50/zone/month**, Cloud DNS **$0.20/zone/month**, both plus $0.40/million queries **[web, 2026-08-11]**; Cloudflare's free tier is $0. Same host-independence, no third-party name in the join string, and it outlives the run — which matters if D24 is ever extended. |
+| **A registered domain** | **~$2.61 amortised — $10.44 actually spent** | **$10.44/year** at the registrar chosen in the next subsection **[web, 2026-08-14]**, and a year is the smallest term sold, so the amortised figure is arithmetic rather than an invoice. Plus a zone: Route 53 **$0.50/zone/month**, Cloud DNS **$0.20/zone/month**, both plus $0.40/million queries **[web, 2026-08-11]**; **Cloudflare's is $0**, which is the one taken. Same host-independence, no third-party name in the join string, and it outlives the run — which matters if D24 is ever extended. |
 
-**A domain is the cheapest insurance in this document.** Five dollars decouples the string every
-participant holds from the machine it points at, and every migration path in Part 3 depends on that
-decoupling.
+**A domain is the cheapest insurance in this document.** Ten dollars and change — one year, the
+smallest term anybody sells — decouples the string every participant holds from the machine it
+points at, and every migration path in Part 3 depends on that decoupling.
 
 One design note WP3 will have to take, flagged rather than answered: the relay currently listens on
 its own port with its own TLS. Participants behind restrictive networks will have an easier time on
@@ -463,6 +465,143 @@ duplicates or terminates the TLS B23 gave the relay. The cheap version is to mov
 and give the status page its own port or its own name; the expensive version is a proxy. **This is
 a WP3 call, and it should be made before the first join string is minted, because the port is in
 the join string too.**
+
+### Which registrar to buy from, and which name to buy
+
+*Added 2026-08-14, two days after the rest of this document.* The section above settles what **kind**
+of name to use and then stops: it prices *zones*, not *registrations*, and it names neither a
+registrar nor a single candidate name. Both questions were researched and both were answered, and
+the answers are already load-bearing in the repo — `deploy/deploy.env.example` sets
+`MV_DOMAIN=bibitesmultiverse.com` and `MV_CERT_EXTRA_NAMES=status.bibitesmultiverse.com`, and
+`deploy/provision.sh`'s preflight refuses to run on a placeholder domain at all **[record:
+`deploy/deploy.env.example` lines 35 and 41; `deploy/provision.sh`, `phase_preflight`]**. What was
+missing was the reasoning. **Read this before renewing the name, or before moving it.**
+
+#### The registrar: four options, `.com` unless noted
+
+| Registrar | First year | **Renewal** | WHOIS privacy | DNS | The string attached |
+|---|---|---|---|---|---|
+| **Cloudflare Registrar** | ~**$10.44** | ~**$10.44 — the same number** | free, automatic, no upsell to decline | free, with an API | **its own nameservers are mandatory** |
+| **Porkbun** | **$11.08** | **$11.08 — the same number** | free | free, Cloudflare-backed | none that matters here |
+| **Namecheap** | ~$10.98 | **~$18.48** | free | free | the renewal is **~68% above** the first year |
+| **AWS Route 53** | **$16.00** | $16.00 | free | **$0.50/zone/month — $6/yr on top** | **~$22/yr all-in**, for nothing this project uses |
+
+All four rows **[web, 2026-08-14]**. Every one of them is a page that can move between now and
+checkout, and **the order screen outranks this table.**
+
+**Cloudflare, and what "at cost" actually means.** Cloudflare's registrar sells at the registry's
+wholesale price plus ICANN's mandatory **$0.18** transaction fee and takes no margin, which is why
+registration and renewal are one number instead of two. Verisign's `.com` wholesale is **$10.26**
+today, so the shelf price is **$10.44**; a price tracker read **$10.46** the same day, and two cents
+is not worth resolving from a chair. **But "no markup" is not "no increase".** Verisign has
+announced a 7% rise to **$10.97 effective 2026-11-01** **[web, 2026-08-14]**, and an at-cost
+registrar passes that straight through — about **$11.15** at the first renewal. That date falls just
+after D24's announced period ends, so it costs this run nothing; it is recorded because the reader
+this subsection exists for is the owner in three months, deciding whether to renew.
+
+**The coupling, named because it is free today and will not always be.** Cloudflare Registrar will
+not let the zone be delegated elsewhere: registrar and DNS become one account and one vendor. The
+switching cost of that is **zero on the day of purchase** — no zone exists, no record exists, nobody
+resolves this name — and it is a real constraint anyway, so it goes in writing rather than being
+discovered later. It also has one upside this project can state precisely: `deploy/README.md` §4
+records DNS-01 as *"the better answer"*, unavailable because it *"needs a certbot plugin for a
+registrar the owner has not chosen"*, and `provision.sh` **refuses `MV_ACME_MODE=dns` rather than
+guessing a provider** **[record]**. A Cloudflare zone with a free API makes that refusing stub
+choosable, which is worth something on the day port 80 becomes inconvenient.
+
+**Porkbun is the named fallback**, and it is a fallback rather than a defeat: $0.64/year more, the
+same flat renewal, free privacy, free Cloudflare-backed DNS, and **no nameserver lock-in**. Take it
+if the owner would rather not hold a Cloudflare account, or wants a TLD Cloudflare does not carry.
+It is also the cheapest first-year `.world` on the shortlist below — **$2.57, renewing at $33.47**
+**[web, 2026-08-14]** — which is a different trap wearing a discount.
+
+**Namecheap has no case here.** Its first year is competitive and its renewal is not, and a name
+this document calls *permanent for the run* is bought for its renewal price. Every advantage it
+offers — free privacy, free DNS — the other two offer at a flat rate.
+
+**Route 53 loses on price and gains nothing on integration.** $16/yr for the name **plus** $0.50 a
+month for the hosted zone is **$22/yr**: about **$44 over two years against Cloudflare's ~$21**. The
+same-vendor argument does not survive contact with the kit — a Lightsail static IP is a plain **A**
+record any DNS service can serve, `provision.sh` never speaks to a DNS API, and a Route 53
+registration is not wired into Lightsail in a way that removes a step. It is defensible only if one
+console and one invoice are worth ~$23 to the owner, which is a real preference and not a technical
+argument.
+
+> **Cloudflare Registrar, with Porkbun as the fallback.** The reason is the flat renewal on a name
+> the section above calls permanent — and the fact that Namecheap's markup lands exactly where a
+> three-month run that gets extended would meet it.
+
+#### The name: how the shortlist was built, and what the method cannot tell you
+
+Candidates were generated in three families — **the game's name** (`bibites*`), a **trademark-free
+concept**, and a **short brandable** — and each was checked against the **authoritative registry by
+RDAP**, not against a registrar's search box, because a registrar's *"available!"* is a sales claim
+and the registry's answer is a fact. `404` means the name is not in the registry; `200` means it is
+taken:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://rdap.verisign.com/com/v1/domain/<name>.com
+# .net   → https://rdap.verisign.com/net/v1/domain/<name>.net              (Verisign)
+# .org   → https://rdap.publicinterestregistry.org/rdap/domain/<name>.org  (PIR)
+# .world → https://rdap.identitydigital.services/rdap/domain/<name>.world  (Identity Digital)
+```
+
+**Three things RDAP will not tell you**, and all three end the same way — *confirm at checkout*: a
+`404` name can still be **registry-reserved** and unsellable; it can be **premium-priced** at three
+or four figures; and it can be in **redemption**, about to reappear in somebody else's hands. RDAP
+answers one question only, and the shelf price is not it.
+
+**Available** — every row checked when the shortlist was built and **re-verified with the command
+above by this pass on 2026-08-14** **[web, 2026-08-14]**. Two families are represented; the third,
+*short brandable*, produced `migrata.com` and `evoverse.com` and both were already taken, which is
+why nothing from it reaches the table:
+
+| Name | Family | Registry | Note |
+|---|---|---|---|
+| **`bibitesmultiverse.com`** | game name | Verisign | **chosen** |
+| `bibiteverse.com` | game name | Verisign | shorter, less literal |
+| `bibiteworlds.com` | game name | Verisign | |
+| `bibites.org` | game name | PIR | renews ~$11.20 at Cloudflare **[web, 2026-08-14]** |
+| `bibites.world` | game name | Identity Digital | first year is cheap, **renews at ~$32–33** — three times a `.com`, on a name called permanent |
+| `evoworlds.com` | concept | Verisign | carries no trademark exposure |
+| `organismcrossing.com` | concept | Verisign | carries no trademark exposure |
+
+**Taken, recorded so nobody spends the check twice**: `bibites.com`, `bibiverse.com`,
+`evoverse.com`, `migrata.com`, `biocrossing.com` and `migrationmap.org` all returned `200` on
+2026-08-12, and all still returned `200` on 2026-08-14.
+
+**The choice, and what it costs.** `bibitesmultiverse.com` — the owner's call, **2026-08-14**
+**[record: `m5_tracking.md` WP3 row]**. It is the most literal and the most searchable name on the
+list: a player who half-remembers it will find it, which matters more than usual for a map whose
+release channel pushes nothing to anybody. What it costs is **ten more characters in every join
+string**, permanently, because the string is minted once per peer and the section above is why it
+cannot be changed afterwards.
+
+#### The name the project does not own
+
+**"The Bibites" is the game developer's mark.** Fan-project domains carrying a game's name are
+common and widely tolerated, and this project sells nothing — but they exist at the rights-holder's
+sufferance, and sufferance is revocable. **What is unusual here is where an objection would land.**
+The name is minted into every participant's join string, so an objection arriving mid-run is not a
+domain to hand over quietly; it is a message the owner has to deliver to people he cannot reach
+(*What changing the name costs*, above). **The owner decided on 2026-08-12 not to ask the
+developer** **[record: `m5_tracking.md` WP3 row, "no developer ask — everything approved to
+proceed"]** — a defensible call, recorded here as a call rather than left implicit. `evoworlds.com`
+and `organismcrossing.com` are on the shortlist for exactly this reason: they carry none of it, and
+they are the fallback if this ever stops being theoretical.
+
+#### One note on the TLD, since the shortlist crosses three of them
+
+`.com`, `.org` and `.world` — and `.net`, had anything landed there — all sidestep a reputation
+question the cheap TLDs do not.
+Interisle's *Cybercrime Supply Chain 2025* found the new gTLDs holding about **12% of the domain
+market and about 47% of reported cybercrime domains**, with seven — `.top`, `.bond`, `.cc`, `.vip`,
+`.info`, `.xyz` and `.shop` — carrying more than **10% of their own domains under management**
+reported for cybercrime, and `.top` second only to `.com` on reported spam domains in absolute terms
+**[web, 2026-08-14]**. For a name a stranger has to paste into a join string, that is a live risk of
+being filtered by somebody else's mail or network policy. **The popular claim that corporate
+firewalls flatly reject `.xyz` could not be substantiated** and is not the reason; blocklist
+reputation is.
 
 ### The options, costed over D24's three months
 
@@ -930,12 +1069,17 @@ Ordered by how much else depends on them.
 3. **The bundle**, once (1) is answered: $12 with a bounded ledger, $44 with *keep everything*.
    With *keep everything*, the $44 bundle is only restartable through month three if the replay is
    streamed first (measured 2026-08-12); `GOMEMLIMIT` alone gets it to day 43.
-4. **The name.** A registered domain (~$5 for the period) or free dynamic DNS ($0). Either works;
-   the cloud's own hostname does not. **It is effectively permanent once the first join string is
+4. ~~**The name.**~~ **Answered 2026-08-14**: a registered domain — `bibitesmultiverse.com`, to be
+   bought at Cloudflare Registrar with Porkbun as the fallback (~$10.44/year). Free dynamic DNS and
+   the cloud's own hostname are both off the table. The reasoning is in *Which registrar to buy
+   from, and which name to buy*; the purchase itself has not happened and has its own handoff at
+   `deploy/HANDOFF-domain.md`. **The name is effectively permanent once the first join string is
    minted.**
 5. **Port 443 or the relay's own port**, decided before the first join string is minted, because
    the port is in the string.
-6. **Whether to run any cloud world at all**, and whether to ask the developer first.
+6. **Whether to run any cloud world at all.** Whether to ask the developer first was answered on
+   2026-08-12 — **no ask**, everything approved to proceed **[record: `m5_tracking.md` WP3 row]**;
+   the trademark side of that same decision is in *The name the project does not own*.
 7. **Whether to pay for the itch.io build per cloud instance**, and how much. Name-your-own-price
    makes this a choice.
 8. **Whether the status page's poll cadence is worth changing.** The measurement is here; the
@@ -990,10 +1134,25 @@ Vendor and search sources, all consulted **2026-08-11**:
 - [BepInEx 5.4.23.2 release notes](https://github.com/BepInEx/BepInEx/releases/tag/v5.4.23.2) and [Installing BepInEx on Mono Unity](https://docs.bepinex.dev/master/articles/user_guide/installation/unity_mono.html) — Linux `linux_x64` builds, Doorstop 4, `run_bepinex.sh`
 - [Let's Encrypt community — policy forbids issuing for AWS EC2 hostnames](https://community.letsencrypt.org/t/policy-forbids-issuing-for-name-on-amazon-ec2-domain/12692) — `*.compute.amazonaws.com` is blocked by issuance policy
 
+Registrar, registry and name sources, consulted **2026-08-14** for *Which registrar to buy from, and
+which name to buy*:
+
+- [Cloudflare Registrar documentation](https://developers.cloudflare.com/registrar/) — *"You only pay what is charged by registries and ICANN… No markup. No surprise fees"*; redacted WHOIS by default
+- [Cloudflare Registrar — register a domain](https://developers.cloudflare.com/registrar/get-started/register-domain/) — *"All domains acquired via Cloudflare Registrar use Cloudflare nameservers… You will not be able to change to another DNS provider's nameservers"*
+- [Cloudflare domain pricing tracker](https://cfdomainpricing.com/) — per-TLD registration and renewal, page updated 2026-08-14: `.com` $10.46, `.org` renewal $11.20, `.world` $32.20
+- [Verisign raising wholesale `.com` prices — Domain Name Wire, 2026-04-23](https://domainnamewire.com/2026/04/23/breaking-verisign-raising-wholesale-com-prices/) — $10.26 → $10.97, *"effective November 1"*
+- [Porkbun `.com` pricing](https://porkbun.com/tld/com) — $11.08 flat, free WHOIS privacy, free Cloudflare-backed DNS — and [`.world` pricing](https://porkbun.com/tld/world) — $2.57 first year, $33.47 renewal
+- [Namecheap `.com` price tracking](https://priceworld.com/domains/namecheap/) — $10.98 first year, $18.48 renewal
+- [Route 53 TLD pricing changes, July 2026 — DevelopersIO](https://dev.classmethod.jp/en/articles/route53-tld-pricing-change-2026/) — `.com` $15 → $16, `.org` $15 → $16, `.net` unchanged at $17, `.world` $13 → $46
+- [Amazon Route 53 pricing](https://aws.amazon.com/route53/pricing/) — re-checked 2026-08-14: hosted zone still $0.50/month for the first 25, queries still $0.40/million
+- [Interisle, *Cybercrime Supply Chain 2025*](https://interisle.net/insights/cybercrimesupplychain2025) and [*Cybercrime across the TLD name space*](https://interisle.substack.com/p/supply-chain-2025-cybercrime-across) — new gTLDs at ~12% of the market and ~47% of reported cybercrime domains; the seven TLDs above 10% of their own domains under management
+- RDAP services used for availability, queried directly: [Verisign](https://rdap.verisign.com/com/v1/domain/) (`.com`, `.net`), [PIR](https://rdap.publicinterestregistry.org/rdap/domain/) (`.org`), [Identity Digital](https://rdap.identitydigital.services/rdap/domain/) (`.world`)
+
 Project sources, cited inline by document and section: `m5_tracking.md`, `m5_considerations.md`
 (DQ2, DQ3, Decisions 2/3/4/8, Risks 3/5/7/9/10, WP3–WP5), `dev_environment.md` (*Versions*,
 *The disk budget*, *The living deployment*, *Watch items*, *Gotchas*),
 `contracts/contract-a.md` (D2, §7.3), `contracts/contract-b-m4.md` (§9, §10, B21–B32),
 `go/internal/peercred/peercred.go`, `go/internal/archive/page.go`,
 `go/internal/archive/store.go` (`ReadLedger`) and `go/internal/archive/archive.go` (`New`'s replay),
-`go/internal/relay/relay.go`, `bibites-mod/game.sh`.
+`go/internal/relay/relay.go`, `bibites-mod/game.sh`, and — for the registrar and name subsection —
+`deploy/README.md` (§4, §6), `deploy/deploy.env.example`, `deploy/provision.sh`.
