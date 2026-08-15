@@ -6,7 +6,7 @@
 
 **One simulation is a world. Connect them, and evolution gets a map.**
 
-[![Installer status: m5.0 released](https://img.shields.io/badge/installer-m5.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/m5.0)
+[![Installer status: 0.1.0 released](https://img.shields.io/badge/installer-0.1.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
@@ -26,8 +26,8 @@ Every participant keeps a separate game, clock, ecosystem, and save history. Thi
 synchronized mega-simulation. It is an evolutionary continent made from worlds that remain local.
 
 > [!IMPORTANT]
-> **Bibites Multiverse `m5.0` is public.** Download the Windows or Linux add-on archive from the
-> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/m5.0). These editions
+> **Bibites Multiverse `0.1.0` is public.** Download the Windows or Linux add-on archive from the
+> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0). These editions
 > connect an existing game installation. Make sure that the SHA-256 matches before you extract it.
 > Do not download a Multiverse build from another source.
 
@@ -70,7 +70,7 @@ The result feels less like a multiplayer lobby and more like a continent with mo
 
 ## Install one world
 
-The `m5.0` release turns the player setup into four steps:
+Release `0.1.0` turns the player setup into four steps:
 
 1. Get one private join string from the map operator.
 2. Download the archive for your platform and make sure that its checksum matches.
@@ -154,8 +154,8 @@ before you connect a world.
 The hosted service is online at [bibitesmultiverse.com](https://bibitesmultiverse.com/).
 The first announced period runs from **August 14 through November 14, 2026**.
 
-The service is healthy and empty. No participant join string exists yet. Participant onboarding
-starts after the `m5.0` release passes its final fleet-identity gate and reaches GitHub Releases.
+The service is healthy and empty. No participant join string exists yet. Release `0.1.0` is
+available from GitHub Releases, so participant onboarding can start.
 
 ## Explore the experiment
 

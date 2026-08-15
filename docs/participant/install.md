@@ -11,10 +11,10 @@ publisher permits the game payload to be redistributed. `SHA256SUMS` sits beside
 
 | Platform and edition | Archive | Game source |
 |---|---|---|
-| Windows add-on | `bibites-multiverse-m5.0-windows-x64.zip` | your existing Steam copy |
-| Windows complete | `bibites-multiverse-m5.0-windows-x64-complete.zip` | the manifest-covered `game\` payload |
-| Linux add-on | `bibites-multiverse-m5.0-linux-x64.zip` | your existing itch.io copy |
-| Linux complete | `bibites-multiverse-m5.0-linux-x64-complete.zip` | the manifest-covered `game/` payload |
+| Windows add-on | `bibites-multiverse-0.1.0-windows-x64.zip` | your existing Steam copy |
+| Windows complete | `bibites-multiverse-0.1.0-windows-x64-complete.zip` | the manifest-covered `game\` payload |
+| Linux add-on | `bibites-multiverse-0.1.0-linux-x64.zip` | your existing itch.io copy |
+| Linux complete | `bibites-multiverse-0.1.0-linux-x64-complete.zip` | the manifest-covered `game/` payload |
 
 **The mod inside every archive is the same file**, byte for byte: it is platform-independent IL.
 What differs by platform is the sidecar, BepInEx flavour, and kit. A complete archive adds
@@ -34,11 +34,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-m5.0-windows-x64.zip).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.1.0-windows-x64.zip).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-m5.0-linux-x64.zip
+sha256sum bibites-multiverse-0.1.0-linux-x64.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -51,7 +51,7 @@ of the package until that mark is cleared. **Clear it once, on the archive, afte
 has passed and before you unpack it:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-m5.0-windows-x64.zip
+Unblock-File .\bibites-multiverse-0.1.0-windows-x64.zip
 ```
 
 or right-click the archive → **Properties** → tick **Unblock**. Files extracted from an unmarked

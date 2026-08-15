@@ -862,7 +862,7 @@ future exception is `WIND-DOWN.md` §4's note that D6's graduation call gets rec
 
 ## 8. What follows
 
-### Publishing m5.0
+### Publishing `v0.1.0`
 
 The release is `release/README.md`'s four steps, done by hand, and it is gated on two things this
 handoff produces or exposes:

@@ -132,15 +132,15 @@ that fails its manifest**.
 1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 2. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag m5.0 && git push origin m5.0`. The page's links point into the tag, so the
+   `git tag v0.1.0 && git push origin v0.1.0`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, and `SHA256SUMS`:
    ```sh
-   gh release create m5.0 \
-       release/dist/bibites-multiverse-m5.0-*.zip \
+   gh release create v0.1.0 \
+       release/dist/bibites-multiverse-0.1.0-*.zip \
        release/dist/SHA256SUMS \
-       --title "Bibites Multiverse m5.0" \
+       --title "Bibites Multiverse 0.1.0" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 4. **Read the published page as a stranger would**, in a browser, and check the three things that
