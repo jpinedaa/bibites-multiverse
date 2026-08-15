@@ -305,10 +305,12 @@ type Archive struct {
 	// The history strip's cache. It is deliberately NOT under mu: building a
 	// history reads a file, and nothing that reads a file may hold the lock the
 	// migration path takes (Risk 4).
-	historyMu  sync.Mutex
-	historyKey string
-	historyAt  time.Time
-	historyVal History
+	historyMu     sync.Mutex
+	historyKey    string
+	historyAt     time.Time
+	historyVal    History
+	historyAllAt  time.Time
+	historyAllVal History
 	// The species detail's sparkline cache, kept apart from the strip's for the
 	// same reason and bounded in entries as well as in age: a reader clicking
 	// through species must not re-read the sample file per click.

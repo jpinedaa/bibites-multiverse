@@ -120,7 +120,7 @@ func TestBuildHistoryDownsamples(t *testing.T) {
 		t.Fatal("a live bucket was marked dark")
 	}
 	if h.MaxPopulation != 30 {
-		t.Fatalf("maxPopulation = %d, want 30 — the shared sparkline scale", h.MaxPopulation)
+		t.Fatalf("maxPopulation = %d, want the API summary 30", h.MaxPopulation)
 	}
 	if h.Total[0].Value == nil || *h.Total[0].Value != 20 {
 		t.Fatalf("total bucket 0 = %v, want the mean of 14 and 26", h.Total[0].Value)
@@ -181,6 +181,23 @@ func TestBuildHistoryClampsAndBaselines(t *testing.T) {
 	}
 }
 
+func TestBuildAllHistoryIncludesSamplesOlderThanRollingLimit(t *testing.T) {
+	now := time.Now().UnixMilli()
+	oldest := now - (30 * 24 * time.Hour).Milliseconds()
+	samples := []historyStatus{
+		compactHistoryStatus(sample(oldest, 1, []*int{ip(10)}, []bool{true})),
+		compactHistoryStatus(sample(now-1000, 2, []*int{ip(12)}, []bool{true})),
+	}
+	h := buildAllHistory(samples, now, 20)
+	if h.ToMs-h.FromMs <= HistoryMaxWindow.Milliseconds() {
+		t.Fatalf("all-record window = %dms, want more than the rolling limit", h.ToMs-h.FromMs)
+	}
+	if h.FromMs > oldest || h.Samples != 2 {
+		t.Fatalf("all-record history starts at %d with %d samples, want to include %d and both samples",
+			h.FromMs, h.Samples, oldest)
+	}
+}
+
 // TestReadMetricsTailIsBounded covers the read bound: a history request reads the
 // END of the sample file, drops the partial record it landed in the middle of,
 // and says it truncated. Nothing that serves a picture may read an unbounded
@@ -233,6 +250,57 @@ func TestReadMetricsTailIsBounded(t *testing.T) {
 	}
 }
 
+func TestReadHistoryStatusesIsCompactBoundedAndTornSafe(t *testing.T) {
+	dir := t.TempDir()
+	m, err := OpenMetrics(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 4; i++ {
+		if err := m.Append(sample(int64(i)*1000, i, []*int{ip(i)}, []bool{true})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	all, truncated, err := ReadHistoryStatuses(m.Path(), 0)
+	if err != nil || truncated || len(all) != 4 {
+		t.Fatalf("complete compact read = %d samples, truncated %v, %v", len(all), truncated, err)
+	}
+	if all[3].GeneratedAtMs != 4000 || len(all[3].Slots) != 1 || all[3].Slots[0].Population == nil {
+		t.Fatalf("newest compact sample lost required fields: %+v", all[3])
+	}
+
+	info, err := os.Stat(m.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tail, truncated, err := ReadHistoryStatuses(m.Path(), info.Size()/2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(tail) == 0 || len(tail) >= 4 {
+		t.Fatalf("bounded compact read = %d samples, truncated %v", len(tail), truncated)
+	}
+	if tail[len(tail)-1].GeneratedAtMs != 4000 {
+		t.Fatalf("bounded compact read ended at %d, want 4000", tail[len(tail)-1].GeneratedAtMs)
+	}
+
+	before, err := os.ReadFile(m.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.Path(), append(before, []byte(`{"generatedAtMs":`)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	all, _, err = ReadHistoryStatuses(m.Path(), 0)
+	if err != nil || len(all) != 4 {
+		t.Fatalf("torn final record changed the compact read: %d samples, %v", len(all), err)
+	}
+}
+
 // TestHistoryEndpoint covers the HTTP surface: the parameters clamp, the answer
 // is valid JSON with the shape the page indexes, and the whole thing is served
 // off the archive's own sample file.
@@ -274,6 +342,23 @@ func TestHistoryEndpoint(t *testing.T) {
 	}
 	if h.MaxPopulation != 30 {
 		t.Fatalf("maxPopulation = %d, want 30", h.MaxPopulation)
+	}
+
+	allResp, err := http.Get(srv.URL + "/api/history?range=all&buckets=20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer allResp.Body.Close()
+	var all History
+	if err := json.NewDecoder(allResp.Body).Decode(&all); err != nil {
+		t.Fatalf("all-record /api/history is not valid JSON: %v", err)
+	}
+	if all.Buckets != 20 || all.Samples != 5 {
+		t.Fatalf("all-record history = %d buckets and %d samples, want 20 and 5",
+			all.Buckets, all.Samples)
+	}
+	if all.Truncated {
+		t.Fatal("a small complete metrics file was marked truncated")
 	}
 
 	// An absurd request is clamped, not honoured.
@@ -427,6 +512,25 @@ func TestStatusPageIsSelfContainedAndDrawsTheMap(t *testing.T) {
 		if !strings.Contains(gloss, "\n "+c[1]+":[") {
 			t.Fatalf("t(%q, ...) names a glossary entry that does not exist", c[1])
 		}
+	}
+}
+
+func TestPopulationHistoryDefaultsToAllTimeAndFitsEachVisibleRange(t *testing.T) {
+	page := statusPageHTML
+	for _, want := range []string{
+		`data-history-range="all" aria-pressed="true"`,
+		`data-history-range="24h" aria-pressed="false"`,
+		`"range=all&buckets=120"`,
+		`function valueRange(points){`,
+		`function sparkPath(points, min, max, w, h){`,
+		`min+'&ndash;'+max`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("population history is missing %q", want)
+		}
+	}
+	if strings.Contains(page, "H.maxPopulation") {
+		t.Fatal("population charts still share a zero-based maximum")
 	}
 }
 
