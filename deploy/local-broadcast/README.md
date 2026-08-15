@@ -11,7 +11,7 @@ The spectator director follows one Bibite until it dies.
 It then selects the youngest living Bibite.
 The simulation runs at `7.5` times normal speed.
 
-The camera uses a zoom of `200`, which is a wider view than the mod default.
+The camera uses a zoom of `250`, which is a wider view than the mod default.
 It shows the selected Bibite's vision range.
 It shows the brain panel for 15 seconds and the biology panel for 30 seconds.
 It disables automatic spawns from the `Basic bibite` template.
@@ -138,7 +138,7 @@ powershell.exe -NoProfile -Command \
   | tr -d '\r' | jq
 ```
 
-The status must report a zoom of `200` and a target time scale of `7.5`.
+The status must report a zoom of `250` and a target time scale of `7.5`.
 The `panel` value alternates between `brain` and `biology`.
 The `fieldOfView` value must be `true`.
 The `disabledSpawnSettings` value must be `1`.
