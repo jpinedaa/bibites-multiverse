@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This is that audit, run against release `0.1.0` on **2026-08-12**, against the code and
+strangers. This audit was updated for release `0.2.0` on **2026-08-15**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -11,15 +11,15 @@ part of it that affects a player is stated on the release page, in
 
 ## What "a bare install" means here
 
-Somebody downloads an add-on or complete archive for their platform. They run the installer,
-answer the join-string prompt, and change nothing else. That is the whole population this audit
-covers. **Every verdict below holds on both platforms and in both editions.** The four defaults
-belong to the mod and relay, not the kit. Each installer writes the same five environment
-variables with the same values. Two facts shape every verdict:
+Somebody downloads a package for their platform, runs its installer, and changes nothing else.
+On Windows, that means the complete package, its included game, automatic public enrollment, and
+the selected start-after-install checkbox. On Linux, it means the add-on and its join-string
+prompt. The mod settings below stay identical on both platforms. Package and enrollment defaults
+are marked where they differ. Two facts shape every verdict:
 
 1. **The package ships no relay and no archive.** Every archive contains the installer, the
    uninstaller, the README, the mod, the sidecar, BepInEx, and the support matrix. A complete
-   archive also contains an authorized game payload and its license. Two defaults are therefore
+   archive also contains an authorized game payload and its redistribution notice. Two defaults are therefore
    not reachable from a participant install. They are audited because an operator can still use
    them on a host.
 2. **The installer writes every setting explicitly, including the ones that match the mod's own
@@ -33,6 +33,7 @@ variables with the same values. Two facts shape every verdict:
 |---|---|---|---|
 | `--insecure-no-token` | The relay, not the package | Cannot reach it: no relay is shipped | **PASS** — and the *"nothing enforces test-rig-only"* half is closed in code, by a bind refusal WP2 added after DQ4 was written |
 | The archive's HTTP bind | The archive, not the package | Cannot reach it: no archive is shipped | **PASS at the packaging layer**, with a **finding for WP3**: the habit in the bring-up instructions, not the compiled default, is what would expose a public host |
+| Public installer enrollment | Relay and Windows complete package | Creates one unique credential over HTTPS and reuses it on retry | **PASS WITH FINITE LIMITS** — compiled off, explicitly enabled by the hosted deployment, bounded by nginx and relay limits, with verifiers stored instead of secrets |
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
 
@@ -112,6 +113,29 @@ copy the habit: publish the status page deliberately — behind the same reverse
 relay uses, with a rate limit — rather than by binding the archive's own listener to `0.0.0.0`.
 The participant documentation already promises a page, so the answer is almost certainly *public,
 but not like this*.
+
+## 2b. Public installer enrollment
+
+**Today.** The relay's compiled default is off. A host must set
+`MULTIVERSE_PUBLIC_ENROLLMENT=1` and finite total, per-address, and time-window limits. The public
+hosting example uses 256 automatic credentials and 8 new identities per network address in 24
+hours. nginx adds an outer limit of two requests per minute with a burst of three.
+
+**A bare Windows install.** The installer creates a random secret and UUID locally. It sends them
+to the exact HTTPS enrollment path. The relay stores a salted verifier and never returns the
+secret. An exact retry is idempotent. The installer also keeps a protected pending record until it
+stores the final credential. A response lost in transit therefore does not spend another identity.
+
+**A bare Linux or private-map install.** Does not use this endpoint. It applies the join string
+that an operator issued.
+
+**The cost.** Open enrollment lets any internet client request an identity. The finite total is a
+deliberate service-capacity control, and an abusive client can consume it. Disabling enrollment
+stops new identities without revoking credentials or disconnecting existing worlds. The operator
+must watch the credential count and decide when to raise or close the limit.
+
+**Verdict: PASS WITH FINITE LIMITS.** No reusable secret ships in the archive. The client creates
+the only recoverable secret, HTTPS protects it in transit, and the relay stores only its verifier.
 
 ## 3. `MULTIVERSE_MIGRATION_EXCLUDE` — the species that stay home
 
@@ -206,7 +230,7 @@ This audit is a release artifact and goes stale with the release. For the next o
 
 1. Re-read the four defaults **in the source**, not in this document.
 2. Re-run the guard tests: `nice -n 19 go test ./internal/relay -run 'InsecureNoToken|Servable'`.
-3. Re-run `release/test-install-uninstall.ps1`, whose suite fails on an installer that prints an
+3. Re-run `release/test-install-uninstall.ps1 -RealGameDir <Windows-game>`, whose suite fails on an installer that prints an
    execution-policy bypass or an `--insecure` instruction.
 4. Re-measure the save footprint against the worlds the project is then running.
 5. Grep `docs/` and `release/` for `--insecure` and check that every occurrence is still a

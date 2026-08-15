@@ -1,19 +1,25 @@
 # Install
 
-**What you need:** a join string and a supported copy of The Bibites. The current release contains
-add-on packages. The installer finds the game automatically. There is no edition choice during
-installation. **What you do not need:** a compiler, an SDK, administrator rights, or root.
+**Recommended Windows setup:** download the complete package. It includes an authorized portable
+copy of *The Bibites*, selects that copy by default, creates a unique public-map identity, and can
+open the connected game when installation finishes. You can select an existing game in the GUI.
+
+The Linux package remains an add-on for a supported native itch.io game and uses a join string.
+**What you do not need:** a compiler, an SDK, administrator rights, or root.
 
 `SHA256SUMS` sits beside both current packages:
 
 | Platform | Archive | Game source |
 |---|---|---|
-| Windows | `bibites-multiverse-0.1.0-windows-x64.zip` | your existing Steam copy |
-| Linux | `bibites-multiverse-0.1.0-linux-x64.zip` | your existing itch.io copy |
+| Windows, recommended | `bibites-multiverse-0.2.0-windows-x64-complete.zip` | included portable game |
+| Windows, add-on | `bibites-multiverse-0.2.0-windows-x64.zip` | your existing Steam copy |
+| Linux | `bibites-multiverse-0.2.0-linux-x64.zip` | your existing itch.io copy |
 
 **The mod inside every archive is the same file**, byte for byte: it is platform-independent IL.
 What differs by platform is the sidecar, BepInEx flavour, and kit. A complete archive adds
-`game-payload.json`, `GAME-LICENSE.txt`, and `game/`. No installer fetches anything while it runs.
+`game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, and `game/`. No installer downloads the
+game, mod, sidecar, or BepInEx while it runs. The Windows installer contacts the public HTTPS
+enrollment endpoint only to create this installation's map identity.
 
 **On Linux the installer needs four programs and checks for all four before it does anything:**
 `sha256sum` and `awk`, which are on any machine that boots; `unzip`; and `file`, which **BepInEx's
@@ -29,11 +35,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.1.0-windows-x64.zip).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.0-windows-x64-complete.zip).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-0.1.0-linux-x64.zip
+sha256sum bibites-multiverse-0.2.0-linux-x64.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -46,7 +52,7 @@ of the package until that mark is cleared. **Clear it once, on the archive, afte
 has passed and before you unpack it:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-0.1.0-windows-x64.zip
+Unblock-File .\bibites-multiverse-0.2.0-windows-x64-complete.zip
 ```
 
 or right-click the archive → **Properties** → tick **Unblock**. Files extracted from an unmarked
@@ -55,9 +61,14 @@ decision rather than a ritual. If you unpacked first, the installer's own first 
 every file against the `MANIFEST.sha256` inside the archive and then clears the mark from exactly
 those files, by name, and from nothing else on your machine. That is `INS-MARKOFWEB`.
 
-Double-click `Install-BibitesMultiverse.cmd` after you extract the unblocked archive. The launcher
-uses `RemoteSigned` for its process only. It does not change the policy for your account or
-computer. The package never uses `ExecutionPolicy Bypass`.
+Double-click `Install-BibitesMultiverse.cmd` after you extract the unblocked archive. The GUI uses
+the included portable game by default. Select **Use a game that is already installed** to bind to
+another copy. The installer searches Steam and common game locations and fills the path when it
+finds one. If it does not, the GUI says **Game not found** and leaves the folder picker available.
+
+**Start The Bibites and connect after installation** is selected by default. Clear it if you want
+to install without starting. The launcher uses `RemoteSigned` for its process only. It does not
+change the policy for your account or computer. The package never uses `ExecutionPolicy Bypass`.
 
 ### On Linux: there is no mark of the web, and no ritual replaces it
 
@@ -132,20 +143,26 @@ written anywhere.
 ./stop-multiverse.sh
 ```
 
-**No parameter takes your join string on the command line**, on purpose: a value typed there is
+The Windows complete package needs no join string for the public map. It generates a different
+secret on this computer and enrolls it over HTTPS. The package contains public service addresses,
+not a shared credential.
+
+**No parameter takes a private-map join string on the command line**, on purpose: a value typed there is
 in every process listing on your machine and in your shell history, and the wire itself has the
 same rule. `-JoinStringFile .\join.txt` — `--join-string-file ./join.txt` on Linux — reads it from
 a file if you would rather not type it, and then delete that file, which the installer tells you
 to do and will not do for you.
 
-There is no edition switch. The package contents select the mode. The current add-on packages
-discover an existing game automatically.
+The Windows GUI selects the package's included portable game when it exists. It also offers an
+existing-game selection. The advanced script has `-RuntimeSelection bundled|external`; `auto`
+uses the included game when present. Linux selects the mode from package contents.
 
 **Both installers work in nine steps they name on your screen as they go**, and the steps are the
 same nine: check the package against `MANIFEST.sha256`; select the existing or bundled game
 runtime; check the build against the
-matrix; install BepInEx if it is not already there; copy the plugin; split your join string and
-store the secret half in a file only you can read; arrange trust for a certificate authority
+matrix; install BepInEx if it is not already there; copy the plugin; enroll a unique public-map
+identity or split a private-map join string, then store the secret in a file only you can read;
+arrange trust for a certificate authority
 **only** if you gave it one for a private map; state the settings this install ships with; and
 write the start script, the stop script and the record the uninstall reads.
 
@@ -154,12 +171,12 @@ write the start script, the stop script and the record the uninstall reads.
 | Step | On Windows | On Linux |
 |---|---|---|
 | 1, after the checksum | clears the mark of the web from the files it verified, by name | makes executable the files it verified, by name |
-| 2, selecting the game | add-on reads Steam's registry and library index; complete installs its payload below the data root | add-on searches the itch app root and usual places; complete installs its payload below the data root |
+| 2, selecting the game | the GUI defaults to the included game; the existing-game option reads Steam's registry, library index, and common paths | add-on searches the itch app root and usual places; complete installs its payload below the data root |
 | 7, a private map's authority | imports it into **your own user store**, `Cert:\CurrentUser\Root`, and records the thumbprint so the uninstall can take it out | writes it to **no store at all**. The copy goes beside your data and the start script sets `SSL_CERT_FILE` at it, for that one process. Nothing under `/etc/ssl` or `/usr/local/share/ca-certificates` is touched and `update-ca-certificates` is never run |
 
 **Neither needs administrator rights or root**, adds a service, a scheduled task, a systemd unit, a
-registry entry or a desktop file, starts anything by itself, or touches your worlds or their
-backups.
+registry entry or a desktop file, or touches your worlds or their backups. The Windows GUI starts
+the sidecar and game only when its final checkbox is selected; it is selected by default.
 
 **The uninstall.** `Uninstall-BibitesMultiverse.ps1` or `./uninstall-bibites-multiverse.sh`, with
 `-DryRun` / `--dry-run` first if you want the ledger without the act. It reads the record the
@@ -245,10 +262,13 @@ perimeter, not silence — that is the shipped default and it is deliberate. The
 so in its own output, and this document says so here, so that neither is the only place a
 reader could have learned it.
 
-**An unconfigured install also connects to nothing.** Without a relay address and a credential
-there is no map to join, so the export default is a question about *what your world means to
-do* rather than a question about safety. When you join, it means: organisms leave your world on
-every side, and arrive from every side.
+**The recommended Windows install connects to the public map automatically.** It generates a
+unique secret locally and gets a unique identity over HTTPS. If an enrollment response is lost,
+the installer keeps a protected pending record and retries the same identity. It does not spend a
+second map identity. Linux and private-map installs connect after you supply a join string.
+
+Once connected, the export default means that organisms leave your world on every side and arrive
+from every side.
 
 If you want a wall on one side, say so: `-ExportEdges E,N` — `--export-edges E,N` on Linux — at
 install time, or the same value in the start script afterwards. If you want your world off the map
@@ -302,5 +322,5 @@ shell, and writes to no system trust store — a private map's authority is trus
 
 ## Next
 
-[join.md](join.md) — what a join string is, what happens on your first claim, and what joining
-publishes about your world.
+[join.md](join.md) — how public enrollment and private-map join strings work, what happens on your
+first claim, and what joining publishes about your world.

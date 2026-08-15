@@ -16,6 +16,7 @@ package peercred
 //   - A CREDENTIAL IS NOT REPRINTED. The relay cannot: it kept a hash.
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,6 +154,54 @@ func TestStoreSurvivesAReopen(t *testing.T) {
 	}
 	if second.Len() != 2 {
 		t.Fatalf("the reopened store holds %d credentials, want 2", second.Len())
+	}
+}
+
+func TestEnrollmentIsIdempotentAndNeverReplacesASecret(t *testing.T) {
+	dir := t.TempDir()
+	store, err := OpenStore(dir)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	secret := MintSecret()
+	created, err := store.Enroll("public-aabb", secret, GrantPeer)
+	if err != nil || !created {
+		t.Fatalf("first Enroll = (%v, %v), want created", created, err)
+	}
+	created, err = store.Enroll("public-aabb", secret, GrantPeer)
+	if err != nil || created {
+		t.Fatalf("idempotent Enroll = (%v, %v), want existing success", created, err)
+	}
+	if _, err := store.Enroll("public-aabb", MintSecret(), GrantPeer); !errors.Is(err, ErrExists) {
+		t.Fatalf("different secret error = %v, want ErrExists", err)
+	}
+	if _, err := store.Enroll("public-aabb", secret, GrantSubscribe); !errors.Is(err, ErrExists) {
+		t.Fatalf("different grant error = %v, want ErrExists", err)
+	}
+	if _, grant, ok := store.Verify(Join("public-aabb", secret)); !ok || grant != GrantPeer {
+		t.Fatal("the enrolled credential does not verify with the peer grant")
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, StoreFileName))
+	if err != nil {
+		t.Fatalf("read store: %v", err)
+	}
+	if strings.Contains(string(raw), secret) {
+		t.Fatal("the enrollment stored the client secret instead of its verifier")
+	}
+}
+
+func TestCountPrefixKeepsPublicCapacitySeparate(t *testing.T) {
+	store, err := OpenStore("")
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	for _, id := range []string{"public-one", "public-two", "archive-main", "peer-manual"} {
+		if _, err := store.Mint(id, GrantPeer); err != nil {
+			t.Fatalf("Mint %s: %v", id, err)
+		}
+	}
+	if got := store.CountPrefix("public-"); got != 2 {
+		t.Fatalf("CountPrefix(public-) = %d, want 2", got)
 	}
 }
 

@@ -23,10 +23,11 @@
 #
 # WHAT IT PROVES BEFORE IT PACKAGES ANYTHING. A release that ships a mod or a
 # sidecar the project's own deployment does not run is a release nobody has
-# tested. So this script builds both and then requires them to be BYTE-IDENTICAL
-# to the copies in farend/dist/farend-bundle.zip — the tracked artifact set the
-# living fleet runs, present in any clean clone. A mismatch stops the build and
-# says which side moved.
+# tested. So this script requires the plugin to be byte-identical to the copy in
+# farend/dist/farend-bundle.zip. It requires go/ to match the revision stamped
+# into that bundle's sidecar. Go's VCS metadata can make two otherwise identical
+# builds differ as files. A source or plugin mismatch stops the build and says
+# which side moved.
 #
 # It also requires the game build to be the one docs/support-matrix.md names.
 # The matrix is the single source of that pin: the JSON block inside that
@@ -53,8 +54,11 @@ BUNDLE="$REPO/farend/dist/farend-bundle.zip"
 CACHE="$REPO/farend/dist/cache"
 PROJECT_LICENSE="$REPO/LICENSE"
 THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
+# A linked worktree can make Go omit VCS metadata when its .git file points to
+# another filesystem. Use a clean checkout of this exact commit in that case.
+SIDECAR_BUILD_REPO="${RELEASE_SIDECAR_BUILD_REPO:-$REPO}"
 
-RELEASE=0.1.0
+RELEASE=0.2.0
 TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
@@ -77,23 +81,23 @@ export TZ=UTC
 ALLOW_DIRTY=0
 WINDOWS_GAME_PAYLOAD=''
 LINUX_GAME_PAYLOAD=''
-GAME_LICENSE=''
+GAME_REDISTRIBUTION_NOTICE=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --allow-dirty) ALLOW_DIRTY=1; shift ;;
     --windows-game-dir) [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; WINDOWS_GAME_PAYLOAD="$2"; shift 2 ;;
     --linux-game-dir)   [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; LINUX_GAME_PAYLOAD="$2"; shift 2 ;;
-    --game-license)     [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; GAME_LICENSE="$2"; shift 2 ;;
-    *) printf 'usage: %s [--allow-dirty] [--windows-game-dir <dir>] [--linux-game-dir <dir>] [--game-license <file>]\n' "$0" >&2; exit 2 ;;
+    --game-redistribution-notice) [ $# -gt 1 ] || { printf '%s needs a value\n' "$1" >&2; exit 2; }; GAME_REDISTRIBUTION_NOTICE="$2"; shift 2 ;;
+    *) printf 'usage: %s [--allow-dirty] [--windows-game-dir <dir>] [--linux-game-dir <dir>] [--game-redistribution-notice <file>]\n' "$0" >&2; exit 2 ;;
   esac
 done
 
-if { [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; } && [ -z "$GAME_LICENSE" ]; then
-  printf 'complete packages require --game-license <applicable license file>\n' >&2
+if { [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; } && [ -z "$GAME_REDISTRIBUTION_NOTICE" ]; then
+  printf 'complete packages require --game-redistribution-notice <permission notice file>\n' >&2
   exit 2
 fi
-if [ -n "$GAME_LICENSE" ] && [ -z "$WINDOWS_GAME_PAYLOAD" ] && [ -z "$LINUX_GAME_PAYLOAD" ]; then
-  printf '%s has no effect without --windows-game-dir or --linux-game-dir\n' '--game-license' >&2
+if [ -n "$GAME_REDISTRIBUTION_NOTICE" ] && [ -z "$WINDOWS_GAME_PAYLOAD" ] && [ -z "$LINUX_GAME_PAYLOAD" ]; then
+  printf '%s has no effect without --windows-game-dir or --linux-game-dir\n' '--game-redistribution-notice' >&2
   exit 2
 fi
 
@@ -119,6 +123,19 @@ if [ -n "$DIRT" ]; then
   note "and MUST NOT be published."
 else
   note "clean at $(git -C "$REPO" rev-parse --short HEAD)"
+fi
+
+SOURCE_REV="$(git -C "$REPO" rev-parse HEAD)"
+[ -d "$SIDECAR_BUILD_REPO/go" ] \
+  || die "missing $SIDECAR_BUILD_REPO/go"
+SIDECAR_BUILD_REV="$(git -C "$SIDECAR_BUILD_REPO" rev-parse HEAD)"
+[ "$SIDECAR_BUILD_REV" = "$SOURCE_REV" ] \
+  || die "the sidecar build checkout is $SIDECAR_BUILD_REV, want $SOURCE_REV"
+if [ "$SIDECAR_BUILD_REPO" != "$REPO" ]; then
+  [ -z "$(git -C "$SIDECAR_BUILD_REPO" status --porcelain)" ] \
+    || die "the sidecar build checkout is dirty: $SIDECAR_BUILD_REPO"
+  [ -z "$DIRT" ] \
+    || die "a clean sidecar checkout cannot represent this dirty package rehearsal"
 fi
 
 # ------------------------------------------------------------------ the matrix
@@ -255,8 +272,12 @@ if [ -n "$(git -C "$REPO" status --porcelain -- go/)" ]; then
 fi
 note "go/ is identical to the tree the fleet's sidecar was built from"
 
-( cd "$REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-    go build -o "$BUILD/multiverse-sidecar.exe" ./cmd/sidecar )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$BUILD/multiverse-sidecar.exe" ./cmd/sidecar )
+BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar.exe" \
+  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+[ "$BUILT_REV" = "$SOURCE_REV" ] \
+  || die "the Windows sidecar VCS stamp is '${BUILT_REV:-missing}', want $SOURCE_REV"
 BUILT_SIDECAR_SHA="$(sha "$BUILD/multiverse-sidecar.exe")"
 if [ "$BUILT_SIDECAR_SHA" = "$(sha "$REF_SIDECAR")" ]; then
   note "byte-identical to the fleet's sidecar"
@@ -276,10 +297,14 @@ step "the Linux sidecar (cross-compiled)"
 # established is the thing that matters and it covers this build too — go/ is
 # identical, commit for commit, to the tree the deployment's sidecar was built
 # from. Same source, second target.
-( cd "$REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-    go build -o "$BUILD/multiverse-sidecar" ./cmd/sidecar )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$BUILD/multiverse-sidecar" ./cmd/sidecar )
+LINUX_BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar" \
+  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+[ "$LINUX_BUILT_REV" = "$SOURCE_REV" ] \
+  || die "the Linux sidecar VCS stamp is '${LINUX_BUILT_REV:-missing}', want $SOURCE_REV"
 note "$(sha "$BUILD/multiverse-sidecar")"
-note "same source as the fleet's sidecar ($REF_REV), built for linux/amd64"
+note "same source as the fleet's sidecar ($REF_REV), stamped $LINUX_BUILT_REV, built for linux/amd64"
 note "static: CGO is off, so it needs no libc of a particular vintage"
 
 # ------------------------------------------------------------------ the plugin
@@ -353,7 +378,10 @@ rm -rf "$DIST/stage" "$DIST/$ZIP_NAME" "$DIST/$LINUX_ZIP_NAME" \
 mkdir -p "$STAGE" "$LINUX_STAGE"
 
 cp "$RELDIR/kit/Install-BibitesMultiverse.ps1"   "$STAGE/"
+cp "$RELDIR/kit/Install-BibitesMultiverse-Gui.ps1" "$STAGE/"
 cp "$RELDIR/kit/Install-BibitesMultiverse.cmd"   "$STAGE/"
+cp "$RELDIR/kit/Find-BibitesGame.ps1"            "$STAGE/"
+cp "$RELDIR/kit/public-map.json"                  "$STAGE/"
 cp "$RELDIR/kit/Uninstall-BibitesMultiverse.ps1" "$STAGE/"
 cp "$RELDIR/kit/README.md"                       "$STAGE/"
 cp "$MATRIX_JSON"                                "$STAGE/support-matrix.json"
@@ -394,7 +422,7 @@ note "the Linux scripts parse, are LF, and carry their executable bit"
 # one long line. Done here rather than with unix2dos, which is not on every
 # machine: whether a tool happens to be installed must not change the archive's
 # checksum. THE LINUX KIT IS DELIBERATELY NOT IN THIS LIST.
-for f in Install-BibitesMultiverse.cmd Install-BibitesMultiverse.ps1 Uninstall-BibitesMultiverse.ps1 README.md LICENSE THIRD_PARTY_NOTICES.md; do
+for f in Install-BibitesMultiverse.cmd Install-BibitesMultiverse.ps1 Install-BibitesMultiverse-Gui.ps1 Find-BibitesGame.ps1 Uninstall-BibitesMultiverse.ps1 README.md LICENSE THIRD_PARTY_NOTICES.md; do
   python3 -c "
 import sys
 p = sys.argv[1]
@@ -417,7 +445,7 @@ validate_game_payload() { # $1 source, $2 platform, $3 executable, $4 assembly s
   [ "$got" = "$expected_sha" ] || die "$platform game payload assembly is $got, want matrix hash $expected_sha"
   bad="$(find "$source" -type l -print -quit)"
   [ -z "$bad" ] || die "$platform game payload contains a symbolic link: $bad"
-  for bad in BepInEx winhttp.dll doorstop_config.ini run_bepinex.sh libdoorstop.so .doorstop_version; do
+  for bad in BepInEx winhttp.dll version.dll doorstop_config.ini run_bepinex.sh libdoorstop.so .doorstop_version; do
     [ ! -e "$source/$bad" ] || die "$platform game payload is already modded ($bad exists). Use a clean source game directory."
   done
   if [ "$platform" = Linux ]; then
@@ -429,13 +457,13 @@ validate_game_payload() { # $1 source, $2 platform, $3 executable, $4 assembly s
 stage_complete() { # $1 add-on stage, $2 complete stage, $3 game source, $4 platform, $5 executable, $6 assembly sha
   local addon="$1" complete="$2" source="$3" platform="$4" executable="$5" expected_sha="$6"
   validate_game_payload "$source" "$platform" "$executable" "$expected_sha"
-  [ -f "$GAME_LICENSE" ] && [ -s "$GAME_LICENSE" ] && [ ! -L "$GAME_LICENSE" ] \
-    || die "game license must be a non-empty regular file, not a symbolic link: $GAME_LICENSE"
+  [ -f "$GAME_REDISTRIBUTION_NOTICE" ] && [ -s "$GAME_REDISTRIBUTION_NOTICE" ] && [ ! -L "$GAME_REDISTRIBUTION_NOTICE" ] \
+    || die "game redistribution notice must be a non-empty regular file, not a symbolic link: $GAME_REDISTRIBUTION_NOTICE"
   mkdir -p "$complete"
   cp -a "$addon/." "$complete/"
   mkdir -p "$complete/game"
   cp -a "$source/." "$complete/game/"
-  cp "$GAME_LICENSE" "$complete/GAME-LICENSE.txt"
+  cp "$GAME_REDISTRIBUTION_NOTICE" "$complete/GAME-REDISTRIBUTION-NOTICE.txt"
   python3 - "$complete/game-payload.json" "$platform" "$GAME_VERSION" "$expected_sha" <<'PY'
 import json, sys
 path, platform, version, assembly_sha = sys.argv[1:]
@@ -444,7 +472,7 @@ doc = {
     "platform": platform,
     "gameVersion": version,
     "assemblySha256": assembly_sha,
-    "licenseFile": "GAME-LICENSE.txt",
+    "redistributionNoticeFile": "GAME-REDISTRIBUTION-NOTICE.txt",
 }
 with open(path, "w", encoding="utf-8", newline="\n") as f:
     json.dump(doc, f, indent=2)
@@ -573,7 +601,7 @@ inner_table "$LINUX_STAGE" "$LINUX_INNER_TABLE"
 COMPLETE_ROWS="$BUILD/complete-rows.md"
 : > "$COMPLETE_ROWS"
 if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
-  printf '| Windows complete | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
+  printf '| **Windows complete (recommended)** | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
     "$COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$COMPLETE_ZIP_NAME" "$COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
 fi
 if [ -n "$LINUX_GAME_PAYLOAD" ]; then
@@ -582,7 +610,7 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
 fi
 
 if [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; then
-  EDITION_NOTE='The package selects its edition automatically. Add-on packages find an existing game. Complete packages use their included game.'
+  EDITION_NOTE='The Windows GUI selects the included game by default and also offers an existing-game option. Add-on packages use an existing game.'
 else
   EDITION_NOTE='This release contains add-on packages only. The installer finds your existing game automatically. There is no edition choice during installation.'
 fi

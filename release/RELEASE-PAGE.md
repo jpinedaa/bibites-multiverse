@@ -5,11 +5,12 @@ Your game and saves stay on your computer.
 
 ## What you need
 
-- The Bibites `0.6.3.1` for your platform.
-- A private join string from the map operator.
+- Windows: nothing else. The recommended package includes The Bibites `0.6.3.1`.
+- Linux: The Bibites `0.6.3.1` from itch.io and a private join string.
 
-A join string contains the map address, your world identity, and its secret. The installer asks
-for it with hidden input. Do not post it in an issue, screenshot, or log.
+The Windows installer creates a unique public-map identity over HTTPS. The package has no shared
+credential. A private join string contains the map address, world identity, and secret. Do not
+post one in an issue, screenshot, or log.
 
 @@EDITION_NOTE@@
 
@@ -17,18 +18,20 @@ for it with hidden input. Do not post it in an issue, screenshot, or log.
 
 | Platform | File | SHA-256 |
 |---|---|---|
-| Windows | [`@@ZIP_NAME@@`](https://github.com/@@REPO@@/releases/download/@@TAG@@/@@ZIP_NAME@@) | `@@ZIP_SHA256@@` |
-| Linux | [`@@LINUX_ZIP_NAME@@`](https://github.com/@@REPO@@/releases/download/@@TAG@@/@@LINUX_ZIP_NAME@@) | `@@LINUX_ZIP_SHA256@@` |
-@@COMPLETE_DOWNLOAD_ROWS@@| All | [`SHA256SUMS`](https://github.com/@@REPO@@/releases/download/@@TAG@@/SHA256SUMS) | Published checksums |
+@@COMPLETE_DOWNLOAD_ROWS@@| Windows add-on | [`@@ZIP_NAME@@`](https://github.com/@@REPO@@/releases/download/@@TAG@@/@@ZIP_NAME@@) | `@@ZIP_SHA256@@` |
+| Linux add-on | [`@@LINUX_ZIP_NAME@@`](https://github.com/@@REPO@@/releases/download/@@TAG@@/@@LINUX_ZIP_NAME@@) | `@@LINUX_ZIP_SHA256@@` |
+| All | [`SHA256SUMS`](https://github.com/@@REPO@@/releases/download/@@TAG@@/SHA256SUMS) | Published checksums |
 
 ## Windows
 
-1. Download the Windows archive.
+1. Download the **Windows complete** archive (recommended).
 2. Make sure that its SHA-256 matches the table.
 3. Open the archive properties and select **Unblock**. Then extract the archive.
 4. Double-click `Install-BibitesMultiverse.cmd`.
 
-The installer finds the Steam game and asks for the join string. It does not start the game.
+The GUI selects the included portable game. You can instead use a game it finds on your machine
+or select the folder yourself. **Start after installation** is selected by default. The game opens
+after the map grants this installation a place.
 
 ## Linux
 

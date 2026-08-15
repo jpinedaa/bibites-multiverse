@@ -1,12 +1,13 @@
 <#
 .SYNOPSIS
-    Install the Bibites Multiverse mod and its sidecar, and join a public map
-    with the join string a map operator handed you.
+    Install The Bibites, the Multiverse mod, and its sidecar. Connect the game
+    to the public map automatically.
 
 .DESCRIPTION
     Runs on Windows PowerShell 5.1 and on PowerShell 7. It needs no compiler, no
     SDK, no runtime and nothing from a developer's toolchain, and it needs no
-    administrator rights. It never starts the game.
+    administrator rights. It starts the game only when -StartAfterInstall is
+    set. The graphical installer selects that option by default.
 
     What it does, in order:
 
@@ -18,8 +19,8 @@
          no entry for it, in the matrix's own words;
       4. installs BepInEx, if it is not already there;
       5. copies the plugin into BepInEx\plugins;
-      6. splits your join string and stores the secret half in a file only you
-         can read;
+      6. gets a unique public-map identity, or splits a private-map join string,
+         and stores the secret half in a file only you can read;
       7. imports a certificate authority ONLY if you gave it one with -CaFile,
          which a public map does not need;
       8. states the settings this install ships with, including the export
@@ -43,11 +44,12 @@
 
         multiverse-join/1 wss://<relay-host>/contract-b/v4 <peerId>.<secret>
 
-    Leave it out and the installer asks for the join string at the keyboard,
-    with the typing hidden. THERE IS DELIBERATELY NO -JoinString PARAMETER: a
-    secret on a command line is in every process listing on this machine and in
-    your shell history. The wire itself has the same rule - no flag anywhere
-    takes a secret literally.
+    Leave it out to connect to the public map automatically. If this package
+    has no public-map.json, the installer asks for the join string at the
+    keyboard, with the typing hidden. THERE IS DELIBERATELY NO -JoinString
+    PARAMETER: a secret on a command line is in every process listing on this
+    machine and in your shell history. The wire itself has the same rule - no
+    flag anywhere takes a secret literally.
 
 .PARAMETER RelayUrl
     Only needed if your operator gave you the two halves separately rather than
@@ -63,9 +65,17 @@
     again.
 
 .PARAMETER GameDir
-    Add-on edition only: the game folder, if Steam keeps it somewhere this
-    script does not find. A complete edition refuses this parameter and uses
-    its own managed runtime.
+    Existing-game selection only: the game folder, if the installer does not
+    find it. The portable-game selection refuses this parameter.
+
+.PARAMETER RuntimeSelection
+    Select the included portable game or an existing game. The default is the
+    included game when the package contains one.
+
+.PARAMETER StartAfterInstall
+    Start the sidecar and game after a successful installation. The start
+    script waits until the map grants this world a place before it starts the
+    game.
 
 .PARAMETER DataRoot
     Where this install keeps its journal, its credential, its logs and its
@@ -92,7 +102,7 @@
 
 .EXAMPLE
     .\Install-BibitesMultiverse.ps1
-    Asks for your join string with the typing hidden, and installs.
+    Installs the included game and connects it to the public map.
 
 .EXAMPLE
     .\Install-BibitesMultiverse.ps1 -JoinStringFile .\join.txt -World MyWorld
@@ -107,6 +117,7 @@ param(
     [string]$RelayUrl = '',
     [string]$CaFile = '',
     [string]$GameDir = '',
+    [ValidateSet('auto', 'bundled', 'external')][string]$RuntimeSelection = 'auto',
     [string]$DataRoot = '',
     [string]$World = 'Multiverse',
     [string]$ExportEdges = 'E,N,W,S',
@@ -116,13 +127,14 @@ param(
     [double]$SaveMinutes = 10,
     [int]$SaveKeep = 6,
     [ValidateSet('on', 'off')][string]$SaveOnQuit = 'on',
+    [switch]$StartAfterInstall,
     [switch]$SkipCaImport
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
-$Release      = '0.1.0'
+$Release      = '0.2.0'
 $Here         = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ManifestName = 'MANIFEST.sha256'
 $MatrixName   = 'support-matrix.json'
@@ -133,6 +145,14 @@ $PluginGuid   = 'dev.multiverse.bibites'
 $StartName    = 'Start-Multiverse.ps1'
 $StopName     = 'Stop-Multiverse.ps1'
 $RecordName   = 'install-record.json'
+$PublicMapName = 'public-map.json'
+
+$discoveryScript = Join-Path $Here 'Find-BibitesGame.ps1'
+if (-not (Test-Path -LiteralPath $discoveryScript -PathType Leaf)) {
+    Write-Host "STOP [INS-CHECKSUM]: Find-BibitesGame.ps1 is missing." -ForegroundColor Red
+    exit 1
+}
+. $discoveryScript
 
 function Say  { param([string]$m) Write-Host "     $m" }
 function Step { param([string]$m) Write-Host ""; Write-Host "==== $m" }
@@ -222,15 +242,21 @@ $runtimeMode  = 'external'
 $runtimeRoot  = ''
 $runtimeFiles = @()
 $payloadDescriptorPath = Join-Path $Here $PayloadDescriptorName
+$hasBundledPayload = Test-Path -LiteralPath $payloadDescriptorPath -PathType Leaf
+if ($RuntimeSelection -eq 'auto') {
+    $RuntimeSelection = if ($hasBundledPayload) { 'bundled' } else { 'external' }
+}
+if ($RuntimeSelection -eq 'bundled' -and -not $hasBundledPayload) {
+    Stop-Setup 'This package has no included portable game. Select an existing game.' 'INS-RUNTIME'
+}
 
-if (Test-Path -LiteralPath $payloadDescriptorPath) {
+if ($RuntimeSelection -eq 'bundled') {
     if ($GameDir) {
-        Stop-Setup ("This is a complete package and installs its own managed game runtime. " +
-                    "Do not pass -GameDir; use the add-on package to bind an existing copy.") 'INS-RUNTIME'
+        Stop-Setup 'The portable-game selection does not use -GameDir.' 'INS-RUNTIME'
     }
 
     $payload = Get-Content -LiteralPath $payloadDescriptorPath -Raw | ConvertFrom-Json
-    foreach ($required in @('format', 'platform', 'gameVersion', 'assemblySha256', 'licenseFile')) {
+    foreach ($required in @('format', 'platform', 'gameVersion', 'assemblySha256', 'redistributionNoticeFile')) {
         if ($payload.PSObject.Properties.Match($required).Count -eq 0) {
             Stop-Setup "$PayloadDescriptorName is missing its '$required' field." 'INS-CHECKSUM'
         }
@@ -247,14 +273,14 @@ if (Test-Path -LiteralPath $payloadDescriptorPath) {
     }
 
     $payloadGameDir = Join-Path $Here 'game'
-    $payloadLicense = Join-Path $Here ([string]$payload.licenseFile)
+    $payloadNotice = Join-Path $Here ([string]$payload.redistributionNoticeFile)
     $payloadExe = Join-Path $payloadGameDir 'The Bibites.exe'
     $payloadAssembly = Join-Path $payloadGameDir 'The Bibites_Data\Managed\BibitesAssembly.dll'
     if (-not (Test-Path -LiteralPath $payloadGameDir -PathType Container)) {
         Stop-Setup 'The complete package is missing its game\ directory.' 'INS-CHECKSUM'
     }
-    if (-not $payload.licenseFile -or -not (Test-Path -LiteralPath $payloadLicense -PathType Leaf)) {
-        Stop-Setup "The complete package is missing the game license named by $PayloadDescriptorName." 'INS-CHECKSUM'
+    if (-not $payload.redistributionNoticeFile -or -not (Test-Path -LiteralPath $payloadNotice -PathType Leaf)) {
+        Stop-Setup "The complete package is missing the redistribution notice named by $PayloadDescriptorName." 'INS-CHECKSUM'
     }
     if (-not (Test-Path -LiteralPath $payloadExe -PathType Leaf)) {
         Stop-Setup "The complete package has no 'The Bibites.exe' in game\." 'INS-CHECKSUM'
@@ -333,10 +359,14 @@ if (Test-Path -LiteralPath $payloadDescriptorPath) {
             sha256 = $file.sha256
         }
     }
-    Say "game license: $payloadLicense"
+    Say "game redistribution notice: $payloadNotice"
     $GameDir = $runtimeRoot
 } else {
-    Say 'add-on edition: binding to an existing game installation'
+    if ($hasBundledPayload) {
+        Say 'existing-game selection: the included portable game will not be copied'
+    } else {
+        Say 'add-on edition: binding to an existing game installation'
+    }
 }
 
 function Get-GameProcessesIn {
@@ -357,60 +387,13 @@ function Get-GameProcessesIn {
     return $hit
 }
 
-function Get-SteamRoots {
-    $roots = New-Object System.Collections.ArrayList
-
-    foreach ($key in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam',
-                       'HKLM:\SOFTWARE\Valve\Steam')) {
-        try {
-            $item = Get-ItemProperty -Path $key -ErrorAction Stop
-        } catch {
-            continue
-        }
-        foreach ($name in @('InstallPath', 'SteamPath')) {
-            $value = $null
-            if ($item.PSObject.Properties.Match($name).Count -gt 0) { $value = $item.$name }
-            if ($value) { [void]$roots.Add(([string]$value).Replace('/', '\')) }
-        }
-    }
-
-    foreach ($guess in @("${env:ProgramFiles(x86)}\Steam", "$env:ProgramFiles\Steam",
-                         "$env:SystemDrive\Steam")) {
-        if ($guess) { [void]$roots.Add($guess) }
-    }
-
-    # A second drive is normal. Every extra Steam library is listed in the
-    # library index of the first one.
-    $extra = New-Object System.Collections.ArrayList
-    foreach ($root in $roots) {
-        $vdf = Join-Path $root 'steamapps\libraryfolders.vdf'
-        if (-not (Test-Path $vdf)) { continue }
-        foreach ($line in (Get-Content -Path $vdf)) {
-            $m = [regex]::Match($line, '"path"\s+"(.+?)"')
-            if ($m.Success) { [void]$extra.Add($m.Groups[1].Value.Replace('\\', '\')) }
-        }
-    }
-    foreach ($e in $extra) { [void]$roots.Add($e) }
-
-    return ($roots | Where-Object { $_ } | Select-Object -Unique)
-}
-
-function Find-GameDir {
-    foreach ($root in (Get-SteamRoots)) {
-        $candidate = Join-Path $root 'steamapps\common\The Bibites'
-        if (Test-Path (Join-Path $candidate 'The Bibites.exe')) { return $candidate }
-    }
-    return ''
-}
-
-if (-not $GameDir) { $GameDir = Find-GameDir }
+if (-not $GameDir) { $GameDir = Find-BibitesGameDirectory }
 if (-not $GameDir) {
-    Stop-Setup ("Steam has no copy of The Bibites on this machine, or it is somewhere this script " +
-                "does not know to look. Install the game, or run this script again with " +
-                "-GameDir 'D:\path\to\The Bibites'.")
+    Stop-Setup ("Game not found. Select the folder that contains The Bibites.exe, or run this " +
+                "script again with -GameDir 'D:\path\to\The Bibites'.") 'INS-GAMEPATH'
 }
 if (-not (Test-Path (Join-Path $GameDir 'The Bibites.exe'))) {
-    Stop-Setup "There is no 'The Bibites.exe' in $GameDir."
+    Stop-Setup "There is no 'The Bibites.exe' in $GameDir." 'INS-GAMEPATH'
 }
 $GameDir = (Resolve-Path $GameDir).Path
 Say "game directory: $GameDir"
@@ -545,19 +528,19 @@ $logDir   = Join-Path $DataRoot 'logs'
 New-Item -ItemType Directory -Force -Path $dataDir, $logDir | Out-Null
 Say "this install's own files live in $DataRoot"
 
-# ---------------------------------------------------------------- 6. the join string
+# ---------------------------------------------------------------- 6. the map identity
 
-Step "6 of 9 - your join string"
+Step "6 of 9 - connect this installation to a map"
 
 function Read-JoinString {
     param([string]$File)
     if ($File) {
-        if (-not (Test-Path $File)) { Stop-Setup "No join string file at $File." }
+        if (-not (Test-Path $File)) { Stop-Setup "No join string file at $File." 'INS-JOINSTRING' }
         foreach ($line in (Get-Content -Path $File)) {
             $candidate = $line.Trim()
             if ($candidate -and -not $candidate.StartsWith('#')) { return $candidate }
         }
-        Stop-Setup "$File holds no join string. Its first non-empty line must be the one your operator sent."
+        Stop-Setup "$File holds no join string. Its first non-empty line must be the one your operator sent." 'INS-JOINSTRING'
     }
     Write-Host ""
     Say "Paste the join string your map's operator handed you. It looks like this:"
@@ -574,26 +557,198 @@ function Read-JoinString {
     }
 }
 
-$joinString = Read-JoinString $JoinStringFile
-if (-not $joinString) { Stop-Setup "No join string was given, so this world has no identity on any map." }
-
 $credential = ''
-$fields = @($joinString -split '\s+' | Where-Object { $_ })
-if ($fields.Count -eq 3 -and $fields[0] -eq 'multiverse-join/1') {
-    $RelayUrl   = $fields[1]
-    $credential = $fields[2]
-} elseif ($fields.Count -eq 1) {
-    $credential = $fields[0]
-    if (-not $RelayUrl) {
-        Stop-Setup ("That is the identity half on its own, with no relay address. Either paste the " +
-                    "whole one-line join string - it starts with 'multiverse-join/1' - or run this " +
-                    "script again with -RelayUrl wss://<relay-host>/contract-b/v4.")
+$pendingEnrollmentPath = ''
+$usedAutomaticEnrollment = $false
+$credentialPath = Join-Path $DataRoot 'peer-secret.txt'
+
+function Protect-UserFile {
+    param([string]$Path, [string]$Description, [switch]$Required)
+    $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    try {
+        $acl = New-Object System.Security.AccessControl.FileSecurity
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($currentUser, 'FullControl', 'Allow')))
+        (Get-Item -LiteralPath $Path).SetAccessControl($acl)
+        Say "$Description is readable by $currentUser only"
+        return $true
+    } catch {
+        if ($Required) {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+            Stop-Setup ("The installer could not protect its pending map credential. It did not " +
+                        "contact the map. $($_.Exception.Message)") 'INS-ENROLL'
+        }
+        Say "$Description is in $Path"
+        Say "WARNING: the permissions could not be tightened: $($_.Exception.Message)"
+        Say "The file is inside your own profile, which other accounts cannot read by default."
+        return $false
+    }
+}
+
+$publicMapPath = Join-Path $Here $PublicMapName
+$usePublicMap = (-not $JoinStringFile) -and (-not $RelayUrl) -and
+                (Test-Path -LiteralPath $publicMapPath -PathType Leaf)
+if ($usePublicMap) {
+    $pendingEnrollmentPath = Join-Path $DataRoot 'enrollment-pending.json'
+    try {
+        $publicMap = Get-Content -LiteralPath $publicMapPath -Raw | ConvertFrom-Json
+    } catch {
+        Stop-Setup "$PublicMapName is not valid JSON." 'INS-ENROLL'
+    }
+    foreach ($required in @('format', 'enrollmentUrl', 'relayUrl')) {
+        if ($publicMap.PSObject.Properties.Match($required).Count -eq 0) {
+            Stop-Setup "$PublicMapName is missing its '$required' field." 'INS-ENROLL'
+        }
+    }
+    if ($publicMap.format -ne 'bibites-multiverse/public-map/1') {
+        Stop-Setup "$PublicMapName has an unsupported format." 'INS-ENROLL'
+    }
+    $enrollmentUrl = [string]$publicMap.enrollmentUrl
+    $publicRelayUrl = [string]$publicMap.relayUrl
+    if ($enrollmentUrl -notmatch '^https://[^\s]+$') {
+        Stop-Setup "$PublicMapName does not contain a secure HTTPS enrollment address." 'INS-ENROLL'
+    }
+    if ($publicRelayUrl -notmatch '^wss://[^\s]+$') {
+        Stop-Setup "$PublicMapName does not contain a secure WSS relay address." 'INS-ENROLL'
+    }
+
+    # A successful earlier install already owns an identity. Reuse it instead
+    # of allocating another slot when the user changes or repairs the runtime.
+    $existingRecordPath = Join-Path $DataRoot $RecordName
+    $existingRecordHeld = Test-Path -LiteralPath $existingRecordPath -PathType Leaf
+    $credentialHeld = Test-Path -LiteralPath $credentialPath -PathType Leaf
+    $reusedIdentity = $false
+    if ($existingRecordHeld -and $credentialHeld) {
+        try {
+            $existingRecord = Get-Content -LiteralPath $existingRecordPath -Raw | ConvertFrom-Json
+            $existingSecret = [string](Get-Content -LiteralPath $credentialPath | Select-Object -First 1)
+            if ($existingRecord.PSObject.Properties.Match('peerId').Count -gt 0 -and
+                $existingRecord.PSObject.Properties.Match('relayUrl').Count -gt 0 -and
+                [string]$existingRecord.relayUrl -eq $publicRelayUrl -and
+                [string]$existingRecord.peerId -match '^public-[0-9a-f]{32}$' -and
+                $existingSecret -match '^[0-9a-f]{64}$') {
+                if (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf) {
+                    try {
+                        $leftoverPending = Get-Content -LiteralPath $pendingEnrollmentPath -Raw | ConvertFrom-Json
+                        $leftoverPeerId = 'public-' + ([string]$leftoverPending.installId).Replace('-', '').ToLowerInvariant()
+                        if ($leftoverPending.format -ne 'bibites-multiverse/enrollment-pending/1' -or
+                            $leftoverPeerId -ne [string]$existingRecord.peerId -or
+                            [string]$leftoverPending.secret -ne $existingSecret) {
+                            throw 'the pending identity does not match the completed identity'
+                        }
+                    } catch {
+                        Stop-Setup ("The completed identity and $pendingEnrollmentPath disagree. " +
+                                    "Neither file was changed. Ask the operator before replacing " +
+                                    "this world identity.") 'INS-ENROLL'
+                    }
+                }
+                $RelayUrl = $publicRelayUrl
+                $credential = ([string]$existingRecord.peerId) + '.' + $existingSecret
+                $reusedIdentity = $true
+                Say 'reusing this installation''s existing public-map identity'
+            }
+        } catch {
+            $reusedIdentity = $false
+        }
+    }
+
+    if (-not $reusedIdentity) {
+        if (($existingRecordHeld -or $credentialHeld) -and
+            -not (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf)) {
+            Stop-Setup ("This data root already contains part of a completed map identity, but " +
+                        "the installer cannot safely reuse it. Do not create a replacement over " +
+                        "the same world. Ask the operator for a slot handover, or use a different " +
+                        "-DataRoot for a new world.") 'INS-ENROLL'
+        }
+        $installId = ''
+        $enrollmentSecret = ''
+        if (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf) {
+            try {
+                $pending = Get-Content -LiteralPath $pendingEnrollmentPath -Raw | ConvertFrom-Json
+            } catch {
+                Stop-Setup ("$pendingEnrollmentPath is not valid JSON. Remove it only if you want " +
+                            "the installer to create a different map identity.") 'INS-ENROLL'
+            }
+            if ($pending.PSObject.Properties.Match('format').Count -eq 0 -or
+                $pending.PSObject.Properties.Match('installId').Count -eq 0 -or
+                $pending.PSObject.Properties.Match('secret').Count -eq 0 -or
+                $pending.format -ne 'bibites-multiverse/enrollment-pending/1') {
+                Stop-Setup ("$pendingEnrollmentPath is not an enrollment record this installer " +
+                            "can use. Remove it only if you want a different map identity.") 'INS-ENROLL'
+            }
+            $installId = [string]$pending.installId
+            $enrollmentSecret = [string]$pending.secret
+            Say 'retrying the pending public-map enrollment'
+        } else {
+            $installId = [guid]::NewGuid().ToString('D')
+            $secretBytes = New-Object byte[] 32
+            $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+            try { $random.GetBytes($secretBytes) } finally { $random.Dispose() }
+            $enrollmentSecret = -join @($secretBytes | ForEach-Object { $_.ToString('x2') })
+            [ordered]@{
+                format    = 'bibites-multiverse/enrollment-pending/1'
+                installId = $installId
+                secret    = $enrollmentSecret
+            } | ConvertTo-Json | Set-Content -LiteralPath $pendingEnrollmentPath -Encoding ASCII
+        }
+
+        $parsedInstallId = [guid]::Empty
+        if (-not [guid]::TryParse($installId, [ref]$parsedInstallId) -or
+            $enrollmentSecret -notmatch '^[0-9a-f]{64}$') {
+            Stop-Setup ("$pendingEnrollmentPath contains an invalid map identity. Remove it only " +
+                        "if you want the installer to create a different identity.") 'INS-ENROLL'
+        }
+        [void](Protect-UserFile $pendingEnrollmentPath 'the pending map credential' -Required)
+        $expectedPeerId = 'public-' + $parsedInstallId.ToString('N')
+        $request = [ordered]@{
+            format    = 'bibites-multiverse/enrollment-request/1'
+            installId = $parsedInstallId.ToString('D')
+            secret    = $enrollmentSecret
+            release   = $Release
+        } | ConvertTo-Json -Compress
+        Say "requesting a unique identity from $enrollmentUrl"
+        try {
+            $response = Invoke-RestMethod -Method Post -Uri $enrollmentUrl -ContentType 'application/json' `
+                                          -Body $request -TimeoutSec 30
+        } catch {
+            Stop-Setup ("The public map did not create this installation's identity. The pending " +
+                        "identity was kept, so running the installer again is a safe retry.") 'INS-ENROLL'
+        }
+        foreach ($required in @('format', 'relayUrl', 'peerId')) {
+            if ($response.PSObject.Properties.Match($required).Count -eq 0) {
+                Stop-Setup "The public map returned an incomplete enrollment response." 'INS-ENROLL'
+            }
+        }
+        if ($response.format -ne 'bibites-multiverse/enrollment-response/1' -or
+            [string]$response.relayUrl -ne $publicRelayUrl -or
+            [string]$response.peerId -ne $expectedPeerId) {
+            Stop-Setup "The public map returned an enrollment response for a different identity or relay." 'INS-ENROLL'
+        }
+        $RelayUrl = $publicRelayUrl
+        $credential = $expectedPeerId + '.' + $enrollmentSecret
+        $usedAutomaticEnrollment = $true
     }
 } else {
-    Stop-Setup ("That is not a join string this installer can read. The one-line form is three " +
-                "parts: 'multiverse-join/1', the wss:// relay address, and your identity and " +
-                "secret joined by a dot. Ask your operator to send the 'one line' from the block " +
-                "their relay printed.")
+    $joinString = Read-JoinString $JoinStringFile
+    if (-not $joinString) { Stop-Setup "No join string was given, so this world has no identity on any map." 'INS-JOINSTRING' }
+
+    $fields = @($joinString -split '\s+' | Where-Object { $_ })
+    if ($fields.Count -eq 3 -and $fields[0] -eq 'multiverse-join/1') {
+        $RelayUrl   = $fields[1]
+        $credential = $fields[2]
+    } elseif ($fields.Count -eq 1) {
+        $credential = $fields[0]
+        if (-not $RelayUrl) {
+            Stop-Setup ("That is the identity half on its own, with no relay address. Either paste the " +
+                        "whole one-line join string - it starts with 'multiverse-join/1' - or run this " +
+                        "script again with -RelayUrl wss://<relay-host>/contract-b/v4.") 'INS-JOINSTRING'
+        }
+    } else {
+        Stop-Setup ("That is not a join string this installer can read. The one-line form is three " +
+                    "parts: 'multiverse-join/1', the wss:// relay address, and your identity and " +
+                    "secret joined by a dot. Ask your operator to send the 'one line' from the block " +
+                    "their relay printed.") 'INS-JOINSTRING'
+    }
 }
 
 if ($RelayUrl -notmatch '^wss://[^\s]+$') {
@@ -601,9 +756,9 @@ if ($RelayUrl -notmatch '^wss://[^\s]+$') {
         Stop-Setup ("The relay address is ws://, which is not encrypted. This wire is always " +
                     "wss:// and there is no fallback anywhere in this software: a relay that " +
                     "answers ws:// off loopback refuses the connection rather than serving it. " +
-                    "Ask your operator for the wss:// address.")
+                    "Ask your operator for the wss:// address.") 'INS-JOINSTRING'
     }
-    Stop-Setup "The relay address '$RelayUrl' is not a wss:// URL."
+    Stop-Setup "The relay address '$RelayUrl' is not a wss:// URL." 'INS-JOINSTRING'
 }
 
 # The two halves split on the LAST dot: an identity may legally contain one and a
@@ -611,48 +766,37 @@ if ($RelayUrl -notmatch '^wss://[^\s]+$') {
 $dot = $credential.LastIndexOf('.')
 if ($dot -le 0 -or $dot -eq $credential.Length - 1) {
     Stop-Setup ("The identity half and the secret half are joined by a dot, and this value has no " +
-                "usable one. Paste the whole 'one line' your operator sent.")
+                "usable one. Paste the whole 'one line' your operator sent.") 'INS-JOINSTRING'
 }
 $peerId = $credential.Substring(0, $dot)
 $secret = $credential.Substring($dot + 1)
 
 if ($secret.Length -lt 32 -or $secret.Length -gt 256) {
     Stop-Setup ("The secret half is $($secret.Length) characters. It must be 32 to 256. Nothing was " +
-                "written; ask your operator to re-send the join string exactly as their relay printed it.")
+                "written; ask your operator to re-send the join string exactly as their relay printed it.") 'INS-JOINSTRING'
 }
 if ($secret -notmatch '^[\x21-\x7e]+$') {
-    Stop-Setup "The secret half must be printable ASCII with no spaces. Nothing was written."
+    Stop-Setup "The secret half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING'
 }
 if ($peerId -notmatch '^[\x21-\x7e]+$') {
-    Stop-Setup "The identity half must be printable ASCII with no spaces. Nothing was written."
+    Stop-Setup "The identity half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING'
 }
 
-$credentialPath = Join-Path $DataRoot 'peer-secret.txt'
 # Written fresh every time: re-writing over an already protected file makes the
 # permission change below need a privilege an ordinary account does not have.
-Remove-Item -Path $credentialPath -Force -ErrorAction SilentlyContinue
-Set-Content -Path $credentialPath -Value $secret -Encoding ASCII
-
-$me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-try {
-    $acl = New-Object System.Security.AccessControl.FileSecurity
-    $acl.SetAccessRuleProtection($true, $false)
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($me, 'FullControl', 'Allow')))
-    (Get-Item -Path $credentialPath).SetAccessControl($acl)
-    Say "the secret half is in $credentialPath, readable by $me only"
-} catch {
-    Say "the secret half is in $credentialPath"
-    Say "WARNING: the permissions could not be tightened: $($_.Exception.Message)"
-    Say "The file is inside your own profile, which other accounts cannot read by default."
-}
+Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
+Set-Content -LiteralPath $credentialPath -Value $secret -Encoding ASCII
+[void](Protect-UserFile $credentialPath 'the map credential')
 $secret = ''
 Say "your world's identity on this map: $peerId"
 Say "the relay it dials: $RelayUrl"
-Write-Host ""
-Say "IF YOU LOSE THAT SECRET there is no software recovery: the relay keeps a verifier"
-Say "and cannot print it again. The only way back is to ask the operator for a slot"
-Say "handover, which mints a fresh one. Your slot, your position and everything"
-Say "addressed to you survive that - see docs/participant/leave.md."
+if (-not $usePublicMap) {
+    Write-Host ""
+    Say "IF YOU LOSE THAT SECRET there is no software recovery: the relay keeps a verifier"
+    Say "and cannot print it again. The only way back is to ask the operator for a slot"
+    Say "handover, which mints a fresh one. Your slot, your position and everything"
+    Say "addressed to you survive that - see docs/participant/leave.md."
+}
 if ($JoinStringFile) {
     Write-Host ""
     Say "Delete $JoinStringFile now. It still holds the secret in clear text, and this"
@@ -906,7 +1050,7 @@ if (Get-RecordedProcess $sidecarPidFile) {
 }
 if (-not (Test-Path $credentialFile)) {
     Write-Host "There is no credential at $credentialFile." -ForegroundColor Red
-    Write-Host "Run .\Install-BibitesMultiverse.ps1 again with your join string."
+    Write-Host "Run .\Install-BibitesMultiverse.ps1 again."
     exit 1
 }
 
@@ -957,8 +1101,9 @@ if ($granted) {
     Write-Host "   2. 'the relay's TLS certificate did not verify'. On a public map that is a"
     Write-Host "      certificate problem the operator has to fix; on a private map it means the"
     Write-Host "      authority is not trusted here yet - re-run the installer with -CaFile."
-    Write-Host "   3. HTTP 401: this credential is not the one the relay holds for $PeerId. Ask"
-    Write-Host "      the operator for a slot handover; a join string cannot be reprinted."
+    Write-Host "   3. HTTP 401: this credential is not the one the relay holds for $PeerId."
+    Write-Host "      Ask the operator for a slot handover. The relay stores only a verifier,"
+    Write-Host "      so neither public enrollment nor a join string can recover the secret."
     Write-Host "   4. Your wire version is below the minimum this map admits. Install the newest"
     Write-Host "      release; nobody on the relay's side can push it to you."
     Write-Host "   5. Your game build is not the one this map is on. Only the operator can see"
@@ -1104,6 +1249,11 @@ $record = [ordered]@{
 $recordPath = Join-Path $DataRoot $RecordName
 $record | ConvertTo-Json -Depth 6 | Set-Content -Path $recordPath -Encoding ASCII
 Say "wrote $recordPath - the uninstall reads it, and removes only what is named in it"
+if ($usePublicMap -and $pendingEnrollmentPath -and
+    (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf)) {
+    Remove-Item -LiteralPath $pendingEnrollmentPath -Force
+    Say 'removed the pending enrollment record after completing the install record'
+}
 
 # ---------------------------------------------------------------- done
 
@@ -1120,7 +1270,18 @@ Say "your files   : $DataRoot"
 if ($caImported) { Say "certificate  : $caThumbprint imported into your own user store" }
 else             { Say "certificate  : nothing imported into any trust store" }
 Write-Host ""
-Say "Next: run  .\$StartName"
+if ($StartAfterInstall) {
+    Say 'Next: the installer will connect this world and start the game now.'
+} else {
+    Say "Next: run  .\$StartName"
+}
 Say "Later: .\$StopName to stop, and the uninstall script here to remove all of it."
 Write-Host ""
 Say "The four pages written for you, on the release page: install, join, diagnose, leave."
+
+if ($StartAfterInstall) {
+    Write-Host ""
+    Say 'Starting the sidecar. The game will open after the map grants this world a place.'
+    & $startPath
+    if (-not $?) { Stop-Setup "The installation succeeded, but the installed world did not start." 'INS-START' }
+}

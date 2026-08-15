@@ -1,0 +1,5 @@
+{
+  "format": "bibites-multiverse/public-map/1",
+  "enrollmentUrl": "https://bibitesmultiverse.com/api/enroll",
+  "relayUrl": "wss://bibitesmultiverse.com/contract-b/v4"
+}

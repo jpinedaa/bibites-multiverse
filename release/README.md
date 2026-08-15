@@ -12,8 +12,11 @@ raised only after the release that satisfies it exists.
 
 | Path | What it is |
 |---|---|
-| `kit/Install-BibitesMultiverse.cmd` | The Windows double-click launcher. It uses `RemoteSigned` for its process only |
+| `kit/Install-BibitesMultiverse.cmd` | The Windows double-click launcher. It opens the GUI and uses `RemoteSigned` for its process only |
+| `kit/Install-BibitesMultiverse-Gui.ps1` | Selects the included or existing game and starts the installed world by default |
+| `kit/Find-BibitesGame.ps1` | Searches Steam, itch.io, and common Windows game locations |
 | `kit/Install-BibitesMultiverse.ps1` | The Windows installer and its advanced options |
+| `kit/public-map.json` | Public HTTPS enrollment and WSS relay addresses. It contains no credential |
 | `kit/Uninstall-BibitesMultiverse.ps1` | Removes what the Windows installer recorded, hash-checked, and nothing else |
 | `kit/README.md` | The page inside the Windows archive |
 | `kit/install-bibites-multiverse.sh` | The Linux installer. bash, and `sha256sum`/`awk`/`unzip`/`file`; no toolchain, no root, and no `jq` or `python` — its JSON reader is 40 lines of awk, shared with the uninstaller |
@@ -29,8 +32,9 @@ raised only after the release that satisfies it exists.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The default build creates an add-on archive for each platform. A permitted build can also create
-a complete archive with an unmodified game payload and its separate license file.
+The build creates an add-on archive for each platform. Release `0.2.0` also publishes the Windows
+complete archive as the recommended download. It contains an authorized, unmodified game payload
+and a redistribution notice.
 Every archive contains the project `LICENSE` and `THIRD_PARTY_NOTICES.md` files.
 
 The two documents that ship *beside* the release rather than inside it are
@@ -45,8 +49,8 @@ script. It stays exactly as it is, and the living deployment still runs from it.
 
 This directory is the stranger-facing descendant of the same mechanics: the Steam search, the
 game-build gate, the BepInEx placement and the generated start and stop scripts are `farend`'s,
-proven. What changed is everything about the audience — a join string instead of a hand-carried
-token file, no slot and no position (the map places you), no certificate authority unless the map
+proven. What changed is everything about the audience — automatic public enrollment or a
+private-map join string instead of a hand-carried token file, no slot and no position (the map places you), no certificate authority unless the map
 is private, and **no instruction to switch a security control off**, which is the one thing
 `farend/README.md` does and a public package may not (`m5_considerations.md`, DQ4).
 
@@ -60,22 +64,26 @@ machine's matrix entry rather than a rule about the map (D22).
 release/make-release.sh
 ```
 
-To build a complete edition, add one or both game directories and the applicable license file:
+To build a complete edition, add one or both clean game directories and the redistribution notice:
 
 ```sh
 release/make-release.sh \
   --windows-game-dir <clean-windows-game> \
   --linux-game-dir <clean-linux-game> \
-  --game-license <applicable-game-license>
+  --game-redistribution-notice release/GAME-REDISTRIBUTION-NOTICE.txt
 ```
 
-The complete editions are optional. The build rejects a payload that does not match the support
-matrix or that already contains mod files. Supplying a license file does not create distribution
-rights; the person publishing the archive is responsible for having the publisher's permission.
+The build rejects a payload that does not match the support matrix or that already contains mod
+files. The project received permission to redistribute the game with this installer. The notice
+records that permission without changing the game's copyright or the source-code license.
 
 It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`), the .NET SDK and Go —
 the build side, never the player's side. Everything heavy runs under `nice -n 19`, because this
 host runs the living deployment.
+
+Go can omit VCS metadata when a linked worktree points to Git data on another filesystem. In that
+case, set `RELEASE_SIDECAR_BUILD_REPO` to a clean checkout of the same commit. The builder checks
+the revision and refuses a missing sidecar stamp.
 
 **It refuses to build a release nobody has run.** Before it packages anything it requires:
 
@@ -83,7 +91,8 @@ host runs the living deployment.
    **Windows** row names — that is the reference assembly the mod is compiled against;
 2. the plugin it builds to be **byte-identical** to the one in `farend/dist/farend-bundle.zip` —
    the tracked artifact set the living fleet runs — and every staged copy to be that same file;
-3. the cross-compiled Windows sidecar to be byte-identical to the same bundle's copy;
+3. the Go source to match the source used for the sidecar in that bundle; VCS stamps can make two
+   builds from the same source differ as files;
 4. and, when this machine's game directory is readable, the deployed plugin to agree as well.
 
 It also checks two things the two-platform matrix made checkable: that **every matrix entry
@@ -108,14 +117,14 @@ executable in a complete archive.
 ## Testing the install and the uninstall
 
 ```sh
-release/test-install-uninstall.ps1     # run it through powershell.exe
-release/test-install-uninstall.sh --game-assembly <the LINUX BibitesAssembly.dll>
+release/test-install-uninstall.ps1 -RealGameDir <clean-or-installed-Windows-game>
+release/test-install-uninstall.sh --real-game-dir <the Linux game directory>
 ```
 
-Each builds a sandbox game directory, runs the real installer against it with a sandbox data root,
-runs the real uninstaller, and requires the tree to be **hash-for-hash identical** to what it was
-before the install — the Linux one requires the permissions to match as well. Neither touches a
-real copy of the game, a trust store, or a live process. Run them after any change to either kit.
+The Windows suite copies a real supported game into each positive sandbox. The Linux suite copies
+a real supported game into each positive sandbox. Each runs the real installer and uninstaller and
+requires the tree to be **hash-for-hash identical** to its initial state. The Linux suite also
+checks permissions. Neither changes the source game, a trust store, or a live process.
 
 **The Linux proof needs no release build**: with no `--kit-dir` it stages a kit out of this
 checkout — the two real scripts, the matrix extracted from `docs/support-matrix.md`, the real
@@ -132,15 +141,15 @@ that fails its manifest**.
 1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 2. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.1.0 && git push origin v0.1.0`. The page's links point into the tag, so the
+   `git tag v0.2.0 && git push origin v0.2.0`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, and `SHA256SUMS`:
    ```sh
-   gh release create v0.1.0 \
-       release/dist/bibites-multiverse-0.1.0-*.zip \
+   gh release create v0.2.0 \
+       release/dist/bibites-multiverse-0.2.0-*.zip \
        release/dist/SHA256SUMS \
-       --title "Bibites Multiverse 0.1.0" \
+       --title "Bibites Multiverse 0.2.0" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 4. **Read the published page as a stranger would**, in a browser, and check the three things that

@@ -21,9 +21,10 @@ When the operator participates in a community discussion:
 Keep channel research, contact history, draft posts, and outcomes in private operations storage.
 The public repository owns only this policy and participant-facing service facts.
 
-## Information required before a join
+## Information required before enrollment
 
-Give each participant these facts before you transfer a join string:
+Give each participant these facts before they use automatic enrollment or receive a private-map
+join string:
 
 1. The service start and end dates.
 2. The rule for an extension or early closure.

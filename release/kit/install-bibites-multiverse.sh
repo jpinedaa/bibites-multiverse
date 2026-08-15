@@ -56,7 +56,7 @@
 #
 set -euo pipefail
 
-RELEASE='0.1.0'
+RELEASE='0.2.0'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_NAME='MANIFEST.sha256'
 MATRIX_NAME='support-matrix.json'
@@ -358,10 +358,10 @@ if [ -f "$PAYLOAD_DESCRIPTOR" ]; then
   case "$PAYLOAD_SHA" in ''|*[!0-9A-F]*) stop_setup "$PAYLOAD_DESCRIPTOR_NAME has an invalid assemblySha256." 'INS-CHECKSUM' ;; esac
   [ "${#PAYLOAD_SHA}" -eq 64 ] || stop_setup "$PAYLOAD_DESCRIPTOR_NAME has an invalid assemblySha256." 'INS-CHECKSUM'
   PAYLOAD_GAME_DIR="$HERE/game"
-  PAYLOAD_LICENSE="$(flat_get "$PAYLOAD_FLAT" licenseFile)"
+  PAYLOAD_NOTICE="$(flat_get "$PAYLOAD_FLAT" redistributionNoticeFile)"
   [ -d "$PAYLOAD_GAME_DIR" ] || stop_setup "The complete package is missing its game/ directory." 'INS-CHECKSUM'
-  [ -n "$PAYLOAD_LICENSE" ] && [ -f "$HERE/$PAYLOAD_LICENSE" ] || \
-    stop_setup "The complete package is missing the game license named by $PAYLOAD_DESCRIPTOR_NAME." 'INS-CHECKSUM'
+  [ -n "$PAYLOAD_NOTICE" ] && [ -f "$HERE/$PAYLOAD_NOTICE" ] || \
+    stop_setup "The complete package is missing the redistribution notice named by $PAYLOAD_DESCRIPTOR_NAME." 'INS-CHECKSUM'
   [ -f "$PAYLOAD_GAME_DIR/$GAME_EXE" ] || stop_setup "The complete package has no '$GAME_EXE' in game/." 'INS-CHECKSUM'
   [ -x "$PAYLOAD_GAME_DIR/$GAME_EXE" ] || stop_setup "The complete package's '$GAME_EXE' is not executable. Unpack the archive again with permissions preserved." 'INS-CHECKSUM'
   PAYLOAD_ASSEMBLY="$PAYLOAD_GAME_DIR/The Bibites_Data/Managed/BibitesAssembly.dll"
@@ -423,7 +423,7 @@ if [ -f "$PAYLOAD_DESCRIPTOR" ]; then
     trap - EXIT
     say "complete edition: installed the verified game payload into a managed runtime"
   fi
-  say "game license: $HERE/$PAYLOAD_LICENSE"
+  say "game redistribution notice: $HERE/$PAYLOAD_NOTICE"
   GAME_DIR="$RUNTIME_ROOT"
 else
   say "add-on edition: binding to an existing game installation"

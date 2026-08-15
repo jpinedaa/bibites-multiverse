@@ -46,6 +46,19 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 	advertise := fs.String("advertise-url", env("MULTIVERSE_RELAY_ADVERTISE_URL", ""),
 		"the URL a join string tells a peer to dial. Defaults to this relay's own scheme, "+
 			"listen address and path; set it when the relay is behind a name or a proxy")
+	publicEnrollment := fs.Bool("public-enrollment",
+		envBool("MULTIVERSE_PUBLIC_ENROLLMENT", false),
+		"serve POST "+PublicEnrollmentPath+" for installers. Disabled by default; enabling it "+
+			"also needs finite total and per-address limits")
+	publicEnrollmentMax := fs.Int64("public-enrollment-max",
+		envInt64("MULTIVERSE_PUBLIC_ENROLLMENT_MAX", 64),
+		"maximum credentials created by public installer enrollment")
+	publicEnrollmentPerAddress := fs.Int64("public-enrollment-per-address",
+		envInt64("MULTIVERSE_PUBLIC_ENROLLMENT_PER_ADDRESS", 8),
+		"new installer credentials per source address in the enrollment window")
+	publicEnrollmentWindowHours := fs.Int64("public-enrollment-window-hours",
+		envInt64("MULTIVERSE_PUBLIC_ENROLLMENT_WINDOW_HOURS", 24),
+		"public installer enrollment rate-limit window in hours")
 	insecure := fs.Bool("insecure-no-token", false,
 		"accept unauthenticated connections; for a single-machine test rig ONLY. It also "+
 			"REFUSES TO BIND ANYTHING BUT LOOPBACK, and no document this project ships may "+
@@ -190,6 +203,12 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		InsecureNoToken:    *insecure,
 		MinContractVersion: *minContract,
 		AdvertiseURL:       joinURL(*advertise, *listen, tlsOn),
+		PublicEnrollment: PublicEnrollmentOptions{
+			Enabled:          *publicEnrollment,
+			MaxCredentials:   int(*publicEnrollmentMax),
+			MaxPerAddress:    int(*publicEnrollmentPerAddress),
+			PerAddressWindow: time.Duration(*publicEnrollmentWindowHours) * time.Hour,
+		},
 		Limits: contractb.Limits{
 			MaxConnectionsPerPeer:      *maxConnPerPeer,
 			MaxConnectionsPerAddress:   *maxConnPerAddr,
@@ -319,6 +338,14 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		"credentials", srv.Credentials().Len(), "credentialStore", srv.Credentials().Path(),
 		"minContractVersion", orNone(srv.MinContractVersion()),
 		"map", srv.MapShape(), "slots", srv.Snapshot(), "relaySessionId", srv.SessionID())
+	if *publicEnrollment {
+		log.Info("relay: public installer enrollment is enabled",
+			"path", PublicEnrollmentPath,
+			"maxCredentials", *publicEnrollmentMax,
+			"maxPerAddress", *publicEnrollmentPerAddress,
+			"windowHours", *publicEnrollmentWindowHours,
+			"relayUrl", joinURL(*advertise, *listen, tlsOn))
+	}
 	// The published table, said once at startup, because a limit an operator
 	// cannot read in their own log is one they will read off a peer's 4007.
 	log.Info("relay: capacity limits, as this relay is running them (contract-b-m4.md §3.3)",
@@ -866,6 +893,21 @@ func env(name, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envBool(name string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 // envInt64 is the environment half of every §3.3 knob. An unparsable value

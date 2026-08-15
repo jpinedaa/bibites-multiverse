@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-15 UTC.
 
-Bibites Multiverse `0.1.0` is public. The first announced service period runs from
+Bibites Multiverse `0.2.0` is public. The first announced service period runs from
 **August 14 through November 14, 2026**.
 
 ## Current public phase
@@ -23,17 +23,19 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.1.0`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0) |
+| Release | [`v0.2.0`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.4` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
 | Network protocol | `contract-b/4.0` |
-| Windows package | Add-on archive for the Steam game |
+| Windows package | GUI complete archive with the authorized portable game; an existing game is optional |
 | Linux package | Add-on archive for the native itch.io game |
+| Public-map setup | Automatic unique enrollment over HTTPS; no shared packaged credential |
 | Live console source | Full-screen map fitting and visible-range species brain charts; deployment pending |
 
 The release page provides checksums. The participant installer compares the game build with
-the support matrix before it changes the game directory.
+the support matrix before it changes the game directory. The Windows GUI starts the connected
+world after installation by default and keeps headless mode in the generated start script.
 
 ## Milestone state
 

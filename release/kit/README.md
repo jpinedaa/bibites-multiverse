@@ -4,18 +4,18 @@
 edges and arrive in other people's; theirs arrive in yours. Your world stays on your machine and
 stays yours.
 
-**You need:** Windows, a supported copy of The Bibites, and a join string. This release contains
-an add-on package. Its installer finds the Steam game automatically. There is no edition choice
-during installation. **You do not need:** a compiler, an SDK, or administrator rights.
+**The recommended package includes an authorized portable copy of The Bibites.** The GUI selects
+it by default. You can instead use a supported game already on this machine. The public map needs
+no join string. **You do not need:** a compiler, an SDK, or administrator rights.
 
-**This is a Windows archive.** The native Linux build has separate add-on and complete archive
-names, with a bash kit in place of this one. The mod is the same file across all of them; the
-sidecar, mod framework, and scripts are platform-specific. Nothing here will ever ask you to turn a
+**This is a Windows archive.** The Linux release is a separate add-on archive, with a bash kit in
+place of this one. The mod is the same file in both packages. The sidecar, mod framework, and
+scripts are platform-specific. Nothing here will ever ask you to turn a
 security control off — no execution-policy bypass, no `--insecure` flag, no skipped certificate
 check. If any part of this package asks you for one of those, that is a defect and reporting it
 is the right response.
 
-You also need **a join string**, which the operator of a map hands you out of band. It looks
+For a private map, you need **a join string**, which the operator hands you out of band. It looks
 like this, on one line:
 
 ```
@@ -37,20 +37,23 @@ against `MANIFEST.sha256` and refuses to go on if one of them disagrees.
 Double-click `Install-BibitesMultiverse.cmd`.
 
 The launcher uses the `RemoteSigned` policy for its process only. It does not change the policy
-for your account or computer. For advanced installation options, run:
+for your account or computer. The GUI uses the included portable game by default. Its other option
+searches for an existing game and lets you select a folder. The final start checkbox is on by
+default. For advanced installation options, run:
 
 ```powershell
 .\Install-BibitesMultiverse.ps1
 ```
 
-It asks for your join string with the typing hidden. **There is no parameter that takes the
-secret on the command line**, on purpose: a value typed on a command line is in every process
-listing on this machine and in your shell history. If you would rather not type it, put the
+The public-map setup creates a unique credential for this installation over HTTPS. It does not
+reuse one packaged join string. For a private map, use a join-string file. **There is no parameter
+that takes the secret on the command line**, on purpose. A command-line value appears in process
+listings and shell history. If you would rather not type it, put the
 one-line join string in a file and pass `-JoinStringFile .\join.txt` — then delete that file.
 
-The installer finds Steam's copy of The Bibites or accepts `-GameDir`. It checks the selected
-game build against `support-matrix.json` and stops if there is no entry. Then it installs BepInEx,
-the plugin, the credential, and the start and stop scripts.
+The GUI defaults to the included game. Its other option finds Steam's copy or accepts a selected
+folder. The installer checks the game build against `support-matrix.json` and stops if there is no
+entry. Then it installs BepInEx, the plugin, the credential, and the start and stop scripts.
 
 It imports nothing into any trust store. `-CaFile` exists for a private or LAN map whose relay
 signs its own certificate, and only then.
@@ -128,12 +131,15 @@ system prints one, and no diagnostic asks for one.
 | File | What it is |
 |---|---|
 | `Install-BibitesMultiverse.cmd` | The double-click installer launcher |
+| `Install-BibitesMultiverse-Gui.ps1` | The game selection and start-after-install window |
+| `Find-BibitesGame.ps1` | The existing-game search shared by the GUI and installer |
 | `Install-BibitesMultiverse.ps1` | The installer and its advanced options |
+| `public-map.json` | The HTTPS enrollment and WSS relay addresses; no secret |
 | `Uninstall-BibitesMultiverse.ps1` | The uninstaller |
 | `BibitesMultiverse.dll` | The mod, a BepInEx plugin |
 | `multiverse-sidecar.exe` | The program that speaks to the map on your world's behalf |
 | `BepInEx_win_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
 | `support-matrix.json` | The game builds this release supports, and the words it refuses with |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
-| `game-payload.json`, `GAME-LICENSE.txt`, `game\` | Files that occur only in a complete package |
+| `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, `game\` | Files that occur only in a complete package |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |

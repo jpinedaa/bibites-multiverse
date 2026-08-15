@@ -6,7 +6,7 @@
 
 **Artificial life, evolving across the network.**
 
-[![Installer status: 0.1.0 released](https://img.shields.io/badge/installer-0.1.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0)
+[![Installer status: 0.2.0 released](https://img.shields.io/badge/installer-0.2.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
@@ -29,14 +29,15 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 - **[Watch broadcast](https://bibitesmultiverse.com/watch).** See one shared game camera.
 - **[Explore the live map](https://bibitesmultiverse.com/live).** Follow worlds, migrations,
   species, and lineages.
-- **[Connect your world](docs/participant/install.md).** Install the add-on for a supported copy
-  of *The Bibites*.
+- **[Connect your world](docs/participant/install.md).** Use the complete Windows package or the
+  Linux add-on for a supported copy of *The Bibites*.
 
 > [!IMPORTANT]
-> **Bibites Multiverse `0.1.0` is public.** Download the Windows or Linux add-on archive from the
-> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0). These editions
-> connect an existing game installation. Make sure that the SHA-256 matches before you extract it.
-> Do not download a Multiverse build from another source.
+> **Bibites Multiverse `0.2.0` is public.** The recommended Windows download includes an
+> authorized portable copy of *The Bibites*. Its GUI can use that copy or find an existing game.
+> The Linux download remains an add-on for the native itch.io game. Get both from the
+> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0), and check the
+> SHA-256 before extraction.
 
 ## About *The Bibites*
 
@@ -127,26 +128,31 @@ Multiverse save.
 
 ## Install one world
 
-Connect one world in four steps:
+Release `0.2.0` turns the Windows setup into three steps:
 
-1. Get one private join string from the map operator.
-2. Download the archive for your platform and make sure that its checksum matches.
-3. Extract the archive and run its installer.
-4. Run the generated start script to open the sidecar and your world.
+1. Download the complete Windows archive and make sure that its checksum matches.
+2. Extract it and double-click `Install-BibitesMultiverse.cmd`.
+3. Keep the recommended options. The installer opens the included game after the map grants it a
+   place.
+
+The installer creates a unique public-map identity for this installation. It does not embed one
+shared join string. Private maps and the Linux add-on still use an operator-issued join string.
 
 After checksum and extraction, the platform commands are:
 
 | Platform | Supported game | Install | Start |
 |---|---|---|---|
-| Windows | *The Bibites* 0.6.3.1 from Steam | Double-click `Install-BibitesMultiverse.cmd` | `.\Start-Multiverse.ps1` |
+| Windows | Included portable *The Bibites* 0.6.3.1, or an existing Steam copy | Double-click `Install-BibitesMultiverse.cmd` | Starts after install by default; later use `.\Start-Multiverse.ps1` |
 | Linux | *The Bibites* 0.6.3.1 from itch.io | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
 Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
 without graphics. The simulation remains active.
 
-The installer finds the game and makes sure that its build is supported. It installs the mod,
-stores the credential, and creates the start and stop scripts. It needs no compiler, SDK,
-administrator account, or root access.
+The Windows GUI uses the included portable game by default. You can instead select an existing
+game; the GUI searches Steam and common install locations before it asks for a folder. The
+installer checks the build, installs the mod, stores the unique credential, and creates the start
+and stop scripts. It needs no compiler or SDK. Windows needs no administrator account, and Linux
+needs no root access.
 
 [Read the full installation guide →](docs/participant/install.md)
 
@@ -218,7 +224,8 @@ duplicated organism because duplication changes the simulation permanently.
 
 A connected world crosses a network boundary. The package limits what crosses that boundary.
 
-- The package includes the mod, BepInEx, the sidecar, and the platform scripts.
+- The recommended Windows package includes the authorized portable game, mod, sidecar, and
+  installer. The Linux package remains an add-on.
 - The installer refuses unsupported game builds before it changes the game folder.
 - The start script opens the sidecar before it opens the game. The stop script closes both
   processes.
@@ -226,7 +233,10 @@ A connected world crosses a network boundary. The package limits what crosses th
 - Your simulation, world, and save files remain on your computer.
 - SHA-256 checksums and an internal file manifest protect the release package.
 - The sidecar accepts mod traffic only from your computer. TLS protects traffic to the relay.
-- Keep join strings out of issue reports, screenshots, logs, and command lines.
+- Automatic enrollment creates the secret on your computer and sends it only to the HTTPS
+  enrollment endpoint.
+- Keep private-map join strings out of issue reports, screenshots, logs, and command lines.
+- The participant guides state what the public service records and retains.
 
 Before you connect a world, read
 [what joining publishes](docs/participant/join.md#what-joining-publishes-about-your-world).
@@ -265,6 +275,7 @@ Developer entry points:
 - [Release engineering](release/README.md)
 - [Mod-to-sidecar protocol](contracts/contract-a.md)
 - [Sidecar-to-relay protocol](contracts/contract-b-m4.md)
+- [Public installer enrollment](contracts/public-enrollment.md)
 - [Project status](STATUS.md)
 
 [Open a GitHub issue](https://github.com/jpinedaa/bibites-multiverse/issues) to report a defect,
