@@ -36,12 +36,11 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 ## About *The Bibites*
 
 [*The Bibites: Digital Life*](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
-is an artificial-life sandbox by Omnia Studios. Each bibite has genes and a neural-network brain
-that can change across generations.
+is an artificial-life sandbox by Omnia Studios. Every Bibite inherits mutable genes and a
+neural-network brain.
 
-You create a world and set its physical and biological conditions. Natural selection does the
-rest: creatures learn to find food, compete, cooperate, specialize, and form new species.
-The game includes lineage views, genetic analysis, creature engineering, and world statistics.
+You set the physical and biological conditions of a world. Natural selection shapes the creatures
+that live there. Their bodies, brains, behavior, and species can change across generations.
 
 You can get *The Bibites* on [Steam](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
 or [itch.io](https://thebibites.itch.io/the-bibites).
@@ -52,18 +51,23 @@ These screenshots come from real Multiverse saves loaded in the game.
 <tr>
 <td width="50%">
 <img src="docs/assets/gameplay-ecosystem.webp" alt="Several living Bibites sharing one green simulation world">
-<br><sub><strong>A living ecosystem.</strong> Multiple Bibites share one local simulation.</sub>
+<br><sub><strong>A world that evolves itself.</strong> Food, movement, reproduction, predation, and mutation shape each local population.</sub>
 </td>
 <td width="50%">
-<img src="docs/assets/gameplay-bibite-closeup.webp" alt="A large living Bibite shown close-up in the game">
-<br><sub><strong>One Bibite up close.</strong> The game can follow an individual inside the wider population.</sub>
+<img src="docs/assets/gameplay-neural-network.webp" alt="A living Bibite beside its neural-network brain diagram">
+<br><sub><strong>Brains evolve too.</strong> Each Bibite turns sensory inputs into actions through its own network of mutable nodes and connections.</sub>
 </td>
 </tr>
 </table>
 
-The base game asks what can evolve inside one world. Bibites Multiverse asks a second question:
+<img src="docs/assets/gameplay-species-lineage.webp" width="100%" alt="The Bibites ancestral lineage graph showing branches across 155 recorded species">
 
-> **What happens when evolution can leave home?**
+<p align="center"><sub><strong>Speciation leaves a history.</strong> This real save has 155 recorded species. The game shows when living branches split from their ancestors.</sub></p>
+
+Each simulation is a living world. Connect many of them, and artificial life can inhabit a digital
+universe larger than any one computer.
+
+> **What evolves when the network itself becomes a habitat?**
 
 Bibites Multiverse is an independent community project. It is not affiliated with or endorsed by
 Omnia Studios.
@@ -92,6 +96,30 @@ The result feels less like a multiplayer lobby and more like a continent with mo
 </a>
 
 <p align="center"><sub><strong>One captured moment.</strong> The public map shows six live worlds, their populations, active lanes, and organisms in transit.</sub></p>
+
+## Watch evolution unfold
+
+### Species across the network
+
+<a href="https://bibitesmultiverse.com/live#species">
+<img src="docs/assets/live-species-view.webp" width="100%" alt="The public Species tab showing living species, their worlds, populations, trends, and recorded ancestry">
+</a>
+
+The [Species tab](https://bibitesmultiverse.com/live#species) joins live census reports with the
+migration archive. It shows which species are alive, where they live, how their populations are
+changing, and how complex their brains have become. It connects ancestry only when the migration
+record has seen that lineage cross between worlds.
+
+### One life at a time
+
+<a href="https://bibitesmultiverse.com/watch">
+<img src="docs/assets/live-broadcast-view.webp" width="100%" alt="A spectator-camera view following one living Bibite">
+</a>
+
+The [live broadcast](https://bibitesmultiverse.com/watch) gives every visitor the same read-only
+camera. It selects the youngest living Bibite and stays with that creature until it dies or leaves
+the world. Then it chooses another. The image above is a real spectator-camera view from a
+Multiverse save.
 
 ## Install one world
 
