@@ -38,6 +38,19 @@ overflow:hidden;background:#020504;box-shadow:0 28px 90px rgba(0,0,0,.36)}.playe
 .offline span{display:block;color:var(--dim);max-width:510px}.statebar{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:15px 4px 0;
 color:var(--dim);font-size:13px}.state{display:flex;align-items:center;gap:8px}.dot{width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 4px rgba(239,189,87,.12)}
 .dot.online{background:var(--green);box-shadow:0 0 0 4px rgba(102,224,172,.12)}.dot.offline-dot{background:var(--red);box-shadow:0 0 0 4px rgba(232,108,118,.12)}
+.worldbar{display:flex;align-items:center;gap:20px;flex-wrap:wrap;margin-top:26px;padding:19px 22px;
+border:1px solid var(--line);border-radius:14px;background:linear-gradient(145deg,var(--panel2),var(--panel))}
+.gridsym{flex:none;display:block}.gridsym .gcell{fill:none;stroke:var(--line);stroke-width:1.5;rx:3}
+.gridsym .gcell.filled{stroke:var(--dim)}.gridsym .gcell.hole{stroke-dasharray:3 3}
+.gridsym .gcell.here{fill:rgba(102,224,172,.16);stroke:var(--green);stroke-width:2}
+.gridsym .gno{fill:var(--dim);font:600 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-anchor:middle}
+.gridsym .gno.here{fill:var(--green)}
+.wmeta{min-width:0}.wname{display:block;font-size:19px;font-weight:700}
+.wpeer{display:block;margin-top:3px;color:var(--dim);font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+word-break:break-all}.wpos{display:block;margin-top:5px;color:var(--dim);font-size:14px}
+.wlink{margin-left:auto;flex:none;padding:9px 15px;border:1px solid var(--line);border-radius:999px;
+color:var(--text);text-decoration:none;font-size:14px}.wlink:hover,.wlink:focus{border-color:var(--green)}
+.wunk{color:var(--gold);font-style:italic}
 .facts{display:grid;grid-template-columns:repeat(3,1fr);margin-top:68px;border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .fact{padding:27px 25px;min-height:160px;background:linear-gradient(145deg,var(--panel2),var(--panel))}.fact+.fact{border-left:1px solid var(--line)}.fact b{display:block;margin:8px 0 9px;font-size:18px}
 .fact p{margin:0;color:var(--dim);font-size:14px}.num{color:var(--green);font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em}
@@ -71,6 +84,9 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
     </div>
   </div>
   <div class="statebar"><span class="state"><i class="dot" id="dot"></i><span id="status">Checking stream</span></span><span>Approximately 6–15 seconds behind the simulation</span></div>
+  <div class="worldbar" id="worldbar">
+    <div class="wmeta" id="wmeta"><span class="wname" id="wname">Finding the world on camera&hellip;</span></div>
+  </div>
   <section class="facts" aria-label="How the broadcast works">
     <article class="fact"><span class="num">01 · CHOOSE</span><b>The youngest living Bibite</b><p>Age means simulated age in this world. Entity ID breaks an exact tie.</p></article>
     <article class="fact"><span class="num">02 · STAY</span><b>No switching on new births</b><p>A younger birth does not steal the camera. The chosen life gets its whole turn.</p></article>
@@ -113,6 +129,113 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
     }
   }
   check();setInterval(check,5000);
+})();
+/* ------------------------------------------------------- which world is this?
+   The camera shows ONE world of the map, and until now this page never said
+   which. The archive is TOLD which peer that is (no frame on either wire says a
+   world is being filmed), publishes it as broadcastPeerId, and everything drawn
+   below is read off the same /api/status the live map reads.
+
+   Every failure here is UNKNOWN and never a guess: an unnamed world, a named
+   world absent from the map, and an unreachable archive each say so plainly.
+   Naming the wrong world would be worse than naming none. */
+(function(){
+  var bar=document.getElementById("worldbar");
+  var SVG="http://www.w3.org/2000/svg", CELL=19, GAP=5;
+  function el(tag,cls,text){
+    var e=document.createElement(tag);
+    if(cls) e.className=cls;
+    if(text!=null) e.textContent=String(text);
+    return e;
+  }
+  function svgEl(tag,cls){
+    var e=document.createElementNS(SVG,tag);
+    if(cls) e.setAttribute("class",cls);
+    return e;
+  }
+  function clear(){ while(bar.firstChild) bar.removeChild(bar.firstChild); }
+  function unknown(text){
+    clear();
+    var meta=el("div","wmeta");
+    meta.appendChild(el("span","wname wunk",text));
+    bar.appendChild(meta);
+  }
+  /* The map rectangle at a glance, with this world's cell lit. Same (col,row)
+     the live map prints, so the two pages can be read against each other. */
+  function gridSymbol(shape,slots,here){
+    var w=Math.max(1,shape.width||1), h=Math.max(1,shape.height||1);
+    var at={};
+    for(var i=0;i<slots.length;i++){
+      var p=slots[i].position||{};
+      at[p.col+","+p.row]=slots[i];
+    }
+    var svg=svgEl("svg","gridsym");
+    svg.setAttribute("width",String(w*CELL+(w-1)*GAP));
+    svg.setAttribute("height",String(h*CELL+(h-1)*GAP));
+    svg.setAttribute("role","img");
+    svg.setAttribute("aria-label","this world sits at column "+((here.position.col|0)+1)+
+      " row "+((here.position.row|0)+1)+" of a "+w+" by "+h+" map");
+    for(var row=0;row<h;row++){
+      for(var col=0;col<w;col++){
+        var slot=at[col+","+row], mine=slot&&slot.slot===here.slot;
+        var kind=mine?"here":(slot?"filled":"hole");
+        var r=svgEl("rect","gcell "+kind);
+        r.setAttribute("x",String(col*(CELL+GAP)));
+        r.setAttribute("y",String(row*(CELL+GAP)));
+        r.setAttribute("width",String(CELL));
+        r.setAttribute("height",String(CELL));
+        r.setAttribute("rx","3");
+        svg.appendChild(r);
+        if(slot){
+          var n=svgEl("text","gno"+(mine?" here":""));
+          n.setAttribute("x",String(col*(CELL+GAP)+CELL/2));
+          n.setAttribute("y",String(row*(CELL+GAP)+CELL/2+3.5));
+          n.textContent=String(slot.slot);
+          svg.appendChild(n);
+        }
+      }
+    }
+    return svg;
+  }
+  function render(d){
+    var named=d&&d.broadcastPeerId;
+    if(!named){
+      unknown("This deployment has not named the world on camera.");
+      return;
+    }
+    var slots=(d&&d.slots)||[], here=null;
+    for(var i=0;i<slots.length;i++) if(slots[i].peerId===named) here=slots[i];
+    if(!here||!here.position){
+      unknown("The world on camera is not on the map right now.");
+      return;
+    }
+    clear();
+    bar.appendChild(gridSymbol(d.map||{},slots,here));
+    var m=el("div","wmeta");
+    m.appendChild(el("span","wname","slot "+here.slot+" of "+(d.slotCount||slots.length)));
+    /* A peer id is another party's chosen string, so it goes in as text. */
+    m.appendChild(el("span","wpeer",here.peerId));
+    var p=here.position, shape=d.map||{};
+    var where="("+p.col+","+p.row+")";
+    if(shape.width&&shape.height){
+      where+=" — column "+((p.col|0)+1)+" of "+shape.width+", row "+((p.row|0)+1)+" of "+shape.height;
+    }
+    m.appendChild(el("span","wpos",where));
+    bar.appendChild(m);
+    var link=el("a","wlink","See it on the live map  →");
+    link.href="/live#settings";
+    bar.appendChild(link);
+  }
+  async function readWorld(){
+    try{
+      var response=await fetch("/api/status",{cache:"no-store"});
+      if(!response.ok) throw new Error("unavailable");
+      render(await response.json());
+    }catch(e){
+      unknown("The map is not answering, so this page cannot name the world.");
+    }
+  }
+  readWorld();setInterval(readWorld,30000);
 })();
 </script>
 </body>

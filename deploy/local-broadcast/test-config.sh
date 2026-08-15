@@ -24,7 +24,7 @@ forbid_text() {
   fi
 }
 
-expect_text "$runner" "MULTIVERSE_BROADCAST_ZOOM = '50'"
+expect_text "$runner" "MULTIVERSE_BROADCAST_ZOOM = '75'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_HIDE_UI = 'false'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_TIME_SCALE = '7.5'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_PANELS = 'brain,biology,biology'"

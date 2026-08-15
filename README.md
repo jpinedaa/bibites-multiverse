@@ -126,8 +126,9 @@ small changes remain clear.
 The [live broadcast](https://bibitesmultiverse.com/watch) gives every visitor the same read-only
 camera. It selects the youngest living Bibite and stays with that creature until it dies or leaves
 the world. Then it chooses another. The broadcast world is a participant of the same map, so a
-followed Bibite can migrate to a neighbour. The image above is a real spectator-camera view from a
-Multiverse save.
+followed Bibite can migrate to a neighbour. The page names that world and draws its place in the
+map grid, and the live map badges the same world and links back. The image above is a real
+spectator-camera view from a Multiverse save.
 
 ## Install one world
 
@@ -258,7 +259,8 @@ The homepage explains the experiment and shows a live summary. The
 lineages, and world settings.
 
 The [broadcast page](https://bibitesmultiverse.com/watch) shows one shared game camera.
-It follows one world on the map, and it reconnects after a broadcast interruption.
+It follows one world on the map, names that world with its place in the grid, and reconnects
+after a broadcast interruption.
 
 ## Repository guide
 

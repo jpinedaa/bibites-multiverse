@@ -19,6 +19,18 @@ func TestWatchPageIsOneSharedReadOnlyBroadcast(t *testing.T) {
 		`response.status===429&&loaded`,
 		`frame.contentDocument.querySelector("video")`,
 		"spectator camera, not a control surface",
+		// The page names the world on camera and draws its place in the grid,
+		// both read off the same /api/status the live map reads.
+		`fetch("/api/status"`,
+		"d.broadcastPeerId",
+		`el("span","wname","slot "+here.slot`,
+		`el("span","wpeer",here.peerId)`,
+		`gridSymbol(d.map||{},slots,here)`,
+		`link.href="/live#settings"`,
+		// Each way of not knowing says so instead of naming a world.
+		"This deployment has not named the world on camera.",
+		"The world on camera is not on the map right now.",
+		"The map is not answering, so this page cannot name the world.",
 	} {
 		if !strings.Contains(watchPageHTML, want) {
 			t.Fatalf("watch page does not contain %q", want)

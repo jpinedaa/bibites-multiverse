@@ -452,6 +452,10 @@ MULTIVERSE_ARCHIVE_DATA_DIR=$ARCHIVE_DATA
 MULTIVERSE_ARCHIVE_HTTP=$MV_ARCHIVE_HTTP
 MULTIVERSE_CREDENTIAL_FILE=$ARCHIVE_SECRET
 MULTIVERSE_ARCHIVE_DENY_LIST=/etc/multiverse/deny-list
+# The world the shared camera at /watch is showing, which no frame on either wire
+# announces. Empty names no world, and both pages then say so. Display only: it
+# changes no placement, no routing and no record. See deploy.env.example.
+MULTIVERSE_BROADCAST_PEER=${MV_BROADCAST_PEER_ID:-}
 MULTIVERSE_LOG_FILE=$MV_LOGDIR/archive.log
 MULTIVERSE_LOG_ROTATE_MB=$MV_LOG_ROTATE_MB
 MULTIVERSE_LOG_KEEP=$MV_LOG_KEEP
