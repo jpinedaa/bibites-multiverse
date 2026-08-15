@@ -559,11 +559,11 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
 fi
 
 for archive in "${ARCHIVE_NAMES[@]}"; do
-  unzip -Z1 "$DIST/$archive" | grep -qx "$STAGE_NAME/LICENSE" \
+  [ "$(unzip -Z1 "$DIST/$archive" "$STAGE_NAME/LICENSE")" = "$STAGE_NAME/LICENSE" ] \
     || die "$archive does not contain the Apache license"
-  unzip -Z1 "$DIST/$archive" | grep -qx "$STAGE_NAME/THIRD_PARTY_NOTICES.md" \
+  [ "$(unzip -Z1 "$DIST/$archive" "$STAGE_NAME/THIRD_PARTY_NOTICES.md")" = "$STAGE_NAME/THIRD_PARTY_NOTICES.md" ] \
     || die "$archive does not contain the third-party notices"
-  unzip -Z1 "$DIST/$archive" | grep -qx "$STAGE_NAME/public-map.json" \
+  [ "$(unzip -Z1 "$DIST/$archive" "$STAGE_NAME/public-map.json")" = "$STAGE_NAME/public-map.json" ] \
     || die "$archive does not contain the public join configuration"
   [ "$(unzip -p "$DIST/$archive" "$STAGE_NAME/public-map.json" | sha256sum | cut -d' ' -f1)" = \
     "$(sha "$RELDIR/kit/public-map.json")" ] \
