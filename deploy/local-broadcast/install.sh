@@ -282,6 +282,136 @@ status_has_ready_peer() {
       ((.exportEdges // []) | sort) == ($edges | sort))' >/dev/null
 }
 
+hls_relative_reference() {
+  local reference="$1"
+  local kind="$2"
+
+  [ -n "$reference" ] || return 1
+  [[ "$reference" =~ ^[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*$ ]] || return 1
+  if [[ "$reference" =~ (^|/)\.\.?(/|$) ]]; then
+    return 1
+  fi
+
+  case "$kind:$reference" in
+    playlist:*.m3u8) return 0 ;;
+    segment:*.mp4|segment:*.m4s|segment:*.ts) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+hls_probe_cleanup() {
+  local probe_dir="$1"
+  [ -d "$probe_dir" ] || return 0
+  find "$probe_dir" -depth -delete >/dev/null 2>&1
+}
+
+hls_probe_fail() {
+  local probe_dir="$1"
+  local reason="$2"
+  hls_probe_error="$reason"
+  if ! hls_probe_cleanup "$probe_dir"; then
+    hls_probe_error='the HLS readiness check could not remove its temporary files'
+  fi
+  return 1
+}
+
+hls_stream_ready() {
+  local manifest_url="$1"
+  local probe_parent="${TMPDIR:-/tmp}"
+  local probe_dir cookie_jar master_file child_file segment_file
+  local manifest_dir child_reference child_url child_dir segment_reference segment_url
+  local first_line segment_status
+
+  hls_probe_error=''
+  if [[ "$manifest_url" != https://*/index.m3u8 ]]; then
+    hls_probe_error='the HLS master URL is not a secure index.m3u8 URL'
+    return 1
+  fi
+
+  probe_dir="$(mktemp -d "$probe_parent/bibites-hls.XXXXXX")" || {
+    hls_probe_error='the HLS readiness check could not create a temporary directory'
+    return 1
+  }
+  cookie_jar="$probe_dir/cookies"
+  master_file="$probe_dir/master.m3u8"
+  child_file="$probe_dir/child.m3u8"
+  segment_file="$probe_dir/segment"
+
+  if ! curl --fail --silent --show-error --location --max-redirs 3 \
+      --connect-timeout 5 --max-time 20 --proto '=https' --proto-redir '=https' \
+      --cookie '' --cookie-jar "$cookie_jar" --output "$master_file" "$manifest_url"; then
+    hls_probe_fail "$probe_dir" 'the public HLS master request failed'
+    return 1
+  fi
+  if ! awk -F '\t' \
+      '$6 == "hlsSession" && length($7) > 0 { found=1 } END { exit !found }' \
+      "$cookie_jar"; then
+    hls_probe_fail "$probe_dir" 'the public HLS master did not create a session cookie'
+    return 1
+  fi
+  first_line="$(head -n 1 "$master_file" | tr -d '\r')"
+  if [ "$first_line" != '#EXTM3U' ]; then
+    hls_probe_fail "$probe_dir" 'the public HLS master is not an M3U8 playlist'
+    return 1
+  fi
+
+  child_reference="$(
+    awk '{ sub(/\r$/, "") }
+         NF && substr($0, 1, 1) != "#" && $0 ~ /\.m3u8$/ { print; exit }' \
+      "$master_file"
+  )"
+  if ! hls_relative_reference "$child_reference" playlist; then
+    hls_probe_fail "$probe_dir" 'the public HLS master has no safe relative child playlist'
+    return 1
+  fi
+  manifest_dir="${manifest_url%/*}"
+  child_url="$manifest_dir/$child_reference"
+  if ! curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
+      --proto '=https' --cookie "$cookie_jar" --output "$child_file" "$child_url"; then
+    hls_probe_fail "$probe_dir" 'the public HLS child playlist request failed'
+    return 1
+  fi
+  first_line="$(head -n 1 "$child_file" | tr -d '\r')"
+  if [ "$first_line" != '#EXTM3U' ]; then
+    hls_probe_fail "$probe_dir" 'the public HLS child is not an M3U8 playlist'
+    return 1
+  fi
+
+  segment_reference="$(
+    awk '{ sub(/\r$/, "") }
+         NF && substr($0, 1, 1) != "#" { latest=$0 }
+         END { print latest }' "$child_file"
+  )"
+  if ! hls_relative_reference "$segment_reference" segment; then
+    hls_probe_fail "$probe_dir" 'the public HLS child has no safe completed segment'
+    return 1
+  fi
+  child_dir="${child_url%/*}"
+  segment_url="$child_dir/$segment_reference"
+  if ! segment_status="$(
+    curl --silent --show-error --connect-timeout 5 --max-time 20 \
+      --proto '=https' --cookie "$cookie_jar" --output "$segment_file" \
+      --write-out '%{http_code}' "$segment_url"
+  )"; then
+    hls_probe_fail "$probe_dir" 'the latest completed HLS segment request failed'
+    return 1
+  fi
+  if [ "$segment_status" != 200 ]; then
+    hls_probe_fail "$probe_dir" 'the latest completed HLS segment did not return HTTP 200'
+    return 1
+  fi
+  if [ ! -s "$segment_file" ]; then
+    hls_probe_fail "$probe_dir" 'the latest completed HLS segment was empty'
+    return 1
+  fi
+
+  if ! hls_probe_cleanup "$probe_dir"; then
+    hls_probe_error='the HLS readiness check could not remove its temporary files'
+    return 1
+  fi
+  return 0
+}
+
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
   return 0
 fi
@@ -309,7 +439,7 @@ case "$world_name" in *[!A-Za-z0-9._-]*|'') die 'the world name contains an unsu
 for edge in ${export_edges//,/ }; do
   case "$edge" in E|N|W|S) ;; *) die "BIBITES_BROADCAST_EXPORT_EDGES holds '$edge'; use E, N, W or S" ;; esac
 done
-for command in aws curl dotnet find flock go install jq nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux wslpath; do
+for command in aws awk curl dotnet find flock go head install jq mktemp nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux tr wslpath; do
   command -v "$command" >/dev/null || die "missing command: $command"
 done
 acquire_install_lock
@@ -519,16 +649,18 @@ if [ "$start" -eq 1 ]; then
   curl -fsS --max-time 10 "$status_url" |
     status_has_ready_peer "$peer_id" "$expected_edges_json" || \
     die "the map does not show $peer_id with its game and expected export edges"
-  public_manifest='https://bibitesmultiverse.com/stream/bibites/index.m3u8?cookieCheck=1'
+  public_manifest='https://bibitesmultiverse.com/stream/bibites/index.m3u8'
+  hls_ready=0
   for _ in $(seq 1 90); do
-    if curl -fsS -H 'Cookie: cookieCheck=1' "$public_manifest" >/dev/null 2>&1; then
-      say 'the public HLS manifest is live'
+    if hls_stream_ready "$public_manifest" >/dev/null 2>&1; then
+      hls_ready=1
+      say 'the public HLS master, child playlist, and latest completed segment are live'
       break
     fi
     sleep 2
   done
-  curl -fsS -H 'Cookie: cookieCheck=1' "$public_manifest" >/dev/null || \
-    die 'the local services started, but the public HLS manifest is not live'
+  [ "$hls_ready" -eq 1 ] || \
+    die "the local services started, but ${hls_probe_error:-the public HLS session is not ready}"
 fi
 
 say "installed Windows world=$world_name peer=$peer_id data=$windows_root"

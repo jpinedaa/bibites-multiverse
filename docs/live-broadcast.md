@@ -26,6 +26,11 @@ MediaMTX rejects a second publisher for that stream path.
 MediaMTX exposes HLS on loopback.
 nginx publishes HLS below `/stream/` over HTTPS.
 
+MediaMTX redirects the first master request to make sure that the client accepts cookies.
+The redirected master creates an HLS session and returns its session cookie.
+Child playlists and segments must use the same cookie engine.
+A child request without `hlsSession` can return `401` while the stream is healthy.
+
 The website does not contain the publish address or password.
 Viewers can send only `GET` and `HEAD` requests to the public stream path.
 
@@ -297,16 +302,22 @@ Store the quote and forecast in private operations storage.
 
 ## Checks
 
-Run these checks after an origin change:
+From the repository root, run these checks after an origin change:
 
 ```sh
 sudo systemctl is-active multiverse-stream nginx
 sudo ss -ltnp | grep -E ':(1935|8888|9998) '
 sudo /opt/multiverse/deploy/provision.sh --only verify
 curl -fsS https://<service-domain>/watch
-curl -fsS -H 'Cookie: cookieCheck=1' \
-  'https://<service-domain>/stream/bibites/index.m3u8?cookieCheck=1'
+(
+  source ./deploy/local-broadcast/install.sh
+  hls_stream_ready 'https://<service-domain>/stream/bibites/index.m3u8'
+)
 ```
+
+The HLS function keeps the server session from the master through the latest completed segment.
+The segment must return HTTP status `200` and contain at least one byte.
+It rejects an unsafe relative reference and removes its temporary files.
 
 The expected listeners are:
 
