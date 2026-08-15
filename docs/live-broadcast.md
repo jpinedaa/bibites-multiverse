@@ -46,6 +46,7 @@ It can request a fixed simulation speed for a broadcast.
 Panel changes use real time, so the simulation speed does not affect their interval.
 
 The director changes selection, presentation, and the requested simulation speed.
+An optional rule can also change template spawn targets.
 It does not move, feed, heal, kill, export, or edit a Bibite.
 
 These environment variables control it:
@@ -61,12 +62,18 @@ These environment variables control it:
 | `MULTIVERSE_BROADCAST_PANELS` | empty | Rotate through `brain`, `biology`, or `expanded-brain`. |
 | `MULTIVERSE_BROADCAST_PANEL_SECONDS` | `15` | Set the real-time interval between panels. |
 | `MULTIVERSE_BROADCAST_SHOW_FOV` | `true` | Show the selected Bibite's vision range. |
+| `MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES` | empty | Set named template spawn targets to zero. |
 
 The panel rotation stays off when `MULTIVERSE_BROADCAST_HIDE_UI` is `true`.
+Repeat a panel name to give that panel more time in each cycle.
 
-The standard broadcast profile uses a zoom of `45` and a speed of `7.5`.
-It alternates the brain and biology panels every 15 seconds.
+The spawn option does not remove existing Bibites or stop natural reproduction.
+A later world save records the zero target count.
+
+The standard broadcast profile uses a zoom of `50` and a speed of `7.5`.
+It shows the brain panel for 15 seconds and the biology panel for 30 seconds.
 It also shows the selected Bibite's vision range.
+It disables automatic spawns from the `Basic bibite` template.
 
 ## Origin boundary
 

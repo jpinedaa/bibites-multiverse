@@ -13,12 +13,13 @@ expect_text() {
   }
 }
 
-expect_text "$runner" "MULTIVERSE_BROADCAST_ZOOM = '45'"
+expect_text "$runner" "MULTIVERSE_BROADCAST_ZOOM = '50'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_HIDE_UI = 'false'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_TIME_SCALE = '7.5'"
-expect_text "$runner" "MULTIVERSE_BROADCAST_PANELS = 'brain,biology'"
+expect_text "$runner" "MULTIVERSE_BROADCAST_PANELS = 'brain,biology,biology'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_PANEL_SECONDS = '15'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_SHOW_FOV = 'true'"
+expect_text "$runner" "MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES = 'Basic bibite'"
 
 if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
   windows_runner="$(wslpath -w "$runner")"
