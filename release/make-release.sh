@@ -54,8 +54,8 @@ CACHE="$REPO/farend/dist/cache"
 PROJECT_LICENSE="$REPO/LICENSE"
 THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
 
-RELEASE=m5.0
-TAG="$RELEASE"
+RELEASE=0.1.0
+TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
 COMPLETE_ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64-complete.zip"
