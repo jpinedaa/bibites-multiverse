@@ -169,7 +169,13 @@ func (a *Archive) httpHandler() http.Handler {
 	})
 	mux.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
 		window, buckets := historyParams(r)
-		h, err := a.HistoryView(window, buckets)
+		var h History
+		var err error
+		if r.URL.Query().Get("range") == "all" {
+			h, err = a.HistoryAllView(buckets)
+		} else {
+			h, err = a.HistoryView(window, buckets)
+		}
 		if err != nil {
 			http.Error(w, `{"error":"history unavailable"}`, http.StatusInternalServerError)
 			a.log.Warn("archive: history read failed", "err", err)
@@ -249,9 +255,9 @@ func serveNotFound(w http.ResponseWriter) {
 	_, _ = w.Write([]byte(notFoundPageHTML))
 }
 
-// historyParams reads ?hours= and ?buckets=, and clamps both. A reader may ask
-// for a different window; it may not ask the archive to read an unbounded file
-// or to build an unbounded answer.
+// historyParams reads ?hours= and ?buckets=, and clamps both. The all-record
+// route uses only the bucket count from this result and applies its own fixed
+// read bound.
 func historyParams(r *http.Request) (time.Duration, int) {
 	window := HistoryDefaultWindow
 	if v := r.URL.Query().Get("hours"); v != "" {
@@ -817,6 +823,13 @@ border-radius:62% 38% 38% 62%/50%}
 background:none}
 
 /* ---- history strip ---- */
+.historyhead{display:flex;align-items:flex-start;justify-content:space-between;gap:12px 20px;
+flex-wrap:wrap;margin-bottom:16px}.historyhead h2{margin:0;flex:1 1 520px}
+.historyrange{display:inline-flex;gap:4px;padding:3px;border:1px solid var(--line);border-radius:9px;
+background:var(--cell)}.historyrange button{font:700 10px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+letter-spacing:.06em;text-transform:uppercase;color:var(--dim);background:transparent;border:1px solid transparent;
+border-radius:6px;padding:7px 10px;cursor:pointer;white-space:nowrap}.historyrange button:hover{color:var(--text)}
+.historyrange button[aria-pressed="true"]{color:var(--ink);background:var(--live);border-color:var(--live)}
 .sparks{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
 .spark{border:1px solid var(--line);border-radius:11px;padding:11px 12px 9px;background:rgba(14,23,20,.82);
 min-width:0;overflow:hidden}
@@ -987,9 +1000,15 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
   </section>
 
   <section>
-    <h2>history <span class="note muted">population per world, last 24 hours, from the
-      archive&rsquo;s own sample file &mdash; a gap in a line is
-      <span class="term" data-t="unknown">unknown</span>, never a zero</span></h2>
+    <div class="historyhead">
+      <h2>history <span class="note muted">population per world, <span id="historyscope">all recorded history</span>, from the
+        archive&rsquo;s own sample file &mdash; each graph fits its visible minimum and maximum;
+        a gap is <span class="term" data-t="unknown">unknown</span>, never a zero</span></h2>
+      <div class="historyrange" id="historyrange" role="group" aria-label="Population history range">
+        <button type="button" data-history-range="all" aria-pressed="true">All time</button>
+        <button type="button" data-history-range="24h" aria-pressed="false">Last 24 hours</button>
+      </div>
+    </div>
     <div class="sparks" id="spark"><span class="muted">loading&hellip;</span></div>
   </section>
 
@@ -4829,7 +4848,15 @@ function frame(ts){
 }
 
 /* ------------------------------------------------------------- the sparklines */
-function sparkPath(points, max, w, h){
+function valueRange(points){
+  var min = null, max = null;
+  for (var i=0;i<points.length;i++) if (points[i].v != null){
+    if (min == null || points[i].v < min) min = points[i].v;
+    if (max == null || points[i].v > max) max = points[i].v;
+  }
+  return {known:min != null, min:min == null ? 0 : min, max:max == null ? 0 : max};
+}
+function sparkPath(points, min, max, w, h){
   var line = "", area = "", open = false, n = points.length, last = null;
   for (var i=0;i<n;i++){
     var p = points[i];
@@ -4837,7 +4864,8 @@ function sparkPath(points, max, w, h){
       if (open){ area += " L "+xAt(i-1,n,w)+" "+h+" Z"; open = false; }
       continue;
     }
-    var x = xAt(i,n,w), y = h - 3 - (max>0 ? (p.v/max)*(h-7) : 0);
+    var x = xAt(i,n,w), y = max>min
+      ? h - 3 - ((p.v-min)/(max-min))*(h-7) : h/2;
     if (!open){ line += " M "+x.toFixed(1)+" "+y.toFixed(1);
                 area += " M "+x.toFixed(1)+" "+h+" L "+x.toFixed(1)+" "+y.toFixed(1); open = true; }
     else { line += " L "+x.toFixed(1)+" "+y.toFixed(1); area += " L "+x.toFixed(1)+" "+y.toFixed(1); }
@@ -4859,10 +4887,10 @@ function darkBands(points, w, h){
   return out;
 }
 
-function sparkCard(title, sub, valueTxt, points, max, opts){
+function sparkCard(title, sub, valueTxt, points, min, max, opts){
   var W = 220, H = 54;
   var dead = opts && opts.dead;
-  var g = sparkPath(points, max, W, H);
+  var g = sparkPath(points, min, max, W, H);
   var body = darkBands(points, W, H);
   if (opts && opts.bars){
     var n = points.length, bw = Math.max(1.2, W/n - 0.8);
@@ -4884,7 +4912,9 @@ function sparkCard(title, sub, valueTxt, points, max, opts){
     + '<svg viewBox="0 0 '+W+' '+H+'" aria-hidden="true">'
     + '<line class="sbase" x1="0" y1="'+(H-0.5)+'" x2="'+W+'" y2="'+(H-0.5)+'"/>'
     + body + '</svg>'
-    + '<div class="sparkft"><span>'+esc(sub)+'</span><span>0&ndash;'+max+'</span></div></div>';
+    + '<div class="sparkft"><span>'+esc(sub)+'</span><span>'
+    + (opts&&opts.bars ? '0&ndash;'+max : opts&&opts.known===false ? 'unknown' : min+'&ndash;'+max)
+    + '</span></div></div>';
 }
 
 function renderHistory(H){
@@ -4892,15 +4922,18 @@ function renderHistory(H){
   if (!H || !H.slots){ box.innerHTML = '<span class="muted">no history yet</span>'; return; }
   var hours = Math.round((H.toMs - H.fromMs)/3600000);
   var span = hours >= 1 ? hours+"h" : Math.round((H.toMs-H.fromMs)/60000)+"m";
-  var max = Math.max(1, H.maxPopulation);
   var h = "";
+  var scope = $("#historyscope");
+  if (scope) scope.textContent = HISTORY_RANGE === "all"
+    ? (H.truncated ? "available history; older samples were trimmed" : "all recorded history")
+    : "the last 24 hours";
 
-  var totMax = 1, i;
-  for (i=0;i<H.total.length;i++) if (H.total[i].v != null && H.total[i].v > totMax) totMax = H.total[i].v;
+  var i, totRange = valueRange(H.total);
   var totLast = null;
   for (i=H.total.length-1;i>=0;i--) if (H.total[i].v != null){ totLast = H.total[i].v; break; }
   h += sparkCard(t("population","whole map"), "every world summed, "+span,
-    totLast==null ? '<span class="unknown">unknown</span>' : totLast, H.total, totMax, {wide:true});
+    totLast==null ? '<span class="unknown">unknown</span>' : totLast, H.total,
+    totRange.min, totRange.max, {wide:true, known:totRange.known});
 
   var flowMax = 1, flowSum = 0;
   for (i=0;i<H.flow.length;i++) if (H.flow[i].v != null){
@@ -4908,14 +4941,15 @@ function renderHistory(H){
     flowSum += H.flow[i].v;
   }
   h += sparkCard(t("migration","migrations"), "per "+Math.round(H.bucketMs/60000)+" min, "+span,
-    flowSum, H.flow, flowMax, {bars:true, wide:true});
+    flowSum, H.flow, 0, flowMax, {bars:true, wide:true});
 
   for (i=0;i<H.slots.length;i++){
     var s = H.slots[i];
     var dead = s.points.length ? s.points[s.points.length-1].dark : false;
+    var range = valueRange(s.points);
     h += sparkCard(t("slot","slot "+s.slot), (s.peerId||"")+" · "+span,
       s.last==null ? '<span class="unknown">unknown</span>' : s.last,
-      s.points, max, {dead:dead});
+      s.points, range.min, range.max, {dead:dead, known:range.known});
   }
   if (H.truncated) h += '<div class="spark"><div class="sparkhd"><span>note</span></div>'
     + '<div class="sparkft">the sample file is longer than one read; older buckets are cut off'
@@ -5420,15 +5454,41 @@ async function tickHops(){
     hopFeedOK = false;
   }
 }
+var HISTORY_RANGE = "all", HISTORY_SEQ = 0;
+function setHistoryRange(range){
+  if (range !== "all" && range !== "24h") return;
+  HISTORY_RANGE = range;
+  var buttons = document.querySelectorAll("#historyrange button");
+  for (var i=0;i<buttons.length;i++) buttons[i].setAttribute("aria-pressed",
+    buttons[i].getAttribute("data-history-range") === range ? "true" : "false");
+  var scope = $("#historyscope");
+  if (scope) scope.textContent = range === "all" ? "all recorded history" : "the last 24 hours";
+  $("#spark").innerHTML = '<span class="muted">loading&hellip;</span>';
+  tickHistory();
+}
 async function tickHistory(){
   if (TAB !== "map") return;
+  var wanted = HISTORY_RANGE, mine = ++HISTORY_SEQ;
   try {
-    var r = await fetch("api/history?hours=24&buckets=120", {cache:"no-store"});
-    renderHistory(await r.json());
+    var query = wanted === "all" ? "range=all&buckets=120" : "hours=24&buckets=120";
+    var r = await fetch("api/history?"+query, {cache:"no-store"});
+    if (!r.ok) throw new Error("history unavailable");
+    var answer = await r.json();
+    if (mine !== HISTORY_SEQ || wanted !== HISTORY_RANGE) return;
+    renderHistory(answer);
   } catch(e){
+    if (mine !== HISTORY_SEQ) return;
     $("#spark").innerHTML = '<span class="bad">history endpoint unreachable</span>';
   }
 }
+
+(function wireHistoryRange(){
+  var box = document.getElementById("historyrange");
+  if (box) box.addEventListener("click", function(ev){
+    var button = ev.target.closest ? ev.target.closest("button") : null;
+    if (button) setHistoryRange(button.getAttribute("data-history-range"));
+  });
+})();
 
 /* ------------------------------------------------------ motion, and its switch
    This page had ONE rule for prefers-reduced-motion and it was the wrong one:

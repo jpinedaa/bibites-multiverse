@@ -11,9 +11,10 @@ package archive
 //
 // Three properties matter and each is a rule below:
 //
-//  1. BOUNDED WORK. A history request reads the TAIL of the sample file, never
-//     the whole of it, and answers from a short-lived cache. The migration path
-//     must never wait for a reader (Risk 4), and neither must the disk.
+//  1. BOUNDED WORK. A rolling request reads the tail of the sample file. An
+//     all-record request reads only compact fields, stops at a fixed byte bound,
+//     and uses a longer cache. The migration path never waits for either reader
+//     (Risk 4), and neither does the disk.
 //  2. UNKNOWN SURVIVES DOWNSAMPLING. A bucket in which no sample knew a value is
 //     null, not zero — the same rule §10.1 applies to the live view. A gap in
 //     the record has to look like a gap on the sparkline.
@@ -23,6 +24,7 @@ package archive
 //     it happened.
 
 import (
+	"bufio"
 	"encoding/json"
 	"io"
 	"os"
@@ -35,6 +37,20 @@ import (
 // one-minute sample cadence a full day of a six-slot map is a few megabytes, so
 // this covers roughly a week and still refuses to read an unbounded file.
 const historyTailBytes int64 = 48 << 20
+
+// historyAllMaxBytes keeps an all-record request finite. The public experiment
+// produces about 1.2 GB of metrics at its current rate, so this covers the
+// announced run with headroom. If the file grows past this bound, the response
+// says that its oldest part was truncated instead of claiming a complete view.
+const historyAllMaxBytes int64 = 2 << 30
+
+// historyAllCacheFor prevents the default all-record view from rescanning a
+// growing sample file every minute. Live values remain in the page header.
+const historyAllCacheFor = 10 * time.Minute
+
+// One status line contains census detail that the history view ignores. This
+// bound rejects a damaged line before bufio.Reader can consume arbitrary memory.
+const historyLineMaxBytes = 16 << 20
 
 // historyCacheFor is how long one built history is reused. The page polls the
 // live status every 2s and the history far more slowly; the cache is what keeps
@@ -91,9 +107,9 @@ type History struct {
 	// because of the read bound, not because nothing happened.
 	Samples   int  `json:"samples"`
 	Truncated bool `json:"truncated"`
-	// MaxPopulation is the largest per-slot population anywhere in the window,
-	// which is the SHARED y-scale of every sparkline. Small multiples that do not
-	// share a scale invite the reader to compare shapes that are not comparable.
+	// MaxPopulation is the largest per-slot population anywhere in the window.
+	// It remains useful to API readers even though the page fits each population
+	// chart to that chart's visible minimum and maximum.
 	MaxPopulation int             `json:"maxPopulation"`
 	Slots         []HistorySeries `json:"slots"`
 	// Total is the map-wide population, summed over the slots that knew one.
@@ -101,6 +117,114 @@ type History struct {
 	// Flow is envelopes RECORDED IN each bucket — the difference between
 	// consecutive cumulative counts, never the cumulative count itself.
 	Flow []HistoryPoint `json:"flow"`
+}
+
+// historyStatus is the small part of a Status that the history strip reads.
+// An all-record scan decodes directly into this shape, so census detail never
+// accumulates in memory.
+type historyStatus struct {
+	GeneratedAtMs int64               `json:"generatedAtMs"`
+	Slots         []historySlotStatus `json:"slots"`
+	Totals        historyTotalsStatus `json:"totals"`
+}
+
+type historySlotStatus struct {
+	Slot       int    `json:"slot"`
+	PeerID     string `json:"peerId"`
+	Live       bool   `json:"live"`
+	Population *int   `json:"population"`
+}
+
+type historyTotalsStatus struct {
+	Population *int `json:"population"`
+	Migrations int  `json:"migrations"`
+}
+
+func compactHistoryStatus(s Status) historyStatus {
+	out := historyStatus{
+		GeneratedAtMs: s.GeneratedAtMs,
+		Totals: historyTotalsStatus{
+			Population: s.Totals.Population,
+			Migrations: s.Totals.Migrations,
+		},
+		Slots: make([]historySlotStatus, 0, len(s.Slots)),
+	}
+	for _, slot := range s.Slots {
+		out.Slots = append(out.Slots, historySlotStatus{
+			Slot: slot.Slot, PeerID: slot.PeerID, Live: slot.Live,
+			Population: slot.Population,
+		})
+	}
+	return out
+}
+
+// ReadHistoryStatuses reads compact history fields from a bounded part of the
+// metrics file. A partial first line and a torn final line are discarded.
+func ReadHistoryStatuses(path string, maxBytes int64) ([]historyStatus, bool, error) {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	size := info.Size()
+	truncated := maxBytes > 0 && size > maxBytes
+	start := int64(0)
+	if truncated {
+		start = size - maxBytes
+	}
+	dropFirst := truncated
+	if start > 0 {
+		var previous [1]byte
+		if _, err := f.ReadAt(previous[:], start-1); err != nil {
+			return nil, truncated, err
+		}
+		dropFirst = previous[0] != '\n'
+	}
+	endsWithNewline := false
+	if size > 0 {
+		var last [1]byte
+		if _, err := f.ReadAt(last[:], size-1); err != nil {
+			return nil, truncated, err
+		}
+		endsWithNewline = last[0] == '\n'
+	}
+
+	scanner := bufio.NewScanner(io.NewSectionReader(f, start, size-start))
+	scanner.Buffer(make([]byte, 64<<10), historyLineMaxBytes)
+	var out []historyStatus
+	appendLine := func(line []byte) {
+		var s historyStatus
+		if json.Unmarshal(line, &s) == nil {
+			out = append(out, s)
+		}
+	}
+	var pending []byte
+	for scanner.Scan() {
+		if dropFirst {
+			dropFirst = false
+			continue
+		}
+		if pending != nil {
+			appendLine(pending)
+		}
+		pending = append(pending[:0], scanner.Bytes()...)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, truncated, &os.PathError{Op: "read", Path: path, Err: err}
+	}
+	// Append writes the JSON and newline together. A final token without the
+	// newline is a torn append, even when its JSON happens to parse.
+	if pending != nil && endsWithNewline {
+		appendLine(pending)
+	}
+	return out, truncated, nil
 }
 
 // ReadMetricsTail replays at most maxBytes from the END of a metrics file, in
@@ -181,10 +305,32 @@ func (b *bucketAcc) point(atMs int64) HistoryPoint {
 // the leftmost bar of the flow series is a real difference rather than a
 // cumulative total drawn as a spike.
 func BuildHistory(samples []Status, nowMs int64, window time.Duration, buckets int) History {
+	compact := make([]historyStatus, 0, len(samples))
+	for _, sample := range samples {
+		compact = append(compact, compactHistoryStatus(sample))
+	}
+	return buildHistory(compact, nowMs, window, buckets, true)
+}
+
+func buildAllHistory(samples []historyStatus, nowMs int64, buckets int) History {
+	window := HistoryMinWindow
+	for _, sample := range samples {
+		if sample.GeneratedAtMs <= 0 || sample.GeneratedAtMs > nowMs {
+			continue
+		}
+		candidate := time.Duration(nowMs-sample.GeneratedAtMs+int64(buckets)) * time.Millisecond
+		if candidate > window {
+			window = candidate
+		}
+	}
+	return buildHistory(samples, nowMs, window, buckets, false)
+}
+
+func buildHistory(samples []historyStatus, nowMs int64, window time.Duration, buckets int, clampMax bool) History {
 	if window < HistoryMinWindow {
 		window = HistoryMinWindow
 	}
-	if window > HistoryMaxWindow {
+	if clampMax && window > HistoryMaxWindow {
 		window = HistoryMaxWindow
 	}
 	if buckets < HistoryMinBuckets {
@@ -214,7 +360,7 @@ func BuildHistory(samples []Status, nowMs int64, window time.Duration, buckets i
 	// Write order is the sample order, but a file concatenated across restarts
 	// can hold a clock that stepped. Sort by the sample's own timestamp so the
 	// flow deltas are measured along real time.
-	ordered := append([]Status(nil), samples...)
+	ordered := append([]historyStatus(nil), samples...)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return ordered[i].GeneratedAtMs < ordered[j].GeneratedAtMs
 	})
@@ -332,5 +478,25 @@ func (a *Archive) HistoryView(window time.Duration, buckets int) (History, error
 	h := BuildHistory(samples, time.Now().UnixMilli(), window, buckets)
 	h.Truncated = truncated
 	a.historyKey, a.historyAt, a.historyVal = key, time.Now(), h
+	return h, nil
+}
+
+// HistoryAllView answers the all-record range from a compact, bounded scan.
+// Its cache is separate from the rolling-window cache because the page can
+// switch between both ranges without forcing either file read again.
+func (a *Archive) HistoryAllView(buckets int) (History, error) {
+	a.historyMu.Lock()
+	defer a.historyMu.Unlock()
+	if !a.historyAllAt.IsZero() && time.Since(a.historyAllAt) < historyAllCacheFor &&
+		a.historyAllVal.Buckets == buckets {
+		return a.historyAllVal, nil
+	}
+	samples, truncated, err := ReadHistoryStatuses(a.metrics.Path(), historyAllMaxBytes)
+	if err != nil {
+		return History{}, err
+	}
+	h := buildAllHistory(samples, time.Now().UnixMilli(), buckets)
+	h.Truncated = truncated
+	a.historyAllAt, a.historyAllVal = time.Now(), h
 	return h, nil
 }

@@ -99,7 +99,9 @@ The result feels less like a multiplayer lobby and more like a continent with mo
 
 <p align="center"><sub><strong>One captured moment.</strong> The public map shows six live worlds, their populations, active lanes, and organisms in transit.</sub></p>
 
-Use the map's **Fullscreen** control to fit the complete grid to the available screen.
+Use the map's **Fullscreen** control to fit the complete grid to the available screen. Each
+population chart fits its visible minimum and maximum. Population history opens on **All time**,
+and you can select **Last 24 hours** to focus on recent changes.
 
 ## Watch evolution unfold
 
