@@ -9,7 +9,7 @@ It runs its own sidecar, holds its own peer identity, and exchanges migrations w
 All website viewers receive the same stream.
 The spectator director follows one Bibite until it dies.
 It then selects the youngest living Bibite.
-The simulation runs at `7.5` times normal speed.
+The simulation runs at `6.5` times normal speed.
 
 The camera uses a zoom of `250`, which is a wider view than the mod default.
 It shows the selected Bibite's vision range.
@@ -138,7 +138,7 @@ powershell.exe -NoProfile -Command \
   | tr -d '\r' | jq
 ```
 
-The status must report a zoom of `250` and a target time scale of `7.5`.
+The status must report a zoom of `250` and a target time scale of `6.5`.
 The `panel` value alternates between `brain` and `biology`.
 The `fieldOfView` value must be `true`.
 The `disabledSpawnSettings` value must be `1`.
