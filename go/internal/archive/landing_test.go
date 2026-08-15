@@ -103,13 +103,16 @@ func TestLandingCardLayoutKeepsRelatedContentTogether(t *testing.T) {
 	for _, want := range []string{
 		`.section{padding-block:64px 0}`,
 		`.section:last-child{padding-bottom:64px}`,
-		`.principle h3{font-size:22px;margin:12px 0 10px}`,
-		`.flowitem b{display:block;margin:12px 0 7px}`,
+		`.principle h3{font-size:22px;margin:0 0 10px}`,
+		`.flowitem b{display:block;margin:0 0 7px}`,
 		`.faq{display:grid;grid-template-columns:1fr 1fr;align-items:start`,
 	} {
 		if !strings.Contains(landingPageHTML, want) {
 			t.Errorf("landing page is missing compact independent card layout %q", want)
 		}
+	}
+	if strings.Contains(landingPageHTML, `class="num"`) {
+		t.Error("landing cards still contain decorative numbers")
 	}
 }
 
