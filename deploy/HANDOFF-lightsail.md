@@ -55,6 +55,14 @@ The service went live on AWS Lightsail on 2026-08-14. The instance uses static a
 `3.229.27.163` in `us-east-1a`. Cloudflare serves both A records as DNS-only records.
 The certificate, alarms, snapshots, reboot test, alert test, and identity restore test passed.
 
+The public website update from PR #1 went live on 2026-08-15. The archive runs clean revision
+`87dc4a2`. The root path now serves the landing page, and `/live` serves the complete console.
+The archive-only restart began at 02:54:22 UTC and reconnected on the third one-second probe.
+All 14 service checks passed. Mobile Lighthouse scored 100 in all four audited categories.
+The map returned with five live slots, no dark slots, and one hole. The relay did not restart.
+Its on-disk binary is from the same revision. The running relay keeps its previous executable until
+the next planned relay restart.
+
 ### What "done" looks like
 
 Done is a public relay and archive that a stranger can join, with all six of Design Question 2's
@@ -907,13 +915,14 @@ Stated rather than left to be discovered.
   peers floor were all fixed in the kit after this handoff was written; **T9, T10 and T11 in §4
   carry what changed.** If you are reading a copy of this document that still lists them here, it
   predates the fix.
-- **The status page's egress estimate predates its newest endpoints.** The published *boundary* is
+- **The live console's egress estimate predates its newest endpoints.** The published *boundary* is
   current in both `README.md` §5 and `nginx/multiverse-20-status.conf`, now stated as a rule —
   every handler on the archive's read-only mux is public, because nginx proxies `location /`
-  wholesale — with a roster of ten beside it. But `SIZING.md` §6's ~32 GB/month per continuously
+  wholesale — with a roster of sixteen beside it. But `SIZING.md` §6's ~32 GB/month per continuously
   open tab was derived before `/api/species/tree`, `/api/species/trends` and `/api/species/brains`
-  existed, and it has not been re-derived. It is the figure the bundle's included transfer is
-  checked against, so it is worth redoing before the page has an audience.
+  existed, and it has not been re-derived. The landing page reads only `/api/status` every
+  15 seconds. Recalculate the console figure against public traffic before transfer becomes a
+  constraint.
 - **DNS-01 is now possible and is not wired.** See T8.
 - **The forward receipt's paragraph in `RESTART-POLICY.md` §1.2 is marked for revision.** It
   describes the world *without* B26; B26 has since shipped from a parallel arc. The paragraph says
