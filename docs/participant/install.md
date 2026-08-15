@@ -58,8 +58,9 @@ Windows marks a downloaded setup or archive. **Clear the mark only after its che
 Unblock-File .\bibites-multiverse-0.2.3-windows-x64-setup.exe
 ```
 
-You can also right-click the setup, select **Properties**, and select **Unblock**. The checksum
-makes this a decision about one verified file. The setup then verifies every embedded package file
+You can also right-click the setup, select **Properties**, and if present, select **Unblock**. The
+checksum makes this a decision about one verified file. The setup then verifies every embedded
+package file
 against `MANIFEST.sha256`. That is `INS-MARKOFWEB`.
 
 This community setup is not code-signed. Windows can show **Unknown publisher**. Continue only
