@@ -15,7 +15,8 @@
 #
 #   1. verifies every file in this folder against MANIFEST.sha256, then makes
 #      executable the files it verified - and nothing else;
-#   2. finds the game;
+#   2. selects the game: an existing itch.io copy in the add-on edition, or the
+#      verified managed payload in the complete edition;
 #   3. checks your game build against support-matrix.json and STOPS if there is
 #      no Linux entry for it, in the matrix's own words;
 #   4. installs BepInEx linux_x64, if it is not already there;
@@ -59,6 +60,7 @@ RELEASE='m5.0'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_NAME='MANIFEST.sha256'
 MATRIX_NAME='support-matrix.json'
+PAYLOAD_DESCRIPTOR_NAME='game-payload.json'
 PLUGIN_NAME='BibitesMultiverse.dll'
 SIDECAR_NAME='multiverse-sidecar'
 PLUGIN_GUID='dev.multiverse.bibites'
@@ -118,9 +120,12 @@ usage: ./$(basename "$0") [options]
   --ca-file <path>           ONLY for a private or LAN map whose relay uses its
                              own certificate authority. Nothing is written to any
                              system trust store, ever - see step 7.
-  --game-dir <path>          The game folder, if this script does not find it.
+  --game-dir <path>          Add-on edition only: the game folder, if this script
+                             does not find it. A complete edition uses its own
+                             managed runtime and refuses this option.
   --data-root <path>         Where this install keeps its journal, credential,
-                             logs and record. Default:
+                             logs and record. A complete edition also keeps its
+                             versioned game runtime here. Default:
                              \${XDG_DATA_HOME:-\$HOME/.local/share}/bibites-multiverse
   --world <name>             The world this install runs. Default: Multiverse.
   --export-edges <list>      The edges your world exports through. THE DEFAULT IS
@@ -328,7 +333,101 @@ say "Nothing else in this folder was touched, and nothing outside it."
 
 # ---------------------------------------------------------------- 2. the game
 
-step "2 of 9 - find The Bibites"
+step "2 of 9 - select The Bibites runtime"
+
+# The installer has one code path and two package editions. A complete package
+# contains game-payload.json and a manifest-covered game/ tree; an add-on
+# package contains neither and binds to an existing copy. The descriptor is not
+# a switch a player passes, so the archive they checked is the whole choice.
+RUNTIME_MODE='external'
+RUNTIME_ROOT=''
+RUNTIME_FILES=''
+PAYLOAD_DESCRIPTOR="$HERE/$PAYLOAD_DESCRIPTOR_NAME"
+
+if [ -f "$PAYLOAD_DESCRIPTOR" ]; then
+  [ -z "$GAME_DIR" ] || stop_setup \
+    "This is a complete package and installs its own managed game runtime. Do not pass --game-dir; use the add-on package to bind an existing copy." 'INS-RUNTIME'
+
+  PAYLOAD_FLAT="$(json_flatten "$PAYLOAD_DESCRIPTOR")"
+  [ "$(flat_get "$PAYLOAD_FLAT" format)" = 'bibites-multiverse/game-payload/1' ] || \
+    stop_setup "$PAYLOAD_DESCRIPTOR_NAME has an unsupported format." 'INS-CHECKSUM'
+  [ "$(flat_get "$PAYLOAD_FLAT" platform)" = "$PLATFORM" ] || \
+    stop_setup "This complete package carries a game payload for $(flat_get "$PAYLOAD_FLAT" platform), not $PLATFORM." 'INS-GAMEBUILD'
+
+  PAYLOAD_SHA="$(flat_get "$PAYLOAD_FLAT" assemblySha256 | tr 'a-f' 'A-F')"
+  case "$PAYLOAD_SHA" in ''|*[!0-9A-F]*) stop_setup "$PAYLOAD_DESCRIPTOR_NAME has an invalid assemblySha256." 'INS-CHECKSUM' ;; esac
+  [ "${#PAYLOAD_SHA}" -eq 64 ] || stop_setup "$PAYLOAD_DESCRIPTOR_NAME has an invalid assemblySha256." 'INS-CHECKSUM'
+  PAYLOAD_GAME_DIR="$HERE/game"
+  PAYLOAD_LICENSE="$(flat_get "$PAYLOAD_FLAT" licenseFile)"
+  [ -d "$PAYLOAD_GAME_DIR" ] || stop_setup "The complete package is missing its game/ directory." 'INS-CHECKSUM'
+  [ -n "$PAYLOAD_LICENSE" ] && [ -f "$HERE/$PAYLOAD_LICENSE" ] || \
+    stop_setup "The complete package is missing the game license named by $PAYLOAD_DESCRIPTOR_NAME." 'INS-CHECKSUM'
+  [ -f "$PAYLOAD_GAME_DIR/$GAME_EXE" ] || stop_setup "The complete package has no '$GAME_EXE' in game/." 'INS-CHECKSUM'
+  [ -x "$PAYLOAD_GAME_DIR/$GAME_EXE" ] || stop_setup "The complete package's '$GAME_EXE' is not executable. Unpack the archive again with permissions preserved." 'INS-CHECKSUM'
+  PAYLOAD_ASSEMBLY="$PAYLOAD_GAME_DIR/The Bibites_Data/Managed/BibitesAssembly.dll"
+  [ -f "$PAYLOAD_ASSEMBLY" ] || stop_setup "The complete package is missing BibitesAssembly.dll." 'INS-CHECKSUM'
+  [ "$(sha256_of "$PAYLOAD_ASSEMBLY")" = "$PAYLOAD_SHA" ] || \
+    stop_setup "$PAYLOAD_DESCRIPTOR_NAME does not describe the game assembly in this package." 'INS-CHECKSUM'
+  if find "$PAYLOAD_GAME_DIR" -type l -print -quit | grep -q .; then
+    stop_setup "The complete package contains a symbolic link. Game payloads must contain regular files and directories only." 'INS-CHECKSUM'
+  fi
+
+  # Refuse an unsupported payload before copying anything. Step 3 repeats the
+  # normal matrix check against the installed runtime, keeping both editions on
+  # the same gate after selection.
+  PAYLOAD_MATRIX_FLAT="$(json_flatten "$HERE/$MATRIX_NAME")"
+  PAYLOAD_SUPPORTED=0
+  payload_i=0
+  while :; do
+    payload_version="$(flat_get "$PAYLOAD_MATRIX_FLAT" "entries.$payload_i.gameVersion")"
+    [ -n "$payload_version" ] || break
+    if [ "$(flat_get "$PAYLOAD_MATRIX_FLAT" "entries.$payload_i.platform")" = "$PLATFORM" ] &&
+       [ "$(flat_get "$PAYLOAD_MATRIX_FLAT" "entries.$payload_i.assemblySha256" | tr 'a-f' 'A-F')" = "$PAYLOAD_SHA" ]; then
+      PAYLOAD_SUPPORTED=1
+      break
+    fi
+    payload_i=$((payload_i + 1))
+  done
+  [ "$PAYLOAD_SUPPORTED" -eq 1 ] || stop_setup \
+    "The game payload in this complete package is not in this release's support matrix. Nothing was installed." 'INS-GAMEBUILD'
+
+  if [ -z "$DATA_ROOT" ]; then DATA_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse"; fi
+  mkdir -p "$DATA_ROOT"
+  DATA_ROOT="$(cd "$DATA_ROOT" && pwd)"
+  case "$DATA_ROOT" in
+    *"'"*) stop_setup "The data directory's path contains a single quote, which the generated start script cannot carry safely. Pass --data-root with a path without one." ;;
+  esac
+
+  RUNTIME_MODE='bundled'
+  RUNTIME_ROOT="$DATA_ROOT/runtimes/$PAYLOAD_SHA"
+  RUNTIME_FILES="$(cd "$PAYLOAD_GAME_DIR" && find . -type f -printf '%P\n' | LC_ALL=C sort)"
+  [ -n "$RUNTIME_FILES" ] || stop_setup "The complete package's game/ directory contains no files." 'INS-CHECKSUM'
+
+  if [ -d "$RUNTIME_ROOT" ]; then
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      [ -f "$RUNTIME_ROOT/$rel" ] || stop_setup \
+        "The managed runtime at $RUNTIME_ROOT is incomplete ($rel is missing). It was not overwritten." 'INS-RUNTIME'
+      [ "$(sha256_of "$RUNTIME_ROOT/$rel")" = "$(sha256_of "$PAYLOAD_GAME_DIR/$rel")" ] || stop_setup \
+        "The managed runtime at $RUNTIME_ROOT was changed ($rel differs). It was not overwritten." 'INS-RUNTIME'
+    done <<< "$RUNTIME_FILES"
+    say "complete edition: reusing the verified managed game runtime"
+  else
+    mkdir -p "$(dirname "$RUNTIME_ROOT")"
+    RUNTIME_TEMP="$(mktemp -d "$(dirname "$RUNTIME_ROOT")/.installing.XXXXXXXX")"
+    trap 'rm -rf "$RUNTIME_TEMP"' EXIT
+    cp -a "$PAYLOAD_GAME_DIR/." "$RUNTIME_TEMP/"
+    [ "$(sha256_of "$RUNTIME_TEMP/The Bibites_Data/Managed/BibitesAssembly.dll")" = "$PAYLOAD_SHA" ] || \
+      stop_setup "The managed runtime copy failed verification." 'INS-RUNTIME'
+    mv "$RUNTIME_TEMP" "$RUNTIME_ROOT"
+    trap - EXIT
+    say "complete edition: installed the verified game payload into a managed runtime"
+  fi
+  say "game license: $HERE/$PAYLOAD_LICENSE"
+  GAME_DIR="$RUNTIME_ROOT"
+else
+  say "add-on edition: binding to an existing game installation"
+fi
 
 game_processes_in() {
   # The check is on the game folder this install writes to rather than on a
@@ -1124,13 +1223,30 @@ json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 RECORD_PATH="$DATA_ROOT/$RECORD_NAME"
 {
   printf '{\n'
-  printf '  "record": "bibites-multiverse/install-record/1",\n'
+  printf '  "record": "bibites-multiverse/install-record/2",\n'
   printf '  "release": "%s",\n' "$(json_escape "$RELEASE")"
   printf '  "platform": "%s",\n' "$PLATFORM"
   printf '  "installedUtc": "%s",\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   printf '  "kitDir": "%s",\n'   "$(json_escape "$HERE")"
   printf '  "gameDir": "%s",\n'  "$(json_escape "$GAME_DIR")"
   printf '  "dataRoot": "%s",\n' "$(json_escape "$DATA_ROOT")"
+  printf '  "runtime": {\n'
+  printf '    "mode": "%s",\n' "$RUNTIME_MODE"
+  printf '    "managedByThisInstaller": %s,\n' "$( [ "$RUNTIME_MODE" = 'bundled' ] && printf true || printf false )"
+  printf '    "root": "%s",\n' "$(json_escape "$RUNTIME_ROOT")"
+  printf '    "files": ['
+  runtime_first=1
+  if [ "$RUNTIME_MODE" = 'bundled' ]; then
+    printf '%s\n' "$RUNTIME_FILES" | while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      [ "$runtime_first" -eq 1 ] && printf '\n' || printf ',\n'
+      runtime_first=0
+      printf '      { "path": "%s", "sha256": "%s" }' \
+        "$(json_escape "$RUNTIME_ROOT/$rel")" "$(sha256_of "$PAYLOAD_GAME_DIR/$rel")"
+    done
+  fi
+  printf '\n    ]\n'
+  printf '  },\n'
   printf '  "peerId": "%s",\n'   "$(json_escape "$PEER_ID")"
   printf '  "relayUrl": "%s",\n' "$(json_escape "$RELAY_URL")"
   printf '  "plugin": {\n'
@@ -1173,6 +1289,8 @@ say "wrote $RECORD_PATH - the uninstall reads it, and removes only what is named
 # ---------------------------------------------------------------- done
 
 printf '\nSetup is complete.\n'
+if [ "$RUNTIME_MODE" = 'bundled' ]; then say "edition      : complete (managed game runtime)"
+else                                      say "edition      : add-on (existing game)"; fi
 say "map          : $RELAY_URL"
 say "your world   : $PEER_ID   world file: $WORLD"
 say "game         : $GAME_DIR"

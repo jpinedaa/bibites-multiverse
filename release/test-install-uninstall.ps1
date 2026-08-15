@@ -9,7 +9,7 @@
     hash-for-hash before and after. It never touches a Steam copy of the game, a
     trust store, a running process or the network.
 
-    Four scenarios:
+    Six scenarios:
 
       A  a machine with no BepInEx. The installer adds it; the game then writes
          BepInEx's config, log and cache; the uninstall must leave the tree
@@ -23,6 +23,8 @@
          refuse with INS-GAMEBUILD and create nothing at all.
       E  a private map, given -CaFile. Runs only when one is passed, and always
          with -SkipCaImport: this test never writes to a trust store.
+      F  a complete package. The same installer creates a versioned managed
+         runtime without -GameDir, and removes only unchanged payload files.
 
 .PARAMETER KitDir
     The staged archive contents - the folder holding Install-BibitesMultiverse.ps1,
@@ -206,6 +208,15 @@ if (Test-Path $startScript) {
     Check "the start script passes the credential as a file, never as a value" `
         ($startText -match "--credential-file")
 }
+$stopScript = Join-Path $KitDir 'Stop-Multiverse.ps1'
+if (Test-Path $stopScript) {
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($stopScript, [ref]$null, [ref]$errors)
+    Check "the generated stop script parses" (@($errors).Count -eq 0) (($errors | Out-String))
+    $stopText = Get-Content -Raw -LiteralPath $stopScript
+    Check "the stop script stops only this install's recorded processes" `
+        (-not ($stopText -match 'Stop-Process\s+-Name'))
+}
 
 $dry = Invoke-Script $uninstaller @{ DataRoot = $aData; DryRun = $true }
 Check "the dry run succeeded" ($dry.ExitCode -eq 0) $dry.Output
@@ -338,6 +349,69 @@ if ($CaFile) {
         ($uninstall.Output -match 'imported nothing into any trust store')
     Check "the copy of the authority is gone" (-not (Test-Path (Join-Path $eData 'relay-ca.crt')))
 }
+
+# ---------------------------------------------------------------- F
+
+Scenario "F - a complete package with an authorized game payload"
+
+$fRoot = Join-Path $sandbox 'F'
+$fKit  = Join-Path $fRoot 'kit'
+$fData = Join-Path $fRoot 'data'
+New-Item -ItemType Directory -Force -Path $fKit | Out-Null
+Get-ChildItem -LiteralPath $KitDir -Force | Copy-Item -Destination $fKit -Recurse -Force
+Remove-Item -LiteralPath (Join-Path $fKit 'Start-Multiverse.ps1'), `
+                         (Join-Path $fKit 'Stop-Multiverse.ps1') -Force -ErrorAction SilentlyContinue
+$fPayload = Join-Path $fKit 'game'
+New-SandboxGame -Path $fPayload -Assembly $GameAssembly
+$fSha = (Get-FileHash -LiteralPath $GameAssembly -Algorithm SHA256).Hash.ToUpperInvariant()
+Set-Content -LiteralPath (Join-Path $fKit 'GAME-LICENSE.txt') -Value 'test publisher license' -Encoding ASCII
+$descriptor = [ordered]@{
+    format = 'bibites-multiverse/game-payload/1'
+    platform = 'Windows'
+    gameVersion = 'test'
+    assemblySha256 = $fSha
+    licenseFile = 'GAME-LICENSE.txt'
+}
+$descriptor | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $fKit 'game-payload.json') -Encoding ASCII
+$manifestPath = Join-Path $fKit 'MANIFEST.sha256'
+$manifestLines = @(Get-ChildItem -LiteralPath $fKit -File -Force -Recurse |
+    Where-Object { $_.FullName -ne $manifestPath } |
+    Sort-Object FullName |
+    ForEach-Object {
+        $relative = ($_.FullName.Substring($fKit.Length) -replace '^[\\/]+', '') -replace '\\', '/'
+        '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $relative
+    })
+Set-Content -LiteralPath $manifestPath -Value $manifestLines -Encoding ASCII
+$fJoin = Join-Path $fRoot 'join.txt'
+[void](New-JoinFile $fJoin)
+$fInstaller = Join-Path $fKit 'Install-BibitesMultiverse.ps1'
+$fUninstaller = Join-Path $fKit 'Uninstall-BibitesMultiverse.ps1'
+
+$install = Invoke-Script $fInstaller @{ GameDir = $fPayload; DataRoot = $fData; JoinStringFile = $fJoin }
+Check "the complete edition refuses an external game path" ($install.ExitCode -eq 1) $install.Output
+Check "that refusal has the INS-RUNTIME taxonomy id" ($install.Output -match 'INS-RUNTIME')
+Check "the refused selection copied no managed runtime" `
+    (-not (Test-Path -LiteralPath (Join-Path $fData 'runtimes')))
+
+$install = Invoke-Script $fInstaller @{ DataRoot = $fData; JoinStringFile = $fJoin }
+Check "the complete installer succeeded without -GameDir" ($install.ExitCode -eq 0) $install.Output
+Check "it selected the complete edition" ($install.Output -match 'complete edition: installed')
+$fRuntime = Join-Path (Join-Path $fData 'runtimes') $fSha
+Check "the game was copied into the versioned managed runtime" `
+    (Test-Path -LiteralPath (Join-Path $fRuntime 'The Bibites.exe'))
+$recordF = Get-Content -Raw -LiteralPath (Join-Path $fData 'install-record.json') | ConvertFrom-Json
+Check "the record identifies a bundled managed runtime" `
+    ($recordF.runtime.mode -eq 'bundled' -and $recordF.runtime.managedByThisInstaller)
+$startF = Get-Content -Raw -LiteralPath (Join-Path $fKit 'Start-Multiverse.ps1')
+Check "the generated start script points at the managed runtime" ($startF.Contains($fRuntime))
+
+Set-Content -LiteralPath (Join-Path $fRuntime 'user-note.txt') -Value 'keep me' -Encoding ASCII
+$uninstall = Invoke-Script $fUninstaller @{ DataRoot = $fData }
+Check "the complete uninstall succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
+Check "the unchanged game executable was removed" `
+    (-not (Test-Path -LiteralPath (Join-Path $fRuntime 'The Bibites.exe')))
+Check "a user-added runtime file was kept" (Test-Path -LiteralPath (Join-Path $fRuntime 'user-note.txt'))
+Check "the uninstall explains why the non-empty runtime stays" ($uninstall.Output -match 'not empty, so it stays')
 
 # ---------------------------------------------------------------- the verdict
 

@@ -1,24 +1,24 @@
 # Install
 
-**What you need:** The Bibites, on one of the two platforms this release supports — the **Steam
-copy on Windows**, or the **native Linux build from itch.io**. **What you do not need:** a
-compiler, an SDK, a runtime, administrator rights, root, or anything from a developer's toolchain.
-If an installation step asks you for one of those, stop — that is a defect, and reporting it is
-the right response.
+**What you need:** a join string and one edition for your platform. Choose **add-on** if you
+already have The Bibites — Steam on Windows or the native itch.io build on Linux. Choose
+**complete** when the release page offers it and you want the authorized game payload, its
+license, the mod, and the sidecar installed together. **What you do not need:** a compiler, an
+SDK, a runtime, administrator rights, root, or anything from a developer's toolchain.
 
-**Where it comes from.** One archive per platform, from this project's GitHub release page, with
-`SHA256SUMS` beside them:
+**Where it comes from.** The add-on archives are always built. Complete rows appear only when the
+publisher permits the game payload to be redistributed. `SHA256SUMS` sits beside all of them:
 
-| Platform | Archive | The kit inside it |
+| Platform and edition | Archive | Game source |
 |---|---|---|
-| Windows / Steam | `bibites-multiverse-m5.0-windows-x64.zip` | `Install-BibitesMultiverse.ps1`, PowerShell |
-| Linux / itch.io | `bibites-multiverse-m5.0-linux-x64.zip` | `install-bibites-multiverse.sh`, bash |
+| Windows add-on | `bibites-multiverse-m5.0-windows-x64.zip` | your existing Steam copy |
+| Windows complete | `bibites-multiverse-m5.0-windows-x64-complete.zip` | the manifest-covered `game\` payload |
+| Linux add-on | `bibites-multiverse-m5.0-linux-x64.zip` | your existing itch.io copy |
+| Linux complete | `bibites-multiverse-m5.0-linux-x64-complete.zip` | the manifest-covered `game/` payload |
 
-**The mod inside the two archives is the same file**, byte for byte: it is platform-independent
-IL, a patch against managed types the game's Mono build carries identically on both. What differs
-is the sidecar (a native binary), the mod framework (BepInEx `win_x64` against `linux_x64`), and
-the kit. Nothing else is a download, and no installer here fetches anything from the internet
-while it runs.
+**The mod inside every archive is the same file**, byte for byte: it is platform-independent IL.
+What differs by platform is the sidecar, BepInEx flavour, and kit. A complete archive adds
+`game-payload.json`, `GAME-LICENSE.txt`, and `game/`. No installer fetches anything while it runs.
 
 **On Linux the installer needs four programs and checks for all four before it does anything:**
 `sha256sum` and `awk`, which are on any machine that boots; `unzip`; and `file`, which **BepInEx's
@@ -103,7 +103,7 @@ see [join.md](join.md).
 
 **Where it is published, and how to look yourself up.** The table is
 [`../support-matrix.md`](../support-matrix.md), beside every release, and a machine-readable copy
-of it travels inside **both** archives as `support-matrix.json` — the same bytes, so the words the
+of it travels inside **every** archive as `support-matrix.json` — the same bytes, so the words the
 installer refuses with are the words on the page. It matches on the **SHA-256 of
 `BibitesAssembly.dll`** rather than on a version string, because a version string is a value a
 build can reuse. You can check yourself before downloading anything — the matrix page gives the
@@ -148,8 +148,14 @@ same rule. `-JoinStringFile .\join.txt` — `--join-string-file ./join.txt` on L
 a file if you would rather not type it, and then delete that file, which the installer tells you
 to do and will not do for you.
 
+There is no edition switch. The complete archive's manifest-covered `game-payload.json` selects
+the managed-runtime path. Without that descriptor, the same installer discovers an existing game.
+Complete installs go below `<data root>/runtimes/<assembly-sha256>`; `-DataRoot` on Windows and
+`--data-root` on Linux choose a different root.
+
 **Both installers work in nine steps they name on your screen as they go**, and the steps are the
-same nine: check the package against `MANIFEST.sha256`; find the game; check the build against the
+same nine: check the package against `MANIFEST.sha256`; select the existing or bundled game
+runtime; check the build against the
 matrix; install BepInEx if it is not already there; copy the plugin; split your join string and
 store the secret half in a file only you can read; arrange trust for a certificate authority
 **only** if you gave it one for a private map; state the settings this install ships with; and
@@ -160,7 +166,7 @@ write the start script, the stop script and the record the uninstall reads.
 | Step | On Windows | On Linux |
 |---|---|---|
 | 1, after the checksum | clears the mark of the web from the files it verified, by name | makes executable the files it verified, by name |
-| 2, finding the game | reads Steam's registry keys and its library index, including a second drive | looks in the itch app's own install root and the usual places, then asks you. There is no registry and no library index to read |
+| 2, selecting the game | add-on reads Steam's registry and library index; complete installs its payload below the data root | add-on searches the itch app root and usual places; complete installs its payload below the data root |
 | 7, a private map's authority | imports it into **your own user store**, `Cert:\CurrentUser\Root`, and records the thumbprint so the uninstall can take it out | writes it to **no store at all**. The copy goes beside your data and the start script sets `SSL_CERT_FILE` at it, for that one process. Nothing under `/etc/ssl` or `/usr/local/share/ca-certificates` is touched and `update-ca-certificates` is never run |
 
 **Neither needs administrator rights or root**, adds a service, a scheduled task, a systemd unit, a
@@ -176,6 +182,10 @@ keeps: **a file somebody changed after the install** — a changed plugin is rep
 organisms other worlds handed you, unless you pass `-RemoveWorldData` / `--remove-world-data`.
 Its two refusals are the game still running from that folder and this install's own sidecar still
 running — both stop before removing anything, and both name the command that fixes them.
+
+For a complete edition, the game payload is in the record too. Uninstall removes each unchanged
+payload file by hash. It reports and keeps a changed file, a user-added file, and every directory
+either one needs.
 
 On Linux the uninstall also takes back the four files BepInEx's archive lays beside the game
 binary — `run_bepinex.sh`, `libdoorstop.so`, `.doorstop_version` and its own `changelog.txt` —
@@ -218,6 +228,10 @@ when something eventually goes wrong is already gone.
 folder** and install into that. It costs disk and nothing else. `LOCAL-LOGSHRED` in
 [`../error-taxonomy.md`](../error-taxonomy.md) has the shape of it and how to recognise a shredded
 log.
+
+A complete edition makes the separate game copy itself. For each concurrent world, unpack a
+separate kit and choose a distinct data root and sidecar port. That gives each world its own game
+folder, BepInEx log, credential, journal, and recorded process IDs.
 
 ## Where your worlds live
 

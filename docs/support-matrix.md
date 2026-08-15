@@ -6,7 +6,7 @@ a statement about the map, and no entry here decides whether you may join one.
 
 **This page is published beside every release** and the installer inside the release reads the
 same table — the machine-readable copy at the end of this document is the one it reads, and it
-is copied into **both** release archives as `support-matrix.json` unchanged. The Windows kit and
+is copied into **every** release archive as `support-matrix.json` unchanged. The Windows kit and
 the Linux kit read the same bytes and refuse in the same words.
 
 **A row is keyed on a game version *and* a platform**, because the two builds of one game version

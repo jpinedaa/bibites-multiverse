@@ -19,15 +19,18 @@ raised only after the release that satisfies it exists.
 | `kit/uninstall-bibites-multiverse.sh` | Removes what the Linux installer recorded, hash-checked, and nothing else |
 | `kit/README-linux.md` | The page inside the Linux archive, staged into it as `README.md` |
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
-| `make-release.sh` | Builds `dist/` — **both** archives, one `SHA256SUMS` covering them, and the page with its checksums |
+| `make-release.sh` | Builds `dist/` — two add-on archives, optional authorized complete archives, one `SHA256SUMS`, and the release page |
 | `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
 | `dist/` | Build output. **Not tracked** — see `.gitignore`, which says why |
 
-**Two archives, one mod.** The plugin in both is the same file, byte for byte — platform-independent
-IL — and `make-release.sh` refuses to build if the two copies ever disagree. What differs is the
-sidecar (cross-compiled twice from one `go/`), the BepInEx flavour (`win_x64` against `linux_x64`),
-and the kit.
+**Two platforms, one mod.** The plugin in every archive is the same file, byte for byte.
+`make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
+BepInEx flavor, and installer differ by platform.
+
+The default build creates an add-on archive for each platform. An authorized build can also
+create a complete archive with an unmodified game payload and its separate license file.
+Every archive contains the project `LICENSE` and `THIRD_PARTY_NOTICES.md` files.
 
 The two documents that ship *beside* the release rather than inside it are
 [`../docs/support-matrix.md`](../docs/support-matrix.md) — which the installer reads, as JSON
@@ -56,6 +59,20 @@ machine's matrix entry rather than a rule about the map (D22).
 release/make-release.sh
 ```
 
+To build an authorized complete edition, add one or both game directories and the publisher's
+license file:
+
+```sh
+release/make-release.sh \
+  --windows-game-dir <clean-windows-game> \
+  --linux-game-dir <clean-linux-game> \
+  --game-license <publisher-provided-license>
+```
+
+The complete editions are optional. The build rejects a payload that does not match the support
+matrix or that already contains mod files. Supplying a license file does not create distribution
+rights; the person publishing the archive is responsible for having the publisher's permission.
+
 It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`), the .NET SDK and Go —
 the build side, never the player's side. Everything heavy runs under `nice -n 19`, because this
 host runs the living deployment.
@@ -65,8 +82,7 @@ host runs the living deployment.
 1. `bibites-mod/libs/BibitesAssembly.dll` to be the game build `docs/support-matrix.md`'s
    **Windows** row names — that is the reference assembly the mod is compiled against;
 2. the plugin it builds to be **byte-identical** to the one in `farend/dist/farend-bundle.zip` —
-   the tracked artifact set the living fleet runs — and the copy staged into each of the two
-   archives to be that same file;
+   the tracked artifact set the living fleet runs — and every staged copy to be that same file;
 3. the cross-compiled Windows sidecar to be byte-identical to the same bundle's copy;
 4. and, when this machine's game directory is readable, the deployed plugin to agree as well.
 
@@ -84,10 +100,10 @@ commit for commit, to the tree the deployment's sidecar was built from. Same sou
 A mismatch stops the build and names which side moved. The fix is never to loosen the check: it
 is to deploy, rebuild the far-end bundle, and release from there.
 
-Both archives are built deterministically — fixed timestamps, sorted entries, no extra attributes
-— so rebuilding from the tag reproduces the checksums on the page. The Linux one keeps its mode
-bits, and the build reads them back out of the finished zip: a kit whose scripts arrive without
-the executable bit is a refusal no page explains.
+Every archive is built deterministically — fixed timestamps, sorted entries, no extra attributes
+— so rebuilding from the same tag and inputs reproduces the checksums on the page. Linux archives
+keep their mode bits, and the build reads them back out of the finished zip, including the game
+executable in a complete archive.
 
 ## Testing the install and the uninstall
 
@@ -104,27 +120,25 @@ real copy of the game, a trust store, or a live process. Run them after any chan
 **The Linux proof needs no release build**: with no `--kit-dir` it stages a kit out of this
 checkout — the two real scripts, the matrix extracted from `docs/support-matrix.md`, the real
 BepInEx archive, and stand-ins for the plugin and the sidecar, neither of which it ever executes.
-It covers the same five scenarios as the PowerShell one plus two that only exist here: **the other
-platform's build of the same game version**, which must refuse because a row is keyed on
-(game version, platform) and cannot be tested from Windows; and **a kit file that fails its
-manifest**, which must refuse before anything is made executable.
+Both suites include a complete-package scenario: no game path is supplied, the game lands in a
+versioned managed runtime, uninstall removes unchanged payload files, and a user-added file is
+kept. Linux also covers **the other platform's build of the same game version** and **a kit file
+that fails its manifest**.
 
 ## Publishing — the four steps, by hand
 
 `make-release.sh` deliberately does none of these.
 
-1. **Fill the owner-only fields in `dist/RELEASE-PAGE.md`.** The build lists every `@@OWNER:…@@`
-   marker it left. Today that is the map's announced period and wind-down (D24), which is WP3's
-   to state.
+1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
+   the generated page describes the intended artifacts and public map.
 2. **Tag the commit the artifacts were built from**, and push the tag:
    `git tag m5.0 && git push origin m5.0`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
-3. **Create the release** with `dist/RELEASE-PAGE.md` as its body and all three files from `dist/`
-   as its assets:
+3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
+   each complete archive that you built, and `SHA256SUMS`:
    ```sh
    gh release create m5.0 \
-       release/dist/bibites-multiverse-m5.0-windows-x64.zip \
-       release/dist/bibites-multiverse-m5.0-linux-x64.zip \
+       release/dist/bibites-multiverse-m5.0-*.zip \
        release/dist/SHA256SUMS \
        --title "Bibites Multiverse m5.0" \
        --notes-file release/dist/RELEASE-PAGE.md

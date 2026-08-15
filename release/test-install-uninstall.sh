@@ -13,7 +13,7 @@
 # before and after. It never touches a real copy of the game, a trust store, a
 # running process or the network.
 #
-# Seven scenarios:
+# Eight scenarios:
 #
 #   A  a machine with no BepInEx. The installer adds it; the game then writes
 #      BepInEx's config, log and cache; the uninstall must leave the tree
@@ -34,6 +34,8 @@
 #   G  a kit file that does not match MANIFEST.sha256. The installer must stop
 #      with INS-CHECKSUM before it touches the game, and must not have made
 #      anything executable.
+#   H  a complete package. The same installer must create a versioned managed
+#      runtime without --game-dir, and uninstall only unchanged payload files.
 #
 # Usage:
 #   release/test-install-uninstall.sh --game-assembly <path to the LINUX BibitesAssembly.dll>
@@ -466,6 +468,54 @@ check "it made nothing executable, because the checksum comes first" \
   "$(b test ! -x "$G_KIT/uninstall-bibites-multiverse.sh")"
 check "no BepInEx was installed" "$(b test ! -d "$G_GAME/BepInEx")"
 check "no credential was written" "$(b test ! -e "$G_DATA/peer-secret.txt")"
+
+# ---------------------------------------------------------------- H
+
+scenario "H - a complete package with an authorized game payload"
+
+H_ROOT="$SANDBOX/H"; H_KIT="$H_ROOT/kit"; H_DATA="$H_ROOT/data"
+mkdir -p "$H_KIT"
+cp -a "$KIT_DIR/." "$H_KIT/"
+rm -f "$H_KIT/start-multiverse.sh" "$H_KIT/stop-multiverse.sh"
+mkdir -p "$H_KIT/game"
+new_sandbox_game "$H_KIT/game" "$GAME_ASSEMBLY"
+H_SHA="$(sha256sum "$GAME_ASSEMBLY" | cut -d' ' -f1 | tr 'a-f' 'A-F')"
+printf 'test publisher license\n' > "$H_KIT/GAME-LICENSE.txt"
+printf '{\n  "format": "bibites-multiverse/game-payload/1",\n  "platform": "Linux",\n  "gameVersion": "test",\n  "assemblySha256": "%s",\n  "licenseFile": "GAME-LICENSE.txt"\n}\n' \
+  "$H_SHA" > "$H_KIT/game-payload.json"
+( cd "$H_KIT" && find . -type f ! -name MANIFEST.sha256 -printf '%P\n' | LC_ALL=C sort \
+    | while read -r f; do printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$f"; done \
+    > MANIFEST.sha256 )
+chmod 644 "$H_KIT"/*.sh "$H_KIT/multiverse-sidecar"
+H_JOIN="$H_ROOT/join.txt"; new_join_file "$H_JOIN" >/dev/null
+
+run_script bash "$H_KIT/install-bibites-multiverse.sh" --game-dir "$H_KIT/game" \
+  --data-root "$H_DATA" --join-string-file "$H_JOIN"
+check "the complete edition refuses an external game path" "$(b test "$RC" -eq 1)" "$OUT"
+check "that refusal has the INS-RUNTIME taxonomy id" "$(b contains 'INS-RUNTIME' "$OUT")"
+check "the refused selection copied no managed runtime" "$(b test ! -d "$H_DATA/runtimes")"
+
+run_script bash "$H_KIT/install-bibites-multiverse.sh" --data-root "$H_DATA" \
+  --join-string-file "$H_JOIN"
+check "the complete installer succeeded without --game-dir" "$(b test "$RC" -eq 0)" "$OUT"
+check "it selected the complete edition" "$(b contains 'complete edition: installed' "$OUT")"
+H_RUNTIME="$H_DATA/runtimes/$H_SHA"
+check "the game was copied into the versioned managed runtime" \
+  "$(b test -x "$H_RUNTIME/The Bibites.x86_64")"
+check "the record identifies a bundled managed runtime" \
+  "$(b bash -c 'grep -q '"'"'"mode": "bundled"'"'"' "$1" && grep -q '"'"'"managedByThisInstaller": true'"'"' "$1"' _ "$H_DATA/install-record.json")"
+check "the generated start script points at the managed runtime" \
+  "$(b bash -c 'grep -qF "$2" "$1"' _ "$H_KIT/start-multiverse.sh" "$H_RUNTIME")"
+
+# A file not in the payload ledger belongs to the participant and keeps the
+# runtime directory alive; all unchanged publisher files still go.
+printf 'keep me\n' > "$H_RUNTIME/user-note.txt"
+run_script bash "$H_KIT/uninstall-bibites-multiverse.sh" --data-root "$H_DATA"
+check "the complete uninstall succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "the unchanged game executable was removed" "$(b test ! -e "$H_RUNTIME/The Bibites.x86_64")"
+check "a user-added runtime file was kept" "$(b test -f "$H_RUNTIME/user-note.txt")"
+check "the uninstall explains why the non-empty runtime stays" \
+  "$(b contains 'not empty, so it stays' "$OUT")"
 
 # ---------------------------------------------------------------- the verdict
 

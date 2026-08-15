@@ -27,6 +27,8 @@
         authority
       * that certificate authority from your own user trust store, if the
         installer imported it and only then
+      * an unchanged managed game payload, when this was the complete edition;
+        changed and user-added files are kept
 
     WHAT IT KEEPS, DELIBERATELY
 
@@ -216,6 +218,31 @@ if (-not $record.bepInEx.installedByThisInstaller) {
     Remove-EmptyDirectory $bepInExDir
 }
 
+# ---------------------------------------------------------------- the managed runtime
+
+Step "the managed game runtime"
+
+$hasRuntime = $record.PSObject.Properties.Match('runtime').Count -gt 0
+if (-not $hasRuntime -or -not $record.runtime.managedByThisInstaller) {
+    Say "This was the add-on edition, so the game installation is not this package's to remove."
+    [void]$kept.Add('game runtime : external installation; left whole')
+} else {
+    foreach ($file in @($record.runtime.files)) {
+        Remove-Recorded -Path $file.path -Sha256 $file.sha256 -What 'the complete edition game payload'
+    }
+
+    # Directories go only when empty. A changed game file or any file somebody
+    # added keeps itself and every parent directory it needs.
+    $runtimeRoot = [string]$record.runtime.root
+    if ($runtimeRoot -and (Test-Path -LiteralPath $runtimeRoot)) {
+        $runtimeDirs = @(Get-ChildItem -LiteralPath $runtimeRoot -Directory -Recurse -Force -ErrorAction SilentlyContinue |
+                         Sort-Object { $_.FullName.Length } -Descending | ForEach-Object { $_.FullName })
+        foreach ($dir in $runtimeDirs) { Remove-EmptyDirectory $dir }
+        Remove-EmptyDirectory $runtimeRoot
+        Remove-EmptyDirectory (Split-Path -Parent $runtimeRoot)
+    }
+}
+
 # ---------------------------------------------------------------- the certificate
 
 Step "the certificate authority"
@@ -297,8 +324,13 @@ Write-Host ""
 if ($DryRun) {
     Write-Host "Nothing was changed. Run it again without -DryRun to do it." -ForegroundColor Cyan
 } else {
-    Write-Host "Done. The game is as the installer found it." -ForegroundColor Green
-    Say "Steam can verify that for you: Properties -> Installed Files -> Verify integrity."
+    if ($hasRuntime -and $record.runtime.managedByThisInstaller) {
+        Write-Host "Done. Every unchanged managed game file was removed." -ForegroundColor Green
+        Say "A changed or user-added runtime file remains in place, if the ledger above names one."
+    } else {
+        Write-Host "Done. The game is as the installer found it." -ForegroundColor Green
+        Say "Steam can verify that for you: Properties -> Installed Files -> Verify integrity."
+    }
 }
 Write-Host ""
 Say "Leaving a map is a separate act from uninstalling, and it is one message to the"

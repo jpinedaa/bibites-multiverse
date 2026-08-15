@@ -26,6 +26,8 @@
 #     is left completely alone
 #   * start-multiverse.sh and stop-multiverse.sh
 #   * your map credential, and the copy of a private map's certificate authority
+#   * an unchanged managed game payload, when this was the complete edition;
+#     changed and user-added files are kept
 #
 # WHAT IT NEVER HAD TO DO, on this platform
 #
@@ -309,6 +311,33 @@ else
   remove_empty_directory "$BEPINEX_DIR"
 fi
 
+# ---------------------------------------------------------------- the managed runtime
+
+step "the managed game runtime"
+
+if [ "$(flat_get "$REC" runtime.managedByThisInstaller)" != 'true' ]; then
+  say "This was the add-on edition, so the game installation is not this package's to remove."
+  add_kept "game runtime : external installation; left whole"
+else
+  R_RUNTIME_ROOT="$(flat_get "$REC" runtime.root)"
+  i=0
+  while :; do
+    p="$(flat_get "$REC" "runtime.files.$i.path")"
+    [ -n "$p" ] || break
+    remove_recorded "$p" "$(flat_get "$REC" "runtime.files.$i.sha256")" 'the complete edition game payload'
+    i=$((i + 1))
+  done
+
+  # Remove directories only when empty. A game file somebody changed or any
+  # file somebody added keeps itself and every parent it needs.
+  if [ -n "$R_RUNTIME_ROOT" ] && [ -d "$R_RUNTIME_ROOT" ]; then
+    while IFS= read -r -d '' dir; do
+      remove_empty_directory "$dir"
+    done < <(find "$R_RUNTIME_ROOT" -depth -type d -print0)
+  fi
+  remove_empty_directory "$(dirname "$R_RUNTIME_ROOT")"
+fi
+
 # ---------------------------------------------------------------- the certificate
 
 step "the certificate authority"
@@ -383,10 +412,15 @@ printf '\n'
 if [ "$DRY_RUN" -eq 1 ]; then
   printf 'Nothing was changed. Run it again without --dry-run to do it.\n'
 else
-  printf 'Done. The game is as the installer found it.\n'
-  say "You can prove that: the itch.io archive's SHA-256 is published in"
-  say "docs/support-matrix.md, so unpacking it again beside this folder and diffing"
-  say "the two trees is a check nobody has to take on trust."
+  if [ "$(flat_get "$REC" runtime.managedByThisInstaller)" = 'true' ]; then
+    printf 'Done. Every unchanged managed game file was removed.\n'
+    say "A changed or user-added runtime file remains in place, if the ledger above names one."
+  else
+    printf 'Done. The game is as the installer found it.\n'
+    say "You can prove that: the itch.io archive's SHA-256 is published in"
+    say "docs/support-matrix.md, so unpacking it again beside this folder and diffing"
+    say "the two trees is a check nobody has to take on trust."
+  fi
 fi
 printf '\n'
 say "Leaving a map is a separate act from uninstalling, and it is one message to the"

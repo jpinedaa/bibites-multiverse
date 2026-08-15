@@ -5,18 +5,21 @@ becomes one square of a grid of other people's worlds. Organisms that reach the 
 world cross into a neighbour's and go on living there; theirs arrive in yours. Your world stays
 on your machine, saves to your disk, and is yours.
 
-You need **The Bibites** — either the **Steam copy on Windows** or the **native Linux build from
-itch.io** — and a **join string**, which the operator of a map hands you. You do not need a
-compiler, an SDK or a runtime.
+You need a **join string**, which the operator of a map hands you. Choose the **add-on edition**
+if The Bibites is already installed (Steam on Windows or the native itch.io build on Linux).
+Choose the **complete edition** when one is published for your platform: it carries the
+publisher-authorized game payload, its license, the mod, and the sidecar in one archive. You do
+not need a compiler, an SDK or a runtime.
 
 **Nothing in this release will ever ask you to turn a security control off.** No
 execution-policy bypass, no `--insecure` flag, no skipped certificate check, no `curl | sh`, no
 `sudo`. If any file, page or script here asks you for one of those, that is a defect: report it,
 and do not work around it.
 
-**Two archives, one mod.** The plugin inside them is the same file, byte for byte — it is
-platform-independent IL. What differs is the sidecar, the mod framework, and the kit: PowerShell
-against bash.
+**Two platforms, two editions, one installer path.** The plugin is the same file, byte for byte —
+it is platform-independent IL. An add-on archive finds an existing game. A complete archive is
+the same kit plus `game-payload.json`, `GAME-LICENSE.txt`, and a manifest-covered `game/` tree;
+that descriptor makes the installer create a versioned managed runtime instead.
 
 ---
 
@@ -46,6 +49,8 @@ sha256sum @@LINUX_ZIP_NAME@@
 
 Compare what it prints with the value in the table below. `sha256sum` prints lower case and the
 table is upper case in places; they are the same value.
+
+For a complete edition, substitute its exact `-complete.zip` filename and use that row's checksum.
 
 **If it does not match, delete the download and try again. If it does not match twice, stop,
 report it, and do not run it.** That is `INS-CHECKSUM` in the error taxonomy.
@@ -120,24 +125,25 @@ flag with `insecure` in its name.
 
 ## Downloads
 
-**Take the one for your platform.** They are not interchangeable: each installer looks its own
-platform's rows up in the support matrix, so the wrong archive stops with `INS-GAMEBUILD` rather
-than doing something surprising.
+**Take the edition and platform you want.** Platform archives are not interchangeable: each
+installer looks up only its own platform's rows. The wrong archive stops with `INS-GAMEBUILD`.
+Complete rows appear only when the release was built with a game payload the publisher permits
+this project to redistribute.
 
 | File | For | Size | SHA-256 |
 |---|---|---|---|
 | [`@@ZIP_NAME@@`](https://github.com/@@REPO@@/releases/download/@@TAG@@/@@ZIP_NAME@@) | Windows, the Steam copy | @@ZIP_SIZE@@ | `@@ZIP_SHA256@@` |
 | [`@@LINUX_ZIP_NAME@@`](https://github.com/@@REPO@@/releases/download/@@TAG@@/@@LINUX_ZIP_NAME@@) | Linux, the itch.io build | @@LINUX_ZIP_SIZE@@ | `@@LINUX_ZIP_SHA256@@` |
-| [`SHA256SUMS`](https://github.com/@@REPO@@/releases/download/@@TAG@@/SHA256SUMS) | both | — | the same two values, as a file |
+@@COMPLETE_DOWNLOAD_ROWS@@| [`SHA256SUMS`](https://github.com/@@REPO@@/releases/download/@@TAG@@/SHA256SUMS) | every archive | — | the same values, as a file |
 
 Built @@BUILT_UTC@@ from `@@COMMIT@@`.
 
-Inside the Windows archive, each file with its own SHA-256 — the installer checks all of them
-against `MANIFEST.sha256` before it does anything:
+Inside the Windows add-on archive, each file has its own SHA-256. A complete archive carries the
+same kit plus its license, descriptor, and game files; its own `MANIFEST.sha256` covers those too.
 
 @@INNER_TABLE@@
 
-Inside the Linux archive, the same, and the mod is the same file:
+Inside the Linux add-on archive, the same, and the mod is the same file:
 
 @@LINUX_INNER_TABLE@@
 
@@ -198,6 +204,10 @@ It asks for your join string with the typing hidden. **No parameter takes the se
 command line** — a value typed there is in every process listing on your machine and in your
 shell history — and the wire itself has the same rule.
 
+The add-on edition finds Steam or accepts `-GameDir`. The complete edition needs no game path:
+it installs the payload under `%LOCALAPPDATA%\BibitesMultiverse\runtimes\<assembly-sha256>` (or
+the `-DataRoot` you choose) and prints the included game-license path.
+
 Then:
 
 ```powershell
@@ -218,6 +228,10 @@ Unpack the archive, open a terminal in the folder, and:
 ```
 
 The same hidden prompt, and the same rule: **no option takes the secret on a command line.**
+
+The add-on edition finds the itch.io copy or accepts `--game-dir`. The complete edition installs
+its payload below the selected data root's `runtimes/<assembly-sha256>` directory and prints the
+included game-license path.
 
 ```sh
 ./start-multiverse.sh      # the sidecar, then the game
@@ -249,6 +263,7 @@ start.
 | BepInEx, if you do not already have it | your game folder | your game folder, plus `run_bepinex.sh`, `libdoorstop.so` and `.doorstop_version` beside the game binary |
 | `BibitesMultiverse.dll` | `<game folder>\BepInEx\plugins` | `<game folder>/BepInEx/plugins` |
 | your map credential, your journal, your logs | `%LOCALAPPDATA%\BibitesMultiverse` | `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse` |
+| complete-edition managed game runtime | `<data root>\runtimes\<assembly-sha256>` | `<data root>/runtimes/<assembly-sha256>` |
 | the start and stop scripts | `Start-Multiverse.ps1`, `Stop-Multiverse.ps1`, beside the installer | `start-multiverse.sh`, `stop-multiverse.sh`, beside the installer |
 
 **Your worlds are not in any of that.** They stay where the game puts them:

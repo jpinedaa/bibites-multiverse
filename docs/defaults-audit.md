@@ -11,16 +11,17 @@ part of it that affects a player is stated on the release page, in
 
 ## What "a bare install" means here
 
-Somebody downloads the release archive for their platform, runs `Install-BibitesMultiverse.ps1` or
-`install-bibites-multiverse.sh`, answers the join string, and changes nothing else. That is the
-whole population this audit is about. **Every verdict below holds identically on both platforms**:
-the four defaults are the mod's and the relay's, not the kit's, and the two kits write the same
-five environment variables with the same values. Two facts shape every verdict:
+Somebody downloads an add-on or complete archive for their platform. They run the installer,
+answer the join-string prompt, and change nothing else. That is the whole population this audit
+covers. **Every verdict below holds on both platforms and in both editions.** The four defaults
+belong to the mod and relay, not the kit. Each installer writes the same five environment
+variables with the same values. Two facts shape every verdict:
 
-1. **The package ships no relay and no archive.** Each release archive holds seven files — the
-   installer, the uninstaller, the in-archive README, the mod, the sidecar, the BepInEx archive
-   and the support matrix — so two of the four defaults are not reachable from a bare install at
-   all. They are audited anyway, because the operator side is a hoster's bare install.
+1. **The package ships no relay and no archive.** Every archive contains the installer, the
+   uninstaller, the README, the mod, the sidecar, BepInEx, and the support matrix. A complete
+   archive also contains an authorized game payload and its license. Two defaults are therefore
+   not reachable from a participant install. They are audited because an operator can still use
+   them on a host.
 2. **The installer writes every setting explicitly, including the ones that match the mod's own
    default.** That is decision 7's second half: a future change to a default cannot silently move
    what an installed world does, and it cannot silently move what the project's own deployment

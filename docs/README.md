@@ -24,14 +24,14 @@ learned, and it stays where it is. Nothing in `docs/` is a copy of it.
 | [`defaults-audit.md`](defaults-audit.md) | a reviewer, and the operator | Every default the release ships with, what a bare install does with it, and the verdict |
 
 **Two of these travel with the release rather than only living here.** `support-matrix.md`'s
-machine-readable block is copied into **both** release archives as `support-matrix.json` — the
-same bytes — so the words either installer refuses an unsupported game build with are the words on
-the page. `defaults-audit.md` is linked from the release page, because what a bare install does is
-something a reader decides on before running it.
+machine-readable block is copied into **every** release archive as `support-matrix.json`. Each
+installer therefore uses the refusal text from the published page. `defaults-audit.md` is linked
+from the release page, because a reader must know what a bare install does before running it.
 
-**Every page here covers two platforms**: the Steam copy on Windows and the native Linux build
-from itch.io. Where a command, a path or a refusal differs, the page gives both rather than
-treating one as the real one — and where something exists on one platform only, the page marks it
+**Every page here covers two platforms and two package editions.** The Windows game comes from
+Steam, and the native Linux game comes from itch.io. The add-on edition uses an existing game.
+An authorized complete edition installs a versioned game runtime. Where a command, a path or a
+refusal differs, the page gives each form. Where something exists on one platform only, the page marks it
 (`INS-MARKOFWEB` and `INS-EXECPOLICY` on Windows; `INS-NOTEXECUTABLE`, `INS-LINUXDEPS` and
 `LOCAL-LOGSHRED` on Linux). The support matrix is honest about the two rows not carrying equal
 weight.

@@ -4,8 +4,10 @@
 edges and arrive in other people's; theirs arrive in yours. Your world stays on your machine and
 stays yours.
 
-**You need:** Linux, and the game's **native Linux build from itch.io**. **You do not need:** a
-compiler, an SDK, a runtime, root, or anything from a developer's toolchain. Nothing here will
+**You need:** Linux and one of this release's two editions. The **add-on edition** binds to the
+game's native Linux build from itch.io. A **complete edition**, when the publisher permits one to
+be published, includes the game payload and its license. **You do not need:** a compiler, an SDK,
+a runtime, root, or anything from a developer's toolchain. Nothing here will
 ever ask you to turn a security control off — no `--insecure` flag, no `curl | sh`, no skipped
 certificate check, and no `sudo`. If any part of this package asks you for one of those, that is a
 defect and reporting it is the right response.
@@ -55,10 +57,13 @@ the command line**, on purpose: a value typed on a command line is in every proc
 this machine and in your shell history. If you would rather not type it, put the one-line join
 string in a file and pass `--join-string-file ./join.txt` — then delete that file.
 
-The installer finds the game, **checks your game build against `support-matrix.json` and stops if
-there is no Linux entry for it**, installs BepInEx `linux_x64` and the plugin, stores the secret
-half of your join string in a file only you can read, states the settings it is giving you, and
-writes `start-multiverse.sh` and `stop-multiverse.sh` beside itself.
+The same installer handles both editions. In an add-on archive it finds the game or accepts
+`--game-dir`. In a complete archive it verifies `game-payload.json`, the included license, and
+every file under `game/`, then copies the payload into
+`<data root>/runtimes/<assembly-sha256>`. It **checks the selected game build against
+`support-matrix.json` and stops if there is no Linux entry**, installs BepInEx `linux_x64` and
+the plugin, stores the secret half of your join string in a file only you can read, and writes
+the start and stop scripts beside itself.
 
 **Where the game is.** There is no registry and no library index on this platform, so the
 installer looks in the itch app's own install root (`~/.config/itch/apps/…`) and a handful of
@@ -116,6 +121,10 @@ If you want a second world on this machine, **unpack a second copy of the game i
 folder** and install into that. It costs disk and nothing else. `LOCAL-LOGSHRED` in
 `error-taxonomy.md` has the shape of it and how to recognise a shredded log.
 
+A complete edition makes that copy for you. Unpack another kit and give it a different
+`--data-root` and `--sidecar-port`; the versioned runtime below that data root has its own game
+folder and BepInEx log.
+
 ## Where your worlds live
 
 Not here, and not in this install's data directory:
@@ -141,7 +150,8 @@ printing a line per path for what it removed and what it kept. That includes the
 BepInEx's Linux archive lays in the game's own root — `run_bepinex.sh`, `libdoorstop.so`,
 `.doorstop_version` and its `changelog.txt` — but only if this installer put them there. Your
 worlds and their backups are never touched. Your journal — the organisms this machine is holding
-for other worlds — is kept unless you pass `--remove-world-data`.
+for other worlds — is kept unless you pass `--remove-world-data`. In a complete install,
+unchanged game-payload files are also removed; a changed or user-added file is reported and kept.
 
 There is no `--keep-certificate`, because there is nothing to keep: this installer never wrote to
 a trust store.
@@ -174,4 +184,6 @@ system prints one, and no diagnostic asks for one.
 | `multiverse-sidecar` | The program that speaks to the map on your world's behalf. A static binary; it needs no libc of a particular vintage |
 | `BepInEx_linux_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
 | `support-matrix.json` | The game builds this release supports, and the words it refuses with. **The same bytes the Windows archive carries** |
+| `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
+| `game-payload.json`, `GAME-LICENSE.txt`, `game/` | Complete edition only: the descriptor, publisher-provided license, and authorized game payload |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |

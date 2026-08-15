@@ -12,7 +12,8 @@
 
       1. verifies every file in this folder against MANIFEST.sha256, then clears
          the mark of the web from the files it verified - and from nothing else;
-      2. finds Steam's copy of The Bibites;
+      2. selects The Bibites: an existing Steam copy in the add-on edition, or
+         the verified managed payload in the complete edition;
       3. checks your game build against support-matrix.json and STOPS if there is
          no entry for it, in the matrix's own words;
       4. installs BepInEx, if it is not already there;
@@ -62,11 +63,14 @@
     again.
 
 .PARAMETER GameDir
-    The game folder, if Steam keeps it somewhere this script does not find.
+    Add-on edition only: the game folder, if Steam keeps it somewhere this
+    script does not find. A complete edition refuses this parameter and uses
+    its own managed runtime.
 
 .PARAMETER DataRoot
     Where this install keeps its journal, its credential, its logs and its
-    record. Defaults to %LOCALAPPDATA%\BibitesMultiverse.
+    record. A complete edition also keeps its versioned game runtime here.
+    Defaults to %LOCALAPPDATA%\BibitesMultiverse.
 
 .PARAMETER World
     The name of the world this install runs. Defaults to Multiverse. The game
@@ -122,6 +126,7 @@ $Release      = 'm5.0'
 $Here         = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ManifestName = 'MANIFEST.sha256'
 $MatrixName   = 'support-matrix.json'
+$PayloadDescriptorName = 'game-payload.json'
 $PluginName   = 'BibitesMultiverse.dll'
 $SidecarName  = 'multiverse-sidecar.exe'
 $PluginGuid   = 'dev.multiverse.bibites'
@@ -208,7 +213,131 @@ if ($unblocked -gt 0) {
 
 # ---------------------------------------------------------------- 2. the game
 
-Step "2 of 9 - find The Bibites"
+Step "2 of 9 - select The Bibites runtime"
+
+# One installer, two package editions. A complete package carries this
+# descriptor and a manifest-covered game\ tree. An add-on package carries
+# neither and binds to an existing Steam copy.
+$runtimeMode  = 'external'
+$runtimeRoot  = ''
+$runtimeFiles = @()
+$payloadDescriptorPath = Join-Path $Here $PayloadDescriptorName
+
+if (Test-Path -LiteralPath $payloadDescriptorPath) {
+    if ($GameDir) {
+        Stop-Setup ("This is a complete package and installs its own managed game runtime. " +
+                    "Do not pass -GameDir; use the add-on package to bind an existing copy.") 'INS-RUNTIME'
+    }
+
+    $payload = Get-Content -LiteralPath $payloadDescriptorPath -Raw | ConvertFrom-Json
+    foreach ($required in @('format', 'platform', 'gameVersion', 'assemblySha256', 'licenseFile')) {
+        if ($payload.PSObject.Properties.Match($required).Count -eq 0) {
+            Stop-Setup "$PayloadDescriptorName is missing its '$required' field." 'INS-CHECKSUM'
+        }
+    }
+    if ($payload.format -ne 'bibites-multiverse/game-payload/1') {
+        Stop-Setup "$PayloadDescriptorName has an unsupported format." 'INS-CHECKSUM'
+    }
+    if ($payload.platform -ne 'Windows') {
+        Stop-Setup "This complete package carries a game payload for $($payload.platform), not Windows." 'INS-GAMEBUILD'
+    }
+    $payloadSha = ([string]$payload.assemblySha256).ToUpperInvariant()
+    if ($payloadSha -notmatch '^[0-9A-F]{64}$') {
+        Stop-Setup "$PayloadDescriptorName has an invalid assemblySha256." 'INS-CHECKSUM'
+    }
+
+    $payloadGameDir = Join-Path $Here 'game'
+    $payloadLicense = Join-Path $Here ([string]$payload.licenseFile)
+    $payloadExe = Join-Path $payloadGameDir 'The Bibites.exe'
+    $payloadAssembly = Join-Path $payloadGameDir 'The Bibites_Data\Managed\BibitesAssembly.dll'
+    if (-not (Test-Path -LiteralPath $payloadGameDir -PathType Container)) {
+        Stop-Setup 'The complete package is missing its game\ directory.' 'INS-CHECKSUM'
+    }
+    if (-not $payload.licenseFile -or -not (Test-Path -LiteralPath $payloadLicense -PathType Leaf)) {
+        Stop-Setup "The complete package is missing the game license named by $PayloadDescriptorName." 'INS-CHECKSUM'
+    }
+    if (-not (Test-Path -LiteralPath $payloadExe -PathType Leaf)) {
+        Stop-Setup "The complete package has no 'The Bibites.exe' in game\." 'INS-CHECKSUM'
+    }
+    if (-not (Test-Path -LiteralPath $payloadAssembly -PathType Leaf)) {
+        Stop-Setup 'The complete package is missing BibitesAssembly.dll.' 'INS-CHECKSUM'
+    }
+    if ((Get-Sha256 $payloadAssembly) -ne $payloadSha) {
+        Stop-Setup "$PayloadDescriptorName does not describe the game assembly in this package." 'INS-CHECKSUM'
+    }
+    $links = @(Get-ChildItem -LiteralPath $payloadGameDir -Force -Recurse |
+               Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 })
+    if ($links.Count -gt 0) {
+        Stop-Setup 'The complete package contains a reparse point. Game payloads must contain regular files and directories only.' 'INS-CHECKSUM'
+    }
+
+    # Refuse an unsupported payload before copying anything. Step 3 repeats the
+    # normal matrix gate against the installed runtime.
+    $payloadMatrix = Get-Content -LiteralPath (Join-Path $Here $MatrixName) -Raw | ConvertFrom-Json
+    $payloadEntry = @($payloadMatrix.entries | Where-Object {
+        $_.platform -eq 'Windows' -and $_.assemblySha256.ToUpperInvariant() -eq $payloadSha
+    }) | Select-Object -First 1
+    if (-not $payloadEntry) {
+        Stop-Setup "The game payload in this complete package is not in this release's support matrix. Nothing was installed." 'INS-GAMEBUILD'
+    }
+
+    if (-not $DataRoot) { $DataRoot = Join-Path $env:LOCALAPPDATA 'BibitesMultiverse' }
+    New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
+    $DataRoot = (Resolve-Path $DataRoot).Path
+    $runtimeMode = 'bundled'
+    $runtimeRoot = Join-Path (Join-Path $DataRoot 'runtimes') $payloadSha
+
+    $payloadFiles = @(Get-ChildItem -LiteralPath $payloadGameDir -File -Force -Recurse | ForEach-Object {
+        $relative = $_.FullName.Substring($payloadGameDir.Length) -replace '^[\\/]+', ''
+        [pscustomobject]@{
+            relative = $relative
+            source   = $_.FullName
+            sha256   = (Get-Sha256 $_.FullName)
+        }
+    })
+    if ($payloadFiles.Count -eq 0) {
+        Stop-Setup "The complete package's game\ directory contains no files." 'INS-CHECKSUM'
+    }
+
+    if (Test-Path -LiteralPath $runtimeRoot -PathType Container) {
+        foreach ($file in $payloadFiles) {
+            $destination = Join-Path $runtimeRoot $file.relative
+            if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
+                Stop-Setup "The managed runtime at $runtimeRoot is incomplete ($($file.relative) is missing). It was not overwritten." 'INS-RUNTIME'
+            }
+            if ((Get-Sha256 $destination) -ne $file.sha256) {
+                Stop-Setup "The managed runtime at $runtimeRoot was changed ($($file.relative) differs). It was not overwritten." 'INS-RUNTIME'
+            }
+        }
+        Say 'complete edition: reusing the verified managed game runtime'
+    } else {
+        $runtimeParent = Split-Path -Parent $runtimeRoot
+        New-Item -ItemType Directory -Force -Path $runtimeParent | Out-Null
+        $runtimeTemp = Join-Path $runtimeParent ('.installing-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $runtimeTemp | Out-Null
+        try {
+            Get-ChildItem -LiteralPath $payloadGameDir -Force |
+                Copy-Item -Destination $runtimeTemp -Recurse -Force
+            $copiedAssembly = Join-Path $runtimeTemp 'The Bibites_Data\Managed\BibitesAssembly.dll'
+            if ((Get-Sha256 $copiedAssembly) -ne $payloadSha) { throw 'the copied game assembly hash does not match' }
+            Move-Item -LiteralPath $runtimeTemp -Destination $runtimeRoot
+        } catch {
+            Remove-Item -LiteralPath $runtimeTemp -Recurse -Force -ErrorAction SilentlyContinue
+            Stop-Setup "The managed runtime copy failed verification: $($_.Exception.Message)" 'INS-RUNTIME'
+        }
+        Say 'complete edition: installed the verified game payload into a managed runtime'
+    }
+    foreach ($file in $payloadFiles) {
+        $runtimeFiles += [pscustomobject]@{
+            path   = (Join-Path $runtimeRoot $file.relative)
+            sha256 = $file.sha256
+        }
+    }
+    Say "game license: $payloadLicense"
+    $GameDir = $runtimeRoot
+} else {
+    Say 'add-on edition: binding to an existing game installation'
+}
 
 function Get-GameProcessesIn {
     # Windows keeps the plugin file open while the game runs, and the copy in
@@ -738,6 +867,14 @@ $env:MULTIVERSE_CONTRACT_A_TOKEN_FILE = Join-Path $dataDir 'contract-a.token'
 $sidecarPidFile = Join-Path $DataRoot 'sidecar.pid'
 $gamePidFile    = Join-Path $DataRoot 'game.pid'
 
+function Get-RecordedProcess {
+    param([string]$File)
+    if (-not (Test-Path -LiteralPath $File)) { return $null }
+    $recordedId = Get-Content -LiteralPath $File | Select-Object -First 1
+    if (-not $recordedId) { return $null }
+    return Get-Process -Id ([int]$recordedId) -ErrorAction SilentlyContinue
+}
+
 $gameLaunch = @{
     FilePath         = (Join-Path $GameDir 'The Bibites.exe')
     WorkingDirectory = $GameDir
@@ -746,12 +883,12 @@ $gameLaunch = @{
 if ($Headless) { $gameLaunch['ArgumentList'] = @('-batchmode', '-nographics') }
 
 if ($GameOnly) {
-    if (-not (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue)) {
+    if (-not (Get-RecordedProcess $sidecarPidFile)) {
         Write-Host "-GameOnly needs the sidecar already running. It is not." -ForegroundColor Red
         Write-Host "Run .\@@STARTNAME@@ with no switch."
         exit 1
     }
-    if (Get-Process -Name 'The Bibites' -ErrorAction SilentlyContinue) {
+    if (Get-RecordedProcess $gamePidFile) {
         Write-Host "The game is already running."
         exit 1
     }
@@ -762,7 +899,7 @@ if ($GameOnly) {
     exit 0
 }
 
-if (Get-Process -Name 'multiverse-sidecar' -ErrorAction SilentlyContinue) {
+if (Get-RecordedProcess $sidecarPidFile) {
     Write-Host "A sidecar is already running. Run .\@@STOPNAME@@ first,"
     Write-Host "or .\@@STARTNAME@@ -GameOnly to start only the game."
     exit 1
@@ -872,7 +1009,6 @@ function Stop-Recorded {
 }
 
 Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game'
-Stop-Process -Name 'The Bibites' -Force
 Start-Sleep -Seconds 1
 
 if ($GameOnly) {
@@ -882,11 +1018,13 @@ if ($GameOnly) {
 }
 
 Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'the sidecar'
-Stop-Process -Name 'multiverse-sidecar' -Force
 Start-Sleep -Seconds 1
 
-$left = @(Get-Process -Name 'The Bibites', 'multiverse-sidecar' -ErrorAction SilentlyContinue)
-Write-Host ("processes still running: {0} (want 0)" -f $left.Count)
+$left = @(
+    (Join-Path $DataRoot 'game.pid')
+    (Join-Path $DataRoot 'sidecar.pid')
+) | Where-Object { Test-Path -LiteralPath $_ }
+Write-Host ("processes still recorded as running: {0} (want 0)" -f $left.Count)
 Write-Host "The journal in $DataRoot\data is kept. Do not delete it: it is this machine's"
 Write-Host "record of every organism it is holding for somebody."
 '@
@@ -928,12 +1066,18 @@ foreach ($rel in $bepInExPaths) {
 }
 
 $record = [ordered]@{
-    record        = 'bibites-multiverse/install-record/1'
+    record        = 'bibites-multiverse/install-record/2'
     release       = $Release
     installedUtc  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     kitDir        = $Here
     gameDir       = $GameDir
     dataRoot      = $DataRoot
+    runtime       = [ordered]@{
+        mode                     = $runtimeMode
+        managedByThisInstaller   = ($runtimeMode -eq 'bundled')
+        root                     = $runtimeRoot
+        files                    = $runtimeFiles
+    }
     peerId        = $peerId
     relayUrl      = $RelayUrl
     plugin        = [ordered]@{
@@ -965,6 +1109,7 @@ Say "wrote $recordPath - the uninstall reads it, and removes only what is named 
 
 Write-Host ""
 Write-Host "Setup is complete." -ForegroundColor Green
+Say ("edition      : {0}" -f $(if ($runtimeMode -eq 'bundled') { 'complete (managed game runtime)' } else { 'add-on (existing game)' }))
 Say "map          : $RelayUrl"
 Say "your world   : $peerId   world file: $World"
 Say "game         : $GameDir"

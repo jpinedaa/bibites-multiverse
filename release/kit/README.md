@@ -4,13 +4,14 @@
 edges and arrive in other people's; theirs arrive in yours. Your world stays on your machine and
 stays yours.
 
-**You need:** Windows, Steam, and The Bibites. **You do not need:** a compiler, an SDK, a
+**You need:** Windows and one of this release's two editions. The **add-on edition** binds to an
+existing Steam copy of The Bibites. A **complete edition**, when the publisher permits one to be
+published, includes the game payload and its license. **You do not need:** a compiler, an SDK, a
 runtime, or anything from a developer's toolchain.
 
-**This is the Windows archive.** The game's native Linux build from itch.io has its own,
-`bibites-multiverse-m5.0-linux-x64.zip`, with a bash kit in place of this one. The mod inside the
-two is the same file; the sidecar, the mod framework and the scripts are not. The support matrix
-lists both. Nothing here will ever ask you to turn a
+**This is a Windows archive.** The native Linux build has separate add-on and complete archive
+names, with a bash kit in place of this one. The mod is the same file across all of them; the
+sidecar, mod framework, and scripts are platform-specific. Nothing here will ever ask you to turn a
 security control off — no execution-policy bypass, no `--insecure` flag, no skipped certificate
 check. If any part of this package asks you for one of those, that is a defect and reporting it
 is the right response.
@@ -43,10 +44,13 @@ secret on the command line**, on purpose: a value typed on a command line is in 
 listing on this machine and in your shell history. If you would rather not type it, put the
 one-line join string in a file and pass `-JoinStringFile .\join.txt` — then delete that file.
 
-The installer finds Steam's copy of The Bibites, **checks your game build against
-`support-matrix.json` and stops if there is no entry for it**, installs BepInEx and the plugin,
-stores the secret half of your join string in a file only you can read, states the settings it
-is giving you, and writes `Start-Multiverse.ps1` and `Stop-Multiverse.ps1` beside itself.
+The same installer handles both editions. In an add-on archive it finds Steam's copy of The
+Bibites (or accepts `-GameDir`). In a complete archive it verifies `game-payload.json`, the
+included license, and every file under `game/`, then copies that payload into
+`<data root>\runtimes\<assembly-sha256>`. It **checks the selected game build against
+`support-matrix.json` and stops if there is no entry**, installs BepInEx and the plugin, stores
+the secret half of your join string in a file only you can read, and writes the start and stop
+scripts beside itself.
 
 It imports nothing into any trust store. `-CaFile` exists for a private or LAN map whose relay
 signs its own certificate, and only then.
@@ -65,6 +69,11 @@ so on your screen while it runs, and `docs/participant/install.md` says so on th
 `Start-Multiverse.ps1 -Headless` runs the world with nothing drawn; the simulation is unchanged.
 `Stop-Multiverse.ps1 -GameOnly` puts the world down and leaves the sidecar up, so it keeps your
 place on the map and keeps taking custody of everything that arrives while you are away.
+
+For another concurrent complete-edition world, unpack another kit and give it a different
+`-DataRoot` and `-SidecarPort`. That creates a separate game folder, BepInEx log, credential,
+journal, and process ledger. The generated stop script stops only the process IDs from its own
+data root.
 
 **Stopping costs nothing and needs nobody.** Your place on the map is keyed on your world's
 identity and never expires.
@@ -93,7 +102,8 @@ does. Edit them there.
 It reads the record the installer wrote and removes **only** what is named in it, hash-checked,
 printing a line per path for what it removed and what it kept. Your worlds and their backups are
 never touched. Your journal — the organisms this machine is holding for other worlds — is kept
-unless you pass `-RemoveWorldData`.
+unless you pass `-RemoveWorldData`. In a complete install, unchanged game-payload files are also
+removed; a changed or user-added file is reported and kept.
 
 ## If something goes wrong
 
@@ -123,4 +133,6 @@ system prints one, and no diagnostic asks for one.
 | `multiverse-sidecar.exe` | The program that speaks to the map on your world's behalf |
 | `BepInEx_win_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
 | `support-matrix.json` | The game builds this release supports, and the words it refuses with |
+| `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
+| `game-payload.json`, `GAME-LICENSE.txt`, `game\` | Complete edition only: the descriptor, publisher-provided license, and authorized game payload |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |
