@@ -30,7 +30,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 | Network protocol | `contract-b/4.0` |
 | Windows package | Add-on archive for the Steam game |
 | Linux package | Add-on archive for the native itch.io game |
-| Live console | Full-screen map fitting and visible-range species brain charts |
+| Live console source | Full-screen map fitting and visible-range species brain charts; deployment pending |
 
 The release page provides checksums. The participant installer compares the game build with
 the support matrix before it changes the game directory.
