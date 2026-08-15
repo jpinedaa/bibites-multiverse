@@ -5,11 +5,15 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist="$repo/cloud/aws/dist"
 template="$repo/cloud/aws/template.yaml"
+validation="$repo/cloud/aws/lib/validation.sh"
+manifest_validator="$repo/cloud/aws/runtime/validate-world-manifest.jq"
 
 [ -r "$dist/artifacts.env" ] || { echo 'run build-artifacts.sh first' >&2; exit 1; }
 [ -r "$dist/staged.env" ] || { echo 'run stage-artifacts.sh first' >&2; exit 1; }
 [ -r "$dist/worlds.json" ] || { echo 'stage-artifacts.sh did not stage a manifest' >&2; exit 1; }
 
+# shellcheck source=lib/validation.sh
+. "$validation"
 # shellcheck source=/dev/null
 . "$dist/artifacts.env"
 # shellcheck source=/dev/null
@@ -30,12 +34,64 @@ instance_type="$BIBITES_INSTANCE_TYPE"
 data_volume_gib="${BIBITES_DATA_VOLUME_GIB:-40}"
 enable_peering="${BIBITES_ENABLE_LIGHTSAIL_PEERING:-0}"
 
+bibites_require_account_id "$BIBITES_AWS_ACCOUNT_ID" BIBITES_AWS_ACCOUNT_ID
+bibites_require_region "$AWS_REGION" AWS_REGION
+bibites_require_stack_name "$stack" BIBITES_STACK_NAME
+bibites_require_instance_type "$instance_type" BIBITES_INSTANCE_TYPE
+bibites_require_positive_integer "$data_volume_gib" BIBITES_DATA_VOLUME_GIB 40 16384
+bibites_require_resource_id "$BIBITES_SUBNET_ID" BIBITES_SUBNET_ID subnet
+bibites_require_resource_id "$BIBITES_VPC_ID" BIBITES_VPC_ID vpc
+bibites_require_availability_zone "$BIBITES_AVAILABILITY_ZONE" BIBITES_AVAILABILITY_ZONE
+bibites_require_rfc1918_ipv4 "$BIBITES_RELAY_PRIVATE_IP" BIBITES_RELAY_PRIVATE_IP
+bibites_require_hostname "$BIBITES_RELAY_DOMAIN" BIBITES_RELAY_DOMAIN
+bibites_require_ssm_parameter "$BIBITES_CREDENTIAL_PARAMETER_PREFIX" \
+  BIBITES_CREDENTIAL_PARAMETER_PREFIX
+bibites_require_s3_bucket "$ARTIFACT_BUCKET" ARTIFACT_BUCKET
+bibites_require_s3_prefix "$ARTIFACT_PREFIX" ARTIFACT_PREFIX
+bibites_require_s3_key "$RUNTIME_OBJECT" RUNTIME_OBJECT
+bibites_require_s3_filename "$GAME_FILE" GAME_FILE
+bibites_require_s3_filename "$BEPINEX_FILE" BEPINEX_FILE
+bibites_require_sha256 "$RUNTIME_SHA256" RUNTIME_SHA256
+bibites_require_sha256 "$GAME_SHA256" GAME_SHA256
+bibites_require_sha256 "$BEPINEX_SHA256" BEPINEX_SHA256
+for key in \
+  "$ARTIFACT_PREFIX/$RUNTIME_OBJECT" \
+  "$ARTIFACT_PREFIX/$GAME_FILE" \
+  "$ARTIFACT_PREFIX/$BEPINEX_FILE" \
+  "$ARTIFACT_PREFIX/worlds.json"; do
+  bibites_require_s3_key "$key" "deployment object key $key"
+done
+jq -e -f "$manifest_validator" "$dist/worlds.json" >/dev/null
+
+case "$enable_peering" in
+  0|1) ;;
+  *) echo 'BIBITES_ENABLE_LIGHTSAIL_PEERING must be 0 or 1' >&2; exit 1 ;;
+esac
+
 account="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" sts get-caller-identity \
   --query Account --output text)"
+bibites_require_account_id "$account" 'authenticated AWS account'
 [ "$account" = "$BIBITES_AWS_ACCOUNT_ID" ] || {
   echo "refusing AWS account $account; expected $BIBITES_AWS_ACCOUNT_ID" >&2
   exit 1
 }
+
+subnet_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-subnets \
+  --subnet-ids "$BIBITES_SUBNET_ID" --output json)"
+jq -e --arg subnet "$BIBITES_SUBNET_ID" --arg vpc "$BIBITES_VPC_ID" \
+  --arg zone "$BIBITES_AVAILABILITY_ZONE" '
+    (.Subnets | length) == 1 and
+    .Subnets[0].SubnetId == $subnet and
+    .Subnets[0].VpcId == $vpc and
+    .Subnets[0].AvailabilityZone == $zone
+  ' <<<"$subnet_description" >/dev/null || {
+  echo 'the subnet, VPC, and availability zone do not describe one target subnet' >&2
+  exit 1
+}
+
+instance_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 \
+  describe-instance-types --instance-types "$instance_type" --output json)"
+bibites_require_x86_64_instance_description "$instance_description" "$instance_type"
 
 missing=0
 while IFS= read -r parameter; do
@@ -47,9 +103,9 @@ while IFS= read -r parameter; do
       continue
       ;;
   esac
-  if ! aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm get-parameter \
-    --name "$parameter" --query Parameter.Name --output text >/dev/null 2>&1; then
-    echo "missing credential parameter: $parameter" >&2
+  if ! bibites_require_default_secure_parameter \
+    "$AWS_PROFILE" "$AWS_REGION" "$parameter"; then
+    echo "invalid credential parameter: $parameter" >&2
     missing=1
   fi
 done < <(jq -r '.worlds[].credentialParameter' "$dist/worlds.json")
@@ -58,13 +114,17 @@ done < <(jq -r '.worlds[].credentialParameter' "$dist/worlds.json")
 case "$enable_peering" in
   0) ;;
   1)
-    if [ "$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" lightsail is-vpc-peered \
-      --query isPeered --output text)" != True ]; then
-      aws --profile "$AWS_PROFILE" --region "$AWS_REGION" lightsail peer-vpc >/dev/null
-      echo 'enabled Lightsail-to-default-VPC peering'
-    fi
+    peered="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" lightsail is-vpc-peered \
+      --query isPeered --output text)"
+    case "$peered" in
+      True) ;;
+      False)
+        aws --profile "$AWS_PROFILE" --region "$AWS_REGION" lightsail peer-vpc >/dev/null
+        echo 'enabled Lightsail-to-default-VPC peering'
+        ;;
+      *) echo "Lightsail returned an invalid peering state: $peered" >&2; exit 1 ;;
+    esac
     ;;
-  *) echo 'BIBITES_ENABLE_LIGHTSAIL_PEERING must be 0 or 1' >&2; exit 1 ;;
 esac
 
 aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation deploy \
@@ -92,6 +152,7 @@ aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation deploy \
 instance="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation describe-stacks \
   --stack-name "$stack" \
   --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' --output text)"
+bibites_require_resource_id "$instance" 'deployed InstanceId output' i
 printf 'stack ready; instance=%s\n' "$instance"
 printf 'session: aws --profile %s --region %s ssm start-session --target %s\n' \
   "$AWS_PROFILE" "$AWS_REGION" "$instance"

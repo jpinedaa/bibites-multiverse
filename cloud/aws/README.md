@@ -6,7 +6,8 @@ It does not contain a live inventory, current quote, source-machine migration, o
 The main stack uses one persistent EC2 Spot host and one retained EBS data volume.
 Each world has a separate game directory, configuration root, sidecar journal, and credential file.
 
-The optional broadcast stack runs one graphical world on a GPU host.
+The broadcast files preserve a proposed GPU-host interface.
+The current deployment wrapper fails at a password-transport safety gate.
 See [`docs/live-broadcast.md`](../../docs/live-broadcast.md) for the public design.
 
 ## Public and private inputs
@@ -35,7 +36,7 @@ Do not commit their contents.
 The workstation needs these tools:
 
 - AWS CLI v2.
-- `jq`, `unzip`, `tar`, and `sha256sum`.
+- `file`, `jq`, `unzip`, `tar`, and `sha256sum`.
 - Go and the .NET SDK for a runtime build.
 - Permission to deploy CloudFormation, IAM, EC2, EBS, S3, SSM, and DLM resources.
 
@@ -114,7 +115,29 @@ Keep the manifest and its saves in protected local or object storage.
 The public repository does not generate a live manifest.
 
 Put each secret half in the Parameter Store path named by `credentialParameter`.
+Use the `SecureString` type and the default `aws/ssm` KMS key.
+The deployment wrapper rejects plaintext parameters and customer-managed keys.
 Do not place a complete join string in S3, a manifest, or a command argument.
+
+The schema validator accepts from 1 through 100 worlds.
+It applies these rules:
+
+- `id` and `peerId` use the public 64-character identifier alphabet.
+- `worldName` is a safe filename. It cannot contain a path separator or traversal segment.
+- `sidecarPort` is a unique integer from `1024` through `65535`.
+- `saveKey` is a safe S3 key that ends in `.zip`.
+- `credentialParameter` is a safe absolute Parameter Store path.
+- `position` uses `column,row`, with non-negative integer coordinates.
+- `preferredSlot` is a positive integer when present.
+- `targetTimeScale`, `saveMinutes`, and `saveKeep` use bounded numeric values.
+- `enabled` is a Boolean value when present.
+
+The validator rejects unknown fields and duplicate identity or placement values.
+Run its fixture checks after a schema change:
+
+```sh
+for test in ./cloud/aws/test-*.sh; do "$test"; done
+```
 
 ## Build artifacts
 
@@ -126,7 +149,9 @@ export BIBITES_BEPINEX_ZIP=/protected/path/BepInEx-linux-x64.zip
 ./cloud/aws/build-artifacts.sh
 ```
 
-The build script checks the supported game assembly and creates a content-addressed runtime archive.
+The build script compiles the sidecar for `linux/amd64`.
+It checks that the result is an x86-64 ELF file.
+It also checks the supported game assembly and creates a content-addressed runtime archive.
 
 ## Stage artifacts
 
@@ -138,10 +163,45 @@ export BIBITES_SAVE_DIR=/protected/deployment/saves
 ./cloud/aws/stage-artifacts.sh
 ```
 
-The stage script creates a private encrypted S3 bucket when necessary.
-It blocks public access and uploads the manifest, saves, game archive, BepInEx archive, and runtime.
+The stage script checks every save before it calls AWS.
+Each save must be a valid ZIP file that contains `scene.bb8scene`.
+
+The local save directory uses flat filenames.
+The script rejects two save keys that have the same basename.
+
+The script creates a private encrypted S3 bucket when necessary.
+It blocks public access and uploads every artifact and save first.
+It uploads `worlds.json` last, so a host cannot read incomplete references.
 
 Record the bucket and object prefix in private operations storage.
+
+## Apply a manifest update
+
+Apply a private manifest change with this sequence:
+
+```sh
+./cloud/aws/stage-artifacts.sh
+./cloud/aws/sync-host.sh
+./cloud/aws/verify-host.sh
+```
+
+`stage-artifacts.sh` validates the manifest and every referenced save before an AWS mutation.
+It uploads immutable runtime inputs and saves before it replaces `worlds.json`.
+
+`sync-host.sh` asks the existing host to download that object.
+The host applies the same schema validator before it changes world services.
+
+The reconciliation has these semantics:
+
+- A new enabled row creates its world directories, credential, initial save, and services.
+- A disabled row stops and disables its services. Its data remains on the retained volume.
+- A re-enabled row starts its existing world data again.
+- An existing save remains unchanged during the normal synchronization.
+- Updated environment or credential files affect a process after its next service start.
+- A removed row does not stop an existing world. Disable the row before a later removal.
+
+Keep a world disabled until its replacement or migration passes all checks.
+Never run two copies with the same save and credential.
 
 ## Deploy the headless host
 
@@ -171,6 +231,17 @@ Deploy and check the host:
 ./cloud/aws/deploy-backups.sh
 ./cloud/aws/verify-host.sh
 ```
+
+The runtime and default AMI require `x86_64`.
+The deployment wrapper queries EC2 and rejects an incompatible instance type.
+Use the wrapper instead of a direct CloudFormation deployment.
+
+The wrapper also checks every manifest credential parameter.
+Each parameter must be a `SecureString` that uses the default `aws/ssm` KMS key.
+
+The instance attaches its tagged data volume during bootstrap.
+Its role can attach only the tagged project instance and volume.
+CloudFormation waits for the host installation signal before it reports success.
 
 The host template retains the data volume after stack deletion.
 This protection also leaves a storage charge.
@@ -244,6 +315,26 @@ Use an in-place runtime update for scripts, the plugin, or the sidecar:
 CAUTION: Do not deploy the host stack only to update runtime files.
 A launch-template change can replace the instance.
 
+The update wrapper validates every stack value before it stops a world.
+It also confirms that the data volume is attached and the Systems Manager target is online.
+
+The host downloads and checks the new runtime before it stops a service.
+A non-blocking host lock rejects a second activation.
+Systems Manager gets one command and an explicit one-hour execution timeout.
+The wrapper polls that command through a bounded terminal-state check.
+
+If installation fails, the activator stops partial new services.
+It keeps the failed runtime and archive below `/opt` with a dated `failed` name.
+It then restores the old runtime and runs the old installer.
+That installer restores host files, plugin files, units, configuration, and world services.
+
+Exit status `20` means that activation failed and rollback completed.
+Exit status `21` means that activation and rollback both failed.
+
+An older stack can lack the `RelayDomain` parameter.
+For that stack only, set an explicit `BIBITES_RELAY_DOMAIN` before the update.
+The wrapper validates the fallback name before it sends a remote command.
+
 ## Backups and recovery
 
 `backup-template.yaml` creates daily encrypted EBS snapshots for tagged volumes.
@@ -258,18 +349,43 @@ Make sure that each world uses its original peer identity and position.
 Do not delete a retained volume until a checked final snapshot exists.
 Resolve the exact volume and snapshot identifiers from private inventory.
 
-## Optional GPU broadcaster
+## GPU broadcaster safety gate
 
 `broadcast-template.yaml` defines a Spot GPU host with no inbound security-group rules.
-The host starts one graphical world from an approved EBS snapshot.
+The retained interface is limited to `slot-1`.
 
-Xorg uses the NVIDIA GPU.
-FFmpeg uses NVENC for the shared H.264 stream.
+The deployment wrapper performs read-only checks for these properties:
 
-The deployment wrapper requires an existing publish-password parameter.
-It does not read or copy the secret value.
+- The instance supports `x86_64` and reports an NVIDIA GPU.
+- The Spot quota covers the selected type's default vCPU count.
+- The relay and RTMP destinations use approved private routes.
+- The publish parameter is a default-key `SecureString`.
+- The staged manifest disables `slot-1`.
+- The snapshot is complete, encrypted, and owned by the approved account.
 
-Review [`docs/live-broadcast.md`](../../docs/live-broadcast.md) before deployment.
+The route check uses the longest matching AWS route.
+It rejects a more specific blackhole, internet gateway, NAT gateway, or network interface route.
+Approved targets are local, peering, transit gateway, and private virtual gateway routes.
+The check fails closed if the selected route table contains a managed prefix-list route.
+The current preflight does not resolve the networks inside managed prefix lists.
+
+The wrapper reads parameter metadata only.
+It does not decrypt or copy the publish password.
+
+The current publisher is disabled.
+FFmpeg needs the authenticated RTMP URL as a process argument in this design.
+That behavior exposes the password to process inspection.
+
+`deploy-broadcast.sh` fails before it sends a remote command or changes CloudFormation.
+The host installer and stream command also fail closed.
+There is no unsafe override.
+
+Before enablement, implement a transport that keeps the password out of arguments, status, and logs.
+After the gate is removed, the wrapper runs `source-world-stopped.sh`.
+That proof checks the game and sidecar services independently.
+Both services must be inactive and disabled.
+
+Review [`docs/live-broadcast.md`](../../docs/live-broadcast.md) before work on this gate.
 
 If GPU quota is not available, use the separate
 [`deploy/local-broadcast/`](../../deploy/local-broadcast/README.md) fallback.

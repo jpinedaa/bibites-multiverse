@@ -119,7 +119,7 @@
 # LAN rig left a Windows-side port proxy behind:
 #
 #   netsh interface portproxy show v4tov4
-#   0.0.0.0   8790   ->   172.24.110.174   8790      (a WSL address that is gone)
+#   0.0.0.0   8790   ->   <stale-wsl-ip>   8790      (a WSL address that is gone)
 #
 # It listens on 0.0.0.0, so it shadows 127.0.0.1:8790 FOR WINDOWS PROCESSES ONLY.
 # The sidecar binds its own 8790 inside WSL and reports success; the game then
@@ -273,9 +273,9 @@ ensure_credentials() {
   done
   if [ "$missing" != 0 ]; then
     fail ""
-    fail "Mint them first, in this order:"
+    fail "For this all-local rig, mint loopback TLS and local credentials:"
     fail "    e2e/crossing/mint-tls.sh"
-    fail "    e2e/crossing/mint-credentials.sh"
+    fail "    RELAY_DATA='$RELAY_DATA' FAR_PEER= e2e/crossing/mint-credentials.sh"
     return 1
   fi
 }
@@ -752,7 +752,7 @@ reserve() {
   for s in $SLOTS; do args+=("$(peer_of "$s")@$(pos_of "$s")"); done
   MAP_PEERS="${args[*]}" RELAY_BIN="$BIN/relay" RELAY_DATA="$RELAY_DATA" \
   SECRETS_DIR="$SECRETS_DIR" TLS_DIR="$TLS_DIR" RELAY_PORT="$RELAY_PORT" \
-  FAR_PEER="${FAR_PEER:-}" LOCAL_URL="$RELAY_URL" \
+  FAR_PEER= LOCAL_URL="$RELAY_URL" \
     "$E2E/crossing/mint-credentials.sh" || return 1
   note "map: $(map_shape)"
   note "order: $(map_order)"

@@ -447,7 +447,7 @@ check_replay_headroom() {
   # Since the replay was fixed the RESIDENT term is the larger one, so this
   # alerts on the larger of the two rather than on the replay alone: an archive
   # that restarts fine and then cannot hold what it replayed is the same outage.
-  # SIZING.md §4.
+  # See SIZING.md, "Archive memory".
   peak_mb=$(( records * 184 / 1048576 ))
   resident_mb=$(( records * 300 / 1048576 ))
   worst_mb=$peak_mb; worst_what="replay peak"
@@ -461,7 +461,7 @@ check_replay_headroom() {
   ratio="$(awk -v p="$worst_mb" -v a="$avail_mb" 'BEGIN{printf "%.2f", p/a}')"
 
   if awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h)}'; then
-    report replay CRIT "the archive can no longer be sure of fitting on this box: $records ledger records project a ~${worst_mb} MB ${worst_what} (replay peak ~${peak_mb} MB, resident ~${resident_mb} MB) against ${avail_mb} MB of RAM+swap (ratio $ratio). THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. If the binding term is the resident set, GOMEMLIMIT and swap do not fix it: the fixes are a bigger instance and the retention rule. SIZING.md."
+    report replay CRIT "the archive can no longer be sure of fitting on this box: $records ledger records project a ~${worst_mb} MB ${worst_what} (replay peak ~${peak_mb} MB, resident ~${resident_mb} MB) against ${avail_mb} MB of RAM+swap (ratio $ratio). THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. If the binding term is the resident set, GOMEMLIMIT and swap do not fix it: the fixes are a bigger instance and the retention rule. See SIZING.md, 'Archive memory'."
   elif awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h*0.75)}'; then
     report replay WARN "the archive's ${worst_what} projects to ~${worst_mb} MB against ${avail_mb} MB RAM+swap (ratio $ratio). Decide the retention rule or size up before it crosses $MV_REPLAY_HEADROOM."
   else

@@ -4,6 +4,8 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist="$repo/cloud/aws/dist"
+validation="$repo/cloud/aws/lib/validation.sh"
+manifest_validator="$repo/cloud/aws/runtime/validate-world-manifest.jq"
 profile="${AWS_PROFILE:-bibites-multiverse}"
 region="${AWS_REGION:-us-east-1}"
 prefix="${BIBITES_ARTIFACT_PREFIX:-cloud/v1}"
@@ -16,30 +18,60 @@ prefix="${BIBITES_ARTIFACT_PREFIX:-cloud/v1}"
 [ -r "$BIBITES_MANIFEST_FILE" ] || { echo "cannot read $BIBITES_MANIFEST_FILE" >&2; exit 1; }
 [ -d "$BIBITES_SAVE_DIR" ] || { echo "not a directory: $BIBITES_SAVE_DIR" >&2; exit 1; }
 
+# shellcheck source=lib/validation.sh
+. "$validation"
 # shellcheck source=/dev/null
 . "$dist/artifacts.env"
 
+bibites_require_account_id "$BIBITES_AWS_ACCOUNT_ID" BIBITES_AWS_ACCOUNT_ID
+bibites_require_region "$region" AWS_REGION
+bibites_require_s3_prefix "$prefix" BIBITES_ARTIFACT_PREFIX
+bibites_require_s3_filename "$GAME_FILE" GAME_FILE
+bibites_require_sha256 "$GAME_SHA256" GAME_SHA256
+bibites_require_s3_filename "$BEPINEX_FILE" BEPINEX_FILE
+bibites_require_sha256 "$BEPINEX_SHA256" BEPINEX_SHA256
+bibites_require_s3_filename "$RUNTIME_FILE" RUNTIME_FILE
+bibites_require_sha256 "$RUNTIME_SHA256" RUNTIME_SHA256
+jq -e -f "$manifest_validator" "$BIBITES_MANIFEST_FILE" >/dev/null
+
+install -m 0600 "$BIBITES_MANIFEST_FILE" "$dist/worlds.json"
+
+runtime_object="runtime/$RUNTIME_SHA256.tar.gz"
+for key in "$runtime_object" "$GAME_FILE" "$BEPINEX_FILE" worlds.json; do
+  bibites_require_s3_key "$prefix/$key" "staged object key $key"
+done
+
+for artifact in \
+  "$RUNTIME_FILE:$RUNTIME_SHA256" \
+  "$GAME_FILE:$GAME_SHA256" \
+  "$BEPINEX_FILE:$BEPINEX_SHA256"; do
+  file="${artifact%%:*}"
+  digest="${artifact##*:}"
+  [ -r "$dist/$file" ] || { echo "missing staged artifact: $dist/$file" >&2; exit 1; }
+  printf '%s  %s\n' "$digest" "$dist/$file" | sha256sum -c - >/dev/null
+done
+
+# Check every save before the script creates a bucket or uploads an object.
+mapfile -t save_keys < <(jq -r '[.worlds[].saveKey] | unique[]' "$dist/worlds.json")
+bibites_require_unique_save_basenames "${save_keys[@]}"
+for save_key in "${save_keys[@]}"; do
+  bibites_require_s3_key "$prefix/$save_key" "manifest saveKey $save_key"
+  save_basename="$(basename "$save_key")"
+  save="$BIBITES_SAVE_DIR/$save_basename"
+  [ -r "$save" ] || { echo "missing save for $save_key: $save" >&2; exit 1; }
+  bibites_require_save_archive "$save" "save for $save_key"
+done
+
 account="$(aws --profile "$profile" --region "$region" sts get-caller-identity \
   --query Account --output text)"
+bibites_require_account_id "$account" 'authenticated AWS account'
 [ "$account" = "$BIBITES_AWS_ACCOUNT_ID" ] || {
   echo "refusing AWS account $account; expected $BIBITES_AWS_ACCOUNT_ID" >&2
   exit 1
 }
 
 bucket="${BIBITES_ARTIFACT_BUCKET:-bibites-multiverse-cloud-$account-$region}"
-
-jq -e '
-  .schema == 1 and
-  (.worlds | type == "array") and
-  (.worlds | length > 0) and
-  (all(.worlds[];
-    (.id | type == "string" and length > 0) and
-    (.peerId | type == "string" and length > 0) and
-    (.saveKey | type == "string" and length > 0) and
-    (.credentialParameter | type == "string" and startswith("/"))))
-' "$BIBITES_MANIFEST_FILE" >/dev/null
-
-install -m 0600 "$BIBITES_MANIFEST_FILE" "$dist/worlds.json"
+bibites_require_s3_bucket "$bucket" BIBITES_ARTIFACT_BUCKET
 
 if ! aws --profile "$profile" --region "$region" s3api head-bucket \
   --bucket "$bucket" 2>/dev/null; then
@@ -61,7 +93,6 @@ aws --profile "$profile" --region "$region" s3api put-bucket-encryption \
   --bucket "$bucket" --server-side-encryption-configuration \
   'Rules=[{ApplyServerSideEncryptionByDefault={SSEAlgorithm=AES256},BucketKeyEnabled=true}]'
 
-runtime_object="runtime/$RUNTIME_SHA256.tar.gz"
 aws --profile "$profile" --region "$region" s3 cp "$dist/$RUNTIME_FILE" \
   "s3://$bucket/$prefix/$runtime_object" --only-show-errors
 
@@ -70,27 +101,23 @@ for file in "$GAME_FILE" "$BEPINEX_FILE"; do
     "s3://$bucket/$prefix/$file" --only-show-errors
 done
 
+for save_key in "${save_keys[@]}"; do
+  save="$BIBITES_SAVE_DIR/$(basename "$save_key")"
+  aws --profile "$profile" --region "$region" s3 cp "$save" \
+    "s3://$bucket/$prefix/$save_key" --only-show-errors
+done
+
+# Publish the manifest last. A host never sees references to incomplete uploads.
 aws --profile "$profile" --region "$region" s3 cp "$dist/worlds.json" \
   "s3://$bucket/$prefix/worlds.json" --only-show-errors
 
-while IFS= read -r save_key; do
-  case "$save_key" in
-    /*|*../*|../*|*'/..') echo "unsafe manifest saveKey: $save_key" >&2; exit 1 ;;
-  esac
-  save="$BIBITES_SAVE_DIR/$(basename "$save_key")"
-  [ -r "$save" ] || { echo "missing save for $save_key: $save" >&2; exit 1; }
-  unzip -tqq "$save"
-  aws --profile "$profile" --region "$region" s3 cp "$save" \
-    "s3://$bucket/$prefix/$save_key" --only-show-errors
-done < <(jq -r '[.worlds[].saveKey] | unique[]' "$dist/worlds.json")
-
-cat > "$dist/staged.env" <<EOF
-AWS_PROFILE='$profile'
-AWS_REGION='$region'
-ARTIFACT_BUCKET='$bucket'
-ARTIFACT_PREFIX='$prefix'
-RUNTIME_OBJECT='$runtime_object'
-EOF
+{
+  printf 'AWS_PROFILE=%q\n' "$profile"
+  printf 'AWS_REGION=%q\n' "$region"
+  printf 'ARTIFACT_BUCKET=%q\n' "$bucket"
+  printf 'ARTIFACT_PREFIX=%q\n' "$prefix"
+  printf 'RUNTIME_OBJECT=%q\n' "$runtime_object"
+} > "$dist/staged.env"
 
 chmod 0600 "$dist/staged.env"
 printf 'staged private artifacts at s3://%s/%s/\n' "$bucket" "$prefix"

@@ -23,8 +23,10 @@
 # running contract-b/3.5 relay never opens peers.json and never re-writes ring.json
 # at startup, so this is additive and an abandoned crossing leaves nothing to undo.
 #
-#   e2e/crossing/mint-credentials.sh            # mint what is missing
-#   e2e/crossing/mint-credentials.sh --check    # report, mint nothing
+#   LAN_RELAY_HOST=<windows-lan-ip> e2e/crossing/mint-credentials.sh
+#   FAR_URL=wss://<relay-host>:8795/contract-b/v4 e2e/crossing/mint-credentials.sh
+#   FAR_PEER= e2e/crossing/mint-credentials.sh
+#   e2e/crossing/mint-credentials.sh --check
 #
 # WHAT IT NEVER DOES: print a peer secret for a LOCAL peer (it goes straight to a
 # 0600 file), mint a second credential over an existing one, or touch a running
@@ -65,8 +67,8 @@ MAP_PEERS="${MAP_PEERS:-slot-1@0,0 slot-2@1,0 slot-3@2,0 slot-4@0,1 slot-5@1,1 s
 # passes. With `:-` an empty value would have silently reinstated slot-6 as remote
 # and left the rehearsal's sixth secret unfiled.
 FAR_PEER="${FAR_PEER-slot-6}"
-LAN_RELAY_HOST="${LAN_RELAY_HOST:-192.168.1.227}"
-FAR_URL="${FAR_URL:-wss://$LAN_RELAY_HOST:$RELAY_PORT$CONTRACT_B_PATH}"
+LAN_RELAY_HOST="${LAN_RELAY_HOST:-}"
+FAR_URL="${FAR_URL:-}"
 LOCAL_URL="${LOCAL_URL:-wss://127.0.0.1:$RELAY_PORT$CONTRACT_B_PATH}"
 # The archive's own identity. Its grant is `subscribe`, which is DISJOINT from
 # `peer`: it cannot claim a slot and no peer credential can subscribe (B27).
@@ -80,6 +82,10 @@ step() { printf '\n==== %s\n' "$*"; }
 warn() { printf '  !! %s\n' "$*" >&2; }
 die()  { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
 
+if [ -n "$FAR_PEER" ] && [ -z "$FAR_URL" ] && [ -n "$LAN_RELAY_HOST" ]; then
+  FAR_URL="wss://$LAN_RELAY_HOST:$RELAY_PORT$CONTRACT_B_PATH"
+fi
+
 [ -x "$RELAY_BIN" ] || die "no relay binary at $RELAY_BIN"
 [ -d "$RELAY_DATA" ] || die "no relay data dir at $RELAY_DATA"
 
@@ -88,7 +94,8 @@ die()  { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
 # `flag provided but not defined: -advertise-url`, capture() discards stderr, and
 # the only symptom was seven "no join string was printed" warnings and an empty
 # peers.json. One --help probe turns that into one sentence.
-if ! "$RELAY_BIN" --help 2>&1 | grep -q -- '-mint-credential'; then
+relay_help="$("$RELAY_BIN" --help 2>&1 || true)"
+if ! grep -- '-mint-credential' >/dev/null <<<"$relay_help"; then
   die "$RELAY_BIN does not understand --mint-credential, so it is a pre-4.0 relay.
      Every mint would fail with 'flag provided but not defined' and this script
      would report seven missing join strings instead.
@@ -101,10 +108,6 @@ fi
 
 peer_secret_file() { printf '%s/peer-%s.secret\n' "$SECRETS_DIR" "$1"; }
 sub_secret_file()  { printf '%s/%s.secret\n' "$SECRETS_DIR" "$1"; }
-
-umask 077
-mkdir -p "$SECRETS_DIR"
-chmod 700 "$SECRETS_DIR"
 
 # ---------------------------------------------------------------- the state now
 
@@ -133,6 +136,14 @@ if [ -s "$store" ]; then
 import json;d=json.load(open('$store'));print(', '.join('%s(%s)' % (p['peerId'], p['grant']) for p in d['peers']))")"
 else
   say "peers.json  <absent — no credential has been minted yet>"
+fi
+if [ -z "$FAR_PEER" ]; then
+  say "far peer    <none — every peer uses LOCAL_URL>"
+elif [ -n "$FAR_URL" ]; then
+  say "far peer    $FAR_PEER -> $FAR_URL"
+else
+  say "far peer    $FAR_PEER -> <not set>"
+  say "            A mint run needs FAR_URL or LAN_RELAY_HOST for this peer."
 fi
 
 ring_before="$(sha256sum "$RELAY_DATA/ring.json" | awk '{print $1}')"
@@ -181,8 +192,21 @@ fi
 if [ "$check_only" = 1 ]; then
   step "--check: nothing was minted"
   say "${#missing[@]} identity(ies) still need a credential"
+  if [ -n "$FAR_PEER" ] && [ -z "$FAR_URL" ]; then
+    say "A later mint run will stop unless FAR_URL or LAN_RELAY_HOST is set."
+  fi
   exit 0
 fi
+
+if [ -n "$FAR_PEER" ] && [ -z "$FAR_URL" ]; then
+  die "FAR_URL or LAN_RELAY_HOST is required when FAR_PEER is set.
+     Set FAR_URL to the complete remote URL, or set LAN_RELAY_HOST to this
+     machine's Windows LAN IPv4 address. Set FAR_PEER= when every peer is local."
+fi
+
+umask 077
+mkdir -p "$SECRETS_DIR"
+chmod 700 "$SECRETS_DIR"
 
 # ---------------------------------------------------------------- refuse to race
 

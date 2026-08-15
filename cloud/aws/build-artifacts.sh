@@ -13,7 +13,7 @@ export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
 export GOROOT="${GOROOT:-$HOME/go}"
 export PATH="$DOTNET_ROOT:$GOROOT/bin:$PATH"
 
-for command in go dotnet tar gzip sha256sum unzip; do
+for command in file go dotnet tar gzip sha256sum unzip; do
   command -v "$command" >/dev/null || { echo "missing $command" >&2; exit 1; }
 done
 [ -f "$game_zip" ] || { echo "missing game archive: $game_zip" >&2; exit 1; }
@@ -26,7 +26,13 @@ bepinex_sha="$(sha256sum "$bepinex_zip" | awk '{print $1}')"
 
 rm -rf "$dist/build" "$dist/runtime"
 install -d "$dist/build" "$dist/runtime"
-nice -n 19 go -C "$repo/go" build -trimpath -o "$dist/build/multiverse-sidecar" ./cmd/sidecar
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 nice -n 19 \
+  go -C "$repo/go" build -buildvcs=false -trimpath \
+    -o "$dist/build/multiverse-sidecar" ./cmd/sidecar
+LC_ALL=C file -b "$dist/build/multiverse-sidecar" | grep -Eq '^ELF 64-bit.*x86-64' || {
+  echo 'the sidecar build is not a linux/amd64 ELF executable' >&2
+  exit 1
+}
 nice -n 19 dotnet build "$repo/bibites-mod/BibitesMultiverse.csproj" -c Release \
   -o "$dist/build/plugin" --nologo >/dev/null
 
@@ -41,14 +47,14 @@ cp "$game_zip" "$dist/TheBibites-0.6.3.1-Linux.zip"
 cp "$bepinex_zip" "$dist/BepInEx_linux_x64_5.4.23.3.zip"
 runtime_sha="$(sha256sum "$dist/bibites-cloud-runtime.tar.gz" | awk '{print $1}')"
 
-cat > "$dist/artifacts.env" <<EOF
-GAME_FILE='TheBibites-0.6.3.1-Linux.zip'
-GAME_SHA256='$game_sha'
-BEPINEX_FILE='BepInEx_linux_x64_5.4.23.3.zip'
-BEPINEX_SHA256='$bepinex_sha'
-RUNTIME_FILE='bibites-cloud-runtime.tar.gz'
-RUNTIME_SHA256='$runtime_sha'
-EOF
+{
+  printf 'GAME_FILE=%q\n' 'TheBibites-0.6.3.1-Linux.zip'
+  printf 'GAME_SHA256=%q\n' "$game_sha"
+  printf 'BEPINEX_FILE=%q\n' 'BepInEx_linux_x64_5.4.23.3.zip'
+  printf 'BEPINEX_SHA256=%q\n' "$bepinex_sha"
+  printf 'RUNTIME_FILE=%q\n' 'bibites-cloud-runtime.tar.gz'
+  printf 'RUNTIME_SHA256=%q\n' "$runtime_sha"
+} > "$dist/artifacts.env"
 sha256sum "$dist"/*.zip "$dist"/*.tar.gz > "$dist/SHA256SUMS"
 printf 'built %s\n' "$dist/bibites-cloud-runtime.tar.gz"
 cat "$dist/SHA256SUMS"
