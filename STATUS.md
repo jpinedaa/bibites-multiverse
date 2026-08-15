@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-15 UTC.
 
-Bibites Multiverse `0.2.0` is public. The first announced service period runs from
+Bibites Multiverse `0.2.1` is public. The first announced service period runs from
 **August 14 through November 14, 2026**.
 
 ## Current public phase
@@ -23,19 +23,22 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.2.0`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0) |
+| Release | [`v0.2.1`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.1) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.4` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
 | Network protocol | `contract-b/4.0` |
 | Windows package | GUI complete archive with the authorized portable game; an existing game is optional |
-| Linux package | Add-on archive for the native itch.io game |
-| Public-map setup | Automatic unique enrollment over HTTPS; no shared packaged credential |
-| Live console source | Full-screen map fitting and visible-range species brain charts; deployment pending |
+| Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
+| Public-map setup | Every participant archive includes `public-map.json`. Installation creates a unique credential over HTTPS |
+| Live console | Full-screen map fitting, visible-range brain charts, shared navigation, and a live homepage status light are deployed. |
 
 The release page provides checksums. The participant installer compares the game build with
 the support matrix before it changes the game directory. The Windows GUI starts the connected
 world after installation by default and keeps headless mode in the generated start script.
+The packaged public join configuration contains service addresses, not a shared world secret.
+Release `0.2.1` adds a Linux complete package and automatic enrollment to the Linux installer.
+Private maps still accept a private join-string file on both platforms.
 
 ## Milestone state
 

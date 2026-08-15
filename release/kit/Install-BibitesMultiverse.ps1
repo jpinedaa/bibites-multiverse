@@ -134,7 +134,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
-$Release      = '0.2.0'
+$Release      = '0.2.1'
 $Here         = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ManifestName = 'MANIFEST.sha256'
 $MatrixName   = 'support-matrix.json'
@@ -887,8 +887,7 @@ Step "8 of 9 - the settings this install ships with"
 $edgeList = @($ExportEdges -split '[,; \t]+' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
 if ($edgeList.Count -eq 0) {
     Stop-Setup ("-ExportEdges names no edge. Use E, N, W or S, comma separated - normally 'E,N,W,S'. " +
-                "If you want this world off the map entirely, do not join it: an install with no " +
-                "join string connects to nothing.")
+                "If you want this world off the map, do not start it.")
 }
 foreach ($e in $edgeList) {
     if ($e -notin @('E', 'N', 'W', 'S')) { Stop-Setup "-ExportEdges holds '$e'. Use E, N, W or S." }

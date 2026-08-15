@@ -4,21 +4,22 @@
 edges and arrive in other people's; theirs arrive in yours. Your world stays on your machine and
 stays yours.
 
-**You need:** Linux, the native itch.io game, and a join string. This release contains an add-on
-package. Its installer finds the game automatically. There is no edition choice during
-installation. **You do not need:** a compiler, an SDK, a runtime, or root. Nothing here will
-ever ask you to turn a security control off — no `--insecure` flag, no `curl | sh`, no skipped
-certificate check, and no `sudo`. If any part of this package asks you for one of those, that is a
-defect and reporting it is the right response.
+**You need:** Linux. The recommended complete package includes the authorized native game and
+uses it automatically. An add-on package can find a supported itch.io copy that you already have.
+Both packages include the public join configuration and create a unique public-map identity.
+**You do not need:** a join string, compiler, SDK, runtime, or root.
 
-**Four programs, and the installer checks for them before it does anything:** `sha256sum` and
-`awk`, which are already on any machine that boots; `unzip`, which unpacks BepInEx; and `file`,
-which **BepInEx's own launcher** uses to check the game binary's architecture. Without that last
-one the install would look complete and the game would never start, so it is checked first, where
-nothing has happened yet. On Debian or Ubuntu: `sudo apt install unzip file`.
+The installer does not turn a security control off. It uses no `--insecure` flag, `curl | sh`,
+skipped certificate check, or `sudo`. Report any installer instruction that asks for one of these
+actions.
 
-You also need **a join string**, which the operator of a map hands you out of band. It looks
-like this, on one line:
+**Five programs are required:** `sha256sum`, `awk`, `unzip`, `file`, and `curl`. The installer
+checks them before it changes the game. BepInEx uses `file` to read the game architecture. The
+installer uses `curl` for one HTTPS enrollment request. On Debian or Ubuntu, run
+`sudo apt install unzip file curl` if one is absent.
+
+For a private map, use **a join string** that its operator gives you out of band. It looks like
+this, on one line:
 
 ```
 multiverse-join/1 wss://<relay-host>/contract-b/v4 <your-world>.<secret>
@@ -30,7 +31,7 @@ The release page you downloaded this from carries the archive's SHA-256 **above*
 link. Do that first if you have not already:
 
 ```sh
-sha256sum bibites-multiverse-0.2.0-linux-x64.zip
+sha256sum bibites-multiverse-0.2.1-linux-x64-complete.zip
 ```
 
 **There is no mark of the web on Linux and this page will not invent a ritual to replace it.**
@@ -51,18 +52,23 @@ before a checksum is a decision nobody made.
 If your shell says *permission denied*, the archive lost the mode bits on the way to you:
 `bash install-bibites-multiverse.sh` runs it once, and its own step 1 fixes the rest.
 
-It asks for your join string with the typing hidden. **There is no option that takes the secret on
-the command line**, on purpose: a value typed on a command line is in every process listing on
-this machine and in your shell history. If you would rather not type it, put the one-line join
-string in a file and pass `--join-string-file ./join.txt` — then delete that file.
+The default install reads `public-map.json`. It creates a random UUID and secret on this computer.
+Then it enrolls the identity over HTTPS. The installer keeps a private pending record until the
+install record is complete. If a response is lost, run the installer again. It retries the same
+identity.
+
+For a private map, put the one-line join string in a file. Pass
+`--join-string-file ./join.txt`, and delete that file after installation. **There is no option
+that takes the secret on the command line.** A command-line secret appears in process listings
+and shell history.
 
 The same installer handles both editions. In an add-on archive it finds the game or accepts
 `--game-dir`. In a complete archive it verifies `game-payload.json`, the redistribution notice, and
 every file under `game/`, then copies the payload into
 `<data root>/runtimes/<assembly-sha256>`. It **checks the selected game build against
-`support-matrix.json` and stops if there is no Linux entry**, installs BepInEx `linux_x64` and
-the plugin, stores the secret half of your join string in a file only you can read, and writes
-the start and stop scripts beside itself.
+`support-matrix.json` and stops if there is no Linux entry**, installs BepInEx `linux_x64`, and
+installs the plugin. It creates or applies the map identity and stores the secret in a mode-`0600`
+file. Then it writes the start and stop scripts beside itself.
 
 **Where the game is.** There is no registry and no library index on this platform, so the
 installer looks in the itch app's own install root (`~/.config/itch/apps/…`) and a handful of
@@ -161,8 +167,7 @@ Four pages are published with this release, and they are written for you rather 
 built it:
 
 - **install** — what the installer does, and what a bare install does.
-- **join** — what a join string is, what happens on your first claim, and what joining publishes
-  about your world.
+- **join** — how automatic enrollment and private join strings work, and what joining publishes.
 - **diagnose** — what to read, in what order, and what to send when you ask for help.
 - **leave** — what stopping, leaving and handing your place over actually mean.
 
@@ -170,8 +175,8 @@ built it:
 **and who has to act on it** — because the most likely failure on a shared map is one where the
 machine that suffers is not the machine at fault.
 
-**Never send anybody your join string**, in a screenshot, an issue or a log. No log in this
-system prints one, and no diagnostic asks for one.
+**Never send anybody a private join string**, in a screenshot, an issue, or a log. No log prints
+one, and no diagnostic asks for one.
 
 ## What is in this folder
 
@@ -179,6 +184,7 @@ system prints one, and no diagnostic asks for one.
 |---|---|
 | `install-bibites-multiverse.sh` | The installer |
 | `uninstall-bibites-multiverse.sh` | The uninstaller |
+| `public-map.json` | The public join configuration: HTTPS enrollment and WSS relay addresses; no secret |
 | `BibitesMultiverse.dll` | The mod, a BepInEx plugin. **The same file the Windows archive ships** — it is platform-independent IL |
 | `multiverse-sidecar` | The program that speaks to the map on your world's behalf. A static binary; it needs no libc of a particular vintage |
 | `BepInEx_linux_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |

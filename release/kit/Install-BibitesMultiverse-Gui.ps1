@@ -33,7 +33,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Install Bibites Multiverse 0.2.0'
+$form.Text = 'Install Bibites Multiverse 0.2.1'
 $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(650, 440)
 $form.FormBorderStyle = 'FixedDialog'

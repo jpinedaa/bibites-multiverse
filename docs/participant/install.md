@@ -1,32 +1,36 @@
 # Install
 
-**Recommended Windows setup:** download the complete package. It includes an authorized portable
-copy of *The Bibites*, selects that copy by default, creates a unique public-map identity, and can
-open the connected game when installation finishes. You can select an existing game in the GUI.
+**Recommended setup:** download the complete package for your platform. It includes an authorized
+copy of *The Bibites*, uses that copy by default, and creates a unique public-map identity. The
+Windows GUI can use an existing game and can open the connected game after installation.
 
-The Linux package remains an add-on for a supported native itch.io game and uses a join string.
-**What you do not need:** a compiler, an SDK, administrator rights, or root.
+The Linux installer uses the included native game automatically. The Linux add-on remains
+available if you already have the supported itch.io game. **What you do not need:** a join
+string, compiler, SDK, administrator rights, or root.
 
-`SHA256SUMS` sits beside both current packages:
+`SHA256SUMS` sits beside all current packages:
 
 | Platform | Archive | Game source |
 |---|---|---|
-| Windows, recommended | `bibites-multiverse-0.2.0-windows-x64-complete.zip` | included portable game |
-| Windows, add-on | `bibites-multiverse-0.2.0-windows-x64.zip` | your existing Steam copy |
-| Linux | `bibites-multiverse-0.2.0-linux-x64.zip` | your existing itch.io copy |
+| Windows, recommended | `bibites-multiverse-0.2.1-windows-x64-complete.zip` | included portable game |
+| Windows, add-on | `bibites-multiverse-0.2.1-windows-x64.zip` | your existing Steam copy |
+| Linux, recommended | `bibites-multiverse-0.2.1-linux-x64-complete.zip` | included native game |
+| Linux, add-on | `bibites-multiverse-0.2.1-linux-x64.zip` | your existing itch.io copy |
+
+Every participant archive includes `public-map.json`, the public join configuration. It contains
+the deployed enrollment and relay addresses. It contains no shared world identity or secret. Each
+installer creates those private values for its installation.
 
 **The mod inside every archive is the same file**, byte for byte: it is platform-independent IL.
 What differs by platform is the sidecar, BepInEx flavour, and kit. A complete archive adds
 `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, and `game/`. No installer downloads the
-game, mod, sidecar, or BepInEx while it runs. The Windows installer contacts the public HTTPS
-enrollment endpoint only to create this installation's map identity.
+game, mod, sidecar, or BepInEx while it runs. Each installer contacts the public HTTPS enrollment
+endpoint only to create this installation's map identity.
 
-**On Linux the installer needs four programs and checks for all four before it does anything:**
-`sha256sum` and `awk`, which are on any machine that boots; `unzip`; and `file`, which **BepInEx's
-own launcher** uses to check the game binary's architecture. Without that last one the install
-would look complete and the game would never start, so it is checked first, where nothing has
-happened yet — `sudo apt install unzip file` on Debian or Ubuntu. That is `INS-LINUXDEPS`, and it
-is a dependency of the mod framework rather than a toolchain: no compiler, no SDK, no runtime.
+**On Linux the installer needs five programs:** `sha256sum`, `awk`, `unzip`, `file`, and `curl`.
+It checks them before it changes the game. BepInEx uses `file` to read the game architecture. The
+installer uses `curl` for one HTTPS enrollment request. On Debian or Ubuntu, run
+`sudo apt install unzip file curl` if one is absent. That is `INS-LINUXDEPS`, not a toolchain.
 
 ## Before you download
 
@@ -35,11 +39,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.0-windows-x64-complete.zip).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.1-windows-x64-complete.zip).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-0.2.0-linux-x64.zip
+sha256sum bibites-multiverse-0.2.1-linux-x64-complete.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -52,7 +56,7 @@ of the package until that mark is cleared. **Clear it once, on the archive, afte
 has passed and before you unpack it:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-0.2.0-windows-x64-complete.zip
+Unblock-File .\bibites-multiverse-0.2.1-windows-x64-complete.zip
 ```
 
 or right-click the archive → **Properties** → tick **Unblock**. Files extracted from an unmarked
@@ -138,14 +142,15 @@ written anywhere.
 ```
 
 ```sh
-./install-bibites-multiverse.sh     # the same, and the same hidden prompt
+./install-bibites-multiverse.sh     # install and enroll this Linux world
 ./start-multiverse.sh
 ./stop-multiverse.sh
 ```
 
-The Windows complete package needs no join string for the public map. It generates a different
-secret on this computer and enrolls it over HTTPS. The package contains public service addresses,
-not a shared credential.
+All participant packages include the public-map connection details. Each installer reads
+`public-map.json`, generates a different secret on this computer, and enrolls it over HTTPS. A
+literal private-map join string is not packaged because each installation needs a different
+identity and secret.
 
 **No parameter takes a private-map join string on the command line**, on purpose: a value typed there is
 in every process listing on your machine and in your shell history, and the wire itself has the
@@ -262,17 +267,17 @@ perimeter, not silence — that is the shipped default and it is deliberate. The
 so in its own output, and this document says so here, so that neither is the only place a
 reader could have learned it.
 
-**The recommended Windows install connects to the public map automatically.** It generates a
+**A default Windows or Linux install connects to the public map automatically.** It generates a
 unique secret locally and gets a unique identity over HTTPS. If an enrollment response is lost,
 the installer keeps a protected pending record and retries the same identity. It does not spend a
-second map identity. Linux and private-map installs connect after you supply a join string.
+second map identity. A private-map install connects after you supply a join-string file.
 
 Once connected, the export default means that organisms leave your world on every side and arrive
 from every side.
 
 If you want a wall on one side, say so: `-ExportEdges E,N` — `--export-edges E,N` on Linux — at
-install time, or the same value in the start script afterwards. If you want your world off the map
-entirely, do not join it.
+install time, or the same value in the start script afterwards. If you want your world off the
+map, do not start it.
 
 ## The settings a fresh install ships with
 

@@ -6,12 +6,12 @@
 
 **Artificial life, evolving across the network.**
 
-[![Installer status: 0.2.0 released](https://img.shields.io/badge/installer-0.2.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0)
+[![Installer status: 0.2.1 released](https://img.shields.io/badge/installer-0.2.1%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.1)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
 
-[Watch live](https://bibitesmultiverse.com/watch) ·
+[Watch broadcast](https://bibitesmultiverse.com/watch) ·
 [Live map](https://bibitesmultiverse.com/live) ·
 [Install a world](docs/participant/install.md) ·
 [Project status](STATUS.md)
@@ -26,17 +26,17 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 
 ## Start here
 
-- **[Watch a world live](https://bibitesmultiverse.com/watch).** See one shared game camera.
+- **[Watch broadcast](https://bibitesmultiverse.com/watch).** See one shared game camera.
 - **[Explore the live map](https://bibitesmultiverse.com/live).** Follow worlds, migrations,
   species, and lineages.
-- **[Connect your world](docs/participant/install.md).** Use the complete Windows package or the
-  Linux add-on for a supported copy of *The Bibites*.
+- **[Connect your world](docs/participant/install.md).** Use the complete package for Windows or
+  Linux. Add-on packages can use a supported game that you already have.
 
 > [!IMPORTANT]
-> **Bibites Multiverse `0.2.0` is public.** The recommended Windows download includes an
-> authorized portable copy of *The Bibites*. Its GUI can use that copy or find an existing game.
-> The Linux download remains an add-on for the native itch.io game. Get both from the
-> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.0), and check the
+> **Bibites Multiverse `0.2.1` is public.** The recommended Windows download includes an
+> authorized portable copy of *The Bibites*. The Linux complete download includes the native
+> game too. Add-on downloads remain available for an existing game. Get them from the
+> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.1), and check the
 > SHA-256 before extraction.
 
 ## About *The Bibites*
@@ -128,22 +128,25 @@ Multiverse save.
 
 ## Install one world
 
-Release `0.2.0` turns the Windows setup into three steps:
+Release `0.2.1` keeps setup to three steps:
 
-1. Download the complete Windows archive and make sure that its checksum matches.
-2. Extract it and double-click `Install-BibitesMultiverse.cmd`.
-3. Keep the recommended options. The installer opens the included game after the map grants it a
-   place.
+1. Download the complete archive for your platform and make sure that its checksum matches.
+2. Extract it. On Windows, double-click `Install-BibitesMultiverse.cmd`. On Linux, run
+   `./install-bibites-multiverse.sh`.
+3. Keep the defaults. Windows opens the included game after the map grants it a place. On Linux,
+   run `./start-multiverse.sh` after installation.
 
-The installer creates a unique public-map identity for this installation. It does not embed one
-shared join string. Private maps and the Linux add-on still use an operator-issued join string.
+All participant archives include `public-map.json`, the public join configuration. It contains
+the deployed enrollment and relay addresses. It contains no world identity or secret. Each
+installer creates a unique identity and secret. Private maps still use an operator-issued join
+string.
 
 After checksum and extraction, the platform commands are:
 
 | Platform | Supported game | Install | Start |
 |---|---|---|---|
 | Windows | Included portable *The Bibites* 0.6.3.1, or an existing Steam copy | Double-click `Install-BibitesMultiverse.cmd` | Starts after install by default; later use `.\Start-Multiverse.ps1` |
-| Linux | *The Bibites* 0.6.3.1 from itch.io | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
+| Linux | Included native *The Bibites* 0.6.3.1, or an existing itch.io copy | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
 Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
 without graphics. The simulation remains active.
@@ -224,8 +227,8 @@ duplicated organism because duplication changes the simulation permanently.
 
 A connected world crosses a network boundary. The package limits what crosses that boundary.
 
-- The recommended Windows package includes the authorized portable game, mod, sidecar, and
-  installer. The Linux package remains an add-on.
+- The recommended complete packages include the authorized game, mod, sidecar, and installer.
+  Add-on packages use a game that is already on the computer.
 - The installer refuses unsupported game builds before it changes the game folder.
 - The start script opens the sidecar before it opens the game. The stop script closes both
   processes.
@@ -251,7 +254,7 @@ The homepage explains the experiment and shows a live summary. The
 [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
 lineages, and world settings.
 
-The [watch page](https://bibitesmultiverse.com/watch) shows one shared game camera.
+The [broadcast page](https://bibitesmultiverse.com/watch) shows one shared game camera.
 It reconnects after a broadcast interruption.
 
 ## Repository guide

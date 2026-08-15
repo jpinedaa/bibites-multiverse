@@ -16,10 +16,10 @@ raised only after the release that satisfies it exists.
 | `kit/Install-BibitesMultiverse-Gui.ps1` | Selects the included or existing game and starts the installed world by default |
 | `kit/Find-BibitesGame.ps1` | Searches Steam, itch.io, and common Windows game locations |
 | `kit/Install-BibitesMultiverse.ps1` | The Windows installer and its advanced options |
-| `kit/public-map.json` | Public HTTPS enrollment and WSS relay addresses. It contains no credential |
+| `kit/public-map.json` | Public join configuration with the HTTPS enrollment and WSS relay addresses. It contains no credential |
 | `kit/Uninstall-BibitesMultiverse.ps1` | Removes what the Windows installer recorded, hash-checked, and nothing else |
 | `kit/README.md` | The page inside the Windows archive |
-| `kit/install-bibites-multiverse.sh` | The Linux installer. bash, and `sha256sum`/`awk`/`unzip`/`file`; no toolchain, no root, and no `jq` or `python` — its JSON reader is 40 lines of awk, shared with the uninstaller |
+| `kit/install-bibites-multiverse.sh` | The Linux installer. It uses bash, coreutils, `awk`, `unzip`, `file`, and `curl`; no toolchain, root, `jq`, or `python` |
 | `kit/uninstall-bibites-multiverse.sh` | Removes what the Linux installer recorded, hash-checked, and nothing else |
 | `kit/README-linux.md` | The page inside the Linux archive, staged into it as `README.md` |
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
@@ -32,9 +32,11 @@ raised only after the release that satisfies it exists.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The build creates an add-on archive for each platform. Release `0.2.0` also publishes the Windows
-complete archive as the recommended download. It contains an authorized, unmodified game payload
-and a redistribution notice.
+The build creates an add-on archive for each platform. Release `0.2.1` also publishes a complete
+archive for each platform as the recommended download. Each contains an authorized, unmodified
+game payload and a redistribution notice.
+Every participant archive contains `public-map.json`. This file lets each installer find the
+deployed public map. Each installation still creates its own world identity and secret.
 Every archive contains the project `LICENSE` and `THIRD_PARTY_NOTICES.md` files.
 
 The two documents that ship *beside* the release rather than inside it are
@@ -132,7 +134,8 @@ BepInEx archive, and stand-ins for the plugin and the sidecar, neither of which 
 Both suites include a complete-package scenario: no game path is supplied, the game lands in a
 versioned managed runtime, uninstall removes unchanged payload files, and a user-added file is
 kept. Linux also covers **the other platform's build of the same game version** and **a kit file
-that fails its manifest**.
+that fails its manifest**. Its public-enrollment scenario also proves safe retry and identity
+reuse without network access.
 
 ## Publishing — the four steps, by hand
 
@@ -141,15 +144,15 @@ that fails its manifest**.
 1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 2. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.2.0 && git push origin v0.2.0`. The page's links point into the tag, so the
+   `git tag v0.2.1 && git push origin v0.2.1`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, and `SHA256SUMS`:
    ```sh
-   gh release create v0.2.0 \
-       release/dist/bibites-multiverse-0.2.0-*.zip \
+   gh release create v0.2.1 \
+       release/dist/bibites-multiverse-0.2.1-*.zip \
        release/dist/SHA256SUMS \
-       --title "Bibites Multiverse 0.2.0" \
+       --title "Bibites Multiverse 0.2.1" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 4. **Read the published page as a stranger would**, in a browser, and check the three things that
@@ -158,6 +161,9 @@ that fails its manifest**.
    afterthought** — a reader on that platform should meet the checksum-then-executable-bit
    ordering, the launcher difference and the one-instance-per-game-folder warning without having
    to read the Windows sections first.
+
+   Also open each participant archive and make sure that `public-map.json` contains the intended
+   enrollment and relay addresses. It must not contain a world identity or secret.
 
 **A fifth step, if the repository is private:** the page's documentation links resolve only for
 somebody who can read the repository. Make it public, or the four participant pages have to
