@@ -64,13 +64,13 @@ for name in MULTIVERSE_BROADCAST MULTIVERSE_BROADCAST_ZOOM \
   MULTIVERSE_BROADCAST_HIDE_UI; do
   sed -i "/^$name=/d" "$env_file"
 done
-cat >>"$env_file" <<EOF
-MULTIVERSE_BROADCAST='true'
-MULTIVERSE_BROADCAST_ZOOM='35'
-MULTIVERSE_BROADCAST_RESELECT_DELAY='2'
-MULTIVERSE_BROADCAST_STATUS_FILE='$root/broadcast-director.json'
-MULTIVERSE_BROADCAST_HIDE_UI='true'
-EOF
+{
+  printf 'MULTIVERSE_BROADCAST=%q\n' true
+  printf 'MULTIVERSE_BROADCAST_ZOOM=%q\n' 35
+  printf 'MULTIVERSE_BROADCAST_RESELECT_DELAY=%q\n' 2
+  printf 'MULTIVERSE_BROADCAST_STATUS_FILE=%q\n' "$root/broadcast-director.json"
+  printf 'MULTIVERSE_BROADCAST_HIDE_UI=%q\n' true
+} >>"$env_file"
 chown bibites:bibites "$env_file"
 chmod 0600 "$env_file"
 
