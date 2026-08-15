@@ -82,7 +82,7 @@ After checksum and extraction, the platform commands are:
 
 | Platform | Supported game | Install | Start |
 |---|---|---|---|
-| Windows | *The Bibites* 0.6.3.1 from Steam | `.\Install-BibitesMultiverse.ps1` | `.\Start-Multiverse.ps1` |
+| Windows | *The Bibites* 0.6.3.1 from Steam | Double-click `Install-BibitesMultiverse.cmd` | `.\Start-Multiverse.ps1` |
 | Linux | *The Bibites* 0.6.3.1 from itch.io | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
 Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
@@ -92,8 +92,7 @@ The installer finds the game and makes sure that its build is supported. It inst
 stores the credential, and creates the start and stop scripts. It needs no compiler, SDK,
 administrator account, or root access.
 
-The normal **add-on edition** connects an existing game installation. A **complete edition** can
-include the game only when the publisher permits distribution.
+Release `0.1.0` contains add-on packages. The installer finds an existing game automatically.
 
 [Read the full installation guide →](docs/participant/install.md)
 

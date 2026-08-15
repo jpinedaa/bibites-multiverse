@@ -4,10 +4,9 @@
 edges and arrive in other people's; theirs arrive in yours. Your world stays on your machine and
 stays yours.
 
-**You need:** Linux and one of this release's two editions. The **add-on edition** binds to the
-game's native Linux build from itch.io. A **complete edition**, when the publisher permits one to
-be published, includes the game payload and its license. **You do not need:** a compiler, an SDK,
-a runtime, root, or anything from a developer's toolchain. Nothing here will
+**You need:** Linux, the native itch.io game, and a join string. This release contains an add-on
+package. Its installer finds the game automatically. There is no edition choice during
+installation. **You do not need:** a compiler, an SDK, a runtime, or root. Nothing here will
 ever ask you to turn a security control off — no `--insecure` flag, no `curl | sh`, no skipped
 certificate check, and no `sudo`. If any part of this package asks you for one of those, that is a
 defect and reporting it is the right response.
@@ -185,5 +184,5 @@ system prints one, and no diagnostic asks for one.
 | `BepInEx_linux_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
 | `support-matrix.json` | The game builds this release supports, and the words it refuses with. **The same bytes the Windows archive carries** |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
-| `game-payload.json`, `GAME-LICENSE.txt`, `game/` | Complete edition only: the descriptor, publisher-provided license, and authorized game payload |
+| `game-payload.json`, `GAME-LICENSE.txt`, `game/` | Files that occur only in a complete package |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |

@@ -53,9 +53,10 @@ Set-StrictMode -Version 2.0
 if (-not $KitDir) { $KitDir = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $KitDir       = (Resolve-Path $KitDir).Path
 $GameAssembly = (Resolve-Path $GameAssembly).Path
+$launcher     = Join-Path $KitDir 'Install-BibitesMultiverse.cmd'
 $installer    = Join-Path $KitDir 'Install-BibitesMultiverse.ps1'
 $uninstaller  = Join-Path $KitDir 'Uninstall-BibitesMultiverse.ps1'
-foreach ($p in @($installer, $uninstaller)) {
+foreach ($p in @($launcher, $installer, $uninstaller)) {
     if (-not (Test-Path $p)) { throw "not in -KitDir: $p" }
 }
 
@@ -78,6 +79,14 @@ function Check {
 }
 
 function Scenario { param([string]$Name) Write-Host ""; Write-Host "==== $Name" -ForegroundColor Cyan }
+
+$launcherText = Get-Content -LiteralPath $launcher -Raw
+Check "the click launcher starts the PowerShell installer" `
+    ($launcherText -match 'Install-BibitesMultiverse\.ps1')
+Check "the click launcher uses process-only RemoteSigned" `
+    ($launcherText -match '(?i)-ExecutionPolicy RemoteSigned')
+Check "the click launcher never uses an execution-policy bypass" `
+    (-not ($launcherText -match '(?i)ExecutionPolicy Bypass'))
 
 function Get-TreeSnapshot {
     param([string]$Root)
@@ -352,7 +361,7 @@ if ($CaFile) {
 
 # ---------------------------------------------------------------- F
 
-Scenario "F - a complete package with an authorized game payload"
+Scenario "F - a complete package with a bundled game payload"
 
 $fRoot = Join-Path $sandbox 'F'
 $fKit  = Join-Path $fRoot 'kit'
