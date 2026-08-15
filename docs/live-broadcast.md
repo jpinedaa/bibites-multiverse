@@ -158,6 +158,8 @@ The preflight checks these properties:
 The route check selects the longest matching route.
 It rejects the destination if that effective route is blackholed or not approved.
 Approved targets are local, peering, transit gateway, and private virtual gateway routes.
+The check fails closed if the selected route table contains a managed prefix-list route.
+The current preflight does not resolve the networks inside managed prefix lists.
 
 The wrapper reads parameter metadata only.
 It does not decrypt or copy the publish password.

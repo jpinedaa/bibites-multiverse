@@ -366,6 +366,8 @@ The deployment wrapper performs read-only checks for these properties:
 The route check uses the longest matching AWS route.
 It rejects a more specific blackhole, internet gateway, NAT gateway, or network interface route.
 Approved targets are local, peering, transit gateway, and private virtual gateway routes.
+The check fails closed if the selected route table contains a managed prefix-list route.
+The current preflight does not resolve the networks inside managed prefix lists.
 
 The wrapper reads parameter metadata only.
 It does not decrypt or copy the publish password.

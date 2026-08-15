@@ -309,11 +309,17 @@ bibites_effective_route_table() {
 }
 
 bibites_private_route_for_ip() {
-  local description="$1" address="$2" cidr state target bits
+  local description="$1" address="$2" cidr state target bits prefix_list_route_count
   local selected_cidr='' selected_state='' selected_target='' selected_bits=-1
   local selected_count=0
 
   bibites_valid_ipv4 "$address" || return 1
+  prefix_list_route_count="$(jq -er '
+    [.RouteTables[0].Routes[]? |
+      select(((.DestinationPrefixListId // "") | length) > 0)] |
+    length
+  ' <<<"$description")" || return 1
+  (( prefix_list_route_count == 0 )) || return 1
   while IFS=$'\t' read -r cidr state target; do
     [ -n "$cidr" ] || continue
     bibites_valid_ipv4_cidr "$cidr" || continue

@@ -125,6 +125,12 @@ reject 'more-specific NAT route' bibites_private_route_for_ip \
     "NatGatewayId":"nat-public-path",
     "State":"active"
   }]' <<<"$precedence_routes")" '10.20.4.5'
+reject 'unresolved managed prefix-list route' bibites_private_route_for_ip \
+  "$(jq '.RouteTables[0].Routes += [{
+    "DestinationPrefixListId":"pl-unresolved",
+    "NatGatewayId":"nat-prefix-list-path",
+    "State":"active"
+  }]' <<<"$precedence_routes")" '10.20.4.5'
 accept 'active route outranks shorter blackhole' bibites_private_route_for_ip \
   "$(jq '.RouteTables[0].Routes[0].State = "blackhole"' <<<"$precedence_routes")" \
   '10.20.4.5'
