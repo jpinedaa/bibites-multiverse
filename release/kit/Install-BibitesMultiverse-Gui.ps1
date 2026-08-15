@@ -229,6 +229,7 @@ $install.Add_Click({
     Write-SetupLog "runtime=$runtime installFromExternal=$($external.Checked)"
     $installer = Join-Path $Here 'Install-BibitesMultiverse.ps1'
     $engine = (Get-Process -Id $PID).Path
+    Write-SetupLog "engine=$engine installer=$installer startAfter=$($startAfter.Checked)"
     $log = Join-Path $env:TEMP ('bibites-multiverse-install-' + [guid]::NewGuid().ToString('N') + '.log')
     $arguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', $installer,
                    '-RuntimeSelection', $runtime)
