@@ -137,7 +137,7 @@ Repeat a panel name to give that panel more time in each cycle.
 The spawn option does not remove existing Bibites or stop natural reproduction.
 A later world save records the zero target count.
 
-The standard broadcast profile uses a zoom of `160` and a speed of `7.5`.
+The standard broadcast profile uses a zoom of `200` and a speed of `7.5`.
 It shows the brain panel for 15 seconds and the biology panel for 30 seconds.
 It also shows the selected Bibite's vision range.
 It disables automatic spawns from the `Basic bibite` template.
