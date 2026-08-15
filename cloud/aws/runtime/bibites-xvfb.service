@@ -1,0 +1,14 @@
+[Unit]
+Description=Shared virtual display for headless Bibites worlds
+After=local-fs.target
+
+[Service]
+Type=simple
+User=bibites
+Group=bibites
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1024x768x24 -nolisten tcp -noreset
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

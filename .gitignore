@@ -14,6 +14,13 @@ bin/
 # the instance; they are regenerable from go/ and are ~60 MB a set.
 deploy/stage/
 
+# AWS cloud-world build and migration staging. The runtime bundle and manifest are
+# reproducible; the game archive is third-party payload; imported saves are the
+# user's worlds; join files contain live credentials. None belongs in Git.
+cloud/aws/dist/
+cloud/aws/imports/
+cloud/aws/private/
+
 # E2E rig runtime state. e2e/data/ holds the sidecar journals — the durable custody
 # record of decision D2 — which belong to one run of one machine, never to the repo.
 e2e/data/

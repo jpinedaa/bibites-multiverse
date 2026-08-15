@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+world="${1:?world id required}"
+env_file="/srv/bibites/worlds/$world/world.env"
+# shellcheck source=/dev/null
+set -a; . "$env_file"; set +a
+
+deadline=$(( $(date +%s) + 600 ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  slot_json="$(/srv/bibites/bin/multiverse-sidecar --data-dir "$SIDECAR_DATA" \
+    --my-slot --json 2>/dev/null || printf '{}')"
+  if jq -e '.mod.connected == true' <<<"$slot_json" >/dev/null; then
+    break
+  fi
+  sleep 2
+done
+jq -e '.mod.connected == true' <<<"$slot_json" >/dev/null || {
+  echo "$world: game did not load within 10 minutes" >&2
+  exit 1
+}
+
+send_scale() {
+  local token tmp
+  token="cloud-$(date +%s%N)"
+  tmp="$COMMAND_FILE.tmp.$$"
+  printf '%s timescale %s\n' "$token" "$TARGET_TIME_SCALE" > "$tmp"
+  mv "$tmp" "$COMMAND_FILE"
+
+  local end=$(( $(date +%s) + 30 ))
+  while [ "$(date +%s)" -lt "$end" ]; do
+    grep -Fq "$token OK targetTimeScale=" "$COMMAND_FILE.log" 2>/dev/null && return 0
+    sleep 1
+  done
+  echo "$world: no answer to timescale command $token" >&2
+  return 1
+}
+
+# The established rig has observed the first command after a load report x1 and
+# the second stick. Preserve that measured workaround on unattended boots.
+send_scale
+sleep 20
+send_scale

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+out=/srv/bibites/metrics/performance.jsonl
+mkdir -p "$(dirname "$out")"
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+/usr/local/bin/bibites-cloud-status --json > "$tmp"
+jq -cn --arg at "$(date -u +%FT%TZ)" --argjson worlds "$(cat "$tmp")" \
+  --arg load "$(cut -d' ' -f1-3 /proc/loadavg)" \
+  --arg mem "$(free -b | awk '/^Mem:/ {print $3 "/" $2}')" \
+  '{at:$at,load:$load,memoryBytes:$mem,worlds:$worlds}' >> "$out"

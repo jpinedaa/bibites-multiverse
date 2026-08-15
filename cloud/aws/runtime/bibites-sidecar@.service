@@ -1,0 +1,20 @@
+[Unit]
+Description=Bibites Multiverse sidecar for %i
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=/srv/bibites
+
+[Service]
+Type=simple
+User=bibites
+Group=bibites
+ExecStart=/usr/local/libexec/bibites-sidecar %i
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/srv/bibites/worlds/%i
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Reconcile the private S3 manifest onto the persistent volume. A new world is
+# additive. An existing save is never replaced unless --replace-saves is given
+# while that world's game is stopped.
+set -euo pipefail
+
+replace=0
+[ "${1:-}" = --replace-saves ] && replace=1
+
+conf=/etc/bibites-cloud.conf
+[ -r "$conf" ] || { echo "missing $conf" >&2; exit 1; }
+# shellcheck source=/dev/null
+set -a; . "$conf"; set +a
+
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
+aws --region "$AWS_REGION" s3 cp "s3://$ARTIFACT_BUCKET/$MANIFEST_KEY" "$stage/worlds.json" --only-show-errors
+jq -e '.schema == 1 and (.worlds | type == "array")' "$stage/worlds.json" >/dev/null
+install -m 0644 "$stage/worlds.json" /srv/bibites/worlds.json
+case "$MANIFEST_KEY" in
+  */*) manifest_prefix="${MANIFEST_KEY%/*}/" ;;
+  *) manifest_prefix='' ;;
+esac
+
+while IFS= read -r row; do
+  world_id="$(jq -r .id <<<"$row")"
+  enabled="$(jq -r '.enabled // true' <<<"$row")"
+  [ "$enabled" = true ] || continue
+  case "$world_id" in (*[!A-Za-z0-9._-]*|'') echo "invalid world id: $world_id" >&2; exit 1;; esac
+
+  peer_id="$(jq -r .peerId <<<"$row")"
+  world_name="$(jq -r .worldName <<<"$row")"
+  port="$(jq -r .sidecarPort <<<"$row")"
+  save_key="$(jq -r .saveKey <<<"$row")"
+  secret_parameter="$(jq -r .credentialParameter <<<"$row")"
+  position="$(jq -r '.position // empty' <<<"$row")"
+  preferred_slot="$(jq -r '.preferredSlot // empty' <<<"$row")"
+  target="$(jq -r '.targetTimeScale // 100' <<<"$row")"
+  save_minutes="$(jq -r '.saveMinutes // 10' <<<"$row")"
+  save_keep="$(jq -r '.saveKeep // 6' <<<"$row")"
+
+  root="/srv/bibites/worlds/$world_id"
+  game="$root/game"
+  sidecar_data="$root/sidecar"
+  xdg_config="$root/config"
+  xdg_data="$root/data"
+  logs="$root/logs"
+  saves="$xdg_config/unity3d/The Bibites/The Bibites/Savefiles"
+  credential="$root/peer-secret.txt"
+  env_file="$root/world.env"
+
+  install -d -o bibites -g bibites -m 0750 "$root" "$sidecar_data" "$xdg_config" "$xdg_data" "$logs" "$saves"
+  # install creates missing parent directories as root. The game also creates
+  # sibling directories below the Unity configuration path at first launch.
+  chown -R bibites:bibites "$xdg_config" "$xdg_data"
+  if [ ! -x "$game/The Bibites.x86_64" ]; then
+    cp -al /srv/bibites/base/game "$game"
+    chown -R bibites:bibites "$game"
+  fi
+
+  secret="$(aws --region "$AWS_REGION" ssm get-parameter --name "$secret_parameter" \
+    --with-decryption --query Parameter.Value --output text)"
+  [ -n "$secret" ] && [ "$secret" != None ] || { echo "$world_id: empty credential" >&2; exit 1; }
+  ( umask 077; printf '%s\n' "$secret" > "$credential.new" )
+  chown bibites:bibites "$credential.new"
+  mv "$credential.new" "$credential"
+
+  save="$saves/$world_name.zip"
+  if [ ! -f "$save" ] || [ "$replace" -eq 1 ]; then
+    if systemctl is-active --quiet "bibites-game@$world_id.service" 2>/dev/null; then
+      echo "$world_id: refusing to replace a save while its game is running" >&2
+      exit 1
+    fi
+    aws --region "$AWS_REGION" s3 cp \
+      "s3://$ARTIFACT_BUCKET/$manifest_prefix$save_key" "$save.new" --only-show-errors
+    unzip -tqq "$save.new"
+    unzip -Z1 "$save.new" > "$stage/save-contents"
+    grep -Fxq 'scene.bb8scene' "$stage/save-contents"
+    chown bibites:bibites "$save.new"
+    mv "$save.new" "$save"
+  fi
+
+  command_file="$root/command.txt"
+  cat > "$env_file.new" <<EOF
+WORLD_ID='$world_id'
+WORLD_NAME='$world_name'
+PEER_ID='$peer_id'
+SIDECAR_PORT='$port'
+RELAY_URL='$RELAY_URL'
+GAME_DIR='$game'
+SIDECAR_DATA='$sidecar_data'
+CREDENTIAL_FILE='$credential'
+SIDECAR_LOG='$logs/sidecar.log'
+GAME_LOG='$logs/game.out'
+COMMAND_FILE='$command_file'
+CONTRACT_A_TOKEN_FILE='$sidecar_data/contract-a.token'
+TARGET_TIME_SCALE='$target'
+PREFERRED_SLOT='$preferred_slot'
+POSITION='$position'
+XDG_CONFIG_HOME='$xdg_config'
+XDG_DATA_HOME='$xdg_data'
+MULTIVERSE_EXPORT_EDGES='E,N,W,S'
+MULTIVERSE_MIGRATION_EXCLUDE='Basic bibite'
+MULTIVERSE_SAVE_MINUTES='$save_minutes'
+MULTIVERSE_SAVE_KEEP='$save_keep'
+MULTIVERSE_SAVE_ON_QUIT='true'
+MULTIVERSE_SIDECAR_PORT='$port'
+MULTIVERSE_WORLD='$world_name'
+MULTIVERSE_PORTAL='false'
+MULTIVERSE_PORTAL_FLOURISHES='false'
+MULTIVERSE_CONTRACT_A_TOKEN_FILE='$sidecar_data/contract-a.token'
+MULTIVERSE_CMD_FILE='$command_file'
+EOF
+  chown bibites:bibites "$env_file.new"
+  chmod 0600 "$env_file.new"
+  mv "$env_file.new" "$env_file"
+
+  systemctl enable "bibites-sidecar@$world_id.service" "bibites-game@$world_id.service" \
+    "bibites-timescale@$world_id.service" >/dev/null
+  systemctl start "bibites-sidecar@$world_id.service"
+  systemctl start "bibites-game@$world_id.service"
+  systemctl start --no-block "bibites-timescale@$world_id.service"
+  printf 'synced %s -> %s (%s)\n' "$world_id" "$world_name" "$peer_id"
+done < <(jq -c '.worlds[]' "$stage/worlds.json")

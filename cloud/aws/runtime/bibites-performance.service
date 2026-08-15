@@ -1,0 +1,6 @@
+[Unit]
+Description=Record Bibites cloud-world performance
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/bibites-performance-sample

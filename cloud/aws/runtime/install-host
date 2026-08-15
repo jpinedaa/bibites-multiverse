@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${AWS_REGION:?}"
+: "${DATA_VOLUME_ID:?}"
+: "${ARTIFACT_BUCKET:?}"
+: "${GAME_KEY:?}"
+: "${GAME_SHA256:?}"
+: "${BEPINEX_KEY:?}"
+: "${BEPINEX_SHA256:?}"
+: "${MANIFEST_KEY:?}"
+: "${RELAY_PRIVATE_IP:?}"
+
+log() { printf '[bibites-install] %s\n' "$*"; }
+
+id bibites >/dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/bibites --shell /usr/sbin/nologin bibites
+if ! command -v Xvfb >/dev/null; then
+  log 'installing the virtual X11 display required by the Linux game'
+  apt-get update -qq
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb
+fi
+
+serial="${DATA_VOLUME_ID//-/}"
+device=''
+for _ in $(seq 1 120); do
+  device="$(lsblk -ndo PATH,SERIAL | awk -v want="$serial" '$2 == want {print $1; exit}')"
+  [ -n "$device" ] && break
+  sleep 2
+done
+[ -n "$device" ] || { echo "data volume $DATA_VOLUME_ID did not appear" >&2; exit 1; }
+
+if ! blkid "$device" >/dev/null 2>&1; then
+  log "formatting new data volume $device"
+  mkfs.ext4 -F -L bibites-data "$device"
+fi
+uuid="$(blkid -s UUID -o value "$device")"
+install -d -m 0755 /srv/bibites
+grep -q "UUID=$uuid " /etc/fstab || printf 'UUID=%s /srv/bibites ext4 defaults,nofail 0 2\n' "$uuid" >> /etc/fstab
+mountpoint -q /srv/bibites || mount /srv/bibites
+install -d -o bibites -g bibites -m 0750 /srv/bibites/{base,bin,worlds,metrics}
+
+# A small swap file buys an orderly save if all six games peak together. It is
+# safety headroom, not capacity: sustained swap use means the instance is too small.
+if [ ! -f /srv/bibites/swapfile ]; then
+  fallocate -l 4G /srv/bibites/swapfile
+  chmod 0600 /srv/bibites/swapfile
+  mkswap /srv/bibites/swapfile
+fi
+grep -q '^/srv/bibites/swapfile ' /etc/fstab || printf '/srv/bibites/swapfile none swap sw 0 0\n' >> /etc/fstab
+swapon --show=NAME | grep -Fxq /srv/bibites/swapfile || swapon /srv/bibites/swapfile
+
+# Resolve the public certificate name to the Lightsail private address. VPC
+# peering makes this same-AZ route free and leaves TLS hostname verification intact.
+sed -i '/[[:space:]]bibitesmultiverse\.com$/d' /etc/hosts
+printf '%s bibitesmultiverse.com\n' "$RELAY_PRIVATE_IP" >> /etc/hosts
+
+cat > /etc/bibites-cloud.conf <<EOF
+AWS_REGION='$AWS_REGION'
+ARTIFACT_BUCKET='$ARTIFACT_BUCKET'
+MANIFEST_KEY='$MANIFEST_KEY'
+RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4'
+EOF
+chmod 0644 /etc/bibites-cloud.conf
+
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
+if [ ! -x '/srv/bibites/base/game/The Bibites.x86_64' ]; then
+  log 'downloading pinned game and BepInEx archives'
+  aws --region "$AWS_REGION" s3 cp "s3://$ARTIFACT_BUCKET/$GAME_KEY" "$stage/game.zip" --only-show-errors
+  aws --region "$AWS_REGION" s3 cp "s3://$ARTIFACT_BUCKET/$BEPINEX_KEY" "$stage/bepinex.zip" --only-show-errors
+  printf '%s  %s\n' "$GAME_SHA256" "$stage/game.zip" | sha256sum -c -
+  printf '%s  %s\n' "$BEPINEX_SHA256" "$stage/bepinex.zip" | sha256sum -c -
+  rm -rf /srv/bibites/base/game.new
+  install -d -o bibites -g bibites /srv/bibites/base/game.new
+  unzip -q "$stage/game.zip" -d /srv/bibites/base/game.new
+  unzip -q -o "$stage/bepinex.zip" -d /srv/bibites/base/game.new
+  install -d /srv/bibites/base/game.new/BepInEx/plugins
+  install -m 0644 /opt/bibites-runtime/BibitesMultiverse.dll \
+    /srv/bibites/base/game.new/BepInEx/plugins/BibitesMultiverse.dll
+  chmod 0755 '/srv/bibites/base/game.new/The Bibites.x86_64' /srv/bibites/base/game.new/run_bepinex.sh
+  got="$(sha256sum '/srv/bibites/base/game.new/The Bibites_Data/Managed/BibitesAssembly.dll' | awk '{print toupper($1)}')"
+  [ "$got" = '5B145A0A941C3560888BAFBB320D984D7290A63467C9F65022FDB02878847ECA' ] || {
+    echo "unsupported Linux game assembly $got" >&2; exit 1; }
+  chown -R bibites:bibites /srv/bibites/base/game.new
+  mv /srv/bibites/base/game.new /srv/bibites/base/game
+fi
+
+# A staged runtime update replaces the plugin in every isolated game folder.
+# The update procedure stops the games before it calls this installer.
+for plugin_dir in /srv/bibites/base/game/BepInEx/plugins \
+  /srv/bibites/worlds/*/game/BepInEx/plugins; do
+  [ -d "$plugin_dir" ] || continue
+  install -m 0644 /opt/bibites-runtime/BibitesMultiverse.dll \
+    "$plugin_dir/BibitesMultiverse.dll"
+  chown bibites:bibites "$plugin_dir/BibitesMultiverse.dll"
+done
+
+install -m 0755 /opt/bibites-runtime/multiverse-sidecar /srv/bibites/bin/multiverse-sidecar
+install -d -m 0755 /usr/local/libexec
+for script in bibites-sidecar bibites-game bibites-wait-sidecar bibites-set-timescale \
+  bibites-spot-watch bibites-sync-worlds bibites-performance-sample bibites-stop-worlds; do
+  install -m 0755 "/opt/bibites-runtime/$script" "/usr/local/libexec/$script"
+done
+install -m 0755 /opt/bibites-runtime/bibites-cloud-status /usr/local/bin/bibites-cloud-status
+install -m 0755 /opt/bibites-runtime/bibites-cloud-ready /usr/local/bin/bibites-cloud-ready
+for unit in /opt/bibites-runtime/*.service /opt/bibites-runtime/*.timer; do
+  install -m 0644 "$unit" "/etc/systemd/system/$(basename "$unit")"
+done
+systemctl daemon-reload
+systemctl enable --now bibites-xvfb.service bibites-spot-watch.service bibites-performance.timer
+/usr/local/libexec/bibites-sync-worlds
+touch /srv/bibites/.installed
+
+log 'host installation complete'

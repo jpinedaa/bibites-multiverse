@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+world="${1:?world id required}"
+env_file="/srv/bibites/worlds/$world/world.env"
+[ -r "$env_file" ] || { echo "missing $env_file" >&2; exit 1; }
+# shellcheck source=/dev/null
+set -a; . "$env_file"; set +a
+
+# Six Unity processes starting on the same second spend CPU on the same atlas
+# build and make readiness slower for all of them. Serialize only the short
+# launch edge; the lock is released before the long-running exec.
+flock -x /run/bibites/game-start.lock -c 'sleep 8'
+
+cd "$GAME_DIR"
+exec ./run_bepinex.sh './The Bibites.x86_64' -batchmode -nographics -logFile "$GAME_LOG"

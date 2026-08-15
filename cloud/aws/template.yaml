@@ -1,0 +1,199 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Persistent Spot host for six headless Bibites Multiverse worlds
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: m6a.2xlarge
+    AllowedPattern: '^[a-z0-9.-]+$'
+  AvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Default: us-east-1a
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  ArtifactBucket:
+    Type: String
+  ArtifactPrefix:
+    Type: String
+    Default: cloud/v1
+  RuntimeFile:
+    Type: String
+    Default: bibites-cloud-runtime.tar.gz
+  RuntimeSha256:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{64}$'
+  GameFile:
+    Type: String
+    Default: TheBibites-0.6.3.1-Linux.zip
+  GameSha256:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{64}$'
+  BepInExFile:
+    Type: String
+    Default: BepInEx_linux_x64_5.4.23.3.zip
+  BepInExSha256:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{64}$'
+  ManifestFile:
+    Type: String
+    Default: worlds.json
+  DataVolumeGiB:
+    Type: Number
+    Default: 80
+    MinValue: 40
+  RelayPrivateIp:
+    Type: String
+    Default: 172.26.12.110
+    AllowedPattern: '^[0-9.]+$'
+  UbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+Resources:
+  HostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: No inbound access; administration uses SSM Session Manager
+      VpcId: !Ref VpcId
+
+  HostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ec2.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadBibitesBootstrap
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/*
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/bibites-multiverse/cloud/*
+
+  HostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref HostRole]
+
+  DataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      Encrypted: true
+      Size: !Ref DataVolumeGiB
+      VolumeType: gp3
+      Tags:
+        - {Key: Name, Value: bibites-cloud-worlds-data}
+        - {Key: Project, Value: bibites-multiverse}
+        - {Key: BibitesBackup, Value: daily}
+
+  HostLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile:
+          Name: !Ref HostProfile
+        ImageId: !Ref UbuntuAmi
+        InstanceType: !Ref InstanceType
+        InstanceInitiatedShutdownBehavior: stop
+        InstanceMarketOptions:
+          MarketType: spot
+          SpotOptions:
+            InstanceInterruptionBehavior: stop
+            SpotInstanceType: persistent
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          InstanceMetadataTags: enabled
+        NetworkInterfaces:
+          - AssociatePublicIpAddress: true
+            DeleteOnTermination: true
+            DeviceIndex: 0
+            Groups: [!Ref HostSecurityGroup]
+            SubnetId: !Ref SubnetId
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 12
+              VolumeType: gp3
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - {Key: Name, Value: bibites-cloud-worlds}
+              - {Key: Project, Value: bibites-multiverse}
+              - {Key: Workload, Value: headless-simulations}
+        UserData:
+          Fn::Base64: !Sub |
+            #!/usr/bin/env bash
+            set -euxo pipefail
+            exec > >(tee -a /var/log/bibites-bootstrap.log | logger -t bibites-bootstrap -s 2>/dev/console) 2>&1
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y curl jq unzip xfsprogs xvfb
+            if ! command -v aws >/dev/null; then
+              curl -fsS https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip
+              rm -rf /tmp/aws
+              unzip -q /tmp/awscliv2.zip -d /tmp
+              /tmp/aws/install --update
+            fi
+            install -d -m 0755 /opt/bibites-runtime
+            aws --region ${AWS::Region} s3 cp \
+              s3://${ArtifactBucket}/${ArtifactPrefix}/${RuntimeFile} /tmp/bibites-runtime.tar.gz \
+              --only-show-errors
+            printf '%s  %s\n' '${RuntimeSha256}' /tmp/bibites-runtime.tar.gz | sha256sum -c -
+            tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime
+            chmod 0755 /opt/bibites-runtime/install-host
+            export AWS_REGION='${AWS::Region}'
+            export DATA_VOLUME_ID='${DataVolume}'
+            export ARTIFACT_BUCKET='${ArtifactBucket}'
+            export GAME_KEY='${ArtifactPrefix}/${GameFile}'
+            export GAME_SHA256='${GameSha256}'
+            export BEPINEX_KEY='${ArtifactPrefix}/${BepInExFile}'
+            export BEPINEX_SHA256='${BepInExSha256}'
+            export MANIFEST_KEY='${ArtifactPrefix}/${ManifestFile}'
+            export RELAY_PRIVATE_IP='${RelayPrivateIp}'
+            /opt/bibites-runtime/install-host
+            systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true
+
+  Host:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref HostLaunchTemplate
+        Version: !GetAtt HostLaunchTemplate.LatestVersionNumber
+
+  DataAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId: !Ref Host
+      VolumeId: !Ref DataVolume
+
+Outputs:
+  InstanceId:
+    Value: !Ref Host
+  AvailabilityZone:
+    Value: !Ref AvailabilityZone
+  PrivateIp:
+    Value: !GetAtt Host.PrivateIp
+  PublicIp:
+    Value: !GetAtt Host.PublicIp
+  DataVolumeId:
+    Value: !Ref DataVolume
+  StatusCommand:
+    Value: !Sub aws ssm start-session --target ${Host} --region ${AWS::Region}

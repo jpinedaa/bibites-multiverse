@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+json=0
+[ "${1:-}" = --json ] && json=1
+shopt -s nullglob
+envs=(/srv/bibites/worlds/*/world.env)
+
+if [ "$json" -eq 1 ]; then printf '['; fi
+first=1
+for env_file in "${envs[@]}"; do
+  # shellcheck source=/dev/null
+  set -a; . "$env_file"; set +a
+  side_state="$(systemctl is-active "bibites-sidecar@$WORLD_ID.service" 2>/dev/null || true)"
+  game_state="$(systemctl is-active "bibites-game@$WORLD_ID.service" 2>/dev/null || true)"
+  slot_json="$(runuser -u bibites -- /srv/bibites/bin/multiverse-sidecar \
+    --data-dir "$SIDECAR_DATA" --my-slot --json 2>/dev/null || printf '{}')"
+  if [ "$json" -eq 1 ]; then
+    [ "$first" -eq 1 ] || printf ','
+    first=0
+    jq -cn --arg id "$WORLD_ID" --arg world "$WORLD_NAME" --arg sidecar "$side_state" \
+      --arg game "$game_state" --argjson slot "$slot_json" \
+      '{id:$id,world:$world,sidecar:$sidecar,game:$game,slot:$slot}'
+  else
+    printf '%-8s sidecar=%-10s game=%-10s ' "$WORLD_ID" "$side_state" "$game_state"
+    printf '%s\n' "$(printf '%s' "$slot_json" | jq -r '
+      if .mod then
+        "slot=\(.slot.slot // "-") population=\(.mod.population // "-") applied=x\(.mod.timeScale // "-") achieved=x\(.mod.achievedTimeScale // "-")"
+      else "slot=unavailable" end' 2>/dev/null || echo 'slot=unavailable')"
+  fi
+done
+if [ "$json" -eq 1 ]; then printf ']\n'; fi

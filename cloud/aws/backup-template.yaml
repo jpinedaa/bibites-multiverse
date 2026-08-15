@@ -1,0 +1,45 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Daily retained-volume snapshots for Bibites cloud worlds
+
+Resources:
+  SnapshotRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: dlm.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+
+  DailySnapshots:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: Daily snapshots of the persistent Bibites world volume
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt SnapshotRole.Arn
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes: [VOLUME]
+        TargetTags:
+          - {Key: BibitesBackup, Value: daily}
+        Schedules:
+          - Name: Daily snapshots
+            CopyTags: true
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times: ['06:00']
+            RetainRule:
+              Count: 7
+            TagsToAdd:
+              - {Key: Project, Value: bibites-multiverse}
+              - {Key: ManagedBy, Value: DLM}
+      Tags:
+        - {Key: Project, Value: bibites-multiverse}
+
+Outputs:
+  LifecyclePolicyId:
+    Value: !Ref DailySnapshots

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+deadline=$(( $(date +%s) + ${1:-720} ))
+last='[]'
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  last="$(bibites-cloud-status --json)"
+  if jq -e '
+    length > 0 and all(.[ ];
+      .sidecar == "active" and
+      .game == "active" and
+      .slot.relay.connected == true and
+      .slot.slot.granted == true and
+      .slot.mod.connected == true and
+      (.slot.mod.timeScale // 0) >= 99.9)
+  ' <<<"$last" >/dev/null; then
+    printf '%s\n' "$last"
+    exit 0
+  fi
+  sleep 5
+done
+
+printf '%s\n' "$last"
+echo 'cloud worlds did not become ready before the deadline' >&2
+exit 1
