@@ -189,6 +189,36 @@ func TestMaxConnectionsPerAddressRefusesTheUpgradeWith429(t *testing.T) {
 	}
 }
 
+func TestSourceKeyTrustsOneAddressFromALoopbackProxy(t *testing.T) {
+	r := &http.Request{
+		RemoteAddr: "127.0.0.1:49152",
+		Header:     http.Header{"X-Forwarded-For": []string{"203.0.113.12"}},
+	}
+	if got := sourceKey(r); got != "203.0.113.12" {
+		t.Fatalf("sourceKey() = %q, want the client address from the local proxy", got)
+	}
+}
+
+func TestSourceKeyIgnoresForwardingFromANonLoopbackPeer(t *testing.T) {
+	r := &http.Request{
+		RemoteAddr: "198.51.100.8:49152",
+		Header:     http.Header{"X-Forwarded-For": []string{"203.0.113.12"}},
+	}
+	if got := sourceKey(r); got != "198.51.100.8" {
+		t.Fatalf("sourceKey() = %q, want the direct peer address", got)
+	}
+}
+
+func TestSourceKeyRejectsAForwardedAddressChain(t *testing.T) {
+	r := &http.Request{
+		RemoteAddr: "[::1]:49152",
+		Header:     http.Header{"X-Forwarded-For": []string{"203.0.113.12, 198.51.100.8"}},
+	}
+	if got := sourceKey(r); got != "::1" {
+		t.Fatalf("sourceKey() = %q, want the direct loopback address", got)
+	}
+}
+
 // TestAThirdConnectionForOnePeerIsShedWith4007 is §3.3's first row: the second
 // connection is the 4006 overlap during a reconnect, and a third is capacity.
 //

@@ -39,10 +39,11 @@ living deployment* and it keeps running throughout; nothing in this handoff touc
 What this handoff stands up is the **public** version of the same thing: one AWS Lightsail instance
 in US East running two processes co-hosted —
 
-- **the relay** (`multiverse-relay`), which terminates its own TLS on port 443 and speaks
-  Contract B at `wss://bibitesmultiverse.com/contract-b/v4`; and
+- **nginx**, which terminates TLS on port 443 and routes the website and relay;
+- **the relay** (`multiverse-relay`), which speaks Contract B at
+  `wss://bibitesmultiverse.com/contract-b/v4`; and
 - **the archive** (`multiverse-archive`), which subscribes to the relay, writes the permanent
-  record of every crossing, and draws the status page that nginx publishes on port 8443.
+  record of every crossing, and draws the website at `https://bibitesmultiverse.com/`.
 
 Strangers join by being handed a **join string** out of band. There is no account system, no email
 and no password reset: the relay keeps a verifier, the secret is printed once, and whoever holds the
@@ -50,18 +51,9 @@ line *is* that world on the map.
 
 ### Where the project stands
 
-Everything in `deploy/` is written, statically checked and behaviourally rehearsed against the real
-binaries on scratch ports (`README.md` §8 is the evidence table). **Nothing has ever been run
-against a cloud account. No AWS account exists. Nothing is deployed and nothing is bought.** That is
-the single most important fact for calibrating your expectations: you are the first execution of
-this kit, and `provision.sh --dry-run` exists precisely so that the first execution is a rehearsal.
-
-The domain `bibitesmultiverse.com` was chosen on 2026-08-14 and is already set in
-`deploy.env.example`. **It is not registered yet.** A sibling session is running that from
-[`deploy/HANDOFF-domain.md`](HANDOFF-domain.md) — if that file is not in the tree when you read
-this, it has not landed yet; ask the owner where domain registration stands rather than assuming.
-**The domain must exist and resolve before provisioning can finish**, because ACME issuance needs
-the A record to point at the instance.
+The service went live on AWS Lightsail on 2026-08-14. The instance uses static address
+`3.229.27.163` in `us-east-1a`. Cloudflare serves both A records as DNS-only records.
+The certificate, alarms, snapshots, reboot test, alert test, and identity restore test passed.
 
 ### What "done" looks like
 
@@ -75,19 +67,18 @@ process*, and each obligation has a file in this kit:
 | Monitoring that speaks when nobody is looking | `monitor.sh` + `multiverse-monitor.timer` | `monitor.sh --test` delivers an alert to the owner's phone, and the daily heartbeat arrives |
 | Backup of the irreplaceable files | `backup.sh` + `multiverse-backup.timer`, plus Lightsail automatic snapshots | `backup.sh --list` shows an identity snapshot under an hour old, and a restore has been rehearsed |
 | A written restart policy | `RESTART-POLICY.md`, installed on the box at `/opt/multiverse/deploy/` | It is readable at 03:00 on the machine that is misbehaving, which is the whole point of putting it there |
-| A name, a certificate and its renewal | `provision.sh --only tls`, `tls-deploy-hook.sh`, `nginx/` | A browser reaches `https://bibitesmultiverse.com:8443/` with no warning, and `certbot.timer` is active |
+| A name, a certificate and its renewal | `provision.sh --only tls`, `tls-deploy-hook.sh`, `nginx/` | A browser reaches `https://bibitesmultiverse.com/` with no warning, and `certbot.timer` is active |
 | D24's announced period and its ending | `WIND-DOWN.md`, `ANNOUNCEMENT.md` | Real dates in `MV_PERIOD_START`/`MV_PERIOD_END`, and the period stated on the release page **before** the first stranger's join string is issued |
 
 Plus the two things WP3 owes beyond DQ2: Decision 3's retention rule with the arithmetic a hoster
 sizes a volume from (`SIZING.md`), and the deliberate publication of the status page
 (`nginx/multiverse-20-status.conf`).
 
-**One thing that cannot be proven from inside the box, stated now so it is not discovered later.**
+**External reachability must be proven outside the box.**
 `provision.sh` writes a `/etc/hosts` entry pinning `bibitesmultiverse.com` to `127.0.0.1`, because
 the archive dials the relay *by name* over a public certificate and Lightsail's public address is
 NAT'd and unreachable from the instance itself. Every check the box runs against its own name
-therefore takes the inside path. **The first proof that a stranger can reach the map is a stranger
-reaching the map**, which belongs to WP8's playtest, not to this handoff.
+therefore takes the inside path. The website and relay path passed off-box checks after deployment.
 
 ---
 
@@ -101,34 +92,27 @@ against the file named, because this table is a summary and the files are the re
 | **Provider** | **AWS Lightsail, US East**, one instance running relay and archive together | owner, 2026-08-12 | `wp3_hosting_options.md` "The single recommendation"; `m5_tracking.md` WP3 |
 | **Name** | `bibitesmultiverse.com`, with `status.bibitesmultiverse.com` on the same certificate | owner, 2026-08-14 (commit 5d5c19c) | `MV_DOMAIN`, `MV_CERT_EXTRA_NAMES` |
 | **Registrar** | Cloudflare, owner-registered | 2026-08-14 | [`deploy/HANDOFF-domain.md`](HANDOFF-domain.md) |
-| **Relay port** | **443**, so participants behind restrictive networks reach the map | owner, 2026-08-12 | `MV_RELAY_PORT` |
-| **Status page port** | **8443**, its own port over the same certificate, because the relay owns 443 whole | 2026-08-12 | `MV_STATUS_PORT`; README §4 |
+| **Public HTTPS** | **443** for the website and `/contract-b/` relay path | owner, 2026-08-14 | `MV_RELAY_PORT`; README §4 |
+| **Relay backend** | `127.0.0.1:8795`, reached only through nginx | owner, 2026-08-14 | `MV_RELAY_BACKEND`; README §4 |
 | **ACME** | certbot, **HTTP-01, webroot**, through nginx on port 80 | 2026-08-12 | `MV_ACME_MODE=webroot`; README §4 |
 | **Retention (Decision 3)** | **The ledger forever; genome blobs pruned to a horizon.** `MV_RETENTION=prune-genomes`, `MV_ARCHIVE_GENOME_HORIZON=720h` (30 days) | owner, 2026-08-12 | contract §23 B33–B34; `WIND-DOWN.md` §4 arm B |
 | **Archive memory** | `MV_ARCHIVE_GOMEMLIMIT=5GiB` as a ceiling against regression, `MV_ARCHIVE_MEMORY_HIGH` empty, `MV_SWAP_GB=0` | measured, 2026-08-12 | `SIZING.md` §4; the matrix is in `wp3_hosting_options.md` |
-| **Announced period (D24)** | **Three months**, stated before anybody joins, extendable by announcement, never silently shortened | owner, 2026-08-11 | `WIND-DOWN.md`; dates still `YYYY-MM-DD` in `deploy.env` |
-| **Alert channel** | **ntfy.sh**, a free unguessable topic, no account | kit default | `MV_ALERT_KIND=ntfy`, `MV_ALERT_URL` empty |
+| **Announced period (D24)** | **2026-08-14 through 2026-11-14**, extendable by announcement, never silently shortened | owner, 2026-08-14 | `WIND-DOWN.md`; live `deploy.env` |
+| **Alert channel** | **ntfy.sh**, tested without recording its capability URL | verified, 2026-08-15 | live `deploy.env` |
 | **Admin path** | **Off.** `MULTIVERSE_RELAY_ADMIN_LISTEN` is deliberately absent; `provision.sh --only verify` checks it stays unset | 2026-08-11 | README §5; `relay.env` |
 
-Three values are still literally `CHOOSE` or a placeholder in `deploy.env.example` and every one of
-them has to be filled on the instance:
+The example file keeps two owner-specific values open for a fresh deployment.
+The live parameter file contains both real values. Do not copy its secrets into this repository.
 
 - `MV_ACME_EMAIL=CHOOSE@example.org` — **`provision.sh` refuses to run until this is real.** It is
   Let's Encrypt's expiry warning address, the last line of defence behind `monitor.sh`'s
   certificate check.
 - `MV_ALERT_URL=` — empty. `monitor.sh` will log "alert dropped" and reach nobody.
-- `MV_BUNDLE=CHOOSE` — informational only (nothing reads it; `monitor.sh` reads real memory from
-  the kernel), but it is the written record of what the box was sized for.
-- `MV_PERIOD_START` / `MV_PERIOD_END` — both `YYYY-MM-DD`. `provision.sh`'s `preflight` now **warns**
-  on a placeholder, on a string that is not a date, and on an end that is not after its start, and
-  prints the period's length in days when they are real. It stays a warning rather than a stop
-  because no command in the run reads them — **the gate is still human**, and it is Phase 14: an
-  announcement built from placeholder dates would be nonsense.
 
-### The one sizing decision left, and the arithmetic behind it
+### The live size and the arithmetic behind it
 
-`MV_BUNDLE` is open because nothing has been bought. **The plan of record is: start on the $12
-bundle and resize when the monitor's RAM tripwire fires.** `SIZING.md` §5 endorses exactly this —
+The live instance uses the $12 `small_3_0` bundle. Resize when the monitor's RAM tripwire fires.
+`SIZING.md` §5 endorses exactly this plan —
 "a third plan exists and is cheaper than either row" — because Lightsail resizes through a snapshot,
 which converts a sizing error from an outage into a bill plus a few minutes of announced downtime.
 
@@ -264,19 +248,18 @@ minted. Attach the static IP first, then point DNS at the static IP. (README §6
 
 **T2 — Both A records must be "DNS only" (grey cloud) at Cloudflare.** Cloudflare defaults new
 proxied records to the orange cloud. A proxied record terminates TLS at Cloudflare, which breaks the
-`wss://` path in every join string — the relay's own certificate is the identity a sidecar expects —
+`wss://` path in every join string — nginx's origin certificate is the identity a sidecar expects —
 and hides the origin from the ACME validator. Both `bibitesmultiverse.com` and
 `status.bibitesmultiverse.com` get their own A record at the same static IP, and both must be grey.
 
 **T3 — `status.bibitesmultiverse.com` must be on the certificate at issuance.** It already is, via
 `MV_CERT_EXTRA_NAMES`. A name added later needs a re-issue, and a re-issue spends an ACME rate-limit
-slot. Do not remove it because the status page is currently reached by port rather than by name;
-it costs nothing at issuance and cannot be added for free afterwards.
+slot. Keep it because it costs nothing at issuance and cannot be added for free afterwards.
 
 **T4 — Open the ports in the Lightsail console's own firewall, not only in `ufw`.** `provision.sh`
 configures `ufw`, which is the *second* of two firewalls; the console's is the one the internet meets
-first, and a new instance opens only 22 and 80 by default. Four rules: **22** (SSH), **80** (ACME
-HTTP-01), **443** (the map), **8443** (the status page). If the instance is dual-stack, repeat every
+first, and a new instance opens only 22 and 80 by default. Three rules: **22** (SSH), **80** (ACME
+HTTP-01), and **443** (HTTPS). If the instance is dual-stack, repeat every
 rule under the IPv6 firewall. And if an **AAAA** record exists anywhere it must point at this same
 host — the ACME validator prefers IPv6, so a stale AAAA fails issuance while every IPv4 test on the
 box passes. The simplest safe answer is to create no AAAA record at all.
@@ -471,12 +454,12 @@ Phase 10 costs an ACME attempt. Spend the time here.
 
 **Who:** the owner only. **Gate:** Phase 3.
 
-Networking → IPv4 Firewall: **22**, **80**, **443**, **8443**. Repeat under IPv6 Firewall if the
+Networking → IPv4 Firewall: **22**, **80**, and **443**. Repeat under IPv6 Firewall if the
 instance is dual-stack.
 
 **Verify, from off the box** — port 80 will refuse until nginx is up in Phase 10, so at this stage
-the observable is the console's own rule list plus, after Phase 10, `nc -z -w5 bibitesmultiverse.com
-80 443 8443` from the development machine returning success on all three.
+the observable is the console's own rule list. After Phase 10, test ports 80 and 443 from the
+development machine.
 
 **When it fails:** a closed 80 is the classic cause of an ACME failure that looks like a DNS problem.
 `ufw` being open proves nothing about the console.
@@ -553,7 +536,7 @@ sudo /home/ubuntu/multiverse-kit/provision.sh --dry-run
   placeholders or run backwards — provisioning continues, but Phase 14 is blocked until they are real.
 - `staged: archive-linux-amd64 archive-linux-arm64 relay-linux-...` — the architecture matching
   `uname -m` must be present.
-- The four summary lines: domain, relay URL, status page URL, archive on loopback.
+- The five summary lines: domain, website, relay URL, relay backend, and archive.
 - Every subsequent phase prints `[dry-run]` before each mutation and creates nothing.
 
 **When it fails:** every `STOP:` line names its own remedy. The three you are most likely to see are
@@ -569,21 +552,18 @@ sudo /home/ubuntu/multiverse-kit/provision.sh
 ```
 
 Fifteen phases, idempotent, a few minutes. The two that carry risk are `tls` (the ACME issuance) and
-`bootstrap` (T6). The run ends in `verify`, which prints twelve checks.
+`bootstrap` (T6). The run ends in `verify`, which prints fourteen checks.
 
-**Verify — the twelve checks must all read PASS:** relay unit active, archive unit active, nginx
-active, monitor timer active, backup timer active, relay `/healthz` over TLS, archive `/healthz` on
-loopback, status page over TLS, **archive listener is loopback only**, relay reads its key without
-root, **monitor and backup read `/etc/multiverse/deploy.env` without root** (T11 — the check reads
-the file *as* the `multiverse` user, and prints the `chown` remedy when it fails), and **admin path
-is NOT bound**. Then, from off the box, load `https://bibitesmultiverse.com:8443/` in a browser: it
-should render with no certificate warning.
+**Verify — all checks must read PASS.** They cover the units, timers, two loopback upstreams,
+website, status API, unauthenticated relay rejection, parameter-file access, and disabled admin path.
+Then load `https://bibitesmultiverse.com/` from outside the instance. It must render without a
+certificate warning. A request to `/contract-b/v4` without a credential must return HTTP 401.
 
 **Verify the certificate specifically:**
 
 ```sh
 sudo certbot certificates                      # names: both, and ~89 days left
-ls -l /etc/multiverse/tls/                     # fullchain.pem, privkey.pem, 0640 root:multiverse
+ls -l /etc/multiverse/tls/                     # certificate 0640, private key 0600 root:root
 systemctl is-active certbot.timer              # active
 ```
 
@@ -691,7 +671,7 @@ copy, and it is kilobytes, so investigate rather than work around.
 **before** any join string leaves the box.
 
 `ANNOUNCEMENT.md` holds the text for six documentation slots and edits nothing itself. Fill
-`<DOMAIN>`, `<START>`, `<END>` and `<STATUS_PORT>` from `deploy.env`, and write the same dates back
+`<DOMAIN>`, `<START>`, and `<END>` from `deploy.env`, and write the same dates back
 into `MV_PERIOD_START` / `MV_PERIOD_END` so the box and the announcement agree.
 
 The six slots are: `release/RELEASE-PAGE.md`'s `@@OWNER:ANNOUNCED_PERIOD@@` field;
@@ -703,7 +683,7 @@ occurrences); `docs/participant/leave.md`'s "When the map itself ends";
 **Two rules that come with D24 and must not be paraphrased:** the period is stated **before** anybody
 joins, and the bound may be extended by announcement but is **never silently shortened**.
 
-**Verify:** no `<START>`, `<END>`, `<DOMAIN>` or `<STATUS_PORT>` placeholder survives in any edited
+**Verify:** no `<START>`, `<END>`, or `<DOMAIN>` placeholder survives in any edited
 file, and no `> **SLOT — WP3` block remains in the three participant documents.
 
 **When it fails:** the honest failure here is announcing a period the owner has not actually
@@ -921,7 +901,7 @@ has to be divided before it means anything about strangers.
 
 Stated rather than left to be discovered.
 
-- **External reachability.** See §1. The box cannot test it and neither can you.
+- **External reachability.** See §1. Test it from outside the instance after each front-door change.
 - **Three defects this document found in the kit are no longer open, and this section no longer
   lists them.** The `deploy.env` ownership defect, the A-record check's loopback answer and the
   peers floor were all fixed in the kit after this handoff was written; **T9, T10 and T11 in §4

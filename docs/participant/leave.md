@@ -122,5 +122,20 @@ to the map's own durable files — the slot-to-identity register and the archive
 Your world is not part of that ending. It is on your machine, it saves on its own schedule, and
 it goes on being a Bibites world with or without a map to export to.
 
-> **SLOT — WP3 (the hosted deployment).** The announced period, the wind-down procedure, and
-> what a participant is told and when.
+**The period is 2026-08-14 to 2026-11-14 — three months**, stated before anybody joined.
+
+**How you are told, and when.** Reminders arrive 30, 14, and 7 days before the end. The
+14-day reminder lists what you keep: your world, saves, journal, and genomes. You do not need
+to rescue them from the server. The 7-day reminder is the last time an extension can be
+announced.
+
+**On the final day**, the relay stops first, followed by the archive. The operator publishes a
+final status-page capture with the closing message. It shows the map, species, flows, and totals
+at the end.
+
+**Within one week**, the map's files reach their stated disposition. A closing message says
+what was kept. The credential store is destroyed because it has no use after the relay stops.
+The slot register stays with the record so the record remains legible.
+
+**Nothing about your world changes on that day.** It becomes a Bibites world without a map,
+just as it was before you joined.

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -128,10 +129,21 @@ func (c *slotCounter) count(key string) int {
 // sourceKey is the address half of maxConnectionsPerAddress. The PORT is
 // deliberately dropped: a limit keyed on host:port would count every connection
 // as its own address and bound nothing at all.
+//
+// The hosted deployment puts nginx on the public listener and the relay on
+// loopback. Trust one X-Forwarded-For address only when the direct peer is
+// loopback. A public client cannot opt into this path, and a comma-separated
+// chain is rejected rather than interpreted.
 func sourceKey(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
+	}
+	if direct := net.ParseIP(host); direct != nil && direct.IsLoopback() {
+		forwarded := strings.TrimSpace(r.Header.Get("X-Forwarded-For"))
+		if client := net.ParseIP(forwarded); client != nil {
+			return client.String()
+		}
 	}
 	return host
 }

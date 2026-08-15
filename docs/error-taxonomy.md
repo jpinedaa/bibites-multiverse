@@ -250,7 +250,7 @@ journal's destination addresses and every organism addressed to it
 | `B-4000` | Close `4000`, and the client does not reconnect until restarted | A different **major** contract version, or a connection on a retired path. The retired paths stay served, over TLS, precisely so this error is defined rather than a bare 404 | Install the release that speaks the map's current major | **you** |
 | `B-4003a` | Close `4003`, reason naming a malformed frame or a first frame that was not a handshake | A defect in the sidecar | Report it | **you** (report) |
 | `B-4003b` | Close `4003` `"peerId does not match the authenticated credential"`, **after** the connection was accepted. Nothing appears on any slot's `lastRefusal` | The credential names one identity and the handshake claimed another. **This is the map's central security property working**: the peer whose identity was borrowed is not touched, not closed, and not told, because nothing happened to it. On the relay's side one line is written — `relay: refusing a handshake whose peerId does not match its credential`, naming the credential's peer, the claimed peer and the role, and stating that the peer whose id was claimed is not told and is not touched — and that line is the operator's whole view of it | Present the identity your join string names. If you did not do this deliberately, your stored identity and your credential have drifted apart — re-apply the join string | **you** |
-| `B-4003c` | Close `4003` naming both game versions, and `lastRefusal` appears on your slot for every other peer to see | The relay refuses a peer whose game version is incompatible with the map's. **The fourth of D22's four kept gates**, kept by the owner's call of 2026-08-11 (`contract-b-m4.md` §6.1, §22 B31) | The map is on a different game build. Only the operator can say which build the map is on and when it will converge | **operator** |
+| `B-4003c` | Close `4003` naming both game versions, and `lastRefusal` appears on your slot for every other peer to see | The relay refuses a peer whose game version is incompatible with the map's. **The fourth of D22's four kept gates**, kept by the owner's call of 2026-08-11 (`contract-b-m4.md` §6.1, §22 B31) | Read every live slot's `gameVersion` at **https://bibitesmultiverse.com/** or in `/api/status`. The page is public, read-only, and available without a credential. The operator coordinates convergence | **operator** |
 | `B-4003d` | Close `4003` `"protocolVersion … is below this relay's minimum …"`, and the same `lastRefusal` on your slot | Your build is older than the floor this map's operator published. It is a **compatibility** control and never a security one — it stops the honest and inconveniences nobody else | Upgrade from the published release. **Nobody on the relay's side can do it for you** — the release channel pushes nothing (D25) | **you** |
 | `B-4003e` | Close `4003` naming a missing grant, e.g. `"credential for … does not carry the subscribe grant"` | You asked for a role your credential does not carry. The three grants — peer, subscribe, admin — are disjoint. Nothing appears on your slot's `lastRefusal`, because your *peer* connection was refused nothing | Connect with the role your credential carries, or ask the operator for the credential the role needs. A subscriber grant is issued deliberately and never requested on the wire | **you**, then **operator** |
 | `B-4004` | Close `4004`, then a reconnect on the backoff ladder | The relay heard nothing from this connection inside its liveness timeout. Ordinarily the network | Wait. If it repeats all day, the path between this machine and the relay is the thing to look at | **nobody**, then **you** |
@@ -476,11 +476,8 @@ has to be treated as a compromise, which turns a support question into a slot ha
 
 ## 9. The slots
 
-Every marked to-do in this document, with the package that owns it.
-
-| Slot | What is missing | Owner |
-|---|---|---|
-| §3.2 `B-4003c` | Where the map publishes the game build it is currently on, so a refused peer can read it rather than ask | **WP3** |
+The hosted map publishes each live slot's game build on its public status page. This closes
+WP3's `B-4003c` documentation slot without adding a private operator lookup.
 
 **WP7's own two are closed by its implementation arc.** §2.4 now names the two commands, states
 that the sidecar must be stopped for both, and quotes the duplication warning the release prints

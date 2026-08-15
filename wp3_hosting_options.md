@@ -1,24 +1,22 @@
 # WP3 Hosting Options — a costed set, for iteration
 
-**Status: an options document. Nothing here is decided** — with one dated exception, *Which
-registrar to buy from, and which name to buy*, added 2026-08-14 to record the reasoning behind a
-choice the owner had already made and the repo already carries. It exists so that the hosting calls
-WP3 waits on can be made against arithmetic instead of against a feeling, and every option in it
-is written to be argued with. Where a number is a measurement it says so and says when; where it
-is a vendor's published price it says which page and what date; where it is a guess it is called
-a guess.
+**Status: historical options record.** The owner resolved the hosting decisions, and the public
+service went live on 2026-08-14/15. This document preserves the analysis that informed those
+decisions. Its prices and alternatives are not the current operations record.
 
-**What it is for.** `m5_tracking.md` records WP3 as *Not started — opens on the owner's hosting
-calls*, and `system_decomposition.md`'s **D24** now fixes one of those calls: a **bounded,
-announced** run of **3 months**, chosen 2026-08-11. The substrate is still open, and the owner has
-narrowed it to **AWS or GCP** and raised a second idea worth taking seriously — **running game
-simulations in the cloud on spot instances, with handoff as they come and go, over cheaper
-permanent storage**. This document costs both.
+**Deployed outcome.** AWS Lightsail instance `bibites-multiverse` runs bundle `small_3_0` in
+`us-east-1a`. Cloudflare serves DNS-only records for `bibitesmultiverse.com`. nginx owns public
+ports 80 and 443. It sends `/contract-b/` to the relay on `127.0.0.1:8795`. It sends all other
+requests to the archive website on `127.0.0.1:8796`. The ledger is retained indefinitely. Genome
+blobs use a 720-hour horizon.
 
-**What it is not.** No account exists, nothing is signed up for, nothing is deployed. It also does
-not decide the retention rule, which is Decision 3's, nor the wind-down, which is WP3's own
-deliverable. What it does is put a **dollar figure on Decision 3**, which turns out to be the
-most consequential thing in it.
+The current operations sources are `deploy/README.md`, `deploy/HANDOFF-lightsail.md`,
+`dev_environment.md`, and `m5_tracking.md`. Use them for live addresses, procedures, and status.
+The spot-world analysis below remains a future option.
+
+**Original purpose.** This document costed the WP3 hosting choices and a possible cloud-world
+rehearsal. Measurements state their date and source. Vendor prices state their source date.
+Estimates are identified as estimates.
 
 **Three things it found that were not in the plan**, and which the owner should read before the
 options:
@@ -458,13 +456,10 @@ That single fact settles the three options:
 smallest term anybody sells — decouples the string every participant holds from the machine it
 points at, and every migration path in Part 3 depends on that decoupling.
 
-One design note WP3 will have to take, flagged rather than answered: the relay currently listens on
-its own port with its own TLS. Participants behind restrictive networks will have an easier time on
-**443**. Putting both the relay and the status page on 443 needs a reverse proxy, which either
-duplicates or terminates the TLS B23 gave the relay. The cheap version is to move the relay to 443
-and give the status page its own port or its own name; the expensive version is a proxy. **This is
-a WP3 call, and it should be made before the first join string is minted, because the port is in
-the join string too.**
+**Deployed front door, 2026-08-15 UTC.** nginx terminates TLS on port 443. It sends
+`/contract-b/` to the loopback relay and sends other paths to the archive website. This result
+supersedes the earlier direct-TLS and separate-port options. No join string existed during the
+change, so no compatibility listener was necessary.
 
 ### Which registrar to buy from, and which name to buy
 
@@ -1001,14 +996,11 @@ month on its own merits regardless of whether cloud worlds are ever scaled.
 
 Three stages. Each one is separately abandonable, and each one names what it proves.
 
-### Stage 1 — the core service. This is WP3 proper.
+### Stage 1 — the core service. WP3 completed this stage.
 
-**The measurement this stage used to wait on is done** **[rig experiment, 2026-08-12]**:
-`GOMEMLIMIT=5GiB` takes about a third off the replay peak for no measurable wall clock and belongs
-in the service unit, and it moves *keep everything* on an 8 GB instance from day 26 to day 43 — not
-to 90.
-**What the bundle waits on now is Decision 3 and one ~80-line change to the archive's replay**,
-which takes 5.6–7.0× off the peak and puts the same instance past day 180.
+The streamed archive replay and retention policy removed the original bundle gate. The deployed
+service uses `small_3_0`, retains the ledger, and prunes genome blobs after 720 hours. The service
+unit sets `GOMEMLIMIT=1536MiB` for the 2 GB instance.
 
 | | |
 |---|---|
@@ -1016,7 +1008,7 @@ which takes 5.6–7.0× off the peak and puts the same instance past day 180.
 | **Cost** | **$36 + ~$5 domain** if Decision 3 bounds the ledger — **$0 + $5** if the 90-day trial applies. **$132 + $5** if the rule is *keep everything* |
 | **Proves** | WP3's done-when clauses: restart on exit and on boot, a survived certificate rotation, monitoring that reaches a person, backup of `ring.json`, `peers.json` and the archive's three durable files, a written restart policy, the forward receipt measured at rate, the announced period, the wind-down, and the retention rule with its arithmetic |
 | **D24 says** | **the clock starts here.** The announced period begins when participants can join, which means the wind-down procedure has to be written **before** this stage completes, not after. The ending is a stated event, and this is the stage that states it |
-| **Owner's calls in it** | the retention rule; the bundle; the name; whether the relay moves to 443 |
+| **Owner's calls in it** | Resolved: ledger retained, genomes kept 720 hours, `small_3_0`, `bibitesmultiverse.com`, and shared HTTPS port 443 |
 
 ### Stage 2 — ONE experimental cloud world, as a rehearsal.
 
@@ -1056,37 +1048,18 @@ ladder has to respect:
 
 ---
 
-## What remains the owner's to decide
+## Decisions and remaining owner calls
 
-Ordered by how much else depends on them.
-
-1. **The retention rule (Decision 3).** It sets the disk, the instance, whether the archive can
-   restart in month three, and about $96 of the Part 1 bill. It is the one decision everything else
-   in this document waits on.
-2. **AWS or GCP.** This document recommends AWS on price, on bundled egress, and on a 2-minute spot
-   notice against 30 seconds. It does not know what the owner already knows how to operate, and
-   that is worth more than the difference.
-3. **The bundle**, once (1) is answered: $12 with a bounded ledger, $44 with *keep everything*.
-   With *keep everything*, the $44 bundle is only restartable through month three if the replay is
-   streamed first (measured 2026-08-12); `GOMEMLIMIT` alone gets it to day 43.
-4. ~~**The name.**~~ **Answered 2026-08-14**: a registered domain — `bibitesmultiverse.com`, to be
-   bought at Cloudflare Registrar with Porkbun as the fallback (~$10.44/year). Free dynamic DNS and
-   the cloud's own hostname are both off the table. The reasoning is in *Which registrar to buy
-   from, and which name to buy*; the purchase itself has not happened and has its own handoff at
-   `deploy/HANDOFF-domain.md`. **The name is effectively permanent once the first join string is
-   minted.**
-5. **Port 443 or the relay's own port**, decided before the first join string is minted, because
-   the port is in the string.
-6. **Whether to run any cloud world at all.** Whether to ask the developer first was answered on
-   2026-08-12 — **no ask**, everything approved to proceed **[record: `m5_tracking.md` WP3 row]**;
-   the trademark side of that same decision is in *The name the project does not own*.
-7. **Whether to pay for the itch.io build per cloud instance**, and how much. Name-your-own-price
-   makes this a choice.
-8. **Whether the status page's poll cadence is worth changing.** The measurement is here; the
-   design is not this document's. Compression is no longer part of this question — it was
-   implemented on 2026-08-12 and ships with the archive's next restart.
-9. **Whether a peer the owner controls belongs on a map of strangers**, given that Decision 8's bar
-   counts only non-owner peers.
+| Topic | Current outcome |
+|---|---|
+| Retention | Resolved. The ledger is retained. Genome blobs use a 720-hour horizon. |
+| Provider and bundle | Resolved. AWS Lightsail runs `small_3_0` in `us-east-1a`. |
+| Domain and DNS | Resolved. Cloudflare serves DNS-only records for `bibitesmultiverse.com`. |
+| Public port | Resolved. nginx owns port 443 and routes the relay by path. |
+| Cloud worlds | Optional future scope. Stage 2 remains the first required rehearsal. |
+| Developer payment | Open only if the owner starts a cloud world. |
+| Status poll cadence | Optional tuning. Compression is deployed. |
+| Owner-controlled peer | Open only if the owner adds one to the public map. |
 
 ## Open questions this document could not close
 
@@ -1098,9 +1071,9 @@ Ordered by how much else depends on them.
   ~$3.65/month and verify on the billing console.
 - **Does GCP's Standard Tier 200 GiB free allowance stack with the Always Free tier's 1 GB?** They
   are separate programmes and this pass could not confirm how they combine.
-- **Does the itch.io Linux build's `BibitesAssembly.dll` match the Windows one?** Downloadable and
-  checkable in minutes; not done here because this document was scoped to buy nothing and install
-  nothing.
+- ~~**Does the itch.io Linux build's `BibitesAssembly.dll` match the Windows one?**~~ **Closed
+  2026-08-12.** The six patched types match. The 512-byte build difference is outside the mod's
+  patch surface. Part 2 records the full rehearsal.
 - ~~**Will `GOMEMLIMIT` bring the archive's replay peak down, and at what cost in replay time?**~~
   **Closed 2026-08-12** by the matrix in *The term nobody has priced*: yes — about a third off the
   peak at `GOMEMLIMIT=5GiB` for no measurable wall clock and 17–39% more CPU, ruinous below ~2× the

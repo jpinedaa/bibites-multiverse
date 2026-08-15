@@ -12,7 +12,6 @@ deployment kit.
 | `<DOMAIN>` | `MV_DOMAIN` | the owner's registered name |
 | `<START>` | `MV_PERIOD_START` | the day the map opens |
 | `<END>` | `MV_PERIOD_END` | `<START>` plus three months |
-| `<STATUS_PORT>` | `MV_STATUS_PORT` | `8443` |
 
 **The period is three months** (D24, chosen by the owner 2026-08-11). Do not
 paraphrase the two rules that come with it: the period is stated **before**
@@ -130,14 +129,13 @@ map to export to, exactly as it was before you joined one.
 Replaces *"> **SLOT — WP3 (the hosted deployment).** The page's address."*.
 
 ```markdown
-The map's page is at **https://<DOMAIN>:<STATUS_PORT>/** — note the port; the map
-itself is on the standard one and the page has its own.
+The map's page is at **https://<DOMAIN>/**.
 
 It is public and read-only. It shows what the relay already broadcasts to every
 peer, which is exactly the list in [join.md](join.md) under *What joining
 publishes about your world* — nothing more, for you or for anybody else. The
 JSON behind it is at `/api/status` if you would rather read it that way, and
-`ringstat --url https://<DOMAIN>:<STATUS_PORT>` is the terminal form.
+`ringstat --url https://<DOMAIN>` is the terminal form.
 ```
 
 ## Slot 5 — `docs/error-taxonomy.md` §3.2, `B-4003c`
@@ -146,7 +144,7 @@ The open slot asks: *"Where the map publishes the game build it is currently on,
 so a refused peer can read it rather than ask."*
 
 ```markdown
-**Where to read it:** the map's status page, **https://<DOMAIN>:<STATUS_PORT>/**,
+**Where to read it:** the map's status page, **https://<DOMAIN>/**,
 publishes every live slot's `gameVersion` — and `/api/status` carries the same
 field per slot for a machine reader. A peer refused for an incompatible game
 version can therefore read the build the map is on **without asking the
@@ -184,7 +182,7 @@ The Bibites Multiverse public map is open from <START> to <END> — three months
 
   Install: <release URL>
   Map:     wss://<DOMAIN>/contract-b/v4   (you get a join string from me)
-  Page:    https://<DOMAIN>:<STATUS_PORT>/
+  Page:    https://<DOMAIN>/
 
 Three months is the whole commitment, stated up front. It can be extended by
 announcement and it will not be shortened without one. Your world stays on your

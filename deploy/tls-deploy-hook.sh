@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# certbot deploy hook: put the renewed pair where the relay is already watching.
+# certbot deploy hook: install the renewed pair for nginx and reload nginx.
 #
 # Installed at /etc/letsencrypt/renewal-hooks/deploy/multiverse-tls.sh, which
 # certbot runs — every executable in that directory — after ANY successful
@@ -7,35 +7,28 @@
 # that a re-issue, an added name or a certbot upgrade cannot leave the hook
 # behind.
 #
-# WHY A COPY AND NOT A GROUP GRANT ON /etc/letsencrypt. Both make the key
-# readable by a relay that is not root. The copy wins on four counts:
+# WHY A COPY. nginx can read the Let's Encrypt files as root. The separate copy
+# gives the monitor one stable certificate path without exposing certbot's tree.
 #
 #   1. ONE FILE, ONE OWNER, ONE MODE. A group grant has to hold across
 #      /etc/letsencrypt/live, /etc/letsencrypt/archive, the dated subdirectory
 #      and the key itself — four objects certbot creates and re-creates on its
 #      own schedule, and whose modes it has reset across versions. An ACL that
 #      survives one renewal is not evidence it survives the next.
-#   2. THE RELAY NEVER TRAVERSES certbot's TREE. live/ is a symlink farm into
-#      archive/; a reader needs both paths. Here it opens two regular files in
-#      one directory that nothing but this hook writes.
-#   3. ATOMIC. The pair is written to temporaries and renamed, so the relay never
-#      sees a half-written renewal. The CertReloader tolerates that case anyway —
-#      it keeps serving the certificate it already has — but not producing the
-#      case is better than surviving it.
+#   2. NO SERVICE TRAVERSES certbot's TREE. live/ is a symlink farm into
+#      archive/. Here nginx opens two regular files in one directory.
+#   3. ATOMIC. Each file is written to a temporary and renamed. nginx reloads
+#      only after both files are installed.
 #   4. AUDITABLE. `ls -l /etc/multiverse/tls` is the whole permissions story, and
 #      the failure mode a copy introduces (a hook that silently stops running) is
-#      exactly what monitor.sh's certificate check watches for, by comparing the
-#      certificate the LISTENER SERVES against the file on disk.
+#      exactly what monitor.sh watches. It compares the served certificate with
+#      the file on disk.
 #
 # The cost is 8 KB duplicated and one hook that must not be forgotten. That is
 # what the renewal-hooks directory is for.
 #
-# WHAT IT DOES NOT DO: restart the relay. B23's rotation row is a rule about what
-# a rotation costs a connected peer and the answer is NOTHING — GetCertificate is
-# called once per handshake and stats the pair, so a renewed pair is picked up by
-# the next handshake with no signal, no restart and no reload command. nginx is
-# the one process here that does need telling, and it gets a reload, not a
-# restart.
+# WHAT IT DOES NOT DO: restart a service. nginx gets a reload. Existing website
+# requests and WebSocket connections continue while nginx opens the new pair.
 set -euo pipefail
 
 ENV_FILE="${MV_ENV_FILE:-/etc/multiverse/deploy.env}"
@@ -69,8 +62,10 @@ install -d -m 0750 -o root -g "$MV_GROUP" "$MV_TLSDIR"
 
 changed=0
 install_one() {
-  local src="$1" dst="$2" mode="$3"
+  local src="$1" dst="$2" mode="$3" owner="$4"
   if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+    chown "$owner" "$dst"
+    chmod "$mode" "$dst"
     return 0
   fi
   # install(1) writes to the destination directly, so go through a temporary and
@@ -78,16 +73,15 @@ install_one() {
   local tmp
   tmp="$(mktemp "${dst}.XXXXXX")"
   cat "$src" >"$tmp"
-  chown "root:$MV_GROUP" "$tmp"
+  chown "$owner" "$tmp"
   chmod "$mode" "$tmp"
   mv -f "$tmp" "$dst"
   changed=1
 }
 
-# 0640 root:<group>. The relay runs as a member of that group and never as root;
-# nothing else on the box is in it.
-install_one "$LINEAGE/fullchain.pem" "$MV_TLSDIR/fullchain.pem" 0640
-install_one "$LINEAGE/privkey.pem"   "$MV_TLSDIR/privkey.pem"   0640
+# The monitor reads the certificate. Only nginx's root master reads the key.
+install_one "$LINEAGE/fullchain.pem" "$MV_TLSDIR/fullchain.pem" 0640 "root:$MV_GROUP"
+install_one "$LINEAGE/privkey.pem"   "$MV_TLSDIR/privkey.pem"   0600 root:root
 
 if [ "$changed" = 0 ]; then
   log "pair unchanged; nothing installed"
@@ -95,10 +89,8 @@ if [ "$changed" = 0 ]; then
 fi
 
 log "installed a renewed pair into $MV_TLSDIR (expires $(openssl x509 -in "$MV_TLSDIR/fullchain.pem" -noout -enddate 2>/dev/null | cut -d= -f2))"
-log "the relay needs NO restart: its CertReloader picks the pair up on the next TLS handshake"
 
-# nginx holds the certificate open and does need telling. A reload, not a
-# restart: an open status-page connection is not worth dropping.
+# nginx gets a reload, not a restart. Existing connections continue.
 if systemctl is-active --quiet nginx 2>/dev/null; then
-  systemctl reload nginx && log "nginx reloaded for the status page's listener"
+  systemctl reload nginx && log "nginx reloaded for the HTTPS front door"
 fi

@@ -281,6 +281,13 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A production data directory must have a durable map even before its first
+	// reservation. Besides making the empty map survive as explicit state, this
+	// gives the identity backup both files from its first run and proves at
+	// startup that ring.json can be replaced and the directory can be synced.
+	if err := grid.Save(); err != nil {
+		return nil, fmt.Errorf("relay: initialize ring.json: %w", err)
+	}
 	s := &Server{
 		log:               opts.Logger,
 		creds:             opts.Credentials,

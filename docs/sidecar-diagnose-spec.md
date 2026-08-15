@@ -153,7 +153,7 @@ not fifteen failures.
 | `journal-replay` | Did this sidecar's journal replay cleanly at its last start? | **Zero** discarded bytes | `FAIL` on any non-zero count, quoting the number. Complete records behind a tear are gone, and the count is the only evidence that ever existed | `LOCAL-JOURNALTORN` | *A damaged journal is loud*; the rolling-restart record, whose every row reads zero discarded bytes |
 | `journal-depths` | Are the custody, paced and held depths healthy, and are the bounce counters moving? | Depths small and falling; the timeout-bounce counter not increasing | `WARN` on a paced depth that never falls — **that names a delivery rate set too low**, and it is read against this world's own configured rate rather than against a default, which has been changed three times. **A single-shot tool cannot see a trend, so it reads an AGE instead of a slope**: at this world's own `inboundRatePerSimMinute` and its applied speed, the current depth needs a computable number of wall seconds to drain, and an entry that has already waited longer than the whole queue should take is a queue that is not draining. That is the configuration's own arithmetic and not a threshold | `BMIG-OVERLOADED`, `AOUT-RATE_LIMITED` | The settled reading of the live map: all four depths at zero, no bypass; *Watch items* on reading a paced depth against its rate |
 | `save-health` | Are this world's saves completing, on schedule, inside their stall budget? | Last save recent against the configured interval; stalls inside the budget; no failed save | `WARN` on a breach rate outside a stated band. The consequence of a long stall is a session churn and a short delivery pause, **not a lost organism** — arrivals are held in order for the whole silence. **The band is WP8's (§6) and the reading is not**, so: `WARN` when the last save breached D14's published 2 000 ms budget, saying that how OFTEN a breach is too often is a rate WP8 measures; `WARN` when the newest receipt is older than **two** configured intervals, because one interval may simply not have elapsed and after two a save that was due did not happen; and `SKIP` on `saveMinutes` 0, which is a world with its save timer off and a reading rather than a gap | `LOCAL-SAVESTALL`, `A-4004` | *The 2-second save-stall budget is breached routinely*; the dose response of stall length against the heartbeat deadline; the save-file rotation layout |
-| `disk-headroom` | Is there room for what this machine will write? | Free space above a stated multiple of the journal ceiling, the log ceiling and the genome cache cap | `FAIL` below **one** of them — the sum of the ceilings this install has already promised itself it may write is arithmetic rather than a threshold, and below it the ceilings cannot all be honoured. Above it the check has a measurement and no criterion, so it reports the free space and the three ceilings and returns `UNKNOWN` naming WP3 (§6). **Nothing here shrinks a record**: the durable files grow with traffic, and a full disk has previously torn an append-only log and left thousands of zero-byte scratch files at the moment inodes were what had run out | `LOCAL-DISK`, `AOUT-JOURNAL_FULL`, `AOUT-JOURNAL_ERROR` | *The disk budget*; *What still grows forever*; `contract-b-m4.md` §20, B20 |
+| `disk-headroom` | Is there room for what this machine will write? | Free space above a stated multiple of the journal ceiling, the log ceiling and the genome cache cap | `FAIL` below the sum of the ceilings this install has promised itself. The ceilings cannot all be honoured below that sum. Above it the check has a measurement and no criterion, so it reports the free space and the three ceilings and returns `UNKNOWN`. It points to §6. **Nothing here shrinks a record.** Durable files grow with traffic. A full disk previously tore an append-only log. It also left thousands of zero-byte scratch files when the host ran out of inodes | `LOCAL-DISK`, `AOUT-JOURNAL_FULL`, `AOUT-JOURNAL_ERROR` | *The disk budget*; *What still grows forever*; `contract-b-m4.md` §20, B20 |
 | `versions` | What is running here? | Always passes; it is a report | Prints the game, mod and sidecar versions and the two wire versions in one line, in the order a support conversation needs them | §8 of the taxonomy | *Versions* |
 
 ### 2.1 The same checks on Linux, where three of them read differently
@@ -288,15 +288,19 @@ Named so that nobody adds them later without arguing for them.
 
 ## 6. Where each check's criterion has to come from
 
-Three checks have criteria the wire does not fix, and each is a package's to supply. They are
-called out here so the implementation arc does not invent a threshold — **and it did not**. Each
-row's last column is what the built check does while the number is missing:
+Three checks have criteria the wire does not fix. They are called out here so the implementation
+arc does not invent a threshold — **and it did not**. Each row's last column shows what the built
+check does while the number is missing:
 
 | Check | The missing number | Owner | What it does meanwhile |
 |---|---|---|---|
 | `save-health` | The breach-rate band that is a `WARN` rather than a fact of life. The project's own deployment breaches its stall budget routinely, and the honest band is a measurement rather than a target | **WP8**, from the playtest's record | Warns on the reading it can defend — a last save over D14's published 2 000 ms — and says in the same breath that the RATE is WP8's to measure |
-| `disk-headroom` | The multiple of the ceilings that counts as headroom, and the per-participant growth arithmetic behind it | **WP3**, which owns the retention rule and its arithmetic | Fails below one multiple, which is arithmetic; above it reports the free space and the three ceilings and returns `UNKNOWN` naming WP3 |
+| `disk-headroom` | The multiple of the participant's ceilings that counts as headroom | **Open.** WP3 supplies the separate host-growth arithmetic below, not this participant threshold | Fails below one multiple, which is arithmetic. Above it, the check reports the free space and the three ceilings and returns `UNKNOWN` |
 | `time-scale` | The band between applied and achieved speed that is a `WARN`. At a speed a machine cannot meet the two come apart completely, and **the gap is the reading** | **WP8**, and Risk 9 is why it matters — a stranger's world at the wrong speed corrupts every rate the playtest measures | Measures the achieved rate itself and prints it beside the applied one with the percentage between them, and judges nothing. **A second half of that row is not WP8's and is not missing either — it is absent**: there is no configured target on this machine to compare the applied value against, because time scale is report-only on both wires and the control surface that would set one is D23's, in M6 |
+
+**The published host-growth arithmetic** comes from WP3 and `deploy/SIZING.md`. The map writes
+**56 MB per day per unit of summed map speed, plus 1.6 MB per day per slot**. A participant
+does not need this number to run a world. The operator uses it to size the hosted volume.
 
 ---
 
@@ -304,7 +308,7 @@ row's last column is what the built check does while the number is missing:
 
 | Slot | What is missing | Owner |
 |---|---|---|
-| §6 | The three thresholds above | **WP3**, **WP8** |
+| §6 | The participant `disk-headroom` multiple and WP8's two measured bands. WP3's separate host-growth arithmetic is published above | **Open**, **WP8** |
 | §2.1 | **`mod-log`'s Linux shape test.** The check as shipped in `m5.0` applies the Windows absence-tell on both platforms and can report `LOCAL-STARVATION` against a shredded log, whose remedy does not apply. The specification above fixes the reading — NUL-shape first, `WARN` with `LOCAL-LOGSHRED`, and no starvation verdict once the shape is seen — and the implementation is owed by the next sidecar build | **WP6's Linux extension**, handed to the next `go/` change |
 
 **WP7's own two are closed by the implementation arc.** §1 now fixes the exit codes, the flags,

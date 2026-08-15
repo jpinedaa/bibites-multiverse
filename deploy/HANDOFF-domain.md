@@ -59,8 +59,8 @@ ask.
 
 The name is decided and is already threaded through the deployment kit. `deploy/deploy.env.example`
 line 35 reads `MV_DOMAIN=bibitesmultiverse.com` and line 41 reads
-`MV_CERT_EXTRA_NAMES=status.bibitesmultiverse.com`, so both the relay's certificate and the
-status page's name are already committed to it. `deploy/provision.sh` refuses to run on a
+`MV_CERT_EXTRA_NAMES=status.bibitesmultiverse.com`, so both public names are on nginx's
+certificate. `deploy/provision.sh` refuses to run on a
 placeholder domain at all (`phase_preflight`, lines 116–120) with the reason stated inline: the
 name is baked into every join string the relay ever mints.
 
@@ -256,10 +256,9 @@ grey cloud.** Three reasons, all of them in this repo:
   address, so the challenge is answered by the wrong host. `provision.sh`'s preflight names this
   exact failure when the resolved address does not match the instance: *"the HTTP-01 challenge
   will be answered by the OTHER host and issuance fails"* (lines 147–160).
-- **The `wss://` path breaks.** The relay terminates its own TLS on 443 with a rotation-surviving
-  reload that was built and tested in WP2 (`README.md` §4). Behind the proxy, Cloudflare's
-  certificate sits in front of the relay and terminates the connection that every join string
-  points at.
+- **The `wss://` path changes origin.** nginx terminates origin TLS on port 443
+  and proxies the relay path. A Cloudflare proxy would terminate the client
+  connection before the configured origin.
 - **It is invisible from inside the box.** `provision.sh` pins the domain to `127.0.0.1` in
   `/etc/hosts` (line ~392) so the archive can dial the relay by name, and `README.md` §7 states
   that external reachability *cannot* be tested from the instance at all. So every on-box check
@@ -395,7 +394,7 @@ see, and ask. This document was written without access to the live registrar UI 
 
 Not in this session. The domain is one of the owner's twelve manual steps, listed in full at
 `deploy/README.md` §6 — step 6 there is the one you just did, and steps 4, 5 and 7 (create the
-Lightsail instance, attach the static IP, open the four firewall ports) are what has to happen
+Lightsail instance, attach the static IP, open the three firewall ports) are what has to happen
 before the DNS records this document forbade you to create.
 
 That work has its own handoff at **`deploy/HANDOFF-lightsail.md`**, written in parallel with this

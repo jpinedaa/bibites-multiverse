@@ -35,11 +35,11 @@ The relay prints a block on its own console, once, and the operator hands you wh
 
 ```
 JOIN STRING for peer-your-world — printed ONCE. Hand it over out of band.
-  relay       wss://<relay-host>/contract-b/v4
+  relay       wss://bibitesmultiverse.com/contract-b/v4
   peerId      peer-your-world
   secret      <32 random bytes, hex>
   grant       peer
-  one line    multiverse-join/1 wss://<relay-host>/contract-b/v4 peer-your-world.<secret>
+  one line    multiverse-join/1 wss://bibitesmultiverse.com/contract-b/v4 peer-your-world.<secret>
 
   This relay keeps a VERIFIER, not the secret: it cannot print this again.
   If it is lost, the only recovery is an operator slot handover by name
@@ -47,7 +47,7 @@ JOIN STRING for peer-your-world — printed ONCE. Hand it over out of band.
 
   On peer-your-world's own machine:
       umask 077; printf '%s\n' '<secret>' > ~/.multiverse-peer-secret
-      multiverse-sidecar --relay wss://<relay-host>/contract-b/v4 \
+      multiverse-sidecar --relay wss://bibitesmultiverse.com/contract-b/v4 \
           --peer-id peer-your-world --credential-file ~/.multiverse-peer-secret
 ```
 
@@ -168,10 +168,33 @@ that you know it before you join rather than after. **A subscriber sees nothing 
 already see** — there is no subscriber-only field and no back channel — and the operator's own
 announcement of the map states what a participant is agreeing to.
 
-> **SLOT — WP3 (the hosted deployment).** The map's announced period, its restart policy —
-> which restarts are routine and what one looks like from your side — and what happens to the
-> map's records when the announced run ends. All three are things a participant is told
-> **before** joining.
+## The map, its period, and its restarts
+
+**The map runs from 2026-08-14 to 2026-11-14 — three months.** The period is stated before
+anybody joins. It can be extended by announcement, and it will never be silently shortened.
+What ends is the shared map. Your world is on your machine and is unaffected.
+
+**Restarts are routine and they are short.** The relay restarts from time to time. It can
+restart to add a participant, apply a setting, or take a security update. **You do not need to
+do anything.** Your sidecar notices the disconnect, waits, reconnects, and reclaims your slot
+at your coordinate with `reason: "reclaimed"`. Your slot, position, and credential are unchanged.
+They live on disk, not in the running process.
+
+Organisms that were mid-crossing can take longer to arrive after a restart. **They are not
+lost.** Your machine holds and resends them. The hold is bounded at 24 hours.
+
+An **archive** restart takes longer. The archive draws the status page, so the page is
+unavailable during its restart. The map keeps running, and crossings continue.
+
+Planned restarts are announced. Unplanned restarts get an explanation afterwards.
+
+**The map's record disposition is written before the run starts.** Reminders begin 30 days
+before the end. Your journal, saves, and genomes remain on your machine.
+
+**The map deletes one type of file on a stated schedule.** It keeps the crossing record and
+ancestry for the whole run and beyond. It keeps the related genome files for **30 days**. An
+older organism remains in the record, but the map might no longer have its genome. Your copy
+remains on your machine.
 
 ## When the map refuses you
 
@@ -181,7 +204,7 @@ Three refusals happen at the door, and each has a different actor:
 |---|---|---|
 | Your credential is refused | Wrong, missing or malformed. Your sidecar says so once per attempt, naming the remedy, and holds its retries at the ceiling after five — a wrong secret looks like a world that never joins rather than a machine hammering the map. Re-apply the join string; if it is lost, ask for a handover | **you**, then the operator |
 | Your wire version is below the map's minimum | Your build is older than the floor this map's operator published. **Upgrade from the published release** — nobody on the relay's side can push it to you | **you** |
-| Your game version is incompatible with the map's | The map is on a different game build. Only the operator can see which build the map is on | the operator |
+| Your game version is incompatible with the map's | The map is on a different game build. Read the live builds at `https://bibitesmultiverse.com/`. The operator coordinates convergence | the operator |
 
 Full detail, including what your sidecar must never do when it is refused, is in the taxonomy's
 §3.1 and §3.2.

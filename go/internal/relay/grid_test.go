@@ -444,6 +444,34 @@ func TestRelayStartsOnAStoreThatHoldsACredential(t *testing.T) {
 	s.Close()
 }
 
+// TestRelayPersistsAnEmptyProductionGrid covers the day-zero half of §7.4:
+// ring.json must exist before the first reservation, or the first identity
+// backup is necessarily incomplete and cannot be restore-rehearsed safely.
+func TestRelayPersistsAnEmptyProductionGrid(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := os.Stat(dir + "/ring.json"); !os.IsNotExist(err) {
+		t.Fatalf("ring.json exists before relay startup: %v", err)
+	}
+
+	s, err := New(Options{DataDir: dir, InsecureNoToken: true})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer s.Close()
+
+	if _, err := os.Stat(dir + "/ring.json"); err != nil {
+		t.Fatalf("ring.json was not persisted at startup: %v", err)
+	}
+	again, err := LoadGrid(dir)
+	if err != nil {
+		t.Fatalf("LoadGrid: %v", err)
+	}
+	if again.Width != 0 || again.Height != 0 || again.Size() != 0 || again.MaxSlotEverIssued != 0 {
+		t.Fatalf("persisted empty map is %dx%d with %d slots (max %d)",
+			again.Width, again.Height, again.Size(), again.MaxSlotEverIssued)
+	}
+}
+
 // TestReleaseAndHandoverRefuseALivePeersSlot covers §7.5: a live peer with its
 // slot taken out from under it would keep claiming, keep being refused, and
 // keep a world running with nowhere to export.

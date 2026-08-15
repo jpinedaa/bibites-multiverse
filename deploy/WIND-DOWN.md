@@ -85,8 +85,8 @@ sudo -u multiverse /opt/multiverse/deploy/backup.sh --full
 ```
 
 Leave `multiverse-backup.timer` enabled until the record's disposition is done.
-Leave nginx running: a static page at the status port explaining that the map has
-ended is kinder than a connection refused, and it costs nothing.
+Leave nginx running. Publish a static page at `https://bibitesmultiverse.com/`
+that explains the ending. This is kinder than a refused connection.
 
 ## 4. What becomes of the durable files
 

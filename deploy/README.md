@@ -1,9 +1,7 @@
 # `deploy/` — the hosting kit
 
-**What this is.** Everything the hosted Bibites Multiverse service needs, built
-so that it can be reviewed today and executed the day an instance exists. It is
-scripts and documents. **Nothing here has been run against a cloud account, no
-account exists, nothing is signed up for and nothing is deployed.**
+**What this is.** Everything the hosted Bibites Multiverse service needs.
+The service went live on AWS Lightsail on 2026-08-14.
 
 **What it is for.** `m5_considerations.md`'s Design Question 2 says the hosted
 relay is a service and not a process, and names six operational obligations.
@@ -29,31 +27,31 @@ decision about publishing the status page (`nginx/multiverse-20-status.conf`).
 | File | What it is |
 |---|---|
 | `README.md` | This index, the execution order, and the owner's manual steps |
-| `deploy.env.example` | **The one parameter file.** Copy to `/etc/multiverse/deploy.env` and fill in four values |
+| `deploy.env.example` | **The one parameter file.** Copy it and fill the owner-specific values |
 | `provision.sh` | Idempotent provisioning of a fresh Lightsail Ubuntu instance, in 15 named phases. `--dry-run`, `--only <phase>` |
 | `ship.sh` | Runs on the **development** machine: cross-compiles both architectures and scps them over. The only script here that does not run on the instance |
 | `issue-join.sh` | Mints a participant's join string. Takes the relay restart issuance requires, deliberately and in a batch |
 | `monitor.sh` | Thirteen checks, five minutes apart, alerting a person on change. `--test` proves the channel |
 | `backup.sh` | Three tiers: identity hourly, the record daily, and the offsite half documented. `--restore-help` prints the procedure |
-| `tls-deploy-hook.sh` | certbot deploy hook: installs the renewed pair where the relay's `CertReloader` is already watching. No relay restart |
+| `tls-deploy-hook.sh` | certbot deploy hook: installs the renewed pair and reloads nginx. No service restart |
+| `test-front-door.sh` | Renders the nginx templates and checks the shared HTTPS front door |
 | `systemd/*.service`, `systemd/*.timer` | Six units: two services, two timers and their oneshots |
 | `nginx/multiverse-10-acme.conf` | Port 80: the ACME challenge and nothing else |
-| `nginx/multiverse-20-status.conf` | The status page, published deliberately — TLS, read-only, rate limited, on its own port |
+| `nginx/multiverse-20-status.conf` | HTTPS 443: the website and the `/contract-b/` WebSocket proxy |
 | `SIZING.md` | Decision 3's arithmetic: the growth rule, the memory model, the tripwire and the sizing procedure |
 | `RESTART-POLICY.md` | WP3's written restart policy, built from the measured replay arithmetic |
 | `WIND-DOWN.md` | D24's ending as a stated event: the timeline, both retention arms, extension, and the publish-the-relay path |
 | `ANNOUNCEMENT.md` | The text for `@@OWNER:ANNOUNCED_PERIOD@@` and the five documentation slots other packages left for WP3. **Edits nothing** |
 
-## 2. What is parameterized, and on what
+## 2. What is parameterized
 
-Four things were not settled when the kit was built; **two of them closed on
-2026-08-12 and two are left.** Every one of them is a variable in `deploy.env`
-and **none of them changes a command**.
+The live values are in `/etc/multiverse/deploy.env`. The file is not stored in
+this repository because it contains the alert capability URL.
 
 | Waiting on | Variables | What it changes |
 |---|---|---|
-| **The domain** — the owner is registering a name | `MV_DOMAIN`, `MV_CERT_EXTRA_NAMES`, `MV_ACME_EMAIL` | The certificate, the advertised URL in every join string, nginx's `server_name`, the loopback pin in `/etc/hosts`. **Permanent for the run**: the URL is baked into every join string and D25's channel pushes nothing, so changing it later is a message to people who may be unreachable |
-| **The alert channel** | `MV_ALERT_KIND`, `MV_ALERT_URL`, `MV_ALERT_COMMAND` | Where `monitor.sh` sends. Default `ntfy`, which needs no account |
+| **The domain** | `MV_DOMAIN`, `MV_CERT_EXTRA_NAMES`, `MV_ACME_EMAIL` | The certificate, advertised relay URL, nginx name, and loopback pin. The live domain is `bibitesmultiverse.com` |
+| **The alert channel** | `MV_ALERT_KIND`, `MV_ALERT_URL`, `MV_ALERT_COMMAND` | Where `monitor.sh` sends. The live alert channel has passed its test |
 
 **The memory verdict is settled and filled in.** `MV_ARCHIVE_GOMEMLIMIT=5GiB`,
 `MV_ARCHIVE_MEMORY_HIGH` empty, `MV_SWAP_GB=0` — because the replay was fixed
@@ -66,11 +64,11 @@ owner on 2026-08-12: `MV_RETENTION=prune-genomes` with
 `MV_ARCHIVE_GENOME_HORIZON=720h`. **The ledger is kept forever** and genome blobs
 are pruned to a thirty-day horizon, which makes Risk 7 a stated policy instead of
 an accident and is announced before anybody joins. It buys disk and egress, not
-RAM: the resident set still grows with ledger records, so the box is still sized
-from `SIZING.md` §4. `MV_BUNDLE` stays open because nothing has been bought.
+RAM: the resident set still grows with ledger records. The live instance uses
+the `small_3_0` bundle described in `SIZING.md` §4.
 
-Two more that are decided and still variables, because a port is not a constant:
-`MV_RELAY_PORT=443` (the owner's call) and `MV_STATUS_PORT=8443`.
+The public front door is `MV_RELAY_PORT=443`. The private relay upstream is
+`MV_RELAY_BACKEND=127.0.0.1:8795`. The archive stays at `127.0.0.1:8796`.
 
 ## 3. Execution order, the day the instance exists
 
@@ -90,9 +88,8 @@ scp -r deploy ubuntu@<instance-ip>:/home/ubuntu/multiverse-kit
 # ---- on the INSTANCE -------------------------------------------------------
 ssh ubuntu@<instance-ip>
 
-# 3. The parameter file. Fill in MV_DOMAIN, MV_ACME_EMAIL, MV_ALERT_URL,
-#    MV_BUNDLE and the two period dates. The retention rule and the memory
-#    verdict already carry their answers.
+# 3. The parameter file. Confirm the domain, bundle, and period. Fill in
+#    MV_ACME_EMAIL and the selected alert fields.
 #
 #    THE GROUP IS LOAD-BEARING. `install` under sudo produces root:root unless
 #    -o/-g say otherwise, and monitor.sh and backup.sh run as the `multiverse`
@@ -145,46 +142,36 @@ new binary or a kit update. It never restarts the two services — a new binary 
 disk is not a running new binary, and the restart is a deliberate act with
 `RESTART-POLICY.md` behind it.
 
-## 4. The TLS design, and why port 80 is the fourth firewall rule
+## 4. The TLS design and shared HTTPS front door
 
-**The relay terminates its own TLS on 443.** That is the owner's call and it is
-also the cheap one: B23 already put TLS at the relay's front door with a
-rotation-surviving reload, so fronting it with a proxy would either duplicate or
-throw away work that is done and tested. A certificate binds **names, not
-ports**, so one certificate covers both the relay's `wss://` on 443 and the
-status page on its own port.
+**nginx terminates TLS on port 443.** It sends `/contract-b/` WebSocket requests
+to the relay on `127.0.0.1:8795`. It sends all other HTTPS paths to the archive
+on `127.0.0.1:8796`.
+
+nginx replaces `X-Forwarded-For` with the direct client address. The relay
+trusts one forwarded address only when the direct peer is on loopback. This rule
+preserves the per-address connection limit and rejects client-supplied chains.
 
 **Issuance and renewal: certbot, HTTP-01, webroot, through nginx on port 80.**
 
 - **Why not standalone on 80.** certbot's standalone plugin binds 80 itself,
   which means stopping whatever is there. nginx is on the box anyway for the
   status page, so a webroot costs nothing extra and never contends for a port.
-- **Why not TLS-ALPN-01 on 443.** It needs the thing holding 443 to speak the
-  ACME ALPN protocol. The relay does not, and teaching it to would put an ACME
-  client inside the process D1 keeps deliberately dumb.
+- **Why not TLS-ALPN-01 on 443.** The webroot flow is already deployed and
+  verified. It also keeps certificate issuance separate from application paths.
 - **Why not DNS-01.** It is the better answer and it is not available yet: it
   needs a certbot plugin for a registrar the owner has not chosen. It is wired as
   `MV_ACME_MODE=dns` and `provision.sh` **refuses rather than guessing a
   provider**. Switch to it once the registrar is known and port 80 can close.
-- **So port 80 is open**, and it is the fourth rule beside 22, 443 and the status
-  port. What it serves is one directory of short-lived challenge files; `/`
-  redirects to the status page and everything else is a 404.
+- **So port 80 is open.** It is the third public rule beside ports 22 and 443.
+  It serves short-lived challenge files. `/` redirects to the HTTPS website.
 
-**The permissions story: a copy hook, not a group grant.** The relay must read
-the private key without running as root. The hook copies the renewed pair into
-`/etc/multiverse/tls/` as `0640 root:multiverse`, atomically, and the relay runs
-as a member of that group. The alternative — an ACL or group bit on
-`/etc/letsencrypt` — has to hold across `live/`, `archive/`, a dated
-subdirectory and the key itself, four objects certbot recreates on its own
-schedule and whose modes it has reset across versions. The copy is one directory,
-one owner, one mode, and `ls -l` is the whole story. Its own failure mode — a
-hook that silently stops running — is what `monitor.sh`'s **cert** check watches,
-by comparing the certificate the listener *serves* against the file on disk.
+**The deploy hook keeps one served copy.** It writes the certificate for the
+monitor and keeps the private key readable only by root. It then reloads nginx.
+The monitor compares the served certificate with the installed certificate.
 
-**A rotation costs no restart.** `GetCertificate` is called once per handshake and
-stats the pair, so a renewed pair is picked up by the next handshake with no
-signal and no dropped session. This was verified in WP2. nginx is the only
-process here that needs telling, and the hook reloads it.
+**A rotation costs no restart.** An nginx reload keeps existing WebSocket and
+website connections open while new workers use the renewed pair.
 
 ## 5. The status page is published deliberately
 
@@ -203,8 +190,8 @@ listener on a box whose disk the same process is filling.
   wrong.
 - **Not by binding the archive to `0.0.0.0`.** `MV_ARCHIVE_HTTP` stays
   `127.0.0.1:8796`, which is the compiled default and the right one. nginx
-  publishes it on `MV_STATUS_PORT` over the same certificate, **GET and HEAD
-  only**, rate limited to 5 r/s with a burst of 20 and 8 concurrent connections
+  publishes it at `https://bibitesmultiverse.com/`, **GET and HEAD only**. It is
+  rate limited to 5 r/s with a burst of 20 and 8 concurrent connections
   per address, with no compression of its own so the archive's gzip negotiation
   survives intact.
 - **The boundary, named — as a rule, because the list grows.** Public: **every
@@ -234,10 +221,10 @@ absent from the generated environment file; the listener is compiled in and boun
 to nothing until an owner-level act turns it on, and off loopback it also demands
 TLS. `provision.sh --only verify` checks that it is still unset.
 
-## 6. The owner's remaining manual steps
+## 6. Cloud deployment record and remaining work
 
-Everything in this list is a console act, a purchase or a decision. **No script
-here can do any of it**, and none of it has been done.
+The instance, static address, DNS, certificate, alarms, snapshots, and services
+are live. The remaining release work is listed in step 12.
 
 1. **Create an AWS account** (or sign in to an existing one). `console.aws.amazon.com`.
 2. **Check Lightsail free-trial eligibility.** New accounts get **90 days free**
@@ -273,9 +260,9 @@ here can do any of it**, and none of it has been done.
    for the name at the static IP, TTL 300 while setting up. If an **AAAA** record
    exists it must point at the same instance, or the ACME validator will reach
    the wrong host over IPv6. **The name is permanent for the run.**
-7. **Open four ports in the Lightsail console's own firewall** — Networking →
-   IPv4 Firewall: **22** (SSH), **80** (ACME), **443** (the map), **8443** (the
-   status page). ufw is the second of two firewalls and the console's is the one
+7. **Open three ports in the Lightsail console's own firewall** — Networking →
+   IPv4 Firewall: **22** (SSH), **80** (ACME), and **443** (HTTPS). ufw is the
+   second of two firewalls and the console's is the one
    the internet meets first. Repeat under IPv6 Firewall if the instance is
    dual-stack.
 8. **Create the alert topic.** One line, no account:
@@ -300,21 +287,20 @@ here can do any of it**, and none of it has been done.
 
 Stated rather than left to be discovered.
 
-- **External reachability cannot be tested from the instance.** `/etc/hosts` pins
+- **External reachability must be tested outside the instance.** `/etc/hosts` pins
   the domain to loopback so the archive can dial the relay by name over a
   certificate that names only the domain — on Lightsail the public address is
   NAT'd and is not reachable from the instance itself. Every check therefore
   takes the inside path. **The first proof that a stranger can reach the map is a
-  stranger reaching the map**, which is WP8's.
+  outside client reaching the map**. The live website and relay path passed this
+  check after deployment.
 - **The forward receipt is not here.** B26 ships from the parallel arc.
   `RESTART-POLICY.md` §1.2 describes the world *without* it and says so; the
   paragraph is marked and should be revised when B26 deploys.
 - **The measured per-migration cost of the receipt at rate** is WP3's done-when
   and belongs to that arc plus WP8, not to this one.
-- **Nothing here has been executed.** `bash -n` clean and `systemd-analyze
-  verify` clean (§8), and that is the whole of the verification available without
-  an instance. Every literal command is written to be read before it is run, and
-  `provision.sh --dry-run` exists so that the first run is a rehearsal.
+- **A dry run remains the first deployment step.** The live instance also runs
+  `nginx -t` before each reload and the full verification phase after changes.
 - **`monitor.sh` cannot alert when the instance is off.** That is what step 9's
   Lightsail alarm and the daily heartbeat are for: the heartbeat's *absence* is
   the signal.
@@ -330,7 +316,8 @@ Static checks:
 |---|---|
 | `bash -n` on all six scripts | clean |
 | `systemd-analyze verify` on all six units | clean on systemd 255 — the only notices are "command not found" for paths that exist on the instance and not here |
-| `nginx -t` | **not run** — no nginx on the development machine. It runs inside `provision.sh` before every reload, so a bad render never reaches a live listener |
+| `test-front-door.sh` | clean render; it also runs `nginx -t` when nginx is available |
+| `nginx -t` | clean on the live Ubuntu 24.04 instance before reload |
 | `shellcheck` | **not run** — not installed here. The scripts are written to its rules: `set -uo pipefail` (`-e` only where a partial run would be worse than a stop), every expansion quoted, `read -r`, `$(...)`, no unquoted globs, arrays for argument lists, and one annotated `disable=SC2086` where the operator's value carries its own arguments |
 
 Behavioural checks, against the real binaries built by `ship.sh` from this
@@ -342,11 +329,11 @@ rig's own constraint:
 |---|---|
 | **The cross-compile is real.** `linux/amd64` and `linux/arm64`, both **statically linked** | `ship.sh --build-only`, then `file` |
 | **The generated environment files drive both binaries with no arguments at all** | Both started from `relay.env` / `archive.env` alone; `ExecStart` carries nothing |
-| **The relay serves TLS on the env-file port with the env-file pair**, and answers `/healthz` | `curl --cacert` |
-| **Plaintext against the TLS listener is refused** | `Client sent an HTTP request to an HTTPS server` |
+| **nginx serves the website and proxies `/contract-b/` on HTTPS 443** | off-box HTTPS and WebSocket-path checks |
+| **Both application listeners stay on loopback** | `ss`, provisioning verification, and an off-box port check |
 | **The bootstrap mint is what lets the relay start at all.** An empty credential store makes it refuse to serve and exit 1 — which is why `bootstrap` precedes `systemd` | Observed, then re-run in the correct order |
 | **The archive subscribes with the bootstrap-minted `subscribe` credential** read from `MULTIVERSE_CREDENTIAL_FILE` | `relayConnected: true`, `haveStatus: true` |
-| **A certificate rotation is survived with no restart and no signal** — the premise the whole TLS design rests on | Replaced both PEMs under the running relay; the served fingerprint changed on the next handshake and `/healthz` never faltered |
+| **Certificate renewal needs no service restart** | certbot deploy hook installs the pair and reloads nginx |
 | **`monitor.sh`'s thirteen checks run, escalate and recover** — including the lane-bypass persistence counter firing on exactly the third consecutive pass, and the replay projection reproducing the options document's model (7.43 M records → ~9.4 GB peak) | A synthetic `/api/status` server and a synthetic state directory |
 | ↳ **The replay check's constants changed on 2026-08-12 and have NOT been re-rehearsed.** It now projects both terms and alerts on the larger, so the same 7.43 M records project ~2.1 GB (resident) rather than ~9.4 GB. The escalate-and-recover behaviour around it is untouched | — |
 | **`monitor.sh`'s error counter survives the numbered log rotation** | Appended errors, rotated `relay.log` → `relay.log.1`, confirmed no double count and no missed lines |
@@ -363,4 +350,4 @@ fixture the status frame compresses ~10×, but on the empty test map the frame w
 anything under `gzipMinBytes = 1400` alone. Compression is a real term at real
 map sizes and a no-op at trivial ones.
 
-**Nothing was run against a cloud account. No account exists.**
+The live deployment record is in `HANDOFF-lightsail.md` and `dev_environment.md`.

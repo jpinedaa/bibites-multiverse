@@ -46,7 +46,12 @@ a grid of six worlds. Add `--json` for the machine-readable form.
 The map also publishes a page with every world on it, including yours, and it is worth reading
 when the question is about somebody else's world rather than your own.
 
-> **SLOT — WP3 (the hosted deployment).** The page's address.
+The map's page is at **https://bibitesmultiverse.com/**.
+
+The page is public and read-only. It shows the same world information that the relay sends to
+every peer. [join.md](join.md) lists that information under *What joining publishes about your
+world*. The machine-readable form is at `/api/status`. The terminal form is
+`ringstat --url https://bibitesmultiverse.com`.
 
 What to read, and what a healthy reading looks like:
 

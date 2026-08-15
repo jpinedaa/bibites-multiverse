@@ -31,12 +31,6 @@ Restart=always
 RestartSec=5s
 TimeoutStopSec=20
 
-# Port 443 without root. The capability is granted to the process by systemd
-# rather than stamped on the file with setcap, because a setcap bit is lost the
-# moment the binary is replaced by an upgrade — which is exactly when nobody
-# would think to re-apply it.
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 
 # The relay is the map. Under memory pressure the kernel should take the archive,

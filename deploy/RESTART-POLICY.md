@@ -25,19 +25,13 @@ the run.*
 
 ### 1. Certificate rotation is not a restart
 
-B23's rotation row is a rule about what a rotation costs a connected peer, and
-the answer is nothing. `GetCertificate` is called once per TLS handshake and
-stats the two files, so a renewed pair is picked up by the **next handshake** —
-no signal, no restart, no reload command, and an established session is
-untouched. This was implemented and tested in WP2, and `tls-deploy-hook.sh` is
-built around it: the hook installs the pair and reloads **nginx** only, because
-nginx is the one process here that holds a certificate open.
+B23's rotation row defines what a rotation costs a connected peer. The answer is
+nothing. `tls-deploy-hook.sh` installs both files and reloads nginx. The old
+nginx workers keep their existing WebSocket connections. New workers use the
+renewed pair. The relay and archive do not restart.
 
-A half-written renewal — the certificate new and the key not yet, for the instant
-between two writes — makes the load fail, and the reloader **keeps serving the
-certificate it already has**. An expired-in-a-month certificate beats no
-certificate now. The hook additionally writes through temporaries and renames, so
-the case does not arise.
+The hook writes each file through a temporary and renames it. It reloads nginx
+only after both files are installed.
 
 `monitor.sh`'s **cert** check compares the certificate the listener *serves*
 against the copy on disk, which is how a deploy hook that silently stopped

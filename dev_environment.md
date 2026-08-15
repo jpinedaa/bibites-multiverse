@@ -1497,6 +1497,63 @@ df -h /mnt/wsl/data                         # /dev/sdX, 251G — if this is miss
 ls /mnt/wsl/data/repos/bibites-multiverse/  # must list the repo, not fail
 ```
 
+## The hosted public deployment
+
+The public relay and archive went live on AWS Lightsail on 2026-08-14. The completed UTC
+checks fall on 2026-08-15. This host is separate from the six-world LAN rig below.
+
+| What | Live value |
+|---|---|
+| Instance | `bibites-multiverse`, `us-east-1a` in `us-east-1`, Ubuntu 24.04 x86-64 |
+| Bundle | `small_3_0`: 2 vCPU, 2 GB RAM, 60 GB SSD, and 3 TB transfer for $12 per month |
+| Static address | `3.229.27.163`, attached before DNS was created |
+| Public names | `bibitesmultiverse.com` and `status.bibitesmultiverse.com`, both DNS-only A records |
+| Public ports | SSH 22, HTTP 80, and HTTPS 443 |
+| SSH | `ssh -i /home/ubuntu/.ssh/id_rsa ubuntu@3.229.27.163` |
+| Announced period | 2026-08-14 through 2026-11-14 |
+
+The certificate covers both public names. Let's Encrypt issued it on 2026-08-15 UTC, and it
+expires on 2026-11-13. `certbot.timer` renews it, and the deploy hook updates the served copy.
+
+`/etc/multiverse/deploy.env` is the one parameter file. It is mode `0640` and owned by
+`root:multiverse`. It contains the alert capability in `MV_ALERT_URL`. **Never copy that URL into
+this repository, a log, or a support message.** The test alert reached the configured ntfy topic.
+
+The live services are `multiverse-relay.service`, `multiverse-archive.service`, and `nginx`.
+The monitor and backup run from `multiverse-monitor.timer` and `multiverse-backup.timer`.
+`certbot.timer` handles certificate renewal. The two application services are enabled at boot.
+
+nginx owns public HTTPS port 443. It sends `/contract-b/` WebSockets to the relay at
+`127.0.0.1:8795`. It sends every other HTTPS path to the archive at `127.0.0.1:8796`.
+The website is at `https://bibitesmultiverse.com/`. The relay URL is
+`wss://bibitesmultiverse.com/contract-b/v4`.
+
+nginx replaces `X-Forwarded-For` with the direct client address for relay requests. The relay
+trusts one forwarded address only when its direct peer is on loopback. Keep both rules together.
+Otherwise, all participants share the loopback address limit or a client can forge its address.
+
+| On-box content | Path |
+|---|---|
+| Binaries | `/opt/multiverse/bin/` |
+| Deployment kit and runbooks | `/opt/multiverse/deploy/` |
+| Relay state | `/var/lib/multiverse/relay/` |
+| Archive state | `/var/lib/multiverse/archive/` |
+| Identity backups | `/var/lib/multiverse/backup/` |
+| Generated join-secret staging | `/var/lib/multiverse/joins/` — delete each file after delivery |
+| Logs | `/var/log/multiverse/` |
+| Served TLS copy | `/etc/multiverse/tls/` |
+
+The full dry run and real provision both passed. A deliberate reboot proved boot recovery for
+the relay, archive, nginx, and timers. The archive reconnected after the relay returned.
+
+The backup timer now captures `ring.json` and `peers.json` from one identity state. A restore
+rehearsal stopped only the relay and restored both files from one snapshot. Their hashes matched
+before and after, and the archive reconnected. Automatic Lightsail snapshots run at 05:00 UTC.
+A manual pre-restore snapshot also exists.
+
+The monitor reports all checks healthy on the empty map. Its test alert was delivered. The
+Lightsail status-check alarm exists, but its email destination still needs AWS verification.
+
 ## The living deployment
 
 The M4 LAN rig has carried the same six worlds since the exit test of 2026-08-06 — across a
@@ -4599,6 +4656,20 @@ took it from 3.4 GB to 21 GB.
 
 ## Gotchas
 
+- **A fresh full dry run has staged prerequisites.** The account phase creates the `multiverse`
+  group during a real run. A dry run must simulate that result for later phases. An isolated
+  environment-files phase still requires the real group.
+- **The relay's Go help path exits with status 2.** With `set -o pipefail`, piping `--help`
+  directly into `grep` makes a supported flag look absent. Capture the help with `|| true`, then
+  inspect the captured text. `provision.sh` now does this.
+- **Ubuntu 24.04 installs nginx 1.24.** This version needs `listen 443 ssl http2;`. The newer
+  `http2 on;` directive fails its configuration check on this host.
+- **An empty public map still needs a durable `ring.json`.** The relay now saves the empty grid
+  immediately after loading it. This makes the first identity backup complete before any slot
+  exists.
+- **Restore `ring.json` and `peers.json` as one identity snapshot.** Stop only the relay. Restore
+  both files from the same backup directory. Preserve their modes and start the relay. The empty
+  map rehearsal proved this sequence and the archive's reconnect.
 - **The rig lives on `/mnt/wsl/data`, at `/mnt/wsl/data/repos/bibites-multiverse`.** There is
   no symlink any more: `~/bibites-multiverse` was one until the volume was reorganised on
   2026-08-12, and anything still reaching for it fails. If the volume is not mounted the repo

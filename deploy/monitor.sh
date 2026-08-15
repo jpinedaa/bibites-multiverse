@@ -94,6 +94,7 @@ set -a; . "$ENV_FILE"; set +a
 : "${MV_LOGDIR:=/var/log/multiverse}"
 : "${MV_TLSDIR:=/etc/multiverse/tls}"
 : "${MV_RELAY_PORT:=443}"
+: "${MV_RELAY_BACKEND:=127.0.0.1:8795}"
 : "${MV_ARCHIVE_HTTP:=127.0.0.1:8796}"
 : "${MV_EXPECTED_PEERS:=0}"
 : "${MV_STATUS_AGE_WARN_MS:=120000}"
@@ -234,11 +235,11 @@ check_units() {
 
 check_relay_healthz() {
   local out
-  out="$(curl -fsS --max-time 10 "https://${MV_DOMAIN}:${MV_RELAY_PORT}/healthz" 2>&1)"
+  out="$(curl -fsS --max-time 10 "http://${MV_RELAY_BACKEND}/healthz" 2>&1)"
   if [ "$out" = ok ]; then
-    report relay-healthz OK "answers on ${MV_RELAY_PORT}"
+    report relay-healthz OK "answers on ${MV_RELAY_BACKEND}"
   else
-    report relay-healthz CRIT "no healthy answer on https://${MV_DOMAIN}:${MV_RELAY_PORT}/healthz — $out"
+    report relay-healthz CRIT "no healthy answer on http://${MV_RELAY_BACKEND}/healthz — $out"
   fi
 }
 
@@ -400,7 +401,7 @@ check_cert() {
   served="$(echo | timeout 15 openssl s_client -connect "${MV_DOMAIN}:${MV_RELAY_PORT}" \
             -servername "$MV_DOMAIN" 2>/dev/null | openssl x509 2>/dev/null)"
   if [ -z "$served" ]; then
-    report cert WARN "could not read the certificate the relay is serving"
+    report cert WARN "could not read the certificate nginx is serving"
     return
   fi
   end="$(printf '%s' "$served" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
@@ -410,9 +411,7 @@ check_cert() {
   fp_file="$(openssl x509 -in "$MV_TLSDIR/fullchain.pem" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
 
   if [ -n "$fp_file" ] && [ "$fp_served" != "$fp_file" ]; then
-    # Not an error by itself: the reloader picks a new pair up on the NEXT
-    # handshake, so a fresh copy can legitimately be one connection ahead.
-    report cert WARN "the certificate on disk is not the one being served. If this persists past the next handshake the CertReloader is not picking the pair up. ($days days left on the served one.)"
+    report cert WARN "the certificate on disk is not the one nginx serves. Reload nginx. ($days days left on the served one.)"
   elif [ "$days" -lt "$MV_CERT_MIN_DAYS" ]; then
     report cert CRIT "$days day(s) of certificate left. certbot renews at 30, so renewal has failed: 'certbot renew --dry-run' and check port 80."
   else

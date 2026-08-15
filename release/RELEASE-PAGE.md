@@ -290,7 +290,23 @@ know it before you join.
 
 ## The map you join is a bounded, announced commitment
 
-@@OWNER:ANNOUNCED_PERIOD@@
+The public map runs from **2026-08-14 to 2026-11-14** — **three months**. That is the
+whole commitment. It is stated here so that you know it before you install anything.
+
+**Your world is not part of that ending.** It lives and saves on your machine. It remains a
+Bibites world with or without a map. What ends is the shared map: the relay, its status page,
+and the operator's support of them.
+
+**What happens to the record at the end is written down in advance.** This includes what
+becomes of the map's files and when you receive notices. The reminders begin 30 days out.
+
+**The bound can be extended, and it will never be silently shortened.** An extension is
+announced no later than a week before the end. If the run must finish early, that date is also
+announced at least a week ahead, with the same procedure.
+
+Restarts during the run are routine and short. See
+[join.md](https://github.com/@@REPO@@/blob/@@TAG@@/docs/participant/join.md) for what one looks
+like from your side.
 
 ## Documentation
 
