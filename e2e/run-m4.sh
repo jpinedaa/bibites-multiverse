@@ -275,7 +275,7 @@ ensure_credentials() {
     fail ""
     fail "For this all-local rig, mint loopback TLS and local credentials:"
     fail "    e2e/crossing/mint-tls.sh"
-    fail "    FAR_PEER= e2e/crossing/mint-credentials.sh"
+    fail "    RELAY_DATA='$RELAY_DATA' FAR_PEER= e2e/crossing/mint-credentials.sh"
     return 1
   fi
 }
