@@ -2,33 +2,34 @@
 
 This report expands milestone M5 of `system_decomposition.md`.
 
-**Execution state: `m5_tracking.md`** — work-package status, the recommended order, the
-orchestration protocol and the live-rig constraints. The design lives here; what is done
-against it lives there.
+**Current public state: [`STATUS.md`](STATUS.md).** It reports the release and the current
+public evidence phase.
 
-**Status: the nine decisions are RATIFIED, 2026-08-10. Everything else here is still a design
-pass.** M4 is complete and its rig runs on as the living deployment. This document opened M5
-on 2026-08-09, written before any work started and before the owner had signed anything, and
-the owner took all nine calls in *Decisions for the Owner* the next day. Seven adopt the
-recommendation as written; **decisions 5 and 6 are the owner's own**, and decision 5 does what
-this document was written to allow — it replaces the recommendation with a better model and
-supersedes a rule `system_decomposition.md` had stated. Five of the nine became **D21–D25** in
-`system_decomposition.md`; the other four stay milestone-internal, and each decision below
-records which it is.
+**Frozen M5 execution record: [`m5_tracking.md`](m5_tracking.md).** It preserves the
+work-package status, recommended order, orchestration protocol, and live-rig constraints.
 
-What is **not** ratified is the rest of the document. *Scope the documents do not state* is
-still inferred scope — five of its rows now have a decision behind them and the remainder do
-not — no work package is started, and every risk, design question and contract change below is
-still a proposal for the implementation wave to accept or override. The owner overrode three
-recommendations in M4 and three more in M3.
+This document preserves the M5 design and dated decisions. Time-relative words such as
+"current," "today," and "next" refer to the stated design dates.
 
-The milestone was created by D9, renumbered by D16, and its scope has not changed since:
-`system_decomposition.md`, *M5 — Public release*. The starting point is M4's join kit
-(`farend/`) and the wire as it stands — `contract-a/2.3` and `contract-b/3.5`, which is what
-the contracts said on 2026-08-07 and what the living deployment speaks today. Read the
-contracts for the current pair rather than this line. **Where the milestone ends is decided:**
-`contract-b/4` for the per-peer credential and `contract-a/2.4` for the bearer token
-(decision 1).
+**Historical design status, 2026-08-10: the nine decisions were RATIFIED. Everything else was a
+design pass.** M4 was complete, and its rig continued as the living deployment. This document
+opened M5 on 2026-08-09, before work started. The owner made all nine calls in *Decisions for
+the Owner* the next day. Seven decisions adopted the recommendation as written. **Decisions 5
+and 6 came from the owner.** Decision 5 replaced the recommendation with a better model. It
+also superseded a rule in `system_decomposition.md`. Five decisions became **D21–D25** in
+`system_decomposition.md`. The other four remained milestone-internal. Each decision below
+identifies its group.
+
+At that time, the rest of the document was **not** ratified. *Scope the documents do not state*
+was inferred scope. Five rows had a decision, and the other rows did not. No work package had
+started. Each risk, design question, and contract change was a proposal for the implementation
+wave to accept or override. The owner overrode three recommendations in M4 and three more in M3.
+
+D9 created the milestone, and D16 renumbered it. Its scope did not change before this design
+pass: `system_decomposition.md`, *M5 — Public release*. The design baseline was M4's join kit
+(`farend/`) and the 2026-08-07 wire. That wire used `contract-a/2.3` and `contract-b/3.5`.
+Read the contracts for the current pair. Decision 1 set the target versions: `contract-b/4`
+for the per-peer credential and `contract-a/2.4` for the bearer token.
 
 ## Purpose
 
@@ -151,7 +152,7 @@ almost none of the work of running something in public. Each item names where it
 | Inferred item | Why it is not optional | Worked through in |
 |---|---|---|
 | **Relay operations** — supervision, restart policy, monitoring, backup | The docs say "a hosted relay on a VPS" and stop there. A relay nobody restarts is not hosted | DQ2 |
-| **A DNS name and certificate issuance/renewal** | TLS is in scope and needs a name; everything today hardcodes `192.168.1.227` and a port | DQ2 |
+| **A DNS name and certificate issuance/renewal** | TLS is in scope and needs a name. The LAN rig used a private address and port | DQ2 |
 | **The forward receipt** | §13 item 6 declined it because "a relay restart is rare". On a VPS it is not | DQ2, Contract Changes 6 |
 | **A signed or otherwise unblockable distribution** | `farend/README.md` currently asks for `Set-ExecutionPolicy Bypass` and `Unblock-File`. A stranger should refuse both | DQ4 |
 | **A distribution channel** | No document names one. Thunderstore, Workshop and GitHub Releases are three different support models | DQ4, Decision 6 |
@@ -1038,8 +1039,8 @@ change after strangers run the build costs a migration story for people the owne
 Eight packages. WP1 gates the wire work, WP2 gates WP3 and WP4, and WP8 cannot start until
 everything else has run against a synthetic map first.
 
-Execution state — what is started, what each package landed, and what is safe to start next —
-lives in `m5_tracking.md`, not here; these sections stay the design. **Every decision the
+The completed work-package record is frozen in `m5_tracking.md`. Current public state lives
+in `STATUS.md`. These sections preserve the design. **Every decision the
 packages waited on is ratified as of 2026-08-10**, so nothing here is gated on a signature any
 more.
 

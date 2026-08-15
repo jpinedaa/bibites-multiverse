@@ -226,7 +226,8 @@ func TestJoinURLNamesWhatAPeerMustDial(t *testing.T) {
 	}{
 		{"", "0.0.0.0:8795", true, "wss://<relay-host>:8795/contract-b/v4"},
 		{"", "127.0.0.1:8795", false, "ws://127.0.0.1:8795/contract-b/v4"},
-		{"", "192.168.1.227:8795", true, "wss://192.168.1.227:8795/contract-b/v4"},
+		// 192.0.2.227 is an RFC 5737 TEST-NET-1 fixture.
+		{"", "192.0.2.227:8795", true, "wss://192.0.2.227:8795/contract-b/v4"},
 		{"", ":8795", true, "wss://<relay-host>:8795/contract-b/v4"},
 		{"wss://relay.example.net/contract-b/v4", "0.0.0.0:443", true,
 			"wss://relay.example.net/contract-b/v4"},

@@ -219,11 +219,11 @@
  
 +# THE FAR END DIALS THIS MACHINE'S WINDOWS LAN ADDRESS, and its TLS client
 +# verifies the name it DIALLED — not the WSL address the portproxy forwards to.
-+# 192.168.1.227 is therefore a Subject Alternative Name on the relay certificate
-+# (e2e/crossing/mint-tls.sh puts it there) and the URL a join string must name.
++# This historical patch uses the anonymized TEST-NET-1 address 192.0.2.227 as a
++# certificate SAN and as the address in the join URL (mint-tls.sh adds the SAN).
 +# The local five keep dialling wss://127.0.0.1, which is a SAN on the same
 +# certificate.
-+LAN_RELAY_HOST="${LAN_RELAY_HOST:-192.168.1.227}"
++LAN_RELAY_HOST="${LAN_RELAY_HOST:-192.0.2.227}"
 +RELAY_ADVERTISE_URL="${RELAY_ADVERTISE_URL:-wss://$LAN_RELAY_HOST:$RELAY_PORT/contract-b/v4}"
 +# The far peer's join string is the one a PERSON has to carry. mint-credentials.sh
 +# prints that one and files the other five straight into 0600 secrets.

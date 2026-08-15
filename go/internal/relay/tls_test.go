@@ -431,13 +431,13 @@ func TestTLSMinVersionIsAKnobWithAFloor(t *testing.T) {
 // distinction is the whole point.
 func TestBindIsLoopback(t *testing.T) {
 	for addr, want := range map[string]bool{
-		"127.0.0.1:8795":     true,
-		"localhost:8795":     true,
-		"[::1]:8795":         true,
-		"0.0.0.0:8795":       false,
-		":8795":              false,
-		"[::]:8795":          false,
-		"192.168.1.227:8795": false,
+		"127.0.0.1:8795":   true,
+		"localhost:8795":   true,
+		"[::1]:8795":       true,
+		"0.0.0.0:8795":     false,
+		":8795":            false,
+		"[::]:8795":        false,
+		"192.0.2.227:8795": false, // RFC 5737 TEST-NET-1.
 	} {
 		if got := bindIsLoopback(addr); got != want {
 			t.Fatalf("bindIsLoopback(%q) = %v, want %v", addr, got, want)

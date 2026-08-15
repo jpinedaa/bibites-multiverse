@@ -155,7 +155,7 @@ phase_preflight() {
     warn "    a pair of YYYY-MM-DD dates. D24's period must be STATED before anybody"
     warn "    joins; ANNOUNCEMENT.md and WIND-DOWN.md are built from these two values,"
     warn "    so a placeholder here becomes a promise no participant can read."
-    warn "    Fill them in before README.md §3 step 9 — the publish gate."
+    warn "    Fill them in before publication. See README.md, 'Public service commitments'."
   elif ! date -d "$pstart" +%s >/dev/null 2>&1 || ! date -d "$pend" +%s >/dev/null 2>&1; then
     warn "MV_PERIOD_START/MV_PERIOD_END look like dates and are not: '$pstart' / '$pend'."
   elif [ "$(date -d "$pend" +%s)" -le "$(date -d "$pstart" +%s)" ]; then
@@ -309,8 +309,8 @@ phase_swap() {
     say "MV_SWAP_GB=0 — none configured."
     say "This is the verdict, not a default: the streamed replay wants ~0.18 KB per"
     say "ledger record and the archive then HOLDS ~0.30 KB, so on this build swap"
-    say "buys time against a peak that no longer binds. See SIZING.md; monitor.sh's"
-    say "replay-headroom check is what tells you when this stops being true."
+    say "buys time against a peak that no longer binds. See 'Archive memory' in"
+    say "SIZING.md. monitor.sh's replay-headroom check tells you when this changes."
     return 0
   fi
   if swapon --show=NAME --noheadings 2>/dev/null | grep -q .; then
@@ -453,7 +453,7 @@ MULTIVERSE_LOG_LEVEL=$MV_LOG_LEVEL
 # and never the ledger. See deploy.env.example.
 MULTIVERSE_GENOME_HORIZON=${MV_ARCHIVE_GENOME_HORIZON:-}
 # The memory verdict, as Go sees it. Empty means unset; the kit ships 5GiB as a
-# ceiling against regression rather than as a fix. See SIZING.md §4.
+# ceiling against regression rather than as a fix. See SIZING.md, "Archive memory".
 GOMEMLIMIT=${MV_ARCHIVE_GOMEMLIMIT:-}
 EOF
   say "wrote /etc/multiverse/archive.env"

@@ -222,11 +222,10 @@ RELAY_LISTEN="${_ENV_LAN_RELAY_LISTEN:-0.0.0.0:$RELAY_PORT}"
 
 # THE FAR END DIALS THIS MACHINE'S WINDOWS LAN ADDRESS, and its TLS client
 # verifies the name it DIALLED — not the WSL address the portproxy forwards to.
-# 192.168.1.227 is therefore a Subject Alternative Name on the relay certificate
-# (e2e/crossing/mint-tls.sh puts it there) and the URL a join string must name.
-# The local five keep dialling wss://127.0.0.1, which is a SAN on the same
-# certificate.
-LAN_RELAY_HOST="${LAN_RELAY_HOST:-192.168.1.227}"
+# Set LAN_RELAY_HOST to the current Windows LAN address before a LAN operation.
+# e2e/crossing/mint-tls.sh puts that address in the relay certificate. The local
+# five keep dialling wss://127.0.0.1, which is a SAN on the same certificate.
+LAN_RELAY_HOST="${LAN_RELAY_HOST:-}"
 RELAY_ADVERTISE_URL="${RELAY_ADVERTISE_URL:-wss://$LAN_RELAY_HOST:$RELAY_PORT/contract-b/v4}"
 # The far peer's join string is the one a PERSON has to carry. mint-credentials.sh
 # prints that one and files the other five straight into 0600 secrets.
@@ -392,9 +391,10 @@ lanhost() {
   note "Windows IPv4 addresses   :"
   printf '%s\n' "$winips" | sed 's/^/        /' >&2
   note ""
-  note "LAN_RELAY_HOST defaults to the historical M4 address 192.168.1.227. Pick it only"
-  note "if it still belongs to this machine — never pick a"
-  note "172.x hypervisor address."
+  note "Select this machine's current Windows LAN address from the list above."
+  note "Set it explicitly for each LAN operation:"
+  note "    LAN_RELAY_HOST=<windows-lan-ip> e2e/run-m4-lan.sh <command>"
+  note "Do not select a WSL or hypervisor address."
   note ""
   note "port proxies on this machine right now:"
   printf '%s\n' "${proxies:-<none, or netsh was unreachable>}" | sed 's/^/        /' >&2
@@ -1460,24 +1460,33 @@ lan_all() {
   lan_phase8
 }
 
+require_lan_relay_host() {
+  local command="$1"
+  if [ -n "$LAN_RELAY_HOST" ]; then return 0; fi
+  fail "LAN_RELAY_HOST is required for '$command'."
+  note "Run 'e2e/run-m4-lan.sh lanhost' and select this machine's Windows LAN address."
+  note "Then set LAN_RELAY_HOST explicitly when you run the command."
+  return 1
+}
+
 case "${1:-status}" in
   build)      build ;;
   lanhost)    lanhost ;;
-  reserve)    reserve ;;
+  reserve)    require_lan_relay_host reserve && reserve ;;
   seed)       lan_seed ;;
-  up)         lan_up ;;
+  up)         require_lan_relay_host up && lan_up ;;
   down)       lan_down ;;
   status)     lan_status ;;
   statuspage) statuspage ;;
-  phase1)     lan_phase1 ;;
-  phase2)     lan_phase2 ;;
-  phase3)     lan_phase3 ;;
-  phase4)     lan_phase4 ;;
-  phase5)     lan_phase5 ;;
-  phase5far)  lan_phase5_far ;;
-  phase6)     lan_phase6 ;;
-  phase7)     lan_phase7 ;;
-  phase8)     lan_phase8 ;;
+  phase1)     require_lan_relay_host phase1 && lan_phase1 ;;
+  phase2)     require_lan_relay_host phase2 && lan_phase2 ;;
+  phase3)     require_lan_relay_host phase3 && lan_phase3 ;;
+  phase4)     require_lan_relay_host phase4 && lan_phase4 ;;
+  phase5)     require_lan_relay_host phase5 && lan_phase5 ;;
+  phase5far)  require_lan_relay_host phase5far && lan_phase5_far ;;
+  phase6)     require_lan_relay_host phase6 && lan_phase6 ;;
+  phase7)     require_lan_relay_host phase7 && lan_phase7 ;;
+  phase8)     require_lan_relay_host phase8 && lan_phase8 ;;
   errors)     lan_errors >/dev/null ;;
   journal)    python3 "$E2E/journal.py" summary $(for s in $SLOTS; do [ -f "$(journal_of "$s")" ] && journal_of "$s"; done) ;;
   archive)    shift; archive_list "$@" ;;
@@ -1485,9 +1494,9 @@ case "${1:-status}" in
   # hop <from> <to> <edge> <selector> — one forced export, observed end to end
   # through both logs and both sidecars. Exposed because a two-way map has four
   # directions to prove and the phases only drive some of them.
-  hop)        shift; hop "$@" ;;
+  hop)        require_lan_relay_host hop && { shift; hop "$@"; } ;;
   count)      shift; count_everywhere "$@" >/dev/null ;;
-  all)        lan_all ;;
+  all)        require_lan_relay_host all && lan_all ;;
   *)
     echo "usage: run-m4-lan.sh build|lanhost|reserve|seed|up|phase1..phase8|phase5far|errors|journal|archive|statuspage|status|down|all" >&2
     exit 1

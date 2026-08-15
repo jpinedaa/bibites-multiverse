@@ -23,8 +23,8 @@
 # running contract-b/3.5 relay never opens peers.json and never re-writes ring.json
 # at startup, so this is additive and an abandoned crossing leaves nothing to undo.
 #
-#   e2e/crossing/mint-credentials.sh            # mint what is missing
-#   e2e/crossing/mint-credentials.sh --check    # report, mint nothing
+#   LAN_RELAY_HOST=<windows-lan-ip> e2e/crossing/mint-credentials.sh
+#   LAN_RELAY_HOST=<windows-lan-ip> e2e/crossing/mint-credentials.sh --check
 #
 # WHAT IT NEVER DOES: print a peer secret for a LOCAL peer (it goes straight to a
 # 0600 file), mint a second credential over an existing one, or touch a running
@@ -65,8 +65,8 @@ MAP_PEERS="${MAP_PEERS:-slot-1@0,0 slot-2@1,0 slot-3@2,0 slot-4@0,1 slot-5@1,1 s
 # passes. With `:-` an empty value would have silently reinstated slot-6 as remote
 # and left the rehearsal's sixth secret unfiled.
 FAR_PEER="${FAR_PEER-slot-6}"
-LAN_RELAY_HOST="${LAN_RELAY_HOST:-192.168.1.227}"
-FAR_URL="${FAR_URL:-wss://$LAN_RELAY_HOST:$RELAY_PORT$CONTRACT_B_PATH}"
+LAN_RELAY_HOST="${LAN_RELAY_HOST:-}"
+FAR_URL="${FAR_URL:-}"
 LOCAL_URL="${LOCAL_URL:-wss://127.0.0.1:$RELAY_PORT$CONTRACT_B_PATH}"
 # The archive's own identity. Its grant is `subscribe`, which is DISJOINT from
 # `peer`: it cannot claim a slot and no peer credential can subscribe (B27).
@@ -79,6 +79,12 @@ say()  { printf '     %s\n' "$*"; }
 step() { printf '\n==== %s\n' "$*"; }
 warn() { printf '  !! %s\n' "$*" >&2; }
 die()  { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
+
+if [ -n "$FAR_PEER" ]; then
+  [ -n "$LAN_RELAY_HOST" ] \
+    || die "LAN_RELAY_HOST is required when FAR_PEER is set. Set it to this machine's Windows LAN IPv4 address."
+  [ -n "$FAR_URL" ] || FAR_URL="wss://$LAN_RELAY_HOST:$RELAY_PORT$CONTRACT_B_PATH"
+fi
 
 [ -x "$RELAY_BIN" ] || die "no relay binary at $RELAY_BIN"
 [ -d "$RELAY_DATA" ] || die "no relay data dir at $RELAY_DATA"

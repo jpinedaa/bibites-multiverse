@@ -15,9 +15,9 @@
 # The private keys never enter the repository. The only file that leaves this
 # machine is ca.crt, which is public by construction.
 #
-#   e2e/crossing/mint-tls.sh              # mint (refuses to overwrite)
-#   e2e/crossing/mint-tls.sh --renew-leaf # keep the CA, mint a new server cert
-#   TLS_DIR=/tmp/scratch e2e/crossing/mint-tls.sh   # a rehearsal, off the rig
+#   LAN_HOST=<windows-lan-ip> e2e/crossing/mint-tls.sh
+#   LAN_HOST=<windows-lan-ip> e2e/crossing/mint-tls.sh --renew-leaf
+#   LAN_HOST=<windows-lan-ip> TLS_DIR=/tmp/scratch e2e/crossing/mint-tls.sh
 #
 # WHAT IT DOES NOT DO. It does not touch a running process, it does not install
 # anything into a trust store, and it does not copy anything to the far end. The
@@ -37,18 +37,16 @@ TLS_DIR="${TLS_DIR:-$E2E/tls-m4-lan}"
 #                    relay's listener is TLS for EVERY address including loopback
 #                    (crypto/tls wraps the net.Listener whole), so the local
 #                    clients dial wss://127.0.0.1 and verify this name.
-#   192.168.1.227    the historical M4 far-end RelayHost. Override LAN_HOST for
-#                    another network. The Windows portproxy forwards it into
-#                    the WSL VM. The far-end TLS client verifies this dialled
-#                    name.
-#   172.24.110.174   the WSL address, the portproxy's connectaddress. Nothing
-#                    dials it by name today; it is here so that a debugging dial
-#                    from Windows against the VM directly does not fail on the
-#                    name, and because it costs nothing to state a name this
-#                    machine already owns. Override with WSL_IP= to drop it.
+#   LAN_HOST         the Windows LAN IPv4 address for this run. The Windows
+#                    portproxy forwards it into the WSL VM. The far-end TLS
+#                    client verifies this dialled address. This value is
+#                    required because the correct LAN interface is site-specific.
+#   WSL_IP           the current WSL address and the portproxy connect address.
+#                    The script derives it from the host. Override it with
+#                    WSL_IP= to omit it.
 #   localhost        the same loopback under its name, for a hand dial.
-LAN_HOST="${LAN_HOST:-192.168.1.227}"
-WSL_IP="${WSL_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+LAN_HOST="${LAN_HOST:-}"
+WSL_IP="${WSL_IP-$(hostname -I 2>/dev/null | awk '{print $1}')}"
 
 CA_DAYS="${CA_DAYS:-3650}"
 LEAF_DAYS="${LEAF_DAYS:-397}"
@@ -61,6 +59,7 @@ step() { printf '\n==== %s\n' "$*"; }
 die() { printf '\nSTOP: %s\n' "$*" >&2; exit 1; }
 
 command -v openssl >/dev/null || die "openssl is not on PATH"
+[ -n "$LAN_HOST" ] || die "LAN_HOST is required. Set it to this machine's Windows LAN IPv4 address."
 
 umask 077
 mkdir -p "$TLS_DIR"

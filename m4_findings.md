@@ -436,9 +436,9 @@ The bring-up itself became a documented seven-step hand procedure (`dev_environm
 2. **Stale pid files survive a reboot** and pid reuse makes `down` dangerous — check liveness
    before deleting.
 3. **Verify the Windows plumbing read-only.** The `8795` portproxy and firewall rule survive a
-   reboot as long as the WSL address has not moved, and it did not move across either reboot
-   (`172.24.110.174`). Re-running the elevated commands blind drops the forward for as long as
-   they take. `lanhost` is the read-only check.
+   reboot if the WSL address has not moved. The address did not move across either reboot.
+   Re-running the elevated commands without a check drops the forward while they run. `lanhost`
+   is the read-only check.
 4. **Expect exactly one game to come up starved of a log file**, and fix that one instance
    (§11.1). It happened on both reboots, on different slots.
 5. **Read the time scale of every instance, not only a restarted one** (§7).
