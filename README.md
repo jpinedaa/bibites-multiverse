@@ -133,10 +133,10 @@ Multiverse save.
 Release `0.2.1` keeps setup to three steps:
 
 1. Download the complete archive for your platform and make sure that its checksum matches.
-2. Extract it. On Windows, double-click `Install-BibitesMultiverse.cmd`. On Linux, run
-   `./install-bibites-multiverse.sh`.
-3. Keep the defaults. Windows opens the included game after the map grants it a place. On Linux,
-   run `./start-multiverse.sh` after installation.
+2. On Windows, unblock the checked archive. Then extract it. On Linux, extract the checked archive.
+3. On Windows, double-click `Install-BibitesMultiverse.cmd`. On Linux, run
+   `./install-bibites-multiverse.sh`. Keep the defaults. Windows opens the game after enrollment.
+   On Linux, run `./start-multiverse.sh` after installation.
 
 All participant archives include `public-map.json`, the public join configuration. It contains
 the deployed enrollment and relay addresses. It contains no world identity or secret. Each

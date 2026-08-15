@@ -21,13 +21,11 @@
 # two cached BepInEx downloads. Publishing is a separate, deliberate act — see
 # release/README.md for the four steps the owner performs by hand.
 #
-# WHAT IT PROVES BEFORE IT PACKAGES ANYTHING. A release that ships a mod or a
-# sidecar the project's own deployment does not run is a release nobody has
-# tested. So this script requires the plugin to be byte-identical to the copy in
-# farend/dist/farend-bundle.zip. It requires go/ to match the revision stamped
-# into that bundle's sidecar. Go's VCS metadata can make two otherwise identical
-# builds differ as files. A source or plugin mismatch stops the build and says
-# which side moved.
+# WHAT IT PROVES BEFORE IT PACKAGES ANYTHING. The tracked M4 bundle is the
+# Windows evidence artifact. This script requires the plugin to be byte-identical
+# to that copy. It also requires go/ to match the revision in that bundle's
+# sidecar. Go's VCS metadata can make two otherwise identical builds differ as
+# files. A source or plugin mismatch stops the build and says which side moved.
 #
 # It also requires the game build to be the one docs/support-matrix.md names.
 # The matrix is the single source of that pin: the JSON block inside that
@@ -41,8 +39,7 @@
 #     repository uses. A PLAYER needs neither; this is the build side
 #   * zip, unzip, curl
 #
-# Everything heavy runs under nice -n 19: this host runs a live six-world
-# deployment and unniced load on it has twice reproduced a sidecar session storm.
+# Everything heavy runs under nice -n 19 to limit interference with local tests.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -234,9 +231,9 @@ else
   note "no unpacked Linux game at $LINUX_GAME_DIR; the Linux row's hash stands on its record"
 fi
 
-# ------------------------------------------------------------------ the fleet's own artifacts
+# ------------------------------------------------------------------ the tested Windows artifacts
 
-step "what the living deployment runs (the byte-identity reference)"
+step "the tracked M4 Windows reference"
 [ -f "$BUNDLE" ] || die "missing $BUNDLE — it is tracked; this is not a clean clone"
 REF="$BUILD/ref"
 rm -rf "$REF"; mkdir -p "$REF"
@@ -252,25 +249,24 @@ note "sidecar $(sha "$REF_SIDECAR")"
 step "the Windows sidecar (cross-compiled)"
 # A Go binary carries a VCS stamp — the commit, its time, and whether the tree
 # was dirty — so two builds of IDENTICAL SOURCE at two commits are different
-# files. Byte-comparing this one against the fleet's copy would therefore fail
+# files. A byte comparison with the M4 copy therefore fails
 # for a documentation commit, which is not the thing worth failing on. What is
 # worth failing on is a SOURCE difference, so that is what is compared: the
-# revision the fleet's binary records against this tree, over go/.
+# revision the M4 binary records against this tree, over go/.
 REF_REV="$(go version -m "$REF_SIDECAR" | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
-[ -n "$REF_REV" ] || die "the fleet's sidecar carries no VCS stamp; this check needs one"
-note "the fleet's sidecar was built from $REF_REV"
+[ -n "$REF_REV" ] || die "the M4 sidecar carries no VCS stamp; this check needs one"
+note "the M4 sidecar was built from $REF_REV"
 git -C "$REPO" cat-file -e "$REF_REV^{commit}" 2>/dev/null \
-  || die "commit $REF_REV is not in this clone, so the fleet's build cannot be compared to it"
+  || die "commit $REF_REV is not in this clone, so the M4 build cannot be compared to it"
 if ! git -C "$REPO" diff --quiet "$REF_REV" HEAD -- go/; then
   git -C "$REPO" diff --stat "$REF_REV" HEAD -- go/ >&2
-  die "go/ has moved since the sidecar the deployment runs was built. Roll the change onto
-   the deployment and rebuild farend/dist/farend-bundle.zip, or release from the commit the
-   fleet is on. A release nobody has run is not a release."
+  die "go/ has moved since the M4 sidecar was built. Rebuild farend/dist/farend-bundle.zip,
+   repeat the relevant tests, and then build the release."
 fi
 if [ -n "$(git -C "$REPO" status --porcelain -- go/)" ]; then
   die "go/ has uncommitted changes, so the binary this would ship is not any published commit"
 fi
-note "go/ is identical to the tree the fleet's sidecar was built from"
+note "go/ is identical to the tree the M4 sidecar was built from"
 
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/multiverse-sidecar.exe" ./cmd/sidecar )
@@ -280,10 +276,10 @@ BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar.exe" \
   || die "the Windows sidecar VCS stamp is '${BUILT_REV:-missing}', want $SOURCE_REV"
 BUILT_SIDECAR_SHA="$(sha "$BUILD/multiverse-sidecar.exe")"
 if [ "$BUILT_SIDECAR_SHA" = "$(sha "$REF_SIDECAR")" ]; then
-  note "byte-identical to the fleet's sidecar"
+  note "byte-identical to the M4 sidecar"
 else
   note "same source, different VCS stamp:"
-  note "  the fleet's copy records $REF_REV"
+  note "  the M4 copy records    $REF_REV"
   note "  this build records        $(git -C "$REPO" rev-parse HEAD)"
   note "  $BUILT_SIDECAR_SHA"
 fi
@@ -291,11 +287,10 @@ fi
 # ------------------------------------------------------------------ the Linux sidecar
 
 step "the Linux sidecar (cross-compiled)"
-# THERE IS NO BYTE-IDENTITY REFERENCE FOR THIS ONE, and pretending otherwise
-# would be the dishonest move. The fleet is Windows: farend/dist/farend-bundle.zip
+# THERE IS NO BYTE-IDENTITY REFERENCE FOR THIS ONE. The M4 bundle is Windows-only, so it
 # holds no linux binary to compare against. What the check above already
 # established is the thing that matters and it covers this build too — go/ is
-# identical, commit for commit, to the tree the deployment's sidecar was built
+# identical, commit for commit, to the tree the M4 sidecar was built
 # from. Same source, second target.
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/multiverse-sidecar" ./cmd/sidecar )
@@ -304,7 +299,7 @@ LINUX_BUILT_REV="$(go version -m "$BUILD/multiverse-sidecar" \
 [ "$LINUX_BUILT_REV" = "$SOURCE_REV" ] \
   || die "the Linux sidecar VCS stamp is '${LINUX_BUILT_REV:-missing}', want $SOURCE_REV"
 note "$(sha "$BUILD/multiverse-sidecar")"
-note "same source as the fleet's sidecar ($REF_REV), stamped $LINUX_BUILT_REV, built for linux/amd64"
+note "same source as the M4 sidecar ($REF_REV), stamped $LINUX_BUILT_REV, built for linux/amd64"
 note "static: CGO is off, so it needs no libc of a particular vintage"
 
 # ------------------------------------------------------------------ the plugin
@@ -316,20 +311,19 @@ PLUGIN="$REPO/bibites-mod/bin/Release/BibitesMultiverse.dll"
 [ -f "$PLUGIN" ] || die "the build produced no $PLUGIN"
 if [ "$(sha "$PLUGIN")" != "$(sha "$REF_PLUGIN")" ]; then
   echo "!! this tree builds  $(sha "$PLUGIN")" >&2
-  echo "!! the fleet runs    $(sha "$REF_PLUGIN")" >&2
-  die "the mod in this tree is not the mod the deployment runs. Deploy it, rebuild
-   farend/dist/farend-bundle.zip, and release from there."
+  echo "!! the M4 bundle has $(sha "$REF_PLUGIN")" >&2
+  die "the mod in this tree is not the mod in the M4 evidence bundle. Rebuild
+   farend/dist/farend-bundle.zip, repeat the tests, and then build the release."
 fi
-note "byte-identical to the fleet's plugin"
+note "byte-identical to the M4 plugin"
 
 DEPLOYED="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll"
 if [ -f "$DEPLOYED" ]; then
   if [ "$(sha256sum <"$DEPLOYED" | cut -d' ' -f1)" != "$(sha "$PLUGIN")" ]; then
-    die "the plugin deployed into this machine's own game is a different build again.
-   Three copies must agree before a release: this tree, the far-end bundle, and the games
-   the deployment is running."
+    die "the plugin in this machine's game is a different build again.
+   Three copies must agree before a release: this tree, the far-end bundle, and the local game."
   fi
-  note "byte-identical to the plugin deployed in this machine's game"
+  note "byte-identical to the plugin in this machine's game"
 else
   note "this machine's game directory is not readable from here; the bundle check stands alone"
 fi
