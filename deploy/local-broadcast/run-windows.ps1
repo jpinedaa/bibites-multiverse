@@ -1,4 +1,90 @@
+param([switch]$ArgumentQuotingSelfTest)
+
 $ErrorActionPreference = 'Stop'
+
+function ConvertTo-WindowsArgument([string]$Value) {
+    if ($Value.Length -gt 0 -and $Value -notmatch '[\s"]') { return $Value }
+
+    $result = '"'
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') {
+            $slashes++
+            continue
+        }
+        if ($character -eq '"') {
+            $result += ('\' * (($slashes * 2) + 1)) + '"'
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) {
+            $result += '\' * $slashes
+            $slashes = 0
+        }
+        $result += $character
+    }
+    if ($slashes -gt 0) { $result += '\' * ($slashes * 2) }
+    return $result + '"'
+}
+
+function Start-NativeProcess {
+    param(
+        [string]$FilePath,
+        [string]$WorkingDirectory,
+        [string[]]$ArgumentList = @(),
+        [switch]$Hidden
+    )
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $FilePath
+    $startInfo.WorkingDirectory = $WorkingDirectory
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = [bool]$Hidden
+    if ($Hidden) { $startInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden }
+    $quoted = @($ArgumentList | ForEach-Object { ConvertTo-WindowsArgument ([string]$_) })
+    $startInfo.Arguments = [string]::Join(' ', $quoted)
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw "Windows did not start $FilePath" }
+    return $process
+}
+
+if ($ArgumentQuotingSelfTest) {
+    $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('bibites-argv-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+    try {
+        $childPath = Join-Path $fixtureRoot 'argument child.ps1'
+        $outputPath = Join-Path $fixtureRoot 'observed arguments.json'
+        @'
+param([string]$OutputPath, [string]$First, [string]$Second, [string]$Third, [string]$Fourth)
+ConvertTo-Json -InputObject @($First, $Second, $Third, $Fourth) -Compress |
+    Set-Content -LiteralPath $OutputPath -Encoding UTF8
+'@ | Set-Content -LiteralPath $childPath -Encoding UTF8
+        $expected = @(
+            'value with spaces',
+            'C:\Program Files\Bibites Multiverse\trail\',
+            'quote"inside',
+            'simple'
+        )
+        $hostExe = (Get-Process -Id $PID).Path
+        $childArguments = @('-NoProfile', '-File', $childPath, $outputPath) + $expected
+        $child = Start-NativeProcess -FilePath $hostExe -WorkingDirectory $fixtureRoot `
+            -ArgumentList $childArguments -Hidden
+        if (-not $child.WaitForExit(30000)) {
+            $child.Kill()
+            throw 'The spaced-argument child process did not finish'
+        }
+        if ($child.ExitCode -ne 0) { throw "The spaced-argument child process exited with code $($child.ExitCode)" }
+        $observedJson = (Get-Content -LiteralPath $outputPath -Raw).Trim()
+        $expectedJson = ConvertTo-Json -InputObject $expected -Compress
+        if ($observedJson -ne $expectedJson) {
+            throw 'The child process received changed arguments'
+        }
+    } finally {
+        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host 'Windows spaced-argument fixture: PASS'
+    exit 0
+}
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $configPath = Join-Path $root 'config.env'
@@ -48,6 +134,14 @@ New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 if (-not (Test-Path -LiteralPath $credentialFile)) {
     throw "There is no map credential at $credentialFile. Run install.sh again."
 }
+$durablePeerFile = Join-Path $dataDir 'peer-id'
+if (-not (Test-Path -LiteralPath $durablePeerFile -PathType Leaf)) {
+    throw "There is no durable peer identity at $durablePeerFile. Run install.sh again."
+}
+$durablePeer = (Get-Content -LiteralPath $durablePeerFile -Raw).Trim()
+if ($durablePeer -ne $config.PeerId) {
+    throw "The durable peer identity does not match PeerId in $configPath. Nothing was started."
+}
 
 $env:MULTIVERSE_EXPORT_EDGES = $config.ExportEdges
 $env:MULTIVERSE_MIGRATION_EXCLUDE = $config.ExcludeSpecies
@@ -82,11 +176,11 @@ $sidecarArguments = @(
     '--relay', $config.RelayUrl,
     '--peer-id', $config.PeerId,
     '--data-dir', $dataDir,
-    '--credential-file', $credentialFile
+    '--credential-file', $credentialFile,
+    '--log-file', $sidecarLog
 )
-$sidecar = Start-Process -FilePath $config.SidecarExe -WorkingDirectory $config.DataRoot `
-    -ArgumentList $sidecarArguments -WindowStyle Hidden -PassThru `
-    -RedirectStandardError $sidecarLog -RedirectStandardOutput "$sidecarLog.out"
+$sidecar = Start-NativeProcess -FilePath $config.SidecarExe -WorkingDirectory $config.DataRoot `
+    -ArgumentList $sidecarArguments -Hidden
 Set-Content -LiteralPath (Join-Path $state 'sidecar.pid') -Value $sidecar.Id -NoNewline
 
 # Everything below runs under one stop obligation. A sidecar left behind would
@@ -139,8 +233,8 @@ try {
         '--minimize-to-tray', '--startstreaming',
         '--profile', 'BibitesBroadcast', '--collection', 'BibitesBroadcast', '--scene', 'Broadcast'
     )
-    $obs = Start-Process -FilePath $config.Obs -WorkingDirectory (Split-Path -Parent $config.Obs) `
-        -ArgumentList $obsArguments -PassThru
+    $obs = Start-NativeProcess -FilePath $config.Obs -WorkingDirectory (Split-Path -Parent $config.Obs) `
+        -ArgumentList $obsArguments
     Set-Content -LiteralPath (Join-Path $state 'obs.pid') -Value $obs.Id -NoNewline
 
     while ($true) {

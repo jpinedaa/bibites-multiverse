@@ -29,6 +29,253 @@ export PATH="$DOTNET_ROOT:$PATH"
 say() { printf '[local-broadcast] %s\n' "$*"; }
 die() { printf '[local-broadcast] ERROR: %s\n' "$*" >&2; exit 1; }
 
+acquire_install_lock() {
+  install -d -m 0700 "$config_root"
+  exec {install_lock_fd}>"$config_root/install.lock"
+  flock -n "$install_lock_fd" || \
+    die 'another local broadcast installation is active'
+}
+
+protect_windows_identity() {
+  local windows_identity_root
+  windows_identity_root="$(wslpath -w "$multiverse_root")"
+  powershell.exe -NoProfile -Command '& {
+    param([string]$Root)
+    $ErrorActionPreference = "Stop"
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+
+    function Set-PrivateAcl([System.IO.FileSystemInfo]$Item) {
+      if ($Item.PSIsContainer) {
+        $acl = New-Object System.Security.AccessControl.DirectorySecurity
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+          $sid, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow"
+        )
+      } else {
+        $acl = New-Object System.Security.AccessControl.FileSecurity
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+          $sid, "FullControl", "Allow"
+        )
+      }
+      $acl.SetOwner($sid)
+      $acl.SetAccessRuleProtection($true, $false)
+      $acl.AddAccessRule($rule)
+      $Item.SetAccessControl($acl)
+
+      $actual = $Item.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Access)
+      if (-not $actual.AreAccessRulesProtected) {
+        throw "ACL inheritance remains enabled on $($Item.FullName)"
+      }
+      $rules = @($actual.GetAccessRules(
+        $true, $true, [System.Security.Principal.SecurityIdentifier]
+      ))
+      $other = @($rules | Where-Object {
+        $_.AccessControlType -ne "Allow" -or $_.IdentityReference -ne $sid
+      })
+      if ($rules.Count -ne 1 -or $other.Count -ne 0) {
+        throw "ACL includes an account other than the current Windows user on $($Item.FullName)"
+      }
+    }
+
+    $rootItem = Get-Item -LiteralPath $Root -Force
+    Set-PrivateAcl $rootItem
+    Get-ChildItem -LiteralPath $Root -Force -Recurse | ForEach-Object {
+      Set-PrivateAcl $_
+    }
+  }' "$windows_identity_root" || \
+    die 'Windows could not enforce the current-user-only ACL on the broadcast identity'
+}
+
+pending_identity() {
+  jq -e '.format == "bibites-multiverse/enrollment-pending/1" and
+         (.installId | type == "string") and (.secret | type == "string")' \
+    "$pending_file" >/dev/null 2>&1 || \
+    die "$pending_file is not an enrollment record this installer can use"
+  install_id="$(jq -r '.installId' "$pending_file")"
+  secret="$(jq -r '.secret' "$pending_file")"
+  [[ "$install_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || \
+    die "$pending_file holds an invalid installation id"
+  [[ "$secret" =~ ^[0-9a-f]{64}$ ]] || \
+    die "$pending_file holds an invalid credential"
+  install_id="$(printf '%s' "$install_id" | tr 'A-F' 'a-f')"
+  expected_peer="public-${install_id//-/}"
+}
+
+install_id_for_peer() {
+  local peer_hex="${1#public-}"
+  printf '%s-%s-%s-%s-%s\n' \
+    "${peer_hex:0:8}" "${peer_hex:8:4}" "${peer_hex:12:4}" \
+    "${peer_hex:16:4}" "${peer_hex:20:12}"
+}
+
+request_public_identity() {
+  local requested_install_id="$1"
+  local requested_secret="$2"
+  local requested_peer="$3"
+  local enrollment_response
+  say "checking the broadcast identity with $enrollment_url"
+  enrollment_response="$(
+    printf '%s\n' "$requested_secret" |
+      jq -Rn --arg id "$requested_install_id" --arg release "$release_id" \
+        'input as $secret |
+         {format:"bibites-multiverse/enrollment-request/1",installId:$id,secret:$secret,release:$release}' |
+      curl -fsS --max-time 30 -X POST -H 'Content-Type: application/json' \
+        --data-binary @- "$enrollment_url"
+  )" || die 'the public map did not accept the broadcast identity; no live service was stopped'
+  jq -e --arg peer "$requested_peer" --arg relay "$relay_url" \
+    '.format == "bibites-multiverse/enrollment-response/1" and
+     .peerId == $peer and .relayUrl == $relay' \
+    <<<"$enrollment_response" >/dev/null || \
+    die 'the public map answered for a different identity or relay'
+}
+
+write_completed_identity() {
+  local entry_umask
+  entry_umask="$(umask)"
+  umask 077
+  printf '%s\n' "$expected_peer" >"$durable_peer_file"
+  printf '%s\n' "$secret" >"$credential_file"
+  jq -nc --arg peer "$expected_peer" --arg relay "$relay_url" --arg world "$world_name" \
+    '{format:"bibites-multiverse/broadcast-identity/1",peerId:$peer,relayUrl:$relay,world:$world}' \
+    >"$record_file"
+  umask "$entry_umask"
+  protect_windows_identity
+}
+
+preflight_public_identity() {
+  [ -f "$public_map" ] || die "missing public join configuration: $public_map"
+  jq -e '.format == "bibites-multiverse/public-map/1"' "$public_map" >/dev/null || \
+    die "$public_map has an unsupported format"
+  relay_url="$(jq -r '.relayUrl // ""' "$public_map")"
+  enrollment_url="$(jq -r '.enrollmentUrl // ""' "$public_map")"
+  [[ "$relay_url" =~ ^wss://[^[:space:]]+$ ]] || \
+    die "$public_map has no secure wss:// relay address"
+  [[ "$enrollment_url" =~ ^https://[^[:space:]]+$ ]] || \
+    die "$public_map has no secure https:// enrollment address"
+
+  local record_held=0 credential_held=0 durable_peer_held=0 pending_held=0
+  [ -f "$record_file" ] && record_held=1
+  [ -f "$credential_file" ] && credential_held=1
+  [ -f "$durable_peer_file" ] && durable_peer_held=1
+  [ -f "$pending_file" ] && pending_held=1
+
+  install_id=''
+  secret=''
+  expected_peer=''
+  if [ "$pending_held" -eq 1 ]; then
+    pending_identity
+  fi
+
+  if [ "$record_held" -eq 1 ] && [ "$credential_held" -eq 1 ] && [ "$durable_peer_held" -eq 1 ]; then
+    local recorded_peer recorded_relay recorded_world recorded_secret durable_peer
+    jq -e '.format == "bibites-multiverse/broadcast-identity/1"' "$record_file" >/dev/null 2>&1 || \
+      die "$record_file is not a completed broadcast identity"
+    recorded_peer="$(jq -r '.peerId // ""' "$record_file")"
+    recorded_relay="$(jq -r '.relayUrl // ""' "$record_file")"
+    recorded_world="$(jq -r '.world // ""' "$record_file")"
+    recorded_secret="$(tr -d '\r' <"$credential_file")"
+    [[ "$recorded_peer" =~ ^public-[0-9a-f]{32}$ ]] || \
+      die "$record_file holds an invalid peer identity"
+    [ "$recorded_relay" = "$relay_url" ] || \
+      die "$record_file names a different relay"
+    [ "$recorded_world" = "$world_name" ] || \
+      die "$record_file belongs to world '$recorded_world', not '$world_name'"
+    [[ "$recorded_secret" =~ ^[0-9a-f]{64}$ ]] || \
+      die "$credential_file holds an invalid credential"
+    durable_peer="$(tr -d '\r' <"$durable_peer_file")"
+    [ "$durable_peer" = "$recorded_peer" ] || \
+      die "$durable_peer_file disagrees with the completed identity"
+    if [ "$pending_held" -eq 1 ]; then
+      [ "$expected_peer" = "$recorded_peer" ] && [ "$secret" = "$recorded_secret" ] || \
+        die 'the pending and completed broadcast identities disagree; neither identity was changed'
+    fi
+
+    expected_peer="$recorded_peer"
+    secret="$recorded_secret"
+    install_id="$(install_id_for_peer "$recorded_peer")"
+    protect_windows_identity
+    request_public_identity "$install_id" "$secret" "$expected_peer"
+    if [ "$pending_held" -eq 1 ]; then
+      rm -f "$pending_file"
+    fi
+    peer_id="$recorded_peer"
+    say "reusing the broadcast world's map identity $peer_id"
+    return
+  fi
+
+  if [ "$pending_held" -eq 1 ] && \
+     { [ "$record_held" -eq 1 ] || [ "$credential_held" -eq 1 ] || [ "$durable_peer_held" -eq 1 ]; }; then
+    local partial_value
+    if [ "$record_held" -eq 1 ]; then
+      jq -e --arg peer "$expected_peer" --arg relay "$relay_url" --arg world "$world_name" \
+        '.format == "bibites-multiverse/broadcast-identity/1" and
+         .peerId == $peer and .relayUrl == $relay and .world == $world' \
+        "$record_file" >/dev/null 2>&1 || \
+        die 'the pending identity disagrees with the partial enrollment record'
+    fi
+    if [ "$credential_held" -eq 1 ]; then
+      partial_value="$(tr -d '\r' <"$credential_file")"
+      [ "$partial_value" = "$secret" ] || \
+        die 'the pending identity disagrees with the partial credential'
+    fi
+    if [ "$durable_peer_held" -eq 1 ]; then
+      partial_value="$(tr -d '\r' <"$durable_peer_file")"
+      [ "$partial_value" = "$expected_peer" ] || \
+        die 'the pending identity disagrees with the partial durable peer ID'
+    fi
+    protect_windows_identity
+    request_public_identity "$install_id" "$secret" "$expected_peer"
+    write_completed_identity
+    rm -f "$pending_file"
+    peer_id="$expected_peer"
+    say "completed the interrupted broadcast identity $peer_id"
+    return
+  fi
+
+  if [ "$record_held" -eq 1 ] || [ "$credential_held" -eq 1 ] || [ "$durable_peer_held" -eq 1 ]; then
+    die "$multiverse_root holds an incomplete map identity; no identity was changed"
+  fi
+
+  install -d -m 0700 "$multiverse_root" "$multiverse_data"
+  if [ "$pending_held" -eq 0 ]; then
+    # Protect the empty directory first. The pending secret then inherits a
+    # current-user-only ACL from its first write.
+    protect_windows_identity
+    install_id="$(tr 'A-F' 'a-f' </proc/sys/kernel/random/uuid | tr -d '\r\n')"
+    secret="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    expected_peer="public-${install_id//-/}"
+    local entry_umask
+    entry_umask="$(umask)"
+    umask 077
+    printf '%s\n' "$secret" |
+      jq -Rn --arg id "$install_id" \
+      'input as $secret |
+       {format:"bibites-multiverse/enrollment-pending/1",installId:$id,secret:$secret}' \
+      >"$pending_file"
+    umask "$entry_umask"
+  else
+    say 'retrying the pending public-map enrollment'
+  fi
+  protect_windows_identity
+  request_public_identity "$install_id" "$secret" "$expected_peer"
+  write_completed_identity
+  rm -f "$pending_file"
+  peer_id="$expected_peer"
+  say "the public map created the broadcast identity $peer_id"
+}
+
+status_has_ready_peer() {
+  local expected_peer_id="$1"
+  local expected_edges_json="$2"
+  jq -e --arg peer "$expected_peer_id" --argjson edges "$expected_edges_json" \
+    'any(.slots[]?;
+      .peerId == $peer and .live == true and .modConnected == true and
+      ((.exportEdges // []) | sort) == ($edges | sort))' >/dev/null
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  return 0
+fi
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --game-dir) source_game="${2:?--game-dir needs a path}"; shift ;;
@@ -47,12 +294,22 @@ case "$world_name" in *[!A-Za-z0-9._-]*|'') die 'the world name contains an unsu
 [[ "$sidecar_port" =~ ^[0-9]{2,5}$ ]] || die 'BIBITES_BROADCAST_SIDECAR_PORT is not a port number'
 [ -n "$exclude_species" ] || die 'BIBITES_BROADCAST_EXCLUDE_SPECIES is empty, which turns the exclusion policy off'
 [ -n "$export_edges" ] || die 'BIBITES_BROADCAST_EXPORT_EDGES names no edge; the broadcast world must stay on the map'
+[ -n "$release_id" ] && [ "${#release_id}" -le 32 ] || \
+  die 'BIBITES_BROADCAST_RELEASE must contain 1 to 32 characters'
 for edge in ${export_edges//,/ }; do
   case "$edge" in E|N|W|S) ;; *) die "BIBITES_BROADCAST_EXPORT_EDGES holds '$edge'; use E, N, W or S" ;; esac
 done
-for command in aws curl dotnet go install jq nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux wslpath; do
+for command in aws curl dotnet flock go install jq nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux wslpath; do
   command -v "$command" >/dev/null || die "missing command: $command"
 done
+acquire_install_lock
+expected_edges_json="$(jq -nc --arg edges "$export_edges" \
+  '$edges | gsub("[[:space:]]"; "") | split(",")')"
+jq -e 'length > 0 and length == (unique | length) and
+       all(.[]; . == "E" or . == "N" or . == "W" or . == "S")' \
+  <<<"$expected_edges_json" >/dev/null || \
+  die 'BIBITES_BROADCAST_EXPORT_EDGES must name each selected edge once'
+export_edges="$(jq -r 'join(",")' <<<"$expected_edges_json")"
 [ -f "$source_game/The Bibites.exe" ] || die "missing Windows game in $source_game"
 [ -f "$source_game/winhttp.dll" ] || die "BepInEx is not installed in $source_game"
 [ -f "$source_obs/bin/64bit/obs64.exe" ] || die "missing Windows OBS: $source_obs"
@@ -79,6 +336,26 @@ windows_root="$windows_local_appdata\\BibitesMultiverse\\broadcast"
 windows_root_wsl="$(wslpath -u "$windows_root")"
 game_dir="$windows_root_wsl/game"
 obs_dir="$windows_root_wsl/obs"
+
+multiverse_root="$windows_root_wsl/multiverse"
+multiverse_data="$multiverse_root/data"
+credential_file="$multiverse_root/peer-secret.txt"
+record_file="$multiverse_root/enrollment.json"
+pending_file="$multiverse_root/enrollment-pending.json"
+durable_peer_file="$multiverse_data/peer-id"
+peer_id=''
+
+# Complete every public-map and identity check before this installer stops a
+# live process or replaces a runtime file.
+preflight_public_identity
+
+private_assembly="$game_dir/The Bibites_Data/Managed/BibitesAssembly.dll"
+if [ -f "$game_dir/The Bibites.exe" ]; then
+  [ -f "$private_assembly" ] || die "the private game copy is incomplete: $private_assembly"
+  private_assembly_sha="$(sha256sum "$private_assembly" | awk '{print toupper($1)}')"
+  [ "$private_assembly_sha" = "$assembly_sha" ] || \
+    die 'the private game copy does not match the installed game; remove it and reinstall'
+fi
 
 tmux -L bibites-broadcast kill-session -t bibites-local-broadcast >/dev/null 2>&1 || true
 systemctl --user disable --now bibites-local-broadcast-windows.service >/dev/null 2>&1 || true
@@ -132,7 +409,6 @@ if [ ! -f "$obs_dir/bin/64bit/obs64.exe" ]; then
   say 'copying OBS into the private broadcast directory'
   cp -a "$source_obs/." "$obs_dir/"
 fi
-private_assembly="$game_dir/The Bibites_Data/Managed/BibitesAssembly.dll"
 [ -f "$private_assembly" ] || die "the private game copy is incomplete: $private_assembly"
 private_assembly_sha="$(sha256sum "$private_assembly" | awk '{print toupper($1)}')"
 [ "$private_assembly_sha" = "$assembly_sha" ] || \
@@ -157,81 +433,6 @@ say 'building the Windows sidecar for the broadcast world'
 ( cd "$repo/go" && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 nice -n 19 \
     go build -trimpath -o "$sidecar_exe" ./cmd/sidecar )
 [ -f "$sidecar_exe" ] || die "the sidecar build did not create $sidecar_exe"
-
-multiverse_root="$windows_root_wsl/multiverse"
-multiverse_data="$multiverse_root/data"
-credential_file="$multiverse_root/peer-secret.txt"
-record_file="$multiverse_root/enrollment.json"
-pending_file="$multiverse_root/enrollment-pending.json"
-install -d -m 0700 "$multiverse_root" "$multiverse_data"
-
-[ -f "$public_map" ] || die "missing public join configuration: $public_map"
-jq -e '.format == "bibites-multiverse/public-map/1"' "$public_map" >/dev/null || \
-  die "$public_map has an unsupported format"
-relay_url="$(jq -r '.relayUrl // ""' "$public_map")"
-enrollment_url="$(jq -r '.enrollmentUrl // ""' "$public_map")"
-[[ "$relay_url" =~ ^wss://[^[:space:]]+$ ]] || die "$public_map has no secure wss:// relay address"
-[[ "$enrollment_url" =~ ^https://[^[:space:]]+$ ]] || die "$public_map has no secure https:// enrollment address"
-
-peer_id=''
-if [ -f "$record_file" ] && [ -f "$credential_file" ]; then
-  recorded_peer="$(jq -r '.peerId // ""' "$record_file" 2>/dev/null || true)"
-  recorded_relay="$(jq -r '.relayUrl // ""' "$record_file" 2>/dev/null || true)"
-  recorded_secret="$(head -n 1 "$credential_file" | tr -d '\r\n')"
-  if [[ "$recorded_peer" =~ ^public-[0-9a-f]{32}$ ]] && [ "$recorded_relay" = "$relay_url" ] &&
-     [[ "$recorded_secret" =~ ^[0-9a-f]{64}$ ]]; then
-    peer_id="$recorded_peer"
-    say "reusing the broadcast world's map identity $peer_id"
-  fi
-fi
-if [ -z "$peer_id" ] && [ ! -f "$pending_file" ] &&
-   { [ -f "$record_file" ] || [ -f "$credential_file" ]; }; then
-  die "$multiverse_root holds part of a map identity this installer cannot read. Nothing was changed. A second enrollment would abandon the world's current place on the map."
-fi
-if [ -z "$peer_id" ]; then
-  if [ -f "$pending_file" ]; then
-    install_id="$(jq -r '.installId // ""' "$pending_file" 2>/dev/null || true)"
-    secret="$(jq -r '.secret // ""' "$pending_file" 2>/dev/null || true)"
-    jq -e '.format == "bibites-multiverse/enrollment-pending/1"' "$pending_file" >/dev/null || \
-      die "$pending_file is not an enrollment record this installer can use"
-    say 'retrying the pending public-map enrollment'
-  else
-    install_id="$(cat /proc/sys/kernel/random/uuid)"
-    secret="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-    entry_umask="$(umask)"
-    umask 077
-    jq -nc --arg id "$install_id" --arg secret "$secret" \
-      '{format:"bibites-multiverse/enrollment-pending/1",installId:$id,secret:$secret}' \
-      >"$pending_file"
-    umask "$entry_umask"
-  fi
-  chmod 0600 "$pending_file"
-  [[ "$install_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || \
-    die "$pending_file holds an invalid installation id"
-  [[ "$secret" =~ ^[0-9a-f]{64}$ ]] || die "$pending_file holds an invalid credential"
-  expected_peer="public-$(printf '%s' "${install_id//-/}" | tr 'A-F' 'a-f')"
-  say "requesting the broadcast world's own identity from $enrollment_url"
-  enrollment_response="$(jq -nc --arg id "$install_id" --arg secret "$secret" --arg release "$release_id" \
-      '{format:"bibites-multiverse/enrollment-request/1",installId:$id,secret:$secret,release:$release}' |
-    curl -fsS --max-time 30 -X POST -H 'Content-Type: application/json' \
-      --data-binary @- "$enrollment_url")" || \
-    die 'the public map did not create the broadcast identity; the pending record was kept, so running this installer again is a safe retry'
-  jq -e --arg peer "$expected_peer" --arg relay "$relay_url" \
-    '.format == "bibites-multiverse/enrollment-response/1" and .peerId == $peer and .relayUrl == $relay' \
-    <<<"$enrollment_response" >/dev/null || \
-    die 'the public map answered for a different identity or relay'
-  entry_umask="$(umask)"
-  umask 077
-  printf '%s\n' "$secret" >"$credential_file"
-  jq -nc --arg peer "$expected_peer" --arg relay "$relay_url" --arg world "$world_name" \
-    '{format:"bibites-multiverse/broadcast-identity/1",peerId:$peer,relayUrl:$relay,world:$world}' \
-    >"$record_file"
-  umask "$entry_umask"
-  chmod 0600 "$credential_file" "$record_file"
-  rm -f "$pending_file"
-  peer_id="$expected_peer"
-  say "the public map created the broadcast identity $peer_id"
-fi
 
 install -m 0644 "$repo/deploy/local-broadcast/run-windows.ps1" "$windows_root_wsl/run-windows.ps1"
 install -m 0644 "$repo/deploy/local-broadcast/stop-windows.ps1" "$windows_root_wsl/stop-windows.ps1"
@@ -297,15 +498,15 @@ if [ "$start" -eq 1 ]; then
   status_url="${status_url%/contract-b/v4}/api/status"
   for _ in $(seq 1 120); do
     if curl -fsS --max-time 10 "$status_url" 2>/dev/null |
-        jq -e --arg peer "$peer_id" 'any(.slots[]?; .peerId == $peer and .live == true)' >/dev/null; then
-      say "the broadcast world is on the map as $peer_id"
+        status_has_ready_peer "$peer_id" "$expected_edges_json"; then
+      say "the broadcast world is ready on the map as $peer_id"
       break
     fi
     sleep 2
   done
   curl -fsS --max-time 10 "$status_url" |
-    jq -e --arg peer "$peer_id" 'any(.slots[]?; .peerId == $peer and .live == true)' >/dev/null || \
-    die "the local services started, but the map does not show $peer_id"
+    status_has_ready_peer "$peer_id" "$expected_edges_json" || \
+    die "the map does not show $peer_id with its game and expected export edges"
   public_manifest='https://bibitesmultiverse.com/stream/bibites/index.m3u8?cookieCheck=1'
   for _ in $(seq 1 90); do
     if curl -fsS -H 'Cookie: cookieCheck=1' "$public_manifest" >/dev/null 2>&1; then

@@ -33,12 +33,30 @@ A later installation reuses that identity. If the identity files are present but
 installer stops and changes nothing: a second enrollment would abandon this world's place on the
 map.
 
-Two files below `%LOCALAPPDATA%\BibitesMultiverse\broadcast\multiverse\` carry the identity:
+The installer makes sure that the completed identity is valid before it stops the broadcaster.
+It uses an exact enrollment retry to make sure that the credential is valid.
+It also makes sure that the recorded world and durable sidecar peer ID match.
+If these values disagree, the installer stops before it replaces a runtime file.
+
+One installation lock covers the preflight, file updates, and optional start.
+A second installer stops while the first installer holds this lock.
+
+The installer applies a protected Windows ACL to the full identity directory.
+The ACL gives access to the current Windows user only.
+If the installer cannot apply this ACL, it does not contact the enrollment endpoint.
+It also stops if the ACL contains access for another account.
+
+The installer can find a pending record beside a completed identity.
+It removes the pending record only when its peer ID and secret match the completed identity.
+If they do not match, the installer keeps both records and stops.
+
+Three files below `%LOCALAPPDATA%\BibitesMultiverse\broadcast\multiverse\` carry the identity:
 
 | File | Contents |
 |---|---|
 | `peer-secret.txt` | The map credential secret |
 | `enrollment.json` | The peer identity and relay address |
+| `data\peer-id` | The durable peer identity that the sidecar uses |
 
 The private OBS profile contains the RTMP publish password.
 The installer reads the password from the origin through SSH.
@@ -51,7 +69,7 @@ Prepare this software before installation:
 
 - A Windows user session with the supported Bibites game and BepInEx.
 - OBS Studio and an NVIDIA GPU that supports NVENC.
-- WSL with systemd, AWS CLI v2, Session Manager Plugin, `tmux`, `jq`, Go, and .NET SDK.
+- WSL with systemd, AWS CLI v2, Session Manager Plugin, `flock`, `tmux`, `jq`, Go, and .NET SDK.
 - SSH access to the private stream origin.
 - An AWS profile that can read the cloud stack and start an SSM session.
 - Outbound HTTPS to the public map for enrollment, and outbound WSS for the relay.
@@ -93,6 +111,9 @@ The first installation copies the game and OBS, and enrolls the world's identity
 Later installations reuse those copies and that identity, and update the Multiverse plugin,
 the sidecar, and the configuration.
 
+The installer makes sure that the map identity is valid before it stops a running broadcaster.
+The sidecar runner makes sure that the durable peer ID matches before each start.
+
 ## Operate
 
 Start the tunnel, sidecar, game, and OBS:
@@ -128,11 +149,16 @@ peer="$(jq -r .peerId \
   "$(wslpath -u "$(powershell.exe -NoProfile -Command \
     '[Environment]::GetFolderPath("LocalApplicationData")' | tr -d '\r')")/BibitesMultiverse/broadcast/multiverse/enrollment.json")"
 curl -fsS https://<service-domain>/api/status |
-  jq -e --arg peer "$peer" 'any(.slots[]?; .peerId == $peer and .live == true)'
+  jq -e --arg peer "$peer" '
+    any(.slots[]?;
+      .peerId == $peer and .live == true and .modConnected == true and
+      ((.exportEdges // []) | sort) == (["E","N","W","S"] | sort))'
 ```
 
 Read `%LOCALAPPDATA%\BibitesMultiverse\broadcast\logs\sidecar.log` when that check fails.
 The line `contract B: slot granted` reports the world's place on the map.
+The `modConnected` value shows that the game mod reached the sidecar.
+The `exportEdges` value must contain the configured map edges.
 
 The website names this world only when the hosted archive is told which peer it is.
 Set `MV_BROADCAST_PEER_ID` to the value printed above, then run
