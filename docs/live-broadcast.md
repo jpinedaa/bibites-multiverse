@@ -151,6 +151,9 @@ It stops the sidecar and flushes the volume.
 The page returns to its reconnecting state.
 A later instance uses the retained data and world identity.
 
+The page ignores a rate-limited health probe after the player loads.
+This prevents a false reconnecting message while the video continues.
+
 The private operations record must track interruption events and restart evidence.
 
 ## Capacity
