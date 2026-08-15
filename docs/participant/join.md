@@ -9,8 +9,13 @@ about your world once it is there.
 
 ## Automatic public enrollment
 
-The Windows `0.2.0` package contains the public HTTPS enrollment address and the WSS relay address.
-It contains no join string and no shared secret.
+Both Windows `0.2.0` archives contain `public-map.json`. This file is the public join
+configuration. It contains the deployed HTTPS enrollment address and WSS relay address. It does
+not contain a world identity or secret.
+
+If “include the join string” means that the installer must already know how to reach the public
+map, the package does include it. A literal `multiverse-join/1` string is different: it contains
+one world's identity and secret, so it cannot be shared by all installations.
 
 During installation, it does this:
 

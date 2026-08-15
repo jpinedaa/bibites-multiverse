@@ -16,7 +16,7 @@ raised only after the release that satisfies it exists.
 | `kit/Install-BibitesMultiverse-Gui.ps1` | Selects the included or existing game and starts the installed world by default |
 | `kit/Find-BibitesGame.ps1` | Searches Steam, itch.io, and common Windows game locations |
 | `kit/Install-BibitesMultiverse.ps1` | The Windows installer and its advanced options |
-| `kit/public-map.json` | Public HTTPS enrollment and WSS relay addresses. It contains no credential |
+| `kit/public-map.json` | Public join configuration with the HTTPS enrollment and WSS relay addresses. It contains no credential |
 | `kit/Uninstall-BibitesMultiverse.ps1` | Removes what the Windows installer recorded, hash-checked, and nothing else |
 | `kit/README.md` | The page inside the Windows archive |
 | `kit/install-bibites-multiverse.sh` | The Linux installer. bash, and `sha256sum`/`awk`/`unzip`/`file`; no toolchain, no root, and no `jq` or `python` — its JSON reader is 40 lines of awk, shared with the uninstaller |
@@ -35,6 +35,8 @@ BepInEx flavor, and installer differ by platform.
 The build creates an add-on archive for each platform. Release `0.2.0` also publishes the Windows
 complete archive as the recommended download. It contains an authorized, unmodified game payload
 and a redistribution notice.
+Both Windows archives contain `public-map.json`. This file lets the installer find the deployed
+public map. Each installation still creates its own world identity and secret.
 Every archive contains the project `LICENSE` and `THIRD_PARTY_NOTICES.md` files.
 
 The two documents that ship *beside* the release rather than inside it are
@@ -158,6 +160,9 @@ that fails its manifest**.
    afterthought** — a reader on that platform should meet the checksum-then-executable-bit
    ordering, the launcher difference and the one-instance-per-game-folder warning without having
    to read the Windows sections first.
+
+   Also open each Windows archive and confirm that `public-map.json` contains the intended
+   enrollment and relay addresses. It must not contain a world identity or secret.
 
 **A fifth step, if the repository is private:** the page's documentation links resolve only for
 somebody who can read the repository. Make it public, or the four participant pages have to

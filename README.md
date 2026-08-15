@@ -135,8 +135,10 @@ Release `0.2.0` turns the Windows setup into three steps:
 3. Keep the recommended options. The installer opens the included game after the map grants it a
    place.
 
-The installer creates a unique public-map identity for this installation. It does not embed one
-shared join string. Private maps and the Linux add-on still use an operator-issued join string.
+Both Windows archives include `public-map.json`, the public join configuration. It contains the
+deployed enrollment and relay addresses. It contains no world identity or secret. The installer
+creates a unique identity and secret for this installation. Private maps and the Linux add-on
+still use an operator-issued join string.
 
 After checksum and extraction, the platform commands are:
 

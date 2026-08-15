@@ -16,6 +16,23 @@ serves the path only when public enrollment is enabled. The advertised relay URL
 All responses use JSON and `Cache-Control: no-store`. Other methods receive `405` from the relay.
 The hosted nginx configuration denies them before they reach the relay.
 
+## Packaged public join configuration
+
+The Windows archives include `public-map.json`:
+
+```json
+{
+  "format": "bibites-multiverse/public-map/1",
+  "enrollmentUrl": "https://bibitesmultiverse.com/api/enroll",
+  "relayUrl": "wss://bibitesmultiverse.com/contract-b/v4"
+}
+```
+
+This file is public join configuration. It contains no peer identity or secret. The installer
+creates those values before it sends the enrollment request. A private-map
+`multiverse-join/1` string contains an identity and secret and must not be shared between
+installations.
+
 ## Request
 
 ```json

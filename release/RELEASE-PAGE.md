@@ -8,9 +8,12 @@ Your game and saves stay on your computer.
 - Windows: nothing else. The recommended package includes The Bibites `0.6.3.1`.
 - Linux: The Bibites `0.6.3.1` from itch.io and a private join string.
 
-The Windows installer creates a unique public-map identity over HTTPS. The package has no shared
-credential. A private join string contains the map address, world identity, and secret. Do not
-post one in an issue, screenshot, or log.
+Both Windows archives include `public-map.json`, the public join configuration. It contains the
+deployed HTTPS enrollment and WSS relay addresses. During installation, the package creates a
+unique world identity and secret. It does not reuse one shared credential.
+
+A private join string contains the map address, world identity, and secret. Do not post one in an
+issue, screenshot, or log.
 
 @@EDITION_NOTE@@
 

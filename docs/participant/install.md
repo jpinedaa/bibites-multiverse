@@ -15,6 +15,10 @@ The Linux package remains an add-on for a supported native itch.io game and uses
 | Windows, add-on | `bibites-multiverse-0.2.0-windows-x64.zip` | your existing Steam copy |
 | Linux | `bibites-multiverse-0.2.0-linux-x64.zip` | your existing itch.io copy |
 
+Both Windows archives include `public-map.json`, the public join configuration. It contains the
+deployed enrollment and relay addresses. It contains no shared world identity or secret. The
+installer creates those private values for each installation.
+
 **The mod inside every archive is the same file**, byte for byte: it is platform-independent IL.
 What differs by platform is the sidecar, BepInEx flavour, and kit. A complete archive adds
 `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, and `game/`. No installer downloads the
@@ -143,9 +147,10 @@ written anywhere.
 ./stop-multiverse.sh
 ```
 
-The Windows complete package needs no join string for the public map. It generates a different
-secret on this computer and enrolls it over HTTPS. The package contains public service addresses,
-not a shared credential.
+Both Windows packages include the public-map connection details. The installer reads
+`public-map.json`, generates a different secret on this computer, and enrolls it over HTTPS. A
+literal private-map join string is not packaged because every installation needs a different
+identity and secret.
 
 **No parameter takes a private-map join string on the command line**, on purpose: a value typed there is
 in every process listing on your machine and in your shell history, and the wire itself has the

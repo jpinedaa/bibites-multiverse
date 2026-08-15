@@ -5,8 +5,9 @@ edges and arrive in other people's; theirs arrive in yours. Your world stays on 
 stays yours.
 
 **The recommended package includes an authorized portable copy of The Bibites.** The GUI selects
-it by default. You can instead use a supported game already on this machine. The public map needs
-no join string. **You do not need:** a compiler, an SDK, or administrator rights.
+it by default. You can instead use a supported game already on this machine. This archive also
+includes `public-map.json`, the public join configuration. It contains the deployed service
+addresses and no secret. **You do not need:** a compiler, an SDK, or administrator rights.
 
 **This is a Windows archive.** The Linux release is a separate add-on archive, with a bash kit in
 place of this one. The mod is the same file in both packages. The sidecar, mod framework, and
@@ -45,11 +46,12 @@ default. For advanced installation options, run:
 .\Install-BibitesMultiverse.ps1
 ```
 
-The public-map setup creates a unique credential for this installation over HTTPS. It does not
-reuse one packaged join string. For a private map, use a join-string file. **There is no parameter
-that takes the secret on the command line**, on purpose. A command-line value appears in process
-listings and shell history. If you would rather not type it, put the
-one-line join string in a file and pass `-JoinStringFile .\join.txt` — then delete that file.
+The public-map setup reads the packaged public join configuration. It creates a unique credential
+for this installation over HTTPS. It does not reuse one packaged join string. For a private map,
+use a join-string file. **There is no parameter that takes the secret on the command line**, on
+purpose. A command-line value appears in process listings and shell history. If you would rather
+not type it, put the one-line join string in a file and pass `-JoinStringFile .\join.txt` — then
+delete that file.
 
 The GUI defaults to the included game. Its other option finds Steam's copy or accepts a selected
 folder. The installer checks the game build against `support-matrix.json` and stops if there is no
@@ -134,7 +136,7 @@ system prints one, and no diagnostic asks for one.
 | `Install-BibitesMultiverse-Gui.ps1` | The game selection and start-after-install window |
 | `Find-BibitesGame.ps1` | The existing-game search shared by the GUI and installer |
 | `Install-BibitesMultiverse.ps1` | The installer and its advanced options |
-| `public-map.json` | The HTTPS enrollment and WSS relay addresses; no secret |
+| `public-map.json` | The public join configuration: HTTPS enrollment and WSS relay addresses; no secret |
 | `Uninstall-BibitesMultiverse.ps1` | The uninstaller |
 | `BibitesMultiverse.dll` | The mod, a BepInEx plugin |
 | `multiverse-sidecar.exe` | The program that speaks to the map on your world's behalf |
