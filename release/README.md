@@ -45,9 +45,9 @@ extracted from that same file — and [`../docs/defaults-audit.md`](../docs/defa
 
 ## What this is not: `farend/`
 
-`farend/` is the preserved Windows bundle for the M4 two-computer test map.
+`farend/` originated as the Windows bundle for the M4 two-computer test map.
 It uses map slot 6, a LAN relay, and a private certificate authority.
-The scripts keep the slot and test-map assumptions from that evidence run.
+The scripts preserve those test-map assumptions, but maintainers can rebuild the artifacts.
 
 This directory is the participant-facing descendant of the same tested mechanics.
 These mechanics include Steam search, the game-build gate, BepInEx placement, and generated process scripts.
@@ -80,22 +80,28 @@ The build rejects a payload that does not match the support matrix or that alrea
 files. The project received permission to redistribute the game with this installer. The notice
 records that permission without changing the game's copyright or the source-code license.
 
-It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`), the .NET SDK and Go.
-These tools are only build inputs. Heavy commands run under `nice -n 19` to limit interference with other local work.
+It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`), the .NET SDK, Go,
+Git, Python 3, `tar`, `zip`, `unzip`, and `curl`. These tools are only build inputs.
+Heavy commands run under `nice -n 19` to limit interference with other local work.
 
 Go can omit VCS metadata when a linked worktree points to Git data on another filesystem. In that
 case, set `RELEASE_SIDECAR_BUILD_REPO` to a clean checkout of the same commit. The builder checks
 the revision and refuses a missing sidecar stamp.
 
-**It refuses to build a release nobody has run.** Before it packages anything it requires:
+**The builder checks package consistency, not remote execution.** Before it packages anything,
+it requires:
 
 1. `bibites-mod/libs/BibitesAssembly.dll` must match the Windows row in `docs/support-matrix.md`.
    The mod uses this file as its reference assembly.
 2. The plugin must be **byte-identical** to the one in `farend/dist/farend-bundle.zip`.
-   This file is the tracked M4 Windows evidence artifact. Every staged copy must use it.
-3. The Go source must match the source for the sidecar in that bundle.
-   VCS stamps can make two builds from the same source differ as files.
+   This comparison keeps the tracked Windows bundle and participant packages aligned.
+3. The repository inputs and module versions selected by `go list` for Windows `cmd/sidecar`
+   must match the source revision in the bundled sidecar. Unrelated Go commands do not affect
+   this comparison. VCS stamps can make two builds from the same inputs differ as files.
 4. If this machine's game directory is readable, the local plugin must also match.
+
+These comparisons do not prove that a bundle ran on another computer. Record runtime evidence
+separately after a real test or deployment.
 
 It also checks two things the two-platform matrix made checkable: that **every matrix entry
 carries the same keys** and that no two rows share a `(gameVersion, platform)` pair — because both
@@ -104,12 +110,13 @@ happens not to have. And when an unpacked Linux game is readable (`LINUX_GAME_DI
 the rehearsal's copy), it checks the Linux row's hash against a real file.
 
 **The Linux sidecar is the one artifact with no byte-identity reference.**
-The M4 bundle contains a Windows sidecar, so it has no Linux binary to compare.
-The Windows gate proves that `go/` matches the source of the tested sidecar.
-The Linux build uses that same source for a second target.
+The tracked bundle contains a Windows sidecar, so it has no Linux binary to compare.
+The input-manifest gate shows that both builds use the same sidecar source.
+It does not show that either binary ran successfully.
 
 A mismatch stops the build and names which side moved.
-Rebuild the far-end bundle and repeat its tests before you release changed plugin or sidecar code.
+If plugin or sidecar code changes, rebuild the far-end bundle. Then repeat its tests before release.
+Complete the required runtime test. Record its results separately.
 
 Every archive is built deterministically — fixed timestamps, sorted entries, no extra attributes
 — so rebuilding from the same tag and inputs reproduces the checksums on the page. Linux archives
