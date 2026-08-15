@@ -580,10 +580,13 @@ type BrainHistory struct {
 	// record. Neither is ever expressed as a zero reading.
 	Persisted bool `json:"persisted"`
 	Lost      bool `json:"lost,omitempty"`
-	// MaxSyn and MaxHid are the drawn window's own upper edges — the two y-scales
-	// the panel fits to what it is showing, published here so the page and any
-	// other renderer scale the same series the same way.
+	// MinSyn/MaxSyn and MinHid/MaxHid are the drawn window's own lower and upper
+	// interquartile edges. Each plot fits this range instead of starting at zero,
+	// so small changes remain visible without clipping the shaded band. The
+	// endpoint publishes the range so every renderer scales the series equally.
+	MinSyn int          `json:"minSyn"`
 	MaxSyn int          `json:"maxSyn"`
+	MinHid int          `json:"minHid"`
 	MaxHid int          `json:"maxHid"`
 	Points []BrainPoint `json:"points"`
 }
@@ -680,6 +683,7 @@ func BuildBrainHistory(src []BrainBucket, fromMs, toMs int64, buckets int) Brain
 		}
 	}
 
+	haveSynRange, haveHidRange := false, false
 	for i := 0; i < buckets; i++ {
 		p := BrainPoint{AtMs: out.FromMs + int64(i)*bucketMs, N: held[i], Seen: seen[i],
 			Binned: binned[i]}
@@ -693,8 +697,14 @@ func BuildBrainHistory(src []BrainBucket, fromMs, toMs int64, buckets int) Brain
 			p.HiSyn = histQuantile(syn[i], n, 0.75, nil)
 			p.MinSyn = histQuantile(syn[i], n, 0, nil)
 			p.MaxSyn = histQuantile(syn[i], n, 1, nil)
-			if p.HiSyn != nil && *p.HiSyn > out.MaxSyn {
-				out.MaxSyn = *p.HiSyn
+			if p.LoSyn != nil && p.HiSyn != nil {
+				if !haveSynRange || *p.LoSyn < out.MinSyn {
+					out.MinSyn = *p.LoSyn
+				}
+				if !haveSynRange || *p.HiSyn > out.MaxSyn {
+					out.MaxSyn = *p.HiSyn
+				}
+				haveSynRange = true
 			}
 		}
 		if n := histTotal(neu[i]); n > 0 {
@@ -703,8 +713,14 @@ func BuildBrainHistory(src []BrainBucket, fromMs, toMs int64, buckets int) Brain
 			p.HiHid = histQuantile(neu[i], n, 0.75, hidden)
 			p.MinHid = histQuantile(neu[i], n, 0, hidden)
 			p.MaxHid = histQuantile(neu[i], n, 1, hidden)
-			if p.HiHid != nil && *p.HiHid > out.MaxHid {
-				out.MaxHid = *p.HiHid
+			if p.LoHid != nil && p.HiHid != nil {
+				if !haveHidRange || *p.LoHid < out.MinHid {
+					out.MinHid = *p.LoHid
+				}
+				if !haveHidRange || *p.HiHid > out.MaxHid {
+					out.MaxHid = *p.HiHid
+				}
+				haveHidRange = true
 			}
 		}
 		out.Points[i] = p

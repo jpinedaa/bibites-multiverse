@@ -309,6 +309,30 @@ func TestTheBrainHistoryIsReAggregatedByMergingDistributions(t *testing.T) {
 	if h.NeuronFloor != BrainNeuronFloor {
 		t.Fatalf("the floor is not published: %d", h.NeuronFloor)
 	}
+	if h.MinSyn != 10 || h.MaxSyn != 10 || h.MinHid != 1 || h.MaxHid != 1 {
+		t.Fatalf("a constant window published the wrong visible ranges: syn=%d–%d hidden=%d–%d",
+			h.MinSyn, h.MaxSyn, h.MinHid, h.MaxHid)
+	}
+}
+
+// TestTheBrainHistoryPublishesBothEdgesOfEachVisibleRange keeps the browser's
+// y-axis independent of zero. The plotted range is the complete interquartile
+// band, not the raw extremes, so the band stays visible and outliers do not
+// flatten the median line.
+func TestTheBrainHistoryPublishesBothEdgesOfEachVisibleRange(t *testing.T) {
+	src := []BrainBucket{
+		{AtMs: 0, Held: 4, Seen: 4,
+			Neurons: map[int]int{BrainNeuronFloor: 4}, Synapses: map[int]int{12: 4}},
+		{AtMs: BrainBucketMs, Held: 4, Seen: 4,
+			Neurons: map[int]int{BrainNeuronFloor + 9: 4}, Synapses: map[int]int{31: 4}},
+	}
+	h := BuildBrainHistory(src, 0, 8*BrainBucketMs, 8)
+	if h.MinSyn != 12 || h.MaxSyn != 31 {
+		t.Fatalf("synapse range = %d–%d, want 12–31", h.MinSyn, h.MaxSyn)
+	}
+	if h.MinHid != 0 || h.MaxHid != 9 {
+		t.Fatalf("hidden-neuron range = %d–%d, want 0–9", h.MinHid, h.MaxHid)
+	}
 }
 
 // TestAGapStaysAGapAndIsNeverAZero is history.go rule 2 carried onto this panel,

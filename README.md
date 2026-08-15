@@ -11,12 +11,9 @@
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
 
-[Website](https://bibitesmultiverse.com/) ·
-[Live map](https://bibitesmultiverse.com/live) ·
 [Watch live](https://bibitesmultiverse.com/watch) ·
-[Install](docs/participant/install.md) ·
-[Join](docs/participant/join.md) ·
-[Participant guide](docs/README.md) ·
+[Live map](https://bibitesmultiverse.com/live) ·
+[Install a world](docs/participant/install.md) ·
 [Project status](STATUS.md)
 
 </div>
@@ -26,6 +23,14 @@ Organisms cross one simulation border and continue their lives in another world.
 
 Every participant keeps a separate game, clock, ecosystem, and save history. This is not one
 synchronized mega-simulation. It is an evolutionary continent made from worlds that remain local.
+
+## Start here
+
+- **[Watch a world live](https://bibitesmultiverse.com/watch).** See one shared game camera.
+- **[Explore the live map](https://bibitesmultiverse.com/live).** Follow worlds, migrations,
+  species, and lineages.
+- **[Connect your world](docs/participant/install.md).** Use the complete Windows package or the
+  Linux add-on for a supported copy of *The Bibites*.
 
 > [!IMPORTANT]
 > **Bibites Multiverse `0.2.0` is public.** The recommended Windows download includes an
@@ -37,37 +42,36 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 ## About *The Bibites*
 
 [*The Bibites: Digital Life*](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
-is an artificial-life sandbox by Omnia Studios. Each bibite has genes and a neural-network brain
-that can change across generations.
+is an artificial-life sandbox by Omnia Studios. Every Bibite inherits mutable genes and a
+neural-network brain.
 
-You create a world and set its physical and biological conditions. Natural selection does the
-rest: creatures learn to find food, compete, cooperate, specialize, and form new species.
-The game includes lineage views, genetic analysis, creature engineering, and world statistics.
+> [!NOTE]
+> ***The Bibites* and Bibites Multiverse have different creators.** Bibites Multiverse is an
+> independent community project. It is not affiliated with or endorsed by Omnia Studios.
+
+You set the physical and biological conditions of a world. Natural selection shapes the creatures
+that live there. Their bodies, brains, behavior, and species can change across generations.
 
 You can get *The Bibites* on [Steam](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
 or [itch.io](https://thebibites.itch.io/the-bibites).
-
-These screenshots come from real Multiverse saves loaded in the game.
 
 <table>
 <tr>
 <td width="50%">
 <img src="docs/assets/gameplay-ecosystem.webp" alt="Several living Bibites sharing one green simulation world">
-<br><sub><strong>A living ecosystem.</strong> Multiple Bibites share one local simulation.</sub>
+<br><sub><strong>A world that evolves itself.</strong> Food, movement, reproduction, predation, and mutation shape each local population.</sub>
 </td>
 <td width="50%">
-<img src="docs/assets/gameplay-bibite-closeup.webp" alt="A large living Bibite shown close-up in the game">
-<br><sub><strong>One Bibite up close.</strong> The game can follow an individual inside the wider population.</sub>
+<img src="docs/assets/gameplay-neural-network.webp" alt="A living Bibite beside its neural-network brain diagram">
+<br><sub><strong>Brains evolve too.</strong> Each Bibite turns sensory inputs into actions through its own network of mutable nodes and connections.</sub>
 </td>
 </tr>
 </table>
 
-The base game asks what can evolve inside one world. Bibites Multiverse asks a second question:
+Each simulation is a living world. Connect many of them, and artificial life can inhabit a digital
+universe larger than any one computer.
 
-> **What happens when evolution can leave home?**
-
-Bibites Multiverse is an independent community project. It is not affiliated with or endorsed by
-Omnia Studios.
+> **What evolves when the network itself becomes a habitat?**
 
 ## What the Multiverse adds
 
@@ -76,13 +80,14 @@ Omnia Studios.
 Each player still runs a complete local simulation. The Multiverse turns the borders between
 those simulations into migration routes.
 
-| 🧬 Evolution can travel | 🗺️ Every world stays independent |
+| Feature | What it changes |
 |---|---|
-| A border crossing can become a migration into another ecosystem. | Your clock, settings, saves, and simulation remain on your machine. |
-| **↔️ Every edge is a route** | **🌐 The map survives churn** |
-| North, east, south, and west can send and receive organisms. | Offline worlds are bypassed. Returning worlds reclaim their prior positions. |
-| **📚 History remains visible** | **🔐 Each world has one identity** |
-| The public archive follows migrations, lineage, species, and brain-complexity trends. | Each participant gets a separate credential that binds to one world. |
+| 🧬 Traveling evolution | A Bibite that crosses a border can enter a neighboring ecosystem. |
+| ↔️ Four migration routes | Each world can send and receive Bibites through its north, east, south, and west edges. |
+| 🗺️ Independent worlds | Each player keeps a separate clock, settings, saves, and simulation. |
+| 🌐 Stable map positions | Offline worlds are bypassed. Returning worlds reclaim their positions. |
+| 📚 Public history | The archive records migrations, lineages, species, and brain-complexity trends. |
+| 🔐 One world identity | Each credential belongs to one world and preserves its place on the map. |
 
 The result feels less like a multiplayer lobby and more like a continent with moving life.
 
@@ -93,6 +98,33 @@ The result feels less like a multiplayer lobby and more like a continent with mo
 </a>
 
 <p align="center"><sub><strong>One captured moment.</strong> The public map shows six live worlds, their populations, active lanes, and organisms in transit.</sub></p>
+
+Use the map's **Fullscreen** control to fit the complete grid to the available screen.
+
+## Watch evolution unfold
+
+### Species across the network
+
+<a href="https://bibitesmultiverse.com/live#species">
+<img src="docs/assets/live-species-view.webp" width="100%" alt="The public Species tab showing living species, their worlds, populations, trends, and recorded ancestry">
+</a>
+
+The [Species tab](https://bibitesmultiverse.com/live#species) joins live census reports with the
+migration archive. It shows which species are alive, where they live, how their populations are
+changing, and how complex their brains have become. It connects ancestry only when the migration
+record has seen that lineage cross between worlds. Each brain chart fits its visible range, so
+small changes remain clear.
+
+### One life at a time
+
+<a href="https://bibitesmultiverse.com/watch">
+<img src="docs/assets/live-broadcast-view.webp" width="100%" alt="A spectator-camera view following one living Bibite">
+</a>
+
+The [live broadcast](https://bibitesmultiverse.com/watch) gives every visitor the same read-only
+camera. It selects the youngest living Bibite and stays with that creature until it dies or leaves
+the world. Then it chooses another. The image above is a real spectator-camera view from a
+Multiverse save.
 
 ## Install one world
 
@@ -119,7 +151,8 @@ without graphics. The simulation remains active.
 The Windows GUI uses the included portable game by default. You can instead select an existing
 game; the GUI searches Steam and common install locations before it asks for a folder. The
 installer checks the build, installs the mod, stores the unique credential, and creates the start
-and stop scripts. It needs no compiler, SDK, or administrator account.
+and stop scripts. It needs no compiler or SDK. Windows needs no administrator account, and Linux
+needs no root access.
 
 [Read the full installation guide →](docs/participant/install.md)
 
@@ -187,31 +220,26 @@ duplicated organism because duplication changes the simulation permanently.
 
 [Read the system design →](system_decomposition.md)
 
-## Designed for players, not build machines
+## Local, private, and reversible
 
-- The recommended Windows package includes the authorized portable game, the mod, BepInEx, the
-  sidecar, and the installer. The Linux package remains an add-on.
+A connected world crosses a network boundary. The package limits what crosses that boundary.
+
+- The recommended Windows package includes the authorized portable game, mod, sidecar, and
+  installer. The Linux package remains an add-on.
 - The installer refuses unsupported game builds before it changes the game folder.
-- The start script launches the sidecar before it launches the game.
-- The stop script closes both processes without removing the world or its saves.
+- The start script opens the sidecar before it opens the game. The stop script closes both
+  processes.
 - The uninstaller keeps changed files and removes only files that its install record owns.
-- Headless mode can run a world without graphics.
-
-## Trust boundary
-
-A connected world crosses a real network boundary. The package keeps that boundary explicit.
-
-- Release archives carry SHA-256 checksums and an internal file manifest.
-- TLS protects traffic between every sidecar and the relay.
+- Your simulation, world, and save files remain on your computer.
+- SHA-256 checksums and an internal file manifest protect the release package.
+- The sidecar accepts mod traffic only from your computer. TLS protects traffic to the relay.
 - Automatic enrollment creates the secret on your computer and sends it only to the HTTPS
-  enrollment endpoint. Private-map join strings never belong in issue reports, screenshots,
-  logs, or command lines.
-- The sidecar accepts mod traffic only from the same computer.
-- Your world and save files remain local.
+  enrollment endpoint.
+- Keep private-map join strings out of issue reports, screenshots, logs, and command lines.
 - The participant guides state what the public service records and retains.
 
-Read [what joining publishes](docs/participant/join.md#what-joining-publishes-about-your-world)
-before you connect a world.
+Before you connect a world, read
+[what joining publishes](docs/participant/join.md#what-joining-publishes-about-your-world).
 
 ## Public experiment
 
@@ -223,22 +251,8 @@ The homepage explains the experiment and shows a live summary. The
 [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
 lineages, and world settings.
 
-The [watch page](https://bibitesmultiverse.com/watch) has one shared game camera.
-It follows the youngest living Bibite until that Bibite dies or leaves the world.
-The page reconnects automatically when the broadcast host is offline.
-
-## Explore the experiment
-
-| Goal | Start here |
-|---|---|
-| Watch one Bibite live | [Open the shared broadcast](https://bibitesmultiverse.com/watch) |
-| Watch the public map and its evolutionary record | [Open the live map](https://bibitesmultiverse.com/live) |
-| Connect a world | [Read the participant guide](docs/README.md) |
-| Understand the architecture | [Read the system design](system_decomposition.md) |
-| Inspect the network protocol | [Read Contract B](contracts/contract-b-m4.md) |
-| Report a defect or propose an experiment | [Open a GitHub issue](https://github.com/jpinedaa/bibites-multiverse/issues) |
-
-Bug reports, documentation corrections, and reproducible experiment ideas are welcome.
+The [watch page](https://bibitesmultiverse.com/watch) shows one shared game camera.
+It reconnects after a broadcast interruption.
 
 ## Repository guide
 
@@ -262,6 +276,10 @@ Developer entry points:
 - [Mod-to-sidecar protocol](contracts/contract-a.md)
 - [Sidecar-to-relay protocol](contracts/contract-b-m4.md)
 - [Public installer enrollment](contracts/public-enrollment.md)
+- [Project status](STATUS.md)
+
+[Open a GitHub issue](https://github.com/jpinedaa/bibites-multiverse/issues) to report a defect,
+correct documentation, or propose a reproducible experiment.
 
 ## License
 
