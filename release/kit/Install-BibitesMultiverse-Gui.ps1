@@ -12,6 +12,29 @@ param(
     [string]$InstallRoot = ''
 )
 
+# ---------------------------------------------------------------- diagnostic log
+# Written before strict error handling so any startup failure is captured in a
+# file the NSIS wrapper can reference. Each run truncates the previous log.
+$SetupLog = Join-Path $env:TEMP 'bibites-multiverse-setup.log'
+try { Set-Content -LiteralPath $SetupLog -Value '' -ErrorAction Stop } catch { $SetupLog = '' }
+function Write-SetupLog {
+    param([string]$Message)
+    if (-not $SetupLog) { return }
+    try { Add-Content -LiteralPath $SetupLog -Value "$(Get-Date -Format 'HH:mm:ss') $Message" } catch { }
+}
+Write-SetupLog "gui-installer start"
+Write-SetupLog "ps=$($PSVersionTable.PSVersion) lang=$($ExecutionContext.SessionState.LanguageMode)"
+Write-SetupLog "script=$($MyInvocation.MyCommand.Path)"
+Write-SetupLog "cwd=$PWD"
+Write-SetupLog "temp=$env:TEMP"
+Write-SetupLog "args: Probe=$Probe InstallRoot='$InstallRoot'"
+
+trap {
+    Write-SetupLog "FATAL $($_.Exception.GetType().FullName): $($_.Exception.Message)"
+    Write-SetupLog "  at $($_.InvocationInfo.PositionMessage)"
+    exit 1
+}
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
@@ -21,6 +44,7 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $hasBundledGame = Test-Path -LiteralPath (Join-Path $Here 'game-payload.json') -PathType Leaf
 $foundGame = Find-BibitesGameDirectory
 $defaultRuntime = if ($hasBundledGame) { 'bundled' } else { 'external' }
+Write-SetupLog "hasBundledGame=$hasBundledGame defaultRuntime=$defaultRuntime foundGame=$foundGame"
 
 if ($Probe) {
     $manifestMatches = $true
@@ -189,6 +213,8 @@ $form.AcceptButton = $install
 $form.CancelButton = $cancel
 
 $install.Add_Click({
+    Write-SetupLog "install button clicked runtime=$($bundled.Checked.ToString()) startAfter=$($startAfter.Checked)"
+
     if ($external.Checked -and -not (Test-BibitesGameDirectory $pathBox.Text)) {
         [void][System.Windows.Forms.MessageBox]::Show(
             $form,
@@ -200,6 +226,7 @@ $install.Add_Click({
     }
 
     $runtime = if ($bundled.Checked) { 'bundled' } else { 'external' }
+    Write-SetupLog "runtime=$runtime installFromExternal=$($external.Checked)"
     $installer = Join-Path $Here 'Install-BibitesMultiverse.ps1'
     $engine = (Get-Process -Id $PID).Path
     $log = Join-Path $env:TEMP ('bibites-multiverse-install-' + [guid]::NewGuid().ToString('N') + '.log')

@@ -38,6 +38,12 @@ VIAddVersionKey /LANG=1033 "CompanyName" "Bibites Multiverse"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "Apache-2.0 project components"
 
 Section "Install"
+  ; $PLUGINSDIR is only created by InitPluginsDir or by the first NSIS plugin
+  ; call. This script uses no plugins (FileFunc.nsh and LogicLib.nsh are pure
+  ; macros), so without this line the variable is empty and extraction targets
+  ; the drive root — which fails without admin rights.
+  InitPluginsDir
+  Delete "$TEMP\bibites-multiverse-setup.log"
   SetOutPath "$PLUGINSDIR\package"
   File /r "${PACKAGE_DIR}\*.*"
 
@@ -57,7 +63,7 @@ Section "Install"
     Quit
   ${EndIf}
   ${If} $R2 != 0
-    MessageBox MB_OK|MB_ICONSTOP "Bibites Multiverse Setup could not open or complete the installer. Download the setup file again and compare its SHA-256 with the release page."
+    MessageBox MB_OK|MB_ICONSTOP "Bibites Multiverse Setup could not open or complete the installer (PowerShell exit code $R2).$\n$\nA diagnostic log may be available at:$\n$TEMP\\bibites-multiverse-setup.log$\nIf it is missing, the setup did not start the installer script.$\n$\nIf the problem persists, include this log when reporting the issue."
     SetErrorLevel $R2
     Quit
   ${EndIf}
