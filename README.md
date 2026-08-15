@@ -39,6 +39,10 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 is an artificial-life sandbox by Omnia Studios. Every Bibite inherits mutable genes and a
 neural-network brain.
 
+> [!NOTE]
+> ***The Bibites* and Bibites Multiverse have different creators.** Bibites Multiverse is an
+> independent community project. It is not affiliated with or endorsed by Omnia Studios.
+
 You set the physical and biological conditions of a world. Natural selection shapes the creatures
 that live there. Their bodies, brains, behavior, and species can change across generations.
 
@@ -58,17 +62,10 @@ or [itch.io](https://thebibites.itch.io/the-bibites).
 </tr>
 </table>
 
-<img src="docs/assets/gameplay-species-lineage.webp" width="100%" alt="The Bibites ancestral lineage graph showing branches across 155 recorded species">
-
-<p align="center"><sub><strong>Speciation leaves a history.</strong> This real save has 155 recorded species. The game shows when living branches split from their ancestors.</sub></p>
-
 Each simulation is a living world. Connect many of them, and artificial life can inhabit a digital
 universe larger than any one computer.
 
 > **What evolves when the network itself becomes a habitat?**
-
-Bibites Multiverse is an independent community project. It is not affiliated with or endorsed by
-Omnia Studios.
 
 ## What the Multiverse adds
 
