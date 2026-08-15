@@ -132,6 +132,30 @@ phase_preflight() {
       warn "    continues — the rule changes no command here — but SIZING.md and"
       warn "    WIND-DOWN.md both have a hole until it is set." ;;
   esac
+  # D24's announced period. Nothing else in the kit reads these two, which is
+  # exactly why they are checked here: a full provision succeeds with the literal
+  # YYYY-MM-DD still in place, and those dates are what a participant is told
+  # BEFORE joining and what may be extended by announcement but never silently
+  # shortened. ANNOUNCEMENT.md and WIND-DOWN.md both consume them. Provisioning
+  # continues — no command below reads them — but the release gate does.
+  local pstart pend
+  pstart="${MV_PERIOD_START:-}"
+  pend="${MV_PERIOD_END:-}"
+  if [[ ! "$pstart" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || [[ ! "$pend" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    warn "MV_PERIOD_START/MV_PERIOD_END are '${pstart:-unset}' / '${pend:-unset}', which is not"
+    warn "    a pair of YYYY-MM-DD dates. D24's period must be STATED before anybody"
+    warn "    joins; ANNOUNCEMENT.md and WIND-DOWN.md are built from these two values,"
+    warn "    so a placeholder here becomes a promise no participant can read."
+    warn "    Fill them in before README.md §3 step 9 — the publish gate."
+  elif ! date -d "$pstart" +%s >/dev/null 2>&1 || ! date -d "$pend" +%s >/dev/null 2>&1; then
+    warn "MV_PERIOD_START/MV_PERIOD_END look like dates and are not: '$pstart' / '$pend'."
+  elif [ "$(date -d "$pend" +%s)" -le "$(date -d "$pstart" +%s)" ]; then
+    warn "MV_PERIOD_END ($pend) is not after MV_PERIOD_START ($pstart). The announced period"
+    warn "    would run backwards, and D24's bound is never silently shortened."
+  else
+    say "announced period: $pstart -> $pend ($(( ( $(date -d "$pend" +%s) - $(date -d "$pstart" +%s) ) / 86400 )) days)"
+  fi
+
   case "$MV_ACME_MODE" in
     webroot) ;;
     dns) die "MV_ACME_MODE=dns needs a certbot plugin for the registrar the owner picks,
@@ -147,11 +171,28 @@ phase_preflight() {
   # The A record. A wrong one is the single most common way an ACME issuance
   # fails, and it fails AFTER the rest of the box is built, which is the
   # expensive order to find out.
+  #
+  # THIS CHECK IS ONLY A DNS CHECK ON THE FIRST RUN. The envfiles phase pins
+  # MV_DOMAIN to 127.0.0.1 in /etc/hosts on purpose — it is what keeps the
+  # archive's dial to the relay on loopback — and getent reads /etc/hosts before
+  # it reads DNS. So every later run reads this script's own pin back. That is
+  # reported as what it is below, because a reader who meets it as a failure
+  # either panics or learns to ignore the line, and the second is worse.
   local want have
   want="$(curl -fsS --max-time 5 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || true)"
   have="$(getent ahostsv4 "$MV_DOMAIN" 2>/dev/null | awk 'NR==1{print $1}' || true)"
   if [ -z "$have" ]; then
     warn "$MV_DOMAIN does not resolve yet. ACME issuance will fail until it does."
+  elif [ "${have#127.}" != "$have" ]; then
+    say "$MV_DOMAIN -> $have — THIS INSTANCE'S OWN /etc/hosts PIN, NOT DNS."
+    say "      Expected on every run after the first: the envfiles phase adds that"
+    say "      entry deliberately, and getent answers from it. This check can"
+    say "      therefore say nothing about the real A record. Verify it from OFF"
+    say "      the box, where no pin is in the way:"
+    say "          dig +short $MV_DOMAIN @1.1.1.1"
+    if [ -n "$want" ]; then
+      say "      It must print $want, this instance's public IPv4."
+    fi
   elif [ -n "$want" ] && [ "$have" != "$want" ]; then
     warn "$MV_DOMAIN resolves to $have; this instance's public IPv4 is $want."
     warn "    If that is a stale record, wait for the TTL. If it is deliberate, the"
@@ -332,6 +373,24 @@ phase_binaries() {
 
 phase_envfiles() {
   step "environment files"
+
+  # THE PARAMETER FILE ITSELF, FIRST. deploy.env.example's header states the
+  # installed mode as 0640 root:$MV_GROUP, and a file copied by hand under sudo
+  # is root:root however carefully the mode was typed. That ownership is not
+  # cosmetic: multiverse-monitor.service and multiverse-backup.service run as
+  # $MV_USER, both scripts exit 2 on an env file they cannot read, and BOTH
+  # TIMERS THEN FAIL ON EVERY TICK WITH NOTHING SAYING SO — no alerts, no
+  # heartbeat, no identity snapshots, discovered on the day one of them was
+  # needed. So make it true here instead of assuming it, and let `verify` prove
+  # it afterwards by reading the file AS $MV_USER.
+  getent group "$MV_GROUP" >/dev/null \
+    || die "group $MV_GROUP does not exist yet, so this phase cannot give
+     $ENV_FILE the group that lets the monitor and backup timers read it. Run
+     the account phase first (--only account), or run every phase in order."
+  run chown "root:$MV_GROUP" "$ENV_FILE"
+  run chmod 0640 "$ENV_FILE"
+  say "$ENV_FILE is root:$MV_GROUP mode 0640 (monitor.sh and backup.sh read it as $MV_USER)"
+
   # Every knob these two processes have exists as BOTH a flag and an environment
   # variable, deliberately: "the rig sets one way and a service unit sets the
   # other" (go/internal/relay/main.go). So ExecStart carries no arguments at all
@@ -645,8 +704,22 @@ phase_verify() {
   chk "archive listener is loopback only" "archive_is_loopback_only"
   chk "relay reads its key without root" \
       "runuser -u $MV_USER -- test -r $MV_TLSDIR/privkey.pem"
+  # Tested by READING IT AS $MV_USER, not by inspecting the mode: the mode can be
+  # right while the group is wrong, and it is the read that the two timers do.
+  chk "monitor and backup read $ENV_FILE without root" \
+      "runuser -u $MV_USER -- test -r '$ENV_FILE'"
   chk "admin path is NOT bound" \
       "! grep -q '^MULTIVERSE_RELAY_ADMIN_LISTEN=..*' /etc/multiverse/relay.env"
+
+  # That one check is worth its own remedy, because its failure is the only one
+  # here that is otherwise silent: the units stay `active` (they are timers), the
+  # oneshots exit 2, and no alert can be raised by the thing that cannot start.
+  if ! runuser -u "$MV_USER" -- test -r "$ENV_FILE" 2>/dev/null; then
+    warn "$ENV_FILE is not readable by $MV_USER. Until it is, the monitor and"
+    warn "    backup timers exit 2 on every tick and NOTHING announces it: no"
+    warn "    alerts, no daily heartbeat, no identity snapshots. Remedy:"
+    warn "        sudo chown root:$MV_GROUP $ENV_FILE && sudo chmod 0640 $ENV_FILE"
+  fi
 
   printf '\n     %d pass, %d fail\n' "$ok" "$bad"
   if [ "$bad" = 0 ]; then

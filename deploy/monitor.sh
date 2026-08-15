@@ -23,7 +23,9 @@
 #   status age            the map is quiet. Not the same as down.
 #   peers                 WP3's done-when: "peers lost". Against an expected
 #                         floor, because zero peers on a map with none joined yet
-#                         is not an incident.
+#                         is not an incident. The floor SHIPS AT 0 — meaning no
+#                         floor, dark slots only — and the check keeps saying so
+#                         on every run until an operator raises it.
 #   lane bypass           WP3's done-when: "bypasses that persist". Risk 4 —
 #                         route-around hides a dead peer, and now nobody is
 #                         watching. Persistence is the whole signal: one skip is
@@ -71,7 +73,20 @@
 set -uo pipefail
 
 ENV_FILE="${MV_ENV_FILE:-/etc/multiverse/deploy.env}"
-[ -r "$ENV_FILE" ] || { echo "monitor: no $ENV_FILE" >&2; exit 2; }
+# MISSING AND UNREADABLE ARE DIFFERENT FAULTS and this process runs unprivileged,
+# so say which one it is: a file installed root:root 0640 is present and
+# unreadable, this exits 2 on every tick of the timer, and the only symptom is
+# that the alerts an operator is trusting never arrive. Naming the cause here is
+# what stops the next person debugging the symptom.
+if [ ! -e "$ENV_FILE" ]; then
+  echo "monitor: no $ENV_FILE" >&2
+  exit 2
+elif [ ! -r "$ENV_FILE" ]; then
+  echo "monitor: $ENV_FILE exists but is NOT READABLE by $(id -un). It must be" >&2
+  echo "         0640 root:${MV_GROUP:-multiverse}:" >&2
+  echo "         sudo chown root:${MV_GROUP:-multiverse} $ENV_FILE && sudo chmod 0640 $ENV_FILE" >&2
+  exit 2
+fi
 # shellcheck source=/dev/null
 set -a; . "$ENV_FILE"; set +a
 
@@ -80,7 +95,7 @@ set -a; . "$ENV_FILE"; set +a
 : "${MV_TLSDIR:=/etc/multiverse/tls}"
 : "${MV_RELAY_PORT:=443}"
 : "${MV_ARCHIVE_HTTP:=127.0.0.1:8796}"
-: "${MV_EXPECTED_PEERS:=1}"
+: "${MV_EXPECTED_PEERS:=0}"
 : "${MV_STATUS_AGE_WARN_MS:=120000}"
 : "${MV_BYPASS_RUNS:=3}"
 : "${MV_DISK_WARN_PCT:=25}"
@@ -264,7 +279,17 @@ check_map() {
     report status-age OK "last broadcast $(( age / 1000 ))s ago"
   fi
 
-  if [ "${live:-0}" -lt "$MV_EXPECTED_PEERS" ] 2>/dev/null; then
+  # MV_EXPECTED_PEERS=0 MEANS "NO FLOOR": the live count cannot be too low, and
+  # this check watches dark slots only. That is the shipped default for one
+  # reason — a floor of 1 makes the FIRST tick against a freshly provisioned,
+  # empty map a CRIT, and an operator whose first-ever alert is a false one
+  # learns to mute the channel while he is still deciding whether to trust it.
+  # It is the wrong value once anybody has joined, because "peers lost" is one of
+  # WP3's own done-when clauses, so the OK line below keeps saying so until
+  # somebody raises it rather than letting an unwatched floor go quiet.
+  if [ "${MV_EXPECTED_PEERS:-0}" -le 0 ] 2>/dev/null && [ "${dark:-0}" = 0 ]; then
+    report peers OK "$live live, 0 dark — NO FLOOR SET (MV_EXPECTED_PEERS=0), so this check is watching dark slots only. Raise it to the map's peer count once they have joined, or 'peers lost' is unwatched."
+  elif [ "${MV_EXPECTED_PEERS:-0}" -gt 0 ] 2>/dev/null && [ "${live:-0}" -lt "$MV_EXPECTED_PEERS" ] 2>/dev/null; then
     report peers CRIT "$live live slot(s), expected at least $MV_EXPECTED_PEERS; $dark dark. A peer that went dark holds its slot number forever — the address never returns to the pool."
   elif [ "${dark:-0}" -gt 0 ] 2>/dev/null; then
     report peers WARN "$live live, $dark DARK. A dark slot is routed around, so its neighbours' traffic looks healthy while it is gone."

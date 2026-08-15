@@ -93,10 +93,20 @@ ssh ubuntu@<instance-ip>
 # 3. The parameter file. Fill in MV_DOMAIN, MV_ACME_EMAIL, MV_ALERT_URL,
 #    MV_BUNDLE and the two period dates. The retention rule and the memory
 #    verdict already carry their answers.
-sudo install -d -m 0750 /etc/multiverse
-sudo install -m 0640 /home/ubuntu/multiverse-kit/deploy.env.example \
-                     /etc/multiverse/deploy.env
+#
+#    THE GROUP IS LOAD-BEARING. `install` under sudo produces root:root unless
+#    -o/-g say otherwise, and monitor.sh and backup.sh run as the `multiverse`
+#    user and exit 2 on an env file they cannot read — so root:root here means
+#    the monitoring timer and the backup timer fail on every tick with nothing
+#    announcing it. `install -g` needs the group to exist, and provision.sh's
+#    `account` phase is what normally creates it, so create it here first: the
+#    line below is idempotent and that phase will simply say "already".
+getent group multiverse >/dev/null || sudo groupadd --system multiverse
+sudo install -d -m 0750 -o root -g multiverse /etc/multiverse
+sudo install -o root -g multiverse -m 0640 \
+     /home/ubuntu/multiverse-kit/deploy.env.example /etc/multiverse/deploy.env
 sudo nano /etc/multiverse/deploy.env
+ls -l /etc/multiverse/deploy.env      # -rw-r----- 1 root multiverse
 
 # 4. Rehearse. It changes nothing, and it checks the A record, the staged
 #    binaries and every value above.
@@ -117,6 +127,10 @@ sudo -u multiverse /opt/multiverse/deploy/backup.sh --list
 
 # 8. The owner's own join string, and the map's first slot.
 sudo /opt/multiverse/deploy/issue-join.sh peer-<name>
+#    Then raise MV_EXPECTED_PEERS to the count the map should hold. It ships at
+#    0, which means NO FLOOR — the peers check watches dark slots only, because
+#    a floor of 1 pages on the first tick of a map nobody has joined yet. Until
+#    you raise it, "peers lost" is unwatched and monitor.sh says so on every run.
 
 # 9. Fill the documentation slots from ANNOUNCEMENT.md, publish the release,
 #    and only then hand a join string to anybody else.
@@ -193,13 +207,22 @@ listener on a box whose disk the same process is filling.
   only**, rate limited to 5 r/s with a burst of 20 and 8 concurrent connections
   per address, with no compression of its own so the archive's gzip negotiation
   survives intact.
-- **The boundary, named.** Public: the nine read-only handlers — `/`,
-  `/healthz`, `/api/status`, `/api/hops`, `/api/species`, `/api/species/history`,
-  `/api/species/tree`, `/api/species/trends`, `/api/history`. Nothing there mutates and nothing there is a secret, because
-  nothing on this wire is: what the page shows is what the relay already
-  broadcasts to every peer, and `join.md` states that in full before anybody
-  joins. Not public: the archive's own listener, the relay's admin path, the data
-  directories, the verifier store, SSH.
+- **The boundary, named — as a rule, because the list grows.** Public: **every
+  handler on the archive's HTTP mux, and the mux is read-only by construction.**
+  nginx proxies `location /` wholesale, so a handler added to
+  `go/internal/archive/page.go` is published the moment the binary ships; the
+  rule, not the roster, is what a reviewer checks. At the commit this kit was
+  last read against, that is **ten** read-only handlers — `/`, `/healthz`,
+  `/api/status`, `/api/hops`, `/api/species`, `/api/species/tree`,
+  `/api/species/trends`, `/api/species/brains`, `/api/species/history`,
+  `/api/history`. **The two questions a new endpoint has to answer** are whether
+  it mutates anything (none of these does, and `limit_except GET HEAD` is the
+  second half of that answer) and whether it carries anything the relay does not
+  already broadcast. Nothing here is a secret, because nothing on this wire is:
+  what the page shows is what the relay already broadcasts to every peer, and
+  `join.md` states that in full before anybody joins. Not public: the archive's
+  own listener, the relay's admin path, the data directories, the verifier store,
+  SSH.
 - **The cost, named.** The status page is the largest single egress term in the
   service — larger than the game traffic — at ~32 GB/month per continuously open
   browser tab uncompressed, ~4 GB gzipped. It is inside the bundle's included
@@ -328,6 +351,11 @@ rig's own constraint:
 | ↳ **The replay check's constants changed on 2026-08-12 and have NOT been re-rehearsed.** It now projects both terms and alerts on the larger, so the same 7.43 M records project ~2.1 GB (resident) rather than ~9.4 GB. The escalate-and-recover behaviour around it is untouched | — |
 | **`monitor.sh`'s error counter survives the numbered log rotation** | Appended errors, rotated `relay.log` → `relay.log.1`, confirmed no double count and no missed lines |
 | **`backup.sh` produces, prunes and round-trips** — identity snapshots with checksums, `MV_BACKUP_KEEP` pruning, gzip of the ledger that `gunzip | diff` matches, the hardlink genome snapshot, and the `auto` guard correctly refusing to copy a ledger onto a filesystem below its free-space floor | Synthetic data directory |
+| **The `deploy.env` ownership is asserted, not assumed.** `envfiles` stops with a named remedy when the group does not exist yet, and otherwise chowns and chmods the file; `verify`'s new check reads the file *as* the service user and prints the `chown` remedy when it cannot | A scratch env file and an existing group, `--dry-run` for the mutation and a real `runuser` for the check |
+| **`monitor.sh` and `backup.sh` distinguish a missing env file from an unreadable one**, each exiting 2 with the cause rather than the symptom | A path that does not exist, and a file at mode 000 |
+| **The A-record preflight tells a `/etc/hosts` pin from a wrong record.** A `127.` answer prints as the pin it is with the off-box `dig` to run instead; a different address still warns exactly as before | `getent` against a loopback-pinned name and against a public one, with the instance-metadata answer stubbed |
+| **`monitor.sh`'s peers check at every floor** — 0 with an empty map (OK, and it says the floor is unset), 0 with a dark slot (WARN), a floor above the live count (CRIT), and a floor met (OK) | A synthetic `/api/status` server |
+| **`provision.sh` catches the announced period's placeholder** — `YYYY-MM-DD`, a shaped non-date, and an end before its start all warn; a real pair prints the period in days | `--only preflight` against four scratch env files |
 
 One observation worth recording rather than filing as a defect: on a six-slot
 fixture the status frame compresses ~10×, but on the empty test map the frame was

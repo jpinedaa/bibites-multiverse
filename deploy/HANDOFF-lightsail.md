@@ -119,9 +119,11 @@ them has to be filled on the instance:
 - `MV_ALERT_URL=` — empty. `monitor.sh` will log "alert dropped" and reach nobody.
 - `MV_BUNDLE=CHOOSE` — informational only (nothing reads it; `monitor.sh` reads real memory from
   the kernel), but it is the written record of what the box was sized for.
-- `MV_PERIOD_START` / `MV_PERIOD_END` — both `YYYY-MM-DD`. **Nothing in the kit validates these**,
-  so a provisioning run will succeed with placeholder dates and an announcement built from them
-  would be nonsense. This is a human gate, not a script gate.
+- `MV_PERIOD_START` / `MV_PERIOD_END` — both `YYYY-MM-DD`. `provision.sh`'s `preflight` now **warns**
+  on a placeholder, on a string that is not a date, and on an end that is not after its start, and
+  prints the period's length in days when they are real. It stays a warning rather than a stop
+  because no command in the run reads them — **the gate is still human**, and it is Phase 14: an
+  announcement built from placeholder dates would be nonsense.
 
 ### The one sizing decision left, and the arithmetic behind it
 
@@ -308,42 +310,60 @@ credential would need storing at `/etc/multiverse/dns-credentials.ini` — so **
 and port 80 stays open. Treat the switch as a future improvement with its own arc, not a decision to
 take under time pressure on provisioning day.
 
-**Three more, found in the kit's own behaviour rather than in its documents. The kit's documents do
-not warn about any of them, and the third is a defect rather than a subtlety:**
+**Three more, found in the kit's own behaviour rather than in its documents. All three have since
+been fixed in the kit — each entry below says what the kit now does, because the trap is still worth
+recognising when you meet its output.**
 
-**T9 — `provision.sh`'s A-record check is only trustworthy on the first run.** The `envfiles` phase
-appends `127.0.0.1 bibitesmultiverse.com` to `/etc/hosts` (deliberately — it is what keeps the
-archive's dial to the relay on loopback). On any subsequent run, `preflight`'s `getent ahostsv4` reads
-that entry first and warns that the domain "resolves to 127.0.0.1" while the instance's public IPv4
-is something else. **That is expected after the first provision, not a fault.** Verify the real
-record from *off* the box — `dig +short bibitesmultiverse.com @1.1.1.1` from the development
-machine — and never conclude anything about DNS from inside the instance after the first run.
+**T9 — `provision.sh`'s A-record check is only trustworthy on the first run. FIXED: the check now
+says so itself.** The `envfiles` phase appends `127.0.0.1 bibitesmultiverse.com` to `/etc/hosts`
+(deliberately — it is what keeps the archive's dial to the relay on loopback), and on any subsequent
+run `preflight`'s `getent ahostsv4` reads that entry before it reads DNS. It used to report that as
+a mismatch against the instance's public IPv4, which reads like a failure and is not one.
+**`preflight` now detects the `127.` answer and prints it as the pin it is** — *"THIS INSTANCE'S OWN
+/etc/hosts PIN, NOT DNS"* — with the off-box command to use instead, and it names the public IPv4
+that command must return. A *different* wrong address is still a warning, unchanged. Either way the
+rule stands: verify the real record from *off* the box — `dig +short bibitesmultiverse.com @1.1.1.1`
+from the development machine — and never conclude anything about DNS from inside the instance.
 
-**T10 — `MV_EXPECTED_PEERS=1` will page you before anybody has joined.** `monitor.sh` reports
-`peers CRIT` when live slots fall below that floor, and a freshly provisioned map has zero. Either
-accept the alert as known noise for the gap between provisioning and the owner's own world joining,
-or set `MV_EXPECTED_PEERS=0` for that window and raise it afterwards. Do not leave it at 0 once the
-map is populated: "peers lost" is one of WP3's own done-when clauses.
+**T10 — `MV_EXPECTED_PEERS=1` would page you before anybody had joined. FIXED: it ships at 0, and
+the check says what 0 means.** `monitor.sh` reports `peers CRIT` when live slots fall below the
+floor, and a freshly provisioned map has zero — so the first tick after provisioning was a CRIT, and
+an operator whose first-ever alert is a false one mutes the channel while he is still deciding
+whether to trust it. **The floor is now 0 by default in both `deploy.env.example` and `monitor.sh`.
+0 means NO FLOOR: the live count cannot be too low and the peers check watches dark slots only.**
+That would be the wrong value forever, since "peers lost" is one of WP3's own done-when clauses, so
+the `peers OK` line carries `NO FLOOR SET (MV_EXPECTED_PEERS=0)` and the instruction to raise it on
+every run until somebody does. **Raise it at Phase 15**, once the first peers hold slots.
 
-**T11 — `/etc/multiverse/deploy.env` must be group `multiverse`, and README §3's literal command
-does not make it so.** This is a defect in the kit, verified rather than suspected, and it silently
-disables two of DQ2's six obligations. `deploy.env.example`'s own header states the intended mode as
-*"0640, root:multiverse"*, but README §3 step 3 is `sudo install -m 0640 … /etc/multiverse/deploy.env`
-with no `-o`/`-g`, and `install` run under `sudo` gives the file **root:root**. Nothing in
-`provision.sh` chowns it afterwards — the `directories` phase sets the group on the *directory* only,
-and `relay.env` and `archive.env` are written explicitly as `root:$MV_GROUP` so they are unaffected.
-But `multiverse-monitor.service` and `multiverse-backup.service` both run `User=multiverse`, and both
-scripts begin with a hard `[ -r "$ENV_FILE" ] || exit 2`. Left as the README writes it, **the monitor
-and the backup timer exit 2 on every tick**: no alerts, no heartbeat, no identity snapshots. Fix it
-in one line, after `provision.sh` has created the group:
+**T11 — `/etc/multiverse/deploy.env` must be group `multiverse`, and README §3's literal command did
+not make it so. FIXED in four places, so it cannot regress from any one of them.** This was a defect
+in the kit, verified rather than suspected, and it silently disabled two of DQ2's six obligations.
+`deploy.env.example`'s header states the intended mode as *"0640, root:multiverse"*, but README §3
+step 3 was `sudo install -m 0640 … /etc/multiverse/deploy.env` with no `-o`/`-g`, and `install` run
+under `sudo` gives the file **root:root**. Nothing chowned it afterwards — the `directories` phase
+sets the group on the *directory* only, and `relay.env` and `archive.env` are written explicitly as
+`root:$MV_GROUP` so they were never affected. But `multiverse-monitor.service` and
+`multiverse-backup.service` both run `User=multiverse`, and both scripts begin with a hard
+`[ -r "$ENV_FILE" ] || exit 2`. Left as the README wrote it, **the monitor and the backup timer
+exited 2 on every tick**: no alerts, no heartbeat, no identity snapshots, and nothing announcing it.
+What the kit does now:
+
+- **README §3 step 3** creates the group if it does not exist and installs the file as
+  `install -o root -g multiverse -m 0640 …`, then prints `ls -l` so the ownership is read rather
+  than assumed.
+- **`provision.sh`'s `envfiles` phase** chowns and chmods the file to `root:$MV_GROUP 0640` itself,
+  so a hand copy is repaired by the ordinary run.
+- **`provision.sh`'s `verify` phase** proves it by *reading the file as the `multiverse` user*
+  (`runuser -u multiverse -- test -r …`), not by inspecting the mode — the mode can be right while
+  the group is wrong — and prints the one-line remedy when it fails.
+- **`monitor.sh` and `backup.sh`** now distinguish *missing* from *unreadable* in their exit-2
+  message, so the next person meets the cause instead of the symptom.
+
+The one-line remedy, if you ever meet it on an older box:
 
 ```sh
 sudo chown root:multiverse /etc/multiverse/deploy.env && ls -l /etc/multiverse/deploy.env
 ```
-
-The failure is caught by README §3 step 6 (`monitor.sh --test` prints `monitor: no
-/etc/multiverse/deploy.env`) — but only if you run that step and read its output, which is exactly
-why it is a trap and not a footnote.
 
 ---
 
@@ -494,8 +514,8 @@ README §3 step 3 copies `deploy.env.example` to `/etc/multiverse/deploy.env` at
 | `MV_ACME_EMAIL` | the owner's address | `provision.sh` refuses on the placeholder |
 | `MV_ALERT_URL` | the ntfy topic from README §6 step 8 | a capability URL — 0640, never in a document or a commit |
 | `MV_BUNDLE` | `2gb` (per Phase 2) | informational; the box's record of what it was sized for |
-| `MV_PERIOD_START` / `MV_PERIOD_END` | real dates, three months apart | nothing validates these; see Phase 15 |
-| `MV_EXPECTED_PEERS` | `0` for now (T10) | raise it once the map is populated |
+| `MV_PERIOD_START` / `MV_PERIOD_END` | real dates, three months apart | `preflight` now warns on the placeholder, on a date that is not one, and on an end before its start — and prints the period's length in days. It is still a warning, not a stop: no command here reads them, and Phase 14 is the gate |
+| `MV_EXPECTED_PEERS` | leave it at `0` (T10) | 0 means no floor: dark slots only. Raise it at Phase 15 |
 
 `MV_DOMAIN`, `MV_CERT_EXTRA_NAMES`, the ports, the retention rule and the memory verdict already
 carry their answers.
@@ -508,9 +528,11 @@ grep -n 'YYYY-MM-DD' /etc/multiverse/deploy.env # nothing
 ls -l /etc/multiverse/deploy.env                # -rw-r----- root multiverse   <- see T11
 ```
 
-The ownership line is the one people skip. **The group must be `multiverse`, not `root`** (T11); the
-`multiverse` group does not exist until `provision.sh`'s `account` phase has run, so the `chown` is
-the first thing to do after Phase 10 and before Phase 12.
+The ownership line is the one people skip, and it is the one that used to be wrong (T11). README §3
+step 3 now installs the file as `root:multiverse` and creates the group first if it has to, so this
+should read correctly the moment the file exists; `provision.sh` re-asserts it in `envfiles` and
+proves it in `verify`. If this `ls` says `root root`, fix it before Phase 12 — that is exactly the
+state in which the monitor and backup timers fail silently.
 
 ### Phase 9 — `provision.sh --dry-run` (T5, T9)
 
@@ -522,8 +544,13 @@ sudo /home/ubuntu/multiverse-kit/provision.sh --dry-run
 
 **Verify — read the preflight output line by line, not the exit code:**
 
-- `bibitesmultiverse.com -> <static IP> (this instance)`. Anything else is T2 or T9 and stops here.
+- `bibitesmultiverse.com -> <static IP> (this instance)` on the **first** run. On any later run the
+  same line reads `-> 127.0.0.1 — THIS INSTANCE'S OWN /etc/hosts PIN, NOT DNS`, which is the pin the
+  `envfiles` phase added and **is not a fault** (T9). A *different* address is still T2 and stops
+  here. Either way, the record itself is proven from off the box with `dig`, never from this line.
 - `retention rule: prune-genomes`.
+- `announced period: <start> -> <end> (91 days)`. A `!!` line here means the dates are still
+  placeholders or run backwards — provisioning continues, but Phase 14 is blocked until they are real.
 - `staged: archive-linux-amd64 archive-linux-arm64 relay-linux-...` — the architecture matching
   `uname -m` must be present.
 - The four summary lines: domain, relay URL, status page URL, archive on loopback.
@@ -542,13 +569,15 @@ sudo /home/ubuntu/multiverse-kit/provision.sh
 ```
 
 Fifteen phases, idempotent, a few minutes. The two that carry risk are `tls` (the ACME issuance) and
-`bootstrap` (T6). The run ends in `verify`, which prints eleven checks.
+`bootstrap` (T6). The run ends in `verify`, which prints twelve checks.
 
-**Verify — the eleven checks must all read PASS:** relay unit active, archive unit active, nginx
+**Verify — the twelve checks must all read PASS:** relay unit active, archive unit active, nginx
 active, monitor timer active, backup timer active, relay `/healthz` over TLS, archive `/healthz` on
 loopback, status page over TLS, **archive listener is loopback only**, relay reads its key without
-root, and **admin path is NOT bound**. Then, from off the box, load
-`https://bibitesmultiverse.com:8443/` in a browser: it should render with no certificate warning.
+root, **monitor and backup read `/etc/multiverse/deploy.env` without root** (T11 — the check reads
+the file *as* the `multiverse` user, and prints the `chown` remedy when it fails), and **admin path
+is NOT bound**. Then, from off the box, load `https://bibitesmultiverse.com:8443/` in a browser: it
+should render with no certificate warning.
 
 **Verify the certificate specifically:**
 
@@ -558,10 +587,11 @@ ls -l /etc/multiverse/tls/                     # fullchain.pem, privkey.pem, 064
 systemctl is-active certbot.timer              # active
 ```
 
-**Then close T11, which nothing in the run does for you.** The `multiverse` group now exists:
+**T11 closes itself now — confirm it rather than perform it.** The `envfiles` phase set the
+ownership and the `verify` check above proved the read. One command if you want to see it with your
+own eyes:
 
 ```sh
-sudo chown root:multiverse /etc/multiverse/deploy.env
 sudo -u multiverse test -r /etc/multiverse/deploy.env && echo "monitor and backup can read it"
 ```
 
@@ -602,11 +632,15 @@ sudo -u multiverse /opt/multiverse/deploy/monitor.sh --verbose   # all thirteen 
 
 **Verify:** the owner's phone or browser tab receives the self-test line. `--verbose` prints one line
 per check — units, relay-healthz, archive-healthz, subscribed, status-age, peers, lane-bypass, disk,
-errors, cert, replay, gaps, backup, reboot. Expect `backup WARN` until Phase 13 and `peers` either OK
-(with `MV_EXPECTED_PEERS=0`) or CRIT (T10). Everything else should read OK.
+errors, cert, replay, gaps, backup, reboot. Expect `backup WARN` until Phase 13, and `peers OK` with
+`NO FLOOR SET (MV_EXPECTED_PEERS=0)` on the end of the line — that is the shipped default saying it
+is watching dark slots only (T10), and it keeps saying it until Phase 15 raises the floor. Everything
+else should read OK.
 
-**If either command prints `monitor: no /etc/multiverse/deploy.env`, that is T11** and the monitor
-timer has been failing silently since Phase 10. Fix the group and re-run.
+**If either command exits 2, read which of the two things it says** (T11). `monitor: no
+/etc/multiverse/deploy.env` is a file that was never installed; `monitor: … exists but is NOT
+READABLE by multiverse` is the ownership defect, the monitor timer has been failing silently since
+Phase 10, and the message carries its own `chown` remedy. Fix and re-run.
 
 **Everything in `monitor.sh` runs *on* the box, so if the instance is off it says nothing and
 silence is indistinguishable from health.** Two answers, and both are the owner's:
@@ -700,8 +734,10 @@ mode 0600 as well as printing it.
   person's identity.
 
 **Verify:** `issue-join.sh --check` lists the credential and its grant; after the participant
-connects, `/api/status` shows their slot live and `monitor.sh --verbose` reports `peers OK`. Then
-raise `MV_EXPECTED_PEERS` to match the map (T10).
+connects, `/api/status` shows their slot live and `monitor.sh --verbose` reports `peers OK`. **Then
+raise `MV_EXPECTED_PEERS` to match the map** (T10) — it ships at 0, which means no floor, and until
+you raise it the `peers OK` line is telling you so on every run. This is the act that makes "peers
+lost" watched.
 
 **When it fails:** "ALREADY HOLDS A CREDENTIAL" means the identity exists and its join string cannot
 be reprinted; the only recovery is `--handover-slot <n>=<newPeerId>`, which mints for a *new* peerId
@@ -829,8 +865,9 @@ them, holding what a future session needs and cannot re-derive: the instance's r
 its static IP, how SSH access is shaped, that `/etc/multiverse/deploy.env` is the one parameter file
 and that it is 0640 root:multiverse, that the alert topic **exists** and where it is configured
 (never the URL itself — it is a capability), the units and timers, and the paths for state, logs and
-the kit's on-box copy. Any surprise you hit during provisioning belongs in *Gotchas* — including T9
-and T10 above if they bite, because they are exactly the shape of thing that section exists for.
+the kit's on-box copy. Any surprise you hit during provisioning belongs in *Gotchas* — including
+anything in §4 that still catches you now that T9–T11 announce themselves, because that is exactly
+the shape of thing the section exists for.
 
 **What must never be recorded anywhere:** `MV_ALERT_URL`, any join string, any credential secret,
 and the contents of `/var/lib/multiverse/joins/`. The first is a capability URL; the rest are other
@@ -885,19 +922,18 @@ has to be divided before it means anything about strangers.
 Stated rather than left to be discovered.
 
 - **External reachability.** See §1. The box cannot test it and neither can you.
-- **The `deploy.env` ownership defect (T11) is unfixed in the kit.** The one-line remedy is in this
-  document, and the durable fix belongs in `README.md` §3 — `sudo install -m 0640 -o root -g
-  multiverse …`, with a note that the group must exist first, or a `chown` line after the provision
-  run. Whoever lands that should also decide whether `provision.sh` ought to assert the ownership in
-  its `verify` phase, since it is the phase that already checks the other four permission facts.
-- **The status page's published boundary is documented stale.** `README.md` §5 names nine read-only
-  handlers and `nginx/multiverse-20-status.conf`'s header names seven; the archive currently serves
-  **ten** — `/`, `/healthz`, `/api/status`, `/api/hops`, `/api/species`, `/api/species/tree`,
-  `/api/species/trends`, `/api/species/brains`, `/api/species/history`, `/api/history`. Nothing is
-  broken: nginx proxies `location /` wholesale, GET and HEAD only, so the new endpoints are already
-  published and already rate limited. But the *stated* boundary is the thing the project promises
-  participants, and it should be brought current in both files. The egress estimate in `SIZING.md`
-  §6 predates the newest endpoints too.
+- **Three defects this document found in the kit are no longer open, and this section no longer
+  lists them.** The `deploy.env` ownership defect, the A-record check's loopback answer and the
+  peers floor were all fixed in the kit after this handoff was written; **T9, T10 and T11 in §4
+  carry what changed.** If you are reading a copy of this document that still lists them here, it
+  predates the fix.
+- **The status page's egress estimate predates its newest endpoints.** The published *boundary* is
+  current in both `README.md` §5 and `nginx/multiverse-20-status.conf`, now stated as a rule —
+  every handler on the archive's read-only mux is public, because nginx proxies `location /`
+  wholesale — with a roster of ten beside it. But `SIZING.md` §6's ~32 GB/month per continuously
+  open tab was derived before `/api/species/tree`, `/api/species/trends` and `/api/species/brains`
+  existed, and it has not been re-derived. It is the figure the bundle's included transfer is
+  checked against, so it is worth redoing before the page has an audience.
 - **DNS-01 is now possible and is not wired.** See T8.
 - **The forward receipt's paragraph in `RESTART-POLICY.md` §1.2 is marked for revision.** It
   describes the world *without* B26; B26 has since shipped from a parallel arc. The paragraph says

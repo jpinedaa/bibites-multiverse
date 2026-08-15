@@ -44,7 +44,19 @@
 set -uo pipefail
 
 ENV_FILE="${MV_ENV_FILE:-/etc/multiverse/deploy.env}"
-[ -r "$ENV_FILE" ] || { echo "backup: no $ENV_FILE" >&2; exit 2; }
+# MISSING AND UNREADABLE ARE DIFFERENT FAULTS and this process runs unprivileged,
+# so say which one it is: a file installed root:root 0640 is present and
+# unreadable, this exits 2 on every tick of the timer, and the only symptom is
+# that there are no identity snapshots on the day one is needed.
+if [ ! -e "$ENV_FILE" ]; then
+  echo "backup: no $ENV_FILE" >&2
+  exit 2
+elif [ ! -r "$ENV_FILE" ]; then
+  echo "backup: $ENV_FILE exists but is NOT READABLE by $(id -un). It must be" >&2
+  echo "        0640 root:${MV_GROUP:-multiverse}:" >&2
+  echo "        sudo chown root:${MV_GROUP:-multiverse} $ENV_FILE && sudo chmod 0640 $ENV_FILE" >&2
+  exit 2
+fi
 # shellcheck source=/dev/null
 set -a; . "$ENV_FILE"; set +a
 
