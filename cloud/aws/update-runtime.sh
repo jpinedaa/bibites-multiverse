@@ -53,7 +53,10 @@ description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformatio
   describe-stacks --stack-name "$stack" --output json)"
 jq -e '
   (.Stacks | length) == 1 and
-  (.Stacks[0].StackStatus | type == "string") and
+  (.Stacks[0].StackStatus == "CREATE_COMPLETE" or
+   .Stacks[0].StackStatus == "UPDATE_COMPLETE" or
+   .Stacks[0].StackStatus == "UPDATE_ROLLBACK_COMPLETE" or
+   .Stacks[0].StackStatus == "IMPORT_COMPLETE") and
   (.Stacks[0].Outputs | type == "array") and
   (.Stacks[0].Parameters | type == "array")
 ' <<<"$description" >/dev/null || {
@@ -146,9 +149,18 @@ relay_private_ip="${11}"
 relay_domain="${12}"
 runtime_root="${13}"
 
+[[ "$aws_region" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || exit 2
+[[ "$data_volume_id" =~ ^vol-[0-9a-f]{8,17}$ ]] || exit 2
+[[ "$artifact_bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || exit 2
+[[ "$runtime_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 2
+[[ "$game_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 2
+[[ "$bepinex_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 2
+[[ "$relay_private_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || exit 2
+[[ "$relay_domain" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || exit 2
+[ "$runtime_root" = /opt/bibites-runtime ] || exit 2
+
 archive="$(mktemp /tmp/bibites-runtime.XXXXXX.tar.gz)"
 new_runtime="$(mktemp -d /opt/bibites-runtime.new.XXXXXX)"
-old_runtime=/opt/bibites-runtime.previous
 cleanup() {
   rm -f "$archive"
   [ -z "${new_runtime:-}" ] || rm -rf "$new_runtime"
@@ -161,37 +173,22 @@ printf '%s  %s\n' "$runtime_sha256" "$archive" | sha256sum -c -
 tar -xzf "$archive" -C "$new_runtime"
 test -x "$new_runtime/install-host"
 test -x "$new_runtime/bibites-stop-worlds"
+test -x "$new_runtime/bibites-activate-runtime"
 test -r "$new_runtime/validate-world-manifest.jq"
 jq -n -f "$new_runtime/validate-world-manifest.jq" >/dev/null
 while IFS= read -r script; do
   bash -n "$script"
 done < <(find "$new_runtime" -maxdepth 1 -type f -name 'bibites-*' -print)
 
-"$new_runtime/bibites-stop-worlds"
-rm -rf "$old_runtime"
-mv "$runtime_root" "$old_runtime"
-mv "$new_runtime" "$runtime_root"
-new_runtime=''
-
-if ! env \
-  AWS_REGION="$aws_region" \
-  DATA_VOLUME_ID="$data_volume_id" \
-  ARTIFACT_BUCKET="$artifact_bucket" \
-  GAME_KEY="$game_key" \
-  GAME_SHA256="$game_sha256" \
-  BEPINEX_KEY="$bepinex_key" \
-  BEPINEX_SHA256="$bepinex_sha256" \
-  MANIFEST_KEY="$manifest_key" \
-  RELAY_PRIVATE_IP="$relay_private_ip" \
-  RELAY_DOMAIN="$relay_domain" \
-  "$runtime_root/install-host"; then
-  rm -rf "$runtime_root.failed"
-  mv "$runtime_root" "$runtime_root.failed"
-  mv "$old_runtime" "$runtime_root"
-  echo 'runtime installation failed; the previous runtime was restored' >&2
-  exit 1
-fi
-rm -rf "$old_runtime"
+set +e
+"$new_runtime/bibites-activate-runtime" \
+  "$new_runtime" "$archive" "$aws_region" "$data_volume_id" \
+  "$artifact_bucket" "$runtime_key" "$runtime_sha256" \
+  "$game_key" "$game_sha256" "$bepinex_key" "$bepinex_sha256" \
+  "$manifest_key" "$relay_private_ip" "$relay_domain" "$runtime_root"
+activate_status=$?
+set -e
+exit "$activate_status"
 REMOTE
 
 remote_arguments=(
@@ -213,19 +210,37 @@ encoded="$(printf '%s' "$remote_script" | base64 -w0)"
 printf -v quoted_arguments ' %q' "${remote_arguments[@]}"
 printf -v remote_command 'printf %%s %q | base64 -d | bash -s --%s' \
   "$encoded" "$quoted_arguments"
-parameters="$(jq -nc --arg command "$remote_command" '{commands:[$command]}')"
+parameters="$(jq -nc --arg command "$remote_command" \
+  '{commands:[$command],executionTimeout:["3600"]}')"
 command_id="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm send-command \
   --instance-ids "$instance" --document-name AWS-RunShellScript --parameters "$parameters" \
-  --comment 'Install staged Bibites cloud runtime' --query Command.CommandId --output text)"
+  --comment 'Install staged Bibites cloud runtime' --timeout-seconds 120 \
+  --query Command.CommandId --output text)"
 [[ "$command_id" =~ ^[0-9a-f-]{36}$ ]] || {
   echo "Systems Manager returned an invalid command identifier: $command_id" >&2
   exit 1
 }
-aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm wait command-executed \
-  --command-id "$command_id" --instance-id "$instance" || true
-aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm get-command-invocation \
-  --command-id "$command_id" --instance-id "$instance" \
-  --query '{status:Status,stdout:StandardOutputContent,stderr:StandardErrorContent}' --output json
-status="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm get-command-invocation \
-  --command-id "$command_id" --instance-id "$instance" --query Status --output text)"
-[ "$status" = Success ]
+set +e
+invocation="$(bibites_wait_ssm_invocation "$AWS_PROFILE" "$AWS_REGION" \
+  "$command_id" "$instance" 3720 3)"
+wait_status=$?
+set -e
+
+if [ -n "$invocation" ]; then
+  jq '{status:.Status,responseCode:.ResponseCode,
+    stdout:.StandardOutputContent,stderr:.StandardErrorContent}' <<<"$invocation"
+fi
+[ "$wait_status" -eq 0 ] && exit 0
+
+response_code="$(jq -r '.ResponseCode // empty' <<<"${invocation:-{}}")"
+case "$response_code" in
+  20)
+    echo 'runtime update failed; the host completed rollback' >&2
+    exit 20
+    ;;
+  21)
+    echo 'runtime update failed; host rollback also failed' >&2
+    exit 21
+    ;;
+esac
+exit "$wait_status"

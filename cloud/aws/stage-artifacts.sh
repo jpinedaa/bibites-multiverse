@@ -52,12 +52,15 @@ for artifact in \
 done
 
 # Check every save before the script creates a bucket or uploads an object.
-while IFS= read -r save_key; do
+mapfile -t save_keys < <(jq -r '[.worlds[].saveKey] | unique[]' "$dist/worlds.json")
+bibites_require_unique_save_basenames "${save_keys[@]}"
+for save_key in "${save_keys[@]}"; do
   bibites_require_s3_key "$prefix/$save_key" "manifest saveKey $save_key"
-  save="$BIBITES_SAVE_DIR/$(basename "$save_key")"
+  save_basename="$(basename "$save_key")"
+  save="$BIBITES_SAVE_DIR/$save_basename"
   [ -r "$save" ] || { echo "missing save for $save_key: $save" >&2; exit 1; }
-  unzip -tqq "$save"
-done < <(jq -r '[.worlds[].saveKey] | unique[]' "$dist/worlds.json")
+  bibites_require_save_archive "$save" "save for $save_key"
+done
 
 account="$(aws --profile "$profile" --region "$region" sts get-caller-identity \
   --query Account --output text)"
@@ -98,14 +101,15 @@ for file in "$GAME_FILE" "$BEPINEX_FILE"; do
     "s3://$bucket/$prefix/$file" --only-show-errors
 done
 
-aws --profile "$profile" --region "$region" s3 cp "$dist/worlds.json" \
-  "s3://$bucket/$prefix/worlds.json" --only-show-errors
-
-while IFS= read -r save_key; do
+for save_key in "${save_keys[@]}"; do
   save="$BIBITES_SAVE_DIR/$(basename "$save_key")"
   aws --profile "$profile" --region "$region" s3 cp "$save" \
     "s3://$bucket/$prefix/$save_key" --only-show-errors
-done < <(jq -r '[.worlds[].saveKey] | unique[]' "$dist/worlds.json")
+done
+
+# Publish the manifest last. A host never sees references to incomplete uploads.
+aws --profile "$profile" --region "$region" s3 cp "$dist/worlds.json" \
+  "s3://$bucket/$prefix/worlds.json" --only-show-errors
 
 {
   printf 'AWS_PROFILE=%q\n' "$profile"

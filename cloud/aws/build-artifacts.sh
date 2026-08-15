@@ -13,7 +13,7 @@ export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
 export GOROOT="${GOROOT:-$HOME/go}"
 export PATH="$DOTNET_ROOT:$GOROOT/bin:$PATH"
 
-for command in go dotnet tar gzip sha256sum unzip; do
+for command in file go dotnet tar gzip sha256sum unzip; do
   command -v "$command" >/dev/null || { echo "missing $command" >&2; exit 1; }
 done
 [ -f "$game_zip" ] || { echo "missing game archive: $game_zip" >&2; exit 1; }
@@ -26,7 +26,13 @@ bepinex_sha="$(sha256sum "$bepinex_zip" | awk '{print $1}')"
 
 rm -rf "$dist/build" "$dist/runtime"
 install -d "$dist/build" "$dist/runtime"
-nice -n 19 go -C "$repo/go" build -trimpath -o "$dist/build/multiverse-sidecar" ./cmd/sidecar
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 nice -n 19 \
+  go -C "$repo/go" build -buildvcs=false -trimpath \
+    -o "$dist/build/multiverse-sidecar" ./cmd/sidecar
+LC_ALL=C file -b "$dist/build/multiverse-sidecar" | grep -Eq '^ELF 64-bit.*x86-64' || {
+  echo 'the sidecar build is not a linux/amd64 ELF executable' >&2
+  exit 1
+}
 nice -n 19 dotnet build "$repo/bibites-mod/BibitesMultiverse.csproj" -c Release \
   -o "$dist/build/plugin" --nologo >/dev/null
 

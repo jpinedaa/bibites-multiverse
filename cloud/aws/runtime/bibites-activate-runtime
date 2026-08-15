@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# Activate one validated runtime tree. Restore the old tree after any failure.
+set -euo pipefail
+
+[ "$#" -eq 15 ] || {
+  echo 'runtime activation received the wrong argument count' >&2
+  exit 2
+}
+
+staged_runtime="$1"
+archive="$2"
+aws_region="$3"
+data_volume_id="$4"
+artifact_bucket="$5"
+runtime_key="$6"
+runtime_sha256="$7"
+game_key="$8"
+game_sha256="$9"
+bepinex_key="${10}"
+bepinex_sha256="${11}"
+manifest_key="${12}"
+relay_private_ip="${13}"
+relay_domain="${14}"
+runtime_root="${15}"
+old_runtime="$runtime_root.previous"
+lock_file="${BIBITES_RUNTIME_LOCK_FILE:-/run/lock/bibites-runtime-update.lock}"
+
+die() { printf 'runtime activation: %s\n' "$*" >&2; exit 2; }
+valid_key() {
+  local value="$1" segment
+  (( ${#value} >= 1 && ${#value} <= 1024 )) || return 1
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || return 1
+  [[ "$value" != */ && "$value" != *//* ]] || return 1
+  local IFS=/
+  read -r -a segments <<<"$value"
+  for segment in "${segments[@]}"; do
+    [[ "$segment" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+  done
+}
+valid_ipv4() {
+  local value="$1" octet
+  local IFS=.
+  read -r -a octets <<<"$value"
+  [ "${#octets[@]}" -eq 4 ] || return 1
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+    (( 10#$octet <= 255 )) || return 1
+  done
+}
+
+[[ "$aws_region" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || die 'invalid AWS region'
+[[ "$data_volume_id" =~ ^vol-[0-9a-f]{8,17}$ ]] || die 'invalid data volume identifier'
+[[ "$artifact_bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] ||
+  die 'invalid artifact bucket'
+[[ "$artifact_bucket" != *..* && "$artifact_bucket" != *.-* &&
+   "$artifact_bucket" != *-.* ]] || die 'invalid artifact bucket'
+[[ ! "$artifact_bucket" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  die 'invalid artifact bucket'
+for key in "$runtime_key" "$game_key" "$bepinex_key" "$manifest_key"; do
+  valid_key "$key" || die 'invalid artifact object key'
+done
+for digest in "$runtime_sha256" "$game_sha256" "$bepinex_sha256"; do
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die 'invalid artifact digest'
+done
+valid_ipv4 "$relay_private_ip" || die 'invalid relay address'
+IFS=. read -r relay_a relay_b _ _ <<<"$relay_private_ip"
+(( 10#$relay_a == 10 ||
+   (10#$relay_a == 172 && 10#$relay_b >= 16 && 10#$relay_b <= 31) ||
+   (10#$relay_a == 192 && 10#$relay_b == 168) )) || die 'relay address is not private'
+[[ "$relay_domain" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] ||
+  die 'invalid relay domain'
+(( ${#relay_domain} <= 253 )) || die 'invalid relay domain'
+
+if [ -n "${BIBITES_RUNTIME_TEST_ROOT:-}" ]; then
+  [ "$runtime_root" = "$BIBITES_RUNTIME_TEST_ROOT" ] || die 'invalid test runtime root'
+else
+  [ "$runtime_root" = /opt/bibites-runtime ] || die 'invalid runtime root'
+  [[ "$staged_runtime" == /opt/bibites-runtime.new.* ]] || die 'invalid staged runtime path'
+  [[ "$archive" == /tmp/bibites-runtime.*.tar.gz ]] || die 'invalid runtime archive path'
+fi
+[ -d "$runtime_root" ] || die 'the active runtime directory is missing'
+[ -x "$runtime_root/install-host" ] || die 'the active installer is missing'
+[ -d "$staged_runtime" ] || die 'the staged runtime directory is missing'
+[ -x "$staged_runtime/install-host" ] || die 'the staged installer is missing'
+[ -x "$staged_runtime/bibites-stop-worlds" ] || die 'the staged stop command is missing'
+[ -f "$archive" ] || die 'the staged runtime archive is missing'
+[ ! -e "$old_runtime" ] || die 'a previous runtime transaction is unresolved'
+
+exec 9>"$lock_file"
+flock -n 9 || {
+  echo 'another runtime activation holds the host lock' >&2
+  exit 73
+}
+
+run_installer() {
+  local tree="$1"
+  env \
+    AWS_REGION="$aws_region" \
+    DATA_VOLUME_ID="$data_volume_id" \
+    ARTIFACT_BUCKET="$artifact_bucket" \
+    GAME_KEY="$game_key" \
+    GAME_SHA256="$game_sha256" \
+    BEPINEX_KEY="$bepinex_key" \
+    BEPINEX_SHA256="$bepinex_sha256" \
+    MANIFEST_KEY="$manifest_key" \
+    RELAY_PRIVATE_IP="$relay_private_ip" \
+    RELAY_DOMAIN="$relay_domain" \
+    "$tree/install-host"
+}
+
+stop_runtime_services() {
+  local tree="$1" failed=0
+  local -a world_units=()
+  if [ -x "$tree/bibites-stop-worlds" ]; then
+    "$tree/bibites-stop-worlds" || failed=1
+  else
+    failed=1
+  fi
+  mapfile -t world_units < <(systemctl list-units --type=service --all \
+    'bibites-timescale@*.service' 'bibites-game@*.service' \
+    'bibites-sidecar@*.service' --no-legend | awk '{print $1}')
+  [ "${#world_units[@]}" -eq 0 ] || systemctl stop "${world_units[@]}" || failed=1
+  systemctl stop bibites-performance.timer bibites-performance.service \
+    bibites-spot-watch.service \
+    bibites-xvfb.service >/dev/null 2>&1 || failed=1
+  sync || failed=1
+  return "$failed"
+}
+
+failed_runtime_path() {
+  local candidate stamp sequence=0
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  candidate="$runtime_root.failed-$stamp-$$"
+  while [ -e "$candidate" ]; do
+    sequence=$((sequence + 1))
+    candidate="$runtime_root.failed-$stamp-$$-$sequence"
+  done
+  printf '%s\n' "$candidate"
+}
+
+update_started=0
+old_moved=0
+new_active=0
+
+perform_update() {
+  update_started=1
+  stop_runtime_services "$staged_runtime" || return $?
+  mv "$runtime_root" "$old_runtime" || return $?
+  old_moved=1
+  mv "$staged_runtime" "$runtime_root" || return $?
+  new_active=1
+  run_installer "$runtime_root"
+}
+
+rollback_update() {
+  local failed=0 failed_path
+  failed_path="$(failed_runtime_path)" || return 1
+  install -d -m 0700 "$failed_path" || return 1
+
+  if [ "$new_active" -eq 1 ] && [ -d "$runtime_root" ]; then
+    stop_runtime_services "$runtime_root" || failed=1
+    mv "$runtime_root" "$failed_path/runtime" || failed=1
+  elif [ -d "$staged_runtime" ]; then
+    mv "$staged_runtime" "$failed_path/runtime" || failed=1
+  fi
+
+  if [ "$old_moved" -eq 1 ]; then
+    mv "$old_runtime" "$runtime_root" || failed=1
+  fi
+  if [ -f "$archive" ]; then
+    mv "$archive" "$failed_path/runtime.tar.gz" || failed=1
+  fi
+  if [ -x "$runtime_root/install-host" ]; then
+    run_installer "$runtime_root" || failed=1
+  else
+    failed=1
+  fi
+
+  printf 'failed runtime artifacts: %s\n' "$failed_path" >&2
+  return "$failed"
+}
+
+if perform_update; then
+  rm -rf "$old_runtime"
+  printf 'runtime activation completed\n'
+  exit 0
+else
+  update_status=$?
+fi
+
+if [ "$update_started" -eq 1 ] && rollback_update; then
+  echo "runtime activation failed with status $update_status; rollback completed" >&2
+  exit 20
+fi
+
+echo "runtime activation failed with status $update_status; rollback also failed" >&2
+exit 21

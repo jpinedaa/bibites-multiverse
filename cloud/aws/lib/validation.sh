@@ -94,6 +94,33 @@ bibites_require_s3_filename() {
     bibites_validation_error "$label is not a safe S3 object filename"
 }
 
+bibites_require_unique_save_basenames() {
+  local save_key save_basename
+  local -A source_by_basename=()
+  for save_key in "$@"; do
+    save_basename="$(basename "$save_key")"
+    if [ -n "${source_by_basename[$save_basename]:-}" ] &&
+       [ "${source_by_basename[$save_basename]}" != "$save_key" ]; then
+      bibites_validation_error \
+        "$save_key and ${source_by_basename[$save_basename]} use the same local save filename"
+      return 1
+    fi
+    source_by_basename[$save_basename]="$save_key"
+  done
+}
+
+bibites_require_save_archive() {
+  local archive="$1" label="$2" contents
+  [ -r "$archive" ] ||
+    bibites_validation_error "$label is not readable" || return 1
+  unzip -tqq "$archive" ||
+    bibites_validation_error "$label is not a valid ZIP archive" || return 1
+  contents="$(unzip -Z1 "$archive")" ||
+    bibites_validation_error "$label contents cannot be read" || return 1
+  grep -Fxq 'scene.bb8scene' <<<"$contents" ||
+    bibites_validation_error "$label does not contain scene.bb8scene"
+}
+
 bibites_valid_ipv4() {
   local value="$1" octet
   local IFS=.
@@ -162,12 +189,67 @@ bibites_require_x86_64_instance_type() {
   local profile="$1" region="$2" instance_type="$3" description
   description="$(aws --profile "$profile" --region "$region" ec2 describe-instance-types \
     --instance-types "$instance_type" --output json)" || return 1
+  bibites_require_x86_64_instance_description "$description" "$instance_type"
+}
+
+bibites_require_x86_64_instance_description() {
+  local description="$1" instance_type="$2"
   jq -e --arg instance_type "$instance_type" '
     (.InstanceTypes | length) == 1 and
     .InstanceTypes[0].InstanceType == $instance_type and
     (.InstanceTypes[0].ProcessorInfo.SupportedArchitectures | index("x86_64") != null)
   ' <<<"$description" >/dev/null ||
     bibites_validation_error "$instance_type does not report x86_64 support"
+}
+
+bibites_require_nvidia_gpu_instance_description() {
+  local description="$1" instance_type="$2"
+  jq -e --arg instance_type "$instance_type" '
+    (.InstanceTypes | length) == 1 and
+    .InstanceTypes[0].InstanceType == $instance_type and
+    any((.InstanceTypes[0].GpuInfo.Gpus // [])[];
+      .Manufacturer == "NVIDIA" and
+      (.Count | type == "number" and . >= 1))
+  ' <<<"$description" >/dev/null ||
+    bibites_validation_error "$instance_type does not report an NVIDIA GPU"
+}
+
+bibites_instance_default_vcpus() {
+  local description="$1" instance_type="$2"
+  jq -er --arg instance_type "$instance_type" '
+    if (.InstanceTypes | length) == 1 and
+       .InstanceTypes[0].InstanceType == $instance_type and
+       (.InstanceTypes[0].VCpuInfo.DefaultVCpus | type == "number") and
+       .InstanceTypes[0].VCpuInfo.DefaultVCpus ==
+         (.InstanceTypes[0].VCpuInfo.DefaultVCpus | floor) and
+       .InstanceTypes[0].VCpuInfo.DefaultVCpus >= 1
+    then .InstanceTypes[0].VCpuInfo.DefaultVCpus
+    else error("missing or invalid DefaultVCpus")
+    end
+  ' <<<"$description" ||
+    bibites_validation_error "$instance_type does not report valid default vCPUs"
+}
+
+bibites_require_default_secure_parameter_metadata() {
+  local description="$1" parameter_name="$2"
+  jq -e --arg name "$parameter_name" '
+    (.Parameters | length) == 1 and
+    .Parameters[0].Name == $name and
+    .Parameters[0].Type == "SecureString" and
+    ((.Parameters[0].KeyId // "") as $key |
+      $key == "alias/aws/ssm" or $key == "aws/ssm" or
+      ($key | endswith(":alias/aws/ssm")))
+  ' <<<"$description" >/dev/null ||
+    bibites_validation_error \
+      "$parameter_name must be a SecureString encrypted with the default aws/ssm KMS key"
+}
+
+bibites_require_default_secure_parameter() {
+  local profile="$1" region="$2" parameter_name="$3" description
+  description="$(aws --profile "$profile" --region "$region" ssm describe-parameters \
+    --parameter-filters "Key=Name,Option=Equals,Values=$parameter_name" \
+    --output json)" || return 1
+  bibites_require_default_secure_parameter_metadata "$description" "$parameter_name"
 }
 
 bibites_valid_ipv4_cidr() {
@@ -227,20 +309,102 @@ bibites_effective_route_table() {
 }
 
 bibites_private_route_for_ip() {
-  local description="$1" address="$2" cidr target
-  while IFS=$'\t' read -r cidr target; do
+  local description="$1" address="$2" cidr state target bits
+  local selected_cidr='' selected_state='' selected_target='' selected_bits=-1
+  local selected_count=0
+
+  bibites_valid_ipv4 "$address" || return 1
+  while IFS=$'\t' read -r cidr state target; do
     [ -n "$cidr" ] || continue
-    bibites_is_rfc1918_cidr "$cidr" || continue
+    bibites_valid_ipv4_cidr "$cidr" || continue
     bibites_ipv4_in_cidr "$address" "$cidr" || continue
-    case "$target" in
-      local|pcx-*|tgw-*|vgw-*) printf '%s via %s\n' "$cidr" "$target"; return 0 ;;
-    esac
+    bits="${cidr##*/}"
+    if (( 10#$bits > selected_bits )); then
+      selected_cidr="$cidr"
+      selected_state="$state"
+      selected_target="$target"
+      selected_bits=$((10#$bits))
+      selected_count=1
+    elif (( 10#$bits == selected_bits )); then
+      selected_count=$((selected_count + 1))
+    fi
   done < <(jq -r '
     .RouteTables[0].Routes[] |
-    select(.State == "active") |
     [(.DestinationCidrBlock // ""),
-     (.GatewayId // .VpcPeeringConnectionId // .TransitGatewayId // "")] |
+     (.State // ""),
+     (.GatewayId // .VpcPeeringConnectionId // .TransitGatewayId //
+      .NatGatewayId // .NetworkInterfaceId // .InstanceId //
+      .EgressOnlyInternetGatewayId // .CarrierGatewayId //
+      .CoreNetworkArn // .LocalGatewayId // "")] |
     @tsv
   ' <<<"$description")
-  return 1
+
+  (( selected_bits >= 0 && selected_count == 1 )) || return 1
+  bibites_is_rfc1918_cidr "$selected_cidr" || return 1
+  [ "$selected_state" = active ] || return 1
+  case "$selected_target" in
+    local|pcx-*|tgw-*|vgw-*)
+      printf '%s via %s\n' "$selected_cidr" "$selected_target"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+bibites_wait_ssm_invocation() {
+  local profile="$1" region="$2" command_id="$3" instance_id="$4"
+  local timeout_seconds="$5" poll_seconds="$6" deadline response status error_file
+
+  [[ "$command_id" =~ ^[0-9a-f-]{36}$ ]] ||
+    bibites_validation_error "Systems Manager returned an invalid command identifier" || return 1
+  bibites_require_resource_id "$instance_id" 'Systems Manager instance identifier' i || return 1
+  bibites_require_positive_integer "$timeout_seconds" \
+    'Systems Manager wait timeout' 1 7200 || return 1
+  [[ "$poll_seconds" =~ ^(0|[1-9][0-9]?)$ ]] ||
+    bibites_validation_error 'Systems Manager poll interval must be from 0 through 99 seconds' ||
+    return 1
+
+  error_file="$(mktemp)"
+  deadline=$(( $(date +%s) + 10#$timeout_seconds ))
+  while (( $(date +%s) < deadline )); do
+    if response="$(aws --profile "$profile" --region "$region" \
+      --cli-connect-timeout 5 --cli-read-timeout 10 ssm get-command-invocation \
+      --command-id "$command_id" --instance-id "$instance_id" --output json \
+      2>"$error_file")"; then
+      status="$(jq -er '.Status | select(type == "string")' <<<"$response")" || {
+        rm -f "$error_file"
+        bibites_validation_error 'Systems Manager returned an invalid invocation document'
+        return 2
+      }
+      case "$status" in
+        Success)
+          rm -f "$error_file"
+          printf '%s\n' "$response"
+          return 0
+          ;;
+        Failed|Cancelled|TimedOut)
+          rm -f "$error_file"
+          printf '%s\n' "$response"
+          return 1
+          ;;
+        Pending|InProgress|Delayed|Cancelling) ;;
+        *)
+          rm -f "$error_file"
+          bibites_validation_error "Systems Manager returned unknown status $status"
+          return 2
+          ;;
+      esac
+    elif grep -Fq InvocationDoesNotExist "$error_file"; then
+      : # Systems Manager can hide a new invocation for a short time.
+    else
+      sed 's/^/Systems Manager status error: /' "$error_file" >&2
+      rm -f "$error_file"
+      return 2
+    fi
+    sleep "$poll_seconds"
+  done
+
+  rm -f "$error_file"
+  bibites_validation_error \
+    "Systems Manager command $command_id did not reach a terminal state in $timeout_seconds seconds"
+  return 124
 }

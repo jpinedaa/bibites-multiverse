@@ -70,9 +70,17 @@ while IFS= read -r row; do
     chown -R bibites:bibites "$game"
   fi
 
-  secret="$(aws --region "$AWS_REGION" ssm get-parameter --name "$secret_parameter" \
-    --with-decryption --query Parameter.Value --output text)"
-  [ -n "$secret" ] && [ "$secret" != None ] || { echo "$world_id: empty credential" >&2; exit 1; }
+  parameter="$(aws --region "$AWS_REGION" ssm get-parameter \
+    --name "$secret_parameter" --with-decryption --output json)"
+  secret="$(jq -er --arg name "$secret_parameter" '
+    .Parameter |
+    select(.Name == $name and .Type == "SecureString") |
+    .Value |
+    select(type == "string" and length > 0)
+  ' <<<"$parameter")" || {
+    echo "$world_id: credential must be a nonempty SecureString" >&2
+    exit 1
+  }
   ( umask 077; printf '%s\n' "$secret" > "$credential.new" )
   chown bibites:bibites "$credential.new"
   mv "$credential.new" "$credential"

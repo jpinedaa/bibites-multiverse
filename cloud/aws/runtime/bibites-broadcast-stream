@@ -1,17 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# shellcheck source=/dev/null
-. /etc/bibites-broadcast/broadcast.env
-for _ in $(seq 1 120); do
-  DISPLAY=:0 xdpyinfo >/dev/null 2>&1 && break
-  sleep 1
-done
-DISPLAY=:0 xdpyinfo >/dev/null 2>&1 || { echo 'Xorg display :0 is not ready' >&2; exit 1; }
-
-url="rtmp://$STREAM_RTMP_ADDRESS/bibites?user=$STREAM_PUBLISH_USER&pass=$STREAM_PUBLISH_PASSWORD"
-exec ffmpeg -hide_banner -loglevel warning \
-  -f x11grab -draw_mouse 0 -framerate 30 -video_size 1280x720 -i :0.0 \
-  -an -c:v h264_nvenc -preset p3 -tune ll -rc cbr \
-  -b:v 2500k -maxrate 2500k -bufsize 5000k -g 60 -keyint_min 60 \
-  -pix_fmt yuv420p -f flv "$url"
+echo 'broadcast streaming is disabled because FFmpeg exposes RTMP credentials in process arguments' >&2
+exit 1
