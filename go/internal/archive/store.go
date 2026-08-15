@@ -318,9 +318,9 @@ func (d LedgerDamage) Any() bool { return d.Lines > 0 }
 // first — which is what this function did until 2026-08-12, and what ReadLedger
 // still does for the callers that genuinely want a slice — put the ENTIRE ledger
 // in one live []Record while New walked it, so the peak was the file by
-// construction and no collector setting could get under it. Measured on the
-// deployment's own 8,156,868-record ledger (wp3_hosting_options.md, "The
-// measured answer"): 1,030–1,286 B of peak RSS per record materialising against
+// construction and no collector setting could get under it. The reference
+// 8,156,868-record replay in wp3_hosting_options.md, "Archive replay memory",
+// measured 1,030–1,286 B of peak RSS per record materialising against
 // **184 B streaming** — 5.6–7.0× lower, about 1.1× the state the replay
 // actually retains, with no GOMEMLIMIT and no measurable wall-clock cost. That
 // is the difference between an archive that can restart on an 8 GB box for

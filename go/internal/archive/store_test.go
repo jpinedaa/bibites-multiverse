@@ -357,8 +357,8 @@ func TestScanAndReadLedgerAgree(t *testing.T) {
 // the replay, which is the thing that was actually wrong.
 //
 // Materialising the ledger into one []Record made the replay's peak the size of
-// the file by construction: measured on the deployment's own 8,156,868-record
-// ledger, 1,030–1,286 B of peak RSS per record, which is what took an 8 GB box
+// the file by construction: the reference 8,156,868-record replay measured
+// 1,030–1,286 B of peak RSS per record, which is what took an 8 GB box
 // from restartable to not restartable around day 26 of a three-month run
 // (wp3_hosting_options.md). Streaming measured 184 B/record. No collector
 // setting reaches under a live slice, so a future edit that quietly collects the

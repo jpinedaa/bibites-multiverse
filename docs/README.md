@@ -5,10 +5,8 @@ installed a mod, joined a map, and has no build toolchain, no access to anybody 
 and no context. Everything here is written to be read by that person, or — in the case of the
 two reference documents — to make sure somebody can answer them.
 
-**It is not the operator's book.** `dev_environment.md` at the repository root is the rig's own
-record: how the project's development deployment is brought up, what it last read, and which
-traps it has fallen into. It is where several of the checks and symptoms here were first
-learned, and it stays where it is. Nothing in `docs/` is a copy of it.
+**It is not the developer guide.** [`dev_environment.md`](../dev_environment.md) explains local
+builds, test rigs, and durable technical findings. Nothing in `docs/` copies that guide.
 
 ## What is here
 
@@ -47,26 +45,10 @@ machine at fault, and the operator is the only party positioned to see both ends
 So the taxonomy has three actors — **you**, **operator**, **nobody** — and no entry is complete
 without one.
 
-## Slots
+## Release state
 
-Several entries carry a **slot**: a marked to-do naming the work package that fills it.
-
-> **SLOT — WP*n* (name).** What is missing, and why it cannot be written yet.
-
-**A slot is a to-do with an owner, never a blank.** They exist because this documentation spine
-was drafted against WP1's contracts while the packages that invent what a participant actually
-sees were still being built. **WP2's and WP4's are closed**: the credential refusals and the
-join string's printed form, the published capacity table, the admin path's participant-visible
-effects and the lineage-gap and export-edge texture are now quoted from what ships. **WP6's are
-closed too**: the artifact names, the checksum and unblock commands, the installer's own output
-and refusals, the uninstall, the support matrix's location and lookup, the participant-facing
-name of every shipped setting, and the two log files a packaged install writes. **WP7's own are
-closed by its implementation arc**: `--diagnose`'s exit codes, output and JSON schema, the
-approaching-a-limit band, the commands that list and release a held entry, and
-`multiverse-sidecar --my-slot` — the participant's own view of their own world, which is a
-sidecar-local command rather than a page, for the reasons the specification's §8 gives. What
-remains is owned by **WP3** (the hosted deployment) and **WP8** (the bands only a playtest can
-measure). Each document collects its own slots in a table at the end.
+The `0.1.0` participant documents contain no work-package placeholders.
+Track a new documentation gap in a GitHub issue. Update the affected page with its fix.
 
 ## Where the authority lives
 
@@ -78,5 +60,6 @@ Everything here is derived. When this directory and one of these disagrees, thes
 | The wire between a sidecar and the relay | `contracts/contract-b-m4.md` |
 | Genome identity | `contracts/genome-hash.md` |
 | Project-wide decisions | `system_decomposition.md` |
+| Current public phase | `STATUS.md` |
 | This milestone's design, and the reasoning behind the support surface | `m5_considerations.md` |
-| The development rig | `dev_environment.md` |
+| Local development and durable technical findings | `dev_environment.md` |

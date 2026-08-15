@@ -28,10 +28,9 @@
 #     Append-only and immutable-once-written, which is what makes the cheap forms
 #     below correct: gzip for the two logs, a HARDLINK farm for the store.
 #
-#   TIER 3 — OFFSITE, and it is not this script's. See "the offsite half" below.
-#     A local copy survives a mistake. It does not survive the instance. The
-#     ledger and the genome store are only genuinely protected by a Lightsail
-#     snapshot, and that is a console act with a bill attached.
+#   TIER 3 — OFF-HOST, and it is not this script's. See "the off-host half".
+#     A local copy survives a mistake. It does not survive the instance. Use a
+#     checked provider snapshot or another approved off-host copy.
 #
 #   monitor.sh watches whether this ran. A backup timer that quietly stopped is
 #   invisible until the day it is needed.
@@ -161,10 +160,10 @@ RESTORING — read the whole of the relevant section before typing anything.
    Same as the ledger, and the least costly of the five: it is a sampled series,
    nothing depends on it for correctness, and a gap in it is a gap in a graph.
 
-RESTORING THE WHOLE INSTANCE, which is the case the local copies do NOT cover:
-   create a new Lightsail instance from the snapshot, attach the SAME static IP
-   (the A record must not have to change — the name is in every join string),
-   then re-run provision.sh. It is idempotent and will find its own files.
+RESTORING THE WHOLE INSTANCE, which the local copies do not cover:
+   create a replacement instance from the checked off-host backup, attach the
+   same stable address, and run provision.sh again. The participant service name
+   must not change during this recovery.
 EOF
 }
 
@@ -235,8 +234,8 @@ backup_record() {
     auto)
       if [ "${pct:-0}" -lt "$MV_BACKUP_LEDGER_MIN_FREE_PCT" ] 2>/dev/null; then
         say "MV_BACKUP_LEDGER=auto and free space is ${pct}% (< ${MV_BACKUP_LEDGER_MIN_FREE_PCT}%)."
-        say "SKIPPING the ledger copy: a backup that fills the volume it protects is"
-        say "the 2026-08-08 outage with better intentions. The offsite half covers this."
+        say "SKIPPING the ledger copy: a backup must not fill the volume it protects."
+        say "The approved off-host backup must cover this case."
         MV_BACKUP_LEDGER=skipped
       fi
       ;;
@@ -316,25 +315,20 @@ esac
 
 cat <<EOF
 
-THE OFFSITE HALF, which this script cannot do and which is the one that matters.
+THE OFF-HOST HALF, which this script cannot do and which is the one that matters.
 
   Everything above is on the same disk as the thing it protects. It survives a
   mistake — a bad restore, a wrong rm, a corrupted write — and it does not
   survive the instance. The ledger and the genome store are only genuinely
-  protected by a LIGHTSAIL SNAPSHOT, which is a console act:
+  protected by a checked provider snapshot or another approved off-host copy.
 
-    Lightsail console -> the instance -> Snapshots -> Enable automatic snapshots
-    and pick an hour. Keep the seven most recent; that is the default.
+  Configure its schedule and retention in the provider or backup service.
+  Record the policy, owner, and latest recovery check in private operations storage.
 
-  COST, and it needs checking on the pricing page at the moment of purchase
-  because this figure is carried knowledge and not a quote: Lightsail charges
-  around \$0.05 per GB-month of snapshot storage, and snapshots after the first
-  are incremental. A 60 GB instance with 40 GB used is on the order of \$2/month
-  for the first snapshot plus the deltas — small against the \$36-\$132 the
-  instance itself costs over D24's three months, and it is the only line item
-  that protects the record.
+  Check current storage and transfer prices before you select the policy.
+  This repository does not contain a current quote or deployment forecast.
 
   TAKE ONE BY HAND BEFORE ANY OF THESE: a binary upgrade, a retention-rule
-  change, a restore, and the wind-down. WIND-DOWN.md's final snapshot is the
-  last act of the announced run.
+  change, a restore, and the wind-down. WIND-DOWN.md requires a final checked
+  backup before resource retirement.
 EOF

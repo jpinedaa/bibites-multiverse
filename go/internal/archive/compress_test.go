@@ -24,8 +24,8 @@ import (
 	"multiverse/internal/wire"
 )
 
-// rigShapedArchive builds the shape wp3 measured on the living deployment: six
-// live worlds in a 3×2 map, each reporting a census of several species, a
+// rigShapedArchive builds the shape of the wp3 reference workload: six worlds
+// in a 3×2 map, each reporting a census of several species, a
 // minute of crossings in the hop feed, and enough samples in the metrics file
 // for both history endpoints to answer. The point is a payload of realistic
 // SIZE and realistic REPETITION — an endpoint's compression ratio is a fact

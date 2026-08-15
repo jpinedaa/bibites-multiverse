@@ -4,11 +4,9 @@ Description: GPU Spot host for the shared Bibites Multiverse live broadcast
 Parameters:
   InstanceType:
     Type: String
-    Default: g4dn.xlarge
     AllowedPattern: '^g[0-9][a-z0-9.]*$'
   AvailabilityZone:
     Type: AWS::EC2::AvailabilityZone::Name
-    Default: us-east-1a
   SubnetId:
     Type: AWS::EC2::Subnet::Id
   VpcId:
@@ -24,19 +22,19 @@ Parameters:
     Type: AWS::EC2::Snapshot::Id
   RelayPrivateIp:
     Type: String
-    Default: 172.26.12.110
     AllowedPattern: '^[0-9.]+$'
+  RelayDomain:
+    Type: String
+    AllowedPattern: '^[A-Za-z0-9.-]+$'
   StreamRtmpAddress:
     Type: String
-    Default: 172.26.12.110:1935
     AllowedPattern: '^[0-9.]+:1935$'
   PublishPasswordParameter:
     Type: String
-    Default: /bibites-multiverse/broadcast/publish-password
+    AllowedPattern: '^/[A-Za-z0-9_./-]+$'
   WorldId:
     Type: String
-    Default: slot-1
-    AllowedValues: [slot-1]
+    AllowedPattern: '^[A-Za-z0-9._-]+$'
   NvidiaAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id
@@ -138,6 +136,7 @@ Resources:
             export AWS_REGION='${AWS::Region}'
             export DATA_VOLUME_ID='${DataVolume}'
             export RELAY_PRIVATE_IP='${RelayPrivateIp}'
+            export RELAY_DOMAIN='${RelayDomain}'
             export STREAM_RTMP_ADDRESS='${StreamRtmpAddress}'
             export PUBLISH_PASSWORD_PARAMETER='${PublishPasswordParameter}'
             export WORLD_ID='${WorldId}'

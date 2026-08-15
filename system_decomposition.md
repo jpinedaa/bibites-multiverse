@@ -899,39 +899,28 @@ shows all of it. Full conditions in `m4_considerations.md`.
 map, twelve lanes open, organisms migrating on both axes, and a hard-killed slot healed
 **across the LAN** before it reclaimed its own slot and position — with exactly-once held
 everywhere and the portals confirmed on screen by the owner.
-**The rig was left running as the living deployment** — six worlds, twelve lanes, ~198
-organisms at that bring-up, periodic saves on. It has run since through D17's two-way lanes,
-which took the map to **24** lanes, and through two host reboots. Full result in
-`m4_considerations.md`, *Exit Test → Result*; the current reading and the reboot procedure
-are in `dev_environment.md`, *The living deployment*.
+The rig then tested two-way lanes and restart recovery. Full results are in
+`m4_considerations.md`, *Exit Test → Result*. Stable findings from the rig are in
+`dev_environment.md`, *The living deployment*.
 
-### M5 — Public release — **NEXT**
-**Opened 2026-08-09. Full plan: `m5_considerations.md`. Execution state: `m5_tracking.md`** —
-its nine owner decisions were
-**ratified on 2026-08-10**, five of them as D21–D25 above and four as calls inside the
-milestone. The scope it infers beyond the contracts' own M5 lists is still inferred, and the
-work packages are still unstarted.
-The public half of the old M3, moved out intact by D9 and pushed out once more by D16. The
-scope is unchanged. A hosted relay on a VPS; TLS and authentication for public exposure;
-capacity and abuse limits; packaging so a player installs the mod and the sidecar without a
-build toolchain; insertion and route-around under strangers joining and leaving. M4's join
-kit is this milestone's starting point, and M4's wire shapes **as amended** are what it starts
-from: `contract-a/2.3` (§16 species identity, §17 the census, §18 two-way lanes — which
-adds no field and moves no version — and §19 the world settings, which does) and
-`contract-b/3.5` (§15 the species block, §16 the census, §17 the reverse lanes, §18 the
-pacing and speed readout, §19 the settings readout; §20's disk budget moves no version).
-**What it publishes is one major on:** D21 takes Contract B to `contract-b/4` for the
-per-peer credential, and Contract A's bearer token is a minor to `contract-a/2.4`.
-Everything ratified after the M4 exit test — species
-identity, the census, and D17–D20 — lands in the **living deployment** between the two
-milestones rather than in a milestone of its own, because the rig is running and each change
-is verified against it.
-**Exit test:** a small community playtest — a handful of strangers' sims exchanging
-organisms for days without operator intervention. **The owner set the bar on 2026-08-10**
-(decision 8): **at least four peers that are not the owner's, at least 72 continuous hours,
-and zero operator actions on any participant's machine.** An operator action on the *relay* is
-allowed and counted; anything typed on a participant's computer at the operator's instruction
-is an intervention and fails the sentence. Full conditions in `m5_considerations.md`,
+### M5 — Public release — **PUBLIC EVIDENCE PHASE**
+
+**Opened 2026-08-09. Full plan: `m5_considerations.md`. Frozen delivery record:
+`m5_tracking.md`. Current public state: `STATUS.md`.**
+
+The owner ratified nine decisions on 2026-08-10. Five became D21 through D25 above.
+Four remain milestone decisions in `m5_considerations.md`.
+
+M5 delivered the public `0.1.0` release and its hosted service. The release includes TLS,
+peer-bound credentials, capacity limits, participant packages, diagnostics, and support guides.
+It publishes `contract-a/2.4` and `contract-b/4.0`.
+
+The first announced service period runs from **August 14 through November 14, 2026**.
+The release channel is GitHub Releases, with checksums and security guidance.
+
+The remaining M5 evidence comes from the public playtest. The exit test requires at least four
+non-owner peers, at least 72 continuous hours, and no operator action on participant computers.
+Relay-side actions are allowed and counted. Full conditions are in `m5_considerations.md`,
 *Exit Test*.
 
 ### M6 — Direct P2P

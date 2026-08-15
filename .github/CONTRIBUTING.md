@@ -6,7 +6,8 @@ documentation, tests, bug reports, and reproducible experiment ideas.
 ## Before you start
 
 1. Read the [project README](../README.md) and the
-   [system design](../system_decomposition.md).
+   [system design](../system_decomposition.md). Read the
+   [current public phase](../STATUS.md).
 2. Search the [open issues](https://github.com/jpinedaa/bibites-multiverse/issues).
 3. Open an issue before a change to a protocol, stored format, deployment, or release package.
 
@@ -17,8 +18,8 @@ For a security vulnerability, do not open an issue. Read the
 
 | Area | Start here | Minimum local test |
 |---|---|---|
-| Go relay, sidecar, archive, or tools | [`go/`](../go/) and [`dev_environment.md`](../dev_environment.md) | `cd go && go test ./...` |
-| Game mod | [`bibites-mod/`](../bibites-mod/) and [`dev_environment.md`](../dev_environment.md) | `dotnet build bibites-mod/BibitesMultiverse.csproj -c Release` |
+| Go relay, sidecar, archive, or tools | [`go/`](../go/) and the [developer guide](../dev_environment.md) | `cd go && go test ./...` |
+| Game mod | [`bibites-mod/`](../bibites-mod/) and the [developer guide](../dev_environment.md) | `dotnet build bibites-mod/BibitesMultiverse.csproj -c Release` |
 | Player packages | [`release/README.md`](../release/README.md) | Run the applicable install and uninstall test |
 | Participant documentation | [`docs/README.md`](../docs/README.md) | Make sure that all local links resolve |
 | Hosted service | [`deploy/README.md`](../deploy/README.md) | Use the documented dry run or local test |

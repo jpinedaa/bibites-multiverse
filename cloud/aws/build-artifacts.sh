@@ -4,8 +4,10 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist="$repo/cloud/aws/dist"
 runtime_src="$repo/cloud/aws/runtime"
-game_zip="${BIBITES_GAME_ZIP:-/mnt/wsl/data/scratch/m5-linux-rehearsal/dl/TheBibites-0.6.3.1-Linux.zip}"
-bepinex_zip="${BIBITES_BEPINEX_ZIP:-/mnt/wsl/data/scratch/m5-linux-rehearsal/bepinex/BepInEx_linux_x64_5.4.23.3.zip}"
+: "${BIBITES_GAME_ZIP:?set BIBITES_GAME_ZIP to an authorized Linux game archive}"
+: "${BIBITES_BEPINEX_ZIP:?set BIBITES_BEPINEX_ZIP to a BepInEx Linux archive}"
+game_zip="$BIBITES_GAME_ZIP"
+bepinex_zip="$BIBITES_BEPINEX_ZIP"
 
 export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
 export GOROOT="${GOROOT:-$HOME/go}"
