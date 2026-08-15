@@ -82,6 +82,10 @@
     record. A complete edition also keeps its versioned game runtime here.
     Defaults to %LOCALAPPDATA%\BibitesMultiverse.
 
+.PARAMETER InstallRoot
+    Where this install keeps its launcher, sidecar, icon, and uninstaller.
+    The executable setup uses %LOCALAPPDATA%\Programs\Bibites Multiverse.
+
 .PARAMETER World
     The name of the world this install runs. Defaults to Multiverse. The game
     seeds it on the first start.
@@ -119,6 +123,7 @@ param(
     [string]$GameDir = '',
     [ValidateSet('auto', 'bundled', 'external')][string]$RuntimeSelection = 'auto',
     [string]$DataRoot = '',
+    [string]$InstallRoot = '',
     [string]$World = 'Multiverse',
     [string]$ExportEdges = 'E,N,W,S',
     [string]$ExcludeSpecies = 'Basic bibite',
@@ -134,7 +139,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
-$Release      = '0.2.1'
+$Release      = '0.2.2'
 $Here         = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ManifestName = 'MANIFEST.sha256'
 $MatrixName   = 'support-matrix.json'
@@ -244,7 +249,13 @@ $runtimeFiles = @()
 $payloadDescriptorPath = Join-Path $Here $PayloadDescriptorName
 $hasBundledPayload = Test-Path -LiteralPath $payloadDescriptorPath -PathType Leaf
 if ($RuntimeSelection -eq 'auto') {
-    $RuntimeSelection = if ($hasBundledPayload) { 'bundled' } else { 'external' }
+    $RuntimeSelection = if ($GameDir) {
+        'external'
+    } elseif ($hasBundledPayload) {
+        'bundled'
+    } else {
+        'external'
+    }
 }
 if ($RuntimeSelection -eq 'bundled' -and -not $hasBundledPayload) {
     Stop-Setup 'This package has no included portable game. Select an existing game.' 'INS-RUNTIME'
@@ -951,7 +962,37 @@ Say "and MULTIVERSE_SAVE_ON_QUIT."
 
 Step "9 of 9 - write $StartName, $StopName and the uninstall's record"
 
-$sidecarExe = Join-Path $Here $SidecarName
+$manageProgramFiles = -not [string]::IsNullOrWhiteSpace($InstallRoot)
+if (-not $InstallRoot) { $InstallRoot = $Here }
+New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+$InstallRoot = (Resolve-Path $InstallRoot).Path
+
+$programFiles = @()
+if ($manageProgramFiles) {
+    foreach ($name in @($SidecarName, 'Uninstall-BibitesMultiverse.ps1', 'README.md',
+                         'LICENSE', 'THIRD_PARTY_NOTICES.md', 'bibites-multiverse.ico')) {
+        $source = Join-Path $Here $name
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            Stop-Setup "The package is incomplete: $name is missing." 'INS-CHECKSUM'
+        }
+        $destination = Join-Path $InstallRoot $name
+        $sourceSha = Get-Sha256 $source
+        $destinationSha = if (Test-Path -LiteralPath $destination -PathType Leaf) {
+            Get-Sha256 $destination
+        } else {
+            ''
+        }
+        if ($sourceSha -ne $destinationSha) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+        $programFiles += [pscustomobject]@{
+            path   = $destination
+            sha256 = (Get-Sha256 $destination)
+        }
+    }
+}
+
+$sidecarExe = Join-Path $InstallRoot $SidecarName
 $saveOnQuitValue = if ($SaveOnQuit -eq 'on') { 'true' } else { 'false' }
 
 $startBody = @'
@@ -1191,8 +1232,8 @@ function Expand-Template {
                  Replace('@@STOPNAME@@',       $StopName)
 }
 
-$startPath = Join-Path $Here $StartName
-$stopPath  = Join-Path $Here $StopName
+$startPath = Join-Path $InstallRoot $StartName
+$stopPath  = Join-Path $InstallRoot $StopName
 Set-Content -Path $startPath -Value (Expand-Template $startBody) -Encoding ASCII
 Set-Content -Path $stopPath  -Value (Expand-Template $stopBody)  -Encoding ASCII
 Say "wrote $startPath"
@@ -1213,7 +1254,7 @@ $record = [ordered]@{
     record        = 'bibites-multiverse/install-record/2'
     release       = $Release
     installedUtc  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    kitDir        = $Here
+    kitDir        = $InstallRoot
     gameDir       = $GameDir
     dataRoot      = $DataRoot
     runtime       = [ordered]@{
@@ -1241,6 +1282,10 @@ $record = [ordered]@{
         storedCopy = $caStored
     }
     generated     = @($startPath, $stopPath)
+    program       = [ordered]@{
+        root  = $InstallRoot
+        files = $programFiles
+    }
     credential    = $credentialPath
     dataDir       = $dataDir
     logDir        = $logDir
@@ -1266,6 +1311,7 @@ Say "export edges : $ExportEdges   (all four is the shipped default)"
 if ($ExcludeSpecies) { Say "never leaves : $ExcludeSpecies" } else { Say "never leaves : nothing - the exclusion policy is OFF" }
 Say "saves        : every $SaveMinutes minutes, keeping $SaveKeep, save on quit $SaveOnQuit"
 Say "your files   : $DataRoot"
+Say "app launcher : $InstallRoot"
 if ($caImported) { Say "certificate  : $caThumbprint imported into your own user store" }
 else             { Say "certificate  : nothing imported into any trust store" }
 Write-Host ""

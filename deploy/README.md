@@ -134,10 +134,10 @@ The archive status must show an active relay subscription.
 
 ## Public enrollment and manual join issuance
 
-The public installers create each secret and installation UUID locally. They send them to
-`POST /api/enroll` over HTTPS. The relay stores a verifier and returns the derived identity and
-advertised WSS address. The endpoint is disabled by default in the relay binary. The deployment
-parameter file enables it with finite limits.
+Each public installer creates a secret and installation UUID locally. The installer sends these
+values to `POST /api/enroll` over HTTPS. The relay stores a verifier. It returns the derived
+identity and advertised WSS address. The endpoint is disabled by default in the relay binary.
+The deployment parameter file enables it with finite limits.
 
 Set `MV_PUBLIC_ENROLLMENT=0` and re-run the envfiles phase to stop new automatic identities. This
 does not revoke an existing credential. Review

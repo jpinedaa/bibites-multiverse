@@ -111,6 +111,8 @@ $expectedRuntime = if (Test-Path -LiteralPath (Join-Path $KitDir 'game-payload.j
     'external'
 }
 Check "the GUI default matches the package edition" ($probe.defaultRuntime -eq $expectedRuntime)
+Check "the GUI probe verifies the package manifest" `
+    ($probe.manifestMatches -eq $true -and $probe.manifestFiles -gt 0)
 
 function Get-TreeSnapshot {
     param([string]$Root)
@@ -404,6 +406,10 @@ Scenario "F - a complete package with a bundled game payload"
 $fRoot = Join-Path $sandbox 'F'
 $fKit  = Join-Path $fRoot 'kit'
 $fData = Join-Path $fRoot 'data'
+$fProgram = Join-Path $fRoot 'program'
+$fExternalGame = Join-Path $fRoot 'external-game'
+$fExternalData = Join-Path $fRoot 'external-data'
+$fExternalProgram = Join-Path $fRoot 'external-program'
 New-Item -ItemType Directory -Force -Path $fKit | Out-Null
 Get-ChildItem -LiteralPath $KitDir -Force | Copy-Item -Destination $fKit -Recurse -Force
 Remove-Item -LiteralPath (Join-Path $fKit 'Start-Multiverse.ps1'), `
@@ -432,18 +438,38 @@ Set-Content -LiteralPath $manifestPath -Value $manifestLines -Encoding ASCII
 $fJoin = Join-Path $fRoot 'join.txt'
 [void](New-JoinFile $fJoin)
 $fInstaller = Join-Path $fKit 'Install-BibitesMultiverse.ps1'
-$fUninstaller = Join-Path $fKit 'Uninstall-BibitesMultiverse.ps1'
 $fProbe = (& (Join-Path $fKit 'Install-BibitesMultiverse-Gui.ps1') -Probe | Out-String) | ConvertFrom-Json
 Check "the complete package defaults to its included portable game" `
     ($fProbe.hasBundledGame -eq $true -and $fProbe.defaultRuntime -eq 'bundled')
+Check "the complete package probe verifies every embedded file" `
+    ($fProbe.manifestMatches -eq $true -and $fProbe.manifestFiles -gt 0)
 
-$install = Invoke-Script $fInstaller @{ GameDir = $fPayload; DataRoot = $fData; JoinStringFile = $fJoin }
-Check "the complete edition refuses an external game path" ($install.ExitCode -eq 1) $install.Output
-Check "that refusal has the INS-RUNTIME taxonomy id" ($install.Output -match 'INS-RUNTIME')
-Check "the refused selection copied no managed runtime" `
-    (-not (Test-Path -LiteralPath (Join-Path $fData 'runtimes')))
+New-SandboxGame -Path $fExternalGame
+$fExternalBefore = Get-TreeSnapshot $fExternalGame
+$install = Invoke-Script $fInstaller @{
+    GameDir = $fExternalGame; DataRoot = $fExternalData
+    InstallRoot = $fExternalProgram; JoinStringFile = $fJoin
+}
+Check "the complete installer accepts an existing game" ($install.ExitCode -eq 0) $install.Output
+Check "it did not copy the included portable game" `
+    ($install.Output -match 'included portable game will not be copied')
+$recordExternal = Get-Content -Raw -LiteralPath `
+    (Join-Path $fExternalData 'install-record.json') | ConvertFrom-Json
+Check "the existing-game record is external" `
+    ($recordExternal.runtime.mode -eq 'external' -and -not $recordExternal.runtime.managedByThisInstaller)
+Check "the existing-game choice created no managed runtime" `
+    (-not (Test-Path -LiteralPath (Join-Path $fExternalData 'runtimes')))
+$uninstall = Invoke-Script (Join-Path $fExternalProgram 'Uninstall-BibitesMultiverse.ps1') `
+    @{ DataRoot = $fExternalData }
+Check "the existing-game uninstall succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
+$fExternalAfter = Get-TreeSnapshot $fExternalGame
+$fExternalDiff = @(Compare-Snapshot $fExternalBefore $fExternalAfter)
+Check "the existing game is unchanged after uninstall" ($fExternalDiff.Count -eq 0) `
+    ($fExternalDiff -join '; ')
 
-$install = Invoke-Script $fInstaller @{ DataRoot = $fData; JoinStringFile = $fJoin }
+$install = Invoke-Script $fInstaller @{
+    DataRoot = $fData; InstallRoot = $fProgram; JoinStringFile = $fJoin
+}
 Check "the complete installer succeeded without -GameDir" ($install.ExitCode -eq 0) $install.Output
 Check "it selected the complete edition" ($install.Output -match 'complete edition: installed')
 $fRuntime = Join-Path (Join-Path $fData 'runtimes') $fSha
@@ -452,16 +478,25 @@ Check "the game was copied into the versioned managed runtime" `
 $recordF = Get-Content -Raw -LiteralPath (Join-Path $fData 'install-record.json') | ConvertFrom-Json
 Check "the record identifies a bundled managed runtime" `
     ($recordF.runtime.mode -eq 'bundled' -and $recordF.runtime.managedByThisInstaller)
-$startF = Get-Content -Raw -LiteralPath (Join-Path $fKit 'Start-Multiverse.ps1')
+Check "the record identifies the installed application directory" `
+    ($recordF.program.root -eq $fProgram)
+Check "the application directory contains the launcher icon" `
+    (Test-Path -LiteralPath (Join-Path $fProgram 'bibites-multiverse.ico'))
+Check "the application directory contains the sidecar" `
+    (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-sidecar.exe'))
+$startF = Get-Content -Raw -LiteralPath (Join-Path $fProgram 'Start-Multiverse.ps1')
 Check "the generated start script points at the managed runtime" ($startF.Contains($fRuntime))
 
 Set-Content -LiteralPath (Join-Path $fRuntime 'user-note.txt') -Value 'keep me' -Encoding ASCII
+$fUninstaller = Join-Path $fProgram 'Uninstall-BibitesMultiverse.ps1'
 $uninstall = Invoke-Script $fUninstaller @{ DataRoot = $fData }
 Check "the complete uninstall succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
 Check "the unchanged game executable was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fRuntime 'The Bibites.exe')))
 Check "a user-added runtime file was kept" (Test-Path -LiteralPath (Join-Path $fRuntime 'user-note.txt'))
 Check "the uninstall explains why the non-empty runtime stays" ($uninstall.Output -match 'not empty, so it stays')
+Check "the installed sidecar was removed" `
+    (-not (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-sidecar.exe')))
 
 # ---------------------------------------------------------------- the verdict
 

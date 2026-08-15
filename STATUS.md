@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-15 UTC.
 
-Bibites Multiverse `0.2.1` is public. The first announced service period runs from
+Bibites Multiverse `0.2.2` is public. The first announced service period runs from
 **August 14 through November 14, 2026**.
 
 ## Current public phase
@@ -23,14 +23,15 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.2.1`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.1) |
+| Release | [`v0.2.2`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.2) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.4` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
 | Network protocol | `contract-b/4.0` |
-| Windows package | GUI complete archive with the authorized portable game; an existing game is optional |
+| Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
-| Public-map setup | Every participant archive includes `public-map.json`. Installation creates a unique credential over HTTPS |
+| Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
+| Homepage | Links the Windows setup, Linux complete package, and `v0.2.2` checksums |
 | Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges the same world and links back to the broadcast. |
 
@@ -39,6 +40,7 @@ the support matrix before it changes the game directory. The Windows GUI starts 
 world after installation by default and keeps headless mode in the generated start script.
 The packaged public join configuration contains service addresses, not a shared world secret.
 Release `0.2.1` adds a Linux complete package and automatic enrollment to the Linux installer.
+Release `0.2.2` adds the single-file Windows setup and normal application shortcuts.
 Private maps still accept a private join-string file on both platforms.
 
 ## Milestone state

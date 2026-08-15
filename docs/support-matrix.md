@@ -36,8 +36,8 @@ skips it.
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
 same weight and the table does not pretend they do:** the Windows row covers a four-day continuous
-six-world run. The Linux row is one rehearsal session on one machine on one day. A build that
-is not in the table is not "probably fine": it is untested, and the installer treats untested as
+six-world run. The Linux row is one rehearsal session on one machine on one day. A build that is
+not in the table is not "probably fine": it is untested, and the installer treats untested as
 unsupported.
 
 **What makes the Linux row trustworthy for the thing the mod actually does** is not session
@@ -204,7 +204,7 @@ that only half the rows would have.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/2",
-  "release": "0.2.1",
+  "release": "0.2.2",
   "published": "2026-08-15",
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",

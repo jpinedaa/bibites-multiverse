@@ -273,6 +273,11 @@ Step "this install's own files"
 foreach ($script in @($record.generated)) {
     Remove-Recorded -Path $script -What 'written by the installer'
 }
+if ($record.PSObject.Properties.Match('program').Count -gt 0) {
+    foreach ($file in @($record.program.files)) {
+        Remove-Recorded -Path $file.path -Sha256 $file.sha256 -What 'the installed application'
+    }
+}
 Remove-Recorded -Path $record.credential -What 'your map credential'
 if ($record.certificate.storedCopy) {
     Remove-Recorded -Path $record.certificate.storedCopy -What "the copy of the map's certificate authority"
@@ -302,6 +307,9 @@ if ($RemoveWorldData) {
 
 if (-not $DryRun) { Remove-Item -LiteralPath $RecordFile -Force }
 [void]$removed.Add("$RecordFile   (the install record itself, last)")
+if ($record.PSObject.Properties.Match('program').Count -gt 0) {
+    Remove-EmptyDirectory ([string]$record.program.root)
+}
 if (-not $RemoveWorldData) {
     Say "the journal and the logs stay. Pass -RemoveWorldData to remove those as well."
 } else {

@@ -12,7 +12,9 @@ raised only after the release that satisfies it exists.
 
 | Path | What it is |
 |---|---|
-| `kit/Install-BibitesMultiverse.cmd` | The Windows double-click launcher. It opens the GUI and uses `RemoteSigned` for its process only |
+| `windows-installer.nsi` | Builds the single-file Windows setup with per-user shortcuts and uninstall registration |
+| `kit/bibites-multiverse.ico` | The setup, desktop, and Start Menu icon |
+| `kit/Install-BibitesMultiverse.cmd` | The advanced Windows ZIP launcher. It opens the same GUI |
 | `kit/Install-BibitesMultiverse-Gui.ps1` | Selects the included or existing game and starts the installed world by default |
 | `kit/Find-BibitesGame.ps1` | Searches Steam, itch.io, and common Windows game locations |
 | `kit/Install-BibitesMultiverse.ps1` | The Windows installer and its advanced options |
@@ -23,21 +25,22 @@ raised only after the release that satisfies it exists.
 | `kit/uninstall-bibites-multiverse.sh` | Removes what the Linux installer recorded, hash-checked, and nothing else |
 | `kit/README-linux.md` | The page inside the Linux archive, staged into it as `README.md` |
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
-| `make-release.sh` | Builds two add-on archives, optional complete archives, `SHA256SUMS`, and the release page |
+| `make-release.sh` | Builds both platform packages, the Windows setup, `SHA256SUMS`, and the release page |
 | `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
 | `dist/` | Build output. **Not tracked** — see `.gitignore`, which says why |
 
-**Two platforms, one mod.** The plugin in every archive is the same file, byte for byte.
+**Two platforms, one mod.** The plugin in every package is the same file, byte for byte.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The build creates an add-on archive for each platform. Release `0.2.1` also publishes a complete
-archive for each platform as the recommended download. Each contains an authorized, unmodified
-game payload and a redistribution notice.
-Every participant archive contains `public-map.json`. This file lets each installer find the
+The build creates an add-on archive for each platform. Release `0.2.2` publishes one executable
+Windows setup as the recommended Windows download. It publishes a complete Linux archive as the
+recommended Linux download. Both contain an authorized, unmodified game payload and a
+redistribution notice. The advanced Windows complete ZIP remains available.
+Every participant package contains `public-map.json`. This file lets each installer find the
 deployed public map. Each installation still creates its own world identity and secret.
-Every archive contains the project `LICENSE` and `THIRD_PARTY_NOTICES.md` files.
+Every package contains the project `LICENSE` and `THIRD_PARTY_NOTICES.md` files.
 
 The two documents that ship *beside* the release rather than inside it are
 [`../docs/support-matrix.md`](../docs/support-matrix.md) — which the installer reads, as JSON
@@ -83,13 +86,15 @@ records that permission without changing the game's copyright or the source-code
 It needs the game's reference assemblies (`bibites-mod/sync-game-refs.sh`), the .NET SDK, Go,
 Git, Python 3, `tar`, `zip`, `unzip`, and `curl`. These tools are only build inputs.
 Heavy commands run under `nice -n 19` to limit interference with other local work.
+A Windows complete build also needs NSIS 3.09 or newer. Set `MAKENSIS` when the compiler is not
+on `PATH`.
 
 Go can omit VCS metadata when a linked worktree points to Git data on another filesystem. In that
 case, set `RELEASE_SIDECAR_BUILD_REPO` to a clean checkout of the same commit. The builder checks
 the revision and refuses a missing sidecar stamp.
 
 **The builder checks package consistency, not remote execution.** Before it packages anything,
-it requires:
+it checks these inputs:
 
 1. `bibites-mod/libs/BibitesAssembly.dll` must match the Windows row in `docs/support-matrix.md`.
    The mod uses this file as its reference assembly.
@@ -118,8 +123,8 @@ A mismatch stops the build and names which side moved.
 If plugin or sidecar code changes, rebuild the far-end bundle. Then repeat its tests before release.
 Complete the required runtime test. Record its results separately.
 
-Every archive is built deterministically — fixed timestamps, sorted entries, no extra attributes
-— so rebuilding from the same tag and inputs reproduces the checksums on the page. Linux archives
+Every artifact is built deterministically with fixed timestamps and sorted entries. Rebuilding
+from the same tag and inputs reproduces the checksums on the page. Linux archives
 keep their mode bits, and the build reads them back out of the finished zip, including the game
 executable in a complete archive.
 
@@ -144,6 +149,10 @@ kept. Linux also covers **the other platform's build of the same game version** 
 that fails its manifest**. Its public-enrollment scenario also proves safe retry and identity
 reuse without network access.
 
+The Windows setup supports a no-install probe. Run the finished executable with `/PROBE` on
+Windows. A successful probe proves that the executable can unpack its real payload and load the
+embedded GUI.
+
 ## Publishing — the four steps, by hand
 
 `make-release.sh` deliberately does none of these.
@@ -151,15 +160,16 @@ reuse without network access.
 1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 2. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.2.1 && git push origin v0.2.1`. The page's links point into the tag, so the
+   `git tag v0.2.2 && git push origin v0.2.2`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
-   each complete archive that you built, and `SHA256SUMS`:
+   each complete archive that you built, the Windows setup, and `SHA256SUMS`:
    ```sh
-   gh release create v0.2.1 \
-       release/dist/bibites-multiverse-0.2.1-*.zip \
+   gh release create v0.2.2 \
+       release/dist/bibites-multiverse-0.2.2-*.zip \
+       release/dist/bibites-multiverse-0.2.2-*.exe \
        release/dist/SHA256SUMS \
-       --title "Bibites Multiverse 0.2.1" \
+       --title "Bibites Multiverse 0.2.2" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 4. **Read the published page as a stranger would**, in a browser, and check the three things that
@@ -169,8 +179,9 @@ reuse without network access.
    ordering, the launcher difference and the one-instance-per-game-folder warning without having
    to read the Windows sections first.
 
-   Also open each participant archive and make sure that `public-map.json` contains the intended
-   enrollment and relay addresses. It must not contain a world identity or secret.
+   Also open each participant archive and probe the Windows setup. Make sure that
+   `public-map.json` contains the intended enrollment and relay addresses. It must not contain a
+   world identity or secret.
 
 **A fifth step, if the repository is private:** the page's documentation links resolve only for
 somebody who can read the repository. Make it public, or the four participant pages have to

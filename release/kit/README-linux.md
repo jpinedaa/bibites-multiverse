@@ -31,7 +31,7 @@ The release page you downloaded this from carries the archive's SHA-256 **above*
 link. Do that first if you have not already:
 
 ```sh
-sha256sum bibites-multiverse-0.2.1-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.2.2-linux-x64-complete.zip
 ```
 
 **There is no mark of the web on Linux and this page will not invent a ritual to replace it.**
@@ -185,10 +185,10 @@ one, and no diagnostic asks for one.
 | `install-bibites-multiverse.sh` | The installer |
 | `uninstall-bibites-multiverse.sh` | The uninstaller |
 | `public-map.json` | The public join configuration: HTTPS enrollment and WSS relay addresses; no secret |
-| `BibitesMultiverse.dll` | The mod, a BepInEx plugin. **The same file the Windows archive ships** — it is platform-independent IL |
+| `BibitesMultiverse.dll` | The mod, a BepInEx plugin. **The same file the Windows packages ship** — it is platform-independent IL |
 | `multiverse-sidecar` | The program that speaks to the map on your world's behalf. A static binary; it needs no libc of a particular vintage |
 | `BepInEx_linux_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
-| `support-matrix.json` | The game builds this release supports, and the words it refuses with. **The same bytes the Windows archive carries** |
+| `support-matrix.json` | The game builds this release supports, and the words it refuses with. **The same bytes the Windows packages carry** |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
 | `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, `game/` | Files that occur only in a complete package |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |
