@@ -39,7 +39,7 @@ neighbours route around it.
 The broadcast world joins the map through the same public enrollment as a participant world.
 Read [`contracts/public-enrollment.md`](../contracts/public-enrollment.md) for the endpoint.
 
-Three rules bind every broadcast publisher:
+Six rules bind every broadcast publisher:
 
 1. A publisher that starts a new world enrolls its own identity. It never copies a live credential.
 2. A publisher that continues an existing world takes that world's identity only after the source
@@ -47,8 +47,15 @@ Three rules bind every broadcast publisher:
    identity can create divergent descendants.
 3. An installer that cannot read its own completed identity stops. It does not enroll again,
    because a second enrollment abandons the world's current place on the map.
+4. An installer makes sure that the completed identity is consistent before it stops a running
+   publisher. This process includes the credential, recorded world, and durable sidecar peer ID.
+5. A pending record beside a completed identity must name the same peer ID and secret. The installer
+   stops when either value differs.
+6. If custody data exists without a durable peer ID, the installer stops before enrollment.
 
 The identity and its secret stay outside this repository, below the publisher's user profile.
+The local installer gives the identity directory a protected Windows ACL.
+Only the current Windows user receives access.
 
 ## Naming the world on the pages
 
@@ -195,12 +202,15 @@ It does not copy an existing map world or an existing map credential.
 The installer creates private copies of the game and OBS below the Windows user profile.
 It builds a Windows sidecar, enrolls one new identity with the public map, and keeps that
 identity for every later installation.
+One exclusive lock covers identity preflight, runtime updates, and startup.
+The preflight finishes before the installer stops a live process or replaces a runtime file.
 OBS captures the game process and uses NVENC to publish H.264.
 A WSL service opens a private RTMP tunnel through AWS Systems Manager.
 A dedicated `tmux` session supervises the Windows sidecar, game, and OBS processes.
 
 The sidecar starts first, because it mints the Contract A token the mod presents and takes the
 world's place on the map before the game opens.
+The runner refuses to start when its configured peer ID differs from the durable peer ID.
 The stop order is the reverse: OBS, then the game, then the sidecar.
 
 The fallback uses the standard broadcast profile.
@@ -311,12 +321,15 @@ Run these checks after a publisher change, with the broadcast world's peer ident
 
 ```sh
 curl -fsS https://<service-domain>/api/status |
-  jq -e --arg peer '<broadcast-peer-id>' 'any(.slots[]?; .peerId == $peer and .live == true)'
+  jq -e --arg peer '<broadcast-peer-id>' '
+    any(.slots[]?;
+      .peerId == $peer and .live == true and .modConnected == true and
+      ((.exportEdges // []) | sort) == (["E","N","W","S"] | sort))'
 curl -fsS https://<service-domain>/api/status |
   jq -e --arg peer '<broadcast-peer-id>' '.broadcastPeerId == $peer'
 ```
 
-The broadcast world must appear on the map like any other world.
+The broadcast world must be live with its game mod and all configured export edges.
 A stream that runs while the map does not show that world is a publisher that lost its sidecar.
 
 The second check is the pages' own claim.
