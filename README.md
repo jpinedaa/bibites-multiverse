@@ -4,7 +4,7 @@
 
 # Bibites Multiverse
 
-**One simulation is a world. Connect them, and evolution gets a map.**
+**Artificial life, evolving across the network.**
 
 [![Installer status: 0.1.0 released](https://img.shields.io/badge/installer-0.1.0%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.1.0)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
@@ -52,6 +52,30 @@ The base game asks what can evolve inside one world. Bibites Multiverse asks a s
 
 Bibites Multiverse is an independent community project. It is not affiliated with or endorsed by
 Omnia Studios.
+
+## See the Multiverse alive
+
+Nothing below is a mockup. The first two images come from running local worlds. The third image
+captures the public network at one moment.
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/assets/gameplay-ecosystem.webp" alt="Several living Bibites sharing one green simulation world">
+<br><sub><strong>Inside one world.</strong> A living neighborhood from a real Multiverse save.</sub>
+</td>
+<td width="50%">
+<img src="docs/assets/gameplay-bibite-closeup.webp" alt="A large living Bibite shown close-up in the game">
+<br><sub><strong>Evolution up close.</strong> A living Bibite from another independent world.</sub>
+</td>
+</tr>
+</table>
+
+<a href="https://bibitesmultiverse.com/live">
+<img src="docs/assets/live-multiverse-map.webp" width="100%" alt="Six live Bibites worlds connected by migration lanes with organisms moving between them">
+</a>
+
+<p align="center"><sub><strong>Across the network.</strong> Six independent worlds exchange organisms through live migration lanes.</sub></p>
 
 ## What the Multiverse adds
 
