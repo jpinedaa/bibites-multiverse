@@ -3,6 +3,10 @@
 The broadcast shows one shared game camera.
 All viewers receive the same encoded stream.
 
+The world under that camera is a participant of the public map.
+It runs its own sidecar, holds its own peer identity, and exchanges migrations with its neighbours.
+A Bibite the camera follows can therefore leave the world, and the camera then chooses another.
+
 The AWS GPU publisher is currently disabled by a security gate.
 The local Windows fallback remains available.
 No public procedure in this repository deploys the AWS publisher.
@@ -27,6 +31,24 @@ Viewers can send only `GET` and `HEAD` requests to the public stream path.
 
 The relay, archive, and headless worlds do not depend on the broadcaster.
 A broadcast failure does not stop the map.
+A broadcast world that stops is an ordinary absent world: its sidecar keeps its place, and its
+neighbours route around it.
+
+## Map identity
+
+The broadcast world joins the map through the same public enrollment as a participant world.
+Read [`contracts/public-enrollment.md`](../contracts/public-enrollment.md) for the endpoint.
+
+Three rules bind every broadcast publisher:
+
+1. A publisher that starts a new world enrolls its own identity. It never copies a live credential.
+2. A publisher that continues an existing world takes that world's identity only after the source
+   world is stopped and disabled. One identity runs in one place, because two copies of one
+   identity can create divergent descendants.
+3. An installer that cannot read its own completed identity stops. It does not enroll again,
+   because a second enrollment abandons the world's current place on the map.
+
+The identity and its secret stay outside this repository, below the publisher's user profile.
 
 ## Camera rule
 
@@ -134,15 +156,23 @@ Two copies with one credential can create different descendants from one checkpo
 ## Local Windows fallback
 
 Use [`deploy/local-broadcast/`](../deploy/local-broadcast/README.md) while cloud GPU quota is not available.
-This fallback runs a new offline exhibition world on a Windows NVIDIA GPU.
-It does not copy a map world, start a sidecar, or load a map credential.
+This fallback runs one new map world on a Windows NVIDIA GPU.
+It does not copy an existing map world or an existing map credential.
 
 The installer creates private copies of the game and OBS below the Windows user profile.
+It builds a Windows sidecar, enrolls one new identity with the public map, and keeps that
+identity for every later installation.
 OBS captures the game process and uses NVENC to publish H.264.
 A WSL service opens a private RTMP tunnel through AWS Systems Manager.
-A dedicated `tmux` session supervises the Windows game and OBS processes.
+A dedicated `tmux` session supervises the Windows sidecar, game, and OBS processes.
+
+The sidecar starts first, because it mints the Contract A token the mod presents and takes the
+world's place on the map before the game opens.
+The stop order is the reverse: OBS, then the game, then the sidecar.
 
 The fallback uses the standard broadcast profile.
+It exports all four edges and keeps `Basic bibite` out of migration, which is the participant
+default.
 The website adds no separate simulation-speed label.
 
 The computer must stay powered on, and the Windows user must stay logged in.
@@ -243,3 +273,13 @@ The expected listeners are:
 
 Make sure that the public HLS manifest is available from outside the origin network.
 Do not expose the RTMP or metrics listener to the internet.
+
+Run this check after a publisher change, with the broadcast world's peer identity:
+
+```sh
+curl -fsS https://<service-domain>/api/status |
+  jq -e --arg peer '<broadcast-peer-id>' 'any(.slots[]?; .peerId == $peer and .live == true)'
+```
+
+The broadcast world must appear on the map like any other world.
+A stream that runs while the map does not show that world is a publisher that lost its sidecar.

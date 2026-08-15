@@ -12,6 +12,11 @@ origin_ssh="${BIBITES_STREAM_ORIGIN_SSH:-}"
 origin_private_ip="${BIBITES_STREAM_ORIGIN_PRIVATE_IP:-}"
 cloud_stack="${BIBITES_CLOUD_STACK_NAME:-bibites-cloud-worlds}"
 world_name="${BIBITES_LOCAL_WORLD_NAME:-Broadcast-Live}"
+public_map="${BIBITES_PUBLIC_MAP:-$repo/release/kit/public-map.json}"
+sidecar_port="${BIBITES_BROADCAST_SIDECAR_PORT:-8787}"
+export_edges="${BIBITES_BROADCAST_EXPORT_EDGES:-E,N,W,S}"
+exclude_species="${BIBITES_BROADCAST_EXCLUDE_SPECIES:-Basic bibite}"
+release_id="${BIBITES_BROADCAST_RELEASE:-local-broadcast}"
 start=1
 
 config_root="${XDG_CONFIG_HOME:-$HOME/.config}/bibites-local-broadcast"
@@ -39,7 +44,13 @@ case "$world_name" in *[!A-Za-z0-9._-]*|'') die 'the world name contains an unsu
 [[ "$expected_account" =~ ^[0-9]{12}$ ]] || die 'set BIBITES_AWS_ACCOUNT_ID to the 12-digit AWS account ID'
 [ -n "$origin_ssh" ] || die 'set BIBITES_STREAM_ORIGIN_SSH to the stream-origin SSH destination'
 [ -n "$origin_private_ip" ] || die 'set BIBITES_STREAM_ORIGIN_PRIVATE_IP to the stream-origin private IP address'
-for command in aws curl dotnet install nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux wslpath; do
+[[ "$sidecar_port" =~ ^[0-9]{2,5}$ ]] || die 'BIBITES_BROADCAST_SIDECAR_PORT is not a port number'
+[ -n "$exclude_species" ] || die 'BIBITES_BROADCAST_EXCLUDE_SPECIES is empty, which turns the exclusion policy off'
+[ -n "$export_edges" ] || die 'BIBITES_BROADCAST_EXPORT_EDGES names no edge; the broadcast world must stay on the map'
+for edge in ${export_edges//,/ }; do
+  case "$edge" in E|N|W|S) ;; *) die "BIBITES_BROADCAST_EXPORT_EDGES holds '$edge'; use E, N, W or S" ;; esac
+done
+for command in aws curl dotnet go install jq nvidia-smi powershell.exe session-manager-plugin sha256sum ssh tmux wslpath; do
   command -v "$command" >/dev/null || die "missing command: $command"
 done
 [ -f "$source_game/The Bibites.exe" ] || die "missing Windows game in $source_game"
@@ -99,6 +110,17 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$private_obs" = 0 ] || die 'the private OBS process did not stop'
+# A running sidecar holds this world's place on the map and locks its own
+# executable, which the build below replaces.
+private_sidecar_exe_windows="$(wslpath -w "$windows_root_wsl/multiverse-sidecar.exe")"
+for _ in $(seq 1 30); do
+  private_sidecars="$(powershell.exe -NoProfile -Command \
+    '& { param($path) @(Get-Process -Name "multiverse-sidecar" -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $path }).Count }' \
+    "$private_sidecar_exe_windows" | tr -d '\r')"
+  [ "$private_sidecars" = 0 ] && break
+  sleep 1
+done
+[ "$private_sidecars" = 0 ] || die 'the private broadcast sidecar did not stop'
 install -d -m 0700 "$config_root"
 install -d -m 0755 "$runtime_root/bin" "$unit_root" "$windows_root_wsl" \
   "$windows_root_wsl/logs" "$windows_root_wsl/state"
@@ -126,6 +148,90 @@ dotnet build "$repo/bibites-mod/BibitesMultiverse.csproj" -c Release --nologo >/
 plugin="$repo/bibites-mod/bin/Release/BibitesMultiverse.dll"
 [ -f "$plugin" ] || die "the plugin build did not create $plugin"
 install -m 0644 "$plugin" "$game_dir/BepInEx/plugins/BibitesMultiverse.dll"
+
+# The broadcast world is a participant of the public map, so it needs the same
+# two halves every participant needs: a sidecar that speaks Contract B, and one
+# identity of its own. It never copies another world's credential.
+sidecar_exe="$windows_root_wsl/multiverse-sidecar.exe"
+say 'building the Windows sidecar for the broadcast world'
+( cd "$repo/go" && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 nice -n 19 \
+    go build -trimpath -o "$sidecar_exe" ./cmd/sidecar )
+[ -f "$sidecar_exe" ] || die "the sidecar build did not create $sidecar_exe"
+
+multiverse_root="$windows_root_wsl/multiverse"
+multiverse_data="$multiverse_root/data"
+credential_file="$multiverse_root/peer-secret.txt"
+record_file="$multiverse_root/enrollment.json"
+pending_file="$multiverse_root/enrollment-pending.json"
+install -d -m 0700 "$multiverse_root" "$multiverse_data"
+
+[ -f "$public_map" ] || die "missing public join configuration: $public_map"
+jq -e '.format == "bibites-multiverse/public-map/1"' "$public_map" >/dev/null || \
+  die "$public_map has an unsupported format"
+relay_url="$(jq -r '.relayUrl // ""' "$public_map")"
+enrollment_url="$(jq -r '.enrollmentUrl // ""' "$public_map")"
+[[ "$relay_url" =~ ^wss://[^[:space:]]+$ ]] || die "$public_map has no secure wss:// relay address"
+[[ "$enrollment_url" =~ ^https://[^[:space:]]+$ ]] || die "$public_map has no secure https:// enrollment address"
+
+peer_id=''
+if [ -f "$record_file" ] && [ -f "$credential_file" ]; then
+  recorded_peer="$(jq -r '.peerId // ""' "$record_file" 2>/dev/null || true)"
+  recorded_relay="$(jq -r '.relayUrl // ""' "$record_file" 2>/dev/null || true)"
+  recorded_secret="$(head -n 1 "$credential_file" | tr -d '\r\n')"
+  if [[ "$recorded_peer" =~ ^public-[0-9a-f]{32}$ ]] && [ "$recorded_relay" = "$relay_url" ] &&
+     [[ "$recorded_secret" =~ ^[0-9a-f]{64}$ ]]; then
+    peer_id="$recorded_peer"
+    say "reusing the broadcast world's map identity $peer_id"
+  fi
+fi
+if [ -z "$peer_id" ] && [ ! -f "$pending_file" ] &&
+   { [ -f "$record_file" ] || [ -f "$credential_file" ]; }; then
+  die "$multiverse_root holds part of a map identity this installer cannot read. Nothing was changed. A second enrollment would abandon the world's current place on the map."
+fi
+if [ -z "$peer_id" ]; then
+  if [ -f "$pending_file" ]; then
+    install_id="$(jq -r '.installId // ""' "$pending_file" 2>/dev/null || true)"
+    secret="$(jq -r '.secret // ""' "$pending_file" 2>/dev/null || true)"
+    jq -e '.format == "bibites-multiverse/enrollment-pending/1"' "$pending_file" >/dev/null || \
+      die "$pending_file is not an enrollment record this installer can use"
+    say 'retrying the pending public-map enrollment'
+  else
+    install_id="$(cat /proc/sys/kernel/random/uuid)"
+    secret="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    entry_umask="$(umask)"
+    umask 077
+    jq -nc --arg id "$install_id" --arg secret "$secret" \
+      '{format:"bibites-multiverse/enrollment-pending/1",installId:$id,secret:$secret}' \
+      >"$pending_file"
+    umask "$entry_umask"
+  fi
+  chmod 0600 "$pending_file"
+  [[ "$install_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || \
+    die "$pending_file holds an invalid installation id"
+  [[ "$secret" =~ ^[0-9a-f]{64}$ ]] || die "$pending_file holds an invalid credential"
+  expected_peer="public-$(printf '%s' "${install_id//-/}" | tr 'A-F' 'a-f')"
+  say "requesting the broadcast world's own identity from $enrollment_url"
+  enrollment_response="$(jq -nc --arg id "$install_id" --arg secret "$secret" --arg release "$release_id" \
+      '{format:"bibites-multiverse/enrollment-request/1",installId:$id,secret:$secret,release:$release}' |
+    curl -fsS --max-time 30 -X POST -H 'Content-Type: application/json' \
+      --data-binary @- "$enrollment_url")" || \
+    die 'the public map did not create the broadcast identity; the pending record was kept, so running this installer again is a safe retry'
+  jq -e --arg peer "$expected_peer" --arg relay "$relay_url" \
+    '.format == "bibites-multiverse/enrollment-response/1" and .peerId == $peer and .relayUrl == $relay' \
+    <<<"$enrollment_response" >/dev/null || \
+    die 'the public map answered for a different identity or relay'
+  entry_umask="$(umask)"
+  umask 077
+  printf '%s\n' "$secret" >"$credential_file"
+  jq -nc --arg peer "$expected_peer" --arg relay "$relay_url" --arg world "$world_name" \
+    '{format:"bibites-multiverse/broadcast-identity/1",peerId:$peer,relayUrl:$relay,world:$world}' \
+    >"$record_file"
+  umask "$entry_umask"
+  chmod 0600 "$credential_file" "$record_file"
+  rm -f "$pending_file"
+  peer_id="$expected_peer"
+  say "the public map created the broadcast identity $peer_id"
+fi
 
 install -m 0644 "$repo/deploy/local-broadcast/run-windows.ps1" "$windows_root_wsl/run-windows.ps1"
 install -m 0644 "$repo/deploy/local-broadcast/stop-windows.ps1" "$windows_root_wsl/stop-windows.ps1"
@@ -157,6 +263,13 @@ chmod 0600 "$obs_profile/service.json"
   printf 'Obs=%s\n' "$obs_windows"
   printf 'WorldName=%s\n' "$world_name"
   printf 'PublishPort=1935\n'
+  printf 'SidecarExe=%s\n' "$(wslpath -w "$sidecar_exe")"
+  printf 'DataRoot=%s\n' "$(wslpath -w "$multiverse_root")"
+  printf 'RelayUrl=%s\n' "$relay_url"
+  printf 'PeerId=%s\n' "$peer_id"
+  printf 'SidecarPort=%s\n' "$sidecar_port"
+  printf 'ExportEdges=%s\n' "$export_edges"
+  printf 'ExcludeSpecies=%s\n' "$exclude_species"
 } >"$windows_config"
 
 config_file="$config_root/broadcast.env"
@@ -180,6 +293,19 @@ systemctl --user daemon-reload
 systemctl --user disable bibites-local-broadcast.target >/dev/null 2>&1 || true
 if [ "$start" -eq 1 ]; then
   "$runtime_root/bin/start"
+  status_url="${relay_url/#wss:\/\//https://}"
+  status_url="${status_url%/contract-b/v4}/api/status"
+  for _ in $(seq 1 120); do
+    if curl -fsS --max-time 10 "$status_url" 2>/dev/null |
+        jq -e --arg peer "$peer_id" 'any(.slots[]?; .peerId == $peer and .live == true)' >/dev/null; then
+      say "the broadcast world is on the map as $peer_id"
+      break
+    fi
+    sleep 2
+  done
+  curl -fsS --max-time 10 "$status_url" |
+    jq -e --arg peer "$peer_id" 'any(.slots[]?; .peerId == $peer and .live == true)' >/dev/null || \
+    die "the local services started, but the map does not show $peer_id"
   public_manifest='https://bibitesmultiverse.com/stream/bibites/index.m3u8?cookieCheck=1'
   for _ in $(seq 1 90); do
     if curl -fsS -H 'Cookie: cookieCheck=1' "$public_manifest" >/dev/null 2>&1; then
@@ -192,6 +318,6 @@ if [ "$start" -eq 1 ]; then
     die 'the local services started, but the public HLS manifest is not live'
 fi
 
-say "installed Windows world=$world_name data=$windows_root"
-say 'the world is offline from the Multiverse map and cannot duplicate a live credential'
+say "installed Windows world=$world_name peer=$peer_id data=$windows_root"
+say "the world holds its own map identity; it never copies another world's credential"
 say 'use tmux -L bibites-broadcast has-session -t bibites-local-broadcast to read its state'
