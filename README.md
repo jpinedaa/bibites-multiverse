@@ -45,8 +45,6 @@ that live there. Their bodies, brains, behavior, and species can change across g
 You can get *The Bibites* on [Steam](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
 or [itch.io](https://thebibites.itch.io/the-bibites).
 
-These screenshots come from real Multiverse saves loaded in the game.
-
 <table>
 <tr>
 <td width="50%">
