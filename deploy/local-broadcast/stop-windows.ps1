@@ -4,10 +4,13 @@ $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $state = Join-Path $root 'state'
 $configPath = Join-Path $root 'config.env'
 $gameDir = ''
+$sidecarExe = ''
 if (Test-Path -LiteralPath $configPath) {
     foreach ($line in Get-Content -LiteralPath $configPath) {
         $pair = $line.Split('=', 2)
-        if ($pair.Count -eq 2 -and $pair[0] -eq 'GameDir') { $gameDir = $pair[1] }
+        if ($pair.Count -ne 2) { continue }
+        if ($pair[0] -eq 'GameDir') { $gameDir = $pair[1] }
+        if ($pair[0] -eq 'SidecarExe') { $sidecarExe = $pair[1] }
     }
 }
 
@@ -36,5 +39,14 @@ if ($game -and $gameDir -and $game.Path -like "$gameDir\*") {
     }
 }
 
+# The sidecar goes last: it holds this world's place on the map and takes
+# custody of every arrival while the game saves and quits.
+$sidecar = Get-RecordedProcess 'sidecar'
+if ($sidecar -and $sidecarExe -and $sidecar.Path -eq $sidecarExe) {
+    Stop-Process -Id $sidecar.Id -Force -ErrorAction SilentlyContinue
+    $sidecar.WaitForExit(15000) | Out-Null
+}
+
 Remove-Item -LiteralPath (Join-Path $state 'obs.pid') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $state 'game.pid') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $state 'sidecar.pid') -Force -ErrorAction SilentlyContinue
