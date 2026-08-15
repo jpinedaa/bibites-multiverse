@@ -116,6 +116,25 @@ func TestLandingCardLayoutKeepsRelatedContentTogether(t *testing.T) {
 	}
 }
 
+func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
+	for _, want := range []string{
+		"The Windows setup and Linux complete package for release 0.2.2",
+		"Each installer creates a unique world identity and keeps its secret on your machine.",
+		"No join string is required.",
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.2/bibites-multiverse-0.2.2-windows-x64-setup.exe"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.2/bibites-multiverse-0.2.2-linux-x64-complete.zip"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.2">Checksums and add-ons`,
+		"Automatic enrollment creates the secret on your machine.",
+	} {
+		if !strings.Contains(landingPageHTML, want) {
+			t.Errorf("landing page is missing public package detail %q", want)
+		}
+	}
+	if strings.Contains(landingPageHTML, "Joining requires a private join string") {
+		t.Error("landing page still says that the public map requires a private join string")
+	}
+}
+
 func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 	a := rigShapedArchive(t)
 	ts := httptest.NewServer(a.httpHandler())

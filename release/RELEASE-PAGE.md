@@ -5,10 +5,10 @@ Your game and saves stay on your computer.
 
 ## What you need
 
-- Windows: nothing else. The recommended package includes The Bibites `0.6.3.1`.
+- Windows: nothing else. The recommended setup includes The Bibites `0.6.3.1`.
 - Linux: nothing else. The recommended package includes the native game.
 
-Every participant archive includes `public-map.json`, the public join configuration. It contains
+Every participant package includes `public-map.json`, the public join configuration. It contains
 the deployed HTTPS enrollment and WSS relay addresses. During installation, each package creates
 a unique world identity and secret. It does not reuse one shared credential.
 
@@ -27,14 +27,21 @@ issue, screenshot, or log.
 
 ## Windows
 
-1. Download the **Windows complete** archive (recommended).
+1. Download the **Windows setup** executable (recommended).
 2. Make sure that its SHA-256 matches the table.
-3. Open the archive properties and select **Unblock**. Then extract the archive.
-4. Double-click `Install-BibitesMultiverse.cmd`.
+3. Open the setup properties and select **Unblock** when Windows shows that option.
+4. Double-click the setup executable.
+
+This community setup is not code-signed. Windows can show **Unknown publisher**. Continue only
+after the setup SHA-256 matches this page.
 
 The GUI selects the included portable game. You can instead use a game it finds on your machine
 or select the folder yourself. **Start after installation** is selected by default. The game opens
-after the map grants this installation a place.
+after the map grants this installation a place. Setup creates desktop and Start Menu launch icons.
+It also registers Bibites Multiverse in Windows Settings for uninstall.
+
+The Windows complete ZIP remains available for advanced or script-based installation. It opens
+the same GUI through `Install-BibitesMultiverse.cmd`.
 
 ## Linux
 

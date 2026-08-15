@@ -30,14 +30,14 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.4` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.0`, `contract-a/2.4` | The project's own six-world deployment, continuously, since 2026-08-11 |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.4` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.0`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
 | **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.4` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.0`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
-same weight and the table does not pretend they do:** the Windows row is weeks of continuous
-six-world running; the Linux row is one rehearsal session on one machine on one day. A build that
-is not in the table is not "probably fine": it is untested, and the installer treats untested as
+same weight and the table does not pretend they do:** the Windows row covers a four-day continuous
+six-world run. The Linux row is one rehearsal session on one machine on one day. A build that is
+not in the table is not "probably fine": it is untested, and the installer treats untested as
 unsupported.
 
 **What makes the Linux row trustworthy for the thing the mod actually does** is not session
@@ -204,7 +204,7 @@ that only half the rows would have.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/2",
-  "release": "0.2.1",
+  "release": "0.2.2",
   "published": "2026-08-15",
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -221,7 +221,7 @@ that only half the rows would have.
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
       "contractB": "contract-b/4.0",
-      "tested": "the project's own six-world deployment, continuously, since 2026-08-11"
+      "tested": "the six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15"
     },
     {
       "gameVersion": "0.6.3.1",

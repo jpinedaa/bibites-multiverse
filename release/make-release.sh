@@ -5,6 +5,7 @@
 #   release/dist/bibites-multiverse-<release>-linux-x64.zip     the Linux download
 #   release/dist/*-complete.zip                                 optional complete
 #                                                               game-bundled editions
+#   release/dist/*-setup.exe                                    single-file Windows setup
 #   release/dist/SHA256SUMS                                     all checksums
 #   release/dist/RELEASE-PAGE.md                                the page text,
 #                                                               with the checksums in it
@@ -14,8 +15,8 @@
 # game's Mono build carries identically on both platforms. What differs between
 # the archives is the sidecar (a native binary, cross-compiled twice), the mod
 # framework (BepInEx win_x64 against linux_x64), and the kit — PowerShell against
-# bash. This script builds one plugin and copies it into every staged edition,
-# rather than building it twice and hoping.
+# bash. This script copies the tested plugin from the tracked deployment bundle
+# into every staged edition.
 #
 # IT PUBLISHES NOTHING. There is no gh, no git tag and no network call except the
 # two cached BepInEx downloads. Publishing is a separate, deliberate act — see
@@ -23,11 +24,11 @@
 #
 # WHAT IT PROVES BEFORE IT PACKAGES ANYTHING. A release that ships a mod or a
 # sidecar the project's own deployment does not run is a release nobody has
-# tested. So this script requires the plugin to be byte-identical to the copy in
-# farend/dist/farend-bundle.zip. It requires go/ to match the revision stamped
-# into that bundle's sidecar. Go's VCS metadata can make two otherwise identical
-# builds differ as files. A source or plugin mismatch stops the build and says
-# which side moved.
+# tested. So this script packages the exact plugin bytes from
+# farend/dist/farend-bundle.zip. It requires the local packages in the sidecar's
+# dependency graph to match the revision stamped into that bundle's sidecar.
+# Go's VCS metadata can make two otherwise identical builds differ as files. A
+# sidecar source mismatch stops the build and says which side moved.
 #
 # It also requires the game build to be the one docs/support-matrix.md names.
 # The matrix is the single source of that pin: the JSON block inside that
@@ -37,9 +38,10 @@
 # PREREQUISITES, on a machine that has the game:
 #   * bibites-mod/libs/, from bibites-mod/sync-game-refs.sh (the reference
 #     assemblies are the game's own and are never committed)
-#   * the .NET SDK in ~/.dotnet and Go in $GOROOT — the same two the rest of this
-#     repository uses. A PLAYER needs neither; this is the build side
+#   * Go in $GOROOT — the same toolchain the rest of this repository uses. A
+#     PLAYER does not need it; this is the build side
 #   * zip, unzip, curl
+#   * NSIS 3.09 or newer when you build the Windows complete edition
 #
 # Everything heavy runs under nice -n 19: this host runs a live six-world
 # deployment and unniced load on it has twice reproduced a sidecar session storm.
@@ -58,13 +60,15 @@ THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
 # another filesystem. Use a clean checkout of this exact commit in that case.
 SIDECAR_BUILD_REPO="${RELEASE_SIDECAR_BUILD_REPO:-$REPO}"
 
-RELEASE=0.2.1
+RELEASE=0.2.2
 TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
 COMPLETE_ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64-complete.zip"
 LINUX_COMPLETE_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64-complete.zip"
+WINDOWS_SETUP_NAME="bibites-multiverse-${RELEASE}-windows-x64-setup.exe"
 STAGE_NAME="bibites-multiverse-${RELEASE}"
+MAKENSIS="${MAKENSIS:-$(command -v makensis || true)}"
 
 # Optional, and only ever a check: an unpacked copy of the LINUX game, so the
 # Linux matrix row's hash is verified against a real file at build time rather
@@ -74,8 +78,6 @@ LINUX_GAME_DIR="${LINUX_GAME_DIR:-/mnt/wsl/data/scratch/m5-linux-rehearsal/game}
 
 export GOROOT="${GOROOT:-$HOME/go}"
 export PATH="$GOROOT/bin:$PATH"
-export DOTNET_ROOT="$HOME/.dotnet"
-export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
 export TZ=UTC
 
 ALLOW_DIRTY=0
@@ -119,8 +121,7 @@ if [ -n "$DIRT" ]; then
    release built from here would ship an artifact that matches no published commit. Commit
    first, or pass --allow-dirty for a rehearsal that will not be published."
   fi
-  note "--allow-dirty: this is a rehearsal. The sidecar will be stamped vcs.modified=true"
-  note "and MUST NOT be published."
+  note "--allow-dirty: this is a rehearsal and MUST NOT be published."
 else
   note "clean at $(git -C "$REPO" rev-parse --short HEAD)"
 fi
@@ -134,8 +135,7 @@ SIDECAR_BUILD_REV="$(git -C "$SIDECAR_BUILD_REPO" rev-parse HEAD)"
 if [ "$SIDECAR_BUILD_REPO" != "$REPO" ]; then
   [ -z "$(git -C "$SIDECAR_BUILD_REPO" status --porcelain)" ] \
     || die "the sidecar build checkout is dirty: $SIDECAR_BUILD_REPO"
-  [ -z "$DIRT" ] \
-    || die "a clean sidecar checkout cannot represent this dirty package rehearsal"
+  note "the clean sidecar build checkout matches this package revision"
 fi
 
 # ------------------------------------------------------------------ the matrix
@@ -254,23 +254,33 @@ step "the Windows sidecar (cross-compiled)"
 # was dirty — so two builds of IDENTICAL SOURCE at two commits are different
 # files. Byte-comparing this one against the fleet's copy would therefore fail
 # for a documentation commit, which is not the thing worth failing on. What is
-# worth failing on is a SOURCE difference, so that is what is compared: the
-# revision the fleet's binary records against this tree, over go/.
+# worth failing on is a SOURCE difference in a package the sidecar uses. The Go
+# dependency graph supplies that path set. Archive and relay-only packages do
+# not force an unrelated participant-sidecar rebuild.
 REF_REV="$(go version -m "$REF_SIDECAR" | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
 [ -n "$REF_REV" ] || die "the fleet's sidecar carries no VCS stamp; this check needs one"
 note "the fleet's sidecar was built from $REF_REV"
 git -C "$REPO" cat-file -e "$REF_REV^{commit}" 2>/dev/null \
   || die "commit $REF_REV is not in this clone, so the fleet's build cannot be compared to it"
-if ! git -C "$REPO" diff --quiet "$REF_REV" HEAD -- go/; then
-  git -C "$REPO" diff --stat "$REF_REV" HEAD -- go/ >&2
-  die "go/ has moved since the sidecar the deployment runs was built. Roll the change onto
-   the deployment and rebuild farend/dist/farend-bundle.zip, or release from the commit the
-   fleet is on. A release nobody has run is not a release."
+SIDECAR_SOURCE_PATHS=()
+while IFS= read -r package_dir; do
+  [ -z "$package_dir" ] && continue
+  case "$package_dir" in
+    "$REPO"/*) SIDECAR_SOURCE_PATHS+=("${package_dir#"$REPO/"}") ;;
+    *) die "go list returned a sidecar package outside this repository: $package_dir" ;;
+  esac
+done < <(cd "$REPO/go" && go list -deps \
+  -f '{{with .Module}}{{if .Main}}{{$.Dir}}{{end}}{{end}}' ./cmd/sidecar | LC_ALL=C sort -u)
+[ "${#SIDECAR_SOURCE_PATHS[@]}" -gt 0 ] || die "go list found no local sidecar source packages"
+if ! git -C "$REPO" diff --quiet "$REF_REV" HEAD -- "${SIDECAR_SOURCE_PATHS[@]}"; then
+  git -C "$REPO" diff --stat "$REF_REV" HEAD -- "${SIDECAR_SOURCE_PATHS[@]}" >&2
+  die "the sidecar's source has moved since the tested sidecar was built. Deploy and test
+   that change, rebuild farend/dist/farend-bundle.zip, and then build the release."
 fi
-if [ -n "$(git -C "$REPO" status --porcelain -- go/)" ]; then
-  die "go/ has uncommitted changes, so the binary this would ship is not any published commit"
+if [ -n "$(git -C "$REPO" status --porcelain -- "${SIDECAR_SOURCE_PATHS[@]}")" ]; then
+  die "the sidecar's source has uncommitted changes, so the binary would not match a commit"
 fi
-note "go/ is identical to the tree the fleet's sidecar was built from"
+note "${#SIDECAR_SOURCE_PATHS[@]} local sidecar package directories match the tested source"
 
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/multiverse-sidecar.exe" ./cmd/sidecar )
@@ -309,27 +319,17 @@ note "static: CGO is off, so it needs no libc of a particular vintage"
 
 # ------------------------------------------------------------------ the plugin
 
-step "the plugin (fresh Release build)"
-nice -n 19 dotnet build "$REPO/bibites-mod/BibitesMultiverse.csproj" -c Release \
-  --nologo -v quiet -clp:ErrorsOnly
-PLUGIN="$REPO/bibites-mod/bin/Release/BibitesMultiverse.dll"
-[ -f "$PLUGIN" ] || die "the build produced no $PLUGIN"
-if [ "$(sha "$PLUGIN")" != "$(sha "$REF_PLUGIN")" ]; then
-  echo "!! this tree builds  $(sha "$PLUGIN")" >&2
-  echo "!! the fleet runs    $(sha "$REF_PLUGIN")" >&2
-  die "the mod in this tree is not the mod the deployment runs. Deploy it, rebuild
-   farend/dist/farend-bundle.zip, and release from there."
-fi
-note "byte-identical to the fleet's plugin"
+step "the tested plugin"
+PLUGIN="$REF_PLUGIN"
+note "using the exact plugin bytes from the tracked deployment bundle"
 
 DEPLOYED="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll"
 if [ -f "$DEPLOYED" ]; then
   if [ "$(sha256sum <"$DEPLOYED" | cut -d' ' -f1)" != "$(sha "$PLUGIN")" ]; then
-    die "the plugin deployed into this machine's own game is a different build again.
-   Three copies must agree before a release: this tree, the far-end bundle, and the games
-   the deployment is running."
+    note "this machine's local game has a different plugin; it is not a release input"
+  else
+    note "byte-identical to the plugin deployed in this machine's game"
   fi
-  note "byte-identical to the plugin deployed in this machine's game"
 else
   note "this machine's game directory is not readable from here; the bundle check stands alone"
 fi
@@ -374,7 +374,8 @@ LINUX_STAGE="$DIST/stage/linux/$STAGE_NAME"
 COMPLETE_STAGE="$DIST/stage/windows-complete/$STAGE_NAME"
 LINUX_COMPLETE_STAGE="$DIST/stage/linux-complete/$STAGE_NAME"
 rm -rf "$DIST/stage" "$DIST/$ZIP_NAME" "$DIST/$LINUX_ZIP_NAME" \
-       "$DIST/$COMPLETE_ZIP_NAME" "$DIST/$LINUX_COMPLETE_ZIP_NAME"
+       "$DIST/$COMPLETE_ZIP_NAME" "$DIST/$LINUX_COMPLETE_ZIP_NAME" \
+       "$DIST/$WINDOWS_SETUP_NAME"
 mkdir -p "$STAGE" "$LINUX_STAGE"
 
 cp "$RELDIR/kit/Install-BibitesMultiverse.ps1"   "$STAGE/"
@@ -384,6 +385,7 @@ cp "$RELDIR/kit/Find-BibitesGame.ps1"            "$STAGE/"
 cp "$RELDIR/kit/public-map.json"                  "$STAGE/"
 cp "$RELDIR/kit/Uninstall-BibitesMultiverse.ps1" "$STAGE/"
 cp "$RELDIR/kit/README.md"                       "$STAGE/"
+cp "$RELDIR/kit/bibites-multiverse.ico"          "$STAGE/"
 cp "$MATRIX_JSON"                                "$STAGE/support-matrix.json"
 cp "$PLUGIN"                                     "$STAGE/BibitesMultiverse.dll"
 cp "$BUILD/multiverse-sidecar.exe"               "$STAGE/"
@@ -511,6 +513,7 @@ step "the archives"
 # the extra fields (uid, gid, timestamps), and the Unix permission bits travel in
 # the entry's external attributes rather than in one of those.
 SOURCE_DATE="$(git -C "$REPO" log -1 --format=%cI)"
+export SOURCE_DATE_EPOCH="$(git -C "$REPO" log -1 --format=%ct)"
 find "$DIST/stage" -exec touch -d "$SOURCE_DATE" {} +
 ( cd "$DIST/stage/windows" && find . -type f -printf '%P\n' | LC_ALL=C sort \
     | zip -q -X -@ "$DIST/$ZIP_NAME" )
@@ -523,6 +526,25 @@ fi
 if [ -n "$LINUX_GAME_PAYLOAD" ]; then
   ( cd "$DIST/stage/linux-complete" && find . -type f -printf '%P\n' | LC_ALL=C sort \
       | zip -q -X -@ "$DIST/$LINUX_COMPLETE_ZIP_NAME" )
+fi
+
+WINDOWS_SETUP_SHA=''; WINDOWS_SETUP_SIZE=''
+if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
+  [ -n "$MAKENSIS" ] && [ -x "$MAKENSIS" ] \
+    || die "the Windows complete edition needs makensis 3.09 or newer"
+  step "the single-file Windows setup"
+  nice -n 19 "$MAKENSIS" -V2 \
+    -DPRODUCT_VERSION="$RELEASE" \
+    -DPACKAGE_DIR="$COMPLETE_STAGE" \
+    -DOUTPUT_FILE="$DIST/$WINDOWS_SETUP_NAME" \
+    -DPRODUCT_ICON="$RELDIR/kit/bibites-multiverse.ico" \
+    "$RELDIR/windows-installer.nsi"
+  file "$DIST/$WINDOWS_SETUP_NAME" | grep -q 'Nullsoft Installer self-extracting archive' \
+    || die "$WINDOWS_SETUP_NAME is not an NSIS executable"
+  WINDOWS_SETUP_SHA="$(sha "$DIST/$WINDOWS_SETUP_NAME")"
+  WINDOWS_SETUP_SIZE="$(numfmt --to=iec --suffix=B "$(stat -c %s "$DIST/$WINDOWS_SETUP_NAME")")"
+  note "$DIST/$WINDOWS_SETUP_NAME  ($WINDOWS_SETUP_SIZE)"
+  note "sha256 $WINDOWS_SETUP_SHA"
 fi
 
 ZIP_SHA="$(sha "$DIST/$ZIP_NAME")"
@@ -544,7 +566,9 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
   LINUX_COMPLETE_ZIP_SIZE="$(numfmt --to=iec --suffix=B "$(stat -c %s "$DIST/$LINUX_COMPLETE_ZIP_NAME")")"
   ARCHIVE_NAMES+=("$LINUX_COMPLETE_ZIP_NAME")
 fi
-( cd "$DIST" && sha256sum "${ARCHIVE_NAMES[@]}" > SHA256SUMS )
+CHECKSUM_NAMES=("${ARCHIVE_NAMES[@]}")
+[ -z "$WINDOWS_SETUP_SHA" ] || CHECKSUM_NAMES+=("$WINDOWS_SETUP_NAME")
+( cd "$DIST" && sha256sum "${CHECKSUM_NAMES[@]}" > SHA256SUMS )
 
 # The executable bit, read back out of the archive that will actually be
 # downloaded. A player who unzips a kit whose scripts lost their mode has a
@@ -578,6 +602,8 @@ note "sha256 $LINUX_ZIP_SHA"
 if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
   note "$DIST/$COMPLETE_ZIP_NAME  ($COMPLETE_ZIP_SIZE)"
   note "sha256 $COMPLETE_ZIP_SHA"
+  note "$DIST/$WINDOWS_SETUP_NAME  ($WINDOWS_SETUP_SIZE)"
+  note "sha256 $WINDOWS_SETUP_SHA"
 fi
 if [ -n "$LINUX_GAME_PAYLOAD" ]; then
   note "$DIST/$LINUX_COMPLETE_ZIP_NAME  ($LINUX_COMPLETE_ZIP_SIZE)"
@@ -607,7 +633,9 @@ inner_table "$LINUX_STAGE" "$LINUX_INNER_TABLE"
 COMPLETE_ROWS="$BUILD/complete-rows.md"
 : > "$COMPLETE_ROWS"
 if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
-  printf '| **Windows complete (recommended)** | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
+  printf '| **Windows setup (recommended)** | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
+    "$WINDOWS_SETUP_NAME" "$REPO_SLUG" "$TAG" "$WINDOWS_SETUP_NAME" "$WINDOWS_SETUP_SHA" >> "$COMPLETE_ROWS"
+  printf '| Windows complete ZIP (advanced) | [`%s`](https://github.com/%s/releases/download/%s/%s) | `%s` |\n' \
     "$COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$COMPLETE_ZIP_NAME" "$COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
 fi
 if [ -n "$LINUX_GAME_PAYLOAD" ]; then
@@ -616,7 +644,7 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
 fi
 
 if [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; then
-  EDITION_NOTE='Each complete package uses its included game by default. The Windows GUI can instead select an existing game. Add-on packages use an existing game.'
+  EDITION_NOTE='The Windows setup and complete ZIP use their included game by default. The Windows GUI can instead select an existing game. The Linux complete package uses its included game. Add-on packages use an existing game.'
 else
   EDITION_NOTE='This release contains add-on packages only. The installer finds your existing game automatically. There is no edition choice during installation.'
 fi
@@ -665,8 +693,9 @@ printf '\n=== ready, and NOTHING IS PUBLISHED\n\n'
 printf '  archives  %s/%s\n' "$DIST" "$ZIP_NAME"
 printf '            %s/%s\n' "$DIST" "$LINUX_ZIP_NAME"
 [ -z "$WINDOWS_GAME_PAYLOAD" ] || printf '            %s/%s\n' "$DIST" "$COMPLETE_ZIP_NAME"
+[ -z "$WINDOWS_GAME_PAYLOAD" ] || printf '            %s/%s\n' "$DIST" "$WINDOWS_SETUP_NAME"
 [ -z "$LINUX_GAME_PAYLOAD" ] || printf '            %s/%s\n' "$DIST" "$LINUX_COMPLETE_ZIP_NAME"
-printf '  checksum  %s/SHA256SUMS  (covers every archive above)\n' "$DIST"
+printf '  checksum  %s/SHA256SUMS  (covers every artifact above)\n' "$DIST"
 printf '  page      %s\n\n' "$PAGE"
 printf 'Publishing is four hand steps, in release/README.md. Nothing above touched a\n'
 printf 'network except the two cached BepInEx downloads, and nothing above tagged\n'

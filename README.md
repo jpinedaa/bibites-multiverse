@@ -6,7 +6,7 @@
 
 **Artificial life, evolving across the network.**
 
-[![Installer status: 0.2.1 released](https://img.shields.io/badge/installer-0.2.1%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.1)
+[![Installer status: 0.2.2 released](https://img.shields.io/badge/installer-0.2.2%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.2)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
@@ -29,15 +29,15 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 - **[Watch broadcast](https://bibitesmultiverse.com/watch).** See one shared game camera.
 - **[Explore the live map](https://bibitesmultiverse.com/live).** Follow worlds, migrations,
   species, and lineages.
-- **[Connect your world](docs/participant/install.md).** Use the complete package for Windows or
-  Linux. Add-on packages can use a supported game that you already have.
+- **[Connect your world](docs/participant/install.md).** Use the Windows setup or Linux complete
+  package. Add-on packages can use a supported game that you already have.
 
 > [!IMPORTANT]
-> **Bibites Multiverse `0.2.1` is public.** The recommended Windows download includes an
+> **Bibites Multiverse `0.2.2` is public.** The Windows download is one setup executable with an
 > authorized portable copy of *The Bibites*. The Linux complete download includes the native
-> game too. Add-on downloads remain available for an existing game. Get them from the
-> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.1), and check the
-> SHA-256 before extraction.
+> game. Add-on downloads remain available for an existing game. Get them from the
+> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.2), and check the
+> SHA-256 before you run or extract a download.
 
 ## About *The Bibites*
 
@@ -130,34 +130,36 @@ Multiverse save.
 
 ## Install one world
 
-Release `0.2.1` keeps setup to three steps:
+Release `0.2.2` gives Windows a normal single-file setup program. Linux keeps its native complete
+archive.
 
-1. Download the complete archive for your platform and make sure that its checksum matches.
-2. Extract it. On Windows, double-click `Install-BibitesMultiverse.cmd`. On Linux, run
+1. Download the recommended file for your platform. Compare it with the published
+   [`SHA256SUMS`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.2/SHA256SUMS)
+   file.
+2. On Windows, double-click the setup executable. On Linux, extract the archive and run
    `./install-bibites-multiverse.sh`.
-3. Keep the defaults. Windows opens the included game after the map grants it a place. On Linux,
-   run `./start-multiverse.sh` after installation.
+3. Keep the defaults. Windows opens the included game and creates desktop and Start Menu icons.
+   On Linux, run `./start-multiverse.sh` after installation.
 
-All participant archives include `public-map.json`, the public join configuration. It contains
+All participant packages include `public-map.json`, the public join configuration. It contains
 the deployed enrollment and relay addresses. It contains no world identity or secret. Each
 installer creates a unique identity and secret. Private maps still use an operator-issued join
 string.
 
-After checksum and extraction, the platform commands are:
+After checksum verification, use these platform steps:
 
-| Platform | Supported game | Install | Start |
+| Platform | Recommended download | Install | Start |
 |---|---|---|---|
-| Windows | Included portable *The Bibites* 0.6.3.1, or an existing Steam copy | Double-click `Install-BibitesMultiverse.cmd` | Starts after install by default; later use `.\Start-Multiverse.ps1` |
-| Linux | Included native *The Bibites* 0.6.3.1, or an existing itch.io copy | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
+| Windows | [`bibites-multiverse-0.2.2-windows-x64-setup.exe`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.2/bibites-multiverse-0.2.2-windows-x64-setup.exe) | Double-click the one downloaded file | Starts after install by default. Later use the **Bibites Multiverse** icon |
+| Linux | [`bibites-multiverse-0.2.2-linux-x64-complete.zip`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.2/bibites-multiverse-0.2.2-linux-x64-complete.zip) | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
 Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
 without graphics. The simulation remains active.
 
 The Windows GUI uses the included portable game by default. You can instead select an existing
-game; the GUI searches Steam and common install locations before it asks for a folder. The
-installer checks the build, installs the mod, stores the unique credential, and creates the start
-and stop scripts. It needs no compiler or SDK. Windows needs no administrator account, and Linux
-needs no root access.
+game. The GUI searches Steam and common install locations before it asks for a folder. Setup
+registers Bibites Multiverse in Windows Settings and creates its launch icons. It needs no
+compiler, SDK, or administrator account. Linux needs no root access.
 
 [Read the full installation guide →](docs/participant/install.md)
 
@@ -229,7 +231,8 @@ duplicated organism because duplication changes the simulation permanently.
 
 A connected world crosses a network boundary. The package limits what crosses that boundary.
 
-- The recommended complete packages include the authorized game, mod, sidecar, and installer.
+- The recommended Windows setup and Linux complete package include the authorized game, mod,
+  sidecar, and installer.
   Add-on packages use a game that is already on the computer.
 - The installer refuses unsupported game builds before it changes the game folder.
 - The start script opens the sidecar before it opens the game. The stop script closes both

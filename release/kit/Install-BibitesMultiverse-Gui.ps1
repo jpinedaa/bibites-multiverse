@@ -7,7 +7,10 @@
     game instead. The installer searches the Steam and itch.io locations first.
 #>
 [CmdletBinding()]
-param([switch]$Probe)
+param(
+    [switch]$Probe,
+    [string]$InstallRoot = ''
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
@@ -20,11 +23,38 @@ $foundGame = Find-BibitesGameDirectory
 $defaultRuntime = if ($hasBundledGame) { 'bundled' } else { 'external' }
 
 if ($Probe) {
+    $manifestMatches = $true
+    $manifestFiles = 0
+    $manifestPath = Join-Path $Here 'MANIFEST.sha256'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        $manifestMatches = $false
+    } else {
+        foreach ($line in (Get-Content -LiteralPath $manifestPath)) {
+            $text = $line.Trim()
+            if (-not $text -or $text.StartsWith('#')) { continue }
+            $match = [regex]::Match($text, '^([0-9A-Fa-f]{64})\s+\*?(.+)$')
+            if (-not $match.Success) {
+                $manifestMatches = $false
+                break
+            }
+            $file = Join-Path $Here $match.Groups[2].Value.Trim()
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $match.Groups[1].Value) {
+                $manifestMatches = $false
+                break
+            }
+            $manifestFiles++
+        }
+    }
+    if ($manifestFiles -eq 0) { $manifestMatches = $false }
     [ordered]@{
         hasBundledGame = $hasBundledGame
         foundGame = $foundGame
         defaultRuntime = $defaultRuntime
+        manifestMatches = $manifestMatches
+        manifestFiles = $manifestFiles
     } | ConvertTo-Json
+    if (-not $manifestMatches) { exit 1 }
     exit 0
 }
 
@@ -33,7 +63,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Install Bibites Multiverse 0.2.1'
+$form.Text = 'Install Bibites Multiverse 0.2.2'
 $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(650, 440)
 $form.FormBorderStyle = 'FixedDialog'
@@ -175,6 +205,7 @@ $install.Add_Click({
     $log = Join-Path $env:TEMP ('bibites-multiverse-install-' + [guid]::NewGuid().ToString('N') + '.log')
     $arguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', $installer,
                    '-RuntimeSelection', $runtime)
+    if ($InstallRoot) { $arguments += @('-InstallRoot', $InstallRoot) }
     if ($external.Checked) { $arguments += @('-GameDir', $pathBox.Text) }
     if ($startAfter.Checked) { $arguments += '-StartAfterInstall' }
 
@@ -227,4 +258,4 @@ Update-GameStatus
 $result = $form.ShowDialog()
 $form.Dispose()
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) { exit 0 }
-exit 1
+exit 2

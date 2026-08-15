@@ -9,8 +9,9 @@ it by default. You can instead use a supported game already on this machine. Thi
 includes `public-map.json`, the public join configuration. It contains the deployed service
 addresses and no secret. **You do not need:** a compiler, an SDK, or administrator rights.
 
-**This is a Windows archive.** Linux has separate complete and add-on archives, with a bash kit in
-place of this one. The mod is the same file in all packages. The sidecar, mod framework, and
+**This is the Windows kit.** It is embedded in the setup executable and included in the advanced
+ZIP packages. Linux has separate complete and add-on archives with a bash kit. The mod is the
+same file in all packages. The sidecar, mod framework, and
 scripts are platform-specific. Nothing here will ever ask you to turn a
 security control off — no execution-policy bypass, no `--insecure` flag, no skipped certificate
 check. If any part of this package asks you for one of those, that is a defect and reporting it
@@ -25,17 +26,17 @@ multiverse-join/1 wss://<relay-host>/contract-b/v4 <your-world>.<secret>
 
 ## Before you run anything
 
-The release page you downloaded this from carries the archive's SHA-256 **above** the download
-link, and the mark-of-the-web steps beside it. Do those two things there, in that order, if you
-have not already: **check the archive against the published checksum, then clear the mark on the
-archive before you unpack it.**
+The recommended Windows download is one setup executable. Its release page carries the SHA-256.
+Check that value before you run the setup. This folder also ships in the advanced ZIP. For that
+ZIP, check the archive and clear its mark before extraction.
 
 The installer checks itself again anyway. Its first step verifies every file in this folder
 against `MANIFEST.sha256` and refuses to go on if one of them disagrees.
 
 ## Install
 
-Double-click `Install-BibitesMultiverse.cmd`.
+The single-file setup opens this GUI automatically. In the advanced ZIP, double-click
+`Install-BibitesMultiverse.cmd`.
 
 The launcher uses the `RemoteSigned` policy for its process only. It does not change the policy
 for your account or computer. The GUI uses the included portable game by default. Its other option
@@ -65,6 +66,10 @@ the whole perimeter, not silence. Every edge is a door that works both ways. The
 so on your screen while it runs, and `docs/participant/install.md` says so on the page.
 
 ## Start and stop
+
+The setup creates **Bibites Multiverse** icons on the desktop and Start Menu. Use either icon to
+start the installed world. The scripts below remain available in the installed application
+directory.
 
 ```powershell
 .\Start-Multiverse.ps1      # the sidecar, then the game
@@ -99,6 +104,9 @@ does. Edit them there.
 
 ## Uninstall
 
+For a setup installation, open **Windows Settings → Apps → Installed apps** and remove
+**Bibites Multiverse**. The Start Menu also contains an uninstall shortcut.
+
 ```powershell
 .\Uninstall-BibitesMultiverse.ps1 -DryRun   # the ledger, changing nothing
 .\Uninstall-BibitesMultiverse.ps1
@@ -132,12 +140,13 @@ system prints one, and no diagnostic asks for one.
 
 | File | What it is |
 |---|---|
-| `Install-BibitesMultiverse.cmd` | The double-click installer launcher |
+| `Install-BibitesMultiverse.cmd` | The advanced ZIP launcher |
 | `Install-BibitesMultiverse-Gui.ps1` | The game selection and start-after-install window |
 | `Find-BibitesGame.ps1` | The existing-game search shared by the GUI and installer |
 | `Install-BibitesMultiverse.ps1` | The installer and its advanced options |
 | `public-map.json` | The public join configuration: HTTPS enrollment and WSS relay addresses; no secret |
 | `Uninstall-BibitesMultiverse.ps1` | The uninstaller |
+| `bibites-multiverse.ico` | The application and setup icon |
 | `BibitesMultiverse.dll` | The mod, a BepInEx plugin |
 | `multiverse-sidecar.exe` | The program that speaks to the map on your world's behalf |
 | `BepInEx_win_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |

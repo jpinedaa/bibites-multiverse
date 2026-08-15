@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.2.1` on **2026-08-15**, against the code and
+strangers. This audit was updated for release `0.2.2` on **2026-08-15**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -12,16 +12,17 @@ part of it that affects a player is stated on the release page, in
 ## What "a bare install" means here
 
 Somebody downloads a package for their platform, runs its installer, and changes nothing else.
-On Windows, that means the complete package, its included game, automatic public enrollment, and
-the selected start-after-install checkbox. On Linux, it means the complete package, its included
-game, and automatic public enrollment. The mod settings below stay identical on both platforms. Package and enrollment
-defaults are marked where they differ. Two facts shape every verdict:
+On Windows, that means the single-file setup, its included game, automatic public enrollment,
+application shortcuts, and the selected start-after-install checkbox. On Linux, it means the
+complete package, its included game, and automatic public enrollment. The mod settings below stay
+identical on both platforms. Package and enrollment defaults are marked where they differ. Two
+facts shape every verdict:
 
-1. **The package ships no relay and no archive.** Every archive contains the installer, the
-   uninstaller, the README, the mod, the sidecar, BepInEx, and the support matrix. A complete
-   archive also contains an authorized game payload and its redistribution notice. Two defaults are therefore
-   not reachable from a participant install. They are audited because an operator can still use
-   them on a host.
+1. **The package ships no relay and no archive service.** Every participant artifact contains the
+   installer, uninstaller, README, mod, sidecar, BepInEx, and support matrix. A complete artifact
+   also contains an authorized game payload and its redistribution notice. Two defaults are not
+   reachable from a participant install. They are audited because an operator can still use them
+   on a host.
 2. **The installer writes every setting explicitly, including the ones that match the mod's own
    default.** That is decision 7's second half: a future change to a default cannot silently move
    what an installed world does, and it cannot silently move what the project's own deployment
@@ -34,6 +35,7 @@ defaults are marked where they differ. Two facts shape every verdict:
 | `--insecure-no-token` | The relay, not the package | Cannot reach it: no relay is shipped | **PASS** — and the *"nothing enforces test-rig-only"* half is closed in code, by a bind refusal WP2 added after DQ4 was written |
 | The archive's HTTP bind | The archive, not the package | Cannot reach it: no archive is shipped | **PASS at the packaging layer**, with a **finding for WP3**: the habit in the bring-up instructions, not the compiled default, is what would expose a public host |
 | Public installer enrollment | Relay and all participant packages | Creates one unique credential over HTTPS and reuses it on retry | **PASS WITH FINITE LIMITS** — compiled off, explicitly enabled by the hosted deployment, bounded by nginx and relay limits, with verifiers stored instead of secrets |
+| Windows application registration | The single-file setup | Creates per-user desktop and Start Menu shortcuts plus one uninstall entry | **PASS** — no administrator access, service, task, or machine-wide setting |
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
 
@@ -135,8 +137,25 @@ deliberate service-capacity control, and an abusive client can consume it. Disab
 stops new identities without revoking credentials or disconnecting existing worlds. The operator
 must watch the credential count and decide when to raise or close the limit.
 
-**Verdict: PASS WITH FINITE LIMITS.** No reusable secret ships in the archive. The client creates
+**Verdict: PASS WITH FINITE LIMITS.** No reusable secret ships in a participant artifact. The client creates
 the only recoverable secret, HTTPS protects it in transit, and the relay stores only its verifier.
+
+## 2c. Windows application registration
+
+**Today.** The Windows setup installs its launcher and sidecar below
+`%LOCALAPPDATA%\Programs\Bibites Multiverse`. It creates one desktop shortcut and two Start Menu
+shortcuts. The second Start Menu shortcut runs the uninstaller. The setup also creates one
+per-user uninstall entry for Windows Settings.
+
+**A bare Windows install.** Creates these entries. It does not add a service, scheduled task,
+machine-wide registry value, or administrator requirement. The launch shortcut uses the project
+icon and starts the generated script.
+
+**The cost.** The desktop receives one icon. Windows Settings receives one application entry.
+The uninstaller removes both shortcut locations and the application entry.
+
+**Verdict: PASS.** The setup creates the normal application surface that a player expects. All
+changes are per-user and the uninstaller owns them.
 
 ## 3. `MULTIVERSE_MIGRATION_EXCLUDE` — the species that stay home
 
@@ -233,6 +252,7 @@ This audit is a release artifact and goes stale with the release. For the next o
 2. Re-run the guard tests: `nice -n 19 go test ./internal/relay -run 'InsecureNoToken|Servable'`.
 3. Re-run `release/test-install-uninstall.ps1 -RealGameDir <Windows-game>`, whose suite fails on an installer that prints an
    execution-policy bypass or an `--insecure` instruction.
-4. Re-measure the save footprint against the worlds the project is then running.
-5. Grep `docs/` and `release/` for `--insecure` and check that every occurrence is still a
+4. Run the finished Windows setup with `/PROBE` on Windows.
+5. Re-measure the save footprint against the worlds the project is then running.
+6. Grep `docs/` and `release/` for `--insecure` and check that every occurrence is still a
    prohibition.

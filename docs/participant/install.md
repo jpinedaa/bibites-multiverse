@@ -1,8 +1,8 @@
 # Install
 
-**Recommended setup:** download the complete package for your platform. It includes an authorized
-copy of *The Bibites*, uses that copy by default, and creates a unique public-map identity. The
-Windows GUI can use an existing game and can open the connected game after installation.
+**Recommended setup:** Windows uses one setup executable. Linux uses a complete archive. Both
+include an authorized copy of *The Bibites* and create a unique public-map identity. The Windows
+GUI can use an existing game and can open the connected game after installation.
 
 The Linux installer uses the included native game automatically. The Linux add-on remains
 available if you already have the supported itch.io game. **What you do not need:** a join
@@ -10,19 +10,20 @@ string, compiler, SDK, administrator rights, or root.
 
 `SHA256SUMS` sits beside all current packages:
 
-| Platform | Archive | Game source |
+| Platform | Download | Game source |
 |---|---|---|
-| Windows, recommended | `bibites-multiverse-0.2.1-windows-x64-complete.zip` | included portable game |
-| Windows, add-on | `bibites-multiverse-0.2.1-windows-x64.zip` | your existing Steam copy |
-| Linux, recommended | `bibites-multiverse-0.2.1-linux-x64-complete.zip` | included native game |
-| Linux, add-on | `bibites-multiverse-0.2.1-linux-x64.zip` | your existing itch.io copy |
+| Windows, recommended | `bibites-multiverse-0.2.2-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
+| Windows, advanced ZIP | `bibites-multiverse-0.2.2-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
+| Windows, add-on | `bibites-multiverse-0.2.2-windows-x64.zip` | your existing Steam copy |
+| Linux, recommended | `bibites-multiverse-0.2.2-linux-x64-complete.zip` | included native game |
+| Linux, add-on | `bibites-multiverse-0.2.2-linux-x64.zip` | your existing itch.io copy |
 
-Every participant archive includes `public-map.json`, the public join configuration. It contains
-the deployed enrollment and relay addresses. It contains no shared world identity or secret. Each
-installer creates those private values for its installation.
+Every participant package includes `public-map.json`, the public join configuration. It contains
+the deployed enrollment and relay addresses. It contains no world identity or secret. Each
+installer creates a unique identity and secret. Only the secret stays private.
 
-**The mod inside every archive is the same file**, byte for byte: it is platform-independent IL.
-What differs by platform is the sidecar, BepInEx flavour, and kit. A complete archive adds
+**The mod inside every package is the same file**, byte for byte: it is platform-independent IL.
+What differs by platform is the sidecar, BepInEx flavour, and kit. A complete package adds
 `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, and `game/`. No installer downloads the
 game, mod, sidecar, or BepInEx while it runs. Each installer contacts the public HTTPS enrollment
 endpoint only to create this installation's map identity.
@@ -39,11 +40,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.1-windows-x64-complete.zip).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.2-windows-x64-setup.exe).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-0.2.1-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.2.2-linux-x64-complete.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -51,24 +52,27 @@ again; if it does not match twice, report it and do not run it. That is `INS-CHE
 
 ### On Windows: the mark of the web, and the execution policy
 
-Windows marks every file that came out of a downloaded archive, and it will refuse to run parts
-of the package until that mark is cleared. **Clear it once, on the archive, after the checksum
-has passed and before you unpack it:**
+Windows marks a downloaded setup or archive. **Clear the mark only after its checksum passes:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-0.2.1-windows-x64-complete.zip
+Unblock-File .\bibites-multiverse-0.2.2-windows-x64-setup.exe
 ```
 
-or right-click the archive → **Properties** → tick **Unblock**. Files extracted from an unmarked
-archive carry no mark. **The order is the point**: the checksum is what makes clearing the mark a
-decision rather than a ritual. If you unpacked first, the installer's own first step verifies
-every file against the `MANIFEST.sha256` inside the archive and then clears the mark from exactly
-those files, by name, and from nothing else on your machine. That is `INS-MARKOFWEB`.
+You can also right-click the setup, select **Properties**, and select **Unblock**. The checksum
+makes this a decision about one verified file. The setup then verifies every embedded package file
+against `MANIFEST.sha256`. That is `INS-MARKOFWEB`.
 
-Double-click `Install-BibitesMultiverse.cmd` after you extract the unblocked archive. The GUI uses
-the included portable game by default. Select **Use a game that is already installed** to bind to
-another copy. The installer searches Steam and common game locations and fills the path when it
-finds one. If it does not, the GUI says **Game not found** and leaves the folder picker available.
+This community setup is not code-signed. Windows can show **Unknown publisher**. Continue only
+after the setup SHA-256 matches the release page.
+
+Double-click the setup executable. The GUI uses the included portable game by default. Select
+**Use a game that is already installed** to bind to another copy. The installer searches Steam
+and common game locations. If it finds no game, the GUI says **Game not found** and keeps the
+folder picker available.
+
+The setup creates desktop and Start Menu icons named **Bibites Multiverse**. It also registers an
+uninstaller in **Windows Settings → Apps → Installed apps**. All application files stay in your
+user profile. Setup does not need administrator rights.
 
 **Start The Bibites and connect after installation** is selected by default. Clear it if you want
 to install without starting. The launcher uses `RemoteSigned` for its process only. It does not
@@ -121,7 +125,7 @@ archive on the right game is `INS-GAMEBUILD`, and the refusal prints the rows so
 archive you wanted.
 
 **The two rows are not equally proven, and the matrix page says so in the rows themselves.** The
-Windows one is weeks of continuous running on this project's own deployment; the Linux one is a
+Windows row covers a four-day continuous run on the six-world test deployment. The Linux row is a
 single 14-minute authenticated session on one machine, alongside a decompile of both builds that
 puts every difference between them outside the types the mod patches.
 
@@ -134,12 +138,15 @@ written anywhere.
 
 ## What the installer does
 
+Use the **Bibites Multiverse** desktop or Start Menu icon. Advanced users can run these files from
+the installed application directory:
+
 ```powershell
-.\Install-BibitesMultiverse.cmd     # double-click this file
-.\Install-BibitesMultiverse.ps1     # advanced options
 .\Start-Multiverse.ps1              # the sidecar, then the game
 .\Stop-Multiverse.ps1               # the game, then the sidecar
 ```
+
+The advanced ZIP also contains `Install-BibitesMultiverse.ps1`.
 
 ```sh
 ./install-bibites-multiverse.sh     # install and enroll this Linux world
@@ -169,7 +176,7 @@ matrix; install BepInEx if it is not already there; copy the plugin; enroll a un
 identity or split a private-map join string, then store the secret in a file only you can read;
 arrange trust for a certificate authority
 **only** if you gave it one for a private map; state the settings this install ships with; and
-write the start script, the stop script and the record the uninstall reads.
+write the start script, the stop script, the application files, and the uninstall record.
 
 **Three of those nine differ, and only three:**
 
@@ -179,12 +186,14 @@ write the start script, the stop script and the record the uninstall reads.
 | 2, selecting the game | the GUI defaults to the included game; the existing-game option reads Steam's registry, library index, and common paths | add-on searches the itch app root and usual places; complete installs its payload below the data root |
 | 7, a private map's authority | imports it into **your own user store**, `Cert:\CurrentUser\Root`, and records the thumbprint so the uninstall can take it out | writes it to **no store at all**. The copy goes beside your data and the start script sets `SSL_CERT_FILE` at it, for that one process. Nothing under `/etc/ssl` or `/usr/local/share/ca-certificates` is touched and `update-ca-certificates` is never run |
 
-**Neither needs administrator rights or root**, adds a service, a scheduled task, a systemd unit, a
-registry entry or a desktop file, or touches your worlds or their backups. The Windows GUI starts
-the sidecar and game only when its final checkbox is selected; it is selected by default.
+**Neither needs administrator rights or root**, adds a service, a scheduled task, or a systemd
+unit. Neither touches your worlds or their backups. The Windows setup adds per-user shortcuts and
+one uninstall entry. The Windows GUI starts the sidecar and game when its final checkbox is
+selected. It is selected by default.
 
-**The uninstall.** `Uninstall-BibitesMultiverse.ps1` or `./uninstall-bibites-multiverse.sh`, with
-`-DryRun` / `--dry-run` first if you want the ledger without the act. It reads the record the
+**The uninstall.** On Windows, use **Settings → Apps → Installed apps → Bibites Multiverse**.
+The advanced command is `Uninstall-BibitesMultiverse.ps1`. On Linux, use
+`./uninstall-bibites-multiverse.sh`. Use `-DryRun` or `--dry-run` first for the ledger. It reads the record the
 installer wrote and removes only what is named in it, checking each file's hash before it goes,
 and prints a line per path for what it removed and what it kept. Three things it deliberately
 keeps: **a file somebody changed after the install** — a changed plugin is reported and left;
@@ -284,7 +293,8 @@ map, do not start it.
 Four of them are worth reading before you start, because each one spends something of yours.
 
 **All of them live in one file you can read and edit: the start script**, `Start-Multiverse.ps1`
-or `start-multiverse.sh`, which the installer writes beside itself. Each is written out
+or `start-multiverse.sh`. Windows keeps it in the installed application directory. Linux writes
+it beside the installer. Each value is written out
 explicitly, *including* the ones that match the mod's own default, so that a future change to a
 default cannot silently move what your world does. **The environment variable names are the mod's
 own and are identical on both platforms**; only the way the file spells an assignment differs
