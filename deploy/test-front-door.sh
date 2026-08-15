@@ -32,6 +32,10 @@ grep -Fq 'proxy_set_header X-Forwarded-For   $remote_addr;' "$front"
 grep -Fq 'location / {' "$front"
 grep -Fq 'proxy_pass http://127.0.0.1:8796;' "$front"
 grep -Fq 'limit_except GET HEAD' "$front"
+grep -Fq 'Strict-Transport-Security "max-age=31536000" always;' "$front"
+grep -Fq 'Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()" always;' "$front"
+grep -Fq 'Cross-Origin-Opener-Policy same-origin always;' "$front"
+grep -Fq "Content-Security-Policy \"default-src 'self';" "$front"
 if grep -Eq '@@|MV_STATUS_PORT|8443' "$TMP/acme.conf" "$front"; then
   echo 'front-door render contains an obsolete value or unresolved placeholder' >&2
   exit 1

@@ -161,7 +161,7 @@ func TestEveryServedSurfaceIsGzippedExactlyWhenAsked(t *testing.T) {
 	ts := httptest.NewServer(a.httpHandler())
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/", "/api/status", "/api/hops", "/api/species",
+	for _, path := range []string{"/", "/live", "/api/status", "/api/hops", "/api/species",
 		"/api/species/tree", "/api/species/history?key=Izus+velox", "/api/history"} {
 		t.Run(path, func(t *testing.T) {
 			plainResp, plain := rawGet(t, ts.URL+path, "")
@@ -235,7 +235,7 @@ func TestTheServedPageSurvivesCompressionByteForByte(t *testing.T) {
 	ts := httptest.NewServer(a.httpHandler())
 	t.Cleanup(ts.Close)
 
-	_, zipped := rawGet(t, ts.URL+"/", "gzip")
+	_, zipped := rawGet(t, ts.URL+"/live", "gzip")
 	if got := string(gunzip(t, zipped)); got != statusPageHTML {
 		t.Fatalf("the page a browser reconstructs is not the page this archive holds "+
 			"(%d bytes against %d)", len(got), len(statusPageHTML))

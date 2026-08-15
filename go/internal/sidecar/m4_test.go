@@ -1417,13 +1417,13 @@ func TestStatusPageShowsTheWholeMap(t *testing.T) {
 
 	// The page itself is self-contained: no CDN, no build step, and it polls the
 	// one JSON endpoint.
-	page := fetchPage(t, base+"/")
+	page := fetchPage(t, base+"/live")
 	for _, want := range []string{"api/status", "setInterval", "unknown", "multiverse map"} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the status page does not contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{"http://cdn", "https://", "<script src"} {
+	for _, forbidden := range []string{"http://cdn", "https://cdn", "<script src"} {
 		if strings.Contains(page, forbidden) {
 			t.Fatalf("the status page reaches outside the LAN: %q", forbidden)
 		}

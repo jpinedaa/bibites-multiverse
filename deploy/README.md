@@ -173,7 +173,7 @@ The monitor compares the served certificate with the installed certificate.
 **A rotation costs no restart.** An nginx reload keeps existing WebSocket and
 website connections open while new workers use the renewed pair.
 
-## 5. The status page is published deliberately
+## 5. The website and live console are published deliberately
 
 `docs/defaults-audit.md` routed a finding to WP3: the project's own bring-up
 passes `ARCHIVE_HTTP=0.0.0.0:8796` and the runbook says so in five places. On a
@@ -181,26 +181,29 @@ LAN with six known worlds that is right. On a public VPS it is *"a hoster copyin
 a LAN habit onto the public internet"* — an unauthenticated, unrated, unproxied
 listener on a box whose disk the same process is filling.
 
-**The decision: the page is public, and not like that.**
+**The decision: the website and console are public, and not like that.**
 
-- **Public, because WP7's participant documentation promises it.**
-  `diagnose.md` tells participants to read it, and `error-taxonomy.md` §3.2 makes
-  it the place a refused peer reads the game build the map is on rather than
-  asking the operator. A page nobody can reach makes both of those documents
-  wrong.
+- **Public, because WP7's participant documentation promises it.** The root
+  page explains the project and shows a live summary. The `/live` console shows
+  the complete map. `diagnose.md` tells participants to read the console.
+  `error-taxonomy.md` §3.2 tells a refused peer to read the current game build
+  there. A page nobody can reach makes both documents wrong.
 - **Not by binding the archive to `0.0.0.0`.** `MV_ARCHIVE_HTTP` stays
   `127.0.0.1:8796`, which is the compiled default and the right one. nginx
-  publishes it at `https://bibitesmultiverse.com/`, **GET and HEAD only**. It is
+  publishes the website at `https://bibitesmultiverse.com/` and the console at
+  `https://bibitesmultiverse.com/live`, **GET and HEAD only**. The surface is
   rate limited to 5 r/s with a burst of 20 and 8 concurrent connections
-  per address, with no compression of its own so the archive's gzip negotiation
-  survives intact.
+  per address. nginx does not compress the responses, so the archive controls
+  gzip negotiation. The front door also sets HSTS, CSP, Permissions Policy,
+  and same-origin opener headers.
 - **The boundary, named — as a rule, because the list grows.** Public: **every
   handler on the archive's HTTP mux, and the mux is read-only by construction.**
   nginx proxies `location /` wholesale, so a handler added to
   `go/internal/archive/page.go` is published the moment the binary ships; the
   rule, not the roster, is what a reviewer checks. At the commit this kit was
-  last read against, that is **ten** read-only handlers — `/`, `/healthz`,
-  `/api/status`, `/api/hops`, `/api/species`, `/api/species/tree`,
+  last read against, that is **sixteen** read-only handlers — `/`, `/live`,
+  `/map`, `/favicon.svg`, `/social-card.svg`, `/robots.txt`, `/sitemap.xml`,
+  `/healthz`, `/api/status`, `/api/hops`, `/api/species`, `/api/species/tree`,
   `/api/species/trends`, `/api/species/brains`, `/api/species/history`,
   `/api/history`. **The two questions a new endpoint has to answer** are whether
   it mutates anything (none of these does, and `limit_except GET HEAD` is the
@@ -210,7 +213,7 @@ listener on a box whose disk the same process is filling.
   `join.md` states that in full before anybody joins. Not public: the archive's
   own listener, the relay's admin path, the data directories, the verifier store,
   SSH.
-- **The cost, named.** The status page is the largest single egress term in the
+- **The cost, named.** The live console is the largest single egress term in the
   service — larger than the game traffic — at ~32 GB/month per continuously open
   browser tab uncompressed, ~4 GB gzipped. It is inside the bundle's included
   transfer, and it is the first time this page has ever been reachable by anybody

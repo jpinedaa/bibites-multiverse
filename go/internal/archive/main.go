@@ -133,7 +133,8 @@ func runMain(args []string, stderr io.Writer) int {
 		return 1
 	}
 	if addr := a.HTTPAddr(); addr != "" {
-		log.Info("archive: status page", "url", "http://"+addr+"/", "json", "http://"+addr+"/api/status",
+		log.Info("archive: website", "url", "http://"+addr+"/", "console", "http://"+addr+"/live",
+			"json", "http://"+addr+"/api/status",
 			"terminal", "ringstat --url http://"+addr)
 	}
 	<-ctx.Done()

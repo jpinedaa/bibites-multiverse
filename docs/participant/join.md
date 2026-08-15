@@ -204,7 +204,7 @@ Three refusals happen at the door, and each has a different actor:
 |---|---|---|
 | Your credential is refused | Wrong, missing or malformed. Your sidecar says so once per attempt, naming the remedy, and holds its retries at the ceiling after five — a wrong secret looks like a world that never joins rather than a machine hammering the map. Re-apply the join string; if it is lost, ask for a handover | **you**, then the operator |
 | Your wire version is below the map's minimum | Your build is older than the floor this map's operator published. **Upgrade from the published release** — nobody on the relay's side can push it to you | **you** |
-| Your game version is incompatible with the map's | The map is on a different game build. Read the live builds at `https://bibitesmultiverse.com/`. The operator coordinates convergence | the operator |
+| Your game version is incompatible with the map's | The map is on a different game build. Read the live builds at `https://bibitesmultiverse.com/live`. The operator coordinates convergence | the operator |
 
 Full detail, including what your sidecar must never do when it is refused, is in the taxonomy's
 §3.1 and §3.2.

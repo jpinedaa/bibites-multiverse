@@ -1,0 +1,99 @@
+package archive
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+func TestPublicFrontDoorAndLiveConsoleHaveSeparateJobs(t *testing.T) {
+	for _, want := range []string{
+		"Evolution has a map.", `href="/live"`, `fetch("/api/status"`,
+		"Aug 14–Nov 14, 2026", "Independent worlds", "Real migration", "Shared history",
+		`rel="canonical" href="https://bibitesmultiverse.com/"`,
+		`property="og:image"`, `href="/favicon.svg"`,
+	} {
+		if !strings.Contains(landingPageHTML, want) {
+			t.Fatalf("the public front door is missing %q", want)
+		}
+	}
+	// Old links were fragments on /. A server never receives a fragment, so the
+	// landing document itself carries the compatibility handoff to /live.
+	if !strings.Contains(landingPageHTML, `location.replace("/live" + location.hash)`) {
+		t.Fatal("old #map/#species/#settings links no longer reach the console")
+	}
+	// The landing page may link out, but it still owns its rendering: no CDN,
+	// remote font, stylesheet, or executable script is needed to introduce the
+	// project or show the live snapshot.
+	for _, forbidden := range []string{`<script src=`, `<link rel="stylesheet"`, "@import", "//cdn"} {
+		if strings.Contains(landingPageHTML, forbidden) {
+			t.Fatalf("the public front door depends on an external rendering asset: %q", forbidden)
+		}
+	}
+
+	for _, want := range []string{
+		`<title>Bibites Multiverse — Live Map</title>`, `href="/" aria-label="Bibites Multiverse home"`,
+		`id="tab-map"`, `aria-controls="p-map"`, `aria-labelledby="tab-map"`,
+		`ev.key === "ArrowRight"`, "The map is online and waiting for worlds.",
+	} {
+		if !strings.Contains(statusPageHTML, want) {
+			t.Fatalf("the live console is missing %q", want)
+		}
+	}
+}
+
+func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
+	a := rigShapedArchive(t)
+	ts := httptest.NewServer(a.httpHandler())
+	t.Cleanup(ts.Close)
+
+	tests := []struct {
+		path, contentType, contains string
+		status                      int
+	}{
+		{"/", "text/html", "Evolution has a map.", http.StatusOK},
+		{"/live", "text/html", "species", http.StatusOK},
+		{"/favicon.svg", "image/svg+xml", "#66e0ac", http.StatusOK},
+		{"/social-card.svg", "image/svg+xml", "Evolution", http.StatusOK},
+		{"/robots.txt", "text/plain", "Sitemap: https://bibitesmultiverse.com/sitemap.xml", http.StatusOK},
+		{"/sitemap.xml", "application/xml", "https://bibitesmultiverse.com/live", http.StatusOK},
+		{"/nothing-here", "text/html", "This world is not on the map.", http.StatusNotFound},
+	}
+	for _, tc := range tests {
+		t.Run(tc.path, func(t *testing.T) {
+			resp, err := http.Get(ts.URL + tc.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != tc.status {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.status)
+			}
+			if !strings.Contains(resp.Header.Get("Content-Type"), tc.contentType) {
+				t.Fatalf("Content-Type = %q, want %q", resp.Header.Get("Content-Type"), tc.contentType)
+			}
+			if !strings.Contains(string(body), tc.contains) {
+				t.Fatalf("body does not contain %q", tc.contains)
+			}
+		})
+	}
+
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Get(ts.URL + "/map")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMovedPermanently || resp.Header.Get("Location") != "/live" {
+		t.Fatalf("legacy /map = HTTP %d to %q, want 301 to /live",
+			resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
