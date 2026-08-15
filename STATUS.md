@@ -31,7 +31,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 | Windows package | GUI complete archive with the authorized portable game; an existing game is optional |
 | Linux package | Add-on archive for the native itch.io game |
 | Public-map setup | Automatic unique enrollment over HTTPS; no shared packaged credential |
-| Live console source | Full-screen map fitting and visible-range species brain charts; deployment pending |
+| Live console source | Full-screen map fitting, visible-range brain charts, shared navigation, and a live homepage status light. Deployment pending. |
 
 The release page provides checksums. The participant installer compares the game build with
 the support matrix before it changes the game directory. The Windows GUI starts the connected
