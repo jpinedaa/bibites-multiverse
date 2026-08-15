@@ -11,7 +11,7 @@
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
 
-[Watch live](https://bibitesmultiverse.com/watch) ·
+[Watch broadcast](https://bibitesmultiverse.com/watch) ·
 [Live map](https://bibitesmultiverse.com/live) ·
 [Install a world](docs/participant/install.md) ·
 [Project status](STATUS.md)
@@ -26,7 +26,7 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 
 ## Start here
 
-- **[Watch a world live](https://bibitesmultiverse.com/watch).** See one shared game camera.
+- **[Watch broadcast](https://bibitesmultiverse.com/watch).** See one shared game camera.
 - **[Explore the live map](https://bibitesmultiverse.com/live).** Follow worlds, migrations,
   species, and lineages.
 - **[Connect your world](docs/participant/install.md).** Install the add-on for a supported copy
@@ -241,7 +241,7 @@ The homepage explains the experiment and shows a live summary. The
 [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
 lineages, and world settings.
 
-The [watch page](https://bibitesmultiverse.com/watch) shows one shared game camera.
+The [broadcast page](https://bibitesmultiverse.com/watch) shows one shared game camera.
 It reconnects after a broadcast interruption.
 
 ## Repository guide

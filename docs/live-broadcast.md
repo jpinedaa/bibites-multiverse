@@ -116,7 +116,7 @@ Complete these steps after the account has enough GPU Spot quota:
 7. Run `cloud/aws/deploy-broadcast.sh`.
 8. Make sure that the source world remains disabled.
 9. Check the HLS manifest through the public front door.
-10. Open the watch page from a second network.
+10. Open the broadcast page from a second network.
 
 The deployment wrapper checks that the source services are stopped and disabled.
 It also checks that the staged manifest disables the selected world.

@@ -389,6 +389,7 @@ color:var(--ink);padding:9px 13px;border-radius:7px;text-decoration:none}.skipli
 letter-spacing:-.02em}.mark{width:30px;height:22px;color:var(--live);filter:drop-shadow(0 0 9px rgba(102,224,172,.3))}
 .consolelinks{display:flex;align-items:center;gap:22px;font-size:14px;color:var(--dim)}
 .consolelinks a{text-decoration:none}.consolelinks a:hover,.consolelinks a:focus-visible{color:var(--text)}
+.consolelinks a[aria-current="page"]{color:var(--text);font-weight:700}
 .livepill{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid var(--line);
 border-radius:999px;color:var(--text)!important;background:rgba(22,34,31,.75)}
 .navdot{width:7px;height:7px;border-radius:50%;background:var(--live);box-shadow:0 0 0 4px rgba(102,224,172,.1)}
@@ -434,9 +435,9 @@ border-radius:8px;padding:10px 14px;cursor:pointer;white-space:nowrap}
 .tabs .tab[aria-selected="true"]{color:var(--ink);border-color:var(--live);background:var(--live)}
 .tabs .tab .sub{display:block;font-size:10px;letter-spacing:.04em;text-transform:none;
 color:inherit;opacity:.68;margin-top:3px;font-weight:500}
-/* On a phone the three tap targets matter and the subtitles do not: keeping
-   them turns a clean bar into a sideways-scrolling one. */
-@media (max-width:560px){.tabs .tab .sub{display:none}.tabs .tab{padding:13px 8px}}
+/* On smaller screens the three tap targets matter and the subtitles do not:
+   keeping them makes their text collide before the bar needs to scroll. */
+@media (max-width:900px){.tabs .tab .sub{display:none}.tabs .tab{padding:13px 8px}}
 
 /* ---- the species view: one drawing, on a time axis ----
    ONE ROW PER SPECIES, and the row is the unit of everything: the label column
@@ -893,8 +894,9 @@ border:1px solid var(--line);border-radius:999px;padding:3px 10px;cursor:pointer
 :focus-visible{outline:3px solid rgba(117,189,242,.75);outline-offset:3px}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 @media (max-width:980px){.console-summary{grid-template-columns:1fr;gap:28px}.statusgrid{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:860px){.console-nav{min-height:62px;padding-block:10px;flex-wrap:wrap;gap:10px}.consolelinks{width:100%;gap:16px;overflow-x:auto;padding-bottom:3px}.consolelinks a{white-space:nowrap}}
 @media (max-width:640px){.console-nav,.console-summary,.tabs,main,footer{width:min(calc(100% - 24px),var(--max))}
-.console-nav{min-height:62px}.consolelinks a:not(.livepill){display:none}.console-summary{padding-block:42px 35px}
+.consolelinks{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}.console-summary{padding-block:42px 35px}
 .summarycopy{font-size:14px}.statusgrid{grid-template-columns:1fr 1fr;border-radius:12px}.statusitem{min-height:82px;padding:14px}
 .statusitem:nth-child(n){border-left:0;border-top:1px solid var(--line)}.statusitem:nth-child(odd){border-left:1px solid var(--line)}
 .statusitem:first-child{border-top:0;border-left:0;grid-column:1/-1}.statusitem:nth-child(2){border-top:1px solid var(--line)}
@@ -922,7 +924,8 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
       <span>Bibites Multiverse</span>
     </a>
     <nav class="consolelinks" aria-label="Primary navigation">
-      <a href="/">About</a><a href="/watch">Watch live</a>
+      <a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch">Watch broadcast</a>
+      <a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>
       <a class="livepill" href="/live" aria-current="page"><i class="navdot"></i>Live map</a>
     </nav>
   </div>

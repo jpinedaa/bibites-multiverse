@@ -9,6 +9,8 @@ import (
 
 func TestWatchPageIsOneSharedReadOnlyBroadcast(t *testing.T) {
 	for _, want := range []string{
+		`<title>Bibites Multiverse — Watch Broadcast</title>`,
+		`href="/watch" aria-current="page">Watch broadcast</a>`,
 		"youngest living Bibite",
 		"No switching on new births",
 		"Death or departure",

@@ -61,14 +61,35 @@ func TestPublicLiveSurfacesShareOneVisualLanguage(t *testing.T) {
 				t.Errorf("%s page is missing shared visual element %q", name, want)
 			}
 		}
+		for _, want := range []string{
+			`>How it works</a>`, `>Join</a>`, `>Watch broadcast</a>`,
+			`href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>`, `>Live map`,
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("%s page is missing shared navigation link %q", name, want)
+			}
+		}
+		for _, old := range []string{`>Watch live</a>`, `>About</a>`, `>Species &amp; lineages</a>`} {
+			if strings.Contains(page, old) {
+				t.Errorf("%s page still contains retired navigation label %q", name, old)
+			}
+		}
 	}
 
 	for _, want := range []string{
 		`class="console-summary"`, `aria-label="Current map status"`,
-		`href="/watch">Watch live</a>`, `aria-current="page"`,
+		`href="/watch">Watch broadcast</a>`, `aria-current="page"`,
 	} {
 		if !strings.Contains(statusPageHTML, want) {
 			t.Errorf("live map is missing integrated navigation or status element %q", want)
+		}
+	}
+	for _, want := range []string{
+		`id="statusdot"`, `@keyframes statuspulse`,
+		`className="statusdot"+(linked?" ok"`, `className="statusdot down"`,
+	} {
+		if !strings.Contains(landingPageHTML, want) {
+			t.Errorf("landing page is missing live status indicator %q", want)
 		}
 	}
 	for _, old := range []string{`--bg:#101215`, `--panel:#191d22`, `--line:#2a3038`} {

@@ -8,7 +8,7 @@ const watchPageHTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Bibites Multiverse — Watch Live</title>
+<title>Bibites Multiverse — Watch Broadcast</title>
 <meta name="description" content="Watch one live Bibites Multiverse world. The shared camera follows the youngest living Bibite until it dies or leaves the world.">
 <meta name="theme-color" content="#0b1110">
 <link rel="canonical" href="https://bibitesmultiverse.com/watch">
@@ -27,7 +27,8 @@ header{position:sticky;top:0;z-index:20;border-bottom:1px solid rgba(83,120,107,
 backdrop-filter:blur(16px)}.nav{min-height:72px;display:flex;align-items:center;
 justify-content:space-between;gap:20px}.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:720;letter-spacing:.01em}
 .mark{width:30px;color:var(--green);filter:drop-shadow(0 0 9px rgba(102,224,172,.3))}nav{display:flex;align-items:center;gap:24px}nav a{font-size:14px;color:var(--dim);text-decoration:none}
-nav a:hover{color:var(--text)}.maplink{padding:8px 13px;border:1px solid var(--line);border-radius:999px;color:var(--text)}
+nav a:hover{color:var(--text)}nav a[aria-current="page"]{color:var(--text);font-weight:700}
+.maplink{padding:8px 13px;border:1px solid var(--line);border-radius:999px;color:var(--text)}
 main{padding:64px 0 90px}.eyebrow{margin:0 0 13px;color:var(--green);font-size:12px;font-weight:760;letter-spacing:.14em;text-transform:uppercase}
 h1{font-size:clamp(42px,7vw,76px);line-height:.98;letter-spacing:-.045em;margin:0;max-width:850px}.lede{max-width:760px;color:var(--dim);
 font-size:clamp(17px,2vw,21px);margin:24px 0 36px}.player{position:relative;aspect-ratio:16/9;border:1px solid var(--line);border-radius:18px;
@@ -43,8 +44,9 @@ color:var(--dim);font-size:13px}.state{display:flex;align-items:center;gap:8px}.
 .note{margin-top:35px;color:var(--dim);font-size:14px;max-width:820px}.note strong{color:var(--text)}
 footer{border-top:1px solid var(--line);padding:28px 0;color:var(--dim);font-size:13px}.foot{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
 .footlinks{display:flex;gap:18px}.foot a{text-decoration:none}.foot a:hover{color:var(--text)}
-@media(max-width:720px){.shell{width:min(calc(100% - 24px),var(--max))}.nav{min-height:62px}nav a:not(.maplink){display:none}
-main{padding-top:46px}.player{border-radius:11px}.facts{grid-template-columns:1fr}.fact+.fact{border-left:0;border-top:1px solid var(--line)}
+@media(max-width:860px){.nav{min-height:62px;padding-block:10px;flex-wrap:wrap;gap:10px}nav{width:100%;gap:16px;overflow-x:auto;padding-bottom:3px}nav a{white-space:nowrap}}
+@media(max-width:720px){.shell{width:min(calc(100% - 24px),var(--max))}
+nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.player{border-radius:11px}.facts{grid-template-columns:1fr}.fact+.fact{border-left:0;border-top:1px solid var(--line)}
 .statebar{align-items:flex-start;flex-direction:column;gap:5px}}
 </style>
 </head>
@@ -55,7 +57,7 @@ main{padding-top:46px}.player{border-radius:11px}.facts{grid-template-columns:1f
     <svg class="mark" viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></svg>
     <span>Bibites Multiverse</span>
   </a>
-  <nav aria-label="Primary navigation"><a href="/">About</a><a href="/live">Species &amp; lineages</a><a class="maplink" href="/live">Live map&nbsp; →</a></nav>
+  <nav aria-label="Primary navigation"><a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch" aria-current="page">Watch broadcast</a><a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a><a class="maplink" href="/live">Live map&nbsp; →</a></nav>
 </div></header>
 <main id="broadcast" class="shell" tabindex="-1">
   <p class="eyebrow">One world · one shared camera · live</p>
@@ -76,7 +78,7 @@ main{padding-top:46px}.player{border-radius:11px}.facts{grid-template-columns:1f
   </section>
   <p class="note"><strong>This is a spectator camera, not a control surface.</strong> Watching cannot pause, select, move, feed, kill, or otherwise change the simulation. A brief outage can occur when the broadcast host restarts; the public map and every other world continue independently.</p>
 </main>
-<footer><div class="shell foot"><span>Independent community project · Apache-2.0</span><span class="footlinks"><a href="/">About</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a></span></div></footer>
+<footer><div class="shell foot"><span>Independent community project · Apache-2.0</span><span class="footlinks"><a href="/#how">How it works</a><a href="/#join">Join</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a></span></div></footer>
 <script>
 (function(){
   var frame=document.getElementById("player"), cover=document.getElementById("offline");
