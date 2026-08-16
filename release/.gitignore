@@ -1,11 +1,9 @@
-# The built artifacts. DELIBERATELY NOT TRACKED, and the reasoning is worth
-# keeping because this repository does track a binary elsewhere.
-#
-# farend/dist/farend-bundle.zip is committed because the far end takes it out of
-# a clone: the repository is that artifact's only distribution channel. A public
-# release has a distribution channel of its own — the release page — so a
-# tracked copy here would be a second, silently drifting one, at about 7 MB per
-# rebuild in history that nothing reads.
+# The built artifacts. DELIBERATELY NOT TRACKED: a release has a distribution
+# channel of its own — the release page — so a tracked copy here would be a
+# second, silently drifting one, at about 7 MB per build in history that nothing
+# reads. The same reasoning retired the far-end bundle (farend/.gitignore), and
+# what a build is measured against is now a record rather than a binary: the
+# "testedBuild" block of docs/support-matrix.md.
 #
 # What IS tracked in release/ is everything a rebuild needs: the installer, the
 # uninstaller, the in-archive README, the release-page text, the build script

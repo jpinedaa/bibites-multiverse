@@ -879,7 +879,7 @@ check "the refusal names both maps" \
 check "the world still dials its own map" \
   "$(b bash -c 'grep -qF "\"relayUrl\": \"$2\"" "$1"' _ "$J5/install-record.json" "$J5_RELAY")"
 
-# J8 - adopting re-applies the credential's mode in place. Up to 0.2.5 every
+# J8 - adopting re-applies the credential's mode in place. Up to that release every
 # install rewrote the file and re-tightened it; adopting must not lose that.
 chmod 644 "$J5/peer-secret.txt"
 J8_SECRET="$(cat "$J5/peer-secret.txt")"
