@@ -1,16 +1,20 @@
 #!/usr/bin/env bash
-# Exercise monitor.sh's data-transfer arithmetic on a workstation.
+# Exercise monitor.sh's money and memory arithmetic on a workstation.
 #
 # THE ARITHMETIC IS THE RISK, not the plumbing. A transfer check that alerts
 # every five minutes gets muted, and a transfer check that never alerts is
-# decoration; both failures are silent and both are arithmetic. So this drives
-# the real monitor.sh through the read seams it exposes — MV_PROC_NET_DEV,
-# MV_PROC_NET_ROUTE, MV_HOSTS_FILE, MV_NOW, MV_STATE, MV_ENV_FILE — against fake
-# counters and a fake clock.
+# decoration; both failures are silent and both are arithmetic. The archive's
+# memory gate has the same shape and one worse failure of its own: it once
+# divided by RAM plus swap, so a swap file could clear a critical verdict
+# without changing one byte of retained state. So this drives the real
+# monitor.sh through the read seams it exposes — MV_PROC_NET_DEV,
+# MV_PROC_NET_ROUTE, MV_HOSTS_FILE, MV_PROC_MEMINFO, MV_STATUS_JSON, MV_NOW,
+# MV_STATE, MV_ENV_FILE — against fake counters, a fake /proc/meminfo, a fake
+# status document and a fake clock.
 #
-# It needs no root, no network, no systemd and no host: --only transfer and
-# --only hosts-pin skip every check that would dial something. Nothing here
-# touches /var, /etc or a real interface.
+# It needs no root, no network, no systemd and no host: --only transfer,
+# --only hosts-pin, --only replay and --only swap skip every check that would
+# dial something. Nothing here touches /var, /etc or a real interface.
 #
 #   deploy/test-monitor.sh          run every case
 #   deploy/test-monitor.sh -v       also print each case as it passes
@@ -31,6 +35,8 @@ DEV="$TMP/net-dev"
 ROUTE="$TMP/net-route"
 HOSTS="$TMP/hosts"
 ENVF="$TMP/deploy.env"
+MEMINFO="$TMP/meminfo"
+STATUSJ="$TMP/status.json"
 
 # A parameter file with no live value in it. MV_ALERT_KIND=none is a second belt
 # beside --quiet: nothing in this file may ever reach a network.
@@ -100,11 +106,27 @@ route_without_default() {
   } >"$ROUTE"
 }
 
+# meminfo <MemTotal kB> <SwapTotal kB> <SwapFree kB>. The field order is
+# deliberately not the kernel's, because the monitor parses by name and must not
+# start depending on position.
+meminfo() {
+  {
+    printf 'MemTotal:       %8s kB\n' "$1"
+    printf 'MemFree:          117524 kB\n'
+    printf 'SwapFree:       %8s kB\n' "$3"
+    printf 'MemAvailable:     393816 kB\n'
+    printf 'SwapTotal:      %8s kB\n' "$2"
+    printf 'AnonPages:       1215924 kB\n'
+  } >"$MEMINFO"
+}
+status() { printf '{"ledgerRecords": %s, "genomeGaps": 0}\n' "$1" >"$STATUSJ"; }
+
 run() { # run <epoch> <group> [KEY=VALUE ...]
   local now="$1" group="$2"
   shift 2
   env MV_ENV_FILE="$ENVF" MV_STATE="$STATE" \
       MV_PROC_NET_DEV="$DEV" MV_PROC_NET_ROUTE="$ROUTE" MV_HOSTS_FILE="$HOSTS" \
+      MV_PROC_MEMINFO="$MEMINFO" MV_STATUS_JSON="$STATUSJ" \
       MV_NOW="$now" "$@" "$MON" --only "$group" --quiet --verbose 2>&1
 }
 
@@ -354,11 +376,113 @@ out="$(run "$BASE" hosts-pin)"
 eq  'a longer name that merely starts the same does not count' \
     "$(sev_of "$out" hosts-pin)" CRIT
 
+# ------------------------------------------------------- 13. replay headroom
+#
+# The numbers below are the production service host as it stood on 2026-08-16:
+# MemTotal 1,953,544 kB (1,907 MB) and 5,213,509 ledger records, which the
+# shipped 300 B/record model projects to 1,491 MB and a ratio of 0.78.
+
+reset_state
+status 5213509
+meminfo 1953544 0 0
+out="$(run "$BASE" replay)"
+eq  'the production reading is a warning'            "$(sev_of "$out" replay)" WARN
+has 'and reports the ratio against physical RAM'     "$out" 'ratio 0.78'
+has 'and names the denominator'                      "$out" '1907 MB of physical RAM'
+
+# THE SWAP TRAP, and the reason this section exists. The same box with a 2 GiB
+# swap file must report the SAME ratio and the SAME severity. The old
+# denominator was MemTotal + SwapTotal, which turned this reading into 0.38 and
+# an OK — a critical archive-memory verdict cleared by one swapon, with the
+# ledger, the retained state and the replay all exactly as they were.
+reset_state
+meminfo 1953544 2097152 2097152
+out="$(run "$BASE" replay)"
+eq  'adding two gigabytes of swap does not move the ratio' \
+    "$(sev_of "$out" replay)" WARN
+has 'and the ratio is the identical figure'          "$out" 'ratio 0.78'
+hasnt 'and swap is nowhere in the denominator'       "$out" 'RAM+swap'
+
+reset_state
+status 5700000
+out="$(run "$BASE" replay)"
+eq  'a larger ledger crosses the critical threshold' "$(sev_of "$out" replay)" CRIT
+has 'the critical line says the denominator is physical RAM' \
+    "$out" 'PHYSICAL RAM'
+has 'and says the ratio is a model of record count'  "$out" 'MODEL OF RECORD COUNT'
+has 'and says GOMEMLIMIT lowers resident set'        "$out" 'lowers real resident set'
+has 'and says GOMEMLIMIT does not move this number'  "$out" 'does not move this number'
+hasnt 'and no longer claims GOMEMLIMIT does not help' \
+      "$out" 'GOMEMLIMIT and swap do not fix it'
+has 'and points at the constants a measurement would correct' \
+    "$out" 'MV_REPLAY_RESIDENT_B'
+
+# The constants are parameters, so a corrected measurement retunes the gate
+# without a release.
+reset_state
+status 5213509
+out="$(run "$BASE" replay MV_REPLAY_RESIDENT_B=200)"
+eq  'a cheaper measured resident model clears the warning' \
+    "$(sev_of "$out" replay)" OK
+has 'and reports the smaller projection'             "$out" '994 MB projected resident set'
+
+reset_state
+out="$(run "$BASE" replay MV_REPLAY_PEAK_B=400 MV_REPLAY_RESIDENT_B=200)"
+eq  'a peak model larger than the resident one binds instead' \
+    "$(sev_of "$out" replay)" CRIT
+has 'and the message says which term binds'          "$out" 'replay peak'
+
+reset_state
+out="$(run "$BASE" replay MV_REPLAY_RESIDENT_B=notanumber)"
+eq  'a per-record constant that is not a number warns rather than dividing by it' \
+    "$(sev_of "$out" replay)" WARN
+has 'and names both constants'                       "$out" 'MV_REPLAY_PEAK_B'
+
+reset_state
+printf 'MemFree: 117524 kB\nSwapTotal: 0 kB\n' >"$MEMINFO"
+out="$(run "$BASE" replay)"
+eq  'no MemTotal warns rather than reporting a ratio of nothing' \
+    "$(sev_of "$out" replay)" WARN
+has 'and says the archive is unwatched'              "$out" 'not being watched'
+
+# ---------------------------------------------------------------- 14. swap
+
+reset_state
+meminfo 1953544 0 0
+out="$(run "$BASE" swap)"
+eq  'no swap is a fact worth reporting, not silence' "$(sev_of "$out" swap)" OK
+has 'and it says the ratio is against RAM either way' "$out" 'physical RAM'
+
+reset_state
+meminfo 1953544 2097152 2097152
+out="$(run "$BASE" swap)"
+eq  'an unused swap file is not a problem'           "$(sev_of "$out" swap)" OK
+has 'and its size is reported'                       "$out" '0 MB of 2048 MB used'
+has 'and it says it is not headroom'                 "$out" 'Not counted as replay headroom'
+
+# Sustained means consecutive passes. One spilled replay peak is the barrier
+# working; a quarter of an hour of it is a sizing signal.
+reset_state
+meminfo 1953544 2097152 1048576
+out="$(run "$BASE" swap)"
+eq  'half the swap in use once is not yet sustained' "$(sev_of "$out" swap)" OK
+out="$(run "$(( BASE + 300 ))" swap)"
+eq  'twice is not either'                            "$(sev_of "$out" swap)" OK
+out="$(run "$(( BASE + 600 ))" swap)"
+eq  'three consecutive passes is'                    "$(sev_of "$out" swap)" WARN
+has 'and it is stated as a sizing signal'            "$out" 'sizing signal'
+has 'and it repeats that swap is not headroom'       "$out" 'NOT counted as replay headroom'
+
+meminfo 1953544 2097152 2097152
+out="$(run "$(( BASE + 900 ))" swap)"
+eq  'and it recovers when the swap is given back'    "$(sev_of "$out" swap)" OK
+eq  'the streak resets with it'                      "$(sget swap.runs)" 0
+
 # ---------------------------------------------------------------- result
 
 printf '\n'
 if [ "$FAIL" -gt 0 ]; then
-  printf 'monitor transfer checks: FAIL (%d passed, %d failed)\n' "$PASS" "$FAIL" >&2
+  printf 'monitor arithmetic checks: FAIL (%d passed, %d failed)\n' "$PASS" "$FAIL" >&2
   exit 1
 fi
-printf 'monitor transfer checks: PASS (%d assertions)\n' "$PASS"
+printf 'monitor arithmetic checks: PASS (%d assertions)\n' "$PASS"

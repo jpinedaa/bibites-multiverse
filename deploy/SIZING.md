@@ -99,7 +99,12 @@ replay_peak_KB = ledger_records * 0.18
 ```
 
 The resident term is larger for the streaming archive.
-Compare the larger result with usable RAM and swap.
+Compare the larger result with physical RAM, and do not add swap to that comparison.
+The swap rule below is the reason.
+`monitor.sh` divides by `MemTotal` alone for this reason, and reports swap in a separate check.
+Its two per-record constants are `MV_REPLAY_PEAK_B` and `MV_REPLAY_RESIDENT_B`,
+which carry the values above, so a measurement on a real ledger can correct the check
+without a new release.
 
 The replay implementation once materialized the complete ledger.
 That design used approximately 1.03 to 1.29 KB for each record at peak.
