@@ -118,6 +118,15 @@ jobs:
       - name: systemd units
         run: deploy/test-units.sh
 
+      # The monitor's transfer arithmetic is the only thing watching the bill,
+      # and both of its failure modes are silent: a check that alerts every
+      # tick gets muted, a check that never alerts is decoration. The script
+      # drives the real monitor.sh through its read seams against fake /proc
+      # files and a fake clock, so it needs no root, no network, no systemd and
+      # no host — there is no reason for it not to run on every pull request.
+      - name: monitor transfer arithmetic
+        run: deploy/test-monitor.sh
+
       # test-front-door.sh self-skips `nginx -t` when nginx or openssl is
       # absent, so installing them is what turns this from a text grep into a
       # real configuration check.

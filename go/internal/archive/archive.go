@@ -233,6 +233,14 @@ type fetch struct {
 	speciesKey string
 	// asked records the peers that answered unknown_hash for this hash, so the
 	// ring is walked one peer at a time rather than re-asking the same one.
+	//
+	// IT IS NIL UNTIL THE FIRST PEER IS ASKED, and it goes back to nil whenever
+	// the ladder resets. A restart discovers every missing hash the ledger names
+	// in a single pass and the pump asks a bounded few of them per tick, so most
+	// entries in a fresh pending set have never been asked anything; a map
+	// allocated for each of them is a header per gap for a set that stays empty.
+	// Reading a nil map is legal and answers false, which is exactly "nobody has
+	// been asked yet", and deleting from one is a no-op.
 	asked map[string]bool
 	// inFlight is the requestId of an unanswered GENOME_REQUEST.
 	inFlight string
@@ -299,8 +307,17 @@ type Archive struct {
 	// damaged line exists — the ledger is never rewritten — and it is the
 	// difference between recordCount and `wc -l` on the file.
 	ledgerSkipped int
-	seen          map[string]bool // "TYPE/" + dedupKey(...), the §5.1 duplicate rule
-	pending       map[string]*fetch
+	// seen is the §5.1 duplicate rule: one entry for every duplicate key the
+	// record already holds, so a re-forwarded envelope is refused rather than
+	// appended a second time. NOTHING IS EVER DELETED FROM IT — a migration
+	// re-copied a year from now must still be refused then — which makes it the
+	// one retained structure that grows with the ledger and therefore the one
+	// that decides whether the next restart fits in memory. It holds a 128-bit
+	// fingerprint of each key rather than the key: dedup.go has the measurement
+	// that motivated that, the collision bound, and why the seeds are per
+	// process.
+	seen    *dedupSet
+	pending map[string]*fetch
 	// pendingOrder is the stable round-robin order pumpFetches walks, and
 	// pendingHead is how far this cycle has got. Go's map iteration is random, so
 	// a bounded walk over the map alone could starve a hash indefinitely; a FIFO
@@ -392,7 +409,7 @@ func New(cfg Config) (*Archive, error) {
 		deny:        deny,
 		lanes:       map[lanePair]*lane{},
 		simRates:    map[int]*achievedRate{},
-		seen:        map[string]bool{},
+		seen:        newDedupSet(dedupHint(ledger.Size())),
 		pending:     map[string]*fetch{},
 		sentWindow:  map[string]*rateWindow{},
 		inFlight:    map[string]int{},
@@ -424,7 +441,8 @@ func New(cfg Config) (*Archive, error) {
 			// dedups on migrationId+code (§14, B7), so replaying it under
 			// migrationId alone would never match and every re-copied NACK
 			// would be recorded a second time after a restart.
-			a.seen[rec.Type+"/"+dedupKey(rec.Type, rec.MigrationID, rec.Code)] = true
+			a.seen.add(a.seen.fingerprint(rec.Type,
+				dedupKey(rec.Type, rec.MigrationID, rec.Code)))
 		}
 		if rec.Type != RecordMigration {
 			return
@@ -1074,18 +1092,20 @@ func dedupKey(typ, migrationID, code string) string {
 	return migrationID
 }
 
+// markSeen records one §5.1 duplicate key and reports whether the record was
+// already in the set. AN EMPTY KEY IS NEVER SEEN: a record with no migrationId
+// cannot be deduplicated at all, and answering "duplicate" for it would drop
+// every one of them after the first.
 func (a *Archive) markSeen(typ, key string) bool {
 	if key == "" {
 		return false
 	}
+	// Fingerprinted before the lock on purpose: the seeds are read-only for the
+	// life of the process and the table is the only shared thing below.
+	fp := a.seen.fingerprint(typ, key)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	k := typ + "/" + key
-	if a.seen[k] {
-		return true
-	}
-	a.seen[k] = true
-	return false
+	return a.seen.add(fp)
 }
 
 // ---------------------------------------------------------------- genome fetch
@@ -1133,7 +1153,6 @@ func (a *Archive) trackLocked(h lineageHash, speciesKey, sourcePeer, migrationID
 		firstSeen:   now,
 		crossedAt:   crossedAt,
 		nextAt:      now.Add(a.cfg.FirstAttemptDelay),
-		asked:       map[string]bool{},
 		migrant:     h.own,
 	}
 	if h.own {
@@ -1263,7 +1282,10 @@ func (a *Archive) pumpChunk(now time.Time, scanBudget, sendBudget int) (scanned,
 			// membership changes — a peer that just came back may hold what
 			// nobody had. This log line is the gap report of §10: the hash, how
 			// long it has been missing, and how often the archive has asked.
-			f.asked = map[string]bool{}
+			// Back to nil rather than to an empty map: this hash may now wait
+			// hours for its next turn, and an empty set and no set at all are
+			// the same answer to every reader below.
+			f.asked = nil
 			f.attempts++
 			f.nextAt = now.Add(a.retryDelay(f.attempts))
 			a.log.Warn("archive: no peer has served this genome",
@@ -1300,6 +1322,9 @@ func (a *Archive) pumpChunk(now time.Time, scanBudget, sendBudget int) (scanned,
 		f.inFlightGen = a.sessionGen
 		a.inFlight[target]++
 		a.outstanding[hash] = f
+		if f.asked == nil {
+			f.asked = map[string]bool{}
+		}
 		f.asked[target] = true
 		f.attempts++
 		a.log.Info("archive: asking for a genome by hash",

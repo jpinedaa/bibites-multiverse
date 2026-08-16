@@ -1,0 +1,107 @@
+<!doctype html>
+<!--
+  The announcements page: chrome only.
+
+  Rendered by provision.sh from deploy/www/announcements/index.html into
+  /var/www/announcements/index.html. DO NOT EDIT THE INSTALLED COPY — the next
+  provision run overwrites it.
+
+  THE NOTICES ARE NOT IN THIS FILE. They live in notices.html beside it, which
+  provision.sh seeds once and never overwrites, and which nginx pulls in with a
+  server-side include at request time. That split is the whole point: posting a
+  notice is one file write, with no rebuild, no restart and no reload.
+
+  WHY nginx SERVES THIS AND NOT THE ARCHIVE. What this page usually announces is
+  that the archive is about to stop. An archive route would take the notice
+  offline for exactly the window the notice is about. nginx reads two files from
+  disk instead, so the page still answers while the archive is stopped, while it
+  replays its ledger, and while the rest of the site is dark.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Announcements — Bibites Multiverse</title>
+<meta name="description" content="Service notices for Bibites Multiverse: planned maintenance, restarts, and outages, newest first.">
+<meta name="theme-color" content="#0b1110">
+<link rel="canonical" href="https://@@MV_DOMAIN@@/announcements/">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Bibites Multiverse">
+<meta property="og:title" content="Announcements — Bibites Multiverse">
+<meta property="og:description" content="Service notices for Bibites Multiverse, newest first.">
+<meta property="og:url" content="https://@@MV_DOMAIN@@/announcements/">
+<style>
+:root{color-scheme:dark;--bg:#0b1110;--surface:#111a18;--surface2:#16221f;
+--line:#294038;--text:#eff7f3;--muted:#9aafa7;--green:#66e0ac;--blue:#75bdf2;
+--amber:#efbd57;--ink:#07100d;--max:1180px}
+*{box-sizing:border-box}
+body{margin:0;background:
+radial-gradient(circle at 82% 8%,rgba(67,160,126,.18),transparent 28rem),
+radial-gradient(circle at 8% 34%,rgba(62,126,174,.12),transparent 26rem),var(--bg);
+color:var(--text);font:16px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:inherit}
+.skip{position:fixed;left:12px;top:-80px;z-index:100;background:var(--text);color:var(--ink);
+padding:9px 13px;border-radius:7px}.skip:focus{top:12px}
+.shell{width:min(calc(100% - 40px),var(--max));margin-inline:auto}
+.sitehd{position:sticky;top:0;z-index:30;background:rgba(11,17,16,.86);
+backdrop-filter:blur(16px);border-bottom:1px solid rgba(83,120,107,.28)}
+.nav{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+.brand{display:inline-flex;align-items:center;gap:10px;text-decoration:none;font-weight:760;letter-spacing:-.02em}
+.mark{width:30px;height:22px;color:var(--green);filter:drop-shadow(0 0 9px rgba(102,224,172,.3))}
+.links{display:flex;align-items:center;gap:22px;font-size:14px;color:var(--muted)}
+.links a{text-decoration:none}.links a:hover,.links a:focus-visible{color:var(--text)}
+.links a[aria-current="page"]{color:var(--text);font-weight:700}
+.head{padding-block:60px 8px;max-width:760px}
+.kicker{color:var(--green);font:700 12px ui-monospace,SFMono-Regular,Menlo,monospace;
+letter-spacing:.12em;text-transform:uppercase}
+h1{font-size:clamp(40px,6vw,68px);line-height:1;letter-spacing:-.05em;margin:12px 0 18px}
+.lede{color:var(--muted);font-size:18px;margin:0}
+.notices{padding-block:34px 64px;display:grid;gap:16px;max-width:860px}
+.notice{padding:28px 30px;border:1px solid var(--line);border-radius:16px;
+background:linear-gradient(145deg,var(--surface2),var(--surface))}
+.notice h2{font-size:26px;line-height:1.2;letter-spacing:-.02em;margin:8px 0 14px}
+.notice p{margin:0 0 12px}.notice p:last-child{margin-bottom:0}
+.notice .when{color:var(--muted);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;
+letter-spacing:.09em;text-transform:uppercase;margin:0}
+.notice .followup{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);color:#bfd0c9}
+.notice .followup b{color:var(--green)}
+.empty{color:var(--muted)}
+.foot{border-top:1px solid var(--line);padding-block:34px;color:var(--muted);font-size:13px}
+.footin{display:flex;justify-content:space-between;align-items:center;gap:24px}
+.footlinks{display:flex;flex-wrap:wrap;gap:18px}.foot a:hover{color:var(--text)}
+:focus-visible{outline:3px solid rgba(117,189,242,.75);outline-offset:3px}
+@media(max-width:860px){.nav{min-height:62px;padding-block:10px;flex-wrap:wrap;gap:10px}
+.links{width:100%;gap:16px;overflow-x:auto;padding-bottom:3px}.links a{white-space:nowrap}}
+@media(max-width:640px){.shell{width:min(calc(100% - 24px),var(--max))}
+.head{padding-block:44px 4px}.notice{padding:22px 20px}.footin{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="sitehd"><div class="shell nav">
+  <a class="brand" href="/" aria-label="Bibites Multiverse home">
+    <svg class="mark" viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></svg>
+    <span>Bibites Multiverse</span>
+  </a>
+  <nav class="links" aria-label="Primary navigation">
+    <a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch">Watch broadcast</a>
+    <a href="/announcements/" aria-current="page">Announcements</a>
+    <a href="/live">Live map</a>
+  </nav>
+</div></header>
+<main id="main" class="shell">
+  <div class="head">
+    <p class="kicker">Service notices</p>
+    <h1>Announcements</h1>
+    <p class="lede">Planned maintenance, restarts, and outages for the shared relay, the archive,
+    and this website. Newest first. This page is served from disk, so it keeps answering while the
+    rest of the site is down.</p>
+  </div>
+  <div class="notices">
+<!--# include file="notices.html" -->
+  </div>
+</main>
+<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/">Home</a><a href="/watch">Watch broadcast</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a></div></div></footer>
+</body>
+</html>

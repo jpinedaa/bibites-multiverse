@@ -18,7 +18,7 @@ Keep these records outside the public repository:
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
-| `monitor.sh` | Checks services, capacity, certificates, backups, and map health. |
+| `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
@@ -26,9 +26,11 @@ Keep these records outside the public repository:
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
+| `test-monitor.sh` | Drives the monitor's transfer, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
+| `www/announcements/` | The announcements page nginx serves from disk, and the seed for its notices file. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
 | `RESTART-POLICY.md` | Generic restart rules and participant effects. |
 | `WIND-DOWN.md` | Public service commitments for a planned ending. |
@@ -55,6 +57,7 @@ The following values identify one deployment:
 - `MV_RETENTION` and `MV_ARCHIVE_GENOME_HORIZON`.
 - `MV_PERIOD_START` and `MV_PERIOD_END`.
 - `MV_ALERT_KIND`, `MV_ALERT_URL`, and `MV_ALERT_COMMAND`.
+- `MV_BUNDLE` and `MV_TRANSFER_ALLOWANCE_GB`, which must state the same bundle.
 - `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
 - Homepage values for the public landing page links: `MV_HOMEPAGE_RELEASE`,
@@ -141,6 +144,19 @@ The alert test must reach its intended recipient.
 The backup list must contain the identity files and their checksums.
 The archive status must show an active relay subscription.
 
+The verbose run prints one line for each check.
+Read the three that watch money rather than availability:
+
+- `transfer` compares month-to-date transfer, and the last 24 closed hours projected over a month,
+  against `MV_TRANSFER_ALLOWANCE_GB`. It reads `/proc/net/dev` on the billed interface and needs no
+  cloud credential. It says `warming up` for its first six hours, which is correct and not a fault.
+- `transfer-rate` reports the last closed hour and warns after `MV_TRANSFER_HOURLY_RUNS`
+  consecutive hours above `MV_TRANSFER_HOURLY_GB`.
+- `hosts-pin` checks that `/etc/hosts` still pins `MV_DOMAIN` to `127.0.0.1`. Without that line the
+  archive's subscription to the relay leaves the host and returns over the billed interface.
+
+The transfer figures use the provider's GB of 2^30 bytes, counted in both directions.
+
 ## Measurement
 
 `monitor.sh` answers whether anything is wrong now.
@@ -149,9 +165,18 @@ The two tools below keep the reading instead, because a change to a live service
 question: is the service worse than it was fifteen minutes ago.
 
 `service-host-sample` records one sample of this host as a single JSON line.
-It runs unprivileged, reads `/proc` and `systemctl show` only, and reports every value it cannot
-read as unknown instead of zero.
-The provisioning script installs neither the sampler nor its timer, so install both by hand:
+It runs unprivileged, reads `/proc`, `systemctl show` and the cgroup files only, and reports every
+value it cannot read as unknown instead of zero.
+Each unit carries `memoryBytes` from `MemoryCurrent` and, beside it, `anonBytes` and `fileBytes`
+from the cgroup.
+`MemoryCurrent` includes page cache, so it moves with file activity and is the wrong field for a
+memory trend; `anonBytes` is the term that grows and the term the out-of-memory killer acts on.
+The archive additionally carries `mainRssAnonBytes`, `mainVmHwmBytes` and `mainPid` from its main
+process, because nothing else on the host remembers the replay peak or sees an operator's restart
+between two samples.
+
+`provision.sh` installs the sampler and enables its timer.
+Install both by hand only on a host the provisioning script has not run against:
 
 ```sh
 sudo install -m 0755 -o root -g root \
@@ -238,6 +263,63 @@ Use `ANNOUNCEMENT.md` as the communication policy.
 Use `WIND-DOWN.md` as the public commitment.
 Keep channel-specific outreach records in private operations storage.
 
+## Post an announcement
+
+`https://<MV_DOMAIN>/announcements/` is the participant-facing notice channel.
+nginx serves it from `/var/www/announcements/` on disk, and not from the archive.
+That is deliberate: a notice usually announces that the archive is about to stop, and an archive
+route would take the notice offline for exactly the window it describes.
+The page keeps answering while the archive is stopped, replaying its ledger, or failed.
+It stops only when the whole host does.
+
+The page is two files with two different owners:
+
+| Path | Owner | Overwritten by `provision.sh` |
+|---|---|---|
+| `/var/www/announcements/index.html` | The kit. Rendered from `www/announcements/index.html`. | Yes, on every `nginxfront` run. |
+| `/var/www/announcements/notices.html` | The operator. | No. It is seeded once, only when it is absent. |
+
+nginx joins them with a server-side include at request time.
+Posting a notice writes one file. It needs no rebuild, no restart, and no reload.
+
+One notice is one `<article class="notice">` fragment. Newest first, so post at the top:
+
+```sh
+sudo sh -c 'cat - /var/www/announcements/notices.html > /var/www/announcements/.notices.new \
+  && chmod 0644 /var/www/announcements/.notices.new \
+  && mv /var/www/announcements/.notices.new /var/www/announcements/notices.html' <<'EOF'
+<article class="notice" id="n-2026-01-01-example">
+  <p class="when"><time datetime="2026-01-01T09:00Z">2026-01-01 09:00 UTC</time> · Planned maintenance</p>
+  <h2>One short headline</h2>
+  <p>The affected service, the window, the expected duration, and the participant action.</p>
+  <!-- followup:2026-01-01-example -->
+</article>
+EOF
+```
+
+Keep the `followup` comment. It is the anchor for the line you add after the event:
+
+```sh
+sudo sed -i 's|<!-- followup:2026-01-01-example -->|<p class="followup"><b>Update 2026-01-01 09:25 UTC.</b> Service returned at 09:19 UTC. The outage lasted 11 minutes.</p>|' \
+  /var/www/announcements/notices.html
+```
+
+Check the published result before you stop:
+
+```sh
+curl -fsS https://<MV_DOMAIN>/announcements/ | grep -c '<article class="notice"'
+```
+
+The page caches for 30 seconds, so a correction is visible within that.
+
+`ANNOUNCEMENT.md` governs what a notice may say.
+State the affected service, the expected duration, and the participant action.
+Never imply that archive records missed during an outage can be reconstructed.
+Never put a join string, an alert URL, a private address, or a resource identifier in a notice.
+
+Record the date, channel, audience, and exact public link of each notice in private operations
+storage, as `ANNOUNCEMENT.md` requires.
+
 ## Changes to a live service
 
 Run `provision.sh` again to apply a changed parameter file or deployment kit.
@@ -246,8 +328,15 @@ The script installs files, but it does not make every restart decision for you.
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
 
-Use `test-front-door.sh` after an nginx template change.
+An archive change that alters what the archive retains per record is not finished until
+`MV_REPLAY_RESIDENT_B`, `MV_REPLAY_PEAK_B` and `MV_ARCHIVE_GOMEMLIMIT` are re-derived in
+`deploy.env` from a measurement of the new build. Those constants describe a binary, not
+the project. `SIZING.md`, "Archive memory", carries the current values and the rule.
+Apply them with `provision.sh --only envfiles`; the archive reads them at start.
+
+Use `test-front-door.sh` after an nginx template or announcements-page change.
 Use `test-units.sh` after a systemd unit change.
+Use `test-monitor.sh` after a `monitor.sh` change.
 Use the provisioning verification phase after any host change.
 
 Use `health-snapshot.sh --watch` across the change window.
@@ -279,7 +368,15 @@ Run these checks after a public kit change:
 bash -n deploy/*.sh deploy/service-host-sample
 deploy/test-front-door.sh
 deploy/test-units.sh
+deploy/test-monitor.sh
 ```
+
+`test-monitor.sh` needs no root, no network and no host.
+It runs `monitor.sh --only transfer`, `--only hosts-pin`, `--only replay` and `--only swap` against
+fake `/proc` files, a fake `/etc/hosts`, a fake status document and a fixed clock, in a temporary
+state directory.
+Its replay cases hold the archive memory gate to physical RAM: the same reading with a swap file
+present must keep the same ratio and the same severity.
 
 Run `shellcheck` when it is available.
 Run `systemd-analyze verify` against the units on a compatible Linux host.

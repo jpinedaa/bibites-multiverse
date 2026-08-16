@@ -43,10 +43,12 @@ TimeoutStopSec=45
 
 NoNewPrivileges=true
 
-# The archive is the process that may legitimately want gigabytes: ~0.30 KB
-# resident per ledger record and ~0.18 KB peak during streaming replay. Under
-# pressure it is the one to lose. Losing it costs a ledger gap, but losing the
-# relay stops the map.
+# The archive is the process that may legitimately want gigabytes. Its resident
+# set and its replay peak are ONE number, measured at ~110 B per ledger record
+# on two vCPUs for the worst real start (a restore with no genome store) and
+# ~64 B for the live shape. SIZING.md "Archive memory" owns those figures.
+# Under pressure this is the one to lose. Losing it costs a ledger gap, but
+# losing the relay stops the map.
 OOMScoreAdjust=+200
 # THERE IS NO MemoryMax HERE, AND THAT IS DELIBERATE. A hard cap kills the
 # replay, and the replay is the one thing that must not fail. provision.sh writes

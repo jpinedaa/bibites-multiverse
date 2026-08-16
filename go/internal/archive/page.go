@@ -253,6 +253,7 @@ func (a *Archive) httpHandler() http.Handler {
   <url><loc>https://bibitesmultiverse.com/</loc><priority>1.0</priority></url>
   <url><loc>https://bibitesmultiverse.com/live</loc><priority>0.8</priority></url>
   <url><loc>https://bibitesmultiverse.com/watch</loc><priority>0.8</priority></url>
+  <url><loc>https://bibitesmultiverse.com/announcements/</loc><priority>0.5</priority></url>
 </urlset>
 `))
 	})
@@ -986,6 +987,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
     </a>
     <nav class="consolelinks" aria-label="Primary navigation">
       <a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch">Watch broadcast</a>
+      <a href="/announcements/">Announcements</a>
       <a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>
       <a class="livepill" href="/live" aria-current="page"><i class="navdot"></i>Live map</a>
     </nav>

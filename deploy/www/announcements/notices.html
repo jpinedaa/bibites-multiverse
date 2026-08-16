@@ -1,0 +1,37 @@
+<!--
+  Service notices, NEWEST FIRST. This file is operator content, not kit content.
+
+  provision.sh installs it only when /var/www/announcements/notices.html does not
+  exist yet, and never overwrites it afterwards, so a re-provision cannot delete a
+  posted notice. This copy in the repository is the seed and the format reference.
+
+  Post a notice by putting a new notice article at the TOP of the installed
+  file, in the shape of the one below. deploy/README.md, "Post an announcement",
+  carries the exact command. Follow deploy/ANNOUNCEMENT.md for what a notice may
+  and may not say. Keep the literal marker text out of these comments: the
+  published-notice count greps for it.
+
+  A notice is a plain HTML fragment: no <html>, <head> or <body>. nginx pulls it
+  into index.html with a server-side include at request time.
+-->
+
+<article class="notice" id="n-2026-08-16-host-reboot">
+  <p class="when"><time datetime="2026-08-16T21:45Z">2026-08-16 21:45 UTC</time> · Planned maintenance</p>
+  <h2>Short planned outage tonight while the service host reboots</h2>
+  <p>The machine that runs the shared relay, the archive, and this website reboots tonight between
+  <strong>22:30 and 23:30 UTC on 16 August 2026</strong>. The service is down for about five minutes
+  inside that window. The reboot applies a kernel update and a fix to how the archive uses memory.</p>
+  <p>While it is down, the live map and the broadcast page do not answer, and crossings between
+  worlds pause. Your own world keeps running on your own machine throughout. Nothing about it
+  changes.</p>
+  <p>The crossing record stays complete. The relay is held down until the archive has finished
+  reloading, so the map pauses instead of running with nothing recording it. No crossing is lost
+  from the permanent record.</p>
+  <p>You do not need to do anything. Each connected world reconnects on its own once the relay is
+  back and reclaims the same slot on the map. Reconnection can take up to about a minute after
+  service returns.</p>
+  <p>This announcements page comes back before the rest of the site does, so it is the page to
+  check while the map is still loading its record.</p>
+  <p>A follow-up line below will state the actual outage times once the service is back.</p>
+  <!-- followup:2026-08-16-host-reboot -->
+</article>

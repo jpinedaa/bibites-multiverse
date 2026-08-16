@@ -32,6 +32,13 @@ set -u
 OUT="${MV_HOST_SAMPLE_OUT:-/var/lib/multiverse/metrics/service-host.jsonl}"
 DATA_DIR="${MV_DATA_DIR:-/var/lib/multiverse/archive}"
 UNITS="${MV_HOST_SAMPLE_UNITS:-multiverse-relay multiverse-archive nginx multiverse-stream}"
+# The units whose MAIN PROCESS is also read from /proc. It is one small file per
+# named unit and it is deliberately not every unit: a per-process resident set
+# describes a unit truthfully only when the unit is one process, and nginx is a
+# master with workers. The archive is one process, and the archive is the one
+# whose replay peak nothing else can see.
+PROC_UNITS="${MV_HOST_SAMPLE_PROC_UNITS:-multiverse-archive}"
+CGROUP_ROOT="${MV_CGROUP_ROOT:-/sys/fs/cgroup}"
 STDOUT=0
 
 while [ $# -gt 0 ]; do
@@ -114,6 +121,41 @@ conntrack_max="$(try cat /proc/sys/net/netfilter/nf_conntrack_max)"
 # MemoryCurrent against the relay's MemoryMax=512M tripwire is the reading that
 # says whether the cap was ever approached. NRestarts is how a restart that
 # healed itself between two monitor ticks stops being invisible.
+#
+# MEMORYCURRENT ALONE CANNOT SEE THE PROBLEM IT WAS ADDED FOR, and that is why
+# the three fields below it exist. MemoryCurrent is anon + page cache + kernel
+# for the whole cgroup. The archive appends to a multi-gigabyte ledger and to a
+# rotating log, so its page-cache term swings by a hundred megabytes between two
+# samples and the kernel reclaims it whenever it likes. Over the first
+# forty-five minutes of this sampler's life the archive's MemoryCurrent fell by
+# 166 MB while its ledger — and its heap — grew. A reader drawing a memory trend
+# from that series would draw it with the wrong sign.
+#
+#   anonBytes  the cgroup's anonymous pages. This is the term that cannot be
+#              reclaimed, the term that grows with the ledger, and the term the
+#              out-of-memory killer eventually acts on. It is the trend.
+#   fileBytes  the page cache in the same cgroup, recorded so that the swing in
+#              MemoryCurrent is explained by the record rather than mistaken for
+#              one. anonBytes + fileBytes + kernel is memoryBytes.
+#   mainVmHwmBytes  the main process's high-water mark. NOTHING ELSE ON THE BOX
+#              REMEMBERS THE REPLAY PEAK. The peak happens in the first minute
+#              after a start, at a moment no five-minute monitor and no
+#              one-minute sampler is guaranteed to observe, and the resident set
+#              afterwards is about 5% below it. A restart is the one operation
+#              this whole record exists to make safe, and its cost is this
+#              number.
+#   mainRssAnonBytes  the same process's anonymous resident set, which agrees
+#              with anonBytes to the byte on a single-process unit. Recording
+#              both is what proves that agreement rather than assuming it.
+#   mainPid    so that a restart BETWEEN two samples is visible. NRestarts
+#              counts only what systemd itself restarted; an operator running
+#              `systemctl restart` leaves it at zero, and every archive restart
+#              on this host so far has been one of those.
+#
+# Cost: one extra read of a cgroup file per unit, and one read of
+# /proc/<pid>/status for the units in PROC_UNITS. Both are small virtual files.
+# No directory walk, no `du`, no privilege — the archive runs as the same
+# unprivileged user this sampler does.
 
 units_json="$(
   for u in $UNITS; do
@@ -122,12 +164,38 @@ units_json="$(
     # CPU counter as a unit's state the first time this was written. Parse the
     # KEY=value form by name instead, which is order-independent.
     line="$(try systemctl show "$u" \
-      --property=ActiveState,SubState,MemoryCurrent,CPUUsageNSec,NRestarts)"
+      --property=ActiveState,SubState,MemoryCurrent,CPUUsageNSec,NRestarts,MainPID,ControlGroup)"
     [ -n "$line" ] || { printf '{"unit":"%s"}\n' "$u"; continue; }
+
+    cg="$(printf '%s\n' "$line" | sed -n 's/^ControlGroup=//p')"
+    pid="$(printf '%s\n' "$line" | sed -n 's/^MainPID=//p')"
+
+    anon=""; file=""
+    if [ -n "$cg" ] && [ -r "$CGROUP_ROOT$cg/memory.stat" ]; then
+      pair="$(try awk '$1=="anon"{a=$2} $1=="file"{f=$2}
+                       END{ if (a != "" || f != "") printf "%s %s", a, f }' \
+              "$CGROUP_ROOT$cg/memory.stat")"
+      anon="${pair%% *}"; file="${pair##* }"
+    fi
+
+    rss_anon=""; vm_hwm=""
+    case " $PROC_UNITS " in
+      *" $u "*)
+        if [ -n "$pid" ] && [ "$pid" -gt 0 ] 2>/dev/null && [ -r "/proc/$pid/status" ]; then
+          # Both are kB in /proc and bytes everywhere in this record.
+          pair="$(try awk '$1=="RssAnon:"{r=$2*1024} $1=="VmHWM:"{h=$2*1024}
+                           END{ if (r != "" || h != "") printf "%s %s", r, h }' \
+                  "/proc/$pid/status")"
+          rss_anon="${pair%% *}"; vm_hwm="${pair##* }"
+        fi ;;
+    esac
+
     # systemd renders an unset numeric property as the u64 sentinel
     # 18446744073709551615, which is not a measurement — it is "no value", and
     # the unknown rule says it must not be published as a number.
-    printf '%s\n' "$line" | jq -Rs --arg u "$u" '
+    printf '%s\n' "$line" | jq -Rs --arg u "$u" \
+      --arg anon "$anon" --arg file "$file" \
+      --arg rssAnon "$rss_anon" --arg vmHwm "$vm_hwm" '
       [ split("\n")[] | select(test("=")) | split("=") | {key: .[0], value: (.[1:] | join("="))} ]
       | from_entries as $p
       | def num(x): if ((x // "") | test("^[0-9]+$")) and (x != "18446744073709551615")
@@ -137,8 +205,13 @@ units_json="$(
        activeState: str($p.ActiveState),
        subState:    str($p.SubState),
        memoryBytes: num($p.MemoryCurrent),
+       anonBytes:   num($anon),
+       fileBytes:   num($file),
        cpuNsec:     num($p.CPUUsageNSec),
-       restarts:    num($p.NRestarts)}'
+       restarts:    num($p.NRestarts),
+       mainPid:     (num($p.MainPID) | if . == 0 then null else . end),
+       mainRssAnonBytes: num($rssAnon),
+       mainVmHwmBytes:   num($vmHwm)}'
   done | jq -sc .
 )"
 
