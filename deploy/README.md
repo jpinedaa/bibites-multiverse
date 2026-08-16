@@ -325,6 +325,11 @@ storage, as `ANNOUNCEMENT.md` requires.
 Run `provision.sh` again to apply a changed parameter file or deployment kit.
 The script installs files, but it does not make every restart decision for you.
 
+Its `systemd` phase is the exception, and it enables and starts both services.
+Never run it while a reboot hold-down is in force: it undoes a `systemctl disable` and puts the
+relay back in front of a replaying archive. `RESTART-POLICY.md`, "Host reboot", holds the order,
+and the drop-in that phase installs is the hold-down that survives it.
+
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
 
