@@ -333,10 +333,22 @@ The private operations record must track interruption events and restart evidenc
 
 ## Capacity
 
-A 2.5-Mbit/s stream uses approximately 810 GB for one continuously open viewer-month.
+Transfer sets the audience limit, and the viewer cost is not the media rate.
+One continuously open viewer of the 2.5-Mbit/s stream costs approximately 1,150 GB each month with
+low-latency HLS, of which 32 percent is playlist re-fetching.
+The same media without low latency costs approximately 790 GB each month and adds several seconds
+of delay.
+The publisher's own ingest costs approximately 780 GB each month while it runs, with no viewers.
 Direct-origin viewing therefore has a small audience limit.
 
-Add a video CDN or managed video service before transfer exceeds the approved budget.
+Read [`deploy/SIZING.md`](../deploy/SIZING.md), "Network transfer", for the units, the
+measurements, and the rest of the model.
+Change a figure there first.
+
+Add a video CDN or a managed video service before direct-origin transfer exceeds the approved
+budget.
+Select the non-low-latency variant first, because a cache cannot help low-latency HLS: each
+playlist request stays open until the next part exists.
 The page and origin do not depend on one CDN provider.
 
 Read current compute, storage, public-address, and transfer prices before deployment.
