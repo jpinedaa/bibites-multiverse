@@ -245,8 +245,8 @@ reads. The installers ignore it; the release gates do not.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/3",
-  "release": "0.2.5",
-  "published": "2026-08-15",
+  "release": "0.2.6",
+  "published": "2026-08-16",
   "testedBuild": {
     "mod": "0.6.4",
     "pluginSha256": "07b30eb07c093da7309ab582150d197dfb2963cbd220f5f50efce8badb77ed83",
