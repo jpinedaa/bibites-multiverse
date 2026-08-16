@@ -123,12 +123,12 @@ func TestLandingCardLayoutKeepsRelatedContentTogether(t *testing.T) {
 func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 	defaultLanding := landingPageHTML
 	for _, want := range []string{
-		"The Windows setup and Linux complete package for release 0.2.5",
+		"The Windows setup and Linux complete package below are always the newest release.",
 		"Each installer creates a unique world identity and keeps its secret on your machine.",
 		"No join string is required.",
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.5/bibites-multiverse-0.2.5-windows-x64-setup.exe"`,
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.5/bibites-multiverse-0.2.5-linux-x64-complete.zip"`,
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.5">Checksums and add-ons`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/latest/download/bibites-multiverse-windows-x64-setup.exe"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/latest/download/bibites-multiverse-linux-x64-complete.zip"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/latest">Checksums and add-ons`,
 		"Automatic enrollment creates the secret on your machine.",
 	} {
 		if !strings.Contains(defaultLanding, want) {
@@ -171,20 +171,42 @@ func TestLandingPageCreditsTheGameItIsBuiltOn(t *testing.T) {
 
 func TestLandingPageUsesHomepageConfigOverrides(t *testing.T) {
 	page := renderLandingPage(Config{
-		HomepageRelease:     "0.9.9",
 		HomepageRepo:        "acme/example-bibites",
 		HomepageGameVersion: "9.9.9",
 	})
 	for _, want := range []string{
-		`The Windows setup and Linux complete package for release 0.9.9`,
 		`<em>The Bibites</em> 9.9.9, the mod, and the connector.`,
-		`href="https://github.com/acme/example-bibites/releases/download/v0.9.9/bibites-multiverse-0.9.9-windows-x64-setup.exe"`,
-		`href="https://github.com/acme/example-bibites/releases/download/v0.9.9/bibites-multiverse-0.9.9-linux-x64-complete.zip"`,
-		`href="https://github.com/acme/example-bibites/releases/tag/v0.9.9">Checksums and add-ons`,
+		`href="https://github.com/acme/example-bibites/releases/latest/download/bibites-multiverse-windows-x64-setup.exe"`,
+		`href="https://github.com/acme/example-bibites/releases/latest/download/bibites-multiverse-linux-x64-complete.zip"`,
+		`href="https://github.com/acme/example-bibites/releases/latest">Checksums and add-ons`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("landing page did not apply homepage config: missing %q", want)
 		}
+	}
+}
+
+// The three download links are the whole point of the change that removed the
+// release number from this page: they must never name a tag or a versioned
+// asset again. GitHub resolves /releases/latest and /releases/latest/download/
+// against whichever release is newest, so a release moves this page with no
+// rebuild and no deployment — and make-release.sh publishes the two
+// stable-named assets these links address.
+func TestLandingPageDownloadsNameNoRelease(t *testing.T) {
+	for _, want := range []string{
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/latest/download/bibites-multiverse-windows-x64-setup.exe"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/latest/download/bibites-multiverse-linux-x64-complete.zip"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/latest">Checksums and add-ons`,
+	} {
+		if !strings.Contains(landingPageHTML, want) {
+			t.Errorf("landing page is missing the release-independent download link %q", want)
+		}
+	}
+	if strings.Contains(landingPageHTML, "/releases/download/") {
+		t.Error("landing page still links a versioned release asset; it must use /releases/latest/download/")
+	}
+	if strings.Contains(landingPageHTML, "/releases/tag/") {
+		t.Error("landing page still links a release tag; it must use /releases/latest")
 	}
 }
 
@@ -370,8 +392,8 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 // half-answered, so they are asserted as one contract.
 func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
 	for _, want := range []string{
-		"The game behind every world.",
-		"Every world on this map runs a copy of <em>The Bibites</em>.",
+		"<h2><em>The Bibites</em></h2>",
+		"Every world on this map runs a copy of the game.",
 		`src="/game-screenshot.jpg"`,
 		`href="#game"><em>The Bibites</em></a>`,
 	} {
@@ -383,6 +405,11 @@ func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
 	// rather than an explanation. It should not come back.
 	if strings.Contains(landingPageHTML, "came first") {
 		t.Error("landing page still carries the retired chronology title")
+	}
+	// Its replacement described the game instead of naming it. The section is
+	// the game's own, so the title is the game's name and nothing else.
+	if strings.Contains(landingPageHTML, "The game behind every world") {
+		t.Error("landing page still carries the retired descriptive title")
 	}
 
 	a := rigShapedArchive(t)

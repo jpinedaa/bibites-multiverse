@@ -1,0 +1,43 @@
+[Unit]
+# The signal that lets the publisher stop when nobody is watching.
+#
+# Publishing costs approximately 780 GB of inbound transfer each month whether or
+# not anyone watches. Nothing on this host can start or stop the publisher — it
+# is OBS on a Windows machine, and this host deliberately holds no credential for
+# it — so the Windows side asks instead, and this unit is what answers.
+Description=Publish whether anyone is watching the Bibites broadcast
+Documentation=file:///opt/multiverse/deploy/viewers-presence.sh
+After=network-online.target
+
+[Service]
+Type=oneshot
+# ROOT, and only for the read: /var/log/multiverse/nginx/front-door.access.log
+# is www-data:adm 0640 and is half of the signal. Everything else below removes
+# a privilege that being root would otherwise carry.
+ExecStart=/opt/multiverse/deploy/viewers-presence.sh
+# A run that cannot finish in fifteen seconds has missed its own tick. The next
+# one will try again.
+TimeoutStartSec=15
+# This runs six times a minute on a two-vCPU box. It must always lose to the
+# relay, the archive and nginx.
+Nice=10
+# Six activations a minute is 8,640 a day, and systemd's own "Starting" and
+# "Finished" lines for each of them would bury every other message in the
+# journal. Warnings and errors from the script still arrive.
+LogLevelMax=warning
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Named although ProtectSystem=strict already makes the whole tree read-only:
+# this is the one path the unit exists to read, and a reviewer should see it.
+# It is MV_NGINX_LOGDIR, not /var/log/nginx: the front door writes beside the
+# relay and archive logs so that the kit owns its rotation policy. Keep it
+# equal to the default in deploy/viewers-presence.sh; test-units.sh checks it.
+ReadOnlyPaths=/var/log/multiverse/nginx
+ReadWritePaths=/var/www/multiverse-status
+# AF_INET for the loopback metrics request, AF_UNIX for the journal. No AF_INET6
+# and no AF_NETLINK: the only address this unit dials is 127.0.0.1:9998.
+RestrictAddressFamilies=AF_INET AF_UNIX
+LockPersonality=true

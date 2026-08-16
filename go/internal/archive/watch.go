@@ -3,6 +3,21 @@ package archive
 // watchPageHTML is the public wrapper around the single shared game broadcast.
 // The media player itself is served from /stream/ by the same nginx front door;
 // no stream key, ingest address, or control surface is present in this page.
+//
+// THE PLAYER IS NOT OURS. The <iframe> loads MediaMTX's own HLS player, so this
+// page holds no hls.js configuration and nothing here selects a latency mode:
+// that player follows whatever `hlsVariant` the origin is running, which
+// deploy/install-stream-origin.sh sets to fmp4. What this page owns is the state
+// around the player — which of the three things a blank frame means, and the
+// retry that resolves it.
+//
+// THE BROADCAST PUBLISHES ON DEMAND. Publishing costs approximately 780 GB of
+// inbound transfer each month whether or not anyone watches, so the publisher
+// starts when somebody arrives here and stops when the last person leaves. The
+// arrival IS the trigger: the five-second playlist poll below is a request to
+// /stream/, and /api/viewers reports it whether it succeeded or 404'd. A first
+// viewer therefore waits about twenty seconds at a player that has nothing in
+// it, and the copy below is what that person reads instead of a dead frame.
 const watchPageHTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -108,7 +123,7 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
     <article class="fact"><span class="num">02 · STAY</span><b>No switching on new births</b><p>A younger birth does not steal the camera. The chosen life gets its whole turn.</p></article>
     <article class="fact"><span class="num">03 · REPEAT</span><b>Death or departure</b><p>Death triggers a new choice. Migration does too, because the creature has left this particular world.</p></article>
   </section>
-  <p class="note"><strong>This is a spectator camera, not a control surface.</strong> Watching cannot pause, select, move, feed, kill, or otherwise change the simulation. A brief outage can occur when the broadcast host restarts; the public map and every other world continue independently.</p>
+  <p class="note"><strong>This is a spectator camera, not a control surface.</strong> Watching cannot pause, select, move, feed, kill, or otherwise change the simulation. The video is published only while somebody is watching, so the first arrival waits about twenty seconds for it to start. A brief outage can occur when the broadcast host restarts; the public map and every other world continue independently.</p>
 </main>
 <footer><div class="shell foot"><span>Independent community project · Apache-2.0</span><span class="footlinks"><a href="/#how">How it works</a><a href="/#join">Join</a><a href="/announcements/">Announcements</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a></span></div></footer>
 <script>
@@ -117,16 +132,28 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
   var dot=document.getElementById("dot"), status=document.getElementById("status");
   var title=document.getElementById("offtitle"), copy=document.getElementById("offcopy");
   var loaded=false, failures=0;
+  /* The broadcast publishes on demand, so an empty player is the NORMAL first
+     thing a visitor meets: arriving here is what starts it, and the publisher
+     needs about twenty seconds. Say that, rather than showing a dead frame.
+     PATIENT is a count of five-second polls, so waiting stays until a minute
+     has passed and only then becomes a fault. */
+  var PATIENT=12;
+  function starting(){
+    cover.hidden=false;dot.className="dot";status.textContent="Broadcast starting";
+    title.textContent="Starting the broadcast for you.";
+    copy.textContent="The stream starts when someone watches, and starting it takes about 20 seconds. This page begins playing on its own.";
+  }
   function reconnecting(){
     cover.hidden=false;dot.className="dot offline-dot";status.textContent="Broadcast reconnecting";
-    title.textContent="The camera is between sessions.";
-    copy.textContent="This page will reconnect automatically. The Multiverse itself continues running.";
+    title.textContent="The broadcast is taking longer than usual.";
+    copy.textContent="This page keeps trying every five seconds. The Multiverse itself continues running.";
   }
+  function waiting(){ if(failures>PATIENT) reconnecting(); else starting(); }
   frame.addEventListener("load",function(){
     setTimeout(function(){
       try{
         if(frame.contentDocument&&frame.contentDocument.querySelector("video")) return;
-        loaded=false;failures=2;reconnecting();
+        loaded=false;failures=2;waiting();
       }catch(e){}
     },600);
   });
@@ -141,9 +168,13 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
     }catch(e){
       failures++;
       if(failures<2) return;
-      reconnecting();
+      waiting();
     }
   }
+  /* Every five seconds, for as long as the tab is open. This is both the retry
+     and the presence signal: /api/viewers reads these requests out of the front
+     door's access log, so a person waiting at a 404 is exactly what tells the
+     publisher to start. Do not slow it below the publisher's own timeout. */
   check();setInterval(check,5000);
 })();
 /* ------------------------------------------------------- which world is this?
