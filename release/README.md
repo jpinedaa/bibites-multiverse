@@ -29,12 +29,14 @@ raised only after the release that satisfies it exists.
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
 | `make-release.sh` | Builds both platform packages, the Windows setup, `SHA256SUMS`, and the release page |
 | `bump-version.sh` | The release string's single surface. `--print` prints it, `--check` asserts every place that names it agrees, and `<version>` rewrites them all from an explicit allowlist |
-| `check-drift.sh` | The half of `make-release.sh` that needs no game: is the far-end bundle still this tree's bundle, and does the mod version agree everywhere it is stated |
+| `check-drift.sh` | The half of `make-release.sh` that needs no game: is this tree still the build that was tested, and does the mod version agree everywhere it is stated |
 | `check-nsis.sh` | Compiles `windows-installer.nsi` against a stub payload, in about two seconds and with no game file |
 | `verify-build-log.sh` | Reads a finished build log and refuses a build whose strongest gates downgraded to a note |
 | `pscheck.ps1` | Parses every shipped PowerShell file. It runs on Windows in CI, because this repository is written on Linux |
-| `lib/mod-version.sh` | One parse of the plugin's declared `Version`, shared by the gates and the bundle record so no two readers can disagree about it |
-| `lib/sidecar-manifest.sh` | The input manifest behind check 3 below, sourced by `make-release.sh` and by `check-drift.sh`, so CI runs the gate itself rather than a lookalike |
+| `record-tested-build.sh` | Prints the `testedBuild` block for this tree, after a build and a test, ready to paste into `docs/support-matrix.md` |
+| `lib/mod-version.sh` | One parse of the plugin's declared `Version`, shared by the gates and the recorder so no two readers can disagree about it |
+| `lib/tested-build.sh` | One parse of the matrix's `testedBuild` record — the release reference — shared by `make-release.sh` and `check-drift.sh` |
+| `lib/sidecar-manifest.sh` | The input manifest behind check 3 below, sourced by `make-release.sh`, `check-drift.sh` and `record-tested-build.sh`, so CI runs the gate itself rather than a lookalike |
 | `tracked-binaries.txt` | Every binary file this repository is allowed to track. The `consistency` job diffs the real set against it, so a game assembly cannot land unnoticed |
 | `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
@@ -64,6 +66,8 @@ extracted from that same file — and [`../docs/defaults-audit.md`](../docs/defa
 `farend/` originated as the Windows bundle for the M4 two-computer test map.
 It uses map slot 6, a LAN relay, and a private certificate authority.
 The scripts preserve those test-map assumptions, but maintainers can rebuild the artifacts.
+Nothing in `farend/dist/` is tracked any more: `make-farend-bundle.sh` builds a handover zip
+on demand, and it is carried to that machine by hand.
 
 This directory is the participant-facing descendant of the same tested mechanics.
 These mechanics include Steam search, the game-build gate, BepInEx placement, and generated process scripts.
@@ -76,6 +80,21 @@ The M4-specific `farend/README.md` does not define public package policy (`m5_co
 Where a fact belongs to both, the two are kept apart deliberately rather than shared: a change to
 this installer must not silently re-cut the far end's bundle, and the far end's pin is that
 machine's matrix entry rather than a rule about the map (D22).
+
+## What a release is measured against: the tested build
+
+The reference is a record, not a binary. `docs/support-matrix.md` carries a top-level
+`testedBuild` block — the mod version, the sha256 of the plugin that was tested, the
+`bibites-mod/` tree it was built from, the commit `cmd/sidecar`'s tested source came from, the
+digest of that source's input manifest, the date, and one sentence of evidence. The build refuses
+anything else, and `check-drift.sh` asks the same questions from tracked text on every pull
+request.
+
+It is self-asserted, and the honest reading is that it catches **forgetting** rather than proving
+that a test happened: a mod change that lands without a test, or a sidecar source change that
+never reached a tested binary. What it gains over a committed reference binary is that the claim
+is one reviewable line in a diff. The strongest check in the build is still gate 3b, which
+compares the plugin against the one this machine's game actually loaded.
 
 ## Building
 
@@ -113,28 +132,28 @@ it checks these inputs:
 
 1. `bibites-mod/libs/BibitesAssembly.dll` must match the Windows row in `docs/support-matrix.md`.
    The mod uses this file as its reference assembly.
-2. The plugin must be **byte-identical** to the one in `farend/dist/farend-bundle.zip`.
-   This comparison keeps the tracked Windows bundle and participant packages aligned.
+2. The freshly built plugin's sha256 must equal `testedBuild.pluginSha256`.
+   This is the mod that was tested, and no other.
 3. The repository inputs and module versions selected by `go list` for Windows `cmd/sidecar`
-   must match the source revision in the bundled sidecar. Unrelated Go commands do not affect
-   this comparison. VCS stamps can make two builds from the same inputs differ as files.
+   must digest to `testedBuild.sidecarInputsSha256`. Unrelated Go commands do not affect this
+   comparison. VCS stamps can make two builds from the same inputs differ as files, which is why
+   the inputs are compared rather than the binary.
 4. If this machine's game directory is readable, the local plugin must also match.
 
 Two cheaper refusals come before all four, in the first seconds and with no toolchain at all:
 `release/bump-version.sh --check` must agree, and `bibites-mod/src/MultiversePlugin.cs`'s `Version`
-must equal the `mod` field of `docs/support-matrix.md`. Both were things a release could
-previously ship past. When the bundle carries a `BUNDLE-SOURCE.txt`, the build also asserts that
-the record agrees with the zip it just unpacked.
+must equal the `mod` field of `docs/support-matrix.md` on both rows **and** `testedBuild.mod`.
+Both were things a release could previously ship past.
 
-**The launcher is deliberately outside gate 3.** That gate compares the package graph of
-`cmd/sidecar` against the tracked far-end bundle, and the launcher is a separate command that
+**The launcher is deliberately outside gate 3.** That gate digests the package graph of
+`cmd/sidecar`, and the launcher is a separate command that
 shares none of it — which is also why adding it could not disturb the sidecar's manifest. What
 stands in its place is the same VCS-stamp rule the sidecar gets, plus a check that the Windows
 build really is a `PE32+` executable, plus `go vet` over its two packages. It uses the standard
 library only, so there is no module set to compare.
 
-These comparisons do not prove that a bundle ran on another computer. Record runtime evidence
-separately after a real test or deployment.
+These comparisons do not prove that either artifact ran anywhere. What was run, and where, is the
+`evidence` sentence of the tested-build record, written by the person who ran it.
 
 It also checks two things the two-platform matrix made checkable: that **every matrix entry
 carries the same keys** and that no two rows share a `(gameVersion, platform)` pair — because both
@@ -142,34 +161,45 @@ installers walk the whole list, and PowerShell under `Set-StrictMode` throws on 
 happens not to have. And when an unpacked Linux game is readable (`LINUX_GAME_DIR`, defaulting to
 the rehearsal's copy), it checks the Linux row's hash against a real file.
 
-**The Linux sidecar is the one artifact with no byte-identity reference.**
-The tracked bundle contains a Windows sidecar, so it has no Linux binary to compare.
-The input-manifest gate shows that both builds use the same sidecar source.
+**The Linux sidecar is the one artifact with no reference of its own.**
+The tested build records one `cmd/sidecar` input digest, and both binaries are built from that
+same Go package in this tree, so gate 3 covers the Linux build too.
 It does not show that either binary ran successfully.
 
 A mismatch stops the build and names which side moved.
 
-**Whenever `bibites-mod/` or the sidecar changes, the far-end bundle is rebuilt — in its own
-commit, before the release.** That bundle is the reference checks 2, 3, and 4 compare against, so a
-mod change that lands without it leaves the tree unreleasable. All four legs run on the machine
-that has the game:
+**Whenever `bibites-mod/` or `cmd/sidecar` changes, the tested build is re-recorded — before the
+release.** That record is what checks 2 and 3 compare against, so a mod change that lands without
+it leaves the tree unreleasable. Four legs, on the machine that has the game:
 
-1. `farend/make-farend-bundle.sh`. It rebuilds `farend/dist/farend-bundle.zip` and writes
-   `farend/dist/BUNDLE-SOURCE.txt` beside it — the bundle's provenance record, naming the commit it
-   was built from, the tree hash of `bibites-mod/`, the blob hash of `farend/setup-farend.ps1`, the
-   plugin version, and the `sha256` of each artifact in the zip. **Commit both files in one
-   commit:** the record describes that zip and no other.
-2. `bibites-mod/deploy.sh`, to refresh this machine's own game plugin. Check 4 is a three-way
-   agreement, and it is the leg that only this machine can prove.
-3. The `mod` field on **both** rows of [`../docs/support-matrix.md`](../docs/support-matrix.md),
+1. Build and **test it**. `dotnet build bibites-mod/BibitesMultiverse.csproj -c Release`, then
+   `bibites-mod/deploy.sh` to put that plugin in this machine's game, then run it and watch it.
+   The record's `evidence` sentence is this leg written down, and nothing in the repository can
+   perform it.
+2. `release/record-tested-build.sh`, which prints the block:
+
+   ```sh
+   release/record-tested-build.sh --tested-on 2026-08-20 \
+       --evidence 'the six-world deployment ran on this build for three days'
+   ```
+
+   It computes the four values by hand-typing none of them — the plugin's `sha256`,
+   `git rev-parse HEAD:bibites-mod`, `git rev-parse HEAD`, and the `sha256` of the manifest
+   `lib/sidecar-manifest.sh` writes — and warns when the tree is dirty or when this machine's game
+   holds a different plugin. Run it from a committed tree: `sidecarSourceCommit` names `HEAD`.
+3. Paste the block over `testedBuild` in
+   [`../docs/support-matrix.md`](../docs/support-matrix.md), and update the human table in that
+   document's *The tested build* section in the same edit.
+4. The `mod` field on **both** rows of the matrix, the Mod column of both tables above the JSON,
    and the Plugin row of [`../dev_environment.md`](../dev_environment.md), whenever the plugin's
    `Version` moved.
-4. Repeat the bundle's tests, complete the required runtime test, and record its results
-   separately.
+
+Each of the four values is checkable by anyone reading the diff, which is the point of recording
+them rather than committing a reference binary.
 
 `release/check-drift.sh` tells you whether any of that is outstanding. It answers from tracked text
-alone — no game files, no .NET, no network — and CI runs it on every pull request. Run it before
-you tag anything.
+alone — no game files, no .NET, no network, no history — and CI runs it on every pull request. Run
+it before you tag anything.
 
 Every artifact is built deterministically with fixed timestamps and sorted entries. Rebuilding
 from the same tag and inputs reproduces the checksums on the page, **for the same NSIS build**: the
@@ -226,8 +256,9 @@ appears nowhere in it, so a pull request from a fork is safe to run.
 | `powershell` | every shipped `*.ps1` parses; PSScriptAnalyzer runs beside it, advisory only | `pwsh -NoProfile -File release/pscheck.ps1 release/kit/*.ps1 farend/setup-farend.ps1` — Windows only |
 | `consistency` | `release/bump-version.sh --check`, `release/check-drift.sh`, and the tracked binary files against `release/tracked-binaries.txt` | `release/bump-version.sh --check && release/check-drift.sh` |
 
-`consistency` checks out with full history, because `check-drift.sh` resolves the far-end bundle's
-source commit and reads the tree at it. A shallow clone cannot answer that.
+`consistency` checks out shallow. Nothing in it reads history: `check-drift.sh` compares this tree
+against values recorded in `docs/support-matrix.md`, and both sides of every comparison come from
+HEAD's own tree. A step that walks history has to restore `fetch-depth: 0` in the same change.
 
 **What CI still cannot do.** The two install-and-uninstall suites need a real game, and
 `test-install-uninstall.ps1` needs Windows as well: CI parses that file, it does not run it. The
@@ -241,8 +272,8 @@ the owner's machine rather than on a hosted runner.
 `make-release.sh` still publishes nothing. Publication is `.github/workflows/release.yml`, and a
 `v*` tag on `main` is what starts it.
 
-Settle the far-end bundle first. `release/check-drift.sh` must be green before you tag anything: a
-stale bundle stops the build on the release machine minutes in, after the game payload has already
+Settle the tested build first. `release/check-drift.sh` must be green before you tag anything: an
+untested tree stops the build on the release machine minutes in, after the game payload has already
 been staged. It is **not** green today — see *Day one* below.
 
 And before the first tag is ever pushed, the four gates under *The release runner* have to be in
@@ -297,7 +328,7 @@ used to be done by eye turned into refusals:
    `--allow-dirty` is never used.
 3. It runs `release/check-drift.sh`, then `make-release.sh` with both game directories, tee-ing the
    build to a log.
-4. It runs `release/verify-build-log.sh`, which refuses a log missing any of the eighteen success
+4. It runs `release/verify-build-log.sh`, which refuses a log missing any of the twenty success
    lines or carrying one of the three silent downgrades. Two of the build's strongest checks
    degrade to a note when an input is unreadable; under a dedicated runner user that is exactly how
    a check stops running for months without anybody noticing.
@@ -464,14 +495,14 @@ first, then start.
 
 Two things are not true yet, and both belong before the first tag.
 
-**The far-end bundle on `main` is stale**, so `release/check-drift.sh` fails and the `consistency`
-job is red on every pull request — including the one that introduces CI. Clear the debt rather than
-paper over it, and clear it first. On the machine that has the game: rebuild the bundle and commit
-`farend/dist/farend-bundle.zip` together with `farend/dist/BUNDLE-SOURCE.txt` in their own commit;
-refresh this machine's Steam plugin with `bibites-mod/deploy.sh`; and set the `mod` field on both
-rows of `docs/support-matrix.md` to the plugin's own `Version`. It is the discipline described
-under *Building*, applied once to catch up. Merging CI into a `main` that is genuinely releasable
-also means the provenance record is active for the very first release.
+**The tested build on `main` is out of date**, so `release/check-drift.sh` fails and the
+`consistency` job is red on every pull request — including the one that introduces CI. The mod
+moved to `0.6.5` after the recorded build and nobody has tested that plugin yet. Clear the debt
+rather than paper over it, and clear it first: it is the four legs under *Building*, applied once
+to catch up — build the `0.6.5` plugin, deploy it to this machine's game, run it, then
+`release/record-tested-build.sh` and paste the block, with `0.6.5` on both matrix rows and in
+`dev_environment.md`. Merging CI into a `main` that is genuinely releasable is the whole point of
+doing it first.
 
 **Nothing has run yet.** Do not make `checks.yml` a required status check until it has been green
 at least once. `go test ./...` and the nginx leg of the front-door check have never run on a hosted

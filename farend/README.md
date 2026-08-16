@@ -1,8 +1,12 @@
 # Far-end Windows peer
 
-This bundle installs one Windows world as the far-end peer of the M4 test map.
+This bundle installs one Windows world as the far-end peer of a private test map.
 The packaged scripts use peer `slot-6` at position `(2,1)`.
 
+This is not the public package. To join the public map, use the installer on the release
+page: it enrolls automatically and needs none of the files below.
+
+The map operator builds this bundle on demand and sends it to you.
 The bundle does not contain a relay address, credential, or private certificate authority.
 The map operator supplies those values through a private channel.
 

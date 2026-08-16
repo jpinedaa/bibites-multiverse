@@ -134,9 +134,12 @@ jobs:
           printf 'release=%s\n' "${tag#v}" >> "$GITHUB_OUTPUT"
           echo "    building $tag"
 
-      # fetch-depth: 0 and the tags are not optional (E5). make-release.sh
-      # resolves the far-end bundle's source commit and runs `git archive` on
-      # it; check-drift.sh does the same. A shallow clone cannot.
+      # fetch-depth: 0 and the tags are not optional (E5), and the reason is the
+      # next step rather than the build: "the tag is on main" is
+      # `git merge-base --is-ancestor`, which needs the history between the tag
+      # and main. The build itself no longer reads history — its reference is
+      # the testedBuild record in docs/support-matrix.md — so this is the only
+      # thing keeping the full clone here.
       #
       # persist-credentials: false, because nothing here pushes with git — the
       # three `gh` steps carry their own token. The default would leave a
@@ -273,8 +276,8 @@ jobs:
           echo "    utilities git python3 zip unzip tar file curl cmp sha256sum numfmt sed awk gh"
 
       # ---- the three cheap refusals, before anything is copied or rewritten.
-      # None of them needs the proprietary inputs, so a moved tag or a stale
-      # bundle costs one second rather than a 5 MB copy and a remote rewrite.
+      # None of them needs the proprietary inputs, so a moved tag or an untested
+      # tree costs one second rather than a 5 MB copy and a remote rewrite.
 
       - name: The version surface agrees with the tag
         env:
@@ -290,7 +293,7 @@ jobs:
           }
           echo "    the tree and the tag both say $TAG"
 
-      - name: The far-end bundle is not stale
+      - name: This tree is the build that was tested
         run: release/check-drift.sh
 
       # E8: a release tag has been force-moved on this repository before. A
@@ -365,8 +368,8 @@ jobs:
           steam="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll"
           [ -r "$steam" ] || {
             echo "!! the runner user cannot read the plugin installed in this machine's game." >&2
-            echo "   Gate 3b — the three-way agreement between this tree, the far-end" >&2
-            echo "   bundle and the local game — would silently stop running." >&2
+            echo "   Gate 3b — the three-way agreement between this tree, the tested-build" >&2
+            echo "   record and the local game — would silently stop running." >&2
             echo "   Grant the runner user read access to that path (design C7 step 1)." >&2
             exit 1
           }

@@ -5141,8 +5141,8 @@ Three consequences follow, and every one of them is an argument for doing it onc
 3. **The far end applies it at its own operator's leisure, and that is not observable from
    here.** D9 forbids the rig to drive the second computer. Its slot stays dark and its lanes
    bypassed until it returns — working exactly as designed and looking exactly like a peer that
-   has gone away — and the far-end bundle must be rebuilt after the mod deploy so that the DLL
-   in the zip is the one this machine runs.
+   has gone away — and the tested build must be re-recorded after the mod deploy so that the
+   plugin the release ships is the one this machine runs.
 
 **What the crossing must not cost, and it is the bar WP2 reports against: zero discarded
 journal bytes.** A token is a check on a connection and touches nothing about custody. Every

@@ -4787,9 +4787,9 @@ than as a deploy.
    `client gone` / `client connected` / `reason=reclaimed` triple for that peer in `relay.log`,
    and until it appears, that slot is dark and its lanes are bypassed — working exactly as
    designed, and looking exactly like a peer that has gone away (§8, Risk 5).
-4. **The far-end bundle is rebuilt after the change**, because a stale far-end sidecar is what
-   refuses an upgraded neighbour's exports — `dev_environment.md`'s *The minors* is the episode,
-   and B25's gate is the rule written from it.
+4. **The far end gets a bundle built from the changed source**, because a stale far-end sidecar
+   is what refuses an upgraded neighbour's exports — `dev_environment.md`'s *The minors* is the
+   episode, and B25's gate is the rule written from it.
 
 **The rollout shape this specific rig has, stated because it changes the cost.** Contract A's
 bearer token ships in the same milestone and is a **mod** change, and a mod deploy takes all
