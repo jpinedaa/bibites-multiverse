@@ -17,14 +17,20 @@ package relay
 // running anything: 60000/statusCoalesceMs broadcasts a minute at the floor,
 // 60000/statusCoalesceMaxMs under a storm. 240 and 30 on the shipped defaults.
 //
-// WHAT COUNTS AS A CHANGE, AND WHAT ONLY COUNTS AS PENDING. §12 says "registry
-// changes inside one window", and the two words are load-bearing. A placement,
-// a release, a handover, a peer arriving, a peer going dark, an eviction and a
-// refusal written to a slot are registry changes and they widen the window. A
-// stats block arriving on a PING is NOT: it changes what the next broadcast
-// says and not what the map IS, it was going to ride the
-// statsBroadcastIntervalMs timer anyway (§14, B4), and counting it would widen
-// the window on a map where nothing was happening at all.
+// WHAT COUNTS AS A CHANGE. §12 says "registry changes inside one window", and
+// the two words are load-bearing. A placement, a release, a handover, a peer
+// arriving, a peer going dark, an eviction and a refusal written to a slot are
+// registry changes: they widen the window and they schedule a broadcast.
+//
+// A STATS BLOCK ARRIVING ON A PING IS NEITHER (amended — §24, B36). It changes
+// what the next broadcast SAYS and not what the map IS. It never widened the
+// window, for the reason above — a bound that fired on a quiet map's heartbeat
+// is not a bound on anything — and since §24 it does not schedule a broadcast
+// either: §6.5 gives stats the statsBroadcastIntervalMs timer, that timer was
+// always going to carry them (§14, B4), and scheduling on the arrival as well
+// turned seven peers' unaligned PINGs into 1.32 broadcasts a second of the whole
+// map. The two counters below therefore hold the same number today; §7.2's
+// "must be published" and B29's "may widen" remain two rules and keep two.
 //
 // THE LAST FRAME OF A BURST IS ALWAYS SENT. Coalescing may drop intermediate
 // states; it MUST NOT drop the last one, because every one of these messages is

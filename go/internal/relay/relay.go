@@ -162,16 +162,28 @@ type Server struct {
 	// what the relay knows about a peer id, live or not. PEER_STATUS keeps
 	// reporting a reserved slot after its peer goes away (§6.5).
 	meta map[string]*peerMeta
-	// pending counts everything the next broadcast would carry that the last one
-	// did not — a registry change OR a stats block. It is drained by the
-	// publisher, and it is what guarantees B29's "the last frame of a burst is
-	// always sent": nothing but a publish that actually happened clears it.
+	// pending counts the REGISTRY changes the next broadcast must carry. It is
+	// drained by the publisher, and it is what guarantees B29's "the last frame
+	// of a burst is always sent": nothing but a publish that actually happened
+	// clears it.
+	//
+	// A STATS BLOCK DOES NOT BUMP IT (amended — §24, B36). It used to, and that
+	// made every peer's PING a broadcast trigger; §6.5 gives stats the
+	// statsBroadcastIntervalMs timer and nothing else. See the note beside
+	// markChurnLocked.
 	pending int
 	// churn counts the REGISTRY changes inside the current window, which is the
-	// narrower thing B29 widens the window on. A stats block bumps pending and
-	// not this: it changes what the next frame says, not what the map is, and
-	// widening the window on a quiet map's heartbeat would be a bound that fired
-	// when nothing was happening.
+	// narrower thing B29 widens the window on. It has never counted a stats
+	// block, for the reason churn.go states at length: widening the window on a
+	// quiet map's heartbeat would be a bound that fired when nothing was
+	// happening.
+	//
+	// SINCE §24 B36 THE TWO COUNTERS HOLD THE SAME NUMBER, because a registry
+	// change is now the only thing either of them counts. They stay separate
+	// because the RULES stay separate: §7.2 says what must be published and B29
+	// says what may widen the window, and the next event that is one without the
+	// other should find the distinction already here rather than have to
+	// reintroduce it. Stats were that event until §24 removed them from both.
 	churn int
 	// broadcasts counts PEER_STATUS broadcast rounds for the life of the
 	// process, for the operator log line and for the churn harness's measured
@@ -1123,12 +1135,30 @@ func (s *Server) markChurnLocked() {
 	s.pending++
 }
 
-// markStatsLocked records a change to what the next broadcast SAYS without a
-// change to what the map IS — a stats block off a PING, and nothing else. It
-// bumps pending so the frame goes out, and deliberately NOT churn: the window
-// must not widen because a healthy map is breathing (§12
-// statusChurnBurstThreshold, §14 B4).
-func (s *Server) markStatsLocked() { s.pending++ }
+// THERE IS NO markStatsLocked, AND THAT IS THE POINT (§6.5, §14 B4; §24, B36).
+//
+// A STATS ARRIVAL SCHEDULES NOTHING. It is neither churn nor pending: it does
+// not change what the map IS, and §6.5 gives it one publisher by name — "also
+// sent on a statsBroadcastIntervalMs timer, BECAUSE STATS CHANGE WITHOUT THE
+// REGISTRY CHANGING". Storing the block against the peer is all an arrival
+// does; the next broadcast, timer-driven or registry-driven, carries whatever
+// is stored. Nothing is delayed by not scheduling — only the extra frame is.
+//
+// UNTIL §24 THIS BUMPED pending, and the cost was the map's whole broadcast
+// rate. Stats arrivals do not line up: seven peers each PINGing once every
+// statsIntervalMs land in seven different coalescing windows, so the relay
+// published PEER_STATUS at 1.32/s measured, one map-wide frame per arrival,
+// where §6.5 designs for one per 5 s. On the 2026-08-16 capture that was
+// ~246 GiB a month of PEER_STATUS the contract never asked for — and
+// publishLoop below already said so in its own words: the stats timer is "A
+// FLOOR ON FRESHNESS, NOT A SECOND SOURCE OF FRAMES".
+//
+// WHAT IT COSTS TO STOP. Stats freshness on the map moves from ~0.76 s to at
+// most statsBroadcastIntervalMs (5 s). §12's statsStaleMs is 30 s, so no
+// reader's staleness rule changes and nothing renders as unknown that did not
+// before. statsAsOfMs is unaffected in meaning: §6.5 defines it as the relay
+// clock when the block ARRIVED, never when it was published, so a reader ages
+// the stats from the arrival either way.
 
 func (s *Server) metaLocked(peerID string) *peerMeta {
 	m, ok := s.meta[peerID]
@@ -1197,13 +1227,17 @@ func (s *Server) dispatch(p *peer, frame []byte) bool {
 		if contractb.DecodeData(env.Data, &ping) == nil {
 			// §6.11: a PING from a peer MAY carry the stats block. The relay
 			// stores it against that peer with its own receivedAt, republishes
-			// it, and never routes, refuses, schedules or filters on a stat.
+			// it, and never routes, refuses, SCHEDULES or filters on a stat.
+			//
+			// "Schedules" is load-bearing and it was the bug (§24, B36). Storing
+			// the block is the whole of the work here; the frame that carries it
+			// out is statsBroadcastIntervalMs's, not this arrival's. See the note
+			// beside markChurnLocked above.
 			if p.role == contractb.RolePeer && ping.Stats != nil {
 				s.mu.Lock()
 				m := s.metaLocked(p.id)
 				m.stats = ping.Stats
 				m.statsAsOfMs = time.Now().UnixMilli()
-				s.markStatsLocked()
 				s.mu.Unlock()
 			}
 			s.send(p, contractb.TypePong, contractb.Pong{Nonce: ping.Nonce})

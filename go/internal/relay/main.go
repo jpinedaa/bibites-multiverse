@@ -371,7 +371,9 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 			time.Duration(*statusCoalesceMs)*time.Millisecond)),
 		"broadcastsPerMinuteUnderAStorm", int(maxBroadcastsPerMinute(
 			time.Duration(*statusCoalesceMaxMs)*time.Millisecond)),
-		"costPerBroadcast", "slotCount stats blocks to every peer AND every subscriber")
+		"costPerBroadcast", "slotCount stats blocks to every peer AND every subscriber",
+		"note", "a stats block arriving on a PING schedules NOTHING; §6.5's "+
+			"statsBroadcastIntervalMs timer is what carries it (§14 B4, §24 B36)")
 	// Whether the wire is compressed is the first thing to check when a transfer
 	// number does not move after a deploy, and it cannot be read off a frame: it
 	// is decided on the HTTP upgrade, per connection, by both ends. So the relay

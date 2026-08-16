@@ -44,6 +44,7 @@ import (
 	"multiverse/internal/contracta"
 	"multiverse/internal/contractb"
 	"multiverse/internal/peercred"
+	"multiverse/internal/wire"
 )
 
 // ---------------------------------------------------------------- B29's placement rules
@@ -1232,6 +1233,175 @@ func grants(p *credPeer) int {
 		}
 	}
 	return n
+}
+
+// ---------------------------------------------------------------- B36: the stats cadence
+
+// statsPing sends one stats-bearing PING, which is the frame §6.11 lets a peer
+// carry its stats block on and the frame §24 B36 stops treating as a broadcast
+// trigger.
+func statsPing(p *credPeer, population int) {
+	p.send(contractb.TypePing, contractb.Ping{
+		Nonce: wire.NewUUID(),
+		Stats: &contractb.PeerStats{Population: contractb.IntPtr(population)},
+	})
+}
+
+// TestB36AStatsBearingPingBroadcastsNothing is §24 B36's first half, and it is
+// the shape TestARepeatClaimThatChangesNothingBroadcastsNothing above already
+// proved for a re-claim: A FRAME THAT CHANGES NO REGISTRY STATE TELLS NOBODY.
+//
+// The bug it locks down was measured on the living deployment on 2026-08-16.
+// markStatsLocked bumped `pending` on every stats-bearing PING; seven peers
+// PINGing once per statsIntervalMs land in seven DIFFERENT coalescing windows,
+// so the relay broadcast the whole map at 1.32/s where §6.5 designs for one per
+// statsBroadcastIntervalMs. That was ~246 GiB a month of PEER_STATUS on a
+// 3,072 GiB allowance, for a frame the timer was going to send anyway.
+//
+// statsBroadcast is OUT OF REACH here, so any broadcast inside the window is a
+// stats-triggered one and nothing else.
+func TestB36AStatsBearingPingBroadcastsNothing(t *testing.T) {
+	r := startCredRelay(t, credRelayOptions{
+		statusCoalesce: 10 * time.Millisecond,
+		statsBroadcast: time.Hour,
+		limits: contractb.Limits{
+			MaxFramesPerSecond: 10000, MaxBytesPerSecond: 1 << 24, MaxClaimsPerMinute: 10000,
+		},
+	})
+	r.mint("breather", peercred.GrantPeer)
+	r.mint("observer", peercred.GrantPeer)
+	breather := r.dial(dialSpec{credentialPeer: "breather", claimPeer: "breather", sendHandshake: true})
+	observer := r.dial(dialSpec{credentialPeer: "observer", claimPeer: "observer", sendHandshake: true})
+	breather.claim()
+	observer.claim()
+	breather.wait(contractb.TypeSectorGrant, 2*time.Second)
+	observer.wait(contractb.TypeSectorGrant, 2*time.Second)
+	time.Sleep(150 * time.Millisecond)
+
+	baseline := r.srv.BroadcastCount()
+	observerFrames := len(observer.statuses())
+
+	// Twelve arrivals, each landing in a coalescing window of its own — which is
+	// exactly the shape that made the measured rate track the number of peers
+	// rather than the timer.
+	const pings = 12
+	last := 0
+	for i := 0; i < pings; i++ {
+		last = 100 + i
+		statsPing(breather, last)
+		time.Sleep(25 * time.Millisecond)
+	}
+	// Every PING is still answered: the peer is owed its PONG whatever the map
+	// is told, exactly as a re-claiming peer is owed its grant.
+	deadline := time.Now().Add(3 * time.Second)
+	for len(breather.findAll(contractb.TypePong)) < pings && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := len(breather.findAll(contractb.TypePong)); got < pings {
+		t.Fatalf("%d PINGs were answered with %d PONGs (closed=%v)", pings, got, breather.isClosed())
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	if got := r.srv.BroadcastCount() - baseline; got != 0 {
+		t.Fatalf("%d stats-bearing PINGs produced %d PEER_STATUS broadcasts, want 0 (§6.5, §14 "+
+			"B4, §24 B36: stats ride the statsBroadcastIntervalMs timer and schedule nothing)",
+			pings, got)
+	}
+	if got := len(observer.statuses()) - observerFrames; got != 0 {
+		t.Fatalf("the other peer was told %d times about a heartbeat that changed no registry "+
+			"state", got)
+	}
+	t.Logf("%d stats-bearing PINGs: %d PONGs to the sender, 0 broadcasts to the map", pings, pings)
+
+	// AND THE STATS ARE NOT LOST, which is the half that makes the suppression
+	// safe. The block was stored on arrival; the next broadcast the map makes for
+	// its own reasons carries it.
+	breather.send(contractb.TypeSectorClaim, contractb.SectorClaim{
+		SimulationSize: 2000, ModConnected: true,
+		ExportEdges: []string{"E"}, BorderEdges: []string{"E"},
+	})
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, st := range observer.statuses()[observerFrames:] {
+			for _, slot := range st.Slots {
+				if slot.PeerID != "breather" || slot.Stats == nil || slot.Stats.Population == nil {
+					continue
+				}
+				if *slot.Stats.Population != last {
+					continue
+				}
+				if slot.StatsAsOfMs == 0 {
+					t.Fatal("the republished stats block carried no statsAsOfMs; §6.5 requires a " +
+						"reader to age it from the moment it ARRIVED")
+				}
+				t.Logf("the next registry-driven broadcast carried population=%d, "+
+					"statsAsOfMs=%d", last, slot.StatsAsOfMs)
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no broadcast after the claim carried the last stats block (population %d); the "+
+		"suppression dropped the stats instead of deferring them", last)
+}
+
+// TestB36StatsRideTheTimerAndOnlyTheTimer is the other half: the broadcast rate
+// on a map whose only traffic is stats must track statsBroadcastIntervalMs and
+// NOT the arrival rate.
+//
+// It is the assertion the measured defect would have failed by a factor of the
+// peer count, and it is written as a RATE rather than a count for the reason
+// B29's own harness gives: a bound a test can assert is worth more than an
+// estimate a comment makes.
+func TestB36StatsRideTheTimerAndOnlyTheTimer(t *testing.T) {
+	const interval = 200 * time.Millisecond
+	r := startCredRelay(t, credRelayOptions{
+		statusCoalesce: 10 * time.Millisecond,
+		statsBroadcast: interval,
+		limits: contractb.Limits{
+			MaxFramesPerSecond: 10000, MaxBytesPerSecond: 1 << 24, MaxClaimsPerMinute: 10000,
+		},
+	})
+	r.mint("breather", peercred.GrantPeer)
+	breather := r.dial(dialSpec{credentialPeer: "breather", claimPeer: "breather", sendHandshake: true})
+	breather.claim()
+	breather.wait(contractb.TypeSectorGrant, 2*time.Second)
+	time.Sleep(2 * interval)
+
+	baseline := r.srv.BroadcastCount()
+	started := time.Now()
+	// One arrival every 20 ms for a second: ten times the timer's rate, and the
+	// cadence a busy map's peers collectively produce.
+	const pings = 50
+	for i := 0; i < pings; i++ {
+		statsPing(breather, 100+i)
+		time.Sleep(20 * time.Millisecond)
+	}
+	elapsed := time.Since(started)
+	got := r.srv.BroadcastCount() - baseline
+
+	// THE CEILING IS THE TIMER'S RATE, with one tick of slack for a busy host.
+	// It is a ceiling and not an equality on purpose: publishLoop skips a tick
+	// whose own last publish is younger than the interval (§14 B4's drift
+	// bound), so a run can legitimately land anywhere between one publish per
+	// interval and one per two.
+	ceiling := int64(elapsed/interval) + 1
+	if got > ceiling {
+		t.Fatalf("%d stats arrivals over %s produced %d broadcasts; the "+
+			"statsBroadcastIntervalMs timer bounds it at %d (§6.5, §14 B4, §24 B36) — the "+
+			"arrivals are scheduling frames again", pings, elapsed.Round(time.Millisecond),
+			got, ceiling)
+	}
+	// AND THE TIMER STILL FIRES. §6.5 makes it a floor on freshness, so a
+	// suppression that also stopped the timer would leave the map's stats
+	// frozen until the next registry change.
+	if got < 1 {
+		t.Fatalf("over %s with statsBroadcastIntervalMs=%s the relay broadcast nothing; the "+
+			"timer is a FLOOR ON FRESHNESS and §24 B36 does not remove it",
+			elapsed.Round(time.Millisecond), interval)
+	}
+	t.Logf("%d stats arrivals over %s produced %d broadcasts (the timer's ceiling is %d), "+
+		"not %d", pings, elapsed.Round(time.Millisecond), got, ceiling, pings)
 }
 
 // ---------------------------------------------------------------- the slot-space policy
