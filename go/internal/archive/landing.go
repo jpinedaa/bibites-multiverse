@@ -188,7 +188,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
   </section>
 
   <section class="shell section" id="game">
-    <div class="sectionhd"><span class="kicker">The original game</span><h2>The game behind every world.</h2><p>Every world on this map runs a copy of <em>The Bibites</em>.</p></div>
+    <div class="sectionhd"><span class="kicker">The original game</span><h2><em>The Bibites</em></h2><p>Every world on this map runs a copy of the game.</p></div>
     <div class="joinbox">
       <div class="joincopy"><p><em>The Bibites</em> is an artificial-life simulation created by Léo Caussan in 2017 and developed by <a href="https://www.thebibites.com/">Omnia Studios</a>. Every creature in it carries its own genes and a neural-network brain. Nothing scores them. Food, mutation, and natural selection do the work, until behavior like pheromone-trail hunting or stockpiling food appears on its own. Its creator's stated goal is to prove that “life doesn't have to be carbon-based.”</p>
       <p>It has been in open development since 2017, with public devlogs since 2019 and a talk at the ALIFE 2020 conference. Bibites Multiverse only gives it neighbors. The simulation itself is theirs.</p>
