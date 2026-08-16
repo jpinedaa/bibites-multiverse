@@ -29,6 +29,7 @@ e2e/baselines/20260805T230730Z/M3-Slot1.zip
 e2e/baselines/20260805T230730Z/M3-Slot3.zip
 e2e/baselines/20260805T230730Z/archive-list.txt.gz
 farend/dist/farend-bundle.zip
+go/internal/archive/assets/game-screenshot.jpg
 go/internal/archive/assets/social-card-live.png
 go/internal/archive/assets/social-card-watch.png
 go/internal/archive/assets/social-card.png
