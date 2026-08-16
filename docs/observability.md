@@ -66,6 +66,17 @@ cannot see a thirty-second stall, and reading one as though it could is how a
 day gets spent on the wrong hypothesis. Every series here states its interval,
 and every claim states the interval it rests on.
 
+**Do not collapse a three-state signal into two.** A world publishes `live` and
+`modConnected` and they are independent: `live` is the sidecar's membership of
+the relay registry, `modConnected` is whether the game is attached to that
+sidecar. The three real states are *live*, *connected but no game attached*, and
+*dark*. The public map draws all three. A reader that asks only "is it live"
+reports a world whose game has died as perfectly healthy — which is exactly what
+happened during a 151-restart crash loop that a `live`-only prober recorded as
+uneventful, and what let a deployment record state "seven live peers, none dark"
+eight seconds before the failing world last restarted. Read every state a signal
+can take, or the one you dropped is the one that fails.
+
 **Counters survive sampling; gauges do not.** A gauge read once a minute misses
 a thirty-second flap about half the time. A monotonic counter read once a
 minute captures every event in the gap, because two readings bracket
