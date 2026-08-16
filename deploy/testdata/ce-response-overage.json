@@ -1,0 +1,317 @@
+{
+    "GroupDefinitions": [
+        {
+            "Type": "DIMENSION",
+            "Key": "USAGE_TYPE"
+        }
+    ],
+    "ResultsByTime": [
+        {
+            "TimePeriod": {
+                "Start": "2026-08-01",
+                "End": "2026-08-02"
+            },
+            "Total": {},
+            "Groups": [
+                {
+                    "Keys": [
+                        "USE1-BundleUsage:2GB"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "24.0000000000",
+                            "Unit": "Hrs"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-SnapshotUsage"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.0169627856",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "0.3392557124",
+                            "Unit": "GB-Month"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-TotalDataXfer-In-Bytes"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "60.0000000000",
+                            "Unit": "GB"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-TotalDataXfer-Out-Bytes"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "40.0000000000",
+                            "Unit": "GB"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-UnusedStaticIP"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "0.0013955600",
+                            "Unit": "Hrs"
+                        }
+                    }
+                }
+            ],
+            "Estimated": true
+        },
+        {
+            "TimePeriod": {
+                "Start": "2026-08-02",
+                "End": "2026-08-03"
+            },
+            "Total": {},
+            "Groups": [
+                {
+                    "Keys": [
+                        "USE1-BundleUsage:2GB"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "24.0000000000",
+                            "Unit": "Hrs"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-SnapshotUsage"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.0169627856",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "0.3392557124",
+                            "Unit": "GB-Month"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-TotalDataXfer-In-Bytes"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "60.0000000000",
+                            "Unit": "GB"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-TotalDataXfer-Out-Bytes"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "40.0000000000",
+                            "Unit": "GB"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-UnusedStaticIP"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "0.0013955600",
+                            "Unit": "Hrs"
+                        }
+                    }
+                }
+            ],
+            "Estimated": true
+        },
+        {
+            "TimePeriod": {
+                "Start": "2026-08-03",
+                "End": "2026-08-04"
+            },
+            "Total": {},
+            "Groups": [
+                {
+                    "Keys": [
+                        "USE1-BundleUsage:2GB"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "24.0000000000",
+                            "Unit": "Hrs"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-DataXfer-Out-Overage-Bytes"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "1.1250000000",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "12.5000000000",
+                            "Unit": "GB"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-SnapshotUsage"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0.0169627856",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "0.3392557124",
+                            "Unit": "GB-Month"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-TotalDataXfer-In-Bytes"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "60.0000000000",
+                            "Unit": "GB"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-TotalDataXfer-Out-Bytes"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "40.0000000000",
+                            "Unit": "GB"
+                        }
+                    }
+                },
+                {
+                    "Keys": [
+                        "USE1-UnusedStaticIP"
+                    ],
+                    "Metrics": {
+                        "UnblendedCost": {
+                            "Amount": "0",
+                            "Unit": "USD"
+                        },
+                        "UsageQuantity": {
+                            "Amount": "0.0013955600",
+                            "Unit": "Hrs"
+                        }
+                    }
+                }
+            ],
+            "Estimated": true
+        },
+        {
+            "TimePeriod": {
+                "Start": "2026-08-04",
+                "End": "2026-08-05"
+            },
+            "Total": {
+                "UnblendedCost": {
+                    "Amount": "0",
+                    "Unit": "USD"
+                },
+                "UsageQuantity": {
+                    "Amount": "0",
+                    "Unit": "N/A"
+                }
+            },
+            "Groups": [],
+            "Estimated": true
+        },
+        {
+            "TimePeriod": {
+                "Start": "2026-08-05",
+                "End": "2026-08-06"
+            },
+            "Total": {
+                "UnblendedCost": {
+                    "Amount": "0",
+                    "Unit": "USD"
+                },
+                "UsageQuantity": {
+                    "Amount": "0",
+                    "Unit": "N/A"
+                }
+            },
+            "Groups": [],
+            "Estimated": true
+        }
+    ],
+    "DimensionValueAttributes": []
+}

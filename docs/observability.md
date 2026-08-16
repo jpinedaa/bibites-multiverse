@@ -246,7 +246,8 @@ capacity risks.
 | A transfer driver that has just appeared | `monitor.sh` `transfer-rate`: consecutive closed hours above an hourly limit | 5 min, free |
 | The loopback pin that keeps the archive's subscription off the billed interface | `monitor.sh` `hosts-pin` | 5 min, free |
 | A publisher spending a quarter of the allowance on an empty room | `deploy/viewers-presence.sh`: MediaMTX `hls_sessions` and non-loopback `/watch` and `/stream/` requests in the front-door access log, published at `/api/viewers` | 10 s, free |
-| Billing truth behind the three rows above | Cost Explorer `UsageQuantity` grouped by usage type | daily |
+| Billing truth behind the transfer rows above | `deploy/ce-reconcile.sh`: one Cost Explorer `get-cost-and-usage` call — DAILY granularity, `UsageQuantity` and `UnblendedCost`, grouped by usage type, filtered to the one service — plus two free instance-metric calls | daily, `$0.01` a day and `$0.31` a month |
+| Whether that reconciliation is still running | `monitor.sh` `billing`: the age of the file the reconciliation ships, and the overage quantity in it | 5 min, free |
 | Anything unexpected | A cost budget and an anomaly monitor scaled to this account | continuous |
 
 These facts shape this layer and each has cost someone an hour:
@@ -280,8 +281,17 @@ These facts shape this layer and each has cost someone an hour:
   rather than a bill.
 - **The Cost Explorer API is not free.** It is charged per paginated request.
   Polling it hourly costs more than it can possibly reveal, because the
-  underlying data refreshes only a few times a day. Daily is the correct
-  cadence.
+  underlying data refreshes only a few times a day, and it lags about fourteen
+  hours behind them. Daily is the correct cadence, and `$0.31/month` is its
+  whole price. The reconciliation therefore makes **exactly one call per run**
+  and passes `--no-paginate`; a `NextPageToken` in the answer stops the run
+  rather than buying a second page, because a query this narrow does not page
+  and a token means the question changed.
+- **The reconciliation cannot run on the host.** It needs a cloud credential,
+  and the service host deliberately holds none. So it runs from an operator
+  machine and ships one small JSON file to the host over `ssh`, atomically,
+  where the monitor reads it. That is the only reason the whole cost layer can
+  reach an alert channel without putting a key on a public-facing box.
 
 **Two projections, because each is blind where the other sees.** The
 month-to-date burn-down cannot be fooled by a quiet afternoon and is meaningless
@@ -312,6 +322,34 @@ The `127.0.0.1` pin is what keeps that ~54 GB/day subscription on loopback and
 off the bill. Lose it and billed transfer roughly doubles while every health
 signal stays green, which is precisely the class of failure this document exists
 to catch.
+
+**A reading that arrives from off-box has absence as its first failure.** Every
+other check in this document fails by reading something bad. The `billing` check
+fails by reading nothing, because the machine that writes its input is an
+operator's, and operator machines close. So a missing or stale reconciliation is
+reported rather than skipped: it is a WARNING and never a critical, since the
+NIC counter is still watching the allowance and what has been lost is the audit
+rather than the alarm. The window is 36 hours — a daily job, plus one missed
+run, plus the provider's own lag — so one failed run is not an alert and two
+are. What *is* critical is a billed overage quantity, which is the provider
+stating that the meter is running and is the one reading here that is not an
+inference.
+
+**The two instruments are compared over the same days, and their residual is
+published rather than corrected.** The instance metric sums about `1.01` times
+the Cost Explorer quantity in the same window. Nobody can explain the last
+percent, so correcting it would hide the day it changes; the ratio is written
+into the file and the monitor warns outside a band of `0.10` either side of 1.
+The comparison uses only the days Cost Explorer has settled — never
+month-to-date against month-to-date, because the fourteen-hour lag alone would
+put that comparison tens of percent out and cost somebody a day.
+
+**The principal is the account root, read-only, and that is a recorded
+acceptance rather than an oversight.** On 2026-08-16 the owner accepted continued
+read-only use of the existing profile for metrics and billing reads, and declined
+a scoped IAM user for it. The written reconciliation carries that sentence in its
+`principal` field, so the fact travels with the reading instead of living only in
+a decision record. Every call the reconciliation makes is read-only.
 
 The default anomaly detection on a new account will not fire below a large
 absolute impact, which on an account of this size means it can never fire. It
@@ -497,6 +535,15 @@ what is actually running.
   hot hours, and the `/etc/hosts` loopback pin. It needs no cloud credential,
   which is the only reason it can run on this host at all.
   `deploy/test-monitor.sh` exercises its arithmetic off-host.
+- **The daily billing reconciliation.** `deploy/ce-reconcile.sh` runs on an
+  operator machine, makes one Cost Explorer call and two free instance-metric
+  calls, and ships `billing.json` to the host over `ssh`. `monitor.sh`
+  `billing` reads it every five minutes: a billed overage is critical, and a
+  reconciliation that stopped arriving is a warning that names the script and
+  the machine it runs from. `deploy/test-ce-reconcile.sh` parses a saved
+  response under `deploy/testdata/` against a fake metric provider, so the
+  parser is covered without spending `$0.01` a run or depending on a figure
+  that changes daily.
 - **The archive memory gate, divided by physical RAM alone.** `monitor.sh`
   `replay` projects the archive's resident set and replay peak from the ledger
   record count and compares the larger against `MemTotal`. **Swap is not in
@@ -524,28 +571,28 @@ what is actually running.
   back applies its target scale again instead of running silently at `x1`.
 
 Every reading above is a file on the host that produced it, and a person is the
-only reader.
+only reader. The one exception is the reconciliation, which is produced
+elsewhere and read by the monitor — and which is exactly why the monitor has to
+report its absence.
 
 ### What does not exist yet
 
-Nothing ships a measurement off-box: no metrics agent, no time-series store, no
-log shipping, no dashboard, no continuous profiling. The Layer 3 path probe has
-not been written. The relay still does not log a close code, so the
+No *continuous* measurement ships off-box: no metrics agent, no time-series
+store, no log shipping, no dashboard, no continuous profiling. The daily
+reconciliation is the one exception and it travels the other way — an operator
+machine reads the provider and writes one file to the host. The Layer 3 path
+probe has not been written. The relay still does not log a close code, so the
 highest-value change named in this document is still unmade. On the cost side
-the transfer check now alerts from the host's own NIC counter, but nothing
-reconciles it against the bill: the daily Cost Explorer call is not scheduled,
-and there is still no budget and no replacement for the default anomaly
-threshold. Reconciliation needs a scoped IAM principal, which this account does
-not have.
+there is still no budget and no replacement for the default anomaly threshold.
 
 The phases below keep their order. Everything in them remains to be done,
 except where a phase says otherwise.
 
 **Phase 0 — no new daemon, no production change.** Read the existing JSONL
 files. Import them into a time-series database on a workstation; they are
-already time series and cover the whole service period. Switch the cost report
-to daily granularity. Create the free budgets and replace the default anomaly
-threshold. Point the existing webhook alert channel at somewhere a person
+already time series and cover the whole service period. Create the free budgets
+and replace the default anomaly threshold; the daily reconciliation above
+already covers the daily-granularity half of this phase. Point the existing webhook alert channel at somewhere a person
 looks. Confirm both clocks are disciplined, because every cross-host ordering
 claim depends on it.
 

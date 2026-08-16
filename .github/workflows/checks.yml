@@ -127,6 +127,16 @@ jobs:
       - name: monitor transfer arithmetic
         run: deploy/test-monitor.sh
 
+      # The other half of the same money check. ce-reconcile.sh parses the
+      # provider's billing answer, and that parser cannot be exercised against
+      # the live API: each Cost Explorer call costs $0.01 and its answer changes
+      # every day, so a test that called it would be both expensive and
+      # non-repeatable. It runs against a saved response under deploy/testdata
+      # and a fake metric provider, so it needs no AWS account, no network and
+      # no host, and it spends nothing.
+      - name: Cost Explorer reconciliation arithmetic
+        run: deploy/test-ce-reconcile.sh
+
       # The viewer-presence signal decides whether the broadcast publishes at
       # all, so both of its failure modes are expensive and neither is visible
       # from the host: a false negative takes the stream off the air in front of
