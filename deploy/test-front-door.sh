@@ -17,6 +17,7 @@ render() {
       -e "s|@@MV_TLSDIR@@|$TMP/tls|g" \
       -e "s|@@ACME_ROOT@@|$TMP/acme|g" \
       -e "s|@@WWW_ROOT@@|$TMP/www|g" \
+      -e "s|@@MV_NGINX_LOGDIR@@|$TMP/nginxlog|g" \
       -e "s|/var/log/nginx|$TMP/logs|g" \
       "$1" >"$2"
 }

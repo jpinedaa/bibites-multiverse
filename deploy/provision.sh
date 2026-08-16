@@ -87,6 +87,7 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_PREFIX:=/opt/multiverse}"
 : "${MV_STATE:=/var/lib/multiverse}"
 : "${MV_LOGDIR:=/var/log/multiverse}"
+: "${MV_NGINX_LOGDIR:=/var/log/multiverse/nginx}"
 : "${MV_TLSDIR:=/etc/multiverse/tls}"
 : "${MV_STAGE_DIR:=/home/ubuntu/multiverse-stage}"
 : "${MV_RELAY_PORT:=443}"
@@ -286,7 +287,15 @@ phase_directories() {
   run install -d -m 0755 -o root -g root "$MV_PREFIX" "$BIN"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE" "$RELAY_DATA" "$ARCHIVE_DATA"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE/backup" "$MV_STATE/monitor"
-  run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_LOGDIR"
+  # 0751, not 0750: nginx runs as www-data, which is not in the multiverse
+  # group, and it must be able to REACH its own log directory below. The
+  # execute bit grants traversal to a known name and nothing else — the
+  # directory still cannot be listed, so relay.log and archive.log are no
+  # more discoverable than they were.
+  run install -d -m 0751 -o "$MV_USER" -g "$MV_GROUP" "$MV_LOGDIR"
+  # The front door writes here rather than to /var/log/nginx, so that the
+  # kit owns its rotation policy. See deploy/nginx/logrotate-multiverse.
+  run install -d -m 0750 -o www-data -g adm "$MV_NGINX_LOGDIR"
   run install -d -m 0755 -o root -g root "$ACME_ROOT" "$ACME_ROOT/.well-known"
   # The kit itself lives on the box, because RESTART-POLICY.md is a document an
   # operator reads at 03:00 on the machine that is misbehaving — and because the
@@ -320,6 +329,14 @@ phase_directories() {
     run install -m 0644 -o root -g root "$f" \
       "$MV_PREFIX/deploy/www/announcements/$(basename "$f")"
   done
+  # The front door's rotation policy. Installed here rather than in the
+  # nginxfront phase because it is kit content and must land on a host whose
+  # nginx is not configured yet; `missingok` covers the gap.
+  if [ -d /etc/logrotate.d ]; then
+    render_template "$KIT_DIR/nginx/logrotate-multiverse" /etc/logrotate.d/multiverse-nginx
+  else
+    say "no /etc/logrotate.d — the front-door rotation policy was NOT installed"
+  fi
   say "state $MV_STATE  logs $MV_LOGDIR  tls $MV_TLSDIR  kit $MV_PREFIX/deploy"
 }
 
@@ -577,6 +594,7 @@ render_template() {
       -e "s|@@MV_TLSDIR@@|$MV_TLSDIR|g" \
       -e "s|@@ACME_ROOT@@|$ACME_ROOT|g" \
       -e "s|@@WWW_ROOT@@|$WWW_ROOT|g" \
+      -e "s|@@MV_NGINX_LOGDIR@@|$MV_NGINX_LOGDIR|g" \
       "$src" | write_file "$dst" 0644 root:root
   say "rendered $dst"
 }
