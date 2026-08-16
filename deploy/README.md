@@ -23,6 +23,7 @@ Keep these records outside the public repository:
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
+| `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, and backup. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
@@ -188,6 +189,7 @@ Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
 
 Use `test-front-door.sh` after an nginx template change.
+Use `test-units.sh` after a systemd unit change.
 Use the provisioning verification phase after any host change.
 
 ## Public and private records
@@ -214,6 +216,7 @@ Run these checks after a public kit change:
 ```sh
 bash -n deploy/*.sh
 deploy/test-front-door.sh
+deploy/test-units.sh
 ```
 
 Run `shellcheck` when it is available.
