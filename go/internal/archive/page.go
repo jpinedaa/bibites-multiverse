@@ -785,6 +785,16 @@ margin:0 auto 20px;color:var(--dim)}.mapempty b{display:block;font-size:18px;col
 .cell.live .statelbl,.cell.live .statedot{fill:var(--live)}
 .cell.dark .statelbl,.cell.dark .statedot{fill:var(--dark)}
 .cell.hole .statelbl,.cell.hole .statedot{fill:var(--hole)}
+/* The broadcast badge on a cell. It is drawn in the lane blue rather than in
+   either state colour, so it cannot be read as a world being live or dark, and
+   it is the same blue the settings card's chip uses — one fact, one colour, on
+   both tabs. A dark world can still be the one on camera, so no .cell.dark rule
+   dims it. */
+.bcastmark{cursor:pointer}
+.bcastmark .bcastpill{fill:none;stroke:var(--lane);stroke-width:1.2}
+.bcastmark .bcastlbl{fill:var(--lane);font-size:8.5px;font-weight:700;letter-spacing:.08em}
+.bcastmark:hover .bcastpill,.bcastmark:focus-visible .bcastpill{stroke:var(--hot)}
+.bcastmark:hover .bcastlbl,.bcastmark:focus-visible .bcastlbl{fill:var(--hot)}
 /* The arrival flash. It is a PURE OPACITY FADE — nothing moves, nothing is
    scaled, nothing slides — so it is deliberately kept when the page is told to
    reduce motion. With travel switched off it is half of what tells a reader a
@@ -1020,6 +1030,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
         <span><i class="bibi"></i><span class="term" data-t="species">one creature, coloured by species</span></span>
         <span><i class="eggi"></i><span class="term" data-t="egg">an egg</span></span>
         <span><i class="bibi unc"></i><span class="term" data-t="unclassed">no species record</span></span>
+        <span><span class="term" data-t="broadcast">on camera</span></span>
       </span>
     </h2>
     <div class="mapstage" id="mapstage">
@@ -1272,6 +1283,7 @@ var G = {
  live:["live","This world is connected right now: it can send creatures and it can receive them."],
  dark:["dark","This world is not connected right now — the game is closed, the machine is off, or the network dropped. Its seat stays on the map, and the worlds pointing at it reach past it instead."],
  hole:["hole","An empty seat: a square inside the map that no world has claimed. Lanes step straight over it in both directions."],
+ broadcast:["on camera","The one world the shared camera at /watch is pointed at. Nothing on the wire says this — a world does not announce that it is being filmed — so the deployment that runs the camera is what names it, and if it names none the pages say so rather than guess. It is a fact about the camera and about nothing else: the world is placed, connected and paced exactly like every other one. The badge is a link to the broadcast, and it is drawn on the map cell, in the worlds table and on that world's settings card."],
  bypass:["bypass / route-around","When a world goes dark, the lane that pointed at it does not shut down — it reaches over that world to the next one that is actually there, and the current keeps flowing. That is the good news and the danger at once: everything can look healthy while a world has been dead since yesterday. So a bypass is always drawn as a warning, with what it is skipping and for how long."],
  custody:["custody","Exactly one side is holding a travelling creature at any instant, and it is written to disk before it is handed over. The sender keeps it until the receiver confirms the creature arrived; only then does the sender let go."],
  custodyDepth:["custody depth","How many creatures this world is holding mid-journey right now — sent but not yet confirmed, plus arrived but not yet let into the world."],
@@ -1341,6 +1353,7 @@ var G = {
 
 (function buildGlossary(){
   var keys = ["world","slot","position","peer","lane","edge","shuttle","wrap","live","dark","hole",
+    "broadcast",
     "bypass","migration","hopfeed","envelope","population","species","census","alive","egg","unclassed",
     "rawname","endemic","everywhere","excluded","seedstock","crossings","speciesgenomes",
     "parentspecies",
@@ -1444,6 +1457,30 @@ var CW=200, CH=166, GX=88, GY=80, MG=96, WOUT=40, WBAR=58;
    caps the drawing, never the truth: past it one glyph stands for several and
    the cell says so. */
 var BCOLS=14, BROWS=5, BCAP=BCOLS*BROWS, BPX=12, BPY=13;
+/* The cell's inner margin, and the state mark on the second line: SDOTX is how
+   far the dot sits left of the label it belongs to, SDOTR its radius. They are
+   named because a SECOND thing now depends on them — the peer id on that same
+   line has to stop before them, and a truncation measured against the cell's
+   edge instead of against the dot would run the id straight under the state. */
+var CPAD=16, SDOTX=9, SDOTR=3.4;
+/* Truncating the peer id on a cell's position line. A peer id is 1 to 64
+   characters (contract-b-m4.md §6.1) and an SVG text neither wraps nor clips,
+   so a long one used to be drawn over the world next door. POSCW is one
+   character of that line's font measured at 11.5px — every monospace in the
+   stack advances 0.6016em — and POSGAP is the clearance kept from the state
+   dot. POSW is therefore what the line has left once the state mark has taken
+   its end of it, before the label's own width is subtracted per cell.
+   NOTHING IS TRUNCATED ANYWHERE ELSE: the cell's tooltip, the worlds table and
+   the settings card all still carry the whole id, and this is the one place
+   where a cell is too narrow to hold it. */
+var POSCW=6.92, POSGAP=6, POSW=CW-CPAD-CPAD-SDOTX-SDOTR-POSGAP;
+/* The broadcast badge: a pill on the free strip above a cell's slot number,
+   drawn on the one world the deployment says the shared camera at /watch is
+   showing. It is the only strip of a cell nothing else claims — the slot number
+   and the population both start lower — and every number here is a CONSTANT, so
+   no peer-chosen text can ever reach the mark or move it. BCW is the nine
+   characters of the label at its own size plus the pill's padding. */
+var BCX=CPAD, BCY=1, BCW=66, BCH=12, BCTX=CPAD+7, BCTY=10;
 var mapSig = "", anim = [], reduced = false, prevMig = {}, rafId = 0;
 /* The hop animation's state (§17, B14). hopLayer sits ABOVE the cells;
    everything else is bounded on purpose and the bounds are named at HOPMS. */
@@ -1466,6 +1503,18 @@ var hopLayer = null, hopSeen = {}, hopSeenQ = [], hopQ = [], hopsLive = [],
 var LSEP = 13;
 function cellX(c){ return MG + c*(CW+GX); }
 function cellY(r,h){ return MG + (h-1-r)*(CH+GY); }
+/* How much of a peer id a cell can actually show. The position line shares its
+   baseline with the state dot and the state label, which are right-aligned, so
+   the room is POSW less that label's own width — measured with the same 7
+   pixels a character the dot is placed with — and the "(col,row) " in front is
+   spent out of the same budget. Two characters is the floor: at that width the
+   line is a coordinate and a mark saying the name was cut, which is still true.
+   The whole id is one hover away in the cell's own tooltip. */
+function posPeer(id, prefix, lbl){
+  var room = Math.floor((POSW - 7*lbl.length) / POSCW) - prefix.length;
+  if (room < 2) room = 2;
+  return id.length > room ? id.slice(0, room-1)+"…" : id;
+}
 /* laneY/laneX are the centreline; laneOff pushes one direction off it. */
 function laneY(r,h){ return cellY(r,h) + CH*0.58; }
 function laneX(c){ return cellX(c) + CW*0.5; }
@@ -1484,7 +1533,8 @@ function signature(d){
   for (var i=0;i<d.slots.length;i++){
     var v = d.slots[i];
     s += v.slot+","+v.position.col+","+v.position.row+","+(v.live?1:0)+","
-       + (v.modConnected?1:0)+","+(v.statsKnown?1:0)+","+esc(v.peerId)+";";
+       + (v.modConnected?1:0)+","+(v.statsKnown?1:0)+","+(v.broadcast?1:0)+","
+       + esc(v.peerId)+";";
   }
   s += "|";
   for (var j=0;j<d.lanes.length;j++){
@@ -1728,6 +1778,7 @@ function buildMap(d){
       }
       var state = v.live ? "live" : "dark";
       var lbl = v.live ? (v.modConnected ? "live" : "no game") : "dark";
+      var pfx = '('+v.position.col+','+v.position.row+') ';
       // The <title> is EMPTY here and filled by paintMap with textContent. It
       // carries species names, which are attacker-choosable text (§13 item 7),
       // and this string becomes innerHTML — so no name may ever reach it. It is
@@ -1737,13 +1788,30 @@ function buildMap(d){
         + '<title id="ctitle-'+v.slot+'"></title></rect>'
         + '<rect class="cellhit" x="'+(x+2)+'" y="'+(y+2)+'" width="'+(CW-4)+'" height="'+(CH-4)
         + '" rx="9"/>'
-        + '<text class="slotno term" data-t="slot" x="'+(x+16)+'" y="'+(y+30)+'">slot '+v.slot+'</text>'
-        + '<text class="pos" x="'+(x+16)+'" y="'+(y+48)+'">('+v.position.col+','+v.position.row
-        + ') <tspan class="term" data-t="peer">'+esc(v.peerId)+'</tspan></text>'
-        + '<text class="popnum" id="cpop-'+v.slot+'" text-anchor="end" x="'+(x+CW-16)+'" y="'
+        // The one world the shared camera at /watch is showing, when the
+        // deployment has named one. The map is where a reader looks at the
+        // worlds, so it is marked here as well as on the settings card, in the
+        // same lane blue, and it is a LINK for the same reason that one is:
+        // "which world am I watching" and "show me that world" are one question
+        // from opposite ends. Every coordinate in it is a constant — no peer
+        // text reaches this mark, and none can move it.
+        + (v.broadcast
+            ? '<a class="bcastmark" href="/watch">'
+              + '<title>broadcast world — on camera at /watch</title>'
+              + '<rect class="bcastpill" x="'+(x+BCX)+'" y="'+(y+BCY)+'" width="'+BCW
+              + '" height="'+BCH+'" rx="'+(BCH/2)+'"/>'
+              + '<text class="bcastlbl" x="'+(x+BCTX)+'" y="'+(y+BCTY)+'">ON CAMERA</text>'
+              + '</a>'
+            : '')
+        + '<text class="slotno term" data-t="slot" x="'+(x+CPAD)+'" y="'+(y+30)+'">slot '+v.slot+'</text>'
+        // The peer id is CUT TO WHAT FITS here and nowhere else: see posPeer.
+        + '<text class="pos" x="'+(x+CPAD)+'" y="'+(y+48)+'">'+pfx
+        + '<tspan class="term" data-t="peer">'+esc(posPeer(v.peerId, pfx, lbl))+'</tspan></text>'
+        + '<text class="popnum" id="cpop-'+v.slot+'" text-anchor="end" x="'+(x+CW-CPAD)+'" y="'
         + (y+32)+'"></text>'
-        + '<circle class="statedot" cx="'+(x+CW-16-7*lbl.length-9)+'" cy="'+(y+44)+'" r="3.4"/>'
-        + '<text class="statelbl" text-anchor="end" x="'+(x+CW-16)+'" y="'+(y+48)+'">'+lbl+'</text>'
+        + '<circle class="statedot" cx="'+(x+CW-CPAD-7*lbl.length-SDOTX)+'" cy="'+(y+44)
+        + '" r="'+SDOTR+'"/>'
+        + '<text class="statelbl" text-anchor="end" x="'+(x+CW-CPAD)+'" y="'+(y+48)+'">'+lbl+'</text>'
         // The creature field is empty markup translated into place; every glyph
         // in it is built by paintSpecies with createElementNS, for the same
         // reason the title above is empty.
@@ -1901,6 +1969,9 @@ function cellTitle(v){
   var s = "slot "+v.slot+" ("+v.position.col+","+v.position.row+")  peer "+v.peerId+"\n"
     + (v.live ? (v.modConnected ? "live" : "connected, but no game attached") : "dark");
   if (!v.live && v.darkForMs != null) s += " for "+ms(v.darkForMs);
+  // The peer id above is the WHOLE one. The cell's own line cuts it to what
+  // fits; this is where a reader gets the rest of it back.
+  if (v.broadcast) s += "\nbroadcast world — on camera at /watch";
   s += "\npopulation " + (v.statsKnown && v.population!=null ? v.population : "unknown");
   if (v.statsKnown){
     var acT = achievedText(v);
@@ -5349,8 +5420,16 @@ function renderMap(d){
     var dep = paceDepthText(v), cap = paceRateText(v);
     var pace = (dep === "?" ? '<span class="unknown">?</span>' : dep) + "/"
       + (cap === "?" ? '<span class="unknown">?</span>' : cap);
+    // The same badge the settings card carries, on the same fact, beside the
+    // WHOLE peer id — this table is one of the three places the map cell's cut
+    // id can be read in full. It is a constant string: nothing a peer chose
+    // reaches it.
+    var bcast = v.broadcast
+      ? ' <a class="chip bcast" href="/watch" title="the shared camera at /watch is showing'
+        + ' this world">broadcast world</a>'
+      : "";
     return "<tr><td>"+v.slot+"</td><td>("+v.position.col+","+v.position.row+")</td>"
-      + "<td>"+esc(v.peerId)+"</td><td>"+state+"</td>"
+      + "<td>"+esc(v.peerId)+bcast+"</td><td>"+state+"</td>"
       + '<td class="num">'+speed+'</td>'
       + '<td class="num">'+num(v.population)+'</td>'
       + '<td class="spx" id="wsp-'+v.slot+'"></td>'

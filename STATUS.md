@@ -33,7 +33,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
 | Homepage | Links the Windows setup, Linux complete package, and `v0.2.3` checksums |
 | Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. |
-| Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges the same world and links back to the broadcast. |
+| Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 
 The release page provides checksums. The participant installer compares the game build with
 the support matrix before it changes the game directory. The Windows GUI starts the connected
