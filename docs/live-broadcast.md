@@ -84,7 +84,15 @@ a symbol of the map rectangle with that world's cell lit.
 It uses the same `(column,row)` the live map prints, so a reader can hold the two pages together.
 It also links to the live map.
 
-The live map badges the same world in its settings card and links back to the broadcast page.
+The live map badges the same world in three places: its cell on the map, its row in the worlds
+table, and its settings card.
+Every badge links back to the broadcast page.
+The cell badge is a pill marked `ON CAMERA` above the slot number.
+
+A map cell is too narrow for a long peer id.
+The cell therefore shows only as much of the id as fits beside the state label, and it ends a cut
+id with an ellipsis.
+The cell tooltip, the worlds table, the settings card, and `/api/status` all keep the whole id.
 
 Three states are unknown, and each says so instead of naming a world:
 

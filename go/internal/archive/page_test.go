@@ -2,6 +2,9 @@ package archive
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -163,6 +166,248 @@ func TestTheLiveMapCanFillTheViewport(t *testing.T) {
 	if !strings.Contains(page, `button.setAttribute("aria-pressed", active ? "true" : "false")`) ||
 		!strings.Contains(page, `? "Exit fullscreen live map" : "Show the live map in fullscreen"`) {
 		t.Fatal("the fullscreen control does not publish its current state and action")
+	}
+}
+
+// TestTheMapMarksTheBroadcastWorld covers the first of the two map defects: the
+// settings card badged the world the shared camera at /watch is showing and the
+// map tab said nothing at all, so the tab a reader actually looks at was the one
+// tab that could not answer "which of these am I watching".
+//
+// The mark is on BOTH places the map tab shows a world — the SVG cell and the
+// worlds table — and in both it is a LINK to the broadcast, for the reason the
+// settings card's badge is one: "which world am I watching" and "show me that
+// world" are one question from opposite ends.
+//
+// The three properties that matter are asserted rather than the pixels:
+//
+//	IT IS BUILT FROM CONSTANTS. The badge lands in a string that becomes
+//	innerHTML, and a peer id is another peer's chosen text — so nothing about
+//	this mark may be derived from one, not its label and not its geometry.
+//
+//	IT IS THE SETTINGS TAB'S COLOUR. One fact rendered in two blues on two tabs
+//	is two facts to a reader.
+//
+//	IT CAN APPEAR AND DISAPPEAR. The cell is drawn once per map signature and
+//	repainted after that, so a flag the signature does not carry is a badge that
+//	sticks to the wrong world.
+func TestTheMapMarksTheBroadcastWorld(t *testing.T) {
+	page := statusPageHTML
+
+	// The SVG cell's badge: drawn only for the named world, and a link.
+	for _, want := range []string{
+		"+ (v.broadcast",
+		`? '<a class="bcastmark" href="/watch">'`,
+		`+ '<title>broadcast world — on camera at /watch</title>'`,
+		`+ '<text class="bcastlbl" x="'+(x+BCTX)+'" y="'+(y+BCTY)+'">ON CAMERA</text>'`,
+		`: '')`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the map cell carries no broadcast badge: %q missing", want)
+		}
+	}
+	// Its geometry is constants and nothing else. x and y are the cell's own
+	// corner; every other number comes from the BC* block beside CW and CH.
+	if !strings.Contains(page, "var BCX=CPAD, BCY=1, BCW=66, BCH=12, BCTX=CPAD+7, BCTY=10;") {
+		t.Fatal("the badge's geometry is not a named set of constants")
+	}
+	if !strings.Contains(page,
+		`+ '<rect class="bcastpill" x="'+(x+BCX)+'" y="'+(y+BCY)+'" width="'+BCW`) {
+		t.Fatal("the badge's pill is not placed from the constants that name it")
+	}
+	// THE LABEL IS A LITERAL. Nothing a peer chose may reach a mark that lands
+	// in innerHTML, so the badge never reads a field of v other than the flag.
+	badge := page[strings.Index(page, `? '<a class="bcastmark" href="/watch">'`):]
+	badge = badge[:strings.Index(badge, `: '')`)]
+	for _, forbidden := range []string{"v.peerId", "esc(", "v.slot", "posPeer"} {
+		if strings.Contains(badge, forbidden) {
+			t.Fatalf("the badge is built from %q; a mark that lands in innerHTML is built "+
+				"from constants or it is a way in for another peer's chosen text", forbidden)
+		}
+	}
+	// The same blue the settings chip uses, and never a state colour: a dark
+	// world can still be the one on camera.
+	for _, want := range []string{
+		".bcastmark .bcastpill{fill:none;stroke:var(--lane);stroke-width:1.2}",
+		".bcastmark .bcastlbl{fill:var(--lane);font-size:8.5px;font-weight:700;letter-spacing:.08em}",
+		".chip.bcast{color:var(--lane);border-color:var(--lane);text-decoration:none}",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the badge does not agree with the settings chip's colour: %q missing", want)
+		}
+	}
+	if strings.Contains(page, ".cell.dark .bcastmark") || strings.Contains(page, ".cell.live .bcastmark") {
+		t.Fatal("the badge is dimmed or recoloured by a world's state; being on camera and " +
+			"being live are two different facts")
+	}
+	// The cell is rebuilt on its signature, so the flag has to be in it or the
+	// badge outlives the world it was drawn for.
+	if !strings.Contains(page, `+ (v.modConnected?1:0)+","+(v.statsKnown?1:0)+","+(v.broadcast?1:0)+","`) {
+		t.Fatal("the map signature does not carry the broadcast flag; the badge would survive " +
+			"the camera being pointed somewhere else")
+	}
+	// The cell's tooltip says it in words, beside the WHOLE peer id.
+	if !strings.Contains(page, `if (v.broadcast) s += "\nbroadcast world — on camera at /watch";`) {
+		t.Fatal("the cell's tooltip never says the world is the one on camera")
+	}
+	// The worlds table carries the settings card's own chip, on the same fact.
+	for _, want := range []string{
+		`? ' <a class="chip bcast" href="/watch" title="the shared camera at /watch is showing'`,
+		`+ ' this world">broadcast world</a>'`,
+		`+ "<td>"+esc(v.peerId)+bcast+"</td><td>"+state+"</td>"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the worlds table does not badge the broadcast world: %q missing", want)
+		}
+	}
+	// And the settings card still does what it always did.
+	if !strings.Contains(page, `var watch = el("a", "chip bcast", "broadcast world");`) {
+		t.Fatal("the settings card's badge was lost while the map grew one")
+	}
+	// The map invents no jargon it does not explain: the legend names the mark
+	// and the glossary defines it.
+	if !strings.Contains(page, `<span><span class="term" data-t="broadcast">on camera</span></span>`) {
+		t.Fatal("the map legend never names the badge")
+	}
+	if !strings.Contains(page, ` broadcast:["on camera",`) || !strings.Contains(page, `"hole",
+    "broadcast",`) {
+		t.Fatal("the glossary never explains what being on camera means, or never lists it")
+	}
+}
+
+// TestALongPeerIdIsCutToTheCellAndNowhereElse covers the second map defect. A
+// peer id is 1 to 64 characters (contract-b-m4.md §6.1) and the deployment's own
+// is 39 of them; SVG text neither wraps nor clips, so the position line of a
+// cell used to be drawn straight over the world next door.
+//
+// THE LINE'S BUDGET IS NOT THE CELL'S WIDTH. That line shares its baseline with
+// the state dot and the state label, which are right-aligned, so an id measured
+// against the cell edge would clear the edge and run under the state instead.
+// posPeer measures against the dot, out of the same constants that place it.
+//
+// AND IT IS CUT IN ONE PLACE ONLY. The cell's tooltip, the worlds table and the
+// settings card each carry the whole id, and so does /api/status — the cut is a
+// drawing decision about a 200-unit-wide box and never a fact about the world.
+func TestALongPeerIdIsCutToTheCellAndNowhereElse(t *testing.T) {
+	page := statusPageHTML
+
+	for _, want := range []string{
+		"var CPAD=16, SDOTX=9, SDOTR=3.4;",
+		"var POSCW=6.92, POSGAP=6, POSW=CW-CPAD-CPAD-SDOTX-SDOTR-POSGAP;",
+		"function posPeer(id, prefix, lbl){",
+		"var room = Math.floor((POSW - 7*lbl.length) / POSCW) - prefix.length;",
+		"if (room < 2) room = 2;",
+		`return id.length > room ? id.slice(0, room-1)+"…" : id;`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("the position line has no budget of its own: %q missing", want)
+		}
+	}
+	// The state mark is placed from the SAME constants the budget is measured
+	// with. Two spellings of one geometry is one of them going stale.
+	if !strings.Contains(page, `+ '<circle class="statedot" cx="'+(x+CW-CPAD-7*lbl.length-SDOTX)+'" cy="'+(y+44)`) ||
+		!strings.Contains(page, `+ '" r="'+SDOTR+'"/>'`) {
+		t.Fatal("the state dot is placed by numbers the truncation cannot see")
+	}
+	// The cut string is still escaped: it is another peer's chosen text, shorter.
+	if !strings.Contains(page,
+		`+ '<tspan class="term" data-t="peer">'+esc(posPeer(v.peerId, pfx, lbl))+'</tspan></text>'`) {
+		t.Fatal("the cell's peer id is not cut, or is no longer escaped after being cut")
+	}
+	// NOWHERE ELSE. Each of the three full-length readings is asserted by the
+	// exact expression that produces it.
+	for _, want := range []string{
+		`var s = "slot "+v.slot+" ("+v.position.col+","+v.position.row+")  peer "+v.peerId+"\n"`,
+		`+ "<td>"+esc(v.peerId)+bcast+"</td><td>"+state+"</td>"`,
+		`left.appendChild(el("span", "peer", v.peerId));`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("a full-length reading of the peer id was lost: %q missing", want)
+		}
+	}
+	if strings.Count(page, "posPeer(") != 2 {
+		t.Fatal("the peer id is cut somewhere other than the map cell; the tooltip, the " +
+			"worlds table and the settings card are where a reader gets the whole of it back")
+	}
+}
+
+// TestTheBroadcastWorldIsMarkedOnTheFrameThePageDraws is the served half of the
+// two tests above. A Go test cannot run this page's JavaScript, so it pins the
+// two things the drawing is derived from and would silently break on:
+//
+//	THE FRAME. Exactly one slot carries broadcast, and it is the one the
+//	DEPLOYMENT named — an archive told nothing names none.
+//
+//	THE ID ON THE WIRE IS WHOLE. The cell cuts a long id to fit a 200-unit box.
+//	That is a fact about the box. /api/status must keep publishing all 39
+//	characters of the deployment's own peer id, or every reading that is
+//	supposed to give a reader the whole of it back is reading a cut one.
+func TestTheBroadcastWorldIsMarkedOnTheFrameThePageDraws(t *testing.T) {
+	const long = "public-a4f0577b446f46ca9df54a2a82c0155d"
+	if len(long) != 39 {
+		t.Fatalf("the fixture id is %d characters, not the deployment's 39", len(long))
+	}
+
+	a := rigShapedArchive(t)
+	a.mu.Lock()
+	a.cfg.BroadcastPeerID = long
+	a.status.Slots[0].PeerID = "slot-1"
+	a.status.Slots[1].PeerID = long
+	a.mu.Unlock()
+
+	srv := httptest.NewServer(a.httpHandler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/status")
+	if err != nil {
+		t.Fatalf("GET /api/status: %v", err)
+	}
+	defer resp.Body.Close()
+	var view Status
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		t.Fatalf("decode /api/status: %v", err)
+	}
+	if view.BroadcastPeerID != long {
+		t.Fatalf("broadcastPeerId = %q, want the whole %q", view.BroadcastPeerID, long)
+	}
+	marked := 0
+	for _, v := range view.Slots {
+		if !v.Broadcast {
+			continue
+		}
+		marked++
+		if v.PeerID != long {
+			t.Fatalf("the marked slot is %q, not the world the deployment named", v.PeerID)
+		}
+	}
+	if marked != 1 {
+		t.Fatalf("%d slots are marked broadcast, want exactly 1", marked)
+	}
+	// The frame is not where anything is shortened.
+	body, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("re-encode: %v", err)
+	}
+	if strings.Contains(string(body), "…") {
+		t.Fatal("the status frame carries an ellipsis; the map cell cuts an id to fit its own " +
+			"box and nothing else on this page or this wire may")
+	}
+
+	// And the page that draws it is served with both marks in it.
+	pr, err := http.Get(srv.URL + "/live")
+	if err != nil {
+		t.Fatalf("GET /live: %v", err)
+	}
+	defer pr.Body.Close()
+	served, err := io.ReadAll(pr.Body)
+	if err != nil {
+		t.Fatalf("read /live: %v", err)
+	}
+	for _, want := range []string{`<a class="bcastmark" href="/watch">`,
+		`<a class="chip bcast" href="/watch"`, "function posPeer(id, prefix, lbl){"} {
+		if !strings.Contains(string(served), want) {
+			t.Fatalf("the served page is missing %q", want)
+		}
 	}
 }
 
