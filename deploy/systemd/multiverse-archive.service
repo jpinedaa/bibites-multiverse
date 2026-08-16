@@ -1,11 +1,20 @@
 [Unit]
 Description=Bibites Multiverse archive (Contract B subscriber, status page)
 Documentation=file:///opt/multiverse/deploy/RESTART-POLICY.md
+# ORDERING ONLY, and the relay is named HERE AND NOWHERE ELSE IN THIS UNIT.
+# After= without Wants= is the whole point: Wants= is a START-TIME PULL, so
+# `systemctl restart multiverse-archive` would start a relay the operator had
+# just stopped on purpose. That silently defeats the record-preserving sequence
+# in RESTART-POLICY.md — the map runs live for the whole replay and NOTHING
+# RECORDS IT, while the operator believes they avoided exactly that. Boot needs
+# no pull: both units carry WantedBy=multi-user.target and provision.sh enables
+# both, so the target starts the relay and After= only orders it first.
 After=network-online.target multiverse-relay.service
-# Wants, NOT Requires. The archive retries its subscription on its own ladder, so
-# it should keep trying while the relay is down rather than be stopped with it —
-# and a relay restart must not cost an archive replay, which is the expensive one.
-Wants=network-online.target multiverse-relay.service
+# And NOT Requires= either, for the reason that came first: the archive retries
+# its subscription on its own ladder, so it should keep trying while the relay
+# is down rather than be stopped with it — and a relay restart must not cost an
+# archive replay, which is the expensive one.
+Wants=network-online.target
 StartLimitIntervalSec=600
 StartLimitBurst=6
 

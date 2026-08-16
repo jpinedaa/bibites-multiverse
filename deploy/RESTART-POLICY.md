@@ -13,7 +13,7 @@ Private operations storage owns each restart window, approval, receipt, and inci
 |---|---|---|
 | Certificate reload | nginx loads a renewed pair. The relay and archive continue. | No notice is normally necessary. |
 | Relay only | Peers disconnect, reconnect, and reclaim their slots. | Announce a planned restart. |
-| Archive only | The website stops while the archive replays the ledger. | Announce it and state the expected replay time. |
+| Archive only | The website stops while the archive replays the ledger. A restart that keeps the record complete also stops the relay. | Announce it and state the expected replay time. |
 | Host reboot | The relay and archive stop. The archive replays after boot. | Announce it and schedule it. |
 | Unplanned restart | The effect matches the failed service and includes diagnosis time. | Explain it after service returns. |
 
@@ -70,8 +70,76 @@ Do not use an old elapsed time as the estimate for a growing ledger.
 An archive that is not subscribed cannot record map activity.
 If the map continues during replay, the permanent record has a gap.
 
-If the record must remain complete, stop relay activity before the archive restart.
-Start the relay only after the archive subscribes again.
+### Restart with a complete record
+
+Run this sequence when the record must stay complete:
+
+```sh
+sudo systemctl stop multiverse-relay
+sudo systemctl restart multiverse-archive
+
+# Wait for the replay. The archive binds its HTTP port only after the replay
+# finishes, so this refuses the connection until the archive is ready.
+until curl -fs --max-time 5 http://127.0.0.1:8796/healthz >/dev/null 2>&1; do sleep 5; done
+
+sudo systemctl start multiverse-relay
+
+# Confirm the subscription. Do not call the restart complete before this passes.
+until curl -fs --max-time 5 http://127.0.0.1:8796/api/status 2>/dev/null \
+  | grep -q '"relayConnected": true'; do sleep 2; done
+```
+
+Use the `MV_ARCHIVE_HTTP` address from the parameter file if it is not the default.
+The archive dials the relay on a backoff between 1 and 30 seconds.
+The last loop normally passes within a few seconds.
+
+The archive and every sidecar reconnect on that same backoff.
+The archive dials only after the replay, so its backoff is still short.
+Each sidecar failed for the whole outage, so its backoff is near 30 seconds.
+The archive normally resubscribes before the relay places the first peer.
+That is a race and not a guarantee, so start the relay promptly after `/healthz` answers.
+
+Prove the result from the relay log:
+
+```sh
+sudo grep -E 'client connected.*role=archive|placement claim' /var/log/multiverse/relay.log | tail -20
+```
+
+Run this immediately after the sequence, so the last lines belong to this restart.
+If the archive line comes before the first placement claim, the record is complete.
+If a placement claim comes first, the record has a gap.
+The gap runs from that claim to the archive line.
+Write that gap into the deployment record.
+
+**CAUTION.** This sequence needs the current archive unit file.
+An older unit named the relay in `Wants=` as well as in `After=`.
+`Wants=` is a start-time pull, so `restart multiverse-archive` started the stopped relay again.
+The map then ran live for the whole replay and nothing recorded it.
+Install the current units first:
+
+```sh
+sudo /opt/multiverse/deploy/provision.sh --only systemd
+```
+
+That phase reloads the systemd configuration and costs no outage.
+Run it before you stop the relay, because it starts stopped units.
+Then check that the archive unit does not name the relay in `Wants=`:
+
+```sh
+systemctl show -p Wants multiverse-archive.service
+```
+
+**CAUTION.** A migration count that only rises does not prove a complete record.
+The counter reports what the archive recorded.
+It cannot report a crossing that reached no subscriber.
+
+The sequence costs a full relay outage for the length of the replay.
+Estimate that length with the formula above.
+The hosted run measured approximately 60 seconds at approximately 3.8 million records.
+Each sidecar reconnects on its backoff schedule after the relay returns.
+The sidecar journal holds unsent custody records for the whole outage.
+That participant outage is the price of a complete record.
+The monitor reports the stopped relay as critical for the whole window.
 
 Batch archive changes into one restart.
 Do not restart the archive only to collect a diagnostic number.
@@ -88,7 +156,29 @@ Before a planned reboot:
 4. Create the approved off-host backup or snapshot.
 5. Announce the window.
 
-Stop relay activity before the reboot when ledger continuity is required.
+A reboot starts both units from `multi-user.target`.
+The relay is live while the archive replays, so the record has a gap.
+Mask the relay before the reboot when ledger continuity is required:
+
+```sh
+sudo systemctl mask multiverse-relay
+sudo reboot
+```
+
+After boot, wait for the archive and then return the relay:
+
+```sh
+until curl -fs --max-time 5 http://127.0.0.1:8796/healthz >/dev/null 2>&1; do sleep 5; done
+sudo systemctl unmask multiverse-relay
+sudo systemctl start multiverse-relay
+until curl -fs --max-time 5 http://127.0.0.1:8796/api/status 2>/dev/null \
+  | grep -q '"relayConnected": true'; do sleep 2; done
+```
+
+A mask holds across every later boot.
+Unmask the relay in the same session, or the map stays down.
+The monitor reports the masked relay as critical until you start it.
+The participant cost is the same as the archive-restart sequence above.
 
 After boot, check service enablement and archive subscription.
 Do not infer archive health from the process state alone.
