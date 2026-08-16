@@ -17,6 +17,8 @@ Keep these records outside the public repository:
 | `deploy.env.example` | Parameters for one deployment. Copy it outside the repository before use. |
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
+| `deploy.sh` | The deployment sequence on the host: install the kit, prove what landed, install the binaries, prove those. It restarts nothing. |
+| `ci-gate.sh` | The forced command for a CI deployment key. It accepts a fixed list of verbs and refuses everything else. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
@@ -27,6 +29,8 @@ Keep these records outside the public repository:
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
 | `test-monitor.sh` | Drives the monitor's transfer, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
+| `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
+| `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
@@ -156,6 +160,73 @@ Read the three that watch money rather than availability:
   archive's subscription to the relay leaves the host and returns over the billed interface.
 
 The transfer figures use the provider's GB of 2^30 bytes, counted in both directions.
+
+## Operating deploys through CI
+
+A deployment can be driven by a continuous-integration system instead of by hand.
+The kit provides the two pieces that need to be the same every time.
+
+`deploy.sh` is the sequence, and it is the same sequence either way:
+
+```sh
+sudo /opt/multiverse/deploy/deploy.sh --kit /path/to/staged-kit --binaries
+```
+
+It snapshots `/etc/multiverse/*.env`, installs the kit from the staged copy's own `provision.sh`,
+proves every installed file is byte-identical to the file it came from, and refuses if a phase
+rewrote an environment file — restoring the file first.
+It installs the binaries only after those checks pass, and then proves each installed binary
+against the artifact that was staged.
+It restarts nothing.
+
+`ci-gate.sh` is the forced command for the CI key.
+Add it to the login account's `authorized_keys`:
+
+```text
+command="/opt/multiverse/deploy/ci-gate.sh",no-port-forwarding,no-agent-forwarding,no-pty,no-X11-forwarding ssh-ed25519 AAAA... mv-deploy-ci
+```
+
+The gate accepts these verbs and refuses everything else with exit code 3:
+
+| Verb | What it does |
+|---|---|
+| `verify` | `provision.sh --only verify`, then reports whether the monitor is running. Changes nothing. |
+| `phase <name>` | One provision phase, from a fixed list: `directories`, `binaries`, `nginxfront`, `streamorigin`, `verify`. |
+| `kit-receive <sha>` | Reads a tar stream on stdin into a new directory under `~/ci-kits/`. |
+| `kit-install <dir> [<digest>]` | `deploy.sh --kit <dir>`. |
+| `binaries-install <dir> [<digest>]` | `deploy.sh --kit <dir> --binaries`. |
+| `restart-relay [--dry-run] [<tag>]` | `restart-relay.sh`. |
+| `restart-archive --dry-run` | `restart-archive.sh --dry-run`, and only ever the rehearsal. |
+| `receipt` | Prints host facts for a deployment record. No secret is among them. |
+
+Four rules the gate applies to all of them:
+
+- **A dry run is the default.** Every mutating verb takes `--dry-run`, and it reaches
+  `provision.sh`, which routes every mutation through one helper.
+- **The archive is never restarted by CI.** `restart-archive` is accepted with `--dry-run` and with
+  nothing else. An archive restart replays the whole ledger, costs the map a full relay outage for
+  the length of the replay, and needs an operator's measured proof that the replay fits in memory.
+  That is a judgement, and a scheduled job cannot make it. Run it by hand from `RESTART-POLICY.md`.
+- **A hold stops it.** While `/run/lock/bibites-archive-deploy.HOLD-README` exists, every mutating
+  verb is refused. `verify` and `receipt` stay available, so a check does not go red because a
+  person is working. There is no override.
+- **Mutations take the deployment lock.** `flock -n` on `/run/lock/bibites-archive-deploy.lock`,
+  the same lock a hand-run deployment takes, so the two paths serialize against each other.
+
+The gate writes one line per invocation to `/var/log/multiverse/ci-gate.log`:
+
+```text
+2026-08-16T12:00:00Z ALLOW verify
+2026-08-16T12:00:04Z REFUSE not an allowed verb: rm
+```
+
+Set `MV_CI_DEPLOY_KEY_PUB` in `deploy.env` to the public half of that key.
+The verify phase then checks that the key is still pinned to the forced command with all four
+restrictions, and that `ci-gate.sh` is installed and root-owned.
+That check exists because its failure is silent: the login account has passwordless sudo, so a CI
+key that loses its forced command is root on the host and nothing about the service looks different.
+
+Never put the private half of that key on the host or in this repository.
 
 ## Measurement
 

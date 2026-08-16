@@ -127,6 +127,20 @@ jobs:
       - name: monitor transfer arithmetic
         run: deploy/test-monitor.sh
 
+      # ci-gate.sh is the forced command pinned to the deployment key, and the
+      # account it runs as has passwordless sudo — so its refusals are the whole
+      # boundary, not error handling. Most of that suite is an attempt to get
+      # past it, and it needs no host, no root and no network.
+      - name: the CI gate's verb allowlist
+        run: deploy/test-ci-gate.sh
+
+      # deploy.sh carries the kit and environment-file assertions that the three
+      # hand-written host scripts had between them. This checks the one thing
+      # about it that can be checked off a host: that its kit listing digest
+      # still equals the one the operations source lock defines.
+      - name: the deployment sequence
+        run: deploy/test-deploy.sh
+
       # test-front-door.sh self-skips `nginx -t` when nginx or openssl is
       # absent, so installing them is what turns this from a text grep into a
       # real configuration check.

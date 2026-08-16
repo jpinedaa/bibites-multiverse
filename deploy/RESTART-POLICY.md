@@ -100,6 +100,11 @@ Credential creation is a startup operation.
 Batch multiple new credentials into one planned relay restart.
 Back up `ring.json` and `peers.json` after the batch.
 
+A deployment that runs through CI performs this restart with the `restart-relay` action, which
+calls `deploy/restart-relay.sh` and produces the receipt this section requires.
+The archive restart below is deliberately not offered through CI: `restart-archive` is accepted as
+a rehearsal only. See "Operating deploys through CI" in [`README.md`](README.md).
+
 ## Archive restart
 
 The archive replays every ledger record before it serves current views.
