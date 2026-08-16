@@ -120,6 +120,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 .trust li{position:relative;padding:12px 0 12px 27px;border-top:1px solid var(--line);color:#bfd0c9}.trust li:before{content:"✓";position:absolute;left:0;color:var(--green)}
 .gameshot{margin:0 0 18px}.gameshot img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px}
 .gameshot figcaption{margin-top:8px;font-size:13px;color:var(--muted)}
+#game .joincopy{margin-block:auto}/* auto margins center the copy in the row the taller screenshot column sets */
 .faq{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:12px}.faq details{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:20px 22px}
 .faq summary{cursor:pointer;font-weight:700}.faq p{color:var(--muted);margin:12px 0 2px}.foot{border-top:1px solid var(--line);padding-block:34px;color:var(--muted);font-size:13px}
 .footin{display:flex;justify-content:space-between;align-items:center;gap:24px}.footlinks{display:flex;flex-wrap:wrap;gap:18px}.foot a:hover{color:var(--text)}

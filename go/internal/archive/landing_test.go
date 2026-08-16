@@ -396,6 +396,9 @@ func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
 		"Every world on this map runs a copy of the game.",
 		`src="/game-screenshot.jpg"`,
 		`href="#game"><em>The Bibites</em></a>`,
+		// The screenshot column is taller than the copy beside it, so the copy
+		// centers itself against it instead of stranding blank space below.
+		`#game .joincopy{margin-block:auto}`,
 	} {
 		if !strings.Contains(landingPageHTML, want) {
 			t.Errorf("landing page is missing %q", want)
