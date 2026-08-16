@@ -59,7 +59,7 @@ THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
 # another filesystem. Use a clean checkout of this exact commit in that case.
 SIDECAR_BUILD_REPO="${RELEASE_SIDECAR_BUILD_REPO:-$REPO}"
 
-RELEASE=0.2.5
+RELEASE=0.2.6
 TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
@@ -419,7 +419,7 @@ LAUNCHER_REV="$(go version -m "$BUILD/$LAUNCHER_NAME" \
   || die "the launcher VCS stamp is '${LAUNCHER_REV:-missing}', want $SOURCE_REV"
 file "$BUILD/$LAUNCHER_NAME" | grep -q 'PE32+' \
   || die "$LAUNCHER_NAME is not a Windows executable"
-# Linux is a compile gate for 0.2.5; the Linux kit does not ship it yet.
+# Linux is a compile gate only; the Linux kit does not ship the launcher yet.
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/bibites-multiverse-launcher" ./cmd/multiverse-launcher )
 note "$(sha "$BUILD/$LAUNCHER_NAME")"

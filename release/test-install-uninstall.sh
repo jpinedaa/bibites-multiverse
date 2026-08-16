@@ -598,8 +598,8 @@ check "the two enrollment requests are byte-identical" \
 I_REQUEST_SECRET="$(sed -n '1s/.*"secret":"\([^"]*\)".*/\1/p' "$I_REQUESTS")"
 check "curl receives the secret through standard input, not its command line" \
   "$(b bash -c '! grep -qF "$2" "$1"' _ "$I_ARGS" "$I_REQUEST_SECRET")"
-check "the request identifies release 0.2.5" \
-  "$(b grep -qF '"release":"0.2.5"' "$I_REQUESTS")"
+check "the request identifies release 0.2.6" \
+  "$(b grep -qF '"release":"0.2.6"' "$I_REQUESTS")"
 check "the completed install removes the pending identity" \
   "$(b test ! -e "$I_DATA/enrollment-pending.json")"
 check "the completed credential is mode 0600" \
@@ -879,7 +879,7 @@ check "the refusal names both maps" \
 check "the world still dials its own map" \
   "$(b bash -c 'grep -qF "\"relayUrl\": \"$2\"" "$1"' _ "$J5/install-record.json" "$J5_RELAY")"
 
-# J8 - adopting re-applies the credential's mode in place. Up to 0.2.5 every
+# J8 - adopting re-applies the credential's mode in place. Up to that release every
 # install rewrote the file and re-tightened it; adopting must not lose that.
 chmod 644 "$J5/peer-secret.txt"
 J8_SECRET="$(cat "$J5/peer-secret.txt")"
