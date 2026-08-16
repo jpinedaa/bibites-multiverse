@@ -109,6 +109,29 @@ A tight limit also increases CPU use during replay.
 Do not use swap as the normal capacity for a live replay heap.
 Sustained swap activity means that the instance needs more memory or less retained state.
 
+The largest retained term is the duplicate-suppression set.
+It holds one entry for each ledger record that carries a `migrationId`.
+It is never evicted, because a re-forwarded migration must stay refusable.
+It measured approximately 88 percent of archive resident memory.
+
+That set now holds a 128-bit fingerprint of each key instead of the key.
+This table replays one copy of the production ledger of 2026-08-16.
+The copy held 5,408,123 records and 5,134,867 duplicate keys.
+Both replays used a 720 hour genome horizon and an empty genome store.
+
+| Archive build | Settled resident | For each record |
+|---|---:|---:|
+| before the change | 1,177 MB | 0.22 KB |
+| after the change | 546 MB | 0.10 KB |
+
+An empty genome store makes both results conservative.
+Those replays rebuilt 273,252 genome gaps, and a live archive reports one or two.
+The same pair with no genome gap measured 958 MB and 290 MB.
+
+The `0.30 KB` constant above describes the deployed build.
+`deploy/monitor.sh` uses the same constant.
+Change both when the fingerprinted build ships.
+
 ## World process memory
 
 **This is the binding constraint on a host that runs worlds, and it is not a
