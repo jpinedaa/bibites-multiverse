@@ -212,7 +212,7 @@ Read the achieved value from `/api/status`.
 
 The remote operator receives these items through approved channels:
 
-- The far-end bundle.
+- A far-end bundle, built on demand with `farend/make-farend-bundle.sh`.
 - The test certificate-authority certificate.
 - The remote peer credential file.
 - The relay name that the certificate covers.

@@ -848,10 +848,11 @@ func (s *Server) closeEvicted(w http.ResponseWriter, r *http.Request, peerID str
 		"peer", peerID, "remote", r.RemoteAddr, "until", evictionUntil(until),
 		"note", "the peer is told what a draining relay tells it (4005) and nothing else; B28 gives "+
 			"this refusal no distinguishable shape")
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true,
-	})
+	// s.acceptOptions() and not a literal, and §24 B35's own comment on that
+	// helper explains why THIS door in particular: an evicted peer must see the
+	// handshake a draining relay gives it, and a Sec-WebSocket-Extensions header
+	// that differed here would be a distinguishable refusal B28 does not grant.
+	conn, err := websocket.Accept(w, r, s.acceptOptions())
 	if err != nil {
 		return
 	}

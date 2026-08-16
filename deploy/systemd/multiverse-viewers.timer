@@ -1,0 +1,27 @@
+[Unit]
+Description=Refresh the Bibites broadcast viewer-presence signal every ten seconds
+Documentation=file:///opt/multiverse/deploy/viewers-presence.sh
+
+[Timer]
+# TEN SECONDS, and the cadence is part of the contract rather than a preference.
+#
+# A viewer arrives at a dead player and waits for the publisher to start, which
+# takes about twenty seconds by itself. Every second of staleness here is added
+# to that wait. Ten seconds keeps the sampling term small beside the start term
+# and still leaves the document's own sixty-second presence window six samples
+# deep, so one missed tick decides nothing.
+#
+# It also bounds the other direction. The publisher stops when this says nobody
+# is watching, and a signal that went stale for minutes would keep an empty room
+# publishing at 780 GB a month — which is the cost this whole mechanism exists
+# to remove.
+OnBootSec=30s
+OnUnitActiveSec=10s
+# No randomised delay, and a tight accuracy: a watcher polling on its own clock
+# must not see a sample age that wanders. systemd's default AccuracySec is one
+# minute, which would make a ten-second interval meaningless.
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

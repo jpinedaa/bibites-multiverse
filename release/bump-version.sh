@@ -129,15 +129,9 @@ couple 'docs/support-matrix.md' '^[[:space:]]*"release": "([^"]*)",$' \
 # Pinned to the matrix by go/internal/launcher/profile_test.go as well.
 couple 'go/internal/launcher/launcher.go' '^const Release = "([^"]*)"$' \
 	'the launcher Release constant'
-# The public homepage default, used when MV_HOMEPAGE_RELEASE is unset.
-couple 'go/internal/archive/landing.go' \
-	'^func defaultHomepageRelease\(\) string[[:space:]]*\{ return "([^"]*)" \}$' \
-	'the homepage release default'
-# The deployed homepage: provision.sh writes MULTIVERSE_HOMEPAGE_RELEASE from it.
-couple 'deploy/provision.sh' '^: "\$\{MV_HOMEPAGE_RELEASE:=([^}]*)\}"$' \
-	'the provision.sh homepage release default'
-couple 'deploy/deploy.env.example' '^MV_HOMEPAGE_RELEASE=(.*)$' \
-	'the deploy.env.example homepage release'
+# The homepage is NOT on this list, and adding it back would be a mistake. Its
+# download links address GitHub's /releases/latest, so the page carries no
+# release number in code, in the deployment configuration, or in its own text.
 # Both installers put this value in the enrollment request they send.
 couple 'release/kit/Install-BibitesMultiverse.ps1' \
 	"^\\\$Release[[:space:]]*= '([^']*)'\$" \
@@ -175,13 +169,6 @@ allow 'docs/support-matrix.md' bump 1 '^  "release": "@@V@@",$' \
 	'the published matrix release; the launcher test and make-release.sh read it'
 allow 'go/internal/launcher/launcher.go' bump 1 '^const Release = "@@V@@"$' \
 	'the launcher stamps this into its own output and the install record'
-allow 'go/internal/archive/landing.go' bump 1 \
-	'^func defaultHomepageRelease\(\) string[[:space:]]*\{ return "@@V@@" \}$' \
-	'the homepage default when MV_HOMEPAGE_RELEASE is unset'
-allow 'deploy/provision.sh' bump 1 '^: "\$\{MV_HOMEPAGE_RELEASE:=@@V@@\}"$' \
-	'the deployed homepage default'
-allow 'deploy/deploy.env.example' bump 1 '^MV_HOMEPAGE_RELEASE=@@V@@$' \
-	'the operator template for the same value'
 allow 'release/kit/Install-BibitesMultiverse.ps1' bump 1 \
 	"^\\\$Release[[:space:]]*= '@@V@@'\$" \
 	'the Windows installer enrollment release'
@@ -195,17 +182,12 @@ allow 'release/test-install-uninstall.sh' bump 1 \
 	'the install test check name'
 allow 'release/test-install-uninstall.sh' bump 1 '"release":"@@V@@"' \
 	'the install test expected enrollment payload'
-# The homepage test mirrors the rendered landing page byte for byte, so its
-# strings are as much a contract as the page itself.
-allow 'go/internal/archive/landing_test.go' bump 1 \
-	'"The Windows setup and Linux complete package for release @@V@@"' \
-	'the landing page package sentence'
-allow 'go/internal/archive/landing_test.go' bump 2 \
-	'releases/download/v@@V@@/bibites-multiverse-@@V@@-' \
-	'the two landing page download links'
-allow 'go/internal/archive/landing_test.go' bump 1 \
-	'releases/tag/v@@V@@">Checksums and add-ons' \
-	'the landing page checksum link'
+# go/internal/archive/landing.go and its test name no release at all, which is
+# why neither appears here. The page's two download buttons and its checksum
+# link address /releases/latest, and make-release.sh publishes the two
+# stable-named copies those addresses need. If a release literal ever appears in
+# either file again, the scan below reports it and the answer is to take it out,
+# not to add an entry here.
 # A worked example of a request the installers actually send; its field shape is
 # the contract, so it is pinned like code.
 allow 'contracts/public-enrollment.md' bump 1 '^  "release": "@@V@@"$' \

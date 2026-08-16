@@ -87,6 +87,20 @@ routing input changes**, and the wire consequence was already defined: a pruned 
 **neither major nor minor** and the identifier **stays at `contract-b/4.0`**. Contract A takes
 **no** set: no rule of that wire changes. Affected body text carries an `(amended — §23, Bx)`
 marker, and **§23 wins over the body and over §14 to §22 wherever they disagree.**
+**Amended:** 2026-08-16, amendment set **B35–B36** (**§24**), from the transfer measurement of
+2026-08-16 — *seven peer connections consume 82% of the host's monthly allowance, and nothing on
+this wire is compressed at any layer*. §3's `permessage-deflate` **MUST NOT** becomes a **MAY**,
+negotiated per connection under RFC 7692, so a peer that does not offer it is served exactly the
+frames every release before this one sent; and §6.5's stats timer becomes the **only** publisher
+a stats arrival may reach, which is what §14's B4 and §22's B29 both already assumed and neither
+said. **No message, field, enum value, code, close code or routing input changes**, and no peer
+can tell a compressed party from an uncompressed one by anything in a frame — the extension is
+settled on the HTTP upgrade, below the envelope this document versions. §4's own test therefore
+answers **neither major nor minor** and the identifier **stays at `contract-b/4.0`**, on §23's
+precedent. Contract A takes **no** set and keeps its own prohibition: that wire is loopback
+between two processes on one machine (`contract-a.md` §2), its bytes cross no network, and this
+set does not reach it. Affected body text carries an `(amended — §24, Bx)` marker, and **§24 wins
+over the body and over §14 to §23 wherever they disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -323,7 +337,7 @@ made one axis honest under one-way ones.
 | Roles | The **relay is the server**. Every sidecar and the archive are **clients** and do all the dialling. |
 | Frame type | Text frames. One JSON object per frame. No batching. |
 | Encoding | UTF-8, no BOM |
-| Compression | `permessage-deflate` **MUST NOT** be negotiated |
+| Compression | **`permessage-deflate` (RFC 7692) MAY be negotiated** (amended — §24, B35). ~~**MUST NOT** be negotiated~~. The relay **offers and accepts** it; **a client that does not offer it is served uncompressed and MUST NOT be refused, ever**. Context takeover is the default on both halves; it costs ~1.25 MB of resident state per connection per process, so a relay carrying hundreds of peers moves to `client_no_context_takeover` / `server_no_context_takeover` rather than to nothing. `wireCompression` (§12) is the relay's off switch |
 | Max frame size | 8 MiB (`maxFrameBytes`), same as Contract A |
 | Authentication | **A per-peer credential, bound to the `peerId`**, on the HTTP upgrade — §3.1 (amended — §22, B22). ~~A **shared bearer token** … Unchanged from M3~~. |
 | Capacity | Published per-peer limits on connections, frames, claims, bytes and genome requests — §3.3 (added — §22, B24). Every one is a knob and every peer-visible one is on the stats block. |
@@ -1243,6 +1257,14 @@ this rig every column has it.
 registry change: a peer connecting or dying, a slot granted, released or handed over, a map
 growth, a `simulationSize` update, a mod connecting or disconnecting behind a peer. Also sent
 on a `statsBroadcastIntervalMs` timer, because stats change without the registry changing.
+
+**Those are the only two sources, and the second one is the ONLY source for stats**
+(amended — §24, B36). A stats block arriving on a `PING` (§6.11) or riding a `SECTOR_CLAIM`
+(§6.3) is stored against its peer and **MUST NOT** schedule a broadcast of its own: it changes
+what the next frame *says*, never what the map *is*, and the timer above was going to carry it.
+The rule is written as a MUST because the failure is invisible from one peer's seat — each
+arrival looks like one harmless frame, and it is the **map** that pays, `slotCount` stats blocks
+to every peer and every subscriber, once per arrival per peer instead of once per interval.
 
 `PEER_STATUS` reports **the structure, not the effect** (D12). It is the map as it is
 reserved; the lanes as they currently run are in each peer's own `SECTOR_GRANT`. Publishing
@@ -2177,6 +2199,20 @@ with the map and a fixed floor stops being a bound:
    every claim with a `SECTOR_GRANT`, because the claimant is owed an answer; what it stops
    doing is telling everybody else.
 
+**And a third, which is the same rule for the other half of the door**
+(added — §24, B36). Rule 2 above told an implementer that a stats block riding a `SECTOR_CLAIM`
+schedules nothing, and said nothing about the same block riding a `PING` — which is where §6.11
+actually puts it, once per `statsIntervalMs` per peer.
+
+3. **A stats arrival broadcasts nothing, whichever frame it rode in on.** A stats block on a
+   `PING` (§6.11) or on a `SECTOR_CLAIM` (§6.3) is stored against its peer and **MUST NOT**
+   raise the epoch or schedule a broadcast. `statsBroadcastIntervalMs` is the only publisher it
+   reaches (§6.5, §14 B4). **This one was measured too, and it dwarfs DQ3's 64 epochs**: seven
+   peers PINGing once per interval each, unaligned, made the hosted relay broadcast the whole
+   map **1.32 times a second** — about four times the intended rate and ~11.6% of the
+   deployment's entire transfer bill, for state that had not changed. Rules 1 and 2 bound how a
+   *busy* map broadcasts; this one is what stops a *quiet* one broadcasting at all.
+
 ### 7.3 Placement must not disturb work in flight
 
 Four rules keep every placement safe, and the first three are M3's:
@@ -2939,7 +2975,8 @@ crossing" is now one of those claims.
 | `statusCoalesceMaxMs` | `2000` | relay | **New in `contract-b/4.0`** (added — §22, B29). Ceiling of the coalescing window under sustained churn. The window doubles from `statusCoalesceMs` toward this value while a window sees more than `statusChurnBurstThreshold` registry changes, and narrows one step after a quieter one. It bounds the broadcast **rate**, which is what a public map's `slotCount` stats blocks per frame make expensive (§7.2). |
 | `statusChurnBurstThreshold` | `8` | relay | **New in `contract-b/4.0`** (added — §22, B29). Registry changes inside one window that make the relay widen it. Sized above what a single peer's join or departure produces, so an ordinary event never widens the window and a churn storm always does. |
 | `minContractVersion` | *unset* | relay | **New in `contract-b/4.0`** (added — §22, B25). The lowest `protocolVersion` this relay admits, published in `HANDSHAKE_ACK` and `PEER_STATUS`. **Unset means no minimum, and that is the default**: a floor is a deployment decision, and a relay that has not made one must not enforce a guess. It is raised only **after** the release that satisfies it is published (D25). A **compatibility** control, never a security one (§6.1). |
-| `statsBroadcastIntervalMs` | `5000` | relay | **New in M4** (added — §14, B4). The §6.5 timer that republishes `PEER_STATUS`, and re-sends any changed `SECTOR_GRANT`, because **stats change without the registry changing**. §6.5 named it and this table did not define it. Set to `statsIntervalMs`, the cadence at which the stats it carries arrive: a faster timer would republish the same block, a slower one would age it. It is a compiled default with no flag and no environment variable. |
+| `statsBroadcastIntervalMs` | `5000` | relay | **New in M4** (added — §14, B4). The §6.5 timer that republishes `PEER_STATUS`, and re-sends any changed `SECTOR_GRANT`, because **stats change without the registry changing**. §6.5 named it and this table did not define it. Set to `statsIntervalMs`, the cadence at which the stats it carries arrive: a faster timer would republish the same block, a slower one would age it. It is a compiled default with no flag and no environment variable. **It is the ONLY thing a stats arrival may cause to be published** (amended — §24, B36): a relay that also scheduled a broadcast on arrival broadcasts at the peer count's rate rather than at this one's. |
+| `wireCompression` | `on` | relay | **New after `contract-b/4.0`** (added — §24, B35). Whether this relay **offers** `permessage-deflate` on a Contract B upgrade (§3). `--ws-compression`, `MULTIVERSE_RELAY_WS_COMPRESSION`. It is a knob for D20's reason — the transfer bill is a number only the operator can see — and it is a **complete** off switch on its own, because the extension needs both ends: a relay that stops offering it returns the whole map to uncompressed frames as each peer reconnects, with no participant action. **A client has no matching knob and MUST NOT be given one**, for the reason B23 gives its TLS verification none: nothing in a participant's hands measures this. |
 | `statsIntervalMs` | `5000` | sidecar | Minimum spacing between stats-bearing `PING`s (§6.11). |
 | `statsStaleMs` | `30000` | archive | Age at which a `stats` block renders as unknown rather than as state (§10.1). |
 | `forwardRetryMs` | `5000` | sidecar | Re-forward cadence for a journaled outbound entry with no answer — flat toward a dark destination, and the backoff floor toward a live one (§14, B8). |
@@ -4787,9 +4824,9 @@ than as a deploy.
    `client gone` / `client connected` / `reason=reclaimed` triple for that peer in `relay.log`,
    and until it appears, that slot is dark and its lanes are bypassed — working exactly as
    designed, and looking exactly like a peer that has gone away (§8, Risk 5).
-4. **The far-end bundle is rebuilt after the change**, because a stale far-end sidecar is what
-   refuses an upgraded neighbour's exports — `dev_environment.md`'s *The minors* is the episode,
-   and B25's gate is the rule written from it.
+4. **The far end gets a bundle built from the changed source**, because a stale far-end sidecar
+   is what refuses an upgraded neighbour's exports — `dev_environment.md`'s *The minors* is the
+   episode, and B25's gate is the rule written from it.
 
 **The rollout shape this specific rig has, stated because it changes the cost.** Contract A's
 bearer token ships in the same milestone and is a **mod** change, and a mod deploy takes all
@@ -4918,3 +4955,146 @@ the same number.
 crossing's own clock, for retiring inside the bounded walk rather than in a pass of its own, and
 for counting what it abandoned; and the **operator**, for reading `genomeGapsExpired` as the
 number that says how much of the map's genetic record has passed out of reach.
+
+---
+
+## 24. The wire's own bytes (2026-08-16)
+
+**This set is a measurement, not a decision that was waiting for an owner.** On 2026-08-16 a
+45-second capture was taken between the front-door proxy and the relay on the hosted deployment,
+and it answered a question nothing in §1–§23 had asked: *what does this map cost to run, in
+bytes?*
+
+> Seven peer connections to `/contract-b/v4` consume **~2,508 GiB a month** — 1,364 relay→peer
+> and 1,144 peer→relay — against a host allowance of **3,072 GiB**. That is **82%** of the
+> budget, spent by eight sockets.
+
+**Where it goes is the shape this document already describes**, which is what makes the two
+amendments below narrow:
+
+| Type | Share | Mean frame | Who pays for it |
+|---|---|---|---|
+| `MIGRATION_PAYLOAD` (§6.6) | 82.7% | ~17.9 KB — `body.bb8` 15.4 KB, of which the brain is 15.1 KB | one sender, one destination, and the archive's copy (§5.1) |
+| `PEER_STATUS` (§6.5) | 11.6% | 12.8 KB | **every peer and every subscriber, per broadcast** |
+| `GENOME_RESPONSE` (§6.10) | 3.3% | 17.7 KB | one requester |
+| everything else | 2.4% | small | — |
+
+**Nothing was compressed at any layer, and the capture proves it out loud**: JSON keys were
+readable in the packets. TLS does not compress; the front door sets `gzip off` because a
+WebSocket is not a response body; and §3 forbade the one mechanism the transport has. Offline
+deflate over the same capture — zlib level 6, 32 KiB window, per-stream context takeover, which
+is the analogue of what RFC 7692 negotiates — returned **9.0x** on `MIGRATION_PAYLOAD`, **9.8x**
+on `PEER_STATUS`, **10.4x** on `GENOME_RESPONSE` and **8.5x overall**, which is ~2,508 GiB
+becoming ~295 GiB. Without context takeover it is ~4.5x.
+
+**Two amendments, B35 and B36, and they are independent.** B35 makes the transport compress;
+B36 fixes a relay that has been sending `PEER_STATUS` at four times the contract's rate. Either
+one lands without the other. They are one set because the same capture found both and because a
+reader who applies only one will misread the remaining number.
+
+**This set does not change the wire.** No message type, no field, no enum value, no NACK code,
+no close code, no change to custody, dedup, the hold, the fan-out, hashing, routing or admission
+control — and nothing any peer sends or accepts changes shape. **§4's test therefore answers
+neither major nor minor, and the identifier stays at `contract-b/4.0`**, exactly as §23's did.
+The reasoning is worth stating because "a rule is being replaced" is §22's own test for a
+**major**, and this replaces a MUST NOT:
+
+1. **§4's identifier is a statement about FRAMES.** It tells two peers what they may assume of
+   each other's envelopes and fields. A negotiated transport extension is settled on the HTTP
+   upgrade, before the first frame exists, and it is invisible in every frame afterwards — the
+   receiver hands its application identical bytes either way.
+2. **The replaced rule has an installed base that does not notice.** §3.1's shared token was the
+   expensive shape because a `contract-b/3` peer **stops working** against a `contract-b/4`
+   relay. Here every deployed peer keeps working unchanged, byte for byte, because it never
+   offered the extension and the relay is required to serve it anyway. A rule whose replacement
+   cannot break an existing peer is not the shape §22 B32 priced.
+3. **A bump would do active harm.** B25's `minContractVersion` lets an operator refuse peers
+   below a published floor. Moving the identifier for this would let a floor refuse a peer for
+   lacking something it already interoperates without, and would tell a reader a frame changed
+   when none did. **RFC 7692's own handshake is the feature detection**, it works in both
+   directions between two `contract-b/4.0` peers, and a second detection mechanism on top of it
+   would be a thing to get out of step.
+
+**Contract A takes no set** (`contract-a.md` §2, unchanged, and its `permessage-deflate` MUST
+NOT stands). That wire is loopback between the mod and the sidecar on one machine: its bytes
+cross no network, appear in no transfer bill, and buying a per-connection megabyte of deflate
+state in every participant's game host would be a cost with no matching saving. **Contract C
+takes no set either**: it is the `MigrationEnvelope` carried *inside* `data` (§6.6), it names no
+transport, and nothing here reaches it.
+
+### B35 — `permessage-deflate` MAY be negotiated, the relay offers it, and an old client is served uncompressed forever (§3, §12)
+
+*From the 2026-08-16 transfer measurement. Milestone-internal — no D-row of its own — and it
+moves D24: the bounded hosted run's dominant cost stops being the wire.*
+
+**Gap.** §3's transport table has said `permessage-deflate` **MUST NOT** be negotiated since
+`contract-b/1`, and **no document in this project has ever given a reason for it**. The line was
+written for Contract A's §2 — a loopback wire, with the honest qualifier *"Not used in M2"* — and
+was copied into `contract-b-m2.md` the same evening without the qualifier, then into `-m3` and
+`-m4` unchanged. It was inherited, not reasoned, and it was inherited from the one wire where it
+is correct. Meanwhile this wire became a public map over TLS on a metered host carrying 17.9 KB
+of JSON per organism, and §3's own rows moved with it — plain HTTP became TLS, a LAN port became
+`443`, a shared token became a per-peer credential — while the compression row did not move
+because nobody had a number.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **The extension is permitted, and it is RFC 7692's, unmodified** | `permessage-deflate` **MAY** be negotiated on the HTTP upgrade. This document defines no framing, no parameters and no fallback of its own: the extension's own handshake is the whole mechanism, and anything this contract invented on top of it would be a second thing to keep in step. |
+| **The relay OFFERS it and ACCEPTS it** | Both halves. §3's table gives the relay the server role, so it is the party that echoes `Sec-WebSocket-Extensions`, and the saving is on both directions — 1,364 GiB out and 1,144 GiB in. |
+| **A client that does not offer it MUST be served, uncompressed, and MUST NOT be refused — ever** | This is the load-bearing rule of the whole set and it has no expiry. This project moves its fleet by publication and cannot make a participant upgrade (D25, `release/README.md`); a relay that required the extension would evict every world that had not. There is no minimum version to raise for this and B25's floor MUST NOT be used as one. |
+| **Both ends must offer it or it is not used** | Which is RFC 7692's rule and is restated because it is what makes the compatibility rule above cost nothing to keep: an old sidecar and a new relay produce **exactly** the pre-§24 wire, on the same URL, with the same frames, and no code path exists that is reachable only in that combination. |
+| **Context takeover is the default, on both halves** | It is the difference between ~8.5x and ~4.5x on this traffic, and this wire is the case the mode exists for: long-lived connections carrying near-identical JSON, where the second `PEER_STATUS` costs a back-reference rather than a dictionary. |
+| **The cost is per connection and it is named** | ~1.25 MB of resident deflate state per connection per process — a sliding window plus a held compressor. At the hosted map's eight sockets that is ~10 MB against a 512 MB ceiling. **At hundreds of peers it is not**, and the fallback is `client_no_context_takeover` / `server_no_context_takeover` — roughly half the ratio at near-zero fixed cost — rather than turning the extension off. An implementation MUST NOT be written so that the mode is stated in more than one place. |
+| **The relay has an off switch; a client does not** | `wireCompression` (§12), `--ws-compression` / `MULTIVERSE_RELAY_WS_COMPRESSION`, on by default. It is complete on its own, because the extension needs both ends: a relay that stops offering it returns the whole map to uncompressed frames as peers reconnect, with no participant action and no rollback. A client-side knob is **forbidden** for B23's reason — no metric in a participant's hands answers to it — and would in any case only be able to make one world's traffic worse. |
+| **Nothing above the transport may read it** | No frame says whether it was compressed, no `PEER_STATUS` field reports it, and no routing, custody, dedup, hashing or admission decision may consult it. A compressed peer and an uncompressed peer are indistinguishable to every other party on the map, which is the same test §20, §21 and §23 applied to their own sets. |
+| **§3.3's limits keep measuring DECOMPRESSED bytes, and that is the safe half** | `maxFrameBytes` and `maxBytesPerSecond` (§3.3, §12) MUST be enforced on the frame the application receives, **after** inflation. Measuring the compressed size would let one peer spend a 4 MiB/s allowance from a few kilobytes of network and hand the relay a fan-out it never authorised: a `PEER_STATUS` costs `slotCount` blocks to everybody whatever the sender paid to send its stats. It also closes the obvious abuse — a frame that inflates past `maxFrameBytes` is refused at the ceiling it was always refused at, and closes 1009 as §3.2 says, so the extension adds no way to make a relay allocate more than a frame. **The consequence is stated rather than hidden**: these two limits stop being a bound on this peer's share of the transfer bill and are only ever a bound on the relay's work. They were sized as the latter (§22, B24) and this changes nothing about them. |
+| **A refusal at the door negotiates like an acceptance** | The upgrades a relay completes only in order to close them — a retired path (§3), a capacity shed (§3.3) and an eviction (§22 B28) — MUST answer the extension exactly as the live path does. Compression saves them nothing, since a close frame is a control frame and RFC 7692 never compresses one; they share the answer so that `Sec-WebSocket-Extensions` cannot separate "refused before the handshake" from "accepted, then closed". B28 requires an evicted peer to see what a draining relay shows it, and a distinguishable handshake would be a refusal shape B28 does not grant. |
+
+**Enforced by:** the **relay**, for offering the extension at every door and for never refusing a
+client that declines it; **every client** — the sidecar and the archive — for offering it and for
+holding no knob that turns it off; and the **operator**, for owning `wireCompression`, for the
+memory headroom the mode's per-connection state needs, and for knowing that a relay updated
+alone saves nothing until the clients that dial it offer the extension too.
+
+### B36 — A stats arrival schedules no broadcast; `statsBroadcastIntervalMs` is the only publisher stats reach (§6.5, §7.2, §12, §14 B4, §22 B29)
+
+*From the same capture. It is a **defect**, not a design change: the implementation diverged from
+this document, and the document is unchanged in intent.*
+
+**Gap.** §6.5 says `PEER_STATUS` is sent after every registry change and "also sent on a
+`statsBroadcastIntervalMs` timer, because stats change without the registry changing", and §14's
+B4 fixes that timer at 5 000 ms and explains that it exists precisely so the stats do not need
+another trigger. §22's B29 then bounds the broadcast **rate** and defines the thing it counts as
+a **registry** change, listing seven and excluding a stats block by name.
+
+§7.2's own rule 2 then said it for the `SECTOR_CLAIM` path in as many words — *"its stats ride
+the next `statsBroadcastIntervalMs` timer, which was going to send them anyway"* — and said
+nothing about the `PING` path, which is where §6.11 actually puts the block.
+
+**Every one of those four places assumed what none of them said**: that a stats arrival is not
+itself a reason to publish. The shipped relay bumped its pending-broadcast counter on every
+stats-bearing `PING`, and stats arrivals do not align — `statsIntervalMs` is per peer, so seven
+peers produce seven arrivals per interval in seven different coalescing windows. The measured
+result was **1.32 `PEER_STATUS` broadcasts a second** where §6.5 designs for one per five
+seconds: **~4x the intended rate**, ~11.6% of the map's whole transfer bill, ~246 GiB a month, and
+a number that grows with the peer count in **both** terms — more arrivals, each costing more
+blocks. The relay's own source said the rule out loud beside the code that broke it: the stats
+timer is "a floor on freshness, not a second source of frames".
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **A stats arrival is stored and publishes nothing** | A stats block on a `PING` (§6.11) or on a `SECTOR_CLAIM` (§6.3) is recorded against its peer with its `statsAsOfMs`, and that is the whole of the work. It **MUST NOT** raise the epoch, **MUST NOT** schedule a broadcast, and **MUST NOT** count toward B29's churn — the last was already true and is restated so the three cannot drift apart again. §7.2 gains it as a third rule, beside the two B29 wrote, because that is the section an implementer builds the publisher from. |
+| **The timer is the only publisher stats reach** | `statsBroadcastIntervalMs` (§12), and it is unchanged: 5 000 ms, matching `statsIntervalMs`, a compiled default with no flag. §14 B4's interaction note now reads exactly: coalescing bounds how closely two broadcasts may follow each other, this timer bounds how far apart they may drift, and **between them there is no third source**. |
+| **A registry change still publishes immediately, coalesced** | Unchanged, and it is what keeps the fix narrow: a placement, a release, a handover, a peer arriving or going dark, an eviction and a refusal written to a slot are still published inside `statusCoalesceMs`, and the last frame of a burst is still always sent (§7.2, §22 B29). The map does not become slower to report what it IS; it stops re-reporting what it SAYS. |
+| **Stats are deferred, never dropped** | The block is on the peer's record from the moment it arrives, so the next broadcast — timer-driven or registry-driven — carries the latest one. A reader that sees a registry change sees fresh stats with it. |
+| **What freshness costs, stated** | Stats on the map age from ~0.76 s to at most `statsBroadcastIntervalMs`, 5 s. §12's `statsStaleMs` is **30 s**, so no reader's staleness rule changes and nothing that rendered as state renders as unknown. `statsAsOfMs` is untouched in meaning — §6.5 defines it as the relay clock when the block **arrived**, never when it was published — so a reader ages the stats from the arrival either way, and §10.1's unknown-is-a-value rule is unaffected. |
+| **The saving is stated so the two amendments are not double-counted** | ~246 GiB a month on the 2026-08-16 figures, taken **before** B35 compresses what is left. A reader applying both must apply B36 first and then B35's ratio to the remainder, or `PEER_STATUS` is credited twice. |
+
+**Enforced by:** the **relay**, which is the only party that publishes `PEER_STATUS` and the only
+one that can get this wrong; and the **archive and every operator surface**, for continuing to age
+a stats block by `statsAsOfMs` rather than by the frame it arrived in — which is what makes a 5 s
+publication cadence indistinguishable from a 0.76 s one to every reader that follows §6.5.

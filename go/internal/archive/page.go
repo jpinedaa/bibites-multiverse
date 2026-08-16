@@ -240,6 +240,13 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write(socialCardLivePNG)
 	})
+	// A frame of our own broadcast, drawn in the #game section. Same day-long
+	// cache as the cards above: the bytes change only when the binary does.
+	mux.HandleFunc("/game-screenshot.jpg", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(gameScreenshotJPEG)
+	})
 	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=3600")

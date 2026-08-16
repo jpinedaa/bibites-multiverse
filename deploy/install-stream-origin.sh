@@ -64,6 +64,7 @@ if [ "$DRY" = 1 ]; then
   say "[dry-run] install MediaMTX v$VERSION with verified SHA-256"
   say "[dry-run] bind RTMP to $MV_STREAM_RTMP_ADDRESS for $MV_STREAM_PUBLISH_CIDR"
   say "[dry-run] bind HLS to $MV_STREAM_HLS_BACKEND"
+  say "[dry-run] serve HLS as fmp4 with 2 s segments, not low latency"
   say "[dry-run] generate a publish secret only if none exists"
   say "[dry-run] enable and start multiverse-stream.service"
   exit 0
@@ -156,9 +157,29 @@ hlsAddress: $MV_STREAM_HLS_BACKEND
 hlsAllowOrigins: ["https://$MV_DOMAIN"]
 hlsTrustedProxies: ["127.0.0.1", "::1"]
 hlsAlwaysRemux: true
-hlsVariant: lowLatency
+# NOT low latency, and the reason is transfer rather than taste.
+#
+# Low-latency HLS re-fetches the playlist about as often as it delivers a media
+# part. Measured on this service: 1.035 playlist requests for each part, 31.8
+# percent of delivered bytes in playlists, 3.69 Mbit/s on the wire against
+# 2.52 Mbit/s of media. That is approximately 1,150 GB for each continuous
+# viewer-month, against approximately 790 GB for fmp4 with the same media.
+#
+# The blocking playlist request is also what makes low-latency HLS uncacheable:
+# each one stays open until the next part exists, so no cache and no delivery
+# network can hold it. fmp4 emits plain immutable segments and an ordinary
+# playlist, both of which a cache can serve.
+#
+# The cost is latency: approximately 1 s becomes approximately 6 to 8 s. This is
+# a spectator camera with no interaction, so nothing here is synchronous with a
+# viewer. deploy/SIZING.md, "Network transfer", owns the measurements.
+hlsVariant: fmp4
 hlsSegmentCount: 7
-hlsSegmentDuration: 1s
+# The encoder uses a 2 s keyframe interval, and the muxer extends a segment until
+# it contains a keyframe. Segments were therefore already about 2 s while this
+# line said 1s. Declaring 2s makes the configuration describe what happens.
+hlsSegmentDuration: 2s
+# Inert outside lowLatency. Kept so that a revert to low latency is one word.
 hlsPartDuration: 200ms
 hlsSegmentMaxSize: 20M
 webrtc: false

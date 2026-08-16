@@ -97,7 +97,6 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_STREAM_PUBLISH_CIDR:=}"
 : "${MV_STREAM_HLS_BACKEND:=127.0.0.1:8888}"
 : "${MV_ARCHIVE_PEER_ID:=archive-main}"
-: "${MV_HOMEPAGE_RELEASE:=0.2.5}"
 : "${MV_HOMEPAGE_REPO:=jpinedaa/bibites-multiverse}"
 : "${MV_HOMEPAGE_GAME_VERSION:=0.6.3.1}"
 : "${MV_ACME_MODE:=webroot}"
@@ -116,7 +115,14 @@ BIN="$MV_PREFIX/bin"
 ACME_ROOT=/var/www/acme
 WWW_ROOT=/var/www
 ANNOUNCE_ROOT="$WWW_ROOT/announcements"
+# The viewer-presence document nginx publishes at /api/viewers. It is static
+# content written by a timer, not a backend, so that reading it costs nothing and
+# a stopped archive does not hide the audience from the publisher.
+VIEWERS_ROOT="$WWW_ROOT/multiverse-status"
 ARCHIVE_SECRET=/etc/multiverse/archive.secret
+# Where restart-relay.sh drops the peer gate. The front-door template globs this
+# directory, so an empty one is the normal state and a valid configuration.
+GATE_DIR=/etc/multiverse/nginx-gates
 CONTRACT_B_PATH=/contract-b/v4
 ADVERTISE_URL="wss://${MV_DOMAIN}${CONTRACT_B_PATH}"
 [ "$MV_RELAY_PORT" = 443 ] || ADVERTISE_URL="wss://${MV_DOMAIN}:${MV_RELAY_PORT}${CONTRACT_B_PATH}"
@@ -283,11 +289,19 @@ phase_directories() {
   # /etc/multiverse holds the env files and the TLS copy: root writes, the
   # service only reads, and the group is what carries the read.
   run install -d -m 0750 -o root -g "$MV_GROUP" /etc/multiverse "$MV_TLSDIR"
+  # The gate directory is created EMPTY and stays empty. nginx reads it, so it
+  # is world-readable; only root writes into it, and only restart-relay.sh
+  # should. It exists here rather than being created on demand so that an
+  # operator can see the mechanism on a healthy host, and so that the one
+  # command that raises the gate is a file write and not a mkdir as well.
+  run install -d -m 0755 -o root -g root "$GATE_DIR"
   run install -d -m 0755 -o root -g root "$MV_PREFIX" "$BIN"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE" "$RELAY_DATA" "$ARCHIVE_DATA"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE/backup" "$MV_STATE/monitor"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_LOGDIR"
   run install -d -m 0755 -o root -g root "$ACME_ROOT" "$ACME_ROOT/.well-known"
+  # root writes viewers.json from the timer; nginx reads it as www-data.
+  run install -d -m 0755 -o root -g www-data "$VIEWERS_ROOT"
   # The kit itself lives on the box, because RESTART-POLICY.md is a document an
   # operator reads at 03:00 on the machine that is misbehaving — and because the
   # on-box copy must be able to re-run this script, which needs the templates.
@@ -475,8 +489,11 @@ MULTIVERSE_ARCHIVE_DENY_LIST=/etc/multiverse/deny-list
 # announces. Empty names no world, and both pages then say so. Display only: it
 # changes no placement, no routing and no record. See deploy.env.example.
 MULTIVERSE_BROADCAST_PEER=${MV_BROADCAST_PEER_ID:-}
-# Homepage links on the landing page, for the current release's file names.
-MULTIVERSE_HOMEPAGE_RELEASE=$MV_HOMEPAGE_RELEASE
+# Homepage links on the landing page. The release is NOT one of these values and
+# must not become one again: the page's download buttons address GitHub's
+# /releases/latest, so the newest published release is what a visitor gets, and
+# no deployment is part of a release. Only the repository and the game label are
+# rendered here.
 MULTIVERSE_HOMEPAGE_REPO=${MV_HOMEPAGE_REPO:-}
 MULTIVERSE_HOMEPAGE_GAME_VERSION=${MV_HOMEPAGE_GAME_VERSION:-}
 MULTIVERSE_LOG_FILE=$MV_LOGDIR/archive.log
@@ -577,6 +594,7 @@ render_template() {
       -e "s|@@MV_TLSDIR@@|$MV_TLSDIR|g" \
       -e "s|@@ACME_ROOT@@|$ACME_ROOT|g" \
       -e "s|@@WWW_ROOT@@|$WWW_ROOT|g" \
+      -e "s|@@MV_GATEDIR@@|$GATE_DIR|g" \
       "$src" | write_file "$dst" 0644 root:root
   say "rendered $dst"
 }
@@ -652,12 +670,19 @@ phase_nginxfront() {
       "$ANNOUNCE_ROOT/notices.html"
     say "seeded $ANNOUNCE_ROOT/notices.html from the kit"
   fi
+  # The front door globs $GATE_DIR, so the directory must exist before the
+  # render is tested. A glob that matches nothing is valid nginx and a missing
+  # directory globs to nothing too, but an operator reading a healthy host
+  # should be able to see the mechanism, so create it here as well as in the
+  # directories phase — `--only nginxfront` is a real way to reach this file.
+  run install -d -m 0755 -o root -g root "$GATE_DIR"
   render_template "$KIT_DIR/nginx/multiverse-20-status.conf" /etc/nginx/conf.d/multiverse-20-status.conf
   run nginx -t
   run systemctl reload nginx
   say "https://$MV_DOMAIN/ -> $MV_ARCHIVE_HTTP, GET and HEAD only, rate limited"
   say "https://$MV_DOMAIN/announcements/ -> $ANNOUNCE_ROOT, static, no archive needed"
   say "$ADVERTISE_URL -> $MV_RELAY_BACKEND, WebSocket proxy"
+  say "peer gate: $GATE_DIR is empty, so /contract-b/ is open. restart-relay.sh raises it."
 }
 
 # ---------------------------------------------------------------- bootstrap
@@ -713,7 +738,8 @@ phase_systemd() {
   for u in multiverse-relay.service multiverse-archive.service \
            multiverse-monitor.service multiverse-monitor.timer \
            multiverse-backup.service multiverse-backup.timer \
-           multiverse-host-sample.service multiverse-host-sample.timer; do
+           multiverse-host-sample.service multiverse-host-sample.timer \
+           multiverse-viewers.service multiverse-viewers.timer; do
     run install -m 0644 -o root -g root "$KIT_DIR/systemd/$u" "/etc/systemd/system/$u"
   done
 
@@ -734,18 +760,50 @@ EOF
     say "archive MemoryHigh unset (no cgroup ceiling)"
   fi
 
+  # The reboot hold-down (RESTART-POLICY.md, "Host reboot"). A reboot must be
+  # able to keep the relay down while the archive replays, or the map runs live
+  # with nothing recording it. `systemctl mask` CANNOT do that here and this
+  # phase is the reason: these units are real files in /etc/systemd/system, with
+  # no vendor copy under /lib, and a mask is a symlink to /dev/null at that same
+  # path — "Failed to mask unit: File /etc/systemd/system/multiverse-relay.service
+  # already exists", at the last step before the reboot. A condition on a file is
+  # the hold-down that survives `enable`, `start`, and a re-run of this script.
+  run install -d -m 0755 /etc/systemd/system/multiverse-relay.service.d
+  write_file /etc/systemd/system/multiverse-relay.service.d/hold.conf 0644 root:root <<'EOF'
+# Generated by provision.sh. RESTART-POLICY.md, "Host reboot", is the procedure.
+# While this file exists the relay does not start — not at boot, not from
+# `systemctl start`, which reports success and starts nothing. `systemctl status`
+# names the condition. Remove the file to release it.
+[Unit]
+ConditionPathExists=!/etc/multiverse/RELAY-HOLD
+EOF
+  say "reboot hold-down: touch /etc/multiverse/RELAY-HOLD holds the relay down; rm releases it"
+
   run systemctl daemon-reload
   # The sampler unit declares ReadWritePaths for this directory, and systemd
   # refuses to start a unit whose ReadWritePaths does not exist.
   run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/metrics
+  # Same rule for the viewer-presence unit, and the directories phase is not
+  # guaranteed to have run: `--only systemd` from a fresh kit is a supported way
+  # to install one new unit on a host that already has everything else.
+  run install -d -m 0755 -o root -g www-data "$VIEWERS_ROOT"
   run systemctl enable multiverse-relay.service multiverse-archive.service
   run systemctl enable --now multiverse-monitor.timer multiverse-backup.timer \
-    multiverse-host-sample.timer
+    multiverse-host-sample.timer multiverse-viewers.timer
   # start, not restart: re-running provision must not cost the map an outage.
   # An upgrade is a deliberate act and RESTART-POLICY.md is where it is written.
   run systemctl start multiverse-relay.service
   run systemctl start multiverse-archive.service
   say "enabled at boot and started. RESTART-POLICY.md is what restarts them by hand."
+  # This phase is an ENABLE and a START, so it defeats a `systemctl disable`
+  # hold-down and it starts nothing while the hold file is there. Say both out
+  # loud: a silent no-op here is how a relay stays down after an operator
+  # believes the reboot is finished.
+  if [ -e /etc/multiverse/RELAY-HOLD ]; then
+    warn "/etc/multiverse/RELAY-HOLD exists, so the relay is HELD DOWN and did not start.
+     Release it when the archive answers /healthz:  rm /etc/multiverse/RELAY-HOLD
+     then  systemctl start multiverse-relay   (RESTART-POLICY.md, 'Host reboot')"
+  fi
 }
 
 # ---------------------------------------------------------------- stream origin
@@ -773,7 +831,7 @@ Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 Unattended-Upgrade::Remove-Unused-Dependencies "true";
 EOF
   run systemctl enable --now unattended-upgrades
-  say "security updates automatic; reboots are NOT (RESTART-POLICY.md, 'the reboot')"
+  say "security updates automatic; reboots are NOT (RESTART-POLICY.md, 'Host reboot')"
   say "monitor.sh reports /var/run/reboot-required so a pending kernel is visible."
 }
 
@@ -830,11 +888,16 @@ phase_verify() {
   chk "monitor timer active"     "systemctl is-active --quiet multiverse-monitor.timer"
   chk "backup timer active"      "systemctl is-active --quiet multiverse-backup.timer"
   chk "host sample timer active" "systemctl is-active --quiet multiverse-host-sample.timer"
+  chk "viewers timer active"     "systemctl is-active --quiet multiverse-viewers.timer"
   chk "host sampler is installed" "test -x $MV_PREFIX/deploy/service-host-sample"
   chk "relay backend healthz"    "curl -fsS --max-time 10 http://$MV_RELAY_BACKEND/healthz"
   chk "archive healthz local"    "curl -fsS --max-time 10 http://$MV_ARCHIVE_HTTP/healthz"
   chk "website over TLS"         "curl -fsS --max-time 15 https://$MV_DOMAIN/"
   chk "status API over TLS"      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/status"
+  # The publisher stops when this says nobody is watching, so an endpoint that
+  # 404s reads to a watcher as a broken service rather than as an empty room.
+  chk "viewer presence over TLS" \
+      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/viewers | grep -q '\"watching\":'"
   chk "relay path rejects no credential" \
       "test \"\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://$MV_DOMAIN$CONTRACT_B_PATH)\" = 401"
   chk "public enrollment rejects GET" \

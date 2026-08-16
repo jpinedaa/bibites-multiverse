@@ -20,19 +20,27 @@ Keep these records outside the public repository:
 | `deploy.sh` | The deployment sequence on the host: install the kit, prove what landed, install the binaries, prove those. It restarts nothing. |
 | `ci-gate.sh` | The forced command for a CI deployment key. It accepts a fixed list of verbs and refuses everything else. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
+| `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
+| `restart-archive.sh` | Runs the complete-record archive sequence, guarded by the archive-deploy hold and the replay-headroom verdict. Costs a full ledger replay. |
+| `restart-lib.sh` | The half both restart scripts share: the peer gate, the waits, the proof, and the receipt. Sourced, never run. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
+| `ce-reconcile.sh` | Reconciles the host's transfer counter against the invoice once a day. It runs on an operator machine, not on the host. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
+| `viewers-presence.sh` | Publishes whether anyone is watching the broadcast, so the publisher can stop while nobody is. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
-| `test-monitor.sh` | Drives the monitor's transfer, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
+| `test-monitor.sh` | Drives the monitor's transfer, billing, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
+| `test-viewers-presence.sh` | Drives `viewers-presence.sh` against a fake access log, fake metrics and a fixed clock. |
+| `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
 | `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
 | `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
+| `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
-| `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
+| `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, and viewer-presence signal. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
 | `www/announcements/` | The announcements page nginx serves from disk, and the seed for its notices file. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
@@ -64,8 +72,10 @@ The following values identify one deployment:
 - `MV_BUNDLE` and `MV_TRANSFER_ALLOWANCE_GB`, which must state the same bundle.
 - `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
-- Homepage values for the public landing page links: `MV_HOMEPAGE_RELEASE`,
-  `MV_HOMEPAGE_REPO`, and `MV_HOMEPAGE_GAME_VERSION`.
+- Homepage values for the public landing page links: `MV_HOMEPAGE_REPO` and
+  `MV_HOMEPAGE_GAME_VERSION`. The release is not one of them. The page's
+  download buttons address GitHub's `/releases/latest`, so a new release reaches
+  the homepage without a deployment.
 
 Never store the completed file in Git.
 Store secret values in a secret manager or in protected files on the host.
@@ -128,6 +138,9 @@ sudo /home/<user>/multiverse-kit/provision.sh
 
 Read every warning from the dry run.
 Do not request a production certificate until public DNS is correct.
+
+Later deployments stage a new kit beside this one. "Changes to a live service", "What a deployment
+leaves on the host", says which copies to keep and when to remove the rest.
 
 ## First verification
 
@@ -289,6 +302,58 @@ The other two run on the host and read the archive on loopback.
 The last form samples a window and prints the table rows a deployment record needs.
 One reading before and one after cannot show a fault that resolves between them.
 
+## Daily billing reconciliation
+
+`monitor.sh` watches the transfer allowance from this host's own NIC counter.
+That counter needs no cloud credential, which is the only reason the check can run on a
+public-facing host at all.
+It is a proxy, and nothing on the host can audit it.
+
+`ce-reconcile.sh` is the audit.
+It runs on an operator machine, not on the host.
+It reads Cost Explorer and the instance metric, compares them, and writes one small JSON file to
+the host over `ssh`.
+The host still holds no cloud credential.
+
+```sh
+export MV_AWS_PROFILE=<read-only profile>
+export MV_LIGHTSAIL_INSTANCE=<instance name>
+export MV_BILLING_HOST=<user>@<host>
+
+deploy/ce-reconcile.sh --dry-run --print   # read, compute, ship nothing
+deploy/ce-reconcile.sh --print             # read, compute, ship
+```
+
+The file lands at `/var/lib/multiverse/monitor/billing.json`, owned by the monitor's service
+account and mode `0644`.
+The write is atomic: `install` creates a temporary file with the final owner and mode, and one
+`mv` replaces the old file.
+The monitor reads it every five minutes and must never see half of it.
+
+| Call | Count per run | Cost |
+|---|---:|---|
+| Cost Explorer `get-cost-and-usage` | 1 | `$0.01` |
+| Lightsail `get-instance-metric-data` | 2 | free |
+
+Daily is the correct cadence.
+The provider's billing data refreshes only a few times a day and lags about 14 hours, so a more
+frequent call costs more and reveals nothing.
+The script makes exactly one Cost Explorer call and passes `--no-paginate`.
+If the answer carries a `NextPageToken`, the script stops instead of paying for a second page.
+
+Every figure uses the provider's GB of `2^30` bytes.
+The instance metric sums about `1.01` times the Cost Explorer quantity over the same days.
+That residual is systematic and is not corrected.
+The ratio is published instead, and the monitor's `billing` check warns when it leaves its band.
+
+The ratio compares the days Cost Explorer has settled, never month-to-date against month-to-date.
+Cost Explorer lags, so the second comparison would show a difference that is only the lag.
+
+Run the reconciliation once a day from a machine that is reliably awake.
+Record the exact schedule in private operations storage, because the schedule names a host.
+If the reconciliation stops, the monitor reports it as a warning after `MV_BILLING_STALE_HOURS`.
+It is a warning and not a critical: the allowance is still watched, and what was lost is the audit.
+
 ## Public enrollment and manual join issuance
 
 Each public installer creates a secret and installation UUID locally. The installer sends these
@@ -396,6 +461,11 @@ storage, as `ANNOUNCEMENT.md` requires.
 Run `provision.sh` again to apply a changed parameter file or deployment kit.
 The script installs files, but it does not make every restart decision for you.
 
+Its `systemd` phase is the exception, and it enables and starts both services.
+Never run it while a reboot hold-down is in force: it undoes a `systemctl disable` and puts the
+relay back in front of a replaying archive. `RESTART-POLICY.md`, "Host reboot", holds the order,
+and the drop-in that phase installs is the hold-down that survives it.
+
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
 
@@ -408,11 +478,45 @@ Apply them with `provision.sh --only envfiles`; the archive reads them at start.
 Use `test-front-door.sh` after an nginx template or announcements-page change.
 Use `test-units.sh` after a systemd unit change.
 Use `test-monitor.sh` after a `monitor.sh` change.
+Use `test-viewers-presence.sh` after a `viewers-presence.sh` change.
+Use `test-ce-reconcile.sh` after a `ce-reconcile.sh` change.
+Use `test-ci-gate.sh` after a `ci-gate.sh` change.
+Use `test-deploy.sh` after a `deploy.sh` change.
 Use the provisioning verification phase after any host change.
 
 Use `health-snapshot.sh --watch` across the change window.
 The verification phase reports that each check passed, and a service can be measurably worse with
 every check still passing.
+
+### What a deployment leaves on the host
+
+Each deployment stages a kit copy, replaces binaries, and can leave a copy of a file it edited.
+These copies are rollback references. They are useful for one generation and clutter after that.
+This is host housekeeping. It is not `MV_RETENTION`, which governs participant data.
+
+Keep on the host:
+
+- The installed kit in `/opt/multiverse/deploy/`, and the staging copy it was installed from.
+- The previous kit staging copy.
+- The installed binaries in `/opt/multiverse/bin/`, and the previous binaries beside them.
+- The staging directory that `ship.sh` writes, `MV_STAGE_DIR`. Each run overwrites it, so it always
+  holds the current artifacts and never accumulates.
+- The last two `.bak-*` copies of any file under `/etc/multiverse/`. Nothing in this kit writes
+  those; an operator makes them by hand, and only the operator removes them.
+
+Remove after the next deployment succeeds:
+
+- Every kit staging copy older than the previous one.
+- Every binary copy older than the previous one.
+- Every `.bak-*` copy beyond the last two.
+
+Remove nothing while a deployment record is still open. A record that is open still names its
+rollback artifacts.
+
+A deploy script belongs in this repository, not in a home directory. A script under `/home/<user>`
+is unversioned, unreviewed, and gone when the instance is replaced. If a deployment needs a step
+this kit does not have, add the step here and ship it. The kit copy under `/home/<user>` that
+"Install a host" creates is not a deploy script; it is the payload that `provision.sh` installs.
 
 ## Public and private records
 
@@ -440,14 +544,40 @@ bash -n deploy/*.sh deploy/service-host-sample
 deploy/test-front-door.sh
 deploy/test-units.sh
 deploy/test-monitor.sh
+deploy/test-viewers-presence.sh
+deploy/test-ce-reconcile.sh
+deploy/test-ci-gate.sh
+deploy/test-deploy.sh
+```
+
+Both restart procedures answer `--dry-run`, which walks every step and changes nothing:
+
+```sh
+deploy/restart-relay.sh --dry-run
+deploy/restart-archive.sh --dry-run
 ```
 
 `test-monitor.sh` needs no root, no network and no host.
-It runs `monitor.sh --only transfer`, `--only hosts-pin`, `--only replay` and `--only swap` against
-fake `/proc` files, a fake `/etc/hosts`, a fake status document and a fixed clock, in a temporary
-state directory.
+It runs `monitor.sh --only transfer`, `--only hosts-pin`, `--only replay`, `--only swap` and
+`--only billing` against fake `/proc` files, a fake `/etc/hosts`, a fake status document, a fake
+reconciliation file and a fixed clock, in a temporary state directory.
 Its replay cases hold the archive memory gate to physical RAM: the same reading with a swap file
 present must keep the same ratio and the same severity.
+Its billing cases hold the check to reporting absence: a reconciliation that never arrived and one
+that stopped arriving must both be readings, not silence.
+
+`test-ce-reconcile.sh` needs no AWS account.
+It runs `ce-reconcile.sh --from-file` against a saved response in `deploy/testdata/` and a fake
+instance-metric provider, so it makes no Cost Explorer call and spends nothing.
+A Cost Explorer call costs `$0.01`, and its answer changes daily, so the live API is the wrong
+place to test a parser.
+
+`test-viewers-presence.sh` needs no root, no network and no host either.
+It runs `viewers-presence.sh` against a written access log, a written metrics file and a fixed
+clock.
+Its cases are the four ways the signal has to be right: silence reads as nobody, a failed request
+still proves that a person is waiting, a loopback probe is not an audience, and a player that
+reached the stream counts whatever the log says.
 
 Run `shellcheck` when it is available.
 Run `systemd-analyze verify` against the units on a compatible Linux host.
