@@ -63,6 +63,12 @@ has() { # has <label> <haystack> <needle>
     *) fail "$1" "expected to contain: $3" "actual: $2" ;;
   esac
 }
+hasnt() { # hasnt <label> <haystack> <needle>
+  case "$2" in
+    *"$3"*) fail "$1" "expected NOT to contain: $3" "actual: $2" ;;
+    *) pass "$1" ;;
+  esac
+}
 
 # ---------------------------------------------------------------- fixtures
 
@@ -234,12 +240,22 @@ out="$(run "$BASE" transfer $FLAT)"
 eq  'the trailing rate warns at eighty percent' "$(sev_of "$out" transfer)" WARN
 has 'the warning names the trailing projection' "$out" 'the last 24 h project a full month of'
 has 'the warning states the billing rate'       "$out" '$0.09/GB'
+has 'the warning carries the same measured levers' "$out" '88 GB/month for each crossing per second'
 
 seed_warm "$GIB" "$(( BASE - 86400 ))" 4000 4000
 out="$(run "$BASE" transfer $FLAT)"
 eq  'the trailing rate is critical at a hundred percent' "$(sev_of "$out" transfer)" CRIT
 has 'the critical line says both directions are counted' "$out" 'counted in BOTH directions'
 has 'the critical line points at the levers'             "$out" 'deploy/SIZING.md'
+# THE LEVERS ARE THE POINT OF THE ALERT. An operator who reads this line at 03:00
+# acts on the number in it, so the numbers are pinned to SIZING.md's measured
+# model here: peer traffic is a crossing-rate term and NOT a time-scale term, and
+# the retired "50 GB per unit of S" rule must never come back.
+has 'the critical line gives the measured peer lever'    "$out" '88 GB/month for each crossing per second'
+has 'the critical line says time scale is not a lever'   "$out" 'does NOT fall with time scale'
+has 'the critical line gives the measured viewer lever'  "$out" '1,150 GB/month'
+has 'the critical line gives the ingest lever'           "$out" '780 GB/month'
+hasnt 'the critical line no longer sells the retired rule' "$out" '50 GB/month per unit'
 has 'the critical line names the interface it read'      "$out" '/proc/net/dev on eth0'
 
 # ---------------------------------------------------------------- 8. projection A

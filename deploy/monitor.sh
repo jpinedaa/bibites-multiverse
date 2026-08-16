@@ -640,9 +640,9 @@ check_transfer() {
 
   case "$sev" in
     CRIT)
-      report transfer CRIT "$mtd_gb GB of transfer used this month against a $MV_TRANSFER_ALLOWANCE_GB GB allowance counted in BOTH directions, and $drove (${pct}% of the allowance). Overage is billed at \$0.09/GB and is NOT throttled, so this is an open-ended invoice rather than an outage. Levers are in deploy/SIZING.md \"Network transfer\": low-latency HLS costs 1,190 GB per viewer-month; peer traffic alone is ~50 GB/month per unit of achieved time scale. Read from /proc/net/dev on $iface, which matches the provider's NetworkIn+NetworkOut to within 1%." ;;
+      report transfer CRIT "$mtd_gb GB of transfer used this month against a $MV_TRANSFER_ALLOWANCE_GB GB allowance counted in BOTH directions, and $drove (${pct}% of the allowance). Overage is billed at \$0.09/GB and is NOT throttled, so this is an open-ended invoice rather than an outage. Levers are in deploy/SIZING.md \"Network transfer\": peer traffic is uncompressed migration envelopes — about 88 GB/month for each crossing per second, both directions — and it does NOT fall with time scale, because population grows into the freed CPU; removing a peer removes its crossings, slowing one removes nothing. A low-latency HLS viewer costs about 1,150 GB/month (about 790 GB/month non-low-latency) and the RTMP ingest about 780 GB/month at 2.5 Mbit/s. Read from /proc/net/dev on $iface, which matches the provider's NetworkIn+NetworkOut to within 1%." ;;
     WARN)
-      report transfer WARN "$mtd_gb GB of transfer used this month against a $MV_TRANSFER_ALLOWANCE_GB GB allowance counted in BOTH directions, and $drove (${pct}% of the allowance). Overage is billed at \$0.09/GB and is not throttled, so it is an invoice rather than an outage. The levers are in deploy/SIZING.md \"Network transfer\". Read from /proc/net/dev on $iface." ;;
+      report transfer WARN "$mtd_gb GB of transfer used this month against a $MV_TRANSFER_ALLOWANCE_GB GB allowance counted in BOTH directions, and $drove (${pct}% of the allowance). Overage is billed at \$0.09/GB and is not throttled, so it is an invoice rather than an outage. The levers are in deploy/SIZING.md \"Network transfer\": peer traffic (about 88 GB/month for each crossing per second, both directions, and it does not fall with time scale), a low-latency HLS viewer (about 1,150 GB/month), and the RTMP ingest (about 780 GB/month). Read from /proc/net/dev on $iface." ;;
     *)
       if [ -n "$proj_b_gb" ]; then
         report transfer OK "$mtd_gb GB used this month, projecting $proj_b_gb GB (${pct_b}% of $MV_TRANSFER_ALLOWANCE_GB GB) at the last 24 h's rate"
@@ -674,7 +674,7 @@ check_transfer_rate() {
         print out
       }')"
     sustain="$(awk -v a="$MV_TRANSFER_ALLOWANCE_GB" -v s="$MONTH_SECS" 'BEGIN{printf "%.1f", a / (s / 3600)}')"
-    report transfer-rate WARN "in+out has exceeded $MV_TRANSFER_HOURLY_GB GB/hour for $hot consecutive hours (last three: $last3 GB). That is more than twice the $sustain GB/hour the allowance sustains. Something started: check open /watch tabs, the broadcast publisher, and each world's achieved time scale before the month-to-date line moves."
+    report transfer-rate WARN "in+out has exceeded $MV_TRANSFER_HOURLY_GB GB/hour for $hot consecutive hours (last three: $last3 GB). That is more than twice the $sustain GB/hour the allowance sustains. Something started: check open /watch tabs, the broadcast publisher, and the map's crossing rate before the month-to-date line moves."
   else
     report transfer-rate OK "last closed hour $last GB, $hot consecutive above $MV_TRANSFER_HOURLY_GB GB"
   fi
