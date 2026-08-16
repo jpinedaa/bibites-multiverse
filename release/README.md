@@ -14,7 +14,7 @@ raised only after the release that satisfies it exists.
 |---|---|
 | `windows-installer.nsi` | Builds the single-file Windows setup with per-user shortcuts and uninstall registration |
 | `kit/bibites-multiverse.ico` | The setup, desktop, and Start Menu icon |
-| `kit/Install-BibitesMultiverse.cmd` | The advanced Windows ZIP launcher. It opens the same GUI |
+| `kit/Install-BibitesMultiverse.cmd` | The advanced Windows ZIP entry point. It opens the same GUI |
 | `kit/Install-BibitesMultiverse-Gui.ps1` | Selects the included or existing game and starts the installed world by default |
 | `kit/Find-BibitesGame.ps1` | Searches Steam, itch.io, and common Windows game locations |
 | `kit/Install-BibitesMultiverse.ps1` | The Windows installer and its advanced options |
@@ -28,15 +28,18 @@ raised only after the release that satisfies it exists.
 | `make-release.sh` | Builds both platform packages, the Windows setup, `SHA256SUMS`, and the release page |
 | `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
+| `../go/cmd/multiverse-launcher/` | Not in this directory, but built here: `make-release.sh` cross-compiles it into every Windows package as `BibitesMultiverseLauncher.exe`, the installed application the shortcuts open |
 | `dist/` | Build output. **Not tracked** — see `.gitignore`, which says why |
 
 **Two platforms, one mod.** The plugin in every package is the same file, byte for byte.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The build creates an add-on archive for each platform. Release `0.2.3` publishes one executable
-Windows setup as the recommended Windows download. It publishes a complete Linux archive as the
-recommended Linux download. Both contain an authorized, unmodified game payload and a
+The build creates an add-on archive for each platform. Release `0.2.4` publishes one executable
+Windows setup as the recommended Windows download, and every Windows package carries
+`BibitesMultiverseLauncher.exe`. It publishes a complete Linux archive as the
+recommended Linux download; the Linux kit keeps its shell scripts and ships no launcher in this
+release. Both contain an authorized, unmodified game payload and a
 redistribution notice. The advanced Windows complete ZIP remains available.
 Every participant package contains `public-map.json`. This file lets each installer find the
 deployed public map. Each installation still creates its own world identity and secret.
@@ -90,8 +93,10 @@ A Windows complete build also needs NSIS 3.09 or newer. Set `MAKENSIS` when the 
 on `PATH`.
 
 Go can omit VCS metadata when a linked worktree points to Git data on another filesystem. In that
-case, set `RELEASE_SIDECAR_BUILD_REPO` to a clean checkout of the same commit. The builder checks
-the revision and refuses a missing sidecar stamp.
+case, set `RELEASE_SIDECAR_BUILD_REPO` to a clean checkout of the same commit. **That checkout now
+builds two binaries** — the sidecar and the launcher, each for Windows and Linux — and the builder
+checks the revision and refuses a missing stamp on either one. The variable keeps its name because
+it is the clean Go build checkout rather than one command's.
 
 **The builder checks package consistency, not remote execution.** Before it packages anything,
 it checks these inputs:
@@ -104,6 +109,13 @@ it checks these inputs:
    must match the source revision in the bundled sidecar. Unrelated Go commands do not affect
    this comparison. VCS stamps can make two builds from the same inputs differ as files.
 4. If this machine's game directory is readable, the local plugin must also match.
+
+**The launcher is deliberately outside gate 3.** That gate compares the package graph of
+`cmd/sidecar` against the tracked far-end bundle, and the launcher is a separate command that
+shares none of it — which is also why adding it could not disturb the sidecar's manifest. What
+stands in its place is the same VCS-stamp rule the sidecar gets, plus a check that the Windows
+build really is a `PE32+` executable, plus `go vet` over its two packages. It uses the standard
+library only, so there is no module set to compare.
 
 These comparisons do not prove that a bundle ran on another computer. Record runtime evidence
 separately after a real test or deployment.
@@ -153,6 +165,19 @@ The Windows setup supports a no-install probe. Run the finished executable with 
 Windows. A successful probe proves that the executable can unpack its real payload and load the
 embedded GUI.
 
+**The build-side smoke checks**, which need no game and no release build:
+
+```sh
+cd go && go vet ./... && go test ./internal/launcher/... ./cmd/multiverse-launcher/...
+cd go && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o /tmp/l.exe ./cmd/multiverse-launcher
+cd go && GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o /tmp/l    ./cmd/multiverse-launcher
+bash -n release/make-release.sh release/test-install-uninstall.sh release/kit/*.sh
+```
+
+**There is no CI.** Every check on this page is a hand step, and the two PowerShell suites need a
+Windows machine. The launcher's Windows process primitives — the detached spawn, the owner-only
+credential file, and the ask-before-forcing stop — compile here and are proved only on Windows.
+
 ## Publishing — the four steps, by hand
 
 `make-release.sh` deliberately does none of these.
@@ -160,28 +185,36 @@ embedded GUI.
 1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 2. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.2.3 && git push origin v0.2.3`. The page's links point into the tag, so the
+   `git tag v0.2.4 && git push origin v0.2.4`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, the Windows setup, and `SHA256SUMS`:
    ```sh
-   gh release create v0.2.3 \
-       release/dist/bibites-multiverse-0.2.3-*.zip \
-       release/dist/bibites-multiverse-0.2.3-*.exe \
+   gh release create v0.2.4 \
+       release/dist/bibites-multiverse-0.2.4-*.zip \
+       release/dist/bibites-multiverse-0.2.4-*.exe \
        release/dist/SHA256SUMS \
-       --title "Bibites Multiverse 0.2.3" \
+       --title "Bibites Multiverse 0.2.4" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 4. **Read the published page as a stranger would**, in a browser, and check the three things that
    matter most about its shape: the checksum step is **above** the download links; each download
    link's file matches the checksum beside it; and **the Linux row does not read as an
    afterthought** — a reader on that platform should meet the checksum-then-executable-bit
-   ordering, the launcher difference and the one-instance-per-game-folder warning without having
-   to read the Windows sections first.
+   ordering, the `run_bepinex.sh` difference and the one-instance-per-game-folder warning without
+   having to read the Windows sections first.
 
    Also open each participant archive and probe the Windows setup. Make sure that
    `public-map.json` contains the intended enrollment and relay addresses. It must not contain a
    world identity or secret.
+
+**The homepage is a separate act, and it is not on this list.** `bibitesmultiverse.com` renders
+the release number from the archive service. The compiled default lives in
+`go/internal/archive/landing.go`, and the service environment's `MULTIVERSE_HOMEPAGE_RELEASE`
+(written from `MV_HOMEPAGE_RELEASE` in the deployment configuration) **overrides it**. So the
+published page names the new release only after the archive binary is rebuilt and redeployed
+**and** the host's value is the new release. Open the homepage afterwards and check that the
+Windows button, the Linux button, and the tag link all resolve to the new release.
 
 **A fifth step, if the repository is private:** the page's documentation links resolve only for
 somebody who can read the repository. Make it public, or the four participant pages have to

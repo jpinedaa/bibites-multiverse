@@ -122,12 +122,12 @@ func TestLandingCardLayoutKeepsRelatedContentTogether(t *testing.T) {
 func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 	defaultLanding := landingPageHTML
 	for _, want := range []string{
-		"The Windows setup and Linux complete package for release 0.2.3",
+		"The Windows setup and Linux complete package for release 0.2.4",
 		"Each installer creates a unique world identity and keeps its secret on your machine.",
 		"No join string is required.",
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.3/bibites-multiverse-0.2.3-windows-x64-setup.exe"`,
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.3/bibites-multiverse-0.2.3-linux-x64-complete.zip"`,
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.3">Checksums and add-ons`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.4/bibites-multiverse-0.2.4-windows-x64-setup.exe"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.4/bibites-multiverse-0.2.4-linux-x64-complete.zip"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.4">Checksums and add-ons`,
 		"Automatic enrollment creates the secret on your machine.",
 	} {
 		if !strings.Contains(defaultLanding, want) {

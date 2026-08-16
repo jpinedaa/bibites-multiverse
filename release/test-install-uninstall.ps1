@@ -200,12 +200,64 @@ Check "BepInEx was installed" (Test-Path (Join-Path $aGame 'BepInEx\core\BepInEx
 Check "the start script was written" (Test-Path (Join-Path $KitDir 'Start-Multiverse.ps1'))
 Check "the stop script was written" (Test-Path (Join-Path $KitDir 'Stop-Multiverse.ps1'))
 
+# The launcher is the application's entry point, and the profile is what it
+# reads. The profile states this same world in the launcher's own format, and
+# it must never carry the credential: that stays in peer-secret.txt.
+Check "the launcher is in the kit" (Test-Path (Join-Path $KitDir 'BibitesMultiverseLauncher.exe'))
+$profilesDir        = Join-Path $KitDir 'profiles'
+$defaultProfilePath = Join-Path $profilesDir 'default.json'
+$activeProfilePath  = Join-Path $profilesDir 'active.txt'
+Check "the launcher's default profile was written" (Test-Path $defaultProfilePath)
+if (Test-Path $defaultProfilePath) {
+    $profileText = Get-Content -Raw -LiteralPath $defaultProfilePath
+    $profileObj  = $profileText | ConvertFrom-Json
+    Check "the profile states the launcher-profile format" `
+        ($profileObj.format -eq 'bibites-multiverse/launcher-profile/1')
+    $profileKeys = @($profileObj.PSObject.Properties.Name)
+    foreach ($key in @('format', 'name', 'gameDir', 'dataRoot', 'sidecarPort', 'world',
+                       'headless', 'exportEdges', 'excludeSpecies', 'saveMinutes', 'saveKeep',
+                       'saveOnQuit', 'peerId', 'relayUrl', 'createdUtc')) {
+        Check ("the profile carries $key") ($profileKeys -contains $key) ($profileKeys -join ', ')
+    }
+    Check "the profile carries nothing else" ($profileKeys.Count -eq 15) ($profileKeys -join ', ')
+    Check "the profile is the world this install was given" `
+        ($profileObj.name -eq 'default' -and $profileObj.world -eq 'TestWorld')
+    Check "the profile carries this install's port, game and data root" `
+        ($profileObj.sidecarPort -eq 8787 -and $profileObj.gameDir -eq $aGame -and
+         $profileObj.dataRoot -eq $aData) `
+        ("$($profileObj.sidecarPort) / $($profileObj.gameDir) / $($profileObj.dataRoot)")
+    Check "the profile carries the identity this install was given" `
+        ($profileObj.peerId -eq 'test-world' -and
+         $profileObj.relayUrl -eq 'wss://relay.example.test/contract-b/v4')
+    Check "the profile runs with a picture unless somebody asks otherwise" `
+        ($profileObj.headless -eq $false)
+    Check "the profile carries the settings this install ships with" `
+        ($profileObj.exportEdges -eq 'E,N,W,S' -and $profileObj.excludeSpecies -eq 'Basic bibite' -and
+         $profileObj.saveMinutes -eq 10 -and $profileObj.saveKeep -eq 6 -and
+         $profileObj.saveOnQuit -eq $true)
+    Check "the profile carries no secret" (-not ($profileText -match $aSecret))
+}
+Check "the launcher's selected world is the one the installer wrote" `
+    ((Test-Path $activeProfilePath) -and
+     ((Get-Content -Raw -LiteralPath $activeProfilePath).Trim() -eq 'default'))
+
 $recordPath = Join-Path $aData 'install-record.json'
 Check "the install record exists" (Test-Path $recordPath)
 if (Test-Path $recordPath) {
     $record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json
     Check "the record says BepInEx was installed by the installer" ($record.bepInEx.installedByThisInstaller -eq $true)
     Check "the record says no certificate was imported" ($record.certificate.imported -eq $false)
+    Check "the record is the revision that names the profiles" `
+        ($record.record -eq 'bibites-multiverse/install-record/3') ([string]$record.record)
+    Check "the record carries this world and its port" `
+        ($record.world -eq 'TestWorld' -and $record.sidecarPort -eq 8787)
+    Check "the record carries the settings this install shipped with" `
+        ($record.settings.exportEdges -eq 'E,N,W,S' -and
+         $record.settings.excludeSpecies -eq 'Basic bibite' -and
+         $record.settings.saveMinutes -eq 10 -and $record.settings.saveKeep -eq 6 -and
+         $record.settings.saveOnQuit -eq 'true')
+    Check "the record points at the launcher's profiles" `
+        ($record.profiles.root -eq $profilesDir -and $record.profiles.default -eq 'default')
 }
 
 $credential = Join-Path $aData 'peer-secret.txt'
@@ -260,11 +312,56 @@ if (Test-Path $stopScript) {
     $stopText = Get-Content -Raw -LiteralPath $stopScript
     Check "the stop script stops only this install's recorded processes" `
         (-not ($stopText -match 'Stop-Process\s+-Name'))
+    # Asking first is what lets the world's save-on-quit run; the force is the
+    # fallback for a process that does not answer. The three checks below are the
+    # difference between "asked and confirmed" and "asked and hoped": a process
+    # with no window makes taskkill refuse, and only Get-Process can say whether
+    # anything actually stopped.
+    Check "the stop script asks the world to close before it forces it" `
+        ($stopText -match 'taskkill')
+    Check "the stop script reads what taskkill answered, so a refusal forces at once" `
+        ($stopText -match '\$LASTEXITCODE')
+    Check "the stop script confirms the process is gone with Get-Process" `
+        ($stopText -match 'Get-Process -Id \$processId')
+    Check "the stop script never trusts WaitForExit for a process it did not start" `
+        (-not ($stopText -match 'WaitForExit'))
+    Check "the stop script keeps the pid file when it could not stop the process" `
+        ($stopText -match 'COULD NOT STOP')
 }
 
 $dry = Invoke-Script $uninstaller @{ DataRoot = $aData; DryRun = $true }
 Check "the dry run succeeded" ($dry.ExitCode -eq 0) $dry.Output
 Check "the dry run changed nothing" (Test-Path (Join-Path $aGame 'BepInEx\plugins\BibitesMultiverse.dll'))
+Check "the dry run says the profiles directory goes, rather than that it stays" `
+    (-not ($dry.Output -match ("not empty, so it stays : " + [regex]::Escape($profilesDir)))) $dry.Output
+
+# The profiles directory is ordinary user-writable JSON in an ordinary
+# user-writable folder, and -RemoveWorldData deletes recursively. A file this
+# script did not write must never steer that: not a foreign format, not a name
+# that disagrees with its file name, and never a data root like a drive root.
+$rogueProfiles = [ordered]@{
+    'rogue-root.json' = ('{"format":"bibites-multiverse/launcher-profile/1","name":"rogue-root",' +
+                         '"gameDir":"","dataRoot":"C:\\"}')
+    'rogue-name.json' = ('{"format":"bibites-multiverse/launcher-profile/1","name":"somethingelse",' +
+                         '"gameDir":"","dataRoot":"C:\\Rogue"}')
+    'rogue-fmt.json'  = ('{"format":"something/else/1","name":"rogue-fmt",' +
+                         '"gameDir":"","dataRoot":"C:\\Rogue"}')
+}
+foreach ($rogueName in $rogueProfiles.Keys) {
+    Set-Content -LiteralPath (Join-Path $profilesDir $rogueName) `
+        -Value $rogueProfiles[$rogueName] -Encoding ASCII
+}
+$rogue = Invoke-Script $uninstaller @{ DataRoot = $aData; RemoveWorldData = $true; DryRun = $true }
+Check "the rogue dry run succeeded" ($rogue.ExitCode -eq 0) $rogue.Output
+Check "no rogue profile's data root is ever named for removal" `
+    (-not ($rogue.Output -match '(?i)C:\\(Rogue|data|logs)')) $rogue.Output
+foreach ($rogueName in $rogueProfiles.Keys) {
+    Check ("the rogue profile $rogueName is kept and the ledger says so") `
+        ($rogue.Output -match ('stays : [^\r\n]*' + [regex]::Escape($rogueName))) $rogue.Output
+    Check ("the rogue profile $rogueName is still on disk") `
+        (Test-Path -LiteralPath (Join-Path $profilesDir $rogueName))
+    Remove-Item -LiteralPath (Join-Path $profilesDir $rogueName) -Force
+}
 
 $uninstall = Invoke-Script $uninstaller @{ DataRoot = $aData }
 Check "the uninstall succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
@@ -278,6 +375,7 @@ Check "the install record is gone" (-not (Test-Path $recordPath))
 Check "the journal is kept, because nobody asked for it to go" (Test-Path (Join-Path $aData 'data'))
 Check "the start script is gone" (-not (Test-Path (Join-Path $KitDir 'Start-Multiverse.ps1')))
 Check "the stop script is gone" (-not (Test-Path (Join-Path $KitDir 'Stop-Multiverse.ps1')))
+Check "the launcher's profiles directory is gone" (-not (Test-Path $profilesDir))
 
 # ---------------------------------------------------------------- B
 
@@ -364,6 +462,7 @@ Check "it said nothing was installed" ($install.Output -match 'NOTHING was insta
 Check "no BepInEx was installed" (-not (Test-Path (Join-Path $dGame 'BepInEx')))
 Check "no credential was written" (-not (Test-Path (Join-Path $dData 'peer-secret.txt')))
 Check "no start script was written" (-not (Test-Path (Join-Path $KitDir 'Start-Multiverse.ps1')))
+Check "no profiles directory was created" (-not (Test-Path (Join-Path $KitDir 'profiles')))
 
 # ---------------------------------------------------------------- E
 
@@ -414,6 +513,7 @@ New-Item -ItemType Directory -Force -Path $fKit | Out-Null
 Get-ChildItem -LiteralPath $KitDir -Force | Copy-Item -Destination $fKit -Recurse -Force
 Remove-Item -LiteralPath (Join-Path $fKit 'Start-Multiverse.ps1'), `
                          (Join-Path $fKit 'Stop-Multiverse.ps1') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $fKit 'profiles') -Recurse -Force -ErrorAction SilentlyContinue
 $fPayload = Join-Path $fKit 'game'
 New-SandboxGame -Path $fPayload
 $fSha = (Get-FileHash -LiteralPath $GameAssembly -Algorithm SHA256).Hash.ToUpperInvariant()
@@ -484,6 +584,12 @@ Check "the application directory contains the launcher icon" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'bibites-multiverse.ico'))
 Check "the application directory contains the sidecar" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-sidecar.exe'))
+Check "the application directory contains the launcher" `
+    (Test-Path -LiteralPath (Join-Path $fProgram 'BibitesMultiverseLauncher.exe'))
+Check "the application directory contains the map the launcher enrolls new worlds with" `
+    (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json'))
+Check "the application directory contains the launcher's default profile" `
+    (Test-Path -LiteralPath (Join-Path $fProgram 'profiles\default.json'))
 $startF = Get-Content -Raw -LiteralPath (Join-Path $fProgram 'Start-Multiverse.ps1')
 Check "the generated start script points at the managed runtime" ($startF.Contains($fRuntime))
 
@@ -497,6 +603,12 @@ Check "a user-added runtime file was kept" (Test-Path -LiteralPath (Join-Path $f
 Check "the uninstall explains why the non-empty runtime stays" ($uninstall.Output -match 'not empty, so it stays')
 Check "the installed sidecar was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-sidecar.exe')))
+Check "the installed launcher was removed" `
+    (-not (Test-Path -LiteralPath (Join-Path $fProgram 'BibitesMultiverseLauncher.exe')))
+Check "the installed public map was removed" `
+    (-not (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json')))
+Check "the launcher's profiles directory was removed" `
+    (-not (Test-Path -LiteralPath (Join-Path $fProgram 'profiles')))
 
 # ---------------------------------------------------------------- the verdict
 

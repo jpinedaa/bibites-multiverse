@@ -9,7 +9,7 @@ about your world once it is there.
 
 ## Automatic public enrollment
 
-All participant `0.2.3` packages contain `public-map.json`. This file is the public join
+All participant `0.2.4` packages contain `public-map.json`. This file is the public join
 configuration. It contains the deployed HTTPS enrollment address and WSS relay address. It does
 not contain a world identity or secret.
 
@@ -25,7 +25,8 @@ During installation, it does this:
 4. The relay stores a salted verifier and returns the derived public identity and relay address.
    It does not return or log the secret.
 5. The installer stores the secret in `peer-secret.txt`, removes the pending record, and writes the
-   identity and relay address into the start script.
+   identity and relay address into the start script. On Windows it writes them into the launcher's
+   world profile as well. The secret is never written into either one.
 
 The public identity is `public-` followed by the UUID without punctuation. It is not a secret and
 will appear on the public map after the first claim.
@@ -37,6 +38,12 @@ the same enrollment. A later repair or runtime change also reuses the installed 
 Enrollment has a total map limit and a per-network-address limit. If either limit is reached, the
 installer stops with `INS-ENROLL` and keeps the pending identity for a safe retry. Existing worlds
 remain connected when the operator disables new enrollment.
+
+**Each extra world on one computer enrolls again.** On Windows,
+`BibitesMultiverseLauncher.exe profile create NAME` runs this same enrollment for the new world, so
+that world takes another public identity and counts against both limits. Several worlds created in
+quick succession can meet the per-address limit; the launcher prints the `Retry-After` value the
+service returns, and its pending record makes the retry safe.
 
 ## Private-map join strings
 
@@ -110,12 +117,23 @@ quietly downgraded.
 `./install-bibites-multiverse.sh --join-string-file ./join.txt`. The file overrides the packaged
 public-map configuration.
 
+**The Windows launcher takes the same file for an extra private-map world**:
+`BibitesMultiverseLauncher.exe profile create NAME --join-string-file .\join.txt`. Add
+`--relay-url wss://<relay-host>/contract-b/v4` **only** when the file holds the identity half on
+its own — a whole `multiverse-join/1` line already carries the relay address, and the launcher
+never takes one from the flag over one the file carries. On the public map the flag is refused
+outright, because the packaged `public-map.json` is the address. Delete the join file afterwards;
+the launcher tells you to and will not do it for you.
+
 Each installer splits the two halves at the last dot. It checks the secret before it writes the
 credential. It stores only the secret in `peer-secret.txt` under the data root. Windows applies
 an ACL for your account. Linux creates the file with mode `0600` before it writes the secret.
 
-The identity and relay address go into the generated start script as `--peer-id` and `--relay`.
-**The secret is never in that script, a command line, or a log.** Delete the join-string file
+The identity and relay address go into the generated start script as `--peer-id` and `--relay`,
+and on Windows into the world's profile as `peerId` and `relayUrl`. Both are fixed once the world
+exists: `profile set` refuses to change either, because a world's identity and the map it is on
+are what its journal is custody for. **The secret is never in a script, a profile, a command line,
+or a log.** Delete the join-string file
 after installation. The installer does not delete a file that you supplied.
 
 **To change a private-map identity later** — a slot handover, or a move to another map — run the

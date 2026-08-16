@@ -25,7 +25,9 @@
 # packaging reference. This script requires the plugin to be byte-identical to
 # that copy. For the sidecar, it compares the repository files and module
 # versions selected by `go list` for cmd/sidecar at both revisions. Unrelated Go
-# commands do not affect this gate. These checks find stale package inputs. They
+# commands do not affect this gate. The launcher is one of those unrelated
+# commands: it is built and VCS-stamped here, and its inputs are deliberately
+# outside that comparison. These checks find stale package inputs. They
 # do not prove that either artifact ran on another computer.
 #
 # It also requires the game build to be the one docs/support-matrix.md names.
@@ -57,7 +59,7 @@ THIRD_PARTY_NOTICES="$REPO/THIRD_PARTY_NOTICES.md"
 # another filesystem. Use a clean checkout of this exact commit in that case.
 SIDECAR_BUILD_REPO="${RELEASE_SIDECAR_BUILD_REPO:-$REPO}"
 
-RELEASE=0.2.3
+RELEASE=0.2.4
 TAG="v$RELEASE"
 ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64.zip"
 LINUX_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64.zip"
@@ -65,6 +67,9 @@ COMPLETE_ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64-complete.zip"
 LINUX_COMPLETE_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64-complete.zip"
 WINDOWS_SETUP_NAME="bibites-multiverse-${RELEASE}-windows-x64-setup.exe"
 STAGE_NAME="bibites-multiverse-${RELEASE}"
+# The installed application's entry point. The shortcuts open this file, so the
+# name is what a player sees in Task Manager and in a SmartScreen prompt.
+LAUNCHER_NAME="BibitesMultiverseLauncher.exe"
 MAKENSIS="${MAKENSIS:-$(command -v makensis || true)}"
 
 # Optional, and only ever a check: an unpacked copy of the LINUX game, so the
@@ -389,6 +394,37 @@ note "$(sha "$BUILD/multiverse-sidecar")"
 note "same source as the bundled sidecar ($REF_REV), stamped $LINUX_BUILT_REV, built for linux/amd64"
 note "static: CGO is off, so it needs no libc of a particular vintage"
 
+# ------------------------------------------------------------------ the launcher
+
+step "the launcher (cross-compiled, both platforms)"
+# THIS BINARY IS NOT IN THE SIDECAR MANIFEST GATE ABOVE. That gate compares the
+# package graph of cmd/sidecar against the tracked far-end bundle, and the
+# launcher is a separate command that shares none of it. What stands in for it
+# here is the same VCS-stamp rule the sidecar gets: the shipped file must record
+# the commit this package is built from, so a downloaded exe names a public
+# revision. The launcher uses the standard library only, so there is no module
+# set to compare.
+# VET BOTH TARGETS. A vet at the host GOOS never opens proc_windows.go, which
+# is the highest-risk file in the launcher and the one no test here can run.
+# The GOOS=windows build below catches compile errors in it but not a vet
+# diagnostic, so the second line is not a duplicate of the first.
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 go vet ./cmd/multiverse-launcher ./internal/launcher )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 \
+    go vet ./cmd/multiverse-launcher ./internal/launcher )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$BUILD/$LAUNCHER_NAME" ./cmd/multiverse-launcher )
+LAUNCHER_REV="$(go version -m "$BUILD/$LAUNCHER_NAME" \
+  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+[ "$LAUNCHER_REV" = "$SOURCE_REV" ] \
+  || die "the launcher VCS stamp is '${LAUNCHER_REV:-missing}', want $SOURCE_REV"
+file "$BUILD/$LAUNCHER_NAME" | grep -q 'PE32+' \
+  || die "$LAUNCHER_NAME is not a Windows executable"
+# Linux is a compile gate for 0.2.4; the Linux kit does not ship it yet.
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$BUILD/bibites-multiverse-launcher" ./cmd/multiverse-launcher )
+note "$(sha "$BUILD/$LAUNCHER_NAME")"
+note "linux/amd64 build succeeds; the Linux kit keeps its shell scripts in this release"
+
 # ------------------------------------------------------------------ the plugin
 
 step "the plugin (fresh Release build)"
@@ -470,6 +506,7 @@ cp "$RELDIR/kit/bibites-multiverse.ico"          "$STAGE/"
 cp "$MATRIX_JSON"                                "$STAGE/support-matrix.json"
 cp "$PLUGIN"                                     "$STAGE/BibitesMultiverse.dll"
 cp "$BUILD/multiverse-sidecar.exe"               "$STAGE/"
+cp "$BUILD/$LAUNCHER_NAME"                       "$STAGE/"
 cp "$CACHE/$BEPINEX_ZIP"                         "$STAGE/"
 cp "$PROJECT_LICENSE"                            "$STAGE/LICENSE"
 cp "$THIRD_PARTY_NOTICES"                        "$STAGE/THIRD_PARTY_NOTICES.md"
@@ -506,6 +543,11 @@ note "the Linux scripts parse, are LF, and carry their executable bit"
 # one long line. Done here rather than with unix2dos, which is not on every
 # machine: whether a tool happens to be installed must not change the archive's
 # checksum. THE LINUX KIT IS DELIBERATELY NOT IN THIS LIST.
+#
+# THIS LIST IS TEXT FILES ONLY, and it is written out by name for that reason. A
+# binary — the sidecar, the launcher, the plugin, the icon, a BepInEx zip — would
+# be rewritten byte for byte by the replacement below and would no longer run.
+# Never add one.
 for f in Install-BibitesMultiverse.cmd Install-BibitesMultiverse.ps1 Install-BibitesMultiverse-Gui.ps1 Find-BibitesGame.ps1 Uninstall-BibitesMultiverse.ps1 README.md LICENSE THIRD_PARTY_NOTICES.md; do
   python3 -c "
 import sys
@@ -675,6 +717,23 @@ for archive in "${ARCHIVE_NAMES[@]}"; do
     || die "$archive contains a changed public join configuration"
 done
 note "every archive contains LICENSE, THIRD_PARTY_NOTICES.md, and the public join configuration"
+
+# The launcher is a Windows payload in this release, so it is checked by name
+# against the Windows archives rather than inside the loop above. The complete
+# stage inherits it through `cp -a "$addon/." "$complete/"` — and THAT COPY IS
+# EXACTLY WHAT THIS CHECKS, because the setup built from it hard-codes the
+# shortcut target, so a complete stage without the launcher would ship shortcuts
+# pointing at a file that does not exist and nothing else would notice.
+[ "$(unzip -Z1 "$DIST/$ZIP_NAME" "$STAGE_NAME/$LAUNCHER_NAME")" = "$STAGE_NAME/$LAUNCHER_NAME" ] \
+  || die "the Windows add-on archive does not contain the launcher"
+note "the Windows add-on archive contains $LAUNCHER_NAME"
+if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
+  [ "$(unzip -Z1 "$DIST/$COMPLETE_ZIP_NAME" "$STAGE_NAME/$LAUNCHER_NAME")" = "$STAGE_NAME/$LAUNCHER_NAME" ] \
+    || die "the Windows complete archive does not contain the launcher, so the setup's shortcuts would point at nothing"
+  [ -f "$COMPLETE_STAGE/$LAUNCHER_NAME" ] \
+    || die "the NSIS payload directory does not contain the launcher"
+  note "the Windows complete archive and the setup payload contain $LAUNCHER_NAME"
+fi
 
 note "$DIST/$ZIP_NAME  ($ZIP_SIZE)"
 note "sha256 $ZIP_SHA"

@@ -6,7 +6,7 @@
 
 **Artificial life, evolving across the network.**
 
-[![Installer status: 0.2.3 released](https://img.shields.io/badge/installer-0.2.3%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.3)
+[![Installer status: 0.2.4 released](https://img.shields.io/badge/installer-0.2.4%20released-4ec9a0)](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.4)
 [![Windows](https://img.shields.io/badge/Windows-Steam-5aa9e6)](docs/participant/install.md)
 [![Linux](https://img.shields.io/badge/Linux-native-4ec9a0)](docs/participant/install.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-8b95a3)](LICENSE)
@@ -33,10 +33,12 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
   package. Add-on packages can use a supported game that you already have.
 
 > [!IMPORTANT]
-> **Bibites Multiverse `0.2.3` is public.** The Windows download is one setup executable with an
-> authorized portable copy of *The Bibites*. The Linux complete download includes the native
-> game. Add-on downloads remain available for an existing game. Get them from the
-> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.3), and check the
+> **Bibites Multiverse `0.2.4` is public.** The Windows download is one setup executable with an
+> authorized portable copy of *The Bibites*. It installs the Bibites Multiverse launcher, which
+> starts, stops, and watches your worlds and can run more than one of them. The Linux complete
+> download includes the native game. Add-on downloads remain available for an existing game. Get
+> them from the
+> [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.4), and check the
 > SHA-256 before you run or extract a download.
 
 ## About *The Bibites*
@@ -133,15 +135,16 @@ a Multiverse save.
 
 ## Install one world
 
-Release `0.2.3` gives Windows a normal single-file setup program. Linux keeps its native complete
-archive.
+Release `0.2.4` installs the Bibites Multiverse launcher as the program you open, on top of the
+single-file Windows setup an earlier release introduced. Linux keeps its native complete archive.
 
 1. Download the recommended file for your platform. Compare it with the published
-   [`SHA256SUMS`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.3/SHA256SUMS)
+   [`SHA256SUMS`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.4/SHA256SUMS)
    file.
 2. On Windows, double-click the setup executable. On Linux, extract the archive and run
    `./install-bibites-multiverse.sh`.
 3. Keep the defaults. Windows opens the included game and creates desktop and Start Menu icons.
+   Later, use the **Bibites Multiverse** icon; it opens the launcher, and Enter starts the world.
    On Linux, run `./start-multiverse.sh` after installation.
 
 All participant packages include `public-map.json`, the public join configuration. It contains
@@ -153,11 +156,18 @@ After checksum verification, use these platform steps:
 
 | Platform | Recommended download | Install | Start |
 |---|---|---|---|
-| Windows | [`bibites-multiverse-0.2.3-windows-x64-setup.exe`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.3/bibites-multiverse-0.2.3-windows-x64-setup.exe) | Double-click the one downloaded file | Starts after install by default. Later use the **Bibites Multiverse** icon |
-| Linux | [`bibites-multiverse-0.2.3-linux-x64-complete.zip`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.3/bibites-multiverse-0.2.3-linux-x64-complete.zip) | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
+| Windows | [`bibites-multiverse-0.2.4-windows-x64-setup.exe`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.4/bibites-multiverse-0.2.4-windows-x64-setup.exe) | Double-click the one downloaded file | Starts after install by default. Later use the **Bibites Multiverse** icon, which opens the launcher |
+| Linux | [`bibites-multiverse-0.2.4-linux-x64-complete.zip`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.4/bibites-multiverse-0.2.4-linux-x64-complete.zip) | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
-Use `.\Start-Multiverse.ps1 -Headless` or `./start-multiverse.sh --headless` to run a world
-without graphics. The simulation remains active.
+To run a world without graphics on Windows, set **headless** in the launcher's settings menu, or
+run `BibitesMultiverseLauncher.exe start --headless`; `start --no-headless` draws it again for one
+session. On Linux, use `./start-multiverse.sh
+--headless`. The simulation remains active.
+
+One Windows computer can run several worlds at the same time.
+`BibitesMultiverseLauncher.exe profile create NAME --world NAME --sidecar-port 8788` adds a world
+with its own map identity, data folder, and sidecar port. One game folder supports five worlds at
+once. Each extra world enrolls its own identity on the public map.
 
 The Windows GUI uses the included portable game by default. You can instead select an existing
 game. The GUI searches Steam and common install locations before it asks for a folder. Setup
@@ -238,8 +248,8 @@ A connected world crosses a network boundary. The package limits what crosses th
   sidecar, and installer.
   Add-on packages use a game that is already on the computer.
 - The installer refuses unsupported game builds before it changes the game folder.
-- The start script opens the sidecar before it opens the game. The stop script closes both
-  processes.
+- The launcher opens the sidecar before it opens the game, and closes both when you stop the
+  world. The Linux start and stop scripts do the same.
 - The uninstaller keeps changed files and removes only files that its install record owns.
 - Your simulation, world, and save files remain on your computer.
 - SHA-256 checksums and an internal file manifest protect the release package.

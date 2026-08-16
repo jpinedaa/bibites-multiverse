@@ -31,7 +31,7 @@ The release page you downloaded this from carries the archive's SHA-256 **above*
 link. Do that first if you have not already:
 
 ```sh
-sha256sum bibites-multiverse-0.2.3-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.2.4-linux-x64-complete.zip
 ```
 
 **There is no mark of the web on Linux and this page will not invent a ritual to replace it.**
@@ -121,6 +121,10 @@ session's header where five should be.
 Windows loses one instance loudly. **Linux keeps every instance and shreds the log for all of
 them at once**, so the first thing you reach for when something is wrong is the thing that is
 already gone.
+
+**`BibitesMultiverseLauncher.exe`, which manages up to five worlds from one Windows game folder,
+is not part of the Linux kit in this release**, so this rule stands unchanged here: one game
+instance per game folder.
 
 If you want a second world on this machine, **unpack a second copy of the game into its own
 folder** and install into that. It costs disk and nothing else. `LOCAL-LOGSHRED` in

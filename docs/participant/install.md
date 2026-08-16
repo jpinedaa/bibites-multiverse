@@ -12,11 +12,11 @@ string, compiler, SDK, administrator rights, or root.
 
 | Platform | Download | Game source |
 |---|---|---|
-| Windows, recommended | `bibites-multiverse-0.2.3-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
-| Windows, advanced ZIP | `bibites-multiverse-0.2.3-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
-| Windows, add-on | `bibites-multiverse-0.2.3-windows-x64.zip` | your existing Steam copy |
-| Linux, recommended | `bibites-multiverse-0.2.3-linux-x64-complete.zip` | included native game |
-| Linux, add-on | `bibites-multiverse-0.2.3-linux-x64.zip` | your existing itch.io copy |
+| Windows, recommended | `bibites-multiverse-0.2.4-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
+| Windows, advanced ZIP | `bibites-multiverse-0.2.4-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
+| Windows, add-on | `bibites-multiverse-0.2.4-windows-x64.zip` | your existing Steam copy |
+| Linux, recommended | `bibites-multiverse-0.2.4-linux-x64-complete.zip` | included native game |
+| Linux, add-on | `bibites-multiverse-0.2.4-linux-x64.zip` | your existing itch.io copy |
 
 Every participant package includes `public-map.json`, the public join configuration. It contains
 the deployed enrollment and relay addresses. It contains no world identity or secret. Each
@@ -40,11 +40,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.3-windows-x64-setup.exe).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.4-windows-x64-setup.exe).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-0.2.3-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.2.4-linux-x64-complete.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -55,7 +55,7 @@ again; if it does not match twice, report it and do not run it. That is `INS-CHE
 Windows marks a downloaded setup or archive. **Clear the mark only after its checksum passes:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-0.2.3-windows-x64-setup.exe
+Unblock-File .\bibites-multiverse-0.2.4-windows-x64-setup.exe
 ```
 
 You can also right-click the setup, select **Properties**, and if present, select **Unblock**. The
@@ -64,20 +64,27 @@ package file
 against `MANIFEST.sha256`. That is `INS-MARKOFWEB`.
 
 This community setup is not code-signed. Windows can show **Unknown publisher**. Continue only
-after the setup SHA-256 matches the release page.
+after the setup SHA-256 matches the release page. `BibitesMultiverseLauncher.exe`, the program the
+setup installs, is not signed either — but the installer clears the download mark from it by name,
+after checking it against `MANIFEST.sha256`, so Windows should not ask a second time when you open
+the **Bibites Multiverse** icon. If it does ask, or if an antivirus quarantines the launcher, that
+is the same `INS-MARKOFWEB` situation one step later: the file came out of a setup whose checksum
+you already matched.
 
 Double-click the setup executable. The GUI uses the included portable game by default. Select
 **Use a game that is already installed** to bind to another copy. The installer searches Steam
 and common game locations. If it finds no game, the GUI says **Game not found** and keeps the
 folder picker available.
 
-The setup creates desktop and Start Menu icons named **Bibites Multiverse**. It also registers an
+The setup creates desktop and Start Menu icons named **Bibites Multiverse**. Both open
+`BibitesMultiverseLauncher.exe`, the installed application. It also registers an
 uninstaller in **Windows Settings → Apps → Installed apps**. All application files stay in your
 user profile. Setup does not need administrator rights.
 
 **Start The Bibites and connect after installation** is selected by default. Clear it if you want
-to install without starting. The launcher uses `RemoteSigned` for its process only. It does not
-change the policy for your account or computer. The package never uses `ExecutionPolicy Bypass`.
+to install without starting. The setup's command wrapper uses `RemoteSigned` for its own process
+only. It does not change the policy for your account or computer. The package never uses
+`ExecutionPolicy Bypass`.
 
 ### On Linux: there is no mark of the web, and no ritual replaces it
 
@@ -139,15 +146,53 @@ written anywhere.
 
 ## What the installer does
 
-Use the **Bibites Multiverse** desktop or Start Menu icon. Advanced users can run these files from
-the installed application directory:
+**On Windows the installed application is `BibitesMultiverseLauncher.exe`**, and the **Bibites
+Multiverse** desktop and Start Menu icons open it. It names the world it is set to, its sidecar
+port, and whether the sidecar and the game are running, above a numbered menu:
+
+```text
+   1) Start this world            [Enter]
+   2) Stop this world
+   3) Status of every world
+   4) Choose another world
+   5) Edit this world's settings
+   6) Create another world
+   7) Delete a world
+   8) Open this world's log folder
+   0) Quit
+```
+
+An empty line selects **1**, so the icon and one key connect you. The same program also takes
+commands, for a shortcut, a script, or a scheduled task:
+
+```powershell
+BibitesMultiverseLauncher.exe start                # the sidecar, then the game
+BibitesMultiverseLauncher.exe start --headless     # no game window
+BibitesMultiverseLauncher.exe start --no-headless  # draw it, even if this world is set headless
+BibitesMultiverseLauncher.exe stop                 # the game, then the sidecar
+BibitesMultiverseLauncher.exe stop --all           # every world on this computer
+BibitesMultiverseLauncher.exe status --all
+BibitesMultiverseLauncher.exe profile list
+```
+
+Advanced users can still run the generated scripts from the installed application directory. They
+hold the values this world was installed with, and they start the same world:
 
 ```powershell
 .\Start-Multiverse.ps1              # the sidecar, then the game
 .\Stop-Multiverse.ps1               # the game, then the sidecar
 ```
 
+**Use one or the other for a world, never both at once.** The scripts and the launcher share that
+world's data folder and its `sidecar.pid` and `game.pid` files, but nothing coordinates the two:
+run the script while the launcher is starting the same world and you can get two sidecars racing
+for one port. The scripts also only know the values the world was installed with, so a setting you
+changed in the launcher is not in them. A world the launcher created has no scripts at all.
+
 The advanced ZIP also contains `Install-BibitesMultiverse.ps1`.
+
+**Linux keeps its scripts as the entry point.** The launcher is a Windows program and is not part
+of the Linux kit in this release:
 
 ```sh
 ./install-bibites-multiverse.sh     # install and enroll this Linux world
@@ -162,7 +207,8 @@ identity and secret.
 
 **No parameter takes a private-map join string on the command line**, on purpose: a value typed there is
 in every process listing on your machine and in your shell history, and the wire itself has the
-same rule. `-JoinStringFile .\join.txt` — `--join-string-file ./join.txt` on Linux — reads it from
+same rule. `-JoinStringFile .\join.txt` — `--join-string-file ./join.txt` on Linux, and the same
+flag on the launcher's `profile create` — reads it from
 a file if you would rather not type it, and then delete that file, which the installer tells you
 to do and will not do for you.
 
@@ -177,7 +223,9 @@ matrix; install BepInEx if it is not already there; copy the plugin; enroll a un
 identity or split a private-map join string, then store the secret in a file only you can read;
 arrange trust for a certificate authority
 **only** if you gave it one for a private map; state the settings this install ships with; and
-write the start script, the stop script, the application files, and the uninstall record.
+write the start script, the stop script, the application files, and the uninstall record. The
+Windows installer writes one more thing in that last step: `profiles\default.json`, the world
+profile the launcher reads.
 
 **Three of those nine differ, and only three:**
 
@@ -202,6 +250,13 @@ keeps: **a file somebody changed after the install** — a changed plugin is rep
 organisms other worlds handed you, unless you pass `-RemoveWorldData` / `--remove-world-data`.
 Its two refusals are the game still running from that folder and this install's own sidecar still
 running — both stop before removing anything, and both name the command that fixes them.
+
+**On Windows the uninstall covers every world you added.** It walks the `profiles\` directory,
+refuses while any of those worlds still has a live game or sidecar — `BibitesMultiverseLauncher.exe
+stop --all` is the command it names — and then removes each world's credential, pending-enrollment
+record and process-id files, the profile files themselves, and the `profiles\` directory. It keeps
+each extra world's journal and logs unless you pass `-RemoveWorldData`. Your save files are never
+touched, on any path.
 
 For a complete edition, the game payload is in the record too. Uninstall removes each unchanged
 payload file by hash. It reports and keeps a changed file, a user-added file, and every directory
@@ -231,25 +286,87 @@ wait is the point: your world's save-on-quit runs during that shutdown, and a wo
 outright loses everything since its last save. A clean quit with its save has measured at about
 two seconds.
 
+**Windows waits now too, and that is a change in this release.** Earlier releases ended the game
+outright on Windows, which skipped the game's own shutdown and therefore skipped save-on-quit. The
+launcher's **Stop this world**, `BibitesMultiverseLauncher.exe stop`, and the generated
+`Stop-Multiverse.ps1` all ask the game to close first and force it only after the wait — 30 seconds
+for the game, 10 for the sidecar. **A headless world is the exception:** it has no window to close,
+so Windows cannot ask it, and the stop forces it. A headless world can lose the simulation since
+its last save when you stop it, so give one a shorter save interval if that matters to you. That
+is `LOCAL-HEADLESSSTOP` in [`../error-taxonomy.md`](../error-taxonomy.md), which has the whole of
+it — including the one way to stop a headless world without losing anything.
+
+## More than one world on this computer
+
+**On Windows the launcher does this, and a second kit is not needed.** Select **Create another
+world** in its menu, or run:
+
+```powershell
+BibitesMultiverseLauncher.exe profile create winter --world Winter --sidecar-port 8788
+```
+
+Both flags are optional. Without them the launcher names the world after the profile and takes the
+lowest free port from 8787 upward. It gives the new world its own data folder as well, so each
+world keeps a separate credential, journal, log folder, and pair of recorded process IDs. The
+worlds share one game folder, one copy of BepInEx, and one plugin, because each game process reads
+its own settings from its own environment.
+
+`profile create` also takes `--data-root`, `--game-dir`, `--world`, `--sidecar-port`,
+`--headless` / `--no-headless`, `--export-edges`, `--exclude-species`, `--no-migration-exclusion`,
+`--save-minutes`, `--save-keep` and `--save-on-quit`. For a private map it takes
+`--join-string-file`, and `--relay-url` **only** when that file holds the identity half on its own
+— a whole `multiverse-join/1` line already carries the relay address, and the launcher never takes
+a relay address from the flag over one the join file carries. On the public map `--relay-url` is
+refused outright, because the packaged `public-map.json` is the address.
+
+`profile set NAME` changes every one of those **except `--data-root`, `--join-string-file` and
+`--relay-url`**. **A world's data folder, its identity and its relay address are fixed once it
+exists**, because changing any of them would point one world's identity at another world's
+journal. If you want a world somewhere else on disk, create another world with `--data-root` and
+delete the old one when you have what you wanted from it. `profile list`, `profile use NAME`,
+`profile show NAME` and `profile delete NAME` do the rest.
+
+**Five worlds per game folder is the ceiling, and the launcher enforces it.** The mod framework
+hands out five log files per game folder and then gives up, and a sixth game that gets no
+log file **never loads the mod** — it comes up connected to nothing, loudly. That is
+`LOCAL-STARVATION` in [`../error-taxonomy.md`](../error-taxonomy.md). The launcher refuses to start
+a sixth world from one game folder and names that code in the refusal. If you want more than five,
+install a second copy of the game into its own folder and point a profile at it with `--game-dir`.
+
+**Every extra world is another identity on the public map, and that has consequences.** The
+launcher enrolls the new world over HTTPS exactly as the installer did, so it creates a new
+credential, a new peer identity, and a new place on the map. The map applies a limit per network
+address, so several worlds created quickly can be refused with `429`; the launcher prints the
+`Retry-After` value the service returns, and waiting that long is the whole remedy. **Deleting a
+profile is not leaving the map.** `profile delete` removes the world from this computer; the map
+side is a separate act, described in [leave.md](leave.md).
+
+**Deleting asks you to type the world's name.** With `--remove-world-data` — which also takes that
+world's journal, logs and credential — it asks **even when you pass the global `--yes`**. A blanket
+"answer yes to everything" must not be able to erase a world's data without naming it. `--yes` still
+answers every other question, including a plain `profile delete`.
+
+**All of your worlds save into one folder** — the game keeps its saves per user, not per game copy
+(see *Where your worlds live* below). So each world needs a name no other world on this computer
+uses; the launcher refuses a repeat. Their saves also queue behind each other. If you run several
+worlds, **give each one a different save interval** so they do not all write at the same minute.
+
 ## ONE GAME INSTANCE PER GAME FOLDER, on Linux
 
-**Windows and Linux both punish a second instance run out of one game folder, and they punish it
-in opposite ways.** On Windows the mod framework hands out a fixed number of log files and then
-gives up, and an instance that gets no log file **never loads the mod** — it comes up connected to
-nothing, loudly. That is `LOCAL-STARVATION`.
+**The Linux kit ships no Bibites Multiverse launcher in this release, and its rule is unchanged:
+one game instance per game folder.** The failure is quieter than the Windows one. **Every Linux instance loads the mod and
+works.** What breaks is the evidence: all of them open the *same* `BepInEx/LogOutput.log`, each
+with its own file offset, each truncating it at launch, and the file ends as mostly NUL bytes with
+one session's header where several should be. Nothing tells you. The world runs, the map is joined,
+the saves land — and the first thing you reach for when something eventually goes wrong is already
+gone.
 
-**On Linux every instance loads the mod and works.** What breaks is the evidence: all of them open
-the *same* `BepInEx/LogOutput.log`, each with its own file offset, each truncating it at launch,
-and the file ends as mostly NUL bytes with one session's header where several should be. Nothing
-tells you. The world runs, the map is joined, the saves land — and the first thing you reach for
-when something eventually goes wrong is already gone.
-
-**If you want a second world on this machine, unpack a second copy of the game into its own
+**If you want a second world on a Linux machine, unpack a second copy of the game into its own
 folder** and install into that. It costs disk and nothing else. `LOCAL-LOGSHRED` in
 [`../error-taxonomy.md`](../error-taxonomy.md) has the shape of it and how to recognise a shredded
 log.
 
-A complete edition makes the separate game copy itself. For each concurrent world, unpack a
+A complete edition makes the separate game copy itself. For each concurrent Linux world, unpack a
 separate kit and choose a distinct data root and sidecar port. That gives each world its own game
 folder, BepInEx log, credential, journal, and recorded process IDs.
 
@@ -286,34 +403,52 @@ Once connected, the export default means that organisms leave your world on ever
 from every side.
 
 If you want a wall on one side, say so: `-ExportEdges E,N` — `--export-edges E,N` on Linux — at
-install time, or the same value in the start script afterwards. If you want your world off the
-map, do not start it.
+install time. Afterwards, use `BibitesMultiverseLauncher.exe profile set NAME --export-edges E,N`
+on Windows, or the same value in the start script on Linux. If you want your world off the map, do
+not start it.
 
 ## The settings a fresh install ships with
 
 Four of them are worth reading before you start, because each one spends something of yours.
 
-**All of them live in one file you can read and edit: the start script**, `Start-Multiverse.ps1`
-or `start-multiverse.sh`. Windows keeps it in the installed application directory. Linux writes
-it beside the installer. Each value is written out
+**On Windows the launcher is where you edit them, per world.** Select **Edit this world's
+settings** in its menu, or run `BibitesMultiverseLauncher.exe profile set NAME --save-minutes 15`.
+The launcher keeps the values in `profiles\<world>.json` beside the application and passes them to
+the game as the environment variables below, so each world on this computer can carry its own.
+
+**If you move or reinstall the game, correct the world's game folder first** —
+`BibitesMultiverseLauncher.exe profile set NAME --game-dir "<the new folder>"`. The launcher checks
+the game folder on every write, so any other edit, and any start, is refused until that path is
+right; the refusal names the folder it looked in.
+
+**On Linux they live in one file you can read and edit: the start script**, `start-multiverse.sh`,
+written beside the installer. Windows keeps `Start-Multiverse.ps1` in the installed application
+directory for the same purpose. Each value is written out
 explicitly, *including* the ones that match the mod's own default, so that a future change to a
-default cannot silently move what your world does. **The environment variable names are the mod's
-own and are identical on both platforms**; only the way the file spells an assignment differs
+default cannot silently move what your world does.
+
+**The environment variable names are the mod's own and are identical on both platforms**; only the
+way a start script spells an assignment differs
 (`$env:NAME = 'value'` against `export NAME='value'`).
 
-| Setting | In the start script | Ships as | What it costs you |
-|---|---|---|---|
-| Export edges | `MULTIVERSE_EXPORT_EDGES` (installer: `-ExportEdges` / `--export-edges`) | `E,N,W,S` | Your world is a full member of the map in every direction. This is the default and it is stated in three places on purpose |
-| Migration exclusion | `MULTIVERSE_MIGRATION_EXCLUDE` (installer: `-ExcludeSpecies` / `--exclude-species`) | `Basic bibite` | It keeps founder stock off the lanes. **An empty value turns the policy off**, which floods a shared map with seed genomes and looks entirely normal in the census while it happens — so the installer refuses an empty value and makes you say `-NoMigrationExclusion` / `--no-migration-exclusion` if you mean it, and prints what it costs when you do |
-| Save interval and retained saves | `MULTIVERSE_SAVE_MINUTES`, `MULTIVERSE_SAVE_KEEP` (installer: `-SaveMinutes`, `-SaveKeep` / `--save-minutes`, `--save-keep`) | `10` and `6` | Six copies of your world on your disk that you did not budget for — measured at about 2.4–2.9 MB in total on this project's own worlds. The interval is also how often your world pauses to write itself out — see [diagnose.md](diagnose.md) |
-| Save on quit | `MULTIVERSE_SAVE_ON_QUIT` (installer: `-SaveOnQuit on\|off` / `--save-on-quit on\|off`) | `true` | Your world is written out when the game closes, so stopping is not losing. On Linux the stop script waits for that save rather than killing the game outright |
+| Setting | Variable the game reads | In the profile | Ships as | What it costs you |
+|---|---|---|---|---|
+| Export edges | `MULTIVERSE_EXPORT_EDGES` (installer: `-ExportEdges` / `--export-edges`) | `exportEdges` | `E,N,W,S` | Your world is a full member of the map in every direction. This is the default and it is stated in three places on purpose |
+| Migration exclusion | `MULTIVERSE_MIGRATION_EXCLUDE` (installer: `-ExcludeSpecies` / `--exclude-species`) | `excludeSpecies` | `Basic bibite` | It keeps founder stock off the lanes. **An empty value turns the policy off**, which floods a shared map with seed genomes and looks entirely normal in the census while it happens — so the installer and the launcher both refuse an empty value and make you say `-NoMigrationExclusion` / `--no-migration-exclusion` if you mean it, and print what it costs when you do |
+| Save interval and retained saves | `MULTIVERSE_SAVE_MINUTES`, `MULTIVERSE_SAVE_KEEP` (installer: `-SaveMinutes`, `-SaveKeep` / `--save-minutes`, `--save-keep`) | `saveMinutes`, `saveKeep` | `10` and `6` | Six copies of your world on your disk that you did not budget for — measured at about 2.4–2.9 MB in total on this project's own worlds. The interval is also how often your world pauses to write itself out — see [diagnose.md](diagnose.md). With several worlds on one computer, give each a different interval |
+| Save on quit | `MULTIVERSE_SAVE_ON_QUIT` (installer: `-SaveOnQuit on\|off` / `--save-on-quit on\|off`) | `saveOnQuit` | `true` | Your world is written out when the game closes, so stopping is not losing. Every stop path waits for that save rather than killing the game outright, except a headless world on Windows, which has no window to close |
 
 The same names appear in the game's own settings file — `<game folder>\BepInEx\config\`
 `dev.multiverse.bibites.cfg` on Windows, `<game folder>/BepInEx/config/dev.multiverse.bibites.cfg`
 on Linux — as `ExportEdges`, `MigrationExcludeSpecies`, `SaveMinutes`, `SaveKeep` and
-`SaveOnQuit`. **The values in the start script win**, because the mod reads its environment before
-that file. Edit the start script; the config file is there for somebody starting the game another
-way.
+`SaveOnQuit`. **The environment wins**, because the mod reads it before that file. That is also why
+several worlds can share one game folder on Windows: each game process gets its own environment.
+Edit the profile on Windows or the start script on Linux; the config file is there for somebody
+starting the game another way.
+
+**`Start-Multiverse.ps1` keeps the values this world was installed with.** It is not updated when
+you change a world's settings in the launcher, and the launcher says so when you do. On Windows the
+launcher is what your world runs from; the script stays for scripted and advanced use.
 
 Every default this release ships with — these four, and the two the operator side has — is
 audited in [`../defaults-audit.md`](../defaults-audit.md), with what a bare install does and a
@@ -327,8 +462,9 @@ instruct you to use either one.** If something does, that is the defect.
 
 They are named differently from each other on purpose, so that no instruction can confuse the
 two, and neither is a thing a participant needs. One belongs to the relay and is not even in the
-package; the other belongs to the sidecar, is off, and **neither generated start script passes
-it** — not `Start-Multiverse.ps1` and not `start-multiverse.sh`. Both are named and audited in
+package; the other belongs to the sidecar, is off, and **nothing that starts a sidecar here passes
+it** — not the launcher, not `Start-Multiverse.ps1`, and not `start-multiverse.sh`. Both are named
+and audited in
 [`../defaults-audit.md`](../defaults-audit.md), so that you can recognise one if somebody ever
 tells you to type it.
 
