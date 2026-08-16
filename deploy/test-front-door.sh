@@ -6,7 +6,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/multiverse-front-door.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/acme" "$TMP/logs" "$TMP/tls" "$TMP/www/announcements"
+mkdir -p "$TMP/acme" "$TMP/logs" "$TMP/tls" "$TMP/www/announcements" "$TMP/gates"
 
 render() {
   sed -e 's|@@MV_DOMAIN@@|multiverse.example|g' \
@@ -17,6 +17,7 @@ render() {
       -e "s|@@MV_TLSDIR@@|$TMP/tls|g" \
       -e "s|@@ACME_ROOT@@|$TMP/acme|g" \
       -e "s|@@WWW_ROOT@@|$TMP/www|g" \
+      -e "s|@@MV_GATEDIR@@|$TMP/gates|g" \
       -e "s|/var/log/nginx|$TMP/logs|g" \
       "$1" >"$2"
 }
@@ -32,6 +33,36 @@ grep -Fq 'proxy_set_header Upgrade' "$front"
 grep -Fq 'proxy_set_header Connection' "$front"
 grep -Fq 'proxy_set_header X-Forwarded-For   $remote_addr;' "$front"
 grep -Fq 'limit_req_zone  $binary_remote_addr zone=mvenroll:1m rate=2r/m;' "$front"
+
+# The peer gate. Three properties matter and each is checked separately: the
+# map exists, loopback is pinned open by an EXACT key (a map consults exact keys
+# before any regex, which is the whole reason the archive is never gated), and
+# the gate directory is included as a GLOB so that the empty normal state is a
+# valid configuration rather than a file nginx cannot open.
+grep -Fq 'map $remote_addr $mv_peer_gate {' "$front"
+awk '/map \$remote_addr \$mv_peer_gate \{/,/^\}/' "$front" >"$TMP/gate-map.conf"
+grep -Eq '^\s+default\s+0;' "$TMP/gate-map.conf"
+grep -Eq '^\s+127\.0\.0\.1\s+0;' "$TMP/gate-map.conf"
+grep -Eq '^\s+::1\s+0;' "$TMP/gate-map.conf"
+grep -Fq "include $TMP/gates/*.map;" "$TMP/gate-map.conf"
+# The relay route must refuse BEFORE it proxies. A gate evaluated after
+# proxy_pass would be no gate at all.
+awk '/location \^~ \/contract-b\/ \{/,/^    \}/' "$front" >"$TMP/contract-b.conf"
+grep -Fq 'if ($mv_peer_gate) {' "$TMP/contract-b.conf"
+grep -Fq 'add_header Retry-After 15 always;' "$TMP/contract-b.conf"
+grep -Fq 'return 503;' "$TMP/contract-b.conf"
+if [ "$(grep -n 'if (\$mv_peer_gate)' "$TMP/contract-b.conf" | cut -d: -f1)" -ge \
+     "$(grep -n 'proxy_pass' "$TMP/contract-b.conf" | head -1 | cut -d: -f1)" ]; then
+  echo 'the peer gate is evaluated after proxy_pass; it must refuse before it' >&2
+  exit 1
+fi
+# No other route may carry the gate. Gating the website would take the map, the
+# announcements page and /healthz down with the relay, and the announcements
+# page exists precisely to survive the outage it announces.
+if [ "$(grep -c 'if (\$mv_peer_gate)' "$front")" != 1 ]; then
+  echo 'the peer gate is applied outside the relay route' >&2
+  exit 1
+fi
 grep -Fq 'location = /api/enroll {' "$front"
 grep -Fq 'limit_except POST { deny all; }' "$front"
 grep -Fq 'limit_req  zone=mvenroll burst=3 nodelay;' "$front"
@@ -102,8 +133,22 @@ http {
     include $TMP/front-door-syntax.conf;
 }
 EOF
+  # BOTH gate states must be valid nginx, and they fail in opposite directions.
+  #
+  # Gate ABSENT is the state this host is in at every moment but one, and it is
+  # the one a literal `include` would break: nginx refuses to start on a named
+  # file that does not exist. $TMP/gates is empty here on purpose.
   nginx -t -q -p "$TMP/" -c "$TMP/nginx.conf"
-  echo 'front-door render and nginx syntax: PASS'
+  # Gate PRESENT is the state a restart puts the host in, and getting it wrong
+  # means discovering it with the relay already stopped. The fixture is the
+  # exact content restart-relay.sh writes.
+  printf '~. 1;\n' >"$TMP/gates/peer-gate.map"
+  nginx -t -q -p "$TMP/" -c "$TMP/nginx.conf"
+  rm -f "$TMP/gates/peer-gate.map"
+  # And absent again, because the interesting failure is a gate that cannot be
+  # taken back down.
+  nginx -t -q -p "$TMP/" -c "$TMP/nginx.conf"
+  echo 'front-door render and nginx syntax, gate down and up: PASS'
 else
   echo 'front-door render: PASS (nginx syntax skipped because nginx or openssl is unavailable)'
 fi

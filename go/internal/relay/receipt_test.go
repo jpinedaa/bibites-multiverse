@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"multiverse/internal/contractb"
 	"multiverse/internal/wire"
 )
@@ -34,12 +36,25 @@ type receiptRig struct {
 	r      *credRelay
 	sender *credPeer
 	dest   *credPeer
+	// compression is what BOTH peers of this rig OFFER on their upgrade (§24,
+	// B35). The zero value is CompressionDisabled, which is what every test in
+	// this file wants: a receipt is measured in frames and fields, not bytes.
+	compression websocket.CompressionMode
 }
 
 func startReceiptRig(t *testing.T, opts credRelayOptions) *receiptRig {
 	t.Helper()
+	return startReceiptRigWith(t, opts, websocket.CompressionDisabled)
+}
+
+// startReceiptRigWith is startReceiptRig with the peers' offered compression
+// chosen by the caller, so compression_test.go can drive a real crossing over a
+// deflated wire without a second copy of this rig.
+func startReceiptRigWith(t *testing.T, opts credRelayOptions,
+	compression websocket.CompressionMode) *receiptRig {
+	t.Helper()
 	r := startCredRelay(t, opts)
-	rig := &receiptRig{t: t, r: r}
+	rig := &receiptRig{t: t, r: r, compression: compression}
 	rig.sender = rig.join("peer-sender", contractb.Position{Col: 0, Row: 0}, 1)
 	rig.dest = rig.join("peer-dest", contractb.Position{Col: 1, Row: 0}, 2)
 	return rig
@@ -52,7 +67,8 @@ func (rig *receiptRig) join(peerID string, at contractb.Position, wantSlot int) 
 	if _, _, err := rig.r.srv.ReserveSlot(peerID, &pos); err != nil {
 		rig.t.Fatalf("reserve %s: %v", peerID, err)
 	}
-	p := rig.r.dial(dialSpec{credentialPeer: peerID, claimPeer: peerID, sendHandshake: true})
+	p := rig.r.dial(dialSpec{credentialPeer: peerID, claimPeer: peerID, sendHandshake: true,
+		compression: rig.compression})
 	p.wait(contractb.TypeHandshakeAck, 2*time.Second)
 	p.claim()
 	deadline := time.Now().Add(5 * time.Second)
@@ -80,6 +96,25 @@ func (rig *receiptRig) forward(destSlot int) string {
 		MigrationID: id,
 		Kind:        "bibite",
 		Body:        contractb.Body{Version: "0.6.3.1", BB8: `{"version":"0.6.3.1"}`},
+		Lineage:     contractb.Lineage{Parents: []contractb.Parent{}},
+		SourcePeer:  "peer-sender",
+		SourceSlot:  1,
+		DestSlot:    destSlot,
+		ExitEdge:    "E",
+		Timestamp:   time.Now().UnixMilli(),
+	})
+	return id
+}
+
+// forwardSized is forward with a caller-supplied bb8 body, so a test can put a
+// realistically sized organism on the wire rather than a placeholder.
+func (rig *receiptRig) forwardSized(destSlot int, bb8 string) string {
+	rig.t.Helper()
+	id := wire.NewUUID()
+	rig.sender.send(contractb.TypeMigrationPayload, contractb.MigrationPayload{
+		MigrationID: id,
+		Kind:        "bibite",
+		Body:        contractb.Body{Version: "0.6.3.1", BB8: bb8},
 		Lineage:     contractb.Lineage{Parents: []contractb.Parent{}},
 		SourcePeer:  "peer-sender",
 		SourceSlot:  1,

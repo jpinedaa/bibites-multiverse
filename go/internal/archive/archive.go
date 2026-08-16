@@ -758,7 +758,14 @@ func jitter(min, max time.Duration, attempt int) time.Duration {
 
 func (a *Archive) session() error {
 	dialCtx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
-	opts := &websocket.DialOptions{CompressionMode: websocket.CompressionDisabled}
+	// §3 Transport, §24 B35: the archive OFFERS permessage-deflate like every
+	// other Contract B client. It is the subscriber that receives a COPY of every
+	// forwarded frame plus every PEER_STATUS (§5.1), so it is the single
+	// connection the relay spends the most bytes on. It is also the process this
+	// project sizes its machine on, so the mode's fixed per-connection cost is
+	// worth naming: ~1.25 MB for this one socket, against the deflate states
+	// compress.go already pools for the status page.
+	opts := wsutil.PeerDialOptions(&websocket.DialOptions{})
 	if a.cfg.Secret != "" {
 		// §3.1: on the HTTP upgrade, bound to this subscriber's own peerId, and
 		// never in a frame. No TLS knob is set and none may be — B23 gives a client

@@ -154,12 +154,29 @@ jobs:
           set -euo pipefail
           out="$(deploy/test-front-door.sh)"
           printf '%s\n' "$out"
-          printf '%s\n' "$out" | grep -Fq 'front-door render and nginx syntax: PASS' || {
+          printf '%s\n' "$out" | grep -Fq 'front-door render and nginx syntax, gate down and up: PASS' || {
             echo "!! test-front-door.sh skipped the nginx syntax check." >&2
             echo "   nginx or openssl is missing, so this job checked the rendered text" >&2
             echo "   only. Fix the install step; do not accept the skip." >&2
             exit 1
           }
+
+      # The restart scripts are the procedures RESTART-POLICY.md describes, and
+      # the day they are read is the day something is already wrong. --dry-run
+      # walks every step and changes nothing, needs no host, no root and no
+      # network, so a regression in either one is caught here rather than by an
+      # operator at 03:00 with the relay already stopped.
+      - name: restart procedures, dry run
+        run: |
+          set -euo pipefail
+          deploy/restart-relay.sh --dry-run --reason 'CI dry run'
+          deploy/restart-archive.sh --dry-run --reason 'CI dry run'
+          # The override must stay unusable without its proof text: an override
+          # that records no reasoning is just a flag that turns the gate off.
+          if deploy/restart-archive.sh --dry-run --i-proved-the-replay-fits >/dev/null 2>&1; then
+            echo "!! --i-proved-the-replay-fits was accepted without --proof" >&2
+            exit 1
+          fi
 
   installer:
     name: installer
