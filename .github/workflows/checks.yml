@@ -127,6 +127,17 @@ jobs:
       - name: monitor transfer arithmetic
         run: deploy/test-monitor.sh
 
+      # The viewer-presence signal decides whether the broadcast publishes at
+      # all, so both of its failure modes are expensive and neither is visible
+      # from the host: a false negative takes the stream off the air in front of
+      # somebody who is watching it, and a false positive publishes 780 GB a
+      # month into an empty room. The script drives the real
+      # viewers-presence.sh through its read seams against a written access log,
+      # a written metrics file and a fixed clock, so it needs no root, no
+      # network, no nginx and no mediamtx.
+      - name: viewer presence
+        run: deploy/test-viewers-presence.sh
+
       # test-front-door.sh self-skips `nginx -t` when nginx or openssl is
       # absent, so installing them is what turns this from a text grep into a
       # real configuration check.

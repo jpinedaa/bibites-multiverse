@@ -74,6 +74,39 @@ if grep -Fq 'zone=mvstream' "$front"; then
   echo 'the HLS route contains an incompatible request-rate limit' >&2
   exit 1
 fi
+# The viewer-presence endpoint. It must be static, no-store, and rate limited on
+# the same zone /api/status uses — a watcher polling every ten seconds against a
+# 5r/s zone has three orders of magnitude of margin, and hitting limit_req here
+# would read to the publisher as an empty room.
+grep -Fq 'location = /api/viewers {' "$front"
+grep -Fq "alias $TMP/www/multiverse-status/viewers.json;" "$front"
+grep -Fq 'default_type application/json;' "$front"
+grep -Fq 'add_header Cache-Control "no-store" always;' "$front"
+awk '/location = \/api\/viewers \{/,/^    \}/' "$front" |
+  grep -Fq 'limit_req  zone=mvstatus burst=20 nodelay;'
+awk '/location = \/api\/viewers \{/,/^    \}/' "$front" | grep -Fq 'proxy_pass' && {
+  echo 'the viewer-presence route proxies to a backend; it must serve from disk' >&2
+  exit 1
+}
+# nginx's add_header REPLACES the inherited set. A location that adds one header
+# and forgets the rest silently drops the site's security headers on that path.
+for header in 'X-Content-Type-Options nosniff' 'Referrer-Policy no-referrer' \
+              'X-Frame-Options SAMEORIGIN' 'Strict-Transport-Security' \
+              'Permissions-Policy' 'Cross-Origin-Opener-Policy same-origin' \
+              'Content-Security-Policy'; do
+  awk '/location = \/api\/viewers \{/,/^    \}/' "$front" | grep -Fq "$header" || {
+    echo "the viewer-presence route drops the inherited $header header" >&2
+    exit 1
+  }
+done
+
+# The origin is fmp4 now, so this file must not claim low latency as the reason
+# for anything. deploy/install-stream-origin.sh owns the variant.
+if grep -Fq 'Low-latency HLS sends frequent playlist' "$front"; then
+  echo 'the /stream/ comment still explains itself with low-latency HLS' >&2
+  exit 1
+fi
+
 grep -Fq 'location = /announcements {' "$front"
 grep -Fq 'return 301 /announcements/;' "$front"
 grep -Fq 'location ^~ /announcements/ {' "$front"

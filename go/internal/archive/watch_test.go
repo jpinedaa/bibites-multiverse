@@ -19,6 +19,17 @@ func TestWatchPageIsOneSharedReadOnlyBroadcast(t *testing.T) {
 		`response.status===429&&loaded`,
 		`frame.contentDocument.querySelector("video")`,
 		"spectator camera, not a control surface",
+		// The broadcast publishes on demand, so an empty player is the normal
+		// first thing a visitor meets and the page has to say why rather than
+		// showing a dead frame. The five-second retry is also the signal that
+		// starts the publisher, so it is asserted here and not only implied.
+		"The stream starts when someone watches, and starting it takes about 20 seconds.",
+		"published only while somebody is watching",
+		`setInterval(check,5000)`,
+		// Waiting is not yet a fault. Only after a minute of it does the page
+		// change its story.
+		"var PATIENT=12",
+		"The broadcast is taking longer than usual.",
 		// The page names the world on camera and draws its place in the grid,
 		// both read off the same /api/status the live map reads.
 		`fetch("/api/status"`,

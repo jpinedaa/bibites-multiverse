@@ -115,6 +115,10 @@ BIN="$MV_PREFIX/bin"
 ACME_ROOT=/var/www/acme
 WWW_ROOT=/var/www
 ANNOUNCE_ROOT="$WWW_ROOT/announcements"
+# The viewer-presence document nginx publishes at /api/viewers. It is static
+# content written by a timer, not a backend, so that reading it costs nothing and
+# a stopped archive does not hide the audience from the publisher.
+VIEWERS_ROOT="$WWW_ROOT/multiverse-status"
 ARCHIVE_SECRET=/etc/multiverse/archive.secret
 # Where restart-relay.sh drops the peer gate. The front-door template globs this
 # directory, so an empty one is the normal state and a valid configuration.
@@ -296,6 +300,8 @@ phase_directories() {
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE/backup" "$MV_STATE/monitor"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_LOGDIR"
   run install -d -m 0755 -o root -g root "$ACME_ROOT" "$ACME_ROOT/.well-known"
+  # root writes viewers.json from the timer; nginx reads it as www-data.
+  run install -d -m 0755 -o root -g www-data "$VIEWERS_ROOT"
   # The kit itself lives on the box, because RESTART-POLICY.md is a document an
   # operator reads at 03:00 on the machine that is misbehaving — and because the
   # on-box copy must be able to re-run this script, which needs the templates.
@@ -732,7 +738,8 @@ phase_systemd() {
   for u in multiverse-relay.service multiverse-archive.service \
            multiverse-monitor.service multiverse-monitor.timer \
            multiverse-backup.service multiverse-backup.timer \
-           multiverse-host-sample.service multiverse-host-sample.timer; do
+           multiverse-host-sample.service multiverse-host-sample.timer \
+           multiverse-viewers.service multiverse-viewers.timer; do
     run install -m 0644 -o root -g root "$KIT_DIR/systemd/$u" "/etc/systemd/system/$u"
   done
 
@@ -776,9 +783,13 @@ EOF
   # The sampler unit declares ReadWritePaths for this directory, and systemd
   # refuses to start a unit whose ReadWritePaths does not exist.
   run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/metrics
+  # Same rule for the viewer-presence unit, and the directories phase is not
+  # guaranteed to have run: `--only systemd` from a fresh kit is a supported way
+  # to install one new unit on a host that already has everything else.
+  run install -d -m 0755 -o root -g www-data "$VIEWERS_ROOT"
   run systemctl enable multiverse-relay.service multiverse-archive.service
   run systemctl enable --now multiverse-monitor.timer multiverse-backup.timer \
-    multiverse-host-sample.timer
+    multiverse-host-sample.timer multiverse-viewers.timer
   # start, not restart: re-running provision must not cost the map an outage.
   # An upgrade is a deliberate act and RESTART-POLICY.md is where it is written.
   run systemctl start multiverse-relay.service
@@ -851,11 +862,16 @@ phase_verify() {
   chk "monitor timer active"     "systemctl is-active --quiet multiverse-monitor.timer"
   chk "backup timer active"      "systemctl is-active --quiet multiverse-backup.timer"
   chk "host sample timer active" "systemctl is-active --quiet multiverse-host-sample.timer"
+  chk "viewers timer active"     "systemctl is-active --quiet multiverse-viewers.timer"
   chk "host sampler is installed" "test -x $MV_PREFIX/deploy/service-host-sample"
   chk "relay backend healthz"    "curl -fsS --max-time 10 http://$MV_RELAY_BACKEND/healthz"
   chk "archive healthz local"    "curl -fsS --max-time 10 http://$MV_ARCHIVE_HTTP/healthz"
   chk "website over TLS"         "curl -fsS --max-time 15 https://$MV_DOMAIN/"
   chk "status API over TLS"      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/status"
+  # The publisher stops when this says nobody is watching, so an endpoint that
+  # 404s reads to a watcher as a broken service rather than as an empty room.
+  chk "viewer presence over TLS" \
+      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/viewers | grep -q '\"watching\":'"
   chk "relay path rejects no credential" \
       "test \"\$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 https://$MV_DOMAIN$CONTRACT_B_PATH)\" = 401"
   chk "public enrollment rejects GET" \

@@ -26,12 +26,14 @@ Keep these records outside the public repository:
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
+| `viewers-presence.sh` | Publishes whether anyone is watching the broadcast, so the publisher can stop while nobody is. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
 | `test-monitor.sh` | Drives the monitor's transfer, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
+| `test-viewers-presence.sh` | Drives `viewers-presence.sh` against a fake access log, fake metrics and a fixed clock. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
-| `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
+| `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, and viewer-presence signal. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
 | `www/announcements/` | The announcements page nginx serves from disk, and the seed for its notices file. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
@@ -347,6 +349,7 @@ Apply them with `provision.sh --only envfiles`; the archive reads them at start.
 Use `test-front-door.sh` after an nginx template or announcements-page change.
 Use `test-units.sh` after a systemd unit change.
 Use `test-monitor.sh` after a `monitor.sh` change.
+Use `test-viewers-presence.sh` after a `viewers-presence.sh` change.
 Use the provisioning verification phase after any host change.
 
 Use `health-snapshot.sh --watch` across the change window.
@@ -379,6 +382,7 @@ bash -n deploy/*.sh deploy/service-host-sample
 deploy/test-front-door.sh
 deploy/test-units.sh
 deploy/test-monitor.sh
+deploy/test-viewers-presence.sh
 ```
 
 Both restart procedures answer `--dry-run`, which walks every step and changes nothing:
@@ -394,6 +398,13 @@ fake `/proc` files, a fake `/etc/hosts`, a fake status document and a fixed cloc
 state directory.
 Its replay cases hold the archive memory gate to physical RAM: the same reading with a swap file
 present must keep the same ratio and the same severity.
+
+`test-viewers-presence.sh` needs no root, no network and no host either.
+It runs `viewers-presence.sh` against a written access log, a written metrics file and a fixed
+clock.
+Its cases are the four ways the signal has to be right: silence reads as nobody, a failed request
+still proves that a person is waiting, a loopback probe is not an audience, and a player that
+reached the stream counts whatever the log says.
 
 Run `shellcheck` when it is available.
 Run `systemd-analyze verify` against the units on a compatible Linux host.
