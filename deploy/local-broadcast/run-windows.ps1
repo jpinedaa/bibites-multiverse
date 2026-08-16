@@ -48,6 +48,25 @@ function Start-NativeProcess {
     return $process
 }
 
+function Start-ViewerWatcher {
+    param([string]$ScriptPath, [string]$PresenceUrl, [string]$ObsConfigRoot, [string]$LogPath)
+
+    # The watcher runs beside the trio instead of inside this loop. A fault in
+    # it must not reach the `finally` block below, because that block stops the
+    # game and reloads the world. It is given this process's identifier so it
+    # cannot outlive the runner that owns the publisher.
+    $hostExecutable = (Get-Process -Id $PID).Path
+    $watcherArguments = @(
+        '-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', $ScriptPath,
+        '-PresenceUrl', $PresenceUrl,
+        '-ObsConfigRoot', $ObsConfigRoot,
+        '-LogFile', $LogPath,
+        '-SupervisorProcessId', "$PID"
+    )
+    return Start-NativeProcess -FilePath $hostExecutable `
+        -WorkingDirectory (Split-Path -Parent $ScriptPath) -ArgumentList $watcherArguments -Hidden
+}
+
 function Remove-StaleSidecarListener {
     param([string]$ExecutablePath, [int]$Port)
 
@@ -278,6 +297,33 @@ try {
         -ArgumentList $obsArguments
     Set-Content -LiteralPath (Join-Path $state 'obs.pid') -Value $obs.Id -NoNewline
 
+    # OBS still starts its stream from the command line above, so an operator
+    # who starts the broadcaster sees the public stream come up and can verify
+    # it. The watcher stops that stream after its idle period if nobody is
+    # there, which costs at most three minutes of ingest for each restart and
+    # keeps a watcher fault from ever leaving the world silently off the air.
+    #
+    # The presence endpoint follows the configured relay, so a watcher never
+    # asks one deployment about another's audience. `PresenceUrl` in config.env
+    # overrides it, and its absence is not an error: an installed config.env
+    # written before this key existed must still start the broadcaster.
+    $presenceUrl = 'https://bibitesmultiverse.com/api/viewers'
+    if ($config.ContainsKey('PresenceUrl') -and $config.PresenceUrl) {
+        $presenceUrl = $config.PresenceUrl
+    } elseif ($config.RelayUrl -match '^wss://([^/]+)') {
+        $presenceUrl = "https://$($Matches[1])/api/viewers"
+    }
+    $watcherScript = Join-Path $root 'watch-viewers.ps1'
+    $watcherLog = Join-Path $logs 'watch-viewers.log'
+    # OBS runs portable, so its configuration lives below the private copy
+    # rather than below the roaming profile.
+    $obsRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $config.Obs))
+    $obsConfigRoot = Join-Path $obsRoot 'config\obs-studio'
+    $watcher = Start-ViewerWatcher -ScriptPath $watcherScript -PresenceUrl $presenceUrl `
+        -ObsConfigRoot $obsConfigRoot -LogPath $watcherLog
+    $watcherStarted = Get-Date
+    Set-Content -LiteralPath (Join-Path $state 'watcher.pid') -Value $watcher.Id -NoNewline
+
     while ($true) {
         $game.Refresh()
         $obs.Refresh()
@@ -285,6 +331,18 @@ try {
         if ($game.HasExited) { throw "The Bibites exited with code $($game.ExitCode)" }
         if ($obs.HasExited) { throw "OBS exited with code $($obs.ExitCode)" }
         if ($sidecar.HasExited) { throw "The sidecar exited with code $($sidecar.ExitCode)" }
+        $watcher.Refresh()
+        if ($watcher.HasExited -and ((Get-Date) - $watcherStarted).TotalSeconds -ge 15) {
+            # The watcher is the one member of this set whose exit is not fatal.
+            # Losing it costs transfer, not the broadcast, so it is started
+            # again instead of taking the world down with it. The interval keeps
+            # a watcher that fails at once from restarting every two seconds.
+            Write-Host "The viewer watcher exited with code $($watcher.ExitCode); starting it again"
+            $watcher = Start-ViewerWatcher -ScriptPath $watcherScript -PresenceUrl $presenceUrl `
+                -ObsConfigRoot $obsConfigRoot -LogPath $watcherLog
+            $watcherStarted = Get-Date
+            Set-Content -LiteralPath (Join-Path $state 'watcher.pid') -Value $watcher.Id -NoNewline
+        }
         Start-Sleep -Seconds 2
     }
 } finally {

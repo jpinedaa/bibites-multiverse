@@ -24,6 +24,70 @@ The mod applies this value at each world load, and it changes the food supply on
 
 Read the full [live broadcast design](../../docs/live-broadcast.md) before installation.
 
+## Publish on demand
+
+The publisher sends video only while somebody watches.
+It costs approximately 780 GB of inbound transfer each month while it runs, and that cost is the
+same with an audience and with an empty room.
+
+The service host cannot start or stop this publisher.
+The publisher is OBS on this Windows machine, and the host holds no credential for it.
+The host publishes the audience instead, and this package reads it:
+
+```text
+GET https://<service-domain>/api/viewers
+{"watching":true,"hlsSessions":1,"lastViewerRequestAgeSec":4,"asOf":"2026-08-16T21:04:00Z"}
+```
+
+Read the [live broadcast design](../../docs/live-broadcast.md), *Publish on demand*, for the
+endpoint contract. This package owns only the publisher half of it.
+
+`watch-viewers.ps1` is that half. It runs beside the game, the sidecar, and OBS:
+
+| Behaviour | Value |
+|---|---|
+| Poll interval | 10 seconds |
+| Start | Immediately, when a reading says somebody is watching |
+| Stop | After 180 unbroken seconds of nobody watching |
+| Hysteresis | One reading of `watching` cancels the idle timer |
+| Unreadable signal | Hold the current stream state, and write an alert line after 5 minutes |
+| Log | `%LOCALAPPDATA%\BibitesMultiverse\broadcast\logs\watch-viewers.log`, in UTC |
+
+An unreachable endpoint, an HTTP error, an unparsable document, and a presence document older than
+120 seconds all read as unknown, and unknown holds the current state.
+The other direction would take a live broadcast off the air because a status timer stopped.
+
+The watcher's own poll is not an audience.
+The service counts requests for `/watch` and `/stream/`, and the watcher reads neither, so it
+cannot hold itself up.
+
+While nobody watches, OBS keeps running and its scene keeps its game-capture hook.
+Only the stream output stops, so the next start is one request and not an application launch.
+The world keeps simulating and keeps its place on the map while the stream is quiet.
+
+OBS still starts its stream when the broadcaster starts.
+An operator can therefore verify a start before any audience exists, and the watcher takes the
+stream down again about three minutes later if the room is still empty.
+
+The watcher starts and stops the stream through obs-websocket on `127.0.0.1:4466`.
+That is not the plugin's default port, because an unrelated OBS on the same desktop uses the
+default and two servers cannot hold one port.
+Use `BIBITES_OBS_WEBSOCKET_PORT` to change it.
+OBS reads that configuration only when it starts, so enabling it is part of a stop and start.
+
+Run the watcher's decisions without touching OBS:
+
+```sh
+./deploy/local-broadcast/test-watch-viewers.sh
+```
+
+### Stream profile
+
+The encoder publishes `1280x720` at 30 frames each second and `1500` kbit/s of video with `64`
+kbit/s of audio, through NVENC.
+OBS rewrites its profile when it exits, so change `obs-basic.ini` and the installed `basic.ini`
+while OBS is not running.
+
 ## Identity boundary
 
 The installer creates private copies of the game and OBS below the Windows user profile.
@@ -66,7 +130,13 @@ Three files below `%LOCALAPPDATA%\BibitesMultiverse\broadcast\multiverse\` carry
 The private OBS profile contains the RTMP publish password.
 The installer reads the password from the origin through SSH.
 It does not put the password in a process argument or this repository.
-Do not print, copy, or commit the OBS `service.json` file, `peer-secret.txt`, or `enrollment.json`.
+
+The private OBS also holds the obs-websocket password that the viewer watcher uses.
+The installer keeps an existing password and generates one only when none exists.
+The watcher reads it from that file, so no obs-websocket password reaches a command line either.
+
+Do not print, copy, or commit the OBS `service.json` file, the obs-websocket `config.json` file,
+`peer-secret.txt`, or `enrollment.json`.
 
 ## Requirements
 
@@ -134,6 +204,19 @@ systemctl --user is-active bibites-local-broadcast-tunnel.service
 tmux -L bibites-broadcast has-session -t bibites-local-broadcast
 ```
 
+Read the viewer watcher:
+
+```sh
+powershell.exe -NoProfile -Command \
+  'Get-Content "$env:LOCALAPPDATA\BibitesMultiverse\broadcast\logs\watch-viewers.log" -Tail 20' \
+  | tr -d '\r'
+```
+
+The first line of each run reports the presence address, the poll interval, and the idle period.
+A `WARN` line reports one unreadable reading, and an `ALERT` line reports five minutes of them.
+The watcher holds the stream state through both, so an alert is a signal to read the service, not
+evidence that the broadcast stopped.
+
 Read the spectator status:
 
 ```sh
@@ -173,6 +256,8 @@ Read the [live broadcast design](../../docs/live-broadcast.md), *Naming the worl
 Until then both pages say the world is unknown.
 
 Make sure that the public page and the complete HLS session are available.
+These requests are themselves an audience, so the first one starts the publisher if it is quiet.
+Allow approximately 20 seconds and repeat the HLS check until it passes.
 Run these commands from the repository root:
 
 ```sh
@@ -198,7 +283,20 @@ Stop only the private broadcast processes:
 
 The stop script compares the recorded process paths.
 It does not stop another Bibites, OBS, or sidecar process.
+It stops the viewer watcher first, because the watcher is the one process that can start the stream
+and must not publish into an OBS that is already closing.
+It matches the watcher by its command line, because the watcher is an ordinary `powershell.exe`.
 It stops the game before the sidecar, so the world saves while its sidecar still holds custody.
+
+Prove that all four processes are gone before you start again.
+A start over a running set opens a second copy of this world under one map identity:
+
+```sh
+powershell.exe -NoProfile -Command \
+  'Get-Process -Name "The Bibites","obs64","multiverse-sidecar" -ErrorAction SilentlyContinue |
+     Where-Object { $_.Path -like "$env:LOCALAPPDATA\BibitesMultiverse\broadcast\*" } |
+     Select-Object Id,Name,Path' | tr -d '\r'
+```
 
 ## Limits
 
@@ -208,7 +306,10 @@ A Windows, WSL, display, or GPU restart can interrupt the broadcast.
 
 The installer does not enable automatic start at boot.
 Run the start command after a computer restart.
-The website shows its reconnecting state until the publisher returns.
+The website shows its waiting state until the publisher returns.
+
+A stopped publisher and a quiet publisher look the same from outside.
+Read the watcher log before you treat an empty player as a fault.
 
 A stopped broadcast world is an ordinary absent world. Its place on the map is kept, and its
 neighbours route around it until it returns.
