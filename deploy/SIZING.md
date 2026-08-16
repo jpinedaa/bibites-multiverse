@@ -10,8 +10,11 @@ Keep the selected resources, current forecast, and budget in private operations 
 
 Define `S` as the sum of achieved time scales across all live peers.
 
-Peer count alone does not predict storage or traffic.
+Peer count alone does not predict durable growth.
 Most durable events follow simulated time instead of wall time.
+
+`S` predicts durable growth. It does not predict network transfer.
+Use the crossing rate and the slot count for transfer; see "Network transfer".
 
 For example, five peers at achieved time scale `1` give `S = 5`.
 One peer at achieved time scale `20` contributes the same simulated-time load as twenty peers at `1`.
@@ -58,11 +61,13 @@ The simulated-time term has this approximate shape:
 | Ledger records | 48,350 |
 | Ledger | 15.9 MB |
 | Genome demand | 40 MB |
-| Relay forward traffic | 357 MB |
 
 Use genome demand instead of observed genome-store growth.
 An archive can build a genome-fetch backlog.
 Observed growth can then report supply instead of demand.
+
+This table once carried a relay forward-traffic term of `357 MB` for each unit of `S`.
+Network transfer no longer follows `S`. The measured model is in "Network transfer".
 
 Add operating-system, package, and log space to the result.
 The default log ceiling for relay and archive is approximately 1.2 GB.
@@ -187,24 +192,112 @@ If the relay stays live, every crossing during replay creates a gap in the archi
 
 ## Network transfer
 
-**Count both directions.** A transfer allowance is usually consumed by inbound
-and outbound together, while only outbound overage is charged. A model that
-tracks egress alone understates the draw by roughly 40 percent.
+**Count both directions, and count in `2^30` bytes.** A transfer allowance is usually
+consumed by inbound and outbound together, while only outbound overage is charged. A
+model that tracks egress alone understates the draw by more than half at this workload.
+The provider's "GB" is `2^30` bytes: reconciling the host's own counter against the
+billing record gives a ratio of `1.01` on `2^30` and `1.08` on `10^9`, so the decimal
+base is the wrong one. Every figure in this section is `2^30` bytes over a 31-day month.
 
-Peer traffic is the largest term and it scales with `S`:
+**Inbound is free, and inbound is not free.** Only outbound above the allowance is
+charged, so inbound never appears on an invoice. Inbound still consumes the allowance, so
+every inbound byte pushes an outbound byte into overage. Price an inbound driver at the
+same rate as an outbound one.
+
+**The host's own interface counter is the measurement.** `/proc/net/dev` on the billed
+interface tracks the provider's own metric to `0.002 percent` outbound and `0.9 percent`
+inbound, and needs no cloud credential. It is what the transfer check reads; see
+[`../docs/observability.md`](../docs/observability.md), "Layer 4 — Cost".
+
+### Peer traffic
+
+Peer traffic is the largest term. It is set by the **simulation throughput of the host
+that runs the worlds**, not by any world's configured time scale:
 
 ```text
-peer_GB_per_month = 27.5 * S          outbound
-allowance_GB_per_month = 50 * S       both directions
+peer_GB_per_month  = 88 * total_crossings_per_second + 5.9 * slot_count^2
+crossings_per_second_of_one_world = 0.010 * population * achieved_time_scale
 ```
 
-Measured, not modelled: `52 GB` each day outbound to six peers whose combined
-achieved time scale was `57.5`. A participant at `x1` draws about `50 GB` each
-month; an accelerated world at `x10` draws about `500 GB`.
+Both terms count both directions. The first term is organism migration: one envelope for
+each edge crossing, measured at approximately `17.9 KB` on the wire. The second term is
+the periodic map-status broadcast, which every peer and the archive receives, so its
+map-wide cost grows with the square of the slot count.
 
-The earlier model in this document gave `54 GB` each month at `S = 5`, which is
-`10.9 GB` for each unit of `S`. **The measured figure is 2.5 times that.** Use
-the measured rule.
+A seven-slot reference map measured `2,508 GB` each month across all peers: `82 percent`
+migration payloads, `12 percent` status broadcasts, `3 percent` genome responses, and the
+balance in acknowledgements and pings. Duplicate migration identifiers were `0` to `1`
+for each stream, so the volume is real work and not a retry storm.
+
+**Peer cost looks constant for each peer, and that is a property of the host.** Six worlds
+measured `3.3` to `4.0` crossings each second while their achieved time scales spanned
+`x3.5` to `x17.9` and their populations spanned `12` to `131`. The product of population
+and achieved time scale is what sets the crossing rate, and that product is pinned by the
+shared host's CPU. A world that runs fast holds a small population, and a world that runs
+slow holds a large one.
+
+**Read the consequence before you plan a change.** Lowering a configured time scale
+lowers transfer only if population does not grow into the freed CPU. On a CPU-bound host
+it will not. **Removing a peer removes its crossings and its share of the status
+broadcast. Slowing a peer can remove nothing.**
+
+An earlier rule in this document gave peer traffic as `50 GB` each month for each unit of
+`S`. At the reference map that result lands close to the measured total by accident. Its
+shape is wrong, and the shape is what a capacity decision uses.
+
+The status coefficient is a measurement of the current build and is an upper bound: the
+reference map emitted status frames about six times more often than its own design
+intends.
+
+**The peer wire is uncompressed JSON.** WebSocket `permessage-deflate` is disabled at
+every endpoint and the reverse proxy does not compress the upgrade. Offline `deflate` at
+level `6`, with a `32 KiB` window and per-stream context takeover, measured `9.0x` on
+migration payloads, `9.8x` on status frames, `10.4x` on genome responses, and `8.5x`
+overall. **Negotiated transport compression is the largest available reduction in this
+document and costs no simulation throughput and no fidelity.** Budget `7x` to `8.5x`, or
+about `4.5x` without context takeover. Each compression state costs approximately
+`260 KB` of memory for each connection, so choose a smaller window or no context takeover
+on a map of more than a few dozen peers.
+
+### Video
+
+Publisher ingest is a fixed inbound cost. The service pays it when nobody watches:
+
+```text
+ingest_GB_per_month = 312 * publish_Mbit_per_second
+```
+
+A `2.5 Mbit/s` publisher costs approximately `780 GB` each month, inbound, in every month
+that it runs. Against a `3,072 GB` allowance that is a quarter of the budget spent on an
+empty room. Lower the publish bitrate, or publish only while an audience exists.
+
+Viewer cost is not the media rate:
+
+```text
+viewer_GB_per_month = 1150       low-latency HLS, 2.5 Mbit/s media
+viewer_GB_per_month = 790        non-low-latency HLS, same media
+```
+
+The media is `2.52 Mbit/s` as designed. Low-latency HLS delivers `3.69 Mbit/s`, because
+it re-fetches its playlist approximately as often as it delivers a media part: a measured
+`1.035` to `1` playlist-to-part ratio, with `31.8 percent` of delivered bytes in
+playlists. A non-low-latency variant removes that overhead and adds several seconds of
+latency.
+
+**Low-latency HLS is also the variant a cache cannot help.** Each playlist request stays
+open until the next part exists, so an edge cannot serve it from a stored object. Select
+the non-low-latency variant before a content delivery network, or the network delivers
+much less than its price implies.
+
+Match the segment target to the encoder keyframe interval. A server extends a segment
+until the segment contains a keyframe, so a `1 s` target against a `2 s` keyframe
+interval produces `2 s` segments and a configuration that describes nothing.
+
+Measure a stalled client separately from a viewer. One stuck low-latency player measured
+`8.7` playlist requests for each media part and delivered no media at all, and it cost
+more than a real viewer.
+
+### Console
 
 The live console is a much smaller term than this document once claimed, but the
 per-tab figure is larger:
@@ -218,35 +311,34 @@ feed polls faster and carries more, and is roughly twice as expensive. Measure
 every endpoint the page polls, not the one it is named after. The page can add
 endpoints or change cadence without changing this document.
 
-Video transfer is a separate workload, and the wire cost is not the media rate:
+### The consequence
 
-```text
-viewer_GB_per_month = 1190        measured, low-latency HLS at 2.5 Mbit/s
-```
+Use a CDN or a managed video service before direct-origin transfer exceeds its approved
+budget. At the measured rate, ten continuous viewers is not a capacity question but a
+four-figure monthly bill. Select the non-low-latency variant first.
 
-The media itself is `2.51 Mbit/s` as designed, which is the `810 GB` this
-document used to quote. The delivered cost is `3.67 Mbit/s`, because low-latency
-HLS re-fetches its playlist more often than it delivers a media part — a
-measured `8,745` playlist requests against `8,441` parts. Raising the part
-duration, or serving a non-low-latency variant, removes that 32 percent.
+A map that carries seven peers and one publisher spends approximately `3,300 GB` each
+month before the first viewer arrives. Size the allowance from the crossing rate, the
+slot count, and the publisher, and treat every viewer as an addition to it.
 
-Use a CDN or managed video service before direct-origin transfer exceeds its
-approved budget. At the measured rate, ten continuous viewers is not a capacity
-question but a four-figure monthly bill.
+Compress the peer wire before you buy a larger allowance. The peer term is `76 percent`
+of that figure and compresses about `8.5` times, which is a larger reduction than any
+other change in this document and costs no simulation throughput.
 
 ## Sizing procedure
 
 Run this procedure during provisioning and after a capacity alert:
 
 1. Sum `achievedTimeScale` to get `S`.
-2. Read the current slot count.
+2. Read the current slot count and the crossing rate.
 3. Calculate daily durable growth.
 4. Read actual free space and recent daily growth.
 5. Count ledger records.
 6. Calculate resident memory and replay peak.
 7. Measure or select a conservative replay rate.
 8. Calculate the remaining disk and memory headroom.
-9. Compare current transfer with the provider allowance and budget.
+9. Calculate peer, publisher, and viewer transfer, and compare the total with the
+   provider allowance and budget in both directions.
 10. Record the result in private operations storage.
 
 Actual recent growth outranks the model when the measurement window is representative.
