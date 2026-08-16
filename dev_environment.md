@@ -16,7 +16,7 @@ resource inventory, costs, credentials, private addresses, incidents, or rollout
 | Go module | `go/` | Relay, sidecar, archive, diagnostics, and protocol tests |
 | Protocols | `contracts/` | Versioned Contract A, Contract B, and genome identity rules |
 | Test rigs | `e2e/` | Multi-world tests, failure rehearsals, and evidence tools |
-| Participant packages | `release/` | Release assembly and install or uninstall tests |
+| Participant packages | `release/` | Release assembly, the release checks, and install or uninstall tests |
 | Remote test bundle | `farend/` | Reusable Windows bundle builder and setup scripts |
 | Participant guides | `docs/` | Install, join, diagnose, leave, defaults, and support data |
 | Deployment code | `deploy/` and `cloud/aws/` | Reusable public-service and cloud-world implementation |
@@ -235,6 +235,36 @@ Capture the help text before you examine it in a shell pipeline.
 Use temporary data directories for manual tests.
 Never point a development command at a live data directory.
 
+### The release checks
+
+Every pull request and every push to `main` runs `.github/workflows/checks.yml` on GitHub-hosted
+runners. That workflow needs no game file and no secret. It runs `go vet` for this host and for
+Windows, `go test ./...`, the cross-builds the release and the hosting kit ship, `bash -n` over
+every tracked shell script, `deploy/test-units.sh`, `deploy/test-front-door.sh`, a stub compile of
+the Windows installer script, a PowerShell parse on Windows, and two consistency gates.
+
+Run the two gates by hand before you push a change to the mod, the far-end bundle, or the release
+version:
+
+```sh
+release/bump-version.sh --check
+release/check-drift.sh
+```
+
+The first proves that every place naming the release agrees with `release/make-release.sh`.
+The second proves that the far-end bundle still matches this tree, and that the plugin version
+agrees across `bibites-mod/src/MultiversePlugin.cs`, both rows of `docs/support-matrix.md`, and the
+Plugin row of the Versions table above.
+Neither needs the game, the .NET SDK, or the network.
+`check-drift.sh` does need full Git history. It resolves the commit the bundled sidecar was built
+from, and reads the tree at it.
+
+A `v*` tag on `main` starts `.github/workflows/release.yml`.
+That workflow builds and publishes the release on the owner's own machine, the only place the
+proprietary build inputs exist.
+Read [`release/README.md`](release/README.md) for the procedure, the runner's setup, and the
+by-hand fallback.
+
 ### Owner steps
 
 This public guide does not contain machine-specific service procedures.
@@ -289,6 +319,11 @@ The artifact contains the plugin, BepInEx, sidecar, setup script, and start or s
 
 Rebuild the artifact after a plugin, sidecar, protocol, or support-matrix change.
 Stop the old Windows sidecar before you replace its executable.
+
+`farend/make-farend-bundle.sh` writes `farend/dist/BUNDLE-SOURCE.txt` beside the zip. Both files
+are tracked and belong in one commit: the record describes that zip and no other.
+`release/check-drift.sh` reads it, and the sidecar's own revision stamp, to decide whether the
+committed bundle has gone stale. A release build refuses a stale one.
 
 The far-end scripts require an explicit relay location and a peer credential.
 Those values are runtime inputs and do not belong in this guide.

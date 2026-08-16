@@ -1,8 +1,10 @@
 # `release/` — the package, and how it is published
 
-**Everything a GitHub release needs, built locally and published by hand.** Nothing in this
-directory publishes anything: `make-release.sh` produces artifacts and text into `dist/`, and the
-four steps at the bottom of this page are the owner's own act.
+**Everything a GitHub release needs, built on the owner's own machine and published from a tag.**
+Nothing in this directory publishes anything: `make-release.sh` produces artifacts and text into
+`dist/`. Publication is `.github/workflows/release.yml`, which a `v*` tag starts on the owner's
+self-hosted runner. The homepage deployment after it is an operator act and is not automated at
+all.
 
 The channel is **GitHub Releases** (D25). It pushes nothing to anybody, which is why this project
 moves its fleet by publication — a release, a matrix row, and a relay-side minimum wire version
@@ -26,6 +28,14 @@ raised only after the release that satisfies it exists.
 | `kit/README-linux.md` | The page inside the Linux archive, staged into it as `README.md` |
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
 | `make-release.sh` | Builds both platform packages, the Windows setup, `SHA256SUMS`, and the release page |
+| `bump-version.sh` | The release string's single surface. `--print` prints it, `--check` asserts every place that names it agrees, and `<version>` rewrites them all from an explicit allowlist |
+| `check-drift.sh` | The half of `make-release.sh` that needs no game: is the far-end bundle still this tree's bundle, and does the mod version agree everywhere it is stated |
+| `check-nsis.sh` | Compiles `windows-installer.nsi` against a stub payload, in about two seconds and with no game file |
+| `verify-build-log.sh` | Reads a finished build log and refuses a build whose strongest gates downgraded to a note |
+| `pscheck.ps1` | Parses every shipped PowerShell file. It runs on Windows in CI, because this repository is written on Linux |
+| `lib/mod-version.sh` | One parse of the plugin's declared `Version`, shared by the gates and the bundle record so no two readers can disagree about it |
+| `lib/sidecar-manifest.sh` | The input manifest behind check 3 below, sourced by `make-release.sh` and by `check-drift.sh`, so CI runs the gate itself rather than a lookalike |
+| `tracked-binaries.txt` | Every binary file this repository is allowed to track. The `consistency` job diffs the real set against it, so a game assembly cannot land unnoticed |
 | `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
 | `../go/cmd/multiverse-launcher/` | Not in this directory, but built here: `make-release.sh` cross-compiles it into every Windows package as `BibitesMultiverseLauncher.exe`, the installed application the shortcuts open |
@@ -110,6 +120,12 @@ it checks these inputs:
    this comparison. VCS stamps can make two builds from the same inputs differ as files.
 4. If this machine's game directory is readable, the local plugin must also match.
 
+Two cheaper refusals come before all four, in the first seconds and with no toolchain at all:
+`release/bump-version.sh --check` must agree, and `bibites-mod/src/MultiversePlugin.cs`'s `Version`
+must equal the `mod` field of `docs/support-matrix.md`. Both were things a release could
+previously ship past. When the bundle carries a `BUNDLE-SOURCE.txt`, the build also asserts that
+the record agrees with the zip it just unpacked.
+
 **The launcher is deliberately outside gate 3.** That gate compares the package graph of
 `cmd/sidecar` against the tracked far-end bundle, and the launcher is a separate command that
 shares none of it — which is also why adding it could not disturb the sidecar's manifest. What
@@ -132,13 +148,35 @@ The input-manifest gate shows that both builds use the same sidecar source.
 It does not show that either binary ran successfully.
 
 A mismatch stops the build and names which side moved.
-If plugin or sidecar code changes, rebuild the far-end bundle. Then repeat its tests before release.
-Complete the required runtime test. Record its results separately.
+
+**Whenever `bibites-mod/` or the sidecar changes, the far-end bundle is rebuilt — in its own
+commit, before the release.** That bundle is the reference checks 2, 3, and 4 compare against, so a
+mod change that lands without it leaves the tree unreleasable. All four legs run on the machine
+that has the game:
+
+1. `farend/make-farend-bundle.sh`. It rebuilds `farend/dist/farend-bundle.zip` and writes
+   `farend/dist/BUNDLE-SOURCE.txt` beside it — the bundle's provenance record, naming the commit it
+   was built from, the tree hash of `bibites-mod/`, the blob hash of `farend/setup-farend.ps1`, the
+   plugin version, and the `sha256` of each artifact in the zip. **Commit both files in one
+   commit:** the record describes that zip and no other.
+2. `bibites-mod/deploy.sh`, to refresh this machine's own game plugin. Check 4 is a three-way
+   agreement, and it is the leg that only this machine can prove.
+3. The `mod` field on **both** rows of [`../docs/support-matrix.md`](../docs/support-matrix.md),
+   and the Plugin row of [`../dev_environment.md`](../dev_environment.md), whenever the plugin's
+   `Version` moved.
+4. Repeat the bundle's tests, complete the required runtime test, and record its results
+   separately.
+
+`release/check-drift.sh` tells you whether any of that is outstanding. It answers from tracked text
+alone — no game files, no .NET, no network — and CI runs it on every pull request. Run it before
+you tag anything.
 
 Every artifact is built deterministically with fixed timestamps and sorted entries. Rebuilding
-from the same tag and inputs reproduces the checksums on the page. Linux archives
-keep their mode bits, and the build reads them back out of the finished zip, including the game
-executable in a complete archive.
+from the same tag and inputs reproduces the checksums on the page, **for the same NSIS build**: the
+Windows setup's bytes depend on the compiler that produced it, which is why the release machine
+keeps the `MAKENSIS` it has always used and CI's stub compile uses a packaged one only to prove the
+installer script still compiles. Linux archives keep their mode bits, and the build reads them back
+out of the finished zip, including the game executable in a complete archive.
 
 ## Testing the install and the uninstall
 
@@ -174,48 +212,316 @@ cd go && GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -o /tm
 bash -n release/make-release.sh release/test-install-uninstall.sh release/kit/*.sh
 ```
 
-**There is no CI.** Every check on this page is a hand step, and the two PowerShell suites need a
-Windows machine. The launcher's Windows process primitives — the detached spawn, the owner-only
-credential file, and the ask-before-forcing stop — compile here and are proved only on Windows.
+## What CI checks
 
-## Publishing — the four steps, by hand
+`.github/workflows/checks.yml` runs on every pull request and every push to `main`, on
+GitHub-hosted runners. It holds no secret and needs no game file, and the release runner's label
+appears nowhere in it, so a pull request from a fork is safe to run.
 
-`make-release.sh` deliberately does none of these.
+| Job | What it proves | The same check locally |
+|---|---|---|
+| `go` | `go vet` for this host and for Windows, `go test ./...`, and the same cross-builds the release and the hosting kit perform | `cd go && go vet ./... && go test ./...` |
+| `scripts` | `bash -n` over every tracked `*.sh`, then `deploy/test-units.sh` and `deploy/test-front-door.sh` against a real nginx | `bash -n` over the scripts, then the two `deploy/test-*.sh` |
+| `installer` | `windows-installer.nsi` compiles against a stub payload | `release/check-nsis.sh` |
+| `powershell` | every shipped `*.ps1` parses; PSScriptAnalyzer runs beside it, advisory only | `pwsh -NoProfile -File release/pscheck.ps1 release/kit/*.ps1 farend/setup-farend.ps1` — Windows only |
+| `consistency` | `release/bump-version.sh --check`, `release/check-drift.sh`, and the tracked binary files against `release/tracked-binaries.txt` | `release/bump-version.sh --check && release/check-drift.sh` |
 
-1. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
+`consistency` checks out with full history, because `check-drift.sh` resolves the far-end bundle's
+source commit and reads the tree at it. A shallow clone cannot answer that.
+
+**What CI still cannot do.** The two install-and-uninstall suites need a real game, and
+`test-install-uninstall.ps1` needs Windows as well: CI parses that file, it does not run it. The
+launcher's Windows process primitives — the detached spawn, the owner-only credential file, and the
+ask-before-forcing stop — compile here and are proved only on Windows. And the build's strongest
+checks, 1, 2, and 4 above, need the proprietary game bytes, which is why the release build runs on
+the owner's machine rather than on a hosted runner.
+
+## Cutting a release
+
+`make-release.sh` still publishes nothing. Publication is `.github/workflows/release.yml`, and a
+`v*` tag on `main` is what starts it.
+
+Settle the far-end bundle first. `release/check-drift.sh` must be green before you tag anything: a
+stale bundle stops the build on the release machine minutes in, after the game payload has already
+been staged. It is **not** green today — see *Day one* below.
+
+And before the first tag is ever pushed, the four gates under *The release runner* have to be in
+place. The `release` environment above all: a workflow that names an environment which does not
+exist gets one auto-created with no protection rule, so the approval pause is missing rather than
+loud.
+
+```sh
+# 1  bump the release string, on a branch off a clean main
+git switch -c release/<version>
+release/bump-version.sh <version>
+#    work through the review list it prints. The dates, the matrix's "published" and "tested"
+#    strings, and STATUS.md's release paragraph are yours to write, not the tool's
+release/bump-version.sh --check
+git add -- $(git diff --name-only)      # exactly what the bump touched, nothing else
+git commit -m "Set the release to <version>"
+git push -u origin release/<version>
+#    open the pull request. checks.yml must be green before it is merged
+
+# 2  tag the merge commit on main
+git switch main && git pull --ff-only
+git tag -a v<version> -m "Bibites Multiverse <version>"
+git push origin v<version>
+
+# 3  on the release machine: read the queue, then run the runner for exactly one job
+gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml --limit 5
+cd ~/actions-runner && ./run.sh --once
+
+# 4  approve the `release` environment when it asks, then watch
+gh run watch --repo jpinedaa/bibites-multiverse
+```
+
+Step 1 has a button as well: the `bump` workflow takes a version, runs the same script on a branch,
+pushes it, and prints the compare link and the same review list. It stops there on purpose — a pull
+request opened by a workflow does not start `checks.yml`, so the owner opens the pull request.
+
+The order of steps 2 and 3 does not matter: a tag pushed while the runner is stopped queues the
+job, and starting the runner picks it up. That is also why step 3 reads the queue first — the
+runner takes whatever is waiting, not only the run you meant to start. *The release runner* below
+says what to do with anything unexpected.
+
+**What the workflow does.** The same build the last two releases ran by hand, with the checks that
+used to be done by eye turned into refusals:
+
+1. It refuses unless the tag is a `vMAJOR.MINOR.PATCH` tag, is on `main`, names the release
+   `bump-version.sh --print` reports, and has no GitHub release already. A moved tag is a real case
+   here: delete the existing release first, deliberately, by hand.
+2. It refuses unless the machine's own inputs are there — the reference assemblies, the BepInEx
+   cache, both clean game directories, and a **readable** plugin in this machine's game, because
+   check 4 turns into a note when that file cannot be read. Those inputs are copied in from fixed
+   paths outside the workspace into gitignored directories, so the tree stays clean and
+   `--allow-dirty` is never used.
+3. It runs `release/check-drift.sh`, then `make-release.sh` with both game directories, tee-ing the
+   build to a log.
+4. It runs `release/verify-build-log.sh`, which refuses a log missing any of the eighteen success
+   lines or carrying one of the three silent downgrades. Two of the build's strongest checks
+   degrade to a note when an input is unreadable; under a dedicated runner user that is exactly how
+   a check stops running for months without anybody noticing.
+5. It verifies the artifacts independently: `SHA256SUMS`, each archive against its own
+   `MANIFEST.sha256`, `LICENSE` and `THIRD_PARTY_NOTICES.md` and `public-map.json` and the launcher
+   in the archives that must carry them, the VCS stamp on all three Go binaries pulled back out of
+   the shipped zips, and every download row in `RELEASE-PAGE.md` re-hashed against the real file.
+6. It uploads the build log, `RELEASE-PAGE.md`, and `SHA256SUMS` as workflow artifacts — never the
+   packages, because GitHub Releases is their channel.
+7. It publishes with the same `gh release create … --verify-tag … --latest` command and the same
+   six assets the last two releases used, then verifies what it published: six assets uploaded, not
+   a draft, `releases/latest` resolving to the tag, and a round trip that downloads two assets and
+   compares them byte for byte against the local build.
+
+**What is still yours, afterwards.** Read the published page as a stranger would, in a browser, and
+check the three things that matter most about its shape: the checksum step is **above** the
+download links; each download link's file matches the checksum beside it; and **the Linux row does
+not read as an afterthought** — a reader on that platform should meet the
+checksum-then-executable-bit ordering, the `run_bepinex.sh` difference and the
+one-instance-per-game-folder warning without having to read the Windows sections first.
+
+Also open each participant archive and probe the Windows setup. Make sure that `public-map.json`
+contains the intended enrollment and relay addresses. It must not contain a world identity or
+secret.
+
+**The homepage is a separate act, and CI never performs it.** `bibitesmultiverse.com` renders the
+release number from the archive service. The compiled default lives in
+`go/internal/archive/landing.go`, and the service environment's `MULTIVERSE_HOMEPAGE_RELEASE`
+(written from `MV_HOMEPAGE_RELEASE` in the deployment configuration) **overrides it**. So the
+published page names the new release only after the archive binary is rebuilt and redeployed
+**and** the host's value is the new release. That deployment takes the relay down for about a
+minute, has to follow the complete-record restart sequence, and ends in a written receipt — which
+is why it stays an operator step in the private operations runbook rather than a workflow. Open the
+homepage afterwards and check that the Windows button, the Linux button, and the tag link all
+resolve to the new release.
+
+**And one more, if the repository is ever made private:** the page's documentation links resolve
+only for somebody who can read the repository. Keep it public, or the four participant pages have
+to travel with the release instead.
+
+## The release runner — the owner's setup
+
+`release.yml` is the only workflow that carries the release runner's label, because it is the only
+one that needs a proprietary input. Registering that runner is a one-time act, and it is
+deliberately not a daemon.
+
+**Read this before building any of it, because it decides what the rest is worth.** On a tag push,
+GitHub executes the workflow file **as it exists in the tag's own tree**, not as it exists on
+`main`. Whoever can push a tag therefore supplies the workflow definition: `environment: release`
+can simply be deleted from it, the `if: github.repository == …` guard still passes, `runs-on:`
+still names this machine, and any `run:` step then executes as the runner user on the box that
+holds this project's production access. Nothing written in this repository can prevent that,
+because the attacker would be writing the file. **The controls that matter are the four gates
+below, and none of them live in a workflow.**
+
+### The machine
+
+1. **A dedicated user, and fixed read-only input paths.** That user must not be able to read the
+   owner's cloud credentials, SSH keys, world identities, the broadcast identity, or the private
+   operations checkout. One deliberate exception: it **must** be able to read the plugin installed
+   in this machine's game
+   (`…/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll`), or check 4
+   silently stops running. The workflow refuses in its first seconds when that file is unreadable,
+   and `verify-build-log.sh` refuses again afterwards.
+2. **Register at repository scope, with the labels `self-hosted`, `linux`, `X64`, and
+   `bibites-release` — and do not install it as a service.** One job at a time: the owner runs
+   `./run.sh --once`, the job runs, the process exits. That turns an always-listening agent on the
+   machine that holds production access into a tool that is started on purpose.
+3. **The runner's `.env` supplies the paths and the toolchain.** Never the repository, and never a
+   GitHub secret:
+
+   | Variable | What it must be |
+   |---|---|
+   | `MV_RELEASE_GAME_REFS` | the directory holding the 13 reference assemblies, `BibitesAssembly.dll` among them. Copied into `bibites-mod/libs/` |
+   | `MV_RELEASE_BEPINEX_CACHE` | a directory holding `BepInEx_win_x64_*.zip` and `BepInEx_linux_x64_*.zip`. Copied into `farend/dist/cache/`; without it the build reaches the network instead |
+   | `MV_RELEASE_WINDOWS_GAME` | a clean Windows game directory containing `The Bibites.exe` |
+   | `MV_RELEASE_LINUX_GAME` | a clean Linux game directory containing an executable `The Bibites.x86_64` |
+   | `LINUX_GAME_DIR` | optional. The unpacked Linux game the matrix row's hash is checked against; it defaults to `MV_RELEASE_LINUX_GAME` |
+   | `MAKENSIS`, `NSISDIR` | the same NSIS build every release has used, and its data directory |
+   | `GOROOT`, `DOTNET_ROOT` | the Go and .NET toolchains `make-release.sh` builds with |
+
+### The four gates, in the order they matter
+
+**1. A ruleset restricting who may create or update a `v*` tag.** This is the primary control: it
+is the only one a tag-supplied workflow file cannot revoke, because it stops the tag from existing
+at all. Put it in place before the runner is ever registered.
+
+*In the UI:* Settings → Rules → Rulesets → **New ruleset → New tag ruleset**. Name it, set
+Enforcement to **Active**, target tags matching `v*`, tick **Restrict creations**, **Restrict
+updates** and **Restrict deletions**, and put only the repository admin on the bypass list.
+
+```sh
+gh api -X POST repos/jpinedaa/bibites-multiverse/rulesets --input - <<'JSON'
+{ "name": "release tags",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/tags/v*"], "exclude": [] } },
+  "bypass_actors": [ { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" } ],
+  "rules": [ { "type": "creation" }, { "type": "update" }, { "type": "deletion" } ] }
+JSON
+gh api repos/jpinedaa/bibites-multiverse/rulesets --jq '.[] | [.name, .target, .enforcement] | @tsv'
+```
+
+`actor_id: 5` is the repository-admin role.
+
+**2. The `release` environment, created before the first tag is ever pushed.** A job that names an
+environment which does not exist gets it **auto-created, with no protection rule on it**. A missing
+environment is therefore not a loud failure; it is the gate silently not being there. Create it
+first, with the owner as a required reviewer and a deployment policy limited to `v*` tags.
+
+*In the UI:* Settings → Environments → **New environment** → `release` → tick **Required
+reviewers** and add yourself → Deployment branches and tags → **Selected branches and tags** → Add
+rule → ref type **Tag**, pattern `v*`.
+
+```sh
+owner=$(gh api users/jpinedaa --jq .id)
+gh api -X PUT repos/jpinedaa/bibites-multiverse/environments/release --input - <<JSON
+{ "reviewers": [ { "type": "User", "id": $owner } ],
+  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
+JSON
+gh api -X POST repos/jpinedaa/bibites-multiverse/environments/release/deployment-branch-policies \
+    -f name='v*' -f type=tag
+```
+
+Verify it, and read empty output as *there is no gate*:
+
+```sh
+gh api repos/jpinedaa/bibites-multiverse/environments/release \
+    --jq '.protection_rules[] | select(.type=="required_reviewers")'
+```
+
+**3. Branch protection on `main`.** Until `main` is protected, "the tag is on `main`" is only as
+strong as `main` is. Require a pull request, and set Actions → **Fork pull request workflows** to
+require approval for all outside collaborators in the same sitting.
+
+```sh
+gh api -X PUT repos/jpinedaa/bibites-multiverse/branches/main/protection --input - <<'JSON'
+{ "required_status_checks": { "strict": true, "contexts": [] },
+  "required_pull_request_reviews": { "required_approving_review_count": 0 },
+  "enforce_admins": false,
+  "restrictions": null }
+JSON
+```
+
+Start with an empty `contexts` list, and add `go`, `scripts`, `installer`, `powershell` and
+`consistency` once they have been green at least once — see *Day one* below.
+
+**4. Start the runner by hand, for one job, only when a release is expected.** `./run.sh --once`
+runs a single job and exits. Never install it as a service: a service is an always-listening agent
+on the machine that holds production access, and it takes whatever is queued, whenever it was
+queued and by whoever queued it. Look at the queue before you start it:
+
+```sh
+gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml --limit 5
+gh run view <id> --repo jpinedaa/bibites-multiverse     # the commit must be the tag you just pushed
+gh run cancel <id> --repo jpinedaa/bibites-multiverse   # anything you did not start
+```
+
+That a queued job waits for the runner is the convenience which makes the order of tagging and
+starting free. It is also the path by which a job you did not start would reach the machine. Look
+first, then start.
+
+### Day one
+
+Two things are not true yet, and both belong before the first tag.
+
+**The far-end bundle on `main` is stale**, so `release/check-drift.sh` fails and the `consistency`
+job is red on every pull request — including the one that introduces CI. Clear the debt rather than
+paper over it, and clear it first. On the machine that has the game: rebuild the bundle and commit
+`farend/dist/farend-bundle.zip` together with `farend/dist/BUNDLE-SOURCE.txt` in their own commit;
+refresh this machine's Steam plugin with `bibites-mod/deploy.sh`; and set the `mod` field on both
+rows of `docs/support-matrix.md` to the plugin's own `Version`. It is the discipline described
+under *Building*, applied once to catch up. Merging CI into a `main` that is genuinely releasable
+also means the provenance record is active for the very first release.
+
+**Nothing has run yet.** Do not make `checks.yml` a required status check until it has been green
+at least once. `go test ./...` and the nginx leg of the front-door check have never run on a hosted
+runner, and a first run read under a red banner teaches nobody anything. Watch one green run, then
+add the five job names to the branch protection above.
+
+**No secret is needed, and none is stored.** `GITHUB_TOKEN` with `contents: write` publishes the
+release. There is no personal access token, and no game byte is ever uploaded to GitHub as a build
+input — not as a secret, not in a private repository. The proprietary inputs stay on the machine
+that is licensed to hold them.
+
+## The manual fallback
+
+The workflow wraps a build the owner can still run, and this is the path back when the runner is
+unavailable. It is how the last two releases were published, before the workflow existed.
+
+1. **Build from a clean full clone of the tag**, not from a linked worktree, and tee the build to a
+   log. Go omits the VCS revision when a worktree's Git data lives on another filesystem, and the
+   build refuses a missing stamp on any of them; `RELEASE_SIDECAR_BUILD_REPO` is the
+   escape hatch described above, but a full clone is simpler.
+   ```sh
+   MAKENSIS=… NSISDIR=… ./release/make-release.sh \
+       --windows-game-dir <clean-windows-game> \
+       --linux-game-dir <clean-linux-game> \
+       --game-redistribution-notice release/GAME-REDISTRIBUTION-NOTICE.txt \
+       2>&1 | tee release-build.log
+   ```
+2. **Run `release/verify-build-log.sh release-build.log` on that log.** By hand this is the only
+   thing that catches a check which downgraded to a note because one path was not readable.
+3. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
-2. **Tag the commit the artifacts were built from**, and push the tag:
+4. **Tag the commit the artifacts were built from**, and push the tag:
    `git tag v0.2.5 && git push origin v0.2.5`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
-3. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
-   each complete archive that you built, the Windows setup, and `SHA256SUMS`:
+5. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
+   each complete archive that you built, the Windows setup, and `SHA256SUMS` — the same six assets
+   the workflow publishes:
    ```sh
    gh release create v0.2.5 \
        release/dist/bibites-multiverse-0.2.5-*.zip \
        release/dist/bibites-multiverse-0.2.5-*.exe \
        release/dist/SHA256SUMS \
+       --repo jpinedaa/bibites-multiverse --verify-tag --latest \
        --title "Bibites Multiverse 0.2.5" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
-4. **Read the published page as a stranger would**, in a browser, and check the three things that
-   matter most about its shape: the checksum step is **above** the download links; each download
-   link's file matches the checksum beside it; and **the Linux row does not read as an
-   afterthought** — a reader on that platform should meet the checksum-then-executable-bit
-   ordering, the `run_bepinex.sh` difference and the one-instance-per-game-folder warning without
-   having to read the Windows sections first.
+6. **Verify what you published**, because nothing else will: `sha256sum -c SHA256SUMS`, each
+   archive against its own `MANIFEST.sha256`, and a `gh release download` round trip compared with
+   the local build. Then the by-hand reading above, and the homepage act after it.
 
-   Also open each participant archive and probe the Windows setup. Make sure that
-   `public-map.json` contains the intended enrollment and relay addresses. It must not contain a
-   world identity or secret.
-
-**The homepage is a separate act, and it is not on this list.** `bibitesmultiverse.com` renders
-the release number from the archive service. The compiled default lives in
-`go/internal/archive/landing.go`, and the service environment's `MULTIVERSE_HOMEPAGE_RELEASE`
-(written from `MV_HOMEPAGE_RELEASE` in the deployment configuration) **overrides it**. So the
-published page names the new release only after the archive binary is rebuilt and redeployed
-**and** the host's value is the new release. Open the homepage afterwards and check that the
-Windows button, the Linux button, and the tag link all resolve to the new release.
-
-**A fifth step, if the repository is private:** the page's documentation links resolve only for
-somebody who can read the repository. Make it public, or the four participant pages have to
-travel with the release instead.
+The version literals in steps 4 and 5 are the current release, and `release/bump-version.sh` moves
+them with every bump — they are on its allowlist by exactly the shape written here. Reword those
+two commands and the allowlist entry has to move with them.
