@@ -26,6 +26,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"multiverse/internal/contractb"
 	"multiverse/internal/peercred"
 	"multiverse/internal/wire"
+	"multiverse/internal/wsutil"
 )
 
 // ---------------------------------------------------------------- harness
@@ -43,13 +45,18 @@ import (
 // operator's console mints one, so nothing here exercises a path production
 // does not have.
 type credRelay struct {
-	t       *testing.T
-	srv     *Server
-	url     string
-	addr    string
-	store   *peercred.Store
-	mu      sync.Mutex
-	secrets map[string]string
+	t    *testing.T
+	srv  *Server
+	url  string
+	addr string
+	// wireBytes is every byte this relay's listener read or wrote, TCP-side and
+	// after any compression the upgrade negotiated (§24, B35). It is the only
+	// place a test can see what permessage-deflate actually did: a frame counted
+	// after wire.Decode has already been inflated.
+	wireBytes atomic.Int64
+	store     *peercred.Store
+	mu        sync.Mutex
+	secrets   map[string]string
 }
 
 type credRelayOptions struct {
@@ -77,6 +84,10 @@ type credRelayOptions struct {
 	// requires the durability in production and says so; nothing about placement
 	// arbitration depends on it.
 	inMemoryGrid bool
+	// noWireCompression stops the relay OFFERING permessage-deflate (§24, B35),
+	// which is the operator's kill switch and, for a test, the uncompressed
+	// baseline to measure the compressed arm against.
+	noWireCompression bool
 }
 
 func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
@@ -125,13 +136,17 @@ func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
 		StatusCoalesceMax:         statusCoalesceMax,
 		StatusChurnBurstThreshold: opts.churnThreshold,
 		StatsBroadcast:            statsBroadcast,
+		NoWireCompression:         opts.noWireCompression,
 	})
 	if err != nil {
 		t.Fatalf("relay: new: %v", err)
 	}
 	// 127.0.0.1 on an EPHEMERAL port, always: this suite never touches a port the
-	// running rig owns.
-	ts := httptest.NewServer(srv.Handler())
+	// running rig owns. The listener is wrapped so a test can read the TCP-side
+	// byte count; httptest owns the socket, so the wrap has to go on before Start.
+	ts := httptest.NewUnstartedServer(srv.Handler())
+	ts.Listener = &countingListener{Listener: ts.Listener, n: &r.wireBytes}
+	ts.Start()
 	t.Cleanup(func() { ts.Close(); srv.Close() })
 	r.srv = srv
 	r.addr = strings.TrimPrefix(ts.URL, "http://")
@@ -165,6 +180,11 @@ type credPeer struct {
 	ws     *websocket.Conn
 	ctx    context.Context
 	cancel context.CancelFunc
+	// extensions is Sec-WebSocket-Extensions off the 101, which is the ONLY
+	// place the negotiated permessage-deflate is observable: coder/websocket
+	// exposes the negotiated subprotocol on the Conn and not the negotiated
+	// extension (§24, B35).
+	extensions string
 
 	mu     sync.Mutex
 	frames []wire.Envelope
@@ -182,6 +202,11 @@ type dialSpec struct {
 	gameVersion    string
 	noCredential   bool
 	sendHandshake  bool
+	// compression is what this client OFFERS on the upgrade (§24, B35). The zero
+	// value is CompressionDisabled, so every test in this package that does not
+	// name it dials as an UN-UPDATED SIDECAR does — which is the property B35
+	// promises and the reason the default was left where it was.
+	compression websocket.CompressionMode
 }
 
 func (r *credRelay) dial(spec dialSpec) *credPeer {
@@ -197,8 +222,9 @@ func (r *credRelay) dial(spec dialSpec) *credPeer {
 	}
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
 	ws, resp, err := websocket.Dial(dialCtx, r.url, &websocket.DialOptions{
-		CompressionMode: websocket.CompressionDisabled,
-		HTTPHeader:      header,
+		CompressionMode:      spec.compression,
+		CompressionThreshold: wsutil.PeerCompressionThreshold,
+		HTTPHeader:           header,
 	})
 	dialCancel()
 	if err != nil {
@@ -210,7 +236,8 @@ func (r *credRelay) dial(spec dialSpec) *credPeer {
 		r.t.Fatalf("dial as %s: %v (HTTP %d)", spec.claimPeer, err, status)
 	}
 	ws.SetReadLimit(wire.MaxFrameBytes)
-	p := &credPeer{t: r.t, ws: ws, ctx: ctx, cancel: cancel, code: -1}
+	p := &credPeer{t: r.t, ws: ws, ctx: ctx, cancel: cancel, code: -1,
+		extensions: resp.Header.Get("Sec-WebSocket-Extensions")}
 	go p.readLoop()
 	r.t.Cleanup(func() { cancel(); _ = ws.CloseNow() })
 

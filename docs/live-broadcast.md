@@ -24,8 +24,18 @@ game world -> GPU capture -> hardware H.264 -> private RTMP -> MediaMTX -> loopb
 The publisher sends one named stream to a private RTMP listener.
 MediaMTX rejects a second publisher for that stream path.
 
+The publisher runs only while somebody watches.
+Read "Publish on demand" for the signal that starts and stops it.
+
 MediaMTX exposes HLS on loopback.
 nginx publishes HLS below `/stream/` over HTTPS.
+
+The origin uses the `fmp4` HLS variant with two-second segments, not low-latency HLS.
+The delay from the simulation to a viewer is then approximately 6 to 8 seconds.
+Low-latency HLS gives approximately 1 second and costs about 45 percent more transfer for each
+viewer, because it re-fetches its playlist about as often as it delivers media.
+This is a spectator camera with no interaction, so no viewer action is synchronous with the video.
+A non-low-latency playlist is also an ordinary cacheable file, which a low-latency playlist is not.
 
 MediaMTX redirects the first master request to make sure that the client accepts cookies.
 The redirected master creates an HLS session and returns its session cookie.
@@ -206,12 +216,73 @@ That interface exposes the password to process inspection.
 For this reason, the public AWS publisher does not start FFmpeg.
 
 The HLS and metrics listeners use loopback.
-The HLS route uses a per-address connection limit.
-It has no request-rate limit because low-latency HLS sends many small part requests.
+The HLS route uses a per-address connection limit and no request-rate limit.
+The reason was that low-latency HLS sends many small part requests, which a rate limit rejects.
+The origin no longer uses low-latency HLS, so a request-rate limit there became possible.
+Adding one is a separate change with its own limit zone and its own measurement.
 
 MediaMTX keeps stream segments in memory.
 It does not create a recording.
 The archive remains the durable migration record.
+
+## Publish on demand
+
+The publisher costs approximately 780 GB of inbound transfer each month while it runs.
+It costs that amount with no audience, which is a quarter of the service's transfer allowance
+spent on an empty room.
+The publisher therefore runs only while somebody watches.
+
+The service host cannot start the publisher.
+The publisher is OBS on a Windows machine, reachable only through a tunnel that the Windows side
+opens, and the service host holds no credential for that machine by design.
+MediaMTX's own `runOnDemand` starts a command on the MediaMTX host, so it cannot start this
+publisher either.
+The Windows side asks instead, and the service host answers.
+
+### The viewer-presence endpoint
+
+```text
+GET https://<service-domain>/api/viewers
+{"watching":true,"hlsSessions":1,"lastViewerRequestAgeSec":4,"asOf":"2026-08-16T21:04:00Z"}
+```
+
+| Field | Meaning |
+|---|---|
+| `watching` | `hlsSessions > 0` or `lastViewerRequestAgeSec` is 60 or less |
+| `hlsSessions` | MediaMTX HLS player sessions now |
+| `lastViewerRequestAgeSec` | Seconds since the most recent viewer request, or `null` for none |
+| `asOf` | The UTC time of the reading |
+
+The response carries `Cache-Control: no-store`.
+A timer refreshes the document at least every 10 seconds.
+nginx serves it from disk, so a stopped or replaying archive does not report an empty room.
+
+The signal has two sources, and each covers what the other cannot.
+
+`hlsSessions` counts players that reached the stream.
+It is zero whenever the publisher is offline, because there is no stream to hold a session.
+
+`lastViewerRequestAgeSec` comes from the front door's access log.
+It is the age of the most recent request for `/watch` or `/stream/` from a client that is not
+loopback.
+The status code does not matter: while the publisher is offline these requests return `404`, and a
+person waiting at a `404` is exactly the audience that must start the publisher.
+Loopback requests are ignored, because the service's own health probes must not hold the publisher
+up with nobody watching.
+
+The presence document reports two aggregates.
+It does not record or publish a viewer address, a session identifier, or a request path.
+
+### What a viewer sees
+
+The broadcast page polls the playlist every 5 seconds, and that poll is the request the signal
+reads.
+The first viewer therefore waits approximately 20 seconds while the publisher starts.
+The page says so and keeps retrying, instead of showing a player with nothing in it.
+After about a minute of waiting the page reports a fault instead of a start.
+
+The Windows publisher's own watcher is a separate component with its own record.
+This document owns the endpoint contract, not the watcher.
 
 ## GPU host
 
@@ -323,7 +394,7 @@ In the target design, a Spot interruption stops the publisher first.
 The watcher then stops the game and waits for save-on-quit.
 It stops the sidecar and flushes the volume.
 
-The page returns to its reconnecting state.
+The page returns to its waiting state, and reports a fault after about a minute of it.
 A later instance uses the retained data and world identity.
 
 The page ignores a rate-limited health probe after the player loads.
@@ -334,11 +405,13 @@ The private operations record must track interruption events and restart evidenc
 ## Capacity
 
 Transfer sets the audience limit, and the viewer cost is not the media rate.
-One continuously open viewer of the 2.5-Mbit/s stream costs approximately 1,150 GB each month with
-low-latency HLS, of which 32 percent is playlist re-fetching.
-The same media without low latency costs approximately 790 GB each month and adds several seconds
-of delay.
-The publisher's own ingest costs approximately 780 GB each month while it runs, with no viewers.
+One continuously open viewer of the 2.5-Mbit/s stream costs approximately 790 GB each month, which
+is the cost of the `fmp4` variant this origin now uses.
+Low-latency HLS cost approximately 1,150 GB for the same media, of which 32 percent was playlist
+re-fetching.
+The publisher's own ingest costs approximately 780 GB each month while it runs.
+With no audience the publisher does not run, so steady-state ingest with an empty room is
+approximately zero.
 Direct-origin viewing therefore has a small audience limit.
 
 Read [`deploy/SIZING.md`](../deploy/SIZING.md), "Network transfer", for the units, the
@@ -347,8 +420,8 @@ Change a figure there first.
 
 Add a video CDN or a managed video service before direct-origin transfer exceeds the approved
 budget.
-Select the non-low-latency variant first, because a cache cannot help low-latency HLS: each
-playlist request stays open until the next part exists.
+The origin already uses the non-low-latency variant, which is the precondition for a cache: a
+low-latency playlist request stays open until the next part exists, so no edge can store it.
 The page and origin do not depend on one CDN provider.
 
 Read current compute, storage, public-address, and transfer prices before deployment.
@@ -363,11 +436,19 @@ sudo systemctl is-active multiverse-stream nginx
 sudo ss -ltnp | grep -E ':(1935|8888|9998) '
 sudo /opt/multiverse/deploy/provision.sh --only verify
 curl -fsS https://<service-domain>/watch
+curl -fsS https://<service-domain>/api/viewers
 (
   source ./deploy/local-broadcast/install.sh
   hls_stream_ready 'https://<service-domain>/stream/bibites/index.m3u8'
 )
 ```
+
+The playlist must contain no `EXT-X-PART` tag.
+That tag is the low-latency variant, which this origin does not use.
+
+The presence document must parse as JSON and must carry `Cache-Control: no-store`.
+Read it twice about 15 seconds apart and check that `asOf` moved.
+A frozen `asOf` means the timer stopped, and a publisher watcher would then hold its last answer.
 
 The HLS function keeps the server session from the master through the latest completed segment.
 The segment must return HTTP status `200` and contain at least one byte.

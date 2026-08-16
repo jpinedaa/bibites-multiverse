@@ -18,20 +18,25 @@ Keep these records outside the public repository:
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
+| `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
+| `restart-archive.sh` | Runs the complete-record archive sequence, guarded by the archive-deploy hold and the replay-headroom verdict. Costs a full ledger replay. |
+| `restart-lib.sh` | The half both restart scripts share: the peer gate, the waits, the proof, and the receipt. Sourced, never run. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `ce-reconcile.sh` | Reconciles the host's transfer counter against the invoice once a day. It runs on an operator machine, not on the host. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
+| `viewers-presence.sh` | Publishes whether anyone is watching the broadcast, so the publisher can stop while nobody is. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
 | `test-monitor.sh` | Drives the monitor's transfer, billing, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
+| `test-viewers-presence.sh` | Drives `viewers-presence.sh` against a fake access log, fake metrics and a fixed clock. |
 | `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
 | `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
-| `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
+| `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, and viewer-presence signal. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
 | `www/announcements/` | The announcements page nginx serves from disk, and the seed for its notices file. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
@@ -63,8 +68,10 @@ The following values identify one deployment:
 - `MV_BUNDLE` and `MV_TRANSFER_ALLOWANCE_GB`, which must state the same bundle.
 - `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
-- Homepage values for the public landing page links: `MV_HOMEPAGE_RELEASE`,
-  `MV_HOMEPAGE_REPO`, and `MV_HOMEPAGE_GAME_VERSION`.
+- Homepage values for the public landing page links: `MV_HOMEPAGE_REPO` and
+  `MV_HOMEPAGE_GAME_VERSION`. The release is not one of them. The page's
+  download buttons address GitHub's `/releases/latest`, so a new release reaches
+  the homepage without a deployment.
 
 Never store the completed file in Git.
 Store secret values in a secret manager or in protected files on the host.
@@ -380,6 +387,11 @@ storage, as `ANNOUNCEMENT.md` requires.
 Run `provision.sh` again to apply a changed parameter file or deployment kit.
 The script installs files, but it does not make every restart decision for you.
 
+Its `systemd` phase is the exception, and it enables and starts both services.
+Never run it while a reboot hold-down is in force: it undoes a `systemctl disable` and puts the
+relay back in front of a replaying archive. `RESTART-POLICY.md`, "Host reboot", holds the order,
+and the drop-in that phase installs is the hold-down that survives it.
+
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
 
@@ -392,6 +404,7 @@ Apply them with `provision.sh --only envfiles`; the archive reads them at start.
 Use `test-front-door.sh` after an nginx template or announcements-page change.
 Use `test-units.sh` after a systemd unit change.
 Use `test-monitor.sh` after a `monitor.sh` change.
+Use `test-viewers-presence.sh` after a `viewers-presence.sh` change.
 Use `test-ce-reconcile.sh` after a `ce-reconcile.sh` change.
 Use the provisioning verification phase after any host change.
 
@@ -425,7 +438,15 @@ bash -n deploy/*.sh deploy/service-host-sample
 deploy/test-front-door.sh
 deploy/test-units.sh
 deploy/test-monitor.sh
+deploy/test-viewers-presence.sh
 deploy/test-ce-reconcile.sh
+```
+
+Both restart procedures answer `--dry-run`, which walks every step and changes nothing:
+
+```sh
+deploy/restart-relay.sh --dry-run
+deploy/restart-archive.sh --dry-run
 ```
 
 `test-monitor.sh` needs no root, no network and no host.
@@ -442,6 +463,13 @@ It runs `ce-reconcile.sh --from-file` against a saved response in `deploy/testda
 instance-metric provider, so it makes no Cost Explorer call and spends nothing.
 A Cost Explorer call costs `$0.01`, and its answer changes daily, so the live API is the wrong
 place to test a parser.
+
+`test-viewers-presence.sh` needs no root, no network and no host either.
+It runs `viewers-presence.sh` against a written access log, a written metrics file and a fixed
+clock.
+Its cases are the four ways the signal has to be right: silence reads as nobody, a failed request
+still proves that a person is waiting, a loopback probe is not an audience, and a player that
+reached the stream counts whatever the log says.
 
 Run `shellcheck` when it is available.
 Run `systemd-analyze verify` against the units on a compatible Linux host.

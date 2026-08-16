@@ -31,7 +31,7 @@ The release page you downloaded this from carries the archive's SHA-256 **above*
 link. Do that first if you have not already:
 
 ```sh
-sha256sum bibites-multiverse-0.2.5-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.2.6-linux-x64-complete.zip
 ```
 
 **There is no mark of the web on Linux and this page will not invent a ritual to replace it.**

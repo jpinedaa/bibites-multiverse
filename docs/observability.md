@@ -245,12 +245,19 @@ capacity risks.
 | Egress eating the transfer allowance | `monitor.sh` `transfer`: `/proc/net/dev` on the billed interface, against a month-to-date burn-down line and a 24-hour trailing rate | 5 min, free |
 | A transfer driver that has just appeared | `monitor.sh` `transfer-rate`: consecutive closed hours above an hourly limit | 5 min, free |
 | The loopback pin that keeps the archive's subscription off the billed interface | `monitor.sh` `hosts-pin` | 5 min, free |
-| Billing truth behind the four rows above | `deploy/ce-reconcile.sh`: one Cost Explorer `get-cost-and-usage` call — DAILY granularity, `UsageQuantity` and `UnblendedCost`, grouped by usage type, filtered to the one service — plus two free instance-metric calls | daily, `$0.01` a day and `$0.31` a month |
+| A publisher spending a quarter of the allowance on an empty room | `deploy/viewers-presence.sh`: MediaMTX `hls_sessions` and non-loopback `/watch` and `/stream/` requests in the front-door access log, published at `/api/viewers` | 10 s, free |
+| Billing truth behind the transfer rows above | `deploy/ce-reconcile.sh`: one Cost Explorer `get-cost-and-usage` call — DAILY granularity, `UsageQuantity` and `UnblendedCost`, grouped by usage type, filtered to the one service — plus two free instance-metric calls | daily, `$0.01` a day and `$0.31` a month |
 | Whether that reconciliation is still running | `monitor.sh` `billing`: the age of the file the reconciliation ships, and the overage quantity in it | 5 min, free |
 | Anything unexpected | A cost budget and an anomaly monitor scaled to this account | continuous |
 
 These facts shape this layer and each has cost someone an hour:
 
+- **The viewer-presence row is a control signal, not an alarm.** Nothing pages a
+  person when it says nobody is watching; the publisher reads it and stops. It
+  belongs in this table because it is a measurement with a cadence and a reader,
+  and because a measurement that quietly stops updating decides something — the
+  publisher holds its last answer. Its liveness is `asOf`, and the
+  verification phase checks that the endpoint answers at all.
 - **The service host does not publish to CloudWatch.** There is no
   `AWS/Lightsail` namespace, so no CloudWatch alarm can watch its CPU, its
   burst capacity or its egress. Those come from the Lightsail API instead, and

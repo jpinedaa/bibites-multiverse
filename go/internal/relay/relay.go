@@ -89,6 +89,17 @@ type Options struct {
 	// ForwardRecordRetention is how long a forwarded migrationId is remembered
 	// for the neverForwarded proof (§5.2).
 	ForwardRecordRetention time.Duration
+	// NoWireCompression stops this relay OFFERING permessage-deflate (§24, B35).
+	//
+	// THE ZERO VALUE IS THE SHIPPED BEHAVIOUR, which is compression offered, so
+	// every existing caller and every test gets §24's wire without being
+	// rewritten. It is expressed as a negative for exactly that reason.
+	//
+	// It is the operator's kill switch and it is complete on its own: the
+	// extension is used only when both ends offer it, so a relay that stops
+	// offering it puts the whole map back on uncompressed frames as each peer
+	// reconnects, with no participant action and no binary rollback.
+	NoWireCompression bool
 }
 
 // Server is the relay. The zero value is not usable; call New.
@@ -110,9 +121,13 @@ type Server struct {
 	churnThreshold    int
 	statsBroadcast    time.Duration
 	forwardRetain     time.Duration
-	publicEnrollment  PublicEnrollmentOptions
-	enrollmentMu      sync.Mutex
-	enrollmentByAddr  map[string][]time.Time
+	// wireCompression is whether this relay OFFERS permessage-deflate on its
+	// upgrades (§3, §24 B35). It is read on every accept and never changes after
+	// New, so it needs no lock.
+	wireCompression  bool
+	publicEnrollment PublicEnrollmentOptions
+	enrollmentMu     sync.Mutex
+	enrollmentByAddr map[string][]time.Time
 
 	// B24's two socket counters. They are outside s.mu deliberately: an upgrade
 	// must not queue behind a PEER_STATUS broadcast, and a connection storm is
@@ -147,16 +162,28 @@ type Server struct {
 	// what the relay knows about a peer id, live or not. PEER_STATUS keeps
 	// reporting a reserved slot after its peer goes away (§6.5).
 	meta map[string]*peerMeta
-	// pending counts everything the next broadcast would carry that the last one
-	// did not — a registry change OR a stats block. It is drained by the
-	// publisher, and it is what guarantees B29's "the last frame of a burst is
-	// always sent": nothing but a publish that actually happened clears it.
+	// pending counts the REGISTRY changes the next broadcast must carry. It is
+	// drained by the publisher, and it is what guarantees B29's "the last frame
+	// of a burst is always sent": nothing but a publish that actually happened
+	// clears it.
+	//
+	// A STATS BLOCK DOES NOT BUMP IT (amended — §24, B36). It used to, and that
+	// made every peer's PING a broadcast trigger; §6.5 gives stats the
+	// statsBroadcastIntervalMs timer and nothing else. See the note beside
+	// markChurnLocked.
 	pending int
 	// churn counts the REGISTRY changes inside the current window, which is the
-	// narrower thing B29 widens the window on. A stats block bumps pending and
-	// not this: it changes what the next frame says, not what the map is, and
-	// widening the window on a quiet map's heartbeat would be a bound that fired
-	// when nothing was happening.
+	// narrower thing B29 widens the window on. It has never counted a stats
+	// block, for the reason churn.go states at length: widening the window on a
+	// quiet map's heartbeat would be a bound that fired when nothing was
+	// happening.
+	//
+	// SINCE §24 B36 THE TWO COUNTERS HOLD THE SAME NUMBER, because a registry
+	// change is now the only thing either of them counts. They stay separate
+	// because the RULES stay separate: §7.2 says what must be published and B29
+	// says what may widen the window, and the next event that is one without the
+	// other should find the distinction already here rather than have to
+	// reintroduce it. Stats were that event until §24 removed them from both.
 	churn int
 	// broadcasts counts PEER_STATUS broadcast rounds for the life of the
 	// process, for the operator log line and for the churn harness's measured
@@ -313,6 +340,7 @@ func New(opts Options) (*Server, error) {
 		coalesceWindow:    opts.StatusCoalesce,
 		statsBroadcast:    opts.StatsBroadcast,
 		forwardRetain:     opts.ForwardRecordRetention,
+		wireCompression:   !opts.NoWireCompression,
 		publicEnrollment:  opts.PublicEnrollment,
 		enrollmentByAddr:  map[string][]time.Time{},
 		sessionID:         wire.NewUUID(),
@@ -529,6 +557,39 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// acceptOptions is the ONE set of upgrade options this relay serves, and every
+// websocket.Accept in this package takes it (§3 Transport, §24 B35).
+//
+// COMPRESSION IS OFFERED, NEVER REQUIRED. permessage-deflate is negotiated, so
+// a sidecar that does not offer it is served uncompressed and MUST NOT be
+// refused — that is what makes this change invisible to an un-updated
+// participant and what lets the fleet cross by publication rather than in
+// lockstep.
+//
+// THE REFUSAL DOORS OFFER IT TOO, AND THAT IS DELIBERATE. serveRetired,
+// shedUpgrade and closeEvicted complete the upgrade only to close it, so
+// compression saves them nothing — a close frame is a control frame and RFC
+// 7692 never compresses one. They share these options because B28 requires an
+// evicted peer to see EXACTLY what a draining relay shows it: if a refusal door
+// declined the extension while the live door accepted it, the response's
+// Sec-WebSocket-Extensions header would separate "refused at the door" from
+// "accepted and then closed" before the peer had read a single frame. One set
+// of options, one observable handshake, and the close code stays the only
+// difference.
+//
+// InsecureSkipVerify is coder/websocket's ORIGIN check and not a TLS one: a
+// Contract B client is a process, not a browser, and it sends no Origin header.
+func (s *Server) acceptOptions() *websocket.AcceptOptions {
+	opts := &websocket.AcceptOptions{InsecureSkipVerify: true}
+	if s.wireCompression {
+		return wsutil.PeerAcceptOptions(opts)
+	}
+	// --ws-compression=false. CompressionDisabled is the zero value, so the
+	// relay simply never echoes the extension and every peer, old or new, runs
+	// on the pre-§24 wire.
+	return opts
+}
+
 func (s *Server) serveRetired(w http.ResponseWriter, r *http.Request, path string) {
 	// A retired path is served over TLS like the live one (B23), so the same
 	// transport rule applies to it: a plaintext upgrade off loopback is refused
@@ -536,10 +597,7 @@ func (s *Server) serveRetired(w http.ResponseWriter, r *http.Request, path strin
 	if !s.allowPlainUpgrade(w, r) {
 		return
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true,
-	})
+	ws, err := websocket.Accept(w, r, s.acceptOptions())
 	if err != nil {
 		return
 	}
@@ -702,12 +760,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode: websocket.CompressionDisabled,
-		// This is coder/websocket's ORIGIN check, not a TLS one: a Contract B
-		// client is a process, not a browser, and it sends no Origin header.
-		InsecureSkipVerify: true,
-	})
+	ws, err := websocket.Accept(w, r, s.acceptOptions())
 	if err != nil {
 		s.log.Warn("relay: websocket upgrade failed", "err", err)
 		return
@@ -734,10 +787,7 @@ func (s *Server) shedUpgrade(w http.ResponseWriter, r *http.Request, peerID, bre
 		}
 		s.mu.Unlock()
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true,
-	})
+	ws, err := websocket.Accept(w, r, s.acceptOptions())
 	if err != nil {
 		return
 	}
@@ -1085,12 +1135,30 @@ func (s *Server) markChurnLocked() {
 	s.pending++
 }
 
-// markStatsLocked records a change to what the next broadcast SAYS without a
-// change to what the map IS — a stats block off a PING, and nothing else. It
-// bumps pending so the frame goes out, and deliberately NOT churn: the window
-// must not widen because a healthy map is breathing (§12
-// statusChurnBurstThreshold, §14 B4).
-func (s *Server) markStatsLocked() { s.pending++ }
+// THERE IS NO markStatsLocked, AND THAT IS THE POINT (§6.5, §14 B4; §24, B36).
+//
+// A STATS ARRIVAL SCHEDULES NOTHING. It is neither churn nor pending: it does
+// not change what the map IS, and §6.5 gives it one publisher by name — "also
+// sent on a statsBroadcastIntervalMs timer, BECAUSE STATS CHANGE WITHOUT THE
+// REGISTRY CHANGING". Storing the block against the peer is all an arrival
+// does; the next broadcast, timer-driven or registry-driven, carries whatever
+// is stored. Nothing is delayed by not scheduling — only the extra frame is.
+//
+// UNTIL §24 THIS BUMPED pending, and the cost was the map's whole broadcast
+// rate. Stats arrivals do not line up: seven peers each PINGing once every
+// statsIntervalMs land in seven different coalescing windows, so the relay
+// published PEER_STATUS at 1.32/s measured, one map-wide frame per arrival,
+// where §6.5 designs for one per 5 s. On the 2026-08-16 capture that was
+// ~246 GiB a month of PEER_STATUS the contract never asked for — and
+// publishLoop below already said so in its own words: the stats timer is "A
+// FLOOR ON FRESHNESS, NOT A SECOND SOURCE OF FRAMES".
+//
+// WHAT IT COSTS TO STOP. Stats freshness on the map moves from ~0.76 s to at
+// most statsBroadcastIntervalMs (5 s). §12's statsStaleMs is 30 s, so no
+// reader's staleness rule changes and nothing renders as unknown that did not
+// before. statsAsOfMs is unaffected in meaning: §6.5 defines it as the relay
+// clock when the block ARRIVED, never when it was published, so a reader ages
+// the stats from the arrival either way.
 
 func (s *Server) metaLocked(peerID string) *peerMeta {
 	m, ok := s.meta[peerID]
@@ -1159,13 +1227,17 @@ func (s *Server) dispatch(p *peer, frame []byte) bool {
 		if contractb.DecodeData(env.Data, &ping) == nil {
 			// §6.11: a PING from a peer MAY carry the stats block. The relay
 			// stores it against that peer with its own receivedAt, republishes
-			// it, and never routes, refuses, schedules or filters on a stat.
+			// it, and never routes, refuses, SCHEDULES or filters on a stat.
+			//
+			// "Schedules" is load-bearing and it was the bug (§24, B36). Storing
+			// the block is the whole of the work here; the frame that carries it
+			// out is statsBroadcastIntervalMs's, not this arrival's. See the note
+			// beside markChurnLocked above.
 			if p.role == contractb.RolePeer && ping.Stats != nil {
 				s.mu.Lock()
 				m := s.metaLocked(p.id)
 				m.stats = ping.Stats
 				m.statsAsOfMs = time.Now().UnixMilli()
-				s.markStatsLocked()
 				s.mu.Unlock()
 			}
 			s.send(p, contractb.TypePong, contractb.Pong{Nonce: ping.Nonce})

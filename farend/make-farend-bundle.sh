@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
-# Build farend/dist/farend-bundle.zip: the part of the far end's handover that is
-# the same for every deployment, and nothing it cannot use.
+# Build farend/dist/farend-bundle.zip: the part of a PRIVATE MAP's far-end
+# handover that is the same for every deployment, and nothing it cannot use.
 #
-# Under M4, the second computer was map SLOT 6 at position (2,1).
-# The bundle preserves that tested peer. Rebuild and commit it when the plugin,
-# sidecar, setup-farend.ps1, or $AssemblySha256 pin changes.
+# THIS IS TEST-RIG TOOLING, NOT THE RELEASE. A participant on the public map
+# installs from the release page; this exists for a private map, where the far
+# end needs a certificate authority and a peer secret that the public enrollment
+# installer neither has nor asks for (-CaFile, -PeerSecretFile). The e2e LAN
+# rigs print those commands as the human step for the second computer.
+#
+# Under M4, the second computer was map SLOT 6 at position (2,1), and the
+# packaged scripts still assume that peer. Run this when a far end needs a
+# bundle; it is built on demand and its output is NOT tracked.
+#
+# WHAT THE RELEASE COMPARES AGAINST IS NOT THIS ZIP. That is
+# docs/support-matrix.md's "testedBuild" record — a plugin hash and a
+# cmd/sidecar input digest, written by release/record-tested-build.sh after a
+# test. This script builds a handover kit and asserts nothing about the release.
 #
 # The bundle holds five files — one install script, one document, three artifacts:
 #
@@ -24,46 +35,10 @@
 # and a secret). setup-farend.ps1 takes them as -CaFile and -PeerSecretFile.
 # farend/README.md is the operator-facing version of the same list.
 #
-# THE ZIP ITSELF IS COMMITTED, and deliberately. farend/.gitignore says `dist/*`
-# and then `!dist/farend-bundle.zip`, so everything under dist/ is ignored EXCEPT
-# that one tracked binary: the second computer takes it out of a clone rather than
-# off a USB stick. Rebuilding it is therefore a repository act — commit the new
-# zip in its own commit, TOGETHER WITH the record described next. The build
-# scratch (dist/farend-bundle/) and the cached BepInEx download (dist/cache/)
-# stay ignored.
-#
-# TWO TRACKED OUTPUTS, ONE COMMIT. Beside the zip this writes
-# farend/dist/BUNDLE-SOURCE.txt — the bundle's provenance record: the commit it
-# was built from, the tree hash of bibites-mod/, the blob hash of
-# setup-farend.ps1, the plugin's version, and the sha256 of each artifact the zip
-# carries. release/check-drift.sh reads it to decide whether the committed zip
-# has gone stale, from tracked text alone: one tree hash, no unzip, no Go, no
-# game files. release/make-release.sh asserts it agrees with the zip it unpacks.
-# The record is only true of the zip it was written with, so the two files must
-# never be committed apart. The .gitignore un-ignores it beside the zip.
-#
-# BUNDLE-SOURCE.txt GRAMMAR — this is the contract with those readers:
-#
-#   format            bibites-multiverse/farend-bundle-source/1
-#   commit            <40 lowercase hex>   git rev-parse HEAD
-#   bibites-mod-tree  <40 lowercase hex>   git rev-parse HEAD:bibites-mod
-#   setup-farend-blob <40 lowercase hex>   git rev-parse HEAD:farend/setup-farend.ps1
-#   mod-version       <e.g. 0.6.5>         MultiversePlugin.cs `Version`
-#   plugin-sha256     <64 lowercase hex>   BibitesMultiverse.dll, from the zip
-#   sidecar-sha256    <64 lowercase hex>   multiverse-sidecar.exe, from the zip
-#   bepinex           <version> <64 lowercase hex>   the pinned BepInEx zip
-#
-#   * Every line is `key<spaces>value`. The key matches [a-z0-9-]+; the separator
-#     is one or more ASCII spaces (this writer pads the key to a column, so a
-#     reader must accept a run of spaces and not just one); the value is the rest
-#     of the line. No leading or trailing whitespace on any line.
-#   * A value never contains a space, with exactly one exception: `bepinex`
-#     carries two fields, `<version> <sha256>`.
-#   * The eight keys above, each exactly once, in that order. No blank lines, no
-#     comments, no other keys. ASCII only, LF endings, one trailing newline.
-#   * `format` is first and names the schema. A reader that does not recognise
-#     its value must refuse the file rather than guess; a new key or a changed
-#     meaning bumps the trailing /1.
+# NOTHING UNDER dist/ IS TRACKED. farend/.gitignore is `dist/*` with no
+# exception: the zip, the build scratch (dist/farend-bundle/) and the cached
+# BepInEx download (dist/cache/) are all build output. Carry the zip to the far
+# end by hand, with the two files below; there is no commit to make.
 #
 # THIS BUILDS AN M4 TEST ARTIFACT. It builds the plugin and reads the result out
 # of bibites-mod/bin/Release/. It never writes into the game's plugins folder,
@@ -80,11 +55,6 @@ CACHE="$DIST/cache"
 STAGE="$DIST/farend-bundle"
 STAGE_NAME="$(basename "$STAGE")"
 ZIP="$DIST/farend-bundle.zip"
-SOURCE_FILE="$DIST/BUNDLE-SOURCE.txt"
-PLUGIN_SOURCE="$REPO/bibites-mod/src/MultiversePlugin.cs"
-# The single strict parse of that file's `Version` declaration, shared with
-# release/make-release.sh and release/check-drift.sh.
-. "$REPO/release/lib/mod-version.sh"
 # Go can omit VCS metadata when a linked worktree and its Git metadata are on
 # different filesystems. A release needs that provenance stamp. Set this to a
 # clean checkout of the same commit when the current worktree has that shape.
@@ -171,11 +141,7 @@ GOT="$(sha256sum "$CACHE/$BEPINEX_ZIP" | cut -d' ' -f1)"
 note "sha256 verified: $GOT"
 
 step "staging"
-# The record goes with the zip, so it goes when the zip goes: a build that dies
-# after this point leaves neither, and never a record describing a zip that is
-# not there any more.
 rm -rf "$STAGE" "$ZIP"
-rm -f "$SOURCE_FILE"
 mkdir -p "$STAGE"
 cp "$FAREND/setup-farend.ps1" "$FAREND/README.md" "$STAGE/"
 cp "$REPO/bin/multiverse-sidecar.exe" "$STAGE/"
@@ -191,14 +157,10 @@ rm -rf "$STAGE"
 note "$ZIP"
 unzip -l "$ZIP"
 
-step "the source record"
-# Written last, and only here: the record can therefore describe nothing but a
-# bundle that built and passed every check above.
-#
-# The three artifact hashes are read back OUT OF THE FINISHED ZIP and compared
-# with the files that were staged. `unzip -p` fails on a bad CRC, so this is also
-# the zip's own read-back test, and the record cannot claim a hash the zip does
-# not carry.
+step "the handover"
+# THE THREE ARTIFACT HASHES ARE READ BACK OUT OF THE FINISHED ZIP and compared
+# with the files that were staged. `unzip -p` fails on a bad CRC, so this is the
+# zip's own read-back test as well as a record of what it carries.
 zip_member_sha256() { unzip -p "$ZIP" "$STAGE_NAME/$1" | sha256sum | cut -d' ' -f1; }
 PLUGIN_SHA="$(sha256sum "$PLUGIN" | cut -d' ' -f1)"
 SIDECAR_SHA="$(sha256sum "$REPO/bin/multiverse-sidecar.exe" | cut -d' ' -f1)"
@@ -213,59 +175,27 @@ for member_want in \
     || { echo "!! $member in the zip is $got, want $want" >&2; exit 1; }
   note "$member  $got"
 done
-
-# The plugin's own version, through the one shared parse. release/make-release.sh
-# gate E and release/check-drift.sh checks B and D read the declaration with the
-# same function, so the record and the gates cannot disagree about what it says.
-MOD_VERSION="$(mod_version "$PLUGIN_SOURCE")"
-note "mod version $MOD_VERSION"
-
-MOD_TREE="$(git -C "$REPO" rev-parse "HEAD:bibites-mod")"
-SETUP_BLOB="$(git -C "$REPO" rev-parse "HEAD:farend/setup-farend.ps1")"
-
-# Written through a temporary file in the same directory and renamed, so a reader
-# — or a `git status` — sees either the whole record or none of it.
-{
-  printf '%-17s %s\n' format bibites-multiverse/farend-bundle-source/1
-  printf '%-17s %s\n' commit "$SOURCE_REV"
-  printf '%-17s %s\n' bibites-mod-tree "$MOD_TREE"
-  printf '%-17s %s\n' setup-farend-blob "$SETUP_BLOB"
-  printf '%-17s %s\n' mod-version "$MOD_VERSION"
-  printf '%-17s %s\n' plugin-sha256 "$PLUGIN_SHA"
-  printf '%-17s %s\n' sidecar-sha256 "$SIDECAR_SHA"
-  printf '%-17s %s %s\n' bepinex "$BEPINEX_VERSION" "$BEPINEX_SHA"
-} > "$SOURCE_FILE.tmp"
-mv -f "$SOURCE_FILE.tmp" "$SOURCE_FILE"
-note "$SOURCE_FILE"
+ZIP_SHA="$(sha256sum "$ZIP" | cut -d' ' -f1)"
+note "the zip itself  $ZIP_SHA"
 
 cat <<EOF
 
 The bundle is ready:
 
   $ZIP
+  sha256  $ZIP_SHA
 
-and beside it, its source record:
+It is build output, not a tracked file. Tell the far end that hash through the
+same channel you tell it the relay name: farend/README.md asks its operator to
+compare the archive they received against the hash you published.
 
-  $SOURCE_FILE
-
-$(sed 's/^/  /' "$SOURCE_FILE")
-
-BOTH FILES ARE TRACKED, AND BOTH GO IN ONE COMMIT — the record describes this
-zip and no other, so a commit that carries one without the other is wrong on its
-face. release/check-drift.sh reads the record to decide whether the committed
-bundle still matches the source, and release/make-release.sh checks it against
-the zip it unpacks.
-
-  git add farend/dist/farend-bundle.zip farend/dist/BUNDLE-SOURCE.txt
-  git commit -m "Rebuild the far-end bundle"
-
-The zip is ONE of THREE files for the M4 test computer. Carry all three by hand:
+The zip is ONE of THREE files for the far-end computer. Carry all three by hand:
 
   1. $ZIP
   2. e2e/tls-m4-lan/ca.crt, as ca.crt — the relay's certificate authority.
      Not a secret.
-  3. slot 6's join secret, as peer-secret.txt — THIS ONE IS A SECRET. The relay
-     prints it once and cannot reprint it; losing it costs a slot handover.
+  3. that peer's join secret, as peer-secret.txt — THIS ONE IS A SECRET. The
+     relay prints it once and cannot reprint it; losing it costs a slot handover.
 
 Tell that machine's operator the relay host as well — it has to be the name the
 certificate was issued for. setup-farend.ps1 takes the two extra files as

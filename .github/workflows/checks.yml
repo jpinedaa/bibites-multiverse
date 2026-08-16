@@ -137,6 +137,17 @@ jobs:
       - name: Cost Explorer reconciliation arithmetic
         run: deploy/test-ce-reconcile.sh
 
+      # The viewer-presence signal decides whether the broadcast publishes at
+      # all, so both of its failure modes are expensive and neither is visible
+      # from the host: a false negative takes the stream off the air in front of
+      # somebody who is watching it, and a false positive publishes 780 GB a
+      # month into an empty room. The script drives the real
+      # viewers-presence.sh through its read seams against a written access log,
+      # a written metrics file and a fixed clock, so it needs no root, no
+      # network, no nginx and no mediamtx.
+      - name: viewer presence
+        run: deploy/test-viewers-presence.sh
+
       # test-front-door.sh self-skips `nginx -t` when nginx or openssl is
       # absent, so installing them is what turns this from a text grep into a
       # real configuration check.
@@ -164,12 +175,29 @@ jobs:
           set -euo pipefail
           out="$(deploy/test-front-door.sh)"
           printf '%s\n' "$out"
-          printf '%s\n' "$out" | grep -Fq 'front-door render and nginx syntax: PASS' || {
+          printf '%s\n' "$out" | grep -Fq 'front-door render and nginx syntax, gate down and up: PASS' || {
             echo "!! test-front-door.sh skipped the nginx syntax check." >&2
             echo "   nginx or openssl is missing, so this job checked the rendered text" >&2
             echo "   only. Fix the install step; do not accept the skip." >&2
             exit 1
           }
+
+      # The restart scripts are the procedures RESTART-POLICY.md describes, and
+      # the day they are read is the day something is already wrong. --dry-run
+      # walks every step and changes nothing, needs no host, no root and no
+      # network, so a regression in either one is caught here rather than by an
+      # operator at 03:00 with the relay already stopped.
+      - name: restart procedures, dry run
+        run: |
+          set -euo pipefail
+          deploy/restart-relay.sh --dry-run --reason 'CI dry run'
+          deploy/restart-archive.sh --dry-run --reason 'CI dry run'
+          # The override must stay unusable without its proof text: an override
+          # that records no reasoning is just a flag that turns the gate off.
+          if deploy/restart-archive.sh --dry-run --i-proved-the-replay-fits >/dev/null 2>&1; then
+            echo "!! --i-proved-the-replay-fits was accepted without --proof" >&2
+            exit 1
+          fi
 
   installer:
     name: installer
@@ -245,12 +273,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # fetch-depth: 0 is MANDATORY (E5): check-drift.sh resolves the far-end
-      # bundle's source commit out of the bundled sidecar's VCS stamp and diffs
-      # the working tree against it. A shallow clone cannot see that commit.
+      # A SHALLOW CHECKOUT IS ENOUGH, and that is a property worth keeping.
+      # check-drift.sh compares this tree against values recorded in
+      # docs/support-matrix.md — one tree hash, one manifest of the working tree
+      # — so nothing here reads history. bump-version.sh and the tracked-binary
+      # check read the working tree too. Do not add a step that walks history
+      # without restoring fetch-depth: 0 in the same change.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-go@v5
@@ -264,10 +294,11 @@ jobs:
       - name: the version surface agrees
         run: release/bump-version.sh --check
 
-      # Is farend/dist/farend-bundle.zip still the bundle this tree builds?
-      # This is the source-level equivalent of make-release.sh's gate 3, and it
-      # needs no game bytes and no .NET.
-      - name: the far-end bundle is not stale
+      # Is this tree still the build somebody tested? The mod tree hash and the
+      # cmd/sidecar input digest recorded in docs/support-matrix.md against what
+      # this checkout holds. This is the source-level equivalent of
+      # make-release.sh's gates 2 and 3, and it needs no game bytes and no .NET.
+      - name: this tree is the build that was tested
         run: release/check-drift.sh
 
       # release/tracked-binaries.txt is the list, and it is a tracked plain
