@@ -87,7 +87,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Install Bibites Multiverse 0.2.3'
+$form.Text = 'Install Bibites Multiverse 0.2.4'
 $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(650, 440)
 $form.FormBorderStyle = 'FixedDialog'
@@ -269,7 +269,7 @@ $install.Add_Click({
         $message = if ($startAfter.Checked) {
             'Installation is complete. The game and its Multiverse connection started.'
         } else {
-            'Installation is complete. Run Start-Multiverse.ps1 when you want to connect.'
+            'Installation is complete. Use the Bibites Multiverse icon when you want to connect.'
         }
         [void][System.Windows.Forms.MessageBox]::Show(
             $form, $message, 'Bibites Multiverse is ready',

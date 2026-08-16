@@ -25,8 +25,9 @@
          which a public map does not need;
       8. states the settings this install ships with, including the export
          default;
-      9. writes Start-Multiverse.ps1, Stop-Multiverse.ps1 and the record the
-         uninstall reads.
+      9. installs the launcher this world runs from, writes the launcher's
+         profile for it, writes Start-Multiverse.ps1 and Stop-Multiverse.ps1
+         for console use, and writes the record the uninstall reads.
 
     IT WILL NEVER ASK YOU TO TURN A SECURITY CONTROL OFF. No part of this
     package prints an -ExecutionPolicy Bypass, an --insecure- flag, or an
@@ -139,7 +140,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
-$Release      = '0.2.3'
+$Release      = '0.2.4'
 $Here         = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ManifestName = 'MANIFEST.sha256'
 $MatrixName   = 'support-matrix.json'
@@ -151,6 +152,9 @@ $StartName    = 'Start-Multiverse.ps1'
 $StopName     = 'Stop-Multiverse.ps1'
 $RecordName   = 'install-record.json'
 $PublicMapName = 'public-map.json'
+$LauncherName = 'BibitesMultiverseLauncher.exe'
+$ProfilesDirName = 'profiles'
+$ProfileFormat = 'bibites-multiverse/launcher-profile/1'
 
 $discoveryScript = Join-Path $Here 'Find-BibitesGame.ps1'
 if (-not (Test-Path -LiteralPath $discoveryScript -PathType Leaf)) {
@@ -960,7 +964,7 @@ Say "and MULTIVERSE_SAVE_ON_QUIT."
 
 # ---------------------------------------------------------------- 9. the scripts
 
-Step "9 of 9 - write $StartName, $StopName and the uninstall's record"
+Step "9 of 9 - install the launcher, write its profile, $StartName, $StopName and the uninstall's record"
 
 $manageProgramFiles = -not [string]::IsNullOrWhiteSpace($InstallRoot)
 if (-not $InstallRoot) { $InstallRoot = $Here }
@@ -969,8 +973,9 @@ $InstallRoot = (Resolve-Path $InstallRoot).Path
 
 $programFiles = @()
 if ($manageProgramFiles) {
-    foreach ($name in @($SidecarName, 'Uninstall-BibitesMultiverse.ps1', 'README.md',
-                         'LICENSE', 'THIRD_PARTY_NOTICES.md', 'bibites-multiverse.ico')) {
+    foreach ($name in @($LauncherName, $SidecarName, 'Uninstall-BibitesMultiverse.ps1',
+                         'public-map.json', 'README.md', 'LICENSE',
+                         'THIRD_PARTY_NOTICES.md', 'bibites-multiverse.ico')) {
         $source = Join-Path $Here $name
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
             Stop-Setup "The package is incomplete: $name is missing." 'INS-CHECKSUM'
@@ -997,7 +1002,8 @@ $saveOnQuitValue = if ($SaveOnQuit -eq 'on') { 'true' } else { 'false' }
 
 $startBody = @'
 # Written by Install-BibitesMultiverse.ps1. Start this world on the map: the
-# sidecar first, then the game.
+# sidecar first, then the game. The Bibites Multiverse launcher is what this
+# world runs from now; this file keeps the values the install was made with.
 #
 #   .\@@STARTNAME@@             the sidecar, then the game
 #   .\@@STARTNAME@@ -GameOnly   the game only, against a sidecar already running
@@ -1181,19 +1187,55 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 $DataRoot = '@@DATAROOT@@'
 
+# Ask before forcing. A close request is what runs the game's own quit path, so
+# save-on-quit still happens; the force is the fallback.
+#
+# TWO RULES THIS FUNCTION KEEPS, AND WHY:
+#   1. Only a process that is really gone is reported as stopped, and only then
+#      is its pid file deleted. The pid file is the ledger the uninstall and the
+#      launcher both read; deleting it while the process lives would hide a
+#      running world from every tool on this machine. Liveness is decided by
+#      Get-Process, never by WaitForExit - a handle this script cannot open can
+#      make WaitForExit answer "exited" for a process that is still running.
+#   2. A process with no window to close - the sidecar, or a game started with
+#      -batchmode -nographics - makes taskkill refuse with a non-zero exit.
+#      There is nothing to wait for in that case, so it is forced at once
+#      instead of burning the whole timeout.
 function Stop-Recorded {
-    param([string]$File, [string]$Name)
-    if (Test-Path $File) {
-        $id = (Get-Content -Path $File | Select-Object -First 1)
-        if ($id) {
-            Stop-Process -Id ([int]$id) -Force
-            Write-Host "stopped $Name (pid $id)"
-        }
-        Remove-Item -Path $File -Force
+    param([string]$File, [string]$Name, [int]$WaitSeconds = 30)
+    if (-not (Test-Path $File)) { return }
+    $id = (Get-Content -Path $File | Select-Object -First 1)
+    $processId = 0
+    if (-not [int]::TryParse([string]$id, [ref]$processId)) {
+        Write-Host "$File does not name a process id; it is left alone."
+        return
     }
+    if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
+        Remove-Item -Path $File -Force
+        return
+    }
+    $global:LASTEXITCODE = 1
+    & taskkill.exe /PID $processId /T *> $null
+    if ($LASTEXITCODE -eq 0) {
+        $deadline = (Get-Date).AddSeconds($WaitSeconds)
+        while ((Get-Date) -lt $deadline -and
+               (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+        Stop-Process -Id $processId -Force
+        Start-Sleep -Milliseconds 500
+    }
+    if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+        Write-Host "COULD NOT STOP $Name (pid $processId). It is still running, so $File is kept."
+        return
+    }
+    Write-Host "stopped $Name (pid $processId)"
+    Remove-Item -Path $File -Force
 }
 
-Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game'
+Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game' 30
 Start-Sleep -Seconds 1
 
 if ($GameOnly) {
@@ -1202,7 +1244,7 @@ if ($GameOnly) {
     exit 0
 }
 
-Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'the sidecar'
+Stop-Recorded (Join-Path $DataRoot 'sidecar.pid') 'the sidecar' 10
 Start-Sleep -Seconds 1
 
 $left = @(
@@ -1239,6 +1281,34 @@ Set-Content -Path $stopPath  -Value (Expand-Template $stopBody)  -Encoding ASCII
 Say "wrote $startPath"
 Say "wrote $stopPath"
 
+# The profile the launcher reads. It states this same world in the launcher's
+# own format, so the app entry point and the scripts above describe one world
+# rather than two. IT HOLDS NO SECRET: the credential stays in its own file,
+# readable by you only, and the launcher never copies it anywhere else.
+$profilesDir = Join-Path $InstallRoot $ProfilesDirName
+New-Item -ItemType Directory -Force -Path $profilesDir | Out-Null
+$defaultProfilePath = Join-Path $profilesDir 'default.json'
+$defaultProfile = [ordered]@{
+    format         = $ProfileFormat
+    name           = 'default'
+    gameDir        = $GameDir
+    dataRoot       = $DataRoot
+    sidecarPort    = [int]$SidecarPort
+    world          = $World
+    headless       = $false
+    exportEdges    = $ExportEdges
+    excludeSpecies = $ExcludeSpecies
+    saveMinutes    = [double]$SaveMinutes
+    saveKeep       = [int]$SaveKeep
+    saveOnQuit     = ($SaveOnQuit -eq 'on')
+    peerId         = $peerId
+    relayUrl       = $RelayUrl
+    createdUtc     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+}
+$defaultProfile | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $defaultProfilePath -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $profilesDir 'active.txt') -Value 'default' -Encoding ASCII
+Say "wrote $defaultProfilePath - the launcher reads it"
+
 # The record the uninstall reads. It names every path this installer created or
 # replaced, with the hash it left behind, so the uninstall can remove exactly
 # what was added and leave anything a later hand changed.
@@ -1251,7 +1321,7 @@ foreach ($rel in $bepInExPaths) {
 }
 
 $record = [ordered]@{
-    record        = 'bibites-multiverse/install-record/2'
+    record        = 'bibites-multiverse/install-record/3'
     release       = $Release
     installedUtc  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     kitDir        = $InstallRoot
@@ -1265,6 +1335,15 @@ $record = [ordered]@{
     }
     peerId        = $peerId
     relayUrl      = $RelayUrl
+    world         = $World
+    sidecarPort   = [int]$SidecarPort
+    settings      = [ordered]@{
+        exportEdges    = $ExportEdges
+        excludeSpecies = $ExcludeSpecies
+        saveMinutes    = [double]$SaveMinutes
+        saveKeep       = [int]$SaveKeep
+        saveOnQuit     = $saveOnQuitValue
+    }
     plugin        = [ordered]@{
         path            = $pluginDst
         sha256          = $pluginSha
@@ -1285,6 +1364,12 @@ $record = [ordered]@{
     program       = [ordered]@{
         root  = $InstallRoot
         files = $programFiles
+    }
+    profiles      = [ordered]@{
+        root    = $profilesDir
+        default = 'default'
+        file    = $defaultProfilePath
+        active  = (Join-Path $profilesDir 'active.txt')
     }
     credential    = $credentialPath
     dataDir       = $dataDir
@@ -1311,16 +1396,19 @@ Say "export edges : $ExportEdges   (all four is the shipped default)"
 if ($ExcludeSpecies) { Say "never leaves : $ExcludeSpecies" } else { Say "never leaves : nothing - the exclusion policy is OFF" }
 Say "saves        : every $SaveMinutes minutes, keeping $SaveKeep, save on quit $SaveOnQuit"
 Say "your files   : $DataRoot"
-Say "app launcher : $InstallRoot"
+Say "app launcher : $InstallRoot\$LauncherName"
+Say "its profiles : $profilesDir   (this world is 'default')"
 if ($caImported) { Say "certificate  : $caThumbprint imported into your own user store" }
 else             { Say "certificate  : nothing imported into any trust store" }
 Write-Host ""
 if ($StartAfterInstall) {
     Say 'Next: the installer will connect this world and start the game now.'
 } else {
-    Say "Next: run  .\$StartName"
+    Say "Next: open the Bibites Multiverse icon, or run  .\$LauncherName  here. It"
+    Say "      starts this world, stops it, and can add another world on this machine."
 }
-Say "Later: .\$StopName to stop, and the uninstall script here to remove all of it."
+Say "Advanced: .\$StartName and .\$StopName still run this world from a console, with"
+Say "the values this install was made with. The uninstall script here removes all of it."
 Write-Host ""
 Say "The four pages written for you, on the release page: install, join, diagnose, leave."
 

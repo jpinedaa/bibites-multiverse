@@ -51,6 +51,11 @@ Section "Install"
   ${IfNot} ${Errors}
     ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "$R9\package\Install-BibitesMultiverse-Gui.ps1" -Probe' $R2
     SetErrorLevel $R2
+    ; The payload is the whole package, and for the complete edition that is the
+    ; game. Leave nothing of it in %TEMP% on any exit. SetOutPath first: Windows
+    ; will not remove the directory this process is sitting in.
+    SetOutPath "$TEMP"
+    RMDir /r "$R9"
     Quit
   ${EndIf}
 
@@ -58,27 +63,36 @@ Section "Install"
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -WindowStyle Hidden -File "$R9\package\Install-BibitesMultiverse-Gui.ps1" -InstallRoot "$INSTDIR"' $R2
   ${If} $R2 == 2
     SetErrorLevel 0
+    SetOutPath "$TEMP"
+    RMDir /r "$R9"
     Quit
   ${EndIf}
   ${If} $R2 != 0
     MessageBox MB_OK|MB_ICONSTOP "Bibites Multiverse Setup could not open or complete the installer (PowerShell exit code $R2).$\n$\nA diagnostic log may be available at:$\n$TEMP\\bibites-multiverse-setup.log$\nIf it is missing, the setup did not start the installer script.$\n$\nIf the problem persists, include this log when reporting the issue."
     SetErrorLevel $R2
+    ; The diagnostic log is $TEMP\bibites-multiverse-setup.log, which is not
+    ; under $R9, so nothing a report needs is thrown away here.
+    SetOutPath "$TEMP"
+    RMDir /r "$R9"
     Quit
   ${EndIf}
 
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
+  ; Every shortcut opens the launcher, and the working directory is the
+  ; installed application - not the temporary payload folder SetOutPath was
+  ; last pointed at.
   SetShellVarContext current
+  SetOutPath "$INSTDIR"
   CreateDirectory "$SMPROGRAMS\Bibites Multiverse"
-  StrCpy $R3 '-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -File "$INSTDIR\Start-Multiverse.ps1"'
-  CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
-  CreateShortCut "$DESKTOP\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
+  CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$INSTDIR\BibitesMultiverseLauncher.exe" "" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
+  CreateShortCut "$DESKTOP\Bibites Multiverse.lnk" "$INSTDIR\BibitesMultiverseLauncher.exe" "" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
   CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Uninstall Bibites Multiverse.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0 SW_SHOWNORMAL
   SetShellVarContext all
   ClearErrors
   CreateDirectory "$SMPROGRAMS\Bibites Multiverse"
   IfErrors doneCommonShortcuts
-  CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" "$R3" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
+  CreateShortCut "$SMPROGRAMS\Bibites Multiverse\Bibites Multiverse.lnk" "$INSTDIR\BibitesMultiverseLauncher.exe" "" "$INSTDIR\bibites-multiverse.ico" 0 SW_SHOWNORMAL
 doneCommonShortcuts:
   SetShellVarContext current
 
@@ -88,15 +102,54 @@ doneCommonShortcuts:
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "Publisher" "Bibites Multiverse"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "URLInfoAbout" "https://bibitesmultiverse.com/"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "UninstallString" '"$INSTDIR\Uninstall.exe"'
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "HelpLink" "https://bibitesmultiverse.com/"
+  ; What this installation actually occupies is BOTH directories: the program
+  ; files here, and the data root - which for the complete edition holds a whole
+  ; managed copy of the game. The graphical installer never passes -DataRoot, so
+  ; the setup's data root is always the installer's own default. Reporting only
+  ; $INSTDIR would tell somebody clearing disk space that a gigabyte is 15 MB.
+  ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+  ClearErrors
+  ${GetSize} "$LOCALAPPDATA\BibitesMultiverse" "/S=0K" $3 $1 $2
+  ${If} ${Errors}
+    StrCpy $3 0
+  ${EndIf}
+  ClearErrors
+  IntOp $0 $0 + $3
+  IntFmt $0 "0x%08X" $0
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "EstimatedSize" "$0"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "NoModify" 1
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "NoRepair" 1
+
+  ; Nothing needs the extracted payload once the install is written.
+  RMDir /r "$R9"
 SectionEnd
 
 Section "Uninstall"
+  ; QuietUninstallString promises an unattended removal, so a caller that passes
+  ; /S must never meet a modal dialog it cannot answer. The recorded uninstaller
+  ; refuses whenever a world is running, which makes that path reachable. The
+  ; exit code carries the refusal instead. Everything is silent here already
+  ; (SilentUnInstall), so the flag on the command line is what tells a scripted
+  ; caller apart from somebody clicking Uninstall in Programs and Features.
+  StrCpy $R3 "0"
+  ${un.GetParameters} $R1
+  ClearErrors
+  ${un.GetOptions} $R1 "/S" $R2
+  ${IfNot} ${Errors}
+    StrCpy $R3 "1"
+  ${EndIf}
+  ClearErrors
+
   IfFileExists "$INSTDIR\Uninstall-BibitesMultiverse.ps1" 0 cleanup
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy RemoteSigned -File "$INSTDIR\Uninstall-BibitesMultiverse.ps1"' $R0
   ${If} $R0 != 0
-    MessageBox MB_OK|MB_ICONSTOP "Bibites Multiverse could not be removed. Close the game and try again."
+    SetErrorLevel $R0
+    ${If} $R3 == "0"
+      MessageBox MB_OK|MB_ICONSTOP "Bibites Multiverse could not be removed. Close the game, and every world the launcher is running, and try again."
+    ${EndIf}
     Abort
   ${EndIf}
 
@@ -113,5 +166,10 @@ cleanup:
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse"
   Delete "$INSTDIR\Uninstall-BibitesMultiverse.ps1"
   Delete "$INSTDIR\Uninstall.exe"
+  ; The recorded uninstaller above removes the launcher by hash - a file a later
+  ; hand changed is kept - and removes the profiles it wrote unconditionally,
+  ; because a profile is meant to change and no recorded hash could survive an
+  ; edit. This only takes the directory away once it is empty.
+  RMDir "$INSTDIR\profiles"
   RMDir "$INSTDIR"
 SectionEnd

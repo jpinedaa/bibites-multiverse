@@ -22,9 +22,15 @@
       * BepInEx itself and its generated files - ONLY if the installer put
         BepInEx there. If BepInEx was already installed on this machine, it is
         left completely alone
+      * the installed application - BibitesMultiverseLauncher.exe, the sidecar,
+        the icon and everything else the installer copied beside them - as long
+        as each file is still the one it left there
       * Start-Multiverse.ps1 and Stop-Multiverse.ps1
-      * your map credential, and the copy of a private map's certificate
-        authority
+      * the launcher's profiles directory: one file for every world this
+        install added, the name of the world the launcher had selected, and
+        each of those worlds' recorded process ids and lock file
+      * your map credential - one for every world this install added - and the
+        copy of a private map's certificate authority
       * that certificate authority from your own user trust store, if the
         installer imported it and only then
       * an unchanged managed game payload, when this was the complete edition;
@@ -36,9 +42,10 @@
         game's own folder under %USERPROFILE%\AppData\LocalLow\The Bibites, and
         nothing in this package has ever written outside its own directory
         there. This script does not go near them
-      * YOUR JOURNAL - the record of every organism this machine took custody of
-        and has not handed on. Pass -RemoveWorldData to delete it too, and read
-        the warning that prints before it happens
+      * YOUR JOURNALS AND LOGS - the record of every organism this machine took
+        custody of and has not handed on, for every world this install runs.
+        Pass -RemoveWorldData to delete them too, and read the warning that
+        prints before it happens
       * any file the installer did not create, including another mod's plugin
 
 .PARAMETER DataRoot
@@ -49,8 +56,9 @@
     The install record, if it is not in the usual place.
 
 .PARAMETER RemoveWorldData
-    Also delete the journal, the logs and the data directory. The journal may
-    still hold organisms other worlds handed to this one.
+    Also delete the journal, the logs and the data directory - of this install
+    and of every other world its launcher added. A journal may still hold
+    organisms other worlds handed to this one.
 
 .PARAMETER KeepCertificate
     Leave a private map's certificate authority in your trust store.
@@ -114,10 +122,17 @@ function Remove-Recorded {
     [void]$removed.Add(("{0}{1}" -f $Path, $(if ($What) { "   ($What)" } else { '' })))
 }
 
+# -Pending names paths this run has already claimed for removal. Under -DryRun
+# they are still on disk, so without this a dry run would report a directory as
+# staying that a real run empties - and would blame files the installer itself
+# created for it.
 function Remove-EmptyDirectory {
-    param([string]$Path)
+    param([string]$Path, [string[]]$Pending = @())
     if (-not (Test-Path -LiteralPath $Path)) { return }
     $left = @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue)
+    if ($DryRun -and $Pending.Count -gt 0) {
+        $left = @($left | Where-Object { $Pending -notcontains $_.FullName })
+    }
     if ($left.Count -gt 0) {
         [void]$kept.Add(("not empty, so it stays : {0} ({1} item(s) this installer did not create)" -f $Path, $left.Count))
         return
@@ -162,12 +177,131 @@ function Test-ProcessUnder {
     return $false
 }
 
+# The launcher's own ledger, on disk: one decimal process id on the first line
+# of the file, the same convention the generated scripts use. A process id is
+# reused by Windows once its process is gone, so the name has to agree too -
+# otherwise a stale file can make this script refuse forever, with no way out.
+function Test-ProcessRecorded {
+    param([string]$File, [string]$ProcessName = '')
+    if (-not (Test-Path -LiteralPath $File)) { return $false }
+    $recordedId = Get-Content -LiteralPath $File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $recordedId) { return $false }
+    $parsed = 0
+    if (-not [int]::TryParse([string]$recordedId, [ref]$parsed)) { return $false }
+    $process = Get-Process -Id $parsed -ErrorAction SilentlyContinue
+    if (-not $process) { return $false }
+    if ($ProcessName -and $process.ProcessName -ne $ProcessName) { return $false }
+    return $true
+}
+
+# A profile file this script cannot read is a file it did not write, or one
+# somebody changed. It returns $null for that, and the caller keeps it. The
+# format and the name-matches-the-file-name rule are the same two the launcher
+# itself enforces when it loads a profile, so the two tools accept exactly the
+# same files.
+function Get-LauncherProfile {
+    param([string]$Path)
+    $data = $null
+    try { $data = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json } catch { return $null }
+    if (-not $data) { return $null }
+    foreach ($field in @('format', 'name', 'gameDir', 'dataRoot')) {
+        if ($data.PSObject.Properties.Match($field).Count -eq 0) { return $null }
+    }
+    if ([string]$data.format -ne 'bibites-multiverse/launcher-profile/1') { return $null }
+    if ([string]$data.name -ne [System.IO.Path]::GetFileNameWithoutExtension($Path)) { return $null }
+    return $data
+}
+
+# NOTHING is removed at a path that fails this. A profile file is ordinary
+# user-writable JSON in an ordinary user-writable directory, so a hand-edited,
+# half-written or foreign file can name any path at all - and -RemoveWorldData
+# deletes recursively. A world's data root has to be a rooted path, below a
+# drive root, and not this install's game folder, application directory,
+# profiles directory or the user's own profile folder - nor a parent of any of
+# them. When the answer is "I cannot tell", the file is left alone.
+function Test-SafeDataRoot {
+    param([string]$Path, [string[]]$Protected = @())
+    if (-not $Path) { return $false }
+    if (-not [System.IO.Path]::IsPathRooted($Path)) { return $false }
+    $full = ''
+    try { $full = [System.IO.Path]::GetFullPath($Path) } catch { return $false }
+    if (-not [System.IO.Path]::GetDirectoryName($full)) { return $false }
+    $me = $full.TrimEnd('\', '/')
+    if (-not $me) { return $false }
+    foreach ($other in $Protected) {
+        if (-not $other) { continue }
+        $target = ''
+        try { $target = [System.IO.Path]::GetFullPath([string]$other) } catch { continue }
+        $target = $target.TrimEnd('\', '/')
+        if (-not $target) { continue }
+        if ($me -eq $target) { return $false }
+        if ($target.StartsWith(($me + '\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Get-LauncherProfileFile {
+    param([string]$Root)
+    if (-not $Root -or -not (Test-Path -LiteralPath $Root)) { return @() }
+    return @(Get-ChildItem -LiteralPath $Root -Filter '*.json' -File -Force -ErrorAction SilentlyContinue |
+             Sort-Object Name | ForEach-Object { $_.FullName })
+}
+
 if (Test-ProcessUnder 'The Bibites' $record.gameDir) {
     Stop-Uninstall ("The Bibites is running from $($record.gameDir). Close it first; Windows holds " +
                     "the plugin open while the game runs. Nothing was removed.")
 }
 if (Test-ProcessUnder 'multiverse-sidecar' $record.kitDir) {
     Stop-Uninstall "This install's sidecar is running. Run .\Stop-Multiverse.ps1 first. Nothing was removed."
+}
+
+# Every other world this install's launcher added has its own data root, its own
+# sidecar and its own game process, and none of them is under the two paths
+# above. They are checked from the launcher's profiles.
+$profilesRoot = ''
+if ($record.PSObject.Properties.Match('profiles').Count -gt 0 -and
+    $record.profiles.PSObject.Properties.Match('root').Count -gt 0) {
+    $profilesRoot = [string]$record.profiles.root
+}
+$profileFiles = @(Get-LauncherProfileFile $profilesRoot)
+
+# The paths no profile may ever name as its data root.
+$protectedRoots = @([string]$record.gameDir, [string]$record.kitDir, $profilesRoot, $env:USERPROFILE)
+if ($record.PSObject.Properties.Match('program').Count -gt 0 -and
+    $record.program.PSObject.Properties.Match('root').Count -gt 0) {
+    $protectedRoots += [string]$record.program.root
+}
+
+# The pid file each world keeps, and the process name that has to be running for
+# the record to mean anything.
+$profilePidFiles = [ordered]@{ 'sidecar.pid' = 'multiverse-sidecar'; 'game.pid' = 'The Bibites' }
+
+$profileGameDirs = @()
+foreach ($profilePath in $profileFiles) {
+    $profileData = Get-LauncherProfile $profilePath
+    if (-not $profileData) { continue }
+    $profileRoot = [string]$profileData.dataRoot
+    if (-not (Test-SafeDataRoot $profileRoot (@($protectedRoots) + @([string]$profileData.gameDir)))) { continue }
+    foreach ($pidFileName in $profilePidFiles.Keys) {
+        $pidFilePath = Join-Path $profileRoot $pidFileName
+        if (Test-ProcessRecorded $pidFilePath $profilePidFiles[$pidFileName]) {
+            Stop-Uninstall ("The world '$($profileData.name)' is still running: $pidFilePath names a " +
+                            "live $($profilePidFiles[$pidFileName]). Stop every world first - open " +
+                            "Bibites Multiverse and choose Stop, or run " +
+                            "BibitesMultiverseLauncher.exe stop --all. If that world is not really " +
+                            "running, delete $pidFilePath and run this again. Nothing was removed.")
+        }
+    }
+    $profileGame = [string]$profileData.gameDir
+    if ($profileGame -and ($profileGameDirs -notcontains $profileGame)) {
+        $profileGameDirs += $profileGame
+    }
+}
+foreach ($profileGame in $profileGameDirs) {
+    if (Test-ProcessUnder 'The Bibites' $profileGame) {
+        Stop-Uninstall ("The Bibites is running from $profileGame, which one of this install's " +
+                        "worlds uses. Close it first. Nothing was removed.")
+    }
 }
 
 # ---------------------------------------------------------------- the plugin
@@ -264,6 +398,88 @@ if (-not $record.certificate.imported) {
         if (-not $DryRun) { $found | Remove-Item }
         [void]$removed.Add("Cert:\CurrentUser\Root\$thumb   (the private map's certificate authority)")
     }
+}
+
+# ---------------------------------------------------------------- the profiles
+
+# Before this install's own files, because the profiles directory sits inside
+# the installed application directory, and the step below only takes that
+# directory away once it is empty.
+Step "the profiles"
+
+if (-not $profilesRoot) {
+    Say "this record names no launcher profiles, so there are none to remove."
+} elseif (-not (Test-Path -LiteralPath $profilesRoot)) {
+    [void]$kept.Add("gone already : $profilesRoot")
+} else {
+    # Only a world with its own data root has anything here to remove: the first
+    # world's files are this install's own, removed from the record below. The
+    # warning is for the worlds beyond that one, so it is counted first rather
+    # than printed on every single-world uninstall.
+    $extraWorlds = 0
+    foreach ($profilePath in $profileFiles) {
+        $countData = Get-LauncherProfile $profilePath
+        if (-not $countData) { continue }
+        $countRoot = [string]$countData.dataRoot
+        if ($countRoot -eq [string]$record.dataRoot) { continue }
+        if (-not (Test-SafeDataRoot $countRoot (@($protectedRoots) + @([string]$countData.gameDir)))) { continue }
+        $extraWorlds++
+    }
+    if ($RemoveWorldData -and $extraWorlds -gt 0) {
+        Write-Host ""
+        Write-Host "  -RemoveWorldData: EVERY world's journal goes, not only the first one's." -ForegroundColor Yellow
+        Write-Host "  Each journal is this machine's record of the organisms that world took custody" -ForegroundColor Yellow
+        Write-Host "  of and has not handed on. Nobody else holds a copy. Your worlds are NOT in it." -ForegroundColor Yellow
+        Write-Host ("  Worlds beyond the first with a journal of their own: {0}." -f $extraWorlds) -ForegroundColor Yellow
+        Write-Host ""
+    }
+    $profilesPending = New-Object System.Collections.ArrayList
+    foreach ($profilePath in $profileFiles) {
+        $profileData = Get-LauncherProfile $profilePath
+        if (-not $profileData) {
+            [void]$kept.Add("not a profile this installer wrote, so it stays : $profilePath")
+            continue
+        }
+        $profileName = [string]$profileData.name
+        $profileRoot = [string]$profileData.dataRoot
+        if (-not (Test-SafeDataRoot $profileRoot (@($protectedRoots) + @([string]$profileData.gameDir)))) {
+            [void]$kept.Add(("its data root is not a path this script will act on, so the whole " +
+                             "profile stays : {0} (dataRoot '{1}')" -f $profilePath, $profileRoot))
+            continue
+        }
+        # The first world's own files are removed with this install's own files
+        # below, from the record rather than from the profile.
+        if ($profileRoot -ne [string]$record.dataRoot) {
+            $worldPending = New-Object System.Collections.ArrayList
+            foreach ($leftover in @('peer-secret.txt', 'enrollment-pending.json',
+                                    'sidecar.pid', 'game.pid', 'launcher.lock')) {
+                Remove-Recorded -Path (Join-Path $profileRoot $leftover) -What "the world '$profileName'"
+                [void]$worldPending.Add((Join-Path $profileRoot $leftover))
+            }
+            if ($RemoveWorldData) {
+                foreach ($dir in @((Join-Path $profileRoot 'data'), (Join-Path $profileRoot 'logs'))) {
+                    if (Test-Path -LiteralPath $dir) {
+                        if (-not $DryRun) { Remove-Item -LiteralPath $dir -Recurse -Force }
+                        [void]$removed.Add("$dir   (recursively, by request)")
+                    }
+                    [void]$worldPending.Add($dir)
+                }
+                Remove-EmptyDirectory $profileRoot -Pending @($worldPending)
+            } else {
+                [void]$kept.Add("journal : $(Join-Path $profileRoot 'data') - custody of organisms the world '$profileName' still holds")
+                [void]$kept.Add("logs    : $(Join-Path $profileRoot 'logs')")
+            }
+        }
+        # A profile is not hash-guarded the way a program file is: the launcher
+        # rewrites it every time somebody edits a world, so no recorded hash
+        # could survive. It is removed because this install wrote it.
+        Remove-Recorded -Path $profilePath -What "the launcher's profile for '$profileName'"
+        [void]$profilesPending.Add($profilePath)
+    }
+    $activeProfilePath = Join-Path $profilesRoot 'active.txt'
+    Remove-Recorded -Path $activeProfilePath -What 'the world the launcher had selected'
+    [void]$profilesPending.Add($activeProfilePath)
+    Remove-EmptyDirectory $profilesRoot -Pending @($profilesPending)
 }
 
 # ---------------------------------------------------------------- this install's own files
