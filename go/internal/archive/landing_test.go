@@ -139,6 +139,35 @@ func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 	}
 }
 
+// The homepage names *The Bibites* throughout, so it also has to say what the
+// game is, who made it, and where to buy or download it from the people who
+// made it. The absence checks guard the two claims this project cannot make:
+// that the game's developer permits or endorses anything here.
+func TestLandingPageCreditsTheGameItIsBuiltOn(t *testing.T) {
+	for _, want := range []string{
+		`id="game"`, "The original game",
+		"created by Léo Caussan in 2017 and developed by",
+		`href="https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/"`,
+		`href="https://thebibites.itch.io/the-bibites"`,
+		`href="https://www.thebibites.com/"`,
+		"independent passion project, built out of an interest in artificial life",
+		"not affiliated with, endorsed by, or sponsored by Léo Caussan or Omnia Studios",
+		"Is this the game's own multiplayer?",
+		"The game itself, running on your machine",
+	} {
+		if !strings.Contains(landingPageHTML, want) {
+			t.Errorf("landing page does not credit the game it is built on: missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"developer's permission", "endorsed by <em>The Bibites</em>", "fan project",
+	} {
+		if strings.Contains(landingPageHTML, forbidden) {
+			t.Errorf("landing page makes a claim this project cannot support: %q", forbidden)
+		}
+	}
+}
+
 func TestLandingPageUsesHomepageConfigOverrides(t *testing.T) {
 	page := renderLandingPage(Config{
 		HomepageRelease:     "0.9.9",
