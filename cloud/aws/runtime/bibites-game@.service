@@ -1,6 +1,16 @@
 [Unit]
 Description=Headless Bibites world %i
 Wants=bibites-sidecar@%i.service
+# The other half of the time-scale fix. PartOf on bibites-timescale@%i
+# propagates an explicit restart, but a restart this unit performs on ITS OWN
+# through Restart=on-failure is not an externally scheduled job, so propagation
+# alone cannot be relied on. Pulling the oneshot in as a Wants of this unit
+# means every start of the world — planned, crashed, or OOM-killed — re-queues
+# the unit that applies the target time scale.
+#
+# Wants and not Requires: a world that comes back is worth having even if the
+# scale command fails, and this must never turn a slow load into a dead world.
+Wants=bibites-timescale@%i.service
 Requires=bibites-xvfb.service
 After=bibites-sidecar@%i.service bibites-xvfb.service
 RequiresMountsFor=/srv/bibites
