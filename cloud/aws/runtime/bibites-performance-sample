@@ -1,4 +1,29 @@
 #!/usr/bin/env bash
+# One sample of the world host.
+#
+# WHAT THE 2026-08-15 INCIDENT ADDED, AND WHY. The original sampler recorded host
+# load, host memory as a used/total string, and each world's own view. Those
+# fields were enough to see that something was wrong and not enough to say what:
+# a host-level "29 of 30 GiB used" names no world, and load average cannot
+# distinguish a host that is busy from a host that is stalled. The failure was
+# read as CPU contention for a day because the sampler had no term that could
+# contradict that reading.
+#
+# Three additions fix that, and each answers a question the old sample could not.
+#
+#   pressure   - PSI says what tasks actually WAITED for. On this host the CPU
+#                figure was zero for the whole incident while the memory figure
+#                ran to several hundred seconds. Utilisation cannot express that
+#                difference; a host pinned at 99% CPU served perfectly well for
+#                7.1 hours, and the same host stalled hard at 96% memory.
+#   vm         - pswpin/pswpout show thrash, and oom_kill is what turns "a world
+#                restarted" into "the kernel killed it". Cumulative, so two
+#                samples bracket everything that happened in the gap.
+#   gameMemory - per-world resident size. This is the one that names which world
+#                to act on, and the one whose absence made the leak invisible.
+#
+# Every original field keeps its name and shape, so existing readers of
+# performance.jsonl continue to work unchanged.
 set -euo pipefail
 
 out=/srv/bibites/metrics/performance.jsonl
@@ -6,7 +31,46 @@ mkdir -p "$(dirname "$out")"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 /usr/local/bin/bibites-cloud-status --json > "$tmp"
-jq -cn --arg at "$(date -u +%FT%TZ)" --argjson worlds "$(cat "$tmp")" \
+
+# PSI "full" totals in microseconds since boot: the time in which NO task on the
+# host could make progress for want of this resource. Absent on a kernel without
+# CONFIG_PSI, in which case the field is null rather than zero.
+psi_full() {
+  awk '/^full/{for(i=2;i<=NF;i++) if($i ~ /^total=/){sub("total=","",$i); print $i; exit}}' \
+    "/proc/pressure/$1" 2>/dev/null
+}
+
+# Per-world game resident bytes, keyed by world id. systemd renders an unset
+# numeric property as a u64 sentinel, which is "no value" and not a measurement.
+game_memory() {
+  local out='{}' unit world bytes
+  for unit in $(systemctl list-units --type=service --state=running \
+                  'bibites-game@*.service' --no-legend 2>/dev/null | awk '{print $1}'); do
+    world="${unit#bibites-game@}"; world="${world%.service}"
+    bytes="$(systemctl show "$unit" -p MemoryCurrent --value 2>/dev/null || echo '')"
+    case "$bytes" in ''|*[!0-9]*|18446744073709551615) bytes=null ;; esac
+    out="$(jq -c --arg w "$world" --argjson b "$bytes" '. + {($w): $b}' <<<"$out")"
+  done
+  printf '%s' "$out"
+}
+
+jq -cn \
+  --arg at "$(date -u +%FT%TZ)" \
+  --argjson worlds "$(cat "$tmp")" \
   --arg load "$(cut -d' ' -f1-3 /proc/loadavg)" \
   --arg mem "$(free -b | awk '/^Mem:/ {print $3 "/" $2}')" \
-  '{at:$at,load:$load,memoryBytes:$mem,worlds:$worlds}' >> "$out"
+  --arg availKb "$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)" \
+  --arg psiCpu "$(psi_full cpu)" \
+  --arg psiMem "$(psi_full memory)" \
+  --arg psiIo "$(psi_full io)" \
+  --arg swpin "$(awk '/^pswpin /{print $2}' /proc/vmstat)" \
+  --arg swpout "$(awk '/^pswpout /{print $2}' /proc/vmstat)" \
+  --arg oom "$(awk '/^oom_kill /{print $2}' /proc/vmstat)" \
+  --argjson gameMemory "$(game_memory)" \
+  'def n(x): if (x // "") == "" then null else (x | tonumber) end;
+   {at:$at, load:$load, memoryBytes:$mem,
+    memoryAvailableBytes: (if ($availKb // "") == "" then null else (($availKb|tonumber)*1024) end),
+    pressureFullUsec: {cpu: n($psiCpu), memory: n($psiMem), io: n($psiIo)},
+    vm: {pswpin: n($swpin), pswpout: n($swpout), oomKill: n($oom)},
+    gameMemoryBytes: $gameMemory,
+    worlds:$worlds}' >> "$out"

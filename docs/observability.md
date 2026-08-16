@@ -103,6 +103,44 @@ report anything they cannot read as unknown. Neither walks a directory: on a
 two-vCPU box a `du` over the genome store is the most expensive thing a monitor
 could do, and it is forbidden.
 
+### Utilisation is not saturation
+
+The most expensive lesson this service has produced. A host pinned at 96–99% CPU
+ran for 7.1 hours without dropping a single peer; the same host dropped peers 47
+times out of 48 while memory sat between 85 and 99 percent. Utilisation says how
+busy a resource is. It does not say whether anything is *waiting*, and waiting is
+what breaks a deadline.
+
+Pressure stall information says it directly, and both hosts sample it:
+
+```text
+/proc/pressure/cpu     full total    time no task could run for want of CPU
+/proc/pressure/memory  full total    time no task could run for want of memory
+/proc/pressure/io      full total    time no task could run for want of IO
+```
+
+On the world host these read **zero** and **several hundred seconds**
+respectively. That single pair reversed a diagnosis that two days of CPU graphs
+had pointed the wrong way. Per-cgroup `memory.pressure` narrows it to a process.
+
+**Read PSI before utilisation, and never conclude from a utilisation graph that
+a resource is the constraint.** A 5-minute CPU average in particular cannot
+resolve a 30-second stall, and reading one as though it could is how the wrong
+answer survives for a day.
+
+### Memory on a host that runs worlds
+
+World processes leak at a wall-clock rate independent of what they simulate.
+[`SIZING.md`](../deploy/SIZING.md) carries the formula and the exhaustion model.
+The observability consequence is that **per-process memory must be sampled, not
+just host totals** — a host-level "29 of 30 GiB used" says nothing about which
+world to act on, and the sampler that recorded only host memory is why the
+failure read as a CPU problem for a day.
+
+Sample per-unit `MemoryCurrent`, per-cgroup `memory.pressure`, and `/proc/vmstat`
+`pswpin`, `pswpout` and `oom_kill`. The last is the one that turns "something
+restarted" into "the kernel killed it".
+
 The fields that matter most are the **cumulative TCP counters** —
 `estabResets`, `retransSegs`, `outResets`, `listenOverflows`, `synRetrans`.
 They are monotonic, so a reader differencing two samples sees every reset in
@@ -255,6 +293,36 @@ A relay restart is cheaper in records and more expensive in blast radius: it
 disconnects every peer at once. Neither is done casually, and both leave a
 record.
 
+## Acting on a measurement
+
+Most of this document is about seeing. One rule governs acting.
+
+**An automatic remedy is a relief valve, not a schedule.** The world recycler
+restarts a world when host memory falls below a threshold; it does not restart
+worlds every N minutes. The distinction is not stylistic. The leak it
+compensates for is a defect, and a fixed schedule would go on restarting healthy
+worlds long after the defect was fixed, while a threshold quietly stops acting.
+Anything automatic here states the condition it responds to, and does nothing
+when that condition is absent.
+
+**A remedy that can deepen an outage must refuse to run during one.** The
+recycler will not touch a world while any world is already dark, will not act
+twice inside its cool-off, and refuses outright if it cannot confirm that the
+world it picked saves on quit. Each guard exists because the failure it prevents
+is worse than the delay it causes.
+
+**Prefer taking the action the failure would take anyway, earlier and gently.**
+The recycler does not prevent restarts — the OOM killer was already performing
+them, with `SIGKILL`, at its own moment, after dragging every other world through
+a swap storm. Doing the same restart early with `SIGTERM` and save-on-quit costs
+no simulated time. When a remedy looks drastic, check whether the failure is
+already doing something worse.
+
+**Automatic action needs its own record.** The recycler logs the world, its
+resident size and the memory reading that triggered it, and leaves a state file
+that the host sampler picks up. An unexplained restart in a metrics series is
+worse than no restart at all.
+
 ## Investigating an incident
 
 Order matters, because the cheap evidence is also the most decisive and it
@@ -263,21 +331,26 @@ expires.
 1. **Read what already exists before adding anything.** `metrics.jsonl` on the
    service host, `performance.jsonl` on the world host, and the relay log. Two
    of the three carry per-peer detail nothing else has.
-2. **Check the free platform metrics.** Host CPU, and burst capacity for the
-   service host from the Lightsail API. State the granularity in the finding.
-3. **Preserve the logs.** Raw logs are evidence and must not be committed to
+2. **Read pressure before utilisation.** `/proc/pressure/{cpu,memory,io}` on
+   both hosts says which resource anything actually *waited* for. A utilisation
+   graph cannot answer that and will mislead you if you let it.
+3. **Check the free platform metrics.** Host CPU, and burst capacity for the
+   service host from the Lightsail API. State the granularity in the finding —
+   EC2 without detailed monitoring is 5-minute averages and cannot resolve a
+   30-second event.
+4. **Preserve the logs.** Raw logs are evidence and must not be committed to
    either repository. Copy them outside both, record the path and a checksum,
    and cite that in the incident record.
-4. **Establish which hosts are implicated before theorising about mechanism.**
+5. **Establish which hosts are implicated before theorising about mechanism.**
    The single most useful question in the 2026-08-15 incident turned out to be
    whether the one peer on a *different* host was also affected. It was not,
    which eliminated the entire service host and its front door in one step.
-5. **Exclude the known confounds.** An archive restart makes every world look
+6. **Exclude the known confounds.** An archive restart makes every world look
    dark for the duration of its replay, and the only health signal most
    runbooks use is served by the archive itself — so it cannot distinguish
    "worlds left" from "the archive is rebuilding its view of them". The status
    epoch resetting is the tell.
-6. **State resolution with every claim.** "CPU did not dip" from five-minute
+7. **State resolution with every claim.** "CPU did not dip" from five-minute
    averages does not mean CPU did not dip.
 
 ## Alerting
