@@ -96,10 +96,26 @@ done
 viewers="$HERE/systemd/multiverse-viewers.service"
 [ -f "$viewers" ] || fail "missing $viewers"
 for setting in 'NoNewPrivileges=true' 'ProtectSystem=strict' 'ProtectHome=true' \
-               'ReadOnlyPaths=/var/log/nginx' 'LockPersonality=true'; do
+               'LockPersonality=true'; do
   grep -Fqx "$setting" "$viewers" ||
     fail "$viewers must set $setting; it runs as root and reads a privileged log"
 done
+
+# The one path the unit exists to read is named in two files, and the front door
+# moved it out of /var/log/nginx so that the kit could own its rotation policy.
+# Read the directory out of the script's own default rather than repeating it
+# here: a move that updates one file and not the other then fails this test
+# instead of publishing "nobody is watching" forever on a live host.
+presence="$HERE/viewers-presence.sh"
+[ -f "$presence" ] || fail "missing $presence"
+access_default="$(sed -n 's/^ACCESS_LOG="\${MV_ACCESS_LOG:-\(.*\)}"$/\1/p' "$presence")"
+[ -n "$access_default" ] ||
+  fail "$presence no longer sets a literal MV_ACCESS_LOG default, so the unit's
+    ReadOnlyPaths cannot be checked against it"
+grep -Fqx "ReadOnlyPaths=${access_default%/*}" "$viewers" ||
+  fail "$viewers must set ReadOnlyPaths=${access_default%/*}, the directory of
+    $presence's own MV_ACCESS_LOG default. The front door writes there and not
+    in /var/log/nginx (deploy/nginx/multiverse-20-status.conf)."
 # ProtectSystem=strict makes the whole tree read-only, so the one path it writes
 # has to be named or the unit fails on its first tick.
 grep -Eq '^ReadWritePaths=/var/www/multiverse-status$' "$viewers" ||

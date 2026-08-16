@@ -6,7 +6,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/multiverse-front-door.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/acme" "$TMP/logs" "$TMP/tls" "$TMP/www/announcements" "$TMP/gates"
+# nginxlog must exist before `nginx -t`: nginx OPENS its log files while
+# testing the configuration, so a missing directory is an [emerg], not a
+# warning. That is also true on the host, which is why provision.sh creates
+# this directory in the directories phase.
+mkdir -p "$TMP/acme" "$TMP/logs" "$TMP/tls" "$TMP/www/announcements" \
+         "$TMP/nginxlog" "$TMP/gates"
 
 render() {
   sed -e 's|@@MV_DOMAIN@@|multiverse.example|g' \
@@ -17,6 +22,7 @@ render() {
       -e "s|@@MV_TLSDIR@@|$TMP/tls|g" \
       -e "s|@@ACME_ROOT@@|$TMP/acme|g" \
       -e "s|@@WWW_ROOT@@|$TMP/www|g" \
+      -e "s|@@MV_NGINX_LOGDIR@@|$TMP/nginxlog|g" \
       -e "s|@@MV_GATEDIR@@|$TMP/gates|g" \
       -e "s|/var/log/nginx|$TMP/logs|g" \
       "$1" >"$2"

@@ -41,7 +41,7 @@ Keep these records outside the public repository:
 | `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, and viewer-presence signal. |
-| `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
+| `nginx/` | HTTP challenge and shared HTTPS front-door templates, and the front door's log rotation policy. |
 | `www/announcements/` | The announcements page nginx serves from disk, and the seed for its notices file. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
 | `RESTART-POLICY.md` | Generic restart rules and participant effects. |

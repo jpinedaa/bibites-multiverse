@@ -11,9 +11,9 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-# ROOT, and only for the read: /var/log/nginx/multiverse-front-door.access.log is
-# root:adm 0640 and is half of the signal. Everything else below removes a
-# privilege that being root would otherwise carry.
+# ROOT, and only for the read: /var/log/multiverse/nginx/front-door.access.log
+# is www-data:adm 0640 and is half of the signal. Everything else below removes
+# a privilege that being root would otherwise carry.
 ExecStart=/opt/multiverse/deploy/viewers-presence.sh
 # A run that cannot finish in fifteen seconds has missed its own tick. The next
 # one will try again.
@@ -32,7 +32,10 @@ ProtectHome=true
 PrivateTmp=true
 # Named although ProtectSystem=strict already makes the whole tree read-only:
 # this is the one path the unit exists to read, and a reviewer should see it.
-ReadOnlyPaths=/var/log/nginx
+# It is MV_NGINX_LOGDIR, not /var/log/nginx: the front door writes beside the
+# relay and archive logs so that the kit owns its rotation policy. Keep it
+# equal to the default in deploy/viewers-presence.sh; test-units.sh checks it.
+ReadOnlyPaths=/var/log/multiverse/nginx
 ReadWritePaths=/var/www/multiverse-status
 # AF_INET for the loopback metrics request, AF_UNIX for the journal. No AF_INET6
 # and no AF_NETLINK: the only address this unit dials is 127.0.0.1:9998.

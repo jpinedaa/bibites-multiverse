@@ -1,0 +1,51 @@
+# Rotation for the front door's own logs. Installed to
+# /etc/logrotate.d/multiverse-nginx by provision.sh's directories phase.
+#
+# WHY THE KIT SHIPS THIS AT ALL. The distribution's own /etc/logrotate.d/nginx
+# rotates daily, keeps 14 generations, and has NO SIZE TRIGGER. On this service
+# that is not a safe default: the front door's access log reached 1.33 GB in a
+# day, and it shares a 58 GB disk with a ledger that grows without asking and
+# with the archive's replay working set. "Daily" means a burst is noticed at
+# midnight, and the first thing that runs out is the disk the record is on.
+#
+# THIS FILE MUST NOT MATCH /var/log/nginx/*.log. The distribution stanza already
+# does, and logrotate treats a path appearing in two stanzas as a fatal
+# configuration error — it then rotates NOTHING, including the distribution's
+# own logs. That is why the front door's logs were moved out of /var/log/nginx
+# rather than given a second policy where they were.
+@@MV_NGINX_LOGDIR@@/*.log {
+    daily
+    # maxsize, NOT size. They read alike and do opposite things:
+    #
+    #   size 200M     rotate ON SIZE ONLY. logrotate says so out loud —
+    #                 "note: 'size' overrides previously specified 'daily'" —
+    #                 and a quiet week would then never rotate at all.
+    #   maxsize 200M  rotate daily, OR EARLIER if the log has passed 200M.
+    #
+    # The second is what is wanted: a floor under how stale a log gets, and a
+    # ceiling on how large one grows between checks. `daily` alone lets a burst
+    # run for 24 hours, which is how a 1.33 GB access log happened.
+    maxsize 200M
+    rotate 7
+    compress
+    # NOT delaycompress. That option exists for a writer that keeps the old
+    # inode open after rotation; nginx does not, because the postrotate below
+    # tells it to reopen. Keeping it would double the space this policy uses,
+    # which is the space it was written to bound.
+    nodelaycompress
+    missingok
+    notifempty
+    # nginx runs as www-data and reads nothing here; adm is the group an
+    # operator is normally in, so the logs stay readable without sudo.
+    create 0640 www-data adm
+    sharedscripts
+    postrotate
+        # `nginx rotate` reopens the log files. It does not restart or reload
+        # the configuration, so it costs no connection and no request.
+        if [ -x /usr/sbin/invoke-rc.d ]; then
+            invoke-rc.d nginx rotate >/dev/null 2>&1 || true
+        else
+            systemctl kill -s USR1 nginx.service >/dev/null 2>&1 || true
+        fi
+    endscript
+}

@@ -36,7 +36,14 @@
 # (an http URL or a file), MV_NOW (epoch seconds), MV_OUT.
 set -euo pipefail
 
-ACCESS_LOG="${MV_ACCESS_LOG:-/var/log/nginx/multiverse-front-door.access.log}"
+# This default is MV_NGINX_LOGDIR/front-door.access.log, which is where
+# deploy/nginx/multiverse-20-status.conf writes and NOT /var/log/nginx. Three
+# places carry that directory and all three must move together: the nginx
+# template, this default, and ReadOnlyPaths= in
+# deploy/systemd/multiverse-viewers.service. deploy/test-units.sh reads this
+# line and checks the unit against it, so the drift fails a test rather than
+# an empty document on a host.
+ACCESS_LOG="${MV_ACCESS_LOG:-/var/log/multiverse/nginx/front-door.access.log}"
 METRICS="${MV_METRICS_URL:-http://127.0.0.1:9998/metrics}"
 OUT="${MV_OUT:-/var/www/multiverse-status/viewers.json}"
 # Sixty seconds is six polls of the /watch page's own five-second playlist check,
