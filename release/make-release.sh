@@ -6,6 +6,8 @@
 #   release/dist/*-complete.zip                                 optional complete
 #                                                               game-bundled editions
 #   release/dist/*-setup.exe                                    single-file Windows setup
+#   release/dist/bibites-multiverse-windows-x64-setup.exe       stable-named copies,
+#   release/dist/bibites-multiverse-linux-x64-complete.zip        which the homepage links
 #   release/dist/SHA256SUMS                                     all checksums
 #   release/dist/RELEASE-PAGE.md                                the page text,
 #                                                               with the checksums in it
@@ -72,6 +74,16 @@ COMPLETE_ZIP_NAME="bibites-multiverse-${RELEASE}-windows-x64-complete.zip"
 LINUX_COMPLETE_ZIP_NAME="bibites-multiverse-${RELEASE}-linux-x64-complete.zip"
 WINDOWS_SETUP_NAME="bibites-multiverse-${RELEASE}-windows-x64-setup.exe"
 STAGE_NAME="bibites-multiverse-${RELEASE}"
+# THE TWO NAMES THAT NEVER CHANGE. GitHub answers
+# /releases/latest/download/<name> out of whichever release is newest, and it
+# can only do that for an asset whose NAME is the same in every release. These
+# are byte-for-byte copies of the Windows setup and the Linux complete package,
+# published beside them, and they are what the public homepage's two download
+# buttons address (go/internal/archive/landing.go). Rename either one and the
+# homepage silently starts serving a 404, so these strings are a contract with
+# that file and with .github/workflows/release.yml.
+STABLE_SETUP_NAME="bibites-multiverse-windows-x64-setup.exe"
+STABLE_LINUX_COMPLETE_NAME="bibites-multiverse-linux-x64-complete.zip"
 # The installed application's entry point. The shortcuts open this file, so the
 # name is what a player sees in Task Manager and in a SmartScreen prompt.
 LAUNCHER_NAME="BibitesMultiverseLauncher.exe"
@@ -556,7 +568,8 @@ COMPLETE_STAGE="$DIST/stage/windows-complete/$STAGE_NAME"
 LINUX_COMPLETE_STAGE="$DIST/stage/linux-complete/$STAGE_NAME"
 rm -rf "$DIST/stage" "$DIST/$ZIP_NAME" "$DIST/$LINUX_ZIP_NAME" \
        "$DIST/$COMPLETE_ZIP_NAME" "$DIST/$LINUX_COMPLETE_ZIP_NAME" \
-       "$DIST/$WINDOWS_SETUP_NAME"
+       "$DIST/$WINDOWS_SETUP_NAME" \
+       "$DIST/$STABLE_SETUP_NAME" "$DIST/$STABLE_LINUX_COMPLETE_NAME"
 mkdir -p "$STAGE" "$LINUX_STAGE"
 
 cp "$RELDIR/kit/Install-BibitesMultiverse.ps1"   "$STAGE/"
@@ -755,7 +768,40 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
 fi
 CHECKSUM_NAMES=("${ARCHIVE_NAMES[@]}")
 [ -z "$WINDOWS_SETUP_SHA" ] || CHECKSUM_NAMES+=("$WINDOWS_SETUP_NAME")
+
+# The stable-named copies: the same bytes under a name that carries no release,
+# so https://github.com/<repo>/releases/latest/download/<name> resolves to this
+# release the moment it becomes the newest one. That is the whole mechanism the
+# homepage relies on, and it is why no archive rebuild or deployment is part of
+# a release any more. Both names go into SHA256SUMS as extra lines, so
+# `sha256sum -c` still verifies the file for somebody who downloaded the stable
+# name rather than the versioned one.
+STABLE_NAMES=()
+if [ -n "$WINDOWS_SETUP_SHA" ]; then
+  cp "$DIST/$WINDOWS_SETUP_NAME" "$DIST/$STABLE_SETUP_NAME"
+  STABLE_NAMES+=("$STABLE_SETUP_NAME")
+fi
+if [ -n "$LINUX_GAME_PAYLOAD" ]; then
+  cp "$DIST/$LINUX_COMPLETE_ZIP_NAME" "$DIST/$STABLE_LINUX_COMPLETE_NAME"
+  STABLE_NAMES+=("$STABLE_LINUX_COMPLETE_NAME")
+fi
+if [ "${#STABLE_NAMES[@]}" -gt 0 ]; then
+  CHECKSUM_NAMES+=("${STABLE_NAMES[@]}")
+  note "stable-named copies for the homepage: ${STABLE_NAMES[*]}"
+fi
 ( cd "$DIST" && sha256sum "${CHECKSUM_NAMES[@]}" > SHA256SUMS )
+
+# The copies are copies. A truncated one would still be listed in SHA256SUMS
+# under its own digest, so the check that matters is that its digest equals the
+# versioned file's.
+if [ -n "$WINDOWS_SETUP_SHA" ]; then
+  [ "$(sha "$DIST/$STABLE_SETUP_NAME")" = "$WINDOWS_SETUP_SHA" ] \
+    || die "$STABLE_SETUP_NAME is not a copy of $WINDOWS_SETUP_NAME"
+fi
+if [ -n "$LINUX_GAME_PAYLOAD" ]; then
+  [ "$(sha "$DIST/$STABLE_LINUX_COMPLETE_NAME")" = "$LINUX_COMPLETE_ZIP_SHA" ] \
+    || die "$STABLE_LINUX_COMPLETE_NAME is not a copy of $LINUX_COMPLETE_ZIP_NAME"
+fi
 
 # The executable bit, read back out of the archive that will actually be
 # downloaded. A player who unzips a kit whose scripts lost their mode has a
@@ -847,6 +893,24 @@ if [ -n "$LINUX_GAME_PAYLOAD" ]; then
     "$LINUX_COMPLETE_ZIP_NAME" "$REPO_SLUG" "$TAG" "$LINUX_COMPLETE_ZIP_NAME" "$LINUX_COMPLETE_ZIP_SHA" >> "$COMPLETE_ROWS"
 fi
 
+# One sentence about the stable names, and only for the files that exist in this
+# build. It carries no digest, so the workflow's release-page audit — which
+# re-hashes every download row that has one — does not read it as a row.
+STABLE_NOTE="$BUILD/stable-note.md"
+: > "$STABLE_NOTE"
+if [ "${#STABLE_NAMES[@]}" -gt 0 ]; then
+  {
+    printf 'The same packages are also published under names that carry no version. These\n'
+    printf 'addresses always give the newest release:\n\n'
+    for name in "${STABLE_NAMES[@]}"; do
+      printf -- '- [`%s`](https://github.com/%s/releases/latest/download/%s)\n' \
+        "$name" "$REPO_SLUG" "$name"
+    done
+    printf '\n`SHA256SUMS` lists both the versioned and the stable name of each file, so the\n'
+    printf 'checksum check works for whichever name you downloaded.\n\n'
+  } > "$STABLE_NOTE"
+fi
+
 if [ -n "$WINDOWS_GAME_PAYLOAD" ] || [ -n "$LINUX_GAME_PAYLOAD" ]; then
   EDITION_NOTE='The Windows setup and complete ZIP use their included game by default. The Windows GUI can instead select an existing game. The Linux complete package uses its included game. Add-on packages use an existing game.'
 else
@@ -854,9 +918,9 @@ else
 fi
 
 PAGE="$DIST/RELEASE-PAGE.md"
-python3 - "$RELDIR/RELEASE-PAGE.md" "$PAGE" "$INNER_TABLE" "$LINUX_INNER_TABLE" "$COMPLETE_ROWS" <<PY
+python3 - "$RELDIR/RELEASE-PAGE.md" "$PAGE" "$INNER_TABLE" "$LINUX_INNER_TABLE" "$COMPLETE_ROWS" "$STABLE_NOTE" <<PY
 import sys
-src, dst, inner, linux_inner, complete_rows = sys.argv[1:]
+src, dst, inner, linux_inner, complete_rows, stable_note = sys.argv[1:]
 text = open(src, encoding='utf-8').read()
 fields = {
     '@@RELEASE@@':    '$RELEASE',
@@ -876,6 +940,9 @@ fields = {
     # Rows already end in a newline. Empty means the SHA256SUMS row follows the
     # two add-on rows directly, without a blank line that would end the table.
     '@@COMPLETE_DOWNLOAD_ROWS@@': open(complete_rows, encoding='utf-8').read(),
+    # Already ends in a blank line when it is there at all. Empty leaves the
+    # download table followed directly by the next heading.
+    '@@STABLE_NAME_NOTE@@': open(stable_note, encoding='utf-8').read(),
 }
 for k, v in fields.items():
     text = text.replace(k, v)
@@ -899,6 +966,9 @@ printf '            %s/%s\n' "$DIST" "$LINUX_ZIP_NAME"
 [ -z "$WINDOWS_GAME_PAYLOAD" ] || printf '            %s/%s\n' "$DIST" "$COMPLETE_ZIP_NAME"
 [ -z "$WINDOWS_GAME_PAYLOAD" ] || printf '            %s/%s\n' "$DIST" "$WINDOWS_SETUP_NAME"
 [ -z "$LINUX_GAME_PAYLOAD" ] || printf '            %s/%s\n' "$DIST" "$LINUX_COMPLETE_ZIP_NAME"
+for name in ${STABLE_NAMES[@]+"${STABLE_NAMES[@]}"}; do
+  printf '  stable    %s/%s  (the homepage links this name)\n' "$DIST" "$name"
+done
 printf '  checksum  %s/SHA256SUMS  (covers every artifact above)\n' "$DIST"
 printf '  page      %s\n\n' "$PAGE"
 printf 'Publishing is four hand steps, in release/README.md. Nothing above touched a\n'

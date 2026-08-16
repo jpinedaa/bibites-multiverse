@@ -82,8 +82,6 @@ func runMain(args []string, stderr io.Writer) int {
 			"its place in the grid. EMPTY IS THE DEFAULT and means no world is named: both pages "+
 			"then say the world is unknown rather than guess at one. It changes no placement, no "+
 			"routing and no record")
-	homepageRelease := fs.String("homepage-release", env("MULTIVERSE_HOMEPAGE_RELEASE", ""),
-		"release number shown in homepage download links; do not include a leading 'v'")
 	homepageRepo := fs.String("homepage-repo", env("MULTIVERSE_HOMEPAGE_REPO", ""),
 		"GitHub org/repo for the homepage's release download and checksum links")
 	homepageGameVersion := fs.String("homepage-game-version", env("MULTIVERSE_HOMEPAGE_GAME_VERSION", ""),
@@ -127,7 +125,6 @@ func runMain(args []string, stderr io.Writer) int {
 		DenyListFile:        *denyList,
 		GenomeHorizon:       *genomeHorizon,
 		BroadcastPeerID:     strings.TrimSpace(*broadcastPeer),
-		HomepageRelease:     strings.TrimSpace(*homepageRelease),
 		HomepageRepo:        strings.TrimSpace(*homepageRepo),
 		HomepageGameVersion: strings.TrimSpace(*homepageGameVersion),
 	})
