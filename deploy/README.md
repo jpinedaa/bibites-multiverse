@@ -19,13 +19,15 @@ Keep these records outside the public repository:
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, and map health. |
+| `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
+| `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
-| `systemd/` | Service and timer units for the relay, archive, monitor, and backup. |
+| `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
 | `RESTART-POLICY.md` | Generic restart rules and participant effects. |
@@ -33,6 +35,10 @@ Keep these records outside the public repository:
 | `ANNOUNCEMENT.md` | Service communication policy. The historical announcement copy is not public guidance. |
 | `HANDOFF-domain.md` | Generic domain and DNS handoff checklist. |
 | `HANDOFF-lightsail.md` | Generic Lightsail handoff checklist. |
+
+[`docs/observability.md`](../docs/observability.md) is the measurement standard that the monitor,
+the two samplers, and the health snapshot belong to.
+It states what is measured, at what interval, where each reading lands, and who reads it.
 
 ## Configuration boundary
 
@@ -135,6 +141,58 @@ The alert test must reach its intended recipient.
 The backup list must contain the identity files and their checksums.
 The archive status must show an active relay subscription.
 
+## Measurement
+
+`monitor.sh` answers whether anything is wrong now.
+It compares each reading with a threshold and keeps only the severity.
+The two tools below keep the reading instead, because a change to a live service asks a different
+question: is the service worse than it was fifteen minutes ago.
+
+`service-host-sample` records one sample of this host as a single JSON line.
+It runs unprivileged, reads `/proc` and `systemctl show` only, and reports every value it cannot
+read as unknown instead of zero.
+The provisioning script installs neither the sampler nor its timer, so install both by hand:
+
+```sh
+sudo install -m 0755 -o root -g root \
+  /home/<user>/multiverse-kit/service-host-sample \
+  /opt/multiverse/deploy/service-host-sample
+sudo -u multiverse /opt/multiverse/deploy/service-host-sample --stdout | jq
+
+sudo install -d -m 0750 -o multiverse -g multiverse /var/lib/multiverse/metrics
+sudo install -m 0644 -o root -g root \
+  /opt/multiverse/deploy/systemd/multiverse-host-sample.service \
+  /opt/multiverse/deploy/systemd/multiverse-host-sample.timer \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now multiverse-host-sample.timer
+sudo tail -n 3 /var/lib/multiverse/metrics/service-host.jsonl | jq
+```
+
+Create the metrics directory before the timer runs.
+The unit confines its writes to that path, and it cannot start while the path is absent.
+
+The timer samples every minute, and one sample is about a kilobyte, so the file grows by roughly
+1.5 MB each day.
+Its TCP counters are cumulative, so compare two samples instead of reading one.
+
+`health-snapshot.sh` reads the published map and prints one JSON record for each sample.
+It only sends GET requests, so it is safe against a live service and safe from a workstation.
+
+```sh
+deploy/health-snapshot.sh --url https://<service-name> | jq
+
+sudo -u multiverse /opt/multiverse/deploy/health-snapshot.sh \
+  --url http://127.0.0.1:8796 --label before-change
+sudo -u multiverse /opt/multiverse/deploy/health-snapshot.sh \
+  --watch 15m --markdown --label after-change
+```
+
+The first form runs from a workstation and reads the public front door.
+The other two run on the host and read the archive on loopback.
+The last form samples a window and prints the table rows a deployment record needs.
+One reading before and one after cannot show a fault that resolves between them.
+
 ## Public enrollment and manual join issuance
 
 Each public installer creates a secret and installation UUID locally. The installer sends these
@@ -192,6 +250,10 @@ Use `test-front-door.sh` after an nginx template change.
 Use `test-units.sh` after a systemd unit change.
 Use the provisioning verification phase after any host change.
 
+Use `health-snapshot.sh --watch` across the change window.
+The verification phase reports that each check passed, and a service can be measurably worse with
+every check still passing.
+
 ## Public and private records
 
 The public repository owns reusable behavior and stable engineering evidence.
@@ -214,7 +276,7 @@ Private records can link to a public file at a fixed commit.
 Run these checks after a public kit change:
 
 ```sh
-bash -n deploy/*.sh
+bash -n deploy/*.sh deploy/service-host-sample
 deploy/test-front-door.sh
 deploy/test-units.sh
 ```

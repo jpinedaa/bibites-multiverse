@@ -114,6 +114,18 @@ report anything they cannot read as unknown. Neither walks a directory: on a
 two-vCPU box a `du` over the genome store is the most expensive thing a monitor
 could do, and it is forbidden.
 
+On the service host the fields that matter most are the **cumulative TCP
+counters** — `estabResets`, `retransSegs`, `outResets`, `listenOverflows`,
+`synRetrans`. They are monotonic, so a reader differencing two samples sees
+every reset in the gap whether or not anything was sampled while it happened.
+This is the counters-survive-sampling principle in its most load-bearing form:
+it is how a one-minute sampler says something true about a thirty-second event.
+
+Per-unit `MemoryCurrent` is sampled against the relay's `MemoryMax=512M`
+tripwire, so "did the cap get near" stops being unanswerable. `NRestarts` is
+sampled so a restart that healed itself between two monitor ticks stops being
+invisible.
+
 ### Utilisation is not saturation
 
 The most expensive lesson this service has produced. A host pinned at 96–99% CPU
@@ -151,18 +163,6 @@ failure read as a CPU problem for a day.
 Sample per-unit `MemoryCurrent`, per-cgroup `memory.pressure`, and `/proc/vmstat`
 `pswpin`, `pswpout` and `oom_kill`. The last is the one that turns "something
 restarted" into "the kernel killed it".
-
-The fields that matter most are the **cumulative TCP counters** —
-`estabResets`, `retransSegs`, `outResets`, `listenOverflows`, `synRetrans`.
-They are monotonic, so a reader differencing two samples sees every reset in
-the gap whether or not anything was sampled while it happened. This is the
-counters-survive-sampling principle in its most load-bearing form: it is how a
-one-minute sampler says something true about a thirty-second event.
-
-Per-unit `MemoryCurrent` is sampled against the relay's `MemoryMax=512M`
-tripwire, so "did the cap get near" stops being unanswerable. `NRestarts` is
-sampled so a restart that healed itself between two monitor ticks stops being
-invisible.
 
 ### Layer 2 — Service
 
@@ -330,9 +330,18 @@ no simulated time. When a remedy looks drastic, check whether the failure is
 already doing something worse.
 
 **Automatic action needs its own record.** The recycler logs the world, its
-resident size and the memory reading that triggered it, and leaves a state file
-that the host sampler picks up. An unexplained restart in a metrics series is
-worse than no restart at all.
+resident size and the memory reading that triggered it, and leaves that decision
+in `/run/bibites-ops/recycle.state`; the Spot watcher leaves the same kind of
+breadcrumb for every poll. Both files are rewritten on each tick, so the age of
+the file says whether the watcher is alive and its contents say what it last
+decided. No collector reads either file yet — today an operator does. An
+unexplained restart in a metrics series is worse than no restart at all.
+
+**A record must not live where the thing it observes can delete it.** The first
+version of both breadcrumbs was written to `/run/bibites`, which is a systemd
+`RuntimeDirectory` of the world unit — so the first real recycle destroyed its
+own evidence, and the Spot watcher's, in the same run. Storage owned by the
+lifecycle under observation is not storage.
 
 ## Investigating an incident
 
@@ -383,7 +392,44 @@ Three things about it are wrong today and are part of this standard:
 
 ## Rollout
 
-Ordered by diagnostic value per unit of risk to a live public experiment.
+Ordered by diagnostic value per unit of risk to a live public experiment. The
+rest of this document is the standard; this section is the only part that says
+what is actually running.
+
+### What exists today
+
+- **Both host samplers.** The world host's sampler now also records PSI,
+  `/proc/vmstat` and per-world resident memory, keeping every field it already
+  had. The service host's sampler and its one-minute timer are installed and
+  enabled. Layer 1's table gives the interval and the path for each.
+- **The deployment health window.** `deploy/health-snapshot.sh` is in the
+  hosting kit and fills in [the health window](#the-health-window) on request.
+  It is a tool a person runs, not something a deployment does by itself yet.
+- **The world recycler.** `bibites-recycle.timer` is enabled on the world host
+  and asks every ten minutes. `bibites-recycle-world` acts only below its memory
+  threshold and records what it decided.
+- **The Spot watchers.** Both read the HTTP status of each IMDS poll instead of
+  discarding it, refresh the token at half its lifetime, log a heartbeat every
+  ten minutes, and leave a liveness breadcrumb. Before this they went blind
+  after six hours and said nothing.
+- **A world's time scale survives a restart it performs itself.**
+  `bibites-game@%i` wants `bibites-timescale@%i`, so a world that systemd brings
+  back applies its target scale again instead of running silently at `x1`.
+
+Every reading above is a file on the host that produced it, and a person is the
+only reader.
+
+### What does not exist yet
+
+Nothing ships a measurement off-box: no metrics agent, no time-series store, no
+log shipping, no dashboard, no continuous profiling. The Layer 3 path probe has
+not been written. The relay still does not log a close code, so the
+highest-value change named in this document is still unmade. On the cost side
+there is no egress monitor, no budget, and no replacement for the default
+anomaly threshold.
+
+The phases below keep their order. Everything in them remains to be done,
+except where a phase says otherwise.
 
 **Phase 0 — no new daemon, no production change.** Read the existing JSONL
 files. Import them into a time-series database on a workstation; they are
@@ -393,9 +439,10 @@ threshold. Point the existing webhook alert channel at somewhere a person
 looks. Confirm both clocks are disciplined, because every cross-host ordering
 claim depends on it.
 
-**Phase 1 — one read-only daemon per host.** The service-host sampler and its
-timer. A metrics agent that ships off-box and buffers with an **explicit** disk
-cap, because the default is unlimited and the disk is shared with the archive.
+**Phase 1 — one read-only daemon per host.** Its first half is done: the
+service-host sampler and its timer are deployed. What remains is a metrics agent
+that ships off-box and buffers with an **explicit** disk cap, because the
+default is unlimited and the disk is shared with the archive.
 
 **Phase 2 — the stateful tier, off the fragile box.** The time-series store and
 log store live on the host with memory to spare, on its retained volume, so

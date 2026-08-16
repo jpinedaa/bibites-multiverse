@@ -79,6 +79,25 @@ The host uses an encrypted retained volume at `/srv/bibites`.
 The game folders use hard links for immutable base files.
 Each world has a separate BepInEx log path.
 
+Two watchers leave a breadcrumb on the runtime file system:
+
+```text
+/run/bibites-ops/
+├── spot-watch.state   last IMDS poll: time, HTTP status, token age, consecutive failures
+├── recycle.state      last recycle decision: time, available memory share, action, detail
+└── recycle.last       start time of the last recycle, which the cool-off reads
+```
+
+Each state file is rewritten on every tick.
+Its timestamp reports whether the watcher is alive, and its contents report the last decision.
+`/run` is a memory file system, so these files are absent from boot until the first tick.
+The broadcast host writes `broadcast-spot-watch.state` in the same directory.
+
+The directory is deliberately not `/run/bibites`.
+`bibites-game@%i.service` declares that path as its `RuntimeDirectory`, so systemd deletes and
+creates it again on every world restart, including a restart the recycler performs.
+A record must not live inside a directory that the thing it observes owns.
+
 The security group has no inbound rules.
 Use AWS Systems Manager Session Manager for administration.
 
@@ -259,6 +278,20 @@ Each world saves on its configured schedule and retains the configured number of
 The Spot watcher receives the EC2 interruption notice.
 It stops games in parallel, waits for save-on-quit, stops sidecars, and flushes the file system.
 
+The watcher reads the HTTP status of each poll instead of discarding it.
+IMDS answers `404` while no interruption is scheduled, which is the usual case, and the watcher
+stays silent for it.
+IMDS answers `401` or `403` when the IMDSv2 token has expired.
+The watcher logs that status, mints a new token at once, and also refreshes the token at half its
+lifetime.
+It logs a heartbeat every ten minutes and records each poll in
+`/run/bibites-ops/spot-watch.state`.
+
+An earlier version minted one six-hour token, refreshed it only when the variable was empty, and
+discarded the status.
+It went blind after six hours of uptime with no log line and no failed unit, because a failed
+credential and a quiet endpoint produced the same swallowed error.
+
 The sidecar journal is durable before an acknowledgment.
 Shutdown does not create that durability.
 
@@ -267,6 +300,41 @@ The copies can create different descendants from one checkpoint.
 
 CAUTION: Do not import a sidecar journal from another map.
 Old custody records can target a different topology.
+
+## Memory recycling
+
+A world process grows by approximately `0.72 GiB` for each wall-clock hour.
+The growth is independent of the configured time scale, the achieved rate, and the population.
+Six worlds fill a 32 GiB host in about seven hours, and that host then reaches swap thrash and an
+out-of-memory kill.
+[`deploy/SIZING.md`](../../deploy/SIZING.md) carries the formula and the exhaustion model.
+
+`bibites-recycle.timer` asks every ten minutes whether one world must restart.
+`bibites-recycle-world` answers from live host memory.
+It does nothing while available memory stays above its threshold.
+Below that threshold it restarts one world, the largest that has been running for at least an hour.
+It holds off while any world is dark, waits out a cool-off after each recycle, and refuses outright
+when the chosen world does not enable `MULTIVERSE_SAVE_ON_QUIT` in its `world.env`.
+
+The game saves on quit, so a recycle costs no simulated time.
+`bibites-game@%i.service` wants `bibites-timescale@%i.service`, so a restarted world applies its
+target time scale again without an operator command.
+This matters for every restart the host performs by itself: the time-scale unit is a completed
+`Type=oneshot`, and ordering alone does not run it again.
+
+The host installer does not install this script and does not enable this timer.
+Install and enable both explicitly on a host that runs worlds:
+
+```sh
+sudo install -m 0755 /opt/bibites-runtime/bibites-recycle-world \
+  /usr/local/libexec/bibites-recycle-world
+sudo /usr/local/libexec/bibites-recycle-world --dry-run
+sudo systemctl enable --now bibites-recycle.timer
+```
+
+The dry run names the world it would choose and changes nothing.
+Read [`deploy/RESTART-POLICY.md`](../../deploy/RESTART-POLICY.md) for the restart class, its
+participant effect, and the command that stops it.
 
 ## Administration
 
@@ -299,7 +367,44 @@ Read the performance record:
 
 ```sh
 sudo tail -n 12 /srv/bibites/metrics/performance.jsonl | jq
+sudo tail -n 1 /srv/bibites/metrics/performance.jsonl \
+  | jq '{at, memoryAvailableBytes, pressureFullUsec, vm, gameMemoryBytes}'
 ```
+
+Each line holds the host reading, the pressure counters, and every world's own view.
+`pressureFullUsec` holds the pressure-stall totals in microseconds since boot for `cpu`, `memory`,
+and `io`.
+Each one counts the time in which no task on the host could run for want of that resource.
+Divide by 1,000,000 to read seconds.
+Read these before the load average, because utilization cannot separate a busy host from a stalled
+host.
+The first sample after this host was extended read zero for `cpu`, 3,707 seconds for `memory`, and
+5,720 seconds for `io`.
+That host had waited hours on memory and storage and had never waited on CPU.
+
+`vm.pswpin` and `vm.pswpout` report swap traffic, and `vm.oomKill` turns "a world restarted" into
+"the kernel killed it".
+`gameMemoryBytes` holds resident bytes for each world, which names the world to act on.
+A host total names none.
+
+The pressure and `vm` counters are cumulative, so compare two samples instead of reading one.
+A value the sampler cannot read is `null` and never `0`.
+
+Check that each watcher is alive:
+
+```sh
+sudo cat /run/bibites-ops/spot-watch.state
+sudo cat /run/bibites-ops/recycle.state
+sudo systemctl list-timers bibites-recycle.timer
+sudo journalctl -u bibites-spot-watch -n 20 --no-pager
+sudo journalctl -u bibites-recycle.service -n 20 --no-pager
+```
+
+The Spot watcher polls every few seconds, so a `spot-watch.state` older than about a minute means
+that it is not watching.
+The recycler writes on each ten-minute tick, so `recycle.state` is stale after about eleven minutes.
+A missing file after a long uptime means the same thing as a stale one.
+The unit journal carries the reason.
 
 ## Runtime updates
 
