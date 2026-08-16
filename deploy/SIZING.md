@@ -227,45 +227,52 @@ The arithmetic is the reusable part, not the answer.
 Inputs, all measured on `2026-08-16`:
 
 - `5,545,189` ledger records at `20:25Z`.
-- `3.00` million records each day, over a `41 h` ledger. The observed band is `2.90` to `3.14`.
-- `338 B` for each record on disk, which is about `1 GB` each day.
+- `338 B` for each record on disk.
 - An archive ceiling of `1,534 MiB` on the `2 GB` host.
   That is `MemTotal` less the `373 MiB` that no other process on the box will return.
 - `28` to `31 B` of retained state for each record, with the fingerprint change.
 - A collector floor of `1.27` times the live heap under a binding limit.
 
+**Growth is the input with the widest band, so carry it as a parameter and never as a
+constant.** The ledger's own `41 h` lifetime average was `3.00` million records each day, in a
+`2.90` to `3.14` band, and a later reading the same evening was `3.9`. Nothing structural
+changed; a diurnal peak and a `41 h` mean are different measurements of one workload. Compute
+every horizon at both ends and quote the shorter one.
+
 The memory horizon:
 
 ```text
-live_ceiling   = 1,534 MiB / 1.27                     = 1,208 MiB = 1,266,500,000 B
-record_ceiling = 1,266,500,000 B / 31 B               = 40,900,000 records
-               = 1,266,500,000 B / 28 B               = 45,200,000 records
-days           = (40,900,000 - 5,545,189) / 3,000,000 = 11.8
-               = (45,200,000 - 5,545,189) / 3,000,000 = 13.2
+live_ceiling   = 1,534 MiB / 1.27       = 1,208 MiB = 1,266,500,000 B
+record_ceiling = 1,266,500,000 B / 31 B = 40,900,000 records
+               = 1,266,500,000 B / 28 B = 45,200,000 records
+remaining      = 40,900,000 - 5,545,189 = 35,400,000 records
+               = 45,200,000 - 5,545,189 = 39,700,000 records
+days           = 35,400,000 / 3,900,000 =  9.1        (fast rate, conservative bound)
+               = 39,700,000 / 3,000,000 = 13.2        (slow rate)
 ```
 
-That is **`12` to `13` days from `2026-08-16`**, or `11` to `14` days across the growth band.
+That is **`9` to `13` days from `2026-08-16`**, so between `2026-08-25` and `2026-08-30`.
 It is the day the collector starts to bind hard, not the day the service fails.
 
-Compare the three states of the same host:
+Compare the states of the same host, at the same two rates:
 
 | State | Ceiling reached at | Days from `2026-08-16` |
 |---|---:|---:|
-| Before the change, limit inert at `5GiB` | `7.5` million records | `0.7` |
-| Before the change, binding limit | `14.3` million records | `2.9` |
-| After the change, limit inert | `25` million records | `6.5` |
-| After the change, binding limit at `1100MiB` | `41` to `45` million records | `12` to `13` |
+| Before the change, limit inert at `5GiB` | `7.5` million records | `0.5` to `0.7` |
+| Before the change, binding limit | `14.3` million records | `2.2` to `2.9` |
+| After the change, limit inert | `25` million records | `5.0` to `6.5` |
+| After the change, binding limit at `1100MiB` | `41` to `45` million records | `9` to `13` |
 
 Disk is not the binding term on this host.
-`46 GB` were free on `2026-08-16`, which is about `45` days at `1 GB` each day.
+`46 GB` were free on `2026-08-16`, which is `35` to `45` days at `1.0` to `1.3 GB` each day.
 
-Larger sizes at the same growth rate and the same measured constants:
+Larger sizes at the same rates and the same measured constants:
 
 | Public bundle | RAM | Disk | Memory horizon | Disk horizon | List price each month |
 |---|---:|---:|---:|---:|---:|
-| `small_3_0`, the current size | 2 GB | 60 GB | `12` to `13` days | ~`45` days | `$12` |
-| `medium_3_0` | 4 GB | 80 GB | `29` to `32` days | ~`65` days | `$24` |
-| `large_3_0` | 8 GB | 160 GB | `61` to `68` days | ~`144` days | `$44` |
+| `small_3_0`, the current size | 2 GB | 60 GB | `9` to `13` days | `35` to `45` days | `$12` |
+| `medium_3_0` | 4 GB | 80 GB | `22` to `32` days | `50` to `65` days | `$24` |
+| `large_3_0` | 8 GB | 160 GB | `47` to `68` days | `111` to `144` days | `$44` |
 
 Read that table for what it is: **every cell is a date and none of them is a bound.**
 Retained state grows with each ledger record, and nothing in the list stops it.

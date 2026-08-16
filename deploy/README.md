@@ -18,6 +18,9 @@ Keep these records outside the public repository:
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
+| `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
+| `restart-archive.sh` | Runs the complete-record archive sequence, guarded by the archive-deploy hold and the replay-headroom verdict. Costs a full ledger replay. |
+| `restart-lib.sh` | The half both restart scripts share: the peer gate, the waits, the proof, and the receipt. Sourced, never run. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
@@ -62,8 +65,10 @@ The following values identify one deployment:
 - `MV_BUNDLE` and `MV_TRANSFER_ALLOWANCE_GB`, which must state the same bundle.
 - `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
-- Homepage values for the public landing page links: `MV_HOMEPAGE_RELEASE`,
-  `MV_HOMEPAGE_REPO`, and `MV_HOMEPAGE_GAME_VERSION`.
+- Homepage values for the public landing page links: `MV_HOMEPAGE_REPO` and
+  `MV_HOMEPAGE_GAME_VERSION`. The release is not one of them. The page's
+  download buttons address GitHub's `/releases/latest`, so a new release reaches
+  the homepage without a deployment.
 
 Never store the completed file in Git.
 Store secret values in a secret manager or in protected files on the host.
@@ -327,6 +332,11 @@ storage, as `ANNOUNCEMENT.md` requires.
 Run `provision.sh` again to apply a changed parameter file or deployment kit.
 The script installs files, but it does not make every restart decision for you.
 
+Its `systemd` phase is the exception, and it enables and starts both services.
+Never run it while a reboot hold-down is in force: it undoes a `systemctl disable` and puts the
+relay back in front of a replaying archive. `RESTART-POLICY.md`, "Host reboot", holds the order,
+and the drop-in that phase installs is the hold-down that survives it.
+
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
 
@@ -373,6 +383,13 @@ deploy/test-front-door.sh
 deploy/test-units.sh
 deploy/test-monitor.sh
 deploy/test-viewers-presence.sh
+```
+
+Both restart procedures answer `--dry-run`, which walks every step and changes nothing:
+
+```sh
+deploy/restart-relay.sh --dry-run
+deploy/restart-archive.sh --dry-run
 ```
 
 `test-monitor.sh` needs no root, no network and no host.
