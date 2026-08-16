@@ -100,7 +100,8 @@ done
 install -m 0755 /opt/bibites-runtime/multiverse-sidecar /srv/bibites/bin/multiverse-sidecar
 install -d -m 0755 /usr/local/libexec
 for script in bibites-sidecar bibites-game bibites-wait-sidecar bibites-set-timescale \
-  bibites-spot-watch bibites-sync-worlds bibites-performance-sample bibites-stop-worlds; do
+  bibites-spot-watch bibites-sync-worlds bibites-performance-sample bibites-stop-worlds \
+  bibites-recycle-world; do
   install -m 0755 "/opt/bibites-runtime/$script" "/usr/local/libexec/$script"
 done
 install -m 0755 /opt/bibites-runtime/bibites-cloud-status /usr/local/bin/bibites-cloud-status
@@ -109,7 +110,11 @@ for unit in /opt/bibites-runtime/*.service /opt/bibites-runtime/*.timer; do
   install -m 0644 "$unit" "/etc/systemd/system/$(basename "$unit")"
 done
 systemctl daemon-reload
-systemctl enable --now bibites-xvfb.service bibites-spot-watch.service bibites-performance.timer
+# bibites-recycle.timer is enabled here rather than left to an operator: its
+# script does nothing until host memory is low, and a host that runs worlds
+# without it fills its RAM in about seven hours and is OOM-killed.
+systemctl enable --now bibites-xvfb.service bibites-spot-watch.service \
+  bibites-performance.timer bibites-recycle.timer
 /usr/local/libexec/bibites-sync-worlds
 touch /srv/bibites/.installed
 

@@ -30,9 +30,11 @@ TOKEN_TTL="${BIBITES_IMDS_TOKEN_TTL:-21600}"
 # missed.
 TOKEN_REFRESH_AFTER=$(( TOKEN_TTL / 2 ))
 POLL_SECONDS="${BIBITES_SPOT_POLL_SECONDS:-5}"
-# Liveness breadcrumb. The host sampler reads this, so a watcher that stops
-# answering stops being invisible. Absence of a fresh timestamp here is the
-# signal the old version could not produce.
+# Liveness breadcrumb, rewritten on every poll. No collector reads it yet -- an
+# operator does, and the staleness of its timestamp is the signal the old
+# version could not produce. Deliberately NOT under /run/bibites: that path is
+# bibites-game@.service's RuntimeDirectory and systemd wipes it whenever a world
+# restarts.
 STATE_DIR="${BIBITES_SPOT_STATE_DIR:-/run/bibites-ops}"
 STATE_FILE="$STATE_DIR/spot-watch.state"
 
