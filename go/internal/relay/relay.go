@@ -89,6 +89,17 @@ type Options struct {
 	// ForwardRecordRetention is how long a forwarded migrationId is remembered
 	// for the neverForwarded proof (§5.2).
 	ForwardRecordRetention time.Duration
+	// NoWireCompression stops this relay OFFERING permessage-deflate (§24, B35).
+	//
+	// THE ZERO VALUE IS THE SHIPPED BEHAVIOUR, which is compression offered, so
+	// every existing caller and every test gets §24's wire without being
+	// rewritten. It is expressed as a negative for exactly that reason.
+	//
+	// It is the operator's kill switch and it is complete on its own: the
+	// extension is used only when both ends offer it, so a relay that stops
+	// offering it puts the whole map back on uncompressed frames as each peer
+	// reconnects, with no participant action and no binary rollback.
+	NoWireCompression bool
 }
 
 // Server is the relay. The zero value is not usable; call New.
@@ -110,9 +121,13 @@ type Server struct {
 	churnThreshold    int
 	statsBroadcast    time.Duration
 	forwardRetain     time.Duration
-	publicEnrollment  PublicEnrollmentOptions
-	enrollmentMu      sync.Mutex
-	enrollmentByAddr  map[string][]time.Time
+	// wireCompression is whether this relay OFFERS permessage-deflate on its
+	// upgrades (§3, §24 B35). It is read on every accept and never changes after
+	// New, so it needs no lock.
+	wireCompression  bool
+	publicEnrollment PublicEnrollmentOptions
+	enrollmentMu     sync.Mutex
+	enrollmentByAddr map[string][]time.Time
 
 	// B24's two socket counters. They are outside s.mu deliberately: an upgrade
 	// must not queue behind a PEER_STATUS broadcast, and a connection storm is
@@ -313,6 +328,7 @@ func New(opts Options) (*Server, error) {
 		coalesceWindow:    opts.StatusCoalesce,
 		statsBroadcast:    opts.StatsBroadcast,
 		forwardRetain:     opts.ForwardRecordRetention,
+		wireCompression:   !opts.NoWireCompression,
 		publicEnrollment:  opts.PublicEnrollment,
 		enrollmentByAddr:  map[string][]time.Time{},
 		sessionID:         wire.NewUUID(),
@@ -529,6 +545,39 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// acceptOptions is the ONE set of upgrade options this relay serves, and every
+// websocket.Accept in this package takes it (§3 Transport, §24 B35).
+//
+// COMPRESSION IS OFFERED, NEVER REQUIRED. permessage-deflate is negotiated, so
+// a sidecar that does not offer it is served uncompressed and MUST NOT be
+// refused — that is what makes this change invisible to an un-updated
+// participant and what lets the fleet cross by publication rather than in
+// lockstep.
+//
+// THE REFUSAL DOORS OFFER IT TOO, AND THAT IS DELIBERATE. serveRetired,
+// shedUpgrade and closeEvicted complete the upgrade only to close it, so
+// compression saves them nothing — a close frame is a control frame and RFC
+// 7692 never compresses one. They share these options because B28 requires an
+// evicted peer to see EXACTLY what a draining relay shows it: if a refusal door
+// declined the extension while the live door accepted it, the response's
+// Sec-WebSocket-Extensions header would separate "refused at the door" from
+// "accepted and then closed" before the peer had read a single frame. One set
+// of options, one observable handshake, and the close code stays the only
+// difference.
+//
+// InsecureSkipVerify is coder/websocket's ORIGIN check and not a TLS one: a
+// Contract B client is a process, not a browser, and it sends no Origin header.
+func (s *Server) acceptOptions() *websocket.AcceptOptions {
+	opts := &websocket.AcceptOptions{InsecureSkipVerify: true}
+	if s.wireCompression {
+		return wsutil.PeerAcceptOptions(opts)
+	}
+	// --ws-compression=false. CompressionDisabled is the zero value, so the
+	// relay simply never echoes the extension and every peer, old or new, runs
+	// on the pre-§24 wire.
+	return opts
+}
+
 func (s *Server) serveRetired(w http.ResponseWriter, r *http.Request, path string) {
 	// A retired path is served over TLS like the live one (B23), so the same
 	// transport rule applies to it: a plaintext upgrade off loopback is refused
@@ -536,10 +585,7 @@ func (s *Server) serveRetired(w http.ResponseWriter, r *http.Request, path strin
 	if !s.allowPlainUpgrade(w, r) {
 		return
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true,
-	})
+	ws, err := websocket.Accept(w, r, s.acceptOptions())
 	if err != nil {
 		return
 	}
@@ -702,12 +748,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode: websocket.CompressionDisabled,
-		// This is coder/websocket's ORIGIN check, not a TLS one: a Contract B
-		// client is a process, not a browser, and it sends no Origin header.
-		InsecureSkipVerify: true,
-	})
+	ws, err := websocket.Accept(w, r, s.acceptOptions())
 	if err != nil {
 		s.log.Warn("relay: websocket upgrade failed", "err", err)
 		return
@@ -734,10 +775,7 @@ func (s *Server) shedUpgrade(w http.ResponseWriter, r *http.Request, peerID, bre
 		}
 		s.mu.Unlock()
 	}
-	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode:    websocket.CompressionDisabled,
-		InsecureSkipVerify: true,
-	})
+	ws, err := websocket.Accept(w, r, s.acceptOptions())
 	if err != nil {
 		return
 	}

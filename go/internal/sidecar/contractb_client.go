@@ -217,7 +217,12 @@ func fullJitter(min, max time.Duration, attempt int) time.Duration {
 
 func (s *Sidecar) relaySession() error {
 	dialCtx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
-	opts := &websocket.DialOptions{CompressionMode: websocket.CompressionDisabled}
+	// §3 Transport, §24 B35: this sidecar OFFERS permessage-deflate. Whether it
+	// is used is the relay's answer — a relay that does not echo the extension
+	// serves this connection exactly as every relay did before §24, on the same
+	// URL, with the same frames and no version to negotiate. There is no knob
+	// and no fallback path here for that reason.
+	opts := wsutil.PeerDialOptions(&websocket.DialOptions{})
 	if s.cfg.Secret != "" {
 		// §3.1: the credential rides the HTTP UPGRADE and nothing
 		// credential-related ever appears in a frame — not on HANDSHAKE, which is

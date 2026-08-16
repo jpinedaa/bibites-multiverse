@@ -21,6 +21,7 @@ import (
 	"multiverse/internal/contractb"
 	"multiverse/internal/logging"
 	"multiverse/internal/peercred"
+	"multiverse/internal/wsutil"
 )
 
 // Main is the multiverse-relay entry point, factored out of package main so a
@@ -77,6 +78,13 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 			"without dropping a session")
 	tlsMin := fs.String("tls-min-version", env("MULTIVERSE_RELAY_TLS_MIN_VERSION", contractb.RelayTLSMinVersion),
 		"lowest TLS version this relay's listener accepts: 1.2 or 1.3 (§12, relayTLSMinVersion)")
+	wsCompression := fs.Bool("ws-compression",
+		envBool("MULTIVERSE_RELAY_WS_COMPRESSION", true),
+		"offer permessage-deflate on Contract B upgrades (§3, §12 wireCompression, §24 B35). ON by "+
+			"default. It is NEGOTIATED, so a client that does not offer it is served uncompressed "+
+			"and is never refused; turning it OFF here puts the WHOLE map back on uncompressed "+
+			"frames as each peer reconnects, with no participant action and no binary rollback. "+
+			"It is the operator's kill switch and the only knob this setting has")
 	// ---------------------------------------------------- §3.3's published table
 	//
 	// EVERY LIMIT IS A KNOB AND NONE IS A COMPILED CONSTANT (D20, §22 B24):
@@ -222,6 +230,7 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		StatusCoalesce:            time.Duration(*statusCoalesceMs) * time.Millisecond,
 		StatusCoalesceMax:         time.Duration(*statusCoalesceMaxMs) * time.Millisecond,
 		StatusChurnBurstThreshold: int(*churnBurstThreshold),
+		NoWireCompression:         !*wsCompression,
 	})
 	if err != nil {
 		log.Error("relay: startup failed", "err", err)
@@ -363,6 +372,17 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		"broadcastsPerMinuteUnderAStorm", int(maxBroadcastsPerMinute(
 			time.Duration(*statusCoalesceMaxMs)*time.Millisecond)),
 		"costPerBroadcast", "slotCount stats blocks to every peer AND every subscriber")
+	// Whether the wire is compressed is the first thing to check when a transfer
+	// number does not move after a deploy, and it cannot be read off a frame: it
+	// is decided on the HTTP upgrade, per connection, by both ends. So the relay
+	// says which side of it this process is on.
+	log.Info("relay: peer wire compression (contract-b-m4.md §3, §24 B35)",
+		"offered", *wsCompression,
+		"extension", "permessage-deflate, context takeover, threshold "+
+			strconv.Itoa(wsutil.PeerCompressionThreshold)+" bytes",
+		"note", "NEGOTIATED: it is used only where the client offers it too, and a client that "+
+			"does not is served uncompressed and never refused. Confirm per connection with "+
+			"Sec-WebSocket-Extensions on the 101")
 	// The slot-space picture, at the one moment an operator is certainly reading
 	// (§7.2, §7.5, DQ3). Holes are where the next newcomer goes before any axis
 	// grows; maxSlotEverIssued is the address counter that never decreases.
