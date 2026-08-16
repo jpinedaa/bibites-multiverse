@@ -14,6 +14,7 @@ cloud_stack="${BIBITES_CLOUD_STACK_NAME:-bibites-cloud-worlds}"
 world_name="${BIBITES_LOCAL_WORLD_NAME:-Broadcast-Live}"
 public_map="${BIBITES_PUBLIC_MAP:-$repo/release/kit/public-map.json}"
 sidecar_port="${BIBITES_BROADCAST_SIDECAR_PORT:-8787}"
+obs_websocket_port="${BIBITES_OBS_WEBSOCKET_PORT:-4466}"
 export_edges="${BIBITES_BROADCAST_EXPORT_EDGES:-E,N,W,S}"
 exclude_species="${BIBITES_BROADCAST_EXCLUDE_SPECIES:-Basic bibite}"
 release_id="${BIBITES_BROADCAST_RELEASE:-local-broadcast}"
@@ -576,6 +577,7 @@ say 'building the Windows sidecar for the broadcast world'
 
 install -m 0644 "$repo/deploy/local-broadcast/run-windows.ps1" "$windows_root_wsl/run-windows.ps1"
 install -m 0644 "$repo/deploy/local-broadcast/stop-windows.ps1" "$windows_root_wsl/stop-windows.ps1"
+install -m 0644 "$repo/deploy/local-broadcast/watch-viewers.ps1" "$windows_root_wsl/watch-viewers.ps1"
 for script in run-loop run-tunnel run-windows start stop stop-windows; do
   install -m 0755 "$repo/deploy/local-broadcast/$script" "$runtime_root/bin/$script"
 done
@@ -599,6 +601,34 @@ install -m 0600 "$repo/deploy/local-broadcast/obs-scene.json" \
 printf '{"settings":{"bwtest":false,"key":"bibites?user=broadcaster&pass=%s","server":"rtmp://127.0.0.1:1935","use_auth":false},"type":"rtmp_custom"}\n' \
   "$publish_password" >"$obs_profile/service.json"
 chmod 0600 "$obs_profile/service.json"
+
+# The viewer watcher starts and stops the RTMP publish through obs-websocket,
+# which OBS ships with but leaves disabled. OBS reads this file only at start,
+# so enabling the server is part of a stop-and-start and never a live edit.
+#
+# The port is not the plugin default, because an unrelated OBS on the same
+# desktop uses that default and two servers cannot hold one port.
+#
+# The password is kept if OBS already generated one, so a reinstall does not
+# invalidate a running watcher's credential. It is a secret: it belongs beside
+# service.json on the list of files that are never printed, copied, or
+# committed.
+obs_websocket_dir="$obs_config/plugin_config/obs-websocket"
+obs_websocket_config="$obs_websocket_dir/config.json"
+install -d -m 0700 "$obs_websocket_dir"
+websocket_password=''
+if [ -f "$obs_websocket_config" ]; then
+  websocket_password="$(jq -r '.server_password // ""' "$obs_websocket_config" 2>/dev/null || true)"
+fi
+if [ -z "$websocket_password" ]; then
+  websocket_password="$(head -c 24 /dev/urandom | base64 | tr -d '\n')"
+fi
+jq -n --arg password "$websocket_password" --argjson port "$obs_websocket_port" \
+  '{alerts_enabled:false,auth_required:true,first_load:false,
+    server_enabled:true,server_password:$password,server_port:$port}' \
+  >"$obs_websocket_config"
+chmod 0600 "$obs_websocket_config"
+websocket_password=''
 {
   printf 'GameDir=%s\n' "$game_windows"
   printf 'Obs=%s\n' "$obs_windows"

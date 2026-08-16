@@ -23,6 +23,23 @@ function Get-RecordedProcess([string]$name) {
     return Get-Process -Id $processId -ErrorAction SilentlyContinue
 }
 
+# The viewer watcher goes first. It is the one process here that can start the
+# stream, so leaving it up during a shutdown lets it publish into an OBS that is
+# already closing. It is matched by its command line and not by its name,
+# because it is an ordinary powershell.exe and a reused identifier must never
+# reach an unrelated one.
+$watcher = Get-RecordedProcess 'watcher'
+if ($watcher) {
+    $watcherCommand = ''
+    $watcherRecord = Get-CimInstance -ClassName Win32_Process `
+        -Filter "ProcessId = $($watcher.Id)" -ErrorAction SilentlyContinue
+    if ($watcherRecord) { $watcherCommand = [string]$watcherRecord.CommandLine }
+    if ($watcherCommand -like '*watch-viewers.ps1*') {
+        Stop-Process -Id $watcher.Id -Force -ErrorAction SilentlyContinue
+        $watcher.WaitForExit(10000) | Out-Null
+    }
+}
+
 $obs = Get-RecordedProcess 'obs'
 if ($obs -and $obs.Path -like '*\obs64.exe') {
     $obs.CloseMainWindow() | Out-Null
@@ -47,6 +64,7 @@ if ($sidecar -and $sidecarExe -and $sidecar.Path -eq $sidecarExe) {
     $sidecar.WaitForExit(15000) | Out-Null
 }
 
+Remove-Item -LiteralPath (Join-Path $state 'watcher.pid') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $state 'obs.pid') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $state 'game.pid') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $state 'sidecar.pid') -Force -ErrorAction SilentlyContinue

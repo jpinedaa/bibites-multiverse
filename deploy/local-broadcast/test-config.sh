@@ -4,6 +4,8 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 runner="$here/run-windows.ps1"
 stopper="$here/stop-windows.ps1"
+watcher="$here/watch-viewers.ps1"
+profile_ini="$here/obs-basic.ini"
 installer="$here/install.sh"
 
 expect_text() {
@@ -37,6 +39,60 @@ expect_text "$runner" "MULTIVERSE_BROADCAST_PANEL_SECONDS = '15'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_SHOW_FOV = 'true'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES = 'Basic bibite'"
 expect_text "$runner" "MULTIVERSE_FERTILITY = '3.5E-05'"
+
+# The encoder profile. The publish rate is the service's largest single
+# transfer cost, so it is held here rather than left to whatever OBS last wrote.
+expect_text "$profile_ini" 'VBitrate=1500'
+forbid_text "$profile_ini" 'VBitrate=2500'
+expect_text "$profile_ini" 'BaseCX=1280'
+expect_text "$profile_ini" 'OutputCY=720'
+expect_text "$profile_ini" 'FPSCommon=30'
+
+# The publisher runs only while somebody watches, and the watcher is what makes
+# that true. It belongs to the trio: the runner starts it and the stopper stops
+# it, so it can never outlive the publisher it controls.
+expect_text "$runner" 'watch-viewers.ps1'
+expect_text "$runner" 'Start-ViewerWatcher'
+expect_text "$runner" '-SupervisorProcessId'
+expect_text "$runner" "Join-Path \$state 'watcher.pid'"
+# OBS still starts streaming, so a start is verifiable before an audience
+# exists. The watcher takes the stream down again if the room stays empty.
+expect_text "$runner" '--startstreaming'
+# A watcher fault must never reach the finally block that reloads the world.
+forbid_text "$runner" 'if ($watcher.HasExited) { throw'
+expect_text "$runner" 'starting it again'
+watcher_line="$(grep -n 'Start-ViewerWatcher -ScriptPath' "$runner" | head -1 | cut -d: -f1)"
+obs_start_line="$(grep -n 'Start-NativeProcess -FilePath \$config.Obs' "$runner" | head -1 | cut -d: -f1)"
+[ "$obs_start_line" -lt "$watcher_line" ] || \
+  fail 'the runner starts the viewer watcher before OBS'
+
+expect_text "$stopper" "Get-RecordedProcess 'watcher'"
+expect_text "$stopper" 'watch-viewers.ps1'
+expect_text "$stopper" "Join-Path \$state 'watcher.pid'"
+forbid_text "$stopper" 'Stop-Process -Name'
+stop_watcher_line="$(grep -n "Get-RecordedProcess 'watcher'" "$stopper" | head -1 | cut -d: -f1)"
+stop_obs_line="$(grep -n "Get-RecordedProcess 'obs'" "$stopper" | head -1 | cut -d: -f1)"
+[ "$stop_watcher_line" -lt "$stop_obs_line" ] || \
+  fail 'the stopper stops OBS before the viewer watcher'
+
+# The watcher changes the stream output and nothing else. It never stops a
+# process, and an unreadable signal holds the current state.
+expect_text "$watcher" '/api/viewers'
+expect_text "$watcher" 'StartStream'
+expect_text "$watcher" 'StopStream'
+expect_text "$watcher" 'SupportsShouldProcess'
+expect_text "$watcher" 'holding the current state'
+expect_text "$watcher" 'the presence document is {0} seconds old'
+forbid_text "$watcher" 'Stop-Process'
+forbid_text "$watcher" 'Start-Process'
+
+# obs-websocket is the watcher's only way in, and OBS reads its configuration
+# only at start. The installer therefore owns it, on a port the desktop OBS on
+# the same machine does not use.
+expect_text "$installer" 'watch-viewers.ps1'
+expect_text "$installer" 'BIBITES_OBS_WEBSOCKET_PORT:-4466'
+expect_text "$installer" 'server_enabled:true'
+expect_text "$installer" 'chmod 0600 "$obs_websocket_config"'
 
 # The broadcast world is a participant of the map, not an offline exhibition.
 expect_text "$runner" 'MULTIVERSE_EXPORT_EDGES = $config.ExportEdges'
@@ -566,7 +622,7 @@ if run_hls_fixture invalid-segment; then fail 'HLS readiness accepted a parent s
 assert_hls_fixture_clean
 
 if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
-  for script in "$runner" "$stopper"; do
+  for script in "$runner" "$stopper" "$watcher"; do
     windows_script="$(wslpath -w "$script")"
     powershell.exe -NoProfile -Command '& {
       param($path)
@@ -606,6 +662,11 @@ if command -v powershell.exe >/dev/null && command -v wslpath >/dev/null; then
   runner_windows="$(wslpath -w "$runner")"
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File \
     "$runner_windows" -ArgumentQuotingSelfTest
+
+  # The viewer watcher's own behaviour is checked by test-watch-viewers.sh,
+  # which drives it against a written presence document. This is the cheap half:
+  # the obs-websocket digest must agree with an independent implementation.
+  "$here/test-watch-viewers.sh"
 fi
 
 printf 'broadcast presentation, identity, lock, ACL, argv, map, and HLS readiness: PASS\n'
