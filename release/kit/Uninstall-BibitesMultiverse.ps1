@@ -88,6 +88,10 @@ Set-StrictMode -Version 2.0
 $RecordName = 'install-record.json'
 $PluginGuid = 'dev.multiverse.bibites'
 
+# The files a running copy holds open, relative to the folder being checked.
+$GameLockProbe    = @('The Bibites.exe', 'BepInEx\plugins\BibitesMultiverse.dll')
+$SidecarLockProbe = @('multiverse-sidecar.exe')
+
 function Say  { param([string]$m) Write-Host "     $m" }
 function Step { param([string]$m) Write-Host ""; Write-Host "==== $m" }
 function Stop-Uninstall {
@@ -162,17 +166,57 @@ if ($DryRun) {
     Write-Host "  -DryRun: nothing below is actually removed." -ForegroundColor Cyan
 }
 
+function Test-FileLocked {
+    # Ask the file itself, rather than asking about processes. A running Windows
+    # process holds its own executable image - and every DLL it has loaded -
+    # open with no write sharing, so an open for ReadWrite that is refused as a
+    # sharing violation means something is running out of that file. An open
+    # that succeeds means nothing is. A file that is not there cannot be locked.
+    #
+    # A refusal this account cannot tell apart from a lock - a folder it may not
+    # write to at all - is reported as locked, because that is still the safe
+    # answer, and it is the answer this check gave before it could tell.
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($Path,
+                                         [System.IO.FileMode]::Open,
+                                         [System.IO.FileAccess]::ReadWrite,
+                                         [System.IO.FileShare]::None)
+        return $false
+    } catch [System.IO.IOException] {
+        return $true
+    } catch [System.UnauthorizedAccessException] {
+        return $true
+    } catch {
+        return $true
+    } finally {
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
 # Both checks are on THIS install's own paths rather than on a process name: a
 # machine may hold a second copy of the game or a second world, and only the one
-# this record describes has to be stopped. A process whose path cannot be read
-# counts against the check, because the safe answer to "I cannot tell" is to stop.
+# this record describes has to be stopped.
+#
+# A process whose path this account cannot read - another user's session, or an
+# elevated one - is NOT counted on that fact alone. What decides it then is the
+# folder itself: -LockProbe names the files a running copy holds open, and if
+# none of them is open for writing, nothing is running out of this folder,
+# whoever else is running whatever else on this machine.
 function Test-ProcessUnder {
-    param([string]$Name, [string]$Path)
+    param([string]$Name, [string]$Path, [string[]]$LockProbe = @())
+    $opaque = $false
     foreach ($process in @(Get-Process -Name $Name -ErrorAction SilentlyContinue)) {
         $exe = ''
         try { $exe = $process.Path } catch { $exe = '' }
-        if (-not $exe) { return $true }
+        if (-not $exe) { $opaque = $true; continue }
         if ($exe.StartsWith($Path, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    if (-not $opaque) { return $false }
+    foreach ($relative in $LockProbe) {
+        if (Test-FileLocked (Join-Path $Path $relative)) { return $true }
     }
     return $false
 }
@@ -247,11 +291,11 @@ function Get-LauncherProfileFile {
              Sort-Object Name | ForEach-Object { $_.FullName })
 }
 
-if (Test-ProcessUnder 'The Bibites' $record.gameDir) {
+if (Test-ProcessUnder 'The Bibites' $record.gameDir $GameLockProbe) {
     Stop-Uninstall ("The Bibites is running from $($record.gameDir). Close it first; Windows holds " +
                     "the plugin open while the game runs. Nothing was removed.")
 }
-if (Test-ProcessUnder 'multiverse-sidecar' $record.kitDir) {
+if (Test-ProcessUnder 'multiverse-sidecar' $record.kitDir $SidecarLockProbe) {
     Stop-Uninstall "This install's sidecar is running. Run .\Stop-Multiverse.ps1 first. Nothing was removed."
 }
 
@@ -298,7 +342,7 @@ foreach ($profilePath in $profileFiles) {
     }
 }
 foreach ($profileGame in $profileGameDirs) {
-    if (Test-ProcessUnder 'The Bibites' $profileGame) {
+    if (Test-ProcessUnder 'The Bibites' $profileGame $GameLockProbe) {
         Stop-Uninstall ("The Bibites is running from $profileGame, which one of this install's " +
                         "worlds uses. Close it first. Nothing was removed.")
     }

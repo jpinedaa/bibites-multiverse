@@ -95,6 +95,21 @@ Check "the click launcher uses process-only RemoteSigned" `
     ($launcherText -match '(?i)-ExecutionPolicy RemoteSigned')
 Check "the click launcher never uses an execution-policy bypass" `
     (-not ($launcherText -match '(?i)ExecutionPolicy Bypass'))
+# A machine may run a second copy of the game under another account, or
+# elevated, and this account cannot read that process's path. Neither script may
+# refuse on that fact alone: what decides it is whether the files in the folder
+# being written to are held open.
+$installerText   = Get-Content -LiteralPath $installer -Raw
+$uninstallerText = Get-Content -LiteralPath $uninstaller -Raw
+foreach ($pair in @(@{ name = 'installer'; text = $installerText },
+                    @{ name = 'uninstall'; text = $uninstallerText })) {
+    Check ("the $($pair.name) probes the folder's own files for a lock") `
+        ($pair.text -match 'function Test-FileLocked')
+    Check ("the $($pair.name) asks for ReadWrite with no sharing, which only a running copy refuses") `
+        ($pair.text -match '\[System\.IO\.FileShare\]::None')
+    Check ("the $($pair.name) never treats a process it cannot inspect as running here on its own") `
+        (-not ($pair.text -match 'if \(-not \$exe\) \{ (return \$true|\[void\]\$hit\.Add)'))
+}
 $guiText = Get-Content -LiteralPath $guiInstaller -Raw
 Check "the GUI selects start-after-install by default" `
     ($guiText -match '\$startAfter\.Checked\s*=\s*\$true')
