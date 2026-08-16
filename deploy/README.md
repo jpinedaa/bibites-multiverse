@@ -18,7 +18,7 @@ Keep these records outside the public repository:
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
-| `monitor.sh` | Checks services, capacity, certificates, backups, and map health. |
+| `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
@@ -26,6 +26,7 @@ Keep these records outside the public repository:
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
+| `test-monitor.sh` | Drives the monitor's data-transfer arithmetic against fake counters and a fake clock. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
@@ -55,6 +56,7 @@ The following values identify one deployment:
 - `MV_RETENTION` and `MV_ARCHIVE_GENOME_HORIZON`.
 - `MV_PERIOD_START` and `MV_PERIOD_END`.
 - `MV_ALERT_KIND`, `MV_ALERT_URL`, and `MV_ALERT_COMMAND`.
+- `MV_BUNDLE` and `MV_TRANSFER_ALLOWANCE_GB`, which must state the same bundle.
 - `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
 - Homepage values for the public landing page links: `MV_HOMEPAGE_RELEASE`,
@@ -140,6 +142,19 @@ Check the public website and relay path from another network.
 The alert test must reach its intended recipient.
 The backup list must contain the identity files and their checksums.
 The archive status must show an active relay subscription.
+
+The verbose run prints one line for each check.
+Read the three that watch money rather than availability:
+
+- `transfer` compares month-to-date transfer, and the last 24 closed hours projected over a month,
+  against `MV_TRANSFER_ALLOWANCE_GB`. It reads `/proc/net/dev` on the billed interface and needs no
+  cloud credential. It says `warming up` for its first six hours, which is correct and not a fault.
+- `transfer-rate` reports the last closed hour and warns after `MV_TRANSFER_HOURLY_RUNS`
+  consecutive hours above `MV_TRANSFER_HOURLY_GB`.
+- `hosts-pin` checks that `/etc/hosts` still pins `MV_DOMAIN` to `127.0.0.1`. Without that line the
+  archive's subscription to the relay leaves the host and returns over the billed interface.
+
+The transfer figures use the provider's GB of 2^30 bytes, counted in both directions.
 
 ## Measurement
 
@@ -248,6 +263,7 @@ Batch archive changes because replay time grows with the ledger.
 
 Use `test-front-door.sh` after an nginx template change.
 Use `test-units.sh` after a systemd unit change.
+Use `test-monitor.sh` after a `monitor.sh` change.
 Use the provisioning verification phase after any host change.
 
 Use `health-snapshot.sh --watch` across the change window.
@@ -279,7 +295,12 @@ Run these checks after a public kit change:
 bash -n deploy/*.sh deploy/service-host-sample
 deploy/test-front-door.sh
 deploy/test-units.sh
+deploy/test-monitor.sh
 ```
+
+`test-monitor.sh` needs no root, no network and no host.
+It runs `monitor.sh --only transfer` and `--only hosts-pin` against fake `/proc` files, a fake
+`/etc/hosts` and a fixed clock, in a temporary state directory.
 
 Run `shellcheck` when it is available.
 Run `systemd-analyze verify` against the units on a compatible Linux host.

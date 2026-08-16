@@ -11,6 +11,11 @@
 #   monitor.sh --verbose    one pass, print every check
 #   monitor.sh --test       send one alert and exit — prove the channel works
 #   monitor.sh --quiet      no alerts, exit code only (1 if anything is not OK)
+#   monitor.sh --only NAME  run one group and nothing else: 'transfer' or
+#                           'hosts-pin'. deploy/test-monitor.sh drives the
+#                           transfer arithmetic through this against fake
+#                           /proc files and a fake clock, on a workstation,
+#                           without root and without touching the network.
 #
 # WHAT IT WATCHES, and why each one is on the list rather than a longer one:
 #
@@ -33,6 +38,21 @@
 #                         a reconnect, three runs of skips is a departure.
 #   free disk             the archive stops writing correctly when its volume is
 #                         full. Alert before the service reaches that state.
+#   transfer              the bundle's monthly data-transfer allowance, counted
+#                         in BOTH directions, read from this box's own NIC
+#                         counters. Nothing else can watch it: the provider
+#                         publishes no CloudWatch metric, overage is BILLED and
+#                         not throttled, and the failure mode is an open-ended
+#                         invoice that no status page will ever show.
+#   transfer rate         a driver that just appeared. Three consecutive hours
+#                         above the hourly limit is visible hours before the
+#                         month-to-date line has moved far enough to see it.
+#   hosts pin             the loopback pin for the service name in /etc/hosts.
+#                         The archive dials the relay BY NAME, so losing that
+#                         one line puts a ~54 GB/day subscription onto the
+#                         billed interface and roughly doubles the bill. It is
+#                         one line, nothing else watches it, and the service
+#                         stays perfectly healthy while it costs money.
 #   error lines           WP3's done-when. A rate, from the rotated logs.
 #   certificate           days left on the certificate THE LISTENER SERVES, not
 #                         the one on disk — which is also how a deploy hook that
@@ -49,6 +69,11 @@
 #                         it is needed.
 #   reboot required       a pending kernel. Unattended upgrades do NOT reboot
 #                         here, deliberately, so somebody has to know.
+#
+# GB HERE IS THE PROVIDER'S GB: 2^30 bytes, the same base the free-disk check
+# uses and the same base the transfer allowance is quoted in. Reconciling the NIC
+# counter against the bill gives a ratio of 1.01 on 2^30 and 1.08 on 10^9, so the
+# decimal base is the wrong one and choosing it buys a month of false comfort.
 #
 # THE ALERT CHANNEL. Select one for each deployment and check that a person
 # receives its self-test.
@@ -106,17 +131,37 @@ set -a; . "$ENV_FILE"; set +a
 : "${MV_GAPS_DELTA_ALERT:=20000}"
 : "${MV_CERT_MIN_DAYS:=10}"
 : "${MV_REPLAY_HEADROOM:=0.85}"
+# The bundle's monthly transfer allowance in the PROVIDER's GB (2^30 bytes),
+# counted in BOTH directions. Overage is billed per GB and is not throttled.
+: "${MV_TRANSFER_ALLOWANCE_GB:=3072}"
+: "${MV_TRANSFER_WARN_PCT:=80}"
+: "${MV_TRANSFER_HYST_PCT:=3}"
+# Empty means "the default-route interface from /proc/net/route". The monitor
+# unit sets RestrictAddressFamilies without AF_NETLINK, so `ip` cannot run here
+# and must never be introduced: it would fail under systemd and work by hand.
+: "${MV_TRANSFER_IFACE:=}"
+: "${MV_TRANSFER_HOURLY_GB:=9}"
+: "${MV_TRANSFER_HOURLY_RUNS:=3}"
 : "${MV_ALERT_KIND:=ntfy}"
 : "${MV_ALERT_URL:=}"
 : "${MV_ALERT_COMMAND:=}"
 : "${MV_ALERT_REPEAT_HOURS:=12}"
 : "${MV_HEARTBEAT_HOUR:=9}"
 
+# READ SEAMS, so the transfer arithmetic can be exercised off the host. Each one
+# defaults to the real file and is overridden only by deploy/test-monitor.sh.
+: "${MV_PROC_NET_DEV:=/proc/net/dev}"
+: "${MV_PROC_NET_ROUTE:=/proc/net/route}"
+: "${MV_HOSTS_FILE:=/etc/hosts}"
+
 STATE="$MV_STATE/monitor"
 ARCHIVE_DATA="$MV_STATE/archive"
 VERBOSE=0
 QUIET=0
-NOW="$(date -u +%s)"
+ONLY=""
+# MV_NOW is the same kind of seam: one clock reading, taken once, that every
+# check below derives its dates from. Nothing here calls date for "now" twice.
+NOW="${MV_NOW:-$(date -u +%s)}"
 WORST=OK
 SUMMARY=""
 
@@ -206,6 +251,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -v|--verbose) VERBOSE=1 ;;
     -q|--quiet) QUIET=1 ;;
+    --only) ONLY="${2:?--only needs a check group: transfer or hosts-pin}"; shift ;;
     --test)
       if notify OK self-test "This is a test from $(hostname) at $(date -u +%FT%TZ). If you are reading it, the alert channel works."; then
         echo "sent one $MV_ALERT_KIND alert"
@@ -213,7 +259,7 @@ while [ $# -gt 0 ]; do
       fi
       echo "the alert channel is NOT working: kind=$MV_ALERT_KIND url set=$([ -n "$MV_ALERT_URL" ] && echo yes || echo no)" >&2
       exit 1 ;;
-    -h|--help) sed -n '2,70p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,96p' "$0"; exit 0 ;;
     *) echo "monitor: unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -375,6 +421,284 @@ check_disk() {
   fi
 }
 
+# ------------------------------------------------------------ data transfer
+#
+# THE ONLY THING WATCHING THE BILL. The bundle includes a fixed monthly transfer
+# allowance counted in BOTH directions. Overage is billed per GB and is NOT
+# throttled, so going over is an invoice rather than an outage: the map stays up,
+# every other check here stays green, and the only symptom arrives next month.
+#
+# It reads /proc/net/dev, and that is the whole design. The provider publishes no
+# CloudWatch metric, so there is no alarm to write; its own API needs a
+# credential, and this box deliberately holds none. The NIC counter tracks the
+# provider's NetworkIn+NetworkOut to 0.002% outbound and 0.9% inbound, needs no
+# credential, no API call, no privilege and no network, and it cannot be the
+# reason an access key exists on a public-facing host.
+#
+# GB is 2^30 bytes throughout — the base the allowance is quoted in.
+
+MONTH_START=0
+MONTH_SECS=0
+# month_window — the UTC month containing NOW, as a start second and a length.
+# Month length is asked of date rather than assumed, because a burn-down line
+# drawn on 30 days in a 31-day month is 3% wrong in the alarming direction.
+month_window() {
+  local first
+  first="$(date -u -d "@$NOW" +%Y-%m-01)"
+  MONTH_START="$(date -u -d "$first" +%s)"
+  MONTH_SECS=$(( $(date -u -d "$first +1 month" +%s) - MONTH_START ))
+  [ "$MONTH_SECS" -gt 0 ] 2>/dev/null || MONTH_SECS=2592000
+}
+
+# transfer_iface — the interface the bill is written against.
+#
+# THE UNIT FORBIDS AF_NETLINK (RestrictAddressFamilies in
+# systemd/multiverse-monitor.service), so `ip route` cannot run here and must
+# never be introduced: it would fail under systemd and work perfectly by hand,
+# which is the worst pair of behaviours a check can have. /proc/net/route is a
+# plain file. Its default route is the row whose destination and mask are both
+# all-zero.
+transfer_iface() {
+  if [ -n "$MV_TRANSFER_IFACE" ]; then
+    printf '%s' "$MV_TRANSFER_IFACE"
+    return
+  fi
+  awk 'NR>1 && $2=="00000000" && $8=="00000000" {print $1; exit}' \
+    "$MV_PROC_NET_ROUTE" 2>/dev/null
+}
+
+check_transfer() {
+  month_window
+  local iface pair rx tx
+  iface="$(transfer_iface)"
+  if [ -z "$iface" ]; then
+    report transfer WARN "no default-route interface in $MV_PROC_NET_ROUTE, so the transfer allowance is not being watched at all. Name the billed interface in MV_TRANSFER_IFACE."
+    return
+  fi
+  # A long interface name is glued to its colon in /proc/net/dev, so split on the
+  # colon instead of trusting the space. Field 2 is receive bytes, field 10 is
+  # transmit bytes.
+  pair="$(awk -v i="$iface" '{ sub(/:/, " ") } $1 == i { print $2, $10; exit }' \
+    "$MV_PROC_NET_DEV" 2>/dev/null)"
+  rx="${pair%% *}"
+  tx="${pair##* }"
+  case "${rx:-x}${tx:-x}" in
+    *[!0-9]*)
+      report transfer WARN "no usable byte counters for $iface in $MV_PROC_NET_DEV, so the transfer allowance is not being watched."
+      return ;;
+  esac
+
+  # THE ACCUMULATOR. The counters are cumulative since boot, so the first reading
+  # is a seed and never a delta: booking it would charge the whole uptime to this
+  # month in one tick. A counter that went BACKWARDS is a reboot, and the new
+  # value is then the whole delta.
+  local lrx ltx drx dtx delta
+  lrx="$(sget net.rx "")"; case "$lrx" in ''|*[!0-9]*) lrx="" ;; esac
+  ltx="$(sget net.tx "")"; case "$ltx" in ''|*[!0-9]*) ltx="" ;; esac
+  if [ -z "$lrx" ] || [ -z "$ltx" ]; then
+    drx=0; dtx=0
+  else
+    if [ "$rx" -lt "$lrx" ]; then drx="$rx"; else drx=$(( rx - lrx )); fi
+    if [ "$tx" -lt "$ltx" ]; then dtx="$tx"; else dtx=$(( tx - ltx )); fi
+  fi
+  sset net.rx "$rx"
+  sset net.tx "$tx"
+  delta=$(( drx + dtx ))
+
+  local month prev_month mtd
+  month="$(date -u -d "@$NOW" +%Y-%m)"
+  prev_month="$(sget net.month "")"
+  if [ -z "$prev_month" ]; then
+    # Nothing recorded yet: ADOPT the month rather than roll over into it, so a
+    # hand-seeded net.mtd and net.since survive the first tick after seeding.
+    sset net.month "$month"
+    [ -n "$(sget net.since "")" ] || sset net.since "$NOW"
+  elif [ "$prev_month" != "$month" ]; then
+    # The delta is added AFTER the reset, so the sliver of traffic that straddles
+    # the first of the month — at most one tick, five minutes — is booked to the
+    # new month. Against a 3 TB allowance that is a rounding error, and the
+    # alternative is a reset that silently discards it.
+    sset net.mtd 0
+    sset net.since "$NOW"
+    sset net.month "$month"
+  fi
+  mtd="$(sget net.mtd 0)"; case "$mtd" in ''|*[!0-9]*) mtd=0 ;; esac
+  mtd=$(( mtd + delta ))
+  sset net.mtd "$mtd"
+
+  # THE HOURLY BUCKETS. A whole five-minute delta is booked to the hour that
+  # contains NOW, so one bucket can be wrong by one tick — at most 8% of an hour.
+  # That is fine for a 9 GB/h trip against a 4-5 GB/h baseline, and it is not
+  # fine for billing, which is what net.mtd above is for.
+  local hourkey prevkey hourbytes hours hot
+  hourkey="$(date -u -d "@$NOW" +%Y-%m-%dT%H)"
+  prevkey="$(sget net.hourkey "")"
+  hourbytes="$(sget net.hourbytes 0)"; case "$hourbytes" in ''|*[!0-9]*) hourbytes=0 ;; esac
+  hours="$(sget net.hours "")"
+  hot="$(sget net.hot 0)"; case "$hot" in ''|*[!0-9]*) hot=0 ;; esac
+  if [ -z "$prevkey" ]; then
+    sset net.hourkey "$hourkey"
+    hourbytes=0
+  elif [ "$prevkey" != "$hourkey" ]; then
+    hours="${hours:+$hours }$hourbytes"
+    # Keep the last 24 CLOSED hours. Trimmed with text tools rather than awk on
+    # purpose: awk would print a ten-digit byte count back as 5e+09.
+    hours="$(printf '%s' "$hours" | tr ' ' '\n' | sed '/^$/d' | tail -n 24 | tr '\n' ' ')"
+    hours="${hours% }"
+    if awk -v b="$hourbytes" -v g="$MV_TRANSFER_HOURLY_GB" 'BEGIN{exit !(b >= g * 1073741824)}'; then
+      hot=$(( hot + 1 ))
+    else
+      hot=0
+    fi
+    sset net.hours "$hours"
+    sset net.hot "$hot"
+    sset net.hourkey "$hourkey"
+    hourbytes=0
+  fi
+  hourbytes=$(( hourbytes + delta ))
+  sset net.hourbytes "$hourbytes"
+
+  local since age mtd_gb
+  since="$(sget net.since "$NOW")"; case "$since" in ''|*[!0-9]*) since="$NOW" ;; esac
+  age=$(( NOW - since ))
+  [ "$age" -ge 0 ] || age=0
+  mtd_gb="$(awk -v b="$mtd" 'BEGIN{printf "%.1f", b / 1073741824}')"
+
+  # WARM-UP. Six hours of observation before any projection is allowed to raise
+  # anything. A trailing rate computed from one tick of a freshly seeded counter
+  # is noise, and the first alert an operator ever receives decides whether the
+  # channel gets trusted or muted.
+  if [ "$age" -lt 21600 ]; then
+    report transfer OK "warming up: $mtd_gb GB observed over $(( age / 3600 ))h on $iface; the projection needs six hours"
+    return
+  fi
+
+  # PROJECTION A — the month-to-date burn-down. Where this month's usage sits
+  # against a straight line from zero to the allowance. It is the one that
+  # cannot be fooled by a quiet day, and the one that is meaningless early in a
+  # month whose first days were not observed.
+  local elapsed pct_a
+  elapsed=$(( NOW - MONTH_START ))
+  [ "$elapsed" -gt 0 ] || elapsed=1
+  pct_a="$(awk -v m="$mtd" -v a="$MV_TRANSFER_ALLOWANCE_GB" -v e="$elapsed" -v s="$MONTH_SECS" 'BEGIN{
+      line = a * 1073741824 * (e / s)
+      if (line <= 0) { print "0.0"; exit }
+      printf "%.1f", 100 * m / line
+    }')"
+
+  # PROJECTION B — the trailing rate. What the last 24 closed hours would cost
+  # over a whole month. It is the one that sees a change of behaviour today
+  # rather than at the end of the month. With no closed hour it is UNKNOWN, and
+  # unknown is not zero: A is then used alone.
+  local nhours proj_b_gb pct_b
+  nhours="$(awk -v h="$hours" 'BEGIN{print split(h, a, " ")}')"
+  proj_b_gb=""
+  pct_b=""
+  if [ "${nhours:-0}" -gt 0 ] 2>/dev/null; then
+    proj_b_gb="$(awk -v h="$hours" -v s="$MONTH_SECS" 'BEGIN{
+        n = split(h, a, " "); t = 0
+        for (i = 1; i <= n; i++) t += a[i]
+        printf "%.0f", (t / n) * (s / 3600) / 1073741824
+      }')"
+    pct_b="$(awk -v h="$hours" -v s="$MONTH_SECS" -v a="$MV_TRANSFER_ALLOWANCE_GB" 'BEGIN{
+        n = split(h, x, " "); t = 0
+        for (i = 1; i <= n; i++) t += x[i]
+        printf "%.1f", 100 * ((t / n) * (s / 3600)) / (a * 1073741824)
+      }')"
+  fi
+
+  local pct drove
+  pct="$pct_a"
+  drove="the month-to-date line is at ${pct_a}% of its burn-down"
+  if [ -n "$pct_b" ] && awk -v b="$pct_b" -v a="$pct_a" 'BEGIN{exit !(b > a)}'; then
+    pct="$pct_b"
+    drove="the last 24 h project a full month of ${proj_b_gb} GB"
+  fi
+
+  # HYSTERESIS, because the steady state sits within a point or two of the line.
+  # 3,072 GB over 31 days is 99.1 GB/day and the box draws about 98.5, so a
+  # trailing projection lands on 99% and stays there. Without hysteresis that
+  # would alert, recover, alert and recover every five minutes, and the channel
+  # would be muted before lunch. Stepping UP is immediate; stepping DOWN needs
+  # MV_TRANSFER_HYST_PCT points of clearance below whichever threshold raised it.
+  local prev sev
+  prev="$(sget sev.transfer OK)"
+  sev=OK
+  if awk -v p="$pct" 'BEGIN{exit !(p >= 100)}'; then
+    sev=CRIT
+  elif awk -v p="$pct" -v w="$MV_TRANSFER_WARN_PCT" 'BEGIN{exit !(p >= w)}'; then
+    sev=WARN
+  fi
+  if [ "$prev" = CRIT ] && [ "$sev" != CRIT ] &&
+     ! awk -v p="$pct" -v h="$MV_TRANSFER_HYST_PCT" 'BEGIN{exit !(p <= 100 - h)}'; then
+    sev=CRIT
+  fi
+  if [ "$prev" != OK ] && [ "$sev" = OK ] &&
+     ! awk -v p="$pct" -v w="$MV_TRANSFER_WARN_PCT" -v h="$MV_TRANSFER_HYST_PCT" 'BEGIN{exit !(p <= w - h)}'; then
+    sev=WARN
+  fi
+
+  case "$sev" in
+    CRIT)
+      report transfer CRIT "$mtd_gb GB of transfer used this month against a $MV_TRANSFER_ALLOWANCE_GB GB allowance counted in BOTH directions, and $drove (${pct}% of the allowance). Overage is billed at \$0.09/GB and is NOT throttled, so this is an open-ended invoice rather than an outage. Levers are in deploy/SIZING.md \"Network transfer\": low-latency HLS costs 1,190 GB per viewer-month; peer traffic alone is ~50 GB/month per unit of achieved time scale. Read from /proc/net/dev on $iface, which matches the provider's NetworkIn+NetworkOut to within 1%." ;;
+    WARN)
+      report transfer WARN "$mtd_gb GB of transfer used this month against a $MV_TRANSFER_ALLOWANCE_GB GB allowance counted in BOTH directions, and $drove (${pct}% of the allowance). Overage is billed at \$0.09/GB and is not throttled, so it is an invoice rather than an outage. The levers are in deploy/SIZING.md \"Network transfer\". Read from /proc/net/dev on $iface." ;;
+    *)
+      if [ -n "$proj_b_gb" ]; then
+        report transfer OK "$mtd_gb GB used this month, projecting $proj_b_gb GB (${pct_b}% of $MV_TRANSFER_ALLOWANCE_GB GB) at the last 24 h's rate"
+      else
+        report transfer OK "$mtd_gb GB used this month, ${pct_a}% of the burn-down line to $MV_TRANSFER_ALLOWANCE_GB GB — no closed hour yet, so there is no trailing projection"
+      fi ;;
+  esac
+}
+
+# check_transfer_rate — the leading indicator, reported on EVERY run from state
+# that check_transfer wrote. A month-to-date line moves slowly by construction;
+# a driver that appears shows up in one hour. The pre-fix day ran 8-10 GB/h with
+# three consecutive hours over 9, sixteen hours before a person noticed.
+check_transfer_rate() {
+  month_window
+  local hours hot n last last3 sustain
+  hours="$(sget net.hours "")"
+  hot="$(sget net.hot 0)"; case "$hot" in ''|*[!0-9]*) hot=0 ;; esac
+  n="$(awk -v h="$hours" 'BEGIN{print split(h, a, " ")}')"
+  if [ "${n:-0}" -eq 0 ] 2>/dev/null; then
+    report transfer-rate OK "no closed hour yet, $hot consecutive above $MV_TRANSFER_HOURLY_GB GB"
+    return
+  fi
+  last="$(awk -v h="$hours" 'BEGIN{n = split(h, a, " "); printf "%.1f", a[n] / 1073741824}')"
+  if [ "$hot" -ge "$MV_TRANSFER_HOURLY_RUNS" ] 2>/dev/null; then
+    last3="$(awk -v h="$hours" 'BEGIN{
+        n = split(h, a, " "); s = (n > 3) ? n - 2 : 1; out = ""
+        for (i = s; i <= n; i++) out = out (out == "" ? "" : ", ") sprintf("%.1f", a[i] / 1073741824)
+        print out
+      }')"
+    sustain="$(awk -v a="$MV_TRANSFER_ALLOWANCE_GB" -v s="$MONTH_SECS" 'BEGIN{printf "%.1f", a / (s / 3600)}')"
+    report transfer-rate WARN "in+out has exceeded $MV_TRANSFER_HOURLY_GB GB/hour for $hot consecutive hours (last three: $last3 GB). That is more than twice the $sustain GB/hour the allowance sustains. Something started: check open /watch tabs, the broadcast publisher, and each world's achieved time scale before the month-to-date line moves."
+  else
+    report transfer-rate OK "last closed hour $last GB, $hot consecutive above $MV_TRANSFER_HOURLY_GB GB"
+  fi
+}
+
+# check_hosts_pin — one line of /etc/hosts, and the cheapest check in the file.
+#
+# The archive subscribes to the relay BY NAME. The name resolves publicly to
+# this box's own public address, so without the loopback pin that subscription
+# leaves the NIC and comes back, and the provider counts it in both directions.
+# It is about 54 GB/day. Nothing about the service looks wrong while it happens.
+check_hosts_pin() {
+  local domain="${MV_DOMAIN:-}"
+  if [ -z "$domain" ]; then
+    report hosts-pin WARN "MV_DOMAIN is not set, so the loopback pin cannot be checked"
+    return
+  fi
+  if grep -qE "^[[:space:]]*127\.0\.0\.1[[:space:]]+${domain}([[:space:]]|\$)" "$MV_HOSTS_FILE" 2>/dev/null; then
+    report hosts-pin OK "$MV_HOSTS_FILE pins $domain to loopback"
+  else
+    report hosts-pin CRIT "$MV_HOSTS_FILE NO LONGER pins $domain to 127.0.0.1. The archive dials the relay BY NAME, so without this line its subscription — about 54 GB/day — leaves the box and comes back over the billed interface, and billed transfer roughly doubles. Restore it: echo '127.0.0.1 $domain' | sudo tee -a $MV_HOSTS_FILE (provision.sh --only envfiles also re-adds it). No restart is needed; Go re-resolves."
+  fi
+}
+
 # count_new_errors <logfile> <state-key> — error lines since the last pass,
 # surviving the numbered rotation the logger performs (<path>, <path>.1, ...).
 count_new_errors() {
@@ -519,24 +843,43 @@ check_reboot() {
 
 # ---------------------------------------------------------------- run
 
-check_units
-check_stream_origin
-check_relay_healthz
-if check_archive_healthz; then
-  check_map
-  check_bypass
-  check_replay_headroom
-  check_gaps
-fi
-check_disk
-check_errors
-check_cert
-check_backup
-check_reboot
+# --only runs one group and nothing else. It exists so the transfer arithmetic
+# can be driven from deploy/test-monitor.sh without a network, without root and
+# without the certificate check dialling the live front door; by hand it is also
+# the fastest way to re-read one check.
+case "${ONLY:-}" in
+  '')
+    check_units
+    check_stream_origin
+    check_relay_healthz
+    if check_archive_healthz; then
+      check_map
+      check_bypass
+      check_replay_headroom
+      check_gaps
+    fi
+    check_disk
+    check_transfer
+    check_transfer_rate
+    check_hosts_pin
+    check_errors
+    check_cert
+    check_backup
+    check_reboot
+    ;;
+  transfer)
+    # check_transfer_rate reads only what check_transfer wrote, so it reports on
+    # every run even when the counter read above failed.
+    check_transfer
+    check_transfer_rate
+    ;;
+  hosts-pin) check_hosts_pin ;;
+  *) echo "monitor: --only accepts 'transfer' or 'hosts-pin', not '$ONLY'" >&2; exit 2 ;;
+esac
 
 # The dead man's half. A daily line that says the watcher itself is alive, so
 # that its ABSENCE is a signal rather than a comfort.
-if [ "$MV_HEARTBEAT_HOUR" -ge 0 ] 2>/dev/null; then
+if [ -z "$ONLY" ] && [ "$MV_HEARTBEAT_HOUR" -ge 0 ] 2>/dev/null; then
   hour="$(date -u +%H)"; hour="${hour#0}"; : "${hour:=0}"
   today="$(date -u +%F)"
   if [ "$hour" = "$MV_HEARTBEAT_HOUR" ] && [ "$(sget heartbeat.day)" != "$today" ]; then

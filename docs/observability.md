@@ -217,16 +217,32 @@ capacity risks.
 | Risk | Signal | Cadence |
 |---|---|---|
 | Spot price drifting toward on-demand | `describe-spot-price-history` for the instance type, **in the AZ actually in use** | hourly, free |
-| Egress eating the transfer allowance | Cost Explorer `UsageQuantity` grouped by usage type | daily |
+| Egress eating the transfer allowance | `monitor.sh` `transfer`: `/proc/net/dev` on the billed interface, against a month-to-date burn-down line and a 24-hour trailing rate | 5 min, free |
+| A transfer driver that has just appeared | `monitor.sh` `transfer-rate`: consecutive closed hours above an hourly limit | 5 min, free |
+| The loopback pin that keeps the archive's subscription off the billed interface | `monitor.sh` `hosts-pin` | 5 min, free |
+| Billing truth behind the three rows above | Cost Explorer `UsageQuantity` grouped by usage type | daily |
 | Anything unexpected | A cost budget and an anomaly monitor scaled to this account | continuous |
 
-Three facts shape this layer and each has cost someone an hour:
+These facts shape this layer and each has cost someone an hour:
 
 - **The service host does not publish to CloudWatch.** There is no
   `AWS/Lightsail` namespace, so no CloudWatch alarm can watch its CPU, its
   burst capacity or its egress. Those come from the Lightsail API instead, and
   burst capacity *rising* means the box is under baseline and was never
   throttled.
+- **The host's own NIC counter is the free source, and the only credential-free
+  one.** `/proc/net/dev` on the billed interface tracks the provider's
+  `NetworkIn` plus `NetworkOut` to 0.002% outbound and 0.9% inbound — the
+  inbound residual is the twelve minutes of provisioning that preceded the first
+  boot. This host holds no cloud credential on purpose, and an egress monitor is
+  not a good enough reason to put one on a public-facing box. So the alerting
+  path reads the kernel and the daily Cost Explorer call reconciles it.
+- **The allowance is counted in BOTH directions, and its GB is 2^30 bytes.**
+  Reconciling the NIC counter against Cost Explorer gives a ratio of 1.01 on
+  2^30 and 1.08 on 10^9, so the decimal base is the wrong one: a 3,072 GB
+  allowance is 3,072 GiB. Everything here counts in 2^30 and calls it GB, as the
+  provider does and as the free-disk check already did. Choosing the other base
+  buys a month of false comfort.
 - **Egress is billed as usage types with a zero rate.** The billed quantity is
   readable before any overage is charged, which makes it a leading indicator
   rather than a bill.
@@ -234,6 +250,36 @@ Three facts shape this layer and each has cost someone an hour:
   Polling it hourly costs more than it can possibly reveal, because the
   underlying data refreshes only a few times a day. Daily is the correct
   cadence.
+
+**Two projections, because each is blind where the other sees.** The
+month-to-date burn-down cannot be fooled by a quiet afternoon and is meaningless
+in a month whose first days were never observed. The 24-hour trailing rate sees
+a change of behaviour today and forgets last week. The severity comes from
+whichever is higher, and the alert says which one drove it. A trailing rate with
+no closed hour behind it is *unknown*, and unknown is not zero.
+
+**A threshold this close to the steady state needs hysteresis.** The bundle's
+3,072 GB over 31 days is 99.1 GB/day and the corrected service draws about 98.5,
+so the trailing projection sits at about 99% of the allowance and stays there.
+Without hysteresis that is an alert and a recovery every five minutes until
+somebody mutes the channel. Severity steps up immediately and steps down only
+with `MV_TRANSFER_HYST_PCT` points of clearance below the threshold that raised
+it. The same reasoning gives the check a six-hour warm-up: the first alert an
+operator ever receives decides whether the channel is trusted.
+
+**The rate trip is the leading half.** A month-to-date line moves slowly by
+construction, so it is the wrong instrument for "something started". Three
+consecutive hours above 9 GB/h — against a 4–5 GB/h corrected baseline and a
+4.1 GB/h sustainable rate — would have caught the developer machine holding
+`/watch` tabs open sixteen hours before a person did, and does not fire at the
+current baseline.
+
+**One line of `/etc/hosts` is worth a check of its own.** The archive subscribes
+to the relay by name, and the name resolves publicly to this host's own address.
+The `127.0.0.1` pin is what keeps that ~54 GB/day subscription on loopback and
+off the bill. Lose it and billed transfer roughly doubles while every health
+signal stays green, which is precisely the class of failure this document exists
+to catch.
 
 The default anomaly detection on a new account will not fire below a large
 absolute impact, which on an account of this size means it can never fire. It
@@ -412,6 +458,13 @@ what is actually running.
   discarding it, refresh the token at half its lifetime, log a heartbeat every
   ten minutes, and leave a liveness breadcrumb. Before this they went blind
   after six hours and said nothing.
+- **The transfer budget check.** `monitor.sh` reads `/proc/net/dev` every five
+  minutes, accumulates month-to-date transfer and 24 closed hourly buckets in
+  `/var/lib/multiverse/monitor`, and alerts on the higher of the two projections
+  in [Layer 4](#layer-4--cost). Two companion checks ship with it: consecutive
+  hot hours, and the `/etc/hosts` loopback pin. It needs no cloud credential,
+  which is the only reason it can run on this host at all.
+  `deploy/test-monitor.sh` exercises its arithmetic off-host.
 - **A world's time scale survives a restart it performs itself.**
   `bibites-game@%i` wants `bibites-timescale@%i`, so a world that systemd brings
   back applies its target scale again instead of running silently at `x1`.
@@ -425,8 +478,11 @@ Nothing ships a measurement off-box: no metrics agent, no time-series store, no
 log shipping, no dashboard, no continuous profiling. The Layer 3 path probe has
 not been written. The relay still does not log a close code, so the
 highest-value change named in this document is still unmade. On the cost side
-there is no egress monitor, no budget, and no replacement for the default
-anomaly threshold.
+the transfer check now alerts from the host's own NIC counter, but nothing
+reconciles it against the bill: the daily Cost Explorer call is not scheduled,
+and there is still no budget and no replacement for the default anomaly
+threshold. Reconciliation needs a scoped IAM principal, which this account does
+not have.
 
 The phases below keep their order. Everything in them remains to be done,
 except where a phase says otherwise.
