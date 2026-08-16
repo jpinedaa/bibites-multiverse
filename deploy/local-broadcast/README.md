@@ -146,7 +146,7 @@ The status must report a zoom of `250` and a target time scale of `6.5`.
 The `panel` value alternates between `brain` and `biology`.
 The `fieldOfView` value must be `true`.
 The `disabledSpawnSettings` value must be `1`.
-The `fertility` value must be `3.5e-05`.
+The `fertility` value must be `3.5E-05`, which `jq` can print as `0.000035`.
 
 Make sure that the world is on the map:
 
