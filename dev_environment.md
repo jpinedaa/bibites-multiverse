@@ -24,6 +24,27 @@ resource inventory, costs, credentials, private addresses, incidents, or rollout
 Runtime data stays outside Git. This includes saves, journals, logs, credentials, build output,
 game files, captures, and archive data.
 
+### Working copies on the development machine
+
+Most work happens in a `git worktree` beside the main checkout. A worktree is a working copy, not
+a record: everything it holds is either committed or not worth keeping.
+
+Remove a worktree when its branch is merged. Confirm the branch first, then remove the directory
+and the branch:
+
+```sh
+git merge-base --is-ancestor <branch> origin/main   # must exit 0
+git worktree remove <path> && git worktree prune
+git branch -d <branch>                              # -d only; never -D
+```
+
+Do the same for a merged remote branch that has no open pull request. Keep an unmerged worktree,
+a worktree with uncommitted changes, and the divergent branches that are preserved on purpose.
+
+Do not keep a checkout of an old deployed commit as a staging copy. `git clone` and
+`git checkout <sha>` rebuild one in seconds, and a stale copy is indistinguishable from current
+source at a glance.
+
 ## Versions
 
 | Component | Public development baseline |
