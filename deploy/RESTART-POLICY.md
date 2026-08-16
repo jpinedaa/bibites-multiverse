@@ -309,7 +309,8 @@ Complete these checks before a planned restart:
 4. Estimate replay time with the target-host rate.
 5. Create and check the identity backup.
 6. Record the reason, approval, and rollback condition.
-7. Send the required notice.
+7. Send the required notice on the announcements page. [`ANNOUNCEMENT.md`](ANNOUNCEMENT.md) names
+   that channel and states what the notice must contain.
 
 If projected archive memory is critical, do not restart the archive.
 Increase capacity or reduce the approved retained state first.

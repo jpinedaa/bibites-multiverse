@@ -40,6 +40,22 @@ The deployed `MV_PERIOD_START` and `MV_PERIOD_END` values must match those docum
 Do not shorten the service period without a dated notice.
 An extension also needs a dated notice.
 
+## Publication channel
+
+Publish every service notice on the announcements page at `https://<MV_DOMAIN>/announcements/`.
+That page is the project's own notice channel.
+Its address is the exact public link that the record of communication below must carry.
+
+nginx serves that page from a file on the service host, and not from the archive.
+A notice therefore stays readable while the archive is stopped or replaying its ledger, which is
+the state that most notices describe.
+The page is unavailable only while the whole host is unavailable.
+[`README.md`](README.md) carries the file layout and the command that posts a notice.
+
+The page does not replace a direct message.
+A notice that requires a participant action also needs the channel that reaches that participant.
+Transfer a replacement credential through an approved private channel, never through this page.
+
 ## Routine service notices
 
 Send a notice before a planned relay, archive, or host restart.

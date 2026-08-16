@@ -6,7 +6,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/multiverse-front-door.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
-mkdir -p "$TMP/acme" "$TMP/logs" "$TMP/tls"
+mkdir -p "$TMP/acme" "$TMP/logs" "$TMP/tls" "$TMP/www/announcements"
 
 render() {
   sed -e 's|@@MV_DOMAIN@@|multiverse.example|g' \
@@ -16,6 +16,7 @@ render() {
       -e 's|@@MV_STREAM_HLS_BACKEND@@|127.0.0.1:8888|g' \
       -e "s|@@MV_TLSDIR@@|$TMP/tls|g" \
       -e "s|@@ACME_ROOT@@|$TMP/acme|g" \
+      -e "s|@@WWW_ROOT@@|$TMP/www|g" \
       -e "s|/var/log/nginx|$TMP/logs|g" \
       "$1" >"$2"
 }
@@ -42,6 +43,17 @@ if grep -Fq 'zone=mvstream' "$front"; then
   echo 'the HLS route contains an incompatible request-rate limit' >&2
   exit 1
 fi
+grep -Fq 'location = /announcements {' "$front"
+grep -Fq 'return 301 /announcements/;' "$front"
+grep -Fq 'location ^~ /announcements/ {' "$front"
+grep -Fq 'ssi on;' "$front"
+# The announcements page must not be a proxy: an archive route would take a
+# service notice offline for the outage the notice is about.
+awk '/location \^~ \/announcements\/ \{/,/^    \}/' "$front" | grep -Fq 'proxy_pass' && {
+  echo 'the announcements route proxies to a backend; it must serve from disk' >&2
+  exit 1
+}
+awk '/location \^~ \/announcements\/ \{/,/^    \}/' "$front" | grep -Fq 'limit_except GET HEAD'
 grep -Fq 'location / {' "$front"
 grep -Fq 'proxy_pass http://127.0.0.1:8796;' "$front"
 grep -Fq 'limit_except GET HEAD' "$front"
@@ -50,7 +62,21 @@ grep -Fq 'Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=
 grep -Fq 'Cross-Origin-Opener-Policy same-origin always;' "$front"
 grep -Fq "media-src 'self' blob:;" "$front"
 grep -Fq "Content-Security-Policy \"default-src 'self';" "$front"
-if grep -Eq '@@|MV_STATUS_PORT|8443' "$TMP/acme.conf" "$front"; then
+render "$HERE/www/announcements/index.html" "$TMP/announcements.html"
+grep -Fq '<!--# include file="notices.html" -->' "$TMP/announcements.html"
+# The page is chrome only. A notice that lived in this file would need a
+# provision run to publish, which is the coupling the split exists to remove.
+if grep -Fq 'class="notice"' "$TMP/announcements.html"; then
+  echo 'the announcements chrome contains a notice; notices belong in notices.html' >&2
+  exit 1
+fi
+grep -Fq 'class="notice"' "$HERE/www/announcements/notices.html"
+if grep -Eq '^[[:space:]]*</?(html|head|body)\b' "$HERE/www/announcements/notices.html"; then
+  echo 'notices.html must be an HTML fragment, not a whole document' >&2
+  exit 1
+fi
+
+if grep -Eq '@@|MV_STATUS_PORT|8443' "$TMP/acme.conf" "$front" "$TMP/announcements.html"; then
   echo 'front-door render contains an obsolete value or unresolved placeholder' >&2
   exit 1
 fi

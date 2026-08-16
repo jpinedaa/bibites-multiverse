@@ -114,6 +114,8 @@ RELAY_DATA="$MV_STATE/relay"
 ARCHIVE_DATA="$MV_STATE/archive"
 BIN="$MV_PREFIX/bin"
 ACME_ROOT=/var/www/acme
+WWW_ROOT=/var/www
+ANNOUNCE_ROOT="$WWW_ROOT/announcements"
 ARCHIVE_SECRET=/etc/multiverse/archive.secret
 CONTRACT_B_PATH=/contract-b/v4
 ADVERTISE_URL="wss://${MV_DOMAIN}${CONTRACT_B_PATH}"
@@ -290,7 +292,8 @@ phase_directories() {
   # operator reads at 03:00 on the machine that is misbehaving — and because the
   # on-box copy must be able to re-run this script, which needs the templates.
   run install -d -m 0755 -o root -g root "$MV_PREFIX/deploy" \
-    "$MV_PREFIX/deploy/nginx" "$MV_PREFIX/deploy/systemd"
+    "$MV_PREFIX/deploy/nginx" "$MV_PREFIX/deploy/systemd" \
+    "$MV_PREFIX/deploy/www" "$MV_PREFIX/deploy/www/announcements"
   local f
   for f in "$KIT_DIR"/*.sh; do
     [ -e "$f" ] || continue
@@ -311,6 +314,11 @@ phase_directories() {
     [ -e "$f" ] || continue
     run install -m 0644 -o root -g root "$f" \
       "$MV_PREFIX/deploy/$(basename "$(dirname "$f")")/$(basename "$f")"
+  done
+  for f in "$KIT_DIR"/www/announcements/*; do
+    [ -e "$f" ] || continue
+    run install -m 0644 -o root -g root "$f" \
+      "$MV_PREFIX/deploy/www/announcements/$(basename "$f")"
   done
   say "state $MV_STATE  logs $MV_LOGDIR  tls $MV_TLSDIR  kit $MV_PREFIX/deploy"
 }
@@ -551,14 +559,14 @@ phase_nginxacme() {
     run rm -f /etc/nginx/sites-enabled/default
     say "removed the packaged default site"
   fi
-  render_nginx "$KIT_DIR/nginx/multiverse-10-acme.conf" /etc/nginx/conf.d/multiverse-10-acme.conf
+  render_template "$KIT_DIR/nginx/multiverse-10-acme.conf" /etc/nginx/conf.d/multiverse-10-acme.conf
   run nginx -t
   run systemctl enable --now nginx
   run systemctl reload nginx
   say "port 80 serves $ACME_ROOT/.well-known/acme-challenge/ and nothing else"
 }
 
-render_nginx() {
+render_template() {
   local src="$1" dst="$2"
   [ -f "$src" ] || die "missing kit file $src"
   sed -e "s|@@MV_DOMAIN@@|$MV_DOMAIN|g" \
@@ -568,6 +576,7 @@ render_nginx() {
       -e "s|@@MV_STREAM_HLS_BACKEND@@|$MV_STREAM_HLS_BACKEND|g" \
       -e "s|@@MV_TLSDIR@@|$MV_TLSDIR|g" \
       -e "s|@@ACME_ROOT@@|$ACME_ROOT|g" \
+      -e "s|@@WWW_ROOT@@|$WWW_ROOT|g" \
       "$src" | write_file "$dst" 0644 root:root
   say "rendered $dst"
 }
@@ -628,10 +637,26 @@ phase_nginxfront() {
       die "no certificate at $MV_TLSDIR/fullchain.pem — run the tls phase first"
     fi
   fi
-  render_nginx "$KIT_DIR/nginx/multiverse-20-status.conf" /etc/nginx/conf.d/multiverse-20-status.conf
+  # The announcements page ships with the front door because nginx, not the
+  # archive, is what serves it — see the /announcements block in the template.
+  run install -d -m 0755 -o root -g root "$ANNOUNCE_ROOT"
+  render_template "$KIT_DIR/www/announcements/index.html" "$ANNOUNCE_ROOT/index.html"
+  # THE NOTICES FILE IS OPERATOR CONTENT AND THIS SCRIPT MUST NOT OWN IT. Seed it
+  # once on a host that has none; never again. An unconditional install here
+  # would delete every posted notice on the next provision run, silently, and the
+  # operator would find out from a participant.
+  if [ -e "$ANNOUNCE_ROOT/notices.html" ]; then
+    say "kept the existing $ANNOUNCE_ROOT/notices.html — posted notices are not kit content"
+  else
+    run install -m 0644 -o root -g root "$KIT_DIR/www/announcements/notices.html" \
+      "$ANNOUNCE_ROOT/notices.html"
+    say "seeded $ANNOUNCE_ROOT/notices.html from the kit"
+  fi
+  render_template "$KIT_DIR/nginx/multiverse-20-status.conf" /etc/nginx/conf.d/multiverse-20-status.conf
   run nginx -t
   run systemctl reload nginx
   say "https://$MV_DOMAIN/ -> $MV_ARCHIVE_HTTP, GET and HEAD only, rate limited"
+  say "https://$MV_DOMAIN/announcements/ -> $ANNOUNCE_ROOT, static, no archive needed"
   say "$ADVERTISE_URL -> $MV_RELAY_BACKEND, WebSocket proxy"
 }
 
