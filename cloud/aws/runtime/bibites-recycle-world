@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Restart at most ONE world, and only when memory says it is needed.
+#
+# WHY THIS EXISTS. Each world process grows by roughly 0.72 GiB per wall-clock
+# hour. The rate is independent of time scale, achieved rate and population — a
+# world pinned at x1 simulating almost nothing leaks at the same rate as one
+# running at x19. Six worlds therefore fill 32 GiB in about seven hours, and the
+# host ends in direct-reclaim thrash and an OOM kill.
+#
+# That restart already happens. The OOM killer performs it, with SIGKILL, at the
+# moment of its choosing, after dragging every other world through a swap storm
+# — and measured against the relay's log, 47 of 48 peer disconnections happened
+# with host memory between 85% and 99%. This script performs the same restart
+# early, with SIGTERM and save-on-quit, one world at a time.
+#
+# It is a PRESSURE RELIEF VALVE AND NOT A SCHEDULE. On a tick where memory is
+# comfortable it does nothing at all. That matters because the leak is a defect:
+# when it is fixed, this script must quietly stop acting rather than keep
+# restarting healthy worlds forever.
+#
+# WHAT IT WILL NOT DO, and each guard is here because the failure it prevents is
+# worse than a delayed restart:
+#   - never more than one world per run
+#   - never while any world is already dark, so it cannot deepen an outage
+#   - never within the cool-off of the previous recycle
+#   - never a world that has not been up long enough to have leaked
+#   - never if it cannot confirm save-on-quit is configured for that world
+set -euo pipefail
+
+log() { logger -t bibites-recycle-world -- "$*"; printf '%s\n' "$*"; }
+
+# Act when available memory falls below this share of total. 0.18 sits well
+# above the thrash floor: direct reclaim was already scanning 3.1 pages per page
+# freed at ~4% available, and PSI showed whole-machine stalls there.
+LOW_MEMORY_FRACTION="${BIBITES_RECYCLE_LOW_MEM_FRACTION:-0.18}"
+# A world younger than this has not leaked enough to be worth the disruption.
+MIN_UPTIME_SECONDS="${BIBITES_RECYCLE_MIN_UPTIME:-3600}"
+# Leave time for a world to come back and re-apply its time scale before another
+# is considered. The setter waits for the mod to report connected and then sends
+# the scale twice, twenty seconds apart.
+COOLOFF_SECONDS="${BIBITES_RECYCLE_COOLOFF:-1500}"
+STATE_DIR="${BIBITES_RECYCLE_STATE_DIR:-/run/bibites}"
+STATE_FILE="$STATE_DIR/recycle.state"
+DRY_RUN=0
+[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+mem_total_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+mem_avail_kb=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+avail_frac=$(awk -v a="$mem_avail_kb" -v t="$mem_total_kb" 'BEGIN{printf "%.4f", a/t}')
+
+note() {
+  printf 'at=%s availableFraction=%s action=%s detail=%s\n' \
+    "$(date -u +%FT%TZ)" "$avail_frac" "$1" "${2:-none}" > "$STATE_FILE" 2>/dev/null || true
+}
+
+# --- guard: is the pressure actually there? ------------------------------------
+if awk -v a="$avail_frac" -v l="$LOW_MEMORY_FRACTION" 'BEGIN{exit !(a > l)}'; then
+  note skipped "memory comfortable (${avail_frac} available)"
+  exit 0
+fi
+
+# --- guard: is the map whole? --------------------------------------------------
+# Recycling into an existing outage turns one dark world into two. bibites-cloud-status
+# reports each world's own view; a world whose sidecar says the relay is down, or
+# whose mod is not connected, means this is not a quiet moment.
+status_json="$(/usr/local/bin/bibites-cloud-status --json 2>/dev/null || printf '[]')"
+unhealthy="$(printf '%s' "$status_json" | jq -r '
+  [ .[]? | select(
+      (.slot.relay.connected // false) != true
+      or (.slot.mod.connected // false) != true
+      or (.game // "") != "active"
+    ) | .world // .id // "unknown" ] | join(",")' 2>/dev/null || echo '')"
+if [ -n "$unhealthy" ]; then
+  log "holding off: the map is not whole (unhealthy: $unhealthy)"
+  note held "unhealthy=$unhealthy"
+  exit 0
+fi
+
+# --- guard: cool-off -----------------------------------------------------------
+last_at=0
+[ -f "$STATE_DIR/recycle.last" ] && last_at="$(cat "$STATE_DIR/recycle.last" 2>/dev/null || echo 0)"
+now="$(date +%s)"
+if [ $(( now - last_at )) -lt "$COOLOFF_SECONDS" ]; then
+  note held "cool-off, $(( COOLOFF_SECONDS - (now - last_at) ))s remaining"
+  exit 0
+fi
+
+# --- choose: the biggest world that is old enough ------------------------------
+# Biggest rather than oldest, because the leak rate varies a little between
+# worlds and the point of the exercise is to reclaim memory.
+best_unit=''; best_bytes=0
+for unit in $(systemctl list-units --type=service --state=running 'bibites-game@*.service' \
+                --no-legend | awk '{print $1}'); do
+  bytes="$(systemctl show "$unit" -p MemoryCurrent --value 2>/dev/null || echo 0)"
+  case "$bytes" in ''|*[!0-9]*) continue ;; esac
+  started_us="$(systemctl show "$unit" -p ActiveEnterTimestampMonotonic --value 2>/dev/null || echo 0)"
+  mono_us=$(( $(awk '{printf "%d", $1*1000000}' /proc/uptime) ))
+  up_s=$(( (mono_us - started_us) / 1000000 ))
+  [ "$up_s" -lt "$MIN_UPTIME_SECONDS" ] && continue
+  if [ "$bytes" -gt "$best_bytes" ]; then best_bytes="$bytes"; best_unit="$unit"; fi
+done
+
+if [ -z "$best_unit" ]; then
+  log "memory is low (${avail_frac} available) but no world is old enough to recycle"
+  note held "no eligible world"
+  exit 0
+fi
+
+world="${best_unit#bibites-game@}"; world="${world%.service}"
+
+# --- guard: save-on-quit must be configured, or a restart loses evolution -------
+env_file="/srv/bibites/worlds/$world/world.env"
+if ! grep -qE '^MULTIVERSE_SAVE_ON_QUIT=(1|true)$' "$env_file" 2>/dev/null; then
+  log "REFUSING to recycle $world: save-on-quit is not configured in $env_file"
+  note refused "$world save-on-quit unset"
+  exit 1
+fi
+
+gib=$(awk -v b="$best_bytes" 'BEGIN{printf "%.2f", b/1073741824}')
+if [ "$DRY_RUN" = 1 ]; then
+  log "[dry-run] would recycle $world (${gib} GiB, ${avail_frac} host memory available)"
+  note dry-run "$world"
+  exit 0
+fi
+
+log "recycling $world: ${gib} GiB resident, ${avail_frac} of host memory available"
+printf '%s' "$now" > "$STATE_DIR/recycle.last"
+note recycling "$world ${gib}GiB"
+
+# TimeoutStopSec=45 on the unit, and the game runs save-on-quit on SIGTERM. The
+# time scale is re-applied by bibites-timescale@%i, which this unit now pulls in
+# through Wants= on every start -- including this one.
+systemctl restart "$best_unit"
+log "$world restarted; bibites-timescale@$world will re-apply its target scale"
