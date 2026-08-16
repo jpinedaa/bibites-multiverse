@@ -177,6 +177,43 @@ the second row to be earnable, never for writing it before somebody earned it.
 your build needs it. The relay-side minimum wire version is raised only *after* the release that
 satisfies it exists.
 
+## The tested build
+
+**The rows above say which *game* build this release supports. This section says which build of
+*this project* earned that claim** — the mod and sidecar that were built, run, and observed, named
+by hash rather than kept as a committed binary. It is `testedBuild` in the block below, and it is
+one record rather than a per-row one because the plugin is a single file for both platforms.
+
+| | |
+|---|---|
+| Mod version | `0.6.4` |
+| `BibitesMultiverse.dll` SHA-256 | `07b30eb07c093da7309ab582150d197dfb2963cbd220f5f50efce8badb77ed83` |
+| `bibites-mod/` tree | `fdeacf430ebf55a2d1271c932eb4011fa945680a` |
+| `cmd/sidecar` source commit | `b96e7124a35a1f88d6d1c13689c27ba4a3230146` |
+| `cmd/sidecar` input digest | `b8ce3e62917a9b1f68f71f3e13ab15d2f4216c9b8caadb414e8fd59d5a4d6469` |
+| Tested on | 2026-08-15 |
+
+**Three refusals stand on those values.** `release/make-release.sh` will not package a release
+whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
+something else, or whose plugin declares a `Version` other than `mod`; `release/check-drift.sh`
+asks the same three questions from tracked text alone — no game, no .NET, no network — on every
+pull request. The input digest is the digest of the manifest `release/lib/sidecar-manifest.sh`
+writes: every file under `go/` that `cmd/sidecar` reaches, with its hash, plus the identity of
+every external module that graph selects. Two checkouts whose manifests agree build the same
+sidecar, so the digest catches *the sidecar source moved and the plugin did not* — the easy
+mistake, because the sidecar changes far more often than the mod.
+
+**What the record is worth, exactly.** It is self-asserted: somebody built these bytes, ran them,
+and wrote down what they ran. It catches **forgetting** — a mod change that lands without a test,
+a sidecar change that never reached a tested binary — and it does not prove that a test happened.
+The `evidence` sentence is where the run is described, and it is written by the person who ran it.
+
+**Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
+it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
+`release/record-tested-build.sh` prints the block ready to paste. The `mod` field on both rows
+moves in the same edit, because a release names one plugin version and this is where that number
+is decided.
+
 ---
 
 ## The machine-readable copy
@@ -192,6 +229,10 @@ and a row with a missing field is a reader that has to guess. Store-specific ide
 lives in one human-readable `storeBuild` string rather than in `steamAppId` / `itchUploadId` pairs
 that only half the rows would have.
 
+**`testedBuild` sits beside `release`, not on a row.** The plugin is one file for both platforms,
+so a per-row copy would be the same data written twice and a change to the shape every installer
+reads. The installers ignore it; the release gates do not.
+
 | Key | What it is |
 |---|---|
 | `platform` | `Windows` or `Linux`. **With `gameVersion` this is the key of a row**; each installer filters the list to its own platform before it matches a hash |
@@ -203,9 +244,18 @@ that only half the rows would have.
 <!-- SUPPORT-MATRIX-JSON-BEGIN -->
 ```json
 {
-  "matrix": "bibites-multiverse/support-matrix/2",
-  "release": "0.2.5",
-  "published": "2026-08-15",
+  "matrix": "bibites-multiverse/support-matrix/3",
+  "release": "0.2.6",
+  "published": "2026-08-16",
+  "testedBuild": {
+    "mod": "0.6.4",
+    "pluginSha256": "07b30eb07c093da7309ab582150d197dfb2963cbd220f5f50efce8badb77ed83",
+    "bibitesModTree": "fdeacf430ebf55a2d1271c932eb4011fa945680a",
+    "sidecarSourceCommit": "b96e7124a35a1f88d6d1c13689c27ba4a3230146",
+    "sidecarInputsSha256": "b8ce3e62917a9b1f68f71f3e13ab15d2f4216c9b8caadb414e8fd59d5a4d6469",
+    "testedOn": "2026-08-15",
+    "evidence": "this plugin and this sidecar source shipped in the two most recent releases; the six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15, and the local broadcast world runs the same plugin"
+  },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
   "entries": [

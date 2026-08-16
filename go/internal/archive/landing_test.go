@@ -2,6 +2,7 @@ package archive
 
 import (
 	"bytes"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
@@ -122,12 +123,12 @@ func TestLandingCardLayoutKeepsRelatedContentTogether(t *testing.T) {
 func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 	defaultLanding := landingPageHTML
 	for _, want := range []string{
-		"The Windows setup and Linux complete package for release 0.2.5",
+		"The Windows setup and Linux complete package for release 0.2.6",
 		"Each installer creates a unique world identity and keeps its secret on your machine.",
 		"No join string is required.",
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.5/bibites-multiverse-0.2.5-windows-x64-setup.exe"`,
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.5/bibites-multiverse-0.2.5-linux-x64-complete.zip"`,
-		`href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.5">Checksums and add-ons`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.6/bibites-multiverse-0.2.6-windows-x64-setup.exe"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.6/bibites-multiverse-0.2.6-linux-x64-complete.zip"`,
+		`href="https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.6">Checksums and add-ons`,
 		"Automatic enrollment creates the secret on your machine.",
 	} {
 		if !strings.Contains(defaultLanding, want) {
@@ -191,6 +192,10 @@ func TestLandingPageUsesHomepageConfigOverrides(t *testing.T) {
 // and is not one is worse than no card: the scraper fetches it, fails to decode
 // it, and shows the link with a blank frame.
 const pngMagic = "\x89PNG\r\n\x1a\n"
+
+// jpegMagic is the three-byte JFIF start-of-image marker, the same kind of
+// check as pngMagic for the one raster asset on this site that is not a card.
+const jpegMagic = "\xff\xd8\xff"
 
 // The one card size every scraper in the list below crops predictably. The
 // og:image:width and og:image:height tags on each page promise exactly this,
@@ -315,6 +320,7 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 		{"/social-card.png", "image/png", pngMagic, http.StatusOK},
 		{"/social-card-watch.png", "image/png", pngMagic, http.StatusOK},
 		{"/social-card-live.png", "image/png", pngMagic, http.StatusOK},
+		{"/game-screenshot.jpg", "image/jpeg", jpegMagic, http.StatusOK},
 		{"/robots.txt", "text/plain", "Sitemap: https://bibitesmultiverse.com/sitemap.xml", http.StatusOK},
 		{"/sitemap.xml", "application/xml", "https://bibitesmultiverse.com/live", http.StatusOK},
 		{"/nothing-here", "text/html", "This world is not on the map.", http.StatusNotFound},
@@ -353,5 +359,57 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 	if resp.StatusCode != http.StatusMovedPermanently || resp.Header.Get("Location") != "/live" {
 		t.Fatalf("legacy /map = HTTP %d to %q, want 301 to /live",
 			resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
+
+// The #game section exists to answer "what am I looking at?" for someone who
+// has never heard of the game. It does that with three things that have to
+// stay together: a title that names the game's role instead of its history, a
+// picture of the game actually running, and a way to get from the hero
+// sentence down to the section. Any one of them alone leaves the question
+// half-answered, so they are asserted as one contract.
+func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
+	for _, want := range []string{
+		"<h2><em>The Bibites</em></h2>",
+		"Every world on this map runs a copy of the game.",
+		`src="/game-screenshot.jpg"`,
+		`href="#game"><em>The Bibites</em></a>`,
+	} {
+		if !strings.Contains(landingPageHTML, want) {
+			t.Errorf("landing page is missing %q", want)
+		}
+	}
+	// The old title told the game's chronology, which reads as a credit line
+	// rather than an explanation. It should not come back.
+	if strings.Contains(landingPageHTML, "came first") {
+		t.Error("landing page still carries the retired chronology title")
+	}
+	// Its replacement described the game instead of naming it. The section is
+	// the game's own, so the title is the game's name and nothing else.
+	if strings.Contains(landingPageHTML, "The game behind every world") {
+		t.Error("landing page still carries the retired descriptive title")
+	}
+
+	a := rigShapedArchive(t)
+	rr := httptest.NewRecorder()
+	a.httpHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/game-screenshot.jpg", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /game-screenshot.jpg status = %d, want 200", rr.Code)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Errorf("GET /game-screenshot.jpg content type = %q, want image/jpeg", got)
+	}
+	if got := rr.Header().Get("Cache-Control"); !strings.Contains(got, "max-age=") {
+		t.Errorf("GET /game-screenshot.jpg cache control = %q, want a cache lifetime", got)
+	}
+	// The markup declares 1280x720 so the browser reserves the box before the
+	// lazy image lands; a frame of another size would reflow the section.
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(rr.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("GET /game-screenshot.jpg did not decode as JPEG: %v", err)
+	}
+	if cfg.Width != 1280 || cfg.Height != 720 {
+		t.Errorf("GET /game-screenshot.jpg is %dx%d, want 1280x720 — the size the markup reserves",
+			cfg.Width, cfg.Height)
 	}
 }

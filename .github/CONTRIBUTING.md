@@ -19,7 +19,7 @@ For a security vulnerability, do not open an issue. Read the
 | Area | Start here | What CI runs on your pull request |
 |---|---|---|
 | Go relay, sidecar, archive, or tools | [`go/`](../go/) and the [developer guide](../dev_environment.md) | `go vet` for this host and for Windows, `go test ./...`, and the cross-builds the release and the hosting kit ship |
-| Game mod | [`bibites-mod/`](../bibites-mod/) and the [developer guide](../dev_environment.md) | Not the build itself — it needs the game assemblies. `release/check-drift.sh` instead: the plugin version has to agree everywhere it is stated, and the far-end bundle has to be rebuilt with the mod |
+| Game mod | [`bibites-mod/`](../bibites-mod/) and the [developer guide](../dev_environment.md) | Not the build itself — it needs the game assemblies. `release/check-drift.sh` instead: the plugin version has to agree everywhere it is stated, and the tested build recorded in `docs/support-matrix.md` has to describe the mod in the tree |
 | Player packages | [`release/README.md`](../release/README.md) | The Windows installer script compiles against a stub payload, every shipped PowerShell file parses, and the release version surface agrees with itself |
 | Participant documentation | [`docs/README.md`](../docs/README.md) | Nothing yet. Make sure that all local links resolve |
 | Hosted service | [`deploy/README.md`](../deploy/README.md) | `deploy/test-units.sh` and `deploy/test-front-door.sh`, the second against a real nginx |
@@ -58,15 +58,16 @@ unexpected tracked binary, a `.dll` above all. When the binary genuinely belongs
 [`release/tracked-binaries.txt`](../release/tracked-binaries.txt) in the same pull request, and say
 in the description why the repository is that file's only distribution channel.
 
-A change to `bibites-mod/` is not finished until the far-end bundle is rebuilt in its own commit;
-[`release/README.md`](../release/README.md) has that procedure, and `release/check-drift.sh` tells
-you whether it is outstanding.
+A change to `bibites-mod/` is not finished until somebody has tested the plugin it builds and
+recorded that build in `docs/support-matrix.md` — the machine with the game does both.
+[`release/README.md`](../release/README.md) has that procedure, `release/record-tested-build.sh`
+prints the record, and `release/check-drift.sh` tells you whether it is outstanding.
 
 **Two things that surprise people.** Some documentation lines are read by the two gates above — the
 publish commands in `release/README.md`, three lines of `STATUS.md`, and the Plugin row of
 `dev_environment.md` — so a documentation-only change can turn CI red. Run both gates before you
 push. And if `consistency` is red on a change that goes nowhere near the release surface, read what
-`release/check-drift.sh` printed: an outstanding far-end-bundle rebuild fails it for everybody, is
+`release/check-drift.sh` printed: an outstanding tested-build record fails it for everybody, is
 not yours to fix, and is described under *Day one* in
 [`release/README.md`](../release/README.md).
 

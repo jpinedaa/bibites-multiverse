@@ -1,14 +1,6 @@
-# The bundle's build scratch and download cache: binaries, never committed.
-# `dist/*` rather than `dist/` so git still descends into the directory and the
-# negation below can take effect.
+# Build output only, and none of it is tracked: the handover zip, its staging
+# directory (dist/farend-bundle/) and the cached BepInEx download (dist/cache/).
+# make-farend-bundle.sh writes the zip on demand and the far end takes it by
+# hand; what a release is measured against is the "testedBuild" record in
+# docs/support-matrix.md, not a binary in this directory.
 dist/*
-
-# Exception: the far-end bundle ships through the repo, so the second computer
-# clones it instead of copying it over USB.
-!dist/farend-bundle.zip
-
-# Exception: the bundle's source record, written beside the zip by
-# make-farend-bundle.sh and committed in the same commit as the zip it describes.
-# Tracked text is what lets a check prove the committed bundle is not stale
-# without unzipping it — see the grammar at the top of make-farend-bundle.sh.
-!dist/BUNDLE-SOURCE.txt
