@@ -44,12 +44,14 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 ## About *The Bibites*
 
 [*The Bibites: Digital Life*](https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/)
-is an artificial-life sandbox by Omnia Studios. Every Bibite inherits mutable genes and a
+is an artificial-life simulation created by Léo Caussan in 2017 and developed by
+[Omnia Studios](https://www.thebibites.com/). Every Bibite inherits mutable genes and a
 neural-network brain.
 
 > [!NOTE]
 > ***The Bibites* and Bibites Multiverse have different creators.** Bibites Multiverse is an
-> independent community project. It is not affiliated with or endorsed by Omnia Studios.
+> independent passion project, built out of an interest in artificial life. It is not affiliated
+> with, endorsed by, or sponsored by Léo Caussan or Omnia Studios.
 
 You set the physical and biological conditions of a world. Natural selection shapes the creatures
 that live there. Their bodies, brains, behavior, and species can change across generations.
