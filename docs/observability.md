@@ -126,6 +126,29 @@ tripwire, so "did the cap get near" stops being unanswerable. `NRestarts` is
 sampled so a restart that healed itself between two monitor ticks stops being
 invisible.
 
+**`MemoryCurrent` on its own is the wrong number for a growing heap, and this
+is the sharpest example the project has.** It is anonymous memory plus page
+cache plus kernel memory for the whole cgroup. The archive appends to a
+multi-gigabyte ledger and to a rotating log, so its page-cache term moves by a
+hundred megabytes between two samples and the kernel reclaims it at will. In
+the first forty-five minutes of the service-host sampler's life the archive's
+`MemoryCurrent` fell by 166 MB while the ledger it holds in memory grew. A
+trend drawn from that series has the wrong sign. So the sampler records the
+decomposition beside it:
+
+| Field | Source | Why it is there |
+|---|---|---|
+| `memoryBytes` | `MemoryCurrent` | unchanged, and what the relay's cap is compared against |
+| `anonBytes` | cgroup `memory.stat` `anon` | the unreclaimable half. This is the term that grows with the ledger and the term the out-of-memory killer eventually acts on |
+| `fileBytes` | cgroup `memory.stat` `file` | the reclaimable half, recorded so the swing in `memoryBytes` is explained by the record rather than mistaken for one |
+| `mainRssAnonBytes` | `/proc/<pid>/status` `RssAnon` | the main process's anonymous resident set. On a single-process unit it agrees with `anonBytes`, and recording both proves that rather than assuming it |
+| `mainVmHwmBytes` | `/proc/<pid>/status` `VmHWM` | **nothing else on the box remembers the replay peak.** It occurs in the first minute after a start, which no one-minute sampler is guaranteed to observe, and the resident set settles about 5% below it |
+| `mainPid` | `MainPID` | a restart *between* two samples. `NRestarts` counts only what systemd restarted by itself; every archive restart on this host so far has been an operator's `systemctl restart`, which leaves it at zero |
+
+The `/proc` reads are taken for named single-process units only — the archive
+by default. A per-process resident set describes a unit truthfully only when
+the unit is one process, and nginx is a master with workers.
+
 ### Utilisation is not saturation
 
 The most expensive lesson this service has produced. A host pinned at 96–99% CPU
@@ -160,9 +183,11 @@ just host totals** — a host-level "29 of 30 GiB used" says nothing about which
 world to act on, and the sampler that recorded only host memory is why the
 failure read as a CPU problem for a day.
 
-Sample per-unit `MemoryCurrent`, per-cgroup `memory.pressure`, and `/proc/vmstat`
-`pswpin`, `pswpout` and `oom_kill`. The last is the one that turns "something
-restarted" into "the kernel killed it".
+Sample per-unit `MemoryCurrent` **and the cgroup's `anon` term beside it**,
+per-cgroup `memory.pressure`, and `/proc/vmstat` `pswpin`, `pswpout` and
+`oom_kill`. The last is the one that turns "something restarted" into "the
+kernel killed it". [Layer 1](#layer-1--host) says why `MemoryCurrent` alone
+misreads a growing heap.
 
 ### Layer 2 — Service
 
@@ -465,6 +490,25 @@ what is actually running.
   hot hours, and the `/etc/hosts` loopback pin. It needs no cloud credential,
   which is the only reason it can run on this host at all.
   `deploy/test-monitor.sh` exercises its arithmetic off-host.
+- **The archive memory gate, divided by physical RAM alone.** `monitor.sh`
+  `replay` projects the archive's resident set and replay peak from the ledger
+  record count and compares the larger against `MemTotal`. **Swap is not in
+  that denominator.** It once was, which meant a critical archive-memory
+  verdict could be cleared by adding a swap file while the ledger, the retained
+  state and the replay were all exactly as they were — a tripwire a one-line
+  change turns green without touching what it watches. Swap is reported by its
+  own `swap` check instead, which says whether any exists and warns when
+  sustained use makes it a sizing signal rather than a crash barrier. The two
+  per-record constants are parameters (`MV_REPLAY_PEAK_B`,
+  `MV_REPLAY_RESIDENT_B`) so a measurement on a real ledger can retune the gate
+  without a release; [`SIZING.md`](../deploy/SIZING.md) "Archive memory" owns
+  their values. `deploy/test-monitor.sh` covers this arithmetic too, including
+  the swap case as a regression.
+- **The archive's anonymous memory and replay peak, in the record.** The
+  service-host sampler records `anonBytes`, `fileBytes`, `mainRssAnonBytes`,
+  `mainVmHwmBytes` and `mainPid` per unit beside the `MemoryCurrent` it already
+  had. [Layer 1](#layer-1--host) says why the original field could not see the
+  problem it was added to watch.
 - **A world's time scale survives a restart it performs itself.**
   `bibites-game@%i` wants `bibites-timescale@%i`, so a world that systemd brings
   back applies its target scale again instead of running silently at `x1`.

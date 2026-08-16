@@ -240,6 +240,44 @@ The participant cost is the same as the archive-restart sequence above.
 After boot, check service enablement and archive subscription.
 Do not infer archive health from the process state alone.
 
+### Reboot checklist
+
+This is the ordered form of the rules above, for one operator, in one session.
+It adds no rule. Each step names the section that states it.
+
+1. Complete every [pre-restart check](#pre-restart-checks).
+   Count the current ledger records and estimate the replay with the target
+   host's measured rate, not with an earlier elapsed time.
+2. Confirm that projected archive memory is below the critical threshold.
+   If it is critical, stop here: [pre-restart checks](#pre-restart-checks)
+   forbids the restart until capacity rises or approved retained state falls.
+3. Create and check the identity backup, and create the approved off-host
+   backup or snapshot.
+4. Announce the window. [`ANNOUNCEMENT.md`](ANNOUNCEMENT.md) states what the
+   notice must contain and what it must not.
+5. `sudo systemctl mask multiverse-relay`.
+   A mask does not stop a running relay. It stops the reboot from starting one.
+6. `sudo reboot`. Record this time. The participant outage begins here.
+7. After boot, poll `/healthz` until it answers.
+   The archive binds its HTTP port only when the replay ends, so that answer is
+   the end of the replay.
+8. `sudo systemctl unmask multiverse-relay`, in this same session.
+9. `sudo systemctl start multiverse-relay`, promptly.
+   Record this time. The participant outage ends here.
+10. Poll `/api/status` until it reports `relayConnected: true`.
+11. Prove the subscription from the relay log, not from the API.
+    [Restart with a complete record](#restart-with-a-complete-record) has the
+    command and the reading: an archive line before the first placement claim
+    is a complete record, and a placement claim first is a gap that belongs in
+    the deployment record.
+12. Run the [post-restart checks](#post-restart-checks).
+    Check service enablement as well. A reboot is the class that can leave a
+    unit disabled and still look healthy for one boot.
+13. Record the actual participant outage in seconds and the actual replay in
+    seconds. Post-restart check 7 requires both, and an estimate is not a
+    record. Take the replay from the archive's own start line in its log to the
+    first successful `/healthz`.
+
 ## Unplanned restart
 
 systemd restarts failed services within configured rate limits.

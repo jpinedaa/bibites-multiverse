@@ -11,11 +11,13 @@
 #   monitor.sh --verbose    one pass, print every check
 #   monitor.sh --test       send one alert and exit — prove the channel works
 #   monitor.sh --quiet      no alerts, exit code only (1 if anything is not OK)
-#   monitor.sh --only NAME  run one group and nothing else: 'transfer' or
-#                           'hosts-pin'. deploy/test-monitor.sh drives the
-#                           transfer arithmetic through this against fake
-#                           /proc files and a fake clock, on a workstation,
-#                           without root and without touching the network.
+#   monitor.sh --only NAME  run one group and nothing else: 'transfer',
+#                           'hosts-pin', 'replay' or 'swap'.
+#                           deploy/test-monitor.sh drives the transfer and
+#                           replay-headroom arithmetic through this against
+#                           fake /proc files, a fake status document and a fake
+#                           clock, on a workstation, without root and without
+#                           touching the network.
 #
 # WHAT IT WATCHES, and why each one is on the list rather than a longer one:
 #
@@ -58,10 +60,21 @@
 #                         the one on disk — which is also how a deploy hook that
 #                         silently stopped running is caught.
 #   replay headroom       the tripwire the hosting options document asked for:
-#                         0.18 KB of peak RAM per ledger record while replaying
-#                         and 0.30 KB held resident afterwards, so an archive
-#                         eventually outgrows its box. It is better to learn that
-#                         from an alert than from a restart.
+#                         a modelled peak while replaying and a modelled
+#                         resident set held afterwards, so an archive eventually
+#                         outgrows its box. It is better to learn that from an
+#                         alert than from a restart. THE DENOMINATOR IS PHYSICAL
+#                         RAM AND NOTHING ELSE — see the swap line below. The
+#                         two per-record constants are MV_REPLAY_PEAK_B and
+#                         MV_REPLAY_RESIDENT_B, so a new measurement can retune
+#                         the gate without a code change.
+#   swap                  whether swap exists and whether it is being USED, as
+#                         a separate and clearly-labelled reading. It is not
+#                         headroom and it is not in the ratio above: swap is a
+#                         crash barrier, and counting it as replay capacity
+#                         would turn the tripwire green without changing one
+#                         byte of retained state. SIZING.md reads sustained swap
+#                         activity as a sizing signal, so sustained use warns.
 #   genome gaps           Risk 7. The archive's arrears on genome capture, and
 #                         the part a departed stranger takes with them is
 #                         permanent.
@@ -131,6 +144,22 @@ set -a; . "$ENV_FILE"; set +a
 : "${MV_GAPS_DELTA_ALERT:=20000}"
 : "${MV_CERT_MIN_DAYS:=10}"
 : "${MV_REPLAY_HEADROOM:=0.85}"
+# THE PER-RECORD MEMORY MODEL, in whole bytes per ledger record. These are the
+# only two numbers the replay-headroom check has, and they are a MODEL rather
+# than a measurement of this process: SIZING.md's "Archive memory" derives them
+# and owns their values. They live here as parameters so that the next
+# measurement can retune the gate on a running host without a code change, and
+# so that a host whose archive is measured to be cheaper or dearer than the
+# reference workload can say so. Changing them changes when the gate trips and
+# nothing else.
+: "${MV_REPLAY_RESIDENT_B:=300}"
+: "${MV_REPLAY_PEAK_B:=184}"
+# SWAP IS WATCHED, NOT COUNTED. Percentage of the swap device in use that this
+# calls sustained, and how many consecutive passes it must hold to be reported.
+# Three passes of the five-minute timer is about a quarter of an hour, which is
+# the difference between one replay spilling and a box that is short of RAM.
+: "${MV_SWAP_USED_WARN_PCT:=25}"
+: "${MV_SWAP_USED_RUNS:=3}"
 # The bundle's monthly transfer allowance in the PROVIDER's GB (2^30 bytes),
 # counted in BOTH directions. Overage is billed per GB and is not throttled.
 : "${MV_TRANSFER_ALLOWANCE_GB:=3072}"
@@ -148,11 +177,12 @@ set -a; . "$ENV_FILE"; set +a
 : "${MV_ALERT_REPEAT_HOURS:=12}"
 : "${MV_HEARTBEAT_HOUR:=9}"
 
-# READ SEAMS, so the transfer arithmetic can be exercised off the host. Each one
-# defaults to the real file and is overridden only by deploy/test-monitor.sh.
+# READ SEAMS, so the arithmetic can be exercised off the host. Each one defaults
+# to the real file and is overridden only by deploy/test-monitor.sh.
 : "${MV_PROC_NET_DEV:=/proc/net/dev}"
 : "${MV_PROC_NET_ROUTE:=/proc/net/route}"
 : "${MV_HOSTS_FILE:=/etc/hosts}"
+: "${MV_PROC_MEMINFO:=/proc/meminfo}"
 
 STATE="$MV_STATE/monitor"
 ARCHIVE_DATA="$MV_STATE/archive"
@@ -251,7 +281,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -v|--verbose) VERBOSE=1 ;;
     -q|--quiet) QUIET=1 ;;
-    --only) ONLY="${2:?--only needs a check group: transfer or hosts-pin}"; shift ;;
+    --only) ONLY="${2:?--only needs a check group: transfer, hosts-pin, replay or swap}"; shift ;;
     --test)
       if notify OK self-test "This is a test from $(hostname) at $(date -u +%FT%TZ). If you are reading it, the alert channel works."; then
         echo "sent one $MV_ALERT_KIND alert"
@@ -259,7 +289,7 @@ while [ $# -gt 0 ]; do
       fi
       echo "the alert channel is NOT working: kind=$MV_ALERT_KIND url set=$([ -n "$MV_ALERT_URL" ] && echo yes || echo no)" >&2
       exit 1 ;;
-    -h|--help) sed -n '2,96p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,109p' "$0"; exit 0 ;;
     *) echo "monitor: unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -303,7 +333,10 @@ check_relay_healthz() {
   fi
 }
 
-STATUS_JSON="$TMP/status.json"
+# The fourth read seam: the live document normally comes from the archive below,
+# and deploy/test-monitor.sh points this at a fixture so that the checks reading
+# it can be exercised without an archive.
+STATUS_JSON="${MV_STATUS_JSON:-$TMP/status.json}"
 check_archive_healthz() {
   if ! curl -fsS --max-time 10 "http://${MV_ARCHIVE_HTTP}/healthz" >/dev/null 2>&1; then
     report archive-healthz CRIT "the archive's own listener does not answer on ${MV_ARCHIVE_HTTP}"
@@ -759,37 +792,117 @@ check_cert() {
 
 check_replay_headroom() {
   [ -s "$STATUS_JSON" ] || return 0
-  local records peak_mb resident_mb worst_mb worst_what mem_kb swap_kb avail_mb ratio
+  local records peak_mb resident_mb worst_mb worst_what mem_kb ram_mb ratio
   records="$(jq -r '.ledgerRecords // 0' "$STATUS_JSON" 2>/dev/null)"
   case "$records" in ''|*[!0-9]*) return ;; esac
+  case "${MV_REPLAY_PEAK_B:-x}${MV_REPLAY_RESIDENT_B:-x}" in
+    *[!0-9]*)
+      report replay WARN "MV_REPLAY_PEAK_B and MV_REPLAY_RESIDENT_B must be whole bytes per ledger record; they read '$MV_REPLAY_PEAK_B' and '$MV_REPLAY_RESIDENT_B', so nothing is watching the archive's memory."
+      return ;;
+  esac
   # TWO models, because the box has to satisfy both and they trade places.
   #
-  #   184 B/record  peak while replaying with the streaming archive. The older
-  #                 materializing design measured approximately 1330 B/record.
-  #   300 B/record  held resident after replay in the reference workload.
+  #   MV_REPLAY_PEAK_B      peak while replaying with the streaming archive. The
+  #                         older materializing design measured approximately
+  #                         1330 B/record.
+  #   MV_REPLAY_RESIDENT_B  held resident after replay in the reference workload.
   #
-  # Since the replay was fixed the RESIDENT term is the larger one, so this
-  # alerts on the larger of the two rather than on the replay alone: an archive
-  # that restarts fine and then cannot hold what it replayed is the same outage.
-  # See SIZING.md, "Archive memory".
-  peak_mb=$(( records * 184 / 1048576 ))
-  resident_mb=$(( records * 300 / 1048576 ))
+  # In the shipped defaults the RESIDENT term is the larger one, so this alerts
+  # on the larger of the two rather than on the replay alone: an archive that
+  # restarts fine and then cannot hold what it replayed is the same outage.
+  # SIZING.md, "Archive memory", owns both values; they are parameters here so
+  # that a measurement on a real ledger can correct them in place.
+  peak_mb=$(( records * MV_REPLAY_PEAK_B / 1048576 ))
+  resident_mb=$(( records * MV_REPLAY_RESIDENT_B / 1048576 ))
   worst_mb=$peak_mb; worst_what="replay peak"
   if [ "$resident_mb" -gt "$peak_mb" ]; then
     worst_mb=$resident_mb; worst_what="resident set"
   fi
-  mem_kb="$(awk '/^MemTotal:/  {print $2}' /proc/meminfo)"
-  swap_kb="$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)"
-  avail_mb=$(( (mem_kb + swap_kb) / 1024 ))
-  [ "$avail_mb" -gt 0 ] || return 0
-  ratio="$(awk -v p="$worst_mb" -v a="$avail_mb" 'BEGIN{printf "%.2f", p/a}')"
+
+  # PHYSICAL RAM IS THE WHOLE DENOMINATOR, AND SWAP IS DELIBERATELY ABSENT.
+  #
+  # This check once divided by MemTotal + SwapTotal, which made it possible to
+  # clear a critical archive-memory verdict by adding a swap file: the number
+  # this gate reports would have halved while the retained state, the record
+  # count and the replay were all exactly as they were. A tripwire that a
+  # one-line change can turn green without touching what it watches is worse
+  # than no tripwire, because somebody will honestly believe it.
+  #
+  # Swap on this host is a crash barrier for a peak, not capacity for a heap —
+  # SIZING.md: "Do not use swap as the normal capacity for a live replay heap."
+  # check_swap below reports it as its own reading, which is where a swap file
+  # is allowed to be good news.
+  mem_kb="$(awk '/^MemTotal:/ {print $2}' "$MV_PROC_MEMINFO" 2>/dev/null)"
+  case "${mem_kb:-x}" in
+    *[!0-9]*)
+      report replay WARN "no MemTotal in $MV_PROC_MEMINFO, so the archive's memory headroom is not being watched at all."
+      return ;;
+  esac
+  ram_mb=$(( mem_kb / 1024 ))
+  [ "$ram_mb" -gt 0 ] || return 0
+  ratio="$(awk -v p="$worst_mb" -v a="$ram_mb" 'BEGIN{printf "%.2f", p/a}')"
 
   if awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h)}'; then
-    report replay CRIT "the archive can no longer be sure of fitting on this box: $records ledger records project a ~${worst_mb} MB ${worst_what} (replay peak ~${peak_mb} MB, resident ~${resident_mb} MB) against ${avail_mb} MB of RAM+swap (ratio $ratio). THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. If the binding term is the resident set, GOMEMLIMIT and swap do not fix it: the fixes are a bigger instance and the retention rule. See SIZING.md, 'Archive memory'."
+    report replay CRIT "the archive can no longer be sure of fitting on this box: $records ledger records project a ~${worst_mb} MB ${worst_what} (replay peak ~${peak_mb} MB at ${MV_REPLAY_PEAK_B} B/record, resident ~${resident_mb} MB at ${MV_REPLAY_RESIDENT_B} B/record) against ${ram_mb} MB of PHYSICAL RAM (ratio $ratio). Swap is not in that denominator on purpose; the separate 'swap' check reports it. THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. This ratio is a MODEL OF RECORD COUNT, so only three things move it: fewer records, more RAM, or per-record constants that a measurement has corrected (MV_REPLAY_RESIDENT_B, MV_REPLAY_PEAK_B). GOMEMLIMIT is a separate and useful lever — it lowers real resident set by removing the collector's headroom, and being a soft limit it cannot fail a replay — but it does not reduce retained state and it does not move this number. See SIZING.md, 'Archive memory'."
   elif awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h*0.75)}'; then
-    report replay WARN "the archive's ${worst_what} projects to ~${worst_mb} MB against ${avail_mb} MB RAM+swap (ratio $ratio). Decide the retention rule or size up before it crosses $MV_REPLAY_HEADROOM."
+    report replay WARN "the archive's ${worst_what} projects to ~${worst_mb} MB against ${ram_mb} MB of physical RAM (ratio $ratio; swap is excluded on purpose and has its own check). Size up, reduce the approved retained state, or correct the per-record model with a measurement before it crosses $MV_REPLAY_HEADROOM."
   else
-    report replay OK "~${worst_mb} MB projected ${worst_what}, ${avail_mb} MB available (ratio $ratio)"
+    report replay OK "~${worst_mb} MB projected ${worst_what}, ${ram_mb} MB of physical RAM (ratio $ratio)"
+  fi
+}
+
+# check_swap — swap, reported honestly and never as headroom.
+#
+# It is here because check_replay_headroom above deliberately refuses to count
+# it, and a reading that is excluded from one place has to appear in another or
+# it stops being watched at all. Two different facts, in one line:
+#
+#   IS THERE ANY?  A swap file is a supported, recorded choice (MV_SWAP_GB in
+#                  deploy.env.example, created by provision.sh). Saying so on
+#                  every pass is what stops a later reader assuming this box has
+#                  none, and what stops the replay ratio being read as though
+#                  swap were behind it.
+#   IS IT IN USE?  SIZING.md: "Sustained swap activity means that the instance
+#                  needs more memory or less retained state." So sustained use
+#                  is a SIZING signal and is reported as one — not as an outage,
+#                  because the service is still up while it happens, which is
+#                  exactly why nobody notices.
+#
+# Sustained means consecutive passes, not one reading: a single replay peak that
+# spills and is reclaimed is the barrier doing its job.
+check_swap() {
+  local total_kb free_kb used_kb total_mb used_mb pct runs
+  total_kb="$(awk '/^SwapTotal:/ {print $2}' "$MV_PROC_MEMINFO" 2>/dev/null)"
+  free_kb="$(awk '/^SwapFree:/ {print $2}' "$MV_PROC_MEMINFO" 2>/dev/null)"
+  case "${total_kb:-x}${free_kb:-x}" in
+    *[!0-9]*)
+      report swap WARN "no SwapTotal/SwapFree in $MV_PROC_MEMINFO, so swap use is not being watched."
+      return ;;
+  esac
+  if [ "$total_kb" -eq 0 ]; then
+    sset swap.runs 0
+    report swap OK "no swap on this host. The replay-headroom ratio is measured against physical RAM either way."
+    return
+  fi
+  used_kb=$(( total_kb - free_kb ))
+  [ "$used_kb" -ge 0 ] || used_kb=0
+  total_mb=$(( total_kb / 1024 ))
+  used_mb=$(( used_kb / 1024 ))
+  pct=$(( used_kb * 100 / total_kb ))
+
+  runs="$(sget swap.runs 0)"
+  case "$runs" in ''|*[!0-9]*) runs=0 ;; esac
+  if [ "$pct" -ge "$MV_SWAP_USED_WARN_PCT" ] 2>/dev/null; then
+    runs=$(( runs + 1 ))
+  else
+    runs=0
+  fi
+  sset swap.runs "$runs"
+
+  if [ "$runs" -ge "$MV_SWAP_USED_RUNS" ] 2>/dev/null; then
+    report swap WARN "${used_mb} MB of ${total_mb} MB of swap has been in use (${pct}%) for $runs consecutive checks (~$(( runs * 5 )) min). SIZING.md reads sustained swap activity as a sizing signal: the instance needs more memory or less retained state. Swap is a crash barrier here, so it is NOT counted as replay headroom — the replay check divides by physical RAM alone, and clearing that check by adding swap would have changed nothing real."
+  else
+    report swap OK "swap present, ${used_mb} MB of ${total_mb} MB used (${pct}%), $runs consecutive pass(es) at or above ${MV_SWAP_USED_WARN_PCT}%. Not counted as replay headroom."
   fi
 }
 
@@ -843,10 +956,10 @@ check_reboot() {
 
 # ---------------------------------------------------------------- run
 
-# --only runs one group and nothing else. It exists so the transfer arithmetic
-# can be driven from deploy/test-monitor.sh without a network, without root and
-# without the certificate check dialling the live front door; by hand it is also
-# the fastest way to re-read one check.
+# --only runs one group and nothing else. It exists so the transfer and
+# replay-headroom arithmetic can be driven from deploy/test-monitor.sh without a
+# network, without root and without the certificate check dialling the live
+# front door; by hand it is also the fastest way to re-read one check.
 case "${ONLY:-}" in
   '')
     check_units
@@ -858,6 +971,10 @@ case "${ONLY:-}" in
       check_replay_headroom
       check_gaps
     fi
+    # Outside that block on purpose: swap is read from /proc and says something
+    # about this box whether or not the archive is answering — and an archive
+    # that is not answering is one of the cases where it matters most.
+    check_swap
     check_disk
     check_transfer
     check_transfer_rate
@@ -874,7 +991,9 @@ case "${ONLY:-}" in
     check_transfer_rate
     ;;
   hosts-pin) check_hosts_pin ;;
-  *) echo "monitor: --only accepts 'transfer' or 'hosts-pin', not '$ONLY'" >&2; exit 2 ;;
+  replay) check_replay_headroom ;;
+  swap) check_swap ;;
+  *) echo "monitor: --only accepts 'transfer', 'hosts-pin', 'replay' or 'swap', not '$ONLY'" >&2; exit 2 ;;
 esac
 
 # The dead man's half. A daily line that says the watcher itself is alive, so

@@ -164,9 +164,18 @@ The two tools below keep the reading instead, because a change to a live service
 question: is the service worse than it was fifteen minutes ago.
 
 `service-host-sample` records one sample of this host as a single JSON line.
-It runs unprivileged, reads `/proc` and `systemctl show` only, and reports every value it cannot
-read as unknown instead of zero.
-The provisioning script installs neither the sampler nor its timer, so install both by hand:
+It runs unprivileged, reads `/proc`, `systemctl show` and the cgroup files only, and reports every
+value it cannot read as unknown instead of zero.
+Each unit carries `memoryBytes` from `MemoryCurrent` and, beside it, `anonBytes` and `fileBytes`
+from the cgroup.
+`MemoryCurrent` includes page cache, so it moves with file activity and is the wrong field for a
+memory trend; `anonBytes` is the term that grows and the term the out-of-memory killer acts on.
+The archive additionally carries `mainRssAnonBytes`, `mainVmHwmBytes` and `mainPid` from its main
+process, because nothing else on the host remembers the replay peak or sees an operator's restart
+between two samples.
+
+`provision.sh` installs the sampler and enables its timer.
+Install both by hand only on a host the provisioning script has not run against:
 
 ```sh
 sudo install -m 0755 -o root -g root \
@@ -299,8 +308,11 @@ deploy/test-monitor.sh
 ```
 
 `test-monitor.sh` needs no root, no network and no host.
-It runs `monitor.sh --only transfer` and `--only hosts-pin` against fake `/proc` files, a fake
-`/etc/hosts` and a fixed clock, in a temporary state directory.
+It runs `monitor.sh --only transfer`, `--only hosts-pin`, `--only replay` and `--only swap` against
+fake `/proc` files, a fake `/etc/hosts`, a fake status document and a fixed clock, in a temporary
+state directory.
+Its replay cases hold the archive memory gate to physical RAM: the same reading with a swap file
+present must keep the same ratio and the same severity.
 
 Run `shellcheck` when it is available.
 Run `systemd-analyze verify` against the units on a compatible Linux host.
