@@ -198,6 +198,12 @@ $env:MULTIVERSE_BROADCAST_PANELS = 'brain,biology,biology'
 $env:MULTIVERSE_BROADCAST_PANEL_SECONDS = '15'
 $env:MULTIVERSE_BROADCAST_SHOW_FOV = 'true'
 $env:MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES = 'Basic bibite'
+# Global Fertility, in E/u**2s. The game default is 1E-05 ("Normal"); this is
+# the value the shipped "Thick Soup" scenario uses. Denser food raises juvenile
+# survival, which keeps a denser and more watchable population on camera. The
+# mod applies it at every world load, so it survives a restart and a reload
+# without a save edit.
+$env:MULTIVERSE_FERTILITY = '3.5E-05'
 $env:MULTIVERSE_MIN_FPS = 'off'
 $env:MULTIVERSE_CMD_FILE = Join-Path $state 'command.txt'
 

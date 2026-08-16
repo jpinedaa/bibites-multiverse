@@ -36,6 +36,7 @@ expect_text "$runner" "MULTIVERSE_BROADCAST_PANELS = 'brain,biology,biology'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_PANEL_SECONDS = '15'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_SHOW_FOV = 'true'"
 expect_text "$runner" "MULTIVERSE_BROADCAST_DISABLE_SPAWN_TEMPLATES = 'Basic bibite'"
+expect_text "$runner" "MULTIVERSE_FERTILITY = '3.5E-05'"
 
 # The broadcast world is a participant of the map, not an offline exhibition.
 expect_text "$runner" 'MULTIVERSE_EXPORT_EDGES = $config.ExportEdges'

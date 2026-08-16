@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.6.4";
+        public const string Version = "0.6.5";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -168,7 +168,8 @@ namespace BibitesMultiverse
                 Log.LogInfo(
                     $"[M2] the export edges are set to 'none' ({MultiverseConfig.EnvExportEdges}, " +
                     $"{MultiverseConfig.EnvExportEdge}, {MultiverseConfig.EnvOpenEdge} or [M4] ExportEdges) — the Contract A " +
-                    "client, the capture bands, the crossing counters and the portal all stay off. Unset the variable to get " +
+                    "client, the capture bands, the crossing counters and the portal all stay off. The world-settings hook " +
+                    "goes with them, so " + WorldSettings.EnvFertility + " is not applied either. Unset the variable to get " +
                     "D17's default of all four edges. The periodic world save is unaffected.");
                 return;
             }

@@ -18,6 +18,10 @@ It disables automatic spawns from the `Basic bibite` template.
 Existing Bibites can still reproduce.
 The website adds no separate simulation-speed label.
 
+The world uses a Global Fertility of `3.5E-05` E/u²s, which is 3.5 times the game default.
+More food lets more young Bibites live, so the population on camera stays dense.
+The mod applies this value at each world load, and it changes the food supply only.
+
 Read the full [live broadcast design](../../docs/live-broadcast.md) before installation.
 
 ## Identity boundary
@@ -142,6 +146,7 @@ The status must report a zoom of `250` and a target time scale of `6.5`.
 The `panel` value alternates between `brain` and `biology`.
 The `fieldOfView` value must be `true`.
 The `disabledSpawnSettings` value must be `1`.
+The `fertility` value must be `3.5e-05`.
 
 Make sure that the world is on the map:
 
