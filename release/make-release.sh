@@ -38,8 +38,8 @@
 # PREREQUISITES, on a machine that has the game:
 #   * bibites-mod/libs/, from bibites-mod/sync-game-refs.sh (the reference
 #     assemblies are the game's own and are never committed)
-#   * the .NET SDK in ~/.dotnet and Go in $GOROOT — the same two the rest of this
-#     repository uses. A PLAYER needs neither; this is the build side
+#   * the .NET SDK — DOTNET_ROOT, else /usr/local/dotnet, else ~/.dotnet — and Go
+#     in $GOROOT. A PLAYER needs neither; this is the build side
 #   * git, python3, tar, zip, unzip, curl
 #   * NSIS 3.09 or newer when you build the Windows complete edition
 #
@@ -80,8 +80,26 @@ LINUX_GAME_DIR="${LINUX_GAME_DIR:-/mnt/wsl/data/scratch/m5-linux-rehearsal/game}
 
 export GOROOT="${GOROOT:-$HOME/go}"
 export PATH="$GOROOT/bin:$PATH"
-export DOTNET_ROOT="$HOME/.dotnet"
-export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+# The .NET SDK lives in either the machine-wide /usr/local/dotnet or the per-user
+# $HOME/.dotnet, and a release runner supplies its own. Take a local convention
+# only when it is real, and never overwrite a value somebody else set: a
+# DOTNET_ROOT that names a directory holding no SDK does not merely fail to help,
+# the toolchain obeys it, so it turns a working dotnet into a fatal host error.
+if [ -n "${DOTNET_ROOT:-}" ] && [ ! -x "$DOTNET_ROOT/dotnet" ]; then
+  unset DOTNET_ROOT
+fi
+if [ -z "${DOTNET_ROOT:-}" ]; then
+  for dotnet_candidate in /usr/local/dotnet "$HOME/.dotnet"; do
+    if [ -x "$dotnet_candidate/dotnet" ]; then
+      export DOTNET_ROOT="$dotnet_candidate"
+      break
+    fi
+  done
+fi
+# Still nothing found: name the per-user path, so the plugin step fails with a
+# message that says where it looked rather than with an empty variable.
+export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"
 export TZ=UTC
 
 ALLOW_DIRTY=0
