@@ -1,14 +1,13 @@
 # The mod's declared version, read from bibites-mod/src/MultiversePlugin.cs.
 #
 # ONE PARSE, THREE READERS. `MultiversePlugin.cs` declares the version that
-# BepInEx registers at runtime; docs/support-matrix.md's `mod` field and
-# dev_environment.md's Plugin row are claims about it, and
-# farend/dist/BUNDLE-SOURCE.txt records it. release/make-release.sh's gate E,
-# release/check-drift.sh's check B and check D, and
-# farend/make-farend-bundle.sh's record all have to agree on what the
-# declaration says — a reader that is laxer than the others can make the gates
-# and the record disagree about the version, which is the exact failure class
-# those gates exist to prevent. So the pattern lives here once.
+# BepInEx registers at runtime; docs/support-matrix.md's `mod` field, its
+# `testedBuild.mod`, and dev_environment.md's Plugin row are all claims about
+# it. release/make-release.sh's gate E, release/check-drift.sh's check B and
+# release/record-tested-build.sh have to agree on what the declaration says — a
+# reader that is laxer than the others can make a gate and a record disagree
+# about the version, which is the exact failure class those gates exist to
+# prevent. So the pattern lives here once.
 #
 # It matches the declaration as written, `public const string Version = "x"`,
 # and takes the first one in the file.

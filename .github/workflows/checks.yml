@@ -252,12 +252,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # fetch-depth: 0 is MANDATORY (E5): check-drift.sh resolves the far-end
-      # bundle's source commit out of the bundled sidecar's VCS stamp and diffs
-      # the working tree against it. A shallow clone cannot see that commit.
+      # A SHALLOW CHECKOUT IS ENOUGH, and that is a property worth keeping.
+      # check-drift.sh compares this tree against values recorded in
+      # docs/support-matrix.md — one tree hash, one manifest of the working tree
+      # — so nothing here reads history. bump-version.sh and the tracked-binary
+      # check read the working tree too. Do not add a step that walks history
+      # without restoring fetch-depth: 0 in the same change.
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
           persist-credentials: false
 
       - uses: actions/setup-go@v5
@@ -271,10 +273,11 @@ jobs:
       - name: the version surface agrees
         run: release/bump-version.sh --check
 
-      # Is farend/dist/farend-bundle.zip still the bundle this tree builds?
-      # This is the source-level equivalent of make-release.sh's gate 3, and it
-      # needs no game bytes and no .NET.
-      - name: the far-end bundle is not stale
+      # Is this tree still the build somebody tested? The mod tree hash and the
+      # cmd/sidecar input digest recorded in docs/support-matrix.md against what
+      # this checkout holds. This is the source-level equivalent of
+      # make-release.sh's gates 2 and 3, and it needs no game bytes and no .NET.
+      - name: this tree is the build that was tested
         run: release/check-drift.sh
 
       # release/tracked-binaries.txt is the list, and it is a tracked plain

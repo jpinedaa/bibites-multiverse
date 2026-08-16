@@ -300,12 +300,29 @@ Before a planned reboot:
 
 A reboot starts both units from `multi-user.target`.
 The relay is live while the archive replays, so the record has a gap.
-Mask the relay before the reboot when ledger continuity is required:
+Hold the relay down across the boot when ledger continuity is required.
+
+Check first that one hold-down is enough to hold this unit:
 
 ```sh
-sudo systemctl mask multiverse-relay
+systemctl show -p WantedBy -p RequiredBy multiverse-relay
+systemctl show -p Wants multiverse-archive.service
+```
+
+`WantedBy=multi-user.target` with an empty `RequiredBy=` means the target is the relay's only boot
+pull-in, and the archive must not name the relay in `Wants=`.
+Any other name in those three properties starts the relay whatever you do to the target, and
+`systemctl list-dependencies --reverse multiverse-relay.service` says which one.
+
+Then remove that pull-in and reboot:
+
+```sh
+sudo systemctl disable multiverse-relay
 sudo reboot
 ```
+
+`disable` does not stop the running relay.
+The map serves until the reboot takes it, and the boot does not bring it back.
 
 After boot, wait for the archive and then return the relay:
 
@@ -317,7 +334,7 @@ until curl -fs --max-time 5 http://127.0.0.1:8796/healthz >/dev/null 2>&1; do sl
 printf '~. 1;\n' > /etc/multiverse/nginx-gates/peer-gate.map
 nginx -t && systemctl reload nginx
 
-sudo systemctl unmask multiverse-relay
+sudo systemctl enable multiverse-relay
 sudo systemctl start multiverse-relay
 until curl -fs --max-time 5 http://127.0.0.1:8796/api/status 2>/dev/null \
   | grep -q '"relayConnected": true'; do sleep 2; done
@@ -330,13 +347,68 @@ nginx -t && systemctl reload nginx
 nginx starts from `multi-user.target` like everything else, so confirm it is running before you
 write the gate file. A gate written while nginx is down does nothing and is easy to forget.
 
-A mask holds across every later boot.
-Unmask the relay in the same session, or the map stays down.
-The monitor reports the masked relay as critical until you start it.
+`sudo systemctl enable --now multiverse-relay` is the enable and the start in one, but it starts
+the relay before you can raise the gate, so keep the two commands apart here.
+A disabled unit stays disabled across every later boot.
+Re-enable the relay in the same session, or the map stays down.
+The monitor reports the stopped relay as critical until you start it, but it reads `is-active`
+only: a relay that runs and is no longer enabled looks healthy to every check until the boot that
+leaves it dark.
 The participant cost is the same as the archive-restart sequence above.
+
+**CAUTION.** Do not run `provision.sh --only systemd` while the hold-down is in force.
+That phase enables and starts both units, so it returns the relay to a replaying archive and undoes
+the `disable` without saying so.
+Run it before the hold-down, which is where
+[Restart with a complete record](#restart-with-a-complete-record) already puts it.
 
 After boot, check service enablement and archive subscription.
 Do not infer archive health from the process state alone.
+
+### Why not `systemctl mask`
+
+`mask` was the instruction here until 2026-08-16, and it cannot work on this layout.
+`provision.sh --only systemd` installs the units as real files in `/etc/systemd/system/`, and no
+vendor copy exists under `/lib` or `/usr/lib`.
+A mask is a symlink to `/dev/null` at that same path, so systemd refuses to write it:
+
+```text
+Failed to mask unit: File /etc/systemd/system/multiverse-relay.service already exists.
+```
+
+The failure lands at the last step before the reboot, inside an announced window.
+Do not put the command back.
+
+### The hold file
+
+`provision.sh --only systemd` installs a drop-in that turns the hold-down into a file:
+
+```sh
+sudo touch /etc/multiverse/RELAY-HOLD
+sudo reboot
+# after /healthz answers:
+sudo rm /etc/multiverse/RELAY-HOLD
+sudo systemctl start multiverse-relay
+```
+
+The drop-in is `/etc/systemd/system/multiverse-relay.service.d/hold.conf`, and it carries one rule:
+`ConditionPathExists=!/etc/multiverse/RELAY-HOLD`.
+
+Prefer it on a host that has it.
+It holds against `start`, against `enable`, and against a provision run, which is what `disable`
+cannot do.
+`disable` is the method that works on any host today, including one provisioned before this
+drop-in existed, and it is the method the checklist below states.
+Ask the host which method it carries:
+
+```sh
+test -f /etc/systemd/system/multiverse-relay.service.d/hold.conf && echo present
+```
+
+While the file exists, `systemctl start multiverse-relay` reports success and starts nothing.
+`systemctl status multiverse-relay` names the failed condition, and the monitor reports the unit as
+critical.
+Only removing the file releases it, and it survives every boot until you do.
 
 ### Reboot checklist
 
@@ -353,13 +425,20 @@ It adds no rule. Each step names the section that states it.
    backup or snapshot.
 4. Announce the window. [`ANNOUNCEMENT.md`](ANNOUNCEMENT.md) states what the
    notice must contain and what it must not.
-5. `sudo systemctl mask multiverse-relay`.
-   A mask does not stop a running relay. It stops the reboot from starting one.
+5. `sudo systemctl disable multiverse-relay`.
+   `disable` does not stop a running relay. It removes the pull-in that would
+   start one at boot. Confirm first that it is the only one: [Host
+   reboot](#host-reboot) gives the two `systemctl show` commands and what they
+   must answer, and says why `systemctl mask` is not the command here. On a
+   host that carries the drop-in, `sudo touch /etc/multiverse/RELAY-HOLD`
+   instead.
 6. `sudo reboot`. Record this time. The participant outage begins here.
 7. After boot, poll `/healthz` until it answers.
    The archive binds its HTTP port only when the replay ends, so that answer is
    the end of the replay.
-8. `sudo systemctl unmask multiverse-relay`, in this same session.
+8. `sudo systemctl enable multiverse-relay`, in this same session.
+   A relay you start without this one runs until the next boot and no further.
+   Release the hold file instead on a host that carries the drop-in.
    Raise the [peer gate](#the-peer-gate) now, after checking that nginx is running.
    It costs nothing and it decides step 11's reading instead of leaving it to a race.
 9. `sudo systemctl start multiverse-relay`, promptly.
@@ -373,8 +452,10 @@ It adds no rule. Each step names the section that states it.
     is a complete record, and a placement claim first is a gap that belongs in
     the deployment record.
 12. Run the [post-restart checks](#post-restart-checks).
-    Check service enablement as well. A reboot is the class that can leave a
-    unit disabled and still look healthy for one boot.
+    Check service enablement as well: `systemctl is-enabled multiverse-relay
+    multiverse-archive` must answer `enabled` twice. A reboot is the class that
+    can leave a unit disabled and still look healthy for one boot, and step 5
+    is what makes that the expected mistake rather than a rare one.
 13. Record the actual participant outage in seconds and the actual replay in
     seconds. Post-restart check 7 requires both, and an estimate is not a
     record. Take the replay from the archive's own start line in its log to the
