@@ -12,11 +12,11 @@ string, compiler, SDK, administrator rights, or root.
 
 | Platform | Download | Game source |
 |---|---|---|
-| Windows, recommended | `bibites-multiverse-0.2.4-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
-| Windows, advanced ZIP | `bibites-multiverse-0.2.4-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
-| Windows, add-on | `bibites-multiverse-0.2.4-windows-x64.zip` | your existing Steam copy |
-| Linux, recommended | `bibites-multiverse-0.2.4-linux-x64-complete.zip` | included native game |
-| Linux, add-on | `bibites-multiverse-0.2.4-linux-x64.zip` | your existing itch.io copy |
+| Windows, recommended | `bibites-multiverse-0.2.5-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
+| Windows, advanced ZIP | `bibites-multiverse-0.2.5-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
+| Windows, add-on | `bibites-multiverse-0.2.5-windows-x64.zip` | your existing Steam copy |
+| Linux, recommended | `bibites-multiverse-0.2.5-linux-x64-complete.zip` | included native game |
+| Linux, add-on | `bibites-multiverse-0.2.5-linux-x64.zip` | your existing itch.io copy |
 
 Every participant package includes `public-map.json`, the public join configuration. It contains
 the deployed enrollment and relay addresses. It contains no world identity or secret. Each
@@ -40,11 +40,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.4-windows-x64-setup.exe).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.2.5-windows-x64-setup.exe).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-0.2.4-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.2.5-linux-x64-complete.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -55,7 +55,7 @@ again; if it does not match twice, report it and do not run it. That is `INS-CHE
 Windows marks a downloaded setup or archive. **Clear the mark only after its checksum passes:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-0.2.4-windows-x64-setup.exe
+Unblock-File .\bibites-multiverse-0.2.5-windows-x64-setup.exe
 ```
 
 You can also right-click the setup, select **Properties**, and if present, select **Unblock**. The
@@ -240,6 +240,22 @@ unit. Neither touches your worlds or their backups. The Windows setup adds per-u
 one uninstall entry. The Windows GUI starts the sidecar and game when its final checkbox is
 selected. It is selected by default.
 
+**A running game blocks only the copy it is running from.** Both installers refuse to write into a
+game folder while a game is running out of **that** folder — on Windows because the platform holds
+the plugin file open while the game runs, on Linux because replacing a file the running game has
+mapped into memory is a way to crash a world mid-save. **A copy of the game in another folder
+blocks nothing**, on either platform.
+
+**On Windows that holds even for a copy this account cannot inspect.** Windows does not always let
+one account read another's process path — another user's session, or an elevated one — and
+*"I cannot tell"* is not the same answer as *"it is running here"*. So when it cannot tell, the
+installer asks the folder instead of guessing: it tries to open `The Bibites.exe` and the plugin in
+the folder it is about to write to. **A file something is holding open stops the install and is
+named in the refusal.** Files nothing is holding let it continue, with a line saying that is what
+it found. A game genuinely running from that folder is still refused, whoever owns it. On Linux the
+check reads `/proc`, so a game **another user** is running out of your game folder is a case it
+cannot see, and it says so.
+
 **The uninstall.** On Windows, use **Settings → Apps → Installed apps → Bibites Multiverse**.
 The advanced command is `Uninstall-BibitesMultiverse.ps1`. On Linux, use
 `./uninstall-bibites-multiverse.sh`. Use `-DryRun` or `--dry-run` first for the ledger. It reads the record the
@@ -249,7 +265,11 @@ keeps: **a file somebody changed after the install** — a changed plugin is rep
 **BepInEx**, whole, if it was on your machine before; and **your journal**, which is the record of
 organisms other worlds handed you, unless you pass `-RemoveWorldData` / `--remove-world-data`.
 Its two refusals are the game still running from that folder and this install's own sidecar still
-running — both stop before removing anything, and both name the command that fixes them.
+running — both stop before removing anything, and both name the command that fixes them. **They use
+the same rule as the install**: only a game running from *that* folder counts, and where a process
+cannot be inspected the uninstaller asks the folder's own files whether anything is holding them
+open. It applies that to this install's game folder, to each extra world's game folder, and to the
+sidecar in its own kit directory.
 
 **On Windows the uninstall covers every world you added.** It walks the `profiles\` directory,
 refuses while any of those worlds still has a live game or sidecar — `BibitesMultiverseLauncher.exe

@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-16 UTC.
 
-Bibites Multiverse `0.2.4` is public. The first announced service period runs from
+Bibites Multiverse `0.2.5` is public. The first announced service period runs from
 **August 14 through November 14, 2026**.
 
 ## Current public phase
@@ -23,7 +23,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.2.4`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.4) |
+| Release | [`v0.2.5`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.5) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.4` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -32,7 +32,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 | Windows launcher | The shortcuts open `BibitesMultiverseLauncher.exe`. It starts, stops, and reports each world, runs a world headless, and manages more than one world on one computer. One game folder supports five worlds at once |
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
-| Homepage | Links the Windows setup, Linux complete package, and `v0.2.4` checksums |
+| Homepage | Links the Windows setup, Linux complete package, and `v0.2.5` checksums |
 | Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 
@@ -43,8 +43,11 @@ start script keeps its own headless switch.
 The packaged public join configuration contains service addresses, not a shared world secret.
 Release `0.2.1` added a Linux complete package and automatic enrollment to the Linux installer.
 The releases after it added the single-file Windows setup and normal application shortcuts.
-Release `0.2.4` adds the Windows launcher application and more than one local world per computer,
+Release `0.2.4` added the Windows launcher application and more than one local world per computer,
 on top of that setup and those shortcuts.
+Release `0.2.5` is a Windows install fix: the installer and the uninstaller no longer refuse when
+another copy of the game is running under an account this one cannot inspect. Only a copy running
+from the folder being written to stops them.
 Private maps still accept a private join-string file on both platforms.
 
 ## Milestone state
