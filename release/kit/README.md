@@ -200,6 +200,12 @@ removed; a changed or user-added file is reported and kept.
 enrollment record and process-id files, the profile files, and the `profiles\` directory. Each
 extra world's journal and logs are kept on the same rule.
 
+**Only a game running from the folder in question blocks it.** Another copy of the game elsewhere
+does not, and neither does one running under an account this one cannot inspect: where Windows will
+not say where a process started from, the check asks the folder's own files whether anything is
+holding them open, and names the file when something is. The install does the same before it writes
+to a game folder.
+
 ## If something goes wrong
 
 Four pages are published with this release, and they are written for you rather than for whoever
