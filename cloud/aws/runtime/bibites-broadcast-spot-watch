@@ -1,24 +1,122 @@
 #!/usr/bin/env bash
+# Watch for a Spot interruption notice on the broadcast host and stop the
+# publisher cleanly before EC2 takes the instance away.
+#
+# This carried the same defect as bibites-spot-watch, which see for the full
+# argument: the IMDSv2 token was minted with a six-hour TTL and re-fetched only
+# when the variable was empty, so after six hours every poll answered HTTP 401,
+# `curl -fsS ... || true` discarded it, and the watcher went blind in silence.
+#
+# The root cause is that **404 is the healthy answer** — IMDS returns it whenever
+# no interruption is scheduled — so a bare `curl -f` cannot separate "nothing to
+# do" from "my credential expired". Reading the status code is what makes the
+# difference observable.
 set -euo pipefail
 
 log() { logger -t bibites-broadcast-spot-watch -- "$*"; }
+
+IMDS=http://169.254.169.254
+TOKEN_TTL="${BIBITES_IMDS_TOKEN_TTL:-21600}"
+TOKEN_REFRESH_AFTER=$(( TOKEN_TTL / 2 ))
+POLL_SECONDS="${BIBITES_SPOT_POLL_SECONDS:-5}"
+STATE_DIR="${BIBITES_SPOT_STATE_DIR:-/run/bibites}"
+STATE_FILE="$STATE_DIR/broadcast-spot-watch.state"
+
 token=''
+token_at=0
+consecutive_failures=0
+last_heartbeat=0
+
+refresh_token() {
+  local t
+  t="$(curl -fsS -m 2 -X PUT \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: $TOKEN_TTL" \
+    "$IMDS/latest/api/token" 2>/dev/null)" || return 1
+  [ -n "$t" ] || return 1
+  token="$t"
+  token_at="$(date +%s)"
+  return 0
+}
+
+POLL_CODE=000
+POLL_BODY=''
+poll_action() {
+  local out
+  out="$(curl -sS -m 2 -H "X-aws-ec2-metadata-token: $token" \
+    -w $'\n%{http_code}' \
+    "$IMDS/latest/meta-data/spot/instance-action" 2>/dev/null)" || { POLL_CODE=000; POLL_BODY=''; return 1; }
+  POLL_CODE="${out##*$'\n'}"
+  POLL_BODY="${out%$'\n'*}"
+  return 0
+}
+
+note_state() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  # An age computed from token_at=0 is epoch arithmetic, not a measurement.
+  local age=unknown
+  [ "$token_at" -gt 0 ] && age=$(( $(date +%s) - token_at ))
+  printf 'at=%s code=%s tokenAgeSeconds=%s consecutiveFailures=%s\n' \
+    "$(date -u +%FT%TZ)" "$POLL_CODE" "$age" \
+    "$consecutive_failures" > "$STATE_FILE" 2>/dev/null || true
+}
+
+log "watching for Spot interruption; token ttl ${TOKEN_TTL}s, refreshed every ${TOKEN_REFRESH_AFTER}s"
+
 while true; do
-  if [ -z "$token" ]; then
-    token="$(curl -fsS -m 2 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
-      http://169.254.169.254/latest/api/token 2>/dev/null || true)"
-    [ -n "$token" ] || { sleep 5; continue; }
+  now="$(date +%s)"
+
+  if [ -z "$token" ] || [ $(( now - token_at )) -ge "$TOKEN_REFRESH_AFTER" ]; then
+    if ! refresh_token; then
+      consecutive_failures=$(( consecutive_failures + 1 ))
+      [ $(( consecutive_failures % 12 )) -eq 1 ] &&
+        log "WARNING: cannot obtain an IMDSv2 token (attempt $consecutive_failures); NOT watching for interruptions"
+      POLL_CODE=token-failed; note_state
+      sleep "$POLL_SECONDS"; continue
+    fi
   fi
-  action="$(curl -fsS -m 2 -H "X-aws-ec2-metadata-token: $token" \
-    http://169.254.169.254/latest/meta-data/spot/instance-action 2>/dev/null || true)"
-  if [ -n "$action" ]; then
-    log "Spot interruption notice received: $action"
-    systemctl stop bibites-broadcast-stream.service
-    systemctl stop bibites-broadcast-game.service
-    systemctl stop 'bibites-sidecar@*.service'
-    sync
-    log 'the world is saved and the publisher is stopped'
-    sleep infinity
+
+  if ! poll_action; then
+    consecutive_failures=$(( consecutive_failures + 1 ))
+    [ $(( consecutive_failures % 12 )) -eq 1 ] &&
+      log "WARNING: IMDS unreachable (attempt $consecutive_failures)"
+    note_state
+    sleep "$POLL_SECONDS"; continue
   fi
-  sleep 5
+
+  case "$POLL_CODE" in
+    404)
+      consecutive_failures=0
+      ;;
+    401|403)
+      log "IMDS answered $POLL_CODE; the token is stale, refreshing immediately"
+      token=''
+      consecutive_failures=$(( consecutive_failures + 1 ))
+      note_state
+      continue
+      ;;
+    200)
+      consecutive_failures=0
+      log "Spot interruption notice received: $POLL_BODY"
+      note_state
+      systemctl stop bibites-broadcast-stream.service
+      systemctl stop bibites-broadcast-game.service
+      systemctl stop 'bibites-sidecar@*.service'
+      sync
+      log 'the world is saved and the publisher is stopped'
+      sleep infinity
+      ;;
+    *)
+      consecutive_failures=$(( consecutive_failures + 1 ))
+      [ $(( consecutive_failures % 12 )) -eq 1 ] &&
+        log "WARNING: unexpected IMDS status $POLL_CODE (attempt $consecutive_failures)"
+      ;;
+  esac
+
+  if [ $(( now - last_heartbeat )) -ge 600 ]; then
+    log "alive; last IMDS status $POLL_CODE, token age $(( now - token_at ))s"
+    last_heartbeat="$now"
+  fi
+
+  note_state
+  sleep "$POLL_SECONDS"
 done

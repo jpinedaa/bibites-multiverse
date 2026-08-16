@@ -1,45 +1,171 @@
 #!/usr/bin/env bash
+# Watch for a Spot interruption notice and save every world before EC2 takes the
+# instance away.
+#
+# THE FAILURE THIS IS WRITTEN AGAINST. The first version of this script minted an
+# IMDSv2 token with a six-hour TTL and refreshed it only when the variable was
+# empty. After six hours of uptime the token expired, every poll answered HTTP
+# 401, `curl -fsS ... || true` swallowed it, and the watcher went blind for the
+# rest of the host's life — silently, with no log line and no unit failure. A
+# Spot reclaim after that point took the worlds down with no save-on-quit.
+#
+# The reason it could be silent is worth stating, because it is the real defect
+# and not the expiry itself: **404 is the healthy answer here.** IMDS returns 404
+# when no interruption is scheduled, which is almost always. `curl -f` collapses
+# every non-2xx into the same failure, so "no interruption" and "my credential
+# expired" became the same observation. A watcher that cannot tell those apart
+# cannot know it is broken.
+#
+# So this version does three things the old one did not: it refreshes the token
+# on a schedule rather than on emptiness, it reads the HTTP status instead of
+# discarding it, and it records liveness where something else can see it.
 set -euo pipefail
 
 log() { logger -t bibites-spot-watch -- "$*"; }
 
+IMDS=http://169.254.169.254
+TOKEN_TTL="${BIBITES_IMDS_TOKEN_TTL:-21600}"
+# Refresh at half life. A token renewed only at expiry leaves a window in which
+# every poll fails, and that window is exactly when a notice is most likely to be
+# missed.
+TOKEN_REFRESH_AFTER=$(( TOKEN_TTL / 2 ))
+POLL_SECONDS="${BIBITES_SPOT_POLL_SECONDS:-5}"
+# Liveness breadcrumb. The host sampler reads this, so a watcher that stops
+# answering stops being invisible. Absence of a fresh timestamp here is the
+# signal the old version could not produce.
+STATE_DIR="${BIBITES_SPOT_STATE_DIR:-/run/bibites}"
+STATE_FILE="$STATE_DIR/spot-watch.state"
+
 token=''
+token_at=0
+consecutive_failures=0
+last_heartbeat=0
+
 refresh_token() {
-  token="$(curl -fsS -m 2 -X PUT \
-    -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600' \
-    http://169.254.169.254/latest/api/token)"
+  local t
+  t="$(curl -fsS -m 2 -X PUT \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: $TOKEN_TTL" \
+    "$IMDS/latest/api/token" 2>/dev/null)" || return 1
+  [ -n "$t" ] || return 1
+  token="$t"
+  token_at="$(date +%s)"
+  return 0
 }
 
-while true; do
-  [ -n "$token" ] || refresh_token || { sleep 5; continue; }
-  action="$(curl -fsS -m 2 -H "X-aws-ec2-metadata-token: $token" \
-    http://169.254.169.254/latest/meta-data/spot/instance-action 2>/dev/null || true)"
-  if [ -n "$action" ]; then
-    log "Spot interruption notice received: $action"
+# Poll the interruption endpoint. Sets POLL_CODE and POLL_BODY.
+#
+# Deliberately NOT `curl -f`: the status code is the whole point. 404 means "no
+# interruption", 200 means "one is scheduled", 401 means "the token died and this
+# watcher is currently useless". Only the third is an error, and only the third
+# should ever be loud.
+POLL_CODE=000
+POLL_BODY=''
+poll_action() {
+  local out
+  out="$(curl -sS -m 2 -H "X-aws-ec2-metadata-token: $token" \
+    -w $'\n%{http_code}' \
+    "$IMDS/latest/meta-data/spot/instance-action" 2>/dev/null)" || { POLL_CODE=000; POLL_BODY=''; return 1; }
+  POLL_CODE="${out##*$'\n'}"
+  POLL_BODY="${out%$'\n'*}"
+  return 0
+}
 
-    mapfile -t games < <(systemctl list-units --type=service --state=running \
-      'bibites-game@*.service' --no-legend | awk '{print $1}')
-    if [ "${#games[@]}" -gt 0 ]; then
-      # Stop in parallel. Each Unity process gets SIGTERM and runs save-on-quit;
-      # serial stops would spend the two-minute notice six times over.
-      systemctl stop --no-block "${games[@]}"
-      deadline=$(( $(date +%s) + 75 ))
-      while [ "$(date +%s)" -lt "$deadline" ]; do
-        any=0
-        for unit in "${games[@]}"; do
-          systemctl is-active --quiet "$unit" && any=1
-        done
-        [ "$any" -eq 0 ] && break
-        sleep 1
+note_state() {
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  # An age computed from token_at=0 is epoch arithmetic, not a measurement. A
+  # watcher that has never held a token reports unknown, because "56 years" in a
+  # health file is worse than saying nothing.
+  local age=unknown
+  [ "$token_at" -gt 0 ] && age=$(( $(date +%s) - token_at ))
+  printf 'at=%s code=%s tokenAgeSeconds=%s consecutiveFailures=%s\n' \
+    "$(date -u +%FT%TZ)" "$POLL_CODE" "$age" \
+    "$consecutive_failures" > "$STATE_FILE" 2>/dev/null || true
+}
+
+stop_worlds_and_wait() {
+  mapfile -t games < <(systemctl list-units --type=service --state=running \
+    'bibites-game@*.service' --no-legend | awk '{print $1}')
+  if [ "${#games[@]}" -gt 0 ]; then
+    # Stop in parallel. Each Unity process gets SIGTERM and runs save-on-quit;
+    # serial stops would spend the two-minute notice six times over.
+    systemctl stop --no-block "${games[@]}"
+    local deadline; deadline=$(( $(date +%s) + 75 ))
+    while [ "$(date +%s)" -lt "$deadline" ]; do
+      local any=0 unit
+      for unit in "${games[@]}"; do
+        systemctl is-active --quiet "$unit" && any=1
       done
-    fi
-
-    mapfile -t sidecars < <(systemctl list-units --type=service --state=running \
-      'bibites-sidecar@*.service' --no-legend | awk '{print $1}')
-    [ "${#sidecars[@]}" -eq 0 ] || systemctl stop "${sidecars[@]}"
-    sync
-    log 'worlds saved and sidecars stopped; waiting for EC2 to stop the instance'
-    sleep infinity
+      [ "$any" -eq 0 ] && break
+      sleep 1
+    done
   fi
-  sleep 5
+
+  mapfile -t sidecars < <(systemctl list-units --type=service --state=running \
+    'bibites-sidecar@*.service' --no-legend | awk '{print $1}')
+  [ "${#sidecars[@]}" -eq 0 ] || systemctl stop "${sidecars[@]}"
+  sync
+}
+
+log "watching for Spot interruption; token ttl ${TOKEN_TTL}s, refreshed every ${TOKEN_REFRESH_AFTER}s"
+
+while true; do
+  now="$(date +%s)"
+
+  # Refresh on age, not on emptiness. This is the fix.
+  if [ -z "$token" ] || [ $(( now - token_at )) -ge "$TOKEN_REFRESH_AFTER" ]; then
+    if ! refresh_token; then
+      consecutive_failures=$(( consecutive_failures + 1 ))
+      # Loud, because a watcher that cannot mint a token is not watching.
+      [ $(( consecutive_failures % 12 )) -eq 1 ] &&
+        log "WARNING: cannot obtain an IMDSv2 token (attempt $consecutive_failures); NOT watching for interruptions"
+      POLL_CODE=token-failed; note_state
+      sleep "$POLL_SECONDS"; continue
+    fi
+  fi
+
+  if ! poll_action; then
+    consecutive_failures=$(( consecutive_failures + 1 ))
+    [ $(( consecutive_failures % 12 )) -eq 1 ] &&
+      log "WARNING: IMDS unreachable (attempt $consecutive_failures)"
+    note_state
+    sleep "$POLL_SECONDS"; continue
+  fi
+
+  case "$POLL_CODE" in
+    404)
+      # The ordinary answer: no interruption scheduled. Silent by design.
+      consecutive_failures=0
+      ;;
+    401|403)
+      # The failure that used to be invisible. Force a refresh and say so.
+      log "IMDS answered $POLL_CODE; the token is stale, refreshing immediately"
+      token=''
+      consecutive_failures=$(( consecutive_failures + 1 ))
+      note_state
+      continue
+      ;;
+    200)
+      consecutive_failures=0
+      log "Spot interruption notice received: $POLL_BODY"
+      note_state
+      stop_worlds_and_wait
+      log 'worlds saved and sidecars stopped; waiting for EC2 to stop the instance'
+      sleep infinity
+      ;;
+    *)
+      consecutive_failures=$(( consecutive_failures + 1 ))
+      [ $(( consecutive_failures % 12 )) -eq 1 ] &&
+        log "WARNING: unexpected IMDS status $POLL_CODE (attempt $consecutive_failures)"
+      ;;
+  esac
+
+  # A heartbeat every ten minutes, so "this watcher is alive and seeing 404s" is
+  # a positive statement in the journal rather than an absence of complaint.
+  if [ $(( now - last_heartbeat )) -ge 600 ]; then
+    log "alive; last IMDS status $POLL_CODE, token age $(( now - token_at ))s"
+    last_heartbeat="$now"
+  fi
+
+  note_state
+  sleep "$POLL_SECONDS"
 done
