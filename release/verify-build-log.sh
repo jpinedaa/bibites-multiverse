@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # Assert that a release/make-release.sh log shows every gate actually running.
 #
-# WHY THIS FILE EXISTS. Several of the build's strongest gates DOWNGRADE
-# silently when an input is unreadable instead of failing:
+# WHY THIS FILE EXISTS. Two of the build's strongest gates DOWNGRADE silently
+# when an input is unreadable instead of failing:
 #
 #   * the Linux matrix row check "stands on its record" when there is no
 #     unpacked Linux game;
-#   * the three-way plugin check says "the bundle check stands alone" when this
-#     machine's game directory cannot be read;
-#   * the bundle provenance file is skipped with a note when it is absent.
+#   * the three-way plugin check says "the recorded hash stands alone" when this
+#     machine's game directory cannot be read.
 #
-# All three are reasonable for a hand build on the owner's machine. Under a
-# dedicated CI runner user, a permission mistake would turn any of them into a
+# Both are reasonable for a hand build on the owner's machine. Under a dedicated
+# CI runner user, a permission mistake would turn either of them into a
 # permanent, invisible no-op — the release would keep passing while the check
 # that gives it its value had stopped running months earlier. So the release
 # workflow requires the full success set to appear in the log, by literal text.
@@ -43,59 +42,35 @@ RELEASE="${2:-}"
 # a pattern may contain an alternation. A description must therefore never
 # contain '|'.
 REQUIRED=(
-  '^ *clean at [0-9a-f]{7,40}$|the build ran on a clean tree (make-release.sh:160)'
-  'allow-listed locations, no stray version literal|the version surface agrees with itself (make-release.sh:193)'
-  'the plugin source and both matrix rows say mod |gate E, the plugin version against the matrix (make-release.sh:293)'
-  'libs/BibitesAssembly\.dll matches the matrix: game .+ on Windows|the game pin held (make-release.sh:307)'
-  "the Linux game at .+ matches the matrix's Linux row|the Linux row was checked against a real game, not trusted (make-release.sh:318)"
-  'the bundled sidecar was built from [0-9a-f]{40}|the bundle stamp was read back (make-release.sh:393)'
-  'cmd/sidecar uses the same repository inputs and module versions as the bundled sidecar|gate 2, the sidecar input manifest (make-release.sh:425)'
-  'same source as the bundled sidecar \([0-9a-f]{40}\)|the Linux sidecar came from the bundled source (make-release.sh:456)'
-  'byte-identical to the bundled plugin|gate 3, the plugin matches the tracked bundle (make-release.sh:503)'
-  "byte-identical to the plugin in this machine's game|gate 3b, the three-way leg (make-release.sh:511)"
-  'BepInEx_win_x64_.+\.zip sha256 verified: [0-9a-f]{64}|the Windows BepInEx pin (make-release.sh:534)'
-  'BepInEx_linux_x64_.+\.zip sha256 verified: [0-9a-f]{64}|the Linux BepInEx pin (make-release.sh:534)'
-  'the Linux scripts parse, are LF, and carry their executable bit|the Linux kit is usable as shipped (make-release.sh:602)'
-  'Windows complete payload: game .+, assembly [0-9A-F]{64}|the Windows game payload was staged and hashed (make-release.sh:642)'
-  'Linux complete payload: game .+, assembly [0-9A-F]{64}|the Linux game payload was staged and hashed (make-release.sh:642)'
-  'MANIFEST\.sha256: [0-9]+ files \(Windows\), [0-9]+ files \(Linux\)|both per-archive manifests were written (make-release.sh:690)'
-  'every archive contains LICENSE, THIRD_PARTY_NOTICES\.md, and the public join configuration|the licence and join config are in every archive (make-release.sh:781)'
-  'the Windows add-on archive contains BibitesMultiverseLauncher\.exe|the add-on archive ships the launcher (make-release.sh:791)'
-  'the Windows complete archive and the setup payload contain BibitesMultiverseLauncher\.exe|the setup shortcuts point at a file that exists (make-release.sh:797)'
-  '^=== ready, and NOTHING IS PUBLISHED$|the build reached its end (make-release.sh:894)'
+  '^ *clean at [0-9a-f]{7,40}$|the build ran on a clean tree (make-release.sh:173)'
+  'allow-listed locations, no stray version literal|the version surface agrees with itself (make-release.sh:206)'
+  '^ *sidecar source [0-9a-f]{40}, inputs [0-9a-f]{64}$|the tested-build record was read (make-release.sh:298)'
+  'the plugin source, both matrix rows and the tested-build record say mod |gate E, the mod version against the matrix and the record (make-release.sh:328)'
+  'libs/BibitesAssembly\.dll matches the matrix: game .+ on Windows|the game pin held (make-release.sh:342)'
+  "the Linux game at .+ matches the matrix's Linux row|the Linux row was checked against a real game, not trusted (make-release.sh:358)"
+  'cmd/sidecar inputs match the recorded tested build: [0-9a-f]{64}|gate 2, the sidecar input manifest against the tested build (make-release.sh:404)'
+  'same inputs as the recorded tested build \([0-9a-f]{64}\)|the Linux sidecar came from the tested source (make-release.sh:434)'
+  'byte-identical to the recorded tested plugin|gate 3, the plugin matches the tested build (make-release.sh:489)'
+  "byte-identical to the plugin in this machine's game|gate 3b, the three-way leg (make-release.sh:498)"
+  'BepInEx_win_x64_.+\.zip sha256 verified: [0-9a-f]{64}|the Windows BepInEx pin (make-release.sh:521)'
+  'BepInEx_linux_x64_.+\.zip sha256 verified: [0-9a-f]{64}|the Linux BepInEx pin (make-release.sh:521)'
+  'the Linux scripts parse, are LF, and carry their executable bit|the Linux kit is usable as shipped (make-release.sh:589)'
+  'Windows complete payload: game .+, assembly [0-9A-F]{64}|the Windows game payload was staged and hashed (make-release.sh:629)'
+  'Linux complete payload: game .+, assembly [0-9A-F]{64}|the Linux game payload was staged and hashed (make-release.sh:629)'
+  'MANIFEST\.sha256: [0-9]+ files \(Windows\), [0-9]+ files \(Linux\)|both per-archive manifests were written (make-release.sh:677)'
+  'every archive contains LICENSE, THIRD_PARTY_NOTICES\.md, and the public join configuration|the licence and join config are in every archive (make-release.sh:768)'
+  'the Windows add-on archive contains BibitesMultiverseLauncher\.exe|the add-on archive ships the launcher (make-release.sh:778)'
+  'the Windows complete archive and the setup payload contain BibitesMultiverseLauncher\.exe|the setup shortcuts point at a file that exists (make-release.sh:784)'
+  '^=== ready, and NOTHING IS PUBLISHED$|the build reached its end (make-release.sh:881)'
 )
 
 # Text that must NOT appear. Each of these is a downgrade the build prints
 # instead of failing, and each one silently deletes a gate.
 FORBIDDEN=(
-  '--allow-dirty: this is a rehearsal and MUST NOT be published\.|the build was a rehearsal; a rehearsal must never be published (make-release.sh:158)'
-  'no unpacked Linux game at|the Linux row check downgraded to its record: MV_RELEASE_LINUX_GAME is wrong or unreadable (make-release.sh:320)'
-  "this machine's game directory is not readable from here|gate 3b did not run: the runner user cannot read the Steam plugin (make-release.sh:513)"
+  '--allow-dirty: this is a rehearsal and MUST NOT be published\.|the build was a rehearsal; a rehearsal must never be published (make-release.sh:171)'
+  'no unpacked Linux game at|the Linux row check downgraded to its record: MV_RELEASE_LINUX_GAME is wrong or unreadable (make-release.sh:360)'
+  "this machine's game directory is not readable from here|gate 3b did not run: the runner user cannot read the Steam plugin (make-release.sh:500)"
 )
-
-# THE BUNDLE PROVENANCE FILE. farend/dist/BUNDLE-SOURCE.txt is the second of
-# the two independent witnesses that the tracked far-end bundle is the bundle
-# this tree builds. make-release.sh asserts it against the zip it just
-# unpacked, and prints a note instead when the file is absent — which is right
-# for a bundle built before the record existed, and is exactly the silent
-# no-op this script exists to catch once the record IS tracked.
-#
-# So the requirement follows the tree, with no edit needed on the day it lands:
-# while the file is absent, one of the two notes must appear (silence fails);
-# once it is present, only the assertion will do and the "predates it" note
-# becomes forbidden.
-if [ -f "$REPO/farend/dist/BUNDLE-SOURCE.txt" ]; then
-  REQUIRED+=(
-    'BUNDLE-SOURCE\.txt agrees with the zip; the bundle was built at [0-9a-f]{40}|the bundle provenance file was asserted against the zip (make-release.sh:377)'
-  )
-  FORBIDDEN+=(
-    'no farend/dist/BUNDLE-SOURCE\.txt|the provenance record is tracked but the build did not see it, so the second witness stopped existing (make-release.sh:379)'
-  )
-else
-  REQUIRED+=(
-    'BUNDLE-SOURCE\.txt agrees with the zip; the bundle was built at [0-9a-f]{40}|no farend/dist/BUNDLE-SOURCE\.txt|the build either asserted the bundle provenance record or said in so many words that there is none (make-release.sh:377 or :379)'
-  )
-fi
 
 fails=0
 for entry in "${REQUIRED[@]}"; do

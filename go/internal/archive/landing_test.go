@@ -370,8 +370,8 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 // half-answered, so they are asserted as one contract.
 func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
 	for _, want := range []string{
-		"The game behind every world.",
-		"Every world on this map runs a copy of <em>The Bibites</em>.",
+		"<h2><em>The Bibites</em></h2>",
+		"Every world on this map runs a copy of the game.",
 		`src="/game-screenshot.jpg"`,
 		`href="#game"><em>The Bibites</em></a>`,
 	} {
@@ -383,6 +383,11 @@ func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
 	// rather than an explanation. It should not come back.
 	if strings.Contains(landingPageHTML, "came first") {
 		t.Error("landing page still carries the retired chronology title")
+	}
+	// Its replacement described the game instead of naming it. The section is
+	// the game's own, so the title is the game's name and nothing else.
+	if strings.Contains(landingPageHTML, "The game behind every world") {
+		t.Error("landing page still carries the retired descriptive title")
 	}
 
 	a := rigShapedArchive(t)
