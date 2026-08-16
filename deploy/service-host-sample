@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# One sample of the SERVICE host: the box that runs nginx, the relay, the
+# archive and the stream origin.
+#
+# THE ASYMMETRY THIS CLOSES. The world host has sampled its own load, memory and
+# per-world state every five minutes since it was built
+# (cloud/aws/runtime/bibites-performance-sample). The service host — which runs
+# the relay every peer connects to, the archive that owns the ledger, and the
+# only process that can see the whole map — has sampled nothing, ever. When six
+# peers dropped together on 2026-08-15 the one end common to all six links was
+# the one end with no record of what it was doing.
+#
+# So this is the missing half of a pair, deliberately written to the same shape:
+# one JSON object per line, appended, readable with tail and jq.
+#
+# WHAT IT MAY COST. This runs on two vCPUs that are also serving the public
+# website, so it obeys monitor.sh's discipline (deploy/monitor.sh, "this
+# monitor's largest cost on a two-vCPU box"): O(1) reads of /proc and one
+# `systemctl show`, no `du`, no directory walks, no genome-store scans. The one
+# deliberate expense is a one-second sleep to turn /proc/stat into a rate, and
+# that second is spent sleeping rather than spinning.
+#
+# UNKNOWN IS A VALUE (§10.1). Every field this cannot read is emitted as null,
+# never as zero. A missing conntrack count and a conntrack count of zero are
+# different facts, and a capacity question answered with a confident zero is
+# worse than one answered honestly with nothing.
+#
+# IT DOES NOT NEED ROOT and must never be given it — the same rule monitor.sh
+# follows. Anything requiring privilege is simply reported as unknown.
+set -u
+
+OUT="${MV_HOST_SAMPLE_OUT:-/var/lib/multiverse/metrics/service-host.jsonl}"
+DATA_DIR="${MV_DATA_DIR:-/var/lib/multiverse/archive}"
+UNITS="${MV_HOST_SAMPLE_UNITS:-multiverse-relay multiverse-archive nginx multiverse-stream}"
+STDOUT=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --stdout) STDOUT=1 ;;
+    --out)    OUT="${2:?--out needs a path}"; shift ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    *) printf 'unknown argument: %s\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+command -v jq >/dev/null || { printf 'no jq on PATH\n' >&2; exit 2; }
+
+# Read a single value, or print nothing so jq renders it as null.
+try() { "$@" 2>/dev/null || true; }
+
+# ---------------------------------------------------------------- cpu
+
+# /proc/stat is cumulative, so a single read is meaningless. One second apart is
+# enough to turn it into a percentage and short enough that the sample stays a
+# point rather than a window.
+read_cpu_total() { awk '/^cpu /{i=$5; t=0; for(f=2;f<=NF;f++) t+=$f; print t, i}' /proc/stat 2>/dev/null; }
+cpu_busy_pct=""
+c0="$(read_cpu_total)"
+if [ -n "$c0" ]; then
+  sleep 1
+  c1="$(read_cpu_total)"
+  if [ -n "$c1" ]; then
+    cpu_busy_pct="$(awk -v a="$c0" -v b="$c1" '
+      BEGIN{ split(a,x," "); split(b,y," ");
+             dt=y[1]-x[1]; di=y[2]-x[2];
+             if (dt>0) printf "%.1f", (dt-di)*100.0/dt }')"
+  fi
+fi
+
+# ---------------------------------------------------------------- memory, load, disk
+
+mem_total="$(try awk '/^MemTotal:/{print $2*1024}'     /proc/meminfo)"
+mem_avail="$(try awk '/^MemAvailable:/{print $2*1024}' /proc/meminfo)"
+swap_total="$(try awk '/^SwapTotal:/{print $2*1024}'   /proc/meminfo)"
+swap_free="$(try awk '/^SwapFree:/{print $2*1024}'     /proc/meminfo)"
+load1="$(try cut -d' ' -f1 /proc/loadavg)"
+load5="$(try cut -d' ' -f2 /proc/loadavg)"
+load15="$(try cut -d' ' -f3 /proc/loadavg)"
+
+disk_free_bytes=""; disk_used_pct=""
+if [ -d "$DATA_DIR" ]; then
+  disk_free_bytes="$(try df -PB1 "$DATA_DIR" | awk 'NR==2{print $4}')"
+  disk_used_pct="$(try df -P "$DATA_DIR"     | awk 'NR==2{gsub(/%/,"",$5); print $5}')"
+fi
+
+# ---------------------------------------------------------------- tcp counters
+#
+# These are the counters that distinguish "the peer closed" from "the path
+# broke", which is the distinction the relay's own log cannot currently make.
+# They are cumulative since boot; a reader compares consecutive samples.
+
+snmp_field() { try awk -v k="$1" '/^Tcp:/{if(h==""){h=$0;next} split(h,H," "); split($0,V," ");
+                for(i=2;i<=length(H);i++) if(H[i]==k){print V[i]; exit}}' /proc/net/snmp; }
+ext_field()  { try awk -v k="$1" '/^TcpExt:/{if(h==""){h=$0;next} split(h,H," "); split($0,V," ");
+                for(i=2;i<=length(H);i++) if(H[i]==k){print V[i]; exit}}' /proc/net/netstat; }
+
+tcp_curr_estab="$(snmp_field CurrEstab)"
+tcp_active_opens="$(snmp_field ActiveOpens)"
+tcp_passive_opens="$(snmp_field PassiveOpens)"
+tcp_attempt_fails="$(snmp_field AttemptFails)"
+tcp_estab_resets="$(snmp_field EstabResets)"
+tcp_retrans_segs="$(snmp_field RetransSegs)"
+tcp_out_rsts="$(snmp_field OutRsts)"
+tcpext_listen_overflows="$(ext_field ListenOverflows)"
+tcpext_listen_drops="$(ext_field ListenDrops)"
+tcpext_syn_retrans="$(ext_field TCPSynRetrans)"
+
+conntrack_count="$(try cat /proc/sys/net/netfilter/nf_conntrack_count)"
+conntrack_max="$(try cat /proc/sys/net/netfilter/nf_conntrack_max)"
+
+# ---------------------------------------------------------------- per-unit state
+#
+# MemoryCurrent against the relay's MemoryMax=512M tripwire is the reading that
+# says whether the cap was ever approached. NRestarts is how a restart that
+# healed itself between two monitor ticks stops being invisible.
+
+units_json="$(
+  for u in $UNITS; do
+    # NOT `--value`: systemctl prints properties in its OWN order, not the order
+    # asked for, so positional parsing silently transposes fields — it read a
+    # CPU counter as a unit's state the first time this was written. Parse the
+    # KEY=value form by name instead, which is order-independent.
+    line="$(try systemctl show "$u" \
+      --property=ActiveState,SubState,MemoryCurrent,CPUUsageNSec,NRestarts)"
+    [ -n "$line" ] || { printf '{"unit":"%s"}\n' "$u"; continue; }
+    # systemd renders an unset numeric property as the u64 sentinel
+    # 18446744073709551615, which is not a measurement — it is "no value", and
+    # the unknown rule says it must not be published as a number.
+    printf '%s\n' "$line" | jq -Rs --arg u "$u" '
+      [ split("\n")[] | select(test("=")) | split("=") | {key: .[0], value: (.[1:] | join("="))} ]
+      | from_entries as $p
+      | def num(x): if ((x // "") | test("^[0-9]+$")) and (x != "18446744073709551615")
+                    then (x|tonumber) else null end;
+      def str(x): if (x // "") == "" then null else x end;
+      {unit:$u,
+       activeState: str($p.ActiveState),
+       subState:    str($p.SubState),
+       memoryBytes: num($p.MemoryCurrent),
+       cpuNsec:     num($p.CPUUsageNSec),
+       restarts:    num($p.NRestarts)}'
+  done | jq -sc .
+)"
+
+# ---------------------------------------------------------------- emit
+
+jq -nc \
+  --arg at "$(date -u +%FT%TZ)" \
+  --arg cpu "$cpu_busy_pct" \
+  --arg l1 "$load1" --arg l5 "$load5" --arg l15 "$load15" \
+  --arg mt "$mem_total" --arg ma "$mem_avail" \
+  --arg st "$swap_total" --arg sf "$swap_free" \
+  --arg df "$disk_free_bytes" --arg dp "$disk_used_pct" \
+  --arg ce "$tcp_curr_estab" --arg ao "$tcp_active_opens" --arg po "$tcp_passive_opens" \
+  --arg af "$tcp_attempt_fails" --arg er "$tcp_estab_resets" --arg rs "$tcp_retrans_segs" \
+  --arg orst "$tcp_out_rsts" \
+  --arg lo "$tcpext_listen_overflows" --arg ld "$tcpext_listen_drops" --arg sr "$tcpext_syn_retrans" \
+  --arg ctc "$conntrack_count" --arg ctm "$conntrack_max" \
+  --argjson units "${units_json:-[]}" '
+  def n(x): if (x // "") == "" then null else (x | tonumber) end;
+  {
+    at: $at,
+    cpuBusyPct: n($cpu),
+    load: {one: n($l1), five: n($l5), fifteen: n($l15)},
+    memory: {totalBytes: n($mt), availableBytes: n($ma),
+             swapTotalBytes: n($st), swapFreeBytes: n($sf)},
+    disk: {dataFreeBytes: n($df), dataUsedPct: n($dp)},
+    tcp: {currEstab: n($ce), activeOpens: n($ao), passiveOpens: n($po),
+          attemptFails: n($af), estabResets: n($er), retransSegs: n($rs),
+          outResets: n($orst), listenOverflows: n($lo), listenDrops: n($ld),
+          synRetrans: n($sr)},
+    conntrack: {count: n($ctc), max: n($ctm)},
+    units: $units
+  }' > /tmp/.mv-host-sample.$$ 2>/dev/null || { rm -f /tmp/.mv-host-sample.$$; exit 1; }
+
+if [ "$STDOUT" = 1 ]; then
+  cat /tmp/.mv-host-sample.$$
+else
+  mkdir -p "$(dirname "$OUT")" 2>/dev/null || true
+  cat /tmp/.mv-host-sample.$$ >> "$OUT"
+fi
+rm -f /tmp/.mv-host-sample.$$

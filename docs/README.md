@@ -20,6 +20,7 @@ builds, test rigs, and durable technical findings. Nothing in `docs/` copies tha
 | [`error-taxonomy.md`](error-taxonomy.md) | a participant **and** the operator | Every refusal this system can hand somebody, with the remedy **and who must act** |
 | [`sidecar-diagnose-spec.md`](sidecar-diagnose-spec.md) | whoever implements or reviews `--diagnose` | Each check, its pass criterion, and the taxonomy entry a failure points at — plus the exit codes, the JSON schema, and the participant's own-slot view `--my-slot` |
 | [`defaults-audit.md`](defaults-audit.md) | a reviewer, and the operator | Every default the release ships with, what a bare install does with it, and the verdict |
+| [`observability.md`](observability.md) | the operator, and whoever ships a change | What is measured, at what interval, where it lands and who reads it — across both hosts, the path between them and the bill; plus the health window a deployment records and the order an incident is investigated in |
 
 **Two of these travel with the release rather than only living here.** `support-matrix.md`'s
 machine-readable block is copied into **every** release archive as `support-matrix.json`. Each

@@ -1,0 +1,15 @@
+[Unit]
+Description=Recycle one Bibites world if host memory demands it
+Documentation=file:///usr/local/libexec/bibites-recycle-world
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Root, because it restarts a system unit. Everything it reads is unprivileged;
+# the privilege is only for the one systemctl restart it may perform, and every
+# guard that could refuse that restart runs first.
+ExecStart=/usr/local/libexec/bibites-recycle-world
+# A run that cannot decide in two minutes should not decide at all. The restart
+# it may issue is --no-block-free: systemctl restart returns once the job is
+# enqueued and the unit's own TimeoutStopSec=45 governs the stop.
+TimeoutStartSec=2min

@@ -1,0 +1,23 @@
+[Unit]
+Description=Consider recycling one Bibites world when host memory is low
+Documentation=file:///usr/local/libexec/bibites-recycle-world
+
+[Timer]
+# Every ten minutes, which is far more often than a world is actually recycled.
+#
+# The cadence is deliberately decoupled from the restart interval. A fixed
+# "restart one world every 43 minutes" schedule would keep restarting healthy
+# worlds after the leak is fixed, and would still be too slow if the leak ever
+# got worse. This timer only ASKS the question; bibites-recycle-world answers it
+# from live memory and does nothing on most ticks. Its own cool-off, not this
+# interval, is what bounds how often a world can be taken down.
+OnBootSec=20min
+OnUnitActiveSec=10min
+# Spread ticks so a recycle decision never lands in the same instant as the
+# five-minute performance sample it reads memory from.
+RandomizedDelaySec=60
+AccuracySec=30s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

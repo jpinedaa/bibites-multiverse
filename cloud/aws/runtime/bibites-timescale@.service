@@ -2,9 +2,31 @@
 Description=Apply target time scale to Bibites world %i
 After=bibites-game@%i.service
 Requires=bibites-game@%i.service
+# WITHOUT THIS LINE THE TIME SCALE SILENTLY REVERTS ON EVERY UNPLANNED RESTART.
+#
+# bibites-game@%i carries Restart=on-failure, so systemd brings a crashed or
+# OOM-killed world back by itself. This unit is a Type=oneshot that has already
+# run and exited, and Requires=/After= only order a start that is ALREADY being
+# scheduled — neither re-runs a spent oneshot when the world comes back on its
+# own. The world therefore returns at the game's built-in x1 and stays there,
+# with nothing logged and every unit reporting healthy.
+#
+# Observed in production on 2026-08-16: bibites-game@slot-5 was OOM-killed at
+# 04:27:28Z, restarted itself at 04:27:43Z, and ran at x1 for over an hour with
+# the largest population on the map and a migration backlog it could not drain,
+# because its neighbours were still running between x5 and x19 and the inbound
+# pacer counts SIMULATED minutes.
+#
+# PartOf propagates the parent's stop and restart to this unit, so the oneshot
+# is re-queued and the scale is re-applied whenever the world is brought back.
+PartOf=bibites-game@%i.service
 
 [Service]
 Type=oneshot
+# RemainAfterExit is what lets PartOf see this unit as something to restart. A
+# oneshot that drops straight back to inactive has no state for the propagation
+# to act on.
+RemainAfterExit=yes
 User=bibites
 Group=bibites
 ExecStart=/usr/local/libexec/bibites-set-timescale %i

@@ -3,6 +3,7 @@
 The relay and archive are separate services.
 A relay restart is usually short.
 An archive restart replays the ledger, and its cost grows with that ledger.
+The host that runs worlds has one class of its own, and that class is automatic.
 
 This policy describes reusable behavior.
 Private operations storage owns each restart window, approval, receipt, and incident record.
@@ -12,6 +13,7 @@ Private operations storage owns each restart window, approval, receipt, and inci
 | Class | Effect | Notice |
 |---|---|---|
 | Certificate reload | nginx loads a renewed pair. The relay and archive continue. | No notice is normally necessary. |
+| World recycle | One world on the world host stops and starts again. The relay, the archive, and every other world continue. | No notice is normally necessary. It is automatic and recurring. |
 | Relay only | Peers disconnect, reconnect, and reclaim their slots. | Announce a planned restart. |
 | Archive only | The website stops while the archive replays the ledger. A restart that keeps the record complete also stops the relay. | Announce it and state the expected replay time. |
 | Host reboot | The relay and archive stop. The archive replays after boot. | Announce it and schedule it. |
@@ -27,6 +29,61 @@ New connections use the renewed certificate.
 
 The monitor compares the served certificate with the installed certificate.
 This check detects a deploy-hook failure before expiry.
+
+## World recycle
+
+This class belongs to the host that runs worlds, and not to the relay and archive host.
+
+A world process grows with wall-clock time, at a rate that its time scale, its achieved rate, and
+its population do not predict.
+[`SIZING.md`](SIZING.md) carries that rate and the exhaustion model it implies.
+A host that runs worlds therefore needs a restart policy, and `bibites-recycle.timer` is that
+policy.
+
+The trigger is memory and not a clock.
+The timer asks every ten minutes.
+`bibites-recycle-world` does nothing while available host memory stays above its threshold.
+Below that threshold it restarts one world, the largest that has been running for at least an hour.
+
+Three guards limit it.
+It does not act while any world is already dark, so it cannot deepen an outage.
+It waits out a cool-off after each recycle.
+It refuses outright when it cannot confirm that the chosen world saves on quit.
+Those guards are the whole pre-restart check for this class.
+No person approves each recycle, because the alternative to acting is a kernel that acts instead.
+
+The recycle costs no simulated time.
+The game receives `SIGTERM`, saves on quit, and resumes from that save.
+The world restarts in either case: without the recycle, the kernel out-of-memory killer performs
+the same restart with `SIGKILL`, later, and drags every other world through a swap storm first.
+This class is the planned form of that unplanned restart.
+
+Only the game unit restarts.
+The sidecar keeps its relay connection, its slot, and its coordinate.
+The map shows that slot as connected with no game attached, and the relay routes organisms around
+it until the game returns.
+
+The recycle touches neither the archive nor the relay.
+There is no ledger replay and no gap in the permanent record.
+It is the opposite case to [Restart with a complete record](#restart-with-a-complete-record), which
+stops the relay for the length of a replay to keep that record whole.
+
+The time scale returns with the world.
+`bibites-game@<world>.service` wants `bibites-timescale@<world>.service`, so every start of a world
+re-runs the unit that applies its target scale.
+A world that comes back at the game's built-in `x1` and stays there is a fault in that dependency.
+
+Each recycle leaves its own record, and [`cloud/aws/README.md`](../cloud/aws/README.md) says where
+to read it.
+
+Stop the whole behavior with one command:
+
+```sh
+sudo systemctl disable --now bibites-recycle.timer
+```
+
+Nothing else changes when it is disabled.
+The growth continues, and the out-of-memory killer performs the restarts instead.
 
 ## Relay restart
 
@@ -194,6 +251,11 @@ The monitor must alert a person when a unit enters the failed state.
 The host protects relay availability under memory pressure.
 An archive failure loses record coverage, but a relay failure stops the map.
 
+A world that the kernel kills for memory on the world host is an unplanned restart of this class.
+[World recycle](#world-recycle) exists to convert it into a planned one before the kernel acts.
+An unplanned world restart also loses its applied time scale unless the unit dependency named in
+that section is installed.
+
 Do not improvise a destructive recovery on a live service.
 Capture logs and state first.
 Use the private incident runbook to resolve exact resources and commands.
@@ -235,5 +297,9 @@ Usually, the sidecar reconnects without participant action.
 
 State that an archive restart can make the public page unavailable.
 State any permanent record gap after an unplanned archive outage.
+
+State that a world the operator runs can restart itself for memory.
+Its slot then shows no game attached for the length of that restart, and its neighbours continue.
+No participant world restarts for this reason, and no record is lost.
 
 Do not include private hostnames, resource identifiers, or operational commands in the participant notice.

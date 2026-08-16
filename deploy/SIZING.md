@@ -109,6 +109,65 @@ A tight limit also increases CPU use during replay.
 Do not use swap as the normal capacity for a live replay heap.
 Sustained swap activity means that the instance needs more memory or less retained state.
 
+## World process memory
+
+**This is the binding constraint on a host that runs worlds, and it is not a
+function of `S`.**
+
+Every other term in this document scales with simulated time. This one does not.
+A world process grows at a measured rate with **wall-clock** age:
+
+```text
+world_GiB = 0.6 + 0.72 * hours_since_start
+```
+
+Use `0.72 GiB` for each world for each real hour. The growth is independent of
+the configured time scale, of the achieved rate, and of population. A world held
+at `x1` and simulating almost nothing grew at `0.75 GiB` each hour, inside the
+band set by worlds running between `x5` and `x19` on the same host at the same
+time. Population predicts nothing: the largest population on the reference host
+held the smallest resident set.
+
+Time to exhaustion for a host running `N` worlds:
+
+```text
+hours_to_exhaustion = (usable_GiB - 0.6 * N) / (0.72 * N)
+```
+
+The reference host, six worlds on `30.65 GiB` usable, predicted `6.3` hours and
+observed `6.95` and `7.0` hours in two independent cycles.
+
+Read the consequence directly from the formula. A continuous-operation target of
+`H` hours needs `0.72 * N * H` GiB of RAM before any other term. Six worlds for
+72 hours is approximately **315 GiB**, which no ordinary instance offers. **A
+host that runs worlds therefore needs a restart policy, not more memory.**
+
+This growth is a defect and not a property of the workload. Treat every number
+here as a description of the current build, recheck it after any game or mod
+change, and delete this section when the growth stops.
+
+### Why the failure looks like a CPU problem
+
+It does not present as memory exhaustion. It presents as peers disconnecting.
+
+As available memory falls the kernel enters direct reclaim, and allocating
+threads stall inside it. A sidecar that cannot run for fifteen seconds misses
+three consecutive sends and the relay drops it on its liveness deadline. On the
+reference host, 47 of 48 recorded drops occurred with memory between 85 and 99
+percent, while CPU sat at 96 to 99 percent for the entire period **including a
+7.1-hour window that contained no drops at all**.
+
+Use pressure stall information to tell the two apart, because utilisation cannot:
+
+```text
+/proc/pressure/cpu     full total    time no task could run for want of CPU
+/proc/pressure/memory  full total    time no task could run for want of memory
+```
+
+On the reference host the CPU figure was **zero** and the memory figure was
+several hundred seconds. A host can be pinned at 99 percent CPU indefinitely and
+serve perfectly well; the same host stalls hard at 96 percent memory.
+
 ## Replay time
 
 Use this formula:
@@ -128,18 +187,52 @@ If the relay stays live, every crossing during replay creates a gap in the archi
 
 ## Network transfer
 
-At `S = 5`, the reference model gives approximately 54 GB each month for migration forwards.
-Genome fetch traffic depends on cache gaps and participant behavior.
+**Count both directions.** A transfer allowance is usually consumed by inbound
+and outbound together, while only outbound overage is charged. A model that
+tracks egress alone understates the draw by roughly 40 percent.
 
-The live console can exceed game traffic when a browser polls continuously.
-HTTP gzip support reduces the reference console estimate from approximately 32 GB to 4 GB each month per open tab.
+Peer traffic is the largest term and it scales with `S`:
 
-Measure all current endpoints before transfer becomes a billing constraint.
-The page can add endpoints or change cadence without changing this document.
+```text
+peer_GB_per_month = 27.5 * S          outbound
+allowance_GB_per_month = 50 * S       both directions
+```
 
-Video transfer is a separate workload.
-A 2.5-Mbit/s stream uses approximately 810 GB for one continuously open viewer-month.
-Use a CDN or managed video service before direct-origin transfer exceeds its approved budget.
+Measured, not modelled: `52 GB` each day outbound to six peers whose combined
+achieved time scale was `57.5`. A participant at `x1` draws about `50 GB` each
+month; an accelerated world at `x10` draws about `500 GB`.
+
+The earlier model in this document gave `54 GB` each month at `S = 5`, which is
+`10.9 GB` for each unit of `S`. **The measured figure is 2.5 times that.** Use
+the measured rule.
+
+The live console is a much smaller term than this document once claimed, but the
+per-tab figure is larger:
+
+```text
+console_GB_per_month_per_open_tab = 12.3
+```
+
+The earlier estimate of `4 GB` gzipped counted only the status endpoint. The hop
+feed polls faster and carries more, and is roughly twice as expensive. Measure
+every endpoint the page polls, not the one it is named after. The page can add
+endpoints or change cadence without changing this document.
+
+Video transfer is a separate workload, and the wire cost is not the media rate:
+
+```text
+viewer_GB_per_month = 1190        measured, low-latency HLS at 2.5 Mbit/s
+```
+
+The media itself is `2.51 Mbit/s` as designed, which is the `810 GB` this
+document used to quote. The delivered cost is `3.67 Mbit/s`, because low-latency
+HLS re-fetches its playlist more often than it delivers a media part — a
+measured `8,745` playlist requests against `8,441` parts. Raising the part
+duration, or serving a non-low-latency variant, removes that 32 percent.
+
+Use a CDN or managed video service before direct-origin transfer exceeds its
+approved budget. At the measured rate, ten continuous viewers is not a capacity
+question but a four-figure monthly bill.
 
 ## Sizing procedure
 
@@ -166,7 +259,12 @@ Select a host that meets these conditions:
 - The volume holds the announced period plus recovery headroom.
 - The archive resident estimate stays below the approved memory threshold.
 - The archive can replay inside the announced maintenance window.
-- The transfer allowance covers map, console, and optional video traffic.
+- **A host that runs worlds has a restart policy, or enough memory for the
+  announced continuous-operation target — and for six worlds and 72 hours no
+  ordinary instance has that much.** Size the restart interval from the world
+  memory formula, never from a guess about CPU.
+- The transfer allowance covers map, console, and optional video traffic **in
+  both directions**, at the measured rates rather than the modelled ones.
 - The provider supports checked off-host backups.
 - The operator can increase capacity without changing the participant service name.
 

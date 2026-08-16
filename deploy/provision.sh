@@ -296,6 +296,13 @@ phase_directories() {
     [ -e "$f" ] || continue
     run install -m 0755 -o root -g root "$f" "$MV_PREFIX/deploy/$(basename "$f")"
   done
+  # Executable kit files that carry no .sh suffix. The glob above is by
+  # extension, so a script named without one silently never reaches the box and
+  # its unit lands with nothing to run. Name them.
+  for f in service-host-sample; do
+    [ -e "$KIT_DIR/$f" ] || continue
+    run install -m 0755 -o root -g root "$KIT_DIR/$f" "$MV_PREFIX/deploy/$f"
+  done
   for f in "$KIT_DIR"/*.md "$KIT_DIR"/deploy.env.example; do
     [ -e "$f" ] || continue
     run install -m 0644 -o root -g root "$f" "$MV_PREFIX/deploy/$(basename "$f")"
@@ -678,7 +685,8 @@ phase_systemd() {
   local u
   for u in multiverse-relay.service multiverse-archive.service \
            multiverse-monitor.service multiverse-monitor.timer \
-           multiverse-backup.service multiverse-backup.timer; do
+           multiverse-backup.service multiverse-backup.timer \
+           multiverse-host-sample.service multiverse-host-sample.timer; do
     run install -m 0644 -o root -g root "$KIT_DIR/systemd/$u" "/etc/systemd/system/$u"
   done
 
@@ -700,8 +708,12 @@ EOF
   fi
 
   run systemctl daemon-reload
+  # The sampler unit declares ReadWritePaths for this directory, and systemd
+  # refuses to start a unit whose ReadWritePaths does not exist.
+  run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/metrics
   run systemctl enable multiverse-relay.service multiverse-archive.service
-  run systemctl enable --now multiverse-monitor.timer multiverse-backup.timer
+  run systemctl enable --now multiverse-monitor.timer multiverse-backup.timer \
+    multiverse-host-sample.timer
   # start, not restart: re-running provision must not cost the map an outage.
   # An upgrade is a deliberate act and RESTART-POLICY.md is where it is written.
   run systemctl start multiverse-relay.service
@@ -764,6 +776,8 @@ phase_verify() {
   chk "nginx active"             "systemctl is-active --quiet nginx"
   chk "monitor timer active"     "systemctl is-active --quiet multiverse-monitor.timer"
   chk "backup timer active"      "systemctl is-active --quiet multiverse-backup.timer"
+  chk "host sample timer active" "systemctl is-active --quiet multiverse-host-sample.timer"
+  chk "host sampler is installed" "test -x $MV_PREFIX/deploy/service-host-sample"
   chk "relay backend healthz"    "curl -fsS --max-time 10 http://$MV_RELAY_BACKEND/healthz"
   chk "archive healthz local"    "curl -fsS --max-time 10 http://$MV_ARCHIVE_HTTP/healthz"
   chk "website over TLS"         "curl -fsS --max-time 15 https://$MV_DOMAIN/"

@@ -1,0 +1,37 @@
+[Unit]
+Description=Sample Bibites service-host performance every minute
+Documentation=file:///opt/multiverse/deploy/service-host-sample
+
+[Timer]
+# ONE MINUTE, not five, and the reason is a measured one.
+#
+# monitor.sh ticks every five minutes and is the right cadence for "is anything
+# wrong": it is comparing against thresholds that describe sustained states. It
+# is the wrong cadence for a RECORD, because the failures this service actually
+# suffers are shorter than its sampling interval. The disconnect episodes of
+# 2026-08-15/16 lasted 24-35 seconds; a five-minute sampler sees such an event
+# as at most one perturbed reading, and usually as nothing at all.
+#
+# One minute still does not resolve a 30-second event — nothing sampled can
+# resolve an event shorter than twice its interval — and that limit is stated
+# here rather than hidden, because it is exactly the mistake this project made
+# once already by reading five-minute CloudWatch averages as though they showed
+# instantaneous CPU. What one minute buys is a bounded, honest series: an event
+# is guaranteed to fall inside a known 60-second window, and the cumulative TCP
+# counters in each sample carry what happened BETWEEN samples even when the
+# gauges do not.
+#
+# The cumulative counters are the point. cpuBusyPct and load are gauges and can
+# miss a spike; tcp.estabResets and tcp.retransSegs are monotonic, so a
+# reader differencing two consecutive samples sees every reset that occurred in
+# the gap whether or not anything was sampled while it happened.
+OnBootSec=2min
+OnUnitActiveSec=1min
+# No randomised delay: unlike the monitor, these samples are meant to line up
+# with each other and with the archive's own 60-second metrics.jsonl cadence,
+# so that two files can be read side by side without interpolation.
+AccuracySec=5s
+Persistent=false
+
+[Install]
+WantedBy=timers.target
