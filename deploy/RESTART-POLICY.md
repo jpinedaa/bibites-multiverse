@@ -113,6 +113,11 @@ The script writes a receipt with UTC times for the deployment record.
 It refuses to start when an archive-deploy hold is in place, when another restart holds its lock,
 and when the peer gate is already raised.
 
+A deployment that runs through CI performs this restart with the `restart-relay` action, which
+calls `deploy/restart-relay.sh` and produces the receipt this section requires.
+The archive restart below is deliberately not offered through CI: `restart-archive` is accepted as
+a rehearsal only. See "Operating deploys through CI" in [`README.md`](README.md).
+
 ### The peer gate
 
 The archive is a Contract B subscriber like any peer, so when the relay returns, the archive and

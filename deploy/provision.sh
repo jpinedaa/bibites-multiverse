@@ -842,6 +842,32 @@ listener_is_loopback_only() {
   ! ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E ":${port}\$" | grep -qv '^127\.0\.0\.1:'
 }
 
+# ci_key_is_forced_command — is the CI deployment key still pinned to the gate?
+#
+# This is checked because the failure is SILENT AND TOTAL. The login account has
+# passwordless sudo, so the difference between a key with `command="…ci-gate.sh"`
+# and the same key without it is the difference between eight allowed verbs and
+# root. Nothing about the running service looks different either way, and the
+# deployments keep working, so only a check like this one can notice.
+#
+# The four restrictions are checked too, and they are not decoration: without
+# no-pty a client can still ask for a terminal, and port or agent forwarding
+# turns the deployment key into a route into the private network behind the box.
+ci_key_is_forced_command() {
+  local f="${MV_CI_AUTHORIZED_KEYS:-/home/ubuntu/.ssh/authorized_keys}" line opt
+  [ -r "$f" ] || return 1
+  line="$(grep -F -- "$MV_CI_DEPLOY_KEY_PUB" "$f" 2>/dev/null | head -1)"
+  [ -n "$line" ] || return 1
+  case "$line" in
+    "command=\"$MV_PREFIX/deploy/ci-gate.sh\","*) : ;;
+    *) return 1 ;;
+  esac
+  for opt in no-port-forwarding no-agent-forwarding no-pty no-X11-forwarding; do
+    printf '%s' "$line" | grep -Fq "$opt" || return 1
+  done
+  return 0
+}
+
 phase_verify() {
   step "verify"
   local ok=0 bad=0
@@ -886,6 +912,16 @@ phase_verify() {
       "runuser -u $MV_USER -- test -r '$ENV_FILE'"
   chk "admin path is NOT bound" \
       "! grep -q '^MULTIVERSE_RELAY_ADMIN_LISTEN=..*' /etc/multiverse/relay.env"
+
+  # Only when this deployment has a CI deployment key. The key's PUBLIC half
+  # goes in deploy.env as MV_CI_DEPLOY_KEY_PUB; the private half lives in the
+  # CI system's secret store and never on this host or in any repository.
+  # A deployment with no CI key sets nothing and is checked for nothing.
+  if [ -n "${MV_CI_DEPLOY_KEY_PUB:-}" ]; then
+    chk "ci-gate.sh is installed"   "test -x $MV_PREFIX/deploy/ci-gate.sh"
+    chk "ci-gate.sh is root-owned"  "test \"\$(stat -c %U:%G $MV_PREFIX/deploy/ci-gate.sh)\" = root:root"
+    chk "CI deploy key is pinned to the forced command" "ci_key_is_forced_command"
+  fi
 
   # That one check is worth its own remedy, because its failure is the only one
   # here that is otherwise silent: the units stay `active` (they are timers), the

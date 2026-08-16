@@ -17,6 +17,8 @@ Keep these records outside the public repository:
 | `deploy.env.example` | Parameters for one deployment. Copy it outside the repository before use. |
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
+| `deploy.sh` | The deployment sequence on the host: install the kit, prove what landed, install the binaries, prove those. It restarts nothing. |
+| `ci-gate.sh` | The forced command for a CI deployment key. It accepts a fixed list of verbs and refuses everything else. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
 | `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
 | `restart-archive.sh` | Runs the complete-record archive sequence, guarded by the archive-deploy hold and the replay-headroom verdict. Costs a full ledger replay. |
@@ -34,6 +36,8 @@ Keep these records outside the public repository:
 | `test-monitor.sh` | Drives the monitor's transfer, billing, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
 | `test-viewers-presence.sh` | Drives `viewers-presence.sh` against a fake access log, fake metrics and a fixed clock. |
 | `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
+| `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
+| `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
 | `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, and viewer-presence signal. |
@@ -169,6 +173,73 @@ Read the three that watch money rather than availability:
   archive's subscription to the relay leaves the host and returns over the billed interface.
 
 The transfer figures use the provider's GB of 2^30 bytes, counted in both directions.
+
+## Operating deploys through CI
+
+A deployment can be driven by a continuous-integration system instead of by hand.
+The kit provides the two pieces that need to be the same every time.
+
+`deploy.sh` is the sequence, and it is the same sequence either way:
+
+```sh
+sudo /opt/multiverse/deploy/deploy.sh --kit /path/to/staged-kit --binaries
+```
+
+It snapshots `/etc/multiverse/*.env`, installs the kit from the staged copy's own `provision.sh`,
+proves every installed file is byte-identical to the file it came from, and refuses if a phase
+rewrote an environment file — restoring the file first.
+It installs the binaries only after those checks pass, and then proves each installed binary
+against the artifact that was staged.
+It restarts nothing.
+
+`ci-gate.sh` is the forced command for the CI key.
+Add it to the login account's `authorized_keys`:
+
+```text
+command="/opt/multiverse/deploy/ci-gate.sh",no-port-forwarding,no-agent-forwarding,no-pty,no-X11-forwarding ssh-ed25519 AAAA... mv-deploy-ci
+```
+
+The gate accepts these verbs and refuses everything else with exit code 3:
+
+| Verb | What it does |
+|---|---|
+| `verify` | `provision.sh --only verify`, then reports whether the monitor is running. Changes nothing. |
+| `phase <name>` | One provision phase, from a fixed list: `directories`, `binaries`, `nginxfront`, `streamorigin`, `verify`. |
+| `kit-receive <sha>` | Reads a tar stream on stdin into a new directory under `~/ci-kits/`. |
+| `kit-install <dir> [<digest>]` | `deploy.sh --kit <dir>`. |
+| `binaries-install <dir> [<digest>]` | `deploy.sh --kit <dir> --binaries`. |
+| `restart-relay [--dry-run] [<tag>]` | `restart-relay.sh`. |
+| `restart-archive --dry-run` | `restart-archive.sh --dry-run`, and only ever the rehearsal. |
+| `receipt` | Prints host facts for a deployment record. No secret is among them. |
+
+Four rules the gate applies to all of them:
+
+- **A dry run is the default.** Every mutating verb takes `--dry-run`, and it reaches
+  `provision.sh`, which routes every mutation through one helper.
+- **The archive is never restarted by CI.** `restart-archive` is accepted with `--dry-run` and with
+  nothing else. An archive restart replays the whole ledger, costs the map a full relay outage for
+  the length of the replay, and needs an operator's measured proof that the replay fits in memory.
+  That is a judgement, and a scheduled job cannot make it. Run it by hand from `RESTART-POLICY.md`.
+- **A hold stops it.** While `/run/lock/bibites-archive-deploy.HOLD-README` exists, every mutating
+  verb is refused. `verify` and `receipt` stay available, so a check does not go red because a
+  person is working. There is no override.
+- **Mutations take the deployment lock.** `flock -n` on `/run/lock/bibites-archive-deploy.lock`,
+  the same lock a hand-run deployment takes, so the two paths serialize against each other.
+
+The gate writes one line per invocation to `/var/log/multiverse/ci-gate.log`:
+
+```text
+2026-08-16T12:00:00Z ALLOW verify
+2026-08-16T12:00:04Z REFUSE not an allowed verb: rm
+```
+
+Set `MV_CI_DEPLOY_KEY_PUB` in `deploy.env` to the public half of that key.
+The verify phase then checks that the key is still pinned to the forced command with all four
+restrictions, and that `ci-gate.sh` is installed and root-owned.
+That check exists because its failure is silent: the login account has passwordless sudo, so a CI
+key that loses its forced command is root on the host and nothing about the service looks different.
+
+Never put the private half of that key on the host or in this repository.
 
 ## Measurement
 
@@ -409,6 +480,8 @@ Use `test-units.sh` after a systemd unit change.
 Use `test-monitor.sh` after a `monitor.sh` change.
 Use `test-viewers-presence.sh` after a `viewers-presence.sh` change.
 Use `test-ce-reconcile.sh` after a `ce-reconcile.sh` change.
+Use `test-ci-gate.sh` after a `ci-gate.sh` change.
+Use `test-deploy.sh` after a `deploy.sh` change.
 Use the provisioning verification phase after any host change.
 
 Use `health-snapshot.sh --watch` across the change window.
@@ -473,6 +546,8 @@ deploy/test-units.sh
 deploy/test-monitor.sh
 deploy/test-viewers-presence.sh
 deploy/test-ce-reconcile.sh
+deploy/test-ci-gate.sh
+deploy/test-deploy.sh
 ```
 
 Both restart procedures answer `--dry-run`, which walks every step and changes nothing:
