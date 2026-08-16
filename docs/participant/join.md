@@ -33,7 +33,36 @@ will appear on the public map after the first claim.
 
 **A retry does not create another identity.** If the request succeeds but the response is lost,
 the protected pending record keeps the same UUID and secret. The relay treats the exact retry as
-the same enrollment. A later repair or runtime change also reuses the installed identity.
+the same enrollment.
+
+**Neither does installing again.** Enrollment happens for a data root with no world in it, and
+nothing else: a repair, an upgrade, a changed game folder, or an install over an earlier one reads
+the identity already in that folder and keeps it, saying *"reusing the map identity already in …"*.
+The uninstall keeps `peer-secret.txt`, `data/peer-id` and `data/relay-url` unless you pass
+`-RemoveWorldData` / `--remove-world-data`, so even removing the software and installing it again
+is the same world on the same slot, on a private map as much as on the public one.
+
+**An install writes over a `peer-secret.txt` only when something vouches for the world it belongs
+to**: the install record this data root's own installer wrote, or a pending record carrying that
+very secret. A claim that an ordinary text file makes — `data/peer-id`, a launcher profile, an old
+start script — is enough to *keep* a world and never enough to *destroy* one. Whatever is replaced
+is kept beside the new file as `peer-secret.txt.<utc>.old`, for you to delete once the world
+connects. In every other case the file is left exactly as it is and the installer stops instead:
+your copy of that secret is the only one there is.
+
+**A join string that names a different identity is gated**, because that is two things at once. A
+**slot handover** mints exactly that — a new identity with a fresh credential, bound to your old
+slot and position — and it is the map's only credential recovery. A borrowed or mistyped join
+string looks identical from here, and applying one would leave the world that owns this journal dark
+on the map. So the installer refuses both by default and applies the handover under
+`-ReplaceWorldIdentity` / `--replace-world-identity`, keeping the old name in
+`data/peer-id.previous`.
+
+**If the secret is gone but the name survives** — an uninstall from a release before this one
+deleted `peer-secret.txt` and kept the journal — the installer stops and says so. Nothing recovers
+a secret. Ask that world's operator for the handover above and install the join string it prints
+with the same switch, or use the switch on its own to take a **new** identity with no place: that is
+a second world on the map, and the old one stays dark until its operator releases it.
 
 Enrollment has a total map limit and a per-network-address limit. If either limit is reached, the
 installer stops with `INS-ENROLL` and keeps the pending identity for a safe retry. Existing worlds

@@ -36,8 +36,17 @@
 #      anything executable.
 #   H  a complete package. The same installer must create a versioned managed
 #      runtime without --game-dir, and uninstall only unchanged payload files.
+#   J  what may adopt a world and what may never overwrite one: a credential
+#      behind a blank first line, a file that is not a credential at all, a name
+#      whose secret is gone, a join string backed only by a hand-written claim,
+#      the one handover that does replace a secret, a private world adopted whole
+#      after an uninstall, --relay-url pointed elsewhere, and a loose mode.
 #   I  public-map enrollment on Linux. A failed response must keep one private
 #      pending identity. A retry must reuse it. A repair must not enroll again.
+#      An uninstall must KEEP the world's credential, so installing again over
+#      the same data root is the same world on the same slot; --remove-world-data
+#      is what ends it. A secret with nothing left to name its world is refused
+#      rather than overwritten, and naming it in data/peer-id is the way back.
 #
 # Usage:
 #   release/test-install-uninstall.sh --real-game-dir <path to the LINUX game>
@@ -316,7 +325,8 @@ check "no BepInEx directory is left behind" "$(b test ! -d "$A_GAME/BepInEx")"
 check "no run_bepinex.sh is left behind" "$(b test ! -e "$A_GAME/run_bepinex.sh")"
 check "no libdoorstop.so is left behind" "$(b test ! -e "$A_GAME/libdoorstop.so")"
 check "no .doorstop_version is left behind" "$(b test ! -e "$A_GAME/.doorstop_version")"
-check "the credential is gone" "$(b test ! -e "$CREDENTIAL")"
+check "the credential is kept, because the world it names is still on the map" \
+  "$(b test -f "$CREDENTIAL")"
 check "the install record is gone" "$(b test ! -e "$RECORD")"
 check "the journal is kept, because nobody asked for it to go" "$(b test -d "$A_DATA/data")"
 check "the start script is gone" "$(b test ! -e "$KIT_DIR/start-multiverse.sh")"
@@ -607,16 +617,278 @@ run_script env PATH="$I_FAKE_BIN:$PATH" \
   bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_DATA"
 check "a repair reuses the completed public identity" "$(b test "$RC" -eq 0)" "$OUT"
 check "the repair reports identity reuse" \
-  "$(b contains "reusing this installation's existing public-map identity" "$OUT")"
+  "$(b contains "reusing the map identity already in $I_DATA" "$OUT")"
 check "the repair sends no enrollment request" \
   "$(b test "$(wc -l < "$I_REQUESTS" | tr -d ' ')" = "$I_REQUEST_COUNT")"
 check "the repair keeps the same secret" \
   "$(b test "$(cat "$I_DATA/peer-secret.txt")" = "$I_SECRET")"
 
+I_PEER_ID="$(sed -n 's/.*"peerId": "\(public-[0-9a-f]*\)".*/\1/p' "$I_DATA/install-record.json" | head -n1)"
+check "the record names the world this data root now owns" \
+  "$(b test -n "$I_PEER_ID")"
+check "the installer wrote the identity beside the journal" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$I_DATA/data/peer-id" "$I_PEER_ID")"
+
 run_script bash "$UNINSTALLER" --data-root "$I_DATA"
 check "the public-map install uninstalls" "$(b test "$RC" -eq 0)" "$OUT"
-check "the public-map credential is removed" \
+check "the uninstall KEEPS the world's credential" \
+  "$(b test -f "$I_DATA/peer-secret.txt")"
+check "the uninstall says the identity stays" \
+  "$(b contains 'keeps its place on the map' "$OUT")"
+check "the uninstall keeps the identity beside the journal" \
+  "$(b test -f "$I_DATA/data/peer-id")"
+check "the uninstall removes its own record" \
+  "$(b test ! -e "$I_DATA/install-record.json")"
+
+# The whole point of keeping it: installing again over an uninstalled world is
+# the same world, on the same slot, with no second identity spent on the map.
+run_script env PATH="$I_FAKE_BIN:$PATH" \
+  FAKE_ENROLL_REQUESTS="$I_REQUESTS" FAKE_ENROLL_STATE="$I_STATE" \
+  FAKE_ENROLL_ARGS="$I_ARGS" \
+  FAKE_ENROLL_FAIL_FIRST=1 \
+  FAKE_ENROLL_RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4' \
+  bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_DATA"
+check "installing again after an uninstall succeeds" "$(b test "$RC" -eq 0)" "$OUT"
+check "it reports that it reused the world already in the data root" \
+  "$(b contains "reusing the map identity already in $I_DATA" "$OUT")"
+check "it sends no enrollment request" \
+  "$(b test "$(wc -l < "$I_REQUESTS" | tr -d ' ')" = "$I_REQUEST_COUNT")"
+check "it keeps the same secret, byte for byte" \
+  "$(b test "$(cat "$I_DATA/peer-secret.txt")" = "$I_SECRET")"
+check "the new record names the same world" \
+  "$(b bash -c 'grep -qF "\"peerId\": \"$2\"" "$1"' _ "$I_DATA/install-record.json" "$I_PEER_ID")"
+check "the new start script names the same world" \
+  "$(b bash -c 'grep -qF "PEER_ID='"'"'$2'"'"'" "$1"' _ "$KIT_DIR/start-multiverse.sh" "$I_PEER_ID")"
+
+run_script bash "$UNINSTALLER" --data-root "$I_DATA" --remove-world-data
+check "the uninstall with --remove-world-data succeeds" "$(b test "$RC" -eq 0)" "$OUT"
+check "--remove-world-data removes the credential" \
   "$(b test ! -e "$I_DATA/peer-secret.txt")"
+check "--remove-world-data says the world ends on the map" \
+  "$(b contains 'end of this world on the map' "$OUT")"
+
+# A secret with nothing left to name it is the one state the installer refuses:
+# overwriting it would destroy the only recoverable half of an identity.
+I_ORPHAN="$I_ROOT/orphan"
+mkdir -p "$I_ORPHAN"
+printf '%s\n' '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' > "$I_ORPHAN/peer-secret.txt"
+chmod 600 "$I_ORPHAN/peer-secret.txt"
+run_script env PATH="$I_FAKE_BIN:$PATH" \
+  FAKE_ENROLL_REQUESTS="$I_REQUESTS" FAKE_ENROLL_STATE="$I_STATE" \
+  FAKE_ENROLL_ARGS="$I_ARGS" \
+  FAKE_ENROLL_RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4' \
+  bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_ORPHAN"
+check "a secret no file can name stops with INS-ENROLL" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal names the file it would not overwrite" \
+  "$(b contains "$I_ORPHAN/peer-secret.txt" "$OUT")"
+check "the refusal names the file that would name the world" \
+  "$(b contains "$I_ORPHAN/data/peer-id" "$OUT")"
+check "the refusal leaves that secret untouched" \
+  "$(b bash -c 'test "$(cat "$1")" = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"' _ "$I_ORPHAN/peer-secret.txt")"
+check "the refusal sends no enrollment request" \
+  "$(b test "$(wc -l < "$I_REQUESTS" | tr -d ' ')" = "$I_REQUEST_COUNT")"
+
+# Naming the world is the remedy the refusal prints, and it has to work.
+printf '%s\n' 'public-ffffffffffffffffffffffffffffffff' > "$I_ORPHAN/data/peer-id"
+run_script env PATH="$I_FAKE_BIN:$PATH" \
+  FAKE_ENROLL_REQUESTS="$I_REQUESTS" FAKE_ENROLL_STATE="$I_STATE" \
+  FAKE_ENROLL_ARGS="$I_ARGS" \
+  FAKE_ENROLL_RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4' \
+  bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_ORPHAN"
+check "naming the world in data/peer-id installs it" "$(b test "$RC" -eq 0)" "$OUT"
+check "the named world is the one the record carries" \
+  "$(b grep -qF '"peerId": "public-ffffffffffffffffffffffffffffffff"' "$I_ORPHAN/install-record.json")"
+check "naming the world sends no enrollment request" \
+  "$(b test "$(wc -l < "$I_REQUESTS" | tr -d ' ')" = "$I_REQUEST_COUNT")"
+
+# ---------------------------------------------------------------- J
+
+scenario "J - what may adopt a world, and what may never overwrite one"
+
+J_ROOT="$SANDBOX/J"; J_GAME="$J_ROOT/game"; J_REQUESTS="$J_ROOT/requests.jsonl"
+J_ARGS="$J_ROOT/curl-args.txt"; J_STATE="$J_ROOT/unused.state"
+new_sandbox_game "$J_GAME"
+mkdir -p "$J_ROOT"
+: > "$J_REQUESTS"
+J_PUBLIC_RELAY='wss://bibitesmultiverse.com/contract-b/v4'
+j_install() { # $@ -> installer arguments, with the fake enrollment endpoint on PATH
+  run_script env PATH="$I_FAKE_BIN:$PATH" \
+    FAKE_ENROLL_REQUESTS="$J_REQUESTS" FAKE_ENROLL_STATE="$J_STATE" \
+    FAKE_ENROLL_ARGS="$J_ARGS" FAKE_ENROLL_FAIL_FIRST=0 \
+    FAKE_ENROLL_RELAY_URL="$J_PUBLIC_RELAY" \
+    bash "$INSTALLER" --game-dir "$J_GAME" "$@"
+}
+j_requests() { wc -l < "$J_REQUESTS" | tr -d ' '; }
+
+# J1 - a credential whose FIRST LINE is blank is still a credential. Reading one
+# line rather than the file would call it absent, delete it, and spend a second
+# identity.
+J1="$J_ROOT/blank-first-line"; mkdir -p "$J1/data"
+J1_SECRET="$(printf 'e%.0s' $(seq 1 64))"
+printf '\n%s\n' "$J1_SECRET" > "$J1/peer-secret.txt"
+chmod 600 "$J1/peer-secret.txt"
+J1_BEFORE="$(sha256sum "$J1/peer-secret.txt" | cut -d' ' -f1)"
+printf 'public-33333333333333333333333333333333\n' > "$J1/data/peer-id"
+J1_COUNT="$(j_requests)"
+j_install --data-root "$J1"
+check "a credential behind a blank first line is adopted, not replaced" "$(b test "$RC" -eq 0)" "$OUT"
+check "it says so" "$(b contains "reusing the map identity already in $J1" "$OUT")"
+check "it spends no identity on it" "$(b test "$(j_requests)" = "$J1_COUNT")"
+check "the credential is byte-identical afterwards" \
+  "$(b bash -c 'test "$(sha256sum "$1" | cut -d" " -f1)" = "$2"' _ "$J1/peer-secret.txt" "$J1_BEFORE")"
+check "the record names the world that file belongs to" \
+  "$(b grep -qF '"peerId": "public-33333333333333333333333333333333"' "$J1/install-record.json")"
+
+# J2 - something that is not a credential is a refusal, never an overwrite.
+J2="$J_ROOT/not-a-credential"; mkdir -p "$J2"
+printf 'hello\n' > "$J2/peer-secret.txt"
+J2_COUNT="$(j_requests)"
+j_install --data-root "$J2"
+check "a peer-secret.txt that is not a credential stops with INS-ENROLL" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal says what a credential is" "$(b contains 'not a map credential' "$OUT")"
+check "it changes that file not at all" \
+  "$(b bash -c 'test "$(cat "$1")" = "hello"' _ "$J2/peer-secret.txt")"
+check "it asks the map for nothing" "$(b test "$(j_requests)" = "$J2_COUNT")"
+
+# J3 - a name with no secret is a SECOND place on the map, and that is a decision.
+J3="$J_ROOT/lost-secret"; mkdir -p "$J3/data"
+printf 'public-44444444444444444444444444444444\n' > "$J3/data/peer-id"
+J3_COUNT="$(j_requests)"
+j_install --data-root "$J3"
+check "a lost secret stops rather than taking a new identity" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal names the world that goes dark" \
+  "$(b contains 'public-44444444444444444444444444444444' "$OUT")"
+check "the refusal names the switch that accepts the cost" \
+  "$(b contains '--replace-world-identity' "$OUT")"
+check "the refusal names the handover that keeps the place instead" \
+  "$(b contains 'handover' "$OUT")"
+check "nothing was enrolled" "$(b test "$(j_requests)" = "$J3_COUNT")"
+check "no credential was written" "$(b test ! -e "$J3/peer-secret.txt")"
+
+j_install --data-root "$J3" --replace-world-identity
+check "the switch takes the new identity" "$(b test "$RC" -eq 0)" "$OUT"
+check "and it enrolled exactly once" "$(b test "$(j_requests)" = "$((J3_COUNT + 1))")"
+check "the world that went dark is kept where the operator can be told" \
+  "$(b bash -c 'test "$(cat "$1")" = "public-44444444444444444444444444444444"' _ "$J3/data/peer-id.previous")"
+check "the summary names it too" "$(b contains 'NOW DARK ON THE MAP' "$OUT")"
+check "the new identity is the one in the record" \
+  "$(b grep -Eq '"peerId": "public-[0-9a-f]{32}"' "$J3/install-record.json")"
+check "and it is not the old one" \
+  "$(b bash -c '! grep -qF "public-44444444444444444444444444444444" "$1"' _ "$J3/install-record.json")"
+
+# J4 - a join string may not destroy a secret on the word of a file anybody can
+# write. data/peer-id is exactly that file: the refusal above tells people to
+# write it.
+J4="$J_ROOT/unproven"; mkdir -p "$J4/data"
+J4_SECRET="$(printf 'y%.0s' $(seq 1 64))"
+printf '%s\n' "$J4_SECRET" > "$J4/peer-secret.txt"
+chmod 600 "$J4/peer-secret.txt"
+printf 'public-55555555555555555555555555555555\n' > "$J4/data/peer-id"
+printf 'multiverse-join/1 %s public-55555555555555555555555555555555.%s\n' \
+  "$J_PUBLIC_RELAY" "$(printf 'x%.0s' $(seq 1 64))" > "$J_ROOT/j4-join.txt"
+J4_COUNT="$(j_requests)"
+j_install --data-root "$J4" --join-string-file "$J_ROOT/j4-join.txt"
+check "a join string over an UNPROVEN claim stops with INS-ENROLL" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal names the file that made the claim" "$(b contains "$J4/data/peer-id" "$OUT")"
+check "the refusal says what such a file may and may not do" \
+  "$(b contains 'ordinary text file' "$OUT")"
+check "the secret it was about to destroy is still there" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$J4/peer-secret.txt" "$J4_SECRET")"
+check "and nothing was enrolled" "$(b test "$(j_requests)" = "$J4_COUNT")"
+
+# J5 - the secret of a world the install record itself names may be replaced;
+# a join string for a DIFFERENT identity is a slot handover or a mistake, and
+# nothing here can tell which, so it is gated either way.
+J5="$J_ROOT/handover"
+J5_RELAY='wss://private.example.test/contract-b/v4'
+J5_SECRET_ONE="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+J5_SECRET_TWO="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+J5_SECRET_THREE="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+printf 'multiverse-join/1 %s priv-j5.%s\n' "$J5_RELAY" "$J5_SECRET_ONE" > "$J_ROOT/j5-join.txt"
+j_install --data-root "$J5" --join-string-file "$J_ROOT/j5-join.txt"
+check "the private-map install succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "it wrote the world's own map beside its journal" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$J5/data/relay-url" "$J5_RELAY")"
+
+printf 'multiverse-join/1 %s priv-j5.%s\n' "$J5_RELAY" "$J5_SECRET_TWO" > "$J_ROOT/j5-rekey.txt"
+j_install --data-root "$J5" --join-string-file "$J_ROOT/j5-rekey.txt"
+check "a new secret for the world the record names is applied" "$(b test "$RC" -eq 0)" "$OUT"
+check "it says it is the same world" "$(b contains 'the same world, priv-j5' "$OUT")"
+check "the new secret is in place" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$J5/peer-secret.txt" "$J5_SECRET_TWO")"
+check "the replaced secret is kept beside it rather than destroyed" \
+  "$(b bash -c 'ls "$1"/peer-secret.txt.*.old >/dev/null 2>&1' _ "$J5")"
+check "and the kept copy is the secret it replaced" \
+  "$(b bash -c 'grep -qxF "$2" "$1"/peer-secret.txt.*.old' _ "$J5" "$J5_SECRET_ONE")"
+check "the kept copy is mode 0600" \
+  "$(b bash -c 'test "$(stat -c %a "$1"/peer-secret.txt.*.old)" = 600' _ "$J5")"
+rm -f "$J5"/peer-secret.txt.*.old
+
+# A handover names a NEW identity (contract-b-m4.md 7.5), so this is both the
+# recovery path and the shape of a mistake. Refused until it is asked for.
+printf 'multiverse-join/1 %s priv-j5b.%s\n' "$J5_RELAY" "$J5_SECRET_THREE" > "$J_ROOT/j5-handover.txt"
+j_install --data-root "$J5" --join-string-file "$J_ROOT/j5-handover.txt"
+check "a join string for another identity stops with INS-ENROLL" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal names both worlds" \
+  "$(b bash -c 'case "$1" in *priv-j5b*) case "$1" in *"is the world priv-j5 "*) exit 0 ;; esac ;; esac; exit 1' _ "$OUT")" "$OUT"
+check "the refusal names the switch a handover needs" \
+  "$(b contains '--replace-world-identity' "$OUT")"
+check "the world it would have replaced still has its own secret" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$J5/peer-secret.txt" "$J5_SECRET_TWO")"
+
+j_install --data-root "$J5" --join-string-file "$J_ROOT/j5-handover.txt" --replace-world-identity
+check "the switch applies the handover" "$(b test "$RC" -eq 0)" "$OUT"
+check "the new identity is the world's" \
+  "$(b grep -qF '"peerId": "priv-j5b"' "$J5/install-record.json")"
+check "the name it used to answer to is kept for its operator" \
+  "$(b bash -c 'test "$(cat "$1")" = "priv-j5"' _ "$J5/data/peer-id.previous")"
+check "the secret it replaced is kept too" \
+  "$(b bash -c 'grep -qxF "$2" "$1"/peer-secret.txt.*.old' _ "$J5" "$J5_SECRET_TWO")"
+check "and the change of identity is stated at the end" \
+  "$(b contains "CHANGED IDENTITY" "$OUT")"
+rm -f "$J5"/peer-secret.txt.*.old
+
+# J6 - a PRIVATE world survives an uninstall whole: the uninstall keeps the name
+# and the map beside the journal, so the next install adopts both.
+run_script bash "$UNINSTALLER" --data-root "$J5"
+check "the private-map uninstall succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "it kept the world's map" "$(b test -f "$J5/data/relay-url")"
+J6_COUNT="$(j_requests)"
+j_install --data-root "$J5"
+check "installing again with no join string adopts the private world" "$(b test "$RC" -eq 0)" "$OUT"
+check "it names the map that world is on" "$(b contains "$J5_RELAY" "$OUT")"
+check "it adopts the identity the handover gave it" \
+  "$(b grep -qF '"peerId": "priv-j5b"' "$J5/install-record.json")"
+check "it did not fall through to the public map" \
+  "$(b bash -c 'grep -qF "\"relayUrl\": \"$2\"" "$1"' _ "$J5/install-record.json" "$J5_RELAY")"
+check "and it asked the public map for nothing" "$(b test "$(j_requests)" = "$J6_COUNT")"
+check "the certificate step follows the map this world dials" \
+  "$(b bash -c 'case "$1" in *"which is not the map this package ships"*) exit 0 ;; *) exit 1 ;; esac' _ "$OUT")" "$OUT"
+
+# J7 - --relay-url names the map a world is on; it does not move one.
+j_install --data-root "$J5" --relay-url 'wss://two.example.test/contract-b/v4'
+check "--relay-url at another map stops with INS-ENROLL" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal names both maps" \
+  "$(b bash -c 'case "$1" in *"$2"*) case "$1" in *"$3"*) exit 0 ;; esac ;; esac; exit 1' _ "$OUT" "$J5_RELAY" 'wss://two.example.test/contract-b/v4')" "$OUT"
+check "the world still dials its own map" \
+  "$(b bash -c 'grep -qF "\"relayUrl\": \"$2\"" "$1"' _ "$J5/install-record.json" "$J5_RELAY")"
+
+# J8 - adopting re-applies the credential's mode in place. Up to 0.2.5 every
+# install rewrote the file and re-tightened it; adopting must not lose that.
+chmod 644 "$J5/peer-secret.txt"
+J8_SECRET="$(cat "$J5/peer-secret.txt")"
+j_install --data-root "$J5"
+check "the repair over a loose credential succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "adopting tightened its mode again" \
+  "$(b test "$(stat -c '%a' "$J5/peer-secret.txt")" = 600)"
+check "without touching what is in it" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$J5/peer-secret.txt" "$J8_SECRET")"
 
 # ---------------------------------------------------------------- the verdict
 
