@@ -48,3 +48,15 @@ var socialCardWatchPNG []byte
 
 //go:embed assets/social-card-live.png
 var socialCardLivePNG []byte
+
+// The game screenshot is embedded for the same reason as the cards, but it is
+// not one of them: it is a single frame of THIS project's own broadcast, shown
+// inside the #game section so a first-time reader can see what the simulation
+// every world runs actually looks like. It stays a JPEG because it is a
+// photograph of a rendered scene rather than flat brand colours — palette
+// quantization is the wrong tool for it, and JPEG at ~50KB beats any PNG of
+// the same frame. Re-grab it from the live stream if the broadcast world
+// changes enough that the frame stops being representative.
+//
+//go:embed assets/game-screenshot.jpg
+var gameScreenshotJPEG []byte

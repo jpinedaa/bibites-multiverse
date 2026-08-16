@@ -72,6 +72,7 @@ font:700 12px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.13
 .eyebrow:before{content:"";width:30px;border-top:1px solid currentColor}
 h1{max-width:780px;font-size:clamp(54px,7.2vw,94px);line-height:.93;letter-spacing:-.062em;margin:0}
 .lede{max-width:660px;color:#bfd0c9;font-size:clamp(18px,2vw,22px);line-height:1.55;margin:28px 0 34px}
+.lede a{color:inherit;text-decoration:underline;text-underline-offset:3px;text-decoration-color:var(--green)}
 .actions{display:flex;flex-wrap:wrap;gap:12px}.button{display:inline-flex;align-items:center;justify-content:center;
 min-height:48px;padding:0 19px;border-radius:8px;text-decoration:none;font-weight:720;font-size:14px;border:1px solid var(--line)}
 .button.primary{background:var(--green);border-color:var(--green);color:var(--ink)}
@@ -120,6 +121,8 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 .joincopy{padding:50px}.joincopy h2{font-size:clamp(38px,5vw,64px)}.joincopy p{color:var(--muted);max-width:620px}
 .trust{padding:50px;background:linear-gradient(150deg,#172720,#101917)}.trust h3{margin:0 0 20px}.trust ul{margin:0;padding:0;list-style:none}
 .trust li{position:relative;padding:12px 0 12px 27px;border-top:1px solid var(--line);color:#bfd0c9}.trust li:before{content:"✓";position:absolute;left:0;color:var(--green)}
+.gameshot{margin:0 0 18px}.gameshot img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px}
+.gameshot figcaption{margin-top:8px;font-size:13px;color:var(--muted)}
 .faq{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:12px}.faq details{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:20px 22px}
 .faq summary{cursor:pointer;font-weight:700}.faq p{color:var(--muted);margin:12px 0 2px}.foot{border-top:1px solid var(--line);padding-block:34px;color:var(--muted);font-size:13px}
 .footin{display:flex;justify-content:space-between;align-items:center;gap:24px}.footlinks{display:flex;flex-wrap:wrap;gap:18px}.foot a:hover{color:var(--text)}
@@ -158,7 +161,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
     <div>
       <p class="eyebrow">Public experiment · Aug 14–Nov 14, 2026</p>
       <h1>Evolution has a map.</h1>
-      <p class="lede">Bibites Multiverse connects independent copies of <em>The Bibites</em> as neighboring ecosystems. Organisms cross between worlds. Evolution remains local, but its consequences can travel.</p>
+      <p class="lede">Bibites Multiverse connects independent copies of <a href="#game"><em>The Bibites</em></a> as neighboring ecosystems. Organisms cross between worlds. Evolution remains local, but its consequences can travel.</p>
       <div class="actions"><a class="button primary" href="/live">Explore the live map&nbsp; →</a><a class="button secondary" href="/watch">Watch broadcast</a><a class="button secondary" href="#join">Run a world</a></div>
       <p class="promise">Every participant owns, runs, and saves a complete local world.</p>
     </div>
@@ -185,12 +188,12 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
   </section>
 
   <section class="shell section" id="game">
-    <div class="sectionhd"><span class="kicker">The original game</span><h2><em>The Bibites</em> came first.</h2><p>Every world on this map is a copy of that game.</p></div>
+    <div class="sectionhd"><span class="kicker">The original game</span><h2>The game behind every world.</h2><p>Every world on this map runs a copy of <em>The Bibites</em>.</p></div>
     <div class="joinbox">
       <div class="joincopy"><p><em>The Bibites</em> is an artificial-life simulation created by Léo Caussan in 2017 and developed by <a href="https://www.thebibites.com/">Omnia Studios</a>. Every creature in it carries its own genes and a neural-network brain. Nothing scores them. Food, mutation, and natural selection do the work, until behavior like pheromone-trail hunting or stockpiling food appears on its own. Its creator's stated goal is to prove that “life doesn't have to be carbon-based.”</p>
       <p>It has been in open development since 2017, with public devlogs since 2019 and a talk at the ALIFE 2020 conference. Bibites Multiverse only gives it neighbors. The simulation itself is theirs.</p>
       <p>Bibites Multiverse is an independent passion project, built out of an interest in artificial life. It is not affiliated with, endorsed by, or sponsored by Léo Caussan or Omnia Studios.</p></div>
-      <aside class="trust"><h3>Get <em>The Bibites</em></h3><p><em>The Bibites: Digital Life</em> is free on itch.io and in Early Access on Steam, for Windows, macOS, and Linux. Get it from the people who made it.</p>
+      <aside class="trust"><figure class="gameshot"><img src="/game-screenshot.jpg" width="1280" height="720" alt="A bibite in The Bibites, with its biology panel open and its field of view drawn as a cone." loading="lazy"><figcaption>A world running in <em>The Bibites</em>, captured from the Multiverse broadcast.</figcaption></figure><h3>Get <em>The Bibites</em></h3><p><em>The Bibites: Digital Life</em> is free on itch.io and in Early Access on Steam, for Windows, macOS, and Linux. Get it from the people who made it.</p>
       <div class="actions"><a class="button primary" href="https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/">Get it on Steam</a><a class="button secondary" href="https://thebibites.itch.io/the-bibites">Free on itch.io</a></div>
       <p class="promise">Official channels: <a href="https://www.thebibites.com/">website</a> · <a href="https://www.youtube.com/@TheBibitesDigitalLife">YouTube</a> · <a href="https://discord.com/invite/rNDMdNjQ2R">Discord</a> · <a href="https://www.patreon.com/thebibites">Patreon</a> · <a href="https://the-bibites.fandom.com/wiki/The_Bibites_Wiki">community wiki</a></p></aside>
     </div>
