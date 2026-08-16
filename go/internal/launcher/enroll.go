@@ -119,12 +119,14 @@ func (a *app) enrollPublicMap(dataRoot, activeRelay string) (identity, error) {
 	}
 
 	credentialPath := filepath.Join(dataRoot, credentialFileName)
-	recordPath := filepath.Join(dataRoot, recordName)
 	pendingPath := filepath.Join(dataRoot, pendingFileName)
-	if fileExists(credentialPath) || fileExists(recordPath) {
-		return id, fmt.Errorf("%s already holds part of a completed world identity. Do not create a "+
-			"replacement over an existing world: choose another data folder, or ask the operator for "+
-			"a slot handover (INS-ENROLL)", dataRoot)
+	if marker := worldMarker(dataRoot); marker != "" {
+		return id, fmt.Errorf("%s already holds a world: %s is in it. A new world never goes over an "+
+			"existing one - two identities over one journal strand both. Create this world with "+
+			"another --data-root; the default gives every world its own. To put THAT world back on "+
+			"this computer instead, run Install-BibitesMultiverse.ps1 -DataRoot %q, which reuses the "+
+			"identity already there (INS-ENROLL)",
+			dataRoot, marker, dataRoot)
 	}
 	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
 		return id, err
@@ -287,6 +289,26 @@ func finishEnrollment(id identity) {
 	}
 }
 
+// worldMarker names the first file that says this data root already belongs to a
+// world, or "" when nothing does. It is the launcher's half of the installers'
+// rule that an identity belongs to a data root: the credential and the install
+// record are what a live world leaves, and <data root>/data/peer-id is what an
+// UNINSTALLED one leaves - the uninstall keeps the world's data, so a folder with
+// a journal and a name in it is still somebody's world and never a place to put a
+// new one.
+func worldMarker(dataRoot string) string {
+	for _, rel := range []string{
+		credentialFileName,
+		recordName,
+		filepath.Join(dataDirName, peerIDFileName),
+	} {
+		if fileExists(filepath.Join(dataRoot, rel)) {
+			return rel
+		}
+	}
+	return ""
+}
+
 // identityFromJoinFile is the private-map path: the operator's one-line join
 // string, read from a file so the secret never reaches a command line.
 func (a *app) identityFromJoinFile(joinFile, relayFlag, dataRoot string) (identity, error) {
@@ -300,9 +322,13 @@ func (a *app) identityFromJoinFile(joinFile, relayFlag, dataRoot string) (identi
 		return id, err
 	}
 	credentialPath := filepath.Join(dataRoot, credentialFileName)
-	if fileExists(credentialPath) || fileExists(filepath.Join(dataRoot, recordName)) {
-		return id, fmt.Errorf("%s already holds part of a completed world identity. Do not create a "+
-			"replacement over an existing world: choose another data folder", dataRoot)
+	if marker := worldMarker(dataRoot); marker != "" {
+		return id, fmt.Errorf("%s already holds a world: %s is in it. A new world never goes over an "+
+			"existing one - two identities over one journal strand both. Create this world with "+
+			"another --data-root. To put THAT world back on this computer instead, run "+
+			"Install-BibitesMultiverse.ps1 -DataRoot %q with its own join string, which reuses the "+
+			"identity already there (INS-ENROLL)",
+			dataRoot, marker, dataRoot)
 	}
 	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
 		return id, err

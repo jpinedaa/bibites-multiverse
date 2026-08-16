@@ -230,7 +230,20 @@ $install.Add_Click({
     $installer = Join-Path $Here 'Install-BibitesMultiverse.ps1'
     $engine = (Get-Process -Id $PID).Path
     Write-SetupLog "engine=$engine installer=$installer startAfter=$($startAfter.Checked)"
-    $log = Join-Path $env:TEMP ('bibites-multiverse-install-' + [guid]::NewGuid().ToString('N') + '.log')
+    # The installer's own words, kept. This window is the only place a graphical
+    # install ever sees them, and some of what step 6 says - a world adopted, a
+    # world left dark, a refusal with numbered choices - has to outlive the
+    # dialog. The data root is the installer's default here, because this GUI
+    # never passes -DataRoot.
+    $logStamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
+    $logDir = Join-Path $env:LOCALAPPDATA 'BibitesMultiverse\logs'
+    try {
+        New-Item -ItemType Directory -Force -Path $logDir -ErrorAction Stop | Out-Null
+    } catch {
+        $logDir = $env:TEMP
+    }
+    $log = Join-Path $logDir ('install-' + $logStamp + '.log')
+    Write-SetupLog "installLog=$log"
     $arguments = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'RemoteSigned', '-File', $installer,
                    '-RuntimeSelection', $runtime)
     if ($InstallRoot) { $arguments += @('-InstallRoot', $InstallRoot) }
@@ -249,7 +262,10 @@ $install.Add_Click({
         if ($process.ExitCode -ne 0) {
             $detail = ''
             if (Test-Path -LiteralPath $log) {
-                $detail = (Get-Content -LiteralPath $log -Tail 18) -join [Environment]::NewLine
+                # Enough lines to carry a whole refusal, not only its last word:
+                # a STOP that prints numbered ways on is useless cut off above
+                # the numbers, and this dialog is all a GUI install ever shows.
+                $detail = (Get-Content -LiteralPath $log -Tail 30) -join [Environment]::NewLine
             }
             if (Test-Path -LiteralPath ($log + '.err')) {
                 $detail += [Environment]::NewLine
@@ -257,7 +273,9 @@ $install.Add_Click({
             }
             [void][System.Windows.Forms.MessageBox]::Show(
                 $form,
-                ('Installation stopped.' + [Environment]::NewLine + [Environment]::NewLine + $detail),
+                ('Installation stopped.' + [Environment]::NewLine + [Environment]::NewLine + $detail +
+                 [Environment]::NewLine + [Environment]::NewLine + 'The whole of it is in:' +
+                 [Environment]::NewLine + $log),
                 'Bibites Multiverse was not installed',
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error)
@@ -271,6 +289,10 @@ $install.Add_Click({
         } else {
             'Installation is complete. Use the Bibites Multiverse icon when you want to connect.'
         }
+        # What the installer said is worth reading even when it succeeded: it names
+        # this world's identity, and whether it took a new one.
+        $message += [Environment]::NewLine + [Environment]::NewLine + 'What it did, in its own words:' +
+                    [Environment]::NewLine + $log
         [void][System.Windows.Forms.MessageBox]::Show(
             $form, $message, 'Bibites Multiverse is ready',
             [System.Windows.Forms.MessageBoxButtons]::OK,
@@ -278,7 +300,12 @@ $install.Add_Click({
         $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
         $form.Close()
     } finally {
-        Remove-Item -LiteralPath $log, ($log + '.err') -Force -ErrorAction SilentlyContinue
+        # The log is NOT deleted: it is this install's only durable account of what
+        # happened, and both dialogs name its path. The empty error file is.
+        if ((Test-Path -LiteralPath ($log + '.err')) -and
+            -not (Get-Item -LiteralPath ($log + '.err')).Length) {
+            Remove-Item -LiteralPath ($log + '.err') -Force -ErrorAction SilentlyContinue
+        }
     }
 })
 

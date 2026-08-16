@@ -105,6 +105,24 @@
     an empty -ExcludeSpecies is refused rather than silently disabling the
     policy, because that is a change a shared map notices and a census does not.
 
+.PARAMETER ReplaceWorldIdentity
+    Let the world in this data root become a DIFFERENT identity. Two situations
+    need it, and they are the same act on disk:
+
+      * a SLOT HANDOVER, which is the map's only credential recovery. It rebinds
+        your slot and your position to a new identity with a freshly minted
+        credential, and the operator sends you its join string. Nothing is
+        stranded: your place moved with you.
+      * a LOST SECRET. Nothing recovers one - the relay keeps a verifier and
+        cannot print a secret again - so a new identity is the only way on, and
+        it is a SECOND place on the map. The old world's slot stays reserved,
+        with nobody in it, until its operator releases it.
+
+    The installer cannot tell those apart, so it refuses both by default rather
+    than strand a world quietly. It keeps the old name in
+    <data root>\data\peer-id.previous and prints it, because that string is what
+    the operator needs, and any secret it replaces is kept beside the new one.
+
 .EXAMPLE
     .\Install-BibitesMultiverse.ps1
     Installs the included game and connects it to the public map.
@@ -134,7 +152,8 @@ param(
     [int]$SaveKeep = 6,
     [ValidateSet('on', 'off')][string]$SaveOnQuit = 'on',
     [switch]$StartAfterInstall,
-    [switch]$SkipCaImport
+    [switch]$SkipCaImport,
+    [switch]$ReplaceWorldIdentity
 )
 
 $ErrorActionPreference = 'Stop'
@@ -588,6 +607,14 @@ Say ("mod version {0}, SHA-256 {1}" -f $entry.mod, $pluginSha.Substring(0, 16))
 if (-not $DataRoot) { $DataRoot = Join-Path $env:LOCALAPPDATA 'BibitesMultiverse' }
 New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
 $DataRoot = (Resolve-Path $DataRoot).Path
+if ($DataRoot.Contains("'")) {
+    # The generated start and stop scripts carry this path inside a single-quoted
+    # PowerShell string, and step 6 reads that line back to recover a world's
+    # identity. A quote in the path breaks both. Refuse rather than write a script
+    # that cannot parse.
+    Stop-Setup ("The data directory's path contains a single quote, which the generated start " +
+                "script cannot carry safely: $DataRoot. Pass -DataRoot with a path without one.")
+}
 $dataDir  = Join-Path $DataRoot 'data'
 $logDir   = Join-Path $DataRoot 'logs'
 New-Item -ItemType Directory -Force -Path $dataDir, $logDir | Out-Null
@@ -625,6 +652,7 @@ function Read-JoinString {
 $credential = ''
 $pendingEnrollmentPath = ''
 $usedAutomaticEnrollment = $false
+$adoptedIdentity = $false
 $credentialPath = Join-Path $DataRoot 'peer-secret.txt'
 
 function Protect-UserFile {
@@ -650,7 +678,234 @@ function Protect-UserFile {
     }
 }
 
+# ONE IDENTITY PER WORLD, AND THE IDENTITY BELONGS TO THE DATA ROOT. Installing
+# again over a data root that already holds a world is an upgrade or a repair,
+# never a second world: it keeps that world's identity, its relay and its secret
+# file untouched. Only an empty data root asks the map for an identity.
+#
+# The identity is written in more than one place, because no single one of them
+# survives everything. These are searched strongest binding first:
+#
+#   1. <data root>\install-record.json         the install that owns this folder,
+#                                              and only when it names this folder
+#   2. <data root>\enrollment-pending.json     ONLY when its secret is the secret
+#                                              on disk, which binds the two
+#   3. <program root>\profiles\*.json          the launcher's own copy, matched
+#                                              on this same data root
+#   4. <program root>\Start-Multiverse.ps1     what 0.2.0-0.2.3 left behind
+#   5. <data root>\data\peer-id (+ relay-url)  what the sidecar persists and what
+#                                              this installer writes, and the last
+#                                              thing an uninstall keeps
+#
+# PROVEN vs CLAIMED. 1 and 2 are proven: the record is written by the same run
+# that writes the credential and names this data root, and the pending record is
+# accepted only when it carries the very secret on disk. 3, 4 and 5 are claims -
+# ordinary text files, and 5 is the one this installer's own refusal asks a
+# participant to write by hand. A claim is enough to ADOPT a world, which changes
+# nothing on disk, and never enough to OVERWRITE a secret.
+
+function Test-SamePath {
+    param([string]$A, [string]$B)
+    if (-not $A -or -not $B) { return $false }
+    $left  = $A.TrimEnd('\', '/')
+    $right = $B.TrimEnd('\', '/')
+    # Windows file names are case-insensitive, so this comparison is too. Every
+    # comparison of a secret or an identity in this script is the opposite, and
+    # is written -ceq / -cne for exactly that reason.
+    return ($left -eq $right)
+}
+
+function Read-JsonFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try {
+        return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+function Get-JsonField {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return '' }
+    if ($Object.PSObject.Properties.Match($Name).Count -eq 0) { return '' }
+    return [string]$Object.$Name
+}
+
+function Get-QuotedValue {
+    param([string]$Line)
+    $open  = $Line.IndexOf("'")
+    $close = $Line.LastIndexOf("'")
+    if ($open -lt 0 -or $close -le $open) { return '' }
+    return $Line.Substring($open + 1, $close - $open - 1)
+}
+
+function Get-FirstLine {
+    param([string]$Path)
+    $text = ''
+    try { $text = [string](Get-Content -LiteralPath $Path -Raw -ErrorAction Stop) } catch { return '' }
+    foreach ($line in ($text -split '\r?\n')) {
+        if ($line.Trim()) { return $line.Trim() }
+    }
+    return ''
+}
+
+function New-WorldIdentity {
+    param([string]$PeerId, [string]$RelayUrl, [string]$Source, [bool]$Proven)
+    return [pscustomobject]@{ peerId = $PeerId; relayUrl = $RelayUrl; source = $Source; proven = $Proven }
+}
+
+function Find-WorldIdentity {
+    param([string]$Root, [string[]]$ProgramRoots, [string]$Secret)
+
+    $recordFile = Join-Path $Root $RecordName
+    $record = Read-JsonFile $recordFile
+    $recordRoot = Get-JsonField $record 'dataRoot'
+    if ((Get-JsonField $record 'peerId') -and
+        ((-not $recordRoot) -or (Test-SamePath $recordRoot $Root))) {
+        return (New-WorldIdentity (Get-JsonField $record 'peerId') (Get-JsonField $record 'relayUrl') $recordFile $true)
+    }
+
+    if ($Secret) {
+        $pendingFile = Join-Path $Root 'enrollment-pending.json'
+        $pending = Read-JsonFile $pendingFile
+        if ((Get-JsonField $pending 'format') -eq 'bibites-multiverse/enrollment-pending/1' -and
+            (Get-JsonField $pending 'secret') -ceq $Secret) {
+            $pendingId = [guid]::Empty
+            if ([guid]::TryParse((Get-JsonField $pending 'installId'), [ref]$pendingId)) {
+                return (New-WorldIdentity ('public-' + $pendingId.ToString('N')) '' $pendingFile $true)
+            }
+        }
+    }
+
+    foreach ($programRoot in $ProgramRoots) {
+        if (-not $programRoot) { continue }
+        $profilesDir = Join-Path $programRoot $ProfilesDirName
+        if (Test-Path -LiteralPath $profilesDir -PathType Container) {
+            $profileFiles = @(Get-ChildItem -LiteralPath $profilesDir -Filter '*.json' -File -ErrorAction SilentlyContinue |
+                              Sort-Object -Property Name)
+            foreach ($profileFile in $profileFiles) {
+                $profileData = Read-JsonFile $profileFile.FullName
+                if ((Test-SamePath (Get-JsonField $profileData 'dataRoot') $Root) -and
+                    (Get-JsonField $profileData 'peerId')) {
+                    return (New-WorldIdentity (Get-JsonField $profileData 'peerId') `
+                                              (Get-JsonField $profileData 'relayUrl') $profileFile.FullName $false)
+                }
+            }
+        }
+        $startScript = Join-Path $programRoot $StartName
+        if (Test-Path -LiteralPath $startScript -PathType Leaf) {
+            $scriptRoot  = ''
+            $scriptPeer  = ''
+            $scriptRelay = ''
+            foreach ($line in (Get-Content -LiteralPath $startScript -ErrorAction SilentlyContinue)) {
+                $text = $line.Trim()
+                if     ($text.StartsWith('$DataRoot')) { $scriptRoot  = Get-QuotedValue $text }
+                elseif ($text.StartsWith('$PeerId'))   { $scriptPeer  = Get-QuotedValue $text }
+                elseif ($text.StartsWith('$RelayUrl')) { $scriptRelay = Get-QuotedValue $text }
+            }
+            if ((Test-SamePath $scriptRoot $Root) -and $scriptPeer) {
+                return (New-WorldIdentity $scriptPeer $scriptRelay $startScript $false)
+            }
+        }
+    }
+
+    # The identity beside the journal, and the map it dials. Both are written by
+    # this installer and kept by an uninstall that keeps the world's data, so a
+    # private map survives a removal exactly as the public one does.
+    $peerIdFile = Join-Path (Join-Path $Root 'data') 'peer-id'
+    $storedPeerId = Get-FirstLine $peerIdFile
+    if ($storedPeerId) {
+        $storedRelay = Get-FirstLine (Join-Path (Join-Path $Root 'data') 'relay-url')
+        return (New-WorldIdentity $storedPeerId $storedRelay $peerIdFile $false)
+    }
+
+    return $null
+}
+
+# The pending record beside a completed identity has to be that same identity's.
+# Two identities in one data root is a state only a person can settle, and
+# nothing is changed on the way to saying so.
+function Assert-PendingAgrees {
+    param([string]$PendingPath, [string]$PeerId, [string]$Secret)
+    if (-not $PendingPath) { return }
+    if (-not (Test-Path -LiteralPath $PendingPath -PathType Leaf)) { return }
+    $pending = Read-JsonFile $PendingPath
+    $pendingPeerId = ''
+    $pendingInstallId = [guid]::Empty
+    if ([guid]::TryParse((Get-JsonField $pending 'installId'), [ref]$pendingInstallId)) {
+        $pendingPeerId = 'public-' + $pendingInstallId.ToString('N')
+    }
+    if ((Get-JsonField $pending 'format') -ne 'bibites-multiverse/enrollment-pending/1' -or
+        $pendingPeerId -cne $PeerId -or
+        (Get-JsonField $pending 'secret') -cne $Secret) {
+        Stop-Setup ("The world in $DataRoot is $PeerId, and $PendingPath is a half-finished " +
+                    "enrollment for a different one. Neither file was changed. Delete the pending " +
+                    "record only if you are sure the world you want is $PeerId; ask the operator " +
+                    "otherwise.") 'INS-ENROLL'
+    }
+}
+
+# What is in peer-secret.txt is decided from the WHOLE file, not from its first
+# line: a credential that starts with a blank line is still a credential, and
+# treating it as absent would delete it and spend a second identity.
+$existingSecret = ''
+$existingSecretHeld = Test-Path -LiteralPath $credentialPath -PathType Leaf
+if ($existingSecretHeld) {
+    $credentialText = ''
+    try {
+        $credentialText = [string](Get-Content -LiteralPath $credentialPath -Raw -ErrorAction Stop)
+    } catch {
+        Stop-Setup ("$credentialPath holds this data root's world credential, and this account cannot read " +
+                    "it: $($_.Exception.Message) Run setup from the account that installed this world, or " +
+                    "move that file aside to start a new one - the old world keeps its place on the map " +
+                    "until you ask the operator to release it (docs/participant/leave.md).") 'INS-ENROLL'
+    }
+    if (-not $credentialText.Trim()) {
+        # An EMPTY file holds no world and nothing that can be lost. It is the one
+        # state that is treated as absent, and it is written like a new one.
+        $existingSecretHeld = $false
+    } else {
+        foreach ($line in ($credentialText -split '\r?\n')) {
+            if ($line.Trim()) { $existingSecret = $line.Trim(); break }
+        }
+        if ($existingSecret.Length -lt 32 -or $existingSecret.Length -gt 256 -or
+            $existingSecret -notmatch '^[\x21-\x7e]+$') {
+            Stop-Setup ("$credentialPath has something in it that is not a map credential: a secret " +
+                        "is 32 to 256 printable characters with no spaces, and this is " +
+                        "$($existingSecret.Length). Nothing was changed, because a file this " +
+                        "installer cannot read is not a file it may overwrite. If a world's secret " +
+                        "belongs there, put it back whole. If it is something else, rename it to " +
+                        "peer-secret.txt.old and run setup again.") 'INS-ENROLL'
+        }
+    }
+}
+
+$programRoots = @()
+if ($InstallRoot) { $programRoots += $InstallRoot }
+$programRoots += $Here
+if ($env:LOCALAPPDATA) { $programRoots += (Join-Path $env:LOCALAPPDATA 'Programs\Bibites Multiverse') }
+$existingIdentity = Find-WorldIdentity $DataRoot $programRoots $existingSecret
+$existingPeerId = ''
+$existingSource = ''
+$existingProven = $false
+if ($existingIdentity) {
+    $existingPeerId = [string]$existingIdentity.peerId
+    $existingSource = [string]$existingIdentity.source
+    $existingProven = [bool]$existingIdentity.proven
+}
+
+# The relay this package ships, when it ships one. It is read even on a private
+# install, because what the certificate step says has to follow the map this
+# world actually dials rather than the branch that chose it.
+$packagedRelayUrl = ''
 $publicMapPath = Join-Path $Here $PublicMapName
+if (Test-Path -LiteralPath $publicMapPath -PathType Leaf) {
+    $packagedMap = Read-JsonFile $publicMapPath
+    if ((Get-JsonField $packagedMap 'format') -eq 'bibites-multiverse/public-map/1') {
+        $packagedRelayUrl = Get-JsonField $packagedMap 'relayUrl'
+    }
+}
 $usePublicMap = (-not $JoinStringFile) -and (-not $RelayUrl) -and
                 (Test-Path -LiteralPath $publicMapPath -PathType Leaf)
 if ($usePublicMap) {
@@ -677,54 +932,100 @@ if ($usePublicMap) {
         Stop-Setup "$PublicMapName does not contain a secure WSS relay address." 'INS-ENROLL'
     }
 
-    # A successful earlier install already owns an identity. Reuse it instead
-    # of allocating another slot when the user changes or repairs the runtime.
-    $existingRecordPath = Join-Path $DataRoot $RecordName
-    $existingRecordHeld = Test-Path -LiteralPath $existingRecordPath -PathType Leaf
-    $credentialHeld = Test-Path -LiteralPath $credentialPath -PathType Leaf
-    $reusedIdentity = $false
-    if ($existingRecordHeld -and $credentialHeld) {
-        try {
-            $existingRecord = Get-Content -LiteralPath $existingRecordPath -Raw | ConvertFrom-Json
-            $existingSecret = [string](Get-Content -LiteralPath $credentialPath | Select-Object -First 1)
-            if ($existingRecord.PSObject.Properties.Match('peerId').Count -gt 0 -and
-                $existingRecord.PSObject.Properties.Match('relayUrl').Count -gt 0 -and
-                [string]$existingRecord.relayUrl -eq $publicRelayUrl -and
-                [string]$existingRecord.peerId -match '^public-[0-9a-f]{32}$' -and
-                $existingSecret -match '^[0-9a-f]{64}$') {
-                if (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf) {
-                    try {
-                        $leftoverPending = Get-Content -LiteralPath $pendingEnrollmentPath -Raw | ConvertFrom-Json
-                        $leftoverPeerId = 'public-' + ([string]$leftoverPending.installId).Replace('-', '').ToLowerInvariant()
-                        if ($leftoverPending.format -ne 'bibites-multiverse/enrollment-pending/1' -or
-                            $leftoverPeerId -ne [string]$existingRecord.peerId -or
-                            [string]$leftoverPending.secret -ne $existingSecret) {
-                            throw 'the pending identity does not match the completed identity'
-                        }
-                    } catch {
-                        Stop-Setup ("The completed identity and $pendingEnrollmentPath disagree. " +
-                                    "Neither file was changed. Ask the operator before replacing " +
-                                    "this world identity.") 'INS-ENROLL'
-                    }
-                }
-                $RelayUrl = $publicRelayUrl
-                $credential = ([string]$existingRecord.peerId) + '.' + $existingSecret
-                $reusedIdentity = $true
-                Say 'reusing this installation''s existing public-map identity'
+    # THE WORLD ALREADY IN THIS DATA ROOT KEEPS ITS IDENTITY. Enrollment is for a
+    # data root with no world in it. Everything else - an upgrade, a repair, a
+    # changed runtime, an install over an earlier one - adopts what is here, and
+    # neither asks the map for a second identity nor rewrites the secret file.
+    if ($existingSecretHeld) {
+        if (-not $existingIdentity) {
+            Write-Host ""
+            Say "$credentialPath holds a world's secret, and nothing in $DataRoot says which world"
+            Say "it belongs to. Nothing was changed. Two ways on, and only you can choose:"
+            Say ""
+            Say "  1. NAME THE WORLD, and this install keeps it. Its identity is written in the"
+            Say ('     earlier install''s profiles\default.json and in the $PeerId line of its ' + $StartName + ',')
+            Say "     both under %LOCALAPPDATA%\Programs\Bibites Multiverse, and in the sidecar log"
+            Say "     under $logDir. It looks like public-0123456789abcdef0123456789abcdef. Put that"
+            Say "     one line into $DataRoot\data\peer-id and run setup again."
+            Say "  2. START A NEW WORLD. Rename $credentialPath to peer-secret.txt.old, or move"
+            Say "     $DataRoot aside, and run setup again. The old world then keeps its place on"
+            Say "     the map with nobody in it until you ask the operator to release it."
+            Stop-Setup ("The secret in $credentialPath was NOT overwritten: it is the only " +
+                        "recoverable half of an identity this map cannot print again. Name the " +
+                        "world in $DataRoot\data\peer-id, or move that secret aside for a new " +
+                        "world - the two choices above, and docs/participant/leave.md.") 'INS-ENROLL'
+        }
+        $adoptedPeerId   = $existingPeerId
+        $adoptedRelayUrl = [string]$existingIdentity.relayUrl
+        if (-not $adoptedRelayUrl) {
+            if ($adoptedPeerId -cmatch '^public-[0-9a-f]{32}$') {
+                $adoptedRelayUrl = $publicRelayUrl
+            } else {
+                Stop-Setup ("$DataRoot holds the world $adoptedPeerId, and nothing here says which " +
+                            "map it is on: that identity is not one this package's public map " +
+                            "issues, and $DataRoot\data\relay-url is not there either. Nothing was " +
+                            "changed. Put that map's wss:// address into $DataRoot\data\relay-url " +
+                            "on one line and run setup again, or run setup from a console with " +
+                            "-JoinStringFile <file> holding the one line your operator sent - or " +
+                            "move $DataRoot aside to start a new world on the public map.") 'INS-ENROLL'
             }
-        } catch {
-            $reusedIdentity = $false
+        }
+        Assert-PendingAgrees $pendingEnrollmentPath $adoptedPeerId $existingSecret
+        $RelayUrl   = $adoptedRelayUrl
+        $credential = $adoptedPeerId + '.' + $existingSecret
+        $adoptedIdentity = $true
+        Say "reusing the map identity already in $DataRoot (peer $adoptedPeerId)"
+        Say "read from $($existingSource): no identity was created and no slot was spent"
+        if ($adoptedRelayUrl -cne $publicRelayUrl) {
+            Say "that world is on $adoptedRelayUrl, which is not the map this package ships. It"
+            Say "stays where it is; -JoinStringFile is what moves a data root to another map."
+        }
+    } elseif ($existingIdentity -and (-not $ReplaceWorldIdentity)) {
+        # The name is here and the secret is not. NOTHING RECOVERS A SECRET, so the
+        # only way on is a second place on the map - and that is a decision, not a
+        # step. It is refused here rather than taken quietly, because on the
+        # graphical path there is no other moment to refuse it in.
+        Write-Host ""
+        Say "$DataRoot is the world $existingPeerId - $existingSource says so - and its secret,"
+        Say "$credentialPath, is gone. Nothing recovers it: the map keeps a verifier and cannot"
+        Say "print a secret again. Write $existingPeerId down. Then, two ways on:"
+        Say ""
+        Say "  1. GET THAT WORLD'S PLACE BACK, with a SLOT HANDOVER. It keeps the slot, the"
+        Say "     position and everything addressed to it, and gives you a NEW identity with a"
+        Say "     freshly minted credential. Its operator sends you one join string; run setup"
+        Say "     from a console with -JoinStringFile <file> -ReplaceWorldIdentity."
+        Say "  2. START A NEW WORLD HERE, and leave $existingPeerId dark on the map until its"
+        Say "     operator releases it. Run setup from a console with -ReplaceWorldIdentity, or"
+        Say "     rename $DataRoot\data\peer-id to peer-id.old first; either way the old name is"
+        Say "     kept in $DataRoot\data\peer-id.previous for you."
+        Stop-Setup ("A new identity over this world is either its slot handed back to you by a " +
+                    "slot handover, or a SECOND place on the map that strands $existingPeerId, " +
+                    "and nothing on this " +
+                    "machine can tell which. -ReplaceWorldIdentity says take it - the two choices " +
+                    "above, and docs/participant/leave.md.") 'INS-ENROLL'
+    } elseif ($existingIdentity) {
+        # -ReplaceWorldIdentity: the participant has said, in as many words, that
+        # this folder takes a different identity. Say what it costs anyway, and
+        # keep the old name - it is what an operator needs to release the slot.
+        Write-Host ""
+        Write-Host ("  -ReplaceWorldIdentity: the world that used $DataRoot was $existingPeerId, " +
+                    "and its secret is gone.") -ForegroundColor Yellow
+        Write-Host "  This install therefore takes a NEW identity, which is a second place on the map." -ForegroundColor Yellow
+        Write-Host "  The old one keeps its slot, with nobody in it, until you ask the operator to" -ForegroundColor Yellow
+        Write-Host "  release it or to hand it to this installation - docs/participant/leave.md." -ForegroundColor Yellow
+        Write-Host ("  Its name is kept in $DataRoot\data\peer-id.previous, and it is what the " +
+                    "operator needs.") -ForegroundColor Yellow
+        Write-Host ""
+        # A leftover pending record here is a new identity already half-taken, and
+        # retrying it is what spends nothing extra. It cannot be the world named on
+        # disk - that world has no secret - so it is announced, not refused.
+        $leftoverPending = Read-JsonFile $pendingEnrollmentPath
+        if ((Get-JsonField $leftoverPending 'format') -eq 'bibites-multiverse/enrollment-pending/1') {
+            Say "an enrollment already begun in this folder is finished rather than started again"
         }
     }
 
-    if (-not $reusedIdentity) {
-        if (($existingRecordHeld -or $credentialHeld) -and
-            -not (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf)) {
-            Stop-Setup ("This data root already contains part of a completed map identity, but " +
-                        "the installer cannot safely reuse it. Do not create a replacement over " +
-                        "the same world. Ask the operator for a slot handover, or use a different " +
-                        "-DataRoot for a new world.") 'INS-ENROLL'
-        }
+    if (-not $adoptedIdentity) {
         $installId = ''
         $enrollmentSecret = ''
         if (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf) {
@@ -793,6 +1094,26 @@ if ($usePublicMap) {
         $credential = $expectedPeerId + '.' + $enrollmentSecret
         $usedAutomaticEnrollment = $true
     }
+} elseif ((-not $JoinStringFile) -and $RelayUrl -and $existingSecretHeld -and $existingIdentity) {
+    # -RelayUrl alone, over a data root that already holds a world: the join
+    # string is not needed, because the secret half is already here. This is the
+    # console remedy for a private-map world whose install record was lost - and
+    # it NAMES the map rather than moving the world to one. The same identity and
+    # secret presented to a different relay is a different world or an authentication
+    # failure, and the journal in this folder belongs to neither.
+    $knownRelayUrl = [string]$existingIdentity.relayUrl
+    if ($knownRelayUrl -and ($knownRelayUrl -cne $RelayUrl)) {
+        Stop-Setup ("$DataRoot holds the world $existingPeerId on $knownRelayUrl - $existingSource " +
+                    "says so - and -RelayUrl names $RelayUrl instead. Nothing was changed. A world " +
+                    "does not move between maps: its slot, its position and its journal are on the " +
+                    "one it joined. Run this again without -RelayUrl to keep it, or use -DataRoot " +
+                    "for a new world on the other map.") 'INS-ENROLL'
+    }
+    Assert-PendingAgrees (Join-Path $DataRoot 'enrollment-pending.json') $existingPeerId $existingSecret
+    $credential = $existingPeerId + '.' + $existingSecret
+    $adoptedIdentity = $true
+    Say "reusing the map identity already in $DataRoot (peer $existingPeerId)"
+    Say "read from $($existingSource): no identity was created and no slot was spent"
 } else {
     $joinString = Read-JoinString $JoinStringFile
     if (-not $joinString) { Stop-Setup "No join string was given, so this world has no identity on any map." 'INS-JOINSTRING' }
@@ -847,15 +1168,100 @@ if ($peerId -notmatch '^[\x21-\x7e]+$') {
     Stop-Setup "The identity half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING'
 }
 
-# Written fresh every time: re-writing over an already protected file makes the
-# permission change below need a privilege an ordinary account does not have.
-Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
-Set-Content -LiteralPath $credentialPath -Value $secret -Encoding ASCII
-[void](Protect-UserFile $credentialPath 'the map credential')
+if ($adoptedIdentity) {
+    # The file on disk IS the credential this install adopted. Its CONTENTS are
+    # never rewritten - no delete, no write, no truncate - so a failure on this
+    # path can never cost somebody the only copy of their secret. The permission
+    # is re-applied in place, because a repair that leaves a loose credential
+    # loose is not a repair.
+    Say "$credentialPath was left exactly as it is"
+    [void](Protect-UserFile $credentialPath 'the map credential')
+} else {
+    # A HANDOVER MINTS A NEW IDENTITY (contract-b-m4.md §7.5: --handover-slot
+    # names a new peerId and a freshly minted credential), so a join string that
+    # does not match the world already here is either that recovery or a mistake,
+    # and nothing on this machine can tell them apart. Both are gated, and the one
+    # destructive act in this script - writing over a secret - never happens on
+    # the word of a file anybody can edit.
+    $identityChanges = ($existingPeerId -and ($peerId -cne $existingPeerId))
+    if ($existingSecretHeld -and (-not $existingPeerId)) {
+        Stop-Setup ("$credentialPath already holds a secret, and nothing in $DataRoot says which " +
+                    "world it belongs to. Nothing was changed, because that secret is the only " +
+                    "recoverable half of an identity no map can print again. If this join string " +
+                    "is that world's slot handed back to you, the file is already spent: rename it " +
+                    "to peer-secret.txt.old and run this again. Otherwise use -DataRoot for a new " +
+                    "world.") 'INS-ENROLL'
+    }
+    if ($identityChanges -and (-not $ReplaceWorldIdentity)) {
+        Stop-Setup ("$DataRoot is the world $existingPeerId (named in $existingSource), and that " +
+                    "join string is a different identity, $peerId. Nothing was changed. If your " +
+                    "operator handed this world's slot over, that IS a new identity and " +
+                    "-ReplaceWorldIdentity applies it here, keeping the journal, the slot and the " +
+                    "position. If they did not, this would leave $existingPeerId dark on the map " +
+                    "with a second world over its journal: use -DataRoot for the new world " +
+                    "instead. See docs/participant/leave.md.") 'INS-ENROLL'
+    }
+    if ($existingSecretHeld -and (-not $identityChanges) -and (-not $existingProven) -and
+        ($secret -cne $existingSecret)) {
+        Stop-Setup ("$existingSource is the only thing that says $DataRoot is the world $peerId, " +
+                    "and it is an ordinary text file that nothing binds to the secret in " +
+                    "$credentialPath. That is enough to keep a world and not enough to overwrite " +
+                    "one, so nothing was changed. If that secret is spent, rename $credentialPath " +
+                    "to peer-secret.txt.old and run this again with the same join string. If it is " +
+                    "the live one, run setup with no join string at all and it is kept as it is.") 'INS-ENROLL'
+    }
+    if ($existingSecretHeld -and ($secret -cne $existingSecret)) {
+        # The replaced secret is kept beside the new one rather than deleted: a
+        # join string that turns out to be the wrong one would otherwise be
+        # unrecoverable in exactly the way this whole step exists to prevent.
+        $backupPath = "$credentialPath." + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') + '.old'
+        Copy-Item -LiteralPath $credentialPath -Destination $backupPath -Force
+        [void](Protect-UserFile $backupPath 'the replaced map credential')
+        Say "the secret it replaces is kept in $backupPath - delete it once this world connects"
+    }
+    if ($identityChanges) {
+        Say "-ReplaceWorldIdentity: $DataRoot was the world $existingPeerId and is now $peerId."
+        Say "If that came from a slot handover, its slot and position came with it and nothing is"
+        Say "stranded. If it did not, $existingPeerId is dark on the map until its operator"
+        Say "releases it - docs/participant/leave.md."
+    } elseif ($existingSecretHeld -and $existingPeerId) {
+        Say "the same world, $peerId (named in $existingSource)"
+    }
+    # Written fresh every time: re-writing over an already protected file makes the
+    # permission change below need a privilege an ordinary account does not have.
+    Remove-Item -LiteralPath $credentialPath -Force -ErrorAction SilentlyContinue
+    Set-Content -LiteralPath $credentialPath -Value $secret -Encoding ASCII
+    [void](Protect-UserFile $credentialPath 'the map credential')
+}
 $secret = ''
+$existingSecret = ''
+
+# The identity and the map beside the journal they belong to. The sidecar keeps
+# peer-id itself (contract-b-m4.md §7.4) and reads it when nothing passes
+# --peer-id; both are written here because an uninstall that keeps this world's
+# data keeps them too, so installing again over it finds the world whole - on a
+# private map exactly as on the public one.
+$peerIdFile   = Join-Path $dataDir 'peer-id'
+$relayUrlFile = Join-Path $dataDir 'relay-url'
+$storedPeerId = Get-FirstLine $peerIdFile
+if ($storedPeerId -cne $peerId) {
+    if ($storedPeerId) {
+        # The name this folder used to answer to. An operator needs that string to
+        # release or hand over the slot it stranded, and nothing else keeps it.
+        Set-Content -LiteralPath (Join-Path $dataDir 'peer-id.previous') -Value $storedPeerId -Encoding ASCII
+        Say "the world this folder used to be, $storedPeerId, is kept in $dataDir\peer-id.previous"
+        Say "It is dark on the map until its operator releases it - docs/participant/leave.md."
+    }
+    Set-Content -LiteralPath $peerIdFile -Value $peerId -Encoding ASCII
+}
+if ((Get-FirstLine $relayUrlFile) -cne $RelayUrl) {
+    Set-Content -LiteralPath $relayUrlFile -Value $RelayUrl -Encoding ASCII
+}
+
 Say "your world's identity on this map: $peerId"
 Say "the relay it dials: $RelayUrl"
-if (-not $usePublicMap) {
+$onPackagedMap = ($packagedRelayUrl -and ($RelayUrl -ceq $packagedRelayUrl))
+if (-not $onPackagedMap) {
     Write-Host ""
     Say "IF YOU LOSE THAT SECRET there is no software recovery: the relay keeps a verifier"
     Say "and cannot print it again. The only way back is to ask the operator for a slot"
@@ -877,13 +1283,24 @@ $caThumbprint = ''
 $caStored     = ''
 
 if (-not $CaFile) {
+    # What this says follows the map this world DIALS, not the branch that chose
+    # it: an adopted private world reaches this step through the public-map path.
     Say "NOTHING WAS IMPORTED INTO ANY TRUST STORE, and nothing needs to be."
-    Say "A public map's relay presents a certificate signed by an authority Windows"
-    Say "already trusts, so your machine checks it the same way it checks a bank's."
-    Say "Your sidecar verifies that certificate on every connection, and there is no"
-    Say "switch anywhere in this software that skips the check."
-    Say "-CaFile exists for a private or LAN map only. If your operator sent you a"
-    Say "ca.crt, run this installer again with -CaFile .\ca.crt."
+    if ($onPackagedMap) {
+        Say "A public map's relay presents a certificate signed by an authority Windows"
+        Say "already trusts, so your machine checks it the same way it checks a bank's."
+        Say "Your sidecar verifies that certificate on every connection, and there is no"
+        Say "switch anywhere in this software that skips the check."
+        Say "-CaFile exists for a private or LAN map only. If your operator sent you a"
+        Say "ca.crt, run this installer again with -CaFile .\ca.crt."
+    } else {
+        Say "This world dials $RelayUrl, which is not the map this package ships."
+        Say "Your sidecar verifies that relay's certificate on every connection, and there"
+        Say "is no switch anywhere in this software that skips the check. If that relay"
+        Say "presents a certificate an authority Windows already trusts, this is right as"
+        Say "it is. If its map's operator sent you a ca.crt, run this installer again with"
+        Say "-CaFile .\ca.crt, which imports it into YOUR OWN user store and nowhere else."
+    }
 } else {
     if (-not (Test-Path $CaFile)) { Stop-Setup "No certificate file at $CaFile." }
     try {
@@ -1428,9 +1845,12 @@ $record = [ordered]@{
 $recordPath = Join-Path $DataRoot $RecordName
 $record | ConvertTo-Json -Depth 6 | Set-Content -Path $recordPath -Encoding ASCII
 Say "wrote $recordPath - the uninstall reads it, and removes only what is named in it"
-if ($usePublicMap -and $pendingEnrollmentPath -and
-    (Test-Path -LiteralPath $pendingEnrollmentPath -PathType Leaf)) {
-    Remove-Item -LiteralPath $pendingEnrollmentPath -Force
+# The pending record holds a SECOND COPY of a secret. Once the install is
+# complete it has no use, on any path that led here, so it does not survive this
+# script and cannot be left for an uninstall to keep.
+$completedPendingPath = Join-Path $DataRoot 'enrollment-pending.json'
+if (Test-Path -LiteralPath $completedPendingPath -PathType Leaf) {
+    Remove-Item -LiteralPath $completedPendingPath -Force
     Say 'removed the pending enrollment record after completing the install record'
 }
 
@@ -1450,6 +1870,15 @@ Say "app launcher : $InstallRoot\$LauncherName"
 Say "its profiles : $profilesDir   (this world is 'default')"
 if ($caImported) { Say "certificate  : $caThumbprint imported into your own user store" }
 else             { Say "certificate  : nothing imported into any trust store" }
+if ($existingPeerId -and ($existingPeerId -cne $peerId)) {
+    Write-Host ""
+    Write-Host "  THIS FOLDER'S WORLD CHANGED IDENTITY. It was $existingPeerId." -ForegroundColor Yellow
+    Write-Host "  If a slot handover gave you $peerId, that slot and position came with it and" -ForegroundColor Yellow
+    Write-Host "  nothing is stranded. If it did not, $existingPeerId IS NOW DARK ON THE MAP:" -ForegroundColor Yellow
+    Write-Host "  its slot stays reserved, with nobody in it, until its operator releases it." -ForegroundColor Yellow
+    Write-Host "  That name is the whole of the message they need, and it is kept in" -ForegroundColor Yellow
+    Write-Host "  $dataDir\peer-id.previous - docs/participant/leave.md." -ForegroundColor Yellow
+}
 Write-Host ""
 if ($StartAfterInstall) {
     Say 'Next: the installer will connect this world and start the game now.'

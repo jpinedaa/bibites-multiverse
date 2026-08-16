@@ -29,8 +29,7 @@
       * the launcher's profiles directory: one file for every world this
         install added, the name of the world the launcher had selected, and
         each of those worlds' recorded process ids and lock file
-      * your map credential - one for every world this install added - and the
-        copy of a private map's certificate authority
+      * the copy of a private map's certificate authority
       * that certificate authority from your own user trust store, if the
         installer imported it and only then
       * an unchanged managed game payload, when this was the complete edition;
@@ -46,6 +45,12 @@
         custody of and has not handed on, for every world this install runs.
         Pass -RemoveWorldData to delete them too, and read the warning that
         prints before it happens
+      * YOUR MAP CREDENTIAL - peer-secret.txt, one for every world this install
+        added. It is the world's, not the install's: the map keeps a verifier
+        and can never print that secret again, so removing a build must not end
+        the world that ran on it. Installing again over the same data root
+        reuses it and spends no second identity. It goes with the journal, under
+        -RemoveWorldData, and never on its own
       * any file the installer did not create, including another mod's plugin
 
 .PARAMETER DataRoot
@@ -56,9 +61,11 @@
     The install record, if it is not in the usual place.
 
 .PARAMETER RemoveWorldData
-    Also delete the journal, the logs and the data directory - of this install
-    and of every other world its launcher added. A journal may still hold
-    organisms other worlds handed to this one.
+    Also delete the journal, the logs, the map credential and the data directory
+    - of this install and of every other world its launcher added. A journal may
+    still hold organisms other worlds handed to this one, and a deleted
+    credential ends that world on the map: only a slot handover from the
+    operator can give a world a fresh one.
 
 .PARAMETER KeepCertificate
     Leave a private map's certificate authority in your trust store.
@@ -471,7 +478,7 @@ if (-not $profilesRoot) {
     }
     if ($RemoveWorldData -and $extraWorlds -gt 0) {
         Write-Host ""
-        Write-Host "  -RemoveWorldData: EVERY world's journal goes, not only the first one's." -ForegroundColor Yellow
+        Write-Host "  -RemoveWorldData: EVERY world's journal and credential goes, not only the first one's." -ForegroundColor Yellow
         Write-Host "  Each journal is this machine's record of the organisms that world took custody" -ForegroundColor Yellow
         Write-Host "  of and has not handed on. Nobody else holds a copy. Your worlds are NOT in it." -ForegroundColor Yellow
         Write-Host ("  Worlds beyond the first with a journal of their own: {0}." -f $extraWorlds) -ForegroundColor Yellow
@@ -495,10 +502,14 @@ if (-not $profilesRoot) {
         # below, from the record rather than from the profile.
         if ($profileRoot -ne [string]$record.dataRoot) {
             $worldPending = New-Object System.Collections.ArrayList
-            foreach ($leftover in @('peer-secret.txt', 'enrollment-pending.json',
-                                    'sidecar.pid', 'game.pid', 'launcher.lock')) {
+            $worldLeftovers = @('sidecar.pid', 'game.pid', 'launcher.lock')
+            if ($RemoveWorldData) { $worldLeftovers = @('peer-secret.txt', 'enrollment-pending.json') + $worldLeftovers }
+            foreach ($leftover in $worldLeftovers) {
                 Remove-Recorded -Path (Join-Path $profileRoot $leftover) -What "the world '$profileName'"
                 [void]$worldPending.Add((Join-Path $profileRoot $leftover))
+            }
+            if ((-not $RemoveWorldData) -and (Test-Path -LiteralPath (Join-Path $profileRoot 'peer-secret.txt'))) {
+                [void]$kept.Add("identity: $(Join-Path $profileRoot 'peer-secret.txt') - the world '$profileName' keeps its place on the map")
             }
             if ($RemoveWorldData) {
                 foreach ($dir in @((Join-Path $profileRoot 'data'), (Join-Path $profileRoot 'logs'))) {
@@ -538,7 +549,24 @@ if ($record.PSObject.Properties.Match('program').Count -gt 0) {
         Remove-Recorded -Path $file.path -Sha256 $file.sha256 -What 'the installed application'
     }
 }
-Remove-Recorded -Path $record.credential -What 'your map credential'
+$pendingCredentialPath = Join-Path $record.dataRoot 'enrollment-pending.json'
+if ($RemoveWorldData) {
+    Remove-Recorded -Path $record.credential -What 'your map credential, with the world data'
+    if (Test-Path -LiteralPath $pendingCredentialPath) {
+        Remove-Recorded -Path $pendingCredentialPath -What 'a half-finished enrollment, with the world data'
+    }
+} else {
+    # THE CREDENTIAL IS THE WORLD'S, NOT THE INSTALL'S. The map keeps a verifier
+    # and cannot print the secret again, so deleting it here would end the world
+    # on the map for a person who is only replacing a build - and installing
+    # again over this data root reuses it rather than spending another identity.
+    # It goes with the journal, under -RemoveWorldData, and never on its own.
+    [void]$kept.Add("identity: $($record.credential) - the world $($record.peerId) keeps its place on the map, and installing again here reuses it")
+    if (Test-Path -LiteralPath $pendingCredentialPath) {
+        # It holds a second copy of a secret, so it is never kept silently.
+        [void]$kept.Add("pending : $pendingCredentialPath - a half-finished enrollment, and a second copy of a secret. Installing again finishes it; -RemoveWorldData removes it")
+    }
+}
 if ($record.certificate.storedCopy) {
     Remove-Recorded -Path $record.certificate.storedCopy -What "the copy of the map's certificate authority"
 }
@@ -548,11 +576,14 @@ foreach ($leftover in @('sidecar.pid', 'game.pid')) {
 
 if ($RemoveWorldData) {
     Write-Host ""
-    Write-Host "  -RemoveWorldData: the journal goes too." -ForegroundColor Yellow
+    Write-Host "  -RemoveWorldData: the journal and this world's identity go too." -ForegroundColor Yellow
     Write-Host "  The journal is this machine's record of every organism it took custody of and" -ForegroundColor Yellow
     Write-Host "  has not handed on. Nobody else holds a copy, and no operator command can reach" -ForegroundColor Yellow
     Write-Host "  it. Deleting it drops whatever it still held. Your worlds are NOT in it and are" -ForegroundColor Yellow
     Write-Host "  not affected." -ForegroundColor Yellow
+    Write-Host "  The credential goes with it, and that is the end of this world on the map: the" -ForegroundColor Yellow
+    Write-Host "  relay keeps a verifier and cannot print that secret again. Its slot stays" -ForegroundColor Yellow
+    Write-Host "  reserved until you ask the operator to release it or hand it on." -ForegroundColor Yellow
     Write-Host ""
     foreach ($dir in @($record.dataDir, $record.logDir)) {
         if (Test-Path -LiteralPath $dir) {
@@ -571,7 +602,8 @@ if ($record.PSObject.Properties.Match('program').Count -gt 0) {
     Remove-EmptyDirectory ([string]$record.program.root)
 }
 if (-not $RemoveWorldData) {
-    Say "the journal and the logs stay. Pass -RemoveWorldData to remove those as well."
+    Say "the journal, the logs and this world's identity stay. Installing again over"
+    Say "$($record.dataRoot) reuses that identity. Pass -RemoveWorldData to remove them as well."
 } else {
     Remove-EmptyDirectory $record.dataRoot
 }

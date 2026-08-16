@@ -51,8 +51,8 @@ computer runs several, name the ones you are leaving with.
 | Your slot number | **Retired forever.** Slot numbers are never reused, and that is what makes the next line safe |
 | Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so no retry can ever succeed. One the relay can prove it never handed anywhere goes home at once; one that may already have reached your sidecar before you went waits out its hold first, because the point of the wait is exactly that possibility |
 | Your neighbours | Their lanes re-pair around the hole. No slot number changes and no other position moves |
-| Your world | Yours. The saves are on your disk, and the uninstall — `Uninstall-BibitesMultiverse.ps1`, or `./uninstall-bibites-multiverse.sh` — leaves your game as it found it, which a test proves against a sandbox game tree rather than a page asserting it. See [install.md](install.md). It keeps your journal unless you pass `-RemoveWorldData` / `--remove-world-data`, and it never goes near your worlds |
-| Removing one world of several | `BibitesMultiverseLauncher.exe profile delete NAME` removes that world from this computer. **It is not leaving the map**: the slot stays reserved for that identity until the operator releases it, so send the message as well. It keeps that world's journal and logs unless you pass `--remove-world-data`. Either way it asks you to type the world's name, and with `--remove-world-data` it asks **even under the global `--yes`** |
+| Your world | Yours. The saves are on your disk, and the uninstall — `Uninstall-BibitesMultiverse.ps1`, or `./uninstall-bibites-multiverse.sh` — leaves your game as it found it, which a test proves against a sandbox game tree rather than a page asserting it. See [install.md](install.md). It keeps your journal **and your world's identity** — `peer-secret.txt`, and `data/peer-id` beside the journal — unless you pass `-RemoveWorldData` / `--remove-world-data`, and it never goes near your worlds. That is why installing again over the same data root comes back as the **same** world on the **same** slot, and why removing the software is not leaving the map |
+| Removing one world of several | `BibitesMultiverseLauncher.exe profile delete NAME` removes that world from this computer. **It is not leaving the map**: the slot stays reserved for that identity until the operator releases it, so send the message as well. It keeps that world's journal, logs and credential unless you pass `--remove-world-data`, which ends that world on the map: the relay keeps a verifier and cannot mint the secret again. Either way it asks you to type the world's name, and with `--remove-world-data` it asks **even under the global `--yes`** |
 | Your credential | **Still authenticates until the operator drops it** — a release retires a *reservation*, not an identity. What is gone is your place: connect again and the map treats you as a newcomer, at a new slot number and wherever the ordinary placement rules put you. Your old slot number is never reused. There is nothing to revoke on your side |
 
 **Before you go, drain your journal.** Your sidecar may be holding organisms it took custody of
@@ -116,6 +116,16 @@ freshly minted credential.
 **This is the only credential recovery there is**, and it is deliberate: the alternative is an
 account system with an email and a reset flow, and the map is a hobby project that chose not to
 have one. The cost was accepted with the price in view.
+
+**What the installer does when it meets a lost secret.** A data root that still names a world —
+`data/peer-id` beside its journal — but has no `peer-secret.txt` stops the installer, which prints
+that world's identity. It will not quietly take a new one, because a new identity without this
+handover is a second place on the map and leaves the old one dark. Ask for the handover above and
+install the join string it prints with `-JoinStringFile` **and** `-ReplaceWorldIdentity` /
+`--replace-world-identity` — the switch is what tells the installer that this folder's world is
+meant to change identity, and it is needed for the same reason whether the new identity arrived
+from a handover or from nowhere. Either way the old name is kept in `data/peer-id.previous`, which
+is the string this operator conversation needs.
 
 ## What you cannot take with you
 
