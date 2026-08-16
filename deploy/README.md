@@ -18,6 +18,9 @@ Keep these records outside the public repository:
 | `provision.sh` | Installs and configures a host in named, repeatable phases. |
 | `ship.sh` | Builds Linux binaries and copies them to a host. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
+| `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
+| `restart-archive.sh` | Runs the complete-record archive sequence, guarded by the archive-deploy hold and the replay-headroom verdict. Costs a full ledger replay. |
+| `restart-lib.sh` | The half both restart scripts share: the peer gate, the waits, the proof, and the receipt. Sourced, never run. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
@@ -369,6 +372,13 @@ bash -n deploy/*.sh deploy/service-host-sample
 deploy/test-front-door.sh
 deploy/test-units.sh
 deploy/test-monitor.sh
+```
+
+Both restart procedures answer `--dry-run`, which walks every step and changes nothing:
+
+```sh
+deploy/restart-relay.sh --dry-run
+deploy/restart-archive.sh --dry-run
 ```
 
 `test-monitor.sh` needs no root, no network and no host.
