@@ -384,20 +384,70 @@ if ($RuntimeSelection -eq 'bundled') {
     }
 }
 
+function Test-FileLocked {
+    # Ask the file itself, rather than asking about processes. A running Windows
+    # process holds its own executable image - and every DLL it has loaded -
+    # open with no write sharing, so an open for ReadWrite that is refused as a
+    # sharing violation means something is running out of that file. An open
+    # that succeeds means nothing is. A file that is not there cannot be locked.
+    #
+    # A refusal this account cannot tell apart from a lock - a folder it may not
+    # write to at all - is reported as locked, because that is still the safe
+    # answer, and it is the answer this check gave before it could tell.
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($Path,
+                                         [System.IO.FileMode]::Open,
+                                         [System.IO.FileAccess]::ReadWrite,
+                                         [System.IO.FileShare]::None)
+        return $false
+    } catch [System.IO.IOException] {
+        return $true
+    } catch [System.UnauthorizedAccessException] {
+        return $true
+    } catch {
+        return $true
+    } finally {
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
 function Get-GameProcessesIn {
     # Windows keeps the plugin file open while the game runs, and the copy in
     # step 5 then fails with an unreadable IOException. The check is on the
     # game folder this install writes to rather than on the process name: one
     # machine may hold more than one copy of the game, and only the copy being
-    # written to has to be closed. A process whose path cannot be read counts,
-    # because the safe answer to "I cannot tell" is to stop.
+    # written to has to be closed.
+    #
+    # A process whose path this account cannot read - another user's session, or
+    # an elevated one - is NOT counted on that fact alone. It used to be, and
+    # that refused an install into a folder this installer had just unpacked on
+    # any machine that happens to run a second world elsewhere. What is asked
+    # instead is the question that actually matters: are the files in THIS
+    # folder held open? Nothing there open for writing means nothing is running
+    # out of this copy, whoever else is running whatever else.
     param([string]$Path)
     $hit = New-Object System.Collections.ArrayList
+    $opaque = 0
     foreach ($process in @(Get-Process -Name 'The Bibites' -ErrorAction SilentlyContinue)) {
         $exe = ''
         try { $exe = $process.Path } catch { $exe = '' }
-        if (-not $exe) { [void]$hit.Add('(a copy of the game this account cannot inspect)'); continue }
+        if (-not $exe) { $opaque++; continue }
         if ($exe.StartsWith($Path, [System.StringComparison]::OrdinalIgnoreCase)) { [void]$hit.Add($exe) }
+    }
+    if ($opaque -gt 0 -and $hit.Count -eq 0) {
+        $probe = @((Join-Path $Path 'The Bibites.exe'),
+                   (Join-Path $Path "BepInEx\plugins\$PluginName"))
+        $held = @($probe | Where-Object { Test-FileLocked $_ })
+        if ($held.Count -gt 0) {
+            [void]$hit.Add("(a copy of the game this account cannot inspect - and $($held[0]) is " +
+                           "open with no write sharing, so it is running from here)")
+        } else {
+            Say ("running: (a copy of the game this account cannot inspect - the files in this " +
+                 "folder are not locked, so it is not running from here)")
+        }
     }
     return $hit
 }
