@@ -34,4 +34,50 @@ for unit in "$relay" "$archive"; do
     fail "$unit must be WantedBy=multi-user.target, or After= alone leaves it unstarted at boot"
 done
 
-echo "systemd units OK"
+# Every timer in this kit, by glob rather than by a hand-kept list, so a new one
+# is covered the day it is added. A timer that is not WantedBy=timers.target is
+# installed, enabled and never fires; a timer whose service is missing fails at
+# every tick. Both are silent until somebody reads a document that stopped
+# updating.
+timers=0
+for timer in "$HERE"/systemd/*.timer; do
+  [ -e "$timer" ] || continue
+  timers=$((timers + 1))
+  grep -Fqx 'WantedBy=timers.target' "$timer" ||
+    fail "$timer must be WantedBy=timers.target, or enabling it starts nothing"
+  service="${timer%.timer}.service"
+  [ -f "$service" ] ||
+    fail "$timer has no $service beside it; systemd would fail at every tick"
+done
+[ "$timers" -gt 0 ] || fail "no timer units found in $HERE/systemd"
+
+# The viewer-presence unit runs as root for one reason — the nginx access log is
+# root:adm — so every other privilege it would inherit has to be given back.
+viewers="$HERE/systemd/multiverse-viewers.service"
+[ -f "$viewers" ] || fail "missing $viewers"
+for setting in 'NoNewPrivileges=true' 'ProtectSystem=strict' 'ProtectHome=true' \
+               'ReadOnlyPaths=/var/log/nginx' 'LockPersonality=true'; do
+  grep -Fqx "$setting" "$viewers" ||
+    fail "$viewers must set $setting; it runs as root and reads a privileged log"
+done
+# ProtectSystem=strict makes the whole tree read-only, so the one path it writes
+# has to be named or the unit fails on its first tick.
+grep -Eq '^ReadWritePaths=/var/www/multiverse-status$' "$viewers" ||
+  fail "$viewers must declare ReadWritePaths for the directory it writes"
+if grep -Eq '^RestrictAddressFamilies=.*AF_INET6' "$viewers"; then
+  fail "$viewers dials 127.0.0.1 only; AF_INET6 is a privilege it does not need"
+fi
+
+# The contract in deploy/viewers-presence.sh promises a refresh at least every
+# ten seconds, and systemd's default AccuracySec of one minute would break that
+# promise while the timer file still said 10s.
+viewers_timer="$HERE/systemd/multiverse-viewers.timer"
+grep -Fqx 'OnUnitActiveSec=10s' "$viewers_timer" ||
+  fail "$viewers_timer must fire every 10s: the publisher's start delay is added to it"
+grep -Eq '^AccuracySec=[0-9]+(ms|s)$' "$viewers_timer" ||
+  fail "$viewers_timer needs a tight AccuracySec; the default is one minute"
+if grep -q 'RandomizedDelaySec' "$viewers_timer"; then
+  fail "$viewers_timer must not jitter: a watcher reads the document's own age"
+fi
+
+echo "systemd units OK ($timers timers)"

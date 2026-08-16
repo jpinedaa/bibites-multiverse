@@ -462,33 +462,43 @@ on a map of more than a few dozen peers.
 
 ### Video
 
-Publisher ingest is a fixed inbound cost. The service pays it when nobody watches:
+Publisher ingest is an inbound cost, and it is paid for every minute the publisher runs
+rather than for every minute anyone watches:
 
 ```text
-ingest_GB_per_month = 312 * publish_Mbit_per_second
+ingest_GB_per_month = 312 * publish_Mbit_per_second      while publishing
 ```
 
-A `2.5 Mbit/s` publisher costs approximately `780 GB` each month, inbound, in every month
-that it runs. Against a `3,072 GB` allowance that is a quarter of the budget spent on an
-empty room. Lower the publish bitrate, or publish only while an audience exists.
+A `2.5 Mbit/s` publisher costs approximately `780 GB` each month while it runs. Against a
+`3,072 GB` allowance that is a quarter of the budget, and a publisher that runs
+continuously spends all of it on an empty room.
+
+**Publish on demand, and the empty-room term goes to approximately zero.** The steady
+state with no audience is no publisher and therefore no ingest; the service pays the rate
+above only for the hours somebody watches. This costs the first viewer a wait of about
+twenty seconds while the publisher starts, and it needs a presence signal the publisher
+can read — see [`../docs/live-broadcast.md`](../docs/live-broadcast.md), "Publish on
+demand". Lowering the publish bitrate is the independent lever and multiplies both this
+term and every viewer term: `2.5` to `1.5 Mbit/s` takes a publishing-month from about
+`780 GB` to about `470 GB`.
 
 Viewer cost is not the media rate:
 
 ```text
-viewer_GB_per_month = 1150       low-latency HLS, 2.5 Mbit/s media
-viewer_GB_per_month = 790        non-low-latency HLS, same media
+viewer_GB_per_month = 790        non-low-latency HLS, 2.5 Mbit/s media
+viewer_GB_per_month = 1150       low-latency HLS, same media
 ```
 
-The media is `2.52 Mbit/s` as designed. Low-latency HLS delivers `3.69 Mbit/s`, because
-it re-fetches its playlist approximately as often as it delivers a media part: a measured
-`1.035` to `1` playlist-to-part ratio, with `31.8 percent` of delivered bytes in
-playlists. A non-low-latency variant removes that overhead and adds several seconds of
-latency.
+The first line is the current origin. The media is `2.52 Mbit/s` as designed. Low-latency
+HLS delivered `3.69 Mbit/s`, because it re-fetches its playlist approximately as often as
+it delivers a media part: a measured `1.035` to `1` playlist-to-part ratio, with
+`31.8 percent` of delivered bytes in playlists. Dropping it removed that overhead and
+moved viewer latency from about `1 s` to about `6` to `8 s`.
 
 **Low-latency HLS is also the variant a cache cannot help.** Each playlist request stays
-open until the next part exists, so an edge cannot serve it from a stored object. Select
-the non-low-latency variant before a content delivery network, or the network delivers
-much less than its price implies.
+open until the next part exists, so an edge cannot serve it from a stored object. The
+non-low-latency variant is therefore the precondition for a content delivery network, not
+an alternative to one.
 
 Match the segment target to the encoder keyframe interval. A server extends a segment
 until the segment contains a keyframe, so a `1 s` target against a `2 s` keyframe
@@ -516,11 +526,13 @@ endpoints or change cadence without changing this document.
 
 Use a CDN or a managed video service before direct-origin transfer exceeds its approved
 budget. At the measured rate, ten continuous viewers is not a capacity question but a
-four-figure monthly bill. Select the non-low-latency variant first.
+four-figure monthly bill.
 
-A map that carries seven peers and one publisher spends approximately `3,300 GB` each
-month before the first viewer arrives. Size the allowance from the crossing rate, the
-slot count, and the publisher, and treat every viewer as an addition to it.
+A map that carries seven peers and one continuous publisher spends approximately
+`3,300 GB` each month before the first viewer arrives. With an on-demand publisher the
+same map spends approximately `2,500 GB` with nobody watching, and pays the publisher and
+the viewer together only while somebody is. Size the allowance from the crossing rate and
+the slot count, and treat each watched hour as an addition to it.
 
 Compress the peer wire before you buy a larger allowance. The peer term is `76 percent`
 of that figure and compresses about `8.5` times, which is a larger reduction than any
