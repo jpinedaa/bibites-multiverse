@@ -284,7 +284,7 @@ func renderLandingPage(cfg Config) string {
 	).Replace(landingPageTemplate)
 }
 
-func defaultHomepageRelease() string     { return "0.2.3" }
+func defaultHomepageRelease() string     { return "0.2.4" }
 func defaultHomepageRepo() string        { return "jpinedaa/bibites-multiverse" }
 func defaultHomepageGameVersion() string { return "0.6.3.1" }
 

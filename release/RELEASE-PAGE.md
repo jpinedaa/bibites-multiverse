@@ -33,15 +33,25 @@ issue, screenshot, or log.
 4. Double-click the setup executable.
 
 This community setup is not code-signed. Windows can show **Unknown publisher**. Continue only
-after the setup SHA-256 matches this page.
+after the setup SHA-256 matches this page. The launcher the setup installs is not signed either,
+but the setup clears the download mark from it after checking it, so Windows should not ask a
+second time. If it does ask, or if an antivirus quarantines the launcher, select **More info → Run
+anyway** for that file only.
 
 The GUI selects the included portable game. You can instead use a game it finds on your machine
 or select the folder yourself. **Start after installation** is selected by default. The game opens
 after the map grants this installation a place. Setup creates desktop and Start Menu launch icons.
 It also registers Bibites Multiverse in Windows Settings for uninstall.
 
+The setup installs `BibitesMultiverseLauncher.exe`, and the icons open it. The launcher starts and
+stops the world, shows its status, and can run the world headless — with no game window, through
+`start --headless`, and back again with `start --no-headless`. It can
+also run more than one world on this computer. Each world has its own map identity, its own data
+folder, and its own sidecar port.
+
 The Windows complete ZIP remains available for advanced or script-based installation. It opens
-the same GUI through `Install-BibitesMultiverse.cmd`.
+the same GUI through `Install-BibitesMultiverse.cmd`. `Start-Multiverse.ps1` and
+`Stop-Multiverse.ps1` are still generated for scripted use.
 
 ## Linux
 
@@ -57,6 +67,11 @@ The add-on archive finds an existing itch.io game. For a private map, pass
 
 The installed world exchanges organisms on all four edges. It saves every 10 minutes, keeps six
 saves, and saves when the game closes.
+
+On Windows, one game folder can run five worlds at the same time. The launcher refuses to start a
+sixth, because BepInEx keeps only five log files per game folder and the mod does not load in the
+sixth game. If you run more than one world, give each world a different save interval, because all
+of them write into the same save folder.
 
 The public map operates from 2026-08-14 through 2026-11-14. The operator can announce an
 extension before the end date.

@@ -12,11 +12,16 @@ This page says what each one does to your world, to your slot, and to the organi
 **Just stop.** Close the game, stop the sidecar, turn the machine off. Nothing has to be told.
 
 **One thing worth doing rather than just pulling the plug**: let the game finish quitting, so
-save-on-quit runs. `Stop-Multiverse.ps1` and `stop-multiverse.sh` both do it for you, and the
-Linux one waits up to twenty seconds for that save before it insists — a clean quit with its save
-has measured at about two seconds. A world killed outright loses everything since its last save,
-which is a loss of *your* progress and never of anybody's organisms: custody lives in the journal,
-not in the world file.
+save-on-quit runs. On Windows, the launcher's **Stop this world** — or
+`BibitesMultiverseLauncher.exe stop`, or `stop --all` for every world on the computer — asks the
+game to close and waits up to thirty seconds for that save before it insists. `Stop-Multiverse.ps1`
+does the same, and `stop-multiverse.sh` waits up to twenty seconds on Linux. A clean quit with its
+save has measured at about two seconds. **A headless world on Windows is the exception**: it has no
+window to close, so it is stopped outright and can lose the time since its last save. That is
+`LOCAL-HEADLESSSTOP` in [`../error-taxonomy.md`](../error-taxonomy.md), which gives the two ways
+around it. A world
+killed outright loses everything since its last save, which is a loss of *your* progress and never
+of anybody's organisms: custody lives in the journal, not in the world file.
 
 | What | What happens |
 |---|---|
@@ -37,6 +42,9 @@ is lost and nothing needs your attention.
 **Tell the operator.** That is the whole of your part. They release your slot, and the release
 is what makes the map tidy rather than permanently expectant.
 
+**One message per world.** Each world you run is a separate identity with its own slot, so if this
+computer runs several, name the ones you are leaving with.
+
 | What | What happens |
 |---|---|
 | Your position | Becomes an ordinary **hole** in the map — the next newcomer fills it before any axis grows |
@@ -44,13 +52,15 @@ is what makes the map tidy rather than permanently expectant.
 | Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so no retry can ever succeed. One the relay can prove it never handed anywhere goes home at once; one that may already have reached your sidecar before you went waits out its hold first, because the point of the wait is exactly that possibility |
 | Your neighbours | Their lanes re-pair around the hole. No slot number changes and no other position moves |
 | Your world | Yours. The saves are on your disk, and the uninstall — `Uninstall-BibitesMultiverse.ps1`, or `./uninstall-bibites-multiverse.sh` — leaves your game as it found it, which a test proves against a sandbox game tree rather than a page asserting it. See [install.md](install.md). It keeps your journal unless you pass `-RemoveWorldData` / `--remove-world-data`, and it never goes near your worlds |
+| Removing one world of several | `BibitesMultiverseLauncher.exe profile delete NAME` removes that world from this computer. **It is not leaving the map**: the slot stays reserved for that identity until the operator releases it, so send the message as well. It keeps that world's journal and logs unless you pass `--remove-world-data`. Either way it asks you to type the world's name, and with `--remove-world-data` it asks **even under the global `--yes`** |
 | Your credential | **Still authenticates until the operator drops it** — a release retires a *reservation*, not an identity. What is gone is your place: connect again and the map treats you as a newcomer, at a new slot number and wherever the ordinary placement rules put you. Your old slot number is never reused. There is nothing to revoke on your side |
 
 **Before you go, drain your journal.** Your sidecar may be holding organisms it took custody of
 and has not been able to hand on — held entries, waiting on a destination that is dark. Custody
 is local: **nobody else can do this for you, and no operator command can reach it.**
 
-**Stop your sidecar first** — `.\Stop-Multiverse.ps1`, or `./stop-multiverse.sh` on Linux —
+**Stop your sidecar first** — `BibitesMultiverseLauncher.exe stop` or `.\Stop-Multiverse.ps1` on
+Windows, `./stop-multiverse.sh` on Linux —
 because the journal takes one writer and both commands refuse while it is running. Then list what
 is left, and release each entry, choosing whether it goes home to the world it came from or is
 dropped:
@@ -70,6 +80,9 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless y
 ./multiverse-sidecar --list-inflight    --data-dir "$data"
 ./multiverse-sidecar --release-inflight <migrationId> bounce|drop --data-dir "$data"
 ```
+
+For a world the launcher created, the data folder is that world's own.
+`BibitesMultiverseLauncher.exe status --all` names it for every world on this computer.
 
 The list gives you the migration id, the organism, where it was going, and how long its hold
 clock has accrued. The release prints the entry and then **the duplication risk, before it acts**,

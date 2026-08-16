@@ -14,7 +14,7 @@ both need to be told which world they are about:
 
 ```powershell
 cd <the folder you unpacked the release into>
-$data = "$env:LOCALAPPDATA\BibitesMultiverse\data"     # unless you passed -DataRoot
+$data = "$env:LOCALAPPDATA\BibitesMultiverse\data"     # the world the installer made
 
 .\multiverse-sidecar.exe --my-slot   --data-dir $data
 .\multiverse-sidecar.exe --diagnose  --data-dir $data
@@ -27,6 +27,15 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless y
 ./multiverse-sidecar --my-slot   --data-dir "$data"
 ./multiverse-sidecar --diagnose  --data-dir "$data"
 ```
+
+**`--data-dir` names ONE world, and on Windows you may have more than one.** Every world the
+launcher created has its own data folder, so the path above is only the world the installer made —
+run either command against another world's folder and you get a clean report for a world that is
+not the one failing. `BibitesMultiverseLauncher.exe status --all` names every world on this
+computer with its data folder, and `BibitesMultiverseLauncher.exe profile show NAME` shows one of
+them. The `data` directory these commands want is `<that world's data root>\data`. The path above
+is the whole story on Linux, where a second world means a second unpacked kit with its own
+`--data-root`.
 
 Everything below writes them short. **The flags are the same on both platforms**; what differs is
 the file name and where your data directory is. **They read; they do not start anything**, and you
@@ -114,7 +123,9 @@ Useful arguments: `--json` for the machine-readable form to paste into a support
 `--check <name>,<name>` to report only some of them, and `--timeout` to bound each probe on a slow
 link. **On a packaged install it needs nothing else**: your game folder and the support matrix
 come from the `install-record.json` the installer left in your data root, which is also how it
-knows where to look for the mod's log. The specification it is built from is
+knows where to look for the mod's log. **A world the launcher created has no install record of its
+own** — it shares the game folder the installer bound, so point `--data-dir` at that world and, if
+a check asks for the game, give it the same game folder `profile show NAME` prints. The specification it is built from is
 [`../sidecar-diagnose-spec.md`](../sidecar-diagnose-spec.md), which lists every check, its pass
 criterion and the taxonomy entry its failure points at.
 
@@ -144,15 +155,19 @@ broke it, but because they are the only party who can see both ends.
 2. **Four versions**: game, mod, sidecar, and the wire versions each side reported.
 3. **The close code and its reason string**, verbatim. Nothing parses a reason string; it is
    written for a person, and it is where the map explains itself.
-4. **The log lines either side of it.** A packaged install writes exactly two logs, and both are
-   **truncated on every launch**, so copy them before you restart the game:
+4. **The log lines either side of it.** A packaged install writes two logs per world — three on
+   Windows, with the launcher's own — and the game's is **truncated on every launch**, so copy it
+   before you restart the game:
 
    | | Windows | Linux |
    |---|---|---|
-   | The game and the mod | `<game folder>\BepInEx\LogOutput.log` | `<game folder>/BepInEx/LogOutput.log` |
-   | The sidecar | `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log` | `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/logs/sidecar.log`, with `logs/game.out` beside it |
+   | The game and the mod | `<game folder>\BepInEx\LogOutput.log`, rotating to `.1`–`.4` when more than one world runs from that folder | `<game folder>/BepInEx/LogOutput.log` |
+   | The sidecar | `<that world's data root>\logs\sidecar.log` — `%LOCALAPPDATA%\BibitesMultiverse\logs\sidecar.log` for the world the installer made | `${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/logs/sidecar.log`, with `logs/game.out` beside it |
+   | The launcher **(Windows)** | `<that world's data root>\logs\launcher.log`, one line per event | not in this release; the Linux kit ships no launcher |
 
-   Neither ever contains your credential. **On Linux, check the mod log is still a log before you
+   Say which world you are sending, when this computer runs more than one, and send that world's
+   logs rather than the installer's. Menu item **8) Open this world's log folder** opens the right
+   one. None of these ever contains your credential. **On Linux, check the mod log is still a log before you
    send it:**
 
    ```sh
@@ -163,7 +178,7 @@ broke it, but because they are the only party who can see both ends.
    folder and the log has been shredded — see `LOCAL-LOGSHRED`. Say so when you send it; what it
    contains is not what happened.
 5. **Your world's identity and slot.** Both are public. **Say which platform you are on**, too:
-   two install refusals and one local failure exist on one platform only.
+   several install refusals and local failures exist on one platform only.
 
 **Never send a credential or a token.** A message that contains one turns a support question
 into a slot handover.
@@ -189,7 +204,9 @@ multiverse-sidecar --list-inflight
 multiverse-sidecar --release-inflight <migrationId> bounce|drop
 ```
 
-Written out for your platform in [leave.md](leave.md); the flags are the same on both.
+Written out for your platform in [leave.md](leave.md); the flags are the same on both. Point
+`--data-dir` at the data root of the world you are asking about — on Windows,
+`BibitesMultiverseLauncher.exe status --all` names each one.
 
 The release prints the entry, then the duplication risk, and waits for a typed `YES` **before it
 acts**. [leave.md](leave.md) gives both commands in full, and
