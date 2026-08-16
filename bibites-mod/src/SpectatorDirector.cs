@@ -361,6 +361,24 @@ namespace BibitesMultiverse
             }
         }
 
+        /// <summary>
+        /// The world's Global Fertility as it is running right now, in E/u²s. It is not the
+        /// director's setting — <see cref="WorldSettings"/> applies <c>MULTIVERSE_FERTILITY</c> at
+        /// world load — but it belongs on the same receipt as the zoom and the time scale, because
+        /// it is part of the same broadcast profile and an operator checks the profile in one place.
+        /// </summary>
+        private static float ReadFertility()
+        {
+            try
+            {
+                return ScenarioIndependentSettings.Instance.pelletGrowth.val;
+            }
+            catch (Exception)
+            {
+                return 0f;
+            }
+        }
+
         private void WriteStatus(string state, string detail)
         {
             if (statusFile.Length == 0 || Time.realtimeSinceStartup < nextStatus)
@@ -392,6 +410,7 @@ namespace BibitesMultiverse
                     ["fieldOfView"] = showFieldOfView,
                     ["targetTimeScale"] = broadcastTimeScale,
                     ["engineTimeScale"] = TimeController.engineTimeScale.val,
+                    ["fertility"] = ReadFertility(),
                     ["disabledSpawnTemplates"] = SpawnTemplateList(),
                     ["disabledSpawnSettings"] = disabledSpawnSettings,
                     ["selectedAt"] = target != null ? selectedAtUtc.ToString("O", CultureInfo.InvariantCulture) : string.Empty,

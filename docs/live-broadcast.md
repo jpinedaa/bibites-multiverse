@@ -11,7 +11,8 @@ The AWS GPU publisher is currently disabled by a security gate.
 The local Windows fallback remains available.
 No public procedure in this repository deploys the AWS publisher.
 
-This document describes the public architecture and camera behavior.
+This document describes the public architecture, the camera behavior, and the world settings the
+broadcast profile applies.
 It does not describe a current deployment, quota request, resource identifier, address, or price.
 
 ## Target data path
@@ -149,6 +150,39 @@ The standard broadcast profile uses a zoom of `250` and a speed of `6.5`.
 It shows the brain panel for 15 seconds and the biology panel for 30 seconds.
 It also shows the selected Bibite's vision range.
 It disables automatic spawns from the `Basic bibite` template.
+It also sets the world's Global Fertility, which the next section describes.
+
+## World fertility
+
+A broadcast world can run with more food than the game default.
+This is a world setting, not a camera setting, and the spectator director does not set it.
+More food lets more young Bibites live, so the population on camera stays dense.
+It changes the food supply only.
+It does not add, move, feed, heal, kill, or edit a Bibite.
+
+This environment variable controls it:
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `MULTIVERSE_FERTILITY` | empty | Set the world's Global Fertility at each world load. |
+
+The value is the game's `Global Fertility` in E/u²s, for example `3.5E-05`.
+The game default is `1E-05`, which its own scale calls `Normal`.
+The game accepts a positive value up to `5E-04`.
+The mod refuses any other value with a warning and keeps the world's saved value.
+An empty or unset variable writes nothing, which is what every other installation gets.
+
+The mod writes the setting after the world loads.
+Each zone then recomputes its pellet production, so the change is immediate.
+The mod does not restore the previous value when the world unloads.
+A periodic world save records the applied value while the world runs.
+While the variable is set, the saved fertility is overwritten at each start.
+Remove the variable and the world keeps the last value it saved.
+
+The standard broadcast profile uses `3.5E-05`, the value of the shipped `Thick Soup` scenario.
+The spectator status file reports the running value as `fertility`.
+The broadcast world is a participant of the map, so it is richer than its neighbours.
+Only Bibites migrate between worlds, so this setting does not change a neighbour's food.
 
 ## Origin boundary
 

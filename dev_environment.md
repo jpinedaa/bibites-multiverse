@@ -29,7 +29,7 @@ game files, captures, and archive data.
 | Component | Public development baseline |
 |---|---|
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.4` |
+| Plugin | `0.6.5` |
 | Contract A | `contract-a/2.4` |
 | Contract B | `contract-b/4.0` |
 | Genome projection | `bb8-genome/1` |
