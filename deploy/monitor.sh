@@ -12,12 +12,13 @@
 #   monitor.sh --test       send one alert and exit — prove the channel works
 #   monitor.sh --quiet      no alerts, exit code only (1 if anything is not OK)
 #   monitor.sh --only NAME  run one group and nothing else: 'transfer',
-#                           'hosts-pin', 'replay' or 'swap'.
-#                           deploy/test-monitor.sh drives the transfer and
-#                           replay-headroom arithmetic through this against
-#                           fake /proc files, a fake status document and a fake
-#                           clock, on a workstation, without root and without
-#                           touching the network.
+#                           'hosts-pin', 'replay', 'swap' or 'billing'.
+#                           deploy/test-monitor.sh drives the transfer, billing
+#                           and replay-headroom arithmetic through this against
+#                           fake /proc files, a fake status document, a fake
+#                           reconciliation file and a fake clock, on a
+#                           workstation, without root and without touching the
+#                           network.
 #
 # WHAT IT WATCHES, and why each one is on the list rather than a longer one:
 #
@@ -55,6 +56,17 @@
 #                         billed interface and roughly doubles the bill. It is
 #                         one line, nothing else watches it, and the service
 #                         stays perfectly healthy while it costs money.
+#   billing               the INVOICE, against the counter above. Every other
+#                         cost check on this list reads a proxy; this one reads
+#                         what the provider is actually metering, and the two
+#                         have never disagreed by more than 1%. A daily Cost
+#                         Explorer call from an OPERATOR machine leaves
+#                         billing.json in the state directory — this host holds
+#                         no cloud credential and must not start. It is the one
+#                         check whose input arrives from off-box, so its
+#                         ABSENCE is the first thing it reports: a
+#                         reconciliation that quietly stopped leaves the proxy
+#                         unaudited, and nothing else here would notice.
 #   error lines           WP3's done-when. A rate, from the rotated logs.
 #   certificate           days left on the certificate THE LISTENER SERVES, not
 #                         the one on disk — which is also how a deploy hook that
@@ -171,6 +183,16 @@ set -a; . "$ENV_FILE"; set +a
 : "${MV_TRANSFER_IFACE:=}"
 : "${MV_TRANSFER_HOURLY_GB:=9}"
 : "${MV_TRANSFER_HOURLY_RUNS:=3}"
+# THE RECONCILIATION, written into the state directory by an operator machine
+# running deploy/ce-reconcile.sh once a day. Hours before a reading is treated
+# as stale, and how far the metric-over-invoice ratio may sit from 1 before the
+# two instruments are called into question. 36 hours is a daily job plus a
+# missed run plus the provider's own ~14-hour billing lag, so a single failed
+# run is not an alert and two are. The ratio band is 10 percent around a
+# measured, systematic 1.01: wide enough that the known residual never trips it,
+# narrow enough that a counter reading the wrong interface would.
+: "${MV_BILLING_STALE_HOURS:=36}"
+: "${MV_BILLING_RATIO_TOL:=0.10}"
 : "${MV_ALERT_KIND:=ntfy}"
 : "${MV_ALERT_URL:=}"
 : "${MV_ALERT_COMMAND:=}"
@@ -281,7 +303,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -v|--verbose) VERBOSE=1 ;;
     -q|--quiet) QUIET=1 ;;
-    --only) ONLY="${2:?--only needs a check group: transfer, hosts-pin, replay or swap}"; shift ;;
+    --only) ONLY="${2:?--only needs a check group: transfer, hosts-pin, replay, swap or billing}"; shift ;;
     --test)
       if notify OK self-test "This is a test from $(hostname) at $(date -u +%FT%TZ). If you are reading it, the alert channel works."; then
         echo "sent one $MV_ALERT_KIND alert"
@@ -289,7 +311,7 @@ while [ $# -gt 0 ]; do
       fi
       echo "the alert channel is NOT working: kind=$MV_ALERT_KIND url set=$([ -n "$MV_ALERT_URL" ] && echo yes || echo no)" >&2
       exit 1 ;;
-    -h|--help) sed -n '2,109p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,121p' "$0"; exit 0 ;;
     *) echo "monitor: unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -732,6 +754,135 @@ check_hosts_pin() {
   fi
 }
 
+# ------------------------------------------------------------------ the bill
+#
+# THE OTHER HALF OF check_transfer. That check reads this box's own NIC counter,
+# which needs no credential and is therefore the only thing that can watch the
+# allowance from here. It is a PROXY. It tracks the provider's own metric to
+# about 1% and it has never been audited by anything on this host, because
+# auditing it needs a cloud credential and a public-facing box is the wrong
+# place for one.
+#
+# So the audit happens somewhere else and posts its answer here.
+# deploy/ce-reconcile.sh runs once a day on an OPERATOR machine, makes exactly
+# one Cost Explorer call, compares the invoice against the same instance metric
+# the provider bills from, and writes billing.json into this state directory
+# over ssh. Nothing on this host initiates it and nothing on this host holds a
+# key.
+#
+# WHICH MAKES ABSENCE THE FIRST THING TO REPORT. Every other check here fails by
+# reading something bad; this one fails by reading nothing, because the machine
+# that writes it is somebody's laptop and laptops close. A missing or stale
+# reconciliation is not an outage — the NIC counter is still watching the
+# allowance and check_transfer will still alert — so it is a WARN that names
+# what stopped and where it runs.
+#
+# WHAT IS A CRITICAL HERE IS AN OVERAGE THAT HAS ALREADY BEEN BILLED. Not a
+# projection: check_transfer already projects, and a projection from one settled
+# day is noise. A non-zero USE1-DataXfer-Out-Overage-Bytes quantity is the
+# provider stating that this month has passed the allowance and the meter is
+# running, which no reading on this box can see and which no status page will
+# ever show.
+check_billing() {
+  local f="$STATE/billing.json"
+  local tail_where="It runs from an operator machine (deploy/ce-reconcile.sh, one Cost Explorer call a day at \$0.01). The NIC counter is still watching the allowance, so this is an unaudited proxy rather than a blind one."
+  if [ ! -s "$f" ]; then
+    report billing WARN "the daily Cost Explorer reconciliation has never reported: there is no $f. $tail_where"
+    return
+  fi
+
+  local asof month through cein ceout ovgib ovusd rin rout proj allow est days
+  asof="$(jq -r '.asOf // empty' "$f" 2>/dev/null)"
+  month="$(jq -r '.month // "unknown"' "$f" 2>/dev/null)"
+  through="$(jq -r '.ceThroughDate // "none"' "$f" 2>/dev/null)"
+  cein="$(jq -r '.ceInGiB // 0' "$f" 2>/dev/null)"
+  ceout="$(jq -r '.ceOutGiB // 0' "$f" 2>/dev/null)"
+  ovgib="$(jq -r '.ceOverageGiB // 0' "$f" 2>/dev/null)"
+  ovusd="$(jq -r '.ceOverageUsd // 0' "$f" 2>/dev/null)"
+  rin="$(jq -r '.ratioIn // "unknown"' "$f" 2>/dev/null)"
+  rout="$(jq -r '.ratioOut // "unknown"' "$f" 2>/dev/null)"
+  proj="$(jq -r '.projectedMonthGiB // 0' "$f" 2>/dev/null)"
+  allow="$(jq -r '.allowanceGiB // 0' "$f" 2>/dev/null)"
+  est="$(jq -r '.ceEstimated // false' "$f" 2>/dev/null)"
+  days="$(jq -r '.ceSettledDays // 0' "$f" 2>/dev/null)"
+
+  if [ -z "$asof" ]; then
+    report billing WARN "$f exists but carries no readable asOf timestamp, so its age cannot be judged and it must not be trusted. Re-run deploy/ce-reconcile.sh from the operator machine. $tail_where"
+    return
+  fi
+  local at age_h
+  at="$(date -u -d "$asof" +%s 2>/dev/null)"
+  case "${at:-x}" in
+    ''|*[!0-9]*)
+      report billing WARN "$f carries an asOf of '$asof', which is not a time this can read. $tail_where"
+      return ;;
+  esac
+  age_h=$(( ( NOW - at ) / 3600 ))
+  [ "$age_h" -ge 0 ] || age_h=0
+
+  # THE PROVIDER SAYS SO. An overage quantity or an overage cost is the one
+  # reading here that is not an inference, and it outranks staleness: a bill
+  # that was billed stays billed while the reconciliation is late.
+  # The allowance is a whole number of GB in every bundle the provider sells, and
+  # a CRIT that quotes the rule as "- 3072.0" reads like a rounding artefact at
+  # 03:00. Print it as it is written on the invoice.
+  local allow_txt
+  allow_txt="$(awk -v a="$allow" 'BEGIN{ if (a == int(a)) printf "%d", a; else printf "%.1f", a }')"
+
+  local billed=0
+  awk -v g="$ovgib" -v u="$ovusd" 'BEGIN{exit !(g > 0 || u > 0)}' && billed=1
+  if [ "$billed" = 1 ]; then
+    local stale_note=""
+    [ "$age_h" -lt "$MV_BILLING_STALE_HOURS" ] || stale_note=" This reading is ALSO $age_h h old, so the real figure is higher."
+    report billing CRIT "the provider has BILLED $ovgib GB of transfer overage this month, \$$ovusd so far, and the meter is still running. The rule is billed = min(out, max(0, (in + out) - $allow_txt)) at \$0.09/GB: both directions spend the allowance and only outbound beyond it is charged, so an inbound driver is free by the letter of the rule and costs the same at the margin. Cost Explorer through $through: in $cein GB, out $ceout GB. Nothing on this host can see this — the NIC counter cannot tell an allowed byte from a billed one — and no status page will ever show it. deploy/SIZING.md \"Network transfer\" has the levers.$stale_note"
+    return
+  fi
+
+  if [ "$age_h" -ge "$MV_BILLING_STALE_HOURS" ] 2>/dev/null; then
+    report billing WARN "the daily Cost Explorer reconciliation has not reported for $age_h h (limit $MV_BILLING_STALE_HOURS h; last reading $asof). $tail_where"
+    return
+  fi
+
+  # UNKNOWN IS A VALUE. A reconciliation that ran and found no transfer usage at
+  # all is normal for the first hours of a month — the provider's own data lags
+  # about fourteen hours — and is a fault after that. The staleness window is
+  # reused as the boundary rather than inventing a second knob.
+  month_window
+  if [ "$through" = none ]; then
+    if [ $(( NOW - MONTH_START )) -ge $(( MV_BILLING_STALE_HOURS * 3600 )) ]; then
+      report billing WARN "the reconciliation is fresh ($age_h h old) but Cost Explorer has returned NO Lightsail transfer usage for $month, and the month is now more than $MV_BILLING_STALE_HOURS h old. The invoice side of this comparison is unknown, which is not zero. Read deploy/ce-reconcile.sh --print from the operator machine."
+    else
+      report billing OK "reconciled $age_h h ago; Cost Explorer has no transfer usage for $month yet, which is its ~14 h lag and not a fault this early in a month"
+    fi
+    return
+  fi
+
+  # THE TWO INSTRUMENTS, ON THE SAME DAYS. The ratio is metric over invoice over
+  # the days Cost Explorer has settled, never month-to-date against
+  # month-to-date: the lag alone would put that comparison 30% out and an
+  # operator would spend a day on it. A ratio outside the band means one of the
+  # two is measuring something else — the wrong interface, the wrong instance,
+  # or a decimal GB somewhere.
+  local drift dir
+  drift=""
+  dir=""
+  if [ "$rin" != unknown ] && awk -v r="$rin" -v t="$MV_BILLING_RATIO_TOL" 'BEGIN{d=r-1; if (d<0) d=-d; exit !(d > t)}'; then
+    drift="$(awk -v r="$rin" 'BEGIN{d=(r-1)*100; if (d<0) d=-d; printf "%.1f", d}')"
+    dir=inbound
+  elif [ "$rout" != unknown ] && awk -v r="$rout" -v t="$MV_BILLING_RATIO_TOL" 'BEGIN{d=r-1; if (d<0) d=-d; exit !(d > t)}'; then
+    drift="$(awk -v r="$rout" 'BEGIN{d=(r-1)*100; if (d<0) d=-d; printf "%.1f", d}')"
+    dir=outbound
+  fi
+  if [ -n "$drift" ]; then
+    report billing WARN "the NIC counter and the invoice disagree by ${drift}% on $dir over the $days settled day(s) through $through (metric/CE: in ${rin}x, out ${rout}x; the band is ${MV_BILLING_RATIO_TOL} either side of 1). One of them is wrong, and until it is known which, the transfer check above is watching a number nobody has confirmed. Read deploy/ce-reconcile.sh --print. The usual causes are the wrong billed interface (MV_TRANSFER_IFACE), the wrong instance name, or a figure that has become decimal GB somewhere."
+    return
+  fi
+
+  local pct
+  pct="$(awk -v p="$proj" -v a="$allow" 'BEGIN{ if (a <= 0) { print "0"; exit } printf "%.0f", 100 * p / a }')"
+  report billing OK "CE through $through: in $cein GB, out $ceout GB, projected $proj GB (${pct}%), overage \$$ovusd; metric/CE in ${rin}x out ${rout}x over $days settled day(s), reconciled $age_h h ago${est:+ (estimated: $est)}"
+}
+
 # count_new_errors <logfile> <state-key> — error lines since the last pass,
 # surviving the numbered rotation the logger performs (<path>, <path>.1, ...).
 count_new_errors() {
@@ -963,7 +1114,7 @@ check_reboot() {
 
 # ---------------------------------------------------------------- run
 
-# --only runs one group and nothing else. It exists so the transfer and
+# --only runs one group and nothing else. It exists so the transfer, billing and
 # replay-headroom arithmetic can be driven from deploy/test-monitor.sh without a
 # network, without root and without the certificate check dialling the live
 # front door; by hand it is also the fastest way to re-read one check.
@@ -986,6 +1137,7 @@ case "${ONLY:-}" in
     check_transfer
     check_transfer_rate
     check_hosts_pin
+    check_billing
     check_errors
     check_cert
     check_backup
@@ -1000,7 +1152,8 @@ case "${ONLY:-}" in
   hosts-pin) check_hosts_pin ;;
   replay) check_replay_headroom ;;
   swap) check_swap ;;
-  *) echo "monitor: --only accepts 'transfer', 'hosts-pin', 'replay' or 'swap', not '$ONLY'" >&2; exit 2 ;;
+  billing) check_billing ;;
+  *) echo "monitor: --only accepts 'transfer', 'hosts-pin', 'replay', 'swap' or 'billing', not '$ONLY'" >&2; exit 2 ;;
 esac
 
 # The dead man's half. A daily line that says the watcher itself is alive, so

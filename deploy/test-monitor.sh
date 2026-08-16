@@ -6,15 +6,19 @@
 # decoration; both failures are silent and both are arithmetic. The archive's
 # memory gate has the same shape and one worse failure of its own: it once
 # divided by RAM plus swap, so a swap file could clear a critical verdict
-# without changing one byte of retained state. So this drives the real
-# monitor.sh through the read seams it exposes — MV_PROC_NET_DEV,
-# MV_PROC_NET_ROUTE, MV_HOSTS_FILE, MV_PROC_MEMINFO, MV_STATUS_JSON, MV_NOW,
-# MV_STATE, MV_ENV_FILE — against fake counters, a fake /proc/meminfo, a fake
-# status document and a fake clock.
+# without changing one byte of retained state. The billing check has a third
+# shape again: its input is written from OFF-BOX, so its commonest failure is
+# that nothing arrives at all, and a check that reads absence as health is
+# worse than no check. So this drives the real monitor.sh through the read
+# seams it exposes — MV_PROC_NET_DEV, MV_PROC_NET_ROUTE, MV_HOSTS_FILE,
+# MV_PROC_MEMINFO, MV_STATUS_JSON, MV_NOW, MV_STATE, MV_ENV_FILE — against fake
+# counters, a fake /proc/meminfo, a fake status document, a fake reconciliation
+# file and a fake clock.
 #
 # It needs no root, no network, no systemd and no host: --only transfer,
-# --only hosts-pin, --only replay and --only swap skip every check that would
-# dial something. Nothing here touches /var, /etc or a real interface.
+# --only hosts-pin, --only replay, --only swap and --only billing skip every
+# check that would dial something. Nothing here touches /var, /etc or a real
+# interface.
 #
 #   deploy/test-monitor.sh          run every case
 #   deploy/test-monitor.sh -v       also print each case as it passes
@@ -477,6 +481,182 @@ meminfo 1953544 2097152 2097152
 out="$(run "$(( BASE + 900 ))" swap)"
 eq  'and it recovers when the swap is given back'    "$(sev_of "$out" swap)" OK
 eq  'the streak resets with it'                      "$(sget swap.runs)" 0
+
+# ---------------------------------------------------------------- 15. billing
+#
+# THE ONE CHECK WHOSE INPUT COMES FROM OFF-BOX. deploy/ce-reconcile.sh runs on
+# an operator machine and ships billing.json here, so this check has a failure
+# mode none of the others have: nothing arrives, and nothing on this host can
+# tell the difference between "the bill is fine" and "the machine that reads the
+# bill is closed". Absence has to be a reading, and these cases hold it to that.
+#
+# The fixture is the shape deploy/test-ce-reconcile.sh produces: three settled
+# days at 60 GB in and 40 GB out, a metric-over-invoice ratio of 1.01, and a
+# 3,100 GB projection against a 3,072 GB allowance.
+
+billing() { # billing <asOf> [KEY=JSON-VALUE ...] — write a reconciliation file
+  local asof="$1"
+  shift
+  python3 - "$STATE/monitor/billing.json" "$asof" "$@" <<'PY'
+import json, sys
+path, as_of = sys.argv[1], sys.argv[2]
+record = {
+    "asOf": as_of, "month": "2026-08", "ceThroughDate": "2026-08-03",
+    "ceInGiB": 180.0, "ceOutGiB": 120.0, "ceOverageGiB": 0.0, "ceOverageUsd": 0.0,
+    "metricInGiB": 201.8, "metricOutGiB": 131.2,
+    "ratioIn": 1.01, "ratioOut": 1.01,
+    "projectedMonthGiB": 3100.0, "projectedOverageUsd": 2.52, "allowanceGiB": 3072.0,
+    "principal": "root (read-only; owner-accepted 2026-08-16)", "ceCallsThisRun": 1,
+    "ceEstimated": True, "ceSettledDays": 3, "daysInMonth": 31,
+    "projectedOutGiB": 1240.0, "overageUsdPerGiB": 0.09,
+}
+for override in sys.argv[3:]:
+    key, _, value = override.partition("=")
+    record[key] = json.loads(value)
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(record, handle, indent=2)
+PY
+}
+
+iso() { date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ; }
+
+# NOTHING HAS EVER ARRIVED. Not an outage — the NIC counter above is still
+# watching the allowance — so it is a warning that names what stopped and where
+# that thing runs, because the operator reading it is not on this host.
+reset_state
+out="$(run "$BASE" billing)"
+eq  'a reconciliation that has never arrived is a warning, not silence' \
+    "$(sev_of "$out" billing)" WARN
+has 'and it says which script produces it'    "$out" 'deploy/ce-reconcile.sh'
+has 'and that it runs off this host'          "$out" 'operator machine'
+has 'and that the NIC counter still watches the allowance' \
+    "$out" 'still watching the allowance'
+
+# FRESH AND ORDINARY.
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")"
+out="$(run "$BASE" billing)"
+eq  'a fresh reading is OK'                   "$(sev_of "$out" billing)" OK
+has 'and the OK line carries the through-date' "$out" 'CE through 2026-08-03'
+has 'and both invoice quantities'             "$out" 'in 180.0 GB, out 120.0 GB'
+has 'and the projection against the allowance' "$out" 'projected 3100.0 GB (101%)'
+has 'and the ratio that says the two agree'   "$out" 'metric/CE in 1.01x out 1.01x'
+
+# STALE. A daily job plus one missed run plus the provider's own lag is inside
+# the window; two missed runs is not.
+reset_state
+billing "$(iso "$(( BASE - 35 * 3600 ))")"
+out="$(run "$BASE" billing)"
+eq  'thirty-five hours is inside the default window' "$(sev_of "$out" billing)" OK
+
+reset_state
+billing "$(iso "$(( BASE - 37 * 3600 ))")"
+out="$(run "$BASE" billing)"
+eq  'thirty-seven hours is stale'             "$(sev_of "$out" billing)" WARN
+has 'and it reports the age in hours'         "$out" 'has not reported for 37 h'
+has 'and names the limit it crossed'          "$out" 'limit 36 h'
+
+reset_state
+billing "$(iso "$(( BASE - 13 * 3600 ))")"
+out="$(run "$BASE" billing MV_BILLING_STALE_HOURS=12)"
+eq  'the staleness window is a knob'          "$(sev_of "$out" billing)" WARN
+
+# THE PROVIDER HAS BILLED. This is the only reading here that is not an
+# inference, and it outranks staleness: a bill that was billed stays billed
+# while the reconciliation is late.
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ceOverageGiB=41.5 ceOverageUsd=3.735
+out="$(run "$BASE" billing)"
+eq  'a billed overage is critical'            "$(sev_of "$out" billing)" CRIT
+has 'and it states the money'                 "$out" '$3.735'
+has 'and the quantity'                        "$out" 'BILLED 41.5 GB'
+has 'and the vendor rule it came from'        "$out" 'min(out, max(0, (in + out) - 3072))'
+has 'and the rate'                            "$out" '$0.09/GB'
+has 'and that nothing on this host can see it' "$out" 'Nothing on this host can see this'
+
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ceOverageGiB=0 ceOverageUsd=0.4
+out="$(run "$BASE" billing)"
+eq  'an overage cost with no quantity is still critical' \
+    "$(sev_of "$out" billing)" CRIT
+
+reset_state
+billing "$(iso "$(( BASE - 200 * 3600 ))")" ceOverageGiB=41.5 ceOverageUsd=3.735
+out="$(run "$BASE" billing)"
+eq  'a stale file with a billed overage is still critical' \
+    "$(sev_of "$out" billing)" CRIT
+has 'and it says the real figure is higher'   "$out" 'the real figure is higher'
+
+# THE TWO INSTRUMENTS DISAGREE. 1.01 is the measured, systematic residual; a
+# band of 0.10 either side of 1 lets that through and catches a counter that has
+# started reading something else.
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ratioOut=1.34
+out="$(run "$BASE" billing)"
+eq  'an out-of-band outbound ratio warns'     "$(sev_of "$out" billing)" WARN
+has 'and it states the disagreement as a percentage' "$out" 'disagree by 34.0% on outbound'
+has 'and says one of them is wrong'           "$out" 'One of them is wrong'
+has 'and where to read the detail'            "$out" 'deploy/ce-reconcile.sh --print'
+has 'and names the usual cause'               "$out" 'MV_TRANSFER_IFACE'
+
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ratioIn=0.62
+out="$(run "$BASE" billing)"
+eq  'an inbound ratio below the band warns too' "$(sev_of "$out" billing)" WARN
+has 'and the direction is named'              "$out" 'on inbound'
+
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ratioOut=1.09
+out="$(run "$BASE" billing)"
+eq  'nine percent is inside the default band' "$(sev_of "$out" billing)" OK
+
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ratioOut=1.05
+out="$(run "$BASE" billing MV_BILLING_RATIO_TOL=0.02)"
+eq  'the band is a knob'                      "$(sev_of "$out" billing)" WARN
+
+# UNKNOWN IS A VALUE, AND IT IS NOT 1.0. A reconciliation that ran before the
+# provider's ~14 h lag caught up has no invoice side at all.
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ratioIn=null ratioOut=null
+out="$(run "$BASE" billing)"
+eq  'an unknown ratio is not read as agreement, and not as drift' \
+    "$(sev_of "$out" billing)" OK
+has 'and it is printed as unknown rather than as a number' "$out" 'in unknownx'
+
+MONTH_TOP="$(date -u -d '2026-08-01T12:00:00Z' +%s)"
+reset_state
+billing "$(iso "$(( MONTH_TOP - 1800 ))")" ceThroughDate=null ratioIn=null ratioOut=null
+out="$(run "$MONTH_TOP" billing)"
+eq  'no invoice data in the first hours of a month is the lag, not a fault' \
+    "$(sev_of "$out" billing)" OK
+has 'and it says so'                          "$out" '14 h lag'
+
+reset_state
+billing "$(iso "$(( BASE - 3600 ))")" ceThroughDate=null ratioIn=null ratioOut=null
+out="$(run "$BASE" billing)"
+eq  'the same emptiness nine days into the month is a fault' \
+    "$(sev_of "$out" billing)" WARN
+has 'and it says unknown is not zero'         "$out" 'which is not zero'
+
+# A FILE THAT CANNOT BE DATED CANNOT BE TRUSTED, and reading it as fresh would
+# be the worst of the three options.
+reset_state
+printf '{"month": "2026-08"}\n' >"$STATE/monitor/billing.json"
+out="$(run "$BASE" billing)"
+eq  'a reconciliation with no timestamp is a warning' "$(sev_of "$out" billing)" WARN
+has 'and it says the age cannot be judged'    "$out" 'age cannot be judged'
+
+reset_state
+billing 'the day before yesterday'
+out="$(run "$BASE" billing)"
+eq  'an unreadable timestamp is a warning rather than a guess' \
+    "$(sev_of "$out" billing)" WARN
+
+reset_state
+printf 'this is not json\n' >"$STATE/monitor/billing.json"
+out="$(run "$BASE" billing)"
+eq  'a corrupt file is a warning and not a crash' "$(sev_of "$out" billing)" WARN
 
 # ---------------------------------------------------------------- result
 
