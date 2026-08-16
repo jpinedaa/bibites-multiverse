@@ -117,6 +117,9 @@ ACME_ROOT=/var/www/acme
 WWW_ROOT=/var/www
 ANNOUNCE_ROOT="$WWW_ROOT/announcements"
 ARCHIVE_SECRET=/etc/multiverse/archive.secret
+# Where restart-relay.sh drops the peer gate. The front-door template globs this
+# directory, so an empty one is the normal state and a valid configuration.
+GATE_DIR=/etc/multiverse/nginx-gates
 CONTRACT_B_PATH=/contract-b/v4
 ADVERTISE_URL="wss://${MV_DOMAIN}${CONTRACT_B_PATH}"
 [ "$MV_RELAY_PORT" = 443 ] || ADVERTISE_URL="wss://${MV_DOMAIN}:${MV_RELAY_PORT}${CONTRACT_B_PATH}"
@@ -283,6 +286,12 @@ phase_directories() {
   # /etc/multiverse holds the env files and the TLS copy: root writes, the
   # service only reads, and the group is what carries the read.
   run install -d -m 0750 -o root -g "$MV_GROUP" /etc/multiverse "$MV_TLSDIR"
+  # The gate directory is created EMPTY and stays empty. nginx reads it, so it
+  # is world-readable; only root writes into it, and only restart-relay.sh
+  # should. It exists here rather than being created on demand so that an
+  # operator can see the mechanism on a healthy host, and so that the one
+  # command that raises the gate is a file write and not a mkdir as well.
+  run install -d -m 0755 -o root -g root "$GATE_DIR"
   run install -d -m 0755 -o root -g root "$MV_PREFIX" "$BIN"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE" "$RELAY_DATA" "$ARCHIVE_DATA"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE/backup" "$MV_STATE/monitor"
@@ -577,6 +586,7 @@ render_template() {
       -e "s|@@MV_TLSDIR@@|$MV_TLSDIR|g" \
       -e "s|@@ACME_ROOT@@|$ACME_ROOT|g" \
       -e "s|@@WWW_ROOT@@|$WWW_ROOT|g" \
+      -e "s|@@MV_GATEDIR@@|$GATE_DIR|g" \
       "$src" | write_file "$dst" 0644 root:root
   say "rendered $dst"
 }
@@ -652,12 +662,19 @@ phase_nginxfront() {
       "$ANNOUNCE_ROOT/notices.html"
     say "seeded $ANNOUNCE_ROOT/notices.html from the kit"
   fi
+  # The front door globs $GATE_DIR, so the directory must exist before the
+  # render is tested. A glob that matches nothing is valid nginx and a missing
+  # directory globs to nothing too, but an operator reading a healthy host
+  # should be able to see the mechanism, so create it here as well as in the
+  # directories phase — `--only nginxfront` is a real way to reach this file.
+  run install -d -m 0755 -o root -g root "$GATE_DIR"
   render_template "$KIT_DIR/nginx/multiverse-20-status.conf" /etc/nginx/conf.d/multiverse-20-status.conf
   run nginx -t
   run systemctl reload nginx
   say "https://$MV_DOMAIN/ -> $MV_ARCHIVE_HTTP, GET and HEAD only, rate limited"
   say "https://$MV_DOMAIN/announcements/ -> $ANNOUNCE_ROOT, static, no archive needed"
   say "$ADVERTISE_URL -> $MV_RELAY_BACKEND, WebSocket proxy"
+  say "peer gate: $GATE_DIR is empty, so /contract-b/ is open. restart-relay.sh raises it."
 }
 
 # ---------------------------------------------------------------- bootstrap
