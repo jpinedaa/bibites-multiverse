@@ -1,0 +1,35 @@
+# Every binary file this repository is allowed to track.
+#
+# .github/CONTRIBUTING.md forbids committing the managed game assemblies, and
+# nothing else in this project needs a binary in Git either — a release ships
+# through the release page, the hosting kit is built from source. The one
+# deliberate exception is farend/dist/farend-bundle.zip, which is committed
+# because a clone is the far end's ONLY distribution channel (the reasoning is
+# in release/.gitignore).
+#
+# The `consistency` job of .github/workflows/checks.yml enumerates the tracked
+# files that hold no readable line — git's own idea of a binary — and diffs the
+# result against this list. Anything not listed here fails the build. A `.dll`
+# under any name is caught, which is the point.
+#
+# Adding a file: put its path here in the same pull request, and say in the
+# description why the repository is that file's only distribution channel.
+# Blank lines and lines starting with # are ignored; order does not matter.
+
+docs/assets/gameplay-bibite-closeup.webp
+docs/assets/gameplay-ecosystem.webp
+docs/assets/gameplay-neural-network.webp
+docs/assets/live-broadcast-view.webp
+docs/assets/live-multiverse-map.webp
+docs/assets/live-species-view.webp
+docs/assets/multiverse-hero.jpg
+e2e/baselines/20260804T013927Z/M3-Slot1.zip
+e2e/baselines/20260804T013927Z/M3-Slot3.zip
+e2e/baselines/20260805T230730Z/M3-Slot1.zip
+e2e/baselines/20260805T230730Z/M3-Slot3.zip
+e2e/baselines/20260805T230730Z/archive-list.txt.gz
+farend/dist/farend-bundle.zip
+go/internal/archive/assets/social-card-live.png
+go/internal/archive/assets/social-card-watch.png
+go/internal/archive/assets/social-card.png
+release/kit/bibites-multiverse.ico

@@ -59,6 +59,31 @@ folder. The installer checks the game build against `support-matrix.json` and st
 entry. Then it installs BepInEx, the plugin, the credential, the start and stop scripts, and
 `profiles\default.json` — the world profile the launcher reads.
 
+**Installing again over the same data root keeps that world.** An upgrade or a repair is not a new
+world: step 6 reads the identity already in `%LOCALAPPDATA%\BibitesMultiverse` — from
+`install-record.json`, from a pending enrollment record carrying that same secret, from
+`profiles\*.json`, from the previous `Start-Multiverse.ps1`, or from `data\peer-id` and
+`data\relay-url` — says *"reusing the map identity already in …"*, and leaves `peer-secret.txt`
+untouched. It asks the map for nothing and spends no second place on it, and an adopted world keeps
+its own relay whether that is the public map or a private one.
+
+**A secret is replaced only when something vouches for the world it belongs to** — this data
+root's own install record, or a pending record carrying that very secret — and the replaced one is
+kept beside the new file as `peer-secret.txt.<utc>.old`. A claim that only an ordinary text file
+makes is enough to keep a world and never enough to destroy one. Everything else stops with
+`INS-ENROLL` and changes nothing: a `peer-secret.txt` no file on this machine can name, a file that
+is not a credential, a `-RelayUrl` that would point an adopted world at another map. Every refusal
+prints the files to look in and the ways on.
+
+**A different identity over this world takes `-ReplaceWorldIdentity`.** A slot handover mints
+exactly that — a new identity with a fresh credential, rebound to your old slot and position, which
+is the map's only credential recovery — and a borrowed or mistyped join string looks the same from
+here. The switch says which it is, and the old name is kept in `data\peer-id.previous`. **If the
+secret is gone and the name is not** — what an uninstall from a release before this one left — setup
+stops and prints the world's identity: ask its operator for that handover, or use the switch alone
+to take a new identity with no place, which is a second world on the map and leaves the old one dark
+until its operator releases it.
+
 It imports nothing into any trust store. `-CaFile` exists for a private or LAN map whose relay
 signs its own certificate, and only then.
 
@@ -191,14 +216,17 @@ For a setup installation, open **Windows Settings → Apps → Installed apps** 
 
 It reads the record the installer wrote and removes **only** what is named in it, hash-checked,
 printing a line per path for what it removed and what it kept. Your worlds and their backups are
-never touched. Your journal — the organisms this machine is holding for other worlds — is kept
-unless you pass `-RemoveWorldData`. In a complete install, unchanged game-payload files are also
-removed; a changed or user-added file is reported and kept.
+never touched. Your journal — the organisms this machine is holding for other worlds — **and your
+world's identity**, `peer-secret.txt` beside it, are kept unless you pass `-RemoveWorldData`. That
+is why installing again later comes back as the same world on the same slot, and why
+`-RemoveWorldData` says on your screen that it is the end of that world on the map. In a complete
+install, unchanged game-payload files are also removed; a changed or user-added file is reported
+and kept.
 
 **It covers every world you added.** It refuses while any of them is still running — stop them with
-`BibitesMultiverseLauncher.exe stop --all` — and then removes each world's credential, pending
-enrollment record and process-id files, the profile files, and the `profiles\` directory. Each
-extra world's journal and logs are kept on the same rule.
+`BibitesMultiverseLauncher.exe stop --all` — and then removes each world's process-id files, the
+profile files, and the `profiles\` directory. Each extra world's journal, logs and credential are
+kept on the same rule.
 
 **Only a game running from the folder in question blocks it.** Another copy of the game elsewhere
 does not, and neither does one running under an account this one cannot inspect: where Windows will

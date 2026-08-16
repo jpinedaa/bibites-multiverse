@@ -6,3 +6,9 @@ dist/*
 # Exception: the far-end bundle ships through the repo, so the second computer
 # clones it instead of copying it over USB.
 !dist/farend-bundle.zip
+
+# Exception: the bundle's source record, written beside the zip by
+# make-farend-bundle.sh and committed in the same commit as the zip it describes.
+# Tracked text is what lets a check prove the committed bundle is not stale
+# without unzipping it — see the grammar at the top of make-farend-bundle.sh.
+!dist/BUNDLE-SOURCE.txt

@@ -78,10 +78,23 @@ MAKENSIS="${MAKENSIS:-$(command -v makensis || true)}"
 # release is not required to hold two copies of the game.
 LINUX_GAME_DIR="${LINUX_GAME_DIR:-/mnt/wsl/data/scratch/m5-linux-rehearsal/game}"
 
-export GOROOT="${GOROOT:-$HOME/go}"
-export PATH="$GOROOT/bin:$PATH"
-export DOTNET_ROOT="$HOME/.dotnet"
-export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+# THE TOOLCHAIN, WITHOUT CLOBBERING ONE THAT IS ALREADY RIGHT. This box keeps Go
+# in $HOME/go and the .NET SDK in $HOME/.dotnet; a release runner supplies both
+# through its own environment instead. Take the local convention only when it is
+# real, and never overwrite a value somebody else set. An exported GOROOT that
+# points at a directory which no longer exists does not merely fail to help: the
+# toolchain obeys it, so it turns a perfectly good `go` on PATH into
+# "cannot find GOROOT directory". The same reasoning applies to DOTNET_ROOT,
+# which a dedicated runner user sets to a path outside its own home.
+if [ -n "${GOROOT:-}" ] && [ ! -x "$GOROOT/bin/go" ]; then
+  unset GOROOT
+fi
+if [ -z "${GOROOT:-}" ] && [ -x "$HOME/go/bin/go" ]; then
+  export GOROOT="$HOME/go"
+fi
+[ -z "${GOROOT:-}" ] || export PATH="$GOROOT/bin:$PATH"
+export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
+export PATH="$DOTNET_ROOT:$DOTNET_ROOT/tools:$PATH"
 export TZ=UTC
 
 ALLOW_DIRTY=0
@@ -114,6 +127,23 @@ die()  { printf '\n!! %s\n' "$*" >&2; exit 1; }
 sha() { sha256sum "$1" | cut -d' ' -f1; }
 SHA_UPPER() { sha "$1" | tr 'a-f' 'A-F'; }
 
+# BOTH COMPILERS, PROVED NOW RATHER THAN DISCOVERED LATER. Go is needed within
+# seconds; dotnet not until gate 3, three minutes and two cross-builds in. A
+# runner user whose DOTNET_ROOT is wrong should learn that here, not there.
+command -v go >/dev/null 2>&1 \
+  || die "no go on PATH. Set GOROOT to a Go installation, or put go on PATH."
+go version >/dev/null 2>&1 \
+  || die "go is on PATH but will not run — GOROOT is ${GOROOT:-unset}: $(go version 2>&1 | head -n 1)"
+command -v dotnet >/dev/null 2>&1 \
+  || die "no dotnet on PATH. The plugin gate needs the .NET SDK; DOTNET_ROOT is $DOTNET_ROOT."
+
+# ONE PARSE OF THE PLUGIN'S VERSION, shared with release/check-drift.sh so the
+# gate and the check cannot disagree about what the declaration says.
+MOD_VERSION_LIB="$RELDIR/lib/mod-version.sh"
+[ -f "$MOD_VERSION_LIB" ] || die "missing $MOD_VERSION_LIB"
+# shellcheck source=lib/mod-version.sh
+. "$MOD_VERSION_LIB"
+
 # ------------------------------------------------------------------ the tree
 
 step "the tree this release is built from"
@@ -140,6 +170,31 @@ if [ "$SIDECAR_BUILD_REPO" != "$REPO" ]; then
   [ -z "$(git -C "$SIDECAR_BUILD_REPO" status --porcelain)" ] \
     || die "the sidecar build checkout is dirty: $SIDECAR_BUILD_REPO"
   note "the clean sidecar build checkout matches this package revision"
+fi
+
+# THE VERSION SURFACE, before any of it is baked into an artifact. RELEASE above
+# is the source of truth for a release string that also appears in the matrix,
+# the launcher, the homepage default, both kits and the deploy defaults.
+# release/bump-version.sh --check asserts they all still agree and lists the ones
+# that do not. A release built from a surface that disagrees with itself ships a
+# player an installer that names one version and downloads another, and no gate
+# further down would notice. THE GATE IS NOT OPTIONAL and it is not skipped when
+# the script looks unusable: a missing file or a lost mode bit is a broken
+# checkout, and a gate that vanishes without a word is worse than no gate.
+step "the version surface"
+BUMP_VERSION="$RELDIR/bump-version.sh"
+[ -f "$BUMP_VERSION" ] \
+  || die "missing $BUMP_VERSION. It is where the release string is checked against every
+   place that repeats it, and a release must not be built without that check."
+[ -x "$BUMP_VERSION" ] \
+  || die "$BUMP_VERSION is not executable, so the version-surface gate could only be
+   skipped in silence. Restore the mode bit: chmod +x $BUMP_VERSION"
+if BUMP_CHECK="$("$BUMP_VERSION" --check 2>&1)"; then
+  printf '%s\n' "$BUMP_CHECK" | sed 's/^/    /'
+else
+  printf '%s\n' "$BUMP_CHECK" | sed 's/^/    /' >&2
+  die "the release version is not consistent across the tree. Fix the places listed above —
+   release/bump-version.sh $RELEASE rewrites them — and build again."
 fi
 
 # ------------------------------------------------------------------ the matrix
@@ -210,6 +265,33 @@ LINUX_FLAVOUR="$(matrix_row Linux bepInExFlavour)"
 note "release $RELEASE — game $GAME_VERSION, mod $MOD_VERSION, sidecar $SIDECAR_VERSION, BepInEx $BEPINEX_VERSION"
 note "two platforms: Windows ($WIN_FLAVOUR) and Linux ($LINUX_FLAVOUR)"
 
+# ------------------------------------------------------------------ the mod version
+
+step "the mod version this release claims"
+# THE PLUGIN'S OWN VERSION AGAINST THE MATRIX, on plain text, before anything is
+# compiled. The matrix's `mod` field is what both installers print and what the
+# published table promises; MultiversePlugin.cs is what BepInEx registers at
+# runtime. Nothing else in this build compares the two, so a release could ship
+# them disagreeing and say nothing — the plugin identity gate further down
+# compares BYTES against the bundle and is blind to what those bytes call
+# themselves. This gate sits here, seconds into the run, because it needs no
+# game, no .NET and no Go.
+PLUGIN_SOURCE="$REPO/bibites-mod/src/MultiversePlugin.cs"
+PLUGIN_VERSION="$(mod_version "$PLUGIN_SOURCE")" \
+  || die "the plugin's version cannot be read; see above. release/lib/mod-version.sh holds
+   the one parse this gate, release/check-drift.sh and the bundle record all use."
+# The two rows were proved to name the same mod above, so $MOD_VERSION is both.
+if [ "$PLUGIN_VERSION" != "$MOD_VERSION" ]; then
+  echo "!! bibites-mod/src/MultiversePlugin.cs says $PLUGIN_VERSION" >&2
+  echo "!! docs/support-matrix.md \"mod\" says $MOD_VERSION on both rows" >&2
+  die "the mod version in the source and the mod version in the matrix disagree, so this
+   release would print one number and load another. Decide which is right, then make the
+   whole set agree: the Version constant, the \"mod\" field on BOTH matrix rows, the
+   Plugin row of dev_environment.md, and — if the plugin itself changed — a rebuilt
+   farend/dist/farend-bundle.zip and a refreshed local game plugin (bibites-mod/deploy.sh)."
+fi
+note "the plugin source and both matrix rows say mod $PLUGIN_VERSION"
+
 # ------------------------------------------------------------------ the game pin
 
 step "the game build this release is compiled against"
@@ -228,14 +310,19 @@ note "libs/BibitesAssembly.dll matches the matrix: game $GAME_VERSION on Windows
 # is compiled against the WINDOWS reference assembly and runs on both, which is
 # the finding the Linux row rests on — so the one thing worth proving here is
 # that the hash in the row is the hash of a file somebody actually has.
+# ONLY THE LAST PATH COMPONENT IS PRINTED on the success path. This build's log
+# is uploaded as an artifact of a PUBLIC repository, and where the owner keeps
+# an unpacked copy of the game is nobody else's business. The die still names
+# the file: a failing build is being read by the owner, and the whole point of
+# that message is to say which file did not match.
 LINUX_ASSEMBLY="$LINUX_GAME_DIR/The Bibites_Data/Managed/BibitesAssembly.dll"
 if [ -f "$LINUX_ASSEMBLY" ]; then
   GOT_LINUX_SHA="$(SHA_UPPER "$LINUX_ASSEMBLY")"
   [ "$GOT_LINUX_SHA" = "$LINUX_GAME_SHA" ] \
     || die "the Linux row pins $LINUX_GAME_SHA but $LINUX_ASSEMBLY is $GOT_LINUX_SHA"
-  note "the Linux game at $LINUX_GAME_DIR matches the matrix's Linux row"
+  note "the Linux game at $(basename "$LINUX_GAME_DIR") matches the matrix's Linux row"
 else
-  note "no unpacked Linux game at $LINUX_GAME_DIR; the Linux row's hash stands on its record"
+  note "no unpacked Linux game at $(basename "$LINUX_GAME_DIR"); the Linux row's hash stands on its record"
 fi
 
 # ------------------------------------------------------------------ the tracked Windows artifacts
@@ -250,6 +337,52 @@ REF_SIDECAR="$REF/farend-bundle/multiverse-sidecar.exe"
 [ -f "$REF_PLUGIN" ] && [ -f "$REF_SIDECAR" ] || die "$BUNDLE does not hold both artifacts"
 note "plugin  $(sha "$REF_PLUGIN")"
 note "sidecar $(sha "$REF_SIDECAR")"
+
+# THE BUNDLE'S OWN PROVENANCE FILE, when it has one. farend/make-farend-bundle.sh
+# writes farend/dist/BUNDLE-SOURCE.txt beside the zip, recording the commit and
+# the digests of the two artifacts it packed. It is tracked, so a stale bundle
+# shows up in a plain diff — but only if the file and the zip actually describe
+# the same build. Assert that here, on the copy just unpacked. Bundles built
+# before the file existed simply do not have it; the VCS-stamp check below and
+# release/check-drift.sh stand on their own for those.
+BUNDLE_SOURCE="$REPO/farend/dist/BUNDLE-SOURCE.txt"
+if [ -f "$BUNDLE_SOURCE" ]; then
+  bundle_source_field() { # $1 field name
+    sed -n "s/^$1[[:space:]]\{1,\}//p" "$BUNDLE_SOURCE" | head -n 1
+  }
+  BS_FORMAT="$(bundle_source_field format)"
+  [ "$BS_FORMAT" = "bibites-multiverse/farend-bundle-source/1" ] \
+    || die "$BUNDLE_SOURCE declares format '${BS_FORMAT:-none}', want bibites-multiverse/farend-bundle-source/1"
+  # The record against the TREE as well as against the zip. Without this a record
+  # that is internally consistent with its own zip but stale relative to
+  # bibites-mod/ passes here and is caught only by a separate check-drift.sh run
+  # — which a hand build does not make. One tree hash, no history walk.
+  BS_MOD_TREE="$(bundle_source_field bibites-mod-tree)"
+  WANT_MOD_TREE="$(git -C "$REPO" rev-parse "HEAD:bibites-mod")" \
+    || die "cannot resolve HEAD:bibites-mod in $REPO"
+  [ -n "$BS_MOD_TREE" ] || die "$BUNDLE_SOURCE carries no bibites-mod-tree field"
+  [ "$BS_MOD_TREE" = "$WANT_MOD_TREE" ] \
+    || die "$BUNDLE_SOURCE records bibites-mod-tree $BS_MOD_TREE; HEAD:bibites-mod is
+   $WANT_MOD_TREE. The bundle is stale: bibites-mod/ has moved since it was built. Re-run
+   farend/make-farend-bundle.sh, commit the zip and the record together, refresh this
+   machine's Steam plugin (bibites-mod/deploy.sh), and update the \"mod\" field on both rows
+   of docs/support-matrix.md."
+  BS_PLUGIN_SHA="$(bundle_source_field plugin-sha256)"
+  BS_SIDECAR_SHA="$(bundle_source_field sidecar-sha256)"
+  [ -n "$BS_PLUGIN_SHA" ] && [ -n "$BS_SIDECAR_SHA" ] \
+    || die "$BUNDLE_SOURCE carries no plugin-sha256/sidecar-sha256 pair"
+  [ "$BS_PLUGIN_SHA" = "$(sha "$REF_PLUGIN")" ] \
+    || die "$BUNDLE_SOURCE records plugin $BS_PLUGIN_SHA but the zip holds $(sha "$REF_PLUGIN").
+   The provenance file and the bundle are from different builds. Re-run
+   farend/make-farend-bundle.sh and commit the zip and the file together."
+  [ "$BS_SIDECAR_SHA" = "$(sha "$REF_SIDECAR")" ] \
+    || die "$BUNDLE_SOURCE records sidecar $BS_SIDECAR_SHA but the zip holds $(sha "$REF_SIDECAR").
+   The provenance file and the bundle are from different builds. Re-run
+   farend/make-farend-bundle.sh and commit the zip and the file together."
+  note "BUNDLE-SOURCE.txt agrees with the zip; the bundle was built at $(bundle_source_field commit)"
+else
+  note "no farend/dist/BUNDLE-SOURCE.txt; this bundle predates it, so the VCS stamp stands alone"
+fi
 
 # ------------------------------------------------------------------ the sidecar
 
@@ -266,81 +399,15 @@ note "the bundled sidecar was built from $REF_REV"
 git -C "$REPO" cat-file -e "$REF_REV^{commit}" 2>/dev/null \
   || die "commit $REF_REV is not in this clone, so the bundled build cannot be compared to it"
 
-sidecar_manifest() { # $1 checkout root, $2 manifest path, $3 go-list JSON path
-  local checkout="$1" manifest="$2" packages_json="$3"
-  (
-    cd "$checkout/go"
-    env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-      go list -buildvcs=false -deps -json ./cmd/sidecar
-  ) > "$packages_json"
-  python3 - "$checkout/go" "$packages_json" "$manifest" <<'PY'
-import hashlib
-import json
-from pathlib import Path
-import sys
-
-module_root = Path(sys.argv[1]).resolve()
-packages_text = Path(sys.argv[2]).read_text(encoding="utf-8")
-manifest_path = Path(sys.argv[3])
-decoder = json.JSONDecoder()
-packages = []
-offset = 0
-while offset < len(packages_text):
-    while offset < len(packages_text) and packages_text[offset].isspace():
-        offset += 1
-    if offset == len(packages_text):
-        break
-    package, offset = decoder.raw_decode(packages_text, offset)
-    packages.append(package)
-
-source_fields = (
-    "GoFiles", "CgoFiles", "CFiles", "CXXFiles", "MFiles", "HFiles",
-    "FFiles", "SFiles", "SwigFiles", "SwigCXXFiles", "SysoFiles", "EmbedFiles",
-)
-files = {}
-modules = set()
-main_module = None
-
-def module_identity(module):
-    replacement = module.get("Replace") or {}
-    return (
-        module.get("Path", ""), module.get("Version", ""), module.get("Sum", ""),
-        module.get("GoVersion", ""), replacement.get("Path", ""),
-        replacement.get("Version", ""), replacement.get("Sum", ""),
-        replacement.get("GoVersion", ""),
-    )
-
-for package in packages:
-    module = package.get("Module")
-    if not module:
-        continue
-    if not module.get("Main"):
-        modules.add(module_identity(module))
-        continue
-    identity = (module.get("Path", ""), module.get("GoVersion", ""))
-    if main_module is None:
-        main_module = identity
-    elif main_module != identity:
-        raise SystemExit("cmd/sidecar resolved more than one main-module identity")
-    package_dir = Path(package["Dir"]).resolve()
-    for field in source_fields:
-        for name in package.get(field) or ():
-            path = (package_dir / name).resolve()
-            try:
-                relative = path.relative_to(module_root)
-            except ValueError:
-                raise SystemExit(f"main-module input is outside {module_root}: {path}")
-            files[relative.as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-
-if main_module is None:
-    raise SystemExit("cmd/sidecar did not resolve to the main module")
-
-lines = ["main-module\t" + "\t".join(main_module)]
-lines.extend("module\t" + "\t".join(identity) for identity in sorted(modules))
-lines.extend(f"file\tgo/{path}\t{digest}" for path, digest in sorted(files.items()))
-manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-PY
-}
+# THE MANIFEST FUNCTION LIVES IN release/lib/sidecar-manifest.sh. It is sourced
+# rather than written twice, because release/check-drift.sh runs this same gate
+# without any of the game bytes the rest of this script needs. One copy, so the
+# check that runs on every pull request cannot drift away from the one that
+# runs here.
+SIDECAR_MANIFEST_LIB="$RELDIR/lib/sidecar-manifest.sh"
+[ -f "$SIDECAR_MANIFEST_LIB" ] || die "missing $SIDECAR_MANIFEST_LIB"
+# shellcheck source=lib/sidecar-manifest.sh
+. "$SIDECAR_MANIFEST_LIB"
 
 REF_SOURCE="$BUILD/sidecar-ref-source"
 REF_ARCHIVE="$BUILD/sidecar-ref-source.tar"
@@ -419,7 +486,7 @@ LAUNCHER_REV="$(go version -m "$BUILD/$LAUNCHER_NAME" \
   || die "the launcher VCS stamp is '${LAUNCHER_REV:-missing}', want $SOURCE_REV"
 file "$BUILD/$LAUNCHER_NAME" | grep -q 'PE32+' \
   || die "$LAUNCHER_NAME is not a Windows executable"
-# Linux is a compile gate for 0.2.5; the Linux kit does not ship it yet.
+# Linux is a compile gate only; the Linux kit does not ship the launcher yet.
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/bibites-multiverse-launcher" ./cmd/multiverse-launcher )
 note "$(sha "$BUILD/$LAUNCHER_NAME")"

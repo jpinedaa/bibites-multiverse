@@ -1,0 +1,286 @@
+# Every check that can be proved without the proprietary game bytes.
+#
+# This file runs on GitHub-hosted runners only, and every `runs-on:` below must
+# stay that way. The repository is public, so a fork's pull request can run
+# this workflow; a runner label belonging to the release machine would hand
+# that fork arbitrary code execution on it. For the same reason the trigger is
+# `pull_request` and never `pull_request_target` — a fork gets a read-only
+# token and no secrets. The audit is one command — every line it prints
+# must name a GitHub-hosted image:
+#
+#     grep -E '^ *runs-on:' .github/workflows/checks.yml
+#
+# The release build, which does need the release machine, is release.yml.
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    # `go test ./...` measured 1 m 46 s locally, of which internal/sidecar is
+    # 94 s. A shared runner is slower, so the budget is generous but finite.
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          # go/go.mod carries the toolchain this project builds with.
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      - name: go vet (host)
+        run: go vet ./...
+
+      # The launcher is a Windows program written on Linux, so the only place
+      # its Windows build is checked is here and in make-release.sh:411-413.
+      - name: go vet (windows)
+        env:
+          GOOS: windows
+        run: go vet ./cmd/multiverse-launcher ./internal/launcher
+
+      - name: go test
+        timeout-minutes: 20
+        run: go test ./...
+
+      # The same cross-builds the release and the hosting kit perform, so a
+      # platform-specific compile error is a pull-request failure rather than a
+      # release-day one. Release: sidecar and launcher for Windows and Linux
+      # (make-release.sh). Hosting kit: relay, archive and ringstat for
+      # linux/amd64 and linux/arm64 (deploy/ship.sh:57-64).
+      - name: cross-build the shipped binaries
+        run: |
+          set -euo pipefail
+          out="$(mktemp -d)"
+          for os in windows linux; do
+            for cmd in sidecar multiverse-launcher; do
+              CGO_ENABLED=0 GOOS="$os" GOARCH=amd64 \
+                go build -trimpath -o "$out/$cmd-$os-amd64" "./cmd/$cmd"
+              echo "    ok  $cmd $os/amd64"
+            done
+          done
+          for arch in amd64 arm64; do
+            for cmd in relay archive ringstat; do
+              CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
+                go build -trimpath -o "$out/$cmd-linux-$arch" "./cmd/$cmd"
+              echo "    ok  $cmd linux/$arch"
+            done
+          done
+          file "$out/sidecar-windows-amd64" | grep -q 'PE32+' \
+            || { echo "!! the Windows sidecar is not a PE32+ executable" >&2; exit 1; }
+          file "$out/relay-linux-amd64" | grep -q 'statically linked' \
+            || { echo "!! the relay did not build statically; CGO_ENABLED=0 is the requirement" >&2; exit 1; }
+
+  scripts:
+    name: scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Every tracked shell script, not a hand-kept list, so a new script is
+      # covered the day it is added.
+      - name: bash -n over every tracked shell script
+        run: |
+          set -euo pipefail
+          fails=0
+          count=0
+          while IFS= read -r f; do
+            count=$((count + 1))
+            if ! bash -n "$f"; then
+              echo "!! $f does not parse" >&2
+              fails=$((fails + 1))
+            fi
+          done < <(git ls-files '*.sh')
+          [ "$count" -gt 0 ] || { echo "!! no shell scripts found" >&2; exit 1; }
+          [ "$fails" -eq 0 ] || exit 1
+          echo "    $count shell scripts parse"
+
+      - name: systemd units
+        run: deploy/test-units.sh
+
+      # test-front-door.sh self-skips `nginx -t` when nginx or openssl is
+      # absent, so installing them is what turns this from a text grep into a
+      # real configuration check.
+      - name: install nginx for the front-door check
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nginx-light openssl
+          # nginx opens its compiled-in default error log BEFORE it reads -c,
+          # and creates its temp paths under /var/lib/nginx. As an ordinary
+          # user `nginx -t` would emit permission alerts there and could exit
+          # non-zero on a configuration that is perfectly good.
+          sudo install -d -m 1777 /var/log/nginx /var/lib/nginx
+          # nginx lives in /usr/sbin, which is on PATH on GitHub's images but
+          # need not be. Say so explicitly rather than relying on it.
+          echo /usr/sbin >> "$GITHUB_PATH"
+          sudo nginx -v
+
+      # The whole point of installing nginx is the `nginx -t` leg, and the
+      # script reports which leg it took. Require the real one: a silent fall
+      # back to the render-only path would mean this job proves less than it
+      # claims, which is the failure mode the release checks exist to refuse.
+      - name: front door
+        run: |
+          set -euo pipefail
+          out="$(deploy/test-front-door.sh)"
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -Fq 'front-door render and nginx syntax: PASS' || {
+            echo "!! test-front-door.sh skipped the nginx syntax check." >&2
+            echo "   nginx or openssl is missing, so this job checked the rendered text" >&2
+            echo "   only. Fix the install step; do not accept the skip." >&2
+            exit 1
+          }
+
+  installer:
+    name: installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # E6: apt's NSIS is a different build from the one the release machine
+      # uses, so it is deliberately used only for this stub compile. The
+      # release build keeps its own MAKENSIS, which is what the reproducible
+      # checksum claim in release/README.md rests on.
+      - name: install NSIS
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nsis nsis-common
+          makensis -VERSION
+
+      - name: compile the Windows installer against a stub payload
+        run: release/check-nsis.sh
+
+  powershell:
+    name: powershell
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # BLOCKING. This project's PowerShell is written on a Linux box with no
+      # PowerShell on it, so before this job existed a syntax error in an
+      # installer was found by the first player who ran it. The parser only
+      # reads the files; nothing is executed.
+      - name: parse every PowerShell file
+        shell: pwsh
+        run: |
+          $paths = @(
+            'release/kit/*.ps1',
+            'farend/setup-farend.ps1',
+            'release/test-install-uninstall.ps1',
+            'deploy/local-broadcast/*.ps1'
+          )
+          ./release/pscheck.ps1 @paths
+
+      # ADVISORY (E11). Style findings are worth seeing, but a first run must
+      # not turn into an open-ended cleanup. Only parse errors block, above.
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          Import-Module PSScriptAnalyzer
+          $files = @(git ls-files '*.ps1')
+          $findings = @($files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ })
+          if ($findings.Count -gt 0) {
+            $findings |
+              Format-Table -AutoSize RuleName, Severity, ScriptName, Line, Message |
+              Out-String -Width 200 |
+              Write-Host
+            Write-Host "$($findings.Count) advisory finding(s)"
+          } else {
+            Write-Host 'no findings'
+          }
+
+  consistency:
+    name: consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # fetch-depth: 0 is MANDATORY (E5): check-drift.sh resolves the far-end
+      # bundle's source commit out of the bundled sidecar's VCS stamp and diffs
+      # the working tree against it. A shallow clone cannot see that commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+
+      # One release string, in 48 places across 21 files. --check asserts they
+      # all agree, and fails when a version literal turns up in a file that is
+      # not on the allowlist — so the surface cannot silently grow.
+      - name: the version surface agrees
+        run: release/bump-version.sh --check
+
+      # Is farend/dist/farend-bundle.zip still the bundle this tree builds?
+      # This is the source-level equivalent of make-release.sh's gate 3, and it
+      # needs no game bytes and no .NET.
+      - name: the far-end bundle is not stale
+        run: release/check-drift.sh
+
+      # release/tracked-binaries.txt is the list, and it is a tracked plain
+      # file rather than part of this workflow so that a documentation pull
+      # request adding one image is an ordinary review, not a change to CI.
+      - name: no unexpected tracked binary
+        run: |
+          set -euo pipefail
+          list=release/tracked-binaries.txt
+          [ -f "$list" ] || { echo "!! missing $list" >&2; exit 1; }
+          allowed="$(mktemp)"
+          found="$(mktemp)"
+          grep -Ev '^[[:space:]]*(#|$)' "$list" | LC_ALL=C sort > "$allowed"
+          [ -s "$allowed" ] || { echo "!! $list lists no path" >&2; exit 1; }
+          # A tracked, non-empty file with no readable line. This is not the
+          # rule git itself applies (git looks for a NUL byte in the first
+          # 8000), but it is stricter in the direction that matters and it
+          # catches a .dll under any name.
+          while IFS= read -r -d '' f; do
+            [ -f "$f" ] || continue
+            [ -s "$f" ] || continue
+            grep -Iq . -- "$f" 2>/dev/null || printf '%s\n' "$f"
+          done < <(git ls-files -z) | LC_ALL=C sort > "$found"
+          if ! diff -u --label "$list" --label 'tracked binaries' "$allowed" "$found"; then
+            echo >&2
+            echo "!! the set of tracked binary files no longer matches $list." >&2
+            echo "   A '+' line is a binary this pull request adds. Game assemblies," >&2
+            echo "   build output and .dll files must never be committed" >&2
+            echo "   (.github/CONTRIBUTING.md). If the new file genuinely belongs in" >&2
+            echo "   the repository, add its path to $list in the same pull request," >&2
+            echo "   and say in the description why the repository is that file's only" >&2
+            echo "   distribution channel." >&2
+            exit 1
+          fi
+          echo "    $(wc -l < "$found") tracked binary files, all listed in $list"

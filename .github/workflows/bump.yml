@@ -1,0 +1,122 @@
+# Rewrite the release string everywhere it appears, on a branch.
+#
+# The release version lives in about fifty places across the repository.
+# release/bump-version.sh rewrites them from an explicit allowlist and then
+# proves the result agrees with itself. This workflow is the button for that:
+# it pushes a branch, and stops.
+#
+# It deliberately does NOT open the pull request. A pull request created with
+# GITHUB_TOKEN does not trigger other workflows, so checks.yml would never run
+# on it — and the only way around that is a long-lived personal access token,
+# which nothing else in this design needs. The owner clicks "Compare & pull
+# request" on the link this job prints, and checks.yml then runs normally.
+name: bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'the new release, in the form MAJOR.MINOR.PATCH'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: github.repository == 'jpinedaa/bibites-multiverse'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REPO_SLUG: jpinedaa/bibites-multiverse
+      # Validated for shape before it is ever used as a shell word.
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: The version has the shape of a version
+        run: |
+          set -euo pipefail
+          printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "!! '$VERSION' is not MAJOR.MINOR.PATCH" >&2; exit 1; }
+          printf 'BRANCH=release/%s\n' "$VERSION" >> "$GITHUB_ENV"
+
+      # A bump is always cut from main, and the version surface check needs the
+      # history the drift gates use.
+      #
+      # This is the one workflow that keeps persist-credentials at its default,
+      # because it is the one workflow that pushes. checks.yml and release.yml
+      # both turn it off: neither of them writes with git, and a persisted
+      # token in .git/config is readable by everything the job runs afterwards.
+      # No `gh` command appears here, so no GH_TOKEN is bound either.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: The branch is free and the version moves forward
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "!! origin already has $BRANCH. Delete it, or finish the bump that" >&2
+            echo "   is already open." >&2
+            exit 1
+          fi
+          current="$(release/bump-version.sh --print)"
+          [ "$current" != "$VERSION" ] \
+            || { echo "!! the release is already $VERSION" >&2; exit 1; }
+          echo "    $current -> $VERSION on $BRANCH"
+
+      # The script prints a review list of the human-owned fields it will not
+      # touch — dates, the matrix's "published" and "tested" strings, and the
+      # prose in STATUS.md. That list is the point of this job's output.
+      - name: Rewrite the version surface
+        run: |
+          set -euo pipefail
+          release/bump-version.sh "$VERSION" 2>&1 | tee "$RUNNER_TEMP/bump.txt"
+          release/bump-version.sh --check
+
+      # The house rule is to stage explicit paths. These are exactly the files
+      # the script changed, listed and printed, and an untracked file appearing
+      # is treated as a fault rather than swept in.
+      - name: Commit and push the branch
+        run: |
+          set -euo pipefail
+          untracked="$(git ls-files --others --exclude-standard)"
+          [ -z "$untracked" ] || {
+            printf '%s\n' "$untracked" >&2
+            echo "!! the bump created untracked files; it should only rewrite tracked ones" >&2
+            exit 1
+          }
+          mapfile -t changed < <(git diff --name-only)
+          [ "${#changed[@]}" -gt 0 ] \
+            || { echo "!! the bump changed nothing" >&2; exit 1; }
+          printf '    %s\n' "${changed[@]}"
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git switch -c "$BRANCH"
+          git add -- "${changed[@]}"
+          git commit -m "Set the release to $VERSION"
+          git push -u origin "$BRANCH"
+
+      - name: What to do next
+        run: |
+          set -euo pipefail
+          {
+            echo "### Bumped to \`$VERSION\` on \`$BRANCH\`"
+            echo
+            echo "1. Work through the review list below: this job rewrote only the"
+            echo "   mechanical occurrences. Dates, the support matrix's \`published\` and"
+            echo "   \`tested\` strings, and the prose in \`STATUS.md\` are yours."
+            echo "2. Open the pull request:"
+            echo "   <https://github.com/$REPO_SLUG/compare/main...$BRANCH?expand=1>"
+            echo "3. \`checks.yml\` must be green before it merges."
+            echo "4. Tag the merge commit on \`main\` with \`v$VERSION\`; that starts \`release.yml\`."
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/bump.txt"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

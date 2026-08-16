@@ -183,6 +183,18 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
     <div class="metric"><span class="snapk">Migrations</span><strong class="snapv" id="migrations">—</strong><span class="snapnote" id="rate">recorded crossings</span></div>
   </section>
 
+  <section class="shell section" id="game">
+    <div class="sectionhd"><span class="kicker">The original game</span><h2><em>The Bibites</em> came first.</h2><p>Every world on this map is a copy of that game.</p></div>
+    <div class="joinbox">
+      <div class="joincopy"><p><em>The Bibites</em> is an artificial-life simulation created by Léo Caussan in 2017 and developed by <a href="https://www.thebibites.com/">Omnia Studios</a>. Every creature in it carries its own genes and a neural-network brain. Nothing scores them. Food, mutation, and natural selection do the work, until behavior like pheromone-trail hunting or stockpiling food appears on its own. Its creator's stated goal is to prove that “life doesn't have to be carbon-based.”</p>
+      <p>It has been in open development since 2017, with public devlogs since 2019 and a talk at the ALIFE 2020 conference. Bibites Multiverse only gives it neighbors. The simulation itself is theirs.</p>
+      <p>Bibites Multiverse is an independent passion project, built out of an interest in artificial life. It is not affiliated with, endorsed by, or sponsored by Léo Caussan or Omnia Studios.</p></div>
+      <aside class="trust"><h3>Get <em>The Bibites</em></h3><p><em>The Bibites: Digital Life</em> is free on itch.io and in Early Access on Steam, for Windows, macOS, and Linux. Get it from the people who made it.</p>
+      <div class="actions"><a class="button primary" href="https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/">Get it on Steam</a><a class="button secondary" href="https://thebibites.itch.io/the-bibites">Free on itch.io</a></div>
+      <p class="promise">Official channels: <a href="https://www.thebibites.com/">website</a> · <a href="https://www.youtube.com/@TheBibitesDigitalLife">YouTube</a> · <a href="https://discord.com/invite/rNDMdNjQ2R">Discord</a> · <a href="https://www.patreon.com/thebibites">Patreon</a> · <a href="https://the-bibites.fandom.com/wiki/The_Bibites_Wiki">community wiki</a></p></aside>
+    </div>
+  </section>
+
   <section class="shell section" id="about">
     <div class="sectionhd"><span class="kicker">The idea</span><h2>One map. Many evolutionary pressures.</h2><p>This is not one synchronized mega-simulation. Each world develops on its own, and the borders between them become migration routes.</p></div>
     <div class="principles">
@@ -195,7 +207,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
   <section class="shell section" id="how">
     <div class="sectionhd"><span class="kicker">How it works</span><h2>A durable path between local simulations.</h2><p>The migration path is encrypted, retry-safe, and designed to prefer a rare loss over ever duplicating an organism.</p></div>
     <div class="flow" aria-label="System flow">
-      <div class="flowitem"><b>The Bibites</b><span>A complete local simulation</span></div>
+      <div class="flowitem"><b>The Bibites</b><span>The game itself, running on your machine</span></div>
       <div class="flowitem"><b>Multiverse mod</b><span>Watches the world's borders</span></div>
       <div class="flowitem"><b>Participant sidecar</b><span>Keeps durable custody in transit</span></div>
       <div class="flowitem"><b>Relay + archive</b><span>Routes migrations and records history</span></div>
@@ -204,7 +216,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 
   <section class="shell section" id="join">
     <div class="joinbox">
-      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package for release __HOMEPAGE_RELEASE__ include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
+      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package for release __HOMEPAGE_RELEASE__ include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
       <aside class="trust"><h3>Clear boundaries</h3><ul><li>Your world and saves stay on your machine.</li><li>Automatic enrollment creates the secret on your machine.</li><li>The public page is read-only.</li><li>TLS protects traffic to the relay.</li><li>Published world data is explained before you join.</li><li>The shared run ends November 14 unless extended by announcement.</li></ul></aside>
     </div>
   </section>
@@ -215,11 +227,12 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
       <details><summary>Does the map control my simulation?</summary><p>No. The public page is read-only, and every participant continues to control and save their own local world.</p></details>
       <details><summary>What happens when another world goes offline?</summary><p>The map can route around a dark world when the axis has another live destination. Its reserved place remains waiting for it.</p></details>
       <details><summary>Is the public run permanent?</summary><p>No. The announced run is August 14 through November 14, 2026. It can be extended by announcement and is never silently shortened.</p></details>
-      <details><summary>Is this an official Bibites project?</summary><p>No. Bibites Multiverse is an independent community project and is not affiliated with or endorsed by <em>The Bibites</em>.</p></details>
+      <details><summary>Is this an official Bibites project?</summary><p>No. Bibites Multiverse is an independent passion project, built out of an interest in artificial life. <em>The Bibites</em> was created by Léo Caussan and is developed by Omnia Studios; this project is not affiliated with, endorsed by, or sponsored by either of them.</p></details>
+      <details><summary>Is this the game's own multiplayer?</summary><p>No. Omnia Studios has announced its own plans for linked simulation realms. Bibites Multiverse is a separate, independent experiment that runs today, and it is not connected to that work.</p></details>
     </div>
   </section>
 </main>
-<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/watch">Watch broadcast</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://thebibites.itch.io/the-bibites">The Bibites</a></div></div></footer>
+<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/watch">Watch broadcast</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/">The Bibites on Steam</a><a href="https://thebibites.itch.io/the-bibites">itch.io</a></div></div></footer>
 <script>
 (function(){
   function n(v){ return v == null ? "unknown" : Number(v).toLocaleString(); }

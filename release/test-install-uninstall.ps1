@@ -10,7 +10,7 @@
     but never changes it. It never touches a trust store, a running process or
     the network.
 
-    Six scenarios:
+    Seven scenarios:
 
       A  a machine with no BepInEx. The installer adds it; the game then writes
          BepInEx's config, log and cache; the uninstall must leave the tree
@@ -26,6 +26,17 @@
          with -SkipCaImport: this test never writes to a trust store.
       F  a complete package. The same installer creates a versioned managed
          runtime without -GameDir, and removes only unchanged payload files.
+      G  a world that is already in the data root. An uninstall keeps its
+         credential; installing again over it - with the same join string, or
+         with none at all - keeps the same identity, spends no second place on
+         the map and never rewrites the secret file. A secret is replaced only
+         for the world the install record itself names, and the replaced one is
+         kept beside it. A DIFFERENT identity - which is what a slot handover
+         mints - takes -ReplaceWorldIdentity, and is refused without it; so is a
+         secret nothing can name, a claim only an ordinary text file makes, a
+         file that is not a credential, and a -RelayUrl pointed at another map. A
+         credential behind a blank first line is still a credential.
+         -RemoveWorldData is the one path that ends the world.
 
 .PARAMETER KitDir
     The staged archive contents - the folder holding Install-BibitesMultiverse.ps1,
@@ -385,7 +396,9 @@ $afterA = Get-TreeSnapshot $aGame
 $problems = @(Compare-Snapshot $beforeA $afterA)
 Check "the game tree is hash-for-hash what it was before the install" ($problems.Count -eq 0) ($problems -join '; ')
 Check "no BepInEx directory is left behind" (-not (Test-Path (Join-Path $aGame 'BepInEx')))
-Check "the credential is gone" (-not (Test-Path $credential))
+Check "the credential is kept, because the world it names is still on the map" `
+    (Test-Path $credential)
+Check "the ledger says the identity stays" ($uninstall.Output -match 'keeps its place on the map') $uninstall.Output
 Check "the install record is gone" (-not (Test-Path $recordPath))
 Check "the journal is kept, because nobody asked for it to go" (Test-Path (Join-Path $aData 'data'))
 Check "the start script is gone" (-not (Test-Path (Join-Path $KitDir 'Start-Multiverse.ps1')))
@@ -624,6 +637,264 @@ Check "the installed public map was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json')))
 Check "the launcher's profiles directory was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'profiles')))
+
+# ---------------------------------------------------------------- G
+
+Scenario "G - a world that is already in the data root"
+
+$gRoot    = Join-Path $sandbox 'G'
+$gGame    = Join-Path $gRoot 'game'
+$gData    = Join-Path $gRoot 'data'
+$gProgram = Join-Path $gRoot 'program'
+New-SandboxGame -Path $gGame
+$gJoin   = Join-Path $gRoot 'join.txt'
+$gSecret = New-JoinFile $gJoin
+
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData
+    InstallRoot = $gProgram; JoinStringFile = $gJoin; World = 'TestWorld'
+}
+Check "the first install succeeded" ($install.ExitCode -eq 0) $install.Output
+$gCredential = Join-Path $gData 'peer-secret.txt'
+$gRecordPath = Join-Path $gData 'install-record.json'
+$gPeerIdFile = Join-Path $gData 'data\peer-id'
+Check "the installer wrote the world's identity beside its journal" `
+    ((Test-Path -LiteralPath $gPeerIdFile) -and
+     ((Get-Content -Raw -LiteralPath $gPeerIdFile).Trim() -eq 'test-world'))
+
+$gUninstaller = Join-Path $gProgram 'Uninstall-BibitesMultiverse.ps1'
+$uninstall = Invoke-Script $gUninstaller @{ DataRoot = $gData }
+Check "the uninstall succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
+Check "it keeps the world's credential" (Test-Path -LiteralPath $gCredential)
+Check "it keeps the identity beside the journal" (Test-Path -LiteralPath $gPeerIdFile)
+Check "it removes its own record" (-not (Test-Path -LiteralPath $gRecordPath))
+
+# Installing again over an uninstalled world is that same world: the same
+# identity, the same secret file, and no second place on the map.
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData
+    InstallRoot = $gProgram; JoinStringFile = $gJoin; World = 'TestWorld'
+}
+Check "installing again after an uninstall succeeded" ($install.ExitCode -eq 0) $install.Output
+Check "it says the identity is the same world and only the secret changes" `
+    ($install.Output -match 'the same world, test-world') $install.Output
+$recordG = Get-Content -Raw -LiteralPath $gRecordPath | ConvertFrom-Json
+Check "the new record names the same world" ($recordG.peerId -eq 'test-world')
+$profileG = Get-Content -Raw -LiteralPath (Join-Path $gProgram 'profiles\default.json') | ConvertFrom-Json
+Check "the launcher's profile names the same world" ($profileG.peerId -eq 'test-world')
+Check "the credential is the secret that join string carries" `
+    ((Get-Content -Raw -LiteralPath $gCredential).Trim() -eq $gSecret)
+
+# The reported defect: no join string at all. An empty data root enrolls a new
+# public identity here; a data root with a world in it must adopt that world,
+# and must not reach the network to do it.
+if (Test-Path -LiteralPath (Join-Path $KitDir 'public-map.json')) {
+    $install = Invoke-Script $installer @{
+        RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData; InstallRoot = $gProgram
+    }
+    Check "a repair with no join string succeeded" ($install.ExitCode -eq 0) $install.Output
+    Check "it reused the identity already in the data root" `
+        ($install.Output -match 'reusing the map identity already in') $install.Output
+    Check "it asked the map for nothing" `
+        (-not ($install.Output -match 'requesting a unique identity')) $install.Output
+    $recordG = Get-Content -Raw -LiteralPath $gRecordPath | ConvertFrom-Json
+    Check "the repair kept the same world and its own relay" `
+        ($recordG.peerId -eq 'test-world' -and
+         $recordG.relayUrl -eq 'wss://relay.example.test/contract-b/v4')
+    Check "the repair kept the secret byte for byte" `
+        ((Get-Content -Raw -LiteralPath $gCredential).Trim() -eq $gSecret)
+}
+
+# A different identity over the same world's journal strands both.
+$gOtherJoin = Join-Path $gRoot 'other-join.txt'
+Set-Content -Path $gOtherJoin `
+    -Value "multiverse-join/1 wss://relay.example.test/contract-b/v4 other-world.$gSecret" `
+    -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData
+    InstallRoot = $gProgram; JoinStringFile = $gOtherJoin
+}
+Check "a second identity over the same world is refused" ($install.ExitCode -eq 1) $install.Output
+Check "that refusal carries INS-ENROLL" ($install.Output -match 'INS-ENROLL') $install.Output
+Check "the refusal names the world that is here and the one offered" `
+    (($install.Output -match 'test-world') -and ($install.Output -match 'other-world')) $install.Output
+Check "the refusal left the credential alone" `
+    ((Get-Content -Raw -LiteralPath $gCredential).Trim() -eq $gSecret)
+
+# A secret with nothing left to name its world is never overwritten either.
+$gOrphan = Join-Path $gRoot 'orphan'
+New-Item -ItemType Directory -Force -Path $gOrphan | Out-Null
+$gOrphanSecret = ('a' * 64)
+Set-Content -LiteralPath (Join-Path $gOrphan 'peer-secret.txt') -Value $gOrphanSecret -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gOrphan
+    InstallRoot = $gProgram; JoinStringFile = $gJoin
+}
+Check "a secret no file can name is refused rather than replaced" ($install.ExitCode -eq 1) $install.Output
+Check "that refusal carries INS-ENROLL" ($install.Output -match 'INS-ENROLL') $install.Output
+Check "the refusal names the file it would have overwritten" `
+    ($install.Output -match 'peer-secret\.txt') $install.Output
+Check "the unnamed secret is exactly as it was" `
+    ((Get-Content -Raw -LiteralPath (Join-Path $gOrphan 'peer-secret.txt')).Trim() -eq $gOrphanSecret)
+
+# The secret of a world the install record itself names may be replaced, and the
+# one it replaces is kept, never destroyed.
+$gHandoverSecret = -join ((1..64) | ForEach-Object { '0123456789abcdef'[(Get-Random -Maximum 16)] })
+$gHandoverJoin = Join-Path $gRoot 'handover-join.txt'
+Set-Content -Path $gHandoverJoin `
+    -Value "multiverse-join/1 wss://relay.example.test/contract-b/v4 test-world.$gHandoverSecret" `
+    -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData
+    InstallRoot = $gProgram; JoinStringFile = $gHandoverJoin; World = 'TestWorld'
+}
+Check "a new secret for the world the record names is applied" ($install.ExitCode -eq 0) $install.Output
+Check "it says it is the same world" ($install.Output -match 'the same world, test-world') $install.Output
+Check "the new secret is in place" `
+    ((Get-Content -Raw -LiteralPath $gCredential).Trim() -ceq $gHandoverSecret)
+$gBackups = @(Get-ChildItem -LiteralPath $gData -Filter 'peer-secret.txt.*.old' -File -ErrorAction SilentlyContinue)
+Check "the replaced secret is kept beside it rather than destroyed" ($gBackups.Count -eq 1)
+if ($gBackups.Count -eq 1) {
+    Check "and the kept copy is the secret it replaced" `
+        ((Get-Content -Raw -LiteralPath $gBackups[0].FullName).Trim() -ceq $gSecret)
+    Remove-Item -LiteralPath $gBackups[0].FullName -Force
+}
+
+# A slot handover mints a NEW identity (contract-b-m4.md §7.5), so this is both
+# the credential-recovery path and the shape of a mistake. Gated either way.
+$gHandoverJoinB = Join-Path $gRoot 'handover-b.txt'
+$gHandoverSecretB = -join ((1..64) | ForEach-Object { '0123456789abcdef'[(Get-Random -Maximum 16)] })
+Set-Content -Path $gHandoverJoinB `
+    -Value "multiverse-join/1 wss://relay.example.test/contract-b/v4 test-world-b.$gHandoverSecretB" `
+    -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData
+    InstallRoot = $gProgram; JoinStringFile = $gHandoverJoinB
+}
+Check "a join string for another identity is refused" ($install.ExitCode -eq 1) $install.Output
+Check "the refusal names both worlds" `
+    (($install.Output -match 'test-world-b') -and ($install.Output -match 'is the world test-world')) $install.Output
+Check "the refusal names the switch a handover needs" `
+    ($install.Output -match 'ReplaceWorldIdentity') $install.Output
+Check "the world it would have replaced still has its own secret" `
+    ((Get-Content -Raw -LiteralPath $gCredential).Trim() -ceq $gHandoverSecret)
+
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData
+    InstallRoot = $gProgram; JoinStringFile = $gHandoverJoinB; ReplaceWorldIdentity = $true
+}
+Check "the switch applies the handover" ($install.ExitCode -eq 0) $install.Output
+$recordG = Get-Content -Raw -LiteralPath $gRecordPath | ConvertFrom-Json
+Check "the new identity is the world's" ($recordG.peerId -ceq 'test-world-b')
+Check "the name it used to answer to is kept for its operator" `
+    ((Get-Content -Raw -LiteralPath (Join-Path $gData 'data\peer-id.previous')).Trim() -ceq 'test-world')
+Check "the change of identity is stated at the end" `
+    ($install.Output -match 'CHANGED IDENTITY') $install.Output
+$gBackups = @(Get-ChildItem -LiteralPath $gData -Filter 'peer-secret.txt.*.old' -File -ErrorAction SilentlyContinue)
+Check "the secret it replaced is kept too" ($gBackups.Count -eq 1)
+foreach ($b in $gBackups) { Remove-Item -LiteralPath $b.FullName -Force }
+$gSecret = $gHandoverSecretB
+
+# A secret a hand-written claim names is NOT the same world proven: an ordinary
+# text file may keep a world and may never destroy one.
+$gUnproven = Join-Path $gRoot 'unproven'
+New-Item -ItemType Directory -Force -Path (Join-Path $gUnproven 'data') | Out-Null
+$gUnprovenSecret = ('y' * 64)
+Set-Content -LiteralPath (Join-Path $gUnproven 'peer-secret.txt') -Value $gUnprovenSecret -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $gUnproven 'data\peer-id') -Value 'test-world' -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gUnproven
+    InstallRoot = $gProgram; JoinStringFile = $gJoin
+}
+Check "a join string over an unproven claim is refused" ($install.ExitCode -eq 1) $install.Output
+Check "that refusal carries INS-ENROLL" ($install.Output -match 'INS-ENROLL') $install.Output
+Check "the refusal names the file that made the claim" ($install.Output -match 'peer-id') $install.Output
+Check "the refusal says what such a file may and may not do" `
+    ($install.Output -match 'ordinary text file') $install.Output
+Check "the secret it was about to destroy is still there" `
+    ((Get-Content -Raw -LiteralPath (Join-Path $gUnproven 'peer-secret.txt')).Trim() -ceq $gUnprovenSecret)
+
+# A credential whose FIRST LINE is blank is still a credential. Reading one line
+# rather than the file would call it absent, delete it, and take a new identity.
+$gBlank = Join-Path $gRoot 'blank-first-line'
+New-Item -ItemType Directory -Force -Path (Join-Path $gBlank 'data') | Out-Null
+$gBlankSecret = ('e' * 64)
+Set-Content -LiteralPath (Join-Path $gBlank 'peer-secret.txt') `
+    -Value ([Environment]::NewLine + $gBlankSecret) -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $gBlank 'data\peer-id') -Value 'test-world' -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $gBlank 'data\relay-url') `
+    -Value 'wss://relay.example.test/contract-b/v4' -Encoding ASCII
+$gBlankBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $gBlank 'peer-secret.txt')).Hash
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gBlank; InstallRoot = $gProgram
+}
+Check "a credential behind a blank first line is adopted, not replaced" ($install.ExitCode -eq 0) $install.Output
+Check "it says so" ($install.Output -match 'reusing the map identity already in') $install.Output
+Check "the credential is byte-identical afterwards" `
+    ((Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $gBlank 'peer-secret.txt')).Hash -eq $gBlankBefore)
+$recordBlank = Get-Content -Raw -LiteralPath (Join-Path $gBlank 'install-record.json') | ConvertFrom-Json
+Check "the record names the world that file belongs to" ($recordBlank.peerId -ceq 'test-world')
+Check "and the map it says it is on" `
+    ($recordBlank.relayUrl -ceq 'wss://relay.example.test/contract-b/v4')
+
+# Something that is not a credential is a refusal, never an overwrite.
+$gJunk = Join-Path $gRoot 'not-a-credential'
+New-Item -ItemType Directory -Force -Path $gJunk | Out-Null
+Set-Content -LiteralPath (Join-Path $gJunk 'peer-secret.txt') -Value 'hello' -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gJunk
+    InstallRoot = $gProgram; JoinStringFile = $gJoin
+}
+Check "a peer-secret.txt that is not a credential is refused" ($install.ExitCode -eq 1) $install.Output
+Check "the refusal says what a credential is" ($install.Output -match 'not a map credential') $install.Output
+Check "it changes that file not at all" `
+    ((Get-Content -Raw -LiteralPath (Join-Path $gJunk 'peer-secret.txt')).Trim() -ceq 'hello')
+
+# A name whose secret is gone, taking a DIFFERENT identity: a second place on the
+# map unless the operator handed this world's slot over, and this machine cannot
+# tell which. The public-map half of this gate is proved on Linux, against the
+# test's fake enrollment endpoint; here it runs on the join-string path so that
+# nothing in this file can reach a network.
+$gLost = Join-Path $gRoot 'lost-secret'
+New-Item -ItemType Directory -Force -Path (Join-Path $gLost 'data') | Out-Null
+Set-Content -LiteralPath (Join-Path $gLost 'data\peer-id') -Value 'lost-world' -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $gLost 'data\relay-url') `
+    -Value 'wss://relay.example.test/contract-b/v4' -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gLost
+    InstallRoot = $gProgram; JoinStringFile = $gJoin
+}
+Check "a new identity over a world whose secret is gone is refused" ($install.ExitCode -eq 1) $install.Output
+Check "the refusal names the world that would go dark" ($install.Output -match 'lost-world') $install.Output
+Check "the refusal names the switch that accepts the cost" `
+    ($install.Output -match 'ReplaceWorldIdentity') $install.Output
+Check "no credential was written" `
+    (-not (Test-Path -LiteralPath (Join-Path $gLost 'peer-secret.txt')))
+
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gLost
+    InstallRoot = $gProgram; JoinStringFile = $gJoin; ReplaceWorldIdentity = $true
+}
+Check "-ReplaceWorldIdentity takes the new identity" ($install.ExitCode -eq 0) $install.Output
+Check "the world that went dark is kept where the operator can be told" `
+    ((Get-Content -Raw -LiteralPath (Join-Path $gLost 'data\peer-id.previous')).Trim() -ceq 'lost-world')
+Check "the summary names the change of identity" ($install.Output -match 'CHANGED IDENTITY') $install.Output
+
+# -RelayUrl names the map a world is on; it does not move one.
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gData
+    InstallRoot = $gProgram; RelayUrl = 'wss://two.example.test/contract-b/v4'
+}
+Check "-RelayUrl at another map is refused" ($install.ExitCode -eq 1) $install.Output
+Check "the refusal names both maps" `
+    (($install.Output -match 'relay\.example\.test') -and ($install.Output -match 'two\.example\.test')) $install.Output
+
+# The one path that does end a world says so, and takes the credential with it.
+$uninstall = Invoke-Script $gUninstaller @{ DataRoot = $gData; RemoveWorldData = $true }
+Check "the uninstall with -RemoveWorldData succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
+Check "-RemoveWorldData removes the credential" (-not (Test-Path -LiteralPath $gCredential))
+Check "-RemoveWorldData says the world ends on the map" `
+    ($uninstall.Output -match 'end of this world on the map') $uninstall.Output
 
 # ---------------------------------------------------------------- the verdict
 

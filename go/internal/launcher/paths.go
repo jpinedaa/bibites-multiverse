@@ -29,7 +29,12 @@ const (
 	lockFileName       = "launcher.lock"
 
 	dataDirName = "data"
-	logDirName  = "logs"
+	// peerIDFileName is what the sidecar persists a world's identity in
+	// (contract-b-m4.md 7.4) and what the installers write beside the journal. It
+	// outlives an uninstall, so it is also how a data root says "a world lives
+	// here" once its credential and its install record are gone.
+	peerIDFileName = "peer-id"
+	logDirName     = "logs"
 
 	sidecarLogName    = "sidecar.log"
 	sidecarLogOutName = "sidecar.log.out"

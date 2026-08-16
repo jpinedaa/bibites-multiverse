@@ -1,0 +1,725 @@
+# Build and publish a tagged release, on the owner's machine.
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE TRUSTING ANYTHING BELOW.
+#
+# On a tag push, GitHub runs the workflow file **as it exists at the tag**.
+# Everything in this file — `environment:`, `if:`, `runs-on:`, this comment —
+# comes from the tree the tag points at. Anyone who can push a `v*` tag to this
+# repository therefore chooses the contents of this file, and can delete every
+# guard in it. Nothing written here can prevent that.
+#
+# The controls that actually contain it are all outside this file:
+#
+#   1. A repository RULESET on tags `v*` — restrict creations, updates and
+#      deletions, bypass = repository admin only. This is the primary control,
+#      ahead of everything else, because a tag-supplied workflow cannot revoke
+#      it.
+#   2. The `release` ENVIRONMENT with a required reviewer. GitHub auto-creates a
+#      named environment with NO protection rules if it does not exist, so
+#      `environment: release` below is worth exactly as much as the environment
+#      the owner configured. Verify it, do not assume it:
+#        gh api repos/jpinedaa/bibites-multiverse/environments/release \
+#          --jq '.protection_rules[] | select(.type=="required_reviewers")'
+#      Empty output means there is no gate.
+#   3. The runner is started BY HAND, for ONE job: `./run.sh --once`. It is
+#      never installed as a service. A queued job is picked up the moment the
+#      runner starts, so INSPECT THE QUEUE FIRST:
+#        gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml
+#      and cancel anything you did not push.
+#   4. Branch protection on `main` requiring `checks.yml`, so "the tag is on
+#      main" means something.
+#   5. A dedicated runner user with no read access to ~/.aws, ~/.ssh,
+#      ~/.multiverse or the deployment repository.
+#
+# The first step below refuses to run for anyone but the owner. It is belt and
+# braces only: an attacker who writes the tag's tree deletes it. It exists to
+# stop an accident, not an attack.
+# ---------------------------------------------------------------------------
+#
+# This is the ONE workflow that carries the release runner's label, because it
+# is the only one that needs the proprietary inputs: the managed game
+# assemblies and two clean game directories. None of that ever reaches GitHub.
+# It is copied in from fixed paths on the machine, named by the runner's own
+# environment, into gitignored directories — and the paths themselves are kept
+# out of the job log and the uploaded artifact, both of which are public.
+#
+# A fork cannot cause this workflow: its only triggers are a tag push to the
+# base repository and workflow_dispatch, and neither is available to a fork.
+#
+# Secrets used: none. GITHUB_TOKEN with `contents: write` publishes the
+# release. There is no PAT and no game byte stored in GitHub by this design.
+# The token is bound to the three `gh` steps only, and the checkout does not
+# persist it into .git/config.
+#
+# The homepage deployment is NOT here and must never be. It is a separate act
+# on the hosting side: it takes the relay down for about a minute, it must
+# follow the complete-record restart sequence, and it ends in a written
+# receipt. The last step of this job prints that reminder and links the
+# runbook.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'an existing tag, in the form vMAJOR.MINOR.PATCH'
+        required: true
+
+permissions:
+  contents: write
+
+# A release is deliberate and one at a time. Never cancel one in flight: it may
+# already have published. GitHub keeps at most one PENDING run per group, so a
+# third tag pushed while two are queued evicts the middle one — cut one release
+# at a time.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: github.repository == 'jpinedaa/bibites-multiverse'
+    runs-on: [self-hosted, linux, X64, bibites-release]
+    environment: release
+    timeout-minutes: 45
+    env:
+      REPO_SLUG: jpinedaa/bibites-multiverse
+      REPO_OWNER: jpinedaa
+      # Never interpolated into a shell script: the dispatch input is
+      # attacker-shaped text until the next step has validated its shape.
+      DISPATCH_TAG: ${{ inputs.tag }}
+
+    steps:
+      # ---------------------------------------------------------------- guards
+
+      # Belt and braces (see the header). This does not stop a hostile tag,
+      # whose tree can simply omit this step. It stops the honest accidents: a
+      # collaborator's tag push, a fork that somehow inherited the label, a
+      # dispatch by someone who is not the owner.
+      - name: Only the owner releases
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.event.repository.owner.login }}
+        run: |
+          set -euo pipefail
+          if [ "$ACTOR" != "$REPO_OWNER" ]; then
+            echo "!! $ACTOR started this run; only $REPO_OWNER releases." >&2
+            echo "   If this was not you, cancel the run and check the v* tag ruleset." >&2
+            exit 1
+          fi
+          if [ -n "$OWNER" ] && [ "$OWNER" != "$REPO_OWNER" ]; then
+            echo "!! the repository is owned by $OWNER, not $REPO_OWNER" >&2
+            exit 1
+          fi
+          echo "    started by $ACTOR"
+
+      - name: Resolve the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            tag="$DISPATCH_TAG"
+          else
+            case "$GITHUB_REF" in
+              refs/tags/*) tag="${GITHUB_REF#refs/tags/}" ;;
+              *) echo "!! $GITHUB_REF is not a tag ref" >&2; exit 1 ;;
+            esac
+          fi
+          printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "!! '$tag' is not a v<major>.<minor>.<patch> tag" >&2; exit 1; }
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+          printf 'release=%s\n' "${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "    building $tag"
+
+      # fetch-depth: 0 and the tags are not optional (E5). make-release.sh
+      # resolves the far-end bundle's source commit and runs `git archive` on
+      # it; check-drift.sh does the same. A shallow clone cannot.
+      #
+      # persist-credentials: false, because nothing here pushes with git — the
+      # three `gh` steps carry their own token. The default would leave a
+      # `contents: write` credential in the workspace .git/config for the whole
+      # job, readable by make-release.sh, dotnet's NuGet restore, go's module
+      # fetches and makensis, and it survives a hard-cancelled job.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: The tag is on main, and the tree is clean
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          tagged="$(git rev-parse "refs/tags/$TAG^{commit}")"
+          [ "$head" = "$tagged" ] \
+            || { echo "!! HEAD is $head but $TAG points at $tagged" >&2; exit 1; }
+          # A public repository, so this needs no credential.
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$head" origin/main || {
+            echo "!! $TAG ($head) is not an ancestor of origin/main." >&2
+            echo "   A release is cut from main. Merge the branch first, then tag" >&2
+            echo "   the merge commit." >&2
+            exit 1
+          }
+          [ -z "$(git status --porcelain)" ] \
+            || { git status --porcelain >&2; echo "!! the checkout is not clean" >&2; exit 1; }
+          echo "    $TAG = $head, on main, clean"
+          printf 'HEAD_SHA=%s\n' "$head" >> "$GITHUB_ENV"
+
+      # The runner .env supplies GOROOT and DOTNET_ROOT, not PATH. Without this
+      # step the first bare `go` is the artifact-verification step, twenty-five
+      # minutes in and one step before publication. Resolve everything now, put
+      # it on PATH for the later steps, and repair a GOROOT that points at a
+      # directory which no longer exists — the toolchain obeys GOROOT, so a
+      # stale one turns a working `go` into "cannot find GOROOT directory".
+      #
+      # No path is printed: this log is public.
+      - name: The toolchain this machine must provide
+        run: |
+          set -euo pipefail
+
+          # A GOROOT that names a directory which no longer exists is worse
+          # than no GOROOT: the toolchain obeys it, so every `go` on the box
+          # answers "cannot find GOROOT directory". Drop it first, then look
+          # for a real one. This is the same treatment check-drift.sh and
+          # make-release.sh give it.
+          if [ -n "${GOROOT:-}" ] && [ ! -x "$GOROOT/bin/go" ]; then
+            echo "    note: GOROOT names a directory with no bin/go; ignoring it"
+            unset GOROOT
+          fi
+
+          # $GITHUB_PATH only affects LATER steps, so everything is verified
+          # here through an absolute path and exported for the build.
+          go_dir=''
+          for cand in "${GOROOT:+$GOROOT/bin}" /usr/local/go/bin "$HOME/go/bin"; do
+            [ -n "$cand" ] || continue
+            [ -x "$cand/go" ] || continue
+            go_dir="$cand"; break
+          done
+          if [ -z "$go_dir" ] && command -v go >/dev/null 2>&1; then
+            go_dir="$(dirname "$(command -v go)")"
+          fi
+          [ -n "$go_dir" ] || {
+            echo "!! no usable go. Set GOROOT in the runner .env, or install Go at" >&2
+            echo "   /usr/local/go, or put go on the runner user's PATH." >&2
+            exit 1
+          }
+          "$go_dir/go" version >/dev/null
+          printf '%s\n' "$go_dir" >> "$GITHUB_PATH"
+          printf 'GOROOT=%s\n' "$("$go_dir/go" env GOROOT)" >> "$GITHUB_ENV"
+          echo "    go        $("$go_dir/go" version | awk '{print $3}')"
+
+          dotnet_dir=''
+          for cand in "${DOTNET_ROOT:-}" "$HOME/.dotnet"; do
+            [ -n "$cand" ] || continue
+            [ -x "$cand/dotnet" ] || continue
+            dotnet_dir="$cand"; break
+          done
+          if [ -z "$dotnet_dir" ] && command -v dotnet >/dev/null 2>&1; then
+            dotnet_dir="$(dirname "$(command -v dotnet)")"
+          fi
+          [ -n "$dotnet_dir" ] || {
+            echo "!! no usable dotnet. Set DOTNET_ROOT in the runner .env." >&2
+            echo "   The plugin identity gate (gate 3) needs the .NET SDK." >&2
+            exit 1
+          }
+          "$dotnet_dir/dotnet" --list-sdks >/dev/null
+          printf '%s\n' "$dotnet_dir" >> "$GITHUB_PATH"
+          printf 'DOTNET_ROOT=%s\n' "$dotnet_dir" >> "$GITHUB_ENV"
+          echo "    dotnet    $("$dotnet_dir/dotnet" --version)"
+
+          if [ -z "${MAKENSIS:-}" ] || [ ! -x "${MAKENSIS:-}" ]; then
+            echo "!! MAKENSIS is unset or not executable in the runner environment." >&2
+            echo "   It must stay the same NSIS build every release has used (E6)," >&2
+            echo "   because the reproducible-checksum claim rests on that." >&2
+            exit 1
+          fi
+          if [ -n "${NSISDIR:-}" ]; then
+            [ -d "$NSISDIR" ] \
+              || { echo "!! NSISDIR is set but does not name a directory" >&2; exit 1; }
+            nsisdir_state='set'
+          else
+            nsisdir_state='unset; makensis must find its own'
+          fi
+          # Not just "the file exists": an NSIS unpacked into an arbitrary
+          # prefix cannot find its own Stubs/ without NSISDIR, and the failure
+          # only shows up when the Windows setup is built, half an hour in.
+          makensis_version="$("$MAKENSIS" -VERSION 2>&1)" || {
+            echo "!! makensis will not run:" >&2
+            printf '%s\n' "$makensis_version" | sed 's/^/   /' >&2
+            echo "   NSISDIR is $nsisdir_state. An NSIS unpacked outside its own prefix" >&2
+            echo "   needs NSISDIR to point at the directory holding Include/ and Stubs/." >&2
+            exit 1
+          }
+          echo "    makensis  $makensis_version"
+          echo "    NSISDIR   $nsisdir_state"
+
+          # Everything else the build and the verification assume exists. Each
+          # of these is otherwise a twenty-minutes-in failure.
+          missing=''
+          for tool in git python3 zip unzip tar file curl cmp sha256sum numfmt sed awk gh; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          [ -z "$missing" ] || {
+            echo "!! the release needs these and this runner has none of them:$missing" >&2
+            exit 1
+          }
+          echo "    utilities git python3 zip unzip tar file curl cmp sha256sum numfmt sed awk gh"
+
+      # ---- the three cheap refusals, before anything is copied or rewritten.
+      # None of them needs the proprietary inputs, so a moved tag or a stale
+      # bundle costs one second rather than a 5 MB copy and a remote rewrite.
+
+      - name: The version surface agrees with the tag
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          release/bump-version.sh --check
+          printed="$(release/bump-version.sh --print)"
+          [ "v$printed" = "$TAG" ] || {
+            echo "!! the tree says the release is $printed, so the tag should be v$printed," >&2
+            echo "   but this build was triggered by $TAG." >&2
+            exit 1
+          }
+          echo "    the tree and the tag both say $TAG"
+
+      - name: The far-end bundle is not stale
+        run: release/check-drift.sh
+
+      # E8: a release tag has been force-moved on this repository before. A
+      # moved tag re-fires this workflow, and `gh release create` then fails
+      # after a twenty-minute build. Fail in one second instead, and say what
+      # deleting the existing release means.
+      - name: The release does not exist yet
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO_SLUG" >/dev/null 2>&1; then
+            echo "!! a release already exists for $TAG." >&2
+            echo "   Publishing is not idempotent. If the existing release is wrong," >&2
+            echo "   delete it by hand, deliberately:" >&2
+            echo "       gh release delete $TAG --repo $REPO_SLUG" >&2
+            echo "   and make sure the tag points where you think it does." >&2
+            exit 1
+          fi
+          echo "    no release exists for $TAG yet"
+
+      # ---- only now the machine-specific parts.
+      #
+      # E4: actions/checkout cleans the workspace between runs (`git clean
+      # -ffdx`), so bibites-mod/libs/ and farend/dist/cache/ are gone by now.
+      # Everything below reads from OUTSIDE the workspace, every run.
+      #
+      # NOTHING HERE PRINTS A PATH. Run logs and artifacts on a public
+      # repository are readable by anyone, and the owner's filesystem layout is
+      # not something a release needs to publish. A failure names the variable
+      # and the reason; the value is in the runner's own .env.
+      - name: This machine provides the release inputs
+        run: |
+          set -euo pipefail
+          bad=0
+          need_dir() {
+            local name="$1" value="${2:-}"
+            if [ -z "$value" ]; then
+              echo "!! $name is not set in the runner environment" >&2; bad=1; return
+            fi
+            if [ ! -d "$value" ]; then
+              echo "!! $name is set but does not name a directory" >&2; bad=1; return
+            fi
+            echo "    $name  present"
+          }
+          need_dir MV_RELEASE_GAME_REFS      "${MV_RELEASE_GAME_REFS:-}"
+          need_dir MV_RELEASE_BEPINEX_CACHE  "${MV_RELEASE_BEPINEX_CACHE:-}"
+          need_dir MV_RELEASE_WINDOWS_GAME   "${MV_RELEASE_WINDOWS_GAME:-}"
+          need_dir MV_RELEASE_LINUX_GAME     "${MV_RELEASE_LINUX_GAME:-}"
+          [ "$bad" -eq 0 ] || exit 1
+
+          # The contents, not just the paths. Each of these turns into a
+          # confusing failure hundreds of megabytes into the build otherwise.
+          [ -f "$MV_RELEASE_GAME_REFS/BibitesAssembly.dll" ] \
+            || { echo "!! MV_RELEASE_GAME_REFS holds no BibitesAssembly.dll" >&2; exit 1; }
+          for zip in BepInEx_win_x64 BepInEx_linux_x64; do
+            ls "$MV_RELEASE_BEPINEX_CACHE"/${zip}_*.zip >/dev/null 2>&1 \
+              || { echo "!! MV_RELEASE_BEPINEX_CACHE holds no ${zip}_*.zip. Without it" >&2
+                   echo "   make-release.sh downloads from the network instead (E4)." >&2; exit 1; }
+          done
+          [ -f "$MV_RELEASE_WINDOWS_GAME/The Bibites.exe" ] \
+            || { echo "!! MV_RELEASE_WINDOWS_GAME is not a Windows game directory" >&2; exit 1; }
+          [ -x "$MV_RELEASE_LINUX_GAME/The Bibites.x86_64" ] \
+            || { echo "!! MV_RELEASE_LINUX_GAME is not a Linux game directory" >&2; exit 1; }
+          echo "    every input holds what the build expects"
+
+          # Gate 3b compares the release plugin against the plugin installed in
+          # this machine's game. make-release.sh DOWNGRADES to a note when it
+          # cannot read that file, so a permission mistake would silently
+          # delete the strongest check in the build. Refuse now, not later.
+          steam="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll"
+          [ -r "$steam" ] || {
+            echo "!! the runner user cannot read the plugin installed in this machine's game." >&2
+            echo "   Gate 3b — the three-way agreement between this tree, the far-end" >&2
+            echo "   bundle and the local game — would silently stop running." >&2
+            echo "   Grant the runner user read access to that path (design C7 step 1)." >&2
+            exit 1
+          }
+          echo "    the local game's plugin is readable, so gate 3b will run"
+
+      - name: Copy the proprietary inputs in
+        run: |
+          set -euo pipefail
+          # Both destinations are gitignored (.gitignore: bibites-mod/libs/;
+          # farend/.gitignore: dist/*), so the tree stays clean and
+          # --allow-dirty is never needed.
+          mkdir -p bibites-mod/libs farend/dist/cache
+          cp -a "$MV_RELEASE_GAME_REFS/." bibites-mod/libs/
+          cp "$MV_RELEASE_BEPINEX_CACHE"/*.zip farend/dist/cache/
+          refs="$(find bibites-mod/libs -type f | wc -l)"
+          zips="$(find farend/dist/cache -name '*.zip' | wc -l)"
+          [ "$refs" -gt 0 ] || { echo "!! no reference assembly was copied in" >&2; exit 1; }
+          # E4: with no cache, fetch_bepinex() silently reaches the network
+          # instead, and the release's SHA pins stop being a local guarantee.
+          [ "$zips" -ge 2 ] \
+            || { echo "!! only $zips BepInEx archive(s) in the cache; both flavours are needed" >&2; exit 1; }
+          echo "    reference assemblies: $refs files"
+          echo "    BepInEx cache:        $zips archives"
+          [ -z "$(git status --porcelain)" ] || {
+            git status --porcelain >&2
+            echo "!! the copied inputs landed on tracked paths. They must be ignored." >&2
+            exit 1
+          }
+          echo "    the tree is still clean"
+
+      # REHEARSAL-BUILD.md §4: a wrong origin produces a release page whose
+      # download links all 404, and nothing else notices.
+      - name: The origin resolves to this repository
+        run: |
+          set -euo pipefail
+          git remote set-url origin "https://github.com/$REPO_SLUG.git"
+          origin="$(git config --get remote.origin.url)"
+          # The same derivation make-release.sh performs for REPO_SLUG.
+          slug="$(printf '%s' "$origin" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
+          [ "$slug" = "$REPO_SLUG" ] \
+            || { echo "!! origin $origin derives the slug '$slug', want '$REPO_SLUG'" >&2; exit 1; }
+          echo "    origin $origin  ->  $slug"
+
+      # ----------------------------------------------------------------- build
+
+      - name: Build the release
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/release-build.log"
+          printf 'BUILD_LOG=%s\n' "$log" >> "$GITHUB_ENV"
+
+          # The build's output goes to a PUBLIC job log and to an artifact that
+          # is kept for ninety days. make-release.sh prints only basenames for
+          # the game directories, but a `die` on an unreadable input would
+          # print more, so every runner-supplied path is substituted out of the
+          # stream before it reaches either. Redacting in the pipe rather than
+          # after it means the live job log is redacted too.
+          redact="$RUNNER_TEMP/redact.sed"
+          : > "$redact"
+          hide() { # $1 label, $2 value
+            [ -n "${2:-}" ] || return 0
+            printf 's|%s|<%s>|g\n' \
+              "$(printf '%s' "$2" | sed -e 's/[][\\.*^$|]/\\&/g')" "$1" >> "$redact"
+          }
+          hide MV_RELEASE_GAME_REFS     "${MV_RELEASE_GAME_REFS:-}"
+          hide MV_RELEASE_BEPINEX_CACHE "${MV_RELEASE_BEPINEX_CACHE:-}"
+          hide MV_RELEASE_WINDOWS_GAME  "${MV_RELEASE_WINDOWS_GAME:-}"
+          hide MV_RELEASE_LINUX_GAME    "${MV_RELEASE_LINUX_GAME:-}"
+          hide MAKENSIS                 "${MAKENSIS:-}"
+          hide NSISDIR                  "${NSISDIR:-}"
+
+          # The Linux matrix row is checked against a real unpacked game. The
+          # script's default path is a scratch directory on the owner's account,
+          # which the runner user cannot read — and it DOWNGRADES rather than
+          # fails when it cannot. Point it at the same clean Linux game the
+          # payload comes from, so the check actually runs.
+          export LINUX_GAME_DIR="${LINUX_GAME_DIR:-$MV_RELEASE_LINUX_GAME}"
+          hide MV_RELEASE_LINUX_GAME "$LINUX_GAME_DIR"
+
+          # NO --allow-dirty, EVER. That flag marks a rehearsal that must never
+          # be published, and verify-build-log.sh below refuses a log that
+          # carries its banner.
+          set +e
+          MAKENSIS="$MAKENSIS" NSISDIR="$NSISDIR" ./release/make-release.sh \
+            --windows-game-dir "$MV_RELEASE_WINDOWS_GAME" \
+            --linux-game-dir   "$MV_RELEASE_LINUX_GAME" \
+            --game-redistribution-notice release/GAME-REDISTRIBUTION-NOTICE.txt \
+            2>&1 | sed -f "$redact" | tee "$log"
+          status="${PIPESTATUS[0]}"
+          set -e
+
+          # Keep the log beside the other two uploaded files, so the artifact
+          # is flat rather than rooted at the runner's work directory — and do
+          # it before the status check, so a FAILED build still uploads its log.
+          # release/dist/ is gitignored.
+          mkdir -p release/dist
+          cp "$log" release/dist/release-build.log
+
+          [ "$status" -eq 0 ] || { echo "!! make-release.sh exited $status" >&2; exit "$status"; }
+
+      # Several gates print a note and carry on when an input is unreadable.
+      # This is what makes that impossible to miss.
+      - name: Every gate actually ran
+        env:
+          RELEASE: ${{ steps.tag.outputs.release }}
+        run: release/verify-build-log.sh "$BUILD_LOG" "$RELEASE"
+
+      # ---------------------------------------------------- verify the artifacts
+      #
+      # Independent of the build: this re-derives every claim from the files
+      # that are about to be published, the same way the last two publication
+      # records did by hand.
+
+      - name: Verify the artifacts
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE: ${{ steps.tag.outputs.release }}
+        run: |
+          set -euo pipefail
+          dist="$PWD/release/dist"
+          stage="bibites-multiverse-$RELEASE"
+          work="$RUNNER_TEMP/verify"
+          rm -rf "$work"; mkdir -p "$work"
+          # The complete archives unpack to about 400 MB between them. Clear
+          # that away however this step ends.
+          trap 'rm -rf "$work"' EXIT
+
+          echo "=== the published checksums cover the published files"
+          ( cd "$dist" && sha256sum -c SHA256SUMS )
+
+          echo "=== every archive's own manifest"
+          for archive in \
+            "bibites-multiverse-$RELEASE-windows-x64.zip" \
+            "bibites-multiverse-$RELEASE-windows-x64-complete.zip" \
+            "bibites-multiverse-$RELEASE-linux-x64.zip" \
+            "bibites-multiverse-$RELEASE-linux-x64-complete.zip"
+          do
+            [ -f "$dist/$archive" ] || { echo "!! missing $archive" >&2; exit 1; }
+            out="$work/${archive%.zip}"
+            mkdir -p "$out"
+            unzip -q "$dist/$archive" -d "$out"
+            ( cd "$out/$stage" && sha256sum -c --quiet MANIFEST.sha256 )
+            echo "    $archive  $(grep -c . "$out/$stage/MANIFEST.sha256") files verified"
+          done
+
+          echo "=== what every archive must contain"
+          for archive in \
+            "bibites-multiverse-$RELEASE-windows-x64.zip" \
+            "bibites-multiverse-$RELEASE-windows-x64-complete.zip" \
+            "bibites-multiverse-$RELEASE-linux-x64.zip" \
+            "bibites-multiverse-$RELEASE-linux-x64-complete.zip"
+          do
+            for member in LICENSE THIRD_PARTY_NOTICES.md public-map.json; do
+              [ "$(unzip -Z1 "$dist/$archive" "$stage/$member")" = "$stage/$member" ] \
+                || { echo "!! $archive has no $member" >&2; exit 1; }
+            done
+          done
+          for archive in \
+            "bibites-multiverse-$RELEASE-windows-x64.zip" \
+            "bibites-multiverse-$RELEASE-windows-x64-complete.zip"
+          do
+            [ "$(unzip -Z1 "$dist/$archive" "$stage/BibitesMultiverseLauncher.exe")" \
+              = "$stage/BibitesMultiverseLauncher.exe" ] \
+              || { echo "!! $archive has no launcher" >&2; exit 1; }
+          done
+          echo "    licence, notices, join configuration, launcher"
+
+          echo "=== the shipped Go binaries record this commit"
+          win="$work/bibites-multiverse-$RELEASE-windows-x64/$stage"
+          lin="$work/bibites-multiverse-$RELEASE-linux-x64/$stage"
+          for bin in "$win/multiverse-sidecar.exe" "$win/BibitesMultiverseLauncher.exe" "$lin/multiverse-sidecar"; do
+            [ -f "$bin" ] || { echo "!! missing $bin" >&2; exit 1; }
+            info="$(go version -m "$bin")"
+            rev="$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+            mod="$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.modified=//p')"
+            [ "$rev" = "$HEAD_SHA" ] \
+              || { echo "!! $(basename "$bin") records $rev, want $HEAD_SHA" >&2; exit 1; }
+            [ "$mod" = false ] \
+              || { echo "!! $(basename "$bin") records vcs.modified=$mod" >&2; exit 1; }
+            echo "    $(basename "$bin")  $rev  modified=$mod"
+          done
+
+          echo "=== the Windows executables are Windows executables"
+          for bin in "$win/multiverse-sidecar.exe" "$win/BibitesMultiverseLauncher.exe"; do
+            file "$bin" | grep -q 'PE32+' \
+              || { echo "!! $(basename "$bin") is not a 64-bit Windows executable:" >&2
+                   file "$bin" >&2; exit 1; }
+          done
+          setup="$dist/bibites-multiverse-$RELEASE-windows-x64-setup.exe"
+          file "$setup" | grep -q 'Nullsoft Installer self-extracting archive' \
+            || { echo "!! the setup is not an NSIS installer:" >&2; file "$setup" >&2; exit 1; }
+          echo "    PE32+ sidecar, PE32+ launcher, Nullsoft setup"
+
+          echo "=== the release page is finished and truthful"
+          python3 - "$dist" "$TAG" "$REPO_SLUG" <<'PY'
+          import hashlib, os, re, sys
+
+          dist, tag, slug = sys.argv[1:4]
+          page = open(os.path.join(dist, 'RELEASE-PAGE.md'), encoding='utf-8').read()
+
+          if '@@' in page:
+              left = sorted(set(re.findall(r'@@[A-Z_]+@@', page)))
+              sys.exit('!! RELEASE-PAGE.md still holds unresolved fields: %s' % left)
+
+          rows = re.findall(
+              r'https://github\.com/([^/\s]+/[^/\s]+)/releases/download/([^/\s]+)/([^)\s]+)\)'
+              r'\s*\|\s*`([0-9a-f]{64})`',
+              page)
+          if len(rows) < 5:
+              sys.exit('!! RELEASE-PAGE.md lists %d download rows with a digest, want at least 5'
+                       % len(rows))
+          for row_slug, row_tag, name, digest in rows:
+              if row_slug != slug:
+                  sys.exit('!! %s points at %s, not %s' % (name, row_slug, slug))
+              if row_tag != tag:
+                  sys.exit('!! %s points at tag %s, not %s' % (name, row_tag, tag))
+              path = os.path.join(dist, name)
+              if not os.path.isfile(path):
+                  sys.exit('!! the page names %s, which was not built' % name)
+              h = hashlib.sha256()
+              with open(path, 'rb') as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b''):
+                      h.update(chunk)
+              if h.hexdigest() != digest:
+                  sys.exit('!! %s: the page says %s, the file is %s'
+                           % (name, digest, h.hexdigest()))
+              print('    %-60s %s' % (name, digest[:16] + '…'))
+          print('    %d download rows, every digest matches the real file' % len(rows))
+          PY
+
+      # The evidence, not the packages: GitHub Releases is the channel for
+      # 200+ MB of archives, and uploading them twice helps nobody. All three
+      # paths are workspace-relative, so the artifact is flat.
+      #
+      # The log is the redacted copy. It still names the workspace and the
+      # release artifacts; it does not name the game directories.
+      - name: Keep the log and the page
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.tag.outputs.tag }}-evidence
+          path: |
+            release/dist/release-build.log
+            release/dist/RELEASE-PAGE.md
+            release/dist/SHA256SUMS
+          if-no-files-found: warn
+          retention-days: 90
+
+      # --------------------------------------------------------------- publish
+
+      - name: Publish
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE: ${{ steps.tag.outputs.release }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --repo "$REPO_SLUG" --verify-tag \
+            --title "Bibites Multiverse $RELEASE" \
+            --notes-file release/dist/RELEASE-PAGE.md --latest \
+            "release/dist/bibites-multiverse-$RELEASE-windows-x64-setup.exe" \
+            "release/dist/bibites-multiverse-$RELEASE-windows-x64-complete.zip" \
+            "release/dist/bibites-multiverse-$RELEASE-windows-x64.zip" \
+            "release/dist/bibites-multiverse-$RELEASE-linux-x64-complete.zip" \
+            "release/dist/bibites-multiverse-$RELEASE-linux-x64.zip" \
+            release/dist/SHA256SUMS
+
+      - name: Verify what was published
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE: ${{ steps.tag.outputs.release }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh release view "$TAG" --repo "$REPO_SLUG" \
+            --json tagName,isDraft,isPrerelease,assets > "$RUNNER_TEMP/release.json"
+          python3 - "$RUNNER_TEMP/release.json" "$TAG" "$RELEASE" <<'PY'
+          import json, sys
+          path, tag, release = sys.argv[1:4]
+          data = json.load(open(path))
+          if data['tagName'] != tag:
+              sys.exit('!! the release is on %s, not %s' % (data['tagName'], tag))
+          if data['isDraft']:
+              sys.exit('!! the release is a draft')
+          if data['isPrerelease']:
+              sys.exit('!! the release is marked as a prerelease')
+          want = {
+              'bibites-multiverse-%s-windows-x64-setup.exe' % release,
+              'bibites-multiverse-%s-windows-x64-complete.zip' % release,
+              'bibites-multiverse-%s-windows-x64.zip' % release,
+              'bibites-multiverse-%s-linux-x64-complete.zip' % release,
+              'bibites-multiverse-%s-linux-x64.zip' % release,
+              'SHA256SUMS',
+          }
+          got = {a['name']: a for a in data['assets']}
+          missing = sorted(want - set(got))
+          if missing:
+              sys.exit('!! the release is missing %s' % ', '.join(missing))
+          for name in sorted(want):
+              state = got[name].get('state')
+              if state != 'uploaded':
+                  sys.exit('!! asset %s is in state %r, not "uploaded"' % (name, state))
+              print('    %-60s %10d bytes  %s' % (name, got[name]['size'], state))
+          extra = sorted(set(got) - want)
+          if extra:
+              print('    note: the release also carries %s' % ', '.join(extra))
+          print('    6 assets, uploaded, not a draft, not a prerelease')
+          PY
+
+          echo "=== this release is the latest"
+          latest="$(gh api "repos/$REPO_SLUG/releases/latest" --jq .tag_name)"
+          [ "$latest" = "$TAG" ] \
+            || { echo "!! /releases/latest is $latest, not $TAG" >&2; exit 1; }
+          headers="$RUNNER_TEMP/latest-headers.txt"
+          curl -sS -o /dev/null -D "$headers" "https://github.com/$REPO_SLUG/releases/latest"
+          tr -d '\r' < "$headers" | grep -Eqi '^HTTP/[0-9.]+ 30[0-9]' \
+            || { echo "!! /releases/latest did not redirect:" >&2; cat "$headers" >&2; exit 1; }
+          tr -d '\r' < "$headers" | grep -Eqi "^location:.*/releases/tag/$TAG$" \
+            || { echo "!! /releases/latest does not redirect to $TAG:" >&2; cat "$headers" >&2; exit 1; }
+          echo "    /releases/latest redirects to /releases/tag/$TAG"
+
+          echo "=== round-trip: download what was published and compare bytes"
+          rt="$RUNNER_TEMP/roundtrip"
+          rm -rf "$rt"; mkdir -p "$rt"
+          gh release download "$TAG" --repo "$REPO_SLUG" --dir "$rt" \
+            --pattern SHA256SUMS \
+            --pattern "bibites-multiverse-$RELEASE-linux-x64.zip"
+          cmp "$rt/SHA256SUMS" release/dist/SHA256SUMS
+          cmp "$rt/bibites-multiverse-$RELEASE-linux-x64.zip" \
+              "release/dist/bibites-multiverse-$RELEASE-linux-x64.zip"
+          ( cd "$rt" && sha256sum -c --ignore-missing SHA256SUMS )
+          rm -rf "$rt"
+          echo "    the published bytes are this build's bytes"
+
+      - name: What is still to do, by hand
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE: ${{ steps.tag.outputs.release }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Published: [\`$TAG\`](https://github.com/$REPO_SLUG/releases/tag/$TAG)"
+            echo
+            echo "**One act remains, and CI does not perform it: the homepage deployment.**"
+            echo
+            echo "The public homepage still advertises the previous release until the archive"
+            echo "binary is rebuilt and redeployed AND \`MULTIVERSE_HOMEPAGE_RELEASE=$RELEASE\` is"
+            echo "set on the host. That deployment takes the relay down for about a minute, must"
+            echo "follow the complete-record restart sequence, and ends in a written receipt."
+            echo "None of that belongs in a workflow."
+            echo
+            echo "The steps are in [\`release/README.md\`](https://github.com/$REPO_SLUG/blob/main/release/README.md)."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
