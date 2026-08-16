@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Bibites Multiverse live map — The whole map, live.">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0b1110"/><stop offset="1" stop-color="#101b18"/></linearGradient>
+<radialGradient id="gg" gradientUnits="userSpaceOnUse" cx="990" cy="46" r="560"><stop offset="0" stop-color="#43a07e" stop-opacity=".34"/><stop offset="1" stop-color="#43a07e" stop-opacity="0"/></radialGradient>
+<radialGradient id="gb" gradientUnits="userSpaceOnUse" cx="70" cy="560" r="520"><stop offset="0" stop-color="#3e7eae" stop-opacity=".22"/><stop offset="1" stop-color="#3e7eae" stop-opacity="0"/></radialGradient>
+<radialGradient id="vig" gradientUnits="userSpaceOnUse" cx="600" cy="315" r="700"><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".5"/></radialGradient>
+<pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0v48" fill="none" stroke="#75bdf2" stroke-opacity=".085" stroke-width="1"/></pattern>
+<pattern id="tick" width="19" height="14" patternUnits="userSpaceOnUse"><path d="M.5 0v6" stroke="#9aafa7" stroke-opacity=".34"/></pattern>
+<pattern id="tick5" width="95" height="14" patternUnits="userSpaceOnUse"><path d="M.5 0v12" stroke="#9aafa7" stroke-opacity=".45"/></pattern>
+<linearGradient id="fade" x1="0" y1="0" x2="0" y2="630" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".8" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<mask id="gm"><rect width="1200" height="630" fill="url(#fade)"/></mask>
+<linearGradient id="pg" x1="700" y1="82" x2="1132" y2="520" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#17241f" stop-opacity=".97"/><stop offset="1" stop-color="#0a1210" stop-opacity=".8"/></linearGradient>
+<radialGradient id="nf" cx=".5" cy=".34" r=".8"><stop offset="0" stop-color="#1d352d"/><stop offset="1" stop-color="#0f1c18"/></radialGradient>
+<radialGradient id="nfd" cx=".5" cy=".34" r=".8"><stop offset="0" stop-color="#1e1517"/><stop offset="1" stop-color="#110d0e"/></radialGradient>
+<filter id="sh" x="-40%" y="-40%" width="180%" height="190%"><feDropShadow dx="0" dy="22" stdDeviation="28" flood-color="#000" flood-opacity=".5"/></filter>
+<filter id="gl" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="glb" x="-140%" y="-160%" width="380%" height="420%"><feGaussianBlur stdDeviation="1.3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<clipPath id="pclip"><rect x="700" y="82" width="432" height="438" rx="24"/></clipPath>
+<rect id="c" width="50" height="40" rx="11"/>
+<rect id="tk" width="32" height="5" rx="2.5"/>
+<style>
+.eb{font:700 16px "Ubuntu Sans Mono","Ubuntu Mono","DejaVu Sans Mono","Liberation Mono",monospace;letter-spacing:3.2px}
+.hl{font:800 96px "Ubuntu Sans","Ubuntu","DejaVu Sans","Liberation Sans",sans-serif;letter-spacing:-4.2px;fill:#eff7f3}
+.sb{font:400 24px "Ubuntu Sans","Ubuntu","DejaVu Sans","Liberation Sans",sans-serif;fill:#9aafa7}
+.mt{font:500 15px "Ubuntu Sans Mono","Ubuntu Mono","DejaVu Sans Mono","Liberation Mono",monospace;letter-spacing:1.3px;fill:#9aafa7}
+.lb{font:700 12px "Ubuntu Sans Mono","Ubuntu Mono","DejaVu Sans Mono","Liberation Mono",monospace;letter-spacing:1.8px;fill:#9aafa7}
+.cp{font:400 12.5px "Ubuntu Sans","Ubuntu","DejaVu Sans",sans-serif;fill:#9aafa7;opacity:.82}
+</style>
+</defs>
+
+<rect width="1200" height="630" fill="url(#bg)"/>
+<rect width="1200" height="630" fill="url(#grid)" mask="url(#gm)"/>
+<rect width="1200" height="630" fill="url(#gg)"/>
+<rect width="1200" height="630" fill="url(#gb)"/>
+<rect width="1200" height="630" fill="url(#vig)"/>
+
+<g stroke="#66e0ac" stroke-opacity=".45" stroke-width="2" fill="none" stroke-linecap="square">
+<path d="M34 60V34h26"/><path d="M1140 34h26v26"/><path d="M34 570v26h26"/><path d="M1166 570v26h-26"/>
+</g>
+
+<g transform="translate(91 86) scale(2.2)"><path fill="#66e0ac" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></g>
+<text class="eb" x="120" y="93" fill="#66e0ac">BIBITES MULTIVERSE<tspan fill="#75bdf2"> · LIVE MAP</tspan></text>
+
+<text class="hl" x="76" y="248">The whole</text>
+<text class="hl" x="76" y="352">map, live.</text>
+<text class="sb" x="78" y="410">Every connected world, real migrations,</text>
+<text class="sb" x="78" y="443">and the species and lineages they carry.</text>
+
+<path d="M76 536h1048" stroke="#294038" stroke-width="1.5"/><path d="M76 536h66" stroke="#75bdf2" stroke-width="2.5"/>
+<text class="mt" x="78" y="566">bibitesmultiverse.com<tspan fill="#75bdf2">/live</tspan></text>
+<text class="mt" x="1124" y="566" text-anchor="end" opacity=".7">PUBLIC · READ-ONLY</text>
+
+<g filter="url(#sh)"><rect x="700" y="82" width="432" height="438" rx="24" fill="url(#pg)" stroke="#294038" stroke-width="1.5"/></g>
+<g clip-path="url(#pclip)">
+  <rect x="700" y="82" width="432" height="438" fill="url(#grid)" opacity=".55"/>
+  <rect x="700" y="82" width="432" height="438" fill="url(#gg)" opacity=".5"/>
+</g>
+
+<circle cx="732" cy="116" r="9" fill="#66e0ac" opacity=".16"/><circle cx="732" cy="116" r="4" fill="#66e0ac"/>
+<text class="lb" x="750" y="120">LIVE MAP · ALL CONNECTED WORLDS</text>
+<rect x="726" y="140" width="380" height="14" fill="url(#tick)"/>
+<rect x="726" y="140" width="380" height="14" fill="url(#tick5)"/>
+
+<g fill="none" stroke="#75bdf2" stroke-width="2" stroke-opacity=".5" stroke-dasharray="4 5" stroke-linecap="round">
+<path d="M776 188h16M842 188h16M908 188h16M974 188h16M1040 188h16"/>
+<path d="M776 244h16M842 244h16M974 244h16M1040 244h16"/>
+<path d="M776 300h16M842 300h16M908 300h16M1040 300h16"/>
+<path d="M776 356h16M908 356h16M974 356h16M1040 356h16"/>
+<path d="M751 208v16M883 208v16M1015 208v16M817 264v16M949 264v16M1081 264v16M751 320v16M883 320v16M1015 320v16"/>
+</g>
+
+<path d="M751 208v8h297v56h33v8" fill="none" stroke="#66e0ac" stroke-width="3" stroke-opacity=".28" stroke-linejoin="round" filter="url(#gl)"/>
+<path d="M751 208v8h297v56h33v8" fill="none" stroke="#66e0ac" stroke-width="2.6" stroke-linejoin="round"/>
+
+<g fill="url(#nf)" stroke="#66e0ac" stroke-width="2">
+<use href="#c" x="726" y="168"/><use href="#c" x="792" y="168"/><use href="#c" x="858" y="168"/><use href="#c" x="924" y="168"/><use href="#c" x="1056" y="168"/>
+<use href="#c" x="726" y="224"/><use href="#c" x="858" y="224"/><use href="#c" x="924" y="224"/><use href="#c" x="990" y="224"/><use href="#c" x="1056" y="224"/>
+<use href="#c" x="726" y="280"/><use href="#c" x="792" y="280"/><use href="#c" x="858" y="280"/><use href="#c" x="990" y="280"/><use href="#c" x="1056" y="280"/>
+<use href="#c" x="726" y="336"/><use href="#c" x="792" y="336"/><use href="#c" x="924" y="336"/><use href="#c" x="990" y="336"/><use href="#c" x="1056" y="336"/>
+</g>
+<g fill="url(#nfd)" stroke="#e86c76" stroke-width="2" stroke-dasharray="5 6">
+<use href="#c" x="990" y="168"/><use href="#c" x="858" y="336"/>
+</g>
+<g fill="#0e1714" stroke="#53625d" stroke-width="2" stroke-dasharray="4 5">
+<use href="#c" x="792" y="224"/><use href="#c" x="924" y="280"/>
+</g>
+
+<g fill="#66e0ac" opacity=".15">
+<use href="#tk" x="735" y="185"/><use href="#tk" x="801" y="185"/><use href="#tk" x="867" y="185"/><use href="#tk" x="933" y="185"/><use href="#tk" x="1065" y="185"/>
+<use href="#tk" x="735" y="241"/><use href="#tk" x="867" y="241"/><use href="#tk" x="933" y="241"/><use href="#tk" x="999" y="241"/><use href="#tk" x="1065" y="241"/>
+<use href="#tk" x="735" y="297"/><use href="#tk" x="801" y="297"/><use href="#tk" x="867" y="297"/><use href="#tk" x="999" y="297"/><use href="#tk" x="1065" y="297"/>
+<use href="#tk" x="735" y="353"/><use href="#tk" x="801" y="353"/><use href="#tk" x="933" y="353"/><use href="#tk" x="999" y="353"/><use href="#tk" x="1065" y="353"/>
+</g>
+<g fill="#66e0ac" opacity=".78">
+<rect x="735" y="185" width="24" height="5" rx="2.5"/><rect x="801" y="185" width="14" height="5" rx="2.5"/><rect x="867" y="185" width="30" height="5" rx="2.5"/><rect x="933" y="185" width="9" height="5" rx="2.5"/><rect x="1065" y="185" width="20" height="5" rx="2.5"/>
+<rect x="735" y="241" width="17" height="5" rx="2.5"/><rect x="867" y="241" width="30" height="5" rx="2.5"/><rect x="933" y="241" width="22" height="5" rx="2.5"/><rect x="999" y="241" width="11" height="5" rx="2.5"/><rect x="1065" y="241" width="27" height="5" rx="2.5"/>
+<rect x="735" y="297" width="9" height="5" rx="2.5"/><rect x="801" y="297" width="25" height="5" rx="2.5"/><rect x="867" y="297" width="16" height="5" rx="2.5"/><rect x="999" y="297" width="30" height="5" rx="2.5"/><rect x="1065" y="297" width="13" height="5" rx="2.5"/>
+<rect x="735" y="353" width="21" height="5" rx="2.5"/><rect x="801" y="353" width="29" height="5" rx="2.5"/><rect x="933" y="353" width="12" height="5" rx="2.5"/><rect x="999" y="353" width="19" height="5" rx="2.5"/><rect x="1065" y="353" width="26" height="5" rx="2.5"/>
+</g>
+
+<g transform="translate(900 216) scale(3.6)"><path fill="#66e0ac" filter="url(#glb)" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></g>
+
+<path d="M726 392h380" stroke="#294038" stroke-width="1.5"/>
+<g fill="none" stroke="#66e0ac" stroke-opacity=".6" stroke-width="2" stroke-linecap="round">
+<path d="M726 440h46"/><path d="M772 416v48M772 416h64M772 464h64"/>
+<path d="M836 404v24M836 404h72M836 428h72"/><path d="M836 452v24M836 452h72M836 476h72"/>
+<path d="M908 404h118M908 428h172M908 452h146M908 476h92"/>
+</g>
+<g fill="#66e0ac"><circle cx="1026" cy="404" r="4"/><circle cx="1080" cy="428" r="4"/><circle cx="1000" cy="476" r="4"/></g>
+<circle cx="1054" cy="452" r="9" fill="#efbd57" opacity=".2"/><circle cx="1054" cy="452" r="4.5" fill="#efbd57"/>
+
+<text class="cp" x="726" y="500">worlds · migrations</text>
+<text class="cp" x="1106" y="500" text-anchor="end">species · lineages</text>
+</svg>

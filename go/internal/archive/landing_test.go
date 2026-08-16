@@ -1,6 +1,8 @@
 package archive
 
 import (
+	"bytes"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +15,8 @@ func TestPublicFrontDoorAndLiveConsoleHaveSeparateJobs(t *testing.T) {
 		"Evolution has a map.", `href="/live"`, `fetch("/api/status"`,
 		"Aug 14–Nov 14, 2026", "Independent worlds", "Real migration", "Shared history",
 		`rel="canonical" href="https://bibitesmultiverse.com/"`,
-		`property="og:image"`, `href="/favicon.svg"`,
+		`property="og:image" content="https://bibitesmultiverse.com/social-card.png"`,
+		`href="/favicon.svg"`,
 	} {
 		if !strings.Contains(landingPageHTML, want) {
 			t.Fatalf("the public front door is missing %q", want)
@@ -155,6 +158,117 @@ func TestLandingPageUsesHomepageConfigOverrides(t *testing.T) {
 	}
 }
 
+// pngMagic is the eight-byte PNG signature. A card that is served as image/png
+// and is not one is worse than no card: the scraper fetches it, fails to decode
+// it, and shows the link with a blank frame.
+const pngMagic = "\x89PNG\r\n\x1a\n"
+
+// The one card size every scraper in the list below crops predictably. The
+// og:image:width and og:image:height tags on each page promise exactly this,
+// and a card that disagrees with its own tags gets letterboxed or dropped.
+const (
+	cardWidth  = 1200
+	cardHeight = 630
+)
+
+// A link preview is read by a scraper, not a browser, and NOT ONE of the
+// platforms this project's links travel through — Facebook, WhatsApp, X,
+// LinkedIn, Discord, Slack, iMessage — renders SVG. This test is the regression
+// guard: every page's card must be raster, must be reachable, and no og: or
+// twitter: image tag may point back at a vector.
+func TestEveryPageAdvertisesARasterSocialCard(t *testing.T) {
+	pages := []struct{ name, html, card, path string }{
+		{"landing", landingPageHTML, "https://bibitesmultiverse.com/social-card.png", "/social-card.png"},
+		{"watch", watchPageHTML, "https://bibitesmultiverse.com/social-card-watch.png", "/social-card-watch.png"},
+		{"live", statusPageHTML, "https://bibitesmultiverse.com/social-card-live.png", "/social-card-live.png"},
+	}
+
+	for _, p := range pages {
+		for _, want := range []string{
+			`<meta property="og:type" content=`,
+			`<meta property="og:site_name" content="Bibites Multiverse">`,
+			`<meta property="og:title" content=`,
+			`<meta property="og:description" content=`,
+			`<meta property="og:url" content="https://bibitesmultiverse.com/`,
+			`<meta property="og:image" content="` + p.card + `">`,
+			`<meta property="og:image:secure_url" content="` + p.card + `">`,
+			`<meta property="og:image:type" content="image/png">`,
+			`<meta property="og:image:width" content="1200">`,
+			`<meta property="og:image:height" content="630">`,
+			`<meta property="og:image:alt" content=`,
+			`<meta name="twitter:card" content="summary_large_image">`,
+			`<meta name="twitter:title" content=`,
+			`<meta name="twitter:description" content=`,
+			`<meta name="twitter:image" content="` + p.card + `">`,
+			`<meta name="twitter:image:alt" content=`,
+		} {
+			if !strings.Contains(p.html, want) {
+				t.Errorf("%s page is missing share metadata %q", p.name, want)
+			}
+		}
+		// Three pages, three cards: a page that borrowed another page's card
+		// would make every link look like the same link.
+		if got := strings.Count(p.html, p.card); got != 3 {
+			t.Errorf("%s page names its own card %d times, want 3 (og:image, og:image:secure_url, twitter:image)",
+				p.name, got)
+		}
+		for _, other := range pages {
+			if other.name != p.name && strings.Contains(p.html, other.card) {
+				t.Errorf("%s page advertises the %s page's card", p.name, other.name)
+			}
+		}
+		// The regression itself: an image tag pointing at a vector.
+		for _, line := range strings.Split(p.html, "\n") {
+			if !strings.Contains(line, "og:image") && !strings.Contains(line, "twitter:image") {
+				continue
+			}
+			if strings.Contains(line, ".svg") {
+				t.Errorf("%s page still offers a vector to link scrapers: %s", p.name, line)
+			}
+		}
+	}
+
+	a := rigShapedArchive(t)
+	h := a.httpHandler()
+	for _, p := range pages {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, p.path, nil))
+		if rr.Code != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", p.path, rr.Code)
+			continue
+		}
+		if got := rr.Header().Get("Content-Type"); got != "image/png" {
+			t.Errorf("GET %s content type = %q, want image/png", p.path, got)
+		}
+		if got := rr.Header().Get("Cache-Control"); !strings.Contains(got, "max-age=") {
+			t.Errorf("GET %s cache control = %q, want a cache lifetime", p.path, got)
+		}
+		body := rr.Body.Bytes()
+		if len(body) == 0 {
+			t.Errorf("GET %s served an empty card", p.path)
+			continue
+		}
+		if !bytes.HasPrefix(body, []byte(pngMagic)) {
+			t.Errorf("GET %s does not begin with the PNG signature", p.path)
+			continue
+		}
+		// The signature alone is not enough. A 1x1 placeholder is a valid PNG,
+		// and the cards were built against placeholders before the artwork
+		// existed — so shipping one is a real way for this to silently regress.
+		// Every scraper crops to 1.91:1 and most reject anything under 200px a
+		// side, so the dimensions are the actual contract, not the bytes.
+		cfg, err := png.DecodeConfig(bytes.NewReader(body))
+		if err != nil {
+			t.Errorf("GET %s did not decode as PNG: %v", p.path, err)
+			continue
+		}
+		if cfg.Width != cardWidth || cfg.Height != cardHeight {
+			t.Errorf("GET %s is %dx%d, want %dx%d — a placeholder or a mis-rendered card",
+				p.path, cfg.Width, cfg.Height, cardWidth, cardHeight)
+		}
+	}
+}
+
 func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 	a := rigShapedArchive(t)
 	ts := httptest.NewServer(a.httpHandler())
@@ -169,6 +283,9 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 		{"/watch", "text/html", "Follow a life in progress.", http.StatusOK},
 		{"/favicon.svg", "image/svg+xml", "#66e0ac", http.StatusOK},
 		{"/social-card.svg", "image/svg+xml", "Evolution", http.StatusOK},
+		{"/social-card.png", "image/png", pngMagic, http.StatusOK},
+		{"/social-card-watch.png", "image/png", pngMagic, http.StatusOK},
+		{"/social-card-live.png", "image/png", pngMagic, http.StatusOK},
 		{"/robots.txt", "text/plain", "Sitemap: https://bibitesmultiverse.com/sitemap.xml", http.StatusOK},
 		{"/sitemap.xml", "application/xml", "https://bibitesmultiverse.com/live", http.StatusOK},
 		{"/nothing-here", "text/html", "This world is not on the map.", http.StatusNotFound},

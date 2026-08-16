@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Bibites Multiverse — Evolution has a map.">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0b1110"/><stop offset="1" stop-color="#101b18"/></linearGradient>
+<radialGradient id="gg" gradientUnits="userSpaceOnUse" cx="990" cy="46" r="560"><stop offset="0" stop-color="#43a07e" stop-opacity=".34"/><stop offset="1" stop-color="#43a07e" stop-opacity="0"/></radialGradient>
+<radialGradient id="gb" gradientUnits="userSpaceOnUse" cx="70" cy="560" r="520"><stop offset="0" stop-color="#3e7eae" stop-opacity=".22"/><stop offset="1" stop-color="#3e7eae" stop-opacity="0"/></radialGradient>
+<radialGradient id="vig" gradientUnits="userSpaceOnUse" cx="600" cy="315" r="700"><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".5"/></radialGradient>
+<pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0v48" fill="none" stroke="#75bdf2" stroke-opacity=".085" stroke-width="1"/></pattern>
+<linearGradient id="fade" x1="0" y1="0" x2="0" y2="630" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".8" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<mask id="gm"><rect width="1200" height="630" fill="url(#fade)"/></mask>
+<linearGradient id="pg" x1="700" y1="82" x2="1132" y2="520" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#17241f" stop-opacity=".97"/><stop offset="1" stop-color="#0a1210" stop-opacity=".8"/></linearGradient>
+<radialGradient id="nf" cx=".5" cy=".36" r=".78"><stop offset="0" stop-color="#1d352d"/><stop offset="1" stop-color="#0f1c18"/></radialGradient>
+<radialGradient id="nfd" cx=".5" cy=".36" r=".78"><stop offset="0" stop-color="#1e1517"/><stop offset="1" stop-color="#110d0e"/></radialGradient>
+<linearGradient id="trail" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#66e0ac" stop-opacity="0"/><stop offset="1" stop-color="#66e0ac" stop-opacity=".9"/></linearGradient>
+<filter id="sh" x="-40%" y="-40%" width="180%" height="190%"><feDropShadow dx="0" dy="22" stdDeviation="28" flood-color="#000" flood-opacity=".5"/></filter>
+<filter id="gl" x="-150%" y="-150%" width="400%" height="400%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<filter id="glb" x="-140%" y="-160%" width="380%" height="420%"><feGaussianBlur stdDeviation="1.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+<clipPath id="pclip"><rect x="700" y="82" width="432" height="438" rx="24"/></clipPath>
+<style>
+.eb{font:700 16px "Ubuntu Sans Mono","Ubuntu Mono","DejaVu Sans Mono","Liberation Mono",monospace;letter-spacing:3.2px}
+.hl{font:800 96px "Ubuntu Sans","Ubuntu","DejaVu Sans","Liberation Sans",sans-serif;letter-spacing:-4.2px;fill:#eff7f3}
+.sb{font:400 24px "Ubuntu Sans","Ubuntu","DejaVu Sans","Liberation Sans",sans-serif;fill:#9aafa7}
+.mt{font:500 15px "Ubuntu Sans Mono","Ubuntu Mono","DejaVu Sans Mono","Liberation Mono",monospace;letter-spacing:1.3px;fill:#9aafa7}
+.lb{font:700 12px "Ubuntu Sans Mono","Ubuntu Mono","DejaVu Sans Mono","Liberation Mono",monospace;letter-spacing:1.8px;fill:#9aafa7}
+.cp{font:400 12.5px "Ubuntu Sans","Ubuntu","DejaVu Sans",sans-serif;fill:#9aafa7;opacity:.82}
+</style>
+</defs>
+
+<rect width="1200" height="630" fill="url(#bg)"/>
+<rect width="1200" height="630" fill="url(#grid)" mask="url(#gm)"/>
+<rect width="1200" height="630" fill="url(#gg)"/>
+<rect width="1200" height="630" fill="url(#gb)"/>
+<rect width="1200" height="630" fill="url(#vig)"/>
+
+<g stroke="#66e0ac" stroke-opacity=".45" stroke-width="2" fill="none" stroke-linecap="square">
+<path d="M34 60V34h26"/><path d="M1140 34h26v26"/><path d="M34 570v26h26"/><path d="M1166 570v26h-26"/>
+</g>
+
+<g transform="translate(91 86) scale(2.2)"><path fill="#66e0ac" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></g>
+<text class="eb" x="120" y="93" fill="#66e0ac">BIBITES MULTIVERSE</text>
+
+<text class="hl" x="76" y="248">Evolution</text>
+<text class="hl" x="76" y="352">has a map.</text>
+<text class="sb" x="78" y="410">Independent worlds. Real migrations.</text>
+<text class="sb" x="78" y="443">Shared evolutionary history.</text>
+
+<path d="M76 536h1048" stroke="#294038" stroke-width="1.5"/><path d="M76 536h66" stroke="#66e0ac" stroke-width="2.5"/>
+<text class="mt" x="78" y="566">bibitesmultiverse.com</text>
+<text class="mt" x="1124" y="566" text-anchor="end" opacity=".7">AUG 14 – NOV 14, 2026</text>
+
+<g filter="url(#sh)"><rect x="700" y="82" width="432" height="438" rx="24" fill="url(#pg)" stroke="#294038" stroke-width="1.5"/></g>
+<g clip-path="url(#pclip)">
+  <rect x="700" y="82" width="432" height="438" fill="url(#grid)" opacity=".55"/>
+  <rect x="700" y="82" width="432" height="438" fill="url(#gg)" opacity=".5"/>
+</g>
+
+<circle cx="732" cy="116" r="9" fill="#66e0ac" opacity=".16"/><circle cx="732" cy="116" r="4" fill="#66e0ac"/>
+<text class="lb" x="750" y="120">LIVE EVOLUTIONARY GEOGRAPHY</text>
+
+<g fill="none" stroke="#75bdf2" stroke-width="2.4" stroke-dasharray="7 9" opacity=".62" stroke-linecap="round">
+<path d="M782 252v116"/><path d="M1050 252v116"/><path d="M830 408h172"/>
+<path d="M954 296c36-8 44-28 48-50"/><path d="M830 388c22-8 36-32 48-58"/>
+</g>
+
+<path d="M830 212h172" stroke="#66e0ac" stroke-width="3" stroke-opacity=".22" filter="url(#gl)" fill="none"/>
+<path d="M830 212h172" stroke="#66e0ac" stroke-width="2.6" fill="none"/>
+<rect x="852" y="210" width="76" height="4" rx="2" fill="url(#trail)"/>
+
+<g stroke-width="2.6">
+<rect x="734" y="172" width="96" height="80" rx="20" fill="url(#nf)" stroke="#66e0ac"/>
+<rect x="1002" y="172" width="96" height="80" rx="20" fill="url(#nf)" stroke="#66e0ac"/>
+<rect x="734" y="368" width="96" height="80" rx="20" fill="url(#nf)" stroke="#66e0ac"/>
+<rect x="1002" y="368" width="96" height="80" rx="20" fill="url(#nfd)" stroke="#e86c76" stroke-opacity=".82" stroke-dasharray="6 7"/>
+<rect x="878" y="278" width="76" height="64" rx="16" fill="#0e1714" stroke="#6b7d77" stroke-dasharray="5 6" stroke-width="2.2"/>
+</g>
+<g fill="none" stroke="#66e0ac" stroke-opacity=".18" stroke-width="1.4">
+<rect x="744" y="182" width="76" height="60" rx="13"/><rect x="1012" y="182" width="76" height="60" rx="13"/><rect x="744" y="378" width="76" height="60" rx="13"/>
+</g>
+
+<g transform="translate(898 408) scale(2.2)" opacity=".6"><path fill="#66e0ac" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/></g>
+<g transform="translate(950 212) scale(4.6)"><path fill="#66e0ac" filter="url(#glb)" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></g>
+
+<text class="cp" x="726" y="500">worlds stay independent</text>
+<text class="cp" x="1106" y="500" text-anchor="end">creatures cross the lanes</text>
+</svg>

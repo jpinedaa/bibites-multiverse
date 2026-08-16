@@ -220,6 +220,26 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = w.Write([]byte(socialCardSVG))
 	})
+	// The raster cards are what a link preview actually shows: no scraper on any
+	// of the messaging platforms renders SVG, so the og:image tags point here and
+	// the vector card above stays what it is — an asset for anything that draws
+	// vectors. See assets.go. Same day-long cache as its neighbours: the bytes
+	// change only when the binary does.
+	mux.HandleFunc("/social-card.png", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(socialCardPNG)
+	})
+	mux.HandleFunc("/social-card-watch.png", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(socialCardWatchPNG)
+	})
+	mux.HandleFunc("/social-card-live.png", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(socialCardLivePNG)
+	})
 	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=3600")
@@ -375,6 +395,22 @@ const statusPageHTML = `<!doctype html>
 <meta name="theme-color" content="#0b1110">
 <link rel="canonical" href="https://bibitesmultiverse.com/live">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Bibites Multiverse">
+<meta property="og:title" content="Bibites Multiverse — Live Map">
+<meta property="og:description" content="The live map: connected worlds, the migrations between them, living species, lineages, and reported settings.">
+<meta property="og:url" content="https://bibitesmultiverse.com/live">
+<meta property="og:image" content="https://bibitesmultiverse.com/social-card-live.png">
+<meta property="og:image:secure_url" content="https://bibitesmultiverse.com/social-card-live.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The live Bibites Multiverse map: worlds drawn on their grid, populations inside them, and migration lanes arcing between them.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Bibites Multiverse — Live Map">
+<meta name="twitter:description" content="The live map: connected worlds, the migrations between them, living species, lineages, and reported settings.">
+<meta name="twitter:image" content="https://bibitesmultiverse.com/social-card-live.png">
+<meta name="twitter:image:alt" content="The live Bibites Multiverse map: worlds drawn on their grid, populations inside them, and migration lanes arcing between them.">
 <style>
 :root{color-scheme:dark;--bg:#0b1110;--panel:#111a18;--panel2:#16221f;--line:#294038;
 --text:#eff7f3;--dim:#9aafa7;--live:#66e0ac;--dark:#e86c76;--hole:#53625d;

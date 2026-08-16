@@ -24,11 +24,17 @@ const landingPageTemplate = `<!doctype html>
 <meta property="og:title" content="Bibites Multiverse — Evolution has a map">
 <meta property="og:description" content="Independent worlds. Real migrations. Shared evolutionary history.">
 <meta property="og:url" content="https://bibitesmultiverse.com/">
-<meta property="og:image" content="https://bibitesmultiverse.com/social-card.svg">
+<meta property="og:image" content="https://bibitesmultiverse.com/social-card.png">
+<meta property="og:image:secure_url" content="https://bibitesmultiverse.com/social-card.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A dark map of independent Bibites worlds with migration lanes drawn between them, under the line Evolution has a map.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Bibites Multiverse — Evolution has a map">
 <meta name="twitter:description" content="Independent worlds. Real migrations. Shared evolutionary history.">
-<meta name="twitter:image" content="https://bibitesmultiverse.com/social-card.svg">
+<meta name="twitter:image" content="https://bibitesmultiverse.com/social-card.png">
+<meta name="twitter:image:alt" content="A dark map of independent Bibites worlds with migration lanes drawn between them, under the line Evolution has a map.">
 <script>
 if (/^#(?:map|species|settings|tree)$/.test(location.hash)) {
   location.replace("/live" + location.hash);

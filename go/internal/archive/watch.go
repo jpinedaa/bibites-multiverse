@@ -13,6 +13,22 @@ const watchPageHTML = `<!doctype html>
 <meta name="theme-color" content="#0b1110">
 <link rel="canonical" href="https://bibitesmultiverse.com/watch">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Bibites Multiverse">
+<meta property="og:title" content="Bibites Multiverse — Watch Broadcast">
+<meta property="og:description" content="Follow a life in progress. The shared camera stays on the youngest living Bibite until it dies or leaves the world.">
+<meta property="og:url" content="https://bibitesmultiverse.com/watch">
+<meta property="og:image" content="https://bibitesmultiverse.com/social-card-watch.png">
+<meta property="og:image:secure_url" content="https://bibitesmultiverse.com/social-card-watch.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The shared broadcast camera held on one young Bibite swimming through its living world.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Bibites Multiverse — Watch Broadcast">
+<meta name="twitter:description" content="Follow a life in progress. The shared camera stays on the youngest living Bibite until it dies or leaves the world.">
+<meta name="twitter:image" content="https://bibitesmultiverse.com/social-card-watch.png">
+<meta name="twitter:image:alt" content="The shared broadcast camera held on one young Bibite swimming through its living world.">
 <style>
 :root{color-scheme:dark;--bg:#0b1110;--panel:#111a18;--panel2:#16221f;--line:#294038;
 --text:#eff7f3;--dim:#9aafa7;--green:#66e0ac;--blue:#75bdf2;--gold:#efbd57;

@@ -105,6 +105,34 @@ func TestPageHasThreeTabsOverOnePoll(t *testing.T) {
 	}
 }
 
+// TestTheLiveMapSharesAsItself is the console's half of the link-preview
+// contract. /live is the page people paste into a chat, and a scraper reads
+// none of the JavaScript above: what it sees is the head block, so the head
+// block has to describe the map, name the map's own card, and agree with the
+// canonical URL the page already declares.
+func TestTheLiveMapSharesAsItself(t *testing.T) {
+	page := statusPageHTML
+	for _, want := range []string{
+		`<link rel="canonical" href="https://bibitesmultiverse.com/live">`,
+		`<meta property="og:url" content="https://bibitesmultiverse.com/live">`,
+		`<meta property="og:title" content="Bibites Multiverse — Live Map">`,
+		`<meta property="og:image" content="https://bibitesmultiverse.com/social-card-live.png">`,
+		`<meta property="og:image:width" content="1200">`,
+		`<meta property="og:image:height" content="630">`,
+		`<meta property="og:image:alt" content="The live Bibites Multiverse map:`,
+		`<meta name="twitter:card" content="summary_large_image">`,
+		`<meta name="twitter:image" content="https://bibitesmultiverse.com/social-card-live.png">`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the live console is missing share metadata %q", want)
+		}
+	}
+	// The console describes itself, not the front door.
+	if strings.Contains(page, `content="https://bibitesmultiverse.com/social-card.png"`) {
+		t.Error("the live console shares the front door's card instead of its own")
+	}
+}
+
 // TestTheLiveMapCanFillTheViewport pins the fullscreen control and its scaling
 // rule. Fullscreen changes presentation only: the same SVG viewBox must fit the
 // available rectangle without a minimum width or a new data request.

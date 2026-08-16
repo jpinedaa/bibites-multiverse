@@ -31,6 +31,12 @@ func TestWatchPageIsOneSharedReadOnlyBroadcast(t *testing.T) {
 		"This deployment has not named the world on camera.",
 		"The world on camera is not on the map right now.",
 		"The map is not answering, so this page cannot name the world.",
+		// A shared link has to say it is a broadcast, and say it in this page's
+		// own voice rather than the front door's.
+		`<meta property="og:url" content="https://bibitesmultiverse.com/watch">`,
+		`<meta property="og:image" content="https://bibitesmultiverse.com/social-card-watch.png">`,
+		`<meta property="og:image:alt" content="The shared broadcast camera`,
+		`content="Follow a life in progress.`,
 	} {
 		if !strings.Contains(watchPageHTML, want) {
 			t.Fatalf("watch page does not contain %q", want)
