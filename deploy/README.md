@@ -135,6 +135,9 @@ sudo /home/<user>/multiverse-kit/provision.sh
 Read every warning from the dry run.
 Do not request a production certificate until public DNS is correct.
 
+Later deployments stage a new kit beside this one. "Changes to a live service", "What a deployment
+leaves on the host", says which copies to keep and when to remove the rest.
+
 ## First verification
 
 Run these checks before you issue a participant credential:
@@ -411,6 +414,36 @@ Use the provisioning verification phase after any host change.
 Use `health-snapshot.sh --watch` across the change window.
 The verification phase reports that each check passed, and a service can be measurably worse with
 every check still passing.
+
+### What a deployment leaves on the host
+
+Each deployment stages a kit copy, replaces binaries, and can leave a copy of a file it edited.
+These copies are rollback references. They are useful for one generation and clutter after that.
+This is host housekeeping. It is not `MV_RETENTION`, which governs participant data.
+
+Keep on the host:
+
+- The installed kit in `/opt/multiverse/deploy/`, and the staging copy it was installed from.
+- The previous kit staging copy.
+- The installed binaries in `/opt/multiverse/bin/`, and the previous binaries beside them.
+- The staging directory that `ship.sh` writes, `MV_STAGE_DIR`. Each run overwrites it, so it always
+  holds the current artifacts and never accumulates.
+- The last two `.bak-*` copies of any file under `/etc/multiverse/`. Nothing in this kit writes
+  those; an operator makes them by hand, and only the operator removes them.
+
+Remove after the next deployment succeeds:
+
+- Every kit staging copy older than the previous one.
+- Every binary copy older than the previous one.
+- Every `.bak-*` copy beyond the last two.
+
+Remove nothing while a deployment record is still open. A record that is open still names its
+rollback artifacts.
+
+A deploy script belongs in this repository, not in a home directory. A script under `/home/<user>`
+is unversioned, unreviewed, and gone when the instance is replaced. If a deployment needs a step
+this kit does not have, add the step here and ship it. The kit copy under `/home/<user>` that
+"Install a host" creates is not a deploy script; it is the payload that `provision.sh` installs.
 
 ## Public and private records
 
