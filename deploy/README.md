@@ -30,6 +30,7 @@ Keep these records outside the public repository:
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
+| `www/announcements/` | The announcements page nginx serves from disk, and the seed for its notices file. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
 | `RESTART-POLICY.md` | Generic restart rules and participant effects. |
 | `WIND-DOWN.md` | Public service commitments for a planned ending. |
@@ -253,6 +254,63 @@ Use `ANNOUNCEMENT.md` as the communication policy.
 Use `WIND-DOWN.md` as the public commitment.
 Keep channel-specific outreach records in private operations storage.
 
+## Post an announcement
+
+`https://<MV_DOMAIN>/announcements/` is the participant-facing notice channel.
+nginx serves it from `/var/www/announcements/` on disk, and not from the archive.
+That is deliberate: a notice usually announces that the archive is about to stop, and an archive
+route would take the notice offline for exactly the window it describes.
+The page keeps answering while the archive is stopped, replaying its ledger, or failed.
+It stops only when the whole host does.
+
+The page is two files with two different owners:
+
+| Path | Owner | Overwritten by `provision.sh` |
+|---|---|---|
+| `/var/www/announcements/index.html` | The kit. Rendered from `www/announcements/index.html`. | Yes, on every `nginxfront` run. |
+| `/var/www/announcements/notices.html` | The operator. | No. It is seeded once, only when it is absent. |
+
+nginx joins them with a server-side include at request time.
+Posting a notice writes one file. It needs no rebuild, no restart, and no reload.
+
+One notice is one `<article class="notice">` fragment. Newest first, so post at the top:
+
+```sh
+sudo sh -c 'cat - /var/www/announcements/notices.html > /var/www/announcements/.notices.new \
+  && chmod 0644 /var/www/announcements/.notices.new \
+  && mv /var/www/announcements/.notices.new /var/www/announcements/notices.html' <<'EOF'
+<article class="notice" id="n-2026-01-01-example">
+  <p class="when"><time datetime="2026-01-01T09:00Z">2026-01-01 09:00 UTC</time> · Planned maintenance</p>
+  <h2>One short headline</h2>
+  <p>The affected service, the window, the expected duration, and the participant action.</p>
+  <!-- followup:2026-01-01-example -->
+</article>
+EOF
+```
+
+Keep the `followup` comment. It is the anchor for the line you add after the event:
+
+```sh
+sudo sed -i 's|<!-- followup:2026-01-01-example -->|<p class="followup"><b>Update 2026-01-01 09:25 UTC.</b> Service returned at 09:19 UTC. The outage lasted 11 minutes.</p>|' \
+  /var/www/announcements/notices.html
+```
+
+Check the published result before you stop:
+
+```sh
+curl -fsS https://<MV_DOMAIN>/announcements/ | grep -c '<article class="notice"'
+```
+
+The page caches for 30 seconds, so a correction is visible within that.
+
+`ANNOUNCEMENT.md` governs what a notice may say.
+State the affected service, the expected duration, and the participant action.
+Never imply that archive records missed during an outage can be reconstructed.
+Never put a join string, an alert URL, a private address, or a resource identifier in a notice.
+
+Record the date, channel, audience, and exact public link of each notice in private operations
+storage, as `ANNOUNCEMENT.md` requires.
+
 ## Changes to a live service
 
 Run `provision.sh` again to apply a changed parameter file or deployment kit.
@@ -261,7 +319,7 @@ The script installs files, but it does not make every restart decision for you.
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
 
-Use `test-front-door.sh` after an nginx template change.
+Use `test-front-door.sh` after an nginx template or announcements-page change.
 Use `test-units.sh` after a systemd unit change.
 Use `test-monitor.sh` after a `monitor.sh` change.
 Use the provisioning verification phase after any host change.
