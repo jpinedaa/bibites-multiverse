@@ -3,8 +3,8 @@
 **Everything a GitHub release needs, built on the owner's own machine and published from a tag.**
 Nothing in this directory publishes anything: `make-release.sh` produces artifacts and text into
 `dist/`. Publication is `.github/workflows/release.yml`, which a `v*` tag starts on the owner's
-self-hosted runner. The homepage deployment after it is an operator act and is not automated at
-all.
+self-hosted runner. The public homepage follows the newest release on its own, and is part of
+neither.
 
 The channel is **GitHub Releases** (D25). It pushes nothing to anybody, which is why this project
 moves its fleet by publication — a release, a matrix row, and a relay-side minimum wire version
@@ -27,7 +27,7 @@ raised only after the release that satisfies it exists.
 | `kit/uninstall-bibites-multiverse.sh` | Removes what the Linux installer recorded, hash-checked, and nothing else |
 | `kit/README-linux.md` | The page inside the Linux archive, staged into it as `README.md` |
 | `RELEASE-PAGE.md` | The release page's text, with `@@…@@` fields the build fills in |
-| `make-release.sh` | Builds both platform packages, the Windows setup, `SHA256SUMS`, and the release page |
+| `make-release.sh` | Builds both platform packages, the Windows setup, the two stable-named copies the homepage links, `SHA256SUMS`, and the release page |
 | `bump-version.sh` | The release string's single surface. `--print` prints it, `--check` asserts every place that names it agrees, and `<version>` rewrites them all from an explicit allowlist |
 | `check-drift.sh` | The half of `make-release.sh` that needs no game: is this tree still the build that was tested, and does the mod version agree everywhere it is stated |
 | `check-nsis.sh` | Compiles `windows-installer.nsi` against a stub payload, in about two seconds and with no game file |
@@ -328,7 +328,7 @@ used to be done by eye turned into refusals:
    `--allow-dirty` is never used.
 3. It runs `release/check-drift.sh`, then `make-release.sh` with both game directories, tee-ing the
    build to a log.
-4. It runs `release/verify-build-log.sh`, which refuses a log missing any of the twenty success
+4. It runs `release/verify-build-log.sh`, which refuses a log missing any of the twenty-one success
    lines or carrying one of the three silent downgrades. Two of the build's strongest checks
    degrade to a note when an input is unreadable; under a dedicated runner user that is exactly how
    a check stops running for months without anybody noticing.
@@ -338,10 +338,12 @@ used to be done by eye turned into refusals:
    the shipped zips, and every download row in `RELEASE-PAGE.md` re-hashed against the real file.
 6. It uploads the build log, `RELEASE-PAGE.md`, and `SHA256SUMS` as workflow artifacts — never the
    packages, because GitHub Releases is their channel.
-7. It publishes with the same `gh release create … --verify-tag … --latest` command and the same
-   six assets the last two releases used, then verifies what it published: six assets uploaded, not
-   a draft, `releases/latest` resolving to the tag, and a round trip that downloads two assets and
-   compares them byte for byte against the local build.
+7. It publishes with the same `gh release create … --verify-tag … --latest` command, now carrying
+   eight assets — the six the last releases used, plus the two stable-named copies the homepage
+   links — then verifies what it published: eight assets uploaded, not a draft, `releases/latest`
+   resolving to the tag, `/releases/latest/download/` resolving to this tag for both stable names,
+   and a round trip that downloads two assets and compares them byte for byte against the local
+   build.
 
 **What is still yours, afterwards.** Read the published page as a stranger would, in a browser, and
 check the three things that matter most about its shape: the checksum step is **above** the
@@ -354,16 +356,19 @@ Also open each participant archive and probe the Windows setup. Make sure that `
 contains the intended enrollment and relay addresses. It must not contain a world identity or
 secret.
 
-**The homepage is a separate act, and CI never performs it.** `bibitesmultiverse.com` renders the
-release number from the archive service. The compiled default lives in
-`go/internal/archive/landing.go`, and the service environment's `MULTIVERSE_HOMEPAGE_RELEASE`
-(written from `MV_HOMEPAGE_RELEASE` in the deployment configuration) **overrides it**. So the
-published page names the new release only after the archive binary is rebuilt and redeployed
-**and** the host's value is the new release. That deployment takes the relay down for about a
-minute, has to follow the complete-record restart sequence, and ends in a written receipt — which
-is why it stays an operator step in the private operations runbook rather than a workflow. Open the
-homepage afterwards and check that the Windows button, the Linux button, and the tag link all
-resolve to the new release.
+**The homepage needs nothing. No deployment is part of a release.** `bibitesmultiverse.com` names
+no release: its two download buttons and its checksum link address
+`https://github.com/jpinedaa/bibites-multiverse/releases/latest…`, which GitHub answers out of
+whichever release is newest. `make-release.sh` publishes a byte-for-byte copy of the Windows setup
+and the Linux complete package under the two names that never change —
+`bibites-multiverse-windows-x64-setup.exe` and `bibites-multiverse-linux-x64-complete.zip` — and
+the publish step uploads them, because `/releases/latest/download/<name>` only works for an asset
+whose name is the same in every release. The moment the release is published, the homepage is
+serving it. Open it afterwards and press both buttons, because a broken link is still a broken
+link — but there is nothing to rebuild, no host value to set, and no relay outage to schedule.
+
+A host whose `/etc/multiverse/deploy.env` still carries an `MV_HOMEPAGE_RELEASE=` line is fine:
+nothing reads it any more. Delete it at the next deployment that happens for some other reason.
 
 **And one more, if the repository is ever made private:** the page's documentation links resolve
 only for somebody who can read the repository. Keep it public, or the four participant pages have
@@ -538,20 +543,25 @@ unavailable. It is how the last two releases were published, before the workflow
    `git tag v0.2.6 && git push origin v0.2.6`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 5. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
-   each complete archive that you built, the Windows setup, and `SHA256SUMS` — the same six assets
-   the workflow publishes:
+   each complete archive that you built, the Windows setup, the two stable-named copies, and
+   `SHA256SUMS` — the same eight assets the workflow publishes. **The two unversioned names are not
+   optional:** the homepage links them through `/releases/latest/download/`, so a release published
+   without them breaks both download buttons, and the version globs below do not match them.
    ```sh
    gh release create v0.2.6 \
        release/dist/bibites-multiverse-0.2.6-*.zip \
        release/dist/bibites-multiverse-0.2.6-*.exe \
+       release/dist/bibites-multiverse-windows-x64-setup.exe \
+       release/dist/bibites-multiverse-linux-x64-complete.zip \
        release/dist/SHA256SUMS \
        --repo jpinedaa/bibites-multiverse --verify-tag --latest \
        --title "Bibites Multiverse 0.2.6" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 6. **Verify what you published**, because nothing else will: `sha256sum -c SHA256SUMS`, each
-   archive against its own `MANIFEST.sha256`, and a `gh release download` round trip compared with
-   the local build. Then the by-hand reading above, and the homepage act after it.
+   archive against its own `MANIFEST.sha256`, a `gh release download` round trip compared with the
+   local build, and `curl -sI …/releases/latest/download/bibites-multiverse-windows-x64-setup.exe`
+   redirecting to this tag. Then the by-hand reading above; the homepage follows on its own.
 
 The version literals in steps 4 and 5 are the current release, and `release/bump-version.sh` moves
 them with every bump — they are on its allowlist by exactly the shape written here. Reword those

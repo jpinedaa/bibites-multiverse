@@ -97,7 +97,6 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_STREAM_PUBLISH_CIDR:=}"
 : "${MV_STREAM_HLS_BACKEND:=127.0.0.1:8888}"
 : "${MV_ARCHIVE_PEER_ID:=archive-main}"
-: "${MV_HOMEPAGE_RELEASE:=0.2.6}"
 : "${MV_HOMEPAGE_REPO:=jpinedaa/bibites-multiverse}"
 : "${MV_HOMEPAGE_GAME_VERSION:=0.6.3.1}"
 : "${MV_ACME_MODE:=webroot}"
@@ -475,8 +474,11 @@ MULTIVERSE_ARCHIVE_DENY_LIST=/etc/multiverse/deny-list
 # announces. Empty names no world, and both pages then say so. Display only: it
 # changes no placement, no routing and no record. See deploy.env.example.
 MULTIVERSE_BROADCAST_PEER=${MV_BROADCAST_PEER_ID:-}
-# Homepage links on the landing page, for the current release's file names.
-MULTIVERSE_HOMEPAGE_RELEASE=$MV_HOMEPAGE_RELEASE
+# Homepage links on the landing page. The release is NOT one of these values and
+# must not become one again: the page's download buttons address GitHub's
+# /releases/latest, so the newest published release is what a visitor gets, and
+# no deployment is part of a release. Only the repository and the game label are
+# rendered here.
 MULTIVERSE_HOMEPAGE_REPO=${MV_HOMEPAGE_REPO:-}
 MULTIVERSE_HOMEPAGE_GAME_VERSION=${MV_HOMEPAGE_GAME_VERSION:-}
 MULTIVERSE_LOG_FILE=$MV_LOGDIR/archive.log

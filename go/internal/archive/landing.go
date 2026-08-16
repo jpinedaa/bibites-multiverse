@@ -1,9 +1,6 @@
 package archive
 
-import (
-	"fmt"
-	"strings"
-)
+import "strings"
 
 // The public front door and the operator console are deliberately separate.
 // The front door answers a first visitor's questions and samples the same
@@ -220,7 +217,7 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 
   <section class="shell section" id="join">
     <div class="joinbox">
-      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package for release __HOMEPAGE_RELEASE__ include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
+      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
       <aside class="trust"><h3>Clear boundaries</h3><ul><li>Your world and saves stay on your machine.</li><li>Automatic enrollment creates the secret on your machine.</li><li>The public page is read-only.</li><li>TLS protects traffic to the relay.</li><li>Published world data is explained before you join.</li><li>The shared run ends November 14 unless extended by announcement.</li></ul></aside>
     </div>
   </section>
@@ -267,20 +264,19 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 </html>`
 
 var landingPageHTML = renderLandingPage(Config{
-	HomepageRelease:     defaultHomepageRelease(),
 	HomepageRepo:        defaultHomepageRepo(),
 	HomepageGameVersion: defaultHomepageGameVersion(),
 })
 
+// THE DOWNLOAD LINKS NAME NO RELEASE, ON PURPOSE. GitHub answers
+// /releases/latest/download/<name> out of whichever release is newest, and
+// release/make-release.sh publishes a stable-named copy of each of the two
+// packages this page links for exactly that reason. So publishing a release
+// moves this page on its own: no rebuild, no host environment value, and no
+// archive deployment is part of a release any more. The release number is not
+// rendered here either — the page the third button opens carries it, and it is
+// correct there by construction.
 func renderLandingPage(cfg Config) string {
-	release := strings.TrimSpace(cfg.HomepageRelease)
-	if release == "" {
-		release = defaultHomepageRelease()
-	}
-	release = strings.TrimPrefix(release, "v")
-	if release == "" {
-		release = defaultHomepageRelease()
-	}
 	gameVersion := strings.TrimSpace(cfg.HomepageGameVersion)
 	if gameVersion == "" {
 		gameVersion = defaultHomepageGameVersion()
@@ -289,19 +285,15 @@ func renderLandingPage(cfg Config) string {
 	if repo == "" {
 		repo = defaultHomepageRepo()
 	}
-	releaseTag := "v" + release
-	baseURL := "https://github.com/" + repo
-	artifactBase := fmt.Sprintf("bibites-multiverse-%s", release)
+	latest := "https://github.com/" + repo + "/releases/latest"
 	return strings.NewReplacer(
-		"__HOMEPAGE_RELEASE__", release,
 		"__HOMEPAGE_GAME_VERSION__", gameVersion,
-		"__HOMEPAGE_WINDOWS__", baseURL+"/releases/download/"+releaseTag+"/"+artifactBase+"-windows-x64-setup.exe",
-		"__HOMEPAGE_LINUX__", baseURL+"/releases/download/"+releaseTag+"/"+artifactBase+"-linux-x64-complete.zip",
-		"__HOMEPAGE_TAG__", baseURL+"/releases/tag/"+releaseTag,
+		"__HOMEPAGE_WINDOWS__", latest+"/download/bibites-multiverse-windows-x64-setup.exe",
+		"__HOMEPAGE_LINUX__", latest+"/download/bibites-multiverse-linux-x64-complete.zip",
+		"__HOMEPAGE_TAG__", latest,
 	).Replace(landingPageTemplate)
 }
 
-func defaultHomepageRelease() string     { return "0.2.6" }
 func defaultHomepageRepo() string        { return "jpinedaa/bibites-multiverse" }
 func defaultHomepageGameVersion() string { return "0.6.3.1" }
 

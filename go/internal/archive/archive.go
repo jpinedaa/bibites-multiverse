@@ -135,12 +135,10 @@ type Config struct {
 	// It changes no placement, no routing and no record; it is display only.
 	BroadcastPeerID string
 
-	// HomepageRelease is the string used for the download links and package card
-	// on the landing page. The tag value is "v<Release>"; this field is the
-	// release suffix without the leading "v".
-	HomepageRelease string
 	// HomepageRepo is the GitHub organization and repository for links from the
-	// landing page.
+	// landing page. The landing page's download links carry no release number:
+	// they address GitHub's /releases/latest, so the newest published release is
+	// what a visitor gets without anything here being changed or redeployed.
 	HomepageRepo string
 	// HomepageGameVersion is the game build label shown in the landing copy.
 	HomepageGameVersion string
@@ -188,9 +186,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MetricsInterval <= 0 {
 		c.MetricsInterval = time.Minute
-	}
-	if c.HomepageRelease == "" {
-		c.HomepageRelease = defaultHomepageRelease()
 	}
 	if c.HomepageRepo == "" {
 		c.HomepageRepo = defaultHomepageRepo()

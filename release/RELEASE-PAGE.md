@@ -25,7 +25,7 @@ issue, screenshot, or log.
 | Linux add-on | [`@@LINUX_ZIP_NAME@@`](https://github.com/@@REPO@@/releases/download/@@TAG@@/@@LINUX_ZIP_NAME@@) | `@@LINUX_ZIP_SHA256@@` |
 | All | [`SHA256SUMS`](https://github.com/@@REPO@@/releases/download/@@TAG@@/SHA256SUMS) | Published checksums |
 
-## Windows
+@@STABLE_NAME_NOTE@@## Windows
 
 1. Download the **Windows setup** executable (recommended).
 2. Make sure that its SHA-256 matches the table.

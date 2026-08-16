@@ -52,11 +52,14 @@
 # The token is bound to the three `gh` steps only, and the checkout does not
 # persist it into .git/config.
 #
-# The homepage deployment is NOT here and must never be. It is a separate act
-# on the hosting side: it takes the relay down for about a minute, it must
-# follow the complete-record restart sequence, and it ends in a written
-# receipt. The last step of this job prints that reminder and links the
-# runbook.
+# The public homepage needs nothing from this workflow and nothing from an
+# operator. Its two download buttons address
+# /releases/latest/download/<stable name>, so publishing below is what moves
+# them. That only works because make-release.sh publishes a copy of the Windows
+# setup and the Linux complete package under names that carry no version, and
+# because this job uploads those copies with the other assets — which is why the
+# publish step names eight files and the verification below refuses a release
+# that is missing either stable name.
 name: release
 
 on:
@@ -637,6 +640,8 @@ jobs:
             "release/dist/bibites-multiverse-$RELEASE-windows-x64.zip" \
             "release/dist/bibites-multiverse-$RELEASE-linux-x64-complete.zip" \
             "release/dist/bibites-multiverse-$RELEASE-linux-x64.zip" \
+            release/dist/bibites-multiverse-windows-x64-setup.exe \
+            release/dist/bibites-multiverse-linux-x64-complete.zip \
             release/dist/SHA256SUMS
 
       - name: Verify what was published
@@ -665,6 +670,11 @@ jobs:
               'bibites-multiverse-%s-windows-x64.zip' % release,
               'bibites-multiverse-%s-linux-x64-complete.zip' % release,
               'bibites-multiverse-%s-linux-x64.zip' % release,
+              # The two names that carry no version. The homepage links these
+              # through /releases/latest/download/, so a release published
+              # without them silently breaks both download buttons.
+              'bibites-multiverse-windows-x64-setup.exe',
+              'bibites-multiverse-linux-x64-complete.zip',
               'SHA256SUMS',
           }
           got = {a['name']: a for a in data['assets']}
@@ -679,7 +689,7 @@ jobs:
           extra = sorted(set(got) - want)
           if extra:
               print('    note: the release also carries %s' % ', '.join(extra))
-          print('    6 assets, uploaded, not a draft, not a prerelease')
+          print('    %d assets, uploaded, not a draft, not a prerelease' % len(want))
           PY
 
           echo "=== this release is the latest"
@@ -693,6 +703,24 @@ jobs:
           tr -d '\r' < "$headers" | grep -Eqi "^location:.*/releases/tag/$TAG$" \
             || { echo "!! /releases/latest does not redirect to $TAG:" >&2; cat "$headers" >&2; exit 1; }
           echo "    /releases/latest redirects to /releases/tag/$TAG"
+
+          echo "=== the homepage's two download links resolve to this release"
+          # This is the whole homepage mechanism, tested against the real
+          # service rather than assumed: the archive renders these two
+          # addresses and nothing else, and GitHub has to answer them out of
+          # this tag. A failure here means the buttons on bibitesmultiverse.com
+          # are broken right now.
+          for name in bibites-multiverse-windows-x64-setup.exe \
+                      bibites-multiverse-linux-x64-complete.zip
+          do
+            h="$RUNNER_TEMP/stable-$name.txt"
+            curl -sS -o /dev/null -D "$h" \
+              "https://github.com/$REPO_SLUG/releases/latest/download/$name"
+            tr -d '\r' < "$h" | grep -Eqi "^location:.*/releases/download/$TAG/$name\$" \
+              || { echo "!! /releases/latest/download/$name does not resolve to $TAG:" >&2
+                   cat "$h" >&2; exit 1; }
+            echo "    /releases/latest/download/$name -> $TAG"
+          done
 
           echo "=== round-trip: download what was published and compare bytes"
           rt="$RUNNER_TEMP/roundtrip"
@@ -716,13 +744,13 @@ jobs:
           {
             echo "### Published: [\`$TAG\`](https://github.com/$REPO_SLUG/releases/tag/$TAG)"
             echo
-            echo "**One act remains, and CI does not perform it: the homepage deployment.**"
+            echo "**The public homepage already points at this release.** Its two download"
+            echo "buttons address \`/releases/latest/download/\` under names that carry no"
+            echo "version, and the step above proved both of them resolve to \`$TAG\`. No archive"
+            echo "rebuild, no host environment value and no deployment is part of a release."
             echo
-            echo "The public homepage still advertises the previous release until the archive"
-            echo "binary is rebuilt and redeployed AND \`MULTIVERSE_HOMEPAGE_RELEASE=$RELEASE\` is"
-            echo "set on the host. That deployment takes the relay down for about a minute, must"
-            echo "follow the complete-record restart sequence, and ends in a written receipt."
-            echo "None of that belongs in a workflow."
-            echo
-            echo "The steps are in [\`release/README.md\`](https://github.com/$REPO_SLUG/blob/main/release/README.md)."
+            echo "What is left is reading, not deploying: open the published page as a stranger"
+            echo "would, open [the homepage](https://bibitesmultiverse.com/), and press both"
+            echo "download buttons. The by-hand list is in"
+            echo "[\`release/README.md\`](https://github.com/$REPO_SLUG/blob/main/release/README.md)."
           } | tee -a "$GITHUB_STEP_SUMMARY"
