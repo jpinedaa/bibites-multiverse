@@ -33,7 +33,7 @@ POLL_SECONDS="${BIBITES_SPOT_POLL_SECONDS:-5}"
 # Liveness breadcrumb. The host sampler reads this, so a watcher that stops
 # answering stops being invisible. Absence of a fresh timestamp here is the
 # signal the old version could not produce.
-STATE_DIR="${BIBITES_SPOT_STATE_DIR:-/run/bibites}"
+STATE_DIR="${BIBITES_SPOT_STATE_DIR:-/run/bibites-ops}"
 STATE_FILE="$STATE_DIR/spot-watch.state"
 
 token=''

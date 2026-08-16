@@ -39,7 +39,13 @@ MIN_UPTIME_SECONDS="${BIBITES_RECYCLE_MIN_UPTIME:-3600}"
 # is considered. The setter waits for the mod to report connected and then sends
 # the scale twice, twenty seconds apart.
 COOLOFF_SECONDS="${BIBITES_RECYCLE_COOLOFF:-1500}"
-STATE_DIR="${BIBITES_RECYCLE_STATE_DIR:-/run/bibites}"
+# NOT /run/bibites. That directory is declared as RuntimeDirectory= by
+# bibites-game@.service with RuntimeDirectoryPreserve=no, so systemd DELETES AND
+# RECREATES it every time a world restarts -- including the restart this script
+# performs. The first version wrote its breadcrumb there and destroyed it in the
+# same run. An observability record must not live inside a directory owned by
+# the lifecycle of the thing it observes.
+STATE_DIR="${BIBITES_RECYCLE_STATE_DIR:-/run/bibites-ops}"
 STATE_FILE="$STATE_DIR/recycle.state"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
@@ -111,9 +117,17 @@ fi
 world="${best_unit#bibites-game@}"; world="${world%.service}"
 
 # --- guard: save-on-quit must be configured, or a restart loses evolution -------
+#
+# world.env is a shell fragment that other tools source, so its values are
+# QUOTED: MULTIVERSE_SAVE_ON_QUIT='true'. The first version of this guard matched
+# a bare value only, refused every world on a correctly configured host, and so
+# disabled the whole mechanism while reporting a safety refusal — which reads as
+# caution and was in fact a false negative. Accept the quoting the file actually
+# uses, and accept the spellings a human might write.
 env_file="/srv/bibites/worlds/$world/world.env"
-if ! grep -qE '^MULTIVERSE_SAVE_ON_QUIT=(1|true)$' "$env_file" 2>/dev/null; then
-  log "REFUSING to recycle $world: save-on-quit is not configured in $env_file"
+if ! grep -qiE "^[[:space:]]*(export[[:space:]]+)?MULTIVERSE_SAVE_ON_QUIT[[:space:]]*=[[:space:]]*['\"]?(1|true|yes|on)['\"]?[[:space:]]*$" \
+       "$env_file" 2>/dev/null; then
+  log "REFUSING to recycle $world: save-on-quit is not enabled in $env_file"
   note refused "$world save-on-quit unset"
   exit 1
 fi
