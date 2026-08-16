@@ -144,7 +144,7 @@ units_json="$(
 
 # ---------------------------------------------------------------- emit
 
-jq -nc \
+sample="$(jq -nc \
   --arg at "$(date -u +%FT%TZ)" \
   --arg cpu "$cpu_busy_pct" \
   --arg l1 "$load1" --arg l5 "$load5" --arg l15 "$load15" \
@@ -171,12 +171,18 @@ jq -nc \
           synRetrans: n($sr)},
     conntrack: {count: n($ctc), max: n($ctm)},
     units: $units
-  }' > /tmp/.mv-host-sample.$$ 2>/dev/null || { rm -f /tmp/.mv-host-sample.$$; exit 1; }
+  }')" || exit 1
 
+# Held in a variable rather than a temp file. The unit runs under
+# ProtectSystem=strict, which makes every path outside ReadWritePaths read-only
+# -- /tmp included -- so the first version failed on every tick with
+# "Read-only file system" while the timer reported itself perfectly healthy. A
+# variable also gives the atomicity the temp file was there for: jq either
+# produces a whole document or the sample is skipped, and a partial line never
+# reaches the record.
 if [ "$STDOUT" = 1 ]; then
-  cat /tmp/.mv-host-sample.$$
+  printf '%s\n' "$sample"
 else
   mkdir -p "$(dirname "$OUT")" 2>/dev/null || true
-  cat /tmp/.mv-host-sample.$$ >> "$OUT"
+  printf '%s\n' "$sample" >> "$OUT"
 fi
-rm -f /tmp/.mv-host-sample.$$
