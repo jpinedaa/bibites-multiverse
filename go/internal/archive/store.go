@@ -135,6 +135,22 @@ func OpenLedger(dir string) (*Ledger, error) {
 // Path is the ledger file.
 func (l *Ledger) Path() string { return l.path }
 
+// Size is the ledger's length in bytes, after any torn tail this open dropped.
+// It is one stat call and never a read, and it exists so a caller can SIZE what
+// the replay is about to build without walking the file first: the ledger is
+// one record per line at a measured average width, so its length is the only
+// cheap estimate of its record count there is. A caller that needs the exact
+// count must scan, and ScanLedger is that scan.
+func (l *Ledger) Size() int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	info, err := l.f.Stat()
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
 // Repaired reports the bytes of an unterminated final line this open dropped.
 // It is 0 for a ledger whose last write completed. Anything else means the
 // previous process died mid-append — the record was never durable and its
