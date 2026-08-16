@@ -812,6 +812,13 @@ check_replay_headroom() {
   # restarts fine and then cannot hold what it replayed is the same outage.
   # SIZING.md, "Archive memory", owns both values; they are parameters here so
   # that a measurement on a real ledger can correct them in place.
+  #
+  # A REAL-LEDGER MEASUREMENT SINCE SAID THEY ARE ONE NUMBER: peak and settled
+  # were 0.06 percent apart in every run with no binding GOMEMLIMIT, so
+  # deploy.env.example now sets both to the same value and this max() survives
+  # only against a future model change. The defaults below stay at the older,
+  # more conservative reference figures on purpose — a host with no tuned
+  # deploy.env should err toward calling itself full, never toward free.
   peak_mb=$(( records * MV_REPLAY_PEAK_B / 1048576 ))
   resident_mb=$(( records * MV_REPLAY_RESIDENT_B / 1048576 ))
   worst_mb=$peak_mb; worst_what="replay peak"

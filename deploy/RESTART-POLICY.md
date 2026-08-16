@@ -105,24 +105,25 @@ Back up `ring.json` and `peers.json` after the batch.
 The archive replays every ledger record before it serves current views.
 Use current record count and a measured replay rate for the estimate.
 
-The reference benchmark produced these conservative memory factors:
-
-- Resident state: approximately `0.30 KB` per ledger record.
-- Streaming replay peak: approximately `0.18 KB` per ledger record.
-
-The benchmark host replayed approximately 37,000 to 49,000 records each second.
-A smaller host can be slower.
-
+Archive memory is one term, not two.
+The replay peak and the settled resident set are the same number, measured.
 Use this estimate:
 
 ```text
 replay_seconds = ledger_records / measured_records_per_second
-resident_bytes = ledger_records * 0.30 KB
-replay_peak_bytes = ledger_records * 0.18 KB
+resident_bytes = ledger_records * MV_REPLAY_RESIDENT_B
+replay_peak_bytes = resident_bytes
 ```
 
-Measure the rate on the target host when possible.
+`MV_REPLAY_RESIDENT_B` and `MV_REPLAY_PEAK_B` live in `deploy.env`.
+They are a property of the deployed build and of the host's core count.
+[`SIZING.md`](SIZING.md), "Archive memory", owns the current values and the measurement
+behind them, and it also gives the rule for `MV_ARCHIVE_GOMEMLIMIT`.
+
+Measure the replay rate on the target host when possible.
 Do not use an old elapsed time as the estimate for a growing ledger.
+The reference benchmark replayed 37,000 to 49,000 records each second; a two-vCPU
+production host measured 61,000 to 73,000, and the rate falls slowly as the ledger grows.
 
 An archive that is not subscribed cannot record map activity.
 If the map continues during replay, the permanent record has a gap.
@@ -312,6 +313,20 @@ Complete these checks before a planned restart:
 
 If projected archive memory is critical, do not restart the archive.
 Increase capacity or reduce the approved retained state first.
+
+Read that verdict for what it is.
+The ratio is a model of record count, not a measurement of the running process.
+It is driven by the `deploy.env` constants `MV_REPLAY_RESIDENT_B` and `MV_REPLAY_PEAK_B`,
+so only three things move it: fewer records, more RAM, or constants that a measurement
+on this host's own ledger has corrected.
+**Retune those constants whenever the binary's per-record footprint changes**, as it did
+when the duplicate-suppression set began holding a fingerprint instead of a key.
+A stale constant is the failure mode in both directions: too high and the gate forbids a
+restart the host could survive, too low and it permits one the host cannot.
+
+`MV_ARCHIVE_GOMEMLIMIT` is a different lever and it does not move this ratio.
+It lowers real resident set, it is a soft limit that cannot fail a replay, and it does not
+reduce retained state. Use it, and do not read its effect out of this number.
 
 ## Post-restart checks
 

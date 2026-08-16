@@ -35,12 +35,16 @@ The table shows the measured quantities that support the model.
 | Genome object size | approximately 14.2 KB |
 | Metrics growth | 1.6 MB each day per slot |
 | Relay resident memory | 93 MB |
-| Archive resident memory | approximately 0.30 KB per ledger record |
-| Streaming replay peak | approximately 0.18 KB per ledger record |
+| Archive retained state | approximately 28 to 31 B per ledger record |
+| Archive resident set | approximately 64 B per ledger record on two cores |
 | Reference replay rate | 37,000 to 49,000 records each second |
 
 These measurements are capacity inputs, not guarantees.
 Measure the target deployment and update its private forecast.
+
+The two archive rows describe the build of `2026-08-16` and change when that build changes.
+The archive resident set is also the replay peak; they are one number.
+"Archive memory" owns both rows and states the workload they were measured on.
 
 ## Durable growth
 
@@ -91,56 +95,203 @@ It does not bound the ledger or archive memory.
 
 ## Archive memory
 
-Use both memory terms:
+Archive memory is one term, not two.
+The replay peak and the settled resident set are the same number.
+A replay of a real ledger measured them `0.06 percent` apart in every run with no binding
+`GOMEMLIMIT`.
+The resident set rises through the replay and is then flat.
+Size against that one number, and never add a peak term to a resident term.
+
+Use this model:
 
 ```text
-resident_KB = ledger_records * 0.30
-replay_peak_KB = ledger_records * 0.18
+resident_B = ledger_records * bytes_per_record
+replay_peak_B = resident_B
 ```
 
-The resident term is larger for the streaming archive.
-Compare the larger result with physical RAM, and do not add swap to that comparison.
+`bytes_per_record` is a property of the build and of the host's core count.
+It is not a constant of this project.
+Measure it, and record the build that produced the measurement.
+`monitor.sh` carries it as `MV_REPLAY_PEAK_B` and `MV_REPLAY_RESIDENT_B`,
+so a measurement on a real ledger corrects the check without a new release.
+
+Compare the result with physical RAM, and do not add swap to that comparison.
 The swap rule below is the reason.
 `monitor.sh` divides by `MemTotal` alone for this reason, and reports swap in a separate check.
-Its two per-record constants are `MV_REPLAY_PEAK_B` and `MV_REPLAY_RESIDENT_B`,
-which carry the values above, so a measurement on a real ledger can correct the check
-without a new release.
 
-The replay implementation once materialized the complete ledger.
-That design used approximately 1.03 to 1.29 KB for each record at peak.
+### What the archive retains
 
-The streaming implementation applies and releases one record at a time.
-It measured approximately 0.18 KB for each record at peak.
-The file format and wire contracts did not change.
-
-`GOMEMLIMIT` can limit a regression, but it does not reduce retained state.
-A tight limit also increases CPU use during replay.
-
-Do not use swap as the normal capacity for a live replay heap.
-Sustained swap activity means that the instance needs more memory or less retained state.
+Retained state is what the archive still holds after the collector runs.
+Resident set is what the kernel counts against host memory, and what the kernel kills for.
+The two are different numbers and they answer different questions.
 
 The largest retained term is the duplicate-suppression set.
 It holds one entry for each ledger record that carries a `migrationId`.
 It is never evicted, because a re-forwarded migration must stay refusable.
-It measured approximately 88 percent of archive resident memory.
+It held approximately 88 percent of archive resident memory before the change below.
+That set now holds a 128-bit fingerprint of each key instead of the key,
+which lowered its cost from `89 B` to `26 B` for each key.
 
-That set now holds a 128-bit fingerprint of each key instead of the key.
-This table replays one copy of the production ledger of 2026-08-16.
-The copy held 5,408,123 records and 5,134,867 duplicate keys.
-Both replays used a 720 hour genome horizon and an empty genome store.
+These measurements replay one copy of the production ledger of `2026-08-16T19:35:41Z`.
+The copy holds `5,408,123` records, `5,134,867` duplicate keys and `1,836,382,633` bytes.
+Both builds replayed that same file on two pinned cores, which is the service host's core count.
 
-| Archive build | Settled resident | For each record |
+| Shape, two pinned cores | Before the change | After it | Factor |
+|---|---:|---:|---:|
+| Retained state for each record | `89 B` | `28` to `31 B` | `3.0` |
+| Resident set for each record, no genome gap | `213 B` | `64 B` [1] | `3.3` |
+| Resident set for each record, every genome missing | `280 B` | `110 B` | `2.5` |
+| Replay time for the whole file | `70.1 s` | `58.2 s` | `1.20` |
+
+[1] Derived. The same pair measured `186 B` and `56 B` on sixteen cores,
+and two cores cost `14.8 percent` more resident set.
+
+The `89 B` retained figure is converged.
+It is the live heap under a `GOMEMLIMIT` set below that heap, where the collector
+leaves no floating garbage.
+Runs at two cores and at sixteen cores agree on it to one megabyte.
+
+The two resident rows are the same file at two genome horizons.
+"No genome gap" is the live service, which reports one or two gaps.
+"Every genome missing" is a restore from the ledger alone, with no genome store.
+That restore costs `273,252` pending gaps on this ledger, and it is the shape to size against.
+A backup that carries the ledger and not the genome store therefore needs more memory to
+restore than the running service needs to serve.
+
+The replay implementation once materialized the complete ledger.
+That design used approximately `1.03` to `1.29 KB` for each record at peak.
+The streaming implementation applies and releases one record at a time.
+The file format and wire contracts did not change.
+
+### Collector headroom, and what `GOMEMLIMIT` does
+
+The resident set is larger than the retained state, and the difference is collector headroom.
+With no binding limit the resident set measured `2.05` times the live heap on two cores.
+`GOGC=100` asks for that headroom by design.
+Two vCPUs make it worse: the same workload on sixteen cores held `15` to `22 percent` less.
+With two Ps the collector cannot keep pace with the replay's allocation rate,
+so the heap runs past its goal before the cycle ends.
+
+`GOMEMLIMIT` reclaims that headroom. It does not reduce retained state.
+
+- It lowers the resident set, which is the number the kernel kills for.
+- It cannot fail a replay. It is a soft limit, and the runtime spends CPU instead of failing.
+  A limit set below the live heap ran the collector continuously, replayed every record,
+  and left the ledger byte-identical.
+- Below the live heap it stops buying resident set and buys only wall time.
+  The measured floor is `1.27` times the live heap on two cores and `1.13` times on sixteen.
+- It does not move `monitor.sh`'s replay-headroom ratio, which is a model of record count.
+
+This is the measured band, on two cores against the real ledger:
+
+| `GOMEMLIMIT` | Resident set | Replay time | Collector share of CPU |
+|---|---:|---:|---:|
+| none | `1,100 MB` | `65.1 s` | `6 percent` |
+| `1200MiB` | `1,074 MB` | `65.0 s` | not separated |
+| `800MiB` | `775 MB` | `66.6 s` | `8 percent` |
+| `600MiB` | `602 MB` | `73.8 s` | `14 percent` |
+| `450MiB`, below the live heap | `579 MB` | `94.2 s` | `14 percent` |
+
+An earlier version of this document said a tight limit increases CPU use during replay.
+That is true in CPU-seconds. It is false in wall time on a host with spare cores.
+
+Select the limit from the host's archive ceiling, not from its total RAM:
+
+```text
+archive_ceiling = MemTotal - the memory no other process on the host will return
+MV_ARCHIVE_GOMEMLIMIT <= archive_ceiling / 1.14
+```
+
+`1.14` is the measured excursion of peak over settled under a binding limit.
+The `2 GB` service host measured an archive ceiling of `1,534 MiB`, so the selected value is
+`1100MiB`.
+That leaves `434 MiB` for the excursion, for the collector floor, and for a restore-shaped replay.
+Once the collector floor passes the limit, the exact value of the limit stops mattering:
+`800MiB` and `1200MiB` reach the same ceiling on the same day.
+The value decides how much resident headroom and CPU the host has until then.
+
+### Swap
+
+Do not use swap as the normal capacity for a live replay heap.
+A small swap file is a recorded crash barrier and not replay capacity.
+Set `vm.swappiness=10` with it, so steady-state processes stay resident and a peak can still spill.
+`monitor.sh` reports swap in a separate check and never counts it as headroom.
+Sustained swap activity means that the instance needs more memory or less retained state.
+
+### A worked horizon, and what it does not bound
+
+This example is dated and it is not a purchase recommendation.
+Vendor prices and the live forecast stay in private operations storage.
+The arithmetic is the reusable part, not the answer.
+
+Inputs, all measured on `2026-08-16`:
+
+- `5,545,189` ledger records at `20:25Z`.
+- `3.00` million records each day, over a `41 h` ledger. The observed band is `2.90` to `3.14`.
+- `338 B` for each record on disk, which is about `1 GB` each day.
+- An archive ceiling of `1,534 MiB` on the `2 GB` host.
+  That is `MemTotal` less the `373 MiB` that no other process on the box will return.
+- `28` to `31 B` of retained state for each record, with the fingerprint change.
+- A collector floor of `1.27` times the live heap under a binding limit.
+
+The memory horizon:
+
+```text
+live_ceiling   = 1,534 MiB / 1.27                     = 1,208 MiB = 1,266,500,000 B
+record_ceiling = 1,266,500,000 B / 31 B               = 40,900,000 records
+               = 1,266,500,000 B / 28 B               = 45,200,000 records
+days           = (40,900,000 - 5,545,189) / 3,000,000 = 11.8
+               = (45,200,000 - 5,545,189) / 3,000,000 = 13.2
+```
+
+That is **`12` to `13` days from `2026-08-16`**, or `11` to `14` days across the growth band.
+It is the day the collector starts to bind hard, not the day the service fails.
+
+Compare the three states of the same host:
+
+| State | Ceiling reached at | Days from `2026-08-16` |
 |---|---:|---:|
-| before the change | 1,177 MB | 0.22 KB |
-| after the change | 546 MB | 0.10 KB |
+| Before the change, limit inert at `5GiB` | `7.5` million records | `0.7` |
+| Before the change, binding limit | `14.3` million records | `2.9` |
+| After the change, limit inert | `25` million records | `6.5` |
+| After the change, binding limit at `1100MiB` | `41` to `45` million records | `12` to `13` |
 
-An empty genome store makes both results conservative.
-Those replays rebuilt 273,252 genome gaps, and a live archive reports one or two.
-The same pair with no genome gap measured 958 MB and 290 MB.
+Disk is not the binding term on this host.
+`46 GB` were free on `2026-08-16`, which is about `45` days at `1 GB` each day.
 
-The `0.30 KB` constant above describes the deployed build.
-`deploy/monitor.sh` uses the same constant.
-Change both when the fingerprinted build ships.
+Larger sizes at the same growth rate and the same measured constants:
+
+| Public bundle | RAM | Disk | Memory horizon | Disk horizon | List price each month |
+|---|---:|---:|---:|---:|---:|
+| `small_3_0`, the current size | 2 GB | 60 GB | `12` to `13` days | ~`45` days | `$12` |
+| `medium_3_0` | 4 GB | 80 GB | `29` to `32` days | ~`65` days | `$24` |
+| `large_3_0` | 8 GB | 160 GB | `61` to `68` days | ~`144` days | `$44` |
+
+Read that table for what it is: **every cell is a date and none of them is a bound.**
+Retained state grows with each ledger record, and nothing in the list stops it.
+Two things bound it, and only two:
+
+- a lower crossing rate, which means a lower `S`;
+- an on-disk index, so that resident memory follows the working set instead of the record count.
+
+A larger instance and a tighter limit buy weeks.
+Revisit the size decision inside that window, and record the date on which it was revisited.
+
+### The gate's constants, and which value lives where
+
+`monitor.sh` ships `MV_REPLAY_PEAK_B=184` and `MV_REPLAY_RESIDENT_B=300`.
+Those are the reference-workload figures and they are conservative for the current build.
+Keep them as the shipped defaults.
+A conservative gate calls a host full before it is, and an optimistic one calls it free
+after it is not, so the shipped default takes the safe error.
+
+`deploy.env.example` carries the measured pair for the current build, `110` and `110`,
+which a host adopts through its own `deploy.env`.
+`110 B` for each record is the measured resident cost of a restore-shaped replay on two cores.
+The live service shape costs about `64 B`, so the selected value carries `1.7` times of margin
+and still describes a replay this host can really be asked to run.
+Both constants take the same value because the peak and the settled resident set are one number;
+`monitor.sh` keeps its `max()` against a future model change.
 
 ## World process memory
 
@@ -209,14 +360,36 @@ Use this formula:
 replay_seconds = ledger_records / measured_records_per_second
 ```
 
-The reference host measured 37,000 to 49,000 records each second.
-Use the lower rate until the target host has its own result.
+Measure the rate on the target host. Do not carry a rate between hosts.
+
+| Host | Measured rate |
+|---|---:|
+| Reference host | `37,000` to `49,000` records each second |
+| Two-vCPU service host, seven starts | `61,000` to `73,000` records each second |
+| Two-core development box, same file | `83,000` records each second |
+
+The service host is `1.37` times slower than a development box with the same core count.
+The difference is disk: the host streams a `1.8 GB` file with a cold page cache.
+Multiply a two-core development measurement by `1.37` to project this host.
+
+The rate falls slowly as the ledger grows.
+It measured `72,000` records each second at `4.0` million records and `61,000` at `5.3` million.
+Use the most recent measurement, never the best one.
+
+The duplicate-suppression fingerprint change replayed the same file `6` to `26 percent` faster.
+Wall time was the least repeatable measurement in that set, so do not plan against one figure.
 
 Replay time grows with every retained ledger record.
 Recalculate it before each planned archive restart.
 
 An archive does not subscribe during replay.
 If the relay stays live, every crossing during replay creates a gap in the archive record.
+The record-preserving sequence holds the relay down for the whole replay,
+so the replay time is also the participant outage.
+At `61,000` records each second, `10` million records cost `164 s`
+and `40` million cost about `11` minutes.
+
+Replay time is not what ends this host's life. Memory is.
 
 ## Network transfer
 
@@ -362,12 +535,13 @@ Run this procedure during provisioning and after a capacity alert:
 3. Calculate daily durable growth.
 4. Read actual free space and recent daily growth.
 5. Count ledger records.
-6. Calculate resident memory and replay peak.
-7. Measure or select a conservative replay rate.
-8. Calculate the remaining disk and memory headroom.
-9. Calculate peer, publisher, and viewer transfer, and compare the total with the
-   provider allowance and budget in both directions.
-10. Record the result in private operations storage.
+6. Calculate the archive resident set, which is also the replay peak.
+7. Select `MV_ARCHIVE_GOMEMLIMIT` from the host's archive ceiling.
+8. Measure or select a conservative replay rate.
+9. Calculate the remaining disk and memory headroom, and the date each one ends.
+10. Calculate peer, publisher, and viewer transfer, and compare the total with the
+    provider allowance and budget in both directions.
+11. Record the result in private operations storage.
 
 Actual recent growth outranks the model when the measurement window is representative.
 The model remains useful for new peers and higher achieved time scales.
@@ -378,7 +552,10 @@ Select a host that meets these conditions:
 
 - The volume holds the announced period plus recovery headroom.
 - The archive resident estimate stays below the approved memory threshold.
-- The archive can replay inside the announced maintenance window.
+- `MV_ARCHIVE_GOMEMLIMIT` is selected from the host's archive ceiling, and the date on
+  which the collector floor reaches that ceiling is recorded with the selection.
+- The archive can replay inside the announced maintenance window, and the replay time is
+  budgeted as participant outage.
 - **A host that runs worlds has a restart policy, or enough memory for the
   announced continuous-operation target — and for six worlds and 72 hours no
   ordinary instance has that much.** Size the restart interval from the world

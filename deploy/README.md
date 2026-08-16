@@ -26,7 +26,7 @@ Keep these records outside the public repository:
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
-| `test-monitor.sh` | Drives the monitor's data-transfer arithmetic against fake counters and a fake clock. |
+| `test-monitor.sh` | Drives the monitor's transfer, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, and host sampler. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates. |
@@ -269,6 +269,12 @@ The script installs files, but it does not make every restart decision for you.
 
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes because replay time grows with the ledger.
+
+An archive change that alters what the archive retains per record is not finished until
+`MV_REPLAY_RESIDENT_B`, `MV_REPLAY_PEAK_B` and `MV_ARCHIVE_GOMEMLIMIT` are re-derived in
+`deploy.env` from a measurement of the new build. Those constants describe a binary, not
+the project. `SIZING.md`, "Archive memory", carries the current values and the rule.
+Apply them with `provision.sh --only envfiles`; the archive reads them at start.
 
 Use `test-front-door.sh` after an nginx template change.
 Use `test-units.sh` after a systemd unit change.

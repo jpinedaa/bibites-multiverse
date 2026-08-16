@@ -142,7 +142,7 @@ decomposition beside it:
 | `anonBytes` | cgroup `memory.stat` `anon` | the unreclaimable half. This is the term that grows with the ledger and the term the out-of-memory killer eventually acts on |
 | `fileBytes` | cgroup `memory.stat` `file` | the reclaimable half, recorded so the swing in `memoryBytes` is explained by the record rather than mistaken for one |
 | `mainRssAnonBytes` | `/proc/<pid>/status` `RssAnon` | the main process's anonymous resident set. On a single-process unit it agrees with `anonBytes`, and recording both proves that rather than assuming it |
-| `mainVmHwmBytes` | `/proc/<pid>/status` `VmHWM` | **nothing else on the box remembers the replay peak.** It occurs in the first minute after a start, which no one-minute sampler is guaranteed to observe, and the resident set settles about 5% below it |
+| `mainVmHwmBytes` | `/proc/<pid>/status` `VmHWM` | **nothing else on the box remembers the replay peak.** It occurs in the first minutes after a start, which no one-minute sampler is guaranteed to observe. Uncapped it equals the settled resident set to within 0.06%, so the value of recording it is the proof of that equality — and it separates from the settled figure, by up to 14%, exactly when a binding `GOMEMLIMIT` is doing its job |
 | `mainPid` | `MainPID` | a restart *between* two samples. `NRestarts` counts only what systemd restarted by itself; every archive restart on this host so far has been an operator's `systemctl restart`, which leaves it at zero |
 
 The `/proc` reads are taken for named single-process units only — the archive
@@ -503,7 +503,10 @@ what is actually running.
   `MV_REPLAY_RESIDENT_B`) so a measurement on a real ledger can retune the gate
   without a release; [`SIZING.md`](../deploy/SIZING.md) "Archive memory" owns
   their values. `deploy/test-monitor.sh` covers this arithmetic too, including
-  the swap case as a regression.
+  the swap case as a regression. **Those constants are a property of the
+  deployed build**: a change to what the archive retains per record leaves the
+  gate describing a binary that is no longer running, so retuning them belongs
+  in the same deployment as the change.
 - **The archive's anonymous memory and replay peak, in the record.** The
   service-host sampler records `anonBytes`, `fileBytes`, `mainRssAnonBytes`,
   `mainVmHwmBytes` and `mainPid` per unit beside the `MemoryCurrent` it already
