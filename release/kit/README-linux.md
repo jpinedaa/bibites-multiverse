@@ -62,6 +62,30 @@ For a private map, put the one-line join string in a file. Pass
 that takes the secret on the command line.** A command-line secret appears in process listings
 and shell history.
 
+**Installing again over the same data root keeps that world.** An upgrade or a repair is not a new
+world: step 6 reads the identity already in the data root — from `install-record.json`, from a
+pending enrollment record carrying that same secret, from the previous `start-multiverse.sh`, or
+from `data/peer-id` and `data/relay-url` — says *"reusing the map identity already in …"*, and
+leaves `peer-secret.txt` untouched. It asks the map for nothing and spends no second place on it,
+and an adopted world keeps its own relay whether that is the public map or a private one.
+
+**A secret is replaced only when something vouches for the world it belongs to** — this data
+root's own install record, or a pending record carrying that very secret — and the replaced one is
+kept beside the new file as `peer-secret.txt.<utc>.old`. A claim that only an ordinary text file
+makes is enough to keep a world and never enough to destroy one. Everything else stops with
+`INS-ENROLL` and changes nothing: a `peer-secret.txt` no file on this machine can name, a file that
+is not a credential, a `--relay-url` that would point an adopted world at another map. Every refusal
+prints the files to look in and the ways on.
+
+**A different identity over this world takes `--replace-world-identity`.** A slot handover mints
+exactly that — a new identity with a fresh credential, rebound to your old slot and position, which
+is the map's only credential recovery — and a borrowed or mistyped join string looks the same from
+here. The switch says which it is, and the old name is kept in `data/peer-id.previous`. **If the
+secret is gone and the name is not** — what an uninstall from a release before this one left — the
+installer stops and prints the world's identity: ask its operator for that handover, or use the
+switch alone to take a new identity with no place, which is a second world on the map and leaves the
+old one dark until its operator releases it.
+
 The same installer handles both editions. In an add-on archive it finds the game or accepts
 `--game-dir`. In a complete archive it verifies `game-payload.json`, the redistribution notice, and
 every file under `game/`, then copies the payload into
@@ -159,7 +183,10 @@ printing a line per path for what it removed and what it kept. That includes the
 BepInEx's Linux archive lays in the game's own root — `run_bepinex.sh`, `libdoorstop.so`,
 `.doorstop_version` and its `changelog.txt` — but only if this installer put them there. Your
 worlds and their backups are never touched. Your journal — the organisms this machine is holding
-for other worlds — is kept unless you pass `--remove-world-data`. In a complete install,
+for other worlds — **and your world's identity**, `peer-secret.txt` beside it, are kept unless you
+pass `--remove-world-data`. That is why installing again over the same data root comes back as the
+same world on the same slot, and why `--remove-world-data` says on your screen that it is the end
+of that world on the map. In a complete install,
 unchanged game-payload files are also removed; a changed or user-added file is reported and kept.
 
 There is no `--keep-certificate`, because there is nothing to keep: this installer never wrote to

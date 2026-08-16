@@ -25,7 +25,7 @@
 #     changelog.txt. If BepInEx was already installed on this machine, all of it
 #     is left completely alone
 #   * start-multiverse.sh and stop-multiverse.sh
-#   * your map credential, and the copy of a private map's certificate authority
+#   * the copy of a private map's certificate authority
 #   * an unchanged managed game payload, when this was the complete edition;
 #     changed and user-added files are kept
 #
@@ -47,6 +47,11 @@
 #   * YOUR JOURNAL - the record of every organism this machine took custody of
 #     and has not handed on. Pass --remove-world-data to delete it too, and read
 #     the warning that prints before it happens
+#   * YOUR MAP CREDENTIAL - peer-secret.txt. It is the world's, not the
+#     install's: the map keeps a verifier and can never print that secret again,
+#     so removing a build must not end the world that ran on it. Installing again
+#     over the same data root reuses it and spends no second identity. It goes
+#     with the journal, under --remove-world-data, and never on its own
 #   * any file the installer did not create, including another mod's plugin
 #
 set -euo pipefail
@@ -220,12 +225,13 @@ R_DATADIR="$(flat_get "$REC" dataDir)"
 R_LOGDIR="$(flat_get "$REC" logDir)"
 R_KITDIR="$(flat_get "$REC" kitDir)"
 R_CREDENTIAL="$(flat_get "$REC" credential)"
+R_PEERID="$(flat_get "$REC" peerId)"
 
 say "record   : $RECORD_FILE"
 say "installed: $(flat_get "$REC" installedUtc)   release $(flat_get "$REC" release)"
 say "platform : $(flat_get "$REC" platform)"
 say "game     : $R_GAMEDIR"
-say "world id : $(flat_get "$REC" peerId)"
+say "world id : $R_PEERID"
 if [ "$DRY_RUN" -eq 1 ]; then
   printf '\n  --dry-run: nothing below is actually removed.\n'
 fi
@@ -364,7 +370,24 @@ while :; do
   remove_recorded "$g" '' 'written by the installer'
   i=$((i + 1))
 done
-remove_recorded "$R_CREDENTIAL" '' 'your map credential'
+R_PENDING="$R_DATAROOT/enrollment-pending.json"
+if [ "$REMOVE_WORLD_DATA" -eq 1 ]; then
+  remove_recorded "$R_CREDENTIAL" '' 'your map credential, with the world data'
+  if [ -f "$R_PENDING" ]; then
+    remove_recorded "$R_PENDING" '' 'a half-finished enrollment, with the world data'
+  fi
+else
+  # THE CREDENTIAL IS THE WORLD'S, NOT THE INSTALL'S. The map keeps a verifier
+  # and cannot print the secret again, so deleting it here would end the world on
+  # the map for a person who is only replacing a build - and installing again
+  # over this data root reuses it rather than spending another identity. It goes
+  # with the journal, under --remove-world-data, and never on its own.
+  add_kept "identity: $R_CREDENTIAL - the world $R_PEERID keeps its place on the map, and installing again here reuses it"
+  if [ -f "$R_PENDING" ]; then
+    # It holds a second copy of a secret, so it is never kept silently.
+    add_kept "pending : $R_PENDING - a half-finished enrollment, and a second copy of a secret. Installing again finishes it; --remove-world-data removes it"
+  fi
+fi
 for leftover in sidecar.pid game.pid; do
   remove_recorded "$R_DATAROOT/$leftover" ''
 done
@@ -372,11 +395,14 @@ done
 if [ "$REMOVE_WORLD_DATA" -eq 1 ]; then
   cat <<'WARNING'
 
-  --remove-world-data: the journal goes too.
+  --remove-world-data: the journal and this world's identity go too.
   The journal is this machine's record of every organism it took custody of and
   has not handed on. Nobody else holds a copy, and no operator command can reach
   it. Deleting it drops whatever it still held. Your worlds are NOT in it and are
   not affected.
+  The credential goes with it, and that is the end of this world on the map: the
+  relay keeps a verifier and cannot print that secret again. Its slot stays
+  reserved until you ask the operator to release it or hand it on.
 
 WARNING
   for dir in "$R_DATADIR" "$R_LOGDIR"; do
@@ -393,7 +419,8 @@ fi
 [ "$DRY_RUN" -eq 1 ] || rm -f "$RECORD_FILE"
 add_removed "$RECORD_FILE   (the install record itself, last)"
 if [ "$REMOVE_WORLD_DATA" -eq 0 ]; then
-  say "the journal and the logs stay. Pass --remove-world-data to remove those as well."
+  say "the journal, the logs and this world's identity stay. Installing again over"
+  say "$R_DATAROOT reuses that identity. Pass --remove-world-data to remove them as well."
 else
   remove_empty_directory "$R_DATAROOT"
 fi

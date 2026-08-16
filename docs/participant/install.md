@@ -205,6 +205,41 @@ All participant packages include the public-map connection details. Each install
 literal private-map join string is not packaged because each installation needs a different
 identity and secret.
 
+**Installing again over the same data root keeps that world.** An upgrade, a repair, a changed
+game folder, a re-run after a stop: none of them is a new world, and none of them asks the map for
+a second identity. The installer reads the identity that is already in the data root — from
+`install-record.json`, from a pending enrollment record carrying that same secret, from the
+launcher's `profiles\*.json`, from the previous `Start-Multiverse.ps1`, or from `data\peer-id` and
+`data\relay-url` beside the journal — says *"reusing the map identity already in …"*, and **leaves
+`peer-secret.txt` exactly as it is**. That works for a private map as well as the public one: an
+adopted world keeps its own relay, and the installer says so rather than moving it.
+
+**A secret is replaced in one case only, and it is the case that is meant to replace one.** If you
+pass a join string that names the world already in that folder — a **slot handover**, which mints a
+new secret for the same identity — the file is rewritten and the old one is kept beside it as
+`peer-secret.txt.<utc>.old`, for you to delete once the world connects. The installer does that only
+when a file it wrote itself proves which world the folder holds: the install record, or a pending
+record carrying that very secret. `data\peer-id`, a launcher profile and an old start script are
+ordinary text, and a claim in one of them is enough to *keep* a world and never enough to *destroy*
+one. Everything else stops with `INS-ENROLL` and changes nothing: a join string for a **different**
+identity, a claim nothing proves, a secret no file can name, a `-RelayUrl` that points an adopted
+world at another map. Nothing recovers a secret once it is gone — the relay keeps a verifier and
+cannot print it again — which is why the refusals are refusals.
+
+**A join string that names a different identity takes `-ReplaceWorldIdentity` /
+`--replace-world-identity`.** A **slot handover** mints exactly that — a new identity with a fresh
+credential, rebound to your old slot and position — and it is the map's only credential recovery; a
+borrowed or mistyped join string looks the same from here and would leave the world that owns this
+journal dark. The switch says which it is. The old name is then kept in `data\peer-id.previous`,
+because that string is the whole of the message an operator needs.
+
+**If the secret is gone and the name is not**, which is what an uninstall from a release before this
+one left behind, the installer stops as well and prints the world's identity. Ask that world's
+operator for the handover above and install the join string it prints with the same switch, or use
+the switch on its own to take a new identity with no place: a **second world on the map**, with the
+old one dark until its operator releases it. Every refusal here is `INS-ENROLL` in
+[`../error-taxonomy.md`](../error-taxonomy.md), with the files to look in and the ways on.
+
 **No parameter takes a private-map join string on the command line**, on purpose: a value typed there is
 in every process listing on your machine and in your shell history, and the wire itself has the
 same rule. `-JoinStringFile .\join.txt` — `--join-string-file ./join.txt` on Linux, and the same
@@ -260,10 +295,14 @@ cannot see, and it says so.
 The advanced command is `Uninstall-BibitesMultiverse.ps1`. On Linux, use
 `./uninstall-bibites-multiverse.sh`. Use `-DryRun` or `--dry-run` first for the ledger. It reads the record the
 installer wrote and removes only what is named in it, checking each file's hash before it goes,
-and prints a line per path for what it removed and what it kept. Three things it deliberately
+and prints a line per path for what it removed and what it kept. Four things it deliberately
 keeps: **a file somebody changed after the install** — a changed plugin is reported and left;
-**BepInEx**, whole, if it was on your machine before; and **your journal**, which is the record of
-organisms other worlds handed you, unless you pass `-RemoveWorldData` / `--remove-world-data`.
+**BepInEx**, whole, if it was on your machine before; **your journal**, which is the record of
+organisms other worlds handed you; and **your world's identity** — `peer-secret.txt`, and
+`data\peer-id` and `data\relay-url` beside the journal — because the world it names still has its
+place on the map and only that secret can claim it. Those last two are removed together, and only
+when you pass `-RemoveWorldData` / `--remove-world-data`, which says on your screen that it is the
+end of that world on the map.
 Its two refusals are the game still running from that folder and this install's own sidecar still
 running — both stop before removing anything, and both name the command that fixes them. **They use
 the same rule as the install**: only a game running from *that* folder counts, and where a process
@@ -273,9 +312,9 @@ sidecar in its own kit directory.
 
 **On Windows the uninstall covers every world you added.** It walks the `profiles\` directory,
 refuses while any of those worlds still has a live game or sidecar — `BibitesMultiverseLauncher.exe
-stop --all` is the command it names — and then removes each world's credential, pending-enrollment
-record and process-id files, the profile files themselves, and the `profiles\` directory. It keeps
-each extra world's journal and logs unless you pass `-RemoveWorldData`. Your save files are never
+stop --all` is the command it names — and then removes each world's process-id files, the profile
+files themselves, and the `profiles\` directory. It keeps each extra world's journal, logs and
+credential unless you pass `-RemoveWorldData`, which takes all three. Your save files are never
 touched, on any path.
 
 For a complete edition, the game payload is in the record too. Uninstall removes each unchanged

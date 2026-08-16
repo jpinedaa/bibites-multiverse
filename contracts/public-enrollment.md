@@ -88,6 +88,27 @@ for the current account. Linux applies mode `0600`. The installer removes the pe
 after it stores `peer-secret.txt` and the install record. A lost response is therefore a retry,
 not a second identity.
 
+**An installer enrolls only for a data root with no world in it, or when the participant has said
+in as many words that it may take a second identity.** When the data root already holds
+`peer-secret.txt`, the installer adopts the identity that names it — from `install-record.json`,
+the pending record whose secret matches, a launcher profile or start script for that same data
+root, or `data/peer-id` and `data/relay-url` — and sends no request. It never overwrites
+`peer-secret.txt` on that path: the client holds the only recoverable copy of the secret. A secret
+with no identity beside it, and a join string naming a different identity, are refused
+(`INS-ENROLL`); a join string naming the **same** identity is a slot handover and is the one case
+that replaces a secret, and then only when a file the installer itself wrote proves which world the
+folder holds. An uninstall keeps `peer-secret.txt`, `data/peer-id` and `data/relay-url` unless the
+participant also asks for the world's data.
+
+**The one path that spends a second credential over an existing world** is a data root that still
+names a world whose `peer-secret.txt` is gone: nothing recovers a secret, so the only alternatives
+are a slot handover on the operator's side — which mints a different identity, not another
+enrollment — or a new identity here. The installers refuse both by default and act only under
+`-ReplaceWorldIdentity` / `--replace-world-identity`, keeping the stranded world's name in
+`data/peer-id.previous`. **No server behaviour changes for any of this**: the endpoint's rules,
+limits and idempotency are exactly as above, and this paragraph describes only what the clients do
+before they call it.
+
 ## Limits and errors
 
 | Status | Meaning |

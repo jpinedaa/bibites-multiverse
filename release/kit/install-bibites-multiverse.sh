@@ -86,6 +86,7 @@ SIDECAR_PORT=8787
 SAVE_MINUTES=10
 SAVE_KEEP=6
 SAVE_ON_QUIT='on'
+REPLACE_WORLD_IDENTITY=0
 
 say()  { printf '     %s\n' "$*"; }
 step() { printf '\n==== %s\n' "$*"; }
@@ -143,6 +144,21 @@ usage: ./$(basename "$0") [options]
   --save-minutes <n>         Default 10.
   --save-keep <n>            Default 6.
   --save-on-quit on|off      Default on.
+  --replace-world-identity   Let the world in this data root become a DIFFERENT
+                             identity. Two situations need it, and they are the
+                             same act on disk. A SLOT HANDOVER is the map's only
+                             credential recovery: it rebinds your slot and your
+                             position to a new identity with a freshly minted
+                             credential, and nothing is stranded. A LOST SECRET
+                             leaves no way on but a new identity, which is a SECOND
+                             place on the map, and the old world's slot stays
+                             reserved, with nobody in it, until its operator
+                             releases it. This installer cannot tell those apart,
+                             so it refuses both by default rather than strand a
+                             world quietly. The old name is kept in
+                             <data root>/data/peer-id.previous and printed, because
+                             that string is what the operator needs, and any secret
+                             it replaces is kept beside the new one.
   -h, --help                 This text.
 USAGE
 }
@@ -164,6 +180,7 @@ while [ $# -gt 0 ]; do
     --save-keep)        need_value "$1" $#; SAVE_KEEP="$2";        shift 2 ;;
     --save-on-quit)     need_value "$1" $#; SAVE_ON_QUIT="$2";     shift 2 ;;
     --no-migration-exclusion) NO_MIGRATION_EXCLUSION=1; shift ;;
+    --replace-world-identity) REPLACE_WORLD_IDENTITY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --join-string|--join-string=*)
       stop_setup "There is no --join-string option, deliberately: a secret typed on a command line is in every process listing on this machine and in your shell history. Run this with no options and paste it at the hidden prompt, or use --join-string-file." ;;
@@ -678,9 +695,171 @@ step "6 of 9 - connect this installation to a map"
 
 PUBLIC_MAP_PATH="$HERE/$PUBLIC_MAP_NAME"
 USE_PUBLIC_MAP=0
+# The relay this package ships, when it ships one. It is read even on a private
+# install, because what the certificate step says has to follow the map this
+# world actually dials rather than the branch that chose it.
+PACKAGED_RELAY_URL=''
+if [ -f "$PUBLIC_MAP_PATH" ]; then
+  PACKAGED_MAP_FLAT="$(json_flatten "$PUBLIC_MAP_PATH")"
+  if [ "$(flat_get "$PACKAGED_MAP_FLAT" format)" = 'bibites-multiverse/public-map/1' ]; then
+    PACKAGED_RELAY_URL="$(flat_get "$PACKAGED_MAP_FLAT" relayUrl)"
+  fi
+fi
 PENDING_ENROLLMENT_PATH=''
 CREDENTIAL_PATH="$DATA_ROOT/peer-secret.txt"
 CREDENTIAL=''
+ADOPTED_IDENTITY=0
+
+# ONE IDENTITY PER WORLD, AND THE IDENTITY BELONGS TO THE DATA ROOT. Installing
+# again over a data root that already holds a world is an upgrade or a repair,
+# never a second world: it keeps that world's identity, its relay and its secret
+# file untouched. Only an empty data root asks the map for an identity.
+#
+# The identity is written in more than one place, because no single one of them
+# survives everything. These are searched strongest binding first:
+#
+#   1. <data root>/install-record.json      the install that owns this folder, and
+#                                           only when it names this folder
+#   2. <data root>/enrollment-pending.json  ONLY when its secret is the secret on
+#                                           disk, which binds the two
+#   3. <kit>/start-multiverse.sh            what an earlier install wrote here
+#   4. <data root>/data/peer-id, relay-url  what the sidecar persists and what this
+#                                           installer writes, and the last thing an
+#                                           uninstall keeps
+#
+# PROVEN vs CLAIMED. 1 and 2 are proven: the record is written by the same run
+# that writes the credential and names this data root, and the pending record is
+# accepted only when it carries the very secret on disk. 3 and 4 are claims -
+# ordinary text files, and 4 is the one this installer's own refusal asks a
+# participant to write by hand. A claim is enough to ADOPT a world, which changes
+# nothing on disk, and never enough to OVERWRITE a secret.
+FOUND_PEER_ID=''
+FOUND_RELAY_URL=''
+FOUND_SOURCE=''
+FOUND_PROVEN=0
+first_line() {
+  # The first line with anything on it, whitespace stripped. Missing file: empty.
+  [ -f "$1" ] || { printf ''; return 0; }
+  awk 'NF { sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print; exit }' "$1" 2>/dev/null || true
+}
+same_path() {
+  [ -n "$1" ] && [ -n "$2" ] || return 1
+  [ "${1%/}" = "${2%/}" ]
+}
+find_world_identity() {
+  # $1 the data root, $2 the secret already on disk, which may be empty
+  FOUND_PEER_ID=''
+  FOUND_RELAY_URL=''
+  FOUND_SOURCE=''
+  FOUND_PROVEN=0
+  local root="$1" secret="$2" file='' flat='' id='' record_root='' script_root='' script_peer='' script_relay=''
+
+  file="$root/$RECORD_NAME"
+  if [ -f "$file" ]; then
+    flat="$(json_flatten "$file")"
+    id="$(flat_get "$flat" peerId)"
+    record_root="$(flat_get "$flat" dataRoot)"
+    if [ -n "$id" ] && { [ -z "$record_root" ] || same_path "$record_root" "$root"; }; then
+      FOUND_PEER_ID="$id"
+      FOUND_RELAY_URL="$(flat_get "$flat" relayUrl)"
+      FOUND_SOURCE="$file"
+      FOUND_PROVEN=1
+      return 0
+    fi
+  fi
+
+  file="$root/enrollment-pending.json"
+  if [ -n "$secret" ] && [ -f "$file" ]; then
+    flat="$(json_flatten "$file")"
+    if [ "$(flat_get "$flat" format)" = 'bibites-multiverse/enrollment-pending/1' ] &&
+       [ "$(flat_get "$flat" secret)" = "$secret" ]; then
+      id="$(flat_get "$flat" installId | tr 'A-F' 'a-f')"
+      if printf '%s' "$id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+        FOUND_PEER_ID="public-$(printf '%s' "$id" | tr -d '-')"
+        FOUND_SOURCE="$file"
+        FOUND_PROVEN=1
+        return 0
+      fi
+    fi
+  fi
+
+  file="$HERE/$START_NAME"
+  if [ -f "$file" ]; then
+    script_root="$(sed -n "s/^DATA_ROOT='\(.*\)'\$/\1/p" "$file" | head -n1)"
+    script_peer="$(sed -n "s/^PEER_ID='\(.*\)'\$/\1/p" "$file" | head -n1)"
+    script_relay="$(sed -n "s/^RELAY_URL='\(.*\)'\$/\1/p" "$file" | head -n1)"
+    if [ -n "$script_peer" ] && same_path "$script_root" "$root"; then
+      FOUND_PEER_ID="$script_peer"
+      FOUND_RELAY_URL="$script_relay"
+      FOUND_SOURCE="$file"
+      return 0
+    fi
+  fi
+
+  # The identity beside the journal, and the map it dials. Both are written by
+  # this installer and kept by an uninstall that keeps the world's data, so a
+  # private map survives a removal exactly as the public one does.
+  file="$root/data/peer-id"
+  id="$(first_line "$file")"
+  if [ -n "$id" ]; then
+    FOUND_PEER_ID="$id"
+    FOUND_RELAY_URL="$(first_line "$root/data/relay-url")"
+    FOUND_SOURCE="$file"
+    return 0
+  fi
+  return 0
+}
+
+# The pending record beside a completed identity has to be that same identity's.
+# Two identities in one data root is a state only a person can settle, and
+# nothing is changed on the way to saying so.
+assert_pending_agrees() {
+  # $1 the pending path, $2 the peer id, $3 the secret
+  [ -f "$1" ] || return 0
+  local flat install_id peer
+  flat="$(json_flatten "$1")"
+  install_id="$(flat_get "$flat" installId | tr 'A-F' 'a-f')"
+  peer="public-$(printf '%s' "$install_id" | tr -d '-')"
+  if [ "$(flat_get "$flat" format)" != 'bibites-multiverse/enrollment-pending/1' ] ||
+     [ "$peer" != "$2" ] || [ "$(flat_get "$flat" secret)" != "$3" ]; then
+    stop_setup "The world in $DATA_ROOT is $2, and $1 is a half-finished enrollment for a different one. Neither file was changed. Delete the pending record only if you are sure the world you want is $2; ask the operator otherwise." 'INS-ENROLL'
+  fi
+}
+
+# What is in peer-secret.txt is decided from the WHOLE file, not from its first
+# line: a credential that starts with a blank line is still a credential, and
+# treating it as absent would delete it and spend a second identity.
+EXISTING_SECRET=''
+EXISTING_SECRET_HELD=0
+if [ -f "$CREDENTIAL_PATH" ]; then
+  EXISTING_SECRET_HELD=1
+  if [ ! -r "$CREDENTIAL_PATH" ]; then
+    stop_setup "$CREDENTIAL_PATH holds this data root's world credential and this account cannot read it. Run the installer as the user that installed this world, or move that file aside to start a new one - the old world keeps its place on the map until you ask the operator to release it (docs/participant/leave.md)." 'INS-ENROLL'
+  fi
+  if [ ! -s "$CREDENTIAL_PATH" ]; then
+    # An EMPTY file holds no world and nothing that can be lost. It is the one
+    # state that is treated as absent, and it is written like a new one.
+    EXISTING_SECRET_HELD=0
+  else
+    EXISTING_SECRET="$(first_line "$CREDENTIAL_PATH")"
+    if [ -z "$EXISTING_SECRET" ]; then
+      EXISTING_SECRET_HELD=0
+    else
+      EXISTING_SECRET_LEN="${#EXISTING_SECRET}"
+      if [ "$EXISTING_SECRET_LEN" -lt 32 ] || [ "$EXISTING_SECRET_LEN" -gt 256 ]; then
+        stop_setup "$CREDENTIAL_PATH has something in it that is not a map credential: a secret is 32 to 256 printable characters with no spaces, and this is $EXISTING_SECRET_LEN. Nothing was changed, because a file this installer cannot read is not a file it may overwrite. If a world's secret belongs there, put it back whole. If it is something else, rename it to peer-secret.txt.old and run this again." 'INS-ENROLL'
+      fi
+      case "$EXISTING_SECRET" in
+        *[![:print:]]*) stop_setup "$CREDENTIAL_PATH has something in it that is not a map credential: a secret is printable characters with no spaces. Nothing was changed. If a world's secret belongs there, put it back whole; if it is something else, rename it to peer-secret.txt.old and run this again." 'INS-ENROLL' ;;
+      esac
+    fi
+  fi
+fi
+find_world_identity "$DATA_ROOT" "$EXISTING_SECRET"
+EXISTING_PEER_ID="$FOUND_PEER_ID"
+EXISTING_IDENTITY_SOURCE="$FOUND_SOURCE"
+EXISTING_IDENTITY_RELAY="$FOUND_RELAY_URL"
+EXISTING_IDENTITY_PROVEN="$FOUND_PROVEN"
 
 if [ -z "$JOIN_STRING_FILE" ] && [ -z "$RELAY_URL" ] && [ -f "$PUBLIC_MAP_PATH" ]; then
   USE_PUBLIC_MAP=1
@@ -699,44 +878,82 @@ if [ -z "$JOIN_STRING_FILE" ] && [ -z "$RELAY_URL" ] && [ -f "$PUBLIC_MAP_PATH" 
     *) stop_setup "$PUBLIC_MAP_NAME does not contain a secure WSS relay address." 'INS-ENROLL' ;;
   esac
 
-  EXISTING_RECORD_PATH="$DATA_ROOT/$RECORD_NAME"
-  EXISTING_RECORD_HELD=0
-  CREDENTIAL_HELD=0
-  [ -f "$EXISTING_RECORD_PATH" ] && EXISTING_RECORD_HELD=1
-  [ -f "$CREDENTIAL_PATH" ] && CREDENTIAL_HELD=1
-  REUSED_IDENTITY=0
-  if [ "$EXISTING_RECORD_HELD" -eq 1 ] && [ "$CREDENTIAL_HELD" -eq 1 ]; then
-    EXISTING_RECORD_FLAT="$(json_flatten "$EXISTING_RECORD_PATH")"
-    EXISTING_PEER_ID="$(flat_get "$EXISTING_RECORD_FLAT" peerId)"
-    EXISTING_RELAY_URL="$(flat_get "$EXISTING_RECORD_FLAT" relayUrl)"
-    EXISTING_SECRET="$(head -n1 "$CREDENTIAL_PATH" | tr -d '\r\n')"
-    if printf '%s' "$EXISTING_PEER_ID" | grep -Eq '^public-[0-9a-f]{32}$' &&
-       printf '%s' "$EXISTING_SECRET" | grep -Eq '^[0-9a-f]{64}$' &&
-       [ "$EXISTING_RELAY_URL" = "$PUBLIC_RELAY_URL" ]; then
-      if [ -f "$PENDING_ENROLLMENT_PATH" ]; then
-        LEFTOVER_FLAT="$(json_flatten "$PENDING_ENROLLMENT_PATH")"
-        LEFTOVER_INSTALL_ID="$(flat_get "$LEFTOVER_FLAT" installId)"
-        LEFTOVER_SECRET="$(flat_get "$LEFTOVER_FLAT" secret)"
-        LEFTOVER_PEER_ID="public-$(printf '%s' "$LEFTOVER_INSTALL_ID" | tr -d '-' | tr 'A-F' 'a-f')"
-        if [ "$(flat_get "$LEFTOVER_FLAT" format)" != 'bibites-multiverse/enrollment-pending/1' ] ||
-           [ "$LEFTOVER_PEER_ID" != "$EXISTING_PEER_ID" ] ||
-           [ "$LEFTOVER_SECRET" != "$EXISTING_SECRET" ]; then
-          stop_setup "The completed identity and $PENDING_ENROLLMENT_PATH disagree. Neither file was changed. Ask the operator before replacing this world identity." 'INS-ENROLL'
-        fi
+  # THE WORLD ALREADY IN THIS DATA ROOT KEEPS ITS IDENTITY. Enrollment is for a
+  # data root with no world in it. Everything else - an upgrade, a repair, a
+  # changed runtime, an install over an earlier one - adopts what is here, and
+  # neither asks the map for a second identity nor rewrites the secret file.
+  if [ "$EXISTING_SECRET_HELD" -eq 1 ]; then
+    if [ -z "$EXISTING_PEER_ID" ]; then
+      printf '\n'
+      say "$CREDENTIAL_PATH holds a world's secret, and nothing in $DATA_ROOT says which"
+      say "world it belongs to. Nothing was changed. Two ways on, and only you can choose:"
+      say ""
+      say "  1. NAME THE WORLD, and this install keeps it. Its identity is in the PEER_ID"
+      say "     line of an earlier $START_NAME, and in $LOG_DIR/sidecar.log. It looks like"
+      say "     public-0123456789abcdef0123456789abcdef. Put that one line into"
+      say "     $DATA_ROOT/data/peer-id and run this again."
+      say "  2. START A NEW WORLD. Rename $CREDENTIAL_PATH to peer-secret.txt.old, or move"
+      say "     $DATA_ROOT aside, and run this again. The old world then keeps its place on"
+      say "     the map with nobody in it until you ask the operator to release it."
+      stop_setup "The secret in $CREDENTIAL_PATH was NOT overwritten: it is the only recoverable half of an identity this map cannot print again. Name the world in $DATA_ROOT/data/peer-id, or move that secret aside for a new world - the two choices above, and docs/participant/leave.md." 'INS-ENROLL'
+    fi
+    ADOPTED_PEER_ID="$EXISTING_PEER_ID"
+    ADOPTED_RELAY_URL="$EXISTING_IDENTITY_RELAY"
+    if [ -z "$ADOPTED_RELAY_URL" ]; then
+      if printf '%s' "$ADOPTED_PEER_ID" | grep -Eq '^public-[0-9a-f]{32}$'; then
+        ADOPTED_RELAY_URL="$PUBLIC_RELAY_URL"
+      else
+        stop_setup "$DATA_ROOT holds the world $ADOPTED_PEER_ID, and nothing here says which map it is on: that identity is not one this package's public map issues, and $DATA_ROOT/data/relay-url is not there either. Nothing was changed. Put that map's wss:// address into $DATA_ROOT/data/relay-url on one line and run this again, or run this again with --join-string-file <file> holding the one line your operator sent - or move $DATA_ROOT aside to start a new world on the public map." 'INS-ENROLL'
       fi
-      RELAY_URL="$PUBLIC_RELAY_URL"
-      CREDENTIAL="$EXISTING_PEER_ID.$EXISTING_SECRET"
-      REUSED_IDENTITY=1
-      say "reusing this installation's existing public-map identity"
+    fi
+    assert_pending_agrees "$PENDING_ENROLLMENT_PATH" "$ADOPTED_PEER_ID" "$EXISTING_SECRET"
+    RELAY_URL="$ADOPTED_RELAY_URL"
+    CREDENTIAL="$ADOPTED_PEER_ID.$EXISTING_SECRET"
+    ADOPTED_IDENTITY=1
+    say "reusing the map identity already in $DATA_ROOT (peer $ADOPTED_PEER_ID)"
+    say "read from $EXISTING_IDENTITY_SOURCE: no identity was created and no slot was spent"
+    if [ "$ADOPTED_RELAY_URL" != "$PUBLIC_RELAY_URL" ]; then
+      say "that world is on $ADOPTED_RELAY_URL, which is not the map this package ships. It"
+      say "stays where it is; --join-string-file is what moves a data root to another map."
+    fi
+  elif [ -n "$EXISTING_PEER_ID" ] && [ "$REPLACE_WORLD_IDENTITY" -eq 0 ]; then
+    # The name is here and the secret is not. NOTHING RECOVERS A SECRET, so the
+    # only way on is a second place on the map - and that is a decision, not a
+    # step. It is refused rather than taken quietly.
+    printf '\n'
+    say "$DATA_ROOT is the world $EXISTING_PEER_ID - $EXISTING_IDENTITY_SOURCE says so - and its"
+    say "secret, $CREDENTIAL_PATH, is gone. Nothing recovers it: the map keeps a verifier and"
+    say "cannot print a secret again. Write $EXISTING_PEER_ID down. Then, two ways on:"
+    say ""
+    say "  1. GET THAT WORLD'S PLACE BACK, with a SLOT HANDOVER. It keeps the slot, the"
+    say "     position and everything addressed to it, and gives you a NEW identity with a"
+    say "     freshly minted credential. Its operator sends you one join string; run this again"
+    say "     with --join-string-file <file> --replace-world-identity."
+    say "  2. START A NEW WORLD HERE, and leave $EXISTING_PEER_ID dark on the map until its"
+    say "     operator releases it. Run this again with --replace-world-identity, or rename"
+    say "     $DATA_ROOT/data/peer-id to peer-id.old first; either way the old name is kept in"
+    say "     $DATA_ROOT/data/peer-id.previous for you."
+    stop_setup "A new identity over this world is either its slot handed back to you by a slot handover or a SECOND place on the map that strands $EXISTING_PEER_ID, and nothing on this machine can tell which. --replace-world-identity says take it - the two choices above, and docs/participant/leave.md." 'INS-ENROLL'
+  elif [ -n "$EXISTING_PEER_ID" ]; then
+    # --replace-world-identity: the participant has said, in as many words, that
+    # this folder takes a different identity. Say what it costs anyway, and keep
+    # the old name - it is what an operator needs to release the slot.
+    printf '\n'
+    say "--replace-world-identity: the world that used $DATA_ROOT was $EXISTING_PEER_ID, and"
+    say "its secret is gone. This install therefore takes a NEW identity, which is a second"
+    say "place on the map. The old one keeps its slot, with nobody in it, until you ask the"
+    say "operator to release it or to hand it to this installation - docs/participant/leave.md."
+    say "Its name is kept in $DATA_ROOT/data/peer-id.previous, and it is what the operator needs."
+    printf '\n'
+    # A leftover pending record here is a new identity already half-taken, and
+    # retrying it is what spends nothing extra. It cannot be the world named on
+    # disk - that world has no secret - so it is announced, not refused.
+    if [ -f "$PENDING_ENROLLMENT_PATH" ]; then
+      say "an enrollment already begun in this folder is finished rather than started again"
     fi
   fi
 
-  if [ "$REUSED_IDENTITY" -eq 0 ]; then
-    if { [ "$EXISTING_RECORD_HELD" -eq 1 ] || [ "$CREDENTIAL_HELD" -eq 1 ]; } &&
-       [ ! -f "$PENDING_ENROLLMENT_PATH" ]; then
-      stop_setup "This data root contains part of a completed map identity, but the installer cannot safely reuse it. Use a different --data-root for a new world, or ask the operator for a slot handover." 'INS-ENROLL'
-    fi
-
+  if [ "$ADOPTED_IDENTITY" -eq 0 ]; then
     INSTALL_ID=''
     ENROLLMENT_SECRET=''
     if [ -f "$PENDING_ENROLLMENT_PATH" ]; then
@@ -788,6 +1005,22 @@ if [ -z "$JOIN_STRING_FILE" ] && [ -z "$RELAY_URL" ] && [ -f "$PUBLIC_MAP_PATH" 
     RELAY_URL="$PUBLIC_RELAY_URL"
     CREDENTIAL="$EXPECTED_PEER_ID.$ENROLLMENT_SECRET"
   fi
+elif [ -z "$JOIN_STRING_FILE" ] && [ -n "$RELAY_URL" ] &&
+     [ "$EXISTING_SECRET_HELD" -eq 1 ] && [ -n "$EXISTING_PEER_ID" ]; then
+  # --relay-url alone, over a data root that already holds a world: the join
+  # string is not needed, because the secret half is already here. This is the
+  # console remedy for a private-map world whose install record was lost - and it
+  # NAMES the map rather than moving the world to one. The same identity and
+  # secret presented to a different relay is a different world or an
+  # authentication failure, and the journal in this folder belongs to neither.
+  if [ -n "$EXISTING_IDENTITY_RELAY" ] && [ "$EXISTING_IDENTITY_RELAY" != "$RELAY_URL" ]; then
+    stop_setup "$DATA_ROOT holds the world $EXISTING_PEER_ID on $EXISTING_IDENTITY_RELAY - $EXISTING_IDENTITY_SOURCE says so - and --relay-url names $RELAY_URL instead. Nothing was changed. A world does not move between maps: its slot, its position and its journal are on the one it joined. Run this again without --relay-url to keep it, or use --data-root for a new world on the other map." 'INS-ENROLL'
+  fi
+  assert_pending_agrees "$DATA_ROOT/enrollment-pending.json" "$EXISTING_PEER_ID" "$EXISTING_SECRET"
+  CREDENTIAL="$EXISTING_PEER_ID.$EXISTING_SECRET"
+  ADOPTED_IDENTITY=1
+  say "reusing the map identity already in $DATA_ROOT (peer $EXISTING_PEER_ID)"
+  say "read from $EXISTING_IDENTITY_SOURCE: no identity was created and no slot was spent"
 else
   JOIN_STRING=''
   if [ -n "$JOIN_STRING_FILE" ]; then
@@ -852,25 +1085,99 @@ fi
 case "$SECRET"  in *[![:print:]]*|*' '*) stop_setup "The secret half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING' ;; esac
 case "$PEER_ID" in *[![:print:]]*|*' '*) stop_setup "The identity half must be printable ASCII with no spaces. Nothing was written." 'INS-JOINSTRING' ;; esac
 
-# Created empty and private BEFORE a byte of the secret is in it: a file that is
-# world-readable for the instant between the write and the chmod is a file that
-# was world-readable.
-rm -f "$CREDENTIAL_PATH"
-( umask 077; : > "$CREDENTIAL_PATH" )
-chmod 600 "$CREDENTIAL_PATH"
-printf '%s\n' "$SECRET" > "$CREDENTIAL_PATH"
-CREDENTIAL_MODE="$(stat -c '%a' "$CREDENTIAL_PATH" 2>/dev/null || echo '?')"
-if [ "$CREDENTIAL_MODE" = '600' ]; then
-  say "the secret half is in $CREDENTIAL_PATH, mode 0600 - readable by you only"
+if [ "$ADOPTED_IDENTITY" -eq 1 ]; then
+  # The file on disk IS the credential this install adopted. Its CONTENTS are
+  # never rewritten - no delete, no write, no truncate - so a failure on this path
+  # can never cost somebody the only copy of their secret. The mode is re-applied
+  # in place, because a repair that leaves a loose credential loose is not a
+  # repair.
+  say "$CREDENTIAL_PATH was left exactly as it is"
+  chmod 600 "$CREDENTIAL_PATH" 2>/dev/null || true
+  CREDENTIAL_MODE="$(stat -c '%a' "$CREDENTIAL_PATH" 2>/dev/null || echo '?')"
+  if [ "$CREDENTIAL_MODE" = '600' ]; then
+    say "its mode is 0600 - readable by you only"
+  else
+    say "WARNING: its mode reads $CREDENTIAL_MODE rather than 600. If that directory is on a"
+    say "filesystem with no Unix permissions, move --data-root somewhere that has them."
+  fi
 else
-  say "the secret half is in $CREDENTIAL_PATH"
-  say "WARNING: its mode reads $CREDENTIAL_MODE rather than 600. If that directory is on a"
-  say "filesystem with no Unix permissions, move --data-root somewhere that has them."
+  # A HANDOVER MINTS A NEW IDENTITY (contract-b-m4.md 7.5: --handover-slot names a
+  # new peerId and a freshly minted credential), so a join string that does not
+  # match the world already here is either that recovery or a mistake, and nothing
+  # on this machine can tell them apart. Both are gated, and the one destructive
+  # act in this script - writing over a secret - never happens on the word of a
+  # file anybody can edit.
+  IDENTITY_CHANGES=0
+  if [ -n "$EXISTING_PEER_ID" ] && [ "$PEER_ID" != "$EXISTING_PEER_ID" ]; then
+    IDENTITY_CHANGES=1
+  fi
+  if [ "$EXISTING_SECRET_HELD" -eq 1 ] && [ -z "$EXISTING_PEER_ID" ]; then
+    stop_setup "$CREDENTIAL_PATH already holds a secret, and nothing in $DATA_ROOT says which world it belongs to. Nothing was changed, because that secret is the only recoverable half of an identity no map can print again. If this join string is that world's slot handed back to you, the file is already spent: rename it to peer-secret.txt.old and run this again. Otherwise use --data-root for a new world." 'INS-ENROLL'
+  fi
+  if [ "$IDENTITY_CHANGES" -eq 1 ] && [ "$REPLACE_WORLD_IDENTITY" -eq 0 ]; then
+    stop_setup "$DATA_ROOT is the world $EXISTING_PEER_ID (named in $EXISTING_IDENTITY_SOURCE), and that join string is a different identity, $PEER_ID. Nothing was changed. If your operator handed this world's slot over, that IS a new identity and --replace-world-identity applies it here, keeping the journal, the slot and the position. If they did not, this would leave $EXISTING_PEER_ID dark on the map with a second world over its journal: use --data-root for the new world instead. See docs/participant/leave.md." 'INS-ENROLL'
+  fi
+  if [ "$EXISTING_SECRET_HELD" -eq 1 ] && [ "$IDENTITY_CHANGES" -eq 0 ] &&
+     [ "$EXISTING_IDENTITY_PROVEN" -eq 0 ] && [ "$SECRET" != "$EXISTING_SECRET" ]; then
+    stop_setup "$EXISTING_IDENTITY_SOURCE is the only thing that says $DATA_ROOT is the world $PEER_ID, and it is an ordinary text file that nothing binds to the secret in $CREDENTIAL_PATH. That is enough to keep a world and not enough to overwrite one, so nothing was changed. If that secret is spent, rename $CREDENTIAL_PATH to peer-secret.txt.old and run this again with the same join string. If it is the live one, run this with no join string at all and it is kept as it is." 'INS-ENROLL'
+  fi
+  if [ "$EXISTING_SECRET_HELD" -eq 1 ] && [ "$SECRET" != "$EXISTING_SECRET" ]; then
+    # The replaced secret is kept beside the new one rather than deleted: a join
+    # string that turns out to be the wrong one would otherwise be unrecoverable
+    # in exactly the way this whole step exists to prevent.
+    BACKUP_PATH="$CREDENTIAL_PATH.$(date -u +%Y%m%dT%H%M%SZ).old"
+    ( umask 077; cp -p "$CREDENTIAL_PATH" "$BACKUP_PATH" )
+    chmod 600 "$BACKUP_PATH" 2>/dev/null || true
+    say "the secret it replaces is kept in $BACKUP_PATH - delete it once this world connects"
+  fi
+  if [ "$IDENTITY_CHANGES" -eq 1 ]; then
+    say "--replace-world-identity: $DATA_ROOT was the world $EXISTING_PEER_ID and is now $PEER_ID."
+    say "If that came from a slot handover, its slot and position came with it and nothing is"
+    say "stranded. If it did not, $EXISTING_PEER_ID is dark on the map until its operator"
+    say "releases it - docs/participant/leave.md."
+  elif [ "$EXISTING_SECRET_HELD" -eq 1 ] && [ -n "$EXISTING_PEER_ID" ]; then
+    say "the same world, $PEER_ID (named in $EXISTING_IDENTITY_SOURCE)"
+  fi
+  # Created empty and private BEFORE a byte of the secret is in it: a file that is
+  # world-readable for the instant between the write and the chmod is a file that
+  # was world-readable.
+  rm -f "$CREDENTIAL_PATH"
+  ( umask 077; : > "$CREDENTIAL_PATH" )
+  chmod 600 "$CREDENTIAL_PATH"
+  printf '%s\n' "$SECRET" > "$CREDENTIAL_PATH"
+  CREDENTIAL_MODE="$(stat -c '%a' "$CREDENTIAL_PATH" 2>/dev/null || echo '?')"
+  if [ "$CREDENTIAL_MODE" = '600' ]; then
+    say "the secret half is in $CREDENTIAL_PATH, mode 0600 - readable by you only"
+  else
+    say "the secret half is in $CREDENTIAL_PATH"
+    say "WARNING: its mode reads $CREDENTIAL_MODE rather than 600. If that directory is on a"
+    say "filesystem with no Unix permissions, move --data-root somewhere that has them."
+  fi
 fi
 SECRET=''
 CREDENTIAL=''
 ENROLLMENT_SECRET=''
 EXISTING_SECRET=''
+
+# The identity and the map beside the journal they belong to. The sidecar keeps
+# peer-id itself (contract-b-m4.md 7.4) and reads it when nothing passes
+# --peer-id; both are written here because an uninstall that keeps this world's
+# data keeps them too, so installing again over it finds the world whole - on a
+# private map exactly as on the public one.
+STORED_PEER_ID="$(first_line "$DATA_DIR/peer-id")"
+if [ "$STORED_PEER_ID" != "$PEER_ID" ]; then
+  if [ -n "$STORED_PEER_ID" ]; then
+    # The name this folder used to answer to. An operator needs that string to
+    # release or hand over the slot it stranded, and nothing else keeps it.
+    printf '%s\n' "$STORED_PEER_ID" > "$DATA_DIR/peer-id.previous"
+    say "the world this folder used to be, $STORED_PEER_ID, is kept in $DATA_DIR/peer-id.previous"
+    say "It is dark on the map until its operator releases it - docs/participant/leave.md."
+  fi
+  printf '%s\n' "$PEER_ID" > "$DATA_DIR/peer-id"
+fi
+if [ "$(first_line "$DATA_DIR/relay-url")" != "$RELAY_URL" ]; then
+  printf '%s\n' "$RELAY_URL" > "$DATA_DIR/relay-url"
+fi
 say "your world's identity on this map: $PEER_ID"
 say "the relay it dials: $RELAY_URL"
 printf '\n'
@@ -895,14 +1202,26 @@ CA_NOTAFTER=''
 CA_FILE_SHA=''
 
 if [ -z "$CA_FILE" ]; then
+  # What this says follows the map this world DIALS, not the branch that chose
+  # it: an adopted private world reaches this step through the public-map path.
   say "NOTHING WAS WRITTEN TO ANY TRUST STORE, and nothing needs to be."
-  say "A public map's relay presents a certificate signed by an authority your"
-  say "machine already trusts through /etc/ssl/certs, so your sidecar checks it the"
-  say "same way curl checks a bank's. Your sidecar verifies that certificate on every"
-  say "connection, and there is no switch anywhere in this software that skips the"
-  say "check."
-  say "--ca-file exists for a private or LAN map only. If your operator sent you a"
-  say "ca.crt, run this installer again with --ca-file ./ca.crt."
+  if [ -n "$PACKAGED_RELAY_URL" ] && [ "$RELAY_URL" = "$PACKAGED_RELAY_URL" ]; then
+    say "A public map's relay presents a certificate signed by an authority your"
+    say "machine already trusts through /etc/ssl/certs, so your sidecar checks it the"
+    say "same way curl checks a bank's. Your sidecar verifies that certificate on every"
+    say "connection, and there is no switch anywhere in this software that skips the"
+    say "check."
+    say "--ca-file exists for a private or LAN map only. If your operator sent you a"
+    say "ca.crt, run this installer again with --ca-file ./ca.crt."
+  else
+    say "This world dials $RELAY_URL, which is not the map this package ships."
+    say "Your sidecar verifies that relay's certificate on every connection, and there"
+    say "is no switch anywhere in this software that skips the check. If that relay"
+    say "presents a certificate an authority your machine already trusts through"
+    say "/etc/ssl/certs, this is right as it is. If its map's operator sent you a"
+    say "ca.crt, run this installer again with --ca-file ./ca.crt, which puts a copy"
+    say "beside your data and points SSL_CERT_FILE at it for that one process."
+  fi
 else
   [ -f "$CA_FILE" ] || stop_setup "No certificate file at $CA_FILE."
   grep -q -- '-----BEGIN CERTIFICATE-----' "$CA_FILE" || stop_setup \
@@ -1406,9 +1725,11 @@ RECORD_PATH="$DATA_ROOT/$RECORD_NAME"
   printf '}\n'
 } > "$RECORD_PATH"
 say "wrote $RECORD_PATH - the uninstall reads it, and removes only what is named in it"
-if [ "$USE_PUBLIC_MAP" -eq 1 ] && [ -n "$PENDING_ENROLLMENT_PATH" ] &&
-   [ -f "$PENDING_ENROLLMENT_PATH" ]; then
-  rm -f "$PENDING_ENROLLMENT_PATH"
+# The pending record holds a SECOND COPY of a secret. Once the install is
+# complete it has no use, on any path that led here, so it does not survive this
+# script and cannot be left for an uninstall to keep.
+if [ -f "$DATA_ROOT/enrollment-pending.json" ]; then
+  rm -f "$DATA_ROOT/enrollment-pending.json"
   say 'removed the pending enrollment record after completing the install record'
 fi
 
@@ -1431,6 +1752,15 @@ if [ -n "$CA_STORED" ]; then
   say "               NOTHING was written to any system trust store"
 else
   say "certificate  : nothing imported, and nothing needed to be"
+fi
+if [ -n "$EXISTING_PEER_ID" ] && [ "$EXISTING_PEER_ID" != "$PEER_ID" ]; then
+  printf '\n'
+  say "THIS FOLDER'S WORLD CHANGED IDENTITY. It was $EXISTING_PEER_ID."
+  say "If a slot handover gave you $PEER_ID, that slot and position came with it and nothing"
+  say "is stranded. If it did not, $EXISTING_PEER_ID IS NOW DARK ON THE MAP: its slot stays"
+  say "reserved, with nobody in it, until its operator releases it. That name is the whole of"
+  say "the message they need, and it is kept in $DATA_DIR/peer-id.previous - see"
+  say "docs/participant/leave.md."
 fi
 printf '\n'
 say "Next: run  ./$START_NAME"
