@@ -1,0 +1,31 @@
+[Unit]
+# The service host's own telemetry, which it has never had.
+#
+# The world host has sampled itself every five minutes since it was built. This
+# box — nginx, the relay, the archive, the stream origin — sampled nothing, so
+# when every peer dropped at once the one end common to all of them was the one
+# end with no record. See deploy/service-host-sample for the full argument.
+Description=Sample Bibites service-host performance
+Documentation=file:///opt/multiverse/deploy/service-host-sample
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Unprivileged, exactly as monitor.sh is. Everything this sampler cannot read
+# without privilege it reports as unknown rather than asking for the privilege.
+User=multiverse
+Group=multiverse
+ExecStart=/opt/multiverse/deploy/service-host-sample
+# A sample that cannot finish in thirty seconds is itself a symptom, and the
+# next tick will try again. It must never pile up on a box with two vCPUs.
+TimeoutStartSec=30
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=false
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+LockPersonality=true
+ReadWritePaths=/var/lib/multiverse/metrics
