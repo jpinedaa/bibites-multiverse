@@ -250,6 +250,18 @@ All participant packages include the public-map connection details. Each install
 literal private-map join string is not packaged because each installation needs a different
 identity and secret.
 
+**Stop the world before you upgrade over it.** Windows holds a program's own file open for as long
+as it runs, and the launcher, the sidecar and the mod are all files setup replaces — so a setup run
+while the **Bibites Multiverse** window is open, or while a world started from this install is
+running, cannot finish. Setup asks that question first, before it has even checked its own package:
+it lists what is running by name, process id and path, says nothing was changed, and stops. That is
+`INS-BUSY`. **It never ends anything for you**, because a world ended rather than stopped loses
+everything it has simulated since its last save. Stop every world the way that keeps it — *"Stop
+every world"* in the launcher's window, `multiverse-launcher.exe stop --all` from a console, or
+`.\Stop-Multiverse.ps1` for a world this install's own script started — then close the launcher
+window and run setup again. Nothing about the upgrade changes: the world, its identity and its
+place on the map are all still there, as the next paragraph describes.
+
 **Installing again over the same data root keeps that world.** An upgrade, a repair, a changed
 game folder, a re-run after a stop: none of them is a new world, and none of them asks the map for
 a second identity. The installer reads the identity that is already in the data root — from
@@ -331,7 +343,10 @@ arrange trust for a certificate authority
 **only** if you gave it one for a private map; state the settings this install ships with; and
 write the start script, the stop script, the application files, and the uninstall record. The
 Windows installer writes one more thing in that last step: `profiles\default.json`, the world
-profile the launcher reads.
+profile the launcher reads. **Ahead of the nine, each installer names a step 0**, and it is a
+different question on each platform: on Windows it checks that nothing of this installation is
+running before anything at all is written, which is the `INS-BUSY` refusal above; on Linux it
+checks for the handful of ordinary programs the script needs, which is `INS-LINUXDEPS`.
 
 **Three of those nine differ, and only three:**
 

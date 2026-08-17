@@ -9,6 +9,14 @@
     administrator rights. It starts the game only when -StartAfterInstall is
     set. The graphical installer selects that option by default.
 
+    Ahead of everything below there is a step 0 that writes nothing at all.
+    Windows will not replace a program while it is running, so the installer
+    first names every launcher, sidecar and game running out of the folders it is
+    about to write into. If it finds one it says which, says how to stop it, and
+    stops before it has changed anything (INS-BUSY, exit code 3). It never ends
+    anything for you: a world ended rather than stopped loses everything it has
+    simulated since its last save.
+
     What it does, in order:
 
       1. verifies every file in this folder against MANIFEST.sha256, then clears
@@ -212,6 +220,320 @@ function Get-Sha256 {
     return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
+# ------------------------------------------------- 0. nothing of this may be running
+
+# WINDOWS WILL NOT REPLACE A PROGRAM WHILE IT IS RUNNING. The launcher, the
+# console launcher, the sidecar and the mod are all files this installer
+# overwrites, and Windows holds every one of them open for as long as something
+# is running out of it. An install started over a live world used to get as far
+# as step 9 and die there on a raw Copy-Item error naming a line number in this
+# script - with steps 1 to 8 already done, so the mod inside the game had been
+# replaced and this world's map identity had already been settled, and with the
+# setup around it quitting before it wrote the shortcuts or the entry in
+# Installed apps. Half an install is not what anybody asked for.
+#
+# So the question is asked FIRST, before this script writes anything at all, and
+# the refusal names every process by name, by id and by path, and says how to
+# stop each one. NOTHING IS EVER ENDED FOR YOU HERE: a world ended rather than
+# stopped loses everything it has simulated since its last save, and only the
+# person at the keyboard knows whether this second is the right one for that.
+
+# A dedicated exit code, because this is the one refusal a caller can act on
+# without reading a word of the log: something has to be closed, and nothing was
+# changed. The graphical installer gives it its own dialog and a longer tail of
+# this output (Install-BibitesMultiverse-Gui.ps1).
+$ExitBusy = 3
+
+# The files a running copy of the game holds open, relative to the game folder.
+# They are what settles it when a process's own path cannot be read at all.
+$GameLockProbe = @('The Bibites.exe', "BepInEx\plugins\$PluginName")
+
+# The launcher ships under two names: the windowed program a shortcut opens, and
+# the console program that takes `stop --all`. BOTH are asked about in every
+# package, including one that carries only the first - a name that is not
+# installed costs one query that finds nothing.
+$ConsoleLauncherName = 'multiverse-launcher.exe'
+
+function Test-FileLocked {
+    # Ask the file itself, rather than asking about processes. A running Windows
+    # process holds its own executable image - and every DLL it has loaded -
+    # open with no write sharing, so an open for ReadWrite that is refused as a
+    # sharing violation means something is running out of that file. An open
+    # that succeeds means nothing is. A file that is not there cannot be locked.
+    #
+    # A refusal this account cannot tell apart from a lock - a folder it may not
+    # write to at all - is reported as locked, because that is still the safe
+    # answer, and it is the answer this check gave before it could tell.
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open($Path,
+                                         [System.IO.FileMode]::Open,
+                                         [System.IO.FileAccess]::ReadWrite,
+                                         [System.IO.FileShare]::None)
+        return $false
+    } catch [System.IO.IOException] {
+        return $true
+    } catch [System.UnauthorizedAccessException] {
+        return $true
+    } catch {
+        return $true
+    } finally {
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
+function Get-FullPath {
+    # A path this script can compare a process's image path against. It never
+    # asks the path to exist: the folder an install is about to create is exactly
+    # the folder nothing can be running out of yet.
+    param([string]$Path)
+    if (-not $Path) { return '' }
+    $candidate = $Path
+    if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+        $candidate = Join-Path (Get-Location).Path $candidate
+    }
+    try { return [System.IO.Path]::GetFullPath($candidate) } catch { return '' }
+}
+
+function Get-ProcessImage {
+    # Every running process of one name, as a name, an id and an image path,
+    # because a message somebody can act on needs all three. Win32_Process
+    # answers with the three together, and leaves the path EMPTY for a process
+    # this account may not inspect - another user's session, or an elevated one -
+    # rather than throwing, which is the answer this check wants. If WMI itself
+    # cannot be reached, Get-Process answers the same question.
+    param([string]$Name)
+    $rows = New-Object System.Collections.ArrayList
+    $viaCim = $null
+    try {
+        $viaCim = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = '$Name'" -ErrorAction Stop)
+    } catch {
+        $viaCim = $null
+    }
+    if ($null -ne $viaCim) {
+        foreach ($row in $viaCim) {
+            $image = ''
+            if ($row.ExecutablePath) { $image = [string]$row.ExecutablePath }
+            [void]$rows.Add([pscustomobject]@{ name = $Name; id = [int]$row.ProcessId; image = $image })
+        }
+        return $rows
+    }
+    $bare = [System.IO.Path]::GetFileNameWithoutExtension($Name)
+    foreach ($process in @(Get-Process -Name $bare -ErrorAction SilentlyContinue)) {
+        $image = ''
+        try { $image = [string]$process.Path } catch { $image = '' }
+        [void]$rows.Add([pscustomobject]@{ name = $Name; id = $process.Id; image = $image })
+    }
+    return $rows
+}
+
+function Get-BusyProcess {
+    # What is running out of ONE folder, asked by program name. The question is
+    # always the folder this install writes into and never the process name on
+    # its own: one machine may hold a second copy of the game, or a second
+    # world's launcher, and neither of them is a reason to refuse an install that
+    # will not touch it. A Steam library elsewhere is somebody else's business.
+    #
+    # A process whose path this account cannot read is NOT counted on that fact
+    # alone. It used to be, and that refused an install into a folder this
+    # installer had just unpacked, on any machine that happens to run a second
+    # world elsewhere. What settles it instead is the folder itself: -LockProbe
+    # names the files a running copy holds open, and none of them open for
+    # writing means nothing is running out of here, whoever else is running
+    # whatever else.
+    param([string]$Name, [string]$Root, [string[]]$LockProbe = @())
+    $hit = New-Object System.Collections.ArrayList
+    $full = Get-FullPath $Root
+    if (-not $full) { return $hit }
+    # THE TRAILING SEPARATOR IS THE WHOLE OF IT. A bare prefix test makes
+    # C:\Bibites Multiverse match C:\Bibites Multiverse Two\launcher.exe, which
+    # is a different install and a refusal nobody could explain.
+    $prefix = $full.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+    $opaque = 0
+    foreach ($row in @(Get-ProcessImage $Name)) {
+        if (-not $row.image) { $opaque++; continue }
+        if ($row.image.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            [void]$hit.Add(("{0}   process {1}   {2}" -f $row.name, $row.id, $row.image))
+        }
+    }
+    if ($opaque -gt 0 -and $hit.Count -eq 0) {
+        foreach ($relative in $LockProbe) {
+            $candidate = Join-Path $full $relative
+            if (Test-FileLocked $candidate) {
+                [void]$hit.Add(("{0}   a copy this account cannot inspect   {1} is open with no write sharing" -f `
+                                $Name, $candidate))
+            }
+        }
+    }
+    return $hit
+}
+
+function Stop-Busy {
+    # The one refusal in this installer that is about a running program and not
+    # about a file, a hash or a world. It never ends anything; it says what to
+    # end, in the order that works - the worlds first, because the launcher is
+    # what stops them, and the launcher itself after that.
+    param([string[]]$Running, [switch]$Late, [string]$Detail = '')
+    Write-Host ""
+    Write-Host "STOP [INS-BUSY]: something of this installation is running, and Windows does not" -ForegroundColor Red
+    Write-Host "                 let anything replace a program while it runs." -ForegroundColor Red
+    Write-Host ""
+    Say "running out of the folders this setup writes into:"
+    foreach ($entry in $Running) { Say "  $entry" }
+    if ($Detail) {
+        Write-Host ""
+        Say "what Windows said: $Detail"
+    }
+    Write-Host ""
+    Say "Close them in this order, then run this setup again:"
+    Write-Host ""
+    Say "  1. STOP EVERY WORLD. Choose 'Stop every world' in the Bibites Multiverse"
+    Say "     window, or run whichever of these your install has, in its own folder:"
+    Say "         .\$LauncherName stop --all"
+    Say "         .\$ConsoleLauncherName stop --all"
+    Say "     A world this install's own script started stops with .\$StopName"
+    Say "     beside it. Every one of those is lossless - the world is written out"
+    Say "     before it closes, which ending it in Task Manager is not."
+    Say "  2. CLOSE THE BIBITES MULTIVERSE WINDOW itself. The launcher's own program"
+    Say "     file is one of the files this setup replaces, so it cannot be open while"
+    Say "     that happens."
+    Say "  3. CLOSE THE BIBITES if it is still open. Windows holds the mod's own file"
+    Say "     open for as long as the game runs."
+    Write-Host ""
+    Say "NOTHING IS ENDED FOR YOU HERE. A world ended rather than stopped loses"
+    Say "everything it has simulated since its last save, and that is not a setup"
+    Say "program's decision to make."
+    Write-Host ""
+    if ($Late) {
+        Say "WHAT THIS INSTALL HAD ALREADY DONE: BepInEx, the mod and this world's map"
+        Say "identity are in place, and the identity is reused rather than spent twice, so"
+        Say "running this setup again once nothing is running costs you no second place on"
+        Say "the map. What is missing is the launcher and the files beside it, which is"
+        Say "exactly what that run finishes."
+    } else {
+        Say "NOTHING WAS CHANGED. This is the first thing this setup does: it asks before"
+        Say "it has even checked its own package, and long before it touches the game, the"
+        Say "mod or your world's identity. This machine is exactly as it was."
+    }
+    Write-Host ""
+    Write-Host "     Every refusal this project can hand you is listed, with its remedy and who"
+    Write-Host "     has to apply it, in docs/error-taxonomy.md on the release page."
+    exit $ExitBusy
+}
+
+function Copy-ProgramFile {
+    # Step 9's copy of a program file, with the sharing violation named. Step 0
+    # above asks what is running before anything at all is written, so a lock
+    # here means something STARTED during the install - a shortcut clicked, a
+    # world started - and a raw "The process cannot access the file ... because it
+    # is being used by another process" against a line number in this script is
+    # not an answer anybody can act on. Every other copy failure is re-thrown
+    # exactly as it arrived.
+    param([string]$Source, [string]$Destination)
+    try {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+    } catch {
+        $failure = $_
+        $blocked = $false
+        $exception = $failure.Exception
+        while ($exception) {
+            if ($exception -is [System.IO.IOException]) { $blocked = $true; break }
+            $exception = $exception.InnerException
+        }
+        if (-not $blocked -and (Test-FileLocked $Destination)) { $blocked = $true }
+        if ($blocked) {
+            Stop-Busy -Running @(("{0} is held open, so Windows will not replace it" -f $Destination)) `
+                      -Late -Detail $failure.Exception.Message
+        }
+        throw $failure
+    }
+}
+
+function Resolve-RuntimeSelection {
+    # One installer, two package editions, and ONE place that decides which game
+    # this run installs against. Step 0 needs the answer to know which game
+    # folder has to be free, and step 2 needs the same answer to install into it;
+    # a second copy of this rule would be a way for those two to disagree, and a
+    # step 0 that guessed 'bundled' where step 2 went external would refuse an
+    # install over a game it was never going to touch.
+    param([string]$Selection, [string]$Game, [bool]$HasPayload)
+    if ($Selection -ne 'auto') { return $Selection }
+    if ($Game) { return 'external' }
+    if ($HasPayload) { return 'bundled' }
+    return 'external'
+}
+
+Step "0 of 9 - check that nothing of this installation is running"
+
+# WHERE IT LOOKS, AND WHY THOSE FOLDERS AND NO OTHERS. Every folder below is one
+# THIS run writes into:
+#
+#   the application folder   step 9 replaces the launcher, the console launcher
+#                            and the sidecar in it - and only when -InstallRoot
+#                            names one. An advanced ZIP without it leaves those
+#                            programs exactly where it was unpacked and copies
+#                            none of them, so nothing there is at risk and
+#                            nothing there is asked about.
+#   the game folder          step 5 replaces the mod inside it. For the included
+#                            portable game that is the managed runtime under the
+#                            data root, whose folder name is the payload's own
+#                            assembly hash - known from the descriptor before a
+#                            single file is unpacked.
+$payloadDescriptorPath = Join-Path $Here $PayloadDescriptorName
+$hasBundledPayload = Test-Path -LiteralPath $payloadDescriptorPath -PathType Leaf
+$busy = New-Object System.Collections.ArrayList
+
+$plannedProgramRoot = ''
+if (-not [string]::IsNullOrWhiteSpace($InstallRoot)) { $plannedProgramRoot = Get-FullPath $InstallRoot }
+if ($plannedProgramRoot) {
+    Say "application folder: $plannedProgramRoot"
+    foreach ($program in @($LauncherName, $ConsoleLauncherName, $SidecarName)) {
+        foreach ($entry in @(Get-BusyProcess $program $plannedProgramRoot @($program))) {
+            [void]$busy.Add($entry)
+        }
+    }
+} else {
+    Say "application folder: none - this run installs no program files"
+}
+
+$plannedGameRoot = ''
+if ((Resolve-RuntimeSelection $RuntimeSelection $GameDir $hasBundledPayload) -eq 'bundled') {
+    $plannedDataRoot = Get-FullPath $DataRoot
+    if (-not $plannedDataRoot -and $env:LOCALAPPDATA) {
+        $plannedDataRoot = Get-FullPath (Join-Path $env:LOCALAPPDATA 'BibitesMultiverse')
+    }
+    $plannedSha = ''
+    try {
+        $plannedPayload = Get-Content -LiteralPath $payloadDescriptorPath -Raw | ConvertFrom-Json
+        $plannedSha = ([string]$plannedPayload.assemblySha256).ToUpperInvariant()
+    } catch {
+        # A descriptor this cannot read is step 2's refusal to make, in its own
+        # words and against the hash it computes itself. Step 0 asks about the
+        # folder it can name and stays quiet about the one it cannot.
+        $plannedSha = ''
+    }
+    if ($plannedDataRoot -and $plannedSha -match '^[0-9A-F]{64}$') {
+        $plannedGameRoot = Join-Path (Join-Path $plannedDataRoot 'runtimes') $plannedSha
+    }
+} elseif ($GameDir) {
+    $plannedGameRoot = Get-FullPath $GameDir
+} else {
+    # The same search step 2 runs, and it only reads. A game it does not find is
+    # step 2's INS-GAMEPATH to refuse with rather than this check's.
+    try { $plannedGameRoot = Get-FullPath (Find-BibitesGameDirectory) } catch { $plannedGameRoot = '' }
+}
+if ($plannedGameRoot) {
+    Say "game folder       : $plannedGameRoot"
+    foreach ($entry in @(Get-BusyProcess 'The Bibites.exe' $plannedGameRoot $GameLockProbe)) {
+        [void]$busy.Add($entry)
+    }
+}
+
+if ($busy.Count -gt 0) { Stop-Busy -Running @($busy) }
+Say "nothing of this installation is running, so nothing has to be closed first."
+
 # ---------------------------------------------------------------- 1. the kit
 
 Step "1 of 9 - check this package against its own manifest"
@@ -283,15 +605,7 @@ $runtimeRoot  = ''
 $runtimeFiles = @()
 $payloadDescriptorPath = Join-Path $Here $PayloadDescriptorName
 $hasBundledPayload = Test-Path -LiteralPath $payloadDescriptorPath -PathType Leaf
-if ($RuntimeSelection -eq 'auto') {
-    $RuntimeSelection = if ($GameDir) {
-        'external'
-    } elseif ($hasBundledPayload) {
-        'bundled'
-    } else {
-        'external'
-    }
-}
+$RuntimeSelection = Resolve-RuntimeSelection $RuntimeSelection $GameDir $hasBundledPayload
 if ($RuntimeSelection -eq 'bundled' -and -not $hasBundledPayload) {
     Stop-Setup 'This package has no included portable game. Select an existing game.' 'INS-RUNTIME'
 }
@@ -415,74 +729,6 @@ if ($RuntimeSelection -eq 'bundled') {
     }
 }
 
-function Test-FileLocked {
-    # Ask the file itself, rather than asking about processes. A running Windows
-    # process holds its own executable image - and every DLL it has loaded -
-    # open with no write sharing, so an open for ReadWrite that is refused as a
-    # sharing violation means something is running out of that file. An open
-    # that succeeds means nothing is. A file that is not there cannot be locked.
-    #
-    # A refusal this account cannot tell apart from a lock - a folder it may not
-    # write to at all - is reported as locked, because that is still the safe
-    # answer, and it is the answer this check gave before it could tell.
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    $stream = $null
-    try {
-        $stream = [System.IO.File]::Open($Path,
-                                         [System.IO.FileMode]::Open,
-                                         [System.IO.FileAccess]::ReadWrite,
-                                         [System.IO.FileShare]::None)
-        return $false
-    } catch [System.IO.IOException] {
-        return $true
-    } catch [System.UnauthorizedAccessException] {
-        return $true
-    } catch {
-        return $true
-    } finally {
-        if ($stream) { $stream.Dispose() }
-    }
-}
-
-function Get-GameProcessesIn {
-    # Windows keeps the plugin file open while the game runs, and the copy in
-    # step 5 then fails with an unreadable IOException. The check is on the
-    # game folder this install writes to rather than on the process name: one
-    # machine may hold more than one copy of the game, and only the copy being
-    # written to has to be closed.
-    #
-    # A process whose path this account cannot read - another user's session, or
-    # an elevated one - is NOT counted on that fact alone. It used to be, and
-    # that refused an install into a folder this installer had just unpacked on
-    # any machine that happens to run a second world elsewhere. What is asked
-    # instead is the question that actually matters: are the files in THIS
-    # folder held open? Nothing there open for writing means nothing is running
-    # out of this copy, whoever else is running whatever else.
-    param([string]$Path)
-    $hit = New-Object System.Collections.ArrayList
-    $opaque = 0
-    foreach ($process in @(Get-Process -Name 'The Bibites' -ErrorAction SilentlyContinue)) {
-        $exe = ''
-        try { $exe = $process.Path } catch { $exe = '' }
-        if (-not $exe) { $opaque++; continue }
-        if ($exe.StartsWith($Path, [System.StringComparison]::OrdinalIgnoreCase)) { [void]$hit.Add($exe) }
-    }
-    if ($opaque -gt 0 -and $hit.Count -eq 0) {
-        $probe = @((Join-Path $Path 'The Bibites.exe'),
-                   (Join-Path $Path "BepInEx\plugins\$PluginName"))
-        $held = @($probe | Where-Object { Test-FileLocked $_ })
-        if ($held.Count -gt 0) {
-            [void]$hit.Add("(a copy of the game this account cannot inspect - and $($held[0]) is " +
-                           "open with no write sharing, so it is running from here)")
-        } else {
-            Say ("running: (a copy of the game this account cannot inspect - the files in this " +
-                 "folder are not locked, so it is not running from here)")
-        }
-    }
-    return $hit
-}
-
 if (-not $GameDir) { $GameDir = Find-BibitesGameDirectory }
 if (-not $GameDir) {
     Stop-Setup ("Game not found. Select the folder that contains The Bibites.exe, or run this " +
@@ -494,12 +740,14 @@ if (-not (Test-Path (Join-Path $GameDir 'The Bibites.exe'))) {
 $GameDir = (Resolve-Path $GameDir).Path
 Say "game directory: $GameDir"
 
-$runningHere = @(Get-GameProcessesIn $GameDir)
+$runningHere = @(Get-BusyProcess 'The Bibites.exe' $GameDir $GameLockProbe)
 if ($runningHere.Count -gt 0) {
-    foreach ($exe in $runningHere) { Say "running: $exe" }
-    Stop-Setup ("The Bibites is running from that folder, and Windows holds the plugin file " +
-                "open while it is. Close the game, then run this script again. Nothing was " +
-                "installed.")
+    # Step 0 asked this before anything at all was written, of the folder it
+    # worked out this run would use. It is asked again here because THIS is that
+    # folder resolved: a search that found the game, a -GameDir given as a
+    # relative path, or the managed runtime step 2 has just unpacked. Nothing has
+    # been written into the game or the data root yet either way.
+    Stop-Busy -Running @($runningHere)
 }
 
 # ---------------------------------------------------------------- 3. the matrix
@@ -1661,7 +1909,7 @@ if ($manageProgramFiles) {
             ''
         }
         if ($sourceSha -ne $destinationSha) {
-            Copy-Item -LiteralPath $source -Destination $destination -Force
+            Copy-ProgramFile $source $destination
         }
         $programFiles += [pscustomobject]@{
             path   = $destination

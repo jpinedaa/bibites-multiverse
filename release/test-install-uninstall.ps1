@@ -147,6 +147,99 @@ Check "the GUI waits on the process object it started" `
     ($guiCode -match '\.WaitForExit\(\)')
 Check "the GUI keeps the handle its exit code is read through" `
     ($guiCode -match '\$process\.Handle')
+
+# NOTHING OF THIS INSTALL MAY BE RUNNING WHILE IT IS BEING REPLACED. Windows
+# holds a program's own file open for as long as it runs, so a re-install started
+# over a live world died in step 9's Copy-Item with a raw
+# "The process cannot access the file" - AFTER steps 1 to 8 had already replaced
+# the mod inside the game and settled this world's map identity, and after the
+# setup around it had given up on writing the shortcuts and the Installed apps
+# entry. A refusal that arrives then is worth almost nothing, so the question is
+# asked FIRST, before a single byte is written, and it names what to close.
+#
+# These read CODE LINES ONLY, like the three above: the comments that explain the
+# check must not be able to satisfy it.
+$installerCode = ((Get-Content -LiteralPath $installer) | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+$stepZeroAt   = $installerCode.IndexOf('Step "0 of 9')
+$stepOneAt    = $installerCode.IndexOf('Step "1 of 9')
+$firstWriteAt = $installerCode.IndexOf('Unblock-File')
+Check "the installer asks what is running in a step 0 of its own" ($stepZeroAt -ge 0)
+Check "step 0 comes before step 1" `
+    ($stepZeroAt -ge 0 -and $stepOneAt -gt $stepZeroAt) "step 0 at $stepZeroAt, step 1 at $stepOneAt"
+Check "step 0 comes before the first thing this installer writes anywhere" `
+    ($stepZeroAt -ge 0 -and $firstWriteAt -gt $stepZeroAt) `
+    "step 0 at $stepZeroAt, first write at $firstWriteAt"
+Check "step 0 ends in the refusal rather than in a warning" `
+    ($installerCode -match '(?s)Step "0 of 9.*?if \(\$busy\.Count -gt 0\) \{ Stop-Busy')
+Check "step 0 asks Win32_Process, so a game launched from elsewhere is not flagged" `
+    ($installerCode -match 'Get-CimInstance -ClassName Win32_Process')
+Check "step 0 asks about the windowed launcher, the console launcher and the sidecar" `
+    ($installerCode -match 'foreach \(\$program in @\(\$LauncherName, \$ConsoleLauncherName, \$SidecarName\)\)')
+Check "the console launcher is asked about by its own name" `
+    ($installerCode -match '\$ConsoleLauncherName = ''multiverse-launcher\.exe''')
+Check "step 0 asks about the application folder only when this run installs into one" `
+    ($installerCode -match '\[string\]::IsNullOrWhiteSpace\(\$InstallRoot\)\) \{ \$plannedProgramRoot = Get-FullPath \$InstallRoot \}')
+Check "step 0 asks about the game in the folder step 5 writes the mod into" `
+    ($installerCode -match 'Get-BusyProcess ''The Bibites\.exe'' \$plannedGameRoot')
+# Step 0 and step 2 must agree about which game this run installs against. A
+# step 0 that guessed 'bundled' where step 2 goes external would refuse an
+# install over a game it was never going to touch, so ONE function decides.
+Check "one rule decides which game this run installs against, and both steps use it" `
+    (([regex]::Matches($installerCode, 'Resolve-RuntimeSelection \$RuntimeSelection \$GameDir \$hasBundledPayload')).Count -ge 2)
+Check "the installer no longer chooses the runtime a second time by hand" `
+    (-not ($installerCode -match 'elseif \(\$hasBundledPayload\) \{'))
+Check "the installer counts a process it cannot inspect as opaque, never as running here" `
+    ($installerCode -match 'if \(-not \$row\.image\) \{ \$opaque\+\+; continue \}')
+Check "a folder is matched with its own separator, so a sibling folder is not it" `
+    ($installerCode -match '\$prefix = \$full\.TrimEnd' -and $installerCode -match 'DirectorySeparatorChar')
+# NOTHING IS EVER ENDED FOR THE PERSON RUNNING SETUP. A world ended rather than
+# stopped loses everything it has simulated since its last save, so step 0 may
+# name a process and may never end one. The scope is step 0 itself - its constant,
+# its functions and its own body - because the stop script this installer WRITES
+# ends processes for a living, and that is the whole point of it.
+$stepZeroRegion = ''
+$busyBlockAt = $installerCode.IndexOf('$ExitBusy = 3')
+if ($busyBlockAt -ge 0 -and $stepOneAt -gt $busyBlockAt) {
+    $stepZeroRegion = $installerCode.Substring($busyBlockAt, $stepOneAt - $busyBlockAt)
+}
+Check "step 0's own code can be read whole" ($stepZeroRegion -ne '')
+foreach ($weapon in @('Stop-Process', '(?i)taskkill', '\.Kill\(')) {
+    Check ("step 0 never ends a process for you: $weapon") `
+        ($stepZeroRegion -ne '' -and -not ($stepZeroRegion -match $weapon))
+}
+# The refusal itself, read whole, because every line of it is the remedy.
+$busyRefusal = ''
+$busyMatch = [regex]::Match($installerText, '(?s)function Stop-Busy \{.*?\r?\n\}')
+if ($busyMatch.Success) { $busyRefusal = $busyMatch.Value }
+Check "the running-programs refusal is one place in the installer" ($busyRefusal -ne '')
+Check "it carries its own taxonomy id" ($busyRefusal -match 'INS-BUSY')
+Check "it names this install's own stop script" ($busyRefusal -match '\$StopName')
+Check "that stop script is Stop-Multiverse.ps1" `
+    ($installerCode -match '\$StopName\s*=\s*''Stop-Multiverse\.ps1''')
+Check "it names the launcher's own stop of every world" ($busyRefusal -match 'stop --all')
+Check "it names the launcher window's own way to do that" ($busyRefusal -match 'Stop every world')
+Check "it says that nothing was changed" ($busyRefusal -match 'NOTHING WAS CHANGED')
+Check "it says that it ended nothing itself" ($busyRefusal -match 'NOTHING IS ENDED FOR YOU')
+Check "it says what an install that got as far as step 9 had already done" `
+    ($busyRefusal -match 'WHAT THIS INSTALL HAD ALREADY DONE')
+# The exit code is the one thing a caller can act on without reading a word.
+Check "the refusal has an exit code of its own" ($installerCode -match '\$ExitBusy = 3')
+Check "the refusal exits with it" ($busyRefusal -match 'exit \$ExitBusy')
+Check "no other refusal in the installer uses that code" `
+    (([regex]::Matches($installerCode, 'exit 3(\s|$)')).Count -eq 0)
+Check "the GUI knows the same code" ($guiCode -match '\$ExitBusy = 3')
+Check "the GUI gives that code a dialog of its own" ($guiCode -match 'if \(\$exitCode -eq \$ExitBusy\)')
+# Step 9 replaces the launcher and the sidecar, and something can start between
+# step 0 and step 9 - a clicked shortcut, a started world. That copy says the
+# same thing rather than printing a sharing violation with a line number in it.
+Check "step 9's program copy names a sharing violation instead of showing it raw" `
+    ($installerCode -match 'Copy-ProgramFile \$source \$destination')
+# -cnotmatch, because Copy-ProgramFile's own body copies $Source to $Destination
+# and PowerShell's -match would call that the very line it is looking for.
+Check "step 9 has no raw copy of a program file left" `
+    ($installerCode -cnotmatch 'Copy-Item -LiteralPath \$source -Destination \$destination')
+Check "that copy re-throws every failure that is not a lock" `
+    ($installerCode -match '(?s)function Copy-ProgramFile.*?\n    \} catch \{.*?\n        throw \$failure')
 $probe = (& $guiInstaller -Probe | Out-String) | ConvertFrom-Json
 Check "the game search finds a real installed game" `
     (Test-Path -LiteralPath (Join-Path ([string]$probe.foundGame) 'The Bibites.exe') -PathType Leaf)
