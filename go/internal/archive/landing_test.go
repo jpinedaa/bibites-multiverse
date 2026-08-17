@@ -157,10 +157,19 @@ func TestJoinSectionWalksAWindowsNewcomerThroughTheInstall(t *testing.T) {
 	if walk < download {
 		t.Error("the walkthrough is rendered above the download buttons; the buttons come first")
 	}
-	// The #game section has a trust aside of its own, so the join box's is
-	// identified by its own heading rather than by the class alone.
+	// The walkthrough is a full-width row of the join card rather than a tail on
+	// the download column, but it still has to be written between the two: below
+	// 900px the card stacks in source order, and the order a newcomer needs is
+	// buttons, then steps, then boundaries. The #game section has a trust aside
+	// of its own, so the join box's is identified by its own heading rather than
+	// by the class alone.
 	if aside := strings.Index(page, `<aside class="trust"><h3>Clear boundaries</h3>`); aside < 0 || walk > aside {
-		t.Error("the walkthrough is outside the download column it explains")
+		t.Error("the walkthrough is written after the checklist; stacked, the card would read boundaries before steps")
+	}
+	// ...and it is a sibling of the download column, not a child of it. Nested,
+	// it made that column 1515px tall against 492px of checklist beside it.
+	if !strings.Contains(page, "</div></div>\n      <div class=\"walk\">") {
+		t.Error("the walkthrough is nested inside the download column again; it is a row of the card, not a tail on the column")
 	}
 
 	steps := page[walk:]
@@ -201,17 +210,63 @@ func TestJoinSectionWalksAWindowsNewcomerThroughTheInstall(t *testing.T) {
 		}
 	}
 
-	// The steps are prose in a narrow column beside the checklist, so they get
-	// their own rules rather than borrowing the flow strip's.
+	// The steps are prose in a row of their own under the two columns they
+	// follow, so they get their own rules rather than borrowing the flow strip's.
 	for _, want := range []string{
 		`.walksteps li{position:relative;counter-increment:walkstep`,
 		`.walksteps li:before{content:counter(walkstep)`,
 		`.walkmenu{`, `overflow-x:auto}`,
-		`#join .trust{display:flex;flex-direction:column;justify-content:center}`,
+		// The three placements are one rule between them: the walkthrough is row
+		// two across the whole card, and the two columns above it are pinned to
+		// row one. Inside the download column the walkthrough made that column
+		// 1515px tall while the checklist held 492px of content, so the checklist
+		// read as an empty panel; as its own row the card is 1173px and the two
+		// columns are the same 636px.
+		`#join .joincopy{grid-column:1;grid-row:1}`,
+		`#join .trust{display:flex;flex-direction:column;justify-content:center;grid-column:2;grid-row:1}`,
+		`#join .walk{grid-column:1/-1;grid-row:2`,
+		// Two columns of steps across that width. The break is forced rather than
+		// balanced so that the step which ends the first column is always the same
+		// one, which is what makes the connector rule below nameable: the vertical
+		// line drawn between consecutive steps would otherwise dangle out of the
+		// bottom of column one with nothing under it.
+		`#join .walksteps{columns:2;column-gap:44px}`,
+		`#join .walksteps li{break-inside:avoid}`,
+		`#join .walksteps li:nth-child(4){break-before:column}`,
+		`#join .walksteps li:nth-child(3):after{content:none}`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the walkthrough is missing its layout rule %q", want)
 		}
+	}
+
+	// Below 900px the card is a single column, and every rule above has to be
+	// taken back with it or the stacked page breaks in ways that are invisible
+	// from the desktop one. A grid-column:2 against a one-column card opens an
+	// implicit second column; and column-count:1 does NOT cancel a forced break —
+	// it moves the break into an overflow column, which the card's overflow:hidden
+	// clips, and steps 4 and 5 stop being on the page at all. Checked in a browser
+	// at 800px and 390px: copy, steps, checklist, in that order, no overflow.
+	for _, want := range []string{
+		`#join .joincopy,#join .trust,#join .walk{grid-column:1;grid-row:auto}`,
+		`#join .walksteps{columns:1}#join .walksteps li:nth-child(4){break-before:auto}`,
+		`#join .walksteps li:nth-child(3):after{content:""}`,
+		// The walkthrough is a card row now, so it carries the card's own padding
+		// and has to narrow with the other two.
+		`.joincopy,.trust,#join .walk{padding:30px 24px}`,
+		// The seam between the two columns becomes the seam above the stacked
+		// checklist.
+		`.trust{border-left:0;border-top:1px solid var(--line)}`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the stacked join card is missing its reset %q", want)
+		}
+	}
+	// A reset outside the media query would simply be the desktop layout undone.
+	narrow := strings.Index(page, "@media(max-width:900px){")
+	reset := strings.Index(page, `#join .joincopy,#join .trust,#join .walk{grid-column:1;grid-row:auto}`)
+	if narrow < 0 || reset < narrow {
+		t.Error("the stacked-card reset is not inside the 900px media query, so it applies to every width")
 	}
 
 	// Every placeholder in the template is replaced by renderLandingPage. A new
@@ -478,9 +533,18 @@ func TestTheGameSectionShowsTheGameAndTheHeroPointsAtIt(t *testing.T) {
 		"Every world on this map runs a copy of the game.",
 		`src="/game-screenshot.jpg"`,
 		`href="#game"><em>The Bibites</em></a>`,
-		// The screenshot column is taller than the copy beside it, so the copy
-		// centers itself against it instead of stranding blank space below.
-		`#game .joincopy{margin-block:auto}`,
+		// The screenshot column used to set a row 169px taller than the copy
+		// beside it, and centering the copy only moved the dead space around it.
+		// The copy is set at the page's reading size and the shot is capped, which
+		// brings the two columns within ~20px of each other and the card from
+		// 702px to 664px; the auto margins are what is left of the old rule, for
+		// whichever column still ends up the shorter one.
+		`#game .joincopy p{font-size:18px;line-height:1.7}`,
+		`#game .gameshot{max-width:390px}`,
+		`#game .joincopy,#game .trust{margin-block:auto}`,
+		// The cap exists only to match a column. Below 900px there is no column
+		// beside it, so the reader gets the whole frame back.
+		`#game .gameshot{max-width:none}`,
 	} {
 		if !strings.Contains(landingPageHTML, want) {
 			t.Errorf("landing page is missing %q", want)

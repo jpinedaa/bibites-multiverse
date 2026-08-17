@@ -116,9 +116,8 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 .flowitem b{display:block;margin:0 0 7px}.flowitem span{color:var(--muted);font-size:14px}
 .joinbox{display:grid;grid-template-columns:1.05fr .95fr;border:1px solid var(--line);border-radius:22px;overflow:hidden;background:var(--surface)}
 .joincopy{padding:50px}.joincopy h2{font-size:clamp(38px,5vw,64px)}.joincopy p{color:var(--muted);max-width:620px}
-.trust{padding:50px;background:linear-gradient(150deg,#172720,#101917)}.trust h3{margin:0 0 20px}.trust ul{margin:0;padding:0;list-style:none}
+.trust{padding:50px;border-left:1px solid var(--line);background:linear-gradient(150deg,#172720,#101917)}.trust h3{margin:0 0 20px}.trust ul{margin:0;padding:0;list-style:none}
 .trust li{position:relative;padding:12px 0 12px 27px;border-top:1px solid var(--line);color:#bfd0c9}.trust li:before{content:"✓";position:absolute;left:0;color:var(--green)}
-.walk{margin-top:28px;padding-top:26px;border-top:1px solid var(--line)}
 .walk h3{margin:0 0 16px;font-size:20px;letter-spacing:-.02em}
 .walksteps{margin:0;padding:0;list-style:none;counter-reset:walkstep}
 .walksteps li{position:relative;counter-increment:walkstep;padding:0 0 18px 46px;color:var(--muted)}
@@ -131,11 +130,32 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
 .walkmenu{margin:11px 0 0;padding:10px 13px;border:1px solid var(--line);border-radius:9px;
 background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-x:auto}
 .walk code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#bfd0c9}
-/* the walkthrough makes the copy column much taller than the checklist beside it */
-#join .trust{display:flex;flex-direction:column;justify-content:center}
+/* the walkthrough is a full-width second row of the same card rather than a
+   tail on the download column: inside that column it made the column 1515px
+   tall against 492px of checklist, so the checklist read as an empty panel.
+   As its own row the two top columns answer each other and the steps get the
+   card's whole width. Source order stays copy, walk, checklist, which is the
+   reading order the stacked layout below 900px falls back to. */
+#join .joincopy{grid-column:1;grid-row:1}
+#join .trust{display:flex;flex-direction:column;justify-content:center;grid-column:2;grid-row:1}
+#join .walk{grid-column:1/-1;grid-row:2;padding:34px 50px 50px;border-top:1px solid var(--line)}
+#join .walksteps{columns:2;column-gap:44px}
+#join .walksteps li{break-inside:avoid}
+/* the break is forced instead of balanced so the same step always ends the
+   first column, and that step is the one whose connector would otherwise
+   dangle into the gutter with nothing under it. */
+#join .walksteps li:nth-child(4){break-before:column}
+#join .walksteps li:nth-child(3):after{content:none}
 .gameshot{margin:0 0 18px}.gameshot img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px}
 .gameshot figcaption{margin-top:8px;font-size:13px;color:var(--muted)}
-#game .joincopy{margin-block:auto}/* auto margins center the copy in the row the taller screenshot column sets */
+/* the screenshot column used to set a row 169px taller than the words beside
+   it, and the copy just floated in the dead space. The copy is set at the
+   page's reading size and the shot is capped, which brings the two columns
+   within 22px of each other; the auto margins are what is left of the old
+   rule, for whichever column still ends up the shorter one. */
+#game .joincopy p{font-size:18px;line-height:1.7}
+#game .gameshot{max-width:390px}
+#game .joincopy,#game .trust{margin-block:auto}
 .faq{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:12px}.faq details{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:20px 22px}
 .faq summary{cursor:pointer;font-weight:700}.faq p{color:var(--muted);margin:12px 0 2px}.foot{border-top:1px solid var(--line);padding-block:34px;color:var(--muted);font-size:13px}
 .footin{display:flex;justify-content:space-between;align-items:center;gap:24px}.footlinks{display:flex;flex-wrap:wrap;gap:18px}.foot a:hover{color:var(--text)}
@@ -144,7 +164,18 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
 @media(max-width:900px){.hero{grid-template-columns:1fr;gap:48px;padding-top:72px}.topology{min-height:410px}.snapshot{grid-template-columns:1fr 1fr}
 .metric:nth-child(3){border-left:0;border-top:1px solid var(--line)}.metric:nth-child(4){border-top:1px solid var(--line)}.principles{grid-template-columns:1fr}
 .principle{min-height:0}.flow{grid-template-columns:1fr 1fr}.flowitem:nth-child(3){border-left:0;border-top:1px solid var(--line)}
-.flowitem:nth-child(4){border-top:1px solid var(--line)}.joinbox{grid-template-columns:1fr}}
+.flowitem:nth-child(4){border-top:1px solid var(--line)}.joinbox{grid-template-columns:1fr}
+/* the card is one column here, so the explicit placement above has to go with
+   it: a grid-column:2 against a single-column card would open an implicit
+   second one. The steps become a single run again, which takes all three of
+   the multi-column rules with it — column-count:1 does NOT cancel a forced
+   break, it moves the break into a clipped overflow column and steps 4 and 5
+   disappear — and gives step 3 its connector back, since there is no longer a
+   gutter for it to dangle in. */
+#join .joincopy,#join .trust,#join .walk{grid-column:1;grid-row:auto}
+#join .walksteps{columns:1}#join .walksteps li:nth-child(4){break-before:auto}
+#join .walksteps li:nth-child(3):after{content:""}
+.trust{border-left:0;border-top:1px solid var(--line)}#game .gameshot{max-width:none}}
 @media(max-width:860px){.nav{min-height:62px;padding-block:10px;flex-wrap:wrap;gap:10px}.links{width:100%;gap:16px;overflow-x:auto;padding-bottom:3px}.links a{white-space:nowrap}}
 @media(max-width:640px){.shell{width:min(calc(100% - 24px),var(--max))}
 .links{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}
@@ -152,7 +183,7 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
 .snapshot{margin-top:-20px;grid-template-columns:1fr 1fr}.snapstate,.metric{min-height:96px;padding:17px}.snapv{font-size:23px}.snapstate .snapv{font-size:15px}
 .snapstate{grid-column:1/-1}.snapshot .metric{border-top:1px solid var(--line)}.snapshot .metric:nth-child(2),.snapshot .metric:nth-child(4){border-left:0}.snapshot .metric:nth-child(3){border-left:1px solid var(--line)}.snapshot .metric:nth-child(4){grid-column:1/-1}
 .section{padding-block:44px 0}.section:last-child{padding-bottom:44px}.sectionhd{margin-bottom:26px}.flow{grid-template-columns:1fr}.flowitem+.flowitem{border-left:0;border-top:1px solid var(--line)}
-.flowitem:not(:last-child):after{content:"↓";right:24px;top:auto;bottom:-13px}.joincopy,.trust{padding:30px 24px}.faq{grid-template-columns:1fr}.footin{align-items:flex-start;flex-direction:column}}
+.flowitem:not(:last-child):after{content:"↓";right:24px;top:auto;bottom:-13px}.joincopy,.trust,#join .walk{padding:30px 24px}.faq{grid-template-columns:1fr}.footin{align-items:flex-start;flex-direction:column}}
 </style>
 </head>
 <body>
@@ -233,7 +264,7 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
 
   <section class="shell section" id="join">
     <div class="joinbox">
-      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div>
+      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
       <div class="walk">
         <h3>On Windows, five steps.</h3>
         <ol class="walksteps">
@@ -245,7 +276,7 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
           <li><b>Stop it from the same menu.</b> Option <b>2</b> asks the game to close and waits for its save, so stopping is not losing. Option <b>6</b> creates another world, when you want more than one on this computer.</li>
         </ol>
         <p class="promise">On Linux: unpack the complete package, run <code>./install-bibites-multiverse.sh</code>, then <code>./start-multiverse.sh</code>. The <a href="__HOMEPAGE_DOCS__">install guide</a> has both platforms in full.</p>
-      </div></div>
+      </div>
       <aside class="trust"><h3>Clear boundaries</h3><ul><li>Your world and saves stay on your machine.</li><li>Automatic enrollment creates the secret on your machine.</li><li>The public page is read-only.</li><li>TLS protects traffic to the relay.</li><li>Published world data is explained before you join.</li><li>The shared run ends November 14 unless extended by announcement.</li></ul></aside>
     </div>
   </section>
