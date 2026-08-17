@@ -167,8 +167,10 @@ merely repeats its caption.
 4. **Assert (the panel):** the world's name `default` in a larger bold face; under it the headline
    `Stopped`; under that, because this is a one-world installation that is not running,
    `This is your world. Click Start to join the map.`
-5. **Assert (the facts):** `Save name:` the installed world, `Port:` `8787`, `Speed:` `-`,
-   `Data folder:` the world's data root, `Map identity:` a `public-…` string.
+5. **Assert (the facts):** `Save name:` the installed world, `Port:` `8787`,
+   `Speed:` **`not running`**, `Data folder:` the world's data root, `Map identity:` a `public-…`
+   string. **No fact is ever a bare `-`**: a dash is a symbol somebody has to interpret, and it reads
+   as a fault. A world that is up but has not reported yet says `not measured yet`.
 6. **Assert (nothing is cut without saying so):** the `Data folder:` value either fits, or is
    shortened **in the middle with an ellipsis** keeping the drive and the last folder
    (`C:\Users\…\BibitesMultiverse-multi-2`). It must never simply stop mid-word where the
@@ -224,11 +226,13 @@ plugin removed, but any world whose game never joins will do.
 
 ### 3c. A refusal says why IN THE PANEL, in the core's own words
 
-**This is the assertion that failed last round**, on all three refusal paths: the panel said
-`Could not start 'default'. The details below say why.` while the core's own sentence sat one line
-lower in a pane nobody had opened. The cause was where the line was picked up — off the pane's own
-hundred-millisecond batch, by which time the action had already finished, because a refusal is
-printed and returned from in microseconds. It is now taken on the goroutine that writes it.
+**This has failed twice, for two different reasons, so drive all three rows.** First the line was
+picked up off the pane's own hundred-millisecond batch, by which time the action had already
+finished — it is now taken on the goroutine that writes it, which fixed the **start** case. Then the
+**create** and **delete** cases were still silent: their results have no world of their own to sit
+beside, and a previous `Stopped every world.` — written against *every* world — was being preferred
+over them, so the newest and only useful line in the window was invisible behind an older success.
+Results are now ordered by **recency**, not by how specific they are.
 
 Drive all three:
 
@@ -240,8 +244,18 @@ Drive all three:
 
 1. **Assert:** each red line carries **both** halves — what was being attempted, and the core's own
    sentence after a colon. A line ending `. The details below say why.` means the core's sentence was
-   not captured, and is a failure of this section even though the pane has the sentence in it.
+   not captured, and is a failure of this section even though the pane has the sentence in it. **An
+   empty result line, or the previous action's line still sitting there, is the other failure** and
+   is what the create and delete rows caught last round.
 2. **Assert:** the details pane opened by itself in each case, and the same sentence is in it.
+2b. **The exact sequence that failed:** press **Stop every world** and let it finish, so every world
+   shows a green `Stopped every world.` Now open **Create a world...** and give it a port another
+   world already has. **Assert:** the moment it is refused, **every** world in the list shows the red
+   `'world2' was not created: ...` — `Stopped every world.` must be gone from all of them, because it
+   has been overtaken. Repeat with a wrong-name delete.
+2c. **Assert (nothing comes back from the dead):** after that, start one world. Its own green line
+   appears; the OTHER world goes **blank** rather than reverting to `Stopped every world.`, which was
+   overtaken two actions ago.
 3. **Assert:** the sentence quoted is the **refusal**, not the last line of the block explaining it.
    The delete case proves this: the custody warning is printed first and is indented, and the
    flush-left refusal below it is the one that must be quoted.
@@ -267,6 +281,9 @@ headline `Stopped` stacked straight on top of multi-2's result, as though the tw
    and it is the line a person most needs to read.
 9. **Assert:** while any action is running, **no** result line is shown on any world — the panel is
    showing what is happening instead.
+10. **Assert (newest wins):** a world's own result is shown when it is the newest thing that
+    happened; a result with no world of its own — a refused create, any delete — is shown on every
+    world while IT is the newest thing. Never the older of the two.
 
 ## 4. The window setting is a setting now, and it persists
 
@@ -330,8 +347,10 @@ which is where a one-off belongs.
    `Its save name`, `Its port` (the lowest free one, `8788`), `Its own folder` (beside the first
    world's), `The folder the game is installed in` (the same as the existing world's), and
    `Run without a game window (headless)`.
-5b. **Assert:** every field's caption is left-aligned on **one** column, and the game folder is
-   readable rather than cut off at the edge of the dialog.
+5b. **Assert:** every field's caption is left-aligned on **one** column — including
+   `A name for the new world`, which is above the advanced block and was fourteen pixels to the right
+   of everything under it last round — and the game folder is readable rather than cut off at the
+   edge of the dialog. Read the left edge of the LINE EDITS too: all six must share it.
 6. **Type `70000` into `Its port`** and press **Create this world**.
 7. **Assert:** nothing is created; the details pane opens by itself and the panel's red result line
    quotes the core: `'world2' was not created: the sidecar port 70000 is outside 1024-65535`. **The
@@ -471,6 +490,13 @@ which is where a one-off belongs.
     `Copied the details to the clipboard.`
 11. Press **Hide details**. **Assert:** the pane disappears **and its divider with it**, the worlds
     and the panel take the whole space, and the caption is `Show details` again.
+12. **Assert (no orphan divider), which failed last round:** with the pane hidden there is **exactly
+    one** divider left in the window — the vertical one between the world list and the panel. There
+    must be **no horizontal bar** anywhere: last round a nine-pixel-tall, window-wide handle stayed
+    behind under the world list, and dragging it resized a pane nobody could see. Sweep the pointer
+    along the bottom of the window and confirm the cursor never becomes a north-south resize arrow.
+13. Show and hide the pane a few times. **Assert:** the divider comes back with the pane every time
+    and goes away with it every time.
 
 ## 11. It remembers where it was
 
@@ -478,8 +504,11 @@ which is where a one-off belongs.
    about half the window**, then close it with its X.
 2. **Assert:** `%APPDATA%\Bibites Multiverse\launcher-window.json` exists, carries
    `"format": "bibites-multiverse/launcher-window/1"`, and its `x`, `y`, `width`, `height` and
-   `details` match what you left. **Assert:** it also carries a `"split"` object with an entry per
-   divider (`"main/details"` and `"main/details/worlds"`), each two pixel sizes.
+   `details` match what you left. **Assert:** it also carries a `"split"` object with one entry per
+   divider, named `"details"` and `"worlds"`, each holding two pixel sizes. **The names are this
+   program's**, not walk's internal widget path — a key like `"main/clientComposite/details"` in a
+   file a participant can open is a leak of another library's furniture, and is what this round
+   replaced.
 3. Re-open the window. **Assert:** it opens at that size and position, with the details pane open
    **and the divider where you left it**.
 3b. **Assert:** there is **no second preferences file** — nothing under
@@ -494,7 +523,7 @@ which is where a one-off belongs.
    sensible default dividers — the field is additive, and a file from the previous build must still
    work.
 6c. Open the window, **never** press `Show details`, and close it. **Assert:** the `"split"` entry
-   for `main/details` is either absent or unchanged from before — never a pair containing `0`. A
+   for `"details"` is either absent or unchanged from before — never a pair containing `0`. A
    hidden splitter child measures zero, and a zero saved here re-opens the pane at no height with its
    divider on the bottom edge of the window.
 7. **Assert:** nothing was written into `profiles\` — a stray `.json` in there is read as a world and
@@ -638,6 +667,8 @@ reach them:
    the line.
 4. **Does a refusal reach the panel in the core's own words** (section 3c)? All three paths, and the
    exact red line for each.
-5. **Does a result stay with the world it is about** (section 3d)?
-6. **Does anything in the window or its dialogs still use an internal word** (section 0's wording
+5. **Does a result stay with the world it is about, and does the newest one win** (sections 3d and
+   3c.2b)? The create and delete refusals are the two that have been silent.
+6. **Is there exactly one divider on screen when the details pane is hidden** (section 10.12)?
+7. **Does anything in the window or its dialogs still use an internal word** (section 0's wording
    rule)?

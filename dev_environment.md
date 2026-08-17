@@ -343,6 +343,12 @@ test walks all of them against `InternalWords()`.
   hidden one, which is zero. `UsableSplit` (tag-free, tested) drops any entry that is not two or more
   positive numbers, and because the file is seeded back into walk's settings before walk writes to
   them, dropping keeps the last position the pane had while it was open.
+- **The names in the file are ours, not walk's path.** walk keys a splitter's state by a path built
+  from the name of every window between the form and the widget, which comes out as
+  `main/clientComposite/details` — correct, stable, and a piece of another library's furniture in a
+  file a participant can open. `SplitAlias` keeps the last segment, which is the name this program
+  gave the widget (`SplitNameDetails`, `SplitNameWorlds`); the two differ, which is what makes the
+  last segment enough to tell them apart.
 - **`TextEdit.AppendText` scrolls the view itself.** It selects the end of the document and replaces
   the selection, and the EDIT control scrolls the caret into view during `EM_REPLACESEL` — so
   deciding not to follow was never enough. A machine measured the first visible line jumping from 0
@@ -355,6 +361,11 @@ test walks all of them against `InternalWords()`.
   `FormBase.Run` re-applies the window's current bounds as it starts, which would move an
   already-maximised window with `SetWindowPos`. The maximise is therefore `Synchronize`d into the
   message loop, which runs after walk has finished starting.
+
+**The panel's empty space below the facts is deliberate.** Content in a form is top-aligned, and the
+slack belongs to whatever grows into it: the world list as worlds are added, and the details pane
+when it is opened. Pinning a control to the bottom to fill it was the previous shape, and it read as
+a gap where something had failed to load.
 
 **Where the window's own preferences live:** `%APPDATA%\Bibites Multiverse\launcher-window.json`
 (`windowstate.go`), holding size, position, maximised, whether the details pane was open, and where

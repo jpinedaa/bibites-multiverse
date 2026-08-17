@@ -319,33 +319,50 @@ func (j Job) ResultAbout() ResultAbout {
 // ResultLog is the last thing that happened to each world, and it is the whole
 // of what the panel's coloured line is drawn from.
 //
-// A result is REPLACED by the next action about the same world and by nothing
-// else, so a world that has been sitting there for ten minutes still says how it
-// got there.
+// A result is REPLACED by something NEWER and by nothing else, so a world that
+// has been sitting there for ten minutes still says how it got there.
+//
+// NEWER IS THE WHOLE RULE, and getting that wrong is a bug a machine found. The
+// first version preferred a world's own result over the loose one whatever their
+// ages, on the reasoning that a world's own line is more specific. Then 'stop
+// every world' wrote a line against EVERY world — so when the next create was
+// refused, its loose refusal was newer, was correct, was the only thing the
+// person needed, and was invisible behind "Stopped every world." on every row in
+// the list. Specificity is not recency, and it is recency a person is reading.
 type ResultLog struct {
-	byWorld map[string]Result
-	// loose is a result with no row to live beside — see ResultAbout. It is
-	// shown for any world that has no result of its own, and it is cleared by the
-	// next action whatever that action is about.
-	loose Result
+	byWorld map[string]stamped
+	// loose is a result with no row to live beside — see ResultAbout.
+	loose stamped
+	// at counts recordings. It is not a clock: nothing here needs to know when
+	// something happened, only what happened last.
+	at int
+}
+
+// stamped is one result and how recent it is.
+type stamped struct {
+	result Result
+	at     int
 }
 
 // NewResultLog makes an empty one.
 func NewResultLog() *ResultLog {
-	return &ResultLog{byWorld: make(map[string]Result)}
+	return &ResultLog{byWorld: make(map[string]stamped)}
 }
 
-// Record writes one result down. A zero Result CLEARS the same places instead,
-// which is what starting an action does: the line under a world must not go on
-// claiming the last thing that happened while the next thing is happening.
+// Record writes one result down. A zero Result CLEARS instead, which is what
+// starting an action does: no line may go on claiming the last thing that
+// happened while the next thing is happening.
 //
 // names is the worlds that exist right now, and it decides whether a result has
 // a row to live beside at all.
 func (r *ResultLog) Record(about ResultAbout, result Result, names []string) {
 	if r.byWorld == nil {
-		r.byWorld = make(map[string]Result)
+		r.byWorld = make(map[string]stamped)
 	}
-	r.loose = Result{}
+	r.at++
+	// THE LOOSE SLOT IS ALWAYS CLEARED, whatever this recording is about: it
+	// belongs to one action, and the moment another one starts it is history.
+	r.loose = stamped{}
 	targets := about.Worlds
 	if about.Every {
 		targets = names
@@ -358,25 +375,34 @@ func (r *ResultLog) Record(about ResultAbout, result Result, names []string) {
 				if result.Text == "" {
 					delete(r.byWorld, strings.ToLower(name))
 				} else {
-					r.byWorld[strings.ToLower(name)] = result
+					r.byWorld[strings.ToLower(name)] = stamped{result: result, at: r.at}
 				}
 			}
 		}
 	}
-	if !matched {
-		r.loose = result
+	if !matched && result.Text != "" {
+		// A LOOSE RESULT SUPERSEDES EVERY WORLD'S OWN LINE, and the older lines
+		// are dropped rather than merely outranked. They are all older than this
+		// by construction, so none of them can be shown while this is here — and
+		// when this is cleared by the next action they must not come BACK, which
+		// is what leaving them in place would do: a world would go from a refusal
+		// straight back to a success it had already been overtaken by.
+		r.byWorld = make(map[string]stamped)
+		r.loose = stamped{result: result, at: r.at}
 	}
 }
 
-// For is the line to show beside one world.
+// For is the line to show beside one world: whichever of that world's own result
+// and the loose one is NEWER.
 func (r *ResultLog) For(world string) Result {
 	if r == nil {
 		return Result{}
 	}
-	if result, ok := r.byWorld[strings.ToLower(world)]; ok {
-		return result
+	own := r.byWorld[strings.ToLower(world)]
+	if r.loose.at > own.at {
+		return r.loose.result
 	}
-	return r.loose
+	return own.result
 }
 
 // Forget drops a world's result, for a world that has left the list.

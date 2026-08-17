@@ -266,6 +266,23 @@ func TestThePanelSaysOneThingAboutOneWorld(t *testing.T) {
 		t.Fatalf("an unmeasured speed reads %q", got)
 	}
 
+	// A DASH IS NOT AN ANSWER. The two reasons there is no number are different
+	// and each of them is a short sentence.
+	if got := speedFact(stoppedWorld()); got != "not running" {
+		t.Fatalf("a stopped world's speed reads %q", got)
+	}
+	starting := aWorld()
+	starting.Game.Running = false
+	starting.Mod = launcher.ModView{}
+	if got := speedFact(starting); got != "not measured yet" {
+		t.Fatalf("a starting world's speed reads %q", got)
+	}
+	for _, fact := range PanelFor(&world, snap, Busy{}, NewResultLog()).Facts {
+		if fact.Value == "-" {
+			t.Fatalf("the %s fact is a dash", fact.Label)
+		}
+	}
+
 	// A stopped world offers Start.
 	stopped := stoppedWorld()
 	if got := PanelFor(&stopped, snap, Busy{}, NewResultLog()).Primary.Caption; got != ButtonStart {
@@ -721,11 +738,12 @@ func TestAResultWithNoRowIsShownAnyway(t *testing.T) {
 	if !strings.Contains(got.Text, "70000") || got.Good {
 		t.Fatalf("a refused create shows %+v", got)
 	}
-	// It is the LOOSE one, so a world with a result of its own still shows that.
+	// It is the LOOSE one, and the NEWER one wins: a world's own result taken
+	// before it does not hide it, and one taken after it does.
 	start := Job{Kind: JobStart, World: "default"}
 	results.Record(start.ResultAbout(), start.Result(0, ""), names)
 	if got := results.For("default").Text; got != "Started 'default'." {
-		t.Fatalf("the world's own result was not preferred: %q", got)
+		t.Fatalf("a newer result about the world itself was not preferred: %q", got)
 	}
 
 	// A delete names a world that is on its way out of the list, so it goes to
@@ -791,5 +809,99 @@ func TestEveryColourIsAccountedFor(t *testing.T) {
 	}
 	if !seen[StatusFor(stoppedWorld(), Busy{World: "default", Short: "Starting..."}).Colour] {
 		t.Fatal("the working state is drawn in a colour that is not in Colours()")
+	}
+}
+
+// THE BUG A MACHINE FOUND, EXACTLY: 'Stop every world' writes a line against
+// EVERY world, so the next refusal — which has no row of its own and lands in
+// the loose slot — was newer, was correct, was the only thing the person needed,
+// and was invisible behind "Stopped every world." on every row in the list.
+//
+// The panel showed nothing at all about a create that had just been refused, and
+// went on saying the last thing that had gone right.
+func TestAFreshRefusalIsNeverHiddenByAnOlderSuccess(t *testing.T) {
+	first := aWorld()
+	second := stoppedNamed("multi-2")
+	snap := launcher.Snapshot{Worlds: []launcher.WorldView{first, second}}
+	names := []string{"default", "multi-2"}
+	results := NewResultLog()
+
+	// Everything is fine, and every world says so.
+	all := Job{Kind: JobStopAll}
+	results.Record(all.ResultAbout(), all.Result(0, ""), names)
+	for _, name := range names {
+		if results.For(name).Text != "Stopped every world." {
+			t.Fatalf("%s did not take the global result", name)
+		}
+	}
+
+	// Now a create is refused. The world it names will never exist, so its result
+	// has no row — and it must still be the line every world shows, because it is
+	// what just happened.
+	create := Job{Kind: JobCreate, World: "world2"}
+	results.Record(create.ResultAbout(), Result{}, names) // the job starts
+	results.Record(create.ResultAbout(),
+		create.Result(1, "the profile 'default' already uses port 8787. Every world needs its own"), names)
+
+	want := "'world2' was not created: the profile 'default' already uses port 8787. Every world needs its own"
+	for _, name := range names {
+		got := results.For(name)
+		if got.Text != want {
+			t.Fatalf("with %s selected the panel would say %q, want %q", name, got.Text, want)
+		}
+		if got.Good {
+			t.Fatalf("with %s selected the refusal would be drawn green", name)
+		}
+	}
+	// And through the panel, which is what is actually on screen.
+	for _, world := range []launcher.WorldView{first, second} {
+		panel := PanelFor(&world, snap, Busy{}, results)
+		if panel.Result.Text != want || panel.Result.Good {
+			t.Fatalf("the panel for %s shows %+v", world.Name, panel.Result)
+		}
+	}
+
+	// The same for a delete that was refused: the world is still in the list, but
+	// the result is about an act on the installation and goes to the same place.
+	del := Job{Kind: JobDelete, World: "multi-2"}
+	results.Record(del.ResultAbout(), Result{}, names)
+	results.Record(del.ResultAbout(),
+		del.Result(1, "that is not 'multi-2'. Nothing was deleted"), names)
+	want = "'multi-2' was not deleted: that is not 'multi-2'. Nothing was deleted"
+	for _, name := range names {
+		if got := results.For(name).Text; got != want {
+			t.Fatalf("with %s selected the panel would say %q, want %q", name, got, want)
+		}
+	}
+
+	// A world's OWN next action takes its line back, because that is newer again.
+	start := Job{Kind: JobStart, World: "default"}
+	results.Record(start.ResultAbout(), start.Result(0, ""), names)
+	if got := results.For("default").Text; got != "Started 'default'." {
+		t.Fatalf("default shows %q", got)
+	}
+	// And multi-2 goes QUIET rather than back to "Stopped every world.". That
+	// line was overtaken two actions ago; resurrecting it would be a lie about
+	// the order things happened in, which is the one thing this log is for.
+	if got := results.For("multi-2").Text; got != "" {
+		t.Fatalf("multi-2 resurrected an overtaken line: %q", got)
+	}
+}
+
+// Starting anything clears the loose slot, so a result belonging to the last
+// action cannot outlive it.
+func TestStartingAnActionDropsTheLooseResult(t *testing.T) {
+	names := []string{"default"}
+	results := NewResultLog()
+	create := Job{Kind: JobCreate, World: "world2"}
+	results.Record(create.ResultAbout(), create.Result(1, "no"), names)
+	if results.For("default").Text == "" {
+		t.Fatal("a refusal was not recorded at all")
+	}
+	// Any other job starting wipes it, whatever that job is about.
+	start := Job{Kind: JobStart, World: "default"}
+	results.Record(start.ResultAbout(), Result{}, names)
+	if got := results.For("default").Text; got != "" {
+		t.Fatalf("the last action's line outlived it: %q", got)
 	}
 }

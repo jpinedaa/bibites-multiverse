@@ -470,9 +470,16 @@ func emptyFacts() []Fact {
 // them is the reading: a machine that cannot draw fast enough holds the applied
 // value below the target, and a participant who sees only one number cannot tell
 // that from a world that is not running.
+//
+// A DASH IS NOT AN ANSWER. This read "-" for a stopped world, which is a symbol
+// a person has to interpret and can read as a fault. There are two reasons there
+// is no number, they are different, and each of them is a short sentence.
 func speedFact(world launcher.WorldView) string {
+	if !world.Sidecar.Running && !world.Game.Running {
+		return "not running"
+	}
 	if !world.Mod.Connected || world.Mod.TimeScale == 0 {
-		return "-"
+		return "not measured yet"
 	}
 	target := "x" + roundedFloat(world.Mod.TimeScale) + " (target)"
 	if world.Mod.Achieved == 0 {

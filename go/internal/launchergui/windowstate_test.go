@@ -30,7 +30,7 @@ func TestTheWindowStateIsKeptAwayFromTheWorlds(t *testing.T) {
 
 func TestWindowStateRoundTrips(t *testing.T) {
 	state := WindowState{X: 120, Y: 80, Width: 1200, Height: 800, Maximized: true, Details: true,
-		Split: map[string]string{"main/details": "612 244"}}
+		Split: map[string]string{SplitNameDetails: "612 244"}}
 	raw, err := state.Encode()
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
@@ -49,7 +49,7 @@ func TestWindowStateRoundTrips(t *testing.T) {
 		back.Details != state.Details {
 		t.Fatalf("read back %+v, wrote %+v", back, state)
 	}
-	if len(back.Split) != 1 || back.Split["main/details"] != "612 244" {
+	if len(back.Split) != 1 || back.Split[SplitNameDetails] != "612 244" {
 		t.Fatalf("the dividers read back as %v", back.Split)
 	}
 }
@@ -128,24 +128,24 @@ func TestAWindowIsNeverRestoredOffTheScreen(t *testing.T) {
 // this keeps the strings walk writes beside the size and the position, so there
 // is one file to find, to document and to delete.
 //
-// THEY ARE KEYED BY WALK'S OWN PATH, which is what keeps the two splitters in
-// this window apart: the details divider and the world list's, nested inside it.
-// A single shared value was handed to both by the first attempt at this, so
+// THEY ARE KEYED SEPARATELY, which is what keeps the two splitters in this
+// window apart: the details divider and the world list's, nested inside it. A
+// single shared value was handed to both by the first attempt at this, so
 // restoring the height of the details pane also set the width of the world list
 // to it.
 func TestTheDividersTravelInTheSameFile(t *testing.T) {
 	raw, err := WindowState{X: 0, Y: 0, Width: 1200, Height: 800, Split: map[string]string{
-		"main/details":        "612 244",
-		"main/details/worlds": "300 900",
+		SplitNameDetails: "612 244",
+		SplitNameWorlds:  "300 900",
 	}}.Encode()
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
 	}
-	if !strings.Contains(string(raw), `"main/details": "612 244"`) {
+	if !strings.Contains(string(raw), `"details": "612 244"`) {
 		t.Fatalf("the divider is not in the file: %s", raw)
 	}
 	back, ok := DecodeWindowState(raw)
-	if !ok || back.Split["main/details"] != "612 244" || back.Split["main/details/worlds"] != "300 900" {
+	if !ok || back.Split[SplitNameDetails] != "612 244" || back.Split[SplitNameWorlds] != "300 900" {
 		t.Fatalf("read back %v", back.Split)
 	}
 
@@ -169,6 +169,31 @@ func TestTheDividersTravelInTheSameFile(t *testing.T) {
 	}
 	if strings.Contains(string(empty), "split") {
 		t.Fatalf("an unopened pane wrote a divider: %s", empty)
+	}
+}
+
+// THE FILE IS SOMETHING A PARTICIPANT CAN OPEN, so the names in it are this
+// program's and not walk's. walk keys a splitter's state by a path built from
+// the name of every window between the form and the widget, which came out as
+// "main/clientComposite/details" — correct, stable, and a piece of another
+// package's furniture in somebody's preferences.
+func TestTheDividerNamesAreOursAndNotWalksPath(t *testing.T) {
+	cases := map[string]string{
+		"main/clientComposite/details":                         SplitNameDetails,
+		"main/clientComposite/details/worlds":                  SplitNameWorlds,
+		"whatever/walk/decides/to/call/it/" + SplitNameDetails: SplitNameDetails,
+		SplitNameWorlds: SplitNameWorlds,
+		"":              "",
+	}
+	for key, want := range cases {
+		if got := SplitAlias(key); got != want {
+			t.Fatalf("SplitAlias(%q) = %q, want %q", key, got, want)
+		}
+	}
+	// The two names must differ, because it is the last segment alone that tells
+	// the two splitters apart.
+	if SplitNameDetails == SplitNameWorlds || SplitNameDetails == "" || SplitNameWorlds == "" {
+		t.Fatalf("the splitter names are %q and %q", SplitNameDetails, SplitNameWorlds)
 	}
 }
 

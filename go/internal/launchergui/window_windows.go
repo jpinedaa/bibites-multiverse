@@ -293,7 +293,7 @@ func (u *ui) build() error {
 				MinSize: d.Size{Width: MinWindowWidth - 60}},
 			d.VSplitter{
 				AssignTo:      &u.detailsSplit,
-				Name:          "details",
+				Name:          SplitNameDetails,
 				Persistent:    true,
 				HandleWidth:   splitterHandle,
 				StretchFactor: 1,
@@ -303,7 +303,7 @@ func (u *ui) build() error {
 						// too. It is the names that keep the two splitters apart
 						// in the settings; an unnamed one would be handed the
 						// other's state — see splitSettings.
-						Name:        "worlds",
+						Name:        SplitNameWorlds,
 						Persistent:  true,
 						HandleWidth: splitterHandle,
 						// The list needs two columns and the panel needs room for
@@ -341,8 +341,7 @@ func (u *ui) build() error {
 	u.spinner.SetVisible(false)
 	u.resultLine.SetVisible(false)
 	u.hint.SetVisible(false)
-	u.detailsPane.SetVisible(false)
-	u.detailsToggle.SetText(ButtonShowDetails)
+	u.showDetails(false)
 	if icon := windowIcon(); icon != nil {
 		u.mw.SetIcon(icon)
 	}
@@ -1063,13 +1062,47 @@ func (u *ui) setDetails(open bool) {
 		return
 	}
 	u.detailsOpen = open
+	u.showDetails(open)
+	if open {
+		u.scrollLogToEnd()
+	}
+}
+
+// showDetails puts the pane AND ITS DIVIDER on screen, or takes both off.
+//
+// THE DIVIDER HAS TO BE HIDDEN BY HAND, which is a walk limitation a machine
+// found: hiding a splitter's child makes walk mark the matching handle's LAYOUT
+// ITEM invisible (splitterlayout.go, reset) so that it is excluded from the
+// arithmetic — but nothing hides the handle's own window. It therefore stayed on
+// screen at whatever bounds it last had: a nine-pixel bar across the bottom of
+// the window, with nothing under it, which could still be dragged and which
+// resized a pane nobody could see.
+func (u *ui) showDetails(open bool) {
 	u.detailsPane.SetVisible(open)
+	if handle := u.detailsHandle(); handle != nil {
+		handle.SetVisible(open)
+	}
 	if open {
 		u.detailsToggle.SetText(ButtonHideDetails)
-		u.scrollLogToEnd()
 	} else {
 		u.detailsToggle.SetText(ButtonShowDetails)
 	}
+}
+
+// detailsHandle is the divider walk inserted between the two halves of the
+// vertical splitter. walk keeps a splitter's handles at the ODD indices of its
+// children — [child, handle, child] — which is the same arithmetic its own
+// layout uses (i%2 == 1 is a handle), so this reads the structure rather than
+// guessing at it. A splitter that has not been built yet has neither.
+func (u *ui) detailsHandle() walk.Widget {
+	if u.detailsSplit == nil {
+		return nil
+	}
+	children := u.detailsSplit.Children()
+	if children == nil || children.Len() < 2 {
+		return nil
+	}
+	return children.At(1)
 }
 
 func (u *ui) onToggleDetails() { u.setDetails(!u.detailsOpen) }
@@ -1505,6 +1538,11 @@ func (u *ui) warn(message string) {
 // therefore handed to the inner splitter as well, whose two children happen to
 // match the two numbers, so restoring the height of the details pane also
 // silently set the width of the world list to it.
+//
+// IT IS KEYED BY THE SHORT NAME, not by walk's whole path (SplitAlias). The path
+// is "main/clientComposite/details" — correct and stable, and a piece of walk's
+// furniture in a file a participant can open. The last segment is the name this
+// program chose for the widget, and the two names differ, so it is exact.
 type splitSettings struct {
 	values map[string]string
 }
@@ -1514,13 +1552,16 @@ func newSplitSettings() *splitSettings {
 }
 
 func (s *splitSettings) Get(key string) (string, bool) {
-	value, ok := s.values[key]
+	value, ok := s.values[SplitAlias(key)]
 	return value, ok
 }
-func (s *splitSettings) Timestamp(string) (time.Time, bool)  { return time.Time{}, false }
-func (s *splitSettings) Put(key, value string) error         { s.values[key] = value; return nil }
+func (s *splitSettings) Timestamp(string) (time.Time, bool) { return time.Time{}, false }
+func (s *splitSettings) Put(key, value string) error {
+	s.values[SplitAlias(key)] = value
+	return nil
+}
 func (s *splitSettings) PutExpiring(key, value string) error { return s.Put(key, value) }
-func (s *splitSettings) Remove(key string) error             { delete(s.values, key); return nil }
+func (s *splitSettings) Remove(key string) error             { delete(s.values, SplitAlias(key)); return nil }
 func (s *splitSettings) ExpireDuration() time.Duration       { return 0 }
 func (s *splitSettings) SetExpireDuration(time.Duration)     {}
 func (s *splitSettings) Load() error                         { return nil }
@@ -1576,10 +1617,7 @@ func (u *ui) restorePlacement() {
 		return
 	}
 	u.detailsOpen = state.Details
-	u.detailsPane.SetVisible(state.Details)
-	if state.Details {
-		u.detailsToggle.SetText(ButtonHideDetails)
-	}
+	u.showDetails(state.Details)
 	// The divider between the worlds and the details pane. walk reads this back
 	// itself, from the settings object above, when the window's state is
 	// restored — which happens after the size is set, because the sizes it holds

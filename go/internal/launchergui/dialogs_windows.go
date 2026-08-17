@@ -235,8 +235,12 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 				MinSize: d.Size{Width: dialogWidth - 40}, TextColor: bannerColour, Text: trouble,
 				Visible: trouble != "",
 			},
+			// MarginsZero, LIKE THE ADVANCED GRID BELOW IT. A grid's own margins
+			// are added to its first column, so a bordered grid above an unbordered
+			// one put this field fourteen pixels to the right of every field under
+			// it — one dialog with two left edges.
 			d.Composite{
-				Layout: d.Grid{Columns: 2},
+				Layout: d.Grid{Columns: 2, MarginsZero: true},
 				Children: []d.Widget{
 					label("A name for the new world"),
 					d.LineEdit{AssignTo: &name, Text: spec.Name, ToolTipText: TipDialogName},

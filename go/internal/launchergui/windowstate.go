@@ -58,21 +58,45 @@ type WindowState struct {
 	// Details is whether the details pane was open. It is remembered because
 	// somebody who works with it open is working with it open.
 	Details bool `json:"details"`
-	// Split is where the window's dividers were left: the one above the details
-	// pane, and the one between the world list and the panel.
+	// Split is where the window's dividers were left, one entry per divider:
+	// "details" is the one above the details pane and "worlds" the one between
+	// the world list and the panel, each holding the pixel sizes of the two
+	// halves.
 	//
-	// IT IS WALK'S OWN STATE, KEY AND ALL. Marking a Splitter Persistent makes
-	// walk read and write one string per splitter through walk.App().Settings(),
-	// keyed by a path it builds from the window's and the widget's names. This
-	// field is that whole map, so nothing in this program has to guess at either
-	// the key or the encoding — see splitSettings in window_windows.go, which is
-	// the walk.Settings that puts it here rather than in an INI file of walk's
-	// own under a second folder.
+	// THE VALUES ARE WALK'S AND THE NAMES ARE OURS. Marking a Splitter
+	// Persistent makes walk read and write one string per splitter through
+	// walk.App().Settings() — see splitSettings in window_windows.go, which is
+	// the walk.Settings that puts them here rather than in an INI file of walk's
+	// own under a second folder. walk keys them by a path built from every name
+	// between the window and the widget, which came out as
+	// "main/clientComposite/details": correct, stable, and a piece of another
+	// package's furniture in a file a participant can open. SplitAlias keeps the
+	// last segment, which is the name this program chose.
 	//
 	// HEIGHTS AND NOT FRACTIONS, because that is what walk stores; a window
 	// re-opened on a different screen therefore gets the same-sized pane rather
 	// than the same-shaped one, and dragging it once fixes that forever.
 	Split map[string]string `json:"split,omitempty"`
+}
+
+// The names this program gives its two splitters, which are also the names their
+// remembered positions are stored under. THEY MUST DIFFER FROM EACH OTHER, which
+// is what makes the last segment of walk's path enough to tell them apart.
+const (
+	SplitNameDetails = "details"
+	SplitNameWorlds  = "worlds"
+)
+
+// SplitAlias is the short name a divider is stored under, given the path walk
+// keyed it by. walk builds that path from the name of every window between the
+// form and the widget (WindowBase.writePath), ending with the widget's own — so
+// the last segment is the name this program chose, and the segments in front of
+// it are walk's business.
+func SplitAlias(key string) string {
+	if at := strings.LastIndex(key, "/"); at >= 0 {
+		return key[at+1:]
+	}
+	return key
 }
 
 // WindowStatePath is the file, given the user's configuration folder — which on
