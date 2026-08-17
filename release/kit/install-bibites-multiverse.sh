@@ -726,10 +726,20 @@ ADOPTED_IDENTITY=0
 #   4. <data root>/data/peer-id, relay-url  what the sidecar persists and what this
 #                                           installer writes, and the last thing an
 #                                           uninstall keeps
+#   5. <data root>/logs/sidecar.log*        THE WORLD'S OWN VOICE. Every line the
+#                                           sidecar writes carries peer=, because
+#                                           the identity is an attribute of its
+#                                           logger, and its startup line carries
+#                                           relay= too
+#
+# THE FOLDERS 3 is searched in are bounded and named: this kit's own folder, the
+# data root itself, and the data root's parent - because a kit is often unpacked
+# beside the data it writes. There is deliberately NO wider search: an installer
+# that walks a disk looking for a world is an installer nobody can predict.
 #
 # PROVEN vs CLAIMED. 1 and 2 are proven: the record is written by the same run
 # that writes the credential and names this data root, and the pending record is
-# accepted only when it carries the very secret on disk. 3 and 4 are claims -
+# accepted only when it carries the very secret on disk. 3, 4 and 5 are claims -
 # ordinary text files, and 4 is the one this installer's own refusal asks a
 # participant to write by hand. A claim is enough to ADOPT a world, which changes
 # nothing on disk, and never enough to OVERWRITE a secret.
@@ -745,6 +755,70 @@ first_line() {
 same_path() {
   [ -n "$1" ] && [ -n "$2" ] || return 1
   [ "${1%/}" = "${2%/}" ]
+}
+
+# THE SIDECAR LOG IS THE LAST WITNESS A DATA ROOT KEEPS. slog's text format
+# writes every attribute as key=value, and the sidecar's logger carries
+# peer=<identity> on EVERY line (go/internal/sidecar/sidecar.go, Logger.With);
+# its "sidecar: listening" line carries relay=<wss url> beside it. No line ever
+# carries a secret - the credential is reported as "configured" and nothing else.
+#
+# The read is bounded on purpose. A log generation can reach 100 MiB
+# (go/internal/logging), so this reads the head and the tail of at most a few
+# files: the head holds the startup banner of whatever ran first, the tail holds
+# whatever ran last, and a folder that has held two worlds shows both.
+SIDECAR_LOG_END_LINES=500
+SIDECAR_LOG_FILE_LIMIT=12
+SIDECAR_LOG_ROWS=''
+SIDECAR_LOG_COUNT=0
+find_sidecar_log_identities() {
+  # $1 the data root. Sets SIDECAR_LOG_ROWS to one "peerId<TAB>relayUrl<TAB>where"
+  # line per DISTINCT identity, and SIDECAR_LOG_COUNT to how many.
+  SIDECAR_LOG_ROWS=''
+  SIDECAR_LOG_COUNT=0
+  local logs="$1/logs" file scanned=0 raw='' rows=''
+  [ -d "$logs" ] || return 0
+  for file in "$logs"/sidecar.log*; do
+    [ -f "$file" ] || continue
+    scanned=$((scanned + 1))
+    [ "$scanned" -le "$SIDECAR_LOG_FILE_LIMIT" ] || break
+    rows="$( { head -n "$SIDECAR_LOG_END_LINES" "$file"; tail -n "$SIDECAR_LOG_END_LINES" "$file"; } 2>/dev/null |
+      awk -v where="$file" '
+        function attr(line, name,   m, v) {
+          if (match(line, "(^|[ \t])" name "=(\"[^\"]*\"|[^ \t]+)") == 0) return ""
+          v = substr(line, RSTART, RLENGTH)
+          sub("^[ \t]*" name "=", "", v)
+          gsub("\"", "", v)
+          return v
+        }
+        {
+          peer = attr($0, "peer")
+          if (peer == "") next
+          if (peer ~ /[^\041-\176]/ || length(peer) > 256) next
+          relay = attr($0, "relay")
+          if (relay !~ /^wss:\/\/[^ \t]+$/) relay = ""
+          msg = attr($0, "msg")
+          w = where
+          if (msg != "") w = where " (\"" msg "\")"
+          print peer "\t" relay "\t" w
+        }' || true )"
+    if [ -n "$rows" ]; then
+      raw="$raw$rows
+"
+    fi
+  done
+  [ -n "$raw" ] || return 0
+  SIDECAR_LOG_ROWS="$(printf '%s\n' "$raw" | awk -F'\t' '
+    $1 == "" { next }
+    {
+      if (!($1 in seen)) { seen[$1] = 1; order[++n] = $1; rel[$1] = $2; src[$1] = $3 }
+      else if (rel[$1] == "" && $2 != "") { rel[$1] = $2 }
+    }
+    END { for (i = 1; i <= n; i++) print order[i] "\t" rel[order[i]] "\t" src[order[i]] }')"
+  if [ -n "$SIDECAR_LOG_ROWS" ]; then
+    SIDECAR_LOG_COUNT="$(printf '%s\n' "$SIDECAR_LOG_ROWS" | wc -l | tr -d ' ')"
+  fi
+  return 0
 }
 find_world_identity() {
   # $1 the data root, $2 the secret already on disk, which may be empty
@@ -783,8 +857,15 @@ find_world_identity() {
     fi
   fi
 
-  file="$HERE/$START_NAME"
-  if [ -f "$file" ]; then
+  # Bounded and named: this kit's folder, the data root, and the data root's
+  # parent - a kit is usually unpacked beside the data it writes, and the one
+  # that made this world may be long gone from here. A start script only counts
+  # when it names THIS data root, so a wider net would add risk, not answers.
+  local kit_root
+  for kit_root in "$HERE" "$root" "$(dirname "$root")"; do
+    [ -n "$kit_root" ] || continue
+    file="$kit_root/$START_NAME"
+    [ -f "$file" ] || continue
     script_root="$(sed -n "s/^DATA_ROOT='\(.*\)'\$/\1/p" "$file" | head -n1)"
     script_peer="$(sed -n "s/^PEER_ID='\(.*\)'\$/\1/p" "$file" | head -n1)"
     script_relay="$(sed -n "s/^RELAY_URL='\(.*\)'\$/\1/p" "$file" | head -n1)"
@@ -794,7 +875,7 @@ find_world_identity() {
       FOUND_SOURCE="$file"
       return 0
     fi
-  fi
+  done
 
   # The identity beside the journal, and the map it dials. Both are written by
   # this installer and kept by an uninstall that keeps the world's data, so a
@@ -805,6 +886,18 @@ find_world_identity() {
     FOUND_PEER_ID="$id"
     FOUND_RELAY_URL="$(first_line "$root/data/relay-url")"
     FOUND_SOURCE="$file"
+    return 0
+  fi
+
+  # Last: what this world said about itself while it was running. ONE identity in
+  # the logs is an answer; two is a folder that has held two worlds, and only the
+  # person who ran them can say which one it is now - so the list is kept for the
+  # refusal to print rather than guessed between.
+  find_sidecar_log_identities "$root"
+  if [ "$SIDECAR_LOG_COUNT" -eq 1 ]; then
+    FOUND_PEER_ID="$(printf '%s' "$SIDECAR_LOG_ROWS" | cut -f1)"
+    FOUND_RELAY_URL="$(printf '%s' "$SIDECAR_LOG_ROWS" | cut -f2)"
+    FOUND_SOURCE="$(printf '%s' "$SIDECAR_LOG_ROWS" | cut -f3)"
     return 0
   fi
   return 0
@@ -888,10 +981,25 @@ if [ -z "$JOIN_STRING_FILE" ] && [ -z "$RELAY_URL" ] && [ -f "$PUBLIC_MAP_PATH" 
       say "$CREDENTIAL_PATH holds a world's secret, and nothing in $DATA_ROOT says which"
       say "world it belongs to. Nothing was changed. Two ways on, and only you can choose:"
       say ""
-      say "  1. NAME THE WORLD, and this install keeps it. Its identity is in the PEER_ID"
-      say "     line of an earlier $START_NAME, and in $LOG_DIR/sidecar.log. It looks like"
-      say "     public-0123456789abcdef0123456789abcdef. Put that one line into"
-      say "     $DATA_ROOT/data/peer-id and run this again."
+      if [ "$SIDECAR_LOG_COUNT" -gt 1 ]; then
+        say "  1. NAME THE WORLD. THIS INSTALLER READ THE SIDECAR LOG in $LOG_DIR and it names"
+        say "     more than one world, so it will not choose between them:"
+        printf '%s\n' "$SIDECAR_LOG_ROWS" | while IFS="$(printf '\t')" read -r log_peer log_relay log_where; do
+          [ -n "$log_peer" ] || continue
+          say "       $log_peer"
+          say "         from $log_where"
+        done
+        say "     Put the ONE this folder is now into $DATA_ROOT/data/peer-id, on one line, and"
+        say "     run this again. The last of them is usually the world this folder ran last;"
+        say "     its journal is the one in $DATA_DIR."
+      else
+        say "  1. NAME THE WORLD, and this install keeps it. THIS INSTALLER ALREADY LOOKED in"
+        say "     the places that hold it: this data root, the folder this kit was unpacked"
+        say "     into, and the sidecar log in $LOG_DIR. None of them names a world. It is also"
+        say "     in the PEER_ID line of an older kit's $START_NAME, wherever that kit was"
+        say "     unpacked. It looks like public-0123456789abcdef0123456789abcdef. Put that one"
+        say "     line into $DATA_ROOT/data/peer-id and run this again."
+      fi
       say "  2. START A NEW WORLD. Rename $CREDENTIAL_PATH to peer-secret.txt.old, or move"
       say "     $DATA_ROOT aside, and run this again. The old world then keeps its place on"
       say "     the map with nobody in it until you ask the operator to release it."
@@ -934,16 +1042,45 @@ if [ -z "$JOIN_STRING_FILE" ] && [ -z "$RELAY_URL" ] && [ -f "$PUBLIC_MAP_PATH" 
     say "     $DATA_ROOT/data/peer-id to peer-id.old first; either way the old name is kept in"
     say "     $DATA_ROOT/data/peer-id.previous for you."
     stop_setup "A new identity over this world is either its slot handed back to you by a slot handover or a SECOND place on the map that strands $EXISTING_PEER_ID, and nothing on this machine can tell which. --replace-world-identity says take it - the two choices above, and docs/participant/leave.md." 'INS-ENROLL'
-  elif [ -n "$EXISTING_PEER_ID" ]; then
+  elif [ "$SIDECAR_LOG_COUNT" -gt 1 ] && [ "$REPLACE_WORLD_IDENTITY" -eq 0 ]; then
+    # No secret, no single name - but this folder's own logs say it has run more
+    # than one world. Enrolling here would be another identity over somebody's
+    # journal, so it is the same decision as the one above.
+    printf '\n'
+    say "$CREDENTIAL_PATH is gone, so no world here can be kept. The sidecar log in $LOG_DIR"
+    say "names more than one world that has run in $DATA_ROOT:"
+    printf '%s\n' "$SIDECAR_LOG_ROWS" | while IFS="$(printf '\t')" read -r log_peer log_relay log_where; do
+      [ -n "$log_peer" ] || continue
+      say "       $log_peer"
+      say "         from $log_where"
+    done
+    say "Write those names down: their slots stay reserved until their operator releases"
+    say "them. Then run this again with --replace-world-identity to take a new identity"
+    say "here, or with --join-string-file <file> --replace-world-identity to apply a slot"
+    say "handover for one of them."
+    stop_setup "A new identity here is a new place on the map over the journal of a world this folder has already run, and its secret is gone, so nothing here can keep it. --replace-world-identity says take it anyway - docs/participant/leave.md." 'INS-ENROLL'
+  elif [ -n "$EXISTING_PEER_ID" ] || [ "$SIDECAR_LOG_COUNT" -gt 1 ]; then
     # --replace-world-identity: the participant has said, in as many words, that
     # this folder takes a different identity. Say what it costs anyway, and keep
     # the old name - it is what an operator needs to release the slot.
     printf '\n'
-    say "--replace-world-identity: the world that used $DATA_ROOT was $EXISTING_PEER_ID, and"
-    say "its secret is gone. This install therefore takes a NEW identity, which is a second"
-    say "place on the map. The old one keeps its slot, with nobody in it, until you ask the"
-    say "operator to release it or to hand it to this installation - docs/participant/leave.md."
-    say "Its name is kept in $DATA_ROOT/data/peer-id.previous, and it is what the operator needs."
+    if [ -n "$EXISTING_PEER_ID" ]; then
+      say "--replace-world-identity: the world that used $DATA_ROOT was $EXISTING_PEER_ID, and"
+      say "its secret is gone."
+    else
+      say "--replace-world-identity: this folder's own logs name worlds that have run here, and"
+      say "the secret of every one of them is gone:"
+      printf '%s\n' "$SIDECAR_LOG_ROWS" | while IFS="$(printf '\t')" read -r log_peer log_relay log_where; do
+        [ -n "$log_peer" ] || continue
+        say "  $log_peer"
+      done
+    fi
+    say "This install therefore takes a NEW identity, which is a second place on the map."
+    say "The old one keeps its slot, with nobody in it, until you ask the operator to release"
+    say "it or to hand it to this installation - docs/participant/leave.md."
+    if [ -n "$EXISTING_PEER_ID" ]; then
+      say "Its name is kept in $DATA_ROOT/data/peer-id.previous, and it is what the operator needs."
+    fi
     printf '\n'
     # A leftover pending record here is a new identity already half-taken, and
     # retrying it is what spends nothing extra. It cannot be the world named on

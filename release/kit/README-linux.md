@@ -69,6 +69,15 @@ from `data/peer-id` and `data/relay-url` — says *"reusing the map identity alr
 leaves `peer-secret.txt` untouched. It asks the map for nothing and spends no second place on it,
 and an adopted world keeps its own relay whether that is the public map or a private one.
 
+**The last place it looks is the sidecar's own log.** Every line the sidecar writes carries
+`peer=<identity>`, and its startup line carries `relay=` beside it, so `logs/sidecar.log` and the
+rotated files beside it still say which world a folder is when nothing else does. The installer
+reads them itself and prints the line it took the identity from. Two worlds in those logs means the
+folder has run two: it lists them with where each was found and asks you to put the right one into
+`data/peer-id` rather than choosing for you. The kit folders it searches are bounded and named —
+this one, the data root, and the data root's parent, because a kit is usually unpacked beside the
+data it writes.
+
 **A secret is replaced only when something vouches for the world it belongs to** — this data
 root's own install record, or a pending record carrying that very secret — and the replaced one is
 kept beside the new file as `peer-secret.txt.<utc>.old`. A claim that only an ordinary text file

@@ -696,11 +696,22 @@ function Protect-UserFile {
 #   5. <data root>\data\peer-id (+ relay-url)  what the sidecar persists and what
 #                                              this installer writes, and the last
 #                                              thing an uninstall keeps
+#   6. <data root>\logs\sidecar.log*          THE WORLD'S OWN VOICE. Every line
+#                                              the sidecar writes carries peer=,
+#                                              because the identity is an
+#                                              attribute of its logger, and its
+#                                              startup line carries relay= too
+#
+# THE PROGRAM ROOTS 3 and 4 are searched in are bounded and named: -InstallRoot,
+# this kit's own folder, %LOCALAPPDATA%\Programs\Bibites Multiverse, the data
+# root itself, and the data root's parent - because a ZIP kit is often unpacked
+# beside the data it writes. There is deliberately NO wider search: an installer
+# that walks a disk looking for a world is an installer nobody can predict.
 #
 # PROVEN vs CLAIMED. 1 and 2 are proven: the record is written by the same run
 # that writes the credential and names this data root, and the pending record is
-# accepted only when it carries the very secret on disk. 3, 4 and 5 are claims -
-# ordinary text files, and 5 is the one this installer's own refusal asks a
+# accepted only when it carries the very secret on disk. 3, 4, 5 and 6 are claims
+# - ordinary text files, and 5 is the one this installer's own refusal asks a
 # participant to write by hand. A claim is enough to ADOPT a world, which changes
 # nothing on disk, and never enough to OVERWRITE a secret.
 
@@ -748,6 +759,66 @@ function Get-FirstLine {
         if ($line.Trim()) { return $line.Trim() }
     }
     return ''
+}
+
+# THE SIDECAR LOG IS THE LAST WITNESS A DATA ROOT KEEPS. slog's text format
+# writes every attribute as key=value, and the sidecar's logger carries
+# peer=<identity> on EVERY line (go/internal/sidecar/sidecar.go, Logger.With);
+# its "sidecar: listening" line carries relay=<wss url> beside it. No line ever
+# carries a secret - the credential is reported as "configured" and nothing else.
+#
+# The read is bounded on purpose. A log generation can reach 100 MiB
+# (go/internal/logging), so this reads the head and the tail of at most a few
+# files: the head holds the startup banner of whatever ran first, the tail holds
+# whatever ran last, and a folder that has held two worlds shows both.
+$SidecarLogEndLines  = 500
+$SidecarLogFileLimit = 12
+$script:sidecarLogCandidates = @()
+
+function Get-LogAttribute {
+    param([string]$Line, [string]$Name)
+    $match = [regex]::Match($Line, '(?:^|\s)' + [regex]::Escape($Name) + '=(?:"([^"]*)"|([^\s]+))')
+    if (-not $match.Success) { return '' }
+    if ($match.Groups[1].Success) { return $match.Groups[1].Value }
+    return $match.Groups[2].Value
+}
+
+function Find-SidecarLogIdentities {
+    param([string]$Root)
+    $logsDir = Join-Path $Root 'logs'
+    if (-not (Test-Path -LiteralPath $logsDir -PathType Container)) { return @() }
+    $found = New-Object System.Collections.ArrayList
+    $byPeer = @{}
+    $files = @(Get-ChildItem -LiteralPath $logsDir -Filter 'sidecar.log*' -File -ErrorAction SilentlyContinue |
+               Sort-Object -Property Name | Select-Object -First $SidecarLogFileLimit)
+    foreach ($file in $files) {
+        $lines = @()
+        try {
+            $lines += @(Get-Content -LiteralPath $file.FullName -TotalCount $SidecarLogEndLines -ErrorAction Stop)
+            $lines += @(Get-Content -LiteralPath $file.FullName -Tail $SidecarLogEndLines -ErrorAction Stop)
+        } catch {
+            continue
+        }
+        foreach ($line in $lines) {
+            if (-not $line) { continue }
+            $peer = Get-LogAttribute $line 'peer'
+            if (-not $peer) { continue }
+            if ($peer.Length -gt 256 -or $peer -notmatch '^[\x21-\x7e]+$') { continue }
+            $relay = Get-LogAttribute $line 'relay'
+            if ($relay -notmatch '^wss://[^\s]+$') { $relay = '' }
+            if ($byPeer.ContainsKey($peer)) {
+                if ($relay -and -not $byPeer[$peer].relayUrl) { $byPeer[$peer].relayUrl = $relay }
+                continue
+            }
+            $message = Get-LogAttribute $line 'msg'
+            $where = $file.FullName
+            if ($message) { $where = "$($file.FullName) (`"$message`")" }
+            $entry = [pscustomobject]@{ peerId = $peer; relayUrl = $relay; source = $where }
+            $byPeer[$peer] = $entry
+            [void]$found.Add($entry)
+        }
+    }
+    return @($found)
 }
 
 function New-WorldIdentity {
@@ -820,6 +891,16 @@ function Find-WorldIdentity {
         return (New-WorldIdentity $storedPeerId $storedRelay $peerIdFile $false)
     }
 
+    # Last: what this world said about itself while it was running. ONE identity
+    # in the logs is an answer; two is a folder that has held two worlds, and
+    # only the person who ran them can say which one it is now - so the list is
+    # kept for the refusal to print rather than guessed between.
+    $script:sidecarLogCandidates = @(Find-SidecarLogIdentities $Root)
+    if ($script:sidecarLogCandidates.Count -eq 1) {
+        $logged = $script:sidecarLogCandidates[0]
+        return (New-WorldIdentity $logged.peerId $logged.relayUrl $logged.source $false)
+    }
+
     return $null
 }
 
@@ -881,10 +962,18 @@ if ($existingSecretHeld) {
     }
 }
 
+# Bounded and named, in this order. The last two are here because an advanced
+# ZIP is usually unpacked beside the data it writes, and the kit that made this
+# world may be long gone from -InstallRoot: a profile or a start script only
+# counts when it names THIS data root, so a wider net would add risk without
+# adding an answer.
 $programRoots = @()
 if ($InstallRoot) { $programRoots += $InstallRoot }
 $programRoots += $Here
 if ($env:LOCALAPPDATA) { $programRoots += (Join-Path $env:LOCALAPPDATA 'Programs\Bibites Multiverse') }
+$programRoots += $DataRoot
+$dataRootParent = Split-Path -Parent $DataRoot
+if ($dataRootParent) { $programRoots += $dataRootParent }
 $existingIdentity = Find-WorldIdentity $DataRoot $programRoots $existingSecret
 $existingPeerId = ''
 $existingSource = ''
@@ -942,11 +1031,26 @@ if ($usePublicMap) {
             Say "$credentialPath holds a world's secret, and nothing in $DataRoot says which world"
             Say "it belongs to. Nothing was changed. Two ways on, and only you can choose:"
             Say ""
-            Say "  1. NAME THE WORLD, and this install keeps it. Its identity is written in the"
-            Say ('     earlier install''s profiles\default.json and in the $PeerId line of its ' + $StartName + ',')
-            Say "     both under %LOCALAPPDATA%\Programs\Bibites Multiverse, and in the sidecar log"
-            Say "     under $logDir. It looks like public-0123456789abcdef0123456789abcdef. Put that"
-            Say "     one line into $DataRoot\data\peer-id and run setup again."
+            if ($sidecarLogCandidates.Count -gt 1) {
+                Say "  1. NAME THE WORLD. THIS INSTALLER READ THE SIDECAR LOG in $logDir and it"
+                Say "     names more than one world, so it will not choose between them:"
+                foreach ($candidate in $sidecarLogCandidates) {
+                    Say "       $($candidate.peerId)"
+                    Say "         from $($candidate.source)"
+                }
+                Say "     Put the ONE this folder is now into $DataRoot\data\peer-id, on one line,"
+                Say "     and run setup again. The newest of them is usually the last world this"
+                Say "     folder ran; its journal is the one in $dataDir."
+            } else {
+                Say "  1. NAME THE WORLD, and this install keeps it. THIS INSTALLER ALREADY LOOKED"
+                Say "     in the places that hold it: this data root, the folder this kit was"
+                Say "     unpacked into, %LOCALAPPDATA%\Programs\Bibites Multiverse, and the"
+                Say "     sidecar log in $logDir. None of them names a world. It is also in an"
+                Say ('     older kit''s profiles\default.json and in the $PeerId line of its ' + $StartName + ',')
+                Say "     wherever that kit was unpacked. It looks like"
+                Say "     public-0123456789abcdef0123456789abcdef. Put that one line into"
+                Say "     $DataRoot\data\peer-id and run setup again."
+            }
             Say "  2. START A NEW WORLD. Rename $credentialPath to peer-secret.txt.old, or move"
             Say "     $DataRoot aside, and run setup again. The old world then keeps its place on"
             Say "     the map with nobody in it until you ask the operator to release it."
@@ -1003,18 +1107,47 @@ if ($usePublicMap) {
                     "and nothing on this " +
                     "machine can tell which. -ReplaceWorldIdentity says take it - the two choices " +
                     "above, and docs/participant/leave.md.") 'INS-ENROLL'
-    } elseif ($existingIdentity) {
+    } elseif (($sidecarLogCandidates.Count -gt 1) -and (-not $ReplaceWorldIdentity)) {
+        # No secret, no single name - but this folder's own logs say it has run
+        # more than one world. Enrolling here would be a third identity over
+        # somebody's journal, so it is the same decision as the one above.
+        Write-Host ""
+        Say "$credentialPath is gone, so no world here can be kept. The sidecar log in $logDir"
+        Say "names more than one world that has run in $DataRoot"
+        foreach ($candidate in $sidecarLogCandidates) {
+            Say "       $($candidate.peerId)"
+            Say "         from $($candidate.source)"
+        }
+        Say "Write those names down: their slots stay reserved until their operator releases"
+        Say "them. Then run setup from a console with -ReplaceWorldIdentity to take a new"
+        Say "identity here, or with -JoinStringFile <file> -ReplaceWorldIdentity to apply a"
+        Say "slot handover for one of them."
+        Stop-Setup ("A new identity here is a new place on the map over the journal of a world " +
+                    "this folder has already run, and its secret is gone, so nothing here can " +
+                    "keep it. -ReplaceWorldIdentity says take it anyway - " +
+                    "docs/participant/leave.md.") 'INS-ENROLL'
+    } elseif ($existingIdentity -or ($sidecarLogCandidates.Count -gt 1)) {
         # -ReplaceWorldIdentity: the participant has said, in as many words, that
         # this folder takes a different identity. Say what it costs anyway, and
         # keep the old name - it is what an operator needs to release the slot.
         Write-Host ""
-        Write-Host ("  -ReplaceWorldIdentity: the world that used $DataRoot was $existingPeerId, " +
-                    "and its secret is gone.") -ForegroundColor Yellow
+        if ($existingPeerId) {
+            Write-Host ("  -ReplaceWorldIdentity: the world that used $DataRoot was $existingPeerId, " +
+                        "and its secret is gone.") -ForegroundColor Yellow
+        } else {
+            Write-Host "  -ReplaceWorldIdentity: this folder's own logs name worlds that have run here," -ForegroundColor Yellow
+            Write-Host "  and the secret of every one of them is gone:" -ForegroundColor Yellow
+            foreach ($candidate in $sidecarLogCandidates) {
+                Write-Host "    $($candidate.peerId)" -ForegroundColor Yellow
+            }
+        }
         Write-Host "  This install therefore takes a NEW identity, which is a second place on the map." -ForegroundColor Yellow
         Write-Host "  The old one keeps its slot, with nobody in it, until you ask the operator to" -ForegroundColor Yellow
         Write-Host "  release it or to hand it to this installation - docs/participant/leave.md." -ForegroundColor Yellow
-        Write-Host ("  Its name is kept in $DataRoot\data\peer-id.previous, and it is what the " +
-                    "operator needs.") -ForegroundColor Yellow
+        if ($existingPeerId) {
+            Write-Host ("  Its name is kept in $DataRoot\data\peer-id.previous, and it is what the " +
+                        "operator needs.") -ForegroundColor Yellow
+        }
         Write-Host ""
         # A leftover pending record here is a new identity already half-taken, and
         # retrying it is what spends nothing extra. It cannot be the world named on
