@@ -268,7 +268,10 @@ function Connect-ObsWebSocket {
     $socket.Options.AddSubProtocol('obswebsocket.json')
     $source = New-Object System.Threading.CancellationTokenSource -ArgumentList ($TimeoutSeconds * 1000)
     try {
-        $socket.ConnectAsync([Uri]"ws://${Address}:$Port", $source.Token).GetAwaiter().GetResult()
+        # ConnectAsync returns a Task that PowerShell resolves as Task[VoidTaskResult],
+        # so GetResult() puts a VoidTaskResult on the pipeline. Unsuppressed it becomes
+        # the first output of this function and the caller gets an array, not a socket.
+        [void]$socket.ConnectAsync([Uri]"ws://${Address}:$Port", $source.Token).GetAwaiter().GetResult()
     } catch {
         $socket.Dispose()
         throw

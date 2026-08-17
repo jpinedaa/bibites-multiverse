@@ -596,6 +596,14 @@ obs_scenes="$obs_config/basic/scenes"
 umask 077
 install -d -m 0700 "$obs_profile" "$obs_scenes"
 install -m 0600 "$repo/deploy/local-broadcast/obs-basic.ini" "$obs_profile/basic.ini"
+# The profile uses the advanced output mode for one reason: the simple mode has
+# no keyframe-interval control, and it never sets `keyint_sec`. NVENC then falls
+# back to its own 250-frame default, which is 8.3 seconds at 30 frames, and
+# MediaMTX cuts an HLS segment on a keyframe -- so the origin produced 8.3
+# second segments whatever `hlsSegmentDuration` said. Every other encoder
+# setting below is the NVENC default that the simple mode also used.
+install -m 0600 "$repo/deploy/local-broadcast/obs-stream-encoder.json" \
+  "$obs_profile/streamEncoder.json"
 install -m 0600 "$repo/deploy/local-broadcast/obs-scene.json" \
   "$obs_scenes/BibitesBroadcast.json"
 printf '{"settings":{"bwtest":false,"key":"bibites?user=broadcaster&pass=%s","server":"rtmp://127.0.0.1:1935","use_auth":false},"type":"rtmp_custom"}\n' \
