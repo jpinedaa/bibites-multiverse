@@ -69,11 +69,13 @@ type brainLine struct {
 	V        int   `json:"v,omitempty"`
 	BucketMs int64 `json:"bucketMs,omitempty"`
 	SavedAt  int64 `json:"savedAtMs,omitempty"`
-	// A bucket ("b"). THERE IS DELIBERATELY NO `seen` HERE: the coverage
-	// denominator is derived from the ledger, which is replayed at every start
-	// anyway, so persisting it would put one fact in two places and let a restart
-	// disagree with the record about how many genomes crossed. What cannot be
-	// re-derived — what was INSIDE each genome — is what this file holds.
+	// A bucket ("b"). THERE IS STILL DELIBERATELY NO `seen` HERE, and the reason
+	// has changed. It was "the coverage denominator is derived from the ledger,
+	// which is replayed at every start anyway"; since the record roll-up it is
+	// "the coverage denominator is a LEDGER fold and the LEDGER fold has its own
+	// sidecar" — rollup.go persists it, this file persists what was INSIDE each
+	// genome, and the split follows which fold produced the number rather than
+	// which file happened to exist first. One fact, still one place.
 	T    int64          `json:"t,omitempty"`
 	Held int            `json:"n,omitempty"`
 	Neu  map[string]int `json:"neu,omitempty"`
