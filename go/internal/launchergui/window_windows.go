@@ -290,7 +290,8 @@ func (u *ui) build() error {
 			// refusal — so the window's minimum width would grow to fit the lot
 			// on one line and the text would run off the edge of the screen.
 			d.TextLabel{AssignTo: &u.banner, Text: "", TextColor: bannerColour,
-				MinSize: d.Size{Width: MinWindowWidth - 60}},
+				Background: labelBackground,
+				MinSize:    d.Size{Width: MinWindowWidth - 60}},
 			d.VSplitter{
 				AssignTo:      &u.detailsSplit,
 				Name:          SplitNameDetails,
@@ -352,12 +353,7 @@ func (u *ui) build() error {
 	// handled on the world list, where the selection is.
 	u.primary.SendMessage(win.BM_SETSTYLE, uintptr(win.BS_DEFPUSHBUTTON), 1)
 	u.restorePlacement()
-	// AFTER the size is set, because what walk stores for a splitter is pixel
-	// heights: restoring them into a window that is about to be resized only
-	// gives them straight back to be redistributed.
-	if u.settings.any() {
-		u.mw.RestoreState()
-	}
+	u.restoreDividers()
 	u.mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) { u.savePlacement() })
 	u.applyActions()
 	fmt.Fprintf(u.log, "Bibites Multiverse launcher %s, installed in %s\n",
@@ -418,11 +414,14 @@ func (u *ui) panel() d.Widget {
 			d.TextLabel{AssignTo: &u.worldName, Text: "",
 				Font: d.Font{Family: uiFontFamily, PointSize: 13, Bold: true}},
 			d.TextLabel{AssignTo: &u.headline, Text: "",
-				Font:    d.Font{Family: uiFontFamily, PointSize: 10},
-				MinSize: d.Size{Width: 380}},
-			d.TextLabel{AssignTo: &u.hint, Text: "", MinSize: d.Size{Width: 380}},
+				Font:       d.Font{Family: uiFontFamily, PointSize: 10},
+				Background: labelBackground,
+				MinSize:    d.Size{Width: 380}},
+			d.TextLabel{AssignTo: &u.hint, Text: "",
+				Background: labelBackground, MinSize: d.Size{Width: 380}},
 			d.ProgressBar{AssignTo: &u.spinner, MarqueeMode: true, MaxSize: d.Size{Height: 12}},
-			d.TextLabel{AssignTo: &u.resultLine, Text: "", MinSize: d.Size{Width: 380}},
+			d.TextLabel{AssignTo: &u.resultLine, Text: "",
+				Background: labelBackground, MinSize: d.Size{Width: 380}},
 			d.Composite{
 				Layout: d.HBox{MarginsZero: true},
 				Children: []d.Widget{
@@ -564,29 +563,53 @@ var (
 		ColourAmber: walk.RGB(160, 96, 0),
 		ColourRed:   walk.RGB(176, 0, 0),
 	}
-	// selectedBackFor is the wash behind the selected row: the same hue as its
-	// text, lightened until black text on it would still be readable. It replaces
-	// the system highlight for that row, which is the only way to keep a state's
-	// colour on the row a person is actually looking at.
-	selectedBackFor = map[Colour]walk.Color{
-		ColourGrey:  walk.RGB(226, 230, 235),
-		ColourGreen: walk.RGB(219, 240, 226),
-		ColourAmber: walk.RGB(252, 238, 214),
-		ColourRed:   walk.RGB(252, 224, 224),
-	}
 	bannerColour = walk.RGB(160, 0, 0)
 	hintColour   = walk.RGB(72, 72, 72)
 )
 
-// Every colour has an entry in both tables. A missing one would draw a state as
-// black on black, which is a state with no signal at all.
+// labelBackground is what makes a coloured label actually come out in its
+// colour, and it is not decoration: it is the whole of the fix.
+//
+// WHAT A MACHINE MEASURED. Every panel label — the headline, the hint, the
+// result line and the banner — was drawn in the system's near-black whatever
+// colour SetTextColor had been given, while the table's cells (which walk draws
+// itself, through StyleCell) carried theirs perfectly.
+//
+// WHY. A walk static is two windows: an outer one whose WndProc answers
+// WM_CTLCOLORSTATIC, and a real "static" child that draws the glyphs. The child
+// asks its parent for the colour, and the parent's answer is
+// static.WndProc (static.go:262):
+//
+//	case win.WM_CTLCOLORSTATIC:
+//	    if hBrush := s.handleWMCTLCOLOR(wp, uintptr(s.hWnd)); hBrush != 0 {
+//	        return hBrush
+//	    }
+//	    ...
+//	return s.WidgetBase.WndProc(hwnd, msg, wp, lp)
+//
+// handleWMCTLCOLOR (window.go:2263) DOES call SetTextColor with our colour — and
+// then looks for a background brush to answer with. It finds none: a static's
+// own background is walk's null brush, backgroundEffective walks up the parents
+// looking for one that is not, and walk sets the form's client composite's
+// background to nil outright (form.go:111). With no brush it returns 0, so
+// static.WndProc falls through to WidgetBase.WndProc and on to DefWindowProc —
+// and DefWindowProc's WM_CTLCOLORSTATIC selects the DEFAULT system colours into
+// the DC before returning the default brush. Our SetTextColor is overwritten
+// microseconds after it is made, on every single paint.
+//
+// So the label needs a background of its own, and it must be the one every walk
+// window class already paints with (MustRegisterWindowClass sets
+// wc.HbrBackground = COLOR_BTNFACE+1), so that nothing about the window looks
+// any different. With a brush to answer with, handleWMCTLCOLOR returns it,
+// static.WndProc returns it too, and DefWindowProc is never reached.
+var labelBackground = d.SystemColorBrush{Color: walk.SysColorBtnFace}
+
+// Every colour has a Windows colour. A missing one would draw a state in black,
+// which is a state with no signal at all.
 func init() {
 	for _, colour := range Colours() {
 		if _, ok := colourFor[colour]; !ok {
 			panic("launchergui: no text colour for colour")
-		}
-		if _, ok := selectedBackFor[colour]; !ok {
-			panic("launchergui: no selected background for colour")
 		}
 	}
 }
@@ -654,12 +677,37 @@ func (m *worldModel) Value(row, col int) interface{} {
 // wrong: it skipped the selected row so that Windows' own highlight stayed
 // legible, which meant the ONE row a person's eye is on was the one row with no
 // signal on it — select the world you are worried about and its red goes away.
+// So the state's colour is put on the text of BOTH cells of the selected row,
+// and the row keeps its signal.
 //
-// So the selection is drawn instead of suppressed: a pale wash of the state's
-// own colour behind both cells, with the state's colour on the text. It reads as
-// a selection because the whole row is tinted and no other row is, and it reads
-// as the state because it is the state's hue. Windows' blue is not used, so
-// nothing is fighting a system colour for contrast.
+// THE BACKGROUND OF THE SELECTED ROW IS WINDOWS', AND WALK WILL NOT LET IT BE
+// ANYTHING ELSE. A round of this window promised a pale wash of the state's own
+// hue behind the selected row, and a machine measured the system's selection
+// colour there instead — 204,232,255 across the whole row, with our green text
+// on top of it and not one pixel of the wash. It is not a bug in this file:
+// walk's TableView throws the value away, in tableview.go's NM_CUSTOMDRAW
+// handler, at CDDS_ITEMPREPAINT:
+//
+//	if selected {
+//	    tv.style.BackgroundColor = tv.itemBGColor      // the theme's colour
+//	    tv.style.TextColor = tv.itemTextColor
+//	} else {
+//	    tv.itemBGColor = tv.style.BackgroundColor      // ours is kept
+//	    tv.itemTextColor = tv.style.TextColor
+//	}
+//
+// — and the fill three lines below it uses that overwritten value. An
+// unselected row's background is ours; a selected row's never is. The subitem
+// pass does hand ClrTextBk our colour, but a themed ListView paints the
+// selection itself and ignores it, which is why setting it changed nothing on
+// screen. walk's only remaining door is CellStyle.Canvas(), which means drawing
+// every cell's text by hand — the font, the alignment, the ellipsis and the
+// focus rectangle — to change a background colour, and that is a great deal of
+// drawing code to own for a tint.
+//
+// So the promise is the text and not the wash: Windows' selection colour is
+// pale (it is the Explorer theme's, not COLOR_HIGHLIGHT), the state's colour is
+// dark, and the two are readable together. The manual test says so too.
 func (u *ui) styleCell(style *walk.CellStyle) {
 	row := style.Row()
 	if row < 0 || row >= len(u.model.rows) {
@@ -667,12 +715,7 @@ func (u *ui) styleCell(style *walk.CellStyle) {
 	}
 	colour := u.model.rows[row].Status.Colour
 	selected := u.table != nil && row == u.table.CurrentIndex()
-	if selected {
-		style.BackgroundColor = selectedBackFor[colour]
-		style.TextColor = colourFor[colour]
-		return
-	}
-	if style.Col() != ColStatus {
+	if !selected && style.Col() != ColStatus {
 		return
 	}
 	style.TextColor = colourFor[colour]
@@ -1050,21 +1093,23 @@ func (u *ui) applyPanel(panel Panel, actions Actions) {
 // say, so an empty line does not sit in the layout pushing everything below it
 // down.
 //
-// WHY IT REDRAWS BY HAND, which is a walk limitation a machine measured: the
-// result line rendered in the system's near-black in every state, while the
-// headline beside it carried its colour perfectly. The difference is that the
-// headline's TEXT changes whenever its colour does, and the result line's often
-// does not.
-//
+// WHY IT REDRAWS BY HAND, which is HALF of what a coloured walk label needs.
 // A walk static is TWO windows: an outer one whose WndProc answers
-// WM_CTLCOLORSTATIC with the text colour, and a real child "static" control that
-// draws the text. Changing the text calls setWindowText on the CHILD, which
-// repaints it and so asks the parent for the colour again. Changing only the
-// colour calls Invalidate on the OUTER window — and invalidating a parent does
-// not reach a child window, so the child kept the pixels it already had and the
-// new colour was never asked for. RDW_ALLCHILDREN is the whole of the
-// difference; RDW_UPDATENOW makes it happen before the next thing is drawn
-// rather than whenever the queue gets round to it.
+// WM_CTLCOLORSTATIC, and a real child "static" control that draws the text.
+// Changing the text calls setWindowText on the CHILD, which repaints it and so
+// asks for the colour again. Changing only the COLOUR calls Invalidate on the
+// OUTER window — and invalidating a parent does not reach a child window, so the
+// child keeps the pixels it already had and nothing ever asks for the new
+// colour. RDW_ALLCHILDREN reaches the child; RDW_UPDATENOW makes it happen
+// before the next thing is drawn rather than whenever the queue gets round to
+// it.
+//
+// THE OTHER HALF IS labelBackground, and without it this one buys nothing: a
+// repaint that does reach the child still ends at DefWindowProc, which selects
+// the system's near-black into the DC. A round that had only this half measured
+// zero coloured pixels in every label in the window. The two go together — one
+// makes the child repaint, the other makes the repaint keep our colour — and
+// every coloured label in this window goes through both.
 //
 // The colour is set BEFORE the text as well as after it, so that a repaint the
 // text change schedules already has the right one.
@@ -1669,6 +1714,45 @@ func (u *ui) restorePlacement() {
 	}
 }
 
+// restoreDividers puts the two dividers back where they were left.
+//
+// IT ASKS THE SPLITTER AND NOT THE WINDOW, and that is the whole of the second
+// fix. The obvious call is MainWindow.RestoreState, which is what walk's own
+// examples use — and it silently did nothing at all. FormBase.RestoreState
+// (form.go:622) reads the FORM'S state first:
+//
+//	state, err := fb.ReadState()
+//	...
+//	if state == "" {
+//	    return nil
+//	}
+//	...
+//	return fb.clientComposite.RestoreState()
+//
+// The descent into the children — which is where the splitters are — is the LAST
+// line of that function, and the early return above it is taken whenever the
+// form itself has nothing stored. This window's placement is its own (a
+// rectangle sanity-checked against the screen it is opening on, in
+// restorePlacement), so nothing is ever stored under the form's key and the
+// early return was taken every single time. The positions were written on close,
+// were read back into the settings on open, and were never handed to a splitter.
+//
+// Splitter.RestoreState descends into its own children whether or not they are
+// Persistent, so asking the outer one restores both: "details" from this call
+// and "worlds" from the recursion inside it.
+//
+// AND IT IS BEFORE Run, WITH THE SIZE ALREADY SET, because what walk stores for
+// a splitter is pixel sizes: restoring them into a window that is about to be
+// resized only gives them straight back to be redistributed.
+func (u *ui) restoreDividers() {
+	if !u.settings.any() || u.detailsSplit == nil {
+		return
+	}
+	if err := u.detailsSplit.RestoreState(); err != nil {
+		fmt.Fprintf(u.log, "The dividers could not be put back where they were: %v\n", err)
+	}
+}
+
 // savePlacement writes it down as the window closes. EVERY FAILURE IS SILENT: a
 // window position that could not be written is not worth a message box in front
 // of somebody who is closing the program.
@@ -1704,8 +1788,18 @@ func (u *ui) savePlacement() {
 
 // splitState is where the dividers were left. walk writes them into the settings
 // above; usable is what decides which of them are worth keeping.
+//
+// IT ASKS THE SAME SPLITTER restoreDividers asks, for symmetry and for one
+// concrete gain: MainWindow.SaveState writes the form's own WINDOWPLACEMENT into
+// the settings too, under walk's key for the form, and that string
+// ("0 1 -1 -1 -1 -1 114 114 1734 1164") is not this program's business — the
+// placement is kept as named fields in the same file. UsableSplit dropped it on
+// the way out, so it never reached anybody; not writing it is simply one less
+// thing to drop.
 func (u *ui) splitState() map[string]string {
-	u.mw.SaveState()
+	if u.detailsSplit != nil {
+		u.detailsSplit.SaveState()
+	}
 	return u.settings.usable()
 }
 

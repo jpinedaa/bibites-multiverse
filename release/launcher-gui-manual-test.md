@@ -168,10 +168,20 @@ merely repeats its caption.
 
 1. **Assert:** one row, for the world the installer made: `World` = `* default` (the `*` marks the
    default world), `Status` = `Stopped`, drawn in **grey**.
-2. **Assert (the selected row keeps its colour):** the selected row is drawn on a **pale wash of its
-   own state's colour** with the state's colour on the text — not on the system's blue highlight with
-   white text. Select a green world and a red one in turn: each stays green and red while selected.
-   The one row a person's eye is on is the one row that must not lose its signal.
+2. **Assert (the selected row keeps its colour):** the selected row's **text** is drawn in its own
+   state's colour, on both cells — not in the white the system draws on a selection. Select a green
+   world and a red one in turn: each stays green and red while selected. The one row a person's eye
+   is on is the one row that must not lose its signal.
+   **The BACKGROUND of that row is Windows' and is not asserted here.** An earlier round of this
+   document promised a pale wash of the state's own hue behind the selected row; a machine measured
+   the system's selection colour, `204,232,255`, across the whole row instead, with the coloured text
+   on top of it and not one pixel of the wash. walk's `TableView` overwrites whatever `StyleCell`
+   returns for a selected row with the theme's own colour before it fills it (`tableview.go`,
+   `NM_CUSTOMDRAW` at `CDDS_ITEMPREPAINT`), and there is no way through it short of drawing every
+   cell by hand. That selection colour is the Explorer theme's pale blue rather than
+   `COLOR_HIGHLIGHT`, so the state's dark colour on it is readable, which is what the assertion above
+   is for. **Assert only that:** the selected row's background is a pale tint (not a saturated blue)
+   and its text is the state's colour.
 3. **Assert:** no banner is shown above the list.
 4. **Assert (the panel):** the world's name `default` in a larger bold face; under it the headline
    `Stopped`; under that, because this is a one-world installation that is not running,
@@ -252,11 +262,33 @@ Drive all three:
 | `Delete this world...` and type the wrong name | `'multi-2' was not deleted: that is not 'multi-2'. Nothing was deleted` |
 
 1. **Assert (it is RED):** measure it. The result line must be drawn in `RGB(176, 0, 0)` on a
-   failure and `RGB(0, 112, 48)` on a success. It rendered in the system's near-black in every state
-   last round — a walk static draws its text in a *child* window, and `SetTextColor` only invalidates
-   the parent, so the child kept the pixels it already had whenever the colour changed but the text
-   did not. Check both directions: run something that succeeds, then something that fails, and
-   confirm the same line changes colour.
+   failure and `RGB(0, 112, 48)` on a success. Check both directions: run something that succeeds,
+   then something that fails, and confirm the same line changes colour.
+
+   **HOW TO MEASURE IT — take a screen copy, not a `PrintWindow`.** A walk static draws its glyphs in
+   a *child* window, and `PrintWindow` does not render that child: a capture taken that way shows an
+   empty rectangle where the result line is, and a harness that trusted it would report "no coloured
+   pixels" whatever the program did. Bring the window to the front and use
+   `Graphics.CopyFromScreen` over `GetWindowRect` (`Save-LauncherShot -FromScreen` in the harness),
+   then crop the label's own rectangle out of it and count the pixels near each of the four colours.
+   Count `RGB(0,0,0)` too: **near-black is the failure**, and it is what this line was in every state
+   for two rounds. Note that ClearType puts orange fringes on near-black glyphs, so a loose tolerance
+   reports amber pixels on a black label — the counts that decide it are the exact colour's and
+   near-black's.
+
+   For the record, from a run on the machine (`RGB` targets within 60, whole-label crops):
+
+   | state | label | red | green | amber | grey | near-black |
+   |---|---|---|---|---|---|---|
+   | stopped | headline `Stopped` | 0 | 0 | 0 | **183** | 0 |
+   | running | headline `Running - on the map…` | 0 | **572** | 0 | 110 | 0 |
+   | working | headline `Checking 'default'...` | 0 | 0 | **351** | 0 | 0 |
+   | one world, stopped | hint `This is your world…` | 0 | 0 | 0 | **673** | 0 |
+   | success | result `The health check found no faults…` | 0 | **487** | 0 | 491 | 0 |
+   | refusal | result `'multi-2' was not deleted: …` | **1291** | 0 | 68 | 0 | 0 |
+   | broken profile | banner | **3991** | 0 | 308 | 0 | 0 |
+
+   Any of those with a near-black count and a zero colour count is the bug back again.
 2. **Assert:** each red line carries **both** halves — what was being attempted, and the core's own
    sentence after a colon. A line ending `. The details below say why.` means the core's sentence was
    not captured, and is a failure of this section even though the pane has the sentence in it. **An
@@ -525,7 +557,13 @@ which is where a one-off belongs.
    file a participant can open is a leak of another library's furniture, and is what this round
    replaced.
 3. Re-open the window. **Assert:** it opens at that size and position, with the details pane open
-   **and the divider where you left it**.
+   **and the divider where you left it**, within a pixel or two. Measure it: the world list's own
+   width (`GetWindowRect` on the `SysListView32`) and the details pane's height before closing and
+   after re-opening. **This failed silently for a round** — the positions were written to the file
+   and read back into walk's settings, and nothing ever handed them to a splitter, because
+   `MainWindow.RestoreState` returns before it descends into its children when the form itself has no
+   stored state. A file that says `"worlds": "345 1216"` and a window that opens with the list at its
+   default width is that bug.
 3b. **Assert:** there is **no second preferences file** — nothing under
    `%APPDATA%\<anything else>` and no `.ini` anywhere. One file holds the lot.
 4. Maximise it, close it, re-open it. **Assert:** it comes back maximised, and un-maximising it
@@ -538,9 +576,12 @@ which is where a one-off belongs.
    sensible default dividers — the field is additive, and a file from the previous build must still
    work.
 6c. Open the window, **never** press `Show details`, and close it. **Assert:** the `"split"` entry
-   for `"details"` is either absent or unchanged from before — never a pair containing `0`. A
-   hidden splitter child measures zero, and a zero saved here re-opens the pane at no height with its
-   divider on the bottom edge of the window.
+   for `"details"` never contains a `0`, and its **second** number — the pane's own height — is
+   unchanged from what the file said before. (The first number is the half above the divider, which
+   is the whole splitter while the pane is hidden, so it does grow: a file holding
+   `"details": "600 300"` comes back as `"866 300"` on a 1050-pixel window, and that is correct.) A
+   hidden splitter child measures zero, and a zero saved here would re-open the pane at no height
+   with its divider on the bottom edge of the window.
 6d. **The upgrade, which left two spellings behind last round.** Put a file holding the OLD key
    names in place and open the window:
 
@@ -554,6 +595,11 @@ which is where a one-off belongs.
    **Assert:** the window opens with the dividers where that file put them — the positions are
    migrated, not thrown away — and after closing it the file holds **only** `"details"` and
    `"worlds"`. No key containing a `/` may survive, and no stale pair may sit beside the new one.
+   **Give that file the size the window will actually keep**, or the assertion cannot be exact: this
+   window's minimum is 900x610 at 96 dpi, so on a 150% display a file asking for 1200x800 opens at
+   1350x915 and the splitter redistributes the extra space. At a size the window keeps, the numbers
+   are exact — `"main/clientComposite/details/worlds": "615 946"` drew a 613-pixel world list, the
+   same pixel a drag had left it on.
 7. **Assert:** nothing was written into `profiles\` — a stray `.json` in there is read as a world and
    would raise the red banner (section 14).
 8. **Assert:** `Help` → `About` names that file's path.
@@ -674,10 +720,12 @@ item's text colour (`NM_CUSTOMDRAW` sets it per cell) or by eye.
 | **game running, never joined the map** | `NOT on the map` | `Running, but NOT on the map - see the details` | **red `RGB(176,0,0)`** |
 | game running with nothing holding its place | `NOT on the map` | `The game is running, but this world has no link to the map - see the details` | red |
 
-**The selected row keeps its colour.** It is drawn on a pale wash of its own state's hue with the
-state's colour on the text, instead of on Windows' blue highlight — because the first attempt at this
+**The selected row keeps its colour** — on its TEXT. Both its cells are drawn in the state's own
+colour rather than in the white a selection usually gets, because the first attempt at this
 suppressed the colour on exactly the row a person's eye is on, so selecting the world you were
-worried about made its red go away.
+worried about made its red go away. Its BACKGROUND is Windows' own selection colour and cannot be
+anything else: walk's `TableView` overwrites the background a `StyleCell` returns for a selected row
+before it fills it. See section 2.2.
 
 ---
 

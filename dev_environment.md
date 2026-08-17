@@ -330,15 +330,29 @@ test walks all of them against `InternalWords()`.
   what pressing it will do, toggling `Visible` on a `Composite`. walk's `SetVisible` calls
   `RequestLayout`, and its box layouts skip invisible children, so the space is genuinely reclaimed.
   An arrow glyph was rejected: it only says "expander" to people who already knew.
-- **A coloured static must be redrawn WITH ITS CHILDREN.** A walk static is two windows: an outer one
-  whose WndProc answers `WM_CTLCOLORSTATIC` with the text colour, and a real child `static` control
-  that draws the text. Changing the text calls `setWindowText` on the child, which repaints it and so
-  asks the parent for the colour again; changing only the COLOUR calls `Invalidate` on the outer
-  window, and invalidating a parent does not reach a child window. So the panel's result line
-  rendered in the system's near-black in every state while the headline beside it — whose text
-  changes whenever its colour does — was perfect. `setLabel` sets the colour on both sides of the
-  text and finishes with `RedrawWindow(..., RDW_ALLCHILDREN|RDW_UPDATENOW)`; every coloured label in
-  the window goes through it.
+- **A coloured static needs a BACKGROUND BRUSH, and a redraw that reaches its children.** This took
+  two rounds and the second one found the real cause, so both halves are written down. A walk static
+  is two windows: an outer one whose WndProc answers `WM_CTLCOLORSTATIC`, and a real child `static`
+  control that draws the text. Changing the text calls `setWindowText` on the child, which repaints
+  it; changing only the COLOUR calls `Invalidate` on the outer window, and invalidating a parent does
+  not reach a child window — so `setLabel` finishes with
+  `RedrawWindow(..., RDW_ALLCHILDREN|RDW_UPDATENOW)`. **That alone bought nothing**: a machine then
+  measured every panel label — headline, hint, result line and banner — at zero coloured pixels and
+  a hundred per cent of the system's near-black, in every state, while the table's cells (which walk
+  draws itself) were perfect. The reason is `static.WndProc` (walk's `static.go`): it calls
+  `handleWMCTLCOLOR`, which *does* `SetTextColor` with our colour and then looks for a background
+  brush to answer the message with. It finds none — a static's own background is walk's null brush,
+  `backgroundEffective` walks up the parents looking for one that is not, and walk sets the form's
+  client composite's background to `nil` outright (`form.go`) — so it returns 0, `static.WndProc`
+  falls through to `WidgetBase.WndProc` and on to `DefWindowProc`, and **`DefWindowProc`'s
+  `WM_CTLCOLORSTATIC` selects the default system colours into the DC**. Our colour was overwritten
+  microseconds after it was set, on every paint. The fix is one line of declarative per label:
+  `Background: SystemColorBrush{Color: SysColorBtnFace}` — the same brush every walk window class
+  already paints with (`MustRegisterWindowClass` sets `wc.HbrBackground = COLOR_BTNFACE+1`), so
+  nothing looks different and `handleWMCTLCOLOR` has something to return. Measured on the machine
+  afterwards, near-black in a coloured label went to **zero pixels** and the colour went from 0 to
+  183 (grey `Stopped`), 572 (green headline), 351 (amber `Checking...`), 487 (green result) and
+  1291 (red refusal) — and 3991 for the red banner.
 - **A splitter does not hide its own handle.** Hiding a splitter child makes walk mark the matching
   handle's *layout item* invisible (`splitterlayout.go`, `reset`) so it is left out of the
   arithmetic — but nothing hides the handle's own window, so it stays on screen at whatever bounds it
@@ -350,15 +364,41 @@ test walks all of them against `InternalWords()`.
   its dropdown is a `TrackPopupMenu` modal loop, which the Windows harness has never driven. The menu
   bar (`World`, `Open`) and the list's context menu are ordinary `HMENU`s the harness already drives,
   and the same captions are keyed to the same actions.
-- **`TableView` colour is per cell, via `StyleCell`.** The unselected rows get the state's colour on
-  the `Status` column. The **selected** row is not skipped — that was the first attempt, and it took
-  the signal off the one row a person's eye is on, so selecting the world you were worried about made
-  its red go away. It is drawn instead: `BackgroundColor` a pale wash of the state's hue across both
-  cells, `TextColor` the state's colour. Windows' blue highlight is replaced rather than fought.
+- **`TableView` colour is per cell, via `StyleCell` — and the SELECTED ROW'S BACKGROUND IS NOT OURS
+  TO SET.** The unselected rows get the state's colour on the `Status` column. The **selected** row is
+  not skipped — that was the first attempt, and it took the signal off the one row a person's eye is
+  on, so selecting the world you were worried about made its red go away — so the state's colour goes
+  on the text of both its cells, and that part works. A round of this window also promised a pale
+  wash of the state's own hue behind the selected row; a machine measured the system's selection
+  colour there instead, 204,232,255 across the whole row, with our green text on top of it and not
+  one pixel of the wash. It is not a bug in this program. walk's `tableview.go` throws the value
+  away, in its `NM_CUSTOMDRAW` handler at `CDDS_ITEMPREPAINT`: `if selected { tv.style.BackgroundColor
+  = tv.itemBGColor ... }` overwrites whatever `StyleCell` returned with the theme's own colour, and
+  the row fill three lines below uses that. The subitem pass does hand `ClrTextBk` our colour, but a
+  themed `ListView` paints the selection itself and ignores it. walk's only remaining door is
+  `CellStyle.Canvas()`, which means drawing every cell's text by hand — font, alignment, ellipsis and
+  focus rectangle — to change a background colour, which is a great deal of drawing code to own for a
+  tint. **So the promise is the text and not the wash**, and the manual test says so: Windows'
+  selection colour here is the Explorer theme's pale blue rather than `COLOR_HIGHLIGHT`, the state's
+  colour is dark, and the two read together.
 - **Only walk's `Label` has an ellipsis mode**, so the panel's fact VALUES are `Label` and not
   `TextLabel`: `EllipsisPath` (`SS_PATHELLIPSIS`) on the data folder, `EllipsisEnd` elsewhere. Before
   that, a path was cut dead at the pixel the button beside it began, mid-word, with nothing to say it
   had been. The whole value is in the tooltip either way.
+- **The splitters' positions are restored by asking the SPLITTER, not the window.** The obvious call
+  is `MainWindow.RestoreState`, which is what walk's own examples use, and it silently did nothing
+  at all: `FormBase.RestoreState` reads the FORM's own state first and `if state == "" { return nil }`
+  — and the descent into the children, `return fb.clientComposite.RestoreState()`, is the last line
+  of that function, below the early return. This window's placement is its own (a rectangle
+  sanity-checked against the screen it is opening on), so nothing is ever stored under the form's key
+  and the early return was taken every single time. The positions were written on close, were read
+  back into the settings on open, and were never handed to a splitter: a dragged divider came back at
+  its default on the next open, and a hand-written file changed nothing whatever it said.
+  `restoreDividers` calls `detailsSplit.RestoreState()` instead — `Splitter.RestoreState` descends
+  into its own children, so the outer one restores both — and `splitState` calls that splitter's
+  `SaveState` for symmetry, which also stops walk's `WINDOWPLACEMENT` string being written into a
+  file that keeps the placement as named fields. Measured on the machine: dragged to a 613-pixel
+  world list and a 243-pixel details pane, closed, re-opened at 613 and 243.
 - **The splitters' positions are walk's mechanism with our storage.** Marking a `Splitter`
   `Persistent` makes walk read and write one string per splitter through `walk.App().Settings()` —
   and what walk ships as a `Settings` is an INI under `%APPDATA%\<organisation>\<product>`, a second
