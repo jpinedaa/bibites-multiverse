@@ -89,3 +89,57 @@ That version uses the ISC License. See the [upstream source](https://github.com/
 > WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 > ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 > OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+## lxn/walk and lxn/win
+
+The Windows launcher's window links `github.com/lxn/walk`
+version 0.0.0-20210112085537-c389da54e794 and `github.com/lxn/win`
+version 0.0.0-20210218163916-a377121e959e, which draw it with the operating
+system's own controls. Both use a 3-clause BSD license. See the upstream sources
+for [walk](https://github.com/lxn/walk/tree/c389da54e794) and
+[win](https://github.com/lxn/win/tree/a377121e959e).
+
+> Copyright (c) 2010 The Walk Authors. All rights reserved.
+> Copyright (c) 2010 The win Authors. All rights reserved.
+>
+> Redistribution and use in source and binary forms, with or without
+> modification, are permitted provided that the following conditions
+> are met:
+> 1. Redistributions of source code must retain the above copyright
+>    notice, this list of conditions and the following disclaimer.
+> 2. Redistributions in binary form must reproduce the above copyright
+>    notice, this list of conditions and the following disclaimer in the
+>    documentation and/or other materials provided with the distribution.
+> 3. The names of the authors may not be used to endorse or promote products
+>    derived from this software without specific prior written permission.
+>
+> THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+> IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+> OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+> IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+> INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+> NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+> DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+> THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+> (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+> THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+That window also links two libraries those two bring with them:
+`gopkg.in/Knetic/govaluate.v3` version 3.0.0, under the MIT License
+(Copyright (c) 2014-2016 George Lester,
+[upstream source](https://github.com/Knetic/govaluate/tree/v3.0.0)), and
+`golang.org/x/sys` version 0.0.0-20201018230417-eeed37f84f13, under the same
+3-clause BSD license as the Go standard library
+(Copyright (c) 2009 The Go Authors,
+[upstream source](https://cs.opensource.google/go/x/sys)). The full texts of both
+are in those sources, and each is reproduced verbatim under
+`go/go.sum`'s recorded module contents.
+
+## rsrc 0.10.2 (build tool; nothing of it ships)
+
+`github.com/akavel/rsrc` version 0.10.2 compiles the Windows launcher's resource
+object at build time - the Common Controls 6 manifest and the application icon,
+both of which are this project's own files. No rsrc code is linked into any
+shipped binary. It uses the MIT License
+(Copyright (c) 2013-2017 The rsrc Authors,
+[upstream source](https://github.com/akavel/rsrc/tree/v0.10.2)).

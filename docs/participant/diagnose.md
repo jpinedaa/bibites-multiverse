@@ -31,11 +31,33 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless y
 **`--data-dir` names ONE world, and on Windows you may have more than one.** Every world the
 launcher created has its own data folder, so the path above is only the world the installer made —
 run either command against another world's folder and you get a clean report for a world that is
-not the one failing. `BibitesMultiverseLauncher.exe status --all` names every world on this
-computer with its data folder, and `BibitesMultiverseLauncher.exe profile show NAME` shows one of
+not the one failing. `multiverse-launcher.exe status --all` names every world on this
+computer with its data folder, and `multiverse-launcher.exe profile show NAME` shows one of
 them. The `data` directory these commands want is `<that world's data root>\data`. The path above
 is the whole story on Linux, where a second world means a second unpacked kit with its own
 `--data-root`.
+
+**`--diagnose` reports on the configuration you hand it, so hand it your map.** With `--data-dir`
+alone the sidecar uses its own default relay — a local address — and the two checks that are about
+your world's place on the map, `relay-reachable` and `credential`, then answer about a relay your
+world has nothing to do with. Add the relay your world dials and the file its secret lives in:
+
+```powershell
+$root = Split-Path $data -Parent
+.\multiverse-sidecar.exe --diagnose --data-dir $data `
+    --relay (Get-Content "$data\relay-url") --credential-file "$root\peer-secret.txt"
+```
+
+```sh
+root="$(dirname "$data")"
+./multiverse-sidecar --diagnose --data-dir "$data" \
+    --relay "$(head -n 1 "$data/relay-url")" --credential-file "$root/peer-secret.txt"
+```
+
+**On Windows the launcher does this for you**: **Run a health check** in the launcher's window runs
+the diagnostic with that world's own relay and credential filled in, and prints the command line it
+used above the report. The window's details pane opens by itself to show it. `--credential-file`
+names the file and never the secret; no flag in this system takes a secret as a value.
 
 Everything below writes them short. **The flags are the same on both platforms**; what differs is
 the file name and where your data directory is. **They read; they do not start anything**, and you
@@ -125,7 +147,8 @@ link. **On a packaged install it needs nothing else**: your game folder and the 
 come from the `install-record.json` the installer left in your data root, which is also how it
 knows where to look for the mod's log. **A world the launcher created has no install record of its
 own** — it shares the game folder the installer bound, so point `--data-dir` at that world and, if
-a check asks for the game, give it the same game folder `profile show NAME` prints. The specification it is built from is
+a check asks for the game, give it the same game folder `profile show NAME` prints. The
+specification it is built from is
 [`../sidecar-diagnose-spec.md`](../sidecar-diagnose-spec.md), which lists every check, its pass
 criterion and the taxonomy entry its failure points at.
 
@@ -206,7 +229,7 @@ multiverse-sidecar --release-inflight <migrationId> bounce|drop
 
 Written out for your platform in [leave.md](leave.md); the flags are the same on both. Point
 `--data-dir` at the data root of the world you are asking about — on Windows,
-`BibitesMultiverseLauncher.exe status --all` names each one.
+`multiverse-launcher.exe status --all` names each one.
 
 The list says, for each organism handed over, when it went and how long is left before it is
 written off as lost. The release prints the entry, then the duplication risk, and waits for a

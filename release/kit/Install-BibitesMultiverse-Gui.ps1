@@ -95,6 +95,12 @@ Set-StrictMode -Version 2.0
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $Here 'Find-BibitesGame.ps1')
 
+# Install-BibitesMultiverse.ps1's dedicated exit code for "something of this
+# installation is running" - its step 0, which asks before it writes anything.
+# It is the one refusal this window can name in its own title, because it is the
+# one whose remedy is a thing to do on this screen rather than a thing to read.
+$ExitBusy = 3
+
 $hasBundledGame = Test-Path -LiteralPath (Join-Path $Here 'game-payload.json') -PathType Leaf
 $foundGame = Find-BibitesGameDirectory
 $defaultRuntime = if ($hasBundledGame) { 'bundled' } else { 'external' }
@@ -316,12 +322,27 @@ $install.Add_Click({
             -StandardOutput $log -StandardError ($log + '.err')
         Write-SetupLog "installer exit=$exitCode"
         if ($exitCode -ne 0) {
+            # Enough lines to carry a whole refusal, not only its last word: a
+            # STOP that prints numbered ways on is useless cut off above the
+            # numbers, and this dialog is all a GUI install ever shows. Step 0's
+            # refusal is longer than the rest - it lists the programs to close
+            # AND the three ways to close them - and cut off at the top it hides
+            # the list, so it gets a tail of its own.
+            $tail = 30
+            $caption = 'Bibites Multiverse was not installed'
+            $headline = 'Installation stopped.'
+            if ($exitCode -eq $ExitBusy) {
+                $tail = 60
+                $caption = 'Close Bibites Multiverse first'
+                $headline = 'Nothing was installed and nothing was changed, because part of' +
+                            [Environment]::NewLine +
+                            'this installation is running. Windows will not let a setup' +
+                            [Environment]::NewLine +
+                            'replace a program while it runs.'
+            }
             $detail = ''
             if (Test-Path -LiteralPath $log) {
-                # Enough lines to carry a whole refusal, not only its last word:
-                # a STOP that prints numbered ways on is useless cut off above
-                # the numbers, and this dialog is all a GUI install ever shows.
-                $detail = (Get-Content -LiteralPath $log -Tail 30) -join [Environment]::NewLine
+                $detail = (Get-Content -LiteralPath $log -Tail $tail) -join [Environment]::NewLine
             }
             if (Test-Path -LiteralPath ($log + '.err')) {
                 $detail += [Environment]::NewLine
@@ -329,10 +350,10 @@ $install.Add_Click({
             }
             [void][System.Windows.Forms.MessageBox]::Show(
                 $form,
-                ('Installation stopped.' + [Environment]::NewLine + [Environment]::NewLine + $detail +
+                ($headline + [Environment]::NewLine + [Environment]::NewLine + $detail +
                  [Environment]::NewLine + [Environment]::NewLine + 'The whole of it is in:' +
                  [Environment]::NewLine + $log),
-                'Bibites Multiverse was not installed',
+                $caption,
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Error)
             $form.UseWaitCursor = $false

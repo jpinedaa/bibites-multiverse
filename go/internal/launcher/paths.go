@@ -12,10 +12,25 @@ import (
 // Start-Multiverse.ps1 / Stop-Multiverse.ps1, which keep working beside the
 // launcher and share the same on-disk PID protocol.
 const (
-	// LauncherExeName is the installed name of this program on Windows. It is
-	// the name the shortcuts, Add/Remove Programs and Task Manager show, so it
-	// is branded rather than internal.
+	// LauncherExeName is the installed name of the GRAPHICAL launcher on
+	// Windows. It is the name the shortcuts, Add/Remove Programs and Task
+	// Manager show, so it is branded rather than internal, and it has not moved:
+	// the window took the name the console program used to carry, so no
+	// shortcut, registry value or installed record had to change.
 	LauncherExeName = "BibitesMultiverseLauncher.exe"
+
+	// ConsoleExeName is the installed name of THIS program: the commands, the
+	// menu, and everything a script drives.
+	//
+	// WHY THERE ARE TWO FILES RATHER THAN ONE THAT DECIDES. The window has to be
+	// built for the Windows GUI subsystem, or a double-clicked icon flashes a
+	// console up beside it. PowerShell and cmd DO NOT WAIT for a process in that
+	// subsystem: `& $launcher stop world; & $launcher status world` would run the
+	// status against a world still shutting down, silently, in every script
+	// anybody has already written. One executable cannot be both, so the console
+	// program keeps its own file and its own name, and the window forwards a
+	// command line it is given to this one and waits for it.
+	ConsoleExeName = "multiverse-launcher.exe"
 
 	profilesDirName = "profiles"
 	activeFileName  = "active.txt"

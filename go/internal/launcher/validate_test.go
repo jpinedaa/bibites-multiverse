@@ -66,6 +66,15 @@ func TestPortRules(t *testing.T) {
 		t.Fatal("a port another world already holds was accepted")
 	}
 	mustContain(t, "the refusal", err.Error(), "second")
+	// THE WORD IS "WORLD". A profile is the file a world is written down in, and
+	// this sentence is read by somebody who has one world and is making another —
+	// including in the graphical launcher, which quotes the core's refusals into
+	// its panel verbatim rather than paraphrasing them, so an internal word here
+	// is an internal word on a participant's screen.
+	mustContain(t, "the refusal", err.Error(), "world 'second'")
+	if strings.Contains(err.Error(), "profile") {
+		t.Fatalf("the refusal names a profile at a participant: %q", err.Error())
+	}
 
 	// The default offered to a new world is the lowest free port from the
 	// Contract A default upwards.

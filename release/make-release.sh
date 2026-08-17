@@ -85,8 +85,16 @@ STAGE_NAME="bibites-multiverse-${RELEASE}"
 STABLE_SETUP_NAME="bibites-multiverse-windows-x64-setup.exe"
 STABLE_LINUX_COMPLETE_NAME="bibites-multiverse-linux-x64-complete.zip"
 # The installed application's entry point. The shortcuts open this file, so the
-# name is what a player sees in Task Manager and in a SmartScreen prompt.
+# name is what a player sees in Task Manager and in a SmartScreen prompt. It is
+# the WINDOW (go/cmd/multiverse-launcher-gui), and it keeps the name the console
+# program shipped under, so no shortcut, registry value or installed record
+# changed when the front door became graphical.
 LAUNCHER_NAME="BibitesMultiverseLauncher.exe"
+# The commands and the console menu, beside it. THEY ARE A SEPARATE FILE because
+# PowerShell and cmd do not wait for a process in the Windows GUI subsystem, so a
+# script that chained two calls to a dual-mode executable would read a world's
+# status while it was still shutting down.
+CONSOLE_LAUNCHER_NAME="multiverse-launcher.exe"
 MAKENSIS="${MAKENSIS:-$(command -v makensis || true)}"
 
 # Optional, and only ever a check: an unpacked copy of the LINUX game, so the
@@ -463,33 +471,72 @@ note "static: CGO is off, so it needs no libc of a particular vintage"
 
 # ------------------------------------------------------------------ the launcher
 
-step "the launcher (cross-compiled, both platforms)"
-# THIS BINARY IS NOT IN THE SIDECAR MANIFEST GATE ABOVE. That gate digests the
+step "the launcher (the window and the commands, cross-compiled)"
+# NEITHER BINARY IS IN THE SIDECAR MANIFEST GATE ABOVE. That gate digests the
 # package graph of cmd/sidecar, and the launcher is a separate command that
 # shares none of it. What stands in for it
 # here is the same VCS-stamp rule the sidecar gets: the shipped file must record
 # the commit this package is built from, so a downloaded exe names a public
-# revision. The launcher uses the standard library only, so there is no module
-# set to compare.
+# revision. The commands use the standard library only; the window links
+# github.com/lxn/walk and github.com/lxn/win, whose licences are in
+# THIRD_PARTY_NOTICES.md.
+#
+# THE RESOURCE OBJECT IS GENERATED HERE, FIRST. The window needs a Common
+# Controls 6 manifest to be drawn with this century's controls at all, and the
+# application icon to be its own in the taskbar. Both arrive through a .syso,
+# which is build output — release/tracked-binaries.txt allows this repository no
+# build output — so it is produced from the checked-in manifest and the same
+# bibites-multiverse.ico the setup and the shortcuts use. rsrc is pinned in
+# go.mod as a tool dependency, so this needs no network and no installed program,
+# and it is byte-for-byte reproducible. It is in .gitignore, which is what keeps
+# `git status` clean and therefore keeps every VCS stamp below unmodified.
+# The manifest comes from the tree being compiled and the icon from $RELDIR,
+# which is the copy this build STAGES into the package a few steps below: the
+# icon inside the executable and the icon beside it must be one file, or the
+# window in the taskbar and the icon on the desktop stop matching.
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 go tool rsrc \
+    -manifest cmd/multiverse-launcher-gui/app.manifest \
+    -ico "$RELDIR/kit/bibites-multiverse.ico" \
+    -arch amd64 -o cmd/multiverse-launcher-gui/rsrc_windows_amd64.syso )
 # VET BOTH TARGETS. A vet at the host GOOS never opens proc_windows.go, which
-# is the highest-risk file in the launcher and the one no test here can run.
-# The GOOS=windows build below catches compile errors in it but not a vet
+# is the highest-risk file in the launcher and the one no test here can run, and
+# it never opens the window's own code at all — walk is Win32 only.
+# The GOOS=windows build below catches compile errors in them but not a vet
 # diagnostic, so the second line is not a duplicate of the first.
-( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 go vet ./cmd/multiverse-launcher ./internal/launcher )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 go vet \
+    ./cmd/multiverse-launcher ./cmd/multiverse-launcher-gui \
+    ./internal/launcher ./internal/launchergui )
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 \
-    go vet ./cmd/multiverse-launcher ./internal/launcher )
+    go vet ./cmd/multiverse-launcher ./cmd/multiverse-launcher-gui \
+    ./internal/launcher ./internal/launchergui )
+# -H=windowsgui is what keeps a console from flashing up behind the window when a
+# shortcut is double-clicked. It is also why the commands are a second file.
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-    go build -buildvcs=true -o "$BUILD/$LAUNCHER_NAME" ./cmd/multiverse-launcher )
-LAUNCHER_REV="$(go version -m "$BUILD/$LAUNCHER_NAME" \
-  | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
-[ "$LAUNCHER_REV" = "$SOURCE_REV" ] \
-  || die "the launcher VCS stamp is '${LAUNCHER_REV:-missing}', want $SOURCE_REV"
-file "$BUILD/$LAUNCHER_NAME" | grep -q 'PE32+' \
-  || die "$LAUNCHER_NAME is not a Windows executable"
+    go build -buildvcs=true -ldflags "-H=windowsgui" \
+      -o "$BUILD/$LAUNCHER_NAME" ./cmd/multiverse-launcher-gui )
+( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    go build -buildvcs=true -o "$BUILD/$CONSOLE_LAUNCHER_NAME" ./cmd/multiverse-launcher )
+for launcher_exe in "$LAUNCHER_NAME" "$CONSOLE_LAUNCHER_NAME"; do
+  LAUNCHER_REV="$(go version -m "$BUILD/$launcher_exe" \
+    | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
+  [ "$LAUNCHER_REV" = "$SOURCE_REV" ] \
+    || die "$launcher_exe's VCS stamp is '${LAUNCHER_REV:-missing}', want $SOURCE_REV"
+  file "$BUILD/$launcher_exe" | grep -q 'PE32+' \
+    || die "$launcher_exe is not a Windows executable"
+done
+# THE SUBSYSTEM IS THE WHOLE POINT OF SHIPPING TWO FILES, so it is checked rather
+# than assumed: a window built as a console program flashes a console, and
+# commands built as a window program are not waited for by any shell.
+file "$BUILD/$LAUNCHER_NAME" | grep -q 'PE32+ executable (GUI)' \
+  || die "$LAUNCHER_NAME is not a GUI-subsystem image; -H=windowsgui did not take"
+file "$BUILD/$CONSOLE_LAUNCHER_NAME" | grep -q 'PE32+ executable (console)' \
+  || die "$CONSOLE_LAUNCHER_NAME is not a console image, so no shell would wait for it"
 # Linux is a compile gate only; the Linux kit does not ship the launcher yet.
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
     go build -buildvcs=true -o "$BUILD/bibites-multiverse-launcher" ./cmd/multiverse-launcher )
 note "$(sha "$BUILD/$LAUNCHER_NAME")"
+note "$(sha "$BUILD/$CONSOLE_LAUNCHER_NAME")"
+note "the window is a GUI-subsystem image and the commands are a console one"
 note "linux/amd64 build succeeds; the Linux kit keeps its shell scripts in this release"
 
 # ------------------------------------------------------------------ the plugin
@@ -584,6 +631,7 @@ cp "$MATRIX_JSON"                                "$STAGE/support-matrix.json"
 cp "$PLUGIN"                                     "$STAGE/BibitesMultiverse.dll"
 cp "$BUILD/multiverse-sidecar.exe"               "$STAGE/"
 cp "$BUILD/$LAUNCHER_NAME"                       "$STAGE/"
+cp "$BUILD/$CONSOLE_LAUNCHER_NAME"               "$STAGE/"
 cp "$CACHE/$BEPINEX_ZIP"                         "$STAGE/"
 cp "$PROJECT_LICENSE"                            "$STAGE/LICENSE"
 cp "$THIRD_PARTY_NOTICES"                        "$STAGE/THIRD_PARTY_NOTICES.md"
@@ -837,12 +885,23 @@ note "every archive contains LICENSE, THIRD_PARTY_NOTICES.md, and the public joi
 [ "$(unzip -Z1 "$DIST/$ZIP_NAME" "$STAGE_NAME/$LAUNCHER_NAME")" = "$STAGE_NAME/$LAUNCHER_NAME" ] \
   || die "the Windows add-on archive does not contain the launcher"
 note "the Windows add-on archive contains $LAUNCHER_NAME"
+# AND THE COMMANDS, which is a separate check because it is a separate file: the
+# window forwards a command line to it, the documentation tells scripts to call
+# it, and an archive with the window alone would leave both silently broken.
+[ "$(unzip -Z1 "$DIST/$ZIP_NAME" "$STAGE_NAME/$CONSOLE_LAUNCHER_NAME")" = "$STAGE_NAME/$CONSOLE_LAUNCHER_NAME" ] \
+  || die "the Windows add-on archive does not contain $CONSOLE_LAUNCHER_NAME"
+note "the Windows add-on archive contains $CONSOLE_LAUNCHER_NAME, which is what a script calls"
 if [ -n "$WINDOWS_GAME_PAYLOAD" ]; then
   [ "$(unzip -Z1 "$DIST/$COMPLETE_ZIP_NAME" "$STAGE_NAME/$LAUNCHER_NAME")" = "$STAGE_NAME/$LAUNCHER_NAME" ] \
     || die "the Windows complete archive does not contain the launcher, so the setup's shortcuts would point at nothing"
   [ -f "$COMPLETE_STAGE/$LAUNCHER_NAME" ] \
     || die "the NSIS payload directory does not contain the launcher"
   note "the Windows complete archive and the setup payload contain $LAUNCHER_NAME"
+  [ "$(unzip -Z1 "$DIST/$COMPLETE_ZIP_NAME" "$STAGE_NAME/$CONSOLE_LAUNCHER_NAME")" = "$STAGE_NAME/$CONSOLE_LAUNCHER_NAME" ] \
+    || die "the Windows complete archive does not contain $CONSOLE_LAUNCHER_NAME"
+  [ -f "$COMPLETE_STAGE/$CONSOLE_LAUNCHER_NAME" ] \
+    || die "the NSIS payload directory does not contain $CONSOLE_LAUNCHER_NAME"
+  note "the Windows complete archive and the setup payload contain $CONSOLE_LAUNCHER_NAME"
 fi
 
 note "$DIST/$ZIP_NAME  ($ZIP_SIZE)"

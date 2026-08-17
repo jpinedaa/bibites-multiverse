@@ -55,6 +55,20 @@ var (
 	procQueryFullProcessImageNameW = kernel32.NewProc("QueryFullProcessImageNameW")
 )
 
+// noWindowAttrs runs a child whose OUTPUT IS BEING CAPTURED without giving it a
+// console of its own. It is not detachedAttrs: a detached child keeps no
+// relationship with this process at all, which is right for a world that must
+// outlive the launcher and wrong for a diagnostic this process is reading.
+//
+// CREATE_NO_WINDOW and DETACHED_PROCESS are mutually exclusive; this is the one
+// of the two that means "a console program with no window".
+func noWindowAttrs() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{CreationFlags: createNoWindow}
+}
+
+// createNoWindow is CREATE_NO_WINDOW, which syscall does not export.
+const createNoWindow = 0x08000000
+
 // detachedAttrs makes a spawned child outlive this console.
 func detachedAttrs() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{
@@ -190,6 +204,21 @@ func processImagePath(pid int) (string, error) {
 // convenience, not part of running a world.
 func openFolder(path string) error {
 	return exec.Command("explorer.exe", path).Start()
+}
+
+// revealFile shows the folder holding one file, with that file selected.
+//
+// IT DOES NOT OPEN THE FILE. The one file this is used for is the mod
+// framework's log, and what happens when a .log is "opened" is whatever this
+// machine has associated with the extension — which may be nothing, may be an
+// editor that locks it while the game is writing, and is not this program's
+// choice to make. Selecting it in its folder always works and hands the person
+// the folder as well.
+func revealFile(path string) error {
+	// The comma is explorer's own syntax and there is no space after it: the
+	// whole '/select,<path>' is ONE argument. Splitting it opens the user's
+	// documents folder instead, which is the failure this comment exists for.
+	return exec.Command("explorer.exe", "/select,"+path).Start()
 }
 
 // systemTool prefers the copy in %SystemRoot%\System32 over whatever the PATH

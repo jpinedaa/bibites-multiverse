@@ -34,8 +34,10 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 
 > [!IMPORTANT]
 > **Bibites Multiverse `0.2.8` is public.** The Windows download is one setup executable with an
-> authorized portable copy of *The Bibites*. It installs the Bibites Multiverse launcher, which
-> starts, stops, and watches your worlds and can run more than one of them. The Linux complete
+> authorized portable copy of *The Bibites*. It installs the Bibites Multiverse launcher — a
+> window that lists your worlds, says what each one is doing and whether it has really reached the
+> map, and starts, stops, creates, clones and checks them. Its commands ship beside it as
+> `multiverse-launcher.exe` for scripts. The Linux complete
 > download includes the native game. Add-on downloads remain available for an existing game. Get
 > them from the
 > [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.8), and check the
@@ -137,8 +139,9 @@ a Multiverse save.
 
 ## Install one world
 
-Windows is a single-file setup program that installs the Bibites Multiverse launcher, the program
-you open. Linux keeps its native complete archive.
+Windows is a single-file setup program that installs the Bibites Multiverse launcher — a window
+that lists your worlds and starts, stops and manages them. Linux keeps its native complete
+archive.
 
 1. Download the recommended file for your platform. Compare it with the published
    [`SHA256SUMS`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.8/SHA256SUMS)
@@ -146,7 +149,8 @@ you open. Linux keeps its native complete archive.
 2. On Windows, double-click the setup executable. On Linux, extract the archive and run
    `./install-bibites-multiverse.sh`.
 3. Keep the defaults. Windows opens the included game and creates desktop and Start Menu icons.
-   Later, use the **Bibites Multiverse** icon; it opens the launcher, and Enter starts the world.
+   Later, use the **Bibites Multiverse** icon; it opens the launcher window, where **Start** runs
+   the selected world.
    On Linux, run `./start-multiverse.sh` after installation.
 
 All participant packages include `public-map.json`, the public join configuration. It contains
@@ -161,15 +165,16 @@ After checksum verification, use these platform steps:
 | Windows | [`bibites-multiverse-0.2.8-windows-x64-setup.exe`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.8/bibites-multiverse-0.2.8-windows-x64-setup.exe) | Double-click the one downloaded file | Starts after install by default. Later use the **Bibites Multiverse** icon, which opens the launcher |
 | Linux | [`bibites-multiverse-0.2.8-linux-x64-complete.zip`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.8/bibites-multiverse-0.2.8-linux-x64-complete.zip) | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
-To run a world without graphics on Windows, set **headless** in the launcher's settings menu, or
-run `BibitesMultiverseLauncher.exe start --headless`; `start --no-headless` draws it again for one
-session. On Linux, use `./start-multiverse.sh
---headless`. The simulation remains active.
+To run a world without graphics on Windows, tick **Run without a game window (headless)** in the
+launcher window. It is that world's own setting and it is written the moment you tick it. For one
+session only, the commands do it instead: `multiverse-launcher.exe start --headless`, and
+`start --no-headless` draws it again. On Linux, use `./start-multiverse.sh --headless`. The
+simulation remains active.
 
-One Windows computer can run several worlds at the same time.
-`BibitesMultiverseLauncher.exe profile create NAME --world NAME --sidecar-port 8788` adds a world
-with its own map identity, data folder, and sidecar port. One game folder supports five worlds at
-once. Each extra world enrolls its own identity on the public map.
+One Windows computer can run several worlds at the same time. **Create a world...** in the
+launcher window, or `multiverse-launcher.exe profile create NAME --world NAME --sidecar-port 8788`,
+adds a world with its own map identity, data folder, and sidecar port. One game folder supports
+five worlds at once. Each extra world enrolls its own identity on the public map.
 
 The Windows GUI uses the included portable game by default. You can instead select an existing
 game. The GUI searches Steam and common install locations before it asks for a folder. Setup

@@ -84,19 +84,33 @@ func (a *app) runStop(p Profile, opts stopOptions) int {
 
 	// The sidecar has no mod and no window; it is asked the only way there is.
 	stopProcess(stopRequest{
-		pidFile: p.SidecarPidFile(),
-		wantExe: a.install.SidecarExe(),
-		what:    "the sidecar",
-		timeout: sidecarTimeout,
-		now:     a.now,
-		report:  report,
-		warn:    warn,
+		pidFile:       p.SidecarPidFile(),
+		wantExe:       a.install.SidecarExe(),
+		what:          "the sidecar",
+		timeout:       sidecarTimeout,
+		now:           a.now,
+		noWindowWords: sidecarEndedWords,
+		report:        report,
+		warn:          warn,
 	})
 	events.event("info", "sidecar.stopped", "world", p.World)
 	a.say("The journal in %s is kept. Do not delete it: it is this machine's record of every "+
 		"organism it is holding for somebody.", p.DataDir())
 	return exitOK
 }
+
+// sidecarEndedWords is what a stopped SIDECAR says when there was no window to
+// post a close request to — which on Windows is every one the launcher started,
+// because it starts them detached and windowless on purpose.
+//
+// IT IS A DIFFERENT FACT FROM THE GAME'S. A game with no window loses everything
+// since its last save (LOCAL-HEADLESSSTOP), and the words for that case are
+// deliberately alarming. A sidecar holds nothing that is not already on disk:
+// the journal is written as it goes and its place on the map is kept by the
+// relay, not by the process. Printing the game's sentence about it told every
+// healthy stop that something had been lost.
+const sidecarEndedWords = "ended directly; a sidecar keeps nothing unsaved - its journal " +
+	"is written as it goes"
 
 // headlessStopNote is what a person needs after a game was killed rather than
 // closed: the reason, and the two ways out. It is LOCAL-HEADLESSSTOP in

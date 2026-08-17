@@ -561,6 +561,21 @@ keep that installed identity.
 
 Private maps and manually named identities still use `issue-join.sh`.
 
+**Open item — a test identity is still holding a slot.** Installer testing follows the rule above
+and enrols for real, so a discarded test install leaves a real identity on the map with no world
+behind it. One is outstanding:
+
+| Identity | World name | Slot | Created | What it needs |
+|---|---|---|---|---|
+| `public-2db3a641ac3a4b6491148ea67c496011` | `LauncherTest` | 10 | 2026-08-17, launcher and installer testing | Release the slot, then drop the credential |
+
+Release it with the `release-slot` act on the relay's admin listener — report first, read the
+consequence, then confirm within the token's ten minutes — and drop its credential from the
+verifier store afterwards. The slot NUMBER is never reused, which is the point of a release rather
+than an eviction: nothing that ever crossed to or from that world changes meaning. Add a row here
+when a test enrols, and delete the row when it is released, so a stale identity is a line somebody
+can read rather than a slot nobody can explain.
+
 Credential creation requires a planned relay restart.
 Collect the approved peer identifiers before the restart.
 Then create the credentials in one batch.

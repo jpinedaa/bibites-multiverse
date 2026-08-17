@@ -300,7 +300,9 @@ func TestUsageAndExitCodes(t *testing.T) {
 	if code := h.run("--help"); code != exitOK {
 		t.Fatalf("--help exited %d", code)
 	}
-	mustContain(t, "the usage", h.out(), LauncherExeName+" [global flags] [command] [args]")
+	// The usage names the CONSOLE program, because that is the file a command
+	// line goes to: BibitesMultiverseLauncher.exe is the window (paths.go).
+	mustContain(t, "the usage", h.out(), ConsoleExeName+" [global flags] [command] [args]")
 
 	if code := h.run("version"); code != exitOK {
 		t.Fatalf("version exited %d", code)
@@ -330,4 +332,71 @@ func TestOwnSlotPathMatchesTheSidecar(t *testing.T) {
 		t.Fatalf("the launcher asks for %q and the sidecar serves %q",
 			ownSlotPath, sidecar.OwnSlotPath)
 	}
+}
+
+// TestDiagnoseArgsNameThisWorldsMap is the golden form of the diagnostic's
+// command line, and it exists because of what the short form did on a real
+// machine: `--diagnose --data-dir … --game-dir …` left the sidecar on its
+// COMPILED-IN DEFAULT RELAY, ws://127.0.0.1:8795, so a healthy world on the
+// public map was told FAIL relay-reachable and FAIL credential, and exited 1.
+// The same world, with the two flags below, is sixteen passes and exit 0.
+func TestDiagnoseArgsNameThisWorldsMap(t *testing.T) {
+	h := newHarness(t)
+	p := h.profile("default", "Multiverse", 8787)
+
+	want := []string{
+		"--diagnose",
+		"--relay", testRelayURL,
+		"--data-dir", p.DataDir(),
+		"--credential-file", p.CredentialFile(),
+		"--game-dir", p.GameDir,
+	}
+	got := diagnoseArgs(p)
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("the diagnostic's command line drifted.\n got: %s\nwant: %s",
+			strings.Join(got, " "), strings.Join(want, " "))
+	}
+
+	// ONE SOURCE OF TRUTH. The three flags the diagnostic shares with the launch
+	// have to carry the same values, or the diagnostic reports on a world the
+	// launcher does not run.
+	launch := sidecarArgs(p)
+	for _, flag := range []string{"--relay", "--data-dir", "--credential-file"} {
+		if valueOfFlag(t, got, flag) != valueOfFlag(t, launch, flag) {
+			t.Fatalf("%s is %q for the diagnostic and %q for the launch", flag,
+				valueOfFlag(t, got, flag), valueOfFlag(t, launch, flag))
+		}
+	}
+
+	// It is read by a person in the launcher's log pane, so it is never --json;
+	// and it names no support matrix, because the sidecar finds that beside its
+	// own executable and a second answer here could disagree with it.
+	for _, unwanted := range []string{"--json", "--support-matrix"} {
+		for _, arg := range got {
+			if arg == unwanted {
+				t.Fatalf("the diagnostic's command line carries %s", unwanted)
+			}
+		}
+	}
+
+	// A SECRET IS NEVER A VALUE. --credential-file names the file; the secret in
+	// it must not appear on a command line every process listing can read.
+	secret := strings.TrimSpace(readFile(t, p.CredentialFile()))
+	for _, arg := range got {
+		if strings.Contains(arg, secret) {
+			t.Fatal("the diagnostic's command line carries the credential itself")
+		}
+	}
+}
+
+// valueOfFlag returns the argument after name.
+func valueOfFlag(t *testing.T, args []string, name string) string {
+	t.Helper()
+	for i, arg := range args {
+		if arg == name && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	t.Fatalf("%s is not in %v", name, args)
+	return ""
 }

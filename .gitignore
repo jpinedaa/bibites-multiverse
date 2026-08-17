@@ -9,6 +9,16 @@ bibites-mod/bin/
 bibites-mod/obj/
 bin/
 
+# The graphical launcher's Win32 resource object: the Common Controls 6 manifest
+# and the application icon, compiled by `go generate ./cmd/multiverse-launcher-gui`
+# (see go/cmd/multiverse-launcher-gui/generate.go) from the checked-in manifest
+# and release/kit/bibites-multiverse.ico. It is build output, which
+# release/tracked-binaries.txt does not allow this repository to track, and it is
+# byte-for-byte reproducible from those two inputs. It is IGNORED rather than
+# merely untracked on purpose: `go build -buildvcs=true` reads `git status`, and
+# an untracked file there would stamp every release binary vcs.modified=true.
+go/cmd/multiverse-launcher-gui/*.syso
+
 # The hosting kit's cross-compiled artifacts. deploy/ship.sh builds the relay,
 # the archive and ringstat for linux/amd64 and linux/arm64 here and scps them to
 # the instance; they are regenerable from go/ and are ~60 MB a set.

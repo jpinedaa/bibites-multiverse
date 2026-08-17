@@ -288,8 +288,16 @@ type stopRequest struct {
 	// It answers whether the request was accepted. Nil — the sidecar has no such
 	// channel — or false, and the ordinary close request is used instead.
 	askFirst func() bool
-	report   func(string, ...any)
-	warn     func(string, ...any)
+	// noWindowWords replaces "forced immediately: it has no window" for a process
+	// that WAS NEVER GOING TO HAVE ONE and has nothing to lose by ending there
+	// and then. Empty — the game — keeps the taxonomy's wording, because for a
+	// game those words are the signature of LOCAL-HEADLESSSTOP and a person who
+	// searches for them must find them. For the sidecar they were only alarming:
+	// every launcher-started sidecar is detached and windowless, so every healthy
+	// stop of one printed the sentence the taxonomy uses for a lost save.
+	noWindowWords string
+	report        func(string, ...any)
+	warn          func(string, ...any)
 }
 
 // stopProcess is the shared game/sidecar stop: identify, ask, wait, force, and
@@ -351,7 +359,7 @@ func stopProcess(req stopRequest) stopOutcome {
 		req.warn("%s (pid %d) did not exit after being forced. Its record was kept", req.what, pid)
 		return stopFailed
 	}
-	req.report("stopped %s (pid %d), forced %s", req.what, pid, forcedReason(outcome, req.timeout))
+	req.report("%s", forcedLine(req, pid, outcome))
 	os.Remove(req.pidFile)
 	return outcome
 }
@@ -364,6 +372,18 @@ func askedWords(outcome stopOutcome) string {
 		return "it was asked through the mod, and it saved and quit"
 	}
 	return "it was asked to close, and it closed"
+}
+
+// forcedLine is the line a forced stop prints. It is a function of its own so
+// that the two halves can be read side by side and pinned by a test: the game's
+// sentence is the signature LOCAL-HEADLESSSTOP tells a person to search their
+// log for, and the sidecar's must not be mistaken for it in either direction.
+func forcedLine(req stopRequest, pid int, outcome stopOutcome) string {
+	if outcome == stopForcedNoWindow && req.noWindowWords != "" {
+		return fmt.Sprintf("stopped %s (pid %d) - %s", req.what, pid, req.noWindowWords)
+	}
+	return fmt.Sprintf("stopped %s (pid %d), forced %s", req.what, pid,
+		forcedReason(outcome, req.timeout))
 }
 
 // forcedReason says WHY the force happened, which is the whole of what a person

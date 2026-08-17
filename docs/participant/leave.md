@@ -20,7 +20,7 @@ that is a broken world. Everything below follows from it.
 
 **One thing worth doing rather than just pulling the plug**: let the game finish quitting, so
 save-on-quit runs. On Windows, the launcher's **Stop this world** — or
-`BibitesMultiverseLauncher.exe stop`, or `stop --all` for every world on the computer — asks the
+`multiverse-launcher.exe stop`, or `stop --all` for every world on the computer — asks the
 game to close and waits up to thirty seconds for that save before it insists. `Stop-Multiverse.ps1`
 does the same, and `stop-multiverse.sh` waits up to twenty seconds on Linux. A clean quit with its
 save has measured at about two seconds. **A headless world on Windows has no window to close**, so it
@@ -61,7 +61,7 @@ computer runs several, name the ones you are leaving with.
 | Organisms still addressed to your slot | Get a **permanent** answer — that world never returns, so nothing addressed to it can ever land. One the relay can prove it never handed anywhere crosses to another world along the same axis, or goes home at once. One that had already been handed over is **lost** a day later: there is nobody left to answer for it, and this map would rather lose an organism than risk a second copy of one |
 | Your neighbours | Their lanes re-pair around the hole. No slot number changes and no other position moves |
 | Your world | Yours. The saves are on your disk, and the uninstall — `Uninstall-BibitesMultiverse.ps1`, or `./uninstall-bibites-multiverse.sh` — leaves your game as it found it, which a test proves against a sandbox game tree rather than a page asserting it. See [install.md](install.md). It keeps your journal **and your world's identity** — `peer-secret.txt`, and `data/peer-id` beside the journal — unless you pass `-RemoveWorldData` / `--remove-world-data`, and it never goes near your worlds. That is why installing again over the same data root comes back as the **same** world on the **same** slot, and why removing the software is not leaving the map |
-| Removing one world of several | `BibitesMultiverseLauncher.exe profile delete NAME` removes that world from this computer. **It is not leaving the map**: the slot stays reserved for that identity until the operator releases it, so send the message as well. It keeps that world's journal, logs and credential unless you pass `--remove-world-data`, which ends that world on the map: the relay keeps a verifier and cannot mint the secret again. That switch removes **this world's own entries** under its data folder — the journal, the logs, the credential and the launcher's pid and lock files — and leaves everything else there, naming what it left: a complete-edition data folder also holds the game itself under `runtimes\`, and the installer's record, and sometimes another deployment's folders. Either way it asks you to type the world's name, and with `--remove-world-data` it asks **even under the global `--yes`** |
+| Removing one world of several | `multiverse-launcher.exe profile delete NAME` removes that world from this computer. **It is not leaving the map**: the slot stays reserved for that identity until the operator releases it, so send the message as well. It keeps that world's journal, logs and credential unless you pass `--remove-world-data`, which ends that world on the map: the relay keeps a verifier and cannot mint the secret again. That switch removes **this world's own entries** under its data folder — the journal, the logs, the credential and the launcher's pid and lock files — and leaves everything else there, naming what it left: a complete-edition data folder also holds the game itself under `runtimes\`, and the installer's record, and sometimes another deployment's folders. Either way it asks you to type the world's name, and with `--remove-world-data` it asks **even under the global `--yes`** |
 | Your credential | **Still authenticates until the operator drops it** — a release retires a *reservation*, not an identity. What is gone is your place: connect again and the map treats you as a newcomer, at a new slot number and wherever the ordinary placement rules put you. Your old slot number is never reused. There is nothing to revoke on your side |
 
 **Before you go, drain your journal.** Your sidecar may still be carrying organisms it took
@@ -69,7 +69,7 @@ custody of and never finished with — arrivals your game refused for good, and 
 handed to the map that were never answered for. Custody is local: **nobody else can do this for
 you, and no operator command can reach it.**
 
-**Stop your sidecar first** — `BibitesMultiverseLauncher.exe stop` or `.\Stop-Multiverse.ps1` on
+**Stop your sidecar first** — `multiverse-launcher.exe stop` or `.\Stop-Multiverse.ps1` on
 Windows, `./stop-multiverse.sh` on Linux —
 because the journal takes one writer and both commands refuse while it is running. Then list what
 is left, and release each entry, choosing whether it goes home to the world it came from or is
@@ -92,7 +92,7 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless y
 ```
 
 For a world the launcher created, the data folder is that world's own.
-`BibitesMultiverseLauncher.exe status --all` names it for every world on this computer.
+`multiverse-launcher.exe status --all` names it for every world on this computer.
 
 The list gives you the migration id, the organism, where it was going, when it was handed over,
 and how long is left before it is written off as lost. The release prints the entry and then

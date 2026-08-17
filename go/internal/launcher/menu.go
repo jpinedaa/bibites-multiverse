@@ -113,8 +113,15 @@ func (a *app) fatalInteractive(format string, args ...any) int {
 // askLine reads one line and says whether there was one. A reader at its end
 // answers false, which every loop treats as "quit" rather than as an empty
 // selection.
-func (a *app) askLine(prompt string) (string, bool) {
-	fmt.Fprint(a.stdout, prompt)
+//
+// THIS IS THE ONLY PLACE THIS PROGRAM ASKS A PERSON ANYTHING, which is what
+// lets a front door with no terminal answer instead of hanging: a session sets
+// app.prompt and the question never reaches a stream nobody is watching.
+func (a *app) askLine(question string) (string, bool) {
+	if a.prompt != nil {
+		return a.prompt(question)
+	}
+	fmt.Fprint(a.stdout, question)
 	line, err := a.stdin.ReadString('\n')
 	if err != nil && line == "" {
 		return "", false

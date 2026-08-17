@@ -551,16 +551,18 @@ jobs:
             "bibites-multiverse-$RELEASE-windows-x64.zip" \
             "bibites-multiverse-$RELEASE-windows-x64-complete.zip"
           do
-            [ "$(unzip -Z1 "$dist/$archive" "$stage/BibitesMultiverseLauncher.exe")" \
-              = "$stage/BibitesMultiverseLauncher.exe" ] \
-              || { echo "!! $archive has no launcher" >&2; exit 1; }
+            for member in BibitesMultiverseLauncher.exe multiverse-launcher.exe; do
+              [ "$(unzip -Z1 "$dist/$archive" "$stage/$member")" = "$stage/$member" ] \
+                || { echo "!! $archive has no $member" >&2; exit 1; }
+            done
           done
-          echo "    licence, notices, join configuration, launcher"
+          echo "    licence, notices, join configuration, the launcher window and its commands"
 
           echo "=== the shipped Go binaries record this commit"
           win="$work/bibites-multiverse-$RELEASE-windows-x64/$stage"
           lin="$work/bibites-multiverse-$RELEASE-linux-x64/$stage"
-          for bin in "$win/multiverse-sidecar.exe" "$win/BibitesMultiverseLauncher.exe" "$lin/multiverse-sidecar"; do
+          for bin in "$win/multiverse-sidecar.exe" "$win/BibitesMultiverseLauncher.exe" \
+                     "$win/multiverse-launcher.exe" "$lin/multiverse-sidecar"; do
             [ -f "$bin" ] || { echo "!! missing $bin" >&2; exit 1; }
             info="$(go version -m "$bin")"
             rev="$(printf '%s\n' "$info" | sed -n 's/^[[:space:]]*build[[:space:]]*vcs\.revision=//p')"
@@ -573,15 +575,25 @@ jobs:
           done
 
           echo "=== the Windows executables are Windows executables"
-          for bin in "$win/multiverse-sidecar.exe" "$win/BibitesMultiverseLauncher.exe"; do
+          for bin in "$win/multiverse-sidecar.exe" "$win/BibitesMultiverseLauncher.exe" \
+                     "$win/multiverse-launcher.exe"; do
             file "$bin" | grep -q 'PE32+' \
               || { echo "!! $(basename "$bin") is not a 64-bit Windows executable:" >&2
                    file "$bin" >&2; exit 1; }
           done
+          # And the two launchers are the two SUBSYSTEMS, which is why they are two
+          # files: a window that flashes a console, or commands no shell waits for,
+          # are both silent failures on a player's machine.
+          file "$win/BibitesMultiverseLauncher.exe" | grep -q 'PE32+ executable (GUI)' \
+            || { echo "!! the launcher window is not a GUI-subsystem image:" >&2
+                 file "$win/BibitesMultiverseLauncher.exe" >&2; exit 1; }
+          file "$win/multiverse-launcher.exe" | grep -q 'PE32+ executable (console)' \
+            || { echo "!! the launcher's commands are not a console image:" >&2
+                 file "$win/multiverse-launcher.exe" >&2; exit 1; }
           setup="$dist/bibites-multiverse-$RELEASE-windows-x64-setup.exe"
           file "$setup" | grep -q 'Nullsoft Installer self-extracting archive' \
             || { echo "!! the setup is not an NSIS installer:" >&2; file "$setup" >&2; exit 1; }
-          echo "    PE32+ sidecar, PE32+ launcher, Nullsoft setup"
+          echo "    PE32+ sidecar, GUI launcher, console commands, Nullsoft setup"
 
           echo "=== the release page is finished and truthful"
           python3 - "$dist" "$TAG" "$REPO_SLUG" <<'PY'

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -18,6 +19,11 @@ const (
 	sidecarExeName = "multiverse-sidecar"
 	gameExeName    = "The Bibites.x86_64"
 )
+
+// noWindowAttrs is the Windows notion of a console program with no console.
+// There is nothing to say here: a child whose streams are redirected shows
+// nobody anything on this platform.
+func noWindowAttrs() *syscall.SysProcAttr { return nil }
 
 // detachedAttrs puts the child in its own session, so it survives the terminal
 // the launcher was started from.
@@ -95,4 +101,10 @@ func processImagePath(pid int) (string, error) {
 // openFolder shows the user a directory.
 func openFolder(path string) error {
 	return exec.Command("xdg-open", path).Start()
+}
+
+// revealFile shows the folder holding one file. There is no portable "select
+// this file" here, and the folder is the useful half.
+func revealFile(path string) error {
+	return openFolder(filepath.Dir(path))
 }

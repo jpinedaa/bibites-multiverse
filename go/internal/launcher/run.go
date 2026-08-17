@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -402,8 +401,8 @@ func (a *app) waitForMod(p Profile, events *eventLog) {
 	a.warn("   is not being loaded. Both are in docs/error-taxonomy.md.")
 	a.warn("")
 	a.warn("   The remedy for either is to restart this world:")
-	a.warn("     %s stop %s", LauncherExeName, p.Name)
-	a.warn("     %s start %s", LauncherExeName, p.Name)
+	a.warn("     %s stop %s", ConsoleExeName, p.Name)
+	a.warn("     %s start %s", ConsoleExeName, p.Name)
 	a.warn("   If it happens twice in a row, report it with that log and the code above.")
 	a.warn("")
 	a.warn("   The world and the sidecar are still running; this is a warning, not a failure.")
@@ -412,23 +411,13 @@ func (a *app) waitForMod(p Profile, events *eventLog) {
 // probeModConnected asks the sidecar's own-slot endpoint whether a game is
 // connected. Every failure — no listener yet, a body it cannot read, a sidecar
 // too old to serve the path — reads as "not yet", because this is a wait.
+//
+// It reads the same document a session's world list reads (fetchOwnSlot in
+// session.go) and takes two fields out of it, so there is one reader of that
+// endpoint in this package rather than one per caller.
 func probeModConnected(client *http.Client, port int) (string, bool) {
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, ownSlotPath)
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false
-	}
-	var view struct {
-		Mod struct {
-			Connected  bool   `json:"connected"`
-			ModVersion string `json:"modVersion"`
-		} `json:"mod"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+	view, ok := fetchOwnSlot(client, port)
+	if !ok {
 		return "", false
 	}
 	return view.Mod.ModVersion, view.Mod.Connected
@@ -444,6 +433,35 @@ func sidecarArgs(p Profile) []string {
 		"--peer-id", p.PeerID,
 		"--data-dir", p.DataDir(),
 		"--credential-file", p.CredentialFile(),
+	}
+}
+
+// diagnoseArgs is the command line the sidecar's read-only diagnostic is run
+// with, and it names THE SAME PROFILE FIELDS sidecarArgs names, on purpose.
+//
+// THE MAP FLAGS ARE NOT DECORATION. The diagnostic reports on the configuration
+// it is given (docs/sidecar-diagnose-spec.md §1), and the sidecar's own default
+// relay is a local one — ws://127.0.0.1:8795. Run with the two local folders
+// alone, a perfectly healthy world on the public map is asked whether it can
+// reach a relay it has nothing to do with, and answers FAIL relay-reachable and
+// FAIL credential: a front door telling somebody their world is broken when what
+// is broken is the question. --relay and --credential-file are what make the
+// diagnostic about THIS world.
+//
+// THERE IS DELIBERATELY NO --support-matrix. The sidecar looks for
+// support-matrix.json beside its own executable, which is this install root, and
+// the installer puts a copy there (internal/sidecar/diagnose.go, supportMatrix).
+// Naming it here would be a second source of truth for a path the sidecar
+// already knows.
+//
+// No --json either: this output is read by a person, in the launcher's log pane.
+func diagnoseArgs(p Profile) []string {
+	return []string{
+		"--diagnose",
+		"--relay", p.RelayURL,
+		"--data-dir", p.DataDir(),
+		"--credential-file", p.CredentialFile(),
+		"--game-dir", p.GameDir,
 	}
 }
 

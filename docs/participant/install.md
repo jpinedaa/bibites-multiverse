@@ -77,7 +77,8 @@ and common game locations. If it finds no game, the GUI says **Game not found** 
 folder picker available.
 
 The setup creates desktop and Start Menu icons named **Bibites Multiverse**. Both open
-`BibitesMultiverseLauncher.exe`, the installed application. It also registers an
+`BibitesMultiverseLauncher.exe`, the installed application's window; its commands ship beside it
+as `multiverse-launcher.exe`. It also registers an
 uninstaller in **Windows Settings → Apps → Installed apps**. All application files stay in your
 user profile. Setup does not need administrator rights.
 
@@ -147,8 +148,78 @@ written anywhere.
 ## What the installer does
 
 **On Windows the installed application is `BibitesMultiverseLauncher.exe`**, and the **Bibites
-Multiverse** desktop and Start Menu icons open it. It names the world it is set to, its sidecar
-port, and whether the sidecar and the game are running, above a numbered menu:
+Multiverse** desktop and Start Menu icons open it. **It is a window**, and it has two halves.
+
+**On the left is every world on this computer**, one line each, with what it is doing right now in
+plain words and in colour:
+
+| The line says | It means | Colour |
+|---|---|---|
+| **Stopped** | nothing is running for this world | grey |
+| **Starting...**, **Stopping...**, **Waiting for the game** | something is happening; give it a moment | amber |
+| **On the map - speed x10** | this is what you want: your world has its place on the map and the game is feeding it | green |
+| **NOT on the map** | the game is running and nothing is reaching the map | red |
+
+**The red line is the one to know about.** A world can be running and still not be on the map: your
+place is held, the map shows you live, and nothing is actually crossing. The window says so in red
+and tells you where to look, which is the whole reason it exists. Selecting a world does not take its
+colour away.
+
+**On the right is the world you selected**, and one big button: **Start** when it is stopped,
+**Stop** when it is running. Under it is **Run without a game window (headless)** — this world's own
+setting, written the moment you tick it — and then its save name, its port, the speed it is asking
+for and achieving, its folder (with **Open the data folder**) and its identity on the map (with
+**Copy this world's identity**). Double-clicking a world in the list, or pressing Enter on it, does
+the same thing the big button does.
+
+**While anything is happening, the window says what.** A bar spins and a line reads *"Waiting for
+the map to give this world a place..."*, then *"The game is starting..."*, then *"Waiting for the
+game to join the map (up to two minutes)..."*. When it is over, one green or red line stays on
+screen beside **that** world until the next thing you do to it — so you can look away for the minute
+a start takes, and so two worlds never share one answer.
+
+**Nothing is ever silent.** Press **Show details** and the whole of what the launcher did appears,
+timestamped, in a pane you can drag taller or shorter. It opens **by itself** whenever something goes
+wrong, and a failure quotes the launcher's own sentence in the panel — *"'world2' was not created:
+the world 'default' already uses port 8787. Every world needs its own"* — rather than a shrug.
+
+**The rest is in two menus,** so the window is not a wall of buttons:
+
+- **World** — Start, Stop, **Run a health check** (checks this world end to end and reports every
+  result), **Edit settings...**, **Clone this world...**, **Delete this world...**,
+  **Set as the default world**, **Create a world...**, **Stop every world**, Refresh now, Quit.
+- **Open** — the data folder, the logs folder, the game's own log, and **Open the commands window**.
+
+Right-clicking a world in the list offers the same things. Anything the launcher would refuse is
+greyed rather than pressed and then explained, and every control has a tooltip saying what it will
+do.
+
+**The window remembers its size and position**, whether you had the details pane open and how tall
+you left it, in `%APPDATA%\Bibites Multiverse\launcher-window.json`. Deleting that file costs
+you the layout and nothing else — no world, no setting and no identity is in it — and the
+uninstaller leaves it, because the installer never wrote it.
+
+**Closing the window does not stop anything.** The worlds keep running, which is what the line
+along the bottom of the window says, and the title bar tells you how many are up. Stop them with
+**Stop** or **Stop every world**.
+
+**The commands are a second program, `multiverse-launcher.exe`, in the same folder.** It carries
+the same commands it always did, plus the numbered console menu, and it is what a script, a
+shortcut or a scheduled task should call:
+
+```powershell
+multiverse-launcher.exe start                # the sidecar, then the game
+multiverse-launcher.exe start --headless     # no game window, this run only
+multiverse-launcher.exe start --no-headless  # draw it, even if this world is set headless
+multiverse-launcher.exe stop                 # the game, then the sidecar
+multiverse-launcher.exe stop --all           # every world on this computer
+multiverse-launcher.exe status --all
+multiverse-launcher.exe profile list
+multiverse-launcher.exe                      # the console menu, on a terminal
+```
+
+Run with no arguments on a terminal it draws the menu it always drew, and an empty line selects
+**1**:
 
 ```text
    1) Start this world            [Enter]
@@ -162,18 +233,12 @@ port, and whether the sidecar and the game are running, above a numbered menu:
    0) Quit
 ```
 
-An empty line selects **1**, so the icon and one key connect you. The same program also takes
-commands, for a shortcut, a script, or a scheduled task:
-
-```powershell
-BibitesMultiverseLauncher.exe start                # the sidecar, then the game
-BibitesMultiverseLauncher.exe start --headless     # no game window
-BibitesMultiverseLauncher.exe start --no-headless  # draw it, even if this world is set headless
-BibitesMultiverseLauncher.exe stop                 # the game, then the sidecar
-BibitesMultiverseLauncher.exe stop --all           # every world on this computer
-BibitesMultiverseLauncher.exe status --all
-BibitesMultiverseLauncher.exe profile list
-```
+**Why two files.** PowerShell and `cmd` do not wait for a program that opens a window: they start
+it and carry straight on. A script that ran `stop` and then `status` against a single dual-purpose
+executable would read the status of a world still shutting down, and nothing would say so.
+`BibitesMultiverseLauncher.exe` given a command line hands it to `multiverse-launcher.exe` and
+waits, so an old shortcut keeps working - but **a script should name `multiverse-launcher.exe`
+itself**, because only that one is waited for.
 
 Advanced users can still run the generated scripts from the installed application directory. They
 hold the values this world was installed with, and they start the same world:
@@ -204,6 +269,18 @@ All participant packages include the public-map connection details. Each install
 `public-map.json`, generates a different secret on this computer, and enrolls it over HTTPS. A
 literal private-map join string is not packaged because each installation needs a different
 identity and secret.
+
+**Stop the world before you upgrade over it.** Windows holds a program's own file open for as long
+as it runs, and the launcher, the sidecar and the mod are all files setup replaces — so a setup run
+while the **Bibites Multiverse** window is open, or while a world started from this install is
+running, cannot finish. Setup asks that question first, before it has even checked its own package:
+it lists what is running by name, process id and path, says nothing was changed, and stops. That is
+`INS-BUSY`. **It never ends anything for you**, because a world ended rather than stopped loses
+everything it has simulated since its last save. Stop every world the way that keeps it — *"Stop
+every world"* in the launcher's window, `multiverse-launcher.exe stop --all` from a console, or
+`.\Stop-Multiverse.ps1` for a world this install's own script started — then close the launcher
+window and run setup again. Nothing about the upgrade changes: the world, its identity and its
+place on the map are all still there, as the next paragraph describes.
 
 **Installing again over the same data root keeps that world.** An upgrade, a repair, a changed
 game folder, a re-run after a stop: none of them is a new world, and none of them asks the map for
@@ -286,7 +363,10 @@ arrange trust for a certificate authority
 **only** if you gave it one for a private map; state the settings this install ships with; and
 write the start script, the stop script, the application files, and the uninstall record. The
 Windows installer writes one more thing in that last step: `profiles\default.json`, the world
-profile the launcher reads.
+profile the launcher reads. **Ahead of the nine, each installer names a step 0**, and it is a
+different question on each platform: on Windows it checks that nothing of this installation is
+running before anything at all is written, which is the `INS-BUSY` refusal above; on Linux it
+checks for the handful of ordinary programs the script needs, which is `INS-LINUXDEPS`.
 
 **Three of those nine differ, and only three:**
 
@@ -337,7 +417,7 @@ open. It applies that to this install's game folder, to each extra world's game 
 sidecar in its own kit directory.
 
 **On Windows the uninstall covers every world you added.** It walks the `profiles\` directory,
-refuses while any of those worlds still has a live game or sidecar — `BibitesMultiverseLauncher.exe
+refuses while any of those worlds still has a live game or sidecar — `multiverse-launcher.exe
 stop --all` is the command it names — and then removes each world's process-id files, the profile
 files themselves, and the `profiles\` directory. It keeps each extra world's journal, logs and
 credential unless you pass `-RemoveWorldData`, which takes all three. Your save files are never
@@ -373,7 +453,7 @@ two seconds.
 
 **Windows waits now too, and that is a change in this release.** Earlier releases ended the game
 outright on Windows, which skipped the game's own shutdown and therefore skipped save-on-quit. The
-launcher's **Stop this world**, `BibitesMultiverseLauncher.exe stop`, and the generated
+launcher's **Stop** button, `multiverse-launcher.exe stop`, and the generated
 `Stop-Multiverse.ps1` all ask the game to close first and force it only after the wait — 30 seconds
 for the game, 10 for the sidecar. **A headless world has no window to close**, so Windows cannot
 ask it that way — and it is not asked that way. The launcher asks the game's own mod to save and
@@ -389,11 +469,11 @@ says as much when it meets that case. That is `LOCAL-HEADLESSSTOP` in
 
 ## More than one world on this computer
 
-**On Windows the launcher does this, and a second kit is not needed.** Select **Create another
-world** in its menu, or run:
+**On Windows the launcher does this, and a second kit is not needed.** Press **Create another
+world...** in its window, or run:
 
 ```powershell
-BibitesMultiverseLauncher.exe profile create winter --world Winter --sidecar-port 8788
+multiverse-launcher.exe profile create winter --world Winter --sidecar-port 8788
 ```
 
 Both flags are optional. Without them the launcher names the world after the profile and takes the
@@ -504,7 +584,8 @@ Once connected, the export default means that organisms leave your world on ever
 from every side.
 
 If you want a wall on one side, say so: `-ExportEdges E,N` — `--export-edges E,N` on Linux — at
-install time. Afterwards, use `BibitesMultiverseLauncher.exe profile set NAME --export-edges E,N`
+install time. Afterwards, use the launcher's **Edit settings...**, or
+`multiverse-launcher.exe profile set NAME --export-edges E,N`,
 on Windows, or the same value in the start script on Linux. If you want your world off the map, do
 not start it.
 
@@ -512,13 +593,14 @@ not start it.
 
 Four of them are worth reading before you start, because each one spends something of yours.
 
-**On Windows the launcher is where you edit them, per world.** Select **Edit this world's
-settings** in its menu, or run `BibitesMultiverseLauncher.exe profile set NAME --save-minutes 15`.
+**On Windows the launcher is where you edit them, per world.** Select the world and press
+**Edit settings...**, or run `multiverse-launcher.exe profile set NAME --save-minutes 15`.
 The launcher keeps the values in `profiles\<world>.json` beside the application and passes them to
 the game as the environment variables below, so each world on this computer can carry its own.
 
-**If you move or reinstall the game, correct the world's game folder first** —
-`BibitesMultiverseLauncher.exe profile set NAME --game-dir "<the new folder>"`. The launcher checks
+**If you move or reinstall the game, correct the world's game folder first** — the game folder
+field in **Edit settings...**, or
+`multiverse-launcher.exe profile set NAME --game-dir "<the new folder>"`. The launcher checks
 the game folder on every write, so any other edit, and any start, is refused until that path is
 right; the refusal names the folder it looked in.
 

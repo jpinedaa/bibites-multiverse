@@ -189,8 +189,8 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.7` |
 | `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
 | `bibites-mod/` tree | `f7aa583e263ebba61737c305c4d557f94faa823a` |
-| `cmd/sidecar` source commit | `8f3c7faf86eabb2d90cf6be7220239da2495d4a5` |
-| `cmd/sidecar` input digest | `fc692779e94a73dcc60a99de16c5abfd2d94517ffd0111c74b8cae3624c28f75` |
+| `cmd/sidecar` source commit | `3a17907668a8871812e90a9ab061644487db0dc2` |
+| `cmd/sidecar` input digest | `ef7c01abc02f967ba03e6f29a1bb52e628c1d9f2b7d8cd15f9c06a66ff226d7b` |
 | Tested on | 2026-08-17 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
@@ -251,10 +251,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.7",
     "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
     "bibitesModTree": "f7aa583e263ebba61737c305c4d557f94faa823a",
-    "sidecarSourceCommit": "8f3c7faf86eabb2d90cf6be7220239da2495d4a5",
-    "sidecarInputsSha256": "fc692779e94a73dcc60a99de16c5abfd2d94517ffd0111c74b8cae3624c28f75",
+    "sidecarSourceCommit": "3a17907668a8871812e90a9ab061644487db0dc2",
+    "sidecarInputsSha256": "ef7c01abc02f967ba03e6f29a1bb52e628c1d9f2b7d8cd15f9c06a66ff226d7b",
     "testedOn": "2026-08-17",
-    "evidence": "two fresh installs from an NSIS setup built from this commit ran this plugin on the Windows complete edition on 2026-08-17: 29/29 installer and 11/11 timescale assertions on each run, BepInEx loaded Bibites Multiverse 0.6.7, the world applied [M5-SPEED] targetTimeScale x1 -> x10 at world load and held timeScale 10 with an achieved 9.96-10.0, the sidecar reported mod.connected on /my-slot and held slot 9 on wss://bibitesmultiverse.com/contract-b/v4, both a headless and a visual start were exercised, a 6-minute soak at x10 logged no error, a second world on slot 10 ran alongside it, and each stop lost nothing through the cmd-file quit ([M4-SAVE] why=quit)"
+    "evidence": "six fresh complete-edition installs from real NSIS setups, runs #12-#17 on this Windows laptop on 2026-08-17, each about 45 installer assertions and all green; the setups were built from commits between 81af447 and this one, whose cmd/sidecar input manifest digests to the recorded value at every commit in that range, so the sidecar that ran is the sidecar this tree builds. Two worlds ran concurrently on slots 9 and 11 of wss://bibitesmultiverse.com/contract-b/v4 through an 18-minute soak of about 4,600 outbound and 4,700 inbound organisms, exercising contract A custody and MIGRATION_PAYLOAD forwarding, contract B inbound custody and MIGRATE_IN delivery, MIGRATION_ACK tombstoning, GENOME_REQUEST service and /my-slot reporting, with no ERROR, WARN, panic or reconnect; --diagnose exited 0 with 16 PASS against the relay and a real credential; journal compaction ran on Windows for the first time, 10 timed compactions across the two worlds at both the 2-minute override and the 15-minute default, the largest reclaiming 97.9 MB (108 MB down to 10 MB), with the journal bounded across cycles; mod 0.6.7 stayed connected throughout and every stop went through the mod quit verb and lost nothing. NOT EXERCISED, and so not claimed: relay disconnect and reconnect, slot loss and re-grant, journal replay after a crash or an interrupted compaction, the roll-up and archive paths, re-route and bounce-back on REFUSED, forward-timeout expiry, --list-inflight and --release-inflight, the private-map path, and compaction under a full or read-only disk"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",

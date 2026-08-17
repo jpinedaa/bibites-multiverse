@@ -59,6 +59,15 @@ folder. The installer checks the game build against `support-matrix.json` and st
 entry. Then it installs BepInEx, the plugin, the credential, the start and stop scripts, and
 `profiles\default.json` — the world profile the launcher reads.
 
+**Stop your worlds before you install again.** Windows does not let anything replace a program
+while it runs, and the launcher, the commands, the sidecar and the mod are all files this setup
+replaces. So it asks first: if any of them is running out of the folders this run writes into, it
+stops at its very first step, names each program with its process id and path, and **changes
+nothing at all**. Close them — **Stop every world** in the launcher's window, or
+`multiverse-launcher.exe stop --all`, then close the window itself and the game — and run the setup
+again. **It never ends anything for you**, because a world ended rather than stopped loses
+everything it has simulated since its last save.
+
 **Installing again over the same data root keeps that world.** An upgrade or a repair is not a new
 world: step 6 reads the identity already in `%LOCALAPPDATA%\BibitesMultiverse` — from
 `install-record.json`, from a pending enrollment record carrying that same secret, from
@@ -109,21 +118,49 @@ so on your screen while it runs, and `docs/participant/install.md` says so on th
 ## Start and stop
 
 The setup creates **Bibites Multiverse** icons on the desktop and Start Menu. Both open
-`BibitesMultiverseLauncher.exe`, the installed application. It names the world it is set to, its
-sidecar port, and whether the sidecar and the game are running. An empty line at its `select:`
-prompt starts that world.
+`BibitesMultiverseLauncher.exe`, the installed application's **window**.
 
-The same program takes commands, for a shortcut, a script, or a scheduled task:
+**On the left it lists every world on this computer**, one line each, saying in plain words and in
+colour what that world is doing: grey **Stopped**, amber **Starting...**, green
+**On the map - speed x10**, red **NOT on the map**. The red one is the one to know about — a world
+can be running with its place on the map held and nothing actually crossing, and that is the state
+this window exists to make visible.
+
+**On the right is the world you selected**, with one big button — **Start** when it is stopped,
+**Stop** when it is running — the check box **Run without a game window (headless)**, and this
+world's save name, port, speed, folder and identity on the map. While anything is happening a bar
+spins and a line says what stage it has reached; when it is over, one green or red line stays on
+screen beside that world. **Show details** opens the whole of what the launcher did, and it opens
+**by itself** whenever something goes wrong — with the launcher's own sentence about it in the panel
+as well.
+
+The rest is in two menus. **World**: **Run a health check**, **Edit settings...**,
+**Clone this world...**, **Delete this world...**, **Set as the default world**,
+**Create a world...**, **Stop every world**. **Open**: the data folder, the logs folder, the game's
+own log, and the commands window.
+
+**Closing the window does not stop your worlds.** They keep running; the window says so, and its
+title bar says how many are up.
+
+The commands are a second program in the same folder, `multiverse-launcher.exe`, and it is the one
+to name in a shortcut, a script or a scheduled task. It also has the numbered console menu, which
+is what it opens when it is run with no arguments on a terminal:
 
 ```powershell
-BibitesMultiverseLauncher.exe start                # the sidecar, then the game
-BibitesMultiverseLauncher.exe start --headless     # nothing drawn; the simulation is unchanged
-BibitesMultiverseLauncher.exe start --no-headless  # draw it, even if this world is set headless
-BibitesMultiverseLauncher.exe stop                 # the game, then the sidecar
-BibitesMultiverseLauncher.exe stop --game-only     # keeps your place on the map
-BibitesMultiverseLauncher.exe stop --all           # every world on this computer
-BibitesMultiverseLauncher.exe status --all
+multiverse-launcher.exe start                # the sidecar, then the game
+multiverse-launcher.exe start --headless     # nothing drawn; the simulation is unchanged
+multiverse-launcher.exe start --no-headless  # draw it, even if this world is set headless
+multiverse-launcher.exe stop                 # the game, then the sidecar
+multiverse-launcher.exe stop --game-only     # keeps your place on the map
+multiverse-launcher.exe stop --all           # every world on this computer
+multiverse-launcher.exe status --all
 ```
+
+**Why two files.** PowerShell and `cmd` do not wait for a program that opens a window, so a script
+that ran `stop` and then `status` against one dual-purpose executable would report on a world that
+was still shutting down. `BibitesMultiverseLauncher.exe` given a command line passes it to
+`multiverse-launcher.exe` and waits, so an old shortcut still works; a script should name
+`multiverse-launcher.exe` itself.
 
 `stop` asks the game to close before it forces it, so save-on-quit runs. **A headless world has no
 window to close**, so it is asked through its own mod instead — the `quit` verb on this world's
@@ -155,15 +192,15 @@ identity and never expires.
 
 ## More than one world on this computer
 
-**The launcher creates them, and a second kit is not needed.** Select **Create another world** in
-its menu, or:
+**The launcher creates them, and a second kit is not needed.** Press **Create a world...**
+in its window, or:
 
 ```powershell
-BibitesMultiverseLauncher.exe profile create winter --world Winter --sidecar-port 8788
-BibitesMultiverseLauncher.exe profile list
-BibitesMultiverseLauncher.exe profile use winter
-BibitesMultiverseLauncher.exe profile set winter --save-minutes 15
-BibitesMultiverseLauncher.exe profile delete winter
+multiverse-launcher.exe profile create winter --world Winter --sidecar-port 8788
+multiverse-launcher.exe profile list
+multiverse-launcher.exe profile use winter
+multiverse-launcher.exe profile set winter --save-minutes 15
+multiverse-launcher.exe profile delete winter
 ```
 
 `profile delete` asks you to type the world's name. With `--remove-world-data`, which also takes
@@ -202,15 +239,15 @@ and their saves queue behind each other. Give each world a different `--save-min
 
 All five are written explicitly, including the ones that match the mod's own default, so that a
 future change to a default cannot silently move what your world does. **The launcher edits them
-per world** — **Edit this world's settings** in its menu, or
-`BibitesMultiverseLauncher.exe profile set NAME` — and keeps them in `profiles\<world>.json`. It
+per world** — **Edit settings...** in its window, or
+`multiverse-launcher.exe profile set NAME` — and keeps them in `profiles\<world>.json`. It
 passes them to the game as the environment variables below.
 
 `Start-Multiverse.ps1` holds the values this world was installed with and is not updated when you
 change them in the launcher. On Windows the launcher is what your world runs from.
 
 **If you move or reinstall the game, correct the world's game folder first** —
-`BibitesMultiverseLauncher.exe profile set NAME --game-dir "<the new folder>"`. The game folder is
+`multiverse-launcher.exe profile set NAME --game-dir "<the new folder>"`. The game folder is
 checked on every write, so any other edit, and any start, is refused until that path is right.
 
 | Variable the game reads | In the profile | Ships as | What it spends |
@@ -242,7 +279,7 @@ install, unchanged game-payload files are also removed; a changed or user-added 
 and kept.
 
 **It covers every world you added.** It refuses while any of them is still running — stop them with
-`BibitesMultiverseLauncher.exe stop --all` — and then removes each world's process-id files, the
+`multiverse-launcher.exe stop --all` — and then removes each world's process-id files, the
 profile files, and the `profiles\` directory. Each extra world's journal, logs and credential are
 kept on the same rule.
 
@@ -283,10 +320,11 @@ system prints one, and no diagnostic asks for one.
 | `bibites-multiverse.ico` | The application and setup icon |
 | `BibitesMultiverse.dll` | The mod, a BepInEx plugin |
 | `multiverse-sidecar.exe` | The program that speaks to the map on your world's behalf |
-| `BibitesMultiverseLauncher.exe` | The installed application: it starts, stops and reports your worlds, and manages more than one of them |
+| `BibitesMultiverseLauncher.exe` | The installed application's window: it lists your worlds and what each of them is doing, starts and stops them, and manages more than one of them. The icons open this |
+| `multiverse-launcher.exe` | The same launcher's commands and console menu. This is the one a script calls |
 | `profiles\` | Created by the installer beside these files: one JSON file per world, plus `active.txt`. **Never contains a secret** |
 | `BepInEx_win_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
-| `support-matrix.json` | The game builds this release supports, and the words it refuses with |
+| `support-matrix.json` | The game builds this release supports, and the words it refuses with. The setup installs a copy beside `multiverse-sidecar.exe`, which reads it whenever you run the diagnostic |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
 | `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, `game\` | Files that occur only in a complete package |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |

@@ -119,6 +119,35 @@ func TestForcedReasonTellsTheThreeApart(t *testing.T) {
 	mustContain(t, "the timeout reason", timedOut, "asked to close")
 }
 
+// TestForcedLineTellsTheSidecarFromTheGame. Every sidecar the launcher starts is
+// detached and windowless on purpose, so EVERY healthy stop of one used to print
+// "forced immediately: it has no window" - the exact sentence
+// docs/error-taxonomy.md tells a person to search their log for when a headless
+// world has come back missing everything since its last save. The game's wording
+// is unchanged, because for a game it is true.
+func TestForcedLineTellsTheSidecarFromTheGame(t *testing.T) {
+	game := stopRequest{what: "the game", timeout: 30 * time.Second}
+	sidecar := stopRequest{what: "the sidecar", timeout: 10 * time.Second,
+		noWindowWords: sidecarEndedWords}
+
+	gameLine := forcedLine(game, 4242, stopForcedNoWindow)
+	mustContain(t, "the game's no-window line", gameLine,
+		"forced immediately: it has no window")
+
+	sidecarLine := forcedLine(sidecar, 4243, stopForcedNoWindow)
+	mustContain(t, "the sidecar's no-window line", sidecarLine,
+		"stopped the sidecar (pid 4243) - ")
+	mustContain(t, "the sidecar's no-window line", sidecarLine, "keeps nothing unsaved")
+	if strings.Contains(sidecarLine, "no window") || strings.Contains(sidecarLine, "forced") {
+		t.Fatalf("a healthy sidecar stop reads like LOCAL-HEADLESSSTOP: %s", sidecarLine)
+	}
+
+	// Only the no-window case is calmer. A sidecar that was asked and would not
+	// go is still a force, and still says so.
+	timedOut := forcedLine(sidecar, 4243, stopForcedTimeout)
+	mustContain(t, "the sidecar's timeout line", timedOut, "forced after 10s")
+}
+
 // TestProbeProcessAnswersForThisProcess pins the three states against the two
 // pids every machine has: this one, and one nothing is using.
 func TestProbeProcessAnswersForThisProcess(t *testing.T) {
