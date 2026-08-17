@@ -378,10 +378,35 @@ An infrequent-access class looks cheaper and is denied outright by some buckets'
 own policies; the symptom is that every upload returns 403, no receipt is
 written, and nothing is ever retired.
 
+**The AWS CLI is not an apt package on Ubuntu 24.04.** `apt-cache policy awscli`
+returns an empty version table there with every component enabled — the package
+is gone, and AWS ships v2 through its own installer only. `provision.sh --only
+packages` therefore installs `unzip` and *detects* the CLI with `command -v aws`;
+it does not try to install it and never claims to have. Install it once, from
+AWS's own signed archive, and verify the signature rather than trusting the
+download:
+
+```sh
+curl -fsSLO https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+curl -fsSLO https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip.sig
+gpg --verify awscli-exe-linux-x86_64.zip.sig awscli-exe-linux-x86_64.zip
+unzip -q awscli-exe-linux-x86_64.zip && sudo ./aws/install
+aws --version
+```
+
+`gpg --verify` must print `Good signature` from the published AWS CLI signing
+key. That key's own expiry has lapsed and AWS has not rotated it, so gpg also
+prints `[expired]`; a signature from the expected private key still establishes
+origin, and expiry is a policy statement rather than a compromise indicator.
+**Do not install the snap.** `multiverse-coldcopy.service` sets
+`NoNewPrivileges=true`, a classic snap launches through the setuid
+`snap-confine`, and `NoNewPrivileges` blocks it — the timer would then fail every
+hour, which is the exact silent failure the cold-copy design exists to prevent.
+
 Then, in order:
 
 ```sh
-sudo deploy/provision.sh --only packages    # installs the AWS CLI
+sudo deploy/provision.sh --only packages    # unzip, and reports the CLI it finds
 sudo deploy/provision.sh --only systemd     # installs and enables the hourly timer
 sudo -u multiverse /opt/multiverse/deploy/coldcopy.sh --check
 sudo -u multiverse /opt/multiverse/deploy/coldcopy.sh --dry-run

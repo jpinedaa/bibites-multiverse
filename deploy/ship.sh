@@ -48,8 +48,57 @@ done
 
 command -v go >/dev/null || die "no go on PATH"
 
+# WHAT THIS TREE IS ON. `go build` stamps vcs.revision into the binary from the
+# repository it builds in, and that stamp is the only thing on the far side that
+# says WHICH SOURCE a running binary came from. Every deployment record is
+# written against it. So it is asserted here, at the point of creation, rather
+# than discovered later.
+#
+# On 2026-08-17 a deployment installed nothing and reported success: stale
+# artifacts from an earlier build sat under the canonical staged names, and the
+# install phase compared stale-against-installed, found them equal, and said so
+# truthfully about the wrong files. That class of defect — a tool reporting
+# success about the wrong file — is caught cheaply here and expensively anywhere
+# else.
+EXPECT_REV=""
+if command -v git >/dev/null && ( cd "$ROOT" && git rev-parse --git-dir >/dev/null 2>&1 ); then
+  EXPECT_REV="$(cd "$ROOT" && git rev-parse HEAD)"
+fi
+
+# Read the stamp with `go version -m`, never with `strings`. `strings` finds the
+# revision of ANY commit whose hash happens to be embedded in the binary, which
+# on a Go build includes module versions and is not the build's own answer.
+stamp_of() {
+  go version -m "$1" 2>/dev/null | sed -n "s/^[[:space:]]*build[[:space:]]\+$2=//p" | head -1
+}
+
+assert_revision() {
+  local out="$1" rev modified
+  rev="$(stamp_of "$out" vcs.revision)"
+  modified="$(stamp_of "$out" vcs.modified)"
+  if [ -z "$rev" ]; then
+    say "  WARNING: $(basename "$out") carries NO vcs.revision stamp."
+    say "           A build inside a git worktree, or one with -buildvcs=false,"
+    say "           produces an artifact nothing downstream can identify. Do not"
+    say "           ship it without recording where it came from by hand."
+    return 0
+  fi
+  if [ -n "$EXPECT_REV" ] && [ "$rev" != "$EXPECT_REV" ]; then
+    die "$(basename "$out") is stamped $rev but this tree is on $EXPECT_REV.
+     The artifact is NOT this source. Remove $STAGE and build again."
+  fi
+  if [ "$modified" = true ]; then
+    say "  WARNING: $(basename "$out") is stamped vcs.modified=true."
+    say "           It was built from a dirty tree, so its revision names a"
+    say "           commit whose content is not what was compiled. A deployment"
+    say "           record that cites that revision would be wrong."
+  fi
+  return 0
+}
+
 step "build"
 say "go $(go version | awk '{print $3}')  from $ROOT/go"
+if [ -n "$EXPECT_REV" ]; then say "tree at $EXPECT_REV"; fi
 mkdir -p "$STAGE"
 # Use low scheduling priority because a development host can also run test worlds.
 # Write artifacts to deploy/stage/. A running process can keep a binary in bin/
@@ -60,6 +109,7 @@ for arch in $ARCHS; do
     ( cd "$ROOT/go" && CGO_ENABLED=0 GOOS=linux GOARCH="$arch" \
         nice -n 19 go build -trimpath -o "$out" "./cmd/$cmd" )
     say "$(basename "$out")  $(stat -c %s "$out" 2>/dev/null || echo ?) bytes"
+    assert_revision "$out"
   done
 done
 

@@ -433,10 +433,25 @@ phase_packages() {
   # status page reads sensibly — which is why the package is installed here and
   # checked in `verify` rather than left to a runbook step.
   #
-  # It is installed only when this deployment has a destination. A host with no
-  # cold archive has nothing for it to do, and the package is 100+ MB.
+  #
+  # THE AWS CLI IS NOT AN UBUNTU 24.04 PACKAGE, and this phase must not pretend
+  # otherwise. On 2026-08-17 `apt-cache policy awscli` on this release returned
+  # an empty version table with universe, restricted and multiverse all enabled
+  # and the mirror reachable: the package is gone, and AWS ships v2 through its
+  # own signed installer only. So `dpkg -s awscli` can NEVER succeed here, and
+  # the version of this phase that tested it printed the "no ledger segment can
+  # leave this host" warning below on every single run while the CLI sat there
+  # working. A warning that is always wrong is a warning that stops being read,
+  # which costs more than the check was ever worth.
+  #
+  # The CLI is therefore detected by `command -v aws` — wherever it came from —
+  # and it is never put on the apt list. `unzip` is, because the vendor
+  # installer needs it. `verify` fails on a missing CLI, and deploy/README.md
+  # carries the install command with its signature check.
+  local need_aws=0
   if [ -n "${MV_COLDCOPY_URI:-}" ] || [ "${MV_COLDCOPY:-off}" != off ]; then
-    want+=(awscli)
+    need_aws=1
+    want+=(unzip)
   fi
   local missing=()
   local p
@@ -445,6 +460,7 @@ phase_packages() {
   done
   if [ "${#missing[@]}" = 0 ]; then
     say "already: ${want[*]}"
+    packages_report_aws "$need_aws"
     return 0
   fi
   say "installing: ${missing[*]}"
@@ -473,16 +489,30 @@ phase_packages() {
     warn "apt-get install failed for: ${missing[*]}"
     warn "    Provisioning CONTINUES. Re-run '--only packages' when the archive"
     warn "    mirror is reachable, and read the 'verify' phase for what is still"
-    warn "    missing. If the AWS CLI is the one that failed, no ledger segment"
-    warn "    can leave this host and the archive therefore retires nothing —"
-    warn "    which is safe, and is not what the deployment record says happened."
+    warn "    missing."
+    packages_report_aws "$need_aws"
     return 0
   fi
-  # Ubuntu 24.04's `awscli` package is v2. Record what actually landed: the
-  # deployment record has to name the version that wrote the first receipt.
+  packages_report_aws "$need_aws"
+}
+
+# Say what the AWS CLI actually is on this host, and say it only when this
+# deployment has a cold archive to copy to. Record what landed: the deployment
+# record has to name the version that wrote the first receipt.
+packages_report_aws() {
+  local need="$1"
+  [ "$need" = 1 ] || return 0
   if command -v aws >/dev/null 2>&1; then
-    say "aws cli: $(aws --version 2>&1 | head -1)"
+    say "aws cli: $(aws --version 2>&1 | head -1)  at $(command -v aws)"
+    return 0
   fi
+  warn "the AWS CLI is NOT on this host, and MV_COLDCOPY is on."
+  warn "    No ledger segment can leave this host, so the archive retires"
+  warn "    nothing — which is safe, and is not what a deployment record that"
+  warn "    claims a working cold archive says happened."
+  warn "    It is NOT an apt package on Ubuntu 24.04. Install it from AWS's own"
+  warn "    signed installer; deploy/README.md carries the command and the"
+  warn "    signature check. Then re-run '--only verify'."
 }
 
 # ---------------------------------------------------------------- account
