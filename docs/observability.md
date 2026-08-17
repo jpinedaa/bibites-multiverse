@@ -494,6 +494,18 @@ expires.
 The monitor alerts on severity change with a repeat while bad and a daily
 heartbeat. That shape is right and stays.
 
+**Severity travels in the alert, never in the exit code.** A check runner exits
+non-zero when *it* could not run, and zero when it ran and found something —
+including something critical. `monitor.sh` once did the opposite, and the cost
+was a `Type=oneshot` unit that a five-minute timer left in `failed` almost
+permanently: `systemctl is-failed multiverse-monitor.service` stopped
+distinguishing a monitor with a warning from a monitor that never started, and
+a deployment pipeline under `set -o pipefail` broke on a healthy tick. The
+verdict belongs in the channel, in the printed `worst:` line and in the stored
+per-check severity, all of which say *which* check and *how bad*. An exit code
+says neither, and spending it on severity throws away the only signal that
+could have reported the watcher's own death.
+
 Three things about it are wrong today and are part of this standard:
 
 - The error check counts only `ERROR`-level lines. The relay logs a
