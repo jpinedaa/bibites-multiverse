@@ -445,9 +445,11 @@ lesser half of the problem: because `find` never descends into a symlinked root,
 a symlink also means **the payload is never scanned for the symlinks the check exists to catch**.
 A symlink here does not weaken the gate, it removes it.
 
-**And keep every directory under `inputs/` writable by the runner user.** Read-only *files* are
-fine and are worth having — a stray edit bounces. Read-only *directories* are not, because both
-copy-in paths use `cp -a`, which stamps the source directory's own mode onto the destination:
+**And do not make any of it read-only — not the directories, and not the files.** The instinct is
+right and the mechanism is wrong: these are copies the owner owns, so read-only guards against a
+slip rather than an attacker, and it costs far more than it buys. Both copy-in paths use `cp -a`,
+which preserves the source's modes exactly and stamps the source directory's own mode onto the
+destination:
 `release.yml` does `cp -a "$MV_RELEASE_GAME_REFS/." bibites-mod/libs/`, and `stage_complete()`
 does `cp -a "$source/." "$complete/game/"`. A `chmod -R a-w` on an input tree therefore travels
 into the workspace and into `release/dist/`, and the next run's `actions/checkout` cannot clean
@@ -456,12 +458,32 @@ what it finds: it deletes what it can, takes `.git` with it, and the job dies in
 permissions and points at the wrong place entirely. The recovery is
 `find _work -type d ! -writable -exec chmod u+w {} +` and then removing the work tree.
 
+So a read-only **directory** reaches the workspace and the next `actions/checkout` cannot clean
+it, and a read-only **file** reaches the shipped archive. The second is the one with teeth: the
+Linux game payload's modes are copied into `bibites-multiverse-<version>-linux-x64-complete.zip`
+untouched, and `make-release.sh` reads them back out of the finished archive —
+
+```sh
+unzip -Z "$DIST/$LINUX_COMPLETE_ZIP_NAME" "$STAGE_NAME/game/The Bibites.x86_64" \
+  | grep -q '^-rwx' || die "the complete Linux archive lost the executable bit on the game"
+```
+
+`chmod -R a-w` turns the game's `-rwxr-xr-x` into `-r-xr-xr-x`, the archive carries `-r-x`, and the
+build refuses on the last check before the content checks — after staging both payloads, writing
+both manifests, building all four archives and compiling the 56 MB Windows setup. The kit's own
+shell scripts survive this, which makes it more confusing rather than less: `make-release.sh`
+`chmod +x`es those itself, so only the game payload carries an input's mode all the way to a user.
+
+**The rule that follows: an input copy must be byte-for-byte and mode-for-mode what a player would
+have.** Copy with `cp -a` and then leave it alone.
+
 ```sh
 # What the layout must satisfy, checked directly.
 IN=/srv/bibites-release/inputs
 find "$IN/windows-game" -type l -print -quit     # empty
 find "$IN/linux-game"   -type l -print -quit     # empty
 find "$IN" -type d ! -writable                   # empty
+[ "$(stat -c %a "$IN/linux-game/The Bibites.x86_64")" = 755 ] && echo ok
 ```
 
 ### The runner's `.env`
