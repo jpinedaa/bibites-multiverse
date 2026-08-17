@@ -295,7 +295,11 @@ the sidecar's job.
   it recorded a *hold deadline* and bounced home before that). **From 2026-08-08 the journal is also bounded
   in bytes**: it compacts on a timer rather than only at startup, and an append is
   all-or-nothing so a short write cannot leave a fragment that makes replay discard
-  everything behind it (`contract-b-m4.md` §20, B20)
+  everything behind it (`contract-b-m4.md` §20, B20). **On Windows that bound was a
+  fiction until 2026-08-17**: the timed rewrite renamed its copy over a file the same
+  process held open, which Windows refuses, so only the compaction at start-up ever ran
+  and two live sidecars reached 718 MB and 132 MB. The rewrite now closes its append
+  handle across the rename
 - Routing: the export edge → the ring's next slot east (D8). From M4 that target is the
   **effective** east neighbour: the next *deliverable* slot, with dark slots bypassed
   (D12), and one target per export edge, east and north, on the live grid (D13). From D17

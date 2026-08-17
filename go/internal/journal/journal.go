@@ -323,6 +323,18 @@ var ErrReadOnly = errors.New("journal: opened read-only")
 // It is nil everywhere except the test that SIGKILLs a process there.
 var testHookPreRename func()
 
+// The three filesystem calls the compaction rewrite makes, indirected so a test
+// can fail them deliberately. WINDOWS REFUSES TO RENAME OVER A FILE THAT IS
+// OPEN, and the only way to prove on Linux that compaction closes its append
+// handle BEFORE the rename is to make the rename fail while one is open.
+var (
+	openAppendFile = func(path string) (*os.File, error) {
+		return os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	}
+	closeFile  = func(f *os.File) error { return f.Close() }
+	renameFile = os.Rename
+)
+
 // Journal is the durable custody log. Every method is safe for concurrent use.
 type Journal struct {
 	mu     sync.Mutex
@@ -392,11 +404,9 @@ func Open(dir string) (*Journal, error) {
 	if err := j.compact(); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(j.path(), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
-	if err != nil {
+	if err := j.openAppend(); err != nil {
 		return nil, err
 	}
-	j.f = f
 	return j, nil
 }
 
@@ -635,11 +645,13 @@ func (j *Journal) apply(rec record) {
 // replays to the identical state. There is no window in which both files are
 // partial, so no crash can lose an entry.
 //
-// The append handle is reopened afterwards, because the rename replaced the
-// inode it pointed at. If that reopen fails the journal marks itself closed
-// rather than keep appending to an unlinked file: a sidecar that cannot journal
-// must stop ACKing (contract-a.md §5.3 step 5), and silently writing custody
-// records into a file with no name is the one outcome worse than an error.
+// THE APPEND HANDLE IS CLOSED FOR THE RENAME AND OPENED AGAIN AFTER IT, which on
+// Windows is the difference between a journal that shrinks and one that never
+// does; see compact. If that reopen fails the journal marks itself closed rather
+// than claim a write handle it does not hold: a sidecar that cannot journal must
+// stop ACKing (contract-a.md §5.3 step 5), and silently writing custody records
+// into a file nothing can reach is the one outcome worse than an error. The log
+// on disk is whole either way, and a restart replays it to the same state.
 func (j *Journal) Compact() (before, after int64, err error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -651,21 +663,7 @@ func (j *Journal) Compact() (before, after int64, err error) {
 	}
 	before = j.size()
 	if err := j.compact(); err != nil {
-		return before, before, err
-	}
-	if j.f != nil {
-		old := j.f
-		f, err := os.OpenFile(j.path(), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
-		if err != nil {
-			old.Close()
-			j.f = nil
-			j.closed = true
-			return before, j.size(), err
-		}
-		j.f = f
-		if err := old.Close(); err != nil {
-			return before, j.size(), err
-		}
+		return before, j.size(), err
 	}
 	return before, j.size(), nil
 }
@@ -702,6 +700,29 @@ func (j *Journal) Live() int {
 // compact rewrites the log as one create per surviving state plus its current
 // status, then renames it into place and fsyncs the directory. An os.Rename
 // without a directory sync is not durable (contract-a.md §11.1).
+//
+// THE APPEND HANDLE IS CLOSED BEFORE THE RENAME, AND THAT IS A WINDOWS RULE.
+// Go's os.OpenFile asks for no FILE_SHARE_DELETE, so a file this process holds
+// open cannot be replaced: MoveFileEx(REPLACE_EXISTING) — which is what
+// os.Rename is on Windows — fails with
+//
+//	rename ...\journal\journal.log.tmp ...\journal\journal.log: Access is denied.
+//
+// and it fails that way on EVERY attempt for the life of the process, so the
+// journal never shrinks again. Both sidecars of the living deployment logged
+// exactly that line every fifteen minutes and reached 718 MB and 132 MB, past
+// the ceiling the diagnostic advertises, while the code that was supposed to
+// bound them ran on schedule. On Linux the same rename succeeds — the old inode
+// outlives the handle — which is why no test on this machine ever saw it, and
+// why TestCompactObeysTheWindowsRenameRule enforces the Windows rule by hand.
+//
+// THE OTHER CANDIDATE FIX WOULD HAVE BEEN WORSE. Opening the append handle with
+// FILE_SHARE_DELETE does let the rename through, but the handle then keeps
+// pointing at the file that was just replaced: every later append would land in
+// a file with no name, be fsynced, be ACKed, and be gone at the next start —
+// D2's whole promise, broken quietly. Closing the handle, renaming, and opening
+// it again has no such window, and it is the same shape on both operating
+// systems.
 func (j *Journal) compact() error {
 	tmp := j.path() + ".tmp"
 	// A failed compaction must not leave its scratch file behind. The rewrite
@@ -771,11 +792,82 @@ func (j *Journal) compact() error {
 	if testHookPreRename != nil {
 		testHookPreRename()
 	}
-	if err := os.Rename(tmp, j.path()); err != nil {
+	// From here to the reopen this journal has no write handle. Nothing can try
+	// to append in the window: every mutating path takes j.mu, and the caller
+	// holds it.
+	reopen := j.f != nil
+	if err := j.closeAppend(); err != nil {
+		// os.File.Close releases the descriptor even when it reports an error,
+		// so there is no handle left to append through. Refusing every later
+		// write is the safe direction: the caller stops ACKing.
+		j.closed = true
+		return err
+	}
+	if err := renameInto(tmp, j.path()); err != nil {
+		// journal.log was not touched. It is whole, it holds every record, and
+		// all that is lost is the reclaim — so take the append handle back and
+		// let the sidecar keep taking custody.
+		if reopen {
+			if reopenErr := j.openAppend(); reopenErr != nil {
+				j.closed = true
+				return errors.Join(err, reopenErr)
+			}
+		}
 		return err
 	}
 	renamed = true
+	if reopen {
+		if err := j.openAppend(); err != nil {
+			j.closed = true
+			return err
+		}
+	}
 	return syncDir(j.dir)
+}
+
+// openAppend and closeAppend own j.f. Caller holds the lock.
+func (j *Journal) openAppend() error {
+	f, err := openAppendFile(j.path())
+	if err != nil {
+		return err
+	}
+	j.f = f
+	return nil
+}
+
+func (j *Journal) closeAppend() error {
+	f := j.f
+	if f == nil {
+		return nil
+	}
+	j.f = nil
+	return closeFile(f)
+}
+
+// renameAttempts is how many times a compaction tries to put its scratch file in
+// place before it gives up and waits for the next compaction.
+const renameAttempts = 3
+
+// renameInto renames the scratch file over the live log, retrying briefly.
+//
+// The retry is for Windows and for one caller above all: --diagnose replays this
+// journal from ANOTHER process, and its read handle can make MoveFileEx fail
+// here even though this process now holds none. A virus scanner or a backup
+// agent does the same thing for the same reason. Three attempts inside 60 ms
+// turn that into a pause instead of a whole compaction interval of unreclaimed
+// growth. A rename does not fail transiently on Linux, so a genuinely failing
+// one — a full disk, a read-only mount — costs 60 ms and returns the error it
+// would have returned at once.
+func renameInto(tmp, path string) error {
+	delay := 20 * time.Millisecond
+	for attempt := 1; ; attempt++ {
+		err := renameFile(tmp, path)
+		if err == nil || attempt == renameAttempts {
+			return err
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
 }
 
 func writeRecord(w *bufio.Writer, rec record) error {
@@ -1034,10 +1126,10 @@ func (j *Journal) Close() error {
 		return nil
 	}
 	if err := j.f.Sync(); err != nil {
-		j.f.Close()
+		_ = j.closeAppend()
 		return err
 	}
-	return j.f.Close()
+	return j.closeAppend()
 }
 
 func boolPtr(b bool) *bool    { return &b }
