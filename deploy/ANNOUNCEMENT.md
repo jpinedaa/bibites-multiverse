@@ -28,7 +28,9 @@ join string:
 
 1. The service start and end dates.
 2. The rule for an extension or early closure.
-3. The retention rule for the ledger and genome blobs.
+3. The retention rule, in all three of its parts: the record that is kept for the whole run and
+   beyond, the per-crossing lines that are kept for a stated period and then only away from the
+   server, and the genome blobs.
 4. The data that the map publishes about their world.
 5. The normal effect of relay and archive restarts.
 6. The wind-down timeline and record disposition.
