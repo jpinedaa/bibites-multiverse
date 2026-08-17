@@ -51,7 +51,7 @@ without one.
 
 ## Release state
 
-The `0.2.8` participant documents contain no work-package placeholders.
+The `0.3.0` participant documents contain no work-package placeholders.
 Track a new documentation gap in a GitHub issue. Update the affected page with its fix.
 
 ## Where the authority lives

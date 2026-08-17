@@ -231,6 +231,24 @@ allow 'release/kit/README-linux.md' bump 0 '@@V@@' \
 # that the file is known and deliberate rather than merely unmatched.
 allow 'cloud/aws/test-validation.sh' ignore 0 '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
 	'RFC 1918 address fixtures, not release versions'
+# COMPONENT versions inside worked protocol examples. `modVersion`,
+# `sidecarVersion` and `relayVersion` are informational fields a frame carries
+# about the program that sent it, and the numbers in these examples were written
+# when those programs were at them. They are not this project's release, they do
+# not move with it, and a bump that rewrote them would silently edit a ratified
+# contract's example frames. They are claimed here so that a release which
+# happens to equal one of them — as 0.3.x equals the mod version in
+# contract-a.md's CONFIG_UPDATE — is a line somebody has read rather than a
+# check nobody can pass.
+allow 'contracts/contract-a.md' ignore 0 '^ *"modVersion": "[0-9]+\.[0-9]+\.[0-9]+",?$' \
+	'the mod version in a worked CONFIG_UPDATE frame, not the release'
+allow 'contracts/contract-b-m3.md' ignore 0 \
+	'^ *"(sidecarVersion|relayVersion)": "[0-9]+\.[0-9]+\.[0-9]+",?$' \
+	'the sidecar and relay versions in worked handshake frames, not the release'
+# The GAME's own version constants, read out of its assembly. m1_findings.md's
+# table is a decompile record: every number in it belongs to The Bibites.
+allow 'm1_findings.md' ignore 0 'canUpdateFromOlderVersion' \
+	"the game's own Utility.Version constants, not this project's release"
 
 # ---------------------------------------------------------------------------
 # Reading the tree
