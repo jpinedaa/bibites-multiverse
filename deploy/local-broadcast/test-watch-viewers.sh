@@ -29,6 +29,7 @@ done
 watcher_windows="$(wslpath -w "$watcher")"
 work="$(mktemp -d)"
 server_pid=''
+obs_pid=''
 cleanup() {
   [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
   rm -rf "$work"
@@ -209,4 +210,107 @@ forbid_line "$output" 'WHATIF would' 'an unreachable service changed the stream'
 printf '%s\n' "$output" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z ' || \
   fail 'the watcher log lines carry no UTC stamp'
 
-printf 'viewer watcher decisions, presence failures, and handshake digest: PASS\n'
+# --------------------------------------------- the real obs-websocket path
+
+# Everything above runs with -WhatIf, which opens no socket. That is exactly how
+# a watcher whose obs-websocket code could not work at all still passed: the
+# first live run failed because ConnectAsync left a VoidTaskResult on the
+# pipeline and the caller received an array instead of a socket. These cases run
+# the watcher for real against fake-obs-websocket.py, so that path is covered
+# with no OBS on the machine.
+
+obs_port=0
+for candidate in $(seq 18840 18880); do
+  if ! (exec 3<>"/dev/tcp/127.0.0.1/$candidate") 2>/dev/null; then
+    obs_port="$candidate"
+    break
+  fi
+  exec 3>&- 2>/dev/null || true
+done
+[ "$obs_port" -ne 0 ] || fail 'no free loopback port for the obs-websocket fixture'
+
+obs_password='fixture-obs-websocket-password'
+obs_state="$work/streaming"
+obs_journal="$work/requests"
+printf 'false' >"$obs_state"
+: >"$obs_journal"
+
+# The watcher reads the port and the password from the plugin's own file, so the
+# fixture needs one. This also exercises the refusal to run against a disabled
+# server.
+config_root="$work/obsconfig"
+mkdir -p "$config_root/plugin_config/obs-websocket"
+config_root_windows="$(wslpath -w "$config_root")"
+write_obs_config() {
+  printf '{"alerts_enabled":false,"auth_required":true,"first_load":false,"server_enabled":%s,"server_password":"%s","server_port":%s}\n' \
+    "$1" "$obs_password" "$obs_port" >"$config_root/plugin_config/obs-websocket/config.json"
+}
+write_obs_config true
+
+python3 "$here/fake-obs-websocket.py" "$obs_port" "$obs_password" "$obs_state" "$obs_journal" \
+  2>"$work/obs-server.err" &
+obs_pid=$!
+obs_ready=0
+for _ in $(seq 1 40); do
+  if grep -Fq ready "$work/obs-server.err" 2>/dev/null; then obs_ready=1; break; fi
+  sleep 0.25
+done
+[ "$obs_ready" -eq 1 ] || fail 'the obs-websocket fixture did not start'
+cleanup() {
+  [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null || true
+  [ -n "$obs_pid" ] && kill "$obs_pid" 2>/dev/null || true
+  rm -rf "$work"
+}
+
+run_live_case() {
+  local url="$1"
+  shift
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$watcher_windows" \
+    -PresenceUrl "$url" -ObsConfigRoot "$config_root_windows" -Once -PollSeconds 1 "$@" 2>&1 |
+    tr -d '\r'
+}
+
+# The service is unreachable at this point, so bring a fixture back for these.
+python3 "$work/serve.py" "$document" "$port" &
+server_pid=$!
+for _ in $(seq 1 40); do
+  if curl -fsS --max-time 2 "$presence_url" >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done
+
+# A viewer arrives, and the watcher really starts the stream.
+write_document "{\"watching\":true,\"hlsSessions\":1,\"lastViewerRequestAgeSec\":2,\"asOf\":\"$(now_stamp)\"}"
+output="$(run_live_case "$presence_url")"
+expect_line "$output" 'sent StartStream' 'the watcher did not start the stream through obs-websocket'
+[ "$(cat "$obs_state")" = 'true' ] || fail 'obs-websocket never saw the stream start'
+grep -Fq IDENTIFIED "$obs_journal" || fail 'the obs-websocket handshake did not authenticate'
+grep -Fq GetStreamStatus "$obs_journal" || fail 'the watcher never read the stream state'
+grep -Fq BADAUTH "$obs_journal" && fail 'the obs-websocket authentication digest was refused'
+
+# A second reading with the stream already up sends no request.
+: >"$obs_journal"
+output="$(run_live_case "$presence_url")"
+forbid_line "$output" 'sent StartStream' 'the watcher started a stream that was already running'
+grep -Fq StartStream "$obs_journal" && fail 'a redundant StartStream reached obs-websocket'
+
+# The room empties and the idle period expires.
+write_document "{\"watching\":false,\"hlsSessions\":0,\"lastViewerRequestAgeSec\":900,\"asOf\":\"$(now_stamp)\"}"
+output="$(run_live_case "$presence_url" -IdleStopSeconds 0)"
+expect_line "$output" 'sent StopStream' 'the watcher did not stop the stream through obs-websocket'
+[ "$(cat "$obs_state")" = 'false' ] || fail 'obs-websocket never saw the stream stop'
+
+# A disabled server is refused before a socket is opened, because OBS reads that
+# setting only at start and a watcher that waits for it would wait forever.
+write_obs_config false
+output="$(run_live_case "$presence_url" -IdleStopSeconds 0 || true)"
+expect_line "$output" 'obs-websocket is disabled' 'a disabled obs-websocket server was not reported'
+write_obs_config true
+
+# A wrong password must fail loudly rather than silently never publishing.
+sed -i "s/$obs_password/wrong-password-entirely/" "$config_root/plugin_config/obs-websocket/config.json"
+write_document "{\"watching\":true,\"hlsSessions\":1,\"lastViewerRequestAgeSec\":2,\"asOf\":\"$(now_stamp)\"}"
+output="$(run_live_case "$presence_url")"
+expect_line "$output" 'obs-websocket did not answer' 'a refused authentication was not reported'
+[ "$(cat "$obs_state")" = 'false' ] || fail 'a refused authentication still started the stream'
+
+printf 'viewer watcher decisions, presence failures, handshake digest, and the live obs-websocket path: PASS\n'

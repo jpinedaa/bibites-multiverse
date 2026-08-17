@@ -6,6 +6,7 @@ runner="$here/run-windows.ps1"
 stopper="$here/stop-windows.ps1"
 watcher="$here/watch-viewers.ps1"
 profile_ini="$here/obs-basic.ini"
+encoder_json="$here/obs-stream-encoder.json"
 installer="$here/install.sh"
 
 expect_text() {
@@ -47,6 +48,23 @@ forbid_text "$profile_ini" 'VBitrate=2500'
 expect_text "$profile_ini" 'BaseCX=1280'
 expect_text "$profile_ini" 'OutputCY=720'
 expect_text "$profile_ini" 'FPSCommon=30'
+
+# The keyframe interval decides the HLS segment length, because MediaMTX cuts a
+# segment on a keyframe. The simple output mode has no control for it and leaves
+# NVENC at its own 250-frame default, which is 8.3 seconds at 30 frames, so the
+# profile uses the advanced mode and states the interval.
+expect_text "$profile_ini" 'Mode=Advanced'
+forbid_text "$profile_ini" 'Mode=Simple'
+expect_text "$profile_ini" 'Encoder=obs_nvenc_h264_tex'
+expect_text "$profile_ini" 'RecEncoder=none'
+expect_text "$profile_ini" 'Track1Bitrate=64'
+expect_text "$encoder_json" '"keyint_sec": 2'
+expect_text "$encoder_json" '"bitrate": 1500'
+expect_text "$encoder_json" '"rate_control": "CBR"'
+expect_text "$encoder_json" '"preset2": "p3"'
+python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$encoder_json" || \
+  fail 'the stream encoder settings are not valid JSON'
+expect_text "$installer" 'obs-stream-encoder.json'
 
 # The publisher runs only while somebody watches, and the watcher is what makes
 # that true. It belongs to the trio: the runner starts it and the stopper stops

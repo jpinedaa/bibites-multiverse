@@ -1,0 +1,7 @@
+{
+    "bitrate": 1500,
+    "keyint_sec": 2,
+    "preset": "p3",
+    "preset2": "p3",
+    "rate_control": "CBR"
+}

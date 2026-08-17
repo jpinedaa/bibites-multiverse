@@ -75,13 +75,17 @@ default and two servers cannot hold one port.
 Use `BIBITES_OBS_WEBSOCKET_PORT` to change it.
 OBS reads that configuration only when it starts, so enabling it is part of a stop and start.
 
-Run the watcher's decisions without touching OBS:
+Run the watcher against written presence documents and a fake obs-websocket server:
 
 ```sh
 ./deploy/local-broadcast/test-watch-viewers.sh
 ```
 
-Every case runs with `-WhatIf`, so it reaches no OBS and cannot disturb a live broadcast.
+Its first half uses `-WhatIf`, so it reaches no OBS at all and cannot disturb a live broadcast.
+Its second half drives the real obs-websocket path against `fake-obs-websocket.py`, because a
+watcher whose socket code cannot work still passes every `-WhatIf` case.
+Neither half needs OBS on the machine.
+
 It needs `powershell.exe` and `wslpath`, which means a WSL host with Windows interop, and it prints
 `SKIP` anywhere else.
 `test-config.sh` calls it at the end of its own Windows half.
@@ -93,9 +97,23 @@ is a WSL host.
 ### Stream profile
 
 The encoder publishes `1280x720` at 30 frames each second and `1500` kbit/s of video with `64`
-kbit/s of audio, through NVENC.
-OBS rewrites its profile when it exits, so change `obs-basic.ini` and the installed `basic.ini`
-while OBS is not running.
+kbit/s of audio, through NVENC at preset `p3`.
+The keyframe interval is 2 seconds.
+
+The profile uses the OBS **advanced** output mode, and `obs-stream-encoder.json` is installed as
+`streamEncoder.json` beside `basic.ini`.
+The simple output mode has no keyframe-interval control and never sets `keyint_sec`, so NVENC used
+its own default of 250 frames, which is 8.3 seconds at 30 frames.
+MediaMTX cuts an HLS segment on a keyframe, so the origin then produced 8.3-second segments
+whatever `hlsSegmentDuration` said, and a viewer waited about 25 seconds instead of about 6.
+Every other encoder setting is the NVENC default that the simple mode also used, so the picture is
+unchanged apart from the bitrate and the keyframe interval.
+
+`[SimpleOutput]` is kept in the profile with the same bitrate.
+Returning to the simple mode is then one word, `Mode=Simple`, at the cost of the keyframe interval.
+
+OBS rewrites its profile when it exits, so change `obs-basic.ini`, the installed `basic.ini`, and
+`streamEncoder.json` while OBS is not running.
 
 ## Identity boundary
 
