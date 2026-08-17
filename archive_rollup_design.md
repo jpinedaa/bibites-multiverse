@@ -1,11 +1,18 @@
 # Archive record roll-up — design
 
-**State: proposed, not ratified.** Nothing in this document is implemented and nothing in it
-changes a published promise on its own. It is the design study behind a proposed change to what
-the archive keeps, written so the change can be argued with before it is made. The governing
-texts it would amend — `contracts/contract-b-m4.md` §10 and §23, `system_decomposition.md` D11,
-`m5_considerations.md` Decision 3, `docs/participant/join.md`, `docs/participant/leave.md`,
-`deploy/SIZING.md`, `deploy/WIND-DOWN.md` — are **untouched** until the owner ratifies.
+**State: ratified, implemented, and deployed on `2026-08-17`.** ~~Proposed, not ratified. Nothing in
+this document is implemented and nothing in it changes a published promise on its own.~~ It is the
+design study behind the change to what the archive keeps, written so the change could be argued
+with before it was made. **It is left as it was written**, except where a later phase corrected it
+in place — each correction is struck through and dated, and there are three.
+
+The owner ratified shape **B for the state, D for the raw, and a window on top of D** on
+`2026-08-17`; all six phases shipped and the build carrying them is in production. The governing
+texts it amends — `contracts/contract-b-m4.md` §10, §23 and the new **§26 (B39–B40)**,
+`system_decomposition.md` D6 and D11, `m5_considerations.md` Decision 3,
+`docs/participant/join.md`, `docs/participant/leave.md`, `deploy/SIZING.md`,
+`deploy/WIND-DOWN.md` — **all carry the amendment**. Each of them, and not this study, is the
+authority for what the map promises and what the archive does.
 
 `m5_considerations.md`, Design Question 7, already states the procedure this document follows:
 *"If the owner wants the stronger promise, that is a change to D11's never-evict rule and belongs
@@ -193,8 +200,17 @@ raises the rate, and nothing in the rule notices.
 alternatives, and each fixes what the other cannot:
 
 - **B** persists the fold, which is the only thing that bounds restart time. It converts an
-  archive restart from a `75`-to-`96`-minute participant outage at the end of the run into a
-  few seconds, permanently.
+  archive restart from a `75`-to-`96`-minute participant outage at the end of the run into ~~a
+  few seconds, permanently~~ **a replay of the duplicate window — corrected 2026-08-17 by phase 1,
+  and resolved.** The sidecar bounds the *aggregate* cost of a restart and not the *raw* one: the
+  duplicate guard and the genome-gap fetch queue are both rebuilt from raw records, so a replay
+  scans `max(dedupWindow, genomeHorizon)` and this study's "a few seconds, flat" (shape B above)
+  was true of neither. **Phase 3 resolved it** by persisting the gap queue — see "The window, and
+  why it is the genome horizon" — after which **only the duplicate window binds**: `48 h` of raw
+  today, and `1 h` once the participant release has been out for a cycle and `duplicatesRefused`
+  says it is safe. The first start after the deployment still replays the whole ledger once,
+  exactly as "Migration, in one restart" says; every start after it is the window.
+  `deploy/RESTART-POLICY.md` and `deploy/SIZING.md` carry the shipped model.
 - **D** compresses closed segments, which is what makes a long window affordable at all.
 - **The window** is the bound, and it is the part that needs the owner: it changes a published
   promise.
@@ -222,9 +238,17 @@ horizon and the fetch queue's retirement horizon **one number**, because two num
 archive that re-fetches what it just deleted. A ledger window is the third mechanism reading the
 same clock. A genome gap whose crossing is older than the horizon is never queued
 (`eviction.go`, `gapPastHorizonLocked`), so **a raw window equal to the horizon contains exactly
-the crossings whose gaps can still be fetched.** The fetch queue is then rebuilt from the window
-alone, with nothing new to persist and nothing lost. A shorter window silently abandons live
-gaps; a longer one buys nothing. One horizon, three mechanisms.
+the crossings whose gaps can still be fetched.** ~~The fetch queue is then rebuilt from the window
+alone, with nothing new to persist and nothing lost.~~ **Corrected 2026-08-17 by phases 1 and 3,
+and resolved: the fetch queue is persisted.** Rebuilding it from the window is correct but it is
+what forced every restart to parse `720 h` of raw records, which is the contradiction phase 1
+measured. Phase 3 gave the roll-up state a `gq` line kind — additive, with a tombstone, because a
+set is the one thing last-writer-wins cannot express cheaply — carrying the hash, `crossedAt` (the
+only lawful clock for this horizon), the source peer, and what `brainhist.go` needs when the blob
+finally lands. A restored queue is **drained on load**, so it is in the state a full replay would
+have produced, and the honest consequence is written down with it: **retirement is durable**, and
+turning the horizon back up does not resume asking for a gap already retired. A shorter window
+silently abandons live gaps; a longer one buys nothing. One horizon, three mechanisms.
 
 **The arithmetic.** At the fast rate, `3.9` million records each day is `1.32 GB` each day:
 
@@ -385,6 +409,16 @@ caused by relying on it — a wait for "a record of shape X exists" that passed 
 hour-old record — so re-examining them is worth doing on its own.
 
 ## Open questions
+
+**Answered on `2026-08-17` by the ratification and by what shipped, and left below as they were
+asked.** 1 — `30` days, `720 h`, on the argument as written. 2 — yes, and the rule is in the code:
+a closed segment is removed only after its off-host copy is confirmed, so the earliest a segment
+can leave the host is `2026-09-16`. 3 — an object store off the host, copied hourly by
+`deploy/coldcopy.sh`, and a *confirmed* copy is a receipt file the archive requires beside the
+segment before it removes anything; `deploy/README.md` documents the job and its checks. 4 — the
+counters shipped with the at-most-once change and the roll-up: forwarded losses, `duplicatesRefused`
+and the per-lane flow totals, and `contracts/contract-b-m4.md` §26 states the claim. **5 is still
+open** — `metrics.jsonl` is not windowed by this set, and it is bounded for this run only.
 
 1. **The window's value.** `30` days is proposed because it is already the genome horizon and
    because one horizon for three mechanisms is a rule rather than a coincidence. Any other value

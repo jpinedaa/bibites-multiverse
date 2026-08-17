@@ -482,6 +482,20 @@ A relay restart is cheaper in records and more expensive in blast radius: it
 disconnects every peer at once. Neither is done casually, and both leave a
 record.
 
+**The gap stopped being hypothetical on 2026-08-17**, and the shape it took is
+worth carrying here because no reading on this page would have prevented it. A
+package manager's own restart hook restarted both services after an unrelated
+`apt` transaction, outside every gate a deployment sets. The worst part was not
+the outage: it was that the **relay came back first and the archive did not**,
+so for a minute and a half the map was live with nothing recording it, and those
+crossings are absent rather than delayed. **`duplicatesRefused` climbing
+afterwards is evidence the duplicate guard worked, not evidence the gap was
+filled** — a crossing forwarded into that window generates no duplicate, because
+nothing ever recorded it. There is no counter that measures a gap; the only
+evidence is the restart timestamps against the relay's own connection log.
+[`RESTART-POLICY.md`](../deploy/RESTART-POLICY.md), "Package installs and
+needrestart", carries the rule that prevents it.
+
 ## Acting on a measurement
 
 Most of this document is about seeing. One rule governs acting.

@@ -237,7 +237,8 @@ flowchart TB
 The mod detects border crossings. The sidecar records custody before it sends a migrant.
 The relay assigns map positions and routes each migration. The archive records the public history.
 
-Stable migration identities make retries safe. The design prefers a lost migration over a
+Stable migration identities are what let a second copy of the same crossing be refused rather
+than recorded twice. Nothing re-sends one. The design prefers a lost migration over a
 duplicated organism because duplication changes the simulation permanently. An organism is
 handed to its destination once. If it does not arrive, it is gone, and the map counts it.
 
