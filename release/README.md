@@ -428,13 +428,41 @@ and never depends on what a previous build left behind.
 
 | `/srv/bibites-release/inputs/…` | What it is |
 |---|---|
-| `game-refs/` | a read-only copy of the 13 reference assemblies (`BibitesAssembly.dll` among them) |
-| `bepinex-cache/` | a read-only copy of both `BepInEx_*_x64_*.zip` archives. Without them the build downloads instead, and the release's SHA pins stop being a local guarantee |
-| `windows-game` | a symlink to the clean Windows game directory |
-| `linux-game` | a symlink to the clean Linux game directory. It must be a *fully unpacked* game: the matrix row's hash is checked against its `The Bibites_Data/Managed/BibitesAssembly.dll`, and the check downgrades to a note when that file is not there |
+| `game-refs/` | a copy of the 13 reference assemblies (`BibitesAssembly.dll` among them) |
+| `bepinex-cache/` | a copy of both `BepInEx_*_x64_*.zip` archives. Without them the build downloads instead, and the release's SHA pins stop being a local guarantee |
+| `windows-game` | a copy of the clean Windows game directory |
+| `linux-game` | a copy of the clean Linux game directory. It must be a *fully unpacked* game: the matrix row's hash is checked against its `The Bibites_Data/Managed/BibitesAssembly.dll`, and the check downgrades to a note when that file is not there |
 
-They are copies and symlinks, not the working tree, so a mod rebuild or a `git clean` in a checkout
-cannot change what a release is built from. Refresh them on purpose when the game version moves.
+They are copies, not the working tree, so a mod rebuild or a `git clean` in a checkout cannot
+change what a release is built from. Refresh them on purpose when the game version moves.
+
+**Copies, and specifically not symlinks.** Both game payloads must be real directories.
+`make-release.sh`'s `validate_game_payload()` refuses a payload containing a symbolic link, and it
+asks with `find "$source" -type l -print -quit`. `find` does not dereference its own starting
+point, so a `$source` that *is* a symlink matches on the first entry and the build stops with
+`<platform> game payload contains a symbolic link` naming the payload root. The refusal is the
+lesser half of the problem: because `find` never descends into a symlinked root, pointing these at
+a symlink also means **the payload is never scanned for the symlinks the check exists to catch**.
+A symlink here does not weaken the gate, it removes it.
+
+**And keep every directory under `inputs/` writable by the runner user.** Read-only *files* are
+fine and are worth having — a stray edit bounces. Read-only *directories* are not, because both
+copy-in paths use `cp -a`, which stamps the source directory's own mode onto the destination:
+`release.yml` does `cp -a "$MV_RELEASE_GAME_REFS/." bibites-mod/libs/`, and `stage_complete()`
+does `cp -a "$source/." "$complete/game/"`. A `chmod -R a-w` on an input tree therefore travels
+into the workspace and into `release/dist/`, and the next run's `actions/checkout` cannot clean
+what it finds: it deletes what it can, takes `.git` with it, and the job dies in checkout with
+`fatal: --local can only be used inside a git repository` — a failure that names nothing about
+permissions and points at the wrong place entirely. The recovery is
+`find _work -type d ! -writable -exec chmod u+w {} +` and then removing the work tree.
+
+```sh
+# What the layout must satisfy, checked directly.
+IN=/srv/bibites-release/inputs
+find "$IN/windows-game" -type l -print -quit     # empty
+find "$IN/linux-game"   -type l -print -quit     # empty
+find "$IN" -type d ! -writable                   # empty
+```
 
 ### The runner's `.env`
 
