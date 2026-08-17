@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-17 UTC.
 
-Bibites Multiverse `0.2.8` is public. The first announced service period runs from
+Bibites Multiverse `0.3.0` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -51,7 +51,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.2.8`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.8) |
+| Release | [`v0.3.0`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.0) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.7` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -88,6 +88,14 @@ its own sidecar log when the record is gone, and is the first release built and 
 release workflow.
 Release `0.2.8` lets the installer finish over a data root whose secret no world ever used, keeping
 that secret aside as an orphan and enrolling a fresh identity.
+Release `0.3.0` makes the Windows launcher a window: every world on the computer, what each one is
+doing, whether its mod has really reached the map, and one button to start or stop it. The same
+launcher's commands ship beside it as `multiverse-launcher.exe`, which is what a script calls. In
+this release a world also starts at ten times the game's own speed, every stop asks the world to
+save and quit through its mod so a headless stop loses nothing, the setup refuses an install over a
+running world before it changes anything, the sidecar's journal is bounded on Windows for the first
+time, and the world speaks `contract-b/4.1`, where a crossing that does not arrive is counted
+rather than held.
 Private maps still accept a private join-string file on both platforms.
 
 ## Milestone state
