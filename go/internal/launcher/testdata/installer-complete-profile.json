@@ -1,0 +1,17 @@
+{
+    "format":  "bibites-multiverse/launcher-profile/1",
+    "name":  "default",
+    "gameDir":  "C:\\Users\\alice\\AppData\\Local\\BibitesMultiverse\\runtimes\\12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE",
+    "dataRoot":  "C:\\Users\\alice\\AppData\\Local\\BibitesMultiverse",
+    "sidecarPort":  8787,
+    "world":  "Multiverse",
+    "headless":  false,
+    "exportEdges":  "E,N,W,S",
+    "excludeSpecies":  "Basic bibite",
+    "saveMinutes":  10,
+    "saveKeep":  6,
+    "saveOnQuit":  true,
+    "peerId":  "public-9af42a17616742e7a6e8c62cb8b95f4f",
+    "relayUrl":  "wss://bibitesmultiverse.com/contract-b/v4",
+    "createdUtc":  "2026-08-16T09:41:07Z"
+}

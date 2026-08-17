@@ -431,6 +431,16 @@ world's journal, logs and credential — it asks **even when you pass the global
 "answer yes to everything" must not be able to erase a world's data without naming it. `--yes` still
 answers every other question, including a plain `profile delete`.
 
+**`--remove-world-data` deletes that world's own entries and nothing else**: `data\` (the journal),
+`logs\`, `peer-secret.txt`, and the launcher's own `game.pid`, `sidecar.pid`, `launcher.lock` and
+`enrollment-pending.json`. Anything else in that folder is **left where it is and named on your
+screen** — because a data folder is not always only one world's. A complete-edition install keeps
+**the game itself** there, under `runtimes\`; the installer keeps `install-record.json` beside it,
+which the uninstaller reads; an interrupted install can leave an orphaned credential no map can
+print again; and a computer that has hosted more than one deployment keeps those worlds' folders
+there too. None of those is this world's to delete. **Your game's own save file is somewhere else
+entirely** — see *Where your worlds live* — and nothing here writes or deletes it.
+
 **All of your worlds save into one folder** — the game keeps its saves per user, not per game copy
 (see *Where your worlds live* below). So each world needs a name no other world on this computer
 uses; the launcher refuses a repeat. Their saves also queue behind each other. If you run several

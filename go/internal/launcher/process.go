@@ -150,16 +150,62 @@ func pidState(pidFile, wantExe string) string {
 	return fmt.Sprintf("running (pid %d)", pid)
 }
 
-// forceStop is the last resort on both platforms. It is TerminateProcess on
-// Windows and SIGKILL on Unix, so whatever the process was writing is lost —
-// which is exactly why gracefulStop is tried first.
-func forceStop(pid int) error {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
+// askResult is what the GRACEFUL phase of a stop learned. It is the difference
+// between "it was asked, and is closing", "there is nothing here that can be
+// asked" and "the ask itself broke" — three different things to say to somebody
+// watching a world shut down, and three different reasons to reach for the
+// force.
+type askResult int
+
+const (
+	// askAccepted: the close request was delivered. The process may still take
+	// as long as its own shutdown takes.
+	askAccepted askResult = iota
+	// askImpossible: there is no window to post a close request to, so waiting
+	// for a graceful exit is waiting for an answer nobody can give.
+	askImpossible
+	// askFailed: the ask could not be made, for a reason that is not "no window".
+	askFailed
+)
+
+// The two taskkill command lines the Windows stop uses. They are HERE rather
+// than in proc_windows.go so a test on any machine can hold them to the rule
+// that used to cost a save on every stop.
+//
+// THE GRACEFUL PHASE MUST NOT PASS /T. taskkill /T walks the process TREE, and
+// it refuses the WHOLE call when any member of that tree needs /F. The game
+// always spawns UnityCrashHandler64.exe --attach <game pid>, which is
+// windowless, so /T failed on the crash handler ("can only be terminated
+// forcefully") and then declined to touch the game itself. The launcher read
+// that as "there was nothing to ask" and force-killed a game that had a window
+// and a world to save. Without /T, taskkill posts WM_CLOSE to the game, and the
+// game's own save-on-quit runs.
+func taskkillGracefulArgs(pid int) []string {
+	return []string{"/PID", strconv.Itoa(pid)}
+}
+
+// THE FORCE PHASE MUST PASS /T. It is the last resort, and the crash handler is
+// exactly the child that has to go with its parent rather than linger holding a
+// dead --attach target.
+func taskkillForceArgs(pid int) []string {
+	return []string{"/PID", strconv.Itoa(pid), "/T", "/F"}
+}
+
+// taskkillNeedsForce is taskkill's own words for "this process has no window, so
+// there is nothing to post a close request to". A headless game (-batchmode
+// -nographics) answers it, and so does the sidecar, which is started detached
+// and owns no console.
+const taskkillNeedsForce = "can only be terminated forcefully"
+
+// classifyTaskkill turns taskkill's exit into the three answers a stop needs.
+func classifyTaskkill(err error, output string) askResult {
+	if err == nil {
+		return askAccepted
 	}
-	defer process.Release()
-	return process.Kill()
+	if strings.Contains(output, taskkillNeedsForce) {
+		return askImpossible
+	}
+	return askFailed
 }
 
 // waitForExit polls until the process is gone or the deadline passes. Polling
@@ -197,21 +243,47 @@ func indexAny(b []byte, set string) int {
 	return -1
 }
 
+// stopOutcome is what a stop actually did. It is returned because the caller has
+// something to add to some of them and nothing to add to others: only a game
+// that had no window to close has lost anything.
+type stopOutcome int
+
+const (
+	// stopNothingRecorded: the ledger named nothing.
+	stopNothingRecorded stopOutcome = iota
+	// stopWasNotRunning: the recorded pid is gone.
+	stopWasNotRunning
+	// stopStaleRecord: the pid belongs to another program now, so NOTHING was
+	// signalled.
+	stopStaleRecord
+	// stopAsked: it was asked to close and it closed. On a game with a window
+	// this is the outcome save-on-quit runs in.
+	stopAsked
+	// stopForcedNoWindow: there was nothing to ask, so the force was immediate.
+	stopForcedNoWindow
+	// stopForcedTimeout: it was asked, it did not close in time, it was forced.
+	stopForcedTimeout
+	// stopForcedAskFailed: the ask broke for some other reason, then the force.
+	stopForcedAskFailed
+	// stopFailed: it is still there and its record was kept.
+	stopFailed
+)
+
 // stopProcess is the shared game/sidecar stop: identify, ask, wait, force, and
 // remove the record only when the process is actually gone.
 func stopProcess(pidFile, wantExe, what string, timeout time.Duration, now func() time.Time,
-	report func(string, ...any), warn func(string, ...any)) {
+	report func(string, ...any), warn func(string, ...any)) stopOutcome {
 
 	pid := readPidFile(pidFile)
 	if pid == 0 {
 		os.Remove(pidFile)
-		return
+		return stopNothingRecorded
 	}
 	switch probeProcess(pid) {
 	case processDead:
 		report("%s was not running (pid %d is gone)", what, pid)
 		os.Remove(pidFile)
-		return
+		return stopWasNotRunning
 	case processOpaque:
 		warn("pid %d cannot be inspected from here: %s may be running as another user or "+
 			"elevated. Stop it from the same account that started it", pid, what)
@@ -220,35 +292,52 @@ func stopProcess(pidFile, wantExe, what string, timeout time.Duration, now func(
 		warn("pid %d is no longer %s - the operating system has given that number to another "+
 			"program. The stale record was removed and NOTHING was stopped", pid, what)
 		os.Remove(pidFile)
-		return
+		return stopStaleRecord
 	}
 
-	forced := false
-	reason := ""
-	if err := gracefulStop(pid); err != nil {
-		// A headless game has no window to close, so this is expected there:
-		// taskkill answers "can only be terminated forcefully". Force at once
-		// rather than spend the whole timeout waiting for an answer nobody can
-		// give.
-		forced = true
-		reason = "immediately (there was nothing to ask)"
-	} else if !waitForExit(pid, timeout, now) {
-		forced = true
-		reason = fmt.Sprintf("after %s", timeout)
+	outcome := stopAsked
+	result, askErr := gracefulStop(pid)
+	switch {
+	case result == askImpossible:
+		// Expected for anything without a window. Force at once rather than
+		// spend the whole timeout waiting for an answer nobody can give.
+		outcome = stopForcedNoWindow
+	case result == askFailed:
+		warn("%s (pid %d) could not be asked to close: %v", what, pid, askErr)
+		outcome = stopForcedAskFailed
+	case !waitForExit(pid, timeout, now):
+		outcome = stopForcedTimeout
 	}
-	if forced {
-		if err := forceStop(pid); err != nil {
-			warn("could not stop %s (pid %d): %v. Its record was kept, so it can still be found",
-				what, pid, err)
-			return
-		}
-		if !waitForExit(pid, forceSettleTimeout, now) {
-			warn("%s (pid %d) did not exit after being forced. Its record was kept", what, pid)
-			return
-		}
-		report("stopped %s (pid %d), forced %s", what, pid, reason)
-	} else {
-		report("stopped %s (pid %d)", what, pid)
+	if outcome == stopAsked {
+		report("stopped %s (pid %d) - it was asked to close, and it closed", what, pid)
+		os.Remove(pidFile)
+		return outcome
 	}
+	if err := forceStop(pid); err != nil {
+		warn("could not stop %s (pid %d): %v. Its record was kept, so it can still be found",
+			what, pid, err)
+		return stopFailed
+	}
+	if !waitForExit(pid, forceSettleTimeout, now) {
+		warn("%s (pid %d) did not exit after being forced. Its record was kept", what, pid)
+		return stopFailed
+	}
+	report("stopped %s (pid %d), forced %s", what, pid, forcedReason(outcome, timeout))
 	os.Remove(pidFile)
+	return outcome
+}
+
+// forcedReason says WHY the force happened, which is the whole of what a person
+// needs to know about whether anything was lost. "immediately (there was nothing
+// to ask)" was printed for a game with a window too, because /T made every
+// graceful ask fail; the three cases are told apart here instead.
+func forcedReason(outcome stopOutcome, timeout time.Duration) string {
+	switch outcome {
+	case stopForcedNoWindow:
+		return "immediately: it has no window, so there was no close request to post to it"
+	case stopForcedAskFailed:
+		return "immediately: the close request could not be delivered"
+	default:
+		return fmt.Sprintf("after %s: it was asked to close and had not closed by then", timeout)
+	}
 }

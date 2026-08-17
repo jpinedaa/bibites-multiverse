@@ -209,6 +209,102 @@ func TestProfileDeleteRemovesOnlyItsOwnData(t *testing.T) {
 	mustContain(t, "the output", h.out(), "kept "+third.DataRoot)
 }
 
+// TestDeleteRemovesOnlyWhatTheWorldOwns is the complete edition's data root as
+// it is on a real machine: the world's journal and credential, THE GAME under
+// runtimes\, the installer's record, an orphaned credential from an interrupted
+// install, a private map's certificate, and the leftover folders of two earlier
+// deployments. os.RemoveAll on that root took every one of them - a multi-gigabyte
+// game, the file the uninstaller reads, an identity no map can print again, and
+// two other worlds' journals - for "delete this world".
+func TestDeleteRemovesOnlyWhatTheWorldOwns(t *testing.T) {
+	h := newHarness(t)
+	h.profile("default", "Multiverse", 8787)
+	second := h.managedProfile("second", "Second", 8788)
+
+	// The world's own entries.
+	writeFile(t, filepath.Join(second.DataDir(), "journal.jsonl"), "custody\n", 0o644)
+	writeFile(t, filepath.Join(second.DataDir(), peerIDFileName), "public-abc\n", 0o644)
+	writeFile(t, second.SidecarLog(), "sidecar: contract B: slot granted\n", 0o644)
+	writeFile(t, second.PendingFile(), "{}", 0o600)
+
+	// Everything in that folder that is NOT the world's.
+	strangers := []string{
+		filepath.Join(second.GameDir, gameExeName),
+		filepath.Join(second.DataRoot, recordName),
+		filepath.Join(second.DataRoot, credentialFileName+".20260814T101112Z.orphan"),
+		filepath.Join(second.DataRoot, "relay-ca.crt"),
+		filepath.Join(second.DataRoot, "data-slot-2", "data", "journal.jsonl"),
+		filepath.Join(second.DataRoot, "data-slot-6", "data", "journal.jsonl"),
+	}
+	writeFile(t, filepath.Join(second.DataRoot, recordName),
+		`{"record":"bibites-multiverse/install-record/3","gameDir":"`+second.GameDir+`"}`, 0o644)
+	writeFile(t, filepath.Join(second.DataRoot, credentialFileName+".20260814T101112Z.orphan"),
+		strings.Repeat("c", 64)+"\n", 0o600)
+	writeFile(t, filepath.Join(second.DataRoot, "relay-ca.crt"), "-----BEGIN CERTIFICATE-----\n", 0o644)
+	writeFile(t, filepath.Join(second.DataRoot, "data-slot-2", "data", "journal.jsonl"), "somebody else\n", 0o644)
+	writeFile(t, filepath.Join(second.DataRoot, "data-slot-6", "data", "journal.jsonl"), "somebody else\n", 0o644)
+
+	if code := h.runWith("second\n", "profile", "delete", "second", "--remove-world-data"); code != exitOK {
+		t.Fatalf("delete exited %d\n%s\n%s", code, h.out(), h.err())
+	}
+
+	// The world's own entries are gone ...
+	for _, path := range []string{second.DataDir(), second.LogDir()} {
+		if dirExists(path) {
+			t.Fatalf("%s survived the removal", path)
+		}
+	}
+	for _, path := range []string{second.CredentialFile(), second.PendingFile(),
+		h.install().ProfilePath("second")} {
+		if fileExists(path) {
+			t.Fatalf("%s survived the removal", path)
+		}
+	}
+	// ... and NOTHING else was touched, starting with the game.
+	for _, path := range strangers {
+		if !fileExists(path) {
+			t.Fatalf("%s was deleted, and it is not this world's", path)
+		}
+	}
+	if !dirExists(second.DataRoot) {
+		t.Fatalf("%s was removed although it still holds things this world does not own",
+			second.DataRoot)
+	}
+
+	// And the output says so, by name, rather than claiming the folder is gone.
+	out := h.out()
+	mustContain(t, "the output", out, "kept "+second.DataRoot)
+	for _, name := range []string{runtimesDirName, recordName, "data-slot-6", "relay-ca.crt"} {
+		mustContain(t, "the list of what was left", out, name)
+	}
+	mustContain(t, "the output", out, "The game's own save of 'Second' is NOT here")
+	mustNotContain(t, "the output", out, "deleted "+second.DataRoot+",")
+
+	// The other world is untouched, and the installation still works.
+	if code := h.run("status", "--all"); code != exitOK {
+		t.Fatalf("status after the delete exited %d\n%s", code, h.err())
+	}
+}
+
+// TestDeleteWholeDataRootWhenItIsAllOurs: the other half of the same rule. A
+// world whose data root holds only its own entries still loses the root itself,
+// so an ordinary delete leaves nothing behind.
+func TestDeleteWholeDataRootWhenItIsAllOurs(t *testing.T) {
+	h := newHarness(t)
+	h.profile("default", "Multiverse", 8787)
+	second := h.profile("second", "Second", 8788)
+	writeFile(t, filepath.Join(second.DataDir(), "journal.jsonl"), "custody\n", 0o644)
+	writeFile(t, second.SidecarLog(), "log\n", 0o644)
+
+	if code := h.runWith("second\n", "profile", "delete", "second", "--remove-world-data"); code != exitOK {
+		t.Fatalf("delete exited %d\n%s", code, h.err())
+	}
+	if dirExists(second.DataRoot) {
+		t.Fatalf("%s survived", second.DataRoot)
+	}
+	mustContain(t, "the output", h.out(), "deleted "+second.DataRoot+", including its journal")
+}
+
 // TestDeleteWarnsAboutTheInstallRecord: the installer-created world's data root
 // holds install-record.json, which the uninstaller needs.
 func TestDeleteWarnsAboutTheInstallRecord(t *testing.T) {
@@ -222,6 +318,11 @@ func TestDeleteWarnsAboutTheInstallRecord(t *testing.T) {
 	}
 	mustContain(t, "the warning", h.out(), "install-record.json")
 	mustContain(t, "the warning", h.out(), "uninstaller")
+	// And the record it warns about is still there afterwards, which is what makes
+	// the uninstaller able to undo the mod installation at all.
+	if !fileExists(p.RecordFile()) {
+		t.Fatalf("%s was deleted; the uninstaller reads it", p.RecordFile())
+	}
 }
 
 // TestProfileSetValidatesGameDir: 'profile set --game-dir' reached the file

@@ -15,6 +15,12 @@ import (
 // forces only when the ask did not work. When the ask CANNOT work — a headless
 // game has no window for taskkill to close — the force is immediate rather than
 // after a timeout nobody is waiting on.
+//
+// THAT INTENT DID NOT REACH THE MACHINE UNTIL taskkillGracefulArgs. The ask
+// carried /T, which walks the game's process tree, meets the windowless
+// UnityCrashHandler64.exe the game always spawns, and refuses the whole call —
+// so EVERY Windows stop, windowed or headless, was reported as "forced
+// immediately (there was nothing to ask)" and every save-on-quit was skipped.
 const (
 	defaultGameStopTimeout    = 30 * time.Second
 	defaultSidecarStopTimeout = 10 * time.Second
@@ -49,8 +55,13 @@ func (a *app) runStop(p Profile, opts stopOptions) int {
 
 	report := func(format string, args ...any) { a.print(format, args...) }
 	warn := func(format string, args ...any) { a.warn(format, args...) }
-	stopProcess(p.GamePidFile(), p.GameExe(), "the game", gameTimeout, a.now, report, warn)
+	outcome := stopProcess(p.GamePidFile(), p.GameExe(), "the game", gameTimeout, a.now, report, warn)
 	events.event("info", "game.stopped", "world", p.World)
+	// Only the game has a save to lose, and only the no-window case loses it.
+	if outcome == stopForcedNoWindow {
+		a.warn("%s", headlessStopNote)
+		events.event("warn", "game.forced", "world", p.World, "why", "no-window")
+	}
 
 	if opts.gameOnly {
 		a.print("the world is down; the sidecar keeps its place and its journal.")
@@ -65,6 +76,16 @@ func (a *app) runStop(p Profile, opts stopOptions) int {
 		"organism it is holding for somebody.", p.DataDir())
 	return exitOK
 }
+
+// headlessStopNote is what a person needs after a game was killed rather than
+// closed: the reason, and the two ways out. It is LOCAL-HEADLESSSTOP in
+// docs/error-taxonomy.md, said here at the moment it happens.
+const headlessStopNote = `  That game had no window, which is what -batchmode -nographics removes, so there was
+  no close request to post to it and it was stopped the only way left. Everything since
+  its last save is gone. Give a headless world a short save interval so that is a small
+  amount ('profile set NAME --save-minutes 5'), or run the session with a window
+  ('start --no-headless') and stop it normally. This is LOCAL-HEADLESSSTOP in
+  docs/error-taxonomy.md.`
 
 // runStopAll stops every world this installation knows about. A file in
 // profiles\ that cannot be read is REPORTED AND SKIPPED rather than fatal: one

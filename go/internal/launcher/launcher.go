@@ -581,8 +581,12 @@ files, and an instance that gets none does not merely lose its log - the mod nev
 	"stop": `stop [NAME] [--profile NAME] [--game-only] [--all] [--timeout SECONDS]
 
 Stops one world: the game first, then the sidecar. Each is asked to close before it is forced,
-so the world's save-on-quit runs. A headless world has no window to close and is forced after
-the timeout, which can lose the last interval.
+so the world's save-on-quit runs, and the stop says which of the three happened: it closed when
+asked, it was forced after the timeout, or there was nothing to ask.
+
+A headless world has no window to close, so there is no close request to post to it and it is
+forced at once rather than after the timeout. That is the one case that loses the interval since
+its last save - LOCAL-HEADLESSSTOP in docs/error-taxonomy.md.
 
 --game-only leaves the sidecar up. It keeps this world's place on the map and keeps taking
 custody of everything that arrives while the world is away.

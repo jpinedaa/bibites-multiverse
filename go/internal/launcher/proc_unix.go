@@ -30,9 +30,26 @@ func protectUserFile(path string) error {
 	return os.Chmod(path, 0o600)
 }
 
-// gracefulStop asks the process to close, so a world's save-on-quit runs.
-func gracefulStop(pid int) error {
-	return syscall.Kill(pid, syscall.SIGTERM)
+// gracefulStop asks the process to close, so a world's save-on-quit runs. There
+// is no headless gap here: SIGTERM reaches a process with no window exactly as
+// it reaches one with a window, which is why LOCAL-HEADLESSSTOP is a Windows
+// entry.
+func gracefulStop(pid int) (askResult, error) {
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		return askFailed, err
+	}
+	return askAccepted, nil
+}
+
+// forceStop is the last resort: SIGKILL, so whatever the process was writing is
+// lost — which is exactly why gracefulStop is tried first.
+func forceStop(pid int) error {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	defer process.Release()
+	return process.Kill()
 }
 
 // probeProcess answers what the operating system knows about pid. EPERM means

@@ -171,6 +171,55 @@ func TestStatusJSONSchema(t *testing.T) {
 	mustNotContain(t, "the status JSON", h.out(), "secret")
 }
 
+// TestStatusJSONReportsWhatItCouldNotRead: the machine-readable form has to fail
+// the way the human one does. `status --all --json` answered
+// {"active": "", "profiles": []} and exit 0 while a world was running - because
+// the profile behind it would not load - so anything watching that output read
+// "nothing is installed here" from a launcher that simply could not read its own
+// files. The human form exited 1 and said why.
+func TestStatusJSONReportsWhatItCouldNotRead(t *testing.T) {
+	h := newHarness(t)
+	h.writeRawProfile("default", "{ this is not json")
+
+	if code := h.run("status", "--all", "--json"); code != exitRefused {
+		t.Fatalf("status --all --json exited %d, want %d\n%s", code, exitRefused, h.out())
+	}
+	mustContain(t, "the JSON", h.out(), `"problems"`)
+	mustContain(t, "the JSON", h.out(), "default.json")
+	mustContain(t, "the JSON", h.out(), "no world profiles yet")
+	// The two forms agree on the exit code, which is the whole point.
+	if code := h.run("status", "--all"); code != exitRefused {
+		t.Fatalf("the human form exited %d, want %d", code, exitRefused)
+	}
+	// 'profile list' answers the same way.
+	if code := h.run("profile", "list", "--json"); code != exitRefused {
+		t.Fatalf("profile list --json exited %d, want %d", code, exitRefused)
+	}
+
+	// A readable world BESIDE the broken file reports normally and exits 0 - one
+	// stray file must not hide the worlds that do parse - and still names it.
+	h.profile("second", "Second", 8788)
+	if code := h.run("status", "--all", "--json"); code != exitOK {
+		t.Fatalf("status --all --json exited %d, want %d\n%s", code, exitOK, h.err())
+	}
+	var parsed Status
+	if err := json.Unmarshal([]byte(h.out()), &parsed); err != nil {
+		t.Fatalf("the status is not valid JSON: %v", err)
+	}
+	if len(parsed.Profiles) != 1 {
+		t.Fatalf("the report holds %d worlds, want 1", len(parsed.Profiles))
+	}
+	if len(parsed.Problems) != 1 {
+		t.Fatalf("the report holds %d problems, want 1: %v", len(parsed.Problems), parsed.Problems)
+	}
+	mustContain(t, "the problem", parsed.Problems[0], "default.json")
+	// The human form prints the same fact.
+	if code := h.run("status", "--all"); code != exitOK {
+		t.Fatalf("the human form exited %d\n%s", code, h.err())
+	}
+	mustContain(t, "the human status", h.out(), "a world could not be read")
+}
+
 // TestMenuScript drives the console menu the way a person does: an empty line
 // selects Start, and 0 quits.
 func TestMenuScript(t *testing.T) {
@@ -192,7 +241,7 @@ func TestMenuScript(t *testing.T) {
 
 	frame := fmt.Sprintf(`Bibites Multiverse launcher %s
    profile 'default'   world 'Multiverse'   port %d   headless off
-   sidecar stopped      game stopped
+   sidecar stopped                  game stopped
 
    1) Start this world            [Enter]
    2) Stop this world

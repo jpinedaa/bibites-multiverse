@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -81,10 +83,42 @@ func serveFakeOwnSlot(addr string, connected bool) {
 	server.ListenAndServe()
 }
 
-// fakeGameMain stands in for a Unity instance: it runs until it is asked to stop.
+// fakeGameMain stands in for a Unity instance: it runs until it is asked to
+// stop. In the world called deafWorld it stands in for one that was asked and
+// did NOT go — the timeout path, which is a different sentence to the person
+// watching and a different amount of lost world.
+//
+// IT ANNOUNCES ITSELF IN THE WORLD'S DATA DIRECTORY, and waitForFakeGame is how
+// a test waits for that. A process that has not finished starting has not
+// installed its signal handling either, and Unity is far slower to get there
+// than this is: a stop delivered into that window kills a game that would have
+// closed, and a test that does it is testing the window rather than the stop.
 func fakeGameMain() int {
+	if os.Getenv("MULTIVERSE_WORLD") == deafWorld {
+		signal.Ignore(syscall.SIGTERM)
+	}
+	if token := os.Getenv("MULTIVERSE_CONTRACT_A_TOKEN_FILE"); token != "" {
+		os.WriteFile(filepath.Join(filepath.Dir(token), fakeGameReadyName), nil, 0o644)
+	}
 	time.Sleep(2 * time.Minute)
 	return 0
+}
+
+// fakeGameReadyName is the fake game's "I am up" marker, in the world's own data
+// directory, where the launcher already writes.
+const fakeGameReadyName = "fake-game-ready"
+
+// waitForFakeGame blocks until the game this world just started is really there.
+func waitForFakeGame(t *testing.T, p Profile) {
+	t.Helper()
+	marker := filepath.Join(p.DataDir(), fakeGameReadyName)
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		if fileExists(marker) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the fake game never announced itself at %s", marker)
 }
 
 // harness is one fake installation: an install root with a sidecar and a
@@ -99,9 +133,18 @@ type harness struct {
 	stderr     bytes.Buffer
 	stdin      io.Reader
 	now        time.Time
+	// nowStep advances the injected clock on every read. It is zero by default,
+	// because the golden stamps need a frozen clock; a test that exercises a
+	// TIMEOUT sets it, so the deadline arrives without anybody waiting for it.
+	nowStep time.Duration
 }
 
 const testRelayURL = "wss://bibitesmultiverse.com/contract-b/v4"
+
+// deafWorld is the save name that makes the fake game ignore SIGTERM, so a test
+// can drive the timeout path. It travels in MULTIVERSE_WORLD, which the launcher
+// sets for every world it starts.
+const deafWorld = "Deaf"
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
@@ -188,6 +231,22 @@ func (h *harness) profile(name, world string, port int) Profile {
 	return p
 }
 
+// managedProfile writes a COMPLETE EDITION world: the game lives INSIDE this
+// world's own data root, at <dataRoot>/runtimes/<assembly sha256>, which is what
+// release/kit/Install-BibitesMultiverse.ps1 produces and what the launcher used
+// to refuse to read.
+func (h *harness) managedProfile(name, world string, port int) Profile {
+	h.t.Helper()
+	p := h.profile(name, world, port)
+	p.GameDir = filepath.Join(p.DataRoot, runtimesDirName,
+		"12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE")
+	h.makeGameDir(p.GameDir)
+	if err := h.install().SaveProfile(p); err != nil {
+		h.t.Fatalf("SaveProfile: %v", err)
+	}
+	return p
+}
+
 // writeRawProfile puts a profile file on disk without going through any
 // validation, which is what a hand-edited or truncated file looks like.
 func (h *harness) writeRawProfile(name, body string) {
@@ -208,7 +267,14 @@ func (h *harness) run(args ...string) int {
 	return run(full, stdin, &h.stdout, &h.stderr,
 		func(string) string { return "" },
 		func() (string, error) { return filepath.Join(h.root, LauncherExeName), nil },
-		func() time.Time { return h.now })
+		h.clock)
+}
+
+// clock is the time the launcher sees: frozen unless a test asked it to move.
+func (h *harness) clock() time.Time {
+	now := h.now
+	h.now = h.now.Add(h.nowStep)
+	return now
 }
 
 // runWith drives the entry point with a scripted stdin, for the commands that

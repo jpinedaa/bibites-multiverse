@@ -3,6 +3,7 @@ package launcher
 import (
 	"fmt"
 	"os"
+	slashpath "path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -157,7 +158,7 @@ func validateDataRoot(dataRoot, ownGameDir string, others []Profile, install Ins
 			"needs at least %d folders below the drive, because deleting a world deletes it",
 			clean, minDataRootElements)
 	}
-	if ownGameDir != "" && pathsOverlap(clean, ownGameDir) {
+	if ownGameDir != "" && pathsOverlap(clean, ownGameDir) && !isManagedRuntime(clean, ownGameDir) {
 		return fmt.Errorf("the data folder '%s' overlaps this world's own game folder '%s'. The "+
 			"launcher never writes inside a game folder, and deleting the world would take the "+
 			"game with it", clean, ownGameDir)
@@ -167,7 +168,10 @@ func validateDataRoot(dataRoot, ownGameDir string, others []Profile, install Ins
 			return fmt.Errorf("the data folder '%s' overlaps the profile '%s' at '%s'. Two worlds "+
 				"sharing a journal is how custody history is lost", clean, other.Name, other.DataRoot)
 		}
-		if other.GameDir != "" && pathsOverlap(clean, other.GameDir) {
+		// A second world in the complete edition runs the SAME managed runtime,
+		// which lives under the FIRST world's data root. That is the installer's
+		// own layout, not an accident, so it is the one overlap allowed here too.
+		if other.GameDir != "" && pathsOverlap(clean, other.GameDir) && !isManagedRuntime(clean, other.GameDir) {
 			return fmt.Errorf("the data folder '%s' overlaps the game folder of the profile '%s'. "+
 				"The launcher never writes inside a game folder", clean, other.Name)
 		}
@@ -240,21 +244,60 @@ func pathsOverlap(a, b string) bool {
 	return pathWithin(a, b) || pathWithin(b, a)
 }
 
+// foldPath is the comparable form of a path: BOTH separators folded to '/', the
+// path cleaned, and the case folded.
+//
+// FOLDING BOTH SEPARATORS IS THE POINT. The Windows installer writes a profile
+// full of backslashes, and that profile is judged here — including on Linux,
+// where every anti-drift test that reads the installer's own fixture runs.
+// With filepath.Clean alone, a backslash is an ordinary character off
+// Windows, so `C:\Data` "did not contain" `C:\Data\runtimes\<build>` and every
+// overlap rule silently passed a file the real machine refuses. The rest of this
+// file already reads both forms (isAbsolutePath, pathDepth); this is the half
+// that did not.
+func foldPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	return strings.ToLower(slashpath.Clean(strings.ReplaceAll(path, `\`, "/")))
+}
+
 // pathWithin reports whether inner is root or lives under it. It is
 // separator-aware, so /data/world does not "contain" /data/world2.
 func pathWithin(inner, root string) bool {
-	if inner == "" || root == "" {
+	i, r := foldPath(inner), foldPath(root)
+	if i == "" || r == "" {
 		return false
 	}
-	i := strings.ToLower(filepath.Clean(inner))
-	r := strings.ToLower(filepath.Clean(root))
 	if i == r {
 		return true
 	}
-	if !strings.HasSuffix(r, string(filepath.Separator)) {
-		r += string(filepath.Separator)
+	if !strings.HasSuffix(r, "/") {
+		r += "/"
 	}
 	return strings.HasPrefix(i, r)
+}
+
+// isManagedRuntime reports whether gameDir is a game the COMPLETE EDITION
+// installed under this world's own data root: <data root>\runtimes\<build>.
+//
+// That layout is the only overlap of a data root and a game folder the launcher
+// accepts, and it is accepted because the launcher owns both halves of it. The
+// rule the overlap check exists for is unchanged: the launcher never writes
+// inside a game folder (it writes data\, logs\ and the pid ledger, all beside
+// runtimes\ and never in it), and --remove-world-data deletes only the entries
+// worldOwnedEntries names, which runtimes\ is deliberately not one of. Every
+// other overlap — a data root on a Steam folder, on the installed application,
+// on a neighbour's journal — is still refused with the message it always had.
+func isManagedRuntime(dataRoot, gameDir string) bool {
+	root, inner := foldPath(dataRoot), foldPath(gameDir)
+	if root == "" || inner == "" {
+		return false
+	}
+	// <data root>\runtimes itself is not a game folder: a build directory below
+	// it is. Requiring the extra element keeps "the data root is the game folder"
+	// and "the game folder is runtimes\" out of the exception.
+	return strings.HasPrefix(inner, root+"/"+runtimesDirName+"/")
 }
 
 // validateGameDir checks the folder actually holds the game, and — when strict,
@@ -465,7 +508,12 @@ func validateProfilePaths(p Profile, install Install) error {
 		return fmt.Errorf("its 'dataRoot' ('%s') overlaps '%s', where this program is installed",
 			p.DataRoot, install.Root)
 	}
-	if pathsOverlap(p.DataRoot, p.GameDir) {
+	// The complete edition installs the game INSIDE the data root, at
+	// <data root>\runtimes\<build>, and writes exactly that pair into
+	// profiles\default.json. Refusing it made every complete-edition install
+	// produce a profile the launcher would not read, so the icons opened a
+	// launcher with no worlds in it. Every other overlap is still refused.
+	if pathsOverlap(p.DataRoot, p.GameDir) && !isManagedRuntime(p.DataRoot, p.GameDir) {
 		return fmt.Errorf("its 'dataRoot' ('%s') overlaps its own game folder ('%s')",
 			p.DataRoot, p.GameDir)
 	}
@@ -486,10 +534,18 @@ func validateRemovable(p Profile, profiles []Profile, install Install) error {
 	// Every game folder on this installation, not only this world's, because a
 	// data root that landed on a neighbour's game folder is the same accident.
 	for _, other := range profiles {
-		if other.GameDir != "" && pathsOverlap(p.DataRoot, other.GameDir) {
-			return fmt.Errorf("the data folder '%s' overlaps the game folder of the profile '%s'",
-				p.DataRoot, other.Name)
+		if other.GameDir == "" || !pathsOverlap(p.DataRoot, other.GameDir) {
+			continue
 		}
+		// The complete edition's managed runtime under this very data root is the
+		// exception, and it is safe here for the reason it is safe anywhere:
+		// removeWorldData deletes the world's own entries and leaves runtimes\
+		// alone, so the game every world on this machine runs survives.
+		if isManagedRuntime(p.DataRoot, other.GameDir) {
+			continue
+		}
+		return fmt.Errorf("the data folder '%s' overlaps the game folder of the profile '%s'",
+			p.DataRoot, other.Name)
 	}
 	return nil
 }

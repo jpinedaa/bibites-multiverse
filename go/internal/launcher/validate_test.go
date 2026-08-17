@@ -165,6 +165,95 @@ func TestValidateRemovable(t *testing.T) {
 	}
 }
 
+// TestManagedRuntimeIsTheOnlyAllowedOverlap: the complete edition's game folder
+// sits inside its own world's data root. That ONE shape is allowed; everything
+// else that overlaps is the deletion hazard the rule exists for.
+func TestManagedRuntimeIsTheOnlyAllowedOverlap(t *testing.T) {
+	const dataRoot = `C:\Users\alice\AppData\Local\BibitesMultiverse`
+	cases := []struct {
+		name    string
+		gameDir string
+		managed bool
+	}{
+		{"the installer's own layout", dataRoot + `\runtimes\ABC123`, true},
+		{"a build folder deeper still", dataRoot + `\runtimes\ABC123\inner`, true},
+		{"the same path with forward slashes", "C:/Users/alice/AppData/Local/BibitesMultiverse/runtimes/ABC123", true},
+		{"the same path in another case", strings.ToUpper(dataRoot) + `\RUNTIMES\ABC123`, true},
+		{"the runtimes folder itself", dataRoot + `\runtimes`, false},
+		{"the data root itself", dataRoot, false},
+		{"the journal", dataRoot + `\data`, false},
+		{"a folder that merely starts the same way", dataRoot + `\runtimes-old\ABC123`, false},
+		{"another data root's runtime", `C:\Users\alice\Other\runtimes\ABC123`, false},
+		{"nothing", "", false},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isManagedRuntime(dataRoot, test.gameDir); got != test.managed {
+				t.Fatalf("isManagedRuntime(%q, %q) = %v, want %v",
+					dataRoot, test.gameDir, got, test.managed)
+			}
+		})
+	}
+
+	// The overlap itself has to be SEEN wherever this program runs. A backslash is
+	// an ordinary character off Windows, so before foldPath the installer's own
+	// profile "did not overlap" anything here and every test of the rule passed on
+	// a file the real machine refused.
+	if !pathsOverlap(dataRoot, dataRoot+`\runtimes\ABC123`) {
+		t.Fatal("a Windows path did not overlap its own parent")
+	}
+	if pathsOverlap(dataRoot, dataRoot+`-second`) {
+		t.Fatal("a sibling with a shared prefix was read as an overlap")
+	}
+}
+
+// TestManagedRuntimeWorldValidates is the same rule against the real validators,
+// with the paths this machine actually has.
+func TestManagedRuntimeWorldValidates(t *testing.T) {
+	h := newHarness(t)
+	p := h.managedProfile("default", "Multiverse", 8787)
+
+	if err := validateProfile(p, nil, h.install()); err != nil {
+		t.Fatalf("the complete edition's own world was refused: %v", err)
+	}
+	if err := validateProfilePaths(p, h.install()); err != nil {
+		t.Fatalf("the complete edition's own world was refused at load: %v", err)
+	}
+	if err := validateRemovable(p, []Profile{p}, h.install()); err != nil {
+		t.Fatalf("the complete edition's own world could not be removed: %v", err)
+	}
+
+	// A SECOND world runs the same managed runtime, which lives under the FIRST
+	// world's data root. Neither profile may be invalidated by the other.
+	second := p
+	second.Name = "second"
+	second.World = "Second"
+	second.SidecarPort = 8788
+	second.DataRoot = filepath.Join(h.dataParent, "BibitesMultiverse-second")
+	if err := validateProfile(p, []Profile{second}, h.install()); err != nil {
+		t.Fatalf("the world hosting the runtime was refused once a second world shared it: %v", err)
+	}
+	if err := validateProfile(second, []Profile{p}, h.install()); err != nil {
+		t.Fatalf("the second world on the shared runtime was refused: %v", err)
+	}
+	if err := validateRemovable(p, []Profile{p, second}, h.install()); err != nil {
+		t.Fatalf("the world hosting the runtime could not be removed: %v", err)
+	}
+
+	// A game folder ANYWHERE ELSE inside the data root is still the old hazard.
+	bad := p
+	bad.GameDir = filepath.Join(p.DataRoot, "game")
+	h.makeGameDir(bad.GameDir)
+	err := validateProfile(bad, nil, h.install())
+	if err == nil {
+		t.Fatal("a game folder inside the data root, outside runtimes\\, was accepted")
+	}
+	mustContain(t, "the refusal", err.Error(), "overlaps this world's own game folder")
+	if err := validateProfilePaths(bad, h.install()); err == nil {
+		t.Fatal("that profile was accepted at load")
+	}
+}
+
 func TestWorldRules(t *testing.T) {
 	others := []Profile{{Name: "default", World: "Multiverse"}}
 	cases := []struct {
