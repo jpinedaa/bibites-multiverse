@@ -22,7 +22,7 @@ Keep these records outside the public repository:
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
 | `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
 | `restart-archive.sh` | Runs the complete-record archive sequence, guarded by the archive-deploy hold and the replay-headroom verdict. Costs a full ledger replay. |
-| `restart-lib.sh` | The half both restart scripts share: the peer gate, the waits, the proof, and the receipt. Sourced, never run. |
+| `restart-lib.sh` | The half both restart scripts share: the peer gate, the waits, the proof, and the scratch directory its EXIT trap removes. Sourced, never run. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `ce-reconcile.sh` | Reconciles the host's transfer counter against the invoice once a day. It runs on an operator machine, not on the host. |
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
@@ -603,6 +603,12 @@ Both restart procedures answer `--dry-run`, which walks every step and changes n
 deploy/restart-relay.sh --dry-run
 deploy/restart-archive.sh --dry-run
 ```
+
+A dry run leaves no scratch directory behind, and neither does a real run, a refusal or an
+interrupt. `restart-archive.sh` copies `deploy.env` into `${TMPDIR:-/tmp}/multiverse-restart-*` to
+read the replay verdict, and `restart-lib.sh` removes it from the same EXIT trap that takes the peer
+gate down. A leftover directory of that name means an old kit is installed; each one holds a copy of
+every deployed parameter.
 
 `test-monitor.sh` needs no root, no network and no host.
 It runs `monitor.sh --only transfer`, `--only hosts-pin`, `--only replay`, `--only swap` and

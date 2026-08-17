@@ -11,7 +11,8 @@
 # outage, by the operator running the script that did not get it.
 #
 # A caller must set DRY (0 or 1) before sourcing, and must call rl_init once
-# after sourcing to load parameters and install the teardown trap.
+# after sourcing to load parameters and install the teardown trap. Scratch space
+# comes from rl_mktemp_d so the same trap removes it.
 
 # ---------------------------------------------------------------- output
 
@@ -63,6 +64,7 @@ rl_init() {
   GATE_CONTENT='~. 1;'
 
   GATE_IS_UP=0
+  RL_TMPDIRS=()
   LOG_OFFSET=0
   T_GATE_UP=""; T_GATE_DOWN=""
   ARCHIVE_LINE=""; CLAIM_LINE=""; PEER_SUMMARY="not read"
@@ -71,6 +73,49 @@ rl_init() {
 
   trap rl_on_exit EXIT
   trap 'crit "interrupted"; exit 130' INT TERM
+}
+
+# ---------------------------------------------------------------- scratch
+
+# A private working directory that the EXIT trap removes on EVERY path.
+#
+# WHY THIS IS NOT A BARE mktemp -d. What these scripts put in scratch is a COPY
+# OF deploy.env — every deployed parameter, in a directory that outlives the run
+# if nobody deletes it. restart-archive.sh built its own with mktemp -d and
+# removed it on the success path only, so each refused preflight, each failed
+# restart, each interrupt and each --dry-run left one more root-owned copy of
+# the deployed parameters in /tmp, on a host where they accumulate silently and
+# nothing ever reads them again. Take scratch from here and the removal is the
+# same trap that takes the gate down: it does not depend on which path the run
+# ends on.
+#
+# 0700 is set twice on purpose. mktemp -d already creates 0700, and the umask
+# makes anything the caller writes INSIDE the directory owner-only too, which is
+# the half that matters for a deploy.env copy.
+#
+# IT ASSIGNS TO A NAMED VARIABLE AND DOES NOT PRINT THE PATH. A function that
+# printed it would be called as `TMPD="$(rl_mktemp_d archive)"`, and a command
+# substitution is a SUBSHELL: the registration below would happen in a shell
+# that exits immediately, this shell's trap would never learn the path, and the
+# leak would look exactly like the one this replaced.
+rl_mktemp_d() { # rl_mktemp_d <name> <destination-variable>
+  local dir name
+  name="${2:?rl_mktemp_d needs a destination variable}"
+  dir="$(umask 077; mktemp -d "${TMPDIR:-/tmp}/multiverse-restart-$1.XXXXXX")" || return 1
+  chmod 0700 "$dir" || return 1
+  RL_TMPDIRS+=("$dir")
+  printf -v "$name" '%s' "$dir"
+}
+
+rl_clean_tmpdirs() {
+  local dir
+  # `${#RL_TMPDIRS[@]}` on a never-assigned name is itself an error under
+  # `set -u`, so ask whether the array has a first element before counting.
+  [ "${RL_TMPDIRS+set}" = set ] || return 0
+  for dir in "${RL_TMPDIRS[@]}"; do
+    [ -n "$dir" ] && rm -rf "$dir"
+  done
+  RL_TMPDIRS=()
 }
 
 # ---------------------------------------------------------------- root, hold, lock
@@ -216,6 +261,9 @@ rl_on_exit() {
     crit "exiting with the gate still up; taking it down before anything else"
     rl_gate_down
   fi
+  # The gate is a participant outage and scratch is a file, so the gate comes
+  # down first and the scratch removal cannot delay it.
+  rl_clean_tmpdirs
   exit "$rc"
 }
 
