@@ -1893,9 +1893,17 @@ if ($manageProgramFiles) {
     # when it is given a command line. A shell does not wait for a process in the
     # Windows GUI subsystem, so one file could not be both. Both are recorded
     # below, so the uninstall removes both.
+    #
+    # $MatrixName IS INSTALLED, NOT ONLY READ. Step 3 reads it out of the kit to
+    # decide whether this game build is supported; the SIDECAR reads it again,
+    # every time somebody runs the diagnostic, to say which build they are on -
+    # and it looks for it beside its own executable (go/internal/sidecar's
+    # supportMatrix). A kit folder is a download that gets deleted, so without a
+    # copy here the diagnostic's game-version check answered UNKNOWN on a
+    # perfectly ordinary install.
     foreach ($name in @($LauncherName, 'multiverse-launcher.exe', $SidecarName,
                          'Uninstall-BibitesMultiverse.ps1',
-                         'public-map.json', 'README.md', 'LICENSE',
+                         'public-map.json', $MatrixName, 'README.md', 'LICENSE',
                          'THIRD_PARTY_NOTICES.md', 'bibites-multiverse.ico')) {
         $source = Join-Path $Here $name
         if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {

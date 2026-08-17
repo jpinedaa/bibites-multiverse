@@ -777,6 +777,11 @@ Check "the application directory contains the launcher's commands" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-launcher.exe'))
 Check "the application directory contains the map the launcher enrolls new worlds with" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json'))
+# The sidecar's diagnostic looks the game build up in this file, beside its own
+# executable. Without it here, 'Check this world' answers UNKNOWN for the
+# game-version check on an install that is perfectly healthy.
+Check "the application directory contains the support matrix the diagnostic reads" `
+    (Test-Path -LiteralPath (Join-Path $fProgram 'support-matrix.json'))
 Check "the application directory contains the launcher's default profile" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'profiles\default.json'))
 $startF = Get-Content -Raw -LiteralPath (Join-Path $fProgram 'Start-Multiverse.ps1')
@@ -798,6 +803,8 @@ Check "the installed launcher's commands were removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-launcher.exe')))
 Check "the installed public map was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json')))
+Check "the installed support matrix was removed" `
+    (-not (Test-Path -LiteralPath (Join-Path $fProgram 'support-matrix.json')))
 Check "the launcher's profiles directory was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'profiles')))
 

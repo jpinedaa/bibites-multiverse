@@ -64,6 +64,13 @@ The two documents that ship *beside* the release rather than inside it are
 [`../docs/support-matrix.md`](../docs/support-matrix.md) — which the installer reads, as JSON
 extracted from that same file — and [`../docs/defaults-audit.md`](../docs/defaults-audit.md).
 
+**`support-matrix.json` is installed as well as read.** The Windows installer copies it into the
+application directory beside `multiverse-sidecar.exe`, because the sidecar reads it again every
+time somebody runs the diagnostic — it is how `--diagnose` names the game build a machine is on.
+It looks for it beside its own executable, and a kit folder is a download that gets deleted, so
+without the installed copy that check answers `UNKNOWN` on a healthy install. It is recorded in
+`install-record.json` like every other program file, so the uninstall removes it.
+
 ## What this is not: `farend/`
 
 `farend/` originated as the Windows bundle for the M4 two-computer test map.

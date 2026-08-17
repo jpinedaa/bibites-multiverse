@@ -302,7 +302,7 @@ system prints one, and no diagnostic asks for one.
 | `multiverse-launcher.exe` | The same launcher's commands and console menu. This is the one a script calls |
 | `profiles\` | Created by the installer beside these files: one JSON file per world, plus `active.txt`. **Never contains a secret** |
 | `BepInEx_win_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |
-| `support-matrix.json` | The game builds this release supports, and the words it refuses with |
+| `support-matrix.json` | The game builds this release supports, and the words it refuses with. The setup installs a copy beside `multiverse-sidecar.exe`, which reads it whenever you run the diagnostic |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md` | The project's Apache-2.0 license and bundled dependency notices |
 | `game-payload.json`, `GAME-REDISTRIBUTION-NOTICE.txt`, `game\` | Files that occur only in a complete package |
 | `MANIFEST.sha256` | The SHA-256 of every file above, which the installer checks first |
