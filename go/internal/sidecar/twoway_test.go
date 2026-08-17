@@ -379,10 +379,9 @@ func TestSidecarMainAcceptsTheInboundRateFlag(t *testing.T) {
 // hops between the same two worlds, told apart only by the edge.
 func TestHopFeedRecordsBothDirectionsThroughTheRig(t *testing.T) {
 	g := newGrid(t, 3, gridOptions{layout: layoutRow(3)})
+	// startArchive returns subscribed, so the two hops below cannot outrun the
+	// registration that has to see them.
 	arch := startArchive(t, g.relay)
-	waitFor(t, 10*time.Second, "the archive to subscribe", func() bool {
-		return arch.StatusView().RelayConnected
-	})
 
 	one, two, three := g.bySlot(1), g.bySlot(2), g.bySlot(3)
 	waitLane(t, one.side, contracta.EdgeE, 2)
