@@ -561,10 +561,13 @@ rm -rf "$work"
 ```
 
 CAUTION: Replace the running path with `mv` and never with a direct write.
-Linux refuses to open a file that a process is executing, and `install` onto that path fails with
-`Text file busy`.
-A rename replaces the directory entry only, and each running sidecar keeps its old file until it
-restarts.
+Linux refuses to open a file that a process is executing.
+`cp` onto that path fails with `Text file busy`.
+`install` does not fail: it deletes the destination and writes a new file instead.
+That recovery works, and it leaves a window in which the path holds a partial file or no file at
+all. A sidecar that restarts inside that window cannot start.
+A rename has no such window. It replaces the directory entry in one step, and each running sidecar
+keeps its old file until it restarts.
 
 The second rename updates `/opt/bibites-runtime/multiverse-sidecar`, which is the file the host
 installer copies from.
