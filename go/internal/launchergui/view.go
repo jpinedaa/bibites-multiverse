@@ -3,12 +3,26 @@
 // WHY A WINDOW. Everything this program does was already reachable from a
 // console menu, and the menu is still shipped (multiverse-launcher.exe). But the
 // front door of a game is not a terminal: a participant who installed a
-// simulation and double-clicked an icon should be handed a list of their worlds
-// with buttons beside it, not a numbered prompt. The window also shows what the
-// menu structurally could not — every world at once, refreshed while they run,
-// with the one fact that says a world is really on the map (its mod has reached
-// its sidecar) in a column rather than in a line that scrolled past a minute
-// ago.
+// simulation and double-clicked an icon should be handed their worlds and one
+// obvious button, not a numbered prompt.
+//
+// WHAT THIS WINDOW IS FOR, IN FOUR RULES. The first shape of it was a
+// spreadsheet: ten columns, fourteen buttons in two rows, and a raw log filling
+// half the window. Everything was reachable and nothing was obvious. The rules
+// it is built to now are:
+//
+//	ONE OBVIOUS PRIMARY ACTION PER WORLD. A world is either started or stopped,
+//	so there is one big button and its caption says which.
+//	PLAIN WORDS. Nothing a person reads in the window names a thing only this
+//	project has: no profile, no sidecar, no contract, no mod. Those words are
+//	true and they are all still there — in the details pane, which is where the
+//	program's own output goes.
+//	STATE AT A GLANCE. The list says, per world, in one coloured line, which of
+//	the states below it is in. The one that matters is the difference between
+//	running and ON THE MAP.
+//	NEVER SILENT. Anything that fails opens the details pane by itself and puts
+//	the core's own words in it. A greyed button, a spinning bar and a result line
+//	are additions to that, never replacements for it.
 //
 // IT IS A FRONT DOOR AND NOT A SECOND LAUNCHER. Every action here is a call into
 // internal/launcher through launcher.Session: the same refusals, the same slot
@@ -19,12 +33,12 @@
 // WHAT IS IN THIS FILE, AND WHY IT HAS NO BUILD TAG. Windows is the only place
 // walk runs and the only place this window exists, so the widgets live in
 // window_windows.go. But the parts most likely to be wrong are not the widgets:
-// they are the column of a table that does not match the value put in it, the
-// flags an edit dialog turns into a 'profile set', the enabling of a button that
-// should have been grey, and the timestamping of a log line written by another
-// goroutine mid-sentence. Those are all in this file, with no build tag on it,
-// so they are exercised by ordinary tests on the machine this project is
-// developed on — which has no Windows at all.
+// they are the words a state is rendered as, the colour that goes with them,
+// which button a state enables, the flags an edit dialog turns into a
+// 'profile set', and the phrase a line of the core's output is turned into.
+// Those are here, in files with no build tag on them, so they are exercised by
+// ordinary tests on the machine this project is developed on — which has no
+// Windows at all.
 package launchergui
 
 import (
@@ -32,27 +46,213 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"multiverse/internal/launcher"
 )
 
-// WindowTitle is the title of the main window, and it is FROZEN: the machine
-// harness finds this window by its caption.
+// WindowTitle is the FIRST PART of the main window's caption, and it is FROZEN:
+// the machine harness finds this window by it.
+//
+// The rest of the caption is state — see WindowTitleFor — so the harness matches
+// this as a PREFIX rather than as the whole string. A window whose caption never
+// changes is one more thing a person has to click into to learn something the
+// title bar could have told them from the taskbar.
 const WindowTitle = "Bibites Multiverse"
+
+// WindowTitleFor is the caption for one reading: the name, and how many worlds
+// are up, when any are.
+func WindowTitleFor(snap launcher.Snapshot) string {
+	running := 0
+	for _, world := range snap.Worlds {
+		if world.Sidecar.Running || world.Game.Running {
+			running++
+		}
+	}
+	if running == 0 {
+		return WindowTitle
+	}
+	return fmt.Sprintf("%s - %d of %d worlds running", WindowTitle, running, len(snap.Worlds))
+}
 
 // CloseHint is the standing line in the status bar. Closing the window is not
 // stopping the worlds, and a participant who believed otherwise would think
 // their world had shut down when it had not.
-const CloseHint = "worlds keep running when you close this window"
+const CloseHint = "Your worlds keep running when you close this window"
 
 // DocsURL is where the menu's documentation item goes.
 const DocsURL = "https://bibitesmultiverse.com"
 
-// ---------------------------------------------------------------- the columns
+// The window's smallest useful size. Below this the world list and the panel
+// beside it start to hide their own text, and a saved size smaller than this is
+// not restored.
+const (
+	MinWindowWidth  = 900
+	MinWindowHeight = 560
+)
 
-// Column is one column of the world list.
+// ---------------------------------------------------------------- the colours
+
+// Colour is what a status line is drawn in. It is an enum rather than an RGB
+// value so that the mapping from a world's state to a colour is decided here,
+// where a test can read it, and turned into a Windows colour in one place in
+// window_windows.go.
+type Colour int
+
+// The four colours, and the ONLY four. A fifth would be a distinction nobody
+// can name.
+const (
+	// ColourGrey is nothing is happening and nothing is wrong.
+	ColourGrey Colour = iota
+	// ColourGreen is the state a participant wants: on the map, with a game
+	// behind it.
+	ColourGreen
+	// ColourAmber is in motion: starting, stopping, or waiting for something
+	// that is expected to arrive.
+	ColourAmber
+	// ColourRed is running and NOT on the map, or an outright fault. It is the
+	// colour of the state this window was written to make visible.
+	ColourRed
+)
+
+// ---------------------------------------------------------------- the states
+
+// State is what one world is doing, as a person would describe it.
+type State int
+
+// The states. THE TWO THAT MUST NEVER COLLAPSE INTO ONE are StateOnTheMap and
+// StateNotOnTheMap: a world whose sidecar is up has a place on the map, and a
+// world whose game's mod has connected is one the map can actually move
+// organisms through. When those two disagree the map shows this world live with
+// nothing behind it — LOCAL-CONFIGRACE and LOCAL-STARVATION in
+// docs/error-taxonomy.md — and every other sign on the machine looks healthy.
+const (
+	// StateStopped is nothing running for this world.
+	StateStopped State = iota
+	// StateWorking is an action of this window's own running against it.
+	StateWorking
+	// StateStarting is up, with nothing answering for it yet.
+	StateStarting
+	// StateWaiting is on the map, waiting for the game to join.
+	StateWaiting
+	// StateOnTheMap is the whole point.
+	StateOnTheMap
+	// StateNotOnTheMap is the game running with its mod never having arrived.
+	StateNotOnTheMap
+	// StateNoMapLink is a game running with nothing holding its place.
+	StateNoMapLink
+)
+
+// Status is one world's state in words and in colour.
+type Status struct {
+	State State
+	// Short is the world list's own line: a few words, no numbers that move.
+	Short string
+	// Headline is the panel's line: the same fact with the detail that makes it
+	// actionable.
+	Headline string
+	Colour   Colour
+}
+
+// Busy is the action running right now, or the zero value when none is.
+//
+// It is not read from the world — a start's first two seconds look exactly like
+// a stopped world — so it is carried alongside the snapshot rather than derived
+// from it.
+type Busy struct {
+	// World is the world the action is about. All is set instead when the action
+	// is about every world at once.
+	World string
+	All   bool
+	// Short is the world list's word for it ("Starting..."), and Phrase is the
+	// panel's live one, which follows the core's output as it prints.
+	Short  string
+	Phrase string
+}
+
+// covers answers whether this action is the reason a given world is unavailable.
+func (b Busy) covers(name string) bool {
+	if b.Short == "" {
+		return false
+	}
+	if b.All {
+		return true
+	}
+	return strings.EqualFold(b.World, name)
+}
+
+// StatusFor renders one world.
+//
+// EVERY BRANCH HERE IS A SENTENCE SOMEBODY READS, so the order is the order the
+// facts arrive in: an action of ours first, because it is the only one this
+// window knows and the world's own signs lag it by a refresh; then the two
+// processes; then what the sidecar says about the game behind it.
+func StatusFor(world launcher.WorldView, busy Busy) Status {
+	if busy.covers(world.Name) {
+		phrase := busy.Phrase
+		if phrase == "" {
+			phrase = busy.Short
+		}
+		return Status{State: StateWorking, Short: busy.Short, Headline: phrase, Colour: ColourAmber}
+	}
+	switch {
+	case !world.Sidecar.Running && !world.Game.Running:
+		return Status{State: StateStopped, Short: "Stopped", Headline: "Stopped", Colour: ColourGrey}
+
+	case !world.Sidecar.Running:
+		// A game with nothing holding its place. Whatever it is simulating is
+		// going nowhere: nothing is carrying it to the map or bringing anything
+		// back.
+		return Status{State: StateNoMapLink, Short: "NOT on the map",
+			Headline: "The game is running, but this world has no link to the map - see the details",
+			Colour:   ColourRed}
+
+	case !world.Mod.Answered:
+		return Status{State: StateStarting, Short: "Starting...",
+			Headline: "Starting - waiting for the map to answer...", Colour: ColourAmber}
+
+	case !world.Mod.Connected && !world.Game.Running:
+		return Status{State: StateWaiting, Short: "Waiting for the game",
+			Headline: "On the map" + slotSuffix(world) + ", waiting for the game to join",
+			Colour:   ColourAmber}
+
+	case !world.Mod.Connected:
+		// THE ONE THIS WINDOW EXISTS FOR. The game is up, the place on the map is
+		// held, and nothing is moving through it.
+		return Status{State: StateNotOnTheMap, Short: "NOT on the map",
+			Headline: "Running, but NOT on the map - see the details", Colour: ColourRed}
+	}
+	return Status{State: StateOnTheMap, Short: "On the map" + speedSuffix(world),
+		Headline: "Running - on the map" + slotSuffix(world) + speedSuffix(world), Colour: ColourGreen}
+}
+
+// slotSuffix names this world's place on the map when the map has said what it
+// is, and says nothing at all when it has not — a slot rendered as "-" in a
+// sentence reads as a fault rather than as a fact not in yet.
+func slotSuffix(world launcher.WorldView) string {
+	if !world.Mod.SlotKnown {
+		return ""
+	}
+	if !world.Mod.Live {
+		return fmt.Sprintf(" (place %d, not live yet)", world.Mod.Slot)
+	}
+	return fmt.Sprintf(" (place %d)", world.Mod.Slot)
+}
+
+// speedSuffix is the target speed, which is a setting and therefore steady. What
+// the world ACHIEVED moves every couple of seconds and belongs in the facts
+// grid, not in a headline somebody is trying to read.
+func speedSuffix(world launcher.WorldView) string {
+	if world.Mod.TimeScale == 0 {
+		return ""
+	}
+	return " - speed x" + roundedFloat(world.Mod.TimeScale)
+}
+
+// ---------------------------------------------------------------- the list
+
+// Column is one column of the world list. There are two, and that is the point:
+// the ten columns this list used to have were a report, and what a person wants
+// from a list of two or three worlds is which one to click.
 type Column struct {
 	Title string
 	Width int
@@ -61,33 +261,15 @@ type Column struct {
 // The column order is the FROZEN order of Row.Cell, and one test walks both.
 const (
 	ColWorld = iota
-	ColSave
-	ColPort
-	ColHeadless
-	ColSidecar
-	ColGame
-	ColMod
-	ColSpeed
-	ColSlot
-	ColData
+	ColStatus
 	columnCount
 )
 
-// Columns is the world list's header. The widths are what the strings below
-// need at the default font: a pid form is 19 characters, and the data folder is
-// last because it is the one column with no upper bound.
+// Columns is the world list's header.
 func Columns() []Column {
 	return []Column{
-		ColWorld:    {Title: "World", Width: 130},
-		ColSave:     {Title: "Save name", Width: 120},
-		ColPort:     {Title: "Port", Width: 55},
-		ColHeadless: {Title: "Window", Width: 70},
-		ColSidecar:  {Title: "Sidecar", Width: 130},
-		ColGame:     {Title: "Game", Width: 130},
-		ColMod:      {Title: "On the map", Width: 130},
-		ColSpeed:    {Title: "Speed", Width: 110},
-		ColSlot:     {Title: "Slot", Width: 60},
-		ColData:     {Title: "Data folder", Width: 320},
+		ColWorld:  {Title: "World", Width: 150},
+		ColStatus: {Title: "Status", Width: 240},
 	}
 }
 
@@ -97,152 +279,205 @@ type Row struct {
 	// for. The selection is remembered by name rather than by index, because the
 	// list is rebuilt under it every couple of seconds.
 	Name string
-	// Active marks the world the bare commands and this window's default
-	// selection act on.
-	Active bool
-	Save   string
-	Port   string
-	// Headless says which way round this world runs, in the words a person would
-	// use rather than the field's name.
-	Headless string
-	Sidecar  string
-	Game     string
-	Mod      string
-	Speed    string
-	Slot     string
-	Data     string
+	// Default marks the world the commands act on when no world is named, and
+	// the one this window selects when it opens.
+	Default bool
+	Status  Status
 }
 
 // Cell is the value of one column, in the frozen order above.
 func (r Row) Cell(column int) string {
 	switch column {
 	case ColWorld:
-		if r.Active {
+		if r.Default {
 			// The marker the console status uses, for the same reason.
 			return "* " + r.Name
 		}
-		return "  " + r.Name
-	case ColSave:
-		return r.Save
-	case ColPort:
-		return r.Port
-	case ColHeadless:
-		return r.Headless
-	case ColSidecar:
-		return r.Sidecar
-	case ColGame:
-		return r.Game
-	case ColMod:
-		return r.Mod
-	case ColSpeed:
-		return r.Speed
-	case ColSlot:
-		return r.Slot
-	case ColData:
-		return r.Data
+		return "   " + r.Name
+	case ColStatus:
+		return r.Status.Short
 	}
 	return ""
 }
 
 // RowsFrom renders a whole snapshot.
-func RowsFrom(snap launcher.Snapshot) []Row {
+func RowsFrom(snap launcher.Snapshot, busy Busy) []Row {
 	rows := make([]Row, 0, len(snap.Worlds))
 	for _, world := range snap.Worlds {
-		rows = append(rows, RowFrom(world))
+		rows = append(rows, RowFrom(world, busy))
 	}
 	return rows
 }
 
 // RowFrom renders one world.
-func RowFrom(world launcher.WorldView) Row {
-	return Row{
-		Name:     world.Name,
-		Active:   world.Active,
-		Save:     world.World,
-		Port:     strconv.Itoa(world.SidecarPort),
-		Headless: headlessWords(world.Headless),
-		Sidecar:  processWords(world.Sidecar),
-		Game:     processWords(world.Game),
-		Mod:      modWords(world),
-		Speed:    speedWords(world),
-		Slot:     slotWords(world),
-		Data:     world.DataRoot,
-	}
+func RowFrom(world launcher.WorldView, busy Busy) Row {
+	return Row{Name: world.Name, Default: world.Active, Status: StatusFor(world, busy)}
 }
 
-// headlessWords says what a person sees rather than what the field is called.
-func headlessWords(headless bool) string {
-	if headless {
-		return "no window"
-	}
-	return "window"
+// ---------------------------------------------------------------- the panel
+
+// Fact is one label-and-value line of the panel's small grid. The grid is the
+// old table's remaining columns, moved to where they are read: beside ONE world,
+// once it has been chosen.
+type Fact struct {
+	Label string
+	Value string
 }
 
-func processWords(p launcher.ProcessStatus) string {
-	if !p.Running {
-		return "stopped"
-	}
-	return fmt.Sprintf("running (pid %d)", p.PID)
+// The panel's fact labels, in the order they are drawn. They are constants
+// because the grid is built once and only its values change, so a label and the
+// value under it can never drift apart.
+const (
+	FactSave     = "Save name"
+	FactPort     = "Port"
+	FactSpeed    = "Speed"
+	FactData     = "Data folder"
+	FactIdentity = "Map identity"
+)
+
+// FactLabels is the fixed order of the panel's grid.
+func FactLabels() []string {
+	return []string{FactSave, FactPort, FactSpeed, FactData, FactIdentity}
 }
 
-// modWords is the column that matters most on this list, and the reason it
-// exists at all.
+// Panel is the whole right-hand side for one selection, decided in one place so
+// that a test can read a whole screen rather than a widget at a time.
+type Panel struct {
+	// World is the selected world's name, or "" when there is none.
+	World string
+	// Headline and Colour are the status, in the words and the colour of it.
+	Headline string
+	Colour   Colour
+	// Hint is the next thing to do, in plain words, or "" when the headline says
+	// it all. It is what a first run needs and an experienced one never sees.
+	Hint string
+	// Working is whether the spinning bar is shown.
+	Working bool
+	// Facts is FactLabels' values, in that order and always that length.
+	Facts []Fact
+	// Headless is the checkbox's state: what the world's own setting says.
+	Headless bool
+	// Primary is the big button.
+	Primary Primary
+}
+
+// Primary is the one obvious action: its caption, and whether it can be pressed.
+type Primary struct {
+	Caption string
+	Enabled bool
+	// Tip is the tooltip, which says what pressing it will do rather than
+	// repeating the caption.
+	Tip string
+}
+
+// PanelFor decides the whole right-hand side.
 //
-// A WORLD WHOSE SIDECAR IS UP IS NOT A WORLD ON THE MAP. The sidecar takes the
-// slot; the game's mod is what puts organisms through it. When the mod never
-// arrives, the map shows this world live with nothing behind it, and every other
-// column on this row looks healthy — that is LOCAL-CONFIGRACE and
-// LOCAL-STARVATION in docs/error-taxonomy.md. So the words here distinguish four
-// states and never collapse them: not started, started and not asked yet, asked
-// and not connected, connected with the mod's own version.
-func modWords(world launcher.WorldView) string {
-	if !world.Sidecar.Running {
-		return "-"
-	}
-	if !world.Mod.Answered {
-		return "sidecar not answering"
-	}
-	if !world.Mod.Connected {
-		if world.Game.Running {
-			return "NOT CONNECTED - see the log"
+// selected is nil when nothing is selected, which is the state an installation
+// with no world at all is permanently in.
+func PanelFor(selected *launcher.WorldView, snap launcher.Snapshot, busy Busy) Panel {
+	panel := Panel{Primary: Primary{Caption: ButtonStart, Tip: StartTip}}
+	if selected == nil {
+		panel.Headline = "No world is selected."
+		if len(snap.Worlds) == 0 {
+			panel.Headline = "There are no worlds on this computer yet."
+			panel.Hint = "Click '" + ButtonCreate + "' to make one."
 		}
-		return "no game"
+		panel.Facts = emptyFacts()
+		return panel
 	}
-	if world.Mod.Version == "" {
-		return "connected"
+	status := StatusFor(*selected, busy)
+	panel.World = selected.Name
+	panel.Headline = status.Headline
+	panel.Colour = status.Colour
+	panel.Headless = selected.Headless
+	panel.Facts = factsFor(*selected)
+	panel.Hint = hintFor(*selected, snap, status)
+
+	// WHILE ANYTHING AT ALL IS RUNNING, THE PANEL SAYS WHAT IT IS. There is one
+	// action goroutine, so an action about another world — a create, which has no
+	// row of its own yet — still occupies this window, and a panel that went on
+	// describing the selected world would have said nothing about the only thing
+	// happening.
+	if busy.Short != "" {
+		panel.Working = true
+		panel.Colour = ColourAmber
+		panel.Hint = ""
+		if busy.Phrase != "" {
+			panel.Headline = busy.Phrase
+		} else {
+			panel.Headline = busy.Short
+		}
 	}
-	return "connected (mod " + world.Mod.Version + ")"
+
+	running := selected.Sidecar.Running || selected.Game.Running
+	if running {
+		panel.Primary = Primary{Caption: ButtonStop, Tip: StopTip}
+	}
+	panel.Primary.Enabled = busy.Short == ""
+	return panel
 }
 
-// speedWords is the target and what the world actually produced. The gap
-// between them is the reading: a machine that cannot draw fast enough holds the
-// applied value below the target, and a participant who sees only one number
-// cannot tell that from a world that is not running.
-func speedWords(world launcher.WorldView) string {
+// hintFor is the sentence that tells somebody what to do next, and it is
+// deliberately rare: a hint under every state is noise, and noise is not read.
+func hintFor(selected launcher.WorldView, snap launcher.Snapshot, status Status) string {
+	switch status.State {
+	case StateStopped:
+		if len(snap.Worlds) == 1 {
+			// A FIRST RUN. One world, nothing running: this person has just
+			// installed a simulation and is looking at a window for the first
+			// time.
+			return "This is your world. Click " + ButtonStart + " to join the map."
+		}
+		return ""
+	case StateNotOnTheMap, StateNoMapLink:
+		return "Nothing is reaching the map from this world. Open the details below for what to do."
+	}
+	return ""
+}
+
+func factsFor(world launcher.WorldView) []Fact {
+	return []Fact{
+		{Label: FactSave, Value: world.World},
+		{Label: FactPort, Value: strconv.Itoa(world.SidecarPort)},
+		{Label: FactSpeed, Value: speedFact(world)},
+		{Label: FactData, Value: world.DataRoot},
+		{Label: FactIdentity, Value: identityFact(world)},
+	}
+}
+
+func emptyFacts() []Fact {
+	facts := make([]Fact, 0, len(FactLabels()))
+	for _, label := range FactLabels() {
+		facts = append(facts, Fact{Label: label, Value: ""})
+	}
+	return facts
+}
+
+// speedFact is the target AND what the world actually produced. The gap between
+// them is the reading: a machine that cannot draw fast enough holds the applied
+// value below the target, and a participant who sees only one number cannot tell
+// that from a world that is not running.
+func speedFact(world launcher.WorldView) string {
 	if !world.Mod.Connected || world.Mod.TimeScale == 0 {
 		return "-"
 	}
-	target := "x" + roundedFloat(world.Mod.TimeScale)
+	target := "x" + roundedFloat(world.Mod.TimeScale) + " asked for"
 	if world.Mod.Achieved == 0 {
 		return target
 	}
-	return target + " (" + roundedFloat(world.Mod.Achieved) + " achieved)"
+	return target + ", x" + roundedFloat(world.Mod.Achieved) + " achieved"
 }
 
-func slotWords(world launcher.WorldView) string {
-	if !world.Mod.SlotKnown {
+func identityFact(world launcher.WorldView) string {
+	if world.PeerID == "" {
 		return "-"
 	}
-	slot := strconv.Itoa(world.Mod.Slot)
-	if !world.Mod.Live {
-		return slot + " (not live)"
-	}
-	return slot
+	return world.PeerID
 }
 
 // roundedFloat renders a MEASUREMENT: three significant figures, because the
 // achieved time scale is a live reading and its last decimals are noise in a
-// column that is redrawn every two seconds.
+// panel that is redrawn every two seconds.
 func roundedFloat(value float64) string {
 	return strconv.FormatFloat(value, 'g', 3, 64)
 }
@@ -255,93 +490,165 @@ func exactFloat(value float64) string {
 	return strconv.FormatFloat(value, 'g', -1, 64)
 }
 
-// ---------------------------------------------------------------- the buttons
+// ---------------------------------------------------------------- the banner
 
-// The button captions. THEY ARE STABLE AND UNIQUE, because the machine harness
-// finds a control by its caption and a duplicate caption is an ambiguous click.
+// BannerFor is the red line above everything, or "" when there is nothing wrong.
+//
+// THE PROBLEMS ARE A BANNER, NOT AN EMPTY LIST. An installation whose profiles
+// cannot be read used to answer "no worlds", which reads as "nothing is
+// installed" from a program that simply could not read its own files. And a
+// banner that only reports is half a banner: each one below says what to do.
+func BannerFor(snap launcher.Snapshot) string {
+	if len(snap.Problems) > 0 {
+		return "The launcher could not read " + countWords(len(snap.Problems)) +
+			" of its own: " + strings.Join(snap.Problems, " | ") +
+			"   Run the installer again, or move the named file out of that folder."
+	}
+	if len(snap.Worlds) == 0 {
+		return "There are no worlds on this computer yet. Click '" + ButtonCreate +
+			"' to make one, or run the installer again."
+	}
+	return ""
+}
+
+func countWords(n int) string {
+	if n == 1 {
+		return "one file"
+	}
+	return fmt.Sprintf("%d files", n)
+}
+
+// ---------------------------------------------------------------- the captions
+
+// THE CAPTIONS. They are STABLE AND UNIQUE, because the machine harness finds a
+// control by its caption and a duplicate caption is an ambiguous click. One
+// caption may appear on several controls — a button and the menu item that does
+// the same thing — and that is the point: one rule enables both.
+//
+// EVERY ONE OF THEM IS PLAIN ENGLISH. A caption is not the place for a word this
+// project invented; the details pane carries the program's own output, and that
+// is where the internal names belong.
 const (
-	ButtonStart       = "Start"
-	ButtonStop        = "Stop"
+	ButtonStart  = "Start"
+	ButtonStop   = "Stop"
+	ButtonCreate = "Create a world..."
+	// ButtonStopAll is not "Stop all": all of WHAT is exactly the question a
+	// participant with one world running and one stopped would have to stop and
+	// ask.
 	ButtonStopAll     = "Stop every world"
-	ButtonSetDefault  = "Set as default"
+	ButtonSetDefault  = "Set as the default world"
 	ButtonEdit        = "Edit settings..."
-	ButtonCreate      = "Create another world..."
-	ButtonClone       = "Clone world..."
-	ButtonDelete      = "Delete world..."
-	ButtonDiagnose    = "Check this world"
-	ButtonOpenLogs    = "Open logs folder"
-	ButtonOpenGameLog = "Open the game's BepInEx log"
-	ButtonCopyPeerID  = "Copy peer id"
-	ButtonCopyLog     = "Copy the log"
+	ButtonClone       = "Clone this world..."
+	ButtonDelete      = "Delete this world..."
+	ButtonDiagnose    = "Run a health check"
+	ButtonOpenData    = "Open the data folder"
+	ButtonOpenLogs    = "Open the logs folder"
+	ButtonOpenGameLog = "Open the game's own log"
+	ButtonOpenConsole = "Open the commands window"
+	ButtonCopyPeerID  = "Copy this world's identity"
+	ButtonCopyLog     = "Copy the details"
+	ButtonRefresh     = "Refresh now"
+	ButtonQuit        = "Quit"
+	ButtonDocs        = "Documentation (bibitesmultiverse.com)"
+	ButtonAbout       = "About"
 
-	// ButtonStartWindowed and ButtonStartHeadless are the same button, whose
-	// caption flips with the world's own setting: it always offers the OTHER way
-	// round, for this session only.
-	ButtonStartWindowed = "Start with a window (this time only)"
-	ButtonStartHeadless = "Start with no window (this time only)"
+	// CheckHeadless is the world's own setting, and changing it WRITES the world
+	// — which is the whole difference from the per-session override this window
+	// used to carry. That override is gone from the window; the commands keep it
+	// (multiverse-launcher.exe start --headless / --no-headless), because a
+	// script is where a one-off belongs.
+	CheckHeadless = "Run without a game window (headless)"
+
+	// ButtonShowDetails and ButtonHideDetails are one button whose caption says
+	// what pressing it does. An arrow glyph would have said the same thing to
+	// people who already knew.
+	ButtonShowDetails = "Show details"
+	ButtonHideDetails = "Hide details"
+)
+
+// The menus' own captions. They group the secondary actions by what a person is
+// trying to do rather than by which part of the program does it.
+const (
+	MenuWorld = "&World"
+	MenuOpen  = "&Open"
+	MenuHelp  = "&Help"
 )
 
 // The dialogs' own buttons. The accepting button says WHAT IT DOES rather than
-// "OK": the create dialog's button enrolls an identity on a shared map, and the
-// delete dialog's deletes a world, and neither is a thing to agree to by
+// "OK": the create dialog's button takes a new identity on a shared map, and the
+// delete dialog's removes a world, and neither is a thing to agree to by
 // pressing the word "OK".
 const (
-	ButtonDialogSave   = "Save"
-	ButtonDialogCreate = "Create and enroll"
-	ButtonDialogClone  = "Clone and enroll"
-	ButtonDialogDelete = "Delete this world"
-	ButtonDialogCancel = "Cancel"
+	ButtonDialogSave     = "Save changes"
+	ButtonDialogCreate   = "Create this world"
+	ButtonDialogClone    = "Create the copy"
+	ButtonDialogDelete   = "Delete it permanently"
+	ButtonDialogCancel   = "Cancel"
+	ButtonShowAdvanced   = "Show advanced settings"
+	ButtonHideAdvanced   = "Hide advanced settings"
+	CheckRemoveWorldData = "Also delete this world's own folder"
 )
 
-// StartOverrideCaption is the caption of the override button for a world whose
-// profile says headless or does not.
-func StartOverrideCaption(headless bool) string {
-	if headless {
-		return ButtonStartWindowed
-	}
-	return ButtonStartHeadless
-}
+// The tooltips. EVERY CONTROL HAS ONE, and none of them repeats its caption: a
+// tooltip that says "Start: starts" has cost a person a hover for nothing. What
+// they say is the consequence — what will have changed after the click.
+const (
+	StartTip = "Starts this world: it takes its place on the map, then the game opens and joins it. " +
+		"This takes up to a couple of minutes and the details below say where it has got to."
+	StopTip = "Asks this world to save and quit, then closes its link to the map. Nothing is lost, " +
+		"and its place on the map is kept for when it comes back."
+	CreateTip = "Makes another world on this computer, with its own save file, its own folder and " +
+		"its own identity on the public map."
+	StopAllTip     = "Stops every world on this computer, one after another. Each one saves first."
+	SetDefaultTip  = "Makes this the world the commands act on when no world is named, and the one this window opens on."
+	EditTip        = "Changes this world's own settings: its save name, its port, how often it saves, and more."
+	CloneTip       = "Makes a new world with this one's settings. Its identity, folder, port and save name are new, because two worlds cannot share any of them."
+	DeleteTip      = "Removes this world from this computer. You will be asked to type its name first."
+	DiagnoseTip    = "Checks this world end to end - its files, its game build, its credential and the map - and reports every result below."
+	OpenDataTip    = "Opens this world's own folder in Explorer: its journal, its logs and its credential live there."
+	OpenLogsTip    = "Opens the folder holding this world's launcher and map logs."
+	OpenGameLogTip = "Opens the game's own log file, which is where to look when the game starts but never joins the map."
+	OpenConsoleTip = "Opens the same launcher as a text window with a numbered menu. It is the one a script should call."
+	CopyPeerIDTip  = "Copies this world's identity on the public map to the clipboard."
+	CopyLogTip     = "Copies everything in the details pane to the clipboard, for a bug report."
+	HeadlessTip    = "Runs the game with nothing drawn. The simulation is exactly the same; only the picture is gone. " +
+		"This is this world's own setting, and it takes effect the next time the world starts."
+	DetailsTip = "Shows everything the launcher has done this session, newest at the bottom. It opens by itself when something goes wrong."
+	WorldsTip  = "Every world on this computer. Double-click one, or press Enter, to start or stop it."
+	RefreshTip = "Reads every world again now, rather than waiting for the next couple of seconds to pass."
+)
 
-// Actions is which buttons a person can press. Every one of them is disabled
+// ---------------------------------------------------------------- the actions
+
+// Actions is which controls a person can press. Every one of them is disabled
 // when the core would refuse it, so a refusal is a message the participant does
 // not have to read.
 type Actions struct {
-	Start          bool
-	StartOverride  bool
-	Stop           bool
-	StopAll        bool
-	SetDefault     bool
-	Edit           bool
-	Create         bool
-	Clone          bool
-	Delete         bool
-	Diagnose       bool
-	OpenLogs       bool
-	OpenGameLog    bool
-	CopyPeerID     bool
-	OverrideOffers string
+	Start       bool
+	Stop        bool
+	StopAll     bool
+	SetDefault  bool
+	Edit        bool
+	Headless    bool
+	Create      bool
+	Clone       bool
+	Delete      bool
+	Diagnose    bool
+	OpenData    bool
+	OpenLogs    bool
+	OpenGameLog bool
+	CopyPeerID  bool
 }
 
-// ActionsFor decides the buttons for one selection.
-//
-// selected is nil when nothing is selected, which is the state an installation
-// with no world at all is permanently in — and the state in which the only
-// useful button is the one that makes a world.
+// ActionsFor decides the controls for one selection.
 //
 // busy is an action already running. The core's per-world lock would refuse a
 // second one anyway, and it is a better experience to grey the button than to
 // print "another launcher is starting or stopping this world".
 func ActionsFor(selected *launcher.WorldView, snap launcher.Snapshot, busy bool) Actions {
 	if busy {
-		// Nothing but reading, and the log pane keeps filling. The override
-		// button keeps the caption it had: a caption that flipped while an action
-		// ran and flipped back afterwards would read as the world's setting
-		// having changed.
-		held := Actions{OverrideOffers: ButtonStartHeadless}
-		if selected != nil {
-			held.OverrideOffers = StartOverrideCaption(selected.Headless)
-		}
-		return held
+		// Nothing but reading, and the details pane keeps filling.
+		return Actions{}
 	}
 	anyRunning := false
 	for _, world := range snap.Worlds {
@@ -355,27 +662,26 @@ func ActionsFor(selected *launcher.WorldView, snap launcher.Snapshot, busy bool)
 		// A world can always be created, EXCEPT that an installation with
 		// nothing in it has no game folder to copy — and the create dialog says
 		// so itself rather than being greyed with no explanation.
-		Create:         true,
-		OverrideOffers: ButtonStartHeadless,
+		Create: true,
 	}
 	if selected == nil {
 		return actions
 	}
 	running := selected.Sidecar.Running || selected.Game.Running
 	actions.Start = !running
-	actions.StartOverride = !running
 	actions.Stop = running
 	actions.SetDefault = !selected.Active
 	actions.Edit = true
+	actions.Headless = true
 	actions.Clone = true
 	// The core refuses to delete a world that is running, and it is right to:
 	// the profile is how its processes are found again.
 	actions.Delete = !running
 	actions.Diagnose = true
+	actions.OpenData = true
 	actions.OpenLogs = true
 	actions.OpenGameLog = true
 	actions.CopyPeerID = selected.PeerID != ""
-	actions.OverrideOffers = StartOverrideCaption(selected.Headless)
 	return actions
 }
 
@@ -435,6 +741,17 @@ func FormFor(p launcher.Profile) WorldForm {
 	}
 }
 
+// DefaultNote says, beside a field, whether the value in it is the one a new
+// world is created with. A person editing settings they did not choose cannot
+// otherwise tell which of them are decisions and which are simply what the
+// packaged default happens to be.
+func DefaultNote(value, packaged string) string {
+	if value == packaged {
+		return "(the default)"
+	}
+	return "(default: " + packaged + ")"
+}
+
 // EditFlags turns what a dialog changed into the flags 'profile set' takes.
 //
 // ONLY WHAT CHANGED. 'profile set' changes nothing it is not given a flag for,
@@ -453,11 +770,7 @@ func EditFlags(before launcher.Profile, after WorldForm) []string {
 		add("--sidecar-port", trim(after.Port))
 	}
 	if after.Headless != was.Headless {
-		if after.Headless {
-			flags = append(flags, "--headless")
-		} else {
-			flags = append(flags, "--no-headless")
-		}
+		flags = append(flags, HeadlessFlag(after.Headless))
 	}
 	if trim(after.ExportEdges) != was.ExportEdges {
 		add("--export-edges", trim(after.ExportEdges))
@@ -489,6 +802,16 @@ func EditFlags(before launcher.Profile, after WorldForm) []string {
 	return flags
 }
 
+// HeadlessFlag is the one flag the window's own checkbox sends. It goes through
+// the same 'profile set' path as every other edit, which is what makes the
+// checkbox a SETTING rather than a mode this window remembers on its own.
+func HeadlessFlag(headless bool) string {
+	if headless {
+		return "--headless"
+	}
+	return "--no-headless"
+}
+
 func onOff(value bool) string {
 	if value {
 		return "on"
@@ -498,117 +821,15 @@ func onOff(value bool) string {
 
 func trim(value string) string { return strings.TrimSpace(value) }
 
-// ---------------------------------------------------------------- the log pane
-
-// Log is the writer the core prints into, turned into whole timestamped lines.
-//
-// WHY IT IS NOT JUST AN APPEND. The core writes with fmt.Fprintf, so one line
-// can arrive in several writes and several lines can arrive in one; a stamp per
-// WRITE would put a time in the middle of a sentence, and appending raw bytes
-// would leave a half line at the bottom of the pane for as long as the next
-// write takes — which, during the two-minute wait for a game's mod, is a long
-// time to look at an unfinished sentence.
-//
-// It is safe for several goroutines, because both of the core's streams are
-// pointed at it and the action goroutine is not the only thing that writes.
-type Log struct {
-	mu      sync.Mutex
-	now     func() time.Time
-	pending strings.Builder
-	emit    func(line string)
-}
-
-// NewLog makes a log whose finished lines go to emit. emit is called with the
-// lock released, from whatever goroutine wrote, and it must be safe there: the
-// window's own emit hands the line to the UI thread.
-func NewLog(now func() time.Time, emit func(line string)) *Log {
-	if now == nil {
-		now = time.Now
+// Dedent strips the leading indentation the core's notes carry, which is there
+// because they are printed under a heading in a terminal. In a dialog the same
+// indentation reads as a mistake.
+func Dedent(text string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
 	}
-	return &Log{now: now, emit: emit}
-}
-
-// Write takes whatever the core printed and emits the lines that are complete.
-func (l *Log) Write(p []byte) (int, error) {
-	var ready []string
-	l.mu.Lock()
-	for _, b := range p {
-		switch b {
-		case '\n':
-			ready = append(ready, l.stampLocked())
-		case '\r':
-			// A stray carriage return would draw as a box in a Windows edit
-			// control. The line ends at the newline that follows it.
-		default:
-			l.pending.WriteByte(b)
-		}
-	}
-	l.mu.Unlock()
-	for _, line := range ready {
-		l.emitLine(line)
-	}
-	return len(p), nil
-}
-
-// Flush emits whatever is pending without a newline, which is what a prompt is.
-// The window calls it when an action ends, so nothing sits half-written.
-func (l *Log) Flush() {
-	l.mu.Lock()
-	if l.pending.Len() == 0 {
-		l.mu.Unlock()
-		return
-	}
-	line := l.stampLocked()
-	l.mu.Unlock()
-	l.emitLine(line)
-}
-
-func (l *Log) emitLine(line string) {
-	if l.emit != nil {
-		l.emit(line)
-	}
-}
-
-// stampLocked takes the pending line and puts the time on the front of it.
-func (l *Log) stampLocked() string {
-	text := l.pending.String()
-	l.pending.Reset()
-	if text == "" {
-		// An empty line is a blank line the core printed on purpose — the start
-		// sequence uses them to separate its blocks — and a bare timestamp would
-		// undo the spacing. It stays empty.
-		return ""
-	}
-	return l.now().Format("15:04:05") + "  " + text
-}
-
-// ---------------------------------------------------------------- the log pane
-
-// LogFollowsTail answers the one question an appending log pane has to ask
-// before it scrolls: is the reader at the bottom, watching it happen, or have
-// they scrolled up to read something?
-//
-// A pane that always jumps to the newest line drags a person off the line they
-// were reading every hundred milliseconds, and a start prints for two minutes.
-// A pane that never jumps shows the two oldest lines of a session forever, which
-// is the bug this was written for. So it follows while the bar is at the bottom
-// and stops the moment it is not.
-//
-// The three numbers are the vertical scroll bar's own, as Windows reports them
-// (SCROLLINFO with SIF_RANGE|SIF_PAGE|SIF_POS, normalised so the range starts at
-// zero): the first visible line, how many lines are visible, and the last line
-// the range covers. Windows leaves nMax at the LAST LINE rather than the last
-// line one can scroll to, so at the bottom is pos+page == max+1 — and one line
-// of slack is allowed, because a pane whose last line is half-hidden by a
-// partial row is still a pane somebody is watching.
-//
-// page == 0 means there is no scroll bar to read: everything fits, and following
-// costs nothing.
-func LogFollowsTail(pos, page, max int) bool {
-	if page <= 0 {
-		return true
-	}
-	return pos+page >= max
+	return strings.Join(lines, " ")
 }
 
 // ---------------------------------------------------------------- forwarding

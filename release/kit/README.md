@@ -109,16 +109,28 @@ so on your screen while it runs, and `docs/participant/install.md` says so on th
 ## Start and stop
 
 The setup creates **Bibites Multiverse** icons on the desktop and Start Menu. Both open
-`BibitesMultiverseLauncher.exe`, the installed application's **window**. It lists every world on
-this computer with its port, whether its sidecar and its game are running, whether the game's mod
-has really reached the sidecar, the speed it is achieving and its place on the map, and it keeps
-that list up to date while they run. Select a world and the buttons act on it: **Start**,
-**Start with no window (this time only)**, **Stop**, **Stop every world**, **Set as default**,
-**Edit settings...**, **Create another world...**, **Clone world...**, **Delete world...**,
-**Check this world**, **Open logs folder**, **Open the game's BepInEx log** and **Copy peer id**.
-Everything it does is reported in the log pane along the bottom.
+`BibitesMultiverseLauncher.exe`, the installed application's **window**.
 
-**Closing the window does not stop your worlds.** They keep running; the window says so.
+**On the left it lists every world on this computer**, one line each, saying in plain words and in
+colour what that world is doing: grey **Stopped**, amber **Starting...**, green
+**On the map - speed x10**, red **NOT on the map**. The red one is the one to know about — a world
+can be running with its place on the map held and nothing actually crossing, and that is the state
+this window exists to make visible.
+
+**On the right is the world you selected**, with one big button — **Start** when it is stopped,
+**Stop** when it is running — the check box **Run without a game window (headless)**, and this
+world's save name, port, speed, folder and identity on the map. While anything is happening a bar
+spins and a line says what stage it has reached; when it is over, one green or red line stays on
+screen. **Show details** opens the whole of what the launcher did, and it opens **by itself**
+whenever something goes wrong.
+
+The rest is in two menus. **World**: **Run a health check**, **Edit settings...**,
+**Clone this world...**, **Delete this world...**, **Set as the default world**,
+**Create a world...**, **Stop every world**. **Open**: the data folder, the logs folder, the game's
+own log, and the commands window.
+
+**Closing the window does not stop your worlds.** They keep running; the window says so, and its
+title bar says how many are up.
 
 The commands are a second program in the same folder, `multiverse-launcher.exe`, and it is the one
 to name in a shortcut, a script or a scheduled task. It also has the numbered console menu, which
@@ -170,7 +182,7 @@ identity and never expires.
 
 ## More than one world on this computer
 
-**The launcher creates them, and a second kit is not needed.** Press **Create another world...**
+**The launcher creates them, and a second kit is not needed.** Press **Create a world...**
 in its window, or:
 
 ```powershell
@@ -298,7 +310,7 @@ system prints one, and no diagnostic asks for one.
 | `bibites-multiverse.ico` | The application and setup icon |
 | `BibitesMultiverse.dll` | The mod, a BepInEx plugin |
 | `multiverse-sidecar.exe` | The program that speaks to the map on your world's behalf |
-| `BibitesMultiverseLauncher.exe` | The installed application's window: it lists your worlds, starts and stops them, and manages more than one of them. The icons open this |
+| `BibitesMultiverseLauncher.exe` | The installed application's window: it lists your worlds and what each of them is doing, starts and stops them, and manages more than one of them. The icons open this |
 | `multiverse-launcher.exe` | The same launcher's commands and console menu. This is the one a script calls |
 | `profiles\` | Created by the installer beside these files: one JSON file per world, plus `active.txt`. **Never contains a secret** |
 | `BepInEx_win_x64_5.4.23.3.zip` | The mod framework, exactly as its own project publishes it |

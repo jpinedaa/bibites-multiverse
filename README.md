@@ -163,12 +163,13 @@ After checksum verification, use these platform steps:
 | Windows | [`bibites-multiverse-0.2.8-windows-x64-setup.exe`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.8/bibites-multiverse-0.2.8-windows-x64-setup.exe) | Double-click the one downloaded file | Starts after install by default. Later use the **Bibites Multiverse** icon, which opens the launcher |
 | Linux | [`bibites-multiverse-0.2.8-linux-x64-complete.zip`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.2.8/bibites-multiverse-0.2.8-linux-x64-complete.zip) | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
-To run a world without graphics on Windows, tick **headless** in the launcher's **Edit
-settings...**, or press **Start with no window (this time only)** for one session. The commands do
-the same: `multiverse-launcher.exe start --headless`, and `start --no-headless` draws it again. On
-Linux, use `./start-multiverse.sh --headless`. The simulation remains active.
+To run a world without graphics on Windows, tick **Run without a game window (headless)** in the
+launcher window. It is that world's own setting and it is written the moment you tick it. For one
+session only, the commands do it instead: `multiverse-launcher.exe start --headless`, and
+`start --no-headless` draws it again. On Linux, use `./start-multiverse.sh --headless`. The
+simulation remains active.
 
-One Windows computer can run several worlds at the same time. **Create another world...** in the
+One Windows computer can run several worlds at the same time. **Create a world...** in the
 launcher window, or `multiverse-launcher.exe profile create NAME --world NAME --sidecar-port 8788`,
 adds a world with its own map identity, data folder, and sidecar port. One game folder supports five worlds at
 once. Each extra world enrolls its own identity on the public map.

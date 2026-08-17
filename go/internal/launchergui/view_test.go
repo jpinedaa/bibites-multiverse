@@ -3,18 +3,15 @@ package launchergui
 import (
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"multiverse/internal/launcher"
 )
 
 // These tests run on the machine this project is developed on, which has no
 // Windows. What they cover is everything about the window that is not a widget:
-// the table's columns against the values put in them, the buttons a state
-// enables, the flags a dialog turns into a 'profile set', and the log pane's
-// line assembly.
+// the words a state is rendered as, the colour that goes with them, which
+// control a state enables, and the flags a dialog turns into a 'profile set'.
 
 func aWorld() launcher.WorldView {
 	return launcher.WorldView{
@@ -44,6 +41,139 @@ func aWorld() launcher.WorldView {
 	}
 }
 
+func stoppedWorld() launcher.WorldView {
+	world := aWorld()
+	world.Sidecar.Running, world.Game.Running = false, false
+	world.Mod = launcher.ModView{}
+	return world
+}
+
+// THE STATE TABLE. Every state is a different sentence AND a different colour,
+// and the two that must never collapse into one are "on the map" and "running
+// but not on the map": when those two look alike, the map shows a world live
+// with nothing behind it and every other sign on the machine looks healthy.
+// That is LOCAL-CONFIGRACE and LOCAL-STARVATION in docs/error-taxonomy.md, and
+// it is the reason this window exists at all.
+func TestEveryStateHasItsOwnWordsAndColour(t *testing.T) {
+	waiting := aWorld()
+	waiting.Game.Running = false
+	waiting.Mod = launcher.ModView{Answered: true, Slot: 3, SlotKnown: true, Live: true}
+
+	orphan := aWorld()
+	orphan.Mod = launcher.ModView{Answered: true}
+
+	starting := aWorld()
+	starting.Game.Running = false
+	starting.Mod = launcher.ModView{}
+
+	gameAlone := aWorld()
+	gameAlone.Sidecar.Running = false
+	gameAlone.Mod = launcher.ModView{}
+
+	cases := []struct {
+		name   string
+		world  launcher.WorldView
+		busy   Busy
+		state  State
+		colour Colour
+		// short and headline are checked as substrings, so the wording can be
+		// improved without rewriting the table — but the DISTINCTION each one
+		// carries is pinned.
+		short    string
+		headline string
+	}{
+		{"stopped", stoppedWorld(), Busy{}, StateStopped, ColourGrey, "Stopped", "Stopped"},
+		{"an action of ours is running", stoppedWorld(),
+			Busy{World: "default", Short: "Starting...", Phrase: "Waiting for the map to give this world a place..."},
+			StateWorking, ColourAmber, "Starting...", "Waiting for the map"},
+		{"up, nothing answering yet", starting, Busy{}, StateStarting, ColourAmber,
+			"Starting...", "waiting for the map to answer"},
+		{"on the map, no game yet", waiting, Busy{}, StateWaiting, ColourAmber,
+			"Waiting for the game", "waiting for the game to join"},
+		{"on the map with a game behind it", aWorld(), Busy{}, StateOnTheMap, ColourGreen,
+			"On the map", "Running - on the map (place 3) - speed x10"},
+		{"running, and NOT on the map", orphan, Busy{}, StateNotOnTheMap, ColourRed,
+			"NOT on the map", "Running, but NOT on the map"},
+		{"a game with nothing holding its place", gameAlone, Busy{}, StateNoMapLink, ColourRed,
+			"NOT on the map", "no link to the map"},
+	}
+	for _, test := range cases {
+		got := StatusFor(test.world, test.busy)
+		if got.State != test.state {
+			t.Fatalf("%s: state %d, want %d", test.name, got.State, test.state)
+		}
+		if got.Colour != test.colour {
+			t.Fatalf("%s: colour %d, want %d", test.name, got.Colour, test.colour)
+		}
+		if !strings.Contains(got.Short, test.short) {
+			t.Fatalf("%s: the list says %q, want %q in it", test.name, got.Short, test.short)
+		}
+		if !strings.Contains(got.Headline, test.headline) {
+			t.Fatalf("%s: the panel says %q, want %q in it", test.name, got.Headline, test.headline)
+		}
+	}
+
+	// The distinction that costs a participant their world when it is lost: the
+	// two red states and the green one are three different sentences.
+	onMap := StatusFor(aWorld(), Busy{})
+	notOnMap := StatusFor(orphan, Busy{})
+	if onMap.Headline == notOnMap.Headline || onMap.Short == notOnMap.Short {
+		t.Fatal("a world on the map and a world with no mod behind it read the same")
+	}
+	if !strings.Contains(notOnMap.Headline, "NOT") {
+		t.Fatalf("the state that matters is not shouted: %q", notOnMap.Headline)
+	}
+}
+
+// A slot the map has not granted yet is SAID NOTHING ABOUT rather than rendered
+// as a dash: "(place -)" in a sentence reads as a fault instead of as a fact not
+// in yet.
+func TestTheHeadlineOnlyNamesWhatIsKnown(t *testing.T) {
+	slotless := aWorld()
+	slotless.Mod.SlotKnown = false
+	if got := StatusFor(slotless, Busy{}).Headline; strings.Contains(got, "place") {
+		t.Fatalf("an unknown place was named: %q", got)
+	}
+	notLive := aWorld()
+	notLive.Mod.Live = false
+	if got := StatusFor(notLive, Busy{}).Headline; !strings.Contains(got, "not live") {
+		t.Fatalf("a place that is not live yet reads %q", got)
+	}
+	unmeasured := aWorld()
+	unmeasured.Mod.TimeScale = 0
+	if got := StatusFor(unmeasured, Busy{}).Headline; strings.Contains(got, "speed") {
+		t.Fatalf("a world that has not said its speed claimed one: %q", got)
+	}
+}
+
+// A busy world is amber in the list wherever the action came from, and 'stop
+// every world' covers all of them at once.
+func TestBusyCoversTheWorldsAnActionIsAbout(t *testing.T) {
+	one := aWorld()
+	two := aWorld()
+	two.Name, two.Active = "second", false
+	snap := launcher.Snapshot{Worlds: []launcher.WorldView{one, two}}
+
+	rows := RowsFrom(snap, Job{Kind: JobStop, World: "second"}.Busy())
+	if rows[0].Status.State == StateWorking {
+		t.Fatal("a world no action is about was marked busy")
+	}
+	if rows[1].Status.State != StateWorking || rows[1].Status.Colour != ColourAmber {
+		t.Fatalf("the world being stopped reads %+v", rows[1].Status)
+	}
+	// Names are compared without case, because the file system a profile lands
+	// on is.
+	if rows := RowsFrom(snap, Job{Kind: JobStop, World: "SECOND"}.Busy()); rows[1].Status.State != StateWorking {
+		t.Fatal("a world named in another case was not matched")
+	}
+	all := RowsFrom(snap, Job{Kind: JobStopAll}.Busy())
+	for i, row := range all {
+		if row.Status.State != StateWorking {
+			t.Fatalf("row %d was not covered by 'stop every world': %+v", i, row.Status)
+		}
+	}
+}
+
 // Every column has a header and every header has a value. A table whose Value
 // switch has drifted from its Columns list shows one column's data under
 // another's title, silently.
@@ -52,7 +182,7 @@ func TestEveryColumnHasAHeaderAndAValue(t *testing.T) {
 	if len(columns) != columnCount {
 		t.Fatalf("there are %d columns and %d column indices", len(columns), columnCount)
 	}
-	row := RowFrom(aWorld())
+	row := RowFrom(aWorld(), Busy{})
 	for i, column := range columns {
 		if column.Title == "" {
 			t.Fatalf("column %d has no title", i)
@@ -60,7 +190,7 @@ func TestEveryColumnHasAHeaderAndAValue(t *testing.T) {
 		if column.Width <= 0 {
 			t.Fatalf("column %q has width %d", column.Title, column.Width)
 		}
-		if row.Cell(i) == "" {
+		if strings.TrimSpace(row.Cell(i)) == "" {
 			t.Fatalf("column %q renders nothing for a whole world", column.Title)
 		}
 	}
@@ -69,114 +199,175 @@ func TestEveryColumnHasAHeaderAndAValue(t *testing.T) {
 	if row.Cell(columnCount) != "" || row.Cell(-1) != "" {
 		t.Fatal("a column that does not exist rendered something")
 	}
-	// The active world is marked, the way the console status marks it.
+	// The default world is marked, the way the console status marks it.
 	if !strings.HasPrefix(row.Cell(ColWorld), "* ") {
-		t.Fatalf("the active world is not marked: %q", row.Cell(ColWorld))
+		t.Fatalf("the default world is not marked: %q", row.Cell(ColWorld))
+	}
+	if strings.HasPrefix(RowFrom(stoppedNamed("second"), Busy{}).Cell(ColWorld), "*") {
+		t.Fatal("a world that is not the default was marked")
 	}
 }
 
-// The four states of "is this world actually on the map" are four different
-// words. Collapsing any two of them is how a world with no game behind it looks
-// healthy, which is the whole reason this column exists.
-func TestTheMapColumnNeverCollapsesTheFourStates(t *testing.T) {
-	world := aWorld()
-	if got := RowFrom(world).Mod; got != "connected (mod 0.6.7)" {
-		t.Fatalf("a connected world reads %q", got)
-	}
-
-	stopped := aWorld()
-	stopped.Sidecar.Running = false
-	stopped.Game.Running = false
-	stopped.Mod = launcher.ModView{}
-	if got := RowFrom(stopped).Mod; got != "-" {
-		t.Fatalf("a stopped world reads %q", got)
-	}
-
-	unanswered := aWorld()
-	unanswered.Mod = launcher.ModView{}
-	if got := RowFrom(unanswered).Mod; got != "sidecar not answering" {
-		t.Fatalf("a sidecar that says nothing reads %q", got)
-	}
-
-	// THE ONE THAT MATTERS: the sidecar holds the slot, the game is up, and the
-	// mod never arrived. The map shows this world live with nothing behind it.
-	orphan := aWorld()
-	orphan.Mod = launcher.ModView{Answered: true}
-	got := RowFrom(orphan).Mod
-	if !strings.Contains(got, "NOT CONNECTED") {
-		t.Fatalf("a world whose mod never arrived reads %q", got)
-	}
-	if RowFrom(orphan).Speed != "-" && RowFrom(orphan).Speed != "" {
-		t.Fatalf("a world with no mod reported a speed: %q", RowFrom(orphan).Speed)
-	}
-
-	// A sidecar up with no game yet is neither of those.
-	waiting := aWorld()
-	waiting.Game.Running = false
-	waiting.Mod = launcher.ModView{Answered: true}
-	if got := RowFrom(waiting).Mod; got != "no game" {
-		t.Fatalf("a world whose game is not running reads %q", got)
-	}
+func stoppedNamed(name string) launcher.WorldView {
+	world := stoppedWorld()
+	world.Name, world.Active = name, false
+	return world
 }
 
-// The speed column carries the target AND what the world produced, because the
-// gap between them is the reading.
-func TestSpeedShowsTargetAndAchieved(t *testing.T) {
+// THE PANEL IS ONE DECISION, taken here and moved into widgets by the window. A
+// test that can read a whole screen is what keeps the window from growing rules
+// of its own.
+func TestThePanelSaysOneThingAboutOneWorld(t *testing.T) {
 	world := aWorld()
-	if got := RowFrom(world).Speed; got != "x10 (6.5 achieved)" {
-		t.Fatalf("the speed reads %q", got)
+	snap := launcher.Snapshot{Worlds: []launcher.WorldView{world}}
+	panel := PanelFor(&world, snap, Busy{})
+	if panel.World != "default" {
+		t.Fatalf("the panel names %q", panel.World)
 	}
-	// A mod that has not measured a span yet reports the target alone rather
+	if panel.Primary.Caption != ButtonStop || !panel.Primary.Enabled {
+		t.Fatalf("a running world's button is %+v", panel.Primary)
+	}
+	if panel.Working {
+		t.Fatal("an idle window is showing a progress bar")
+	}
+	if panel.Primary.Tip == "" || panel.Primary.Tip == panel.Primary.Caption {
+		t.Fatalf("the primary button's tooltip is %q", panel.Primary.Tip)
+	}
+	// The facts are FIXED IN ORDER AND IN LENGTH, because the grid is built once
+	// and only its values change. A short list would leave a value under the
+	// wrong label.
+	labels := FactLabels()
+	if len(panel.Facts) != len(labels) {
+		t.Fatalf("%d facts for %d labels", len(panel.Facts), len(labels))
+	}
+	for i, label := range labels {
+		if panel.Facts[i].Label != label {
+			t.Fatalf("fact %d is %q, want %q", i, panel.Facts[i].Label, label)
+		}
+	}
+	byLabel := map[string]string{}
+	for _, fact := range panel.Facts {
+		byLabel[fact.Label] = fact.Value
+	}
+	if byLabel[FactSave] != "Multiverse" || byLabel[FactPort] != "8787" {
+		t.Fatalf("the facts are %v", byLabel)
+	}
+	if byLabel[FactSpeed] != "x10 asked for, x6.5 achieved" {
+		t.Fatalf("the speed reads %q", byLabel[FactSpeed])
+	}
+	if byLabel[FactIdentity] != world.PeerID || byLabel[FactData] != world.DataRoot {
+		t.Fatalf("the facts are %v", byLabel)
+	}
+
+	// A world that has not measured a span yet reports the target alone rather
 	// than claiming zero.
 	world.Mod.Achieved = 0
-	if got := RowFrom(world).Speed; got != "x10" {
+	if got := PanelFor(&world, snap, Busy{}).Facts[2].Value; got != "x10 asked for" {
 		t.Fatalf("an unmeasured speed reads %q", got)
 	}
-	slotless := aWorld()
-	slotless.Mod.SlotKnown = false
-	if got := RowFrom(slotless).Slot; got != "-" {
-		t.Fatalf("an unknown slot reads %q", got)
+
+	// A stopped world offers Start.
+	stopped := stoppedWorld()
+	if got := PanelFor(&stopped, snap, Busy{}).Primary.Caption; got != ButtonStart {
+		t.Fatalf("a stopped world's button is %q", got)
 	}
-	notLive := aWorld()
-	notLive.Mod.Live = false
-	if got := RowFrom(notLive).Slot; got != "3 (not live)" {
-		t.Fatalf("a slot that is not live reads %q", got)
+
+	// While anything at all is running, the panel says what is happening and the
+	// button cannot be pressed — including for a job about a DIFFERENT world,
+	// because there is one action goroutine and it is occupied.
+	busy := Job{Kind: JobCreate, World: "world2"}.Busy()
+	during := PanelFor(&stopped, snap, busy)
+	if !during.Working || during.Primary.Enabled {
+		t.Fatalf("a busy window offered its primary action: %+v", during)
+	}
+	if !strings.Contains(during.Headline, "world2") {
+		t.Fatalf("the panel does not say what is happening: %q", during.Headline)
 	}
 }
 
-func TestRowsFromASnapshot(t *testing.T) {
-	second := aWorld()
-	second.Name, second.World, second.Active = "second", "Second", false
-	second.Sidecar.Running, second.Game.Running = false, false
-	second.Headless = true
-	second.Mod = launcher.ModView{}
-	rows := RowsFrom(launcher.Snapshot{Worlds: []launcher.WorldView{aWorld(), second}})
-	if len(rows) != 2 {
-		t.Fatalf("%d rows from two worlds", len(rows))
+// The first run: one world, stopped, and a person who has never seen this
+// window. The headline alone does not tell them what to do.
+func TestTheFirstRunSaysWhatToDo(t *testing.T) {
+	world := stoppedWorld()
+	one := launcher.Snapshot{Worlds: []launcher.WorldView{world}}
+	hint := PanelFor(&world, one, Busy{}).Hint
+	if !strings.Contains(hint, ButtonStart) {
+		t.Fatalf("a first run is told %q", hint)
 	}
-	if rows[1].Headless != "no window" || rows[0].Headless != "window" {
-		t.Fatalf("the window column reads %q and %q", rows[0].Headless, rows[1].Headless)
+
+	// With two worlds this person has used the window before, and a standing
+	// instruction under every stopped world is noise.
+	second := stoppedNamed("second")
+	two := launcher.Snapshot{Worlds: []launcher.WorldView{world, second}}
+	if got := PanelFor(&world, two, Busy{}).Hint; got != "" {
+		t.Fatalf("an experienced installation is told %q", got)
 	}
-	if rows[1].Sidecar != "stopped" {
-		t.Fatalf("a stopped sidecar reads %q", rows[1].Sidecar)
+
+	// A world that is running and not on the map is told where to look, whatever
+	// else is installed.
+	orphan := aWorld()
+	orphan.Mod = launcher.ModView{Answered: true}
+	if got := PanelFor(&orphan, two, Busy{}).Hint; !strings.Contains(got, "details") {
+		t.Fatalf("a world that is not on the map is told %q", got)
 	}
-	if !strings.Contains(rows[0].Sidecar, "4242") {
-		t.Fatalf("a running sidecar does not name its pid: %q", rows[0].Sidecar)
+
+	// Nothing installed at all: the panel is not blank, and it names the button.
+	empty := PanelFor(nil, launcher.Snapshot{}, Busy{})
+	if empty.Headline == "" || !strings.Contains(empty.Hint, ButtonCreate) {
+		t.Fatalf("an empty installation's panel is %+v", empty)
+	}
+	if len(empty.Facts) != len(FactLabels()) {
+		t.Fatal("an empty panel dropped the facts grid, so its labels would move")
 	}
 }
 
-// A button that is enabled when the core would refuse it is a refusal a
-// participant has to read for no reason, and a button that is disabled when the
+// The banner REPORTS AND THEN SAYS WHAT TO DO. An installation whose files
+// cannot be read must never look like an installation with no worlds.
+func TestTheBannerNamesTheFileAndTheRemedy(t *testing.T) {
+	if got := BannerFor(launcher.Snapshot{Worlds: []launcher.WorldView{aWorld()}}); got != "" {
+		t.Fatalf("a healthy installation showed %q", got)
+	}
+	broken := launcher.Snapshot{
+		Worlds:   []launcher.WorldView{aWorld()},
+		Problems: []string{`C:\...\profiles\broken.json is not readable as a world profile`},
+	}
+	got := BannerFor(broken)
+	if !strings.Contains(got, "broken.json") || !strings.Contains(got, "installer") {
+		t.Fatalf("the banner reads %q", got)
+	}
+	empty := BannerFor(launcher.Snapshot{})
+	if !strings.Contains(empty, ButtonCreate) {
+		t.Fatalf("an empty installation's banner reads %q", empty)
+	}
+}
+
+// The title bar carries the one fact somebody wants from the taskbar.
+func TestTheTitleSaysHowManyWorldsAreRunning(t *testing.T) {
+	// A window with nothing running keeps the frozen caption exactly, because
+	// that is the string the machine harness looks for.
+	if got := WindowTitleFor(launcher.Snapshot{Worlds: []launcher.WorldView{stoppedWorld()}}); got != WindowTitle {
+		t.Fatalf("an idle window is titled %q", got)
+	}
+	snap := launcher.Snapshot{Worlds: []launcher.WorldView{aWorld(), stoppedNamed("second")}}
+	got := WindowTitleFor(snap)
+	if !strings.HasPrefix(got, WindowTitle) {
+		t.Fatalf("the title no longer starts with the frozen caption: %q", got)
+	}
+	if !strings.Contains(got, "1 of 2") {
+		t.Fatalf("the title reads %q", got)
+	}
+}
+
+// A control that is enabled when the core would refuse it is a refusal a
+// participant has to read for no reason, and a control that is disabled when the
 // core would accept it is a feature they cannot reach.
-func TestButtonsFollowWhatTheCoreWouldAccept(t *testing.T) {
+func TestControlsFollowWhatTheCoreWouldAccept(t *testing.T) {
 	running := aWorld()
-	stopped := aWorld()
-	stopped.Name, stopped.Active = "second", false
-	stopped.Sidecar.Running, stopped.Game.Running = false, false
+	stopped := stoppedNamed("second")
 	snap := launcher.Snapshot{Worlds: []launcher.WorldView{running, stopped}}
 
 	onRunning := ActionsFor(&running, snap, false)
-	if onRunning.Start || onRunning.StartOverride {
+	if onRunning.Start {
 		t.Fatal("a running world offered Start")
 	}
 	if !onRunning.Stop || !onRunning.StopAll {
@@ -186,18 +377,30 @@ func TestButtonsFollowWhatTheCoreWouldAccept(t *testing.T) {
 		t.Fatal("a running world offered Delete; the core refuses it")
 	}
 	if onRunning.SetDefault {
-		t.Fatal("the active world offered Set as default")
+		t.Fatal("the default world offered Set as the default world")
 	}
-	if !onRunning.CopyPeerID || !onRunning.Diagnose || !onRunning.OpenLogs {
+	if !onRunning.CopyPeerID || !onRunning.Diagnose || !onRunning.OpenLogs || !onRunning.OpenData {
 		t.Fatalf("a running world lost a reading action: %+v", onRunning)
+	}
+	// The window setting is a SETTING, so it can be changed whichever way the
+	// world is: the core writes it and it takes effect at the next start.
+	if !onRunning.Headless {
+		t.Fatal("a running world cannot be told how to run next time")
 	}
 
 	onStopped := ActionsFor(&stopped, snap, false)
-	if !onStopped.Start || !onStopped.StartOverride || !onStopped.Delete || !onStopped.SetDefault {
+	if !onStopped.Start || !onStopped.Delete || !onStopped.SetDefault {
 		t.Fatalf("a stopped world is missing an action: %+v", onStopped)
 	}
 	if onStopped.Stop {
 		t.Fatal("a stopped world offered Stop")
+	}
+
+	// A world with no identity yet cannot have one copied.
+	noID := stopped
+	noID.PeerID = ""
+	if ActionsFor(&noID, snap, false).CopyPeerID {
+		t.Fatal("a world with no identity offered to copy it")
 	}
 
 	// Nothing selected: an installation with no worlds at all can still make one.
@@ -205,51 +408,71 @@ func TestButtonsFollowWhatTheCoreWouldAccept(t *testing.T) {
 	if !empty.Create {
 		t.Fatal("an empty installation cannot create a world")
 	}
-	if empty.Start || empty.Stop || empty.Delete || empty.StopAll {
+	if empty.Start || empty.Stop || empty.Delete || empty.StopAll || empty.Headless {
 		t.Fatalf("an empty installation offered an action: %+v", empty)
 	}
 
 	// While an action runs, nothing else can be pressed: the core's per-world
 	// lock would refuse it and a grey button says so better than a refusal.
 	busy := ActionsFor(&stopped, snap, true)
-	if busy.Start || busy.Stop || busy.Create || busy.Delete || busy.Diagnose {
+	if busy != (Actions{}) {
 		t.Fatalf("a busy window still offered actions: %+v", busy)
-	}
-
-	// The override button always offers the OTHER way round.
-	if onStopped.OverrideOffers != ButtonStartHeadless {
-		t.Fatalf("a windowed world offers %q", onStopped.OverrideOffers)
-	}
-	headless := stopped
-	headless.Headless = true
-	if got := ActionsFor(&headless, snap, false).OverrideOffers; got != ButtonStartWindowed {
-		t.Fatalf("a headless world offers %q", got)
-	}
-	if StartOverrideCaption(true) == StartOverrideCaption(false) {
-		t.Fatal("the two override captions are the same string")
 	}
 }
 
-// Every caption the harness clicks by is unique: two controls with one caption
-// is an ambiguous click.
-func TestButtonCaptionsAreUnique(t *testing.T) {
+// Every caption the harness clicks by is unique: two DIFFERENT actions with one
+// caption is an ambiguous click. (The same action may wear its caption on a
+// button, a menu item and a context menu item — that is the point of keying them
+// by caption.)
+func TestCaptionsAreUniqueAndPlain(t *testing.T) {
 	captions := []string{
-		ButtonStart, ButtonStop, ButtonStopAll, ButtonSetDefault, ButtonEdit,
-		ButtonCreate, ButtonClone, ButtonDelete, ButtonDiagnose, ButtonOpenLogs,
-		ButtonOpenGameLog, ButtonCopyPeerID, ButtonCopyLog,
-		ButtonStartWindowed, ButtonStartHeadless,
+		ButtonStart, ButtonStop, ButtonCreate, ButtonStopAll, ButtonSetDefault,
+		ButtonEdit, ButtonClone, ButtonDelete, ButtonDiagnose,
+		ButtonOpenData, ButtonOpenLogs, ButtonOpenGameLog, ButtonOpenConsole,
+		ButtonCopyPeerID, ButtonCopyLog, ButtonRefresh, ButtonQuit, ButtonDocs, ButtonAbout,
+		CheckHeadless, ButtonShowDetails, ButtonHideDetails,
 		ButtonDialogSave, ButtonDialogCreate, ButtonDialogClone, ButtonDialogDelete,
-		ButtonDialogCancel,
+		ButtonDialogCancel, ButtonShowAdvanced, ButtonHideAdvanced, CheckRemoveWorldData,
 	}
 	seen := make(map[string]bool, len(captions))
 	for _, caption := range captions {
 		if caption == "" {
-			t.Fatal("a button has no caption")
+			t.Fatal("a control has no caption")
 		}
 		if seen[caption] {
-			t.Fatalf("two buttons are captioned %q", caption)
+			t.Fatalf("two controls are captioned %q", caption)
 		}
 		seen[caption] = true
+	}
+
+	// PLAIN WORDS. Nothing a person reads on a control names a thing only this
+	// project has. Those words are all still in the window — in the details pane,
+	// which is where the program's own output goes.
+	jargon := []string{"profile", "sidecar", "contract", "peer", "enroll", "headless "}
+	for _, caption := range captions {
+		lower := strings.ToLower(caption)
+		for _, word := range jargon {
+			if strings.Contains(lower, word) {
+				t.Fatalf("the caption %q uses the internal word %q", caption, word)
+			}
+		}
+	}
+
+	// Every tooltip says something the caption does not, because a tooltip that
+	// repeats its caption has cost a person a hover for nothing.
+	tips := map[string]string{
+		ButtonStart: StartTip, ButtonStop: StopTip, ButtonCreate: CreateTip,
+		ButtonStopAll: StopAllTip, ButtonSetDefault: SetDefaultTip, ButtonEdit: EditTip,
+		ButtonClone: CloneTip, ButtonDelete: DeleteTip, ButtonDiagnose: DiagnoseTip,
+		ButtonOpenData: OpenDataTip, ButtonOpenLogs: OpenLogsTip,
+		ButtonOpenGameLog: OpenGameLogTip, ButtonOpenConsole: OpenConsoleTip,
+		ButtonCopyPeerID: CopyPeerIDTip, ButtonCopyLog: CopyLogTip,
+		CheckHeadless: HeadlessTip, ButtonShowDetails: DetailsTip, ButtonRefresh: RefreshTip,
+	}
+	for caption, tip := range tips {
+		if len(tip) <= len(caption) {
+			t.Fatalf("the tooltip for %q is %q, which says no more than the caption does", caption, tip)
+		}
 	}
 }
 
@@ -293,6 +516,10 @@ func TestEditFlagsSendOnlyWhatChanged(t *testing.T) {
 	if strings.Join(EditFlags(headless, form), " ") != "--no-headless" {
 		t.Fatalf("clearing headless produced %v", EditFlags(headless, form))
 	}
+	// And the panel's own checkbox sends exactly the flag an edit would.
+	if HeadlessFlag(true) != "--headless" || HeadlessFlag(false) != "--no-headless" {
+		t.Fatalf("the checkbox sends %q and %q", HeadlessFlag(true), HeadlessFlag(false))
+	}
 
 	form = FormFor(before)
 	form.SaveOnQuit = false
@@ -321,6 +548,34 @@ func TestEditFlagsSendOnlyWhatChanged(t *testing.T) {
 	}
 }
 
+// A person editing settings they did not choose cannot otherwise tell which of
+// them are decisions and which are simply what the packaged default happens to
+// be.
+func TestDefaultNoteSaysWhichValuesAreThePackagedOnes(t *testing.T) {
+	if got := DefaultNote("E,N,W,S", launcher.DefaultExportEdges); !strings.Contains(got, "the default") {
+		t.Fatalf("an untouched default reads %q", got)
+	}
+	got := DefaultNote("E", launcher.DefaultExportEdges)
+	if !strings.Contains(got, launcher.DefaultExportEdges) {
+		t.Fatalf("a changed value does not name the default: %q", got)
+	}
+}
+
+// The core's notes are printed under a heading in a terminal, so they carry an
+// indentation that reads as a mistake in a dialog.
+func TestDedentFlattensTheCoresOwnNotes(t *testing.T) {
+	got := Dedent(launcher.PublicMapNote())
+	if strings.Contains(got, "\n") || strings.HasPrefix(got, " ") {
+		t.Fatalf("the note still carries its layout: %q", got)
+	}
+	if !strings.Contains(got, "per-address enrollment limit") {
+		t.Fatalf("the note lost its content: %q", got)
+	}
+	if strings.Contains(Dedent(launcher.CustodyWarning()), "  ") {
+		t.Fatal("the custody warning still carries a double space")
+	}
+}
+
 // The name a create dialog opens on has to be one the core would accept, and it
 // has to be chosen BEFORE the defaults that are derived from it.
 func TestNextFreeWorldName(t *testing.T) {
@@ -339,98 +594,6 @@ func TestNextFreeWorldName(t *testing.T) {
 	}
 }
 
-// The log pane's lines: one stamp per line, whole lines only, and a blank line
-// stays blank.
-func TestLogAssemblesWholeLinesWithOneStampEach(t *testing.T) {
-	at := time.Date(2026, 8, 17, 9, 41, 7, 0, time.UTC)
-	var lines []string
-	log := NewLog(func() time.Time { return at }, func(line string) {
-		lines = append(lines, line)
-	})
-
-	// One sentence in three writes, which is what fmt.Fprintf does.
-	log.Write([]byte("sidecar started "))
-	log.Write([]byte("(pid 42)"))
-	if len(lines) != 0 {
-		t.Fatalf("an unfinished line was emitted: %v", lines)
-	}
-	log.Write([]byte("\n"))
-	if len(lines) != 1 || lines[0] != "09:41:07  sidecar started (pid 42)" {
-		t.Fatalf("the assembled line is %v", lines)
-	}
-
-	// Several lines in one write, a blank line among them, and Windows line
-	// endings.
-	lines = nil
-	log.Write([]byte("YOU ARE ON THE MAP:\r\n\r\n  slot granted\r\n"))
-	if len(lines) != 3 {
-		t.Fatalf("%d lines from three: %v", len(lines), lines)
-	}
-	if lines[1] != "" {
-		t.Fatalf("a blank line became %q", lines[1])
-	}
-	for _, line := range []string{lines[0], lines[2]} {
-		if !strings.HasPrefix(line, "09:41:07  ") {
-			t.Fatalf("a line lost its stamp: %q", line)
-		}
-		if strings.Contains(line, "\r") {
-			t.Fatalf("a carriage return reached the pane: %q", line)
-		}
-	}
-
-	// A prompt has no newline, and Flush is what puts it on screen.
-	lines = nil
-	log.Write([]byte("type the world's name: "))
-	log.Flush()
-	if len(lines) != 1 || !strings.HasSuffix(lines[0], "type the world's name: ") {
-		t.Fatalf("Flush emitted %v", lines)
-	}
-	// Flushing nothing emits nothing, so an idle window does not fill with
-	// stamps.
-	lines = nil
-	log.Flush()
-	if len(lines) != 0 {
-		t.Fatalf("Flush on an empty log emitted %v", lines)
-	}
-}
-
-// Both of the core's streams point at one log, and the action goroutine is not
-// the only writer. A line must never interleave with another line.
-func TestLogIsSafeForSeveralWriters(t *testing.T) {
-	var mu sync.Mutex
-	var lines []string
-	log := NewLog(time.Now, func(line string) {
-		mu.Lock()
-		lines = append(lines, line)
-		mu.Unlock()
-	})
-	var writers sync.WaitGroup
-	for writer := 0; writer < 8; writer++ {
-		writers.Add(1)
-		go func(id int) {
-			defer writers.Done()
-			for i := 0; i < 50; i++ {
-				log.Write([]byte(strings.Repeat(string(rune('a'+id)), 20) + "\n"))
-			}
-		}(writer)
-	}
-	writers.Wait()
-	mu.Lock()
-	defer mu.Unlock()
-	if len(lines) != 400 {
-		t.Fatalf("%d lines from 400 writes", len(lines))
-	}
-	for _, line := range lines {
-		body := line[strings.LastIndex(line, "  ")+2:]
-		if len(body) != 20 {
-			t.Fatalf("a line was interleaved: %q", line)
-		}
-		if strings.Count(body, body[:1]) != 20 {
-			t.Fatalf("a line mixes two writers: %q", line)
-		}
-	}
-}
-
 // The window forwards a command line to the console program beside it.
 func TestConsoleExePathIsBesideTheWindow(t *testing.T) {
 	// The separator is the host's, so what this pins is the two halves: the
@@ -441,39 +604,5 @@ func TestConsoleExePathIsBesideTheWindow(t *testing.T) {
 	}
 	if filepath.Dir(got) != filepath.Join("somewhere", "Bibites Multiverse") {
 		t.Fatalf("the forwarded program is not beside the window: %q", got)
-	}
-}
-
-// TestLogFollowsTail. The pane held 191 lines with its first visible line still
-// 0 on a real machine, so the follow rule is pinned here: at the bottom it
-// follows, one line up it still does, further up it leaves the reader alone.
-func TestLogFollowsTail(t *testing.T) {
-	// 40 lines of text in a 10-line pane: the range is 0..39 and the last
-	// position the bar can take is 30.
-	const page, max = 10, 39
-	cases := []struct {
-		name string
-		pos  int
-		want bool
-	}{
-		{"at the bottom", 30, true},
-		{"one line off the bottom, which is a partial row", 29, true},
-		{"two lines up, which is a reader", 28, false},
-		{"at the top of a long log", 0, false},
-	}
-	for _, test := range cases {
-		if got := LogFollowsTail(test.pos, page, max); got != test.want {
-			t.Fatalf("%s: LogFollowsTail(%d, %d, %d) = %v, want %v",
-				test.name, test.pos, page, max, got, test.want)
-		}
-	}
-
-	// Nothing to scroll — everything fits, or the bar could not be read — is
-	// always a follow. A pane that stopped following is the defect this fixes.
-	if !LogFollowsTail(0, 0, 0) {
-		t.Fatal("a pane with no scroll bar does not follow its own newest line")
-	}
-	if !LogFollowsTail(0, 40, 39) {
-		t.Fatal("a pane taller than its text does not follow its own newest line")
 	}
 }

@@ -14,26 +14,33 @@ package launchergui
 //
 // So there are four goroutines and one rule:
 //
-//   1. THE UI THREAD runs walk's loop. It draws, it opens dialogs, it decides
-//      which buttons are enabled. It NEVER reads a file, asks a port or waits.
-//   2. THE REFRESHER takes a snapshot every refreshInterval — profiles, the pid
-//      ledger, and each running sidecar's own-slot endpoint — and hands it to
-//      the UI thread with Synchronize.
-//   3. THE ACTION goroutine runs one action at a time, in order. One at a time
-//      is deliberate: the core's per-world lock would refuse a second one, and a
-//      queue of clicked buttons is easier to reason about than a race between
-//      them.
-//   4. THE LOG PUMP moves finished lines into the pane in batches, because the
-//      core can print a hundred lines in a second and one Synchronize per line
-//      is a hundred messages.
+//  1. THE UI THREAD runs walk's loop. It draws, it opens dialogs, it decides
+//     which buttons are enabled. It NEVER reads a file, asks a port or waits.
+//  2. THE REFRESHER takes a snapshot every refreshInterval — profiles, the pid
+//     ledger, and each running sidecar's own-slot endpoint — and hands it to
+//     the UI thread with Synchronize.
+//  3. THE ACTION goroutine runs one action at a time, in order. One at a time
+//     is deliberate: the core's per-world lock would refuse a second one, and a
+//     queue of clicked buttons is easier to reason about than a race between
+//     them.
+//  4. THE LOG PUMP moves finished lines into the pane in batches, because the
+//     core can print a hundred lines in a second and one Synchronize per line
+//     is a hundred messages.
 //
 // Synchronize is walk's own mechanism for "run this on the UI thread", and it is
 // the only way any of the other three touch a control.
+//
+// WHAT THIS FILE DECIDES, AND WHAT IT DOES NOT. It builds widgets and moves
+// values into them. Every word it puts on screen, every colour, every enabling
+// rule and every phrase it makes of the core's output comes from view.go,
+// details.go and windowstate.go — which carry no build tag and are tested on a
+// machine with no Windows at all.
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -51,12 +58,22 @@ import (
 // as the sidecar's own heartbeat, and every reading it takes is local.
 const refreshInterval = 2 * time.Second
 
-// logPaneLimit bounds the pane. A long session prints a great deal, and an edit
-// control that grows without limit is a window that slows down and then a
-// process that runs out of memory. When it is reached the oldest half goes; the
-// event log under each world's data root is the permanent record, and the pane
-// says so when it trims.
+// logPaneLimit bounds the details pane. A long session prints a great deal, and
+// an edit control that grows without limit is a window that slows down and then
+// a process that runs out of memory. When it is reached the oldest half goes;
+// the event log under each world's data root is the permanent record, and the
+// pane says so when it trims.
 const logPaneLimit = 200000
+
+// The window's own metrics, in the 96-dpi units walk lays out in.
+const (
+	defaultWindowWidth  = 1080
+	defaultWindowHeight = 700
+	// primaryButtonWidth and primaryButtonHeight are what make Start the button
+	// a person's eye lands on. It is the only oversized control in the window.
+	primaryButtonWidth  = 190
+	primaryButtonHeight = 40
+)
 
 // Options is what the executable hands the window.
 type Options struct {
@@ -116,24 +133,53 @@ type ui struct {
 	session *launcher.Session
 	log     *Log
 
-	mw        *walk.MainWindow
-	table     *walk.TableView
-	model     *worldModel
-	logView   *walk.TextEdit
-	banner    *walk.TextLabel
+	mw     *walk.MainWindow
+	table  *walk.TableView
+	model  *worldModel
+	banner *walk.TextLabel
+
+	// The panel: one world, in plain words.
+	worldName  *walk.TextLabel
+	headline   *walk.TextLabel
+	hint       *walk.TextLabel
+	spinner    *walk.ProgressBar
+	resultLine *walk.TextLabel
+	primary    *walk.PushButton
+	headless   *walk.CheckBox
+	// factValue is the panel's grid, by label. factHolders is where declarative
+	// writes the labels before Create has run.
+	factValue   map[string]*walk.TextLabel
+	factHolders []factHolder
+
+	// The details pane, which is collapsed until it is wanted or until something
+	// goes wrong.
+	detailsToggle *walk.PushButton
+	detailsPane   *walk.Composite
+	logView       *walk.TextEdit
+
 	statusBar *walk.StatusBarItem
-	override  *walk.PushButton
-	// buttons and menuActions are keyed by the caption, which is the same
-	// caption for a button and for the menu item that does the same thing, so
-	// one rule enables both. They hold the ADDRESS declarative writes the widget
-	// into, because a widget does not exist until Create runs.
-	buttons     map[string]**walk.PushButton
-	menuActions map[string]**walk.Action
+
+	// controls are keyed by CAPTION, which is the same caption for a button and
+	// for the menu item that does the same thing, so one rule enables both. A
+	// caption may hold several controls for exactly that reason.
+	buttons map[string][]**walk.PushButton
+	menus   map[string][]**walk.Action
 
 	// UI THREAD ONLY.
 	snapshot launcher.Snapshot
 	selected string
+	job      Job
 	busy     bool
+	phrase   string
+	// said is the last flush-left line the core printed during the job that is
+	// running, which is what a failure quotes. See SaidLine.
+	said        string
+	result      Result
+	detailsOpen bool
+	// settingHeadless is up while the refresher is writing the checkbox, so that
+	// the write does not read as a person having clicked it. Without it every
+	// refresh of a headless world would queue an edit, forever.
+	settingHeadless bool
 
 	// mu guards what crosses a thread boundary and nothing else.
 	mu      sync.Mutex
@@ -149,8 +195,9 @@ type ui struct {
 
 func (u *ui) build() error {
 	u.model = &worldModel{}
-	u.buttons = make(map[string]**walk.PushButton)
-	u.menuActions = make(map[string]**walk.Action)
+	u.buttons = make(map[string][]**walk.PushButton)
+	u.menus = make(map[string][]**walk.Action)
+	u.factValue = make(map[string]*walk.TextLabel, len(FactLabels()))
 
 	columns := make([]d.TableViewColumn, 0, len(Columns()))
 	for _, column := range Columns() {
@@ -160,29 +207,46 @@ func (u *ui) build() error {
 	window := d.MainWindow{
 		AssignTo: &u.mw,
 		Title:    WindowTitle,
-		MinSize:  d.Size{Width: 900, Height: 600},
-		Size:     d.Size{Width: 1180, Height: 760},
+		MinSize:  d.Size{Width: MinWindowWidth, Height: MinWindowHeight},
+		Size:     d.Size{Width: defaultWindowWidth, Height: defaultWindowHeight},
 		Layout:   d.VBox{},
 		MenuItems: []d.MenuItem{
 			d.Menu{
-				Text: "&Worlds",
+				Text: MenuWorld,
 				Items: []d.MenuItem{
-					d.Action{Text: "&Refresh now", OnTriggered: func() { u.askForRefresh() }},
+					u.item(ButtonStart, u.onPrimaryStart),
+					u.item(ButtonStop, u.onPrimaryStop),
 					d.Separator{},
-					d.Action{Text: ButtonStopAll, AssignTo: u.action(ButtonStopAll),
-						OnTriggered: u.onStopAll},
+					u.item(ButtonDiagnose, u.onDiagnose),
 					d.Separator{},
-					d.Action{Text: "Open the &console launcher", OnTriggered: u.onOpenConsole},
+					u.item(ButtonEdit, u.onEdit),
+					u.item(ButtonClone, u.onClone),
+					u.item(ButtonDelete, u.onDelete),
+					u.item(ButtonSetDefault, u.onSetDefault),
 					d.Separator{},
-					d.Action{Text: "&Quit", OnTriggered: func() { u.mw.Close() }},
+					u.item(ButtonCreate, u.onCreate),
+					u.item(ButtonStopAll, u.onStopAll),
+					d.Separator{},
+					d.Action{Text: ButtonRefresh, OnTriggered: func() { u.askForRefresh() }},
+					d.Action{Text: ButtonQuit, OnTriggered: func() { u.mw.Close() }},
 				},
 			},
 			d.Menu{
-				Text: "&Help",
+				Text: MenuOpen,
 				Items: []d.MenuItem{
-					d.Action{Text: "Documentation (bibitesmultiverse.com)", OnTriggered: u.onDocs},
+					u.item(ButtonOpenData, u.onOpenData),
+					u.item(ButtonOpenLogs, u.onOpenLogs),
+					u.item(ButtonOpenGameLog, u.onOpenGameLog),
 					d.Separator{},
-					d.Action{Text: "&About", OnTriggered: u.onAbout},
+					d.Action{Text: ButtonOpenConsole, OnTriggered: u.onOpenConsole},
+				},
+			},
+			d.Menu{
+				Text: MenuHelp,
+				Items: []d.MenuItem{
+					d.Action{Text: ButtonDocs, OnTriggered: u.onDocs},
+					d.Separator{},
+					d.Action{Text: ButtonAbout, OnTriggered: u.onAbout},
 				},
 			},
 		},
@@ -191,87 +255,24 @@ func (u *ui) build() error {
 		},
 		Children: []d.Widget{
 			// MinSize.Width IS WHAT MAKES IT WRAP. Without it a label is measured
-			// as one line, and this one carries every unreadable profile's whole
+			// as one line, and this one carries every unreadable file's whole
 			// refusal — so the window's minimum width would grow to fit the lot
 			// on one line and the text would run off the edge of the screen.
-			d.TextLabel{AssignTo: &u.banner, Text: "", TextColor: walk.RGB(160, 0, 0),
-				MinSize: d.Size{Width: 860}},
-			d.VSplitter{
+			d.TextLabel{AssignTo: &u.banner, Text: "", TextColor: bannerColour,
+				MinSize: d.Size{Width: MinWindowWidth - 60}},
+			d.HSplitter{
+				StretchFactor: 3,
 				Children: []d.Widget{
-					d.TableView{
-						AssignTo:              &u.table,
-						Model:                 u.model,
-						Columns:               columns,
-						LastColumnStretched:   true,
-						MultiSelection:        false,
-						StretchFactor:         3,
-						OnCurrentIndexChanged: u.onSelectionChanged,
-						OnItemActivated:       u.onStart,
-						ContextMenuItems: []d.MenuItem{
-							d.Action{Text: ButtonStart, AssignTo: u.action(ButtonStart), OnTriggered: u.onStart},
-							d.Action{Text: ButtonStop, AssignTo: u.action(ButtonStop), OnTriggered: u.onStop},
-							d.Separator{},
-							d.Action{Text: ButtonSetDefault, AssignTo: u.action(ButtonSetDefault),
-								OnTriggered: u.onSetDefault},
-							d.Action{Text: ButtonEdit, AssignTo: u.action(ButtonEdit), OnTriggered: u.onEdit},
-							d.Action{Text: ButtonClone, AssignTo: u.action(ButtonClone), OnTriggered: u.onClone},
-							d.Action{Text: ButtonDelete, AssignTo: u.action(ButtonDelete), OnTriggered: u.onDelete},
-							d.Separator{},
-							d.Action{Text: ButtonDiagnose, AssignTo: u.action(ButtonDiagnose),
-								OnTriggered: u.onDiagnose},
-							d.Action{Text: ButtonOpenLogs, AssignTo: u.action(ButtonOpenLogs),
-								OnTriggered: u.onOpenLogs},
-							d.Action{Text: ButtonOpenGameLog, AssignTo: u.action(ButtonOpenGameLog),
-								OnTriggered: u.onOpenGameLog},
-							d.Action{Text: ButtonCopyPeerID, AssignTo: u.action(ButtonCopyPeerID),
-								OnTriggered: u.onCopyPeerID},
-						},
-					},
-					d.Composite{
-						Layout:        d.VBox{MarginsZero: true},
-						StretchFactor: 2,
-						Children: []d.Widget{
-							d.TextEdit{
-								AssignTo: &u.logView,
-								ReadOnly: true,
-								VScroll:  true,
-								HScroll:  true,
-								// AN EDIT CONTROL HAS ITS OWN CEILING, about
-								// 32,767 characters, and past it every append is
-								// silently dropped — the pane would freeze on old
-								// text with nothing to say it had, and Copy the log
-								// would copy that. It is raised above the trimming
-								// limit below, which is what actually bounds this.
-								MaxLength: logPaneLimit * 2,
-								Font:      d.Font{Family: "Consolas", PointSize: 9},
-							},
-						},
-					},
+					u.worldList(columns),
+					u.panel(),
 				},
 			},
+			u.details(),
 			d.Composite{
 				Layout: d.HBox{MarginsZero: true},
 				Children: []d.Widget{
-					u.button(ButtonStart, u.onStart),
-					u.overrideButton(),
-					u.button(ButtonStop, u.onStop),
-					u.button(ButtonStopAll, u.onStopAll),
-					u.button(ButtonSetDefault, u.onSetDefault),
-					u.button(ButtonEdit, u.onEdit),
-					d.HSpacer{},
-				},
-			},
-			d.Composite{
-				Layout: d.HBox{MarginsZero: true},
-				Children: []d.Widget{
-					u.button(ButtonCreate, u.onCreate),
-					u.button(ButtonClone, u.onClone),
-					u.button(ButtonDelete, u.onDelete),
-					u.button(ButtonDiagnose, u.onDiagnose),
-					u.button(ButtonOpenLogs, u.onOpenLogs),
-					u.button(ButtonOpenGameLog, u.onOpenGameLog),
-					u.button(ButtonCopyPeerID, u.onCopyPeerID),
-					u.button(ButtonCopyLog, u.onCopyLog),
+					u.button(ButtonCreate, CreateTip, u.onCreate),
+					u.button(ButtonStopAll, StopAllTip, u.onStopAll),
 					d.HSpacer{},
 				},
 			},
@@ -280,10 +281,20 @@ func (u *ui) build() error {
 	if err := window.Create(); err != nil {
 		return err
 	}
+	for _, holder := range u.factHolders {
+		u.factValue[holder.label] = *holder.into
+	}
 	u.banner.SetVisible(false)
+	u.spinner.SetVisible(false)
+	u.resultLine.SetVisible(false)
+	u.hint.SetVisible(false)
+	u.detailsPane.SetVisible(false)
+	u.detailsToggle.SetText(ButtonShowDetails)
 	if icon := windowIcon(); icon != nil {
 		u.mw.SetIcon(icon)
 	}
+	u.restorePlacement()
+	u.mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) { u.savePlacement() })
 	u.applyActions()
 	fmt.Fprintf(u.log, "Bibites Multiverse launcher %s, installed in %s\n",
 		launcher.Release, u.session.InstallRoot())
@@ -291,26 +302,194 @@ func (u *ui) build() error {
 	return nil
 }
 
+// worldList is the left half: every world, one line each, in the colour of what
+// it is doing.
+func (u *ui) worldList(columns []d.TableViewColumn) d.Widget {
+	return d.TableView{
+		AssignTo:              &u.table,
+		Model:                 u.model,
+		Columns:               columns,
+		LastColumnStretched:   true,
+		MultiSelection:        false,
+		StretchFactor:         2,
+		MinSize:               d.Size{Width: 240},
+		ToolTipText:           WorldsTip,
+		OnCurrentIndexChanged: u.onSelectionChanged,
+		// Enter and a double-click both do the world's OWN primary action, which
+		// is start when it is stopped and stop when it is running. A stop is not
+		// guarded by a confirmation: it asks the world to save and quit, so it
+		// costs nothing, and a dialog in front of a lossless action teaches
+		// people to click through dialogs.
+		OnItemActivated: u.onPrimary,
+		StyleCell:       u.styleCell,
+		ContextMenuItems: []d.MenuItem{
+			u.item(ButtonStart, u.onPrimaryStart),
+			u.item(ButtonStop, u.onPrimaryStop),
+			d.Separator{},
+			u.item(ButtonDiagnose, u.onDiagnose),
+			u.item(ButtonEdit, u.onEdit),
+			u.item(ButtonSetDefault, u.onSetDefault),
+			d.Separator{},
+			u.item(ButtonClone, u.onClone),
+			u.item(ButtonDelete, u.onDelete),
+			d.Separator{},
+			u.item(ButtonOpenData, u.onOpenData),
+			u.item(ButtonOpenLogs, u.onOpenLogs),
+			u.item(ButtonOpenGameLog, u.onOpenGameLog),
+			u.item(ButtonCopyPeerID, u.onCopyPeerID),
+		},
+	}
+}
+
+// panel is the right half: ONE world, said in plain words, with the one button
+// that acts on it.
+func (u *ui) panel() d.Widget {
+	return d.Composite{
+		Layout:        d.VBox{},
+		StretchFactor: 3,
+		MinSize:       d.Size{Width: 420},
+		Children: []d.Widget{
+			d.TextLabel{AssignTo: &u.worldName, Text: "",
+				Font: d.Font{Family: uiFontFamily, PointSize: 13, Bold: true}},
+			d.TextLabel{AssignTo: &u.headline, Text: "",
+				Font:    d.Font{Family: uiFontFamily, PointSize: 10},
+				MinSize: d.Size{Width: 380}},
+			d.TextLabel{AssignTo: &u.hint, Text: "", MinSize: d.Size{Width: 380}},
+			d.ProgressBar{AssignTo: &u.spinner, MarqueeMode: true, MaxSize: d.Size{Height: 12}},
+			d.TextLabel{AssignTo: &u.resultLine, Text: "", MinSize: d.Size{Width: 380}},
+			d.Composite{
+				Layout: d.HBox{MarginsZero: true},
+				Children: []d.Widget{
+					d.PushButton{AssignTo: &u.primary, Text: ButtonStart, ToolTipText: StartTip,
+						MinSize:   d.Size{Width: primaryButtonWidth, Height: primaryButtonHeight},
+						OnClicked: u.onPrimary},
+					d.HSpacer{},
+				},
+			},
+			d.CheckBox{AssignTo: &u.headless, Text: CheckHeadless, ToolTipText: HeadlessTip,
+				OnCheckedChanged: u.onHeadlessChanged},
+			u.factGrid(),
+			d.Composite{
+				Layout: d.HBox{MarginsZero: true},
+				Children: []d.Widget{
+					u.button(ButtonEdit, EditTip, u.onEdit),
+					u.button(ButtonDiagnose, DiagnoseTip, u.onDiagnose),
+					d.HSpacer{},
+				},
+			},
+			d.VSpacer{},
+			d.Composite{
+				Layout: d.HBox{MarginsZero: true},
+				Children: []d.Widget{
+					d.PushButton{AssignTo: &u.detailsToggle, Text: ButtonShowDetails,
+						ToolTipText: DetailsTip, OnClicked: u.onToggleDetails},
+					d.HSpacer{},
+				},
+			},
+		},
+	}
+}
+
+// factGrid is the old table's remaining columns, moved to where they are read:
+// beside ONE world, once it has been chosen. It is built once, with a label per
+// row in a fixed order, and only the values change — so a value can never end up
+// under the wrong label.
+func (u *ui) factGrid() d.Widget {
+	children := make([]d.Widget, 0, len(FactLabels())*3)
+	for _, label := range FactLabels() {
+		holder := new(*walk.TextLabel)
+		u.factHolders = append(u.factHolders, factHolder{label: label, into: holder})
+		children = append(children,
+			d.Label{Text: label + ":"},
+			d.TextLabel{AssignTo: holder, Text: "", MinSize: d.Size{Width: 200}},
+		)
+		switch label {
+		case FactData:
+			children = append(children, u.button(ButtonOpenData, OpenDataTip, u.onOpenData))
+		case FactIdentity:
+			children = append(children, u.button(ButtonCopyPeerID, CopyPeerIDTip, u.onCopyPeerID))
+		default:
+			// The third column has to exist on every row or the two that hold a
+			// button would be laid out against a different grid.
+			children = append(children, d.Label{Text: ""})
+		}
+	}
+	return d.Composite{Layout: d.Grid{Columns: 3, MarginsZero: true}, Children: children}
+}
+
+// details is the whole truth, collapsed. It holds the core's own output, which
+// is the only place in this window the program's own vocabulary appears.
+func (u *ui) details() d.Widget {
+	return d.Composite{
+		AssignTo:      &u.detailsPane,
+		Layout:        d.VBox{MarginsZero: true},
+		StretchFactor: 2,
+		Children: []d.Widget{
+			d.Composite{
+				Layout: d.HBox{MarginsZero: true},
+				Children: []d.Widget{
+					d.Label{Text: "Everything the launcher did this session, newest at the bottom:"},
+					d.HSpacer{},
+					u.button(ButtonCopyLog, CopyLogTip, u.onCopyLog),
+				},
+			},
+			d.TextEdit{
+				AssignTo: &u.logView,
+				ReadOnly: true,
+				VScroll:  true,
+				HScroll:  true,
+				// AN EDIT CONTROL HAS ITS OWN CEILING, about 32,767 characters,
+				// and past it every append is silently dropped — the pane would
+				// freeze on old text with nothing to say it had, and Copy the
+				// details would copy that. It is raised above the trimming limit
+				// below, which is what actually bounds this.
+				MaxLength: logPaneLimit * 2,
+				Font:      d.Font{Family: "Consolas", PointSize: 9},
+			},
+		},
+	}
+}
+
+// uiFontFamily is the face the rest of Windows uses. walk takes the system font
+// when none is named, which on a modern Windows is not the one the shell draws
+// with, so the two labels that are meant to be read first name it.
+const uiFontFamily = "Segoe UI"
+
+// The colours. They are the ONLY place a Colour becomes a Windows colour, and
+// they are chosen for a white list background: dark enough to read, different
+// enough from each other to tell apart without reading.
+var (
+	colourFor = map[Colour]walk.Color{
+		ColourGrey:  walk.RGB(96, 96, 96),
+		ColourGreen: walk.RGB(0, 112, 48),
+		ColourAmber: walk.RGB(160, 96, 0),
+		ColourRed:   walk.RGB(176, 0, 0),
+	}
+	bannerColour = walk.RGB(160, 0, 0)
+)
+
+// factHolder is one row of the facts grid, waiting for declarative to create it.
+type factHolder struct {
+	label string
+	into  **walk.TextLabel
+}
+
 // button registers one push button under its caption, which is how the harness
-// finds it and how applyActions enables it.
-func (u *ui) button(caption string, onClicked func()) d.PushButton {
+// finds it and how applyActions enables it. Several controls may share a caption
+// — a button in the panel and the menu item that does the same thing — and they
+// are enabled together.
+func (u *ui) button(caption, tip string, onClicked func()) d.PushButton {
 	holder := new(*walk.PushButton)
-	u.buttons[caption] = holder
-	return d.PushButton{AssignTo: holder, Text: caption, OnClicked: onClicked}
+	u.buttons[caption] = append(u.buttons[caption], holder)
+	return d.PushButton{AssignTo: holder, Text: caption, ToolTipText: tip, OnClicked: onClicked}
 }
 
-// overrideButton is the per-session headless switch. Its caption changes with
-// the selected world, so it is held on its own rather than by caption.
-func (u *ui) overrideButton() d.PushButton {
-	return d.PushButton{AssignTo: &u.override, Text: ButtonStartHeadless, OnClicked: u.onStartOverride}
-}
-
-// action registers a menu item under the same caption as the button that does
-// the same thing, so the two are enabled and disabled together.
-func (u *ui) action(caption string) **walk.Action {
+// item registers a menu item under the same caption as the button that does the
+// same thing.
+func (u *ui) item(caption string, onTriggered func()) d.Action {
 	holder := new(*walk.Action)
-	u.menuActions[caption] = holder
-	return holder
+	u.menus[caption] = append(u.menus[caption], holder)
+	return d.Action{Text: caption, AssignTo: holder, OnTriggered: onTriggered}
 }
 
 // windowIcon is the icon compiled into this executable by the resource object
@@ -344,6 +523,27 @@ func (m *worldModel) Value(row, col int) interface{} {
 		return ""
 	}
 	return m.rows[row].Cell(col)
+}
+
+// styleCell paints the status column in the colour of the state it names.
+//
+// THE SELECTED ROW IS LEFT ALONE. Windows draws it on the highlight colour, and
+// a dark green on that blue is harder to read than the system's own white — so
+// the one row a person is looking at keeps the colours the rest of Windows would
+// give it, and every other row carries the signal.
+func (u *ui) styleCell(style *walk.CellStyle) {
+	if style.Col() != ColStatus {
+		return
+	}
+	if style.Row() < 0 || style.Row() >= len(u.model.rows) {
+		return
+	}
+	if u.table != nil && style.Row() == u.table.CurrentIndex() {
+		return
+	}
+	if colour, ok := colourFor[u.model.rows[style.Row()].Status.Colour]; ok {
+		style.TextColor = colour
+	}
 }
 
 // ---------------------------------------------------------------- the threads
@@ -384,10 +584,6 @@ func (u *ui) actor() {
 			// Anything the core left half-written — a prompt, which a session
 			// answers rather than asks — goes to the pane now.
 			u.log.Flush()
-			u.mw.Synchronize(func() {
-				u.busy = false
-				u.applyActions()
-			})
 			u.askForRefresh()
 		}
 	}
@@ -429,36 +625,89 @@ func (u *ui) appendLine(line string) {
 
 // ---------------------------------------------------------------- the UI thread
 
-// writeLines appends to the pane and keeps it bounded.
+// writeLines appends to the pane, keeps it bounded, and READS WHAT IT IS
+// APPENDING: the same lines are the progress phrase in the panel, the core's own
+// last word for a failure, and the reason the pane opens itself.
+//
+// AND IT PUTS THE READER BACK. See LinesToRestore: deciding not to follow is not
+// enough, because walk's AppendText scrolls the caret into view itself, so the
+// view has already moved by the time this code gets to have an opinion. The
+// first visible line is therefore read on both sides of the append, and a pane
+// nobody is following is scrolled back by the difference.
 func (u *ui) writeLines(lines []string) {
+	for _, line := range lines {
+		if u.busy {
+			if phrase, ok := ProgressFor(line); ok {
+				u.setPhrase(phrase)
+			}
+			if said, ok := SaidLine(line); ok {
+				u.said = said
+			}
+		}
+		if IsAlarm(line) {
+			u.setDetails(true)
+		}
+	}
 	// Whether to follow is decided BEFORE the append, because appending is what
 	// moves the bottom away from wherever the reader is.
 	follow := u.logFollowsTail()
+	before := u.firstVisibleLine()
+
+	// The append and the correction are ONE redraw. Without this the view is
+	// drawn at the bottom and then drawn again where the reader was, which is a
+	// flicker on every batch — ten times a second while a world starts.
+	u.logView.SendMessage(win.WM_SETREDRAW, 0, 0)
 	// A Windows edit control's line ending is CRLF; a bare newline draws as one
 	// long line.
 	u.logView.AppendText(strings.Join(lines, "\r\n") + "\r\n")
 	if u.logView.TextLength() > logPaneLimit {
-		text := u.logView.Text()
-		cut := len(text) / 2
-		if index := strings.Index(text[cut:], "\r\n"); index >= 0 {
-			cut += index + 2
-		} else {
-			// No line ending in the second half: cut on a rune boundary instead,
-			// so a path with an accent in it does not become a replacement
-			// character at the top of the pane.
-			for cut < len(text) && !utf8.RuneStart(text[cut]) {
-				cut++
-			}
-		}
-		u.logView.SetText("[the older half of this session's log was trimmed here; " +
-			"each world's own log folder keeps the whole of it]\r\n" + text[cut:])
+		u.trimLogPane()
 		// A trim replaces the whole document, so nobody is where they were. The
 		// newest line is the one place worth landing.
 		follow = true
 	}
 	if follow {
 		u.scrollLogToEnd()
+	} else if back := LinesToRestore(before, u.firstVisibleLine()); back != 0 {
+		u.logView.SendMessage(win.EM_LINESCROLL, 0, uintptr(int32(back)))
 	}
+	u.logView.SendMessage(win.WM_SETREDRAW, 1, 0)
+	// RDW_FRAME AND NOT JUST InvalidateRect. WM_SETREDRAW false also stops the
+	// control repainting its scroll bar, which is non-client area — an
+	// invalidation of the client rectangle alone leaves a bar drawn at the
+	// position it held before the append, which is worse than the flicker this
+	// suppresses.
+	win.RedrawWindow(u.logView.Handle(), nil, 0,
+		win.RDW_INVALIDATE|win.RDW_ERASE|win.RDW_FRAME)
+}
+
+// trimLogPane drops the oldest half. A long session prints a great deal, and an
+// edit control that grows without limit is a window that slows down and then a
+// process that runs out of memory. Each world's own log folder keeps the whole
+// of it, and the line left behind says so.
+func (u *ui) trimLogPane() {
+	text := u.logView.Text()
+	cut := len(text) / 2
+	if index := strings.Index(text[cut:], "\r\n"); index >= 0 {
+		cut += index + 2
+	} else {
+		// No line ending in the second half: cut on a rune boundary instead, so a
+		// path with an accent in it does not become a replacement character at the
+		// top of the pane.
+		for cut < len(text) && !utf8.RuneStart(text[cut]) {
+			cut++
+		}
+	}
+	u.logView.SetText("[the older half of this session's log was trimmed here; " +
+		"each world's own log folder keeps the whole of it]\r\n" + text[cut:])
+}
+
+// firstVisibleLine is the line at the top of the pane, or -1 when the control
+// cannot say. EM_GETFIRSTVISIBLELINE is the same reading the machine harness
+// takes, which is what makes the assertion in the manual test the same fact this
+// code acts on.
+func (u *ui) firstVisibleLine() int {
+	return int(int32(u.logView.SendMessage(win.EM_GETFIRSTVISIBLELINE, 0, 0)))
 }
 
 // scrollLogToEnd puts the newest line on screen.
@@ -503,10 +752,10 @@ func (u *ui) logFollowsTail() bool {
 	return LogFollowsTail(int(info.NPos-info.NMin), int(info.NPage), int(info.NMax-info.NMin))
 }
 
-// applySnapshot redraws the list, keeping the selection on the world it was on.
+// applySnapshot redraws everything, keeping the selection on the world it was on.
 func (u *ui) applySnapshot(snap launcher.Snapshot) {
 	u.snapshot = snap
-	u.model.rows = RowsFrom(snap)
+	u.model.rows = RowsFrom(snap, u.busyView())
 	u.model.PublishRowsReset()
 
 	if u.selected == "" {
@@ -529,31 +778,28 @@ func (u *ui) applySnapshot(snap launcher.Snapshot) {
 		u.selected = ""
 	}
 
-	// THE PROBLEMS ARE A BANNER, NOT AN EMPTY LIST. An installation whose
-	// profiles cannot be read used to answer "no worlds", which reads as
-	// "nothing is installed" from a program that simply could not read its own
-	// files.
-	if len(snap.Problems) > 0 {
-		u.banner.SetText("This installation has " + countWords(len(snap.Problems)) +
-			" the launcher could not read: " + strings.Join(snap.Problems, " | "))
-		u.banner.SetVisible(true)
-	} else if len(snap.Worlds) == 0 {
-		u.banner.SetText("This installation has no worlds yet. Use " + ButtonCreate +
-			", or re-run the installer.")
+	if banner := BannerFor(snap); banner != "" {
+		u.banner.SetText(banner)
 		u.banner.SetVisible(true)
 	} else {
 		u.banner.SetVisible(false)
 	}
+	u.mw.SetTitle(WindowTitleFor(snap))
 	u.statusBar.SetText(fmt.Sprintf("%s   -   %d world(s) in %s",
 		CloseHint, len(snap.Worlds), snap.InstallRoot))
 	u.applyActions()
 }
 
-func countWords(n int) string {
-	if n == 1 {
-		return "one file"
+// busyView is the action running right now, as the list and the panel see it.
+func (u *ui) busyView() Busy {
+	if !u.busy {
+		return Busy{}
 	}
-	return fmt.Sprintf("%d files", n)
+	busy := u.job.Busy()
+	if u.phrase != "" {
+		busy.Phrase = u.phrase
+	}
+	return busy
 }
 
 func (u *ui) onSelectionChanged() {
@@ -574,9 +820,11 @@ func (u *ui) selectedWorld() *launcher.WorldView {
 	return nil
 }
 
-// applyActions greys every button the core would refuse.
+// applyActions is the whole of what a person can press and what the panel says,
+// applied from one decision taken in view.go.
 func (u *ui) applyActions() {
-	actions := ActionsFor(u.selectedWorld(), u.snapshot, u.busy)
+	selected := u.selectedWorld()
+	actions := ActionsFor(selected, u.snapshot, u.busy)
 	enabled := map[string]bool{
 		ButtonStart:       actions.Start,
 		ButtonStop:        actions.Stop,
@@ -587,38 +835,122 @@ func (u *ui) applyActions() {
 		ButtonClone:       actions.Clone,
 		ButtonDelete:      actions.Delete,
 		ButtonDiagnose:    actions.Diagnose,
+		ButtonOpenData:    actions.OpenData,
 		ButtonOpenLogs:    actions.OpenLogs,
 		ButtonOpenGameLog: actions.OpenGameLog,
 		ButtonCopyPeerID:  actions.CopyPeerID,
 		ButtonCopyLog:     true,
 	}
-	for caption, holder := range u.buttons {
-		if button := *holder; button != nil {
-			button.SetEnabled(enabled[caption])
+	for caption, holders := range u.buttons {
+		for _, holder := range holders {
+			if button := *holder; button != nil {
+				if want, known := enabled[caption]; known {
+					button.SetEnabled(want)
+				}
+			}
 		}
 	}
-	for caption, holder := range u.menuActions {
-		if action := *holder; action != nil {
-			action.SetEnabled(enabled[caption])
+	for caption, holders := range u.menus {
+		for _, holder := range holders {
+			if action := *holder; action != nil {
+				action.SetEnabled(enabled[caption])
+			}
 		}
 	}
-	if u.override != nil {
-		u.override.SetText(actions.OverrideOffers)
-		u.override.SetEnabled(actions.StartOverride)
+	u.applyPanel(PanelFor(selected, u.snapshot, u.busyView()), actions)
+}
+
+// applyPanel moves one decided Panel into the widgets. NOTHING IS DECIDED HERE.
+func (u *ui) applyPanel(panel Panel, actions Actions) {
+	u.worldName.SetText(panel.World)
+	u.headline.SetText(panel.Headline)
+	u.headline.SetTextColor(colourFor[panel.Colour])
+	setLabel(u.hint, panel.Hint, walk.RGB(64, 64, 64))
+	u.spinner.SetVisible(panel.Working)
+	if panel.Working {
+		// PBM_SETMARQUEE is re-asserted on every show: a bar that was hidden
+		// mid-animation does not always take it up again by itself.
+		u.spinner.SetMarqueeMode(true)
+	}
+	// The result of the LAST action stays until the next one starts, so somebody
+	// who looked away for the ninety seconds a start takes still learns how it
+	// went.
+	if panel.Working {
+		u.resultLine.SetVisible(false)
+	} else if u.result.Text != "" {
+		colour := colourFor[ColourGreen]
+		if !u.result.Good {
+			colour = colourFor[ColourRed]
+		}
+		setLabel(u.resultLine, u.result.Text, colour)
+	}
+	u.primary.SetText(panel.Primary.Caption)
+	u.primary.SetToolTipText(panel.Primary.Tip)
+	u.primary.SetEnabled(panel.Primary.Enabled)
+	for _, fact := range panel.Facts {
+		if label := u.factValue[fact.Label]; label != nil {
+			label.SetText(fact.Value)
+			// A data folder and an identity are both longer than the column they
+			// sit in, and a hover is cheaper than widening the window.
+			label.SetToolTipText(fact.Value)
+		}
+	}
+	// A CHECKBOX THAT SNAPS BACK WHILE ITS OWN EDIT IS RUNNING is worse than one
+	// that lags. The world has not been written yet, so the snapshot still holds
+	// the OLD value, and putting it back into the box would undo the click in
+	// front of the person who just made it. It is left where they put it until
+	// the edit lands and the next reading confirms it.
+	if !(u.busy && u.job.Kind == JobHeadless) {
+		u.settingHeadless = true
+		u.headless.SetChecked(panel.Headless)
+		u.settingHeadless = false
+	}
+	u.headless.SetEnabled(actions.Headless)
+}
+
+// setLabel writes a label and hides it when there is nothing to say, so an empty
+// line does not sit in the layout pushing everything below it down.
+func setLabel(label *walk.TextLabel, text string, colour walk.Color) {
+	label.SetText(text)
+	label.SetTextColor(colour)
+	label.SetVisible(text != "")
+}
+
+// setDetails opens or closes the details pane, and remembers which.
+func (u *ui) setDetails(open bool) {
+	if u.detailsOpen == open {
+		return
+	}
+	u.detailsOpen = open
+	u.detailsPane.SetVisible(open)
+	if open {
+		u.detailsToggle.SetText(ButtonHideDetails)
+		u.scrollLogToEnd()
+	} else {
+		u.detailsToggle.SetText(ButtonShowDetails)
 	}
 }
 
-// start queues one action. The window says what it started, so the log pane
+func (u *ui) onToggleDetails() { u.setDetails(!u.detailsOpen) }
+
+// start queues one job. The window says what it started, so the details pane
 // reads as a session rather than as a stream of unattributed output.
-func (u *ui) start(what string, fn func()) {
+func (u *ui) start(job Job, run func() int) {
 	if u.busy {
 		return
 	}
 	u.busy = true
+	u.job = job
+	u.phrase = job.Progress()
+	u.said = ""
+	u.result = Result{}
 	u.applyActions()
-	fmt.Fprintf(u.log, "\n> %s\n", what)
+	fmt.Fprintf(u.log, "\n> %s\n", job.Heading())
 	select {
-	case u.actions <- fn:
+	case u.actions <- func() {
+		code := run()
+		u.mw.Synchronize(func() { u.finish(job, code) })
+	}:
 	default:
 		// The queue is one deep and the busy flag is what keeps it that way; if
 		// it is ever full, say so rather than block the message loop.
@@ -628,52 +960,77 @@ func (u *ui) start(what string, fn func()) {
 	}
 }
 
+// setPhrase moves the panel on to the next stage of an action that is running.
+func (u *ui) setPhrase(phrase string) {
+	if u.phrase == phrase {
+		return
+	}
+	u.phrase = phrase
+	u.applyActions()
+}
+
+// finish is the end of a job, on the UI thread: the bar stops, the buttons come
+// back, and one line says how it went until the next action starts.
+//
+// A FAILURE OPENS THE DETAILS PANE. The result line names the job and nothing
+// else; the reason is the core's own words, and this is the window's promise
+// that they are never behind a button somebody did not know to press.
+func (u *ui) finish(job Job, code int) {
+	u.busy = false
+	u.phrase = ""
+	u.result = job.Result(code, u.said)
+	if !u.result.Good {
+		u.setDetails(true)
+	}
+	u.applyActions()
+	u.askForRefresh()
+}
+
 // ---------------------------------------------------------------- the actions
 
-func (u *ui) onStart() {
+// onPrimary is the one obvious action: start a stopped world, stop a running
+// one. It is the big button, Enter on the list, and a double-click on a row.
+func (u *ui) onPrimary() {
 	world := u.selectedWorld()
 	if world == nil {
 		return
 	}
-	// The button for this is greyed when a world is already running, but a
-	// double-click on the row reaches here too, and the same rule has to hold on
-	// both paths.
+	if world.Sidecar.Running || world.Game.Running {
+		u.onPrimaryStop()
+		return
+	}
+	u.onPrimaryStart()
+}
+
+func (u *ui) onPrimaryStart() {
+	world := u.selectedWorld()
+	if world == nil {
+		return
+	}
+	// The rule that greys the button has to hold on the keyboard path too.
 	if !ActionsFor(world, u.snapshot, u.busy).Start {
 		return
 	}
 	name := world.Name
-	u.start("start "+name, func() { u.session.Start(name, launcher.StartOptions{}) })
+	u.start(Job{Kind: JobStart, World: name},
+		func() int { return u.session.Start(name, launcher.StartOptions{}) })
 }
 
-// onStartOverride is the switch the console menu never had: run THIS session the
-// other way round, with a window or without one, and leave the world alone.
-func (u *ui) onStartOverride() {
+func (u *ui) onPrimaryStop() {
 	world := u.selectedWorld()
 	if world == nil {
 		return
 	}
-	name := world.Name
-	headless := !world.Headless
-	what := fmt.Sprintf("start %s with no window (this time only)", name)
-	if !headless {
-		what = fmt.Sprintf("start %s with a window (this time only)", name)
-	}
-	u.start(what, func() {
-		u.session.Start(name, launcher.StartOptions{Headless: &headless})
-	})
-}
-
-func (u *ui) onStop() {
-	world := u.selectedWorld()
-	if world == nil {
+	if !ActionsFor(world, u.snapshot, u.busy).Stop {
 		return
 	}
 	name := world.Name
-	u.start("stop "+name, func() { u.session.Stop(name, false, 0) })
+	u.start(Job{Kind: JobStop, World: name},
+		func() int { return u.session.Stop(name, false, 0) })
 }
 
 func (u *ui) onStopAll() {
-	u.start("stop every world", func() { u.session.StopAll(0) })
+	u.start(Job{Kind: JobStopAll}, func() int { return u.session.StopAll(0) })
 }
 
 func (u *ui) onSetDefault() {
@@ -682,7 +1039,37 @@ func (u *ui) onSetDefault() {
 		return
 	}
 	name := world.Name
-	u.start("make "+name+" the default world", func() { u.session.SetDefault(name) })
+	u.start(Job{Kind: JobSetDefault, World: name}, func() int { return u.session.SetDefault(name) })
+}
+
+// onHeadlessChanged writes the world, through the same 'profile set' path an
+// edit uses. It is a SETTING and not a mode this window remembers: a checkbox
+// that only applied until the window closed would be a promise the next start
+// broke.
+func (u *ui) onHeadlessChanged() {
+	if u.settingHeadless {
+		return
+	}
+	world := u.selectedWorld()
+	if world == nil {
+		return
+	}
+	want := u.headless.Checked()
+	if want == world.Headless {
+		return
+	}
+	if u.busy {
+		// Put it back: the action goroutine is occupied and the click cannot be
+		// honoured, so the checkbox must not go on showing a value the world
+		// does not have.
+		u.settingHeadless = true
+		u.headless.SetChecked(world.Headless)
+		u.settingHeadless = false
+		return
+	}
+	name := world.Name
+	u.start(Job{Kind: JobHeadless, World: name, Headless: want},
+		func() int { return u.session.Edit(name, []string{HeadlessFlag(want)}) })
 }
 
 func (u *ui) onEdit() {
@@ -706,12 +1093,13 @@ func (u *ui) onEdit() {
 	}
 	flags := EditFlags(current, form)
 	if len(flags) == 0 {
+		u.result = Result{Text: "Nothing about '" + name + "' was changed.", Good: true}
 		fmt.Fprintf(u.log, "nothing about '%s' was changed.\n", name)
+		u.applyActions()
 		return
 	}
-	u.start("edit "+name+" ("+strings.Join(flags, " ")+")", func() {
-		u.session.Edit(name, flags)
-	})
+	u.start(Job{Kind: JobEdit, World: name, Flags: flags},
+		func() int { return u.session.Edit(name, flags) })
 }
 
 func (u *ui) onCreate() {
@@ -725,9 +1113,10 @@ func (u *ui) onCreate() {
 		// An installation with nothing in it can still be given a world, but the
 		// person has to say where the game is. The dialog opens with the fields
 		// empty and the reason shown.
+		u.setDetails(true)
 		u.warn(defaultsErr.Error())
 	}
-	created, ok, err := runCreateDialog(u.mw, spec)
+	created, ok, err := runCreateDialog(u.mw, spec, defaultsErr)
 	if err != nil {
 		u.warn(err.Error())
 		return
@@ -735,9 +1124,7 @@ func (u *ui) onCreate() {
 	if !ok {
 		return
 	}
-	u.start("create "+created.Name+" and enroll a new identity on the map", func() {
-		u.session.Create(created)
-	})
+	u.start(Job{Kind: JobCreate, World: created.Name}, func() int { return u.session.Create(created) })
 }
 
 func (u *ui) onClone() {
@@ -754,7 +1141,8 @@ func (u *ui) onClone() {
 	if !ok {
 		return
 	}
-	u.start("clone "+source+" as "+name, func() { u.session.Clone(source, name) })
+	u.start(Job{Kind: JobClone, World: source, Other: name},
+		func() int { return u.session.Clone(source, name) })
 }
 
 func (u *ui) onDelete() {
@@ -771,7 +1159,8 @@ func (u *ui) onDelete() {
 	if !ok {
 		return
 	}
-	u.start("delete "+name, func() { u.session.Delete(name, removeData, typed) })
+	u.start(Job{Kind: JobDelete, World: name},
+		func() int { return u.session.Delete(name, removeData, typed) })
 }
 
 func (u *ui) onDiagnose() {
@@ -780,7 +1169,20 @@ func (u *ui) onDiagnose() {
 		return
 	}
 	name := world.Name
-	u.start("check "+name, func() { u.session.Diagnose(name) })
+	// A health check is a REPORT, and a report nobody can see is not one. This is
+	// the one action that opens the details pane whether or not it finds a fault.
+	u.setDetails(true)
+	u.start(Job{Kind: JobCheck, World: name}, func() int { return u.session.Diagnose(name) })
+}
+
+func (u *ui) onOpenData() {
+	world := u.selectedWorld()
+	if world == nil {
+		return
+	}
+	if err := openFolder(world.DataRoot); err != nil {
+		u.warn(err.Error())
+	}
 }
 
 func (u *ui) onOpenLogs() {
@@ -803,6 +1205,19 @@ func (u *ui) onOpenGameLog() {
 	}
 }
 
+// openFolder shows a folder in Explorer. It is the window's own because the data
+// root is the one path here the core has no opener for — it opens the LOG folder
+// and the game's log, both of which it creates.
+func openFolder(path string) error {
+	if path == "" {
+		return fmt.Errorf("this world has no data folder recorded")
+	}
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("%s cannot be opened: %v", path, err)
+	}
+	return exec.Command("explorer.exe", filepath.Clean(path)).Start()
+}
+
 func (u *ui) onCopyPeerID() {
 	world := u.selectedWorld()
 	if world == nil || world.PeerID == "" {
@@ -812,13 +1227,18 @@ func (u *ui) onCopyPeerID() {
 		u.warn(err.Error())
 		return
 	}
+	u.result = Result{Text: "Copied this world's identity on the map.", Good: true}
 	fmt.Fprintf(u.log, "copied this world's identity on the map: %s\n", world.PeerID)
+	u.applyActions()
 }
 
 func (u *ui) onCopyLog() {
 	if err := walk.Clipboard().SetText(u.logView.Text()); err != nil {
 		u.warn(err.Error())
+		return
 	}
+	u.result = Result{Text: "Copied the details to the clipboard.", Good: true}
+	u.applyActions()
 }
 
 // onOpenConsole opens the console launcher, which is the same program with the
@@ -871,12 +1291,13 @@ func (u *ui) onDocs() {
 }
 
 func (u *ui) onAbout() {
-	walk.MsgBox(u.mw, "About "+WindowTitle, strings.Join([]string{
+	walk.MsgBox(u.mw, ButtonAbout+" "+WindowTitle, strings.Join([]string{
 		fmt.Sprintf("Bibites Multiverse launcher %s", launcher.Release),
 		"",
 		"installed in " + u.session.InstallRoot(),
 		"the sidecar: " + u.session.SidecarExe(),
 		"the commands: " + launcher.ConsoleExeName,
+		"this window remembers its size in: " + u.placementPath(),
 		"",
 		DocsURL,
 		"",
@@ -884,9 +1305,101 @@ func (u *ui) onAbout() {
 	}, "\n"), walk.MsgBoxIconInformation|walk.MsgBoxOK)
 }
 
-// warn says something the window itself decided, in the pane and nowhere else:
-// a message box for every refusal would be a window a person has to dismiss
-// before they can read what it was about.
+// warn says something the window itself decided, in the details pane and
+// nowhere else: a message box for every refusal would be a window a person has
+// to dismiss before they can read what it was about. The pane is opened, because
+// a refusal written into a collapsed pane is a refusal nobody read.
 func (u *ui) warn(message string) {
+	u.setDetails(true)
 	fmt.Fprintf(u.log, "%s\n", message)
+}
+
+// ---------------------------------------------------------------- the placement
+
+// placementPath is where this window's size and position are kept. It is the
+// user's own roaming application data, for the two reasons in windowstate.go:
+// not in a world's data folder, and not in the profiles folder.
+func (u *ui) placementPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil || dir == "" {
+		return ""
+	}
+	return WindowStatePath(dir)
+}
+
+// restorePlacement puts the window back where it was, if that is still a place
+// on this machine's screen.
+//
+// THE ORDER MATTERS, and it is the reason this is two calls rather than one
+// SetWindowPlacement. walk's own Run() re-applies the window's current bounds as
+// it starts (FormBase.Run calls SetBoundsPixels(BoundsPixels())), which on a
+// window already put into the maximised state would move a maximised window with
+// SetWindowPos — a shape Windows does not promise anything sensible about. So
+// the rectangle is set here, before Run, with a plain SetWindowPos that does not
+// show the window; and the maximising, if any, is POSTED to the message loop, so
+// it happens after walk has finished starting up.
+func (u *ui) restorePlacement() {
+	path := u.placementPath()
+	if path == "" {
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	state, ok := DecodeWindowState(raw)
+	if !ok {
+		return
+	}
+	u.detailsOpen = state.Details
+	u.detailsPane.SetVisible(state.Details)
+	if state.Details {
+		u.detailsToggle.SetText(ButtonHideDetails)
+	}
+	fitted, usable := state.Fit(
+		int(win.GetSystemMetrics(win.SM_XVIRTUALSCREEN)),
+		int(win.GetSystemMetrics(win.SM_YVIRTUALSCREEN)),
+		int(win.GetSystemMetrics(win.SM_CXVIRTUALSCREEN)),
+		int(win.GetSystemMetrics(win.SM_CYVIRTUALSCREEN)))
+	if !usable {
+		return
+	}
+	win.SetWindowPos(u.mw.Handle(), 0,
+		int32(fitted.X), int32(fitted.Y), int32(fitted.Width), int32(fitted.Height),
+		win.SWP_NOZORDER|win.SWP_NOACTIVATE)
+	if fitted.Maximized {
+		u.mw.Synchronize(func() { win.ShowWindow(u.mw.Handle(), win.SW_MAXIMIZE) })
+	}
+}
+
+// savePlacement writes it down as the window closes. EVERY FAILURE IS SILENT: a
+// window position that could not be written is not worth a message box in front
+// of somebody who is closing the program.
+func (u *ui) savePlacement() {
+	path := u.placementPath()
+	if path == "" {
+		return
+	}
+	var placement win.WINDOWPLACEMENT
+	placement.Length = uint32(unsafe.Sizeof(placement))
+	if !win.GetWindowPlacement(u.mw.Handle(), &placement) {
+		return
+	}
+	rect := placement.RcNormalPosition
+	state := WindowState{
+		X:         int(rect.Left),
+		Y:         int(rect.Top),
+		Width:     int(rect.Right - rect.Left),
+		Height:    int(rect.Bottom - rect.Top),
+		Maximized: placement.ShowCmd == win.SW_SHOWMAXIMIZED,
+		Details:   u.detailsOpen,
+	}
+	raw, err := state.Encode()
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	os.WriteFile(path, raw, 0o644)
 }

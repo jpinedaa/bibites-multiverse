@@ -8,14 +8,19 @@ development machine has no Windows at all.
 **What is already proved elsewhere, and is not repeated here.** Every decision about a world is made
 in `go/internal/launcher`, and its tests run on any machine: the refusals, the slot wait, the
 mod-connected wait, the mod-quit stop and its four outcomes, enrollment and its 409/429/503 wording,
-and the gate before a folder is deleted (`session_test.go`, `session_linux_test.go`,
-`cli_test.go`, `run_linux_test.go`). Everything about the window that is not a widget is proved by
-`go/internal/launchergui/view_test.go`: the table's columns, the four states of the **On the map**
-column, which buttons a state enables, the flags an edit dialog turns into a `profile set`, and the
-log pane's line assembly.
+and the gate before a folder is deleted (`session_test.go`, `session_linux_test.go`, `cli_test.go`,
+`run_linux_test.go`). Everything about the window that is not a widget is proved by the build-tag-free
+files of `go/internal/launchergui` — `view.go`, `details.go`, `windowstate.go` and their tests: the
+state-to-words-to-colour table, the panel, which control a state enables, the flags an edit dialog
+turns into a `profile set`, the progress phrases read off the core's output, and the log pane's
+line assembly and scroll arithmetic.
 
-**So what is left is exactly this: does the window exist, does clicking it reach the core, and does
-what the core said arrive on screen.**
+**So what is left is exactly this: does the window exist, does clicking it reach the core, does what
+the core said arrive on screen, and are the colours and the collapsing pane what they claim to be.**
+
+> **This window was redesigned.** If you have a script from the previous round, throw it away: the
+> ten-column table is now two columns and a panel, the fourteen buttons are one big one plus two
+> menus, and the log pane is collapsed by default. Every caption in section 0 is new or moved.
 
 ---
 
@@ -27,175 +32,306 @@ what the core said arrive on screen.**
 | Install root | wherever the setup put it, e.g. `%LOCALAPPDATA%\Programs\Bibites Multiverse` |
 | Files that must be there | `BibitesMultiverseLauncher.exe`, `multiverse-launcher.exe`, `multiverse-sidecar.exe`, `public-map.json`, `support-matrix.json`, `bibites-multiverse.ico`, `profiles\default.json` |
 | A second world | created during the run, so start with one |
+| One file this window writes | `%APPDATA%\Bibites Multiverse\launcher-window.json` — its size, position and whether the details pane was open. Delete it before section 1 for a clean first run |
 
 Automation hooks, if the harness drives this rather than a person:
 
-- The main window's caption is exactly `Bibites Multiverse` — `launchergui.WindowTitle`, and it is
-  frozen for this reason.
-- Every button and menu item has a **stable, unique caption**, listed in
-  `go/internal/launchergui/view.go` (`ButtonStart`, `ButtonStopAll`, `ButtonDialogDelete`, …), and a
-  test enforces that no two are the same string. Find them by caption; click with `BM_CLICK` or the
-  MSAA/UIA `Invoke` pattern.
-- They are real Win32 controls (`walk` creates `SysListView32`, `Button`, `Edit`, `msctls_statusbar32`),
-  so MSAA sees the whole tree without any accessibility work of our own.
-- The world list is a list view; read its rows for the assertions below.
-- The log pane is a read-only multiline `Edit`: `WM_GETTEXT` is the whole session's log. It follows
-  its own newest line, so `EM_GETFIRSTVISIBLELINE` + the visible line count reaches
-  `EM_GETLINECOUNT` while nobody has scrolled up (see section 3, step 8).
+- **Find the window by the PREFIX `Bibites Multiverse`, not by the whole caption.** The caption is
+  now `Bibites Multiverse` when nothing is running and `Bibites Multiverse - 1 of 2 worlds running`
+  when something is (`launchergui.WindowTitle` and `WindowTitleFor`). The prefix is frozen.
+- Every button, checkbox and menu item has a **stable, unique caption**, listed in section 0 and in
+  `go/internal/launchergui/view.go`; a test enforces that no two are the same string. Find them by
+  caption; click with `BM_CLICK` or the MSAA/UIA `Invoke` pattern. One caption may appear on more
+  than one control (a button and the menu item that does the same thing) — those are the same
+  action and are enabled together.
+- They are real Win32 controls (`walk` creates `SysListView32`, `Button`, `Edit`, `Static`,
+  `msctls_progress32`, `msctls_statusbar32`), so MSAA sees the whole tree.
+- The world list is a two-column list view; read its rows for the assertions below.
+- The details pane is a read-only multiline `Edit` **inside a container that is hidden until
+  `Show details` is pressed**. `WM_GETTEXT` on it is the whole session's log whether it is visible or
+  not; `IsWindowVisible` on its parent is whether the pane is open.
+
+---
+
+## 0. The captions, in full
+
+Assert each of these exists, spelled exactly like this.
+
+**The panel (right-hand side), top to bottom**
+
+| Caption | Control |
+|---|---|
+| `Start` / `Stop` | the big primary button; the caption is `Start` for a stopped world and `Stop` for a running one |
+| `Run without a game window (headless)` | check box |
+| `Open the data folder` | small button, beside the **Data folder** value |
+| `Copy this world's identity` | small button, beside the **Map identity** value |
+| `Edit settings...` | button |
+| `Run a health check` | button |
+| `Show details` / `Hide details` | one button; the caption says what pressing it will do |
+
+**Along the bottom**
+
+| Caption | Control |
+|---|---|
+| `Create a world...` | button |
+| `Stop every world` | button |
+| `Copy the details` | button, **inside the details pane**, so it is only visible when the pane is |
+
+**Menu bar**
+
+| Menu | Items, in order |
+|---|---|
+| `World` | `Start`, `Stop`, —, `Run a health check`, —, `Edit settings...`, `Clone this world...`, `Delete this world...`, `Set as the default world`, —, `Create a world...`, `Stop every world`, —, `Refresh now`, `Quit` |
+| `Open` | `Open the data folder`, `Open the logs folder`, `Open the game's own log`, —, `Open the commands window` |
+| `Help` | `Documentation (bibitesmultiverse.com)`, —, `About` |
+
+**Right-click on a world in the list**
+
+`Start`, `Stop`, —, `Run a health check`, `Edit settings...`, `Set as the default world`, —,
+`Clone this world...`, `Delete this world...`, —, `Open the data folder`, `Open the logs folder`,
+`Open the game's own log`, `Copy this world's identity`
+
+**Dialog buttons**
+
+| Dialog | Accepting button | Other |
+|---|---|---|
+| Edit settings | `Save changes` | `Cancel` |
+| Create a world | `Create this world` | `Show advanced settings` / `Hide advanced settings`, `Cancel` |
+| Clone | `Create the copy` | `Cancel` |
+| Delete | `Delete it permanently` | `Cancel`, check box `Also delete this world's own folder` |
+
+**Fixed labels**
+
+- List columns: `World`, `Status`.
+- Panel facts, in this order: `Save name:`, `Port:`, `Speed:`, `Data folder:`, `Map identity:`.
+- Details pane header: `Everything the launcher did this session, newest at the bottom:`.
+- Status bar: `Your worlds keep running when you close this window   -   N world(s) in <install root>`.
+- Edit dialog group boxes: `This world`, `Who may leave, and where`, `Saving`.
+
+**Assert (the wording rule):** no caption, label, group box, check box or tooltip anywhere in the
+window contains the words **profile**, **sidecar**, **contract**, **peer** or **enroll**. Those words
+belong to the program and they are all still present — inside the details pane, which is the core's
+own output and is deliberately left in the core's own vocabulary.
+
+**Assert (tooltips):** hovering each control in the two tables above shows a tooltip, and no tooltip
+merely repeats its caption.
 
 ---
 
 ## 1. It opens, and it opens as a window
 
-1. Double-click the **Bibites Multiverse** desktop icon.
-2. **Assert:** a window titled `Bibites Multiverse` appears, and **no console window flashes** before
-   it. A console flash means the `-H=windowsgui` link flag did not take, which the build also checks
-   (`file` must say `PE32+ executable (GUI)`).
+1. Delete `%APPDATA%\Bibites Multiverse\launcher-window.json` if it exists. Double-click the
+   **Bibites Multiverse** desktop icon.
+2. **Assert:** a window whose caption begins `Bibites Multiverse` appears, and **no console window
+   flashes** before it. A console flash means the `-H=windowsgui` link flag did not take, which the
+   build also checks (`file` must say `PE32+ executable (GUI)`).
 3. **Assert:** the window's icon in the taskbar and in Alt-Tab is the project icon, not the Go
    gopher. The gopher means the resource object was not generated before the build.
-4. **Assert:** the controls look like the rest of Windows (a themed list view with a real header). Flat
-   grey Windows-95 controls mean the Common Controls 6 manifest is missing from the resource object.
-5. **Assert:** the status bar along the bottom reads
-   `worlds keep running when you close this window   -   1 world(s) in <install root>`.
-6. **Assert:** the log pane's first two lines are the release and the install root, then the same
-   hint naming `multiverse-launcher.exe`.
+4. **Assert:** the controls look like the rest of Windows (a themed list view with a real header,
+   themed buttons). Flat grey Windows-95 controls mean the Common Controls 6 manifest is missing
+   from the resource object.
+5. **Assert:** the window is at least 900 x 560; try to drag it smaller and confirm it stops there.
+6. **Assert (the layout):** the world list is on the LEFT with a draggable splitter beside it, the
+   panel is on the RIGHT, and **the details pane is not visible at all** — no log, no monospaced
+   text, nothing below the splitter but the two bottom buttons and the status bar.
+7. **Assert:** the status bar reads
+   `Your worlds keep running when you close this window   -   1 world(s) in <install root>`.
 
-## 2. The world list is the installation
+## 2. The world list is the installation, in two columns
 
-1. **Assert:** one row, for the world the installer made, named `default` with a `*` in front of it.
-2. **Assert:** the columns read `Save name` = the installed world, `Port` = `8787`,
-   `Window` = `window`, `Sidecar` = `stopped`, `Game` = `stopped`, `On the map` = `-`,
-   `Speed` = `-`, `Slot` = `-`, `Data folder` = the world's data root.
-3. **Assert:** no banner is shown above the list.
+1. **Assert:** one row, for the world the installer made: `World` = `* default` (the `*` marks the
+   default world), `Status` = `Stopped`, drawn in **grey**.
+2. **Assert:** no banner is shown above the list.
+3. **Assert (the panel):** the world's name `default` in a larger bold face; under it the headline
+   `Stopped`; under that, because this is a one-world installation that is not running,
+   `This is your world. Click Start to join the map.`
+4. **Assert (the facts):** `Save name:` the installed world, `Port:` `8787`, `Speed:` `-`,
+   `Data folder:` the world's data root, `Map identity:` a `public-…` string.
+5. **Assert:** the big button reads `Start`; `Run without a game window (headless)` is unticked;
+   there is **no** progress bar and **no** coloured result line.
 
 ## 3. Start, and the one fact that matters
 
 1. Select the row. Click **Start**.
-2. **Assert while it runs:** the buttons grey out (an action is running) and the log pane fills with
-   the same lines the console prints — `sidecar started (pid N) -> wss://…`, then
-   `waiting for the map to grant this world a place ...`, then `YOU ARE ON THE MAP:` and the relay's
-   own granted line. Every line carries a `HH:MM:SS` stamp.
-3. **Assert:** within a couple of seconds of the sidecar starting, the list's `Sidecar` column reads
-   `running (pid N)` with the same pid the log named.
-4. **Assert:** after the game starts, `Game` reads `running (pid N)`, and the log says
-   `game started (pid N); it loads the world '<world>' by itself…`.
-5. **Assert (the important one):** when the game's mod reaches the sidecar, the log says
-   `the game joined the map: mod connected, speed x10.` **and** the `On the map` column changes to
-   `connected (mod <version>)`. The version must be the mod's real version, not blank.
-6. **Assert:** the `Speed` column becomes `x10` and then `x10 (<achieved> achieved)` once the sidecar
-   has measured a span, and `Slot` becomes this world's slot number.
-7. **Assert:** the buttons come back, **Start** is now greyed and **Stop** is enabled.
-8. **Assert (the log pane follows):** while all that printed, the pane showed its **newest** lines
-   without anybody touching it — the last line on screen is the last line printed. Drive it with
-   `EM_GETLINECOUNT` and `EM_GETFIRSTVISIBLELINE`: with the window in the foreground and the pane
-   never scrolled by hand, the first visible line must be within a screenful of the line count, not
-   `0`. (`0` with a line count of 191 is what a machine reported before `scrollLogToEnd`:
-   walk's `AppendText` restores the selection it saved, so `ScrollToCaret` was scrolling a caret
-   that had been put back at the top.)
-9. **Assert (and it stops following when you read):** scroll the pane up by more than a line while a
-   world is starting. New lines keep arriving and **the view stays where you put it**. Scroll back to
-   the bottom and it follows again.
+2. **Assert (the panel, while it runs):** a marquee progress bar appears and the headline changes
+   through these phrases, in this order, in **amber**:
+   - `Starting 'default'...`
+   - `Connecting this world to the map...`
+   - `Waiting for the map to give this world a place...`
+   - `This world has its place on the map. Starting the game...`
+   - `The game is starting...`
+   - `Waiting for the game to join the map (up to two minutes)...`
+   - `The game joined the map.`
+   (A phrase may be passed through quickly; what must not happen is the headline sitting on
+   `Starting 'default'...` for the whole ninety seconds.)
+3. **Assert:** while it runs the world's `Status` cell reads `Starting...` in amber, and **every**
+   button and menu item that acts on a world is greyed — `Start`, `Stop`, `Edit settings...`,
+   `Run a health check`, `Create a world...`, `Stop every world`, the check box, and the same items
+   in both menus. `Show details` and `Copy the details` stay enabled.
+4. **Assert (when it finishes):** the progress bar disappears, and a **green** line appears in the
+   panel reading `Started 'default'.` — and it STAYS there until the next action.
+5. **Assert (the important one):** the `Status` cell reads `On the map - speed x10` in **green**, and
+   the panel headline reads `Running - on the map (place N) - speed x10`.
+6. **Assert:** the `Speed:` fact becomes `x10 asked for` and then `x10 asked for, x<achieved>
+   achieved` once the sidecar has measured a span.
+7. **Assert:** the big button's caption has flipped to `Stop`.
+8. **Assert (the title bar):** the caption is now `Bibites Multiverse - 1 of 1 worlds running`.
+9. **Assert:** the details pane is **still closed**. A start that worked says so in one green line
+   and does not open a log at anybody.
 
 ### 3b. The failure that must never be silent
 
 To see the other side of step 5, make the mod not arrive — the honest way is a game folder with the
 plugin removed, but any world whose game never joins will do.
 
-1. **Assert:** the start still finishes and the window does not claim success: the log carries
-   `!! THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR after 120 s.`, the whole block under
-   it (`LOCAL-CONFIGRACE`, `LOCAL-STARVATION`, the `BepInEx/LogOutput.log` path, and
-   `this is a warning, not a failure`).
-2. **Assert:** the `On the map` column reads `NOT CONNECTED - see the log`.
-3. **Assert:** `Open the game's BepInEx log` opens Explorer with that log selected.
+1. **Assert:** the details pane **opens by itself**, without anybody pressing `Show details`, at the
+   moment the core prints `!! THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR after 120 s.`
+   — and the pane is scrolled to that line.
+2. **Assert:** the pane carries the whole block under it (`LOCAL-CONFIGRACE`, `LOCAL-STARVATION`, the
+   `BepInEx/LogOutput.log` path, and `this is a warning, not a failure`).
+3. **Assert:** the `Status` cell reads `NOT on the map` in **red**, and the panel headline reads
+   `Running, but NOT on the map - see the details`, also red, with the hint
+   `Nothing is reaching the map from this world. Open the details below for what to do.`
+4. **Assert:** `Open` → `Open the game's own log` opens Explorer with that log selected.
 
-## 4. The per-session window override
+### 3c. A start that is refused says why, in the core's own words
 
-1. Stop the world (section 5), leaving its profile at `Window` = `window`.
-2. **Assert:** the second button's caption is `Start with no window (this time only)`.
-3. Click it.
-4. **Assert:** the game starts with no window (`-batchmode -nographics`; nothing is drawn), and the
-   log says `It runs with nothing drawn. The simulation is unchanged; only the picture is gone.`
-5. **Assert:** the list's `Window` column still reads `window`, and
-   `multiverse-launcher.exe profile show default` still reports `headless off`. **The override must
-   not have been written into the world.**
-6. Stop it. Tick **headless** in **Edit settings...** and save.
-7. **Assert:** the caption flips to `Start with a window (this time only)`, and using it starts a
-   world with a window while the profile still says headless.
+1. Start the same world twice — or hold the world's `launcher.lock` — so that the core refuses.
+2. **Assert:** the result line is **red** and carries the core's own sentence after the job, e.g.
+   `Could not start 'default': another launcher is starting or stopping this world (…)`. It must not
+   read only "the operation failed"; the launcher's own refusals are the best sentences in the
+   program and the panel quotes them.
+3. **Assert:** the details pane opened by itself.
+
+## 4. The window setting is a setting now, and it persists
+
+The per-session `Start with no window (this time only)` button is **gone from the window**. The
+override lives on the command line (`multiverse-launcher.exe start --headless` / `--no-headless`),
+which is where a one-off belongs.
+
+1. With the world stopped, tick **`Run without a game window (headless)`**.
+2. **Assert:** the check box **stays ticked** — it must not flicker back to unticked while the edit
+   runs — a spinning bar appears, the headline reads
+   `Setting 'default' to run without a game window...`, and a green line follows:
+   `'default' will run without a game window from now on.`
+3. **Assert:** `multiverse-launcher.exe profile show default` now reports `headless on`. **The
+   window wrote the world**; this is not a mode the window remembers.
+4. Close the window and re-open it. **Assert:** the box is still ticked.
+5. Click **Start**. **Assert:** the game starts with nothing drawn, and the details pane carries
+   `It runs with nothing drawn. The simulation is unchanged; only the picture is gone.`
+6. Untick it while the world is running. **Assert:** it is accepted (the check box is not greyed),
+   the green line reads `'default' will run with a game window from now on.`, and the running game
+   is unaffected — the change takes effect at the next start, which is what the tooltip says.
 
 ## 5. Stop, and whether anything was lost
 
 1. With a world running — **headless**, which is the case that used to lose a save — click **Stop**.
-2. **Assert:** the log says
+   There is **no confirmation dialog**, and that is deliberate: a stop asks the world to save and
+   quit, so it costs nothing.
+2. **Assert (the phrases):** `Stopping 'default' - asking it to save and quit...`, then
+   `The world is saving and shutting down...`, then
+   `The game has stopped. Closing the link to the map...`.
+3. **Assert:** the details pane carries
    `stopped the game (pid N) - it was asked through the mod, and it saved and quit`, then a sidecar
-   line. **The sidecar's line is about the sidecar**: every sidecar this launcher starts is detached
-   and windowless, so on Windows it reads
-   `stopped the sidecar (pid N) - ended directly; a sidecar keeps nothing unsaved - its journal is
-   written as it goes`. (Where a sidecar does take a close request — Linux — it reads
-   `it was asked to close, and it closed`.)
-3. **Assert:** the log does **not** contain `forced immediately: it has no window`, and does not
-   contain the `LOCAL-HEADLESSSTOP` note. A headless stop through this window loses nothing. That
-   sentence is the signature `docs/error-taxonomy.md` tells a person to search for after a lost
-   save, and it is now only ever printed about a **game**.
-4. **Assert:** both process columns return to `stopped` within one refresh, and `On the map` to `-`.
-5. Start two worlds, then click **Stop every world**.
-6. **Assert:** the log carries a `--- <name>` header for each world and both are stopped.
+   line reading `stopped the sidecar (pid N) - ended directly; a sidecar keeps nothing unsaved - its
+   journal is written as it goes`.
+4. **Assert:** the pane does **not** contain `forced immediately: it has no window`, and does not
+   contain the `LOCAL-HEADLESSSTOP` note. A headless stop through this window loses nothing. (If it
+   ever did, the pane would open by itself — `LOCAL-HEADLESSSTOP` is one of the alarm lines.)
+5. **Assert:** a **green** `Stopped 'default'.` stays in the panel; the `Status` cell returns to
+   `Stopped` in grey within one refresh; the button reads `Start` again; the title bar drops back to
+   `Bibites Multiverse`.
+6. **Keyboard and mouse:** select a stopped world and press **Enter**. **Assert:** it starts.
+   Double-click a running world. **Assert:** it stops. Both do exactly what the big button does.
+7. Start two worlds, then click **Stop every world**.
+8. **Assert:** BOTH rows read `Stopping...` in amber at once, the headline names each world in turn
+   (`Stopping 'default'...`, `Stopping 'second'...`), the pane carries a `--- <name>` header for
+   each, and the result is `Stopped every world.`
 
-## 6. Create another world
+## 6. Create a world — a name, and nothing else unless asked
 
-1. Click **Create another world...**.
-2. **Assert:** the dialog opens on values that will not be refused: a name no world has, the same
-   game folder, a data folder beside the first world's, and the lowest free port (`8788`).
-3. **Assert:** the dialog says, before anything is agreed to, that every world takes another
-   identity on the public map and that the map applies a per-address enrollment limit, and that
-   deleting a world here is not leaving the map.
-4. **Type `70000` into the port field** and press **Create and enroll**.
-5. **Assert:** nothing is created, and the log carries the core's own words:
-   `the sidecar port 70000 is outside 1024-65535`. **The map must not have been contacted** — check
-   that no `enrollment-pending.json` appeared in the new data folder.
-6. Repeat with a valid port and press **Create and enroll**.
-7. **Assert:** the log carries `requesting a unique identity from https://…`, then
-   `wrote …\profiles\<name>.json`, the world's identity (`public-…`), the relay it dials, and the
-   two notes.
-8. **Assert:** the list now has two rows, and the new one's `Port` is what the dialog said.
-9. **Assert:** `Copy peer id` puts the new world's `public-…` identity on the clipboard.
+1. Click **Create a world...**.
+2. **Assert:** the dialog is titled `Create a world on this computer` and shows, above everything,
+   one plain sentence about what a world is. The ONLY field is `A name for the new world`,
+   pre-filled with a name no world has.
+3. **Assert:** the identity and leaving notes are immediately **above** the `Create this world`
+   button, not at the top: the per-address enrollment limit and *"Deleting a world here is not
+   leaving the map"*.
+4. Press **Show advanced settings**.
+5. **Assert:** the caption flips to `Hide advanced settings` and five more fields appear —
+   `Its save name`, `Its port` (the lowest free one, `8788`), `Its own folder` (beside the first
+   world's), `The folder the game is installed in` (the same as the existing world's), and
+   `Run without a game window (headless)`.
+6. **Type `70000` into `Its port`** and press **Create this world**.
+7. **Assert:** nothing is created; the details pane opens by itself and the panel's red result line
+   quotes the core: `'world2' was not created: the sidecar port 70000 is outside 1024-65535`. **The
+   map must not have been contacted** — check that no `enrollment-pending.json` appeared in the new
+   data folder.
+8. Repeat with a valid port and press **Create this world**.
+9. **Assert (step two is the window, not a second dialog):** the dialog closes at once and the PANEL
+   shows `Creating 'world2' - asking the map for a new identity...` with a spinning bar, then
+   `Asking the map for a new identity...`, then a green
+   `Created 'world2'. It has its own identity on the map.`
+10. **Assert:** the details pane carries `requesting a unique identity from https://…`, then
+    `wrote …\profiles\world2.json`, the world's `public-…` identity, and the two notes.
+11. **Assert:** the list now has two rows and the new one's `Port:` fact is what the dialog said.
+12. Select it and press **Copy this world's identity**.
+    **Assert:** its `public-…` identity is on the clipboard, and the panel says
+    `Copied this world's identity on the map.`
+13. **Assert:** `Open the data folder` opens that world's own folder in Explorer.
 
 ## 7. Edit, default, clone
 
-1. Select a world, **Edit settings...**, change `save every N minutes` to `5`, press **Save**.
-2. **Assert:** the log says `wrote …\profiles\<name>.json`, and re-opening the dialog shows `5`.
-3. **Assert:** an edit that changes nothing says `nothing about '<name>' was changed.` and writes
-   no file.
-4. **Assert:** emptying the **species that never leave** field is accepted as
-   `--no-migration-exclusion` — the log shows the exclusion-policy-off warning rather than the
-   refusal about an empty value.
-5. Select the world that is not marked `*`, click **Set as default**.
-6. **Assert:** the `*` moves, and `multiverse-launcher.exe status` (no world named) reports that
-   world.
-7. **Clone world...** the first world.
-8. **Assert:** the clone gets a new identity, a new port, a new data folder and a new save name, and
-   the log names all four.
+1. Select a world, **Edit settings...**.
+2. **Assert:** the fields are in three labelled groups — `This world`, `Who may leave, and where`,
+   `Saving` — and each field carries a tooltip.
+3. **Assert (which values are defaults):** beside `Port` the grey note reads `(the default)` for
+   `8787` and `(default: 8787)` for anything else; the same for `Edges organisms may cross`,
+   `Species that never leave`, `Save every N minutes` and `Saves kept`.
+4. Change `Save every N minutes` to `5`, press **Save changes**.
+5. **Assert:** a green `Saved the settings for 'default'.`, the pane says
+   `wrote …\profiles\default.json`, and re-opening the dialog shows `5` with `(default: 10)`.
+6. **Assert:** an edit that changes nothing leaves `Nothing about 'default' was changed.` in the
+   panel and writes no file.
+7. **Assert:** emptying `Species that never leave` is accepted as `--no-migration-exclusion` — the
+   pane shows the exclusion-policy-off warning rather than the refusal about an empty value.
+8. Press **Escape** in the dialog. **Assert:** it closes and nothing is written.
+9. Select the world that is not marked `*`, `World` → **Set as the default world**.
+10. **Assert:** the `*` moves, the result reads `'second' is now the default world.`, and
+    `multiverse-launcher.exe status` (no world named) reports that world.
+11. `World` → **Clone this world...** on the first world.
+12. **Assert:** the dialog is titled `Make a copy of the world '<name>'`, has one field
+    `A name for the copy`, and its button is `Create the copy`.
+13. **Assert:** the clone gets a new identity, a new port, a new data folder and a new save name; the
+    pane names all four and the result reads `Copied 'default' to 'world3'.`
 
 ## 8. Delete, which has to be hard
 
-1. Select the clone. Click **Delete world...**.
+1. Select the clone. `World` → **Delete this world...**.
 2. **Assert:** the dialog carries the custody warning (*"Deleting this world here is NOT leaving the
-   map"*), names the data folder, offers the checkbox
-   `also remove this world's data (journal, logs, credential)…`, and asks for the world's name.
-3. Press Enter without typing anything.
-4. **Assert:** **Cancel** is the default button — nothing is deleted by pressing Enter.
-5. Re-open it, type a **wrong** name, press **Delete this world**.
-6. **Assert:** the log says `that is not '<name>'. Nothing was deleted`, and the world is still in
-   the list.
-7. Re-open it, tick the data checkbox, type the right name, press **Delete this world**.
-8. **Assert:** the log carries the custody warning, the list of this world's own entries, `deleted
-   …\profiles\<name>.json`, and either `deleted <data root>, including its journal` or a `kept <data
-   root>: N thing(s) in it are not this world's…` line naming every one of them.
-9. **Assert:** a running world's **Delete world...** button is greyed.
+   map"*) as flowing text — not indented like terminal output — offers the check box
+   `Also delete this world's own folder`, names the folder, and says in plain words that
+   **the game's own save file is not in it and is never touched**.
+3. **Assert:** the field reads `Type <name> to confirm`.
+4. Press Enter without typing anything.
+5. **Assert:** **Cancel** is the default button — nothing is deleted by pressing Enter.
+6. Re-open it, type a **wrong** name, press **Delete it permanently**.
+7. **Assert:** the red result line quotes the core — `'world3' was not deleted: that is not
+   'world3'. Nothing was deleted` — the pane is open, and the world is still in the list.
+8. Re-open it, tick the check box, type the right name, press **Delete it permanently**.
+9. **Assert:** the pane carries the custody warning, this world's own entries, `deleted
+   …\profiles\world3.json`, and either `deleted <data root>, including its journal` or a
+   `kept <data root>: N thing(s) in it are not this world's…` line naming every one of them. The
+   result is a green `Deleted 'world3'.`
+10. **Assert:** for a **running** world, `Delete this world...` is greyed in both the `World` menu
+    and the context menu.
 
-## 9. Check this world
+## 9. Run a health check
 
-1. Click **Check this world**.
-2. **Assert:** the log carries the command line it ran, and it names **this world's map**, not only
+1. Click **Run a health check**.
+2. **Assert:** the details pane **opens by itself** — a report nobody can see is not a report — and
+   the panel shows `Checking 'default'...` with a spinning bar.
+3. **Assert:** the pane carries the command line it ran, and it names **this world's map**, not only
    its folders:
 
    ```
@@ -204,41 +340,105 @@ plugin removed, but any world whose game never joins will do.
 
    `--relay` and `--credential-file` are the whole point of this assertion. Without them the sidecar
    falls back to its own default relay, `ws://127.0.0.1:8795/contract-b/v4`, and a perfectly healthy
-   world is told `FAIL relay-reachable` and `FAIL credential` — which is what this button did before
-   (`diagnoseArgs`, `go/internal/launcher/run.go`).
-3. **Assert:** then the diagnostic's whole output, each check with its verdict. On a healthy world on
+   world is told `FAIL relay-reachable` and `FAIL credential`.
+4. **Assert:** then the diagnostic's whole output, each check with its verdict. On a healthy world on
    the public map that is **all passes and exit 0** — the run this was written from reported
-   `16 PASS` — and in particular:
-   - `relay-reachable` and `credential` **pass**, rather than failing about a relay this world has
-     nothing to do with;
-   - `game-version` names the build rather than answering `UNKNOWN … a packaged install keeps its
-     copy in the folder it was installed from`. That answer means `support-matrix.json` is missing
-     from the install root; the installer's step 9 copies it there.
-4. **Assert:** a diagnostic that finds a real fault does not look like a launcher failure: the output
-   is there, followed by `the diagnostic finished with: exit status N`.
+   `16 PASS` — and the panel's result line is a green
+   `The health check found no faults. Its whole report is in the details.` In particular:
+   - `relay-reachable` and `credential` **pass**;
+   - `game-version` names the build rather than answering `UNKNOWN …`. That answer means
+     `support-matrix.json` is missing from the install root.
+5. **Assert:** a diagnostic that finds a real fault does not look like a launcher failure: the whole
+   output is there, followed by `the diagnostic finished with: exit status N`, and the result line is
+   the red `The health check found a fault. Its whole report is in the details.` — it must **not**
+   quote `exit status N` at the participant.
 
-## 10. Closing the window stops nothing
+## 10. The details pane: collapsed, opened, and it leaves a reader alone
+
+**This section is the one that regressed on a real machine, so drive it exactly.**
+
+1. With the pane closed, click **Show details**.
+2. **Assert:** the caption flips to `Hide details`, a monospaced pane appears below the splitter with
+   `Everything the launcher did this session, newest at the bottom:` above it and
+   `Copy the details` beside that, and the newest line is on screen.
+3. **Assert:** its first two lines are the release and the install root, then the hint naming
+   `multiverse-launcher.exe`. Every line carries a `HH:MM:SS` stamp, and each action is preceded by
+   a `> ` heading (`> start default`, `> stop default`, `> check default`,
+   `> edit default (--headless)`, `> create world2 and enroll a new identity on the map`).
+4. Start a world so it prints for a minute, and **assert (it follows):** with nobody touching it, the
+   last line on screen is the last line printed. Drive it with `EM_GETLINECOUNT` and
+   `EM_GETFIRSTVISIBLELINE`: the first visible line must be within a screenful of the line count.
+5. **Now the regression.** While that start is still printing, send the pane `WM_VSCROLL` `SB_TOP`
+   (or scroll to the top by hand). Read `EM_GETFIRSTVISIBLELINE` — call it `before`.
+6. Wait for at least ten more lines to arrive (watch `EM_GETLINECOUNT` grow).
+7. **Assert (the one that failed at `5becf8a`):** `EM_GETFIRSTVISIBLELINE` is **still `before`**. A
+   machine previously measured it jumping from `0` to `286` on the very next appended line: walk's
+   `AppendText` replaces the selection at the end of the document and the EDIT control scrolls the
+   caret into view as part of that, before this program is consulted. The window now reads the first
+   visible line on both sides of the append and scrolls the reader back with `EM_LINESCROLL`
+   (`launchergui.LinesToRestore`).
+8. **Assert:** while that happens the pane does not flicker — the append and the correction are one
+   redraw (`WM_SETREDRAW`), and the vertical scroll bar is redrawn with the frame, so it is not left
+   at a stale position.
+9. Scroll back to the bottom. **Assert:** it follows again.
+10. Press **Copy the details**. **Assert:** the whole pane is on the clipboard and the panel says
+    `Copied the details to the clipboard.`
+11. Press **Hide details**. **Assert:** the pane disappears, the splitter above it takes the space,
+    and the caption is `Show details` again.
+
+## 11. It remembers where it was
+
+1. With the details pane **open**, move and resize the window, then close it with its X.
+2. **Assert:** `%APPDATA%\Bibites Multiverse\launcher-window.json` exists, carries
+   `"format": "bibites-multiverse/launcher-window/1"`, and its `x`, `y`, `width`, `height` and
+   `details` match what you left.
+3. Re-open the window. **Assert:** it opens at that size and position with the details pane open.
+4. Maximise it, close it, re-open it. **Assert:** it comes back maximised, and un-maximising it
+   returns it to the size from step 1 — the file keeps the restored rectangle, not the maximised one.
+5. Edit the file to `"x": 9000` and re-open. **Assert:** the window opens at its default size on the
+   screen rather than off the edge of it.
+6. Replace the file's contents with `not json` and re-open. **Assert:** the window opens normally and
+   says nothing about it.
+7. **Assert:** nothing was written into `profiles\` — a stray `.json` in there is read as a world and
+   would raise the red banner (section 14).
+8. **Assert:** `Help` → `About` names that file's path.
+
+## 12. Closing the window stops nothing
 
 1. Start a world. Close the window with its X.
 2. **Assert:** `multiverse-launcher.exe status --all` still reports the sidecar and the game running,
    with the same pids.
 3. **Assert:** the game is still on screen (or still in Task Manager, if headless).
 4. Re-open the window.
-5. **Assert:** the list shows that world running, and `On the map` still reads
-   `connected (mod …)` — the reading is taken from the sidecar, not remembered.
+5. **Assert:** the list shows that world `On the map - speed x10` in green — the reading is taken
+   from the sidecar, not remembered — and the title bar says `1 of N worlds running`.
 6. Stop it from the window.
 
-## 11. Two windows at once
+## 13. Two windows at once
 
 1. Open the launcher twice.
 2. **Assert:** both windows list the same worlds and both refresh.
 3. Click **Start** on the same world in both, as close together as you can manage.
-4. **Assert:** one starts it, and the other says
-   `another launcher is starting or stopping this world (…launcher.lock was taken … ago by pid N).
-   Wait for it to finish` — the per-world lock, not a corrupted world. Exactly one sidecar is
-   running afterwards (`status --all`, and one process in Task Manager).
+4. **Assert:** one starts it, and the other's panel shows a red
+   `Could not start '<name>': another launcher is starting or stopping this world (…launcher.lock
+   was taken … ago by pid N). Wait for it to finish` with its details pane opened by itself — the
+   per-world lock, not a corrupted world. Exactly one sidecar is running afterwards (`status --all`,
+   and one process in Task Manager).
 
-## 12. The command line, and the two executables
+## 14. A broken file is a banner, not an empty list
+
+1. With the window closed, put a file that is not JSON at `profiles\broken.json`.
+2. Open the window.
+3. **Assert:** the worlds that do parse are all listed, and a red banner above the list names
+   `broken.json`, says the launcher could not read it, **and says what to do**:
+   `Run the installer again, or move the named file out of that folder.`
+4. Remove the file. **Assert:** the banner goes on the next refresh.
+5. Move every profile out of `profiles\` and re-open. **Assert:** the banner reads
+   `There are no worlds on this computer yet. Click 'Create a world...' to make one, or run the
+   installer again.`, the panel says the same thing, and `Create a world...` is the only enabled
+   action.
+
+## 15. The command line, and the two executables
 
 1. In PowerShell, from the install root:
 
@@ -251,7 +451,11 @@ plugin removed, but any world whose game never joins will do.
 2. **Assert:** the console menu still works — `.\multiverse-launcher.exe` with no arguments on a
    terminal draws the numbered menu, and `0` quits.
 
-3. **The forwarding, which is compatibility for an old script:**
+3. **Assert (the override the window dropped is still on the command line):**
+   `.\multiverse-launcher.exe start default --no-headless` starts a world with a window even though
+   its profile says headless, and does not write the profile.
+
+4. **The forwarding, which is compatibility for an old script:**
 
    ```powershell
    .\BibitesMultiverseLauncher.exe status --all --json
@@ -274,32 +478,23 @@ plugin removed, but any world whose game never joins will do.
 
    **Assert:** `2`, the usage code.
 
-4. **Assert:** `.\BibitesMultiverseLauncher.exe` with **no** arguments opens the window and returns
-   immediately (a shell does not wait for it) — which is the whole reason the commands are a second
-   file, and the reason the documentation tells a script to call `multiverse-launcher.exe`.
+5. **Assert:** `.\BibitesMultiverseLauncher.exe` with **no** arguments opens the window and returns
+   immediately (a shell does not wait for it).
 
-5. In the window: **Worlds → Open the console launcher**.
+6. In the window: `Open` → **Open the commands window**.
    **Assert:** a console window opens with the numbered menu in it.
 
-## 13. Help and about
+## 16. Help and about
 
-1. **Help → About.**
+1. `Help` → **About**.
    **Assert:** `Bibites Multiverse launcher <this release>` — the same string
    `multiverse-launcher.exe version` prints — the install root, the sidecar's path,
-   `multiverse-launcher.exe`, `https://bibitesmultiverse.com`, and the closing hint.
-2. **Help → Documentation.**
+   `multiverse-launcher.exe`, the window-position file's path,
+   `https://bibitesmultiverse.com`, and the closing hint.
+2. `Help` → **Documentation**.
    **Assert:** the default browser opens `https://bibitesmultiverse.com`.
 
-## 14. A broken profile is a banner, not an empty list
-
-1. With the window closed, put a file that is not JSON at `profiles\broken.json`.
-2. Open the window.
-3. **Assert:** the worlds that do parse are all listed, and a red banner above the list names
-   `broken.json` and says the launcher could not read it. **An installation with unreadable files
-   must never look like an installation with no worlds.**
-4. Remove the file. **Assert:** the banner goes on the next refresh.
-
-## 15. The uninstall takes both executables
+## 17. The uninstall takes both executables
 
 1. Run `Uninstall-BibitesMultiverse.ps1`.
 2. **Assert:** it refuses while a world is running, naming `multiverse-launcher.exe stop --all`.
@@ -309,12 +504,36 @@ plugin removed, but any world whose game never joins will do.
 
 ---
 
+## The state table, for reference
+
+Every row is a different sentence AND a different colour. Assert the colour by reading the list
+item's text colour (`NM_CUSTOMDRAW` sets it per cell) or by eye.
+
+| The world | `Status` column | Panel headline | Colour |
+|---|---|---|---|
+| nothing running | `Stopped` | `Stopped` | grey `RGB(96,96,96)` |
+| an action of the window's is running on it | `Starting...` / `Stopping...` / `Creating...` / `Copying...` / `Deleting...` / `Checking...` / `Saving...` | the live progress phrase | amber `RGB(160,96,0)` |
+| link up, nothing answering yet | `Starting...` | `Starting - waiting for the map to answer...` | amber |
+| on the map, no game yet | `Waiting for the game` | `On the map (place N), waiting for the game to join` | amber |
+| **on the map with a game behind it** | `On the map - speed x10` | `Running - on the map (place N) - speed x10` | **green `RGB(0,112,48)`** |
+| **game running, never joined the map** | `NOT on the map` | `Running, but NOT on the map - see the details` | **red `RGB(176,0,0)`** |
+| game running with nothing holding its place | `NOT on the map` | `The game is running, but this world has no link to the map - see the details` | red |
+
+The selected row is deliberately **not** recoloured: Windows draws it on the highlight colour, and a
+dark green on that blue is harder to read than the system's own white.
+
+---
+
 ## What to report back
 
-For each section: pass, or the exact text the log pane held and the columns the list showed. The two
-answers that matter most, because no test in this repository can reach them:
+For each section: pass, or the exact text the panel held, the `Status` cell's words and colour, and
+the details pane's contents. The answers that matter most, because no test in this repository can
+reach them:
 
 1. **Does the window open with themed controls and its own icon** (sections 1.3 and 1.4)? Those are
    the resource object, and they are the one thing a missing `go generate` breaks silently.
-2. **Does the `On the map` column agree with the log** (sections 3.5 and 3b.2)? That column is the
-   reason this window exists.
+2. **Does the `Status` column agree with the details pane** (sections 3.5 and 3b.3)? That
+   distinction is the reason this window exists.
+3. **Does the details pane leave a reader where they put themselves** (section 10.7)? That is the
+   regression this round fixes, and it is measurable to the line.
+4. **Does anything in the window still use an internal word** (section 0's wording rule)?

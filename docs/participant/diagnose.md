@@ -54,9 +54,9 @@ root="$(dirname "$data")"
     --relay "$(head -n 1 "$data/relay-url")" --credential-file "$root/peer-secret.txt"
 ```
 
-**On Windows the launcher does this for you**: **Check this world** in the launcher's window runs the
-diagnostic with that world's own relay and credential filled in, and prints the command line it used
-above the report. `--credential-file` names the file and never the secret; no flag in this system
+**On Windows the launcher does this for you**: **Run a health check** in the launcher's window runs
+the diagnostic with that world's own relay and credential filled in, and prints the command line it
+used above the report. The window's details pane opens by itself to show it. `--credential-file` names the file and never the secret; no flag in this system
 takes a secret as a value.
 
 Everything below writes them short. **The flags are the same on both platforms**; what differs is

@@ -778,7 +778,7 @@ Check "the application directory contains the launcher's commands" `
 Check "the application directory contains the map the launcher enrolls new worlds with" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json'))
 # The sidecar's diagnostic looks the game build up in this file, beside its own
-# executable. Without it here, 'Check this world' answers UNKNOWN for the
+# executable. Without it here, 'Run a health check' answers UNKNOWN for the
 # game-version check on an install that is perfectly healthy.
 Check "the application directory contains the support matrix the diagnostic reads" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'support-matrix.json'))

@@ -148,40 +148,56 @@ written anywhere.
 ## What the installer does
 
 **On Windows the installed application is `BibitesMultiverseLauncher.exe`**, and the **Bibites
-Multiverse** desktop and Start Menu icons open it. **It is a window.** It lists every world on
-this computer, one to a line, and keeps the list up to date while they run:
+Multiverse** desktop and Start Menu icons open it. **It is a window**, and it has two halves.
 
-| Column | What it says |
-|---|---|
-| **World** | the world's name here, with `*` on the one the bare commands act on |
-| **Save name** | the save file the game loads for it |
-| **Port** | its own sidecar port |
-| **Window** | `window` or `no window`, which is the headless setting |
-| **Sidecar** | `stopped`, or `running (pid N)` |
-| **Game** | the same, for the game |
-| **On the map** | `connected (mod x.y.z)` when the game's mod has really reached its sidecar, and `NOT CONNECTED - see the log` when it has not |
-| **Speed** | the speed the world is set to, and what it actually achieved |
-| **Slot** | its place on the map |
-| **Data folder** | where its journal, logs and credential live |
+**On the left is every world on this computer**, one line each, with what it is doing right now in
+plain words and in colour:
 
-**"On the map" is the column to read.** A world whose sidecar is running has a place on the map;
-a world whose *mod* has connected is one the map can actually move organisms through. When those
-two disagree the map shows your world live with nothing behind it, and the log pane at the bottom
-of the window says what to do about it.
+| The line says | It means | Colour |
+|---|---|---|
+| **Stopped** | nothing is running for this world | grey |
+| **Starting...**, **Stopping...**, **Waiting for the game** | something is happening; give it a moment | amber |
+| **On the map - speed x10** | this is what you want: your world has its place on the map and the game is feeding it | green |
+| **NOT on the map** | the game is running and nothing is reaching the map | red |
 
-Select a world and the buttons act on it: **Start**, **Stop**, **Stop every world**,
-**Set as default**, **Edit settings...**, **Create another world...**, **Clone world...**,
-**Delete world...**, **Check this world** (the sidecar's own diagnostic), **Open logs folder**,
-**Open the game's BepInEx log** and **Copy peer id**. A button the launcher would refuse is greyed
-rather than pressed and then explained. Everything the launcher says goes into the log pane, which
-has a **Copy the log** button beside it.
+**The red line is the one to know about.** A world can be running and still not be on the map: your
+place is held, the map shows you live, and nothing is actually crossing. The window says so in red
+and tells you where to look, which is the whole reason it exists.
 
-**Start with a window (this time only)** / **Start with no window (this time only)** is next to
-**Start**, and it is the one thing the window can do that no earlier version could: run this
-session the other way round without changing the world's own setting.
+**On the right is the world you selected**, and one big button: **Start** when it is stopped,
+**Stop** when it is running. Under it is **Run without a game window (headless)** — this world's own
+setting, written the moment you tick it — and then its save name, its port, the speed it is asking
+for and achieving, its folder (with **Open the data folder**) and its identity on the map (with
+**Copy this world's identity**). Double-clicking a world in the list, or pressing Enter on it, does
+the same thing the big button does.
+
+**While anything is happening, the window says what.** A bar spins and a line reads *"Waiting for
+the map to give this world a place..."*, then *"The game is starting..."*, then *"Waiting for the
+game to join the map (up to two minutes)..."*. When it is over, one green or red line stays on
+screen until the next thing you do — so you can look away for the minute a start takes.
+
+**Nothing is ever silent.** Press **Show details** and the whole of what the launcher did appears,
+timestamped. It opens **by itself** whenever something goes wrong, and a failure quotes the
+launcher's own sentence in the panel — *"Could not start 'default': the sidecar port 70000 is
+outside 1024-65535"* — rather than a shrug.
+
+**The rest is in two menus,** so the window is not a wall of buttons:
+
+- **World** — Start, Stop, **Run a health check** (checks this world end to end and reports every
+  result), **Edit settings...**, **Clone this world...**, **Delete this world...**,
+  **Set as the default world**, **Create a world...**, **Stop every world**, Refresh now, Quit.
+- **Open** — the data folder, the logs folder, the game's own log, and **Open the commands window**.
+
+Right-clicking a world in the list offers the same things. Anything the launcher would refuse is
+greyed rather than pressed and then explained, and every control has a tooltip saying what it will
+do.
+
+**The window remembers its size and position**, and whether you had the details pane open, in
+`%APPDATA%\Bibites Multiverse\launcher-window.json`. Deleting that file costs nothing.
 
 **Closing the window does not stop anything.** The worlds keep running, which is what the line
-along the bottom of the window says. Stop them with **Stop** or **Stop every world**.
+along the bottom of the window says, and the title bar tells you how many are up. Stop them with
+**Stop** or **Stop every world**.
 
 **The commands are a second program, `multiverse-launcher.exe`, in the same folder.** It carries
 the same commands it always did, plus the numbered console menu, and it is what a script, a
@@ -189,7 +205,7 @@ shortcut or a scheduled task should call:
 
 ```powershell
 multiverse-launcher.exe start                # the sidecar, then the game
-multiverse-launcher.exe start --headless     # no game window
+multiverse-launcher.exe start --headless     # no game window, this run only
 multiverse-launcher.exe start --no-headless  # draw it, even if this world is set headless
 multiverse-launcher.exe stop                 # the game, then the sidecar
 multiverse-launcher.exe stop --all           # every world on this computer

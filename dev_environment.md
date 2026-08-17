@@ -196,10 +196,10 @@ working; nothing else relies on that.
 
 **Neither executable holds any launcher logic.** Both drive `internal/launcher`. The window reaches
 it through `launcher.Session` (`go/internal/launcher/session.go`), which is the same commands with
-the terminal taken away: the core's writers go to the log pane, and the one question the core asks —
-the world's name, typed, before a folder is deleted — is answered by a dialog and still compared in
-the core. `internal/launchergui` decides what a person can press and what they are shown, and
-nothing else.
+the terminal taken away: the core's writers go to the details pane, and the one question the core
+asks — the world's name, typed, before a folder is deleted — is answered by a dialog and still
+compared in the core. `internal/launchergui` decides what a person can press and what they are
+shown, and nothing else.
 
 Build both, from `go/`:
 
@@ -225,12 +225,96 @@ both generate it before they cross-build; a build without it still links, and pr
 the Go icon and the wrong controls.
 
 **What cannot be tested here.** walk is Win32, so no test in this repository opens the window.
-Everything about it that is not a widget is in `internal/launchergui/view.go`, which carries no
-build tag and is covered by ordinary `go test` on this host: the table's columns against the values
-put in them, the four states of the "on the map" column, which buttons a state enables, the flags an
-edit dialog turns into a `profile set`, and the log pane's line assembly. The window itself is
-proved on a Windows machine, by the outline in
-`release/launcher-gui-manual-test.md`.
+Everything about it that is not a widget is in the **build-tag-free** files of
+`internal/launchergui` — `view.go`, `details.go` and `windowstate.go` — which are covered by
+ordinary `go test` on this host: the state-to-words-to-colour table, the whole right-hand panel,
+which control a state enables, the flags an edit dialog turns into a `profile set`, the progress
+phrases read off the core's output, and the log pane's line assembly and scroll arithmetic. The
+widgets are `window_windows.go` and `dialogs_windows.go`, and they decide nothing. The window itself
+is proved on a Windows machine, by the outline in `release/launcher-gui-manual-test.md`.
+
+### The launcher window's design
+
+The first shape of this window was a report: a ten-column table, fourteen buttons in two rows, a raw
+log filling half the window, and jargon in the captions. Everything was reachable and nothing was
+obvious. It is now built to four rules — **one obvious primary action per world; plain words; state
+at a glance; never silent** — which is what the layout is for:
+
+```
++-------------------------- banner, red, hidden unless something is wrong -----+
+| world list (2 columns)   |  world name                                       |
+|  World  | Status         |  headline, in the colour of the state             |
+|  * default | On the map  |  hint, only when there is one thing to do         |
+|  second | Stopped        |  [====== marquee, only while something runs =====]|
+|                          |  green/red result of the last action              |
+|                          |  [        Start / Stop        ]  <- the one button|
+|                          |  [x] Run without a game window (headless)         |
+|                          |  Save name / Port / Speed / Data folder / Map     |
+|                          |     identity, with Open and Copy beside two of    |
+|                          |  [Edit settings...] [Run a health check]          |
+|                          |  [Show details]                                   |
++------------------------------------------------------------------------------+
+| details pane: the core's own output, timestamped. HIDDEN by default.          |
++------------------------------------------------------------------------------+
+| [Create a world...] [Stop every world]                                        |
++------------------------------------------------------------------------------+
+```
+
+The **state table** — one row per state, and no two rows may ever read alike. The pair that must
+never collapse is the last two green/red rows: a world whose link is up has a place on the map, and
+a world whose game has joined is one the map can actually move organisms through. When those differ
+the map shows a world live with nothing behind it (`LOCAL-CONFIGRACE`, `LOCAL-STARVATION`), and every
+other sign on the machine looks healthy.
+
+| State | List column | Panel headline | Colour |
+|---|---|---|---|
+| `StateStopped` | `Stopped` | `Stopped` | grey `RGB(96,96,96)` |
+| `StateWorking` | `Starting...`, `Stopping...`, `Creating...`, `Copying...`, `Deleting...`, `Checking...`, `Saving...` | the live progress phrase | amber `RGB(160,96,0)` |
+| `StateStarting` | `Starting...` | `Starting - waiting for the map to answer...` | amber |
+| `StateWaiting` | `Waiting for the game` | `On the map (place N), waiting for the game to join` | amber |
+| `StateOnTheMap` | `On the map - speed x10` | `Running - on the map (place N) - speed x10` | green `RGB(0,112,48)` |
+| `StateNotOnTheMap` | `NOT on the map` | `Running, but NOT on the map - see the details` | red `RGB(176,0,0)` |
+| `StateNoMapLink` | `NOT on the map` | `The game is running, but this world has no link to the map - see the details` | red |
+
+**Progress, results and alarms are all read off one stream** — the core's own output — in
+`details.go`. `ProgressFor` turns a recognised line into a plain-words phrase for the panel;
+`SaidLine` keeps the last flush-left line so that a failure can quote the core's own refusal rather
+than shrug; `IsAlarm` opens the details pane without being asked. **Nothing there parses a value**:
+every fact comes from `Session.Snapshot`, so a line this file fails to recognise costs a caption and
+never a fact. That is deliberately cheaper than a progress hook the core would have to call, which
+would be a second contract between two packages for the sake of a caption.
+
+**walk limitations hit, and what was done instead:**
+
+- **No expander widget.** `Show details` / `Hide details` is a plain `PushButton` whose caption says
+  what pressing it will do, toggling `Visible` on a `Composite`. walk's `SetVisible` calls
+  `RequestLayout`, and its box layouts skip invisible children, so the space is genuinely reclaimed.
+  An arrow glyph was rejected: it only says "expander" to people who already knew.
+- **Grouped secondary actions are MENUS, not `SplitButton` dropdowns.** walk has `SplitButton`, but
+  its dropdown is a `TrackPopupMenu` modal loop, which the Windows harness has never driven. The menu
+  bar (`World`, `Open`) and the list's context menu are ordinary `HMENU`s the harness already drives,
+  and the same captions are keyed to the same actions.
+- **`TableView` colour is per cell, via `StyleCell`.** Only the `Status` column is coloured, and the
+  **selected** row is deliberately skipped: Windows draws it on the highlight colour and a dark green
+  on that blue reads worse than the system's own white.
+- **`TextEdit.AppendText` scrolls the view itself.** It selects the end of the document and replaces
+  the selection, and the EDIT control scrolls the caret into view during `EM_REPLACESEL` — so
+  deciding not to follow was never enough. A machine measured the first visible line jumping from 0
+  to 286 on one appended line while the reader was at the top. The pane now reads
+  `EM_GETFIRSTVISIBLELINE` on both sides of the append and scrolls the reader back with
+  `EM_LINESCROLL` (`LogFollowsTail` decides, `LinesToRestore` measures; both are tested here). The
+  pair is wrapped in `WM_SETREDRAW`, with `RedrawWindow(..., RDW_FRAME)` after it because
+  `WM_SETREDRAW` also freezes the non-client scroll bar.
+- **Window placement is `SetWindowPos` plus a posted `SW_MAXIMIZE`,** not one `SetWindowPlacement`:
+  `FormBase.Run` re-applies the window's current bounds as it starts, which would move an
+  already-maximised window with `SetWindowPos`. The maximise is therefore `Synchronize`d into the
+  message loop, which runs after walk has finished starting.
+
+**Where the window's own preferences live:** `%APPDATA%\Bibites Multiverse\launcher-window.json`
+(`windowstate.go`), holding size, position, maximised and whether the details pane was open. **Not**
+in a world's data root, which is the machine's custody record, and **not** in the install root's
+`profiles\` folder, where every `.json` is read as a world and one that will not parse raises the
+red banner on every start.
 
 ### Control local game processes
 
