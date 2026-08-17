@@ -102,9 +102,24 @@ import (
 
 const (
 	// segmentsDirName holds every closed segment and every cold-copy receipt.
-	// Its EXISTENCE is the marker that this data directory has been segmented:
-	// see migrateMonolithic.
+	//
+	// ITS EXISTENCE MEANS NOTHING. The directory is created by whoever gets
+	// there first, and on the production host that is provision.sh, because
+	// multiverse-coldcopy.service names it in ReadWritePaths and systemd refuses
+	// to start a unit whose ReadWritePaths is absent. migratedMarkerName below
+	// is what says the layout has been established; see migrateIfMonolithic.
 	segmentsDirName = "segments"
+	// migratedMarkerName is the marker file inside the segments directory that
+	// says THIS PACKAGE has established the layout: either it renamed a
+	// monolithic ledger into a legacy segment, or it found a directory that had
+	// nothing to migrate. Its presence is what makes the one-time migration run
+	// exactly once, and its ABSENCE beside an empty directory is what makes a
+	// pre-created directory harmless.
+	//
+	// The leading dot keeps it out of coldcopy.sh's *.jsonl.gz glob and out of
+	// every segment-name parse; readSegmentDir knows it by name so that it is
+	// not reported as a stray file on every start.
+	migratedMarkerName = ".migrated"
 	// plainSuffix and gzSuffix are the two forms a closed segment takes. The
 	// plain one is what the rename produces; the gz one is what replaces it once
 	// the round trip has been checked.
@@ -199,6 +214,80 @@ func segmentOrder(a, b Segment) bool {
 
 // segmentsDir is <dir>/segments.
 func segmentsDir(dir string) string { return filepath.Join(dir, segmentsDirName) }
+
+// migratedMarker is <dir>/segments/.migrated.
+func migratedMarker(dir string) string { return filepath.Join(segmentsDir(dir), migratedMarkerName) }
+
+// segmentsAreEstablished answers the ONE question the one-time migration turns
+// on: has this data directory's segment layout already been established?
+//
+// Two things answer yes, and the second is what makes the first safe to
+// introduce on a host that is already running:
+//
+//	the marker file exists   this package has been here before.
+//	a segment is present     it has been here before under a build that had no
+//	                         marker, or the live file has already rotated once.
+//	                         Migrating now would rename a live file that already
+//	                         has segments beside it.
+//
+// AN EMPTY DIRECTORY ANSWERS NO, which is the whole point: provision.sh creates
+// it before the archive has ever run, and an empty directory is not evidence of
+// anything having happened.
+func segmentsAreEstablished(dir string) (bool, error) {
+	if _, err := os.Stat(migratedMarker(dir)); err == nil {
+		return true, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	st, err := readSegmentDir(dir)
+	if err != nil {
+		return false, err
+	}
+	return len(st.Segments) > 0, nil
+}
+
+// writeMigratedMarker records that the layout is established. It is idempotent,
+// it is written through a temporary file so a torn write cannot produce a
+// half-marker, and its CONTENT is for a person reading the directory: nothing
+// parses it.
+func writeMigratedMarker(dir string) error {
+	sd := segmentsDir(dir)
+	path := migratedMarker(dir)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.MkdirAll(sd, 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(sd, migratedMarkerName+".*")
+	if err != nil {
+		return err
+	}
+	body := "This directory's segment layout has been established by the archive.\n" +
+		"Its presence is what stops the one-time monolithic-ledger migration running again.\n" +
+		"Do not delete it. Creating the directory alone is NOT this file.\n"
+	if _, err := tmp.WriteString(body); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return fsutil.SyncDir(sd)
+}
 
 // parseSegmentName reads a segment's identity out of its base name — the file
 // name with .jsonl or .jsonl.gz already removed. It returns false for anything
@@ -325,6 +414,12 @@ func readSegmentDir(dir string) (segmentDirState, error) {
 		name := e.Name()
 		if e.IsDir() {
 			st.Unknown = append(st.Unknown, name)
+			continue
+		}
+		// The migration marker and the temporaries writeMigratedMarker leaves
+		// behind if it is interrupted. Known, so they are neither counted as
+		// segments nor reported as strays on every start.
+		if name == migratedMarkerName || strings.HasPrefix(name, migratedMarkerName+".") {
 			continue
 		}
 		var size int64

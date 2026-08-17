@@ -961,6 +961,70 @@ eq  'an unknown --only group exits 2'                "$rc" 2
 err="$(env MV_ENV_FILE="$ENVF" MV_STATE="$STATE" "$MON" --nonesuch 2>&1)"; rc=$?
 eq  'an unknown argument exits 2'                    "$rc" 2
 
+# ------------------------------- 17. every --only group actually emits a line
+#
+# THE DEFECT THIS SECTION EXISTS FOR. Every check in the `replay` and `archive`
+# groups opens with `[ -s "$STATUS_JSON" ] || return 0`, and until 2026-08-17
+# only check_archive_healthz wrote that file — in the default path, which no
+# --only group runs. So on a real host `monitor.sh --only replay` printed
+# NOTHING and reported `worst: OK`, and deploy/restart-archive.sh, which reads
+# its replay-headroom gate out of exactly that command, was gating on an empty
+# line. The whole test file above missed it because the harness hands every
+# group a fixture, so the fetch that was never made was never needed.
+#
+# So the cases below assert the two halves separately: with a document the
+# group emits its lines and does NOT go near the network, and with NO document
+# the group says so loudly instead of saying nothing.
+
+# A closed port for the archive listener, so "cannot reach it" is decided by the
+# kernel and not by whatever this workstation happens to be running.
+DEADPORT=MV_ARCHIVE_HTTP=127.0.0.1:1
+
+reset_state
+status_rollup
+before_fixture="$(sha256sum "$STATUSJ" | awk '{print $1}')"
+out="$(run "$BASE" replay "$DEADPORT")"
+has 'replay emits its headroom line'                 "$out" 'replay '
+has 'replay emits the restart-cost line'             "$out" 'replay-cost '
+hasnt 'and does not refetch a fixture it was given'  "$out" 'archive-healthz'
+eq  'the fixture is byte-unchanged by the group'     "$(sha256sum "$STATUSJ" | awk '{print $1}')" "$before_fixture"
+
+reset_state
+status_rollup
+out="$(run "$BASE" archive "$DEADPORT")"
+has 'archive emits the rollup line'                  "$out" 'rollup '
+has 'archive emits the cold-copy line'               "$out" 'cold-copy '
+has 'archive emits the duplicates line'              "$out" 'duplicates '
+hasnt 'and it does not refetch either'               "$out" 'archive-healthz'
+
+# NO DOCUMENT. Before the fix this printed nothing at all and reported OK. It
+# must now name the listener it could not reach, and it must be CRIT: a gate
+# that cannot read the ledger size has no verdict to give and restart-archive.sh
+# has to refuse rather than proceed.
+reset_state
+rm -f "$STATUSJ"
+out="$(run "$BASE" replay "$DEADPORT")"
+eq  'with no status document replay says the archive is unreachable' \
+    "$(sev_of "$out" archive-healthz)" CRIT
+has 'and it names the listener it tried'             "$out" '127.0.0.1:1'
+has 'and the pass is not reported as healthy'        "$out" 'worst: CRIT'
+
+reset_state
+rm -f "$STATUSJ"
+out="$(run "$BASE" archive "$DEADPORT")"
+eq  'the record-layer group fetches too'             "$(sev_of "$out" archive-healthz)" CRIT
+has 'and it too refuses to look healthy'             "$out" 'worst: CRIT'
+
+# The groups that read nothing from the archive must not have grown a fetch.
+reset_state
+rm -f "$STATUSJ"
+out="$(run "$BASE" swap "$DEADPORT")"
+hasnt 'swap still touches no archive'                "$out" 'archive-healthz'
+route
+dev 0 0
+out="$(run "$BASE" transfer "$DEADPORT")"
+hasnt 'transfer still touches no archive'            "$out" 'archive-healthz'
+
 # ---------------------------------------------------------------- result
 
 printf '\n'

@@ -133,6 +133,14 @@ restore_envfiles() {
 step "2  install the kit  (provision.sh --only directories, from the staged copy)"
 "$PROVISION" --only directories "${DRYFLAG[@]}" || die "the directories phase failed"
 
+# BEFORE ANY BINARY IS STAGED INTO PLACE. From here on the running services and
+# their files on disk disagree, and that disagreement is exactly what
+# needrestart acts on after an apt transaction — restarting the relay and the
+# archive together, outside the peer gate and the relay hold-down. It cost
+# 134.063 s of permanent record on 2026-08-17. RESTART-POLICY.md, "Package
+# installs and needrestart".
+"$PROVISION" --only needrestart "${DRYFLAG[@]}" || die "the needrestart phase failed"
+
 # ---------------------------------------------------------------- 3  prove the kit
 #
 # The exit code of the phase above says a script ran. It does not say the right

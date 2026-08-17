@@ -12,6 +12,11 @@
 #   sudo deploy/provision.sh --dry-run        # print, change nothing
 #   sudo deploy/provision.sh --list           # the phases, in order
 #
+#   sudo deploy/provision.sh --only binaries \
+#        --expect-sha256 archive=<sha256> --expect-sha256 relay=<sha256>
+#                                             # refuse unless the STAGED artifact
+#                                             # is the build you meant to ship
+#
 # WHAT IT NEEDS BEFORE IT RUNS. All five, and it refuses rather than half-builds:
 #   1. /etc/multiverse/deploy.env, filled in (deploy.env.example is the template).
 #   2. MV_DOMAIN's A record already pointing at this instance's STATIC IP.
@@ -27,9 +32,30 @@ set -euo pipefail
 ENV_FILE="${MV_ENV_FILE:-/etc/multiverse/deploy.env}"
 DRY=0
 ONLY=""
+# --expect-sha256 <name>=<sha256>, repeatable. What THIS run is supposed to
+# install, stated by the operator and checked against the staged file before
+# anything is compared or copied. See phase_binaries.
+EXPECT_SHA=()
 
-PHASES="preflight packages account directories swap binaries envfiles firewall
+PHASES="preflight needrestart packages account directories swap binaries envfiles firewall
         nginxacme tls nginxfront bootstrap systemd streamorigin upgrades verify"
+
+# `needrestart` IS THE FIRST PHASE AFTER PREFLIGHT, AND `packages` STAYS AHEAD
+# OF `binaries`. Both are safety rules rather than preferences.
+#
+# needrestart runs after every apt transaction and restarts services whose
+# binaries have been replaced on disk. On 2026-08-17 an ad-hoc `apt install
+# unzip`, run three minutes after `--only binaries` had put new binaries in
+# place and before the deliberate restart sequence had begun, was turned by
+# needrestart into an undirected restart of the relay and the archive together.
+# It cost 134.063 s of the permanent crossing record, 96.44 s of it with the
+# relay live and no archive subscribed.
+#
+# The phase below installs the override that stops that happening again — for
+# an apt command this script never runs as much as for its own. The ordering is
+# the second half: no apt transaction of any kind belongs between staging
+# binaries and the restart. RESTART-POLICY.md, "Package installs and
+# needrestart", carries the rule.
 
 say()  { printf '     %s\n' "$*"; }
 step() { printf '\n==== %s\n' "$*"; }
@@ -68,7 +94,13 @@ while [ $# -gt 0 ]; do
     --only) ONLY="${2:?--only needs a phase name}"; shift ;;
     --list) printf '%s\n' $PHASES; exit 0 ;;
     --env-file) ENV_FILE="${2:?--env-file needs a path}"; shift ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    --expect-sha256)
+      case "${2:?--expect-sha256 needs <relay|archive|ringstat>=<sha256>}" in
+        relay=*|archive=*|ringstat=*) EXPECT_SHA+=("$2") ;;
+        *) die "--expect-sha256 takes <relay|archive|ringstat>=<sha256>, not '$2'" ;;
+      esac
+      shift ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
   shift
@@ -252,6 +284,142 @@ phase_preflight() {
   say "archive     $MV_ARCHIVE_HTTP  (loopback, deliberately — see README)"
 }
 
+# ---------------------------------------------------------------- needrestart
+
+# Where the override lands. 90- so it sorts after anything a distribution or an
+# operator dropped in first, because needrestart parses conf.d in sort order and
+# the last assignment wins.
+#
+# MV_NEEDRESTART_CONF_D is a read seam, the same idea as monitor.sh's: it lets
+# this phase be exercised against a directory in a temporary tree instead of the
+# host's /etc. Nothing on a real host sets it.
+NEEDRESTART_CONF_D="${MV_NEEDRESTART_CONF_D:-/etc/needrestart/conf.d}"
+NEEDRESTART_CONF="${NEEDRESTART_CONF_D%/conf.d}/needrestart.conf"
+NEEDRESTART_OVERRIDE="$NEEDRESTART_CONF_D/90-multiverse.conf"
+
+# needrestart_mode_is_pinned — does anything OTHER than our own override already
+# choose a restart mode on this host? An operator who has pinned one has made a
+# decision, and this script states what it found rather than overwriting it.
+needrestart_mode_is_pinned() {
+  local f
+  for f in "$NEEDRESTART_CONF" "$NEEDRESTART_CONF_D"/*.conf; do
+    [ -f "$f" ] || continue
+    [ "$f" = "$NEEDRESTART_OVERRIDE" ] && continue
+    # An uncommented assignment to $nrconf{restart}. The shipped
+    # needrestart.conf carries the line commented out, which is not a pin.
+    if grep -Eq '^[[:space:]]*\$nrconf\{restart\}[[:space:]]*=' "$f"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# needrestart_override_text prints the file this phase wants on disk. It takes
+# one argument: 1 to include the host-wide list-only mode, 0 to leave the mode
+# alone because something else already pins it.
+needrestart_override_text() {
+  local with_mode="$1"
+  cat <<'EOF'
+# needrestart: the multiverse units are never restarted by a package transaction.
+#
+# INSTALLED BY deploy/provision.sh, phase `needrestart`. Edit it there.
+#
+# 2026-08-17T11:20:33.788Z: installing `unzip` for the AWS CLI ran an apt
+# transaction. needrestart runs after every apt transaction, saw that
+# multiverse-archive and multiverse-relay had had their binaries replaced on
+# disk three minutes earlier, and restarted BOTH -- outside the deliberate
+# record-preserving sequence in deploy/RESTART-POLICY.md, with no peer gate and
+# no relay hold-down. It cost 134.063 s of the permanent crossing record,
+# 96.44 s of it with the relay live and nothing recording it.
+#
+# The deployment lock coordinates OPERATORS. needrestart is not an operator.
+# When these services restart is decided by RESTART-POLICY.md and by a person,
+# never by a package manager.
+$nrconf{override_rc}{qr(^multiverse-)} = 0;
+EOF
+  [ "$with_mode" = 1 ] || return 0
+  cat <<'EOF'
+
+# And nothing else on this host is auto-restarted by apt either: (l)ist only.
+# The Ubuntu apt hook calls `needrestart -m u`, whose restart mode defaults to
+# (a)utomatic, so an unattended upgrade of a shared library is enough to restart
+# a service nobody asked to restart. Listing keeps the report and drops the act.
+#
+# This line is written ONLY when nothing else on the host pins a mode. An
+# operator's own choice is left alone and provision.sh says so on the run that
+# finds it.
+$nrconf{restart} = q(l);
+EOF
+}
+
+phase_needrestart() {
+  step "needrestart override"
+
+  local with_mode=1
+  if needrestart_mode_is_pinned; then
+    with_mode=0
+    say "a restart mode is already pinned outside this override — leaving it alone."
+    say "      Only the multiverse unit rule is written. Read the pin with:"
+    say "          grep -rn '\$nrconf{restart}' /etc/needrestart/"
+  fi
+
+  local want
+  want="$(needrestart_override_text "$with_mode")"
+
+  if [ -f "$NEEDRESTART_OVERRIDE" ] && [ "$(cat "$NEEDRESTART_OVERRIDE")" = "$want" ]; then
+    say "already: $NEEDRESTART_OVERRIDE"
+  else
+    # Only when it is absent. On a host that has needrestart the directory is
+    # the package's, and re-imposing a mode and an owner on somebody else's
+    # directory is not this script's business.
+    if [ ! -d "$NEEDRESTART_CONF_D" ]; then
+      run install -d -m 0755 -o root -g root "$NEEDRESTART_CONF_D"
+    fi
+    printf '%s\n' "$want" | write_file "$NEEDRESTART_OVERRIDE" 0644 root:root
+    say "wrote $NEEDRESTART_OVERRIDE"
+    if [ "$with_mode" = 1 ]; then
+      say "      multiverse units: never auto-restarted. Host mode: list only."
+    fi
+  fi
+
+  # Prove it parses AND that it decides the two units the way needrestart itself
+  # would, by running needrestart's own override loop (needrestart 3.6, the
+  # `foreach my $re (keys %{$nrconf{override_rc}})` in `sub _do_check`). A
+  # syntax error in conf.d makes needrestart die on every apt transaction
+  # afterwards, which is a broken host found by the next person to install
+  # anything; a rule that parses but matches nothing is worse, because it looks
+  # like protection.
+  if [ "$DRY" = 0 ] && command -v perl >/dev/null 2>&1; then
+    if perl -e '
+        my $f = shift @ARGV;
+        our %nrconf; $nrconf{override_rc} = {};
+        eval do { local(@ARGV, $/) = $f; <> };
+        die $@ if $@;
+        for my $rc (qw(multiverse-archive.service multiverse-relay.service)) {
+            my $ok = 0;
+            for my $re (keys %{$nrconf{override_rc}}) {
+                next unless($rc =~ /$re/);
+                $ok = ($nrconf{override_rc}->{$re} == 0);
+                last;
+            }
+            exit 3 unless($ok);
+        }
+        exit 0;' "$NEEDRESTART_OVERRIDE" 2>/dev/null; then
+      say "parses, and both multiverse units resolve to never-restart"
+    else
+      die "$NEEDRESTART_OVERRIDE does not parse as needrestart configuration, or does
+     not carry the multiverse rule. needrestart dies on every apt transaction
+     while that is true. Remove the file and re-run this phase."
+    fi
+  fi
+
+  if [ "$DRY" = 0 ] && ! command -v needrestart >/dev/null 2>&1; then
+    say "note: needrestart is not installed on this host. The override is in place"
+    say "      for the day it is, which is the day apt would otherwise start"
+    say "      restarting these services on its own."
+  fi
+}
+
 # ---------------------------------------------------------------- packages
 
 phase_packages() {
@@ -280,13 +448,28 @@ phase_packages() {
     return 0
   fi
   say "installing: ${missing[*]}"
-  run env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+  # NEEDRESTART_MODE=l: THIS APT TRANSACTION RESTARTS NOTHING.
+  #
+  # needrestart's apt hook runs `needrestart -m u`, whose restart mode defaults
+  # to (a)utomatic, and it restarts any service whose binary or libraries have
+  # been replaced on disk. On 2026-08-17 that turned an apt transaction into an
+  # undirected restart of the relay and the archive and cost 134.063 s of the
+  # permanent crossing record. `l` is list-only: the report is still printed and
+  # nothing is acted on.
+  #
+  # This is the second lock on that door, not the first. The `needrestart` phase
+  # writes /etc/needrestart/conf.d/90-multiverse.conf, which holds for apt
+  # commands this script never runs — an operator's `apt install`, an
+  # unattended upgrade, anything. This variable only covers the two lines below,
+  # and it covers them even on a host whose override was removed by hand.
+  local apt_env=(DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l)
+  run env "${apt_env[@]}" apt-get update -qq
   # IDEMPOTENT AND OFFLINE-SAFE. This phase is re-run on every provision, and a
   # host with no archive mirror reachable must not lose the fifteen other things
   # this script does afterwards. So the install is allowed to fail: what it
   # leaves behind is a printed follow-up and a `verify` check that names the one
   # thing that is missing.
-  if ! run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"; then
+  if ! run env "${apt_env[@]}" apt-get install -y -qq "${missing[@]}"; then
     warn "apt-get install failed for: ${missing[*]}"
     warn "    Provisioning CONTINUES. Re-run '--only packages' when the archive"
     warn "    mirror is reachable, and read the 'verify' phase for what is still"
@@ -342,6 +525,12 @@ phase_directories() {
   # names it in ReadWritePaths — systemd refuses to start a unit whose
   # ReadWritePaths does not exist, so the timer would fail at every tick on a
   # host that had not yet rotated a segment.
+  #
+  # CREATING IT EMPTY USED TO SUPPRESS THE ARCHIVE'S ONE-TIME LEGACY MIGRATION,
+  # which read the directory's mere existence as "already segmented". It did
+  # exactly that on 2026-08-17. The archive now reads a marker FILE inside the
+  # directory instead (go/internal/archive: migratedMarkerName), so an empty
+  # directory created here means what it looks like: nothing has happened yet.
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$ARCHIVE_DATA/segments"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE/backup" "$MV_STATE/monitor"
   # 0751, not 0750: nginx runs as www-data, which is not in the multiverse
@@ -432,6 +621,24 @@ phase_swap() {
 
 # ---------------------------------------------------------------- binaries
 
+# sha_of prints a file's sha256, or "-" when there is no file. Used for the
+# before/after report below, so it never fails a phase.
+sha_of() {
+  [ -f "$1" ] || { printf '%s\n' -; return 0; }
+  sha256sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
+# expected_sha <relay|archive|ringstat> prints what --expect-sha256 said this
+# run must install for that artifact, or nothing when the operator said nothing.
+expected_sha() {
+  local want="$1" e
+  [ "${#EXPECT_SHA[@]}" -gt 0 ] || return 0
+  for e in "${EXPECT_SHA[@]}"; do
+    case "$e" in "$want="*) printf '%s\n' "${e#*=}"; return 0 ;; esac
+  done
+  return 0
+}
+
 phase_binaries() {
   step "binaries"
   local arch
@@ -442,7 +649,43 @@ phase_binaries() {
   esac
   say "this instance is $arch"
 
-  local installed=0 name src dst
+  # THE STAGE DIRECTORY IS CHECKED AGAINST ITS OWN MANIFEST BEFORE ANYTHING IS
+  # COMPARED, AND THE PHASE REPORTS CHECKSUMS RATHER THAN VERDICTS.
+  #
+  # 2026-08-17: this phase reported `already current` for all three binaries and
+  # installed none of them. It was telling the truth about the wrong files — the
+  # PREVIOUS deployment's artifacts were still sitting in the stage directory
+  # under exactly the names it reads, and the intended binaries had been staged
+  # alongside them under different names. Nothing was overwritten, nothing was
+  # lost, and the deployment would have gone on to restart services onto the old
+  # build believing it had upgraded them. It was caught only because the
+  # operator checked the INSTALLED checksum against the intended one instead of
+  # trusting this phase's own report.
+  #
+  # ship.sh writes SHA256SUMS beside the artifacts it staged and verifies it
+  # over ssh, so the manifest is the stage directory's own statement about
+  # itself: if a file has been replaced by hand since, `sha256sum -c` says so.
+  # A stale-but-self-consistent stage directory it cannot catch, which is what
+  # --expect-sha256 is for.
+  if [ -f "$MV_STAGE_DIR/SHA256SUMS" ]; then
+    if ( cd "$MV_STAGE_DIR" && sha256sum -c --quiet SHA256SUMS ) >/dev/null 2>&1; then
+      say "stage manifest: SHA256SUMS verifies ($(date -u -r "$MV_STAGE_DIR/SHA256SUMS" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || echo 'unknown time'))"
+    else
+      ( cd "$MV_STAGE_DIR" && sha256sum -c SHA256SUMS 2>&1 | sed 's/^/     /' ) || true
+      die "$MV_STAGE_DIR/SHA256SUMS does not match the files beside it. The stage
+     directory has been edited since ship.sh wrote it, so this phase cannot say
+     which build it is about to install. Re-run deploy/ship.sh, or remove the
+     stage directory and stage again. NOTHING WAS INSTALLED."
+    fi
+  else
+    warn "no $MV_STAGE_DIR/SHA256SUMS. This phase cannot check the provenance of what"
+    warn "    it is about to install, and a stale artifact under a canonical name is"
+    warn "    indistinguishable from a fresh one. deploy/ship.sh writes that manifest;"
+    warn "    prefer it over staging by hand. Use --expect-sha256 <name>=<sum> to pin"
+    warn "    what this run is supposed to install."
+  fi
+
+  local installed=0 skipped=0 name src dst before after want
   for name in relay archive ringstat; do
     src="$MV_STAGE_DIR/${name}-linux-${arch}"
     [ -f "$src" ] || src="$MV_STAGE_DIR/$name"
@@ -452,8 +695,28 @@ phase_binaries() {
       [ "$name" = ringstat ] && { say "no ringstat staged — skipping (it is the operator's terminal tool, not the service)"; continue; }
       die "no $name binary at $MV_STAGE_DIR (looked for ${name}-linux-${arch} and $name)"
     fi
+
+    # The operator's own statement of what this run is supposed to install,
+    # checked against the STAGED file before the comparison that decides
+    # anything. It is the only check that catches a stale stage directory whose
+    # manifest agrees with itself.
+    want="$(expected_sha "$name")"
+    before="$(sha_of "$src")"
+    if [ -n "$want" ] && [ "$before" != "$want" ]; then
+      die "the staged $name is not the one this run was told to install.
+     staged   $src
+              $before
+     expected $want
+     Nothing has been installed. This is the stale-stage-directory case: the
+     file under the canonical name is from an earlier ship.sh run."
+    fi
+
+    after="$(sha_of "$dst")"
+    say "$name: staged    $before"
+    say "$name: installed $after"
     if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
       say "already current: $dst"
+      skipped=$((skipped + 1))
       continue
     fi
     # A running binary cannot be written in place (ETXTBSY) but CAN be replaced
@@ -461,9 +724,28 @@ phase_binaries() {
     # running process until it restarts — which is what makes an upgrade a
     # deliberate restart rather than an accident.
     run install -m 0755 -o root -g root "$src" "$dst"
-    say "installed $dst"
+    say "installed $dst  -> $(sha_of "$dst")"
     installed=1
   done
+
+  # NOTHING CHANGED. Say so in the loudest form this script has that is not a
+  # failure, because "already current" for every artifact is both the ordinary
+  # state of a re-run and the exact signature of the 2026-08-17 defect. An
+  # operator who expected an upgrade must not read past this.
+  if [ "$installed" = 0 ] && [ "$skipped" -gt 0 ]; then
+    if [ "${#EXPECT_SHA[@]}" -gt 0 ]; then
+      say "nothing to install: the staged artifacts are already installed, and each"
+      say "      one matched the --expect-sha256 given. This IS the upgrade."
+    else
+      warn "THIS PHASE INSTALLED NOTHING. Every staged artifact was already installed."
+      warn "    That is correct for a re-run and it is also what a STALE STAGE"
+      warn "    DIRECTORY looks like: the checksums above are the whole evidence."
+      warn "    If you expected new binaries, compare the 'staged' checksums above"
+      warn "    against the build you meant to ship, and re-run with"
+      warn "    --expect-sha256 <name>=<sum> so this phase refuses instead of"
+      warn "    reassuring. Do NOT restart on the strength of this line alone."
+    fi
+  fi
 
   if [ "$DRY" = 0 ] && [ -x "$BIN/multiverse-relay" ]; then
     local relay_help
@@ -1009,6 +1291,17 @@ phase_verify() {
       "runuser -u $MV_USER -- test -r '$ENV_FILE'"
   chk "admin path is NOT bound" \
       "! grep -q '^MULTIVERSE_RELAY_ADMIN_LISTEN=..*' /etc/multiverse/relay.env"
+
+  # THE needrestart OVERRIDE. Without it, any apt transaction on this host —
+  # this script's own packages phase, an unattended upgrade, an operator
+  # installing an unrelated tool — restarts whichever multiverse unit has had
+  # its binary replaced on disk, outside every protection RESTART-POLICY.md
+  # specifies. It cost 134.063 s of the permanent crossing record on 2026-08-17.
+  # Checked as a FILE and as a RULE: a file that parses but matches neither unit
+  # looks like protection and is not.
+  chk "needrestart override is installed" "test -f $NEEDRESTART_OVERRIDE"
+  chk "needrestart never restarts a multiverse unit" \
+      "grep -Eq 'override_rc.*multiverse-' $NEEDRESTART_OVERRIDE"
 
   # THE RAW-LEDGER WINDOW'S THREE PARTS, checked because all three fail
   # silently. The archive segments its ledger whatever this deployment does, so

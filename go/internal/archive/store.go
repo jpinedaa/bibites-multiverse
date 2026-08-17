@@ -154,10 +154,10 @@ const ledgerName = "migrations.jsonl"
 //     else — a partial record that was never durable must not be carried into
 //     an immutable segment by the migration below, where nothing could ever
 //     repair it again.
-//  2. MIGRATE. If <dir>/segments does not exist and the repaired ledger is not
-//     empty, this is the first start on a whole-file ledger: it is renamed
-//     WHOLE into one legacy segment and a fresh live file is opened behind it.
-//     Nothing is read, nothing is rewritten, no record moves.
+//  2. MIGRATE. If this data directory has never been segmented and the repaired
+//     ledger is not empty, this is the first start on a whole-file ledger: it is
+//     renamed WHOLE into one legacy segment and a fresh live file is opened
+//     behind it. Nothing is read, nothing is rewritten, no record moves.
 //  3. RECONCILE. Resolve what a crash left in the segments directory — a
 //     half-written compression, a segment present in both forms. This MUST
 //     happen before anything replays, and the replay is defensive about it
@@ -213,16 +213,35 @@ func OpenLedgerLog(dir string, log func(msg string, kv ...any)) (*Ledger, error)
 // already-open and already-repaired live file: the whole existing ledger becomes
 // one legacy segment by rename, and a fresh empty live file is opened behind it.
 //
-// IT RUNS EXACTLY ONCE in the life of a data directory, and the marker is the
-// EXISTENCE of <dir>/segments rather than a state file — a marker that can be
-// lost is a migration that can run twice, and running twice would rename a live
-// file that already has a legacy segment beside it.
+// IT RUNS EXACTLY ONCE in the life of a data directory, and what says so is
+// segmentsAreEstablished: the marker FILE, or a segment that is already there.
+//
+// IT USED TO BE THE EXISTENCE OF <dir>/segments, AND THAT WAS WRONG. The
+// reasoning was that a marker which can be lost is a migration that can run
+// twice; the flaw is that the directory is not this package's to own. On
+// 2026-08-17 the production deployment created <archive-data>/segments before
+// the archive ever started, because multiverse-coldcopy.service names it in
+// ReadWritePaths and systemd refuses to start a unit whose ReadWritePaths is
+// absent. An empty directory then read as "already segmented" and the one-time
+// migration was silently skipped: no rename, no legacy segment, and a
+// monolithic ledger that the next day boundary closed under a name that does
+// not say which days are in it. Nothing was lost and nothing was at risk — the
+// failure was entirely one of a marker that meant something other than what it
+// was read as.
+//
+// The marker file is written on BOTH paths that establish the layout, so a
+// directory this function has finished with always carries it.
 func (l *Ledger) migrateIfMonolithic(log func(string, ...any)) error {
 	sd := segmentsDir(l.dir)
-	if _, err := os.Stat(sd); err == nil {
-		return nil // already segmented
-	} else if !errors.Is(err, os.ErrNotExist) {
+	done, err := segmentsAreEstablished(l.dir)
+	if err != nil {
 		return err
+	}
+	if done {
+		// Already segmented. Write the marker if it is only the presence of a
+		// segment that says so — an archive that migrated under the older build,
+		// or one whose first rotation happened before this one ever ran.
+		return writeMigratedMarker(l.dir)
 	}
 	info, err := l.f.Stat()
 	if err != nil {
@@ -230,9 +249,12 @@ func (l *Ledger) migrateIfMonolithic(log func(string, ...any)) error {
 	}
 	if info.Size() == 0 {
 		// A fresh data directory, or one whose ledger was a torn tail and
-		// nothing else. There is nothing to migrate, and creating the directory
-		// here is the last time the question is asked.
-		return mkdirSync(l.dir, sd)
+		// nothing else. There is nothing to migrate, and the marker below is the
+		// last time the question is asked.
+		if err := mkdirSync(l.dir, sd); err != nil {
+			return err
+		}
+		return writeMigratedMarker(l.dir)
 	}
 	first, last := ledgerDayBounds(l.path, info.ModTime())
 	if err := l.f.Sync(); err != nil {
@@ -257,6 +279,13 @@ func (l *Ledger) migrateIfMonolithic(log func(string, ...any)) error {
 		return err
 	}
 	l.f = f
+	// The marker before the parent sync, so the one fsync that makes the rename
+	// durable makes the marker durable with it. A crash between the two leaves a
+	// segments directory with a segment in it, which segmentsAreEstablished reads
+	// correctly anyway.
+	if err := writeMigratedMarker(l.dir); err != nil {
+		return err
+	}
 	if err := fsutil.SyncDir(l.dir); err != nil {
 		return err
 	}
