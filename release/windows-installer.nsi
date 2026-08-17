@@ -105,14 +105,32 @@ doneCommonShortcuts:
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "QuietUninstallString" '"$INSTDIR\Uninstall.exe" /S'
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "HelpLink" "https://bibitesmultiverse.com/"
-  ; What this installation actually occupies is BOTH directories: the program
-  ; files here, and the data root - which for the complete edition holds a whole
-  ; managed copy of the game. The graphical installer never passes -DataRoot, so
-  ; the setup's data root is always the installer's own default. Reporting only
-  ; $INSTDIR would tell somebody clearing disk space that a gigabyte is 15 MB.
+  ; What this installation occupies is BOTH the program files here and the
+  ; managed game copies under <data root>\runtimes - a whole copy of the game per
+  ; build, which is the size somebody clearing disk space came to this entry for.
+  ; The graphical installer never passes -DataRoot, so the setup's data root is
+  ; always the installer's own default. Reporting only $INSTDIR would tell that
+  ; person a gigabyte is 15 MB.
+  ;
+  ; IT STOPS AT runtimes\ BECAUSE THAT IS WHERE THE UNINSTALL STOPS. This number
+  ; is what removing the entry gives back, and the uninstall takes the recorded
+  ; runtime by hash while the journal in data\ and the logs beside it SURVIVE it
+  ; by design - only -RemoveWorldData takes those. Counting them would promise
+  ; back space that uninstalling does not free.
+  ;
+  ; AND NOTHING MAY WALK data\ OR logs\ HERE WHATEVER THE NUMBER IS FOR.
+  ; ${GetSize} enumerates every file below the path it is given, and a world's
+  ; journal grows without bound: one measured data root held 145k files and
+  ; 14.1 GB, and this line sat on it for 27.5 MINUTES - all of it AFTER the
+  ; success dialog, with the setup invisible (SilentInstall), the shortcuts
+  ; already written and the unpacked payload still in %TEMP%. A managed runtime
+  ; is 216 files, so runtimes\ stays a sub-second walk however many builds have
+  ; accumulated in it.
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   ClearErrors
-  ${GetSize} "$LOCALAPPDATA\BibitesMultiverse" "/S=0K" $3 $1 $2
+  ; Absent in the add-on edition, which manages no runtime: GetSize sets the
+  ; error flag for a path that is not there, and $3 is made 0 below.
+  ${GetSize} "$LOCALAPPDATA\BibitesMultiverse\runtimes" "/S=0K" $3 $1 $2
   ${If} ${Errors}
     StrCpy $3 0
   ${EndIf}

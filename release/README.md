@@ -14,7 +14,7 @@ raised only after the release that satisfies it exists.
 
 | Path | What it is |
 |---|---|
-| `windows-installer.nsi` | Builds the single-file Windows setup with per-user shortcuts and uninstall registration |
+| `windows-installer.nsi` | Builds the single-file Windows setup with per-user shortcuts and uninstall registration. Its `EstimatedSize` measures the program directory and `<data root>\runtimes` only — never `data\` or `logs\`, which an uninstall keeps and whose journal grows without bound |
 | `kit/bibites-multiverse.ico` | The setup, desktop, and Start Menu icon |
 | `kit/Install-BibitesMultiverse.cmd` | The advanced Windows ZIP entry point. It opens the same GUI |
 | `kit/Install-BibitesMultiverse-Gui.ps1` | Selects the included or existing game and starts the installed world by default |
@@ -265,6 +265,9 @@ HEAD's own tree. A step that walks history has to restore `fetch-depth: 0` in th
 `test-install-uninstall.ps1` needs Windows as well: CI parses that file, it does not run it.
 `test-installer-wait.ps1` needs neither, so CI runs that one on Windows PowerShell 5.1 — the engine
 the setup uses, and the one whose `Start-Process -Wait` waits on a whole descendant tree. The
+`installer` job compiles `windows-installer.nsi` against a stub payload, which proves what the script
+says and not what it costs: a `${GetSize}` over a real data root is a walk no stub has, and it is
+reviewed rather than measured. The
 launcher's Windows process primitives — the detached spawn, the owner-only credential file, and the
 ask-before-forcing stop — compile here and are proved only on Windows. And the build's strongest
 checks, 1, 2, and 4 above, need the proprietary game bytes, which is why the release build runs on

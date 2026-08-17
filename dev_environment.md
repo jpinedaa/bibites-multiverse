@@ -551,6 +551,9 @@ Do not present a historical rig value as current service state.
 - With output redirection, `Start-Process -PassThru` returns a process object that holds no
   handle, and its `ExitCode` then reads as `$null`. Read `.Handle` once while the process is
   alive if the exit code is going to be needed.
+- NSIS `${GetSize}` enumerates every file under the path it is given. Point it at a program
+  directory, never at a data root a journal grows inside: 145k files took 27.5 minutes, with the
+  setup already invisible and its payload still unpacked in `%TEMP%`.
 - Name each forwarded environment variable in `WSLENV`.
 - Map BepInEx logs by content, not launch order.
 - If `LogOutput.log` contains required evidence, copy it before a restart.
