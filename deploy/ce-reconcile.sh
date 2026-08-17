@@ -57,11 +57,20 @@
 # Inbound is never billed and inbound is not free: while any overage is billed,
 # a GB of allowance is worth the overage rate whichever direction spends it.
 #
-# COST EXPLORER LAGS about fourteen hours, so the current month is always
-# partly missing and is flagged Estimated. Every ratio below is therefore
-# computed over THE DAYS COST EXPLORER HAS, never month-to-date against
-# month-to-date — comparing a complete counter with an incomplete invoice
-# manufactures a discrepancy that is only the lag.
+# COST EXPLORER LAGS about fourteen hours, so the current month is always partly
+# missing and is flagged Estimated. Two consequences, and the second one cost a
+# false alert to learn:
+#
+#   Every ratio below is computed over THE DAYS COST EXPLORER HAS, never
+#   month-to-date against month-to-date. Comparing a complete counter with an
+#   incomplete invoice manufactures a discrepancy that is only the lag.
+#
+#   AND A DAY IS NOT "HAD" BECAUSE IT HAS DATA IN IT. The newest day Cost
+#   Explorer returns is always partly filled. Counting it compares a whole day
+#   of counter against a part day of invoice, which is the same error one level
+#   down. A day is settled only once it has been over for longer than the lag
+#   (MV_BILLING_CE_LAG_HOURS). At 06:30Z that makes the newest settled day the
+#   day before yesterday, which is the honest reading rather than a fresher one.
 #
 # THE PRINCIPAL. The configured profile authenticates as the account root
 # principal. Every call here is read-only. The owner accepted that on
@@ -79,6 +88,12 @@ set -uo pipefail
 : "${MV_TRANSFER_ALLOWANCE_GB:=3072}"
 # US East (N. Virginia) overage rate per GB beyond the allowance, outbound only.
 : "${MV_TRANSFER_OVERAGE_USD_PER_GB:=0.09}"
+# HOW LATE COST EXPLORER IS, in hours, and therefore how long a UTC day must
+# have been over before this treats that day as COMPLETE. The measured lag is
+# about fourteen hours; 18 is that plus margin. A day is not settled because it
+# has some data in it -- see the arithmetic block below, where getting this
+# wrong once produced a 1.37 ratio out of two instruments that agree to 1.01.
+: "${MV_BILLING_CE_LAG_HOURS:=18}"
 # The ssh target that receives the file. Empty means "compute but do not ship".
 : "${MV_BILLING_HOST:=}"
 : "${MV_BILLING_REMOTE_PATH:=/var/lib/multiverse/monitor/billing.json}"
@@ -224,13 +239,13 @@ RESULT="$WORK/billing.json"
 python3 - \
   "$CE_JSON" "$WORK/NetworkIn.json" "$WORK/NetworkOut.json" "$RESULT" \
   "$MONTH" "$NOW_Z" "$MV_TRANSFER_ALLOWANCE_GB" "$MV_TRANSFER_OVERAGE_USD_PER_GB" \
-  "$DAYS_IN_MONTH" "$MONTH_START_Z" "$CE_CALLS" <<'PY'
+  "$DAYS_IN_MONTH" "$MONTH_START_Z" "$CE_CALLS" "$MV_BILLING_CE_LAG_HOURS" <<'PY'
 import datetime as dt
 import json
 import sys
 
 (ce_path, in_path, out_path, result_path, month, as_of, allowance_s,
- rate_s, days_in_month_s, month_start_s, ce_calls_s) = sys.argv[1:12]
+ rate_s, days_in_month_s, month_start_s, ce_calls_s, lag_hours_s) = sys.argv[1:13]
 
 GIB = float(1 << 30)
 allowance = float(allowance_s)
@@ -249,6 +264,19 @@ def load(path):
             return json.load(handle)
     except Exception as error:                      # noqa: BLE001
         fail("cannot parse %s: %s" % (path, error))
+
+
+def parse_stamp(text):
+    """An ISO-8601 instant, in UTC, whether it was spelled Z or with an offset."""
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        moment = dt.datetime.fromisoformat(text)
+    except ValueError:
+        fail("cannot read a timestamp: %r" % text)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.timezone.utc)
+    return moment.astimezone(dt.timezone.utc)
 
 
 ce = load(ce_path)
@@ -278,10 +306,14 @@ def classify(usage_type):
     return None
 
 
-totals = {"in": 0.0, "out": 0.0, "overage": 0.0}
-overage_usd = 0.0
+# PER DAY, not one running total. Settlement is decided further down, and a
+# total accumulated before that decision cannot be un-accumulated: the first
+# version summed as it went, filtered the DAY LIST afterwards, and reported a
+# settled-day count of 2 beside an invoice figure that held 3. The ratio then
+# divided a two-day metric by a three-day invoice. Keep the days apart until it
+# is known which ones count.
+per_day = {}
 estimated = False
-days_with_data = []
 seen_units = set()
 
 results = ce.get("ResultsByTime")
@@ -292,6 +324,7 @@ for period in results:
     day = period.get("TimePeriod", {}).get("Start")
     if period.get("Estimated"):
         estimated = True
+    bucket = {"in": 0.0, "out": 0.0, "overage": 0.0, "overageUsd": 0.0}
     day_total = 0.0
     for group in period.get("Groups", []) or []:
         keys = group.get("Keys") or []
@@ -304,13 +337,13 @@ for period in results:
         quantity = metrics.get("UsageQuantity", {})
         amount = float(quantity.get("Amount", 0.0) or 0.0)
         seen_units.add(quantity.get("Unit"))
-        totals[kind] += amount
+        bucket[kind] += amount
         day_total += amount
         if kind == "overage":
-            overage_usd += float(
+            bucket["overageUsd"] += float(
                 metrics.get("UnblendedCost", {}).get("Amount", 0.0) or 0.0)
     if day_total > 0.0:
-        days_with_data.append(day)
+        per_day[day] = bucket
 
 # THE UNIT IS THE WHOLE FOUNDATION. Every figure here is the provider's GB of
 # 2^30 bytes and the 1.01 ratio is the evidence for that reading. A response
@@ -323,26 +356,68 @@ if unexpected:
          "in this file assumes the provider's GB of 2^30 bytes; re-derive the "
          "arithmetic before trusting it." % ", ".join(unexpected))
 
-days_with_data.sort()
+days_with_data = sorted(per_day)
+
+# A DAY IS NOT SETTLED BECAUSE IT HAS DATA IN IT.
+#
+# This is the defect the first real shipped run found, and it is worth the
+# paragraph. Cost Explorer lags about fourteen hours, so the NEWEST day it
+# returns is always PARTIALLY FILLED -- it has data, and it has less data than
+# the day actually contains. The first version of this counted any day with a
+# non-zero quantity as settled, which meant the ratio compared a WHOLE day of
+# instance metric against a PART day of invoice.
+#
+# Run at 2026-08-17T00:44Z that produced ratioIn 1.37 and ratioOut 1.17 out of
+# two instruments that agree to 1.01: Cost Explorer held about 34 of the 48
+# hours the metric held, and 48/34 is 1.41. The monitor would have raised its
+# first-ever billing alert, it would have said the two instruments disagree, and
+# both instruments would have been perfectly correct. A projection built the
+# same way is diluted in the other direction, because a part day counts as a
+# whole one in the denominator.
+#
+# So settlement is decided by the CLOCK, not by the presence of data: a UTC day
+# is complete only once it has been over for longer than the lag. Days that have
+# data but are not yet settled are excluded from both sides of every comparison
+# below -- they are not lost, they simply arrive in tomorrow's reading.
+try:
+    lag = dt.timedelta(hours=float(lag_hours_s))
+except ValueError:
+    fail("MV_BILLING_CE_LAG_HOURS must be a number of hours, not %r" % lag_hours_s)
+
+now = parse_stamp(as_of)
+
+
+def day_is_settled(day):
+    end_of_day = (dt.datetime.strptime(day, "%Y-%m-%d")
+                  .replace(tzinfo=dt.timezone.utc) + dt.timedelta(days=1))
+    return now >= end_of_day + lag
+
+
+unsettled = [d for d in days_with_data if not day_is_settled(d)]
+days_with_data = [d for d in days_with_data if day_is_settled(d)]
 ce_through = days_with_data[-1] if days_with_data else None
 settled_days = len(days_with_data)
+
+# TRANSFER QUANTITIES COME FROM THE SETTLED DAYS ONLY, because they feed the
+# ratio and the projection and both need whole days on both sides.
+totals = {"in": 0.0, "out": 0.0}
+for day in days_with_data:
+    totals["in"] += per_day[day]["in"]
+    totals["out"] += per_day[day]["out"]
+
+# AN OVERAGE IS COUNTED FROM EVERY DAY, SETTLED OR NOT, and that asymmetry is
+# deliberate. The two quantities above are one half of a comparison and are
+# useless without a matching half. A billed overage is not a comparison: it is
+# the provider stating that this month has passed the allowance and the meter is
+# running. Holding that back for a day because the day is not complete would
+# delay an open-ended invoice alert to keep a ratio tidy.
+overage_gb = sum(b["overage"] for b in per_day.values())
+overage_usd = sum(b["overageUsd"] for b in per_day.values())
 
 # ---------------------------------------------------------------- the metric
 #
 # Sum by VALUE, inside an explicit UTC window. Nothing here depends on the
 # order the API returned the buckets in.
-
-def parse_stamp(text):
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        moment = dt.datetime.fromisoformat(text)
-    except ValueError:
-        fail("cannot read a metric timestamp: %r" % text)
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=dt.timezone.utc)
-    return moment.astimezone(dt.timezone.utc)
-
 
 month_start = parse_stamp(month_start_s)
 if ce_through:
@@ -410,7 +485,7 @@ record = {
     "ceThroughDate": ce_through,
     "ceInGiB": round(ce_in, 3),
     "ceOutGiB": round(ce_out, 3),
-    "ceOverageGiB": round(totals["overage"], 3),
+    "ceOverageGiB": round(overage_gb, 3),
     "ceOverageUsd": round(overage_usd, 4),
     "metricInGiB": round(metric_in_mtd / GIB, 3),
     "metricOutGiB": round(metric_out_mtd / GIB, 3),
@@ -425,6 +500,11 @@ record = {
     # without it invites a wrong conclusion.
     "ceEstimated": estimated,
     "ceSettledDays": settled_days,
+    # The days Cost Explorer has begun but not finished. They are excluded from
+    # every figure above; naming them is what stops the next reader wondering
+    # why the invoice looks a day short.
+    "ceUnsettledDays": unsettled,
+    "ceLagHours": float(lag_hours_s),
     "daysInMonth": days_in_month,
     "projectedOutGiB": round(projected_out, 1),
     "overageUsdPerGiB": rate,
@@ -435,10 +515,17 @@ with open(result_path, "w", encoding="utf-8") as handle:
     handle.write("\n")
 
 if ce_through is None:
-    sys.stderr.write(
-        "ce-reconcile: Cost Explorer returned no transfer usage for %s yet. "
-        "It lags about fourteen hours, so this is normal early in a month and "
-        "is a fault later in one.\n" % month)
+    if unsettled:
+        sys.stderr.write(
+            "ce-reconcile: Cost Explorer has data for %s but no COMPLETE day "
+            "yet: %s. A day counts once it has been over for %s h. This is "
+            "normal in the first day or two of a month.\n"
+            % (month, ", ".join(unsettled), lag_hours_s))
+    else:
+        sys.stderr.write(
+            "ce-reconcile: Cost Explorer returned no transfer usage for %s yet. "
+            "It lags about fourteen hours, so this is normal early in a month "
+            "and is a fault later in one.\n" % month)
 PY
 [ -s "$RESULT" ] || die "the reconciliation produced no file"
 
@@ -460,7 +547,8 @@ def ratio(value):
     return "unknown" if value is None else "%.2fx" % value
 
 
-through = record["ceThroughDate"] or "nothing yet"
+through = record["ceThroughDate"] or "nothing complete yet"
+held = record.get("ceUnsettledDays") or []
 pct = 0.0
 if record["allowanceGiB"]:
     pct = 100.0 * record["projectedMonthGiB"] / record["allowanceGiB"]
@@ -481,6 +569,9 @@ print("  projection     %s of a %s allowance (%.0f%%), billed overage $%.2f"
          record["projectedOverageUsd"]))
 print("  rule           billed = min(out, max(0, (in + out) - allowance)) "
       "at $%.2f/GB" % record["overageUsdPerGiB"])
+if held:
+    print("  held back      %s — begun but not yet %sh complete, so excluded "
+          "from every figure above" % (", ".join(held), record.get("ceLagHours")))
 print("  principal      %s" % record["principal"])
 print("  Cost Explorer calls this run: %s ($%.2f)"
       % (sys.argv[2], 0.01 * int(sys.argv[2])))

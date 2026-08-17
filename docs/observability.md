@@ -344,6 +344,18 @@ The comparison uses only the days Cost Explorer has settled — never
 month-to-date against month-to-date, because the fourteen-hour lag alone would
 put that comparison tens of percent out and cost somebody a day.
 
+**And a day is not settled because it has data in it.** The newest day Cost
+Explorer returns always has data and always has *less* data than the day
+contains, so counting it makes the same error one level down: a whole day of
+counter against a part day of invoice. The first real run of the reconciliation
+reported `1.37` and `1.17` from two instruments that agree to `1.01`, and that
+would have been the monitor's first-ever billing alert — saying the instruments
+disagree, while both were correct. A day now counts only once it has been over
+for longer than the lag, which at 06:30 UTC makes the newest settled day the day
+before yesterday. That is the honest reading; a fresher one is a part day. This
+is the general shape of the trap: **a lagging source makes its most recent
+record look complete, and the reader is the only party that knows it is not.**
+
 **The principal is the account root, read-only, and that is a recorded
 acceptance rather than an oversight.** On 2026-08-16 the owner accepted continued
 read-only use of the existing profile for metrics and billing reads, and declined
