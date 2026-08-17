@@ -321,6 +321,24 @@ func TestEditFlagsSendOnlyWhatChanged(t *testing.T) {
 	}
 }
 
+// The name a create dialog opens on has to be one the core would accept, and it
+// has to be chosen BEFORE the defaults that are derived from it.
+func TestNextFreeWorldName(t *testing.T) {
+	if got := NextFreeWorldName(launcher.Snapshot{}); got != "world2" {
+		t.Fatalf("an empty installation is offered %q", got)
+	}
+	second := aWorld()
+	second.Name = "world2"
+	third := aWorld()
+	third.Name = "WORLD3"
+	snap := launcher.Snapshot{Worlds: []launcher.WorldView{aWorld(), second, third}}
+	// Names are compared without case, because the file system the profile lands
+	// on is.
+	if got := NextFreeWorldName(snap); got != "world4" {
+		t.Fatalf("an installation holding world2 and WORLD3 is offered %q", got)
+	}
+}
+
 // The log pane's lines: one stamp per line, whole lines only, and a blank line
 // stays blank.
 func TestLogAssemblesWholeLinesWithOneStampEach(t *testing.T) {

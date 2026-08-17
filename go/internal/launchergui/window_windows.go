@@ -36,8 +36,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
@@ -55,11 +55,6 @@ const refreshInterval = 2 * time.Second
 // event log under each world's data root is the permanent record, and the pane
 // says so when it trims.
 const logPaneLimit = 200000
-
-// createNewConsole is CREATE_NEW_CONSOLE. A window has no console to lend, so
-// the console launcher is given one of its own — otherwise its menu would be
-// drawn to a handle nobody can see.
-const createNewConsole = 0x00000010
 
 // Options is what the executable hands the window.
 type Options struct {
@@ -193,7 +188,12 @@ func (u *ui) build() error {
 			{AssignTo: &u.statusBar, Text: CloseHint, Width: 900},
 		},
 		Children: []d.Widget{
-			d.TextLabel{AssignTo: &u.banner, Text: "", TextColor: walk.RGB(160, 0, 0)},
+			// MinSize.Width IS WHAT MAKES IT WRAP. Without it a label is measured
+			// as one line, and this one carries every unreadable profile's whole
+			// refusal — so the window's minimum width would grow to fit the lot
+			// on one line and the text would run off the edge of the screen.
+			d.TextLabel{AssignTo: &u.banner, Text: "", TextColor: walk.RGB(160, 0, 0),
+				MinSize: d.Size{Width: 860}},
 			d.VSplitter{
 				Children: []d.Widget{
 					d.TableView{
@@ -234,7 +234,14 @@ func (u *ui) build() error {
 								ReadOnly: true,
 								VScroll:  true,
 								HScroll:  true,
-								Font:     d.Font{Family: "Consolas", PointSize: 9},
+								// AN EDIT CONTROL HAS ITS OWN CEILING, about
+								// 32,767 characters, and past it every append is
+								// silently dropped — the pane would freeze on old
+								// text with nothing to say it had, and Copy the log
+								// would copy that. It is raised above the trimming
+								// limit below, which is what actually bounds this.
+								MaxLength: logPaneLimit * 2,
+								Font:      d.Font{Family: "Consolas", PointSize: 9},
 							},
 						},
 					},
@@ -305,10 +312,12 @@ func (u *ui) action(caption string) **walk.Action {
 }
 
 // windowIcon is the icon compiled into this executable by the resource object
-// (see cmd/multiverse-launcher-gui). rsrc numbers the resources it is given from
-// 1, the manifest first, so the icon group's id depends on how many images the
-// .ico holds; the first id that loads as an icon is it. A window with no icon is
-// a cosmetic loss and never a reason to refuse to open.
+// (see cmd/multiverse-launcher-gui). rsrc numbers what it is given from 1 — the
+// manifest, then the icon group, then the group's images — so with the manifest
+// first the group is 2 and the first probe below finds it. The loop is there
+// because that ordering is rsrc's and not ours: a resource id that holds no icon
+// group answers with an error rather than an icon, never a panic, and a window
+// with no icon is a cosmetic loss rather than a reason to refuse to open.
 func windowIcon() *walk.Icon {
 	for id := 2; id <= 32; id++ {
 		if icon, err := walk.NewIconFromResourceId(id); err == nil {
@@ -428,6 +437,13 @@ func (u *ui) writeLines(lines []string) {
 		cut := len(text) / 2
 		if index := strings.Index(text[cut:], "\r\n"); index >= 0 {
 			cut += index + 2
+		} else {
+			// No line ending in the second half: cut on a rune boundary instead,
+			// so a path with an accent in it does not become a replacement
+			// character at the top of the pane.
+			for cut < len(text) && !utf8.RuneStart(text[cut]) {
+				cut++
+			}
 		}
 		u.logView.SetText("[the older half of this session's log was trimmed here; " +
 			"each world's own log folder keeps the whole of it]\r\n" + text[cut:])
@@ -647,8 +663,12 @@ func (u *ui) onEdit() {
 }
 
 func (u *ui) onCreate() {
-	spec, defaultsErr := u.session.NewWorldDefaults("world2")
-	spec = nextFreeName(u.snapshot, spec)
+	// THE NAME IS CHOSEN FIRST, because the defaults are derived FROM it: the
+	// data folder a new world is offered is named after it. Asking for defaults
+	// under one name and then renaming the world left the second create dialog
+	// offering the FIRST new world's data folder, which the core refuses — two
+	// worlds over one journal strand both.
+	spec, defaultsErr := u.session.NewWorldDefaults(NextFreeWorldName(u.snapshot))
 	if defaultsErr != nil {
 		// An installation with nothing in it can still be given a world, but the
 		// person has to say where the game is. The dialog opens with the fields
@@ -668,32 +688,13 @@ func (u *ui) onCreate() {
 	})
 }
 
-// nextFreeName offers a name no world already has, so the dialog opens on a
-// value that will not be refused the moment it is accepted.
-func nextFreeName(snap launcher.Snapshot, spec launcher.CreateSpec) launcher.CreateSpec {
-	taken := make(map[string]bool, len(snap.Worlds))
-	for _, world := range snap.Worlds {
-		taken[strings.ToLower(world.Name)] = true
-	}
-	for n := 2; n < 100; n++ {
-		candidate := fmt.Sprintf("world%d", n)
-		if !taken[candidate] {
-			spec.Name = candidate
-			spec.World = candidate
-			return spec
-		}
-	}
-	return spec
-}
-
 func (u *ui) onClone() {
 	world := u.selectedWorld()
 	if world == nil {
 		return
 	}
 	source := world.Name
-	spec := nextFreeName(u.snapshot, launcher.CreateSpec{})
-	name, ok, err := runCloneDialog(u.mw, source, spec.Name)
+	name, ok, err := runCloneDialog(u.mw, source, NextFreeWorldName(u.snapshot))
 	if err != nil {
 		u.warn(err.Error())
 		return
@@ -770,6 +771,19 @@ func (u *ui) onCopyLog() {
 
 // onOpenConsole opens the console launcher, which is the same program with the
 // commands and the menu on it.
+//
+// IT GOES THROUGH THE SHELL, AND THAT IS NOT LAZINESS. A window has no console
+// to lend, and os/exec ALWAYS passes standard handles to a child
+// (STARTF_USESTDHANDLES is set unconditionally in syscall's exec), opening the
+// null device for any stream left nil. A console launcher started that way gets
+// a console window of its own AND the null device for all three streams: NUL is
+// a character device, so the menu opens, draws into nothing, reads end-of-input
+// on its first prompt and quits. A blank console flashes and vanishes.
+//
+// `cmd /c start "" <exe>` hands the job to the shell, which creates the console
+// and its handles the way it does for anything a person types. The empty string
+// is start's title argument, and it is required: without it start would read a
+// quoted path AS the title and open a console with nothing in it.
 func (u *ui) onOpenConsole() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -777,14 +791,22 @@ func (u *ui) onOpenConsole() {
 		return
 	}
 	console := ConsoleExePath(exe)
-	cmd := exec.Command(console)
+	cmd := exec.Command(comSpec(), "/c", "start", "", console)
 	cmd.Dir = u.session.InstallRoot()
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole}
 	if err := cmd.Start(); err != nil {
 		u.warn(fmt.Sprintf("could not open %s: %v", console, err))
 		return
 	}
-	fmt.Fprintf(u.log, "opened %s in its own window.\n", console)
+	fmt.Fprintf(u.log, "opened %s in a console window of its own.\n", console)
+}
+
+// comSpec prefers the shell this Windows says it has, and falls back to the
+// name rather than to a path this machine may not have.
+func comSpec() string {
+	if shell := os.Getenv("ComSpec"); shell != "" {
+		return shell
+	}
+	return "cmd.exe"
 }
 
 func (u *ui) onDocs() {

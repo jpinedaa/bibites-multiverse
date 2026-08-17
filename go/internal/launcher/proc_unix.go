@@ -20,6 +20,11 @@ const (
 	gameExeName    = "The Bibites.x86_64"
 )
 
+// noWindowAttrs is the Windows notion of a console program with no console.
+// There is nothing to say here: a child whose streams are redirected shows
+// nobody anything on this platform.
+func noWindowAttrs() *syscall.SysProcAttr { return nil }
+
 // detachedAttrs puts the child in its own session, so it survives the terminal
 // the launcher was started from.
 func detachedAttrs() *syscall.SysProcAttr {

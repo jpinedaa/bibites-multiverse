@@ -28,11 +28,16 @@ package launcher
 //     sidecar's own read-only endpoint says about the game behind it. The menu
 //     redraws that from a fresh process each time; a window holds it.
 //
-// A SESSION IS NOT SAFE FOR TWO GOROUTINES AT ONCE. It carries one app, one
-// writer pair and one answer function. The GUI runs its actions on one
-// goroutine for that reason, and the per-world launcher.lock is what makes a
-// SECOND launcher — another window, or a console beside it — safe rather than
-// this type.
+// WHAT IS SAFE TO CALL TOGETHER, EXACTLY. Snapshot reads and never writes — not
+// a file, not a field of this type — so it is safe beside anything, which is what
+// lets a window refresh its list while an action runs. THE ACTIONS ARE NOT: they
+// share one writer pair and one answer function, and two of them at once would
+// interleave a participant's output and could hand one action's typed name to
+// another's question. A caller runs them one at a time; the GUI has a single
+// goroutine for exactly that.
+//
+// And a SECOND launcher — another window, or a console beside it — is made safe
+// by the per-world launcher.lock rather than by this type.
 
 import (
 	"bufio"
@@ -430,6 +435,12 @@ func (s *Session) Diagnose(name string) int {
 	cmd.Dir = p.DataRoot
 	cmd.Stdout = s.a.stdout
 	cmd.Stderr = s.a.stderr
+	// NO CONSOLE WINDOW. The sidecar is a console program and a graphical front
+	// door has no console to lend it, so Windows would give it one of its own —
+	// a black window that appears for the length of the diagnostic and reads as
+	// something having gone wrong. Its output is being captured above, which is
+	// where it belongs.
+	cmd.SysProcAttr = noWindowAttrs()
 	if err := cmd.Run(); err != nil {
 		// A diagnostic that finds a fault EXITS NON-ZERO, and that is a report
 		// rather than a failure of the launcher. Say what it was and let the

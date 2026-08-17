@@ -23,7 +23,7 @@ what the core said arrive on screen.**
 
 | Thing | Value |
 |---|---|
-| Package | a `0.2.8` (or later) Windows package built from `feat/launcher-gui` |
+| Package | a Windows package built from this branch |
 | Install root | wherever the setup put it, e.g. `%LOCALAPPDATA%\Programs\Bibites Multiverse` |
 | Files that must be there | `BibitesMultiverseLauncher.exe`, `multiverse-launcher.exe`, `multiverse-sidecar.exe`, `public-map.json`, `bibites-multiverse.ico`, `profiles\default.json` |
 | A second world | created during the run, so start with one |
@@ -250,7 +250,8 @@ plugin removed, but any world whose game never joins will do.
 ## 13. Help and about
 
 1. **Help → About.**
-   **Assert:** `Bibites Multiverse launcher 0.2.8`, the install root, the sidecar's path,
+   **Assert:** `Bibites Multiverse launcher <this release>` — the same string
+   `multiverse-launcher.exe version` prints — the install root, the sidecar's path,
    `multiverse-launcher.exe`, `https://bibitesmultiverse.com`, and the closing hint.
 2. **Help → Documentation.**
    **Assert:** the default browser opens `https://bibitesmultiverse.com`.

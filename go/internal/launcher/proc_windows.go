@@ -55,6 +55,20 @@ var (
 	procQueryFullProcessImageNameW = kernel32.NewProc("QueryFullProcessImageNameW")
 )
 
+// noWindowAttrs runs a child whose OUTPUT IS BEING CAPTURED without giving it a
+// console of its own. It is not detachedAttrs: a detached child keeps no
+// relationship with this process at all, which is right for a world that must
+// outlive the launcher and wrong for a diagnostic this process is reading.
+//
+// CREATE_NO_WINDOW and DETACHED_PROCESS are mutually exclusive; this is the one
+// of the two that means "a console program with no window".
+func noWindowAttrs() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{CreationFlags: createNoWindow}
+}
+
+// createNoWindow is CREATE_NO_WINDOW, which syscall does not export.
+const createNoWindow = 0x08000000
+
 // detachedAttrs makes a spawned child outlive this console.
 func detachedAttrs() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{

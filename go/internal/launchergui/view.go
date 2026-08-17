@@ -379,6 +379,29 @@ func ActionsFor(selected *launcher.WorldView, snap launcher.Snapshot, busy bool)
 	return actions
 }
 
+// NextFreeWorldName is the name a create or a clone dialog opens on: the first
+// world<N> this installation has not got. A dialog that opened on a name the
+// core would refuse the moment it was accepted is a dialog that wastes a
+// participant's attempt.
+//
+// It is also the name the OTHER defaults are derived from — a new world's data
+// folder is named after it — so it is chosen before them and never after.
+func NextFreeWorldName(snap launcher.Snapshot) string {
+	taken := make(map[string]bool, len(snap.Worlds))
+	for _, world := range snap.Worlds {
+		taken[strings.ToLower(world.Name)] = true
+	}
+	for n := 2; n <= 99; n++ {
+		candidate := fmt.Sprintf("world%d", n)
+		if !taken[candidate] {
+			return candidate
+		}
+	}
+	// Ninety-eight worlds on one machine is not a case worth a second naming
+	// scheme: the core refuses a duplicate by name, and says so.
+	return "world"
+}
+
 // ---------------------------------------------------------------- edit dialog
 
 // WorldForm is the editable half of a world, as text — which is what a dialog

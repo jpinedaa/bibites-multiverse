@@ -490,6 +490,10 @@ step "the launcher (the window and the commands, cross-compiled)"
 # go.mod as a tool dependency, so this needs no network and no installed program,
 # and it is byte-for-byte reproducible. It is in .gitignore, which is what keeps
 # `git status` clean and therefore keeps every VCS stamp below unmodified.
+# The manifest comes from the tree being compiled and the icon from $RELDIR,
+# which is the copy this build STAGES into the package a few steps below: the
+# icon inside the executable and the icon beside it must be one file, or the
+# window in the taskbar and the icon on the desktop stop matching.
 ( cd "$SIDECAR_BUILD_REPO/go" && nice -n 19 go tool rsrc \
     -manifest cmd/multiverse-launcher-gui/app.manifest \
     -ico "$RELDIR/kit/bibites-multiverse.ico" \

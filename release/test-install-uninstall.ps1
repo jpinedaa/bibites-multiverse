@@ -250,8 +250,9 @@ Check "the stop script was written" (Test-Path (Join-Path $KitDir 'Stop-Multiver
 # it must never carry the credential: that stays in peer-secret.txt.
 Check "the launcher is in the kit" (Test-Path (Join-Path $KitDir 'BibitesMultiverseLauncher.exe'))
 # The window and its commands are two files, and step 9 refuses to install with
-# either one missing (INS-CHECKSUM), so a kit with one of them is a kit that
-# cannot be installed at all.
+# either one missing (INS-CHECKSUM) whenever it is managing an application
+# directory - which every setup and every -InstallRoot install is. A kit with one
+# of them is therefore a kit that cannot be installed the way anybody installs.
 Check "the launcher's commands are in the kit" (Test-Path (Join-Path $KitDir 'multiverse-launcher.exe'))
 $profilesDir        = Join-Path $KitDir 'profiles'
 $defaultProfilePath = Join-Path $profilesDir 'default.json'
