@@ -125,6 +125,51 @@ meminfo() {
 }
 status() { printf '{"ledgerRecords": %s, "genomeGaps": 0}\n' "$1" >"$STATUSJ"; }
 
+# THE STATUS DOCUMENT AN ARCHIVE WITH THE RECORD ROLL-UP PUBLISHES. The one
+# above is the document the build before it published, and it is kept because
+# the fallback path is a real state on a real host: a monitor shipped with this
+# kit has to keep working against the binary that is running when it lands.
+#
+# Each field is a variable with a default so that a case sets only the one it is
+# about. Every value below is a shape, not a measurement.
+ST_LEDGER=5408123
+ST_RAWREC=100000        # records the LAST start parsed
+ST_RAWSEC=10            # seconds it took: 0.0001 s a record
+ST_SEGS=2
+ST_AWAIT=0
+ST_WINMS=2592000000     # 30 days
+ST_FROMMS=0
+ST_SAVED=0
+ST_DUP=0
+ST_RAWBYTES=6100000000
+status_rollup() {
+  cat >"$STATUSJ" <<EOF
+{"ledgerRecords": $ST_LEDGER,
+ "genomeGaps": 0,
+ "rollupCoveredRecords": $ST_LEDGER,
+ "rollupSavedAtMs": $ST_SAVED,
+ "replayRawRecords": $ST_RAWREC,
+ "replayRawSeconds": $ST_RAWSEC,
+ "duplicatesRefused": $ST_DUP,
+ "ledgerSegments": $ST_SEGS,
+ "ledgerRawBytes": $ST_RAWBYTES,
+ "ledgerRawWindowFromMs": $ST_FROMMS,
+ "ledgerWindowMs": $ST_WINMS,
+ "ledgerSegmentsAwaitingColdCopy": $ST_AWAIT,
+ "ledgerRetiredTotal": 0}
+EOF
+}
+
+# A record rate this box has already sampled, so a case can exercise the
+# projection without waiting an hour of fake clock for the sample to close.
+# 1000 records per 1000 s is one a second, which makes every figure below
+# readable by eye.
+seed_rate() { # seed_rate <records-per-1000s> <now>
+  sset replay.rate "$1"
+  sset replay.rec "$ST_LEDGER"
+  sset replay.rec.at "$2"
+}
+
 run() { # run <epoch> <group> [KEY=VALUE ...]
   local now="$1" group="$2"
   shift 2
@@ -452,6 +497,208 @@ out="$(run "$BASE" replay)"
 eq  'no MemTotal warns rather than reporting a ratio of nothing' \
     "$(sev_of "$out" replay)" WARN
 has 'and says the archive is unwatched'              "$out" 'not being watched'
+
+# ------------------------------------------- 13b. what the restart will COST
+#
+# The memory gate above answers "will it fit". This answers "what will it cost
+# the map in seconds", which is the question the roll-up exists to change and
+# the one nobody was watching: the record-preserving sequence holds the relay
+# down for the whole replay, so the projection IS the participant outage.
+
+# THE FALLBACK, and it is a real state: the build running when this kit lands
+# publishes neither field, and the record-count model is then the only estimate.
+# It must say which model is in force rather than reporting silence.
+reset_state
+status 5213509
+meminfo 1953544 0 0
+out="$(run "$BASE" replay)"
+eq  'an archive with no replay measurement still gets a memory verdict' \
+    "$(sev_of "$out" replay)" WARN
+eq  'and the cost check reports rather than staying silent' \
+    "$(sev_of "$out" replay-cost)" OK
+has 'and it names the field it needs'                "$out" 'replayRawRecords'
+has 'and it says the fallback is a memory model'     "$out" 'model of MEMORY'
+hasnt 'and the memory verdict carries no roll-up caveat on that build' \
+      "$out" 'this archive has a roll-up'
+
+# With the fields present but no record rate yet, it reports the MEASUREMENT and
+# says a projection needs a sample. It must not report the last start as the
+# next one: the first start after this deployment reads the whole ledger once.
+reset_state
+status_rollup
+out="$(run "$BASE" replay)"
+eq  'a warming projection is not an alarm'           "$(sev_of "$out" replay-cost)" OK
+has 'and it states what the last start measured'     "$out" '10.0 s to parse 100000 raw record'
+has 'and it says a sample is still opening'          "$out" 'record rate'
+has 'and it names the window that will bound it'     "$out" '48h'
+
+# With a sample, the projection is the whole model: records in the window at the
+# cost per record the archive itself measured.
+#   1 record/s * 172,800 s = 172,800 records * 0.0001 s = 17 s
+reset_state
+seed_rate 1000 "$BASE"
+out="$(run "$BASE" replay)"
+eq  'a cheap restart is OK'                          "$(sev_of "$out" replay-cost)" OK
+has 'and it prints the projected seconds'            "$out" '~17 s projected'
+has 'and the record count it projected'              "$out" '172800 raw records'
+
+# The same box, a build that parses a hundred times slower: 1,728 s of held-down
+# relay, which is a scheduled window and not a maintenance action.
+reset_state
+ST_RAWSEC=1000 status_rollup
+seed_rate 1000 "$BASE"
+out="$(run "$BASE" replay)"
+eq  'an unaffordable outage is critical'             "$(sev_of "$out" replay-cost)" CRIT
+has 'and it says the replay time is the outage'      "$out" 'THE REPLAY TIME IS THE PARTICIPANT OUTAGE'
+has 'and it names the one knob that moves it'        "$out" 'MV_ARCHIVE_DEDUP_WINDOW'
+has 'and it names the counter that says lowering is safe' "$out" 'duplicatesRefused'
+
+reset_state
+ST_RAWSEC=200 status_rollup
+seed_rate 1000 "$BASE"
+out="$(run "$BASE" replay)"
+eq  'an outage that must be announced is a warning'  "$(sev_of "$out" replay-cost)" WARN
+has 'and it says so'                                 "$out" 'announced before it is done'
+
+# THE KNOB. The same binary, the same state, a shorter duplicate window: the
+# projection falls with it, because the window is what the restart reads.
+reset_state
+ST_RAWSEC=1000 status_rollup
+seed_rate 1000 "$BASE"
+out="$(run "$BASE" replay MV_ARCHIVE_DEDUP_WINDOW=1h)"
+eq  'a one-hour window clears the critical projection' "$(sev_of "$out" replay-cost)" OK
+has 'and the window it used is the one that was set'   "$out" '3600s'
+
+# A window this cannot parse must never be read as no window at all, which would
+# make every restart project as free.
+reset_state
+seed_rate 1000 "$BASE"
+out="$(run "$BASE" replay MV_ARCHIVE_DEDUP_WINDOW=notaduration)"
+eq  'an unparseable window falls back and stays critical' "$(sev_of "$out" replay-cost)" CRIT
+has 'and it uses the default window'                 "$out" '172800s'
+
+# The compressed-segment term the model does not carry, named rather than
+# implied: reaching the window's start is a decompress-and-discard on a gz.
+has 'and it says reaching the window is not in the figure' "$out" "Reaching the window's start is not in this figure"
+
+# The memory gate says out loud that it is now the conservative model, so that
+# nobody reads a record-count ratio as a measurement of a bounded process.
+reset_state
+status_rollup
+out="$(run "$BASE" replay)"
+has 'the memory gate admits the record-count model over-estimates' \
+    "$out" 'this archive has a roll-up'
+has 'and points at the check that answers the other question' \
+    "$out" 'replay-cost'
+
+# ------------------------------------------- 13c. the record layer
+#
+# Three checks, and each one watches something whose failure is INVISIBLE
+# everywhere else: an off-host copy that stopped (nothing else on this host
+# looks at the object store), a state sidecar that stopped saving (no published
+# number moves), and a duplicate counter that is the only evidence the window
+# may come down.
+
+reset_state
+status_rollup
+out="$(run "$BASE" archive)"
+eq  'a healthy record layer is OK on all three'      "$(sev_of "$out" cold-copy)" OK
+eq  'the state sidecar too'                          "$(sev_of "$out" rollup)" OK
+eq  'and the duplicate counter'                      "$(sev_of "$out" duplicates)" OK
+
+# THE FIRST-PASS BLIND SPOT. The archive refreshes the segment fields in its
+# maintenance pass, and the pass at start COMPRESSES before it refreshes — 21 s
+# on a real legacy segment. A reading taken inside that window shows a healthy
+# archive with no segments at all, and a check that fires on it fires on every
+# restart.
+reset_state
+ST_SEGS=0 ST_AWAIT=0 ST_SAVED=0 status_rollup
+out="$(run "$BASE" archive)"
+eq  'no segment layer yet is not an alarm'           "$(sev_of "$out" cold-copy)" OK
+has 'and it says the pass has not reported yet'      "$out" 'not reported yet'
+
+# A segment waiting for its copy is normal for the hour after a rotation.
+reset_state
+ST_AWAIT=1 ST_SAVED=$(( BASE * 1000 )) status_rollup
+out="$(run "$BASE" archive)"
+eq  'one segment waiting is not yet a problem'       "$(sev_of "$out" cold-copy)" OK
+has 'and it says the timer runs hourly'              "$out" 'timer runs hourly'
+
+# A day of waiting is the copy failing rather than lagging.
+reset_state
+sset coldcopy.awaiting.since "$(( BASE - 25 * 3600 ))"
+out="$(run "$BASE" archive)"
+eq  'a day of waiting is a warning'                  "$(sev_of "$out" cold-copy)" WARN
+has 'and it says the record is safe and the disk is not' "$out" 'costs disk and not record'
+has 'and it names the mode that diagnoses it'        "$out" 'coldcopy.sh --check'
+
+# The critical case is not lateness. It is the raw on this host reaching back
+# further than the window was ever meant to allow, which is the point at which
+# the window is doing nothing at all.
+reset_state
+ST_AWAIT=3 ST_SAVED=$(( BASE * 1000 )) ST_FROMMS=$(( BASE * 1000 - 6000000000 )) status_rollup
+sset coldcopy.awaiting.since "$(( BASE - 30 * 3600 ))"
+out="$(run "$BASE" archive)"
+eq  'a backlog past twice the window is critical'    "$(sev_of "$out" cold-copy)" CRIT
+has 'and it contrasts the days held with the window' "$out" '69 days of raw lines against a 30-day window'
+has 'and it says no segment is ever removed without a copy' "$out" 'NO SEGMENT IS EVER REMOVED'
+has 'and it names the three commonest causes'        "$out" 'storage class'
+
+# A state sidecar that stopped saving breaks nothing and moves no other number.
+reset_state
+ST_AWAIT=0 ST_FROMMS=0 ST_SAVED=$(( (BASE - 1800) * 1000 )) status_rollup
+out="$(run "$BASE" archive)"
+eq  'a stale state sidecar is a warning'             "$(sev_of "$out" rollup)" WARN
+has 'and it says what it costs: the next restart'    "$out" 'window-bounded restart back into a full one'
+
+# One that has never saved is correct for the first half-minute and not after.
+reset_state
+ST_SAVED=0 ST_SEGS=2 status_rollup
+out="$(run "$BASE" archive)"
+eq  'a sidecar that has not saved yet is not an alarm' "$(sev_of "$out" rollup)" OK
+sset rollup.zero.since "$(( BASE - 3600 ))"
+out="$(run "$BASE" archive)"
+eq  'one that has never saved for an hour is a warning' "$(sev_of "$out" rollup)" WARN
+has 'and it says every restart from here is a full replay' "$out" 'full replay of the raw ledger'
+
+# duplicatesRefused: zero is the answer that matters and it is reported as such.
+reset_state
+ST_SAVED=$(( BASE * 1000 )) ST_DUP=0 status_rollup
+out="$(run "$BASE" archive)"
+eq  'zero refusals is OK'                            "$(sev_of "$out" duplicates)" OK
+has 'and it says what zero buys'                     "$out" 'may come down'
+
+# A non-zero counter during the transition is information, not an alarm — and it
+# becomes one only when it is still MOVING, because a moving counter is what
+# says the window must not come down yet.
+reset_state
+ST_DUP=7 status_rollup
+out="$(run "$BASE" archive)"
+eq  'refusals during the transition are not an alarm' "$(sev_of "$out" duplicates)" OK
+has 'and it says why they are expected'              "$out" 'B37'
+
+sset dup.24 4
+sset dup.24.at "$(( BASE - 25 * 3600 ))"
+out="$(run "$BASE" archive)"
+eq  'refusals still arriving after a day is a warning' "$(sev_of "$out" duplicates)" WARN
+has 'and it forbids lowering the window while it moves' "$out" 'DO NOT LOWER'
+
+sset dup.24 7
+sset dup.24.at "$(( BASE - 25 * 3600 ))"
+out="$(run "$BASE" archive)"
+eq  'a flat day at a non-zero total is OK'           "$(sev_of "$out" duplicates)" OK
+has 'and it says a full cycle at zero is the bar'    "$out" 'full cycle at zero'
+
+# ------------------------------------------- 13d. disk, with a bounded ledger
+#
+# The days-to-full projection is a straight line, and once the window is in
+# force and the copy is working the raw ledger is not one. A straight line
+# through a term that stops growing reads a healthy host as weeks from full.
+
+reset_state
+ST_DUP=0 ST_AWAIT=0 status_rollup
+out="$(run "$BASE" replay)"
+hasnt 'the disk caveat does not leak into the replay group' "$out" 'raw ledger is bounded'
 
 # ---------------------------------------------------------------- 14. swap
 

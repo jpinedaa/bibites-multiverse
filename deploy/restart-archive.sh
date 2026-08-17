@@ -220,6 +220,27 @@ check_replay_headroom() {
   say "monitor replay verdict: $REPLAY_SEV"
   [ -n "$REPLAY_MSG" ] && say "$REPLAY_MSG"
 
+  # PRE-RESTART CHECK 4, "estimate replay time with the target-host rate", read
+  # from the same pass. The gate above is a MEMORY verdict and it is what this
+  # script refuses on; this is what the restart will COST the map in seconds,
+  # and it is what the announcement has to state. It is printed and NOT gated
+  # on: a restart that is expensive is a restart that has to be announced, and
+  # refusing it here would leave an operator with no supported way to do the
+  # thing the policy tells them to schedule.
+  local cost_sev cost_msg
+  cost_sev="$(printf '%s\n' "$out" | awk '$1 == "replay-cost" { print $2; exit }')"
+  cost_msg="$(printf '%s\n' "$out" | awk '$1 == "replay-cost" { $1=""; $2=""; sub(/^ +/, ""); print; exit }')"
+  if [ -n "$cost_sev" ]; then
+    say "projected replay cost: $cost_sev"
+    [ -n "$cost_msg" ] && say "$cost_msg"
+    case "$cost_sev" in
+      WARN|CRIT)
+        say "THAT PROJECTION IS THE PARTICIPANT OUTAGE. This sequence holds the relay"
+        say "down for the whole replay on purpose, so announce it before you proceed"
+        say "(RESTART-POLICY.md, pre-restart check 7)." ;;
+    esac
+  fi
+
   case "$REPLAY_SEV" in
     OK|WARN)
       say "below the ban threshold; the restart may proceed"

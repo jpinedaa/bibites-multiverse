@@ -12,7 +12,10 @@
 #   monitor.sh --test       send one alert and exit — prove the channel works
 #   monitor.sh --quiet      no alerts; the verdict is printed, never sent
 #   monitor.sh --only NAME  run one group and nothing else: 'transfer',
-#                           'hosts-pin', 'replay', 'swap' or 'billing'.
+#                           'hosts-pin', 'replay', 'archive', 'swap' or
+#                           'billing'. 'replay' is the two restart checks —
+#                           deploy/restart-archive.sh reads its verdict — and
+#                           'archive' is the three record-layer checks.
 #                           deploy/test-monitor.sh drives the transfer, billing
 #                           and replay-headroom arithmetic through this against
 #                           fake /proc files, a fake status document, a fake
@@ -112,6 +115,36 @@
 #                         would turn the tripwire green without changing one
 #                         byte of retained state. SIZING.md reads sustained swap
 #                         activity as a sizing signal, so sustained use warns.
+#   replay cost           WHAT THE NEXT RESTART WILL COST IN SECONDS, which is
+#                         a different question from whether it fits. A
+#                         record-preserving archive restart holds the relay
+#                         down for the length of the replay, so this is the
+#                         participant outage an announcement has to state.
+#                         Projected from two numbers the archive MEASURES at
+#                         its own last start — replayRawSeconds and
+#                         replayRawRecords — and from the duplicate window,
+#                         which is what bounds the next one. It is not a
+#                         memory of the last restart: the record rate this box
+#                         samples for itself is what turns a measured cost per
+#                         record into a projection of the next scan.
+#   cold copy             ledgerSegmentsAwaitingColdCopy, THE NUMBER THAT
+#                         SHOULD BE ZERO. A closed segment is never removed
+#                         without a receipt confirming an off-host copy, so a
+#                         cold archive that stopped working surfaces here and
+#                         in disk usage, and never as a record that is gone.
+#                         Nothing else watches the object store at all.
+#   roll-up state         rollupSavedAtMs. The state sidecar is what makes a
+#                         restart cost a window instead of a whole ledger. A
+#                         sidecar that stopped saving breaks nothing, moves no
+#                         other number, and turns the next restart back into a
+#                         full replay — a silent regression of the one promise
+#                         the roll-up exists to keep.
+#   duplicates            duplicatesRefused. All-time, and zero is the answer
+#                         that matters: it is the evidence that the duplicate
+#                         window — which is also what a restart costs — may
+#                         safely come down. A refused duplicate leaves no other
+#                         trace anywhere, so without this counter the guard's
+#                         whole working is invisible.
 #   genome gaps           Risk 7. The archive's arrears on genome capture, and
 #                         the part a departed stranger takes with them is
 #                         permanent.
@@ -197,6 +230,32 @@ set -a; . "$ENV_FILE"; set +a
 # the difference between one replay spilling and a box that is short of RAM.
 : "${MV_SWAP_USED_WARN_PCT:=25}"
 : "${MV_SWAP_USED_RUNS:=3}"
+# THE RESTART'S COST IN SECONDS. A record-preserving archive restart holds the
+# relay down for the length of the replay (RESTART-POLICY.md), so these are
+# thresholds on a participant outage and not on a resource. 180 s is an
+# announcement; 600 s is a scheduled window.
+: "${MV_REPLAY_SECONDS_WARN:=180}"
+: "${MV_REPLAY_SECONDS_CRIT:=600}"
+# THE DUPLICATE WINDOW IS WHAT A RESTART COSTS, since the roll-up: the replay
+# rebuilds its aggregates from the state sidecar and parses only
+# min(the raw window on this host, this value) of raw records. It is read from
+# deploy.env because that is where provision.sh reads it to write
+# MULTIVERSE_ARCHIVE_DEDUP_WINDOW into archive.env — one value, two readers.
+# Empty takes the contract's own default, which is also 48h.
+: "${MV_ARCHIVE_DEDUP_WINDOW:=}"
+# How long a record-rate sample must be open before it is used. An hour of a
+# real map is ~130,000 records, which is signal enough; the alternative is
+# waiting a day before this check says anything at all.
+: "${MV_REPLAY_RATE_MIN_S:=3600}"
+# The roll-up state sidecar saves every 30 s. Warn when its last save is older
+# than this. It also covers the sidecar that has never saved.
+: "${MV_ROLLUP_STALE_S:=900}"
+# Closed segments waiting for an off-host copy. One is normal for the hour after
+# a rotation; a day of them means the copy has stopped. The factor is the
+# multiple of the ledger window at which the backlog stops being late and starts
+# being the thing that fills the disk.
+: "${MV_COLDCOPY_WAIT_HOURS:=24}"
+: "${MV_COLDCOPY_WINDOW_FACTOR:=2}"
 # The bundle's monthly transfer allowance in the PROVIDER's GB (2^30 bytes),
 # counted in BOTH directions. Overage is billed per GB and is not throttled.
 : "${MV_TRANSFER_ALLOWANCE_GB:=3072}"
@@ -250,6 +309,33 @@ trap 'rm -rf "$TMP"' EXIT
 
 sget() { cat "$STATE/$1" 2>/dev/null || printf '%s' "${2:-}"; }
 sset() { printf '%s' "$2" >"$STATE/$1.new" 2>/dev/null && mv -f "$STATE/$1.new" "$STATE/$1"; }
+
+# go_duration_s <value> <default-seconds> — the subset of Go's duration syntax a
+# deployment actually writes: a run of <number><unit> with unit h, m or s.
+#
+# AN UNPARSEABLE VALUE RETURNS THE DEFAULT AND NEVER ZERO. Zero here would read
+# as "no duplicate window", which is a setting no deployment should have and one
+# this script must never invent on the operator's behalf: it would make every
+# restart projection say a restart is free.
+go_duration_s() {
+  local v="${1:-}" def="$2" total=0 num unit rest ok=1
+  [ -n "$v" ] || { printf '%s' "$def"; return; }
+  rest="$v"
+  while [ -n "$rest" ]; do
+    num="${rest%%[hms]*}"
+    case "$num" in ''|*[!0-9]*) ok=0; break ;; esac
+    rest="${rest#"$num"}"
+    unit="${rest:0:1}"
+    rest="${rest:1}"
+    case "$unit" in
+      h) total=$(( total + num * 3600 )) ;;
+      m) total=$(( total + num * 60 )) ;;
+      s) total=$(( total + num )) ;;
+      *) ok=0; break ;;
+    esac
+  done
+  if [ "$ok" = 1 ] && [ "$total" -gt 0 ]; then printf '%s' "$total"; else printf '%s' "$def"; fi
+}
 
 # ---------------------------------------------------------------- the channel
 
@@ -328,7 +414,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -v|--verbose) VERBOSE=1 ;;
     -q|--quiet) QUIET=1 ;;
-    --only) ONLY="${2:?--only needs a check group: transfer, hosts-pin, replay, swap or billing}"; shift ;;
+    --only) ONLY="${2:?--only needs a check group: transfer, hosts-pin, replay, archive, swap or billing}"; shift ;;
     --test)
       if notify OK self-test "This is a test from $(hostname) at $(date -u +%FT%TZ). If you are reading it, the alert channel works."; then
         echo "sent one $MV_ALERT_KIND alert"
@@ -494,6 +580,28 @@ check_disk() {
   fi
   local tail=""
   [ -n "$days" ] && tail=" — about $days day(s) left at the last 24 h's growth"
+
+  # THE PROJECTION ABOVE IS A STRAIGHT LINE AND THE RAW LEDGER IS NOT ONE, once
+  # a window is in force and the off-host copy is working: the raw lines reach a
+  # flat ceiling and everything after that is the genome store and the logs. A
+  # straight line through a term that stops growing reads a healthy host as
+  # weeks from full. Say which shape this host is in — and say it only when the
+  # gate that makes it true is actually closed, because a window with segments
+  # waiting for a copy retires nothing and the straight line is then correct.
+  if [ -s "$STATUS_JSON" ]; then
+    local winms awaiting rawb
+    winms="$(jq -r '.ledgerWindowMs // 0' "$STATUS_JSON" 2>/dev/null)"
+    awaiting="$(jq -r '.ledgerSegmentsAwaitingColdCopy // 0' "$STATUS_JSON" 2>/dev/null)"
+    rawb="$(jq -r '.ledgerRawBytes // 0' "$STATUS_JSON" 2>/dev/null)"
+    case "${winms:-x}" in ''|*[!0-9]*) winms=0 ;; esac
+    case "${awaiting:-x}" in ''|*[!0-9]*) awaiting=0 ;; esac
+    case "${rawb:-x}" in ''|*[!0-9]*) rawb=0 ;; esac
+    if [ "$winms" -gt 0 ] && [ "$awaiting" = 0 ]; then
+      tail="$tail. The raw ledger is bounded: a $(( winms / 86400000 ))-day window with every older segment copied off-host, holding $(( rawb / 1073741824 )) GB as stored today, so that term stops growing and this projection reads high"
+    elif [ "$winms" -gt 0 ]; then
+      tail="$tail. A $(( winms / 86400000 ))-day raw window is set but $awaiting segment(s) have no confirmed off-host copy, so NOTHING is being retired and the raw ledger is growing as though there were no window ('cold-copy' check)"
+    fi
+  fi
 
   if [ "$free" -le "$MV_DISK_CRIT_PCT" ]; then
     report disk CRIT "${free}% free (${availg} GB)$tail. Grow the volume or apply the announced retention rule before writes fail."
@@ -1028,12 +1136,287 @@ check_replay_headroom() {
   [ "$ram_mb" -gt 0 ] || return 0
   ratio="$(awk -v p="$worst_mb" -v a="$ram_mb" 'BEGIN{printf "%.2f", p/a}')"
 
+  # SAY WHEN THE MODEL IS KNOWN TO OVER-ESTIMATE, rather than quietly letting it.
+  # Since the record roll-up the archive's retained state is the bounded
+  # aggregates plus the duplicate window's keys — not one term for every ledger
+  # record there has ever been — so a record-count projection grows against a
+  # process that no longer does. The arithmetic is deliberately NOT changed
+  # here: the shipped constants err toward calling a host full, which is the
+  # safe error, and correcting them needs a measurement on this host rather than
+  # a guess from this script. What changes is that the verdict says so.
+  local rollup_note="" covered
+  covered="$(jq -r '.rollupCoveredRecords // 0' "$STATUS_JSON" 2>/dev/null)"
+  case "$covered" in
+    ''|*[!0-9]*) covered=0 ;;
+  esac
+  if [ "$covered" -gt 0 ]; then
+    rollup_note=" This ratio is a RECORD-COUNT model and this archive has a roll-up: its retained state is the bounded aggregates plus the duplicate window's keys, so the projection above grows while the process does not, and it errs toward calling this host full. Correct it only with a measurement on this host (SIZING.md, 'Archive memory'). What the next restart COSTS in seconds is the separate 'replay-cost' check."
+  fi
+
   if awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h)}'; then
-    report replay CRIT "the archive can no longer be sure of fitting on this box: $records ledger records project a ~${worst_mb} MB ${worst_what} (replay peak ~${peak_mb} MB at ${MV_REPLAY_PEAK_B} B/record, resident ~${resident_mb} MB at ${MV_REPLAY_RESIDENT_B} B/record) against ${ram_mb} MB of PHYSICAL RAM (ratio $ratio). Swap is not in that denominator on purpose; the separate 'swap' check reports it. THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. This ratio is a MODEL OF RECORD COUNT, so only three things move it: fewer records, more RAM, or per-record constants that a measurement has corrected (MV_REPLAY_RESIDENT_B, MV_REPLAY_PEAK_B). GOMEMLIMIT is a separate and useful lever — it lowers real resident set by removing the collector's headroom, and being a soft limit it cannot fail a replay — but it does not reduce retained state and it does not move this number. See SIZING.md, 'Archive memory'."
+    report replay CRIT "the archive can no longer be sure of fitting on this box: $records ledger records project a ~${worst_mb} MB ${worst_what} (replay peak ~${peak_mb} MB at ${MV_REPLAY_PEAK_B} B/record, resident ~${resident_mb} MB at ${MV_REPLAY_RESIDENT_B} B/record) against ${ram_mb} MB of PHYSICAL RAM (ratio $ratio). Swap is not in that denominator on purpose; the separate 'swap' check reports it. THE MAP IS FINE — the relay is unaffected — but the archive must not be restarted until this is fixed. This ratio is a MODEL OF RECORD COUNT, so only three things move it: fewer records, more RAM, or per-record constants that a measurement has corrected (MV_REPLAY_RESIDENT_B, MV_REPLAY_PEAK_B). GOMEMLIMIT is a separate and useful lever — it lowers real resident set by removing the collector's headroom, and being a soft limit it cannot fail a replay — but it does not reduce retained state and it does not move this number. See SIZING.md, 'Archive memory'.$rollup_note"
   elif awk -v r="$ratio" -v h="$MV_REPLAY_HEADROOM" 'BEGIN{exit !(r >= h*0.75)}'; then
-    report replay WARN "the archive's ${worst_what} projects to ~${worst_mb} MB against ${ram_mb} MB of physical RAM (ratio $ratio; swap is excluded on purpose and has its own check). Size up, reduce the approved retained state, or correct the per-record model with a measurement before it crosses $MV_REPLAY_HEADROOM."
+    report replay WARN "the archive's ${worst_what} projects to ~${worst_mb} MB against ${ram_mb} MB of physical RAM (ratio $ratio; swap is excluded on purpose and has its own check). Size up, reduce the approved retained state, or correct the per-record model with a measurement before it crosses $MV_REPLAY_HEADROOM.$rollup_note"
   else
-    report replay OK "~${worst_mb} MB projected ${worst_what}, ${ram_mb} MB of physical RAM (ratio $ratio)"
+    report replay OK "~${worst_mb} MB projected ${worst_what}, ${ram_mb} MB of physical RAM (ratio $ratio)$rollup_note"
+  fi
+}
+
+# check_restart_cost — what the NEXT archive restart will cost, in seconds.
+#
+# THIS IS THE PROMISE THE ROLL-UP MADE AND IT IS THE ONE NOBODY WAS WATCHING.
+# The record-preserving sequence holds the relay down for the whole replay, so
+# the replay time IS the participant outage; before the roll-up it grew with
+# every record there had ever been, and after it, it is bounded by one number an
+# operator sets. A bound nobody measures is a claim nobody can check.
+#
+# The model, and every term in it is either measured or sampled on this box:
+#
+#   cost per raw record = replayRawSeconds / replayRawRecords, both MEASURED by
+#                         the archive at its own last start and published.
+#   records in the window = the record rate this check samples for itself,
+#                         times the duplicate window, capped at the whole ledger
+#                         because a scan cannot read raw that is not there.
+#   projected seconds   = the two multiplied.
+#
+# WHY NOT JUST REPORT replayRawSeconds. Because it is a memory of the last
+# start, and the last start is the one that is never representative: the first
+# start after this deployment reads the WHOLE ledger once, and every start after
+# it reads a window. A check that reported the measurement alone would raise a
+# critical alarm on the healthiest archive this project has ever had, on the day
+# it became healthy.
+#
+# THE SECOND TERM THE MODEL DOES NOT CARRY. Getting TO the window's start is
+# free on a plain segment or the live file and is a decompress-and-discard on a
+# compressed one, because a gzip stream cannot seek: 5.9 s to skip 1.8 GB in the
+# measurement this was built from. In ordinary running the window starts inside
+# a recent day and the skip is small; the one-off legacy segment the migration
+# produces is the worst case. The verdict says so when segments are present
+# rather than pretending the projection is the whole cost.
+check_restart_cost() {
+  [ -s "$STATUS_JSON" ] || return 0
+  local rr rs ledger segs
+  rr="$(jq -r '.replayRawRecords // empty' "$STATUS_JSON" 2>/dev/null)"
+  rs="$(jq -r '.replayRawSeconds // empty' "$STATUS_JSON" 2>/dev/null)"
+  ledger="$(jq -r '.ledgerRecords // 0' "$STATUS_JSON" 2>/dev/null)"
+  segs="$(jq -r '.ledgerSegments // 0' "$STATUS_JSON" 2>/dev/null)"
+  case "${ledger:-x}" in ''|*[!0-9]*) ledger=0 ;; esac
+  case "${segs:-x}" in ''|*[!0-9]*) segs=0 ;; esac
+
+  # THE FALLBACK, and it is a real state rather than an error: an archive built
+  # before the roll-up publishes neither field, and the record-count model in
+  # the 'replay' check is then the only estimate there is. Say which model is in
+  # force, because the two answer different questions.
+  case "${rr:-x}" in
+    ''|*[!0-9]*)
+      report replay-cost OK "this archive does not publish replayRawRecords, so the next restart's cost is not measured on this host. The 'replay' check above is the fallback and it is a model of MEMORY, not of time: for the outage, use RESTART-POLICY.md's ledger_records / measured_records_per_second. An archive built before the record roll-up is the expected reason."
+      return ;;
+  esac
+  if [ "$rr" -le 0 ] 2>/dev/null || ! awk -v v="${rs:-x}" 'BEGIN{exit !(v+0 > 0)}' 2>/dev/null; then
+    report replay-cost OK "the archive published replayRawRecords=$rr and replayRawSeconds=${rs:-unset}, which is a start that parsed no raw at all — a first start on an empty ledger. There is nothing to project from yet."
+    return
+  fi
+
+  local win_s
+  win_s="$(go_duration_s "$MV_ARCHIVE_DEDUP_WINDOW" 172800)"
+
+  # THE RECORD RATE, sampled by this box from its own status document. It is
+  # kept as records per 1000 s so the arithmetic below stays in integers.
+  local rate_k rec_then t_then
+  rate_k="$(sget replay.rate "")"
+  rec_then="$(sget replay.rec "")"
+  t_then="$(sget replay.rec.at 0)"
+  case "$t_then" in ''|*[!0-9]*) t_then=0 ;; esac
+  if [ -z "$rec_then" ] || [ "$t_then" -le 0 ]; then
+    sset replay.rec "$ledger"; sset replay.rec.at "$NOW"
+    t_then="$NOW"
+  elif [ $(( NOW - t_then )) -ge "$MV_REPLAY_RATE_MIN_S" ]; then
+    local grew=$(( ledger - rec_then )) span=$(( NOW - t_then ))
+    # A ledger counter that went backwards is a restored or replaced archive,
+    # not a negative rate. Drop the sample and start a new one.
+    if [ "$grew" -ge 0 ] && [ "$span" -gt 0 ]; then
+      rate_k=$(( grew * 1000 / span ))
+      sset replay.rate "$rate_k"
+    fi
+    sset replay.rec "$ledger"; sset replay.rec.at "$NOW"
+  fi
+
+  local measured
+  measured="$(awk -v s="$rs" -v n="$rr" 'BEGIN{printf "%.1f s to parse %d raw record(s), %.0f/s", s, n, n/s}')"
+
+  local gz_note=""
+  [ "$segs" -gt 0 ] 2>/dev/null && gz_note=" Reaching the window's start is not in this figure: it is free on a plain segment and a decompress-and-discard on a compressed one, and this host holds $segs closed segment(s)."
+
+  case "${rate_k:-x}" in
+    ''|*[!0-9]*)
+      report replay-cost OK "the last start measured $measured. A projection of the NEXT restart needs this box's own record rate, and the sample opened $(( (NOW - t_then) / 60 )) min ago of the $(( MV_REPLAY_RATE_MIN_S / 60 )) min it needs. The duplicate window is what will bound it: $(( win_s / 3600 ))h."
+      return ;;
+  esac
+
+  local proj_rec proj_s
+  proj_rec=$(( rate_k * win_s / 1000 ))
+  [ "$proj_rec" -gt "$ledger" ] && proj_rec="$ledger"
+  proj_s="$(awk -v n="$proj_rec" -v s="$rs" -v r="$rr" 'BEGIN{printf "%.0f", n * (s/r)}')"
+
+  local common="the next archive restart projects to ~${proj_s} s of held-down relay: ${proj_rec} raw record(s) inside the ${win_s}s duplicate window at the cost the last start measured ($measured). THE REPLAY TIME IS THE PARTICIPANT OUTAGE — the record-preserving sequence holds the relay down for all of it (RESTART-POLICY.md).${gz_note}"
+
+  if [ "$proj_s" -ge "$MV_REPLAY_SECONDS_CRIT" ] 2>/dev/null; then
+    report replay-cost CRIT "$common This is past $MV_REPLAY_SECONDS_CRIT s, so a restart is a scheduled and announced window and not a maintenance action. Lower MV_ARCHIVE_DEDUP_WINDOW if duplicatesRefused says it is safe — that is the one knob that moves this number — and do not restart on the strength of an old estimate."
+  elif [ "$proj_s" -ge "$MV_REPLAY_SECONDS_WARN" ] 2>/dev/null; then
+    report replay-cost WARN "$common This is past $MV_REPLAY_SECONDS_WARN s, so it has to be announced before it is done."
+  else
+    report replay-cost OK "~${proj_s} s projected (${proj_rec} raw records in a ${win_s}s window; last start $measured)"
+  fi
+}
+
+# check_cold_copy — ledgerSegmentsAwaitingColdCopy, the number that should be
+# zero, and the only thing on this host that watches the object store at all.
+#
+# WHY IT IS ITS OWN CHECK. A closed segment is never removed until a receipt
+# confirms an off-host copy that matches the bytes on this disk. That gate is in
+# the code and not in a runbook, so a cold archive that has stopped working
+# cannot cost a record — it costs DISK, weeks later, in a different check, with
+# nothing in between saying why. This is the "in between".
+#
+# THE FIRST-PASS BLIND SPOT, and it is easy to fire on: the segment fields are
+# refreshed by the archive's maintenance pass, and the pass at Start compresses
+# before it refreshes — 21 s on a real legacy segment. A status document
+# captured inside that window reads 0 segments and no window start on a
+# perfectly healthy archive. So an archive that has not saved its roll-up state
+# yet is reported as "not yet", never as "nothing there".
+check_cold_copy() {
+  [ -s "$STATUS_JSON" ] || return 0
+  local awaiting segs winms fromms saved
+  awaiting="$(jq -r '.ledgerSegmentsAwaitingColdCopy // empty' "$STATUS_JSON" 2>/dev/null)"
+  case "${awaiting:-x}" in ''|*[!0-9]*) return ;; esac
+  segs="$(jq -r '.ledgerSegments // 0' "$STATUS_JSON" 2>/dev/null)"
+  winms="$(jq -r '.ledgerWindowMs // 0' "$STATUS_JSON" 2>/dev/null)"
+  fromms="$(jq -r '.ledgerRawWindowFromMs // 0' "$STATUS_JSON" 2>/dev/null)"
+  saved="$(jq -r '.rollupSavedAtMs // 0' "$STATUS_JSON" 2>/dev/null)"
+  case "${segs:-x}"   in ''|*[!0-9]*) segs=0   ;; esac
+  case "${winms:-x}"  in ''|*[!0-9]*) winms=0  ;; esac
+  case "${fromms:-x}" in ''|*[!0-9]*) fromms=0 ;; esac
+  case "${saved:-x}"  in ''|*[!0-9]*) saved=0  ;; esac
+
+  if [ "$saved" = 0 ] && [ "$segs" = 0 ] && [ "$awaiting" = 0 ]; then
+    report cold-copy OK "the segment layer has not reported yet. The archive refreshes these fields in its maintenance pass, and the pass at start compresses before it refreshes, so a reading taken in the first minute after a restart is 'not yet' rather than 'nothing there'."
+    return
+  fi
+
+  if [ "$awaiting" = 0 ]; then
+    sset coldcopy.awaiting.since 0
+    if [ "$winms" -gt 0 ]; then
+      report cold-copy OK "every closed segment past the $(( winms / 86400000 ))-day window has a confirmed off-host copy ($segs segment(s) held)"
+    else
+      report cold-copy OK "no segment is waiting for an off-host copy ($segs segment(s) held; no ledger window is in force, so none would be removed anyway)"
+    fi
+    return
+  fi
+
+  local since age
+  since="$(sget coldcopy.awaiting.since 0)"
+  case "$since" in ''|*[!0-9]*|0) since="$NOW"; sset coldcopy.awaiting.since "$NOW" ;; esac
+  age=$(( NOW - since ))
+
+  # THE CRITICAL CASE IS NOT "LATE", IT IS "THE WINDOW IS NO LONGER A WINDOW".
+  # Every segment counted here is already past the window by construction, so
+  # lateness alone is the warning. What makes it critical is the raw on this
+  # host reaching back further than the window was ever meant to allow, which is
+  # the point at which the disk, and not the record, is what is at risk.
+  local held_days="" want_days=""
+  if [ "$winms" -gt 0 ] && [ "$fromms" -gt 0 ]; then
+    held_days=$(( (NOW * 1000 - fromms) / 86400000 ))
+    want_days=$(( winms / 86400000 ))
+    if [ $(( NOW * 1000 - fromms )) -gt $(( winms * MV_COLDCOPY_WINDOW_FACTOR )) ]; then
+      report cold-copy CRIT "$awaiting closed segment(s) have been waiting for an off-host copy for $(( age / 3600 ))h, and this host now holds ${held_days} days of raw lines against a ${want_days}-day window. NO SEGMENT IS EVER REMOVED WITHOUT A CONFIRMED COPY, so the record is safe and the DISK is what pays: the window is doing nothing and the raw ledger is growing as though there were none. Run 'deploy/coldcopy.sh --check' and then 'deploy/coldcopy.sh --list'; the commonest causes are an absent AWS CLI, an unset MV_COLDCOPY_URI, and a storage class the bucket's policy denies."
+      return
+    fi
+  fi
+
+  if [ "$age" -ge $(( MV_COLDCOPY_WAIT_HOURS * 3600 )) ]; then
+    report cold-copy WARN "$awaiting closed segment(s) have had no confirmed off-host copy for $(( age / 3600 ))h. The hourly timer should clear one within the hour, so this is the copy failing rather than lagging. Nothing is removed without a receipt, so this costs disk and not record: 'systemctl status multiverse-coldcopy.timer', then 'deploy/coldcopy.sh --check'."
+  else
+    report cold-copy OK "$awaiting segment(s) waiting for an off-host copy, first seen $(( age / 60 )) min ago (the timer runs hourly)"
+  fi
+}
+
+# check_rollup — the state sidecar's last save.
+#
+# IT IS A SILENT RESTART-COST REGRESSION AND NOTHING ELSE WOULD FIND IT. The
+# sidecar is what lets a restart rebuild its aggregates from a file instead of
+# from the whole ledger. If it stops saving, every published number stays right,
+# every other check stays green, the archive serves perfectly — and the next
+# restart replays from wherever the file stopped, which on a long enough gap is
+# the full replay the roll-up exists to remove. The cost is only ever paid once,
+# at the worst possible moment, by a participant.
+check_rollup() {
+  [ -s "$STATUS_JSON" ] || return 0
+  local saved covered age first
+  saved="$(jq -r '.rollupSavedAtMs // empty' "$STATUS_JSON" 2>/dev/null)"
+  case "${saved:-x}" in ''|*[!0-9]*) return ;; esac
+  covered="$(jq -r '.rollupCoveredRecords // 0' "$STATUS_JSON" 2>/dev/null)"
+  case "${covered:-x}" in ''|*[!0-9]*) covered=0 ;; esac
+
+  if [ "$saved" -gt 0 ]; then
+    sset rollup.zero.since 0
+    age=$(( NOW - saved / 1000 ))
+    [ "$age" -lt 0 ] && age=0
+    if [ "$age" -gt "$MV_ROLLUP_STALE_S" ]; then
+      report rollup WARN "the roll-up state sidecar last saved $(( age / 60 )) min ago and it saves every 30 s. Nothing has failed and no published number is wrong — which is the problem: the next restart replays from where this file stopped, so a sidecar that quietly stopped turns a window-bounded restart back into a full one. Check the archive log for a save error and for free space and inodes on the archive volume."
+    else
+      report rollup OK "state sidecar saved ${age}s ago, covering $covered record(s)"
+    fi
+    return
+  fi
+
+  # Never saved. On a fresh archive that is correct for the first half-minute.
+  first="$(sget rollup.zero.since 0)"
+  case "$first" in ''|*[!0-9]*|0) first="$NOW"; sset rollup.zero.since "$NOW" ;; esac
+  if [ $(( NOW - first )) -gt "$MV_ROLLUP_STALE_S" ]; then
+    report rollup WARN "the roll-up state sidecar has never saved, and this host has been reporting that for $(( (NOW - first) / 60 )) min. Every restart from here is a full replay of the raw ledger. Check the archive log at start: an unreadable sidecar is kept aside as .unreadable and rebuilt, and that is reported rather than silent."
+  else
+    report rollup OK "the state sidecar has not saved yet ($(( NOW - first ))s); it saves every 30 s"
+  fi
+}
+
+# check_duplicates — duplicatesRefused, all-time.
+#
+# ZERO IS THE ANSWER THAT MATTERS, which is why the archive does not omit the
+# field when it is zero and why this check reports on every pass. The duplicate
+# window is sized against how far behind the oldest sidecar on the map can be,
+# and it is ALSO what a restart costs; lowering it is the one change that makes
+# a restart cheap, and this counter is the only evidence that it is safe. A
+# refused duplicate leaves no other trace anywhere: nothing is appended, nothing
+# is logged for each one, and the record is by construction the record without
+# it.
+check_duplicates() {
+  [ -s "$STATUS_JSON" ] || return 0
+  local dup then t_then delta
+  dup="$(jq -r '.duplicatesRefused // empty' "$STATUS_JSON" 2>/dev/null)"
+  case "${dup:-x}" in ''|*[!0-9]*) return ;; esac
+
+  if [ "$dup" = 0 ]; then
+    report duplicates OK "0 refused since this archive began. That is the evidence MV_ARCHIVE_DEDUP_WINDOW may come down once the participant release has been out for a cycle, and the window is also what a restart costs."
+    return
+  fi
+  then="$(sget dup.24 "")"
+  t_then="$(sget dup.24.at 0)"
+  case "$t_then" in ''|*[!0-9]*) t_then=0 ;; esac
+  if [ -z "$then" ] || [ "$t_then" -le 0 ]; then
+    sset dup.24 "$dup"; sset dup.24.at "$NOW"
+    report duplicates OK "$dup duplicate record(s) refused all-time (first sample). Expected while sidecars older than contract-b/4.1 §25 B37 are still on the map: each one is a retry the guard caught, and the record is correct because it was caught."
+    return
+  fi
+  if [ $(( NOW - t_then )) -lt 82800 ]; then
+    report duplicates OK "$dup duplicate record(s) refused all-time"
+    return
+  fi
+  delta=$(( dup - then ))
+  sset dup.24 "$dup"; sset dup.24.at "$NOW"
+  if [ "$delta" -gt 0 ]; then
+    report duplicates WARN "$delta duplicate record(s) were refused in the last 24 h, $dup all-time. The guard is doing its job and the record is correct — and DO NOT LOWER MV_ARCHIVE_DEDUP_WINDOW while this is moving: something on the map is still re-sending, and a shorter window would let the second copy into the record instead of refusing it."
+  else
+    report duplicates OK "$dup refused all-time and none in the last 24 h. A full cycle at zero is what says the window may come down."
   fi
 }
 
@@ -1155,6 +1538,10 @@ case "${ONLY:-}" in
       check_map
       check_bypass
       check_replay_headroom
+      check_restart_cost
+      check_rollup
+      check_cold_copy
+      check_duplicates
       check_gaps
     fi
     # Outside that block on purpose: swap is read from /proc and says something
@@ -1178,10 +1565,19 @@ case "${ONLY:-}" in
     check_transfer_rate
     ;;
   hosts-pin) check_hosts_pin ;;
-  replay) check_replay_headroom ;;
+  # BOTH RESTART CHECKS, because they answer the two halves of one question and
+  # deploy/restart-archive.sh asks it before every planned restart: does the
+  # replay still fit in RAM, and what will it cost the map in seconds. That
+  # script reads the 'replay' line for its gate and prints the 'replay-cost'
+  # line as RESTART-POLICY.md's pre-restart replay estimate.
+  replay) check_replay_headroom; check_restart_cost ;;
+  # The record layer: the state sidecar that makes a restart cheap, the off-host
+  # copy that lets a segment be removed at all, and the duplicate counter that
+  # says whether the window may come down.
+  archive) check_rollup; check_cold_copy; check_duplicates ;;
   swap) check_swap ;;
   billing) check_billing ;;
-  *) echo "monitor: --only accepts 'transfer', 'hosts-pin', 'replay', 'swap' or 'billing', not '$ONLY'" >&2; exit 2 ;;
+  *) echo "monitor: --only accepts 'transfer', 'hosts-pin', 'replay', 'archive', 'swap' or 'billing', not '$ONLY'" >&2; exit 2 ;;
 esac
 
 # The dead man's half. A daily line that says the watcher itself is alive, so
