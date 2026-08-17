@@ -126,7 +126,7 @@ build can reuse. You can check yourself before downloading anything — the matr
 one-line command for each platform.
 
 **A row is keyed on a game version AND a platform**, and today the matrix has two: game
-**0.6.3.1** on Windows/Steam, and game **0.6.3.1** on Linux/itch.io, both with mod `0.6.4` and
+**0.6.3.1** on Windows/Steam, and game **0.6.3.1** on Linux/itch.io, both with mod `0.6.5` and
 sidecar `m5.0`. The same version is two different files — they differ by 512 bytes, in the native
 file-dialog shim — so **each installer looks up only its own platform's rows.** Running the wrong
 archive on the right game is `INS-GAMEBUILD`, and the refusal prints the rows so you can see which
