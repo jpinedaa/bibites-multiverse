@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -402,8 +401,8 @@ func (a *app) waitForMod(p Profile, events *eventLog) {
 	a.warn("   is not being loaded. Both are in docs/error-taxonomy.md.")
 	a.warn("")
 	a.warn("   The remedy for either is to restart this world:")
-	a.warn("     %s stop %s", LauncherExeName, p.Name)
-	a.warn("     %s start %s", LauncherExeName, p.Name)
+	a.warn("     %s stop %s", ConsoleExeName, p.Name)
+	a.warn("     %s start %s", ConsoleExeName, p.Name)
 	a.warn("   If it happens twice in a row, report it with that log and the code above.")
 	a.warn("")
 	a.warn("   The world and the sidecar are still running; this is a warning, not a failure.")
@@ -412,23 +411,13 @@ func (a *app) waitForMod(p Profile, events *eventLog) {
 // probeModConnected asks the sidecar's own-slot endpoint whether a game is
 // connected. Every failure — no listener yet, a body it cannot read, a sidecar
 // too old to serve the path — reads as "not yet", because this is a wait.
+//
+// It reads the same document a session's world list reads (fetchOwnSlot in
+// session.go) and takes two fields out of it, so there is one reader of that
+// endpoint in this package rather than one per caller.
 func probeModConnected(client *http.Client, port int) (string, bool) {
-	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, ownSlotPath)
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", false
-	}
-	var view struct {
-		Mod struct {
-			Connected  bool   `json:"connected"`
-			ModVersion string `json:"modVersion"`
-		} `json:"mod"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+	view, ok := fetchOwnSlot(client, port)
+	if !ok {
 		return "", false
 	}
 	return view.Mod.ModVersion, view.Mod.Connected

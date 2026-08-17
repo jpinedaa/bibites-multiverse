@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -95,4 +96,10 @@ func processImagePath(pid int) (string, error) {
 // openFolder shows the user a directory.
 func openFolder(path string) error {
 	return exec.Command("xdg-open", path).Start()
+}
+
+// revealFile shows the folder holding one file. There is no portable "select
+// this file" here, and the folder is the useful half.
+func revealFile(path string) error {
+	return openFolder(filepath.Dir(path))
 }

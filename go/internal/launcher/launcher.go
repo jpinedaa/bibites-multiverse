@@ -10,11 +10,18 @@
 // ordinary, and it is a real installed program rather than a shortcut to a
 // script, so Windows shows it in Add/Remove Programs like anything else.
 //
-// WHY IT IS A CONSOLE PROGRAM. The menu is rendered to an injected writer and
-// read from an injected reader, so every frame of the interface is exercised by
-// a test on a machine that has no Windows at all. A native window, a local web
-// server or a PowerShell form would all have moved the front door into code
-// that cannot be tested here.
+// WHY THE MENU IS A CONSOLE PROGRAM. The menu is rendered to an injected writer
+// and read from an injected reader, so every frame of the interface is exercised
+// by a test on a machine that has no Windows at all.
+//
+// AND WHY THERE IS A WINDOW TOO. A console menu is not what somebody who
+// installed a game expects to be handed, so the shortcuts open a native window
+// instead (internal/launchergui). It is a front door, not a second
+// implementation: it drives THIS package through session.go, so every refusal,
+// every wait and every warning a participant reads is written once, here, and
+// the golden tests that hold this file to its word hold the window to it too.
+// What could not follow is the terminal, and that is the whole of what a session
+// replaces — the writers it prints to, and the one question it asks.
 //
 // The generated Start-Multiverse.ps1 and Stop-Multiverse.ps1 keep working. The
 // two paths interoperate through the on-disk PID protocol rather than through
@@ -56,6 +63,17 @@ type app struct {
 	stdin   *bufio.Reader
 	stdout  io.Writer
 	stderr  io.Writer
+
+	// prompt, when it is set, ANSWERS EVERY QUESTION THIS PROGRAM WOULD HAVE
+	// ASKED A TERMINAL, and nothing is printed or read. It is how the graphical
+	// launcher drives the commands in this package: its dialogs ask first, and
+	// the answer is handed back here so that the gate itself — the world's name,
+	// typed before its folder is deleted — is still checked by the code that
+	// deletes, rather than reimplemented beside a window (see session.go).
+	//
+	// A nil prompt is the console: the question goes to stdout and the answer
+	// comes from stdin, which is what every golden test drives.
+	prompt func(question string) (string, bool)
 
 	interactive bool
 	asJSON      bool
@@ -526,7 +544,7 @@ func (a *app) confirm(prompt string) bool {
 // it character for character.
 const usageText = `Bibites Multiverse launcher ` + Release + `
 
-  ` + LauncherExeName + ` [global flags] [command] [args]
+  ` + ConsoleExeName + ` [global flags] [command] [args]
 
 Global flags (accepted anywhere on the line):
   --install-root PATH    default: the directory of this executable; env MULTIVERSE_LAUNCHER_HOME

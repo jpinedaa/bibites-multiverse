@@ -192,6 +192,21 @@ func openFolder(path string) error {
 	return exec.Command("explorer.exe", path).Start()
 }
 
+// revealFile shows the folder holding one file, with that file selected.
+//
+// IT DOES NOT OPEN THE FILE. The one file this is used for is the mod
+// framework's log, and what happens when a .log is "opened" is whatever this
+// machine has associated with the extension — which may be nothing, may be an
+// editor that locks it while the game is writing, and is not this program's
+// choice to make. Selecting it in its folder always works and hands the person
+// the folder as well.
+func revealFile(path string) error {
+	// The comma is explorer's own syntax and there is no space after it: the
+	// whole '/select,<path>' is ONE argument. Splitting it opens the user's
+	// documents folder instead, which is the failure this comment exists for.
+	return exec.Command("explorer.exe", "/select,"+path).Start()
+}
+
 // systemTool prefers the copy in %SystemRoot%\System32 over whatever the PATH
 // resolves, because both tools this file uses are Windows' own.
 func systemTool(name string) string {

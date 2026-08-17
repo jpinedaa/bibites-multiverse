@@ -300,7 +300,9 @@ func TestUsageAndExitCodes(t *testing.T) {
 	if code := h.run("--help"); code != exitOK {
 		t.Fatalf("--help exited %d", code)
 	}
-	mustContain(t, "the usage", h.out(), LauncherExeName+" [global flags] [command] [args]")
+	// The usage names the CONSOLE program, because that is the file a command
+	// line goes to: BibitesMultiverseLauncher.exe is the window (paths.go).
+	mustContain(t, "the usage", h.out(), ConsoleExeName+" [global flags] [command] [args]")
 
 	if code := h.run("version"); code != exitOK {
 		t.Fatalf("version exited %d", code)
