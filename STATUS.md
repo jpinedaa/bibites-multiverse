@@ -32,7 +32,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 | Windows launcher | The shortcuts open `BibitesMultiverseLauncher.exe`. It starts, stops, and reports each world, runs a world headless, and manages more than one world on one computer. One game folder supports five worlds at once |
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
-| Homepage | Links the Windows setup, the Linux complete package, and the checksums of the newest release. The links carry no version, so a release reaches the homepage with no deployment |
+| Homepage | Links the Windows setup, the Linux complete package, and the checksums of the newest release. The links carry no version, so a release reaches the homepage with no deployment. A five-step Windows walkthrough sits under those links, with one line for Linux |
 | Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 | Release process | Every pull request and every push to `main` runs the project's automated checks, and a version tag builds and publishes the release from the owner's own machine. The homepage follows the published release on its own |

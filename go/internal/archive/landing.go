@@ -118,6 +118,21 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 .joincopy{padding:50px}.joincopy h2{font-size:clamp(38px,5vw,64px)}.joincopy p{color:var(--muted);max-width:620px}
 .trust{padding:50px;background:linear-gradient(150deg,#172720,#101917)}.trust h3{margin:0 0 20px}.trust ul{margin:0;padding:0;list-style:none}
 .trust li{position:relative;padding:12px 0 12px 27px;border-top:1px solid var(--line);color:#bfd0c9}.trust li:before{content:"✓";position:absolute;left:0;color:var(--green)}
+.walk{margin-top:28px;padding-top:26px;border-top:1px solid var(--line)}
+.walk h3{margin:0 0 16px;font-size:20px;letter-spacing:-.02em}
+.walksteps{margin:0;padding:0;list-style:none;counter-reset:walkstep}
+.walksteps li{position:relative;counter-increment:walkstep;padding:0 0 18px 46px;color:var(--muted)}
+.walksteps li:last-child{padding-bottom:0}
+.walksteps li:before{content:counter(walkstep);position:absolute;left:0;top:0;width:28px;height:28px;
+border:1px solid var(--line);border-radius:50%;background:rgba(102,224,172,.1);color:var(--green);
+text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace}
+.walksteps li:not(:last-child):after{content:"";position:absolute;left:14px;top:34px;bottom:2px;border-left:1px solid var(--line)}
+.walksteps b{color:var(--text)}
+.walkmenu{margin:11px 0 0;padding:10px 13px;border:1px solid var(--line);border-radius:9px;
+background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-x:auto}
+.walk code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#bfd0c9}
+/* the walkthrough makes the copy column much taller than the checklist beside it */
+#join .trust{display:flex;flex-direction:column;justify-content:center}
 .gameshot{margin:0 0 18px}.gameshot img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px}
 .gameshot figcaption{margin-top:8px;font-size:13px;color:var(--muted)}
 #game .joincopy{margin-block:auto}/* auto margins center the copy in the row the taller screenshot column sets */
@@ -218,7 +233,19 @@ z-index:2;width:26px;height:26px;border:1px solid var(--line);border-radius:50%;
 
   <section class="shell section" id="join">
     <div class="joinbox">
-      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
+      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div>
+      <div class="walk">
+        <h3>On Windows, five steps.</h3>
+        <ol class="walksteps">
+          <li><b>Download the setup.</b> It is one file. The checksums page beside these buttons lets you verify it first, if you want to.</li>
+          <li><b>Run it, and expect the warning.</b> This is a community build with no code-signing certificate, so SmartScreen shows <b>Windows protected your PC</b>. Select <b>More info</b>, then <b>Run anyway</b>.</li>
+          <li><b>Press Install.</b> Keep the included copy of <em>The Bibites</em>, or point the setup at a game you already own. It needs no administrator account, no sign-up, and no join code: it gives this world its own identity on the map while it installs, and starts the world when it finishes.</li>
+          <li><b>Open Bibites Multiverse, then press Enter.</b> The desktop and Start Menu icon of that name opens the launcher: it says which world it is set to and whether that world is running, above a short menu. Enter starts it, and the world reaches the <a href="/live">live map</a> about a minute later.<pre class="walkmenu">1) Start this world   [Enter]
+2) Stop this world</pre></li>
+          <li><b>Stop it from the same menu.</b> Option <b>2</b> asks the game to close and waits for its save, so stopping is not losing. Option <b>6</b> creates another world, when you want more than one on this computer.</li>
+        </ol>
+        <p class="promise">On Linux: unpack the complete package, run <code>./install-bibites-multiverse.sh</code>, then <code>./start-multiverse.sh</code>. The <a href="__HOMEPAGE_DOCS__">install guide</a> has both platforms in full.</p>
+      </div></div>
       <aside class="trust"><h3>Clear boundaries</h3><ul><li>Your world and saves stay on your machine.</li><li>Automatic enrollment creates the secret on your machine.</li><li>The public page is read-only.</li><li>TLS protects traffic to the relay.</li><li>Published world data is explained before you join.</li><li>The shared run ends November 14 unless extended by announcement.</li></ul></aside>
     </div>
   </section>
@@ -277,6 +304,10 @@ var landingPageHTML = renderLandingPage(Config{
 // archive deployment is part of a release any more. The release number is not
 // rendered here either — the page the third button opens carries it, and it is
 // correct there by construction.
+//
+// The Windows walkthrough's install-guide link follows the same rule from the
+// other side: it names the repository's `main`, never a tag, so the page it
+// opens is the guide as it stands rather than the guide a past release shipped.
 func renderLandingPage(cfg Config) string {
 	gameVersion := strings.TrimSpace(cfg.HomepageGameVersion)
 	if gameVersion == "" {
@@ -292,6 +323,7 @@ func renderLandingPage(cfg Config) string {
 		"__HOMEPAGE_WINDOWS__", latest+"/download/bibites-multiverse-windows-x64-setup.exe",
 		"__HOMEPAGE_LINUX__", latest+"/download/bibites-multiverse-linux-x64-complete.zip",
 		"__HOMEPAGE_TAG__", latest,
+		"__HOMEPAGE_DOCS__", "https://github.com/"+repo+"/blob/main/docs/participant/install.md",
 	).Replace(landingPageTemplate)
 }
 

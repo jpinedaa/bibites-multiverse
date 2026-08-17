@@ -140,6 +140,87 @@ func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 	}
 }
 
+// The download buttons answer "where do I get it"; a first-time Windows reader
+// then has to survive an unsigned setup, an installer that asks which game to
+// use, and a launcher they have never seen. The walkthrough is the section's
+// answer to that, and this test pins the three things that make it one:
+// the buttons still come first, the steps are numbered and counted, and the
+// SmartScreen panel — the one screen that stops people who did nothing wrong —
+// is named with the two words to click.
+func TestJoinSectionWalksAWindowsNewcomerThroughTheInstall(t *testing.T) {
+	page := landingPageHTML
+	download := strings.Index(page, `href="https://github.com/jpinedaa/bibites-multiverse/releases/latest/download/bibites-multiverse-windows-x64-setup.exe"`)
+	walk := strings.Index(page, `<div class="walk">`)
+	if download < 0 || walk < 0 {
+		t.Fatalf("the join section lost its download button (%d) or its walkthrough (%d)", download, walk)
+	}
+	if walk < download {
+		t.Error("the walkthrough is rendered above the download buttons; the buttons come first")
+	}
+	// The #game section has a trust aside of its own, so the join box's is
+	// identified by its own heading rather than by the class alone.
+	if aside := strings.Index(page, `<aside class="trust"><h3>Clear boundaries</h3>`); aside < 0 || walk > aside {
+		t.Error("the walkthrough is outside the download column it explains")
+	}
+
+	steps := page[walk:]
+	open, end := strings.Index(steps, `<ol class="walksteps">`), strings.Index(steps, "</ol>")
+	if open < 0 || end < open {
+		t.Fatal("the walkthrough no longer contains a numbered step list")
+	}
+	steps = steps[open:end]
+	if got := strings.Count(steps, "<li>"); got != 5 {
+		t.Errorf("the Windows walkthrough has %d steps, want 5 — and its heading says five", got)
+	}
+	if !strings.Contains(page, "On Windows, five steps.") {
+		t.Error("the walkthrough heading no longer names the number of steps the list has")
+	}
+
+	for _, want := range []string{
+		// Download, then the warning, with the two words that get past it.
+		// Verifying the download is offered, not demanded.
+		"The checksums page beside these buttons lets you verify it first, if you want to.",
+		"SmartScreen shows <b>Windows protected your PC</b>",
+		"<b>More info</b>, then <b>Run anyway</b>",
+		// Install: what it asks, and what it does not ask for.
+		"Keep the included copy of <em>The Bibites</em>, or point the setup at a game you already own",
+		"no administrator account, no sign-up, and no join code",
+		// The launcher, the key that starts a world, and where it shows up.
+		"<b>Open Bibites Multiverse, then press Enter.</b>",
+		"1) Start this world",
+		`the <a href="/live">live map</a>`,
+		// Stopping, and the second world.
+		"Option <b>2</b> asks the game to close and waits for its save",
+		"Option <b>6</b> creates another world",
+		// One line for the other platform, pointing at the full guide.
+		"<code>./install-bibites-multiverse.sh</code>",
+		`href="https://github.com/jpinedaa/bibites-multiverse/blob/main/docs/participant/install.md">install guide</a>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the Windows walkthrough is missing %q", want)
+		}
+	}
+
+	// The steps are prose in a narrow column beside the checklist, so they get
+	// their own rules rather than borrowing the flow strip's.
+	for _, want := range []string{
+		`.walksteps li{position:relative;counter-increment:walkstep`,
+		`.walksteps li:before{content:counter(walkstep)`,
+		`.walkmenu{`, `overflow-x:auto}`,
+		`#join .trust{display:flex;flex-direction:column;justify-content:center}`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the walkthrough is missing its layout rule %q", want)
+		}
+	}
+
+	// Every placeholder in the template is replaced by renderLandingPage. A new
+	// one that nothing replaces would ship its own name to a reader.
+	if strings.Contains(page, "__HOMEPAGE_") {
+		t.Error("the rendered landing page still carries an unreplaced __HOMEPAGE_ placeholder")
+	}
+}
+
 // The homepage names *The Bibites* throughout, so it also has to say what the
 // game is, who made it, and where to buy or download it from the people who
 // made it. The absence checks guard the two claims this project cannot make:
@@ -179,6 +260,7 @@ func TestLandingPageUsesHomepageConfigOverrides(t *testing.T) {
 		`href="https://github.com/acme/example-bibites/releases/latest/download/bibites-multiverse-windows-x64-setup.exe"`,
 		`href="https://github.com/acme/example-bibites/releases/latest/download/bibites-multiverse-linux-x64-complete.zip"`,
 		`href="https://github.com/acme/example-bibites/releases/latest">Checksums and add-ons`,
+		`href="https://github.com/acme/example-bibites/blob/main/docs/participant/install.md">install guide</a>`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("landing page did not apply homepage config: missing %q", want)
