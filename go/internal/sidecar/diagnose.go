@@ -890,28 +890,28 @@ func (d *diag) checkJournalDepths() CheckResult {
 			if st.Direction == journal.In && st.Status == journal.StatusOpen {
 				c.PacedDepth++
 			}
-			if st.Direction == journal.Out && st.Handoff == journal.HandoffHeld &&
+			if st.Direction == journal.Out && st.Handoff == journal.HandoffSent &&
 				(st.Status == journal.StatusOpen || st.Status == journal.StatusInFlight) {
-				c.HeldDepth++
+				c.UnresolvedDepth++
 			}
 		}
-		c.OldestPacedAgeMs, c.OldestHeldAgeMs = oldestWaiting(states, d.now)
+		c.OldestPacedAgeMs, c.OldestUnresolvedAgeMs = oldestWaiting(states, d.now)
 		c.InboundRatePerSimMinute = contracta.InboundRatePerSimMinute
 		if _, err := os.Stat(d.jr.Path()); errors.Is(err, os.ErrNotExist) {
 			return pass(id, "this data directory holds no journal yet, so nothing is queued",
 				"nothing has taken custody here")
 		}
 	}
-	det := []string{fmt.Sprintf("in custody %d, paced %d, held %d, bounced home on a timeout %d",
-		c.CustodyDepth, c.PacedDepth, c.HeldDepth, c.BouncedTimeoutTotal)}
+	det := []string{fmt.Sprintf("in custody %d, paced %d, forwarded and unanswered %d, lost %d",
+		c.CustodyDepth, c.PacedDepth, c.UnresolvedDepth, c.LostForwardTotal)}
 	if !d.live.OK {
 		det = append(det, "read from the journal on disk; the configured delivery rate is this "+
 			"build's default because no running sidecar named one")
 	}
-	if c.HeldDepth > 0 {
-		det = append(det, fmt.Sprintf("the oldest held entry has waited %s — a hold is designed "+
-			"behaviour and its clock runs only while the destination is dark AND this sidecar "+
-			"can see it", roundMs(c.OldestHeldAgeMs)))
+	if c.UnresolvedDepth > 0 {
+		det = append(det, fmt.Sprintf("the oldest unanswered forward has waited %s — it is NOT "+
+			"re-sent and does not come home; at forwardTimeoutMs it is recorded lost, because "+
+			"migration is at-most-once (contract-b-m4.md §9.3)", roundMs(c.OldestUnresolvedAgeMs)))
 	}
 	if c.PacedDepth == 0 {
 		return pass(id, "nothing is queued behind the delivery rate", det...)

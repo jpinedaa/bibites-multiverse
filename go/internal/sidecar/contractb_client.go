@@ -873,16 +873,19 @@ func (s *Sidecar) onMigrationAck(env wire.Envelope) bool {
 			"migrationId", ack.MigrationID, "from", ack.SourcePeer)
 		return true
 	}
-	if st.BouncedTimeout {
-		// THE ACCEPTED DUPLICATION CASE OF §9.3, ANNOUNCING ITSELF. The far peer
-		// took custody, died before its acknowledgement, this sidecar's hold
-		// expired and bounced the organism home, and the far peer has now
-		// returned and delivered it. Two organisms exist.
-		s.duplicateSuspected++
-		s.log.Error("contract B: MIGRATION_ACK arrived for an entry a hold timeout already bounced — "+
-			"THE MAP NOW HOLDS TWO COPIES OF THIS ORGANISM",
+	if st.Handoff == journal.HandoffLost {
+		// A LATE DELIVERY, NOT A DUPLICATION. The far peer took custody, its
+		// acknowledgement took longer than forwardTimeoutMs to arrive, and this
+		// sidecar had already written the organism off. Nothing was bounced home
+		// in the meantime — §25's B37 removed the only path that did — so ONE
+		// organism exists and the map is correct. What this line reports is that
+		// forwardTimeoutMs is set shorter than this map's slowest honest answer.
+		s.lateAckTotal++
+		s.log.Warn("contract B: MIGRATION_ACK arrived for a forward already recorded LOST — "+
+			"the organism did arrive; the record was written off too early",
 			"migrationId", ack.MigrationID, "entityId", ack.EntityID,
-			"deliveredBy", ack.SourcePeer, "duplicateSuspected", s.duplicateSuspected)
+			"deliveredBy", ack.SourcePeer, "lateAckTotal", s.lateAckTotal,
+			"remedy", "raise forwardTimeoutMs (--forward-timeout) above this map's slowest answer")
 		return true
 	}
 	if st.Direction != journal.Out {
@@ -1037,7 +1040,7 @@ func (s *Sidecar) onMigrationNack(env wire.Envelope) bool {
 		// Refused for a payload reason: every slot refuses this organism, so the
 		// map is not the answer. A sidecar NACK is only ever sent BEFORE durable
 		// custody (§6.8), so the bounce cannot duplicate.
-		s.bounceLocked(st, "MIGRATION_NACK "+nack.Code+" — every slot would refuse this payload", false)
+		s.bounceLocked(st, "MIGRATION_NACK "+nack.Code+" — every slot would refuse this payload")
 		return true
 
 	case !relayGenerated && contractb.PeerLocalRefusal(nack.Code):

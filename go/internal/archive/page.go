@@ -1097,8 +1097,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
       <th><span class="term" data-t="census">species</span></th>
       <th class="num"><span class="term" data-t="custodyDepth">custody</span></th>
       <th class="num"><span class="term" data-t="pace">pace</span></th>
-      <th class="num"><span class="term" data-t="held">held</span></th>
-      <th class="num"><span class="term" data-t="bounce">bounces</span></th>
+      <th class="num"><span class="term" data-t="lost">lost</span></th>
       <th><span class="term" data-t="lastSave">last save</span></th>
       <th>note</th></tr></thead>
     <tbody></tbody></table></div></section>
@@ -1300,8 +1299,8 @@ var G = {
  speed:["simulation speed","How fast a world is running, as the game itself reports it: ×5 means the game is set to pass five simulated seconds for every real second. It is the speed control inside that copy of the game, and each world has its own — one can be asking for ×100 while its neighbour sits at ×1. A paused world reports ×0. A world at a different speed from its neighbours is not a fault; it only means the two experience the traffic between them at different rates, which is why arrivals are paced on the receiving world's OWN clock and not on the wall clock. This is what the game is TRYING to do; the number after the arrow is what it managed."],
  achieved:["speed actually delivered","The second half of a cell's speed, written ×100 → ~×12: the world is set to run a hundred times real time and is really running about twelve. This one is not reported by anybody — it is measured here, by watching that world's own clock against the wall clock for the last minute, so it is the only figure on this page that says what a world genuinely did. A machine can only run so many worlds so fast: each drawing of the screen advances the simulation by one small step, so however high the speed is set, the real rate is capped by how fast that computer can draw. Setting ×100 on a machine that can deliver ×12 buys nothing, and before this number existed the page said ×100 and looked healthy. The two agreeing means a world is keeping up. It shows nothing at all until it has watched long enough to be sure — just after this program starts, or just after a world comes back — because a rate measured over two seconds would jump about and mean nothing."],
  pace:["pace","Two numbers about arrivals into this world: how many are queued waiting to be let in, and the cap they are queued behind. The cap counts per SIMULATED minute of this world — so a world at ×10 gets through its allowance ten times faster in real time, and at the same rate as the world itself experiences it. Queued 0 against any cap is a world keeping up. A queue that never drains means the cap is set too low. A world whose helper program is too old to report its cap shows a ? there: unknown, never the shipped default, which has been changed three times."],
- held:["held","A creature whose destination went dark while it was travelling. It waits, quietly retrying; if the destination stays gone long enough it is sent back where it came from rather than lost."],
- bounce:["bounce","A migration that gave up and returned to the world it started in. It is a thing you get told about, never a silent repair."],
+ lost:["lost","A creature that set off for another world and was never heard of again. Travelling between worlds is the one dangerous thing a creature here can do: it is handed over exactly once, and if it does not arrive it is gone — it is not sent again, and it does not come home. The count is per world and it only ever goes up. A world with a rising count has a neighbour that keeps disappearing mid-crossing."],
+ bounce:["bounce","A migration that turned back before it was handed to anybody, and returned to the world it started in. It happens when there is nowhere to send the creature, or when the far world refuses it outright — in both cases the far world is known not to have it, so a return cannot make a second copy. Nothing turns back on a guess."],
  migration:["migration / hop","One creature's trip from one world to the next. Every hop is copied to the archive as it happens, which is where all the counts on this page come from. On the map a lane carries a number — how many crossings a minute it has been measuring — and when a hop actually happens, that creature itself, drawn in its own species' colour, sets off along the lane and travels to the far world. Nothing else moves on a lane: what you see travelling is always a real creature that really crossed."],
  hopfeed:["hops just now","The last minute of crossings, kept in memory and nowhere else. It is a record of who CROSSED, which is a different question from who LIVES in a world: the creatures drawn inside a cell come from that world's own census, and these come from the migrations the archive was copied on. Never add the two together. A hop whose message carried no species name travels as a plain grey creature — unknown, never guessed."],
  motion:["motion","Whether a crossing TRAVELS across this map or simply appears where it landed. On 'auto' the page follows your system's reduce-motion setting — Windows calls it 'Animation effects' and macOS calls it 'Reduce motion' — and a great many machines have that switched off for reasons that have nothing to do with this page. Either way a crossing is still drawn and still counted: with motion reduced, the creature appears for a moment at the world it reached, in its own species colour, and fades. 'on' and 'off' override the system setting in both directions, and this browser remembers which you chose."],
@@ -1313,7 +1312,7 @@ var G = {
  unclassed:["no species record","Creatures the world counted but did not file under any species. It is an ordinary state, not a fault — and it is drawn in grey so the gap is visible rather than quietly rolled into whichever species happens to be nearby."],
  rawname:["as the world spells it","A species name is copied here exactly as the owning world holds it, including stray or doubled spaces. Nothing on the way tidies one, because a tidied name is a name the player cannot find in their own game — and two spellings a world keeps apart really are two records in it."],
  unknown:["unknown","A number that is missing, or older than the freshness rule allows, is shown as unknown — never as zero. A world that has told us nothing is unknown, not empty. An honest gap beats a confident zero."],
- exactlyonce:["exactly-once","The promise the whole thing is built on: a creature is never duplicated. It is in one world, or in transit, or in the next world — never in two places at once. Very rarely one can be lost instead, and a lost creature simply reads as a natural death."],
+ exactlyonce:["at-most-once","The promise the whole thing is built on, and it is one-sided on purpose: a creature is NEVER duplicated. It is in one world, or in transit, or in the next world — never in two places at once. The price is that it can be lost instead. A creature is handed to its destination exactly once and never sent again, so one that does not arrive is gone, and a lost creature simply reads as a natural death. Migrating is the dangerous thing; nothing here will ever make a copy of a creature to make it safer."],
  relay:["relay","The small server in the middle. Every world's helper connects to it and to nothing else, so there is exactly one map and one set of rules."],
  archive:["archive","The program serving this page. It listens to everything the relay broadcasts, keeps a permanent record of every migration and a copy of every genome, and never asks a world for anything — so watching can never slow the traffic down."],
  envelope:["envelope","One message carrying one creature between two worlds. The counts here are the envelopes this archive was copied on."],
@@ -1370,7 +1369,7 @@ var G = {
     "branchpoint","collapsed","beforeparent","noancestry","recordfloor",
     "minimap","trend","brainsize","braintrend","hiddenneurons","braincoverage","braingap",
     "brainwaiting",
-    "speed","achieved","pace","custody","custodyDepth","pacedDepth","held","bounce",
+    "speed","achieved","pace","custody","custodyDepth","pacedDepth","lost","bounce",
     "settings","readonly","savepolicy","savekeep","lastSave","worldwrap","modversion",
     "contractaversion","simsize","exportedges","ceilings","floor",
     "unknown","exactlyonce","relay","archive","epoch","genomegap","horizon","flow"];
@@ -1991,7 +1990,7 @@ function cellTitle(v){
       + "\narrivals: " + paceDepthText(v) + " queued, cap " + paceRateText(v)
       + " per simulated minute";
     s += "\ncustody "+(v.custodyDepth==null?"unknown":v.custodyDepth)
-      +", held "+(v.heldDepth==null?"unknown":v.heldDepth);
+      +", lost "+(v.lostForwardTotal==null?"unknown":v.lostForwardTotal);
     if (v.lastSave) s += "\nlast save "+ms(v.lastSaveAgeMs)+" ago";
     s += "\n" + censusLines(v);
   } else {
@@ -5444,10 +5443,9 @@ function renderMap(d){
       + '<td class="spx" id="wsp-'+v.slot+'"></td>'
       + '<td class="num">'+num(v.custodyDepth)+'</td>'
       + '<td class="num">'+pace+'</td>'
-      + '<td class="num">'+num(v.heldDepth)+'</td>'
-      + '<td class="num">'+num(v.bouncedTimeoutTotal)+'</td>'
+      + '<td class="num">'+num(v.lostForwardTotal)+'</td>'
       + "<td>"+save+"</td><td>"+note+"</td></tr>";
-  }).join("") || '<tr><td colspan="13" class="muted">no slots reserved yet</td></tr>';
+  }).join("") || '<tr><td colspan="12" class="muted">no slots reserved yet</td></tr>';
   for (var si=0; si<d.slots.length; si++) paintSpeciesCell(d.slots[si]);
 
   var tt = d.totals;
@@ -5457,8 +5455,7 @@ function renderMap(d){
     + kv(t("population","population")+" (known worlds)", num(tt.population))
     + kv(t("custodyDepth","custody depth"), num(tt.custodyDepth))
     + kv(t("pacedDepth","paced depth"), num(tt.pacedDepth))
-    + kv(t("held","held depth"), num(tt.heldDepth))
-    + kv(t("bounce","bounces a hold timeout caused"), num(tt.timeoutBounces))
+    + kv(t("lost","creatures lost in transit"), num(tt.lostForwards))
     + kv("worlds reporting nothing", tt.unknownSlots)
     // Counted over the COMPARED spelling, and labelled as such: two worlds
     // spelling one species differently would otherwise read as two.

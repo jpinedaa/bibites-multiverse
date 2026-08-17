@@ -163,11 +163,13 @@ type AdminApplied struct {
 	Lifted         bool  `json:"lifted,omitempty"`
 }
 
-const heldEntriesSentence = "not knowable from the relay — read stats.heldDepth on PEER_STATUS, " +
-	"and multiverse-sidecar --list-inflight --dest-slot %d on the machine that holds the journal"
+const heldEntriesSentence = "not knowable from the relay — run multiverse-sidecar " +
+	"--list-inflight --dest-slot %d on the machine that holds the journal. " +
+	"stats.lostForwardTotal on PEER_STATUS says how many that peer has already written off"
 
-const heldEntriesSentenceNoSlot = "not knowable from the relay — read stats.heldDepth on " +
-	"PEER_STATUS, and multiverse-sidecar --list-inflight on the machine that holds the journal"
+const heldEntriesSentenceNoSlot = "not knowable from the relay — run multiverse-sidecar " +
+	"--list-inflight on the machine that holds the journal. stats.lostForwardTotal on " +
+	"PEER_STATUS says how many that peer has already written off"
 
 // ---------------------------------------------------------------- the listener
 

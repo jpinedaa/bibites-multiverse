@@ -107,9 +107,8 @@ func TestB26AReceiptArrivesPerForwardAndBecomesTheSendersOwnEvidence(t *testing.
 		t.Fatalf("handoff is %q after a receipt; §6.12 says an entry that is `sent` STAYS `sent` "+
 			"and the receipt is the evidence that the state is right", st.Handoff)
 	}
-	if st.RerouteCount != 0 || st.AccruedHoldMs != 0 {
-		t.Fatalf("the receipt moved the re-route count (%d) or the hold accrual (%d ms)",
-			st.RerouteCount, st.AccruedHoldMs)
+	if st.RerouteCount != 0 {
+		t.Fatalf("the receipt moved the re-route count to %d", st.RerouteCount)
 	}
 	if n := a.side.ReceiptsRecorded(); n != 1 {
 		t.Fatalf("the sidecar counted %d recorded receipts, want 1", n)
@@ -122,29 +121,46 @@ func TestB26AReceiptArrivesPerForwardAndBecomesTheSendersOwnEvidence(t *testing.
 }
 
 // TestB26TwoForwardsOfOneMigrationAreTwoReceipts is §6.12's *One per forward*
-// row on the sender's side. A retry into a silent destination forwards again,
-// and the count in the journal is a count of THIS SENDER'S OWN WRITES — never a
-// count of organisms, because the migrationId is preserved and the destination
-// deduplicates (§6.6).
+// row on the sender's side: the count in the journal is a count of THIS SENDER'S
+// OWN WRITES, and never a count of organisms.
+//
+// WHAT PRODUCES A SECOND WRITE HAS CHANGED, and the test changed with it. Under
+// B5 it was a retry into a silent destination, so this ran end to end against a
+// live grid. §25's B37 removed the retry: a conforming sender writes a frame
+// once per DESTINATION, and only a re-route under a proof of non-delivery gives
+// it a second destination (§9.2, covered end to end by
+// TestRerouteNeedsAProofAndSilenceIsNeverOne). So the property left on this side
+// is the accounting one — the sidecar records every receipt it is sent, the
+// count is absolute rather than incremented, and no count of writes moves the
+// handoff state — and a stub relay is the honest way to drive it.
 func TestB26TwoForwardsOfOneMigrationAreTwoReceipts(t *testing.T) {
-	g := newGrid(t, 2, gridOptions{layout: layoutRow(2)})
-	a, b := g.node(0), g.node(1)
-	b.mod.setAckMode(ackSilent)
+	stub := newStubRelay(t)
+	cfg := stubConfig(t, stub)
+	id := seedSentEntry(t, cfg.DataDir, 2, stub.session)
+	side := startSidecar(t, cfg)
+	stub.waitConnected()
+	waitSession(t, side, stub.session)
 
-	migrationID := a.mod.migrateOut(testEntityID, contracta.EdgeE, 0.5)
-	waitFor(t, 20*time.Second, "a second FORWARD_RECEIPT from the retry", func() bool {
-		return receiptsOf(a.side, migrationID) >= 2
+	for i := 0; i < 2; i++ {
+		stub.push(contractb.TypeForwardReceipt, contractb.ForwardReceipt{
+			MigrationID: id, DestSlot: 2 + i, RelaySessionID: stub.session,
+			ForwardedAt: time.Now().UnixMilli()})
+	}
+	waitFor(t, 10*time.Second, "both receipts to be recorded", func() bool {
+		return receiptsOf(side, id) == 2
 	})
 
-	st := journalEntry(t, a.side, migrationID)
+	st := journalEntry(t, side, id)
 	if st.Handoff != journal.HandoffSent {
-		t.Fatalf("handoff is %q after two receipts, want sent", st.Handoff)
+		t.Fatalf("handoff is %q after two receipts, want sent — a receipt is evidence that the "+
+			"state is right, never a transition", st.Handoff)
 	}
-	// The organism did not double. The destination's dedup is what guarantees it
-	// and the receipt count is what would tempt a reader to think otherwise.
-	if got := b.world.spawnCount(migrationID); got > 1 {
-		t.Fatalf("the destination spawned the organism %d times; two receipts are two WRITES, "+
-			"not two organisms", got)
+	if st.ReceiptDestSlot != 3 {
+		t.Fatalf("receiptDestSlot = %d, want the LAST receipt's 3: the block is how a sender "+
+			"that re-routed tells two attempts apart (§6.12)", st.ReceiptDestSlot)
+	}
+	if st.RerouteCount != 0 {
+		t.Fatalf("a receipt re-routed an entry %d times", st.RerouteCount)
 	}
 }
 
@@ -628,9 +644,10 @@ func runReceiptContradiction(t *testing.T, withReceipt bool) {
 		if st.ForwardReceipts != 1 {
 			t.Fatalf("the entry holds %d receipts after the contradiction, want 1", st.ForwardReceipts)
 		}
-		if st.Handoff != journal.HandoffSent && st.Handoff != journal.HandoffHeld {
-			t.Fatalf("handoff is %q; a contradicted proof must leave the entry where it was — "+
-				"sent, or held once the destination is observed dark", st.Handoff)
+		if st.Handoff != journal.HandoffSent {
+			t.Fatalf("handoff is %q; a contradicted proof must leave the entry exactly where it "+
+				"was, which since §25 B37 is `sent` and stays `sent` until an answer or "+
+				"forwardTimeoutMs", st.Handoff)
 		}
 		return
 	}
@@ -679,12 +696,11 @@ func TestB26AnUnknownMessageTypeIsIgnoredAndTheSessionSurvives(t *testing.T) {
 	if st.ForwardReceipts != 0 {
 		t.Fatalf("an unknown type was journaled as a receipt: %d", st.ForwardReceipts)
 	}
-	// `held` is allowed and expected: the stub publishes no map, so the tick loop
-	// observes slot 2 dark and holds — which is §9.2 working, and is what the
-	// entry would be doing whether the unknown frames had arrived or not. What
-	// must NOT have happened is a re-route or a refusal, because nothing in those
-	// five frames is evidence of anything.
-	if st.Handoff != journal.HandoffSent && st.Handoff != journal.HandoffHeld {
+	// `sent` and nothing else: the stub publishes no map, so slot 2 is dark to
+	// this sidecar, and since §25's B37 a dark destination is not a state change
+	// for a forwarded entry. What must NOT have happened is a re-route or a
+	// refusal, because nothing in those five frames is evidence of anything.
+	if st.Handoff != journal.HandoffSent {
 		t.Fatalf("an unknown type moved the handoff to %q", st.Handoff)
 	}
 	if st.RerouteCount != 0 {
@@ -770,8 +786,8 @@ func TestB26ReceiptsAndTheTwoCapacityShedsPin(t *testing.T) {
 	if st.ReceiptSessionID != stub.session {
 		t.Fatalf("the recorded receipt's session changed across a shed: %q", st.ReceiptSessionID)
 	}
-	if st.Handoff != journal.HandoffSent && st.Handoff != journal.HandoffHeld {
-		t.Fatalf("handoff is %q after two sheds, want sent or held", st.Handoff)
+	if st.Handoff != journal.HandoffSent {
+		t.Fatalf("handoff is %q after two sheds, want sent", st.Handoff)
 	}
 	if st.RerouteCount != 0 {
 		t.Fatalf("a capacity shed re-routed an entry %d times", st.RerouteCount)

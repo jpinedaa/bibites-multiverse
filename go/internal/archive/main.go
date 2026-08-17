@@ -68,6 +68,17 @@ func runMain(args []string, stderr io.Writer) int {
 			"setting, and a pruned hash stays a lineage node that answers exactly like a hash no "+
 			"peer ever served. The same horizon retires a genome gap whose crossing is older "+
 			"than it (§23, B34)")
+	// §25's B38: the duplicate set's window. It is a knob for the same reason the
+	// horizon is one — the deployment, not the contract, knows how far behind its
+	// oldest peer can be.
+	dedupWindow := fs.Duration("dedup-window",
+		envDuration("MULTIVERSE_ARCHIVE_DEDUP_WINDOW", 0),
+		"how long this archive remembers a record's duplicate key, as a Go duration. 0 — THE "+
+			"DEFAULT — is 48h (contract-b-m4.md §25, B38). A duplicate that arrives inside the "+
+			"window is refused; one that arrives later is appended to the ledger a second time. "+
+			"Migration is at-most-once with no re-forward (§25, B37), so the only sources of a "+
+			"duplicate left are a sidecar older than B37 still retrying and a defective peer, "+
+			"and both arrive within minutes. Raising it costs memory in proportion")
 	// DQ7's operator-side render deny list (§22, B30).
 	denyList := fs.String("deny-list", env("MULTIVERSE_ARCHIVE_DENY_LIST", ""),
 		"file of species names and peer:<peerId> entries this archive's PAGE AND JSON refuse to "+
@@ -124,6 +135,7 @@ func runMain(args []string, stderr io.Writer) int {
 		RequestsPerMinute:   *maxGenomeRPM,
 		DenyListFile:        *denyList,
 		GenomeHorizon:       *genomeHorizon,
+		DedupWindow:         *dedupWindow,
 		BroadcastPeerID:     strings.TrimSpace(*broadcastPeer),
 		HomepageRepo:        strings.TrimSpace(*homepageRepo),
 		HomepageGameVersion: strings.TrimSpace(*homepageGameVersion),

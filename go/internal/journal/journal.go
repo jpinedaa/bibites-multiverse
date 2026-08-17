@@ -76,28 +76,40 @@ const (
 //
 //	pending   journaled, never written to a live relay connection   NO
 //	sent      written to a live relay connection, no answer yet     YES, unknowably
-//	held      sent, and the destination is observed dark            YES, unknowably
 //	refused   a statement arrived that proves no custody moved      NO
 //	done      MIGRATION_ACK received; becomes a tombstone           it moved, and completed
+//	lost      sent, and no answer came within forwardTimeoutMs      YES, unknowably — and
+//	          unknowable forever: the organism is not re-sent and not returned
 //
-// A bounce is a TERMINAL ACTION, not a sixth state: the entry leaves the
-// outbound journal, becomes an inbound delivery into this peer's own mod, and
-// leaves a tombstone behind.
+// THE `held` STATE IS GONE (contract-b-m4.md §25, B37). A forwarded frame is
+// forwarded once. It is never re-forwarded, no clock accrues against it, and it
+// never comes home on a timeout: migration is at-most-once with no exception,
+// and a forward that is never answered is a loss.
+//
+// A bounce is a TERMINAL ACTION, not a state: the entry leaves the outbound
+// journal, becomes an inbound delivery into this peer's own mod, and leaves a
+// tombstone behind. It is reachable only from `pending` and `refused`, where no
+// custody can have moved, and from the operator's --release-inflight.
 type Handoff string
+
+// retiredHandoffHeld is the `held` state of the bounded hold, retired by §25's
+// B37. It is never written; it is only ever read out of a journal an older
+// sidecar left behind, and it replays as HandoffSent.
+const retiredHandoffHeld Handoff = "held"
 
 const (
 	HandoffPending Handoff = "pending"
 	HandoffSent    Handoff = "sent"
-	HandoffHeld    Handoff = "held"
 	HandoffRefused Handoff = "refused"
 	HandoffDone    Handoff = "done"
+	HandoffLost    Handoff = "lost"
 )
 
 // CustodyMayHaveMoved reports whether the far side could hold this organism.
 // It is the whole of the re-route safety rule: only pending and refused are
 // safe to redirect, and silence never turns "yes" into "no".
 func (h Handoff) CustodyMayHaveMoved() bool {
-	return h == HandoffSent || h == HandoffHeld
+	return h == HandoffSent || h == HandoffLost
 }
 
 // ParentRef is one entry of the lineage annex as the journal keeps it
@@ -155,9 +167,9 @@ type Entry struct {
 //
 // The M4 fields are LOAD-BEARING and must survive a restart (§7.4): the handoff
 // state says whether custody may have moved, RelaySessionID scopes the proof,
-// AccruedHoldMs is what the bounded hold counts, and RerouteCount is what bounds
-// it. A sidecar that reconstructs any of them from memory at startup has lost
-// the safety property, not just the bookkeeping.
+// SentAtMs is when the forward-resolution deadline started, and RerouteCount is
+// what bounds the re-route. A sidecar that reconstructs any of them from memory
+// at startup has lost the safety property, not just the bookkeeping.
 type State struct {
 	Entry         Entry     `json:"entry"`
 	Direction     Direction `json:"direction"`
@@ -201,11 +213,18 @@ type State struct {
 	// because a correctness decision on another machine's clock is what the
 	// session id exists to avoid.
 	ReceiptForwardedAtMs int64 `json:"receiptForwardedAt,omitempty"`
-	// AccruedHoldMs is ACCRUED dark time, not a deadline. A wall-clock deadline
-	// cannot express a clock that stops, so the entry carries the accrual
-	// instead — a restart cannot lose time already served, and cannot invent
-	// time that was never served (§9.3).
-	AccruedHoldMs int64 `json:"accruedHoldMs,omitempty"`
+	// SentAtMs is the wall clock at the FIRST write of this entry to a live relay
+	// connection. It is the only clock an outbound entry carries since §25's B37
+	// removed the hold, and it decides one thing: when an unanswered forward
+	// stops being in flight and is recorded LOST (forwardTimeoutMs, §9.3).
+	//
+	// A plain wall-clock instant is enough BECAUSE OF WHAT EXPIRY NOW DOES. The
+	// accrual it replaces existed so that a sender which had never observed the
+	// destination dark could not wake with an expired clock and bounce an
+	// organism that was on its way — expiry moved an organism. Expiry now only
+	// closes a record: nothing is re-sent, nothing comes home, and a sidecar that
+	// slept through the deadline records a loss that had already happened.
+	SentAtMs int64 `json:"sentAt,omitempty"`
 	// RerouteCount, RerouteFrom, RerouteProof and RerouteAtMs are the §6.6
 	// reroute block, kept so a re-forward reproduces it and the archive can say
 	// WHY an organism took the lane it took.
@@ -213,10 +232,6 @@ type State struct {
 	RerouteFrom  int    `json:"rerouteFrom,omitempty"`
 	RerouteProof string `json:"rerouteProof,omitempty"`
 	RerouteAtMs  int64  `json:"rerouteAtMs,omitempty"`
-	// BouncedTimeout marks the tombstone of an entry the hold timeout bounced.
-	// A MIGRATION_ACK that arrives afterwards is the accepted duplication case
-	// of §9.3 announcing itself, and it MUST be logged at error level.
-	BouncedTimeout bool `json:"bouncedTimeout,omitempty"`
 
 	seq uint64
 }
@@ -265,13 +280,12 @@ type record struct {
 
 	Handoff        *Handoff `json:"handoff,omitempty"`
 	RelaySessionID *string  `json:"relaySessionId,omitempty"`
-	AccruedHoldMs  *int64   `json:"accruedHoldMs,omitempty"`
+	SentAtMs       *int64   `json:"sentAt,omitempty"`
 	DestSlot       *int     `json:"destSlot,omitempty"`
 	RerouteCount   *int     `json:"rerouteCount,omitempty"`
 	RerouteFrom    *int     `json:"rerouteFrom,omitempty"`
 	RerouteProof   *string  `json:"rerouteProof,omitempty"`
 	RerouteAtMs    *int64   `json:"rerouteAtMs,omitempty"`
-	BouncedTimeout *bool    `json:"bouncedTimeout,omitempty"`
 
 	// B26's four. The COUNT is written absolute rather than as an increment,
 	// which is what makes a record idempotent under both of the ways this log is
@@ -534,6 +548,17 @@ func (j *Journal) apply(rec record) {
 		}
 		if rec.Handoff != nil {
 			st.Handoff = *rec.Handoff
+			if st.Handoff == retiredHandoffHeld {
+				// A JOURNAL WRITTEN BEFORE §25's B37 HAS A `held` STATE, AND IT
+				// MEANT EXACTLY WHAT `sent` MEANS: written to a live relay
+				// connection, no terminal answer, custody may have moved. The
+				// hold that distinguished the two is gone, so the state folds
+				// into the one it was a sub-case of. Replaying it as an unknown
+				// string instead would leave the entry in no case of the
+				// sender's state machine — journaled, never resolved, never
+				// counted.
+				st.Handoff = HandoffSent
+			}
 		} else if st.Direction == Out && rec.Status == StatusInFlight && st.Handoff == HandoffPending {
 			// AN M3 JOURNAL HAS NO HANDOFF FIELD, AND REPLAYING IT AS `pending`
 			// WOULD BE A LIE THAT COSTS AN ORGANISM.
@@ -557,8 +582,8 @@ func (j *Journal) apply(rec record) {
 		if rec.RelaySessionID != nil {
 			st.RelaySessionID = *rec.RelaySessionID
 		}
-		if rec.AccruedHoldMs != nil {
-			st.AccruedHoldMs = *rec.AccruedHoldMs
+		if rec.SentAtMs != nil {
+			st.SentAtMs = *rec.SentAtMs
 		}
 		if rec.DestSlot != nil {
 			st.Entry.DestSlot = *rec.DestSlot
@@ -574,9 +599,6 @@ func (j *Journal) apply(rec record) {
 		}
 		if rec.RerouteAtMs != nil {
 			st.RerouteAtMs = *rec.RerouteAtMs
-		}
-		if rec.BouncedTimeout != nil {
-			st.BouncedTimeout = *rec.BouncedTimeout
 		}
 		if rec.ForwardReceipts != nil {
 			st.ForwardReceipts = *rec.ForwardReceipts
@@ -708,10 +730,9 @@ func (j *Journal) compact() error {
 			Direction: st.Direction, Status: st.Status, Attempt: intPtr(st.Attempt),
 			BounceBack: boolPtr(st.BounceBack), Acked: boolPtr(st.AckedUpstream),
 			Duplicate: boolPtr(st.Duplicate), Note: st.Note,
-			AccruedHoldMs: int64Ptr(st.AccruedHoldMs), DestSlot: intPtr(st.Entry.DestSlot),
+			SentAtMs: int64Ptr(st.SentAtMs), DestSlot: intPtr(st.Entry.DestSlot),
 			RerouteCount: intPtr(st.RerouteCount), RerouteFrom: intPtr(st.RerouteFrom),
-			RerouteProof: strPtr(st.RerouteProof), RerouteAtMs: int64Ptr(st.RerouteAtMs),
-			BouncedTimeout: boolPtr(st.BouncedTimeout)}
+			RerouteProof: strPtr(st.RerouteProof), RerouteAtMs: int64Ptr(st.RerouteAtMs)}
 		if st.Handoff != "" {
 			h := st.Handoff
 			status.Handoff = &h
@@ -871,7 +892,7 @@ type Update struct {
 
 	Handoff        Handoff
 	RelaySessionID *string
-	AccruedHoldMs  *int64
+	SentAtMs       *int64
 	// DestSlot is the ONE exception to §7.3's no-rewrite rule, and it carries
 	// its own evidence: a re-route under a proof of non-delivery (§9.2). Every
 	// other entry keeps the destination it recorded.
@@ -880,7 +901,6 @@ type Update struct {
 	RerouteFrom    *int
 	RerouteProof   *string
 	RerouteAtMs    *int64
-	BouncedTimeout *bool
 	// The FORWARD_RECEIPT block (§6.12, §22 B26). ForwardReceipts is the new
 	// ABSOLUTE count, not a delta; the caller reads the current one and writes
 	// count+1, so a replayed record can never double-count a forward.
@@ -903,10 +923,10 @@ func (j *Journal) Apply(migrationID string, u Update) (*State, error) {
 	rec := record{Op: opStatus, MigrationID: migrationID, At: time.Now().UnixMilli(),
 		Status: u.Status, Direction: u.Direction, Attempt: u.Attempt, BounceBack: u.BounceBack,
 		Acked: u.Acked, Duplicate: u.Duplicate, Edge: u.Edge, CompletedAt: u.CompletedAt,
-		Note: u.Note, RelaySessionID: u.RelaySessionID, AccruedHoldMs: u.AccruedHoldMs,
+		Note: u.Note, RelaySessionID: u.RelaySessionID, SentAtMs: u.SentAtMs,
 		DestSlot: u.DestSlot, RerouteCount: u.RerouteCount, RerouteFrom: u.RerouteFrom,
 		RerouteProof: u.RerouteProof, RerouteAtMs: u.RerouteAtMs,
-		BouncedTimeout: u.BouncedTimeout, ForwardReceipts: u.ForwardReceipts,
+		ForwardReceipts: u.ForwardReceipts,
 		ReceiptSessionID: u.ReceiptSessionID, ReceiptDestSlot: u.ReceiptDestSlot,
 		ReceiptForwardedAtMs: u.ReceiptForwardedAtMs}
 	if u.Handoff != "" {

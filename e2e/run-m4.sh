@@ -12,7 +12,7 @@
 #   run-m4.sh phase4     kill slot 5 mid-column, then splice it back in
 #   run-m4.sh phase5     a NEW seventh peer splices into a live map
 #   run-m4.sh phase6     burst pacing: dark slot 2, accumulate, wake, assert the pacing
-#   run-m4.sh phase7     bounce-after-hold, against a short configured holdTimeoutMs
+#   run-m4.sh phase7     a forwarded organism recorded LOST, against a short forwardTimeoutMs
 #   run-m4.sh phase8     periodic saves: [M4-SAVE] on interval, rotation on disk
 #   run-m4.sh phase9     portals: two open edges on screen, plus a flourish
 #   run-m4.sh phase10    error sweep, teardown, exactly-once census
@@ -317,10 +317,10 @@ STRANDED_MIGRATION=9d6db335-b1ae-433e-a44a-bb2109912913
 STRANDED_ENTITY=2004967003
 STRANDED_DEST=2
 
-# Phase 7 needs to SEE the automatic bounce, and the contract default is 24
+# Phase 7 needs to SEE a forward written off, and the contract default is 24
 # hours. It moves that tunable on one sidecar, and the sidecar logs a warning
 # when it is set.
-HOLD_TIMEOUT="${HOLD_TIMEOUT:-45s}"
+FORWARD_TIMEOUT="${FORWARD_TIMEOUT:-45s}"
 
 # Phase 6 needs to SEE the delivery rate limit work, and the shipped default no
 # longer lets it: 100.0 per simulated minute with a burst of 50 swallows any
@@ -864,7 +864,7 @@ up() {
     extra=()
     # Phase 7 needs one sidecar whose bounded hold expires inside a test run.
     # Slot 3 is the one, because nothing else in the rig depends on its timing.
-    [ "$slot" = 3 ] && extra=(--hold-timeout "$HOLD_TIMEOUT")
+    [ "$slot" = 3 ] && extra=(--forward-timeout "$FORWARD_TIMEOUT")
     # Phase 6 needs one sidecar whose delivery rate limit is low enough to dam a
     # burst a person can force. Slot 2 is the one, and it is set here rather than
     # inside the phase because the pacing clock and the journal belong to the
@@ -1519,11 +1519,11 @@ print(int((b-a).total_seconds()))" 2>/dev/null)"
   step "the entry-edge crowding metric in slot 2 — the receiving half of the same measurement"
   grep_log 2 '\[M4-CROWDING\]' | tail -n 4 | sed 's/^/      /' >&2
 
-  step "no held entry bounced while its destination was live (Risk 9)"
-  local bounced
-  bounced="$(status_get 'next((s for s in d["slots"] if s["slot"]==1), {}).get("bouncedTimeoutTotal","unknown")')"
-  note "slot 1 bouncedTimeoutTotal=$bounced"
-  [ "$bounced" = "0" ] || [ "$bounced" = "unknown" ] || { fail "slot 1 bounced $bounced entr(y|ies)"; ok=1; }
+  step "nothing was written off while its destination was live (Risk 9)"
+  local lost
+  lost="$(status_get 'next((s for s in d["slots"] if s["slot"]==1), {}).get("lostForwardTotal","unknown")')"
+  note "slot 1 lostForwardTotal=$lost"
+  [ "$lost" = "0" ] || [ "$lost" = "unknown" ] || { fail "slot 1 lost $lost forward(s)"; ok=1; }
 
   step "and every organism in the burst exists exactly once"
   local dupes=0
@@ -1542,15 +1542,16 @@ print(int((b-a).total_seconds()))" 2>/dev/null)"
 # ---------------------------------------------------------------- phase 7
 
 phase7() {
-  step "PHASE 7 — bounce after the bounded hold, against holdTimeoutMs=$HOLD_TIMEOUT"
-  note "Slot 3's sidecar runs with --hold-timeout $HOLD_TIMEOUT. §9.3's clock accrues ONLY"
-  note "while the destination is dark, and at the timeout the sidecar bounces the organism"
-  note "home BY ITSELF and says so at error level."
+  step "PHASE 7 — a forwarded organism is LOST, not held and not bounced (forwardTimeoutMs=$FORWARD_TIMEOUT)"
+  note "Slot 3's sidecar runs with --forward-timeout $FORWARD_TIMEOUT. Since contract-b-m4.md"
+  note "§25 B37 there is no hold and no timeout bounce: a frame handed to the relay is handed"
+  note "over ONCE, and an entry with no answer is recorded LOST at the deadline and said so at"
+  note "error level. The organism is gone. Nothing comes home."
   note ""
   note "THE ORDER MATTERS AND AN EARLIER VERSION OF THIS PHASE HAD IT BACKWARDS. Darkening"
   note "the destination FIRST closes the lane, and a closed lane makes the sidecar refuse"
-  note "the MIGRATE_OUT outright — no journal entry, nothing to hold, nothing to bounce."
-  note "§9.3's case is an entry that was FORWARDED and then lost its destination, so the"
+  note "the MIGRATE_OUT outright — no journal entry, nothing in flight, nothing to lose."
+  note "The case is an entry that was FORWARDED and then lost its destination, so the"
   note "kill has to land between the forward and the acknowledgement. A watcher does it,"
   note "the same way run-m3.sh kills the relay mid-migration."
   local ok=0 line dest=6
@@ -1609,70 +1610,68 @@ phase7() {
   rm -f "$(pidfile "sidecar-$dest")" "$(pidfile "fakemod-$dest")"
   note "slot $dest is dark: $(tail -n 1 "$LOGS/kills.log")"
 
-  step "the destination went dark with the frame in flight, so the entry is HELD and the clock runs"
+  step "the destination went dark with the frame in flight, and NOTHING happens to the entry"
   settle 20
-  line="$(grep -a 'holding a forwarded organism whose destination went dark' "$(sclog_of 3)" | tail -n 1)"
-  if [ -n "$line" ]; then
-    note "DECISIVE (held): $line"
-  else
-    fail "slot 3 never logged the hold; §9.3's clock did not start"
+  note "the entry stays in handoff 'sent'. There is no held state to enter and no clock to"
+  note "start: a dark destination is not a state change for a forwarded frame (§9.2)."
+  "$BIN/sidecar" --data-dir "$(datadir_of 3)" --list-inflight 2>&1 | sed 's/^/      /' >&2 || true
+  if grep -qa 'holding a forwarded organism whose destination went dark' "$(sclog_of 3)"; then
+    fail "slot 3 logged a HOLD; §25 B37 removed the held state"
     ok=1
   fi
-  "$BIN/sidecar" --data-dir "$(datadir_of 3)" --list-inflight 2>&1 | sed 's/^/      /' >&2 || true
 
-  step "waiting for the bounded hold to expire ($HOLD_TIMEOUT) and the automatic bounce"
-  line="$(wait_file "$(sclog_of 3)" 'BOUNDED HOLD EXPIRED' 300 "$mark3sc")" || {
-    fail "the bounded hold never expired; §9.3's automatic bounce did not fire"
+  step "waiting for forwardTimeoutMs ($FORWARD_TIMEOUT) and the LOST record"
+  line="$(wait_file "$(sclog_of 3)" 'FORWARD LOST' 300 "$mark3sc")" || {
+    fail "the forward was never recorded lost; §9.3's deadline did not fire"
     "$BIN/sidecar" --data-dir "$(datadir_of 3)" --list-inflight 2>&1 | sed 's/^/      /' >&2 || true
     ok=1; }
-  [ -n "$line" ] && note "DECISIVE (bounce): $line"
+  [ -n "$line" ] && note "DECISIVE (lost): $line"
 
-  step "the organism comes home through the edge it left by, exactly once"
-  line="$(wait_log 3 "migrationId=$mid .*phase=SPAWNED" 180)" || {
-    fail "the bounced organism never came home to slot 3"; ok=1; }
-  [ -n "$line" ] && note "DECISIVE (home): $line"
-  case "$line" in
-    *"edge=N"*) note "it re-entered through N — the edge it left by, not a passive entry edge (§9.4)" ;;
-    *) [ -n "$line" ] && { fail "the bounce came home through the wrong edge"; ok=1; } ;;
-  esac
+  step "the organism does NOT come home — that is the whole of the change"
+  settle 30
+  if wait_log 3 "migrationId=$mid .*phase=SPAWNED" 5 >/dev/null 2>&1; then
+    fail "the organism was re-injected into slot 3; §25 B37 removed the timeout bounce, and a bounce here is the duplication it exists to prevent"
+    ok=1
+  else
+    note "DECISIVE (no bounce): slot 3 spawned nothing for $mid. Migration is at-most-once."
+  fi
 
-  local bounces
-  bounces="$(status_get 'next((s for s in d["slots"] if s["slot"]==3), {}).get("bouncedTimeoutTotal","unknown")')"
-  note "status page, slot 3: bouncedTimeoutTotal=$bounces — an automatic bounce is a FACT the operator reads (§9.3)"
-  [ "$bounces" = "1" ] || [ "$bounces" -ge 1 ] 2>/dev/null || { fail "the status page reports no timeout bounce"; ok=1; }
+  local lost
+  lost="$(status_get 'next((s for s in d["slots"] if s["slot"]==3), {}).get("lostForwardTotal","unknown")')"
+  note "status page, slot 3: lostForwardTotal=$lost — a loss is a FACT the operator reads (§9.3)"
+  [ "$lost" = "1" ] || [ "$lost" -ge 1 ] 2>/dev/null || { fail "the status page reports no lost forward"; ok=1; }
   status_json > "$LOGS/status-phase7.json" 2>/dev/null
 
-  step "exactly once AT THE ORIGIN — and §9.3's ONE ACCEPTED EXCEPTION, named out loud"
-  # The origin must hold exactly one copy: the bounce came home and nothing else
-  # did. The DESTINATION is a different question, and the contract answers it in
-  # advance. §9.3: "the far sidecar took custody, died before its acknowledgement,
-  # and replays its own journal on its return" — that is the one case D2's
-  # at-most-once carries as a bounded exception, and the owner signed it off. A
-  # rig that FAILS on it is asserting a rule the milestone deliberately does not
-  # have; a rig that stays silent about it is hiding one. This does neither.
-  local bounced_eid; bounced_eid="$(field entityId "$line")"
-  [ -n "$bounced_eid" ] || bounced_eid="$eid"
-  if [ -n "$bounced_eid" ]; then
+  step "AT MOST ONCE, and this phase is where the map proves it holds with no exception"
+  # Where the organism is now is the whole question. The ORIGIN must hold NONE:
+  # the sender wrote its record off and delivered nothing to its own world. The
+  # DESTINATION may hold one, un-acknowledged in its journal — it took custody and
+  # died before its acknowledgement left. Under M4 the sender's hold then expired
+  # and bounced the organism home, so BOTH existed and §9.3 named that as its one
+  # accepted exception. §25 B37 removed the bounce, so the count across the map is
+  # one or zero and never two.
+  if [ -n "$eid" ]; then
     settle 15
-    local home_count; home_count="$(holds_entity 3 "$bounced_eid")"
-    note "slot 3 (the origin) holds $home_count copy/copies of entity $bounced_eid"
-    [ "$home_count" = "1" ] || { fail "the origin holds $home_count copies after the bounce"; ok=1; }
+    local home_count; home_count="$(holds_entity 3 "$eid")"
+    note "slot 3 (the origin) holds $home_count copy/copies of entity $eid"
+    [ "$home_count" = "0" ] || { fail "the origin holds $home_count copies; nothing may come home on a timeout"; ok=1; }
     local stranded
-    stranded="$(python3 "$E2E/journal.py" custody "$bounced_eid" "$(journal_of "$dest")" 2>/dev/null \
+    stranded="$(python3 "$E2E/journal.py" custody "$eid" "$(journal_of "$dest")" 2>/dev/null \
       | sed -n 's/^custodyCount=\([0-9]*\)$/\1/p')"
     stranded="${stranded:-0}"
     if [ "$stranded" != 0 ]; then
       note ""
-      note "ACCEPTED DUPLICATION CASE (contract-b-m4.md §9.3, signed off 2026-08-05):"
-      note "slot $dest's journal still holds $stranded live custody row(s) for this organism. It"
-      note "took custody, died before its acknowledgement left, and the sender could not tell"
-      note "silence from delivery — so the bounded hold expired and the organism went home."
-      note "When slot $dest returns it will replay its own journal and the organism will exist"
-      note "TWICE. That is the residual risk the owner accepted, it needs an invisible delivery"
-      note "AND a return after the timeout, and this run reproduced it on purpose."
-      python3 "$E2E/journal.py" custody "$bounced_eid" "$(journal_of "$dest")" 2>/dev/null | sed 's/^/      /' >&2
+      note "WHERE THE ORGANISM ACTUALLY IS (contract-b-m4.md §25, B37):"
+      note "slot $dest's journal holds $stranded live custody row(s) for it. It took custody and"
+      note "died before its acknowledgement left, and the sender could not tell that from a"
+      note "delivery that never happened. The sender recorded a LOSS and did nothing else."
+      note "When slot $dest returns it replays its own journal and the organism exists ONCE, at"
+      note "the destination, with the origin's record saying lost — a wrong record and a correct"
+      note "world. A late MIGRATION_ACK is what says so, and it names --forward-timeout."
+      python3 "$E2E/journal.py" custody "$eid" "$(journal_of "$dest")" 2>/dev/null | sed 's/^/      /' >&2
     else
-      note "slot $dest's journal holds nothing for this organism, so not even the accepted case fired"
+      note "slot $dest's journal holds nothing for this organism either: it is genuinely gone,"
+      note "which is what 'migrating is dangerous' costs and what the map reports as lost."
     fi
   fi
 
@@ -1685,7 +1684,7 @@ phase7() {
   world_ready "$dest" 300 || true
   restore_sims
 
-  [ "$ok" = 0 ] && verdict "PHASE 7: PASS — the bounded hold expired and the organism bounced home by itself, exactly once" \
+  [ "$ok" = 0 ] && verdict "PHASE 7: PASS — the forward was recorded LOST, nothing came home, and nothing duplicated" \
                 || verdict "PHASE 7: FAIL"
   return "$ok"
 }
@@ -1844,11 +1843,12 @@ errors() {
   done
   note "slot $FAKE_SLOT is the synthetic peer and has no BepInEx log; its own log is swept below."
 
-  # TWO Go-side ERROR LINES ARE EXPECTED AFTER PHASE 7, and both are the contract
-  # working rather than failing. §9.3 REQUIRES an automatic bounce to be loud, and
-  # it REQUIRES the accepted duplication case to announce itself at error level
-  # when the late acknowledgement finally arrives. A sweep that treated either as
-  # a defect would be asking the rig to hide the one risk the owner signed off.
+  # ONE Go-side ERROR LINE IS EXPECTED AFTER PHASE 7, and it is the contract
+  # working rather than failing. §9.3 REQUIRES a loss to be loud: it is a fact the
+  # operator reads, not a silent repair, and a sweep that treated it as a defect
+  # would be asking the rig to hide the price the owner chose to pay. The second
+  # line M4 expected here — the accepted duplication case announcing itself — is
+  # gone with the case (§25, B37).
   local f
   for f in "$LOGS/relay.log" "$LOGS/archive.log" "$(fakelog "$FAKE_SLOT")" \
            $(for s in $SLOTS $SPLICE_SLOT; do sclog_of "$s"; done); do
@@ -1857,7 +1857,7 @@ errors() {
     grep -a 'level=ERROR' "$f" | tail -n 10 | sed 's/^/      /' >&2
     local all expected
     all="$(grep -ac 'level=ERROR' "$f" || true)"; all="${all:-0}"
-    expected="$(grep -ac 'BOUNDED HOLD EXPIRED\|a hold timeout already bounced' "$f" || true)"
+    expected="$(grep -ac 'FORWARD LOST\|already recorded LOST' "$f" || true)"
     expected="${expected:-0}"
     printf '    total ERROR lines: %s, of which §9.3 REQUIRES: %s, unexplained: %s\n' \
       "$all" "$expected" "$(( all - expected ))" >&2

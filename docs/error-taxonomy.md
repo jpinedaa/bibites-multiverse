@@ -9,7 +9,7 @@ on their computer (`m5_considerations.md`, DQ8).
 **Status: WP7's spine, with WP2's, WP4's and WP6's texture landed and WP7's own slots closed.**
 Every entry below is taken
 from the wire as WP1 published it — `contracts/contract-a.md` at `contract-a/2.4` and
-`contracts/contract-b-m4.md` at `contract-b/4.0` — and every wording, value and log line that
+`contracts/contract-b-m4.md` at `contract-b/4.1` — and every wording, value and log line that
 belongs to the credential and TLS work (WP2), to the capacity table, the admin path and the
 A49/A50 halves (WP4), or to the package and its installer (WP6) is quoted from what those
 packages ship. Entries whose exact wording,
@@ -215,17 +215,23 @@ multiverse-sidecar --data-dir <path> --release-inflight <migrationId> bounce|dro
 ```
 
 The list prints, per entry, the migration id, the entity, the direction and status, the
-destination slot and exit edge, the durable handoff state, and **the accrued hold with the time
-left on it** — the clock that runs only while the destination is dark and this sidecar can see
-it.
+destination slot and exit edge, the durable handoff state, and — for an outbound entry that
+reached the relay — **when it was forwarded and how long is left before it is recorded lost**,
+with the reason beside it: *it is NOT re-sent and does not come home: migration is
+at-most-once*. An entry that was never written to a live relay connection says exactly that
+instead, because that is the one that cannot have duplicated anything.
 
 **The release prints the risk before it acts**, and waits for a typed `YES` unless `--yes` is
 passed. The words are the release's own:
 
-> An entry in handoff "sent" or "held" WAS written to a live relay connection, so the far sidecar
-> may already hold custody of this organism. If it does, and it returns and replays its own
-> journal after you bounce this one home, **THE MAP HOLDS TWO COPIES.** That is the one exception
-> at-most-once carries (§9.3), and this command is one of the two ways to fire it deliberately.
+> An entry in handoff "sent" WAS written to a live relay connection, so the far sidecar may
+> already hold custody of this organism. If it does, and it returns and replays its own journal
+> after you bounce this one home, **THE MAP HOLDS TWO COPIES.**
+>
+> At-most-once now carries NO automatic exception: this sidecar never bounces a forwarded
+> organism by itself, and an unanswered forward is recorded LOST rather than brought home (§9.3,
+> §25 B37). **THIS COMMAND IS THE ONLY WAY LEFT TO DUPLICATE AN ORGANISM ON THIS MAP**, and you
+> are the one firing it.
 >
 > An entry in handoff "pending" or "refused" was never handed to anybody, or was refused before
 > custody moved. Bouncing one of those cannot duplicate anything.
@@ -238,8 +244,10 @@ which is why the warning comes first.
 
 ## 3. The map wire — your sidecar and the relay
 
-`contract-b/4.0` over TLS (`contract-b-m4.md` §3). **This is where another participant's
-machine can become your symptom**, and every entry that has that shape says so.
+`contract-b/4.1` over TLS (`contract-b-m4.md` §3), on the same `/contract-b/v4` path: the minor
+bump changes no frame, and a map carries sidecars either side of it without anybody being
+evicted for the difference. **This is where another participant's machine can become your
+symptom**, and every entry that has that shape says so.
 
 ### 3.1 Refused before the socket exists
 
@@ -312,8 +320,8 @@ durable custody, which is what makes both the bounce-back and the re-route safe.
 
 | Id | Class | Sent by | Meaning | Remedy | Who acts |
 |---|---|---|---|---|---|
-| `BMIG-SLOT_VACANT` | **permanent** | relay | The destination slot names no reservation at all — released, or never issued. **Slot numbers are never reused, so that world never returns** | None. The organism comes home: at once where the relay can prove it never handed the migration anywhere, and otherwise after its hold expires — the wait is not hope, it is the possibility that custody already moved to a world that is now gone | **nobody** |
-| `BMIG-PEER_OFFLINE` | transient | relay | The reservation exists and its peer is dark right now | Wait. The entry holds, keeps retrying, and after 24 hours of **accrued** dark time bounces home to the world it left | **nobody** |
+| `BMIG-SLOT_VACANT` | **permanent** | relay | The destination slot names no reservation at all — released, or never issued. **Slot numbers are never reused, so that world never returns** | None. Where the relay can prove it never handed this migration anywhere, the organism re-routes along the same axis, or comes home. Where it cannot, the entry was already forwarded once and is **recorded lost** at `forwardTimeoutMs` like any other unanswered forward: there was never anything to wait for, and a slot that will never answer resolves as a loss rather than as a bounce that might duplicate (`contract-b-m4.md` §9.3) | **nobody** |
+| `BMIG-PEER_OFFLINE` | transient | relay | The reservation exists and its peer is dark right now | Wait. The frame reached nobody, which is the relay stating that no custody moved, so the entry **re-routes** to the next live world along that axis — or comes home after `bounceTimeoutMs` where that axis has no lane to offer. Nothing retries the dark world, and nothing accrues against it | **nobody** |
 | `BMIG-NOT_FORWARDED` | transient | relay | The relay declined this one attempt — a full outbound queue, a failed write before any byte left, or a drain | Wait | **nobody** |
 | `BMIG-PEER_UNKNOWN` | transient | relay | The named peer is not connected. Applies to the acknowledgement and genome messages, which route on identity rather than on a slot | Wait | **nobody** |
 | `BMIG-NOT_A_MEMBER` | **permanent** | relay | A read-only subscriber tried to send a migration | Connect with the peer role | **you** |
@@ -329,10 +337,23 @@ durable custody, which is what makes both the bounce-back and the re-route safe.
 **A relay refusal is a statement about one attempt.** Whether the migration as a whole was
 ever handed anywhere is a separate, provable fact the relay attaches to its own refusals, and
 it is scoped to one relay process — after a relay restart the relay honestly says it cannot
-speak for the period before it started, and the sender holds instead of re-routing
-(`contract-b-m4.md` §5.2, §6.8, §9.2). **Nothing here is a participant action**; it is written
-down so that a held entry that does not move for a while reads as designed behaviour rather
-than as a stuck queue.
+speak for the period before it started. With no proof, **the sender does nothing at all**: the
+frame is not sent again, the entry is not re-routed and the organism is not brought home, and
+at `forwardTimeoutMs` the entry is recorded **lost** (`contract-b-m4.md` §5.2, §6.8, §9.2,
+§9.3). Silence is never proof, and this map spends an organism rather than guess with one.
+**Nothing here is a participant action**; it is written down so that an unanswered forward that
+does not move for a day reads as designed behaviour rather than as a stuck queue.
+
+**A refusal, on the other hand, is a statement — and a stated refusal still gets a second
+world.** A sender acts on a code only where the code says, in as many words, that nobody took
+custody: the frame never left this machine; the relay proved it forwarded nothing for the whole
+life of the entry; or the destination refused it before journaling anything, which §6.8 forbids
+it to do afterwards. Those entries re-route along the same axis, up to four times, and then
+bounce home. None of it can duplicate an organism, because the only party who could hold a
+second copy has said it holds none. **The one knob here belongs to the operator of this
+machine**: a negative `--max-reroutes` (`MULTIVERSE_MAX_REROUTES`) turns re-routing off
+altogether, making a crossing a single hop and bouncing a refused organism home instead of
+offering it to a second world (`contract-b-m4.md` §9.2, §25 B37).
 
 ### 3.5 A genome fetch was refused — `contract-b-m4.md` §6.10
 
@@ -457,9 +478,21 @@ Written down because each one has already cost somebody an evening somewhere.
   is a top slice, and the marker says so rather than pretending otherwise.
 - **An absent value on the status page.** Absence means **unknown**, and a reader must not
   render it as zero. A slot that reports nothing is unknown, not empty.
-- **A held migration that sits for hours.** The hold clock counts only time when the
-  destination is dark **and** the sender can see the map. A sender whose machine slept for a
-  night must not wake with an expired clock.
+- **A forwarded migration that sits unanswered for hours.** Nothing is stuck and nothing is
+  retrying: the organism was handed over once, and the sender is waiting for an answer it will
+  take no action without. It is not re-sent, and it does not come home. At `forwardTimeoutMs` —
+  24 hours from the moment it was forwarded — the entry is closed as **lost**
+  (`contract-b-m4.md` §9.3).
+- **A `lost` count that is not zero.** It is what migration costs on this map, not a defect.
+  Every world publishes its own count and the status page and `ringstat` both show it, because
+  **a loss is a fact the operator reads rather than a silent repair**. A count that rises names
+  a lane whose far end keeps disappearing mid-crossing; a count that rises on one world alone
+  names that world's neighbour. The trade is stated in `contract-b-m4.md` §25, B37 and it was
+  made in one direction only: **losing an organism is accepted, and duplicating one is not.**
+- **A late `MIGRATION_ACK`, against an entry already written off.** Good news, and the sidecar
+  logs it as such: the organism *did* arrive, exactly one of it exists, and its answer simply
+  outran the deadline. What it names is a setting, not a fault — raise `--forward-timeout`
+  (`MULTIVERSE_FORWARD_TIMEOUT`) above this map's slowest honest answer.
 
 ---
 

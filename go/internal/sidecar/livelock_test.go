@@ -8,7 +8,13 @@ package sidecar
 // full multi-MiB decode on each duplicate. These tests pin the five sidecar-side
 // defences: no burst refill on a same-session reconnect (G1), an escalating
 // replay delay (G2), delivery held into a silent mod (G3), dedup before decode
-// (G4), and exponential backoff on re-forwards to a LIVE destination (G5).
+// (G4), and — since §25's B37 replaced G5's exponential backoff with the
+// stronger rule it was approximating — NO re-forward at all (G5).
+//
+// G5 is worth reading as a lesson rather than a fix. The livelock's 203,735
+// duplicate deliveries came from a retry loop, B8 bounded that loop, and B37
+// removed it: a frame handed to the relay is handed over once. The hammer cannot
+// come back, because the code that swung it is gone.
 
 import (
 	"encoding/json"
@@ -58,30 +64,10 @@ func nextForwardOf(s *Sidecar, id string) time.Time {
 	return time.Time{}
 }
 
-func liveForwardCountOf(s *Sidecar, id string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if sc, ok := s.sched[id]; ok {
-		return sc.liveForwardCount
-	}
-	return 0
-}
-
 func destLiveOf(s *Sidecar, slot int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.destLiveLocked(slot)
-}
-
-// resetSchedForward clears one entry's forward schedule so a test can measure a
-// backoff run from a known-clean start, after the desired liveness is settled.
-func resetSchedForward(s *Sidecar, id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if sc, ok := s.sched[id]; ok {
-		sc.nextForward = time.Time{}
-		sc.liveForwardCount = 0
-	}
 }
 
 func journalStateOf(s *Sidecar, id string) *journal.State {
@@ -132,25 +118,6 @@ func TestReplayBatchDelayFormula(t *testing.T) {
 		if got := replayBatchDelay(c.minAttempt); got != c.want {
 			t.Errorf("replayBatchDelay(%d) = %v, want %v", c.minAttempt, got, c.want)
 		}
-	}
-}
-
-// TestBackoffIntervalFormula pins the live-destination re-forward backoff of
-// §9.3/B5: doubling from the base, capped, with no overflow at large n.
-func TestBackoffIntervalFormula(t *testing.T) {
-	const base = 5 * time.Second
-	const max = 60 * time.Second
-	want := []time.Duration{
-		5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second,
-		60 * time.Second, 60 * time.Second,
-	}
-	for n, w := range want {
-		if got := backoffInterval(base, max, n); got != w {
-			t.Errorf("backoffInterval(5s,60s,%d) = %v, want %v", n, got, w)
-		}
-	}
-	if got := backoffInterval(base, max, 1000); got != max {
-		t.Errorf("backoffInterval at a large n = %v, want the cap %v (no overflow)", got, max)
 	}
 }
 
@@ -384,14 +351,17 @@ func TestDeliveryPausesIntoASilentMod(t *testing.T) {
 
 // ---------------------------------------------------------------- G5
 
-// TestLiveDestinationReforwardBacksOff is G5. A re-forward to a LIVE destination
-// that has not answered climbs an exponential backoff (a live peer with a deep
-// paced backlog is slow, not gone) up to the cap, instead of hammering every
-// forwardRetryMs — the shape that produced 203 735 duplicate deliveries. A DARK
-// destination is exempt: the dark branch resets the backoff so the retry keeps
-// its own cadence and the hold clock is untouched (§9.3, B5).
-func TestLiveDestinationReforwardBacksOff(t *testing.T) {
-	clock := newFakeClock()
+// TestAForwardedEntryIsNeverReForwarded is G5 as §25's B37 leaves it. A frame
+// written to a live relay connection is written ONCE — to a destination that is
+// live and silent, to one that has gone dark, and to one that never answers at
+// all. There is no cadence to measure any more, which is the point: the retry
+// that produced 203,735 duplicate deliveries into the stalled slot 6 no longer
+// exists, so no bound on it has to be correct.
+//
+// The instrument is the relay's own FORWARD_RECEIPT (§6.12, §22 B26): one
+// receipt per write, recorded durably in the sender's journal. A second write of
+// any kind would put a second receipt there.
+func TestAForwardedEntryIsNeverReForwarded(t *testing.T) {
 	rl := startRelay(t)
 	ids := []string{"peer-a", "peer-b"}
 	for i, pos := range []contractb.Position{{Col: 0, Row: 0}, {Col: 1, Row: 0}} {
@@ -401,63 +371,64 @@ func TestLiveDestinationReforwardBacksOff(t *testing.T) {
 		}
 	}
 	cfgA := fastConfig(t, rl, "peer-a")
-	cfgA.Clock = clock.Now
-	cfgA.HeartbeatTimeout = time.Hour // fake-clock jumps must not read as a silent mod
-	cfgA.ForwardRetry = time.Second
-	cfgA.ForwardRetryMax = 4 * time.Second
+	// Short enough that several would have fired inside this test, and far short
+	// of the forward timeout, so nothing is written off either.
+	cfgA.ForwardRetry = 100 * time.Millisecond
+	cfgA.ForwardTimeout = time.Hour
 
 	cfgB := fastConfig(t, rl, "peer-b")
 	sideB := startSidecar(t, cfgB)
 	waitSlot(t, sideB, 2)
+	// ackSilent: slot 2 takes the frame and never answers. Under B5 this was the
+	// case that re-forwarded forever; it is now the case that waits.
 	modB := dialFakeMod(t, fakeModOptions{
 		url: sideB.URL(), world: newWorld(), heartbeat: 200 * time.Millisecond, ackMode: ackSilent})
 
-	migrationID := seedSentEntry(t, cfgA.DataDir, 2, rl.relay.SessionID())
-
 	sideA := startSidecar(t, cfgA)
 	waitSlot(t, sideA, 1)
-	dialFakeMod(t, fakeModOptions{url: sideA.URL(), world: newWorld(), heartbeat: 200 * time.Millisecond})
+	modA := dialFakeMod(t, fakeModOptions{
+		url: sideA.URL(), world: newWorld(), heartbeat: 200 * time.Millisecond})
 	waitLane(t, sideA, contracta.EdgeE, 2)
-	waitFor(t, 10*time.Second, "sideA to see slot 2 live", func() bool { return destLiveOf(sideA, 2) })
 
-	// Measure a clean backoff run: 1s, 2s, 4s, then the cap.
-	resetSchedForward(sideA, migrationID)
-	base := clock.Now()
-	waitFor(t, 10*time.Second, "the first live re-forward", func() bool {
-		return nextForwardOf(sideA, migrationID).After(base)
+	migrationID := modA.migrateOut(testEntityID, contracta.EdgeE, 0.4)
+	waitFor(t, 10*time.Second, "the one forward and its receipt", func() bool {
+		st := journalStateOf(sideA, migrationID)
+		return st != nil && st.ForwardReceipts >= 1
 	})
-	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 4 * time.Second}
-	prev := base
-	for k, w := range want {
-		nf := nextForwardOf(sideA, migrationID)
-		if got := nf.Sub(prev); !approxDur(got, w, 100*time.Millisecond) {
-			t.Fatalf("live re-forward interval %d = %v, want ~%v (5→10→20→cap, scaled)", k, got, w)
-		}
-		prev = nf
-		if k < len(want)-1 {
-			clock.Advance(nf.Sub(clock.Now())) // step to the scheduled re-forward
-			target := nf
-			waitFor(t, 10*time.Second, "the next live re-forward", func() bool {
-				return nextForwardOf(sideA, migrationID).After(target)
-			})
-		}
+
+	// Twenty forwardRetry intervals. Under the old rule this window held four
+	// backed-off re-forwards; under B37 it holds none.
+	time.Sleep(20 * cfgA.ForwardRetry)
+	st := journalStateOf(sideA, migrationID)
+	if st == nil {
+		t.Fatal("the entry vanished")
 	}
-	if liveForwardCountOf(sideA, migrationID) == 0 {
-		t.Fatal("the live-forward backoff counter never advanced")
+	if st.ForwardReceipts != 1 {
+		t.Fatalf("forwardReceipts = %d after 20 retry intervals against a LIVE silent "+
+			"destination, want exactly 1: a forwarded frame is forwarded once (§25, B37)",
+			st.ForwardReceipts)
+	}
+	if st.Handoff != journal.HandoffSent {
+		t.Fatalf("handoff = %q, want sent — custody may have moved and nothing may change that "+
+			"but an answer", st.Handoff)
 	}
 
-	// Dark destination: killing the peer must switch the backoff OFF. The dark
-	// branch resets the counter, so the retry keeps its own cadence (§9.3, B5).
+	// And the destination going dark changes nothing. There is no dark cadence
+	// to fall back to, because there is no cadence.
 	modB.abort()
 	_ = sideB.Close()
 	waitFor(t, 15*time.Second, "sideA to observe slot 2 dark", func() bool {
 		return sideA.RelayConnected() && !destLiveOf(sideA, 2)
 	})
-	waitFor(t, 10*time.Second, "the dark branch to reset the live-forward backoff", func() bool {
-		return liveForwardCountOf(sideA, migrationID) == 0
-	})
-	if h := handoffOf(sideA, migrationID); h != journal.HandoffHeld && h != journal.HandoffSent {
-		t.Fatalf("after going dark the entry is %q, want held/sent — a dark destination is held, not re-routed", h)
+	time.Sleep(20 * cfgA.ForwardRetry)
+	if st := journalStateOf(sideA, migrationID); st.ForwardReceipts != 1 {
+		t.Fatalf("forwardReceipts = %d after the destination went DARK, want 1: a dark "+
+			"destination used to be the one the retry kept hammering (§14, B5), and B37 "+
+			"removed the retry rather than re-timing it", st.ForwardReceipts)
+	}
+	if h := handoffOf(sideA, migrationID); h != journal.HandoffSent {
+		t.Fatalf("after going dark the entry is %q, want sent — silence is not proof, so it "+
+			"is neither re-routed nor brought home", h)
 	}
 }
 

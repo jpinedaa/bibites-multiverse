@@ -741,11 +741,17 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	// This goes through the custody scheduler rather than forwarding directly:
 	// the journal write above released the lock, so the tick may already have
 	// picked the entry up, and forwarding again here would put two identical
-	// frames on the wire. The receiver deduplicates either way, but a
-	// gratuitous duplicate turns every ACK into duplicate: true and makes the
-	// archive's record read as a re-delivery.
+	// frames on the wire. The receiver deduplicates either way, but a gratuitous
+	// duplicate turns every ACK into duplicate: true and makes the archive's
+	// record read as a re-delivery — and since §25's B37 it would also be the one
+	// thing this sidecar is no longer allowed to do.
+	//
+	// IT READS THE SIDECAR'S OWN CLOCK, not the wall's. This is the call that
+	// writes `sentAt` for most entries, and forwardTimeoutMs is measured from it
+	// by a scheduler that reads s.now(): a mix of the two makes the deadline
+	// meaningless in either direction.
 	s.mu.Lock()
-	s.tickOutbound(st, time.Now())
+	s.tickOutbound(st, s.now())
 	s.mu.Unlock()
 	return true
 }

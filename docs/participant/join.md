@@ -240,7 +240,8 @@ subscriber the operator has authorised. Your block carries:
 - its population and egg count, and its species census — the names as your player sees them;
 - the mod version, the wire version, the game version;
 - your save policy, your exclusion list and whether your world wraps;
-- the speed the world is running at, and its queue depths.
+- the speed the world is running at, its queue depths, and how many of its organisms have been
+  lost in transit.
 
 That is a fairly complete profile of one world on your machine, and it is written down here so
 that you know it before you join rather than after. **A subscriber sees nothing a peer does not
@@ -259,8 +260,13 @@ do anything.** Your sidecar notices the disconnect, waits, reconnects, and recla
 at your coordinate with `reason: "reclaimed"`. Your slot, position, and credential are unchanged.
 They live on disk, not in the running process.
 
-Organisms that were mid-crossing can take longer to arrive after a restart. **They are not
-lost.** Your machine holds and resends them. The hold is bounded at 24 hours.
+Organisms that were mid-crossing can take longer to arrive after a restart. The ones your
+machine had not handed over yet wait in your journal and cross when the relay is back — they
+are safe, and they can go around a world that is still missing. **One that was already handed
+over is handed over once**, though: nothing re-sends it and nothing brings it home, so in the
+rare case where a restart swallows one it is gone. Crossing between worlds is the one dangerous
+thing an organism does here, and the map would rather lose one than hold two copies of it — a
+lost creature reads as a natural death, and a duplicated one is a broken world.
 
 An **archive** restart takes longer. The archive draws the status page, so the page is
 unavailable during its restart. The map keeps running, and crossings continue.

@@ -47,8 +47,7 @@ func rigShapedArchive(t *testing.T) *Archive {
 		st := census(60+i*7, 4+i, entries...)
 		st.CustodyDepth = contractb.IntPtr(i % 3)
 		st.PacedDepth = contractb.IntPtr(0)
-		st.HeldDepth = contractb.IntPtr(0)
-		st.BouncedTimeoutTotal = contractb.IntPtr(0)
+		st.LostForwardTotal = contractb.IntPtr(0)
 		st.MigrationExclude = &wire.ExcludeList{Names: []string{"Nereus obscura"}}
 		slots = append(slots, slot(i+1, i%3, i/3, true, st))
 	}

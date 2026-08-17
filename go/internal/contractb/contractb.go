@@ -292,21 +292,30 @@ const (
 	ForwardRetry              = 5 * time.Second
 	BounceTimeout             = 20 * time.Second
 	MigrationAckTimeout       = 30 * time.Second
-	// HoldTimeout is the accrued dark time before a held entry bounces home by
-	// itself — 24 hours (D2, signed off 2026-08-05). The clock runs only while
-	// the destination is dark and the sender can see it (§9.3).
-	HoldTimeout = 24 * time.Hour
-	// HoldAccrualFlush is how often the accrued hold time is flushed to the
-	// journal entry. A crash loses at most this much, in the safe direction.
-	HoldAccrualFlush = 60 * time.Second
+	// ForwardTimeout is how long a forwarded outbound entry waits for its answer
+	// before the sender records it LOST — 24 hours (§9.3, §25 B37). It is a
+	// bookkeeping deadline and nothing else: nothing is re-sent at it and nothing
+	// comes home, so a sender that slept through it records a loss that had
+	// already happened.
+	ForwardTimeout = 24 * time.Hour
 	// MaxReroutes bounds the re-routes one entry may take before it bounces home
 	// instead. An organism circling a broken axis is a symptom, not a delivery
-	// strategy.
+	// strategy. A NEGATIVE value turns re-routing off entirely, which is the one
+	// switch that makes migration a single hop with no second destination.
 	MaxReroutes = 4
 	// ForwardRecordRetention is how long the relay remembers a forwarded
-	// migrationId, in memory, for the neverForwarded proof — 48 hours, twice the
-	// default hold. Keep it at least twice HoldTimeout.
+	// migrationId, in memory, for the neverForwarded proof — 48 hours. It bounds
+	// nothing on the sending side any more (§25, B37 removed the hold it used to
+	// be sized against); what it now covers is a re-routed entry's second and
+	// later attempts, and an old sidecar that is still retrying across the
+	// transition. It matches ArchiveDedupWindow for the same reason.
 	ForwardRecordRetention = 48 * time.Hour
+	// ArchiveDedupWindow is how long the archive remembers a record's duplicate
+	// key (§5.1, §25 B38). Legitimate duplicates stopped existing when the
+	// re-forward did; what is left is an old sidecar's retry and a buggy peer,
+	// both of which arrive within minutes. Bounding the set is what makes the
+	// archive's memory a constant instead of a function of the record.
+	ArchiveDedupWindow = 48 * time.Hour
 	// StatsBroadcastInterval is the §6.5 timer that republishes PEER_STATUS
 	// because stats change without the registry changing. §6.5 names
 	// statsBroadcastIntervalMs but §12 does not give it a default; 5000 ms
@@ -490,14 +499,18 @@ type PeerStats struct {
 	// PacedDepth is inbound entries waiting on the delivery rate limit
 	// (contract-a.md §7.5). A depth that never falls names a limit set too low.
 	PacedDepth *int `json:"pacedDepth,omitempty"`
-	// HeldDepth is outbound entries in the held state of §9.2 — forwarded,
-	// unproven, destination dark.
-	HeldDepth *int `json:"heldDepth,omitempty"`
-	// BouncedTimeoutTotal is cumulative and monotonic. An automatic bounce is a
-	// fact the operator reads, not a silent repair (§9.3).
-	BouncedTimeoutTotal *int         `json:"bouncedTimeoutTotal,omitempty"`
-	SimulatedTime       *float64     `json:"simulatedTime,omitempty"`
-	LastSave            *SaveReceipt `json:"lastSave,omitempty"`
+	// LostForwardTotal is cumulative and monotonic: outbound entries this sidecar
+	// forwarded once and never heard an answer for within forwardTimeoutMs
+	// (§6.3.1, §9.3, §25 B37). It is the map's only reading of what migration
+	// costs, and a rising one names a lane, not a bug.
+	//
+	// `heldDepth` and `bouncedTimeoutTotal` STOOD HERE and are retired with the
+	// bounded hold. Their names are reserved and never reused; a sidecar that
+	// still sends them is older than §25, and its values ride through as unknown
+	// keys rather than being read (knownStatKeys below).
+	LostForwardTotal *int         `json:"lostForwardTotal,omitempty"`
+	SimulatedTime    *float64     `json:"simulatedTime,omitempty"`
+	LastSave         *SaveReceipt `json:"lastSave,omitempty"`
 	// TimeScale is how fast the world is running, copied out of the last
 	// HEARTBEAT (contract-a.md §5.2) and never computed here (§18, B16). 5 means
 	// five simulated seconds per real second; 0 means the world is standing
@@ -599,8 +612,8 @@ type PeerStats struct {
 // knownStatKeys is every key PeerStats has a field for. Anything else a peer
 // sends is carried through untouched.
 var knownStatKeys = []string{
-	"population", "eggCount", "custodyDepth", "pacedDepth", "heldDepth",
-	"bouncedTimeoutTotal", "simulatedTime", "timeScale",
+	"population", "eggCount", "custodyDepth", "pacedDepth",
+	"lostForwardTotal", "simulatedTime", "timeScale",
 	"inboundRatePerSimMinute", "inboundRateBurst",
 	"lastSave", "species", "truncated",
 	// §19, B18.

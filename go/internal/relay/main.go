@@ -858,8 +858,8 @@ func (s *Server) describeCustodySplitLocked(b *strings.Builder, res Reservation)
 	// the report has to say that rather than imply a fleet the operator can log
 	// in to.
 	fmt.Fprintf(b, "  custody     this relay CANNOT list the entries that name slot %d: journals live on\n", res.Slot)
-	fmt.Fprintf(b, "              the peers' own machines and D2 keeps custody local. Read heldDepth per peer on\n")
-	fmt.Fprintf(b, "              the status page or in ringstat, then run on the machine that owns them:\n")
+	fmt.Fprintf(b, "              the peers' own machines and D2 keeps custody local. Read lostForwardTotal per\n")
+	fmt.Fprintf(b, "              peer on the status page or in ringstat, then run on the machine that owns them:\n")
 	fmt.Fprintf(b, "                  multiverse-sidecar --list-inflight --dest-slot %d\n", res.Slot)
 }
 

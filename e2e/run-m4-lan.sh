@@ -142,7 +142,7 @@
 #     placement rules changes across a network; the relay is the only arbiter and
 #     it is here.
 #
-#   run-m4.sh phase7 (the bounded hold and its automatic bounce) — NOT RUNNABLE
+#   run-m4.sh phase7 (a forwarded organism recorded LOST) — NOT RUNNABLE
 #     ON AN UNDRIVEN FAR END, and it is worth being exact about why. §9.3's case
 #     needs the destination to die in the window between the forward and the
 #     acknowledgement. The rehearsal aims at that window by restarting the
@@ -1212,12 +1212,12 @@ lan_phase5_far() {
     sleep 20
   done
 
-  step "no held entry bounced while its destination was live (Risk 9)"
-  local slot bounced
+  step "nothing was written off while its destination was live (Risk 9)"
+  local slot lost
   for slot in 3 5; do
-    bounced="$(slot_stat "$slot" bouncedTimeoutTotal)"
-    note "slot $slot bouncedTimeoutTotal=$bounced"
-    [ "$bounced" = "0" ] || [ "$bounced" = "unknown" ] || { fail "slot $slot bounced $bounced entr(y|ies)"; ok=1; }
+    lost="$(slot_stat "$slot" lostForwardTotal)"
+    note "slot $slot lostForwardTotal=$lost"
+    [ "$lost" = "0" ] || [ "$lost" = "unknown" ] || { fail "slot $slot lost $lost forward(s)"; ok=1; }
   done
 
   step "and every organism in the burst exists exactly once"
@@ -1397,7 +1397,7 @@ lan_phase8() {
   step "map-wide census: five populations counted, one read off the wire"
   local slot
   for slot in $SLOTS; do note "slot $slot: $(send "$slot" census 2>&1 | tail -c 200)"; done
-  note "slot $REMOTE_SLOT (remote): population=$(remote_stat population) custodyDepth=$(remote_stat custodyDepth) pacedDepth=$(remote_stat pacedDepth) heldDepth=$(remote_stat heldDepth)"
+  note "slot $REMOTE_SLOT (remote): population=$(remote_stat population) custodyDepth=$(remote_stat custodyDepth) pacedDepth=$(remote_stat pacedDepth) lostForwardTotal=$(remote_stat lostForwardTotal)"
   python3 "$E2E/journal.py" summary $(for s in $SLOTS; do [ -f "$(journal_of "$s")" ] && journal_of "$s"; done) 2>/dev/null \
     | tail -n 30 | sed 's/^/      /' >&2
 

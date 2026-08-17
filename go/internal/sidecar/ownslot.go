@@ -186,16 +186,21 @@ type ModState struct {
 // CustodyState is this machine's journal, which is the half of the system no
 // operator can see (contract-b-m4.md §7.5).
 type CustodyState struct {
-	CustodyDepth            int     `json:"custodyDepth"`
-	PacedDepth              int     `json:"pacedDepth"`
-	HeldDepth               int     `json:"heldDepth"`
-	BouncedTimeoutTotal     int     `json:"bouncedTimeoutTotal"`
+	CustodyDepth int `json:"custodyDepth"`
+	PacedDepth   int `json:"pacedDepth"`
+	// UnresolvedDepth is outbound entries forwarded once with no answer yet, and
+	// LostForwardTotal is how many of them this sidecar has written off since it
+	// last lost its journal (§9.3, §25 B37). `heldDepth` and
+	// `bouncedTimeoutTotal` stood here and went with the bounded hold.
+	UnresolvedDepth         int     `json:"unresolvedDepth"`
+	LostForwardTotal        int     `json:"lostForwardTotal"`
+	LateAckTotal            int     `json:"lateAckTotal"`
 	InboundRatePerSimMinute float64 `json:"inboundRatePerSimMinute"`
 	InboundRateBurst        float64 `json:"inboundRateBurst"`
 	// The oldest waiting entry of each kind. A depth is a number; an AGE is what
 	// says whether it is draining.
-	OldestPacedAgeMs int64 `json:"oldestPacedAgeMs,omitempty"`
-	OldestHeldAgeMs  int64 `json:"oldestHeldAgeMs,omitempty"`
+	OldestPacedAgeMs      int64 `json:"oldestPacedAgeMs,omitempty"`
+	OldestUnresolvedAgeMs int64 `json:"oldestUnresolvedAgeMs,omitempty"`
 	JournalBytes     int64 `json:"journalBytes"`
 	JournalLive      int   `json:"journalLive"`
 	// JournalDiscardedBytes is what replay threw away behind a torn record AT
@@ -386,33 +391,35 @@ func (s *Sidecar) custodyStateLocked(now time.Time) CustodyState {
 	c := CustodyState{
 		CustodyDepth:            s.jr.CountPending(journal.Out) + s.jr.CountPending(journal.In),
 		PacedDepth:              s.pacedDepthLocked(),
-		HeldDepth:               s.heldDepthLocked(),
-		BouncedTimeoutTotal:     s.bouncedTimeoutTotal,
+		UnresolvedDepth:         s.unresolvedDepthLocked(),
+		LostForwardTotal:        s.lostForwardTotal,
+		LateAckTotal:            s.lateAckTotal,
 		InboundRatePerSimMinute: s.cfg.InboundRatePerSimMinute,
 		InboundRateBurst:        s.cfg.InboundRateBurst,
 		JournalBytes:            s.jr.Size(),
 		JournalLive:             s.jr.Live(),
 		JournalDiscardedBytes:   s.jr.Discarded(),
 	}
-	c.OldestPacedAgeMs, c.OldestHeldAgeMs = oldestWaiting(s.jr.List(), now)
+	c.OldestPacedAgeMs, c.OldestUnresolvedAgeMs = oldestWaiting(s.jr.List(), now)
 	return c
 }
 
 // oldestWaiting is the age of the oldest entry waiting on the delivery rate and
-// the age of the oldest entry in a bounded hold. A depth with no age beside it
-// cannot say whether it is draining.
-func oldestWaiting(states []*journal.State, now time.Time) (paced, held int64) {
-	var oldestPaced, oldestHeld int64
+// the age of the oldest entry forwarded with no answer. A depth with no age
+// beside it cannot say whether it is draining — and on the second one an age
+// approaching forwardTimeoutMs says the entry is about to be written off.
+func oldestWaiting(states []*journal.State, now time.Time) (paced, unresolved int64) {
+	var oldestPaced, oldestUnresolved int64
 	for _, st := range states {
 		switch {
 		case st.Direction == journal.In && st.Status == journal.StatusOpen:
 			if at := st.Entry.JournaledAt; at > 0 && (oldestPaced == 0 || at < oldestPaced) {
 				oldestPaced = at
 			}
-		case st.Direction == journal.Out && st.Handoff == journal.HandoffHeld &&
+		case st.Direction == journal.Out && st.Handoff == journal.HandoffSent &&
 			(st.Status == journal.StatusOpen || st.Status == journal.StatusInFlight):
-			if at := st.Entry.JournaledAt; at > 0 && (oldestHeld == 0 || at < oldestHeld) {
-				oldestHeld = at
+			if at := st.Entry.JournaledAt; at > 0 && (oldestUnresolved == 0 || at < oldestUnresolved) {
+				oldestUnresolved = at
 			}
 		}
 	}
@@ -420,10 +427,10 @@ func oldestWaiting(states []*journal.State, now time.Time) (paced, held int64) {
 	if oldestPaced > 0 && nowMs > oldestPaced {
 		paced = nowMs - oldestPaced
 	}
-	if oldestHeld > 0 && nowMs > oldestHeld {
-		held = nowMs - oldestHeld
+	if oldestUnresolved > 0 && nowMs > oldestUnresolved {
+		unresolved = nowMs - oldestUnresolved
 	}
-	return paced, held
+	return paced, unresolved
 }
 
 func (s *Sidecar) edgeStatesLocked() []EdgeState {
@@ -739,10 +746,16 @@ func RenderOwnSlot(w io.Writer, v OwnSlot) {
 	fmt.Fprintf(w, "  in custody   %d\n", v.Custody.CustodyDepth)
 	fmt.Fprintf(w, "  paced        %d waiting on your own delivery rate of %.1f per simulated minute%s\n",
 		v.Custody.PacedDepth, v.Custody.InboundRatePerSimMinute, ageSuffix(v.Custody.OldestPacedAgeMs))
-	fmt.Fprintf(w, "  held         %d waiting for a dark destination%s\n",
-		v.Custody.HeldDepth, ageSuffix(v.Custody.OldestHeldAgeMs))
-	if v.Custody.BouncedTimeoutTotal > 0 {
-		fmt.Fprintf(w, "  bounced home %d after a destination stayed dark\n", v.Custody.BouncedTimeoutTotal)
+	fmt.Fprintf(w, "  unresolved   %d forwarded once, waiting for an answer%s\n",
+		v.Custody.UnresolvedDepth, ageSuffix(v.Custody.OldestUnresolvedAgeMs))
+	if v.Custody.LostForwardTotal > 0 {
+		fmt.Fprintf(w, "  lost         %d forwarded and never answered. migration is at-most-once:\n"+
+			"               an organism that does not arrive is gone, not returned\n",
+			v.Custody.LostForwardTotal)
+	}
+	if v.Custody.LateAckTotal > 0 {
+		fmt.Fprintf(w, "  late answers %d arrived after their entry was written off; "+
+			"raise --forward-timeout\n", v.Custody.LateAckTotal)
 	}
 
 	// 5. The neighbours — DQ8's row, from the machine that suffers for it.

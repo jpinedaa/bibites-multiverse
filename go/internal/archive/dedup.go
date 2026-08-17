@@ -1,20 +1,29 @@
 package archive
 
-import "hash/maphash"
+import (
+	"hash/maphash"
+	"time"
+)
 
 // The §5.1 duplicate set: the structure that answers "has this record already
 // been recorded" for every MIGRATION, ACK and NACK the archive ever sees.
 //
-// IT IS THE ONE RETAINED STRUCTURE THAT GROWS WITH THE LEDGER, and that is not
-// a defect to be fixed by forgetting old keys. A migration re-forwarded a year
-// from now must still be refused a year from now, or the archive appends it to
-// migrations.jsonl a second time and the permanent record gains a duplicate
-// nothing can remove — the file is never rewritten (store.go). Every other
-// retained thing in this package is bounded by construction: species at 4096,
-// genome fingerprints per species at 8192, brain buckets at a year, lanes at
-// the grid, gaps at the retention horizon. This one is bounded by the size of
-// the record, so what it costs PER KEY is what decides whether the archive
-// still fits in memory after the next restart.
+// IT WAS THE ONE RETAINED STRUCTURE THAT GREW WITH THE LEDGER, AND SINCE §25's
+// B38 IT IS NOT. The reason it could never forget was the re-forward: a sender
+// that re-sent a frame a year later had to be refused a year later, or the
+// archive appended it to migrations.jsonl a second time and the permanent record
+// gained a duplicate nothing can remove — the file is never rewritten
+// (store.go). B37 removed the re-forward. A conforming sender hands each
+// migration to the relay exactly once, so a SECOND copy of one record can now
+// only come from a sidecar older than B37 still running its retry, or from a
+// peer with a defect; both of those arrive within seconds or minutes of the
+// first, never a year later.
+//
+// So the set became a WINDOW (dedupWindow, below), and with it every retained
+// thing in this package is bounded by construction: species at 4096, genome
+// fingerprints per species at 8192, brain buckets at a year, lanes at the grid,
+// gaps at the retention horizon, and this at its own window. What it costs PER
+// KEY still decides how big the window may be.
 //
 // WHAT IT COSTS. Measured on this dev box over 5,408,123 distinct keys, which
 // is the record count of the 2026-08-16 production ledger:
@@ -50,9 +59,10 @@ import "hash/maphash"
 // A collision HERE means treating a NEW migration as a duplicate and leaving it
 // out of the permanent record. That is the whole reason there are two hashes.
 //
-// AND THE SEEDS ARE DRAWN PER PROCESS. The set is rebuilt from the ledger on
+// AND THE SEEDS ARE DRAWN PER PROCESS. The window is rebuilt from the ledger on
 // every start and is never persisted, so the fingerprints only ever have to
-// agree with themselves inside one run. A participant who chooses migrationIds
+// agree with themselves inside one run — and with the other generation, which is
+// why a rotation keeps the seeds it has. A participant who chooses migrationIds
 // therefore cannot search offline for a pair that collides and hold it against
 // the archive: it would have to find one under a seed it cannot see, and that
 // seed stops existing at the next restart.
@@ -129,13 +139,20 @@ type dedupShard struct {
 // estimate. Sizing it once matters twice: the replay never stops to rehash, and
 // a shard that grows holds its old array and its new one at the same time.
 func newDedupSet(hint int) *dedupSet {
+	return newDedupSetWithSeeds(hint, maphash.MakeSeed(), maphash.MakeSeed())
+}
+
+// newDedupSetWithSeeds is the same, under seeds the caller already holds. It is
+// what lets a dedupWindow rotate: two generations that hashed a key differently
+// could not answer one question between them.
+func newDedupSetWithSeeds(hint int, seedA, seedB maphash.Seed) *dedupSet {
 	per := int64(hint) / dedupShards
 	capacity := int64(dedupMinSlots)
 	want := per * dedupLoadDen / dedupLoadNum
 	for capacity < want && capacity < 1<<40 {
 		capacity <<= 1
 	}
-	s := &dedupSet{seedA: maphash.MakeSeed(), seedB: maphash.MakeSeed()}
+	s := &dedupSet{seedA: seedA, seedB: seedB}
 	for i := range s.shards {
 		s.shards[i] = dedupShard{slots: make([]dedupFP, capacity), mask: uint64(capacity - 1)}
 	}
@@ -246,6 +263,138 @@ func (d *dedupShard) grow() {
 		}
 		d.slots[i] = fp
 	}
+}
+
+// dedupWindow is the §5.1 duplicate set, bounded in time (§25, B38).
+//
+// IT IS TWO GENERATIONS AND A ROTATION, and the shape is chosen by what the set
+// underneath it is good at. dedupSet is an open-addressed table with no
+// tombstones, which is the whole reason it costs 25 bytes a key instead of 41 to
+// 90; adding deletion to it would give back exactly what it bought. Expiring by
+// generation keeps it: nothing is ever deleted from a generation, the oldest
+// generation is DROPPED WHOLE, and the memory it held is returned in one piece.
+//
+//	add     inserts into cur
+//	has     checks cur, then prev
+//	rotate  prev = cur, cur = a fresh table, once every window
+//
+// WHAT THAT RETAINS. A key inserted just before a rotation survives one more
+// window; one inserted just after survives two. So the guarantee is AT LEAST
+// window and AT MOST twice it, and the memory is at most two windows of keys.
+// Sizing the guarantee from below is what matters: a duplicate that arrives
+// inside `window` of the original is always refused.
+//
+// WHY NOT MORE GENERATIONS. Four generations rotating at window/3 would hold at
+// most 4/3 of a window instead of 2, for one more array and one more probe per
+// miss. The saving is real and small, and this set is no longer the archive's
+// dominant term once it is bounded at all; two generations is the version a
+// reader can hold in their head.
+type dedupWindow struct {
+	window time.Duration
+	cur    *dedupSet
+	prev   *dedupSet
+	// rotateAt is when cur stops taking new keys and becomes prev. It moves on
+	// the clock the caller passes in, so a replay of an old ledger rotates on the
+	// LEDGER's timestamps and a live archive rotates on the wall clock.
+	rotateAt time.Time
+	// hint sizes the next generation. It starts as the caller's estimate and
+	// afterwards is whatever the generation being retired actually held, so the
+	// second and every later generation is sized from measurement.
+	hint int
+}
+
+// newDedupWindow builds the window. hint is the caller's estimate of how many
+// keys ONE generation will hold; window is the retention floor.
+func newDedupWindow(hint int, window time.Duration, now time.Time) *dedupWindow {
+	if window <= 0 {
+		window = 48 * time.Hour
+	}
+	return &dedupWindow{
+		window:   window,
+		cur:      newDedupSet(hint),
+		hint:     hint,
+		rotateAt: now.Add(window),
+	}
+}
+
+// fingerprint is dedupSet's, and it is taken from the CURRENT generation's
+// seeds. Both generations must agree about a key or a rotation would forget
+// everything it kept, so the seeds are drawn once for the window and every
+// generation is built with them.
+func (w *dedupWindow) fingerprint(typ, key string) dedupFP {
+	return w.cur.fingerprint(typ, key)
+}
+
+// tick rotates the window when its time has come. The caller holds the lock that
+// guards the tables.
+//
+// A GAP OF SEVERAL WINDOWS IS ONE ROTATION, not several. An archive that was
+// stopped for a week, or a replay that walks a month of ledger, must not be made
+// to allocate a generation per window it slept through — and it must not keep
+// one either, because every generation it slept through is empty.
+func (w *dedupWindow) tick(now time.Time) {
+	if now.Before(w.rotateAt) {
+		return
+	}
+	if n := w.cur.len(); n > w.hint {
+		w.hint = n
+	}
+	seedA, seedB := w.cur.seedA, w.cur.seedB
+	if now.Sub(w.rotateAt) >= w.window {
+		// Two or more rotations are due, so the generation that would have
+		// become `prev` is one this window never filled. Both go.
+		w.prev = nil
+		w.cur = newDedupSetWithSeeds(w.hint, seedA, seedB)
+		w.rotateAt = now.Add(w.window)
+		return
+	}
+	w.prev = w.cur
+	w.cur = newDedupSetWithSeeds(w.hint, seedA, seedB)
+	// The grid is kept rather than restarted, so a rotation that runs late does
+	// not push every later one late with it.
+	w.rotateAt = w.rotateAt.Add(w.window)
+}
+
+// add records one fingerprint and reports whether it was ALREADY THERE, in
+// either generation. The caller holds the lock that guards the tables.
+func (w *dedupWindow) add(fp dedupFP, now time.Time) bool {
+	w.tick(now)
+	if w.prev != nil && w.prev.has(fp) {
+		// Already known, and known from the older generation. It is deliberately
+		// NOT copied forward: a key that keeps arriving is a peer that keeps
+		// re-sending, and refreshing its lease would let it hold a slot for as
+		// long as it kept doing so.
+		return true
+	}
+	return w.cur.add(fp)
+}
+
+// has reports whether a fingerprint is in either generation, without adding it.
+func (w *dedupWindow) has(fp dedupFP) bool {
+	if w.cur.has(fp) {
+		return true
+	}
+	return w.prev != nil && w.prev.has(fp)
+}
+
+// len is how many distinct keys the window holds, across both generations. A key
+// in both is counted twice, which is the honest answer to "how many keys is this
+// paying for".
+func (w *dedupWindow) len() int {
+	n := w.cur.len()
+	if w.prev != nil {
+		n += w.prev.len()
+	}
+	return n
+}
+
+// slots is what the window costs, divided by 16 bytes.
+func (w *dedupWindow) slots() int {
+	n := w.cur.slots()
+	if w.prev != nil {
+		n += w.prev.slots()
+	}
+	return n
 }
 
 // dedupHint estimates how many duplicate keys a ledger of this many bytes

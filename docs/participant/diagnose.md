@@ -69,7 +69,7 @@ What to read, and what a healthy reading looks like:
 |---|---|---|
 | Your slot is **live**, with a game connected | both true | Live with no game connected is the worst-looking symptom in this system and it has two very different causes — see `LOCAL-CONFIGRACE` and `LOCAL-STARVATION` in the taxonomy. **On Linux the second of those does not happen**; what happens instead is `LOCAL-LOGSHRED`, where every world works and the log is the casualty |
 | Your **edges** | Every edge you declared reports a live peer | Each closed reason means something different, and only some of them are yours to fix — taxonomy §4 |
-| Your **queue depths** — in custody, paced, held | Small, and moving | A paced depth that never falls names a delivery rate set too low. Read it against your own configured rate, which is published beside it |
+| Your **queue depths** — in custody, paced, unresolved | Small, and moving, with nothing lost | A paced depth that never falls names a delivery rate set too low. Read it against your own configured rate, which is published beside it. An **unresolved** entry is an organism handed to the map once and not answered for yet: it is not re-sent and it does not come home, so if no answer arrives it is recorded **lost** and counted on a line of its own. **Late answers** on that line are good news — the organism did arrive, and the count is telling you `--forward-timeout` is set shorter than this map's slowest honest answer |
 | Your **last save** | Recent, against your own save interval | An absent save with a save interval of zero is a world with its save timer off — a reading, not a gap |
 | Your **speed** | The applied speed and the achieved speed are close | When they come apart, your machine cannot meet the speed you asked for, and **the gap is the news**. Every rate about your world is wrong by that factor |
 | Your **last refusal** | Absent | Present means the relay refused this world for a stated reason, and it is published to every peer rather than only logged, so that a stale world does not read as a dead one. It names one of three things: an incompatible game version, a wire version below the map's floor, or `capacity:` and the limit that fired. **Two refusals deliberately never appear here** — a rejected credential, which reaches no slot at all, and an eviction, which has no shape of its own. An empty field is not proof that nothing was refused |
@@ -188,9 +188,9 @@ into a slot handover.
 Knowing the boundary saves a round trip in both directions.
 
 **They can see**, for every world at once: liveness, slot and position, population, census,
-mod and wire and game versions, save policy, exclusion list, speed, queue depths, and every
-refusal that reached a slot. They can also see the one thing you cannot — **your neighbours'
-side of a shared failure**.
+mod and wire and game versions, save policy, exclusion list, speed, queue depths, **how many
+organisms each world has lost in transit**, and every refusal that reached a slot. They can also
+see the one thing you cannot — **your neighbours' side of a shared failure**.
 
 **They cannot see inside your world or your journal.** Custody is local by design: the
 organisms your sidecar holds live in a file on your machine, and there is no protocol that
@@ -208,10 +208,12 @@ Written out for your platform in [leave.md](leave.md); the flags are the same on
 `--data-dir` at the data root of the world you are asking about — on Windows,
 `BibitesMultiverseLauncher.exe status --all` names each one.
 
-The release prints the entry, then the duplication risk, and waits for a typed `YES` **before it
-acts**. [leave.md](leave.md) gives both commands in full, and
+The list says, for each organism handed over, when it went and how long is left before it is
+written off as lost. The release prints the entry, then the duplication risk, and waits for a
+typed `YES` **before it acts**. [leave.md](leave.md) gives both commands in full, and
 [`../error-taxonomy.md`](../error-taxonomy.md) §2.4 gives the warning's exact words and why
-bouncing an entry the far side may already hold is the one exception at-most-once carries.
+bouncing an entry the far side may already hold is now **the only way left to duplicate an
+organism on this map** — nothing here does it on its own any more.
 
 ## Next
 

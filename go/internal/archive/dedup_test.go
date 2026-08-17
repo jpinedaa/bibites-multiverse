@@ -3,6 +3,8 @@ package archive
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"runtime"
 	"testing"
@@ -547,5 +549,168 @@ func TestTheRealLedgerDedups(t *testing.T) {
 	}
 	if id := wire.NewUUID(); a.markSeen(RecordMigration, id) {
 		t.Fatalf("a migrationId no ledger has ever held (%s) was called a duplicate", id)
+	}
+}
+
+// ---------------------------------------------------------------- the window
+
+// TestTheDedupWindowRefusesInsideItAndForgetsOutsideIt is §25's B38: the set
+// stopped being unbounded, and this is exactly what that costs and buys.
+//
+// It is bounded because the thing it was unbounded FOR is gone. The set could
+// never forget because a sender could re-forward a frame a year later and the
+// ledger is never rewritten, so a duplicate row would be permanent. B37 removed
+// the re-forward: a conforming sender writes a frame once, and the duplicates
+// that remain — an old sidecar's retry, a defective peer — arrive in seconds.
+//
+// The guarantee is a FLOOR and not a deadline: two generations rotating every
+// window remember at least one window and at most two. This asserts the floor,
+// which is the half a correctness argument can be built on.
+func TestTheDedupWindowRefusesInsideItAndForgetsOutsideIt(t *testing.T) {
+	const window = time.Hour
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	w := newDedupWindow(0, window, base)
+
+	fp := w.fingerprint(RecordMigration, "0e5b1a44-0000-4000-8000-000000000001")
+	if w.add(fp, base) {
+		t.Fatal("the first record of a key was called a duplicate")
+	}
+
+	// Anywhere inside the window, the copy is refused. This is the whole of
+	// what the archive needs from it during the transition.
+	for _, at := range []time.Duration{0, time.Second, window / 2, window - time.Second} {
+		if !w.add(fp, base.Add(at)) {
+			t.Fatalf("a duplicate %s after the original was admitted; the floor is %s",
+				at, window)
+		}
+	}
+
+	// Two rotations later the key is gone, and a copy is recorded again. That
+	// is a duplicate ROW in a permanent ledger, and it is the price B38 states
+	// out loud rather than the defect it would have been before B37.
+	if w.add(fp, base.Add(3*window)) {
+		t.Fatalf("the key survived %s of a %s window; the set is not bounded and the "+
+			"archive's memory is still a function of the record", 3*window, window)
+	}
+	if !w.add(fp, base.Add(3*window+time.Second)) {
+		t.Fatal("the re-recorded key was not remembered by the new generation")
+	}
+}
+
+// TestTheDedupWindowsMemoryIsAFunctionOfTheWindow is the sizing claim
+// deploy/SIZING.md now makes, held as a test rather than as a paragraph: keys
+// keep arriving forever and the set does not keep growing forever.
+//
+// The arithmetic it pins is the one an operator can check. At most two
+// generations exist, each holds at most one window of keys, and a slot is 16
+// bytes — so the set costs at most 2 x (keys per window) x 16 / load bytes,
+// whatever the age of the ledger.
+func TestTheDedupWindowsMemoryIsAFunctionOfTheWindow(t *testing.T) {
+	const window = time.Hour
+	const perWindow = 20_000
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	w := newDedupWindow(perWindow, window, base)
+
+	var peak int
+	for gen := 0; gen < 12; gen++ {
+		at := base.Add(time.Duration(gen) * window)
+		for i := 0; i < perWindow; i++ {
+			key := fmt.Sprintf("gen-%d-key-%d", gen, i)
+			w.add(w.fingerprint(RecordMigration, key), at)
+		}
+		if n := w.slots(); n > peak {
+			peak = n
+		}
+	}
+
+	// Twelve windows of keys went in. Never more than two are held.
+	if got := w.len(); got > 2*perWindow {
+		t.Fatalf("the window holds %d keys after 12 windows of %d; at most two generations "+
+			"may exist", got, perWindow)
+	}
+	if got := w.len(); got < perWindow {
+		t.Fatalf("the window holds only %d keys, below one window of %d: it is forgetting "+
+			"inside its own floor", got, perWindow)
+	}
+	// 240,000 distinct keys arrived. A set sized for them would need well over
+	// 320,000 slots; this one is sized for two windows.
+	if peak > 4*perWindow {
+		t.Fatalf("the set peaked at %d slots for %d keys per window; the memory model is "+
+			"still the record's size and not the window's", peak, perWindow)
+	}
+	t.Logf("12 windows x %d keys: peak %d slots (%d KiB), holding %d keys",
+		perWindow, peak, peak*16/1024, w.len())
+}
+
+// TestARotationKeepsTheSeeds is what makes the two generations one set. A
+// generation that hashed a key differently would answer a different question,
+// and a rotation would silently forget everything it was meant to keep.
+func TestARotationKeepsTheSeeds(t *testing.T) {
+	base := time.Date(2026, 8, 17, 0, 0, 0, 0, time.UTC)
+	w := newDedupWindow(0, time.Hour, base)
+	before := w.fingerprint(RecordMigration, "same-key")
+	w.tick(base.Add(time.Hour))
+	if w.prev == nil {
+		t.Fatal("the window did not rotate")
+	}
+	if after := w.fingerprint(RecordMigration, "same-key"); after != before {
+		t.Fatalf("the fingerprint changed across a rotation: %v then %v", before, after)
+	}
+}
+
+// TestTheReplayOnlyRebuildsTheWindow is the restart half of B38. Before it, a
+// restart re-read the whole ledger into the set and paid the whole ledger's
+// memory for it; now it inserts only what the window covers, so the cost of a
+// restart stops growing with the age of the record.
+func TestTheReplayOnlyRebuildsTheWindow(t *testing.T) {
+	dir := t.TempDir()
+	ledger, err := OpenLedger(dir)
+	if err != nil {
+		t.Fatalf("OpenLedger: %v", err)
+	}
+	now := time.Now()
+	const old, recent = 400, 40
+	for i := 0; i < old; i++ {
+		_ = ledger.Append(Record{
+			Type: RecordMigration, RecordedAt: now.Add(-30 * 24 * time.Hour).UnixMilli(),
+			MigrationID: fmt.Sprintf("old-%d", i)})
+	}
+	for i := 0; i < recent; i++ {
+		_ = ledger.Append(Record{
+			Type: RecordMigration, RecordedAt: now.Add(-time.Minute).UnixMilli(),
+			MigrationID: fmt.Sprintf("new-%d", i)})
+	}
+	_ = ledger.Close()
+
+	a, err := New(Config{
+		DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test",
+		DedupWindow: time.Hour,
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	if a.recordCount != old+recent {
+		t.Fatalf("the replay read %d records, want %d: B38 bounds the SET and never the "+
+			"ledger", a.recordCount, old+recent)
+	}
+	a.mu.Lock()
+	n := a.seen.len()
+	a.mu.Unlock()
+	if n != recent {
+		t.Fatalf("the replay rebuilt %d keys, want the %d inside the window: a key whose "+
+			"record is older than the window would not have been refused by the live path "+
+			"either", n, recent)
+	}
+	// And the window it did rebuild works: a copy of a recent record is refused.
+	if !a.markSeen(RecordMigration, "new-0") {
+		t.Fatal("a duplicate of an in-window record was admitted after a restart")
+	}
+	// A copy of an out-of-window record is recorded again, which is the stated
+	// price and not a defect.
+	if a.markSeen(RecordMigration, "old-0") {
+		t.Fatal("an out-of-window key was still in the set; the replay is not bounded")
 	}
 }

@@ -18,11 +18,11 @@ import (
 // TestCompactUnderConcurrentWritesKeepsEveryLiveEntry runs compactions against a
 // journal that is being written the whole time.
 //
-// The value under test is AccruedHoldMs. It is not bookkeeping: contract-b-m4.md
-// §9.3 makes the accrued dark time the thing that decides when a held organism
-// bounces home, and it lives in the entry precisely because a restart must not
-// lose time already served or invent time that was never served. A compaction
-// that dropped it would silently reset every hold clock in the rig.
+// The value under test is SentAtMs. It is not bookkeeping: contract-b-m4.md §9.3
+// makes it the instant the forward-resolution deadline runs from, and it lives
+// in the entry precisely because a restart must not restart that deadline. A
+// compaction that dropped it would give every unresolved forward in the rig a
+// fresh day to wait, silently.
 func TestCompactUnderConcurrentWritesKeepsEveryLiveEntry(t *testing.T) {
 	dir := t.TempDir()
 	j, err := Open(dir)
@@ -73,9 +73,9 @@ func TestCompactUnderConcurrentWritesKeepsEveryLiveEntry(t *testing.T) {
 				var last int64
 				for k := 1; k <= 3; k++ {
 					last = int64(w*1000 + i*10 + k)
-					h := HandoffHeld
+					h := HandoffSent
 					if _, err := j.Apply(id, Update{Status: StatusInFlight, Handoff: h,
-						AccruedHoldMs: &last}); err != nil {
+						SentAtMs: &last}); err != nil {
 						t.Errorf("Apply %s: %v", id, err)
 						return
 					}
@@ -100,12 +100,12 @@ func TestCompactUnderConcurrentWritesKeepsEveryLiveEntry(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s: entry %s vanished", what, id)
 			}
-			if st.AccruedHoldMs != hold {
-				t.Fatalf("%s: entry %s accruedHoldMs = %d, want %d",
-					what, id, st.AccruedHoldMs, hold)
+			if st.SentAtMs != hold {
+				t.Fatalf("%s: entry %s sentAt = %d, want %d",
+					what, id, st.SentAtMs, hold)
 			}
-			if st.Handoff != HandoffHeld {
-				t.Fatalf("%s: entry %s handoff = %q, want held", what, id, st.Handoff)
+			if st.Handoff != HandoffSent {
+				t.Fatalf("%s: entry %s handoff = %q, want sent", what, id, st.Handoff)
 			}
 			if st.Entry.Payload != sampleEntry(id).Payload {
 				t.Fatalf("%s: entry %s lost its payload", what, id)
@@ -242,8 +242,8 @@ func TestCompactCrashBetweenScratchAndRenameLosesNothing(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s was lost by the crash", id)
 		}
-		if want := int64(i + 1); st.AccruedHoldMs != want {
-			t.Fatalf("%s accruedHoldMs = %d, want %d", id, st.AccruedHoldMs, want)
+		if want := int64(i + 1); st.SentAtMs != want {
+			t.Fatalf("%s sentAt = %d, want %d", id, st.SentAtMs, want)
 		}
 		if st.Entry.Payload != sampleEntry(id).Payload {
 			t.Fatalf("%s lost its payload", id)
@@ -274,8 +274,8 @@ func TestCompactCrashChild(t *testing.T) {
 			t.Fatal(err)
 		}
 		hold := int64(i + 1)
-		if _, err := j.Apply(id, Update{Status: StatusInFlight, Handoff: HandoffHeld,
-			AccruedHoldMs: &hold}); err != nil {
+		if _, err := j.Apply(id, Update{Status: StatusInFlight, Handoff: HandoffSent,
+			SentAtMs: &hold}); err != nil {
 			t.Fatal(err)
 		}
 	}

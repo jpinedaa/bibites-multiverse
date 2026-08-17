@@ -140,13 +140,17 @@ type SlotView struct {
 	StatsAgeMs          int64                  `json:"statsAgeMs,omitempty"`
 	Population          *int                   `json:"population,omitempty"`
 	EggCount            *int                   `json:"eggCount,omitempty"`
-	CustodyDepth        *int                   `json:"custodyDepth,omitempty"`
-	PacedDepth          *int                   `json:"pacedDepth,omitempty"`
-	HeldDepth           *int                   `json:"heldDepth,omitempty"`
-	BouncedTimeoutTotal *int                   `json:"bouncedTimeoutTotal,omitempty"`
-	SimulatedTime       *float64               `json:"simulatedTime,omitempty"`
-	LastSave            *contracta.SaveReceipt `json:"lastSave,omitempty"`
-	LastSaveAgeMs       *int64                 `json:"lastSaveAgeMs,omitempty"`
+	CustodyDepth *int `json:"custodyDepth,omitempty"`
+	PacedDepth   *int `json:"pacedDepth,omitempty"`
+	// LostForwardTotal is what migration costs on this map: organisms this peer
+	// forwarded once and never heard an answer for (§6.3.1, §25 B37). `heldDepth`
+	// and `bouncedTimeoutTotal` stood here; they went with the bounded hold, and
+	// a peer old enough to still send them has its values carried as unknown keys
+	// and read by nobody.
+	LostForwardTotal *int                   `json:"lostForwardTotal,omitempty"`
+	SimulatedTime    *float64               `json:"simulatedTime,omitempty"`
+	LastSave         *contracta.SaveReceipt `json:"lastSave,omitempty"`
+	LastSaveAgeMs    *int64                 `json:"lastSaveAgeMs,omitempty"`
 
 	// How fast the world runs, and the cap on how fast organisms are let into it
 	// (contract-b-m4.md §18, B16). TimeScale comes from the mod's HEARTBEAT;
@@ -255,10 +259,9 @@ type Totals struct {
 	DarkSlots     int  `json:"darkSlots"`
 	Holes         int  `json:"holes"`
 	Population    *int `json:"population,omitempty"`
-	CustodyDepth  *int `json:"custodyDepth,omitempty"`
-	PacedDepth    *int `json:"pacedDepth,omitempty"`
-	HeldDepth     *int `json:"heldDepth,omitempty"`
-	TimeoutBounce *int `json:"timeoutBounces,omitempty"`
+	CustodyDepth *int `json:"custodyDepth,omitempty"`
+	PacedDepth   *int `json:"pacedDepth,omitempty"`
+	LostForward  *int `json:"lostForwards,omitempty"`
 	// UnknownSlots is how many slots contributed nothing to the sums above.
 	UnknownSlots int     `json:"unknownSlots"`
 	Migrations   int     `json:"migrations"`
@@ -375,8 +378,8 @@ func (a *Archive) StatusView() Status {
 	}
 	out.Totals.Holes = len(out.Holes)
 
-	popTotal, custody, paced, held, bounces := 0, 0, 0, 0, 0
-	havePop, haveCustody, havePaced, haveHeld, haveBounce := false, false, false, false, false
+	popTotal, custody, paced, lost := 0, 0, 0, 0
+	havePop, haveCustody, havePaced, haveLost := false, false, false, false
 
 	for _, si := range a.status.Slots {
 		v := SlotView{
@@ -413,8 +416,7 @@ func (a *Archive) StatusView() Status {
 				v.EggCount = si.Stats.EggCount
 				v.CustodyDepth = si.Stats.CustodyDepth
 				v.PacedDepth = si.Stats.PacedDepth
-				v.HeldDepth = si.Stats.HeldDepth
-				v.BouncedTimeoutTotal = si.Stats.BouncedTimeoutTotal
+				v.LostForwardTotal = si.Stats.LostForwardTotal
 				v.SimulatedTime = si.Stats.SimulatedTime
 				v.TimeScale = si.Stats.TimeScale
 				// The measured rate ages with the block that carries the
@@ -482,13 +484,9 @@ func (a *Archive) StatusView() Status {
 				paced += *v.PacedDepth
 				havePaced = true
 			}
-			if v.HeldDepth != nil {
-				held += *v.HeldDepth
-				haveHeld = true
-			}
-			if v.BouncedTimeoutTotal != nil {
-				bounces += *v.BouncedTimeoutTotal
-				haveBounce = true
+			if v.LostForwardTotal != nil {
+				lost += *v.LostForwardTotal
+				haveLost = true
 			}
 		}
 
@@ -529,11 +527,8 @@ func (a *Archive) StatusView() Status {
 	if havePaced {
 		out.Totals.PacedDepth = &paced
 	}
-	if haveHeld {
-		out.Totals.HeldDepth = &held
-	}
-	if haveBounce {
-		out.Totals.TimeoutBounce = &bounces
+	if haveLost {
+		out.Totals.LostForward = &lost
 	}
 	for _, l := range a.lanes {
 		out.Totals.Migrations += l.total

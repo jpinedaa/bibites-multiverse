@@ -107,6 +107,15 @@ type Config struct {
 	// StatsStale is §10.1's honesty threshold: a stats block older than this
 	// renders as UNKNOWN rather than as state.
 	StatsStale time.Duration
+	// DedupWindow is how long the §5.1 duplicate set remembers a record's key
+	// (§25, B38). It is the archive's one unbounded structure made bounded: a
+	// legitimate duplicate stopped existing when the re-forward did (§25, B37),
+	// so what is left to absorb is an old sidecar's retry and a defective peer,
+	// both of which arrive within minutes. 0 takes the contract default of 48 h.
+	//
+	// The retention it buys is AT LEAST this and at most twice it, and the memory
+	// is at most two windows of keys — deploy/SIZING.md has the arithmetic.
+	DedupWindow time.Duration
 	// MetricsInterval is how often a PEER_STATUS sample is appended to
 	// <data-dir>/metrics.jsonl, so history survives everything (WP3, WP5).
 	MetricsInterval time.Duration
@@ -183,6 +192,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.StatsStale <= 0 {
 		c.StatsStale = contractb.StatsStale
+	}
+	if c.DedupWindow <= 0 {
+		c.DedupWindow = contractb.ArchiveDedupWindow
 	}
 	if c.MetricsInterval <= 0 {
 		c.MetricsInterval = time.Minute
@@ -303,15 +315,15 @@ type Archive struct {
 	// difference between recordCount and `wc -l` on the file.
 	ledgerSkipped int
 	// seen is the §5.1 duplicate rule: one entry for every duplicate key the
-	// record already holds, so a re-forwarded envelope is refused rather than
-	// appended a second time. NOTHING IS EVER DELETED FROM IT — a migration
-	// re-copied a year from now must still be refused then — which makes it the
-	// one retained structure that grows with the ledger and therefore the one
-	// that decides whether the next restart fits in memory. It holds a 128-bit
+	// record holds WITHIN THE LAST cfg.DedupWindow, so a re-copied envelope is
+	// refused rather than appended a second time. It used to remember every key
+	// forever, because a re-forward could arrive a year later; §25's B37 removed
+	// the re-forward, and B38 made this a rotating window whose memory is a
+	// function of the window and not of the record. It holds a 128-bit
 	// fingerprint of each key rather than the key: dedup.go has the measurement
-	// that motivated that, the collision bound, and why the seeds are per
-	// process.
-	seen    *dedupSet
+	// that motivated that, the collision bound, the rotation, and why the seeds
+	// are per process.
+	seen    *dedupWindow
 	pending map[string]*fetch
 	// pendingOrder is the stable round-robin order pumpFetches walks, and
 	// pendingHead is how far this cycle has got. Go's map iteration is random, so
@@ -404,7 +416,7 @@ func New(cfg Config) (*Archive, error) {
 		deny:        deny,
 		lanes:       map[lanePair]*lane{},
 		simRates:    map[int]*achievedRate{},
-		seen:        newDedupSet(dedupHint(ledger.Size())),
+		seen:        newDedupWindow(dedupHint(ledger.Size()), cfg.DedupWindow, time.Now()),
 		pending:     map[string]*fetch{},
 		sentWindow:  map[string]*rateWindow{},
 		inFlight:    map[string]int{},
@@ -436,8 +448,17 @@ func New(cfg Config) (*Archive, error) {
 			// dedups on migrationId+code (§14, B7), so replaying it under
 			// migrationId alone would never match and every re-copied NACK
 			// would be recorded a second time after a restart.
-			a.seen.add(a.seen.fingerprint(rec.Type,
-				dedupKey(rec.Type, rec.MigrationID, rec.Code)))
+			// THE REPLAY ONLY REBUILDS THE WINDOW, not the record (§25, B38). A
+			// key whose record is older than the window is not inserted at all:
+			// the live path would not have refused a copy of it either, and
+			// inserting it would make the set the size of the ledger again for
+			// the first window after every restart. recordedAt is the LEDGER's
+			// clock, so the rotation below walks the ledger's own time.
+			if at := time.UnixMilli(rec.RecordedAt); rec.RecordedAt > 0 &&
+				now.Sub(at) < a.cfg.DedupWindow {
+				a.seen.add(a.seen.fingerprint(rec.Type,
+					dedupKey(rec.Type, rec.MigrationID, rec.Code)), at)
+			}
 		}
 		if rec.Type != RecordMigration {
 			return
@@ -1098,9 +1119,10 @@ func (a *Archive) markSeen(typ, key string) bool {
 	// Fingerprinted before the lock on purpose: the seeds are read-only for the
 	// life of the process and the table is the only shared thing below.
 	fp := a.seen.fingerprint(typ, key)
+	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.seen.add(fp)
+	return a.seen.add(fp, now)
 }
 
 // ---------------------------------------------------------------- genome fetch

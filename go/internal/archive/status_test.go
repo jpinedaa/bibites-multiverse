@@ -52,8 +52,7 @@ func slot(n, col, row int, live bool, stats *contractb.PeerStats) contractb.Slot
 func TestStaleStatsRenderAsUnknown(t *testing.T) {
 	fresh := &contractb.PeerStats{
 		Population: contractb.IntPtr(231), CustodyDepth: contractb.IntPtr(1),
-		PacedDepth: contractb.IntPtr(0), HeldDepth: contractb.IntPtr(2),
-		BouncedTimeoutTotal: contractb.IntPtr(0),
+		PacedDepth: contractb.IntPtr(0), LostForwardTotal: contractb.IntPtr(2),
 	}
 	status := contractb.PeerStatus{
 		Epoch: 41, Map: contractb.MapShape{Width: 2, Height: 1}, SlotCount: 2,
@@ -67,8 +66,8 @@ func TestStaleStatsRenderAsUnknown(t *testing.T) {
 	if live.Totals.Population == nil || *live.Totals.Population != 462 {
 		t.Fatalf("the totals sum known populations to %v, want 462", live.Totals.Population)
 	}
-	if live.Totals.HeldDepth == nil || *live.Totals.HeldDepth != 4 {
-		t.Fatalf("held depth totals %v, want 4", live.Totals.HeldDepth)
+	if live.Totals.LostForward == nil || *live.Totals.LostForward != 4 {
+		t.Fatalf("lost forwards total %v, want 4", live.Totals.LostForward)
 	}
 
 	stale := newViewFixture(t, status, 5*time.Minute).StatusView()
@@ -76,7 +75,7 @@ func TestStaleStatsRenderAsUnknown(t *testing.T) {
 		if s.StatsKnown {
 			t.Fatalf("a five-minute-old stats block reads as state: %+v", s)
 		}
-		if s.Population != nil || s.HeldDepth != nil {
+		if s.Population != nil || s.LostForwardTotal != nil {
 			t.Fatalf("a stale slot published numbers: %+v", s)
 		}
 		if s.StatsAgeMs == 0 {
