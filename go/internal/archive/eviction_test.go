@@ -14,6 +14,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -243,16 +244,89 @@ func TestTheFetchQueueRetiresAGapPastTheHorizon(t *testing.T) {
 // retired backlog on every restart — and pay for it in resident memory as well
 // as in work.
 func TestAReplayDoesNotRequeueACrossingPastTheHorizon(t *testing.T) {
+	// TWO LEDGERS WITH THE SAME RECORDS, and they have to be two since the roll-up
+	// state made the QUEUE ITSELF DURABLE: a second archive on the first one's
+	// data directory reads the first one's retirement decision out of the sidecar
+	// rather than re-deciding it from raw. That is the point of persisting the
+	// queue and it is asserted on its own below; here the horizon rule is what is
+	// under test, so each setting gets a directory nobody else has folded.
+	seedGaps := func(dir string) {
+		seed := horizonArchive(t, dir, 24*time.Hour)
+		for i, h := range []string{hashN(7), hashN(8)} {
+			at := time.Now().Add(-72 * time.Hour)
+			if i == 1 {
+				at = time.Now()
+			}
+			if err := seed.ledger.Append(Record{
+				Type: RecordMigration, MigrationID: []string{"m-stale", "m-recent"}[i],
+				EntityID: int32(i), RecordedAt: at.UnixMilli(),
+				Lineage: &contractb.Lineage{GenomeHash: h},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := seed.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// The seed archive wrote a roll-up state of its own from an empty ledger;
+		// remove it so the archive under test folds the records itself.
+		if err := os.Remove(filepath.Join(dir, rollupSidecarName)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	dir := t.TempDir()
-	stale, recent := hashN(7), hashN(8)
-	seed := horizonArchive(t, dir, 24*time.Hour)
-	for i, h := range []string{stale, recent} {
-		at := time.Now().Add(-72 * time.Hour)
+	seedGaps(dir)
+	withHorizon := horizonArchive(t, dir, 24*time.Hour)
+	if got := withHorizon.PendingGaps(); got != 1 {
+		t.Fatalf("the replay queued %d gaps, want 1 (the recent crossing only)", got)
+	}
+	if _, _, expired := withHorizon.EvictionCounters(); expired != 1 {
+		t.Fatalf("the replay counted %d retired gaps, want 1", expired)
+	}
+
+	// The same records, no horizon: M4's behaviour, both hashes queued forever.
+	plain := t.TempDir()
+	seedGaps(plain)
+	noHorizon := horizonArchive(t, plain, 0)
+	if got := noHorizon.PendingGaps(); got != 2 {
+		t.Fatalf("with no horizon the replay queued %d gaps, want 2", got)
+	}
+	if _, _, expired := noHorizon.EvictionCounters(); expired != 0 {
+		t.Fatalf("an archive with no horizon retired %d gaps", expired)
+	}
+}
+
+// TestTheGapQueueSurvivesARestartAndIsDrainedOnLoad is phase 3's change to this
+// file, and it has three halves.
+//
+//  1. THE QUEUE IS PERSISTED. A restart resumes the same gaps without re-reading
+//     the raw record for them, which is what took the retention horizon out of
+//     the restart's raw scan altogether.
+//  2. genomeGapsExpired IS ALL-TIME. It used to count what THE REPLAY declined,
+//     so it read differently on a restart than on a first start — the only field
+//     that differed in the whole phase-1 validation.
+//  3. A RESTORED QUEUE IS DRAINED ON LOAD. An archive that was down for longer
+//     than the horizon must come back in the state a full replay would have
+//     produced, not in the state it was saved in.
+//
+// The honest consequence, stated because it is a change: RETIREMENT IS NOW
+// DURABLE. Turning the horizon off after a gap has been retired does not bring
+// it back, because nothing re-reads the crossing that named it. The hash is
+// still in the ledger and still in the gap report (§10, "keep the hash
+// forever"); what stays stopped is the asking.
+func TestTheGapQueueSurvivesARestartAndIsDrainedOnLoad(t *testing.T) {
+	dir := t.TempDir()
+	fresh, aged := hashN(11), hashN(12)
+	seed := horizonArchive(t, dir, 48*time.Hour)
+	for i, h := range []string{fresh, aged} {
+		at := time.Now().Add(-time.Hour)
 		if i == 1 {
-			at = time.Now()
+			// Inside a 48 h horizon and outside a 6 h one.
+			at = time.Now().Add(-12 * time.Hour)
 		}
 		if err := seed.ledger.Append(Record{
-			Type: RecordMigration, MigrationID: []string{"m-stale", "m-recent"}[i],
+			Type: RecordMigration, MigrationID: []string{"m-fresh", "m-aged"}[i],
 			EntityID: int32(i), RecordedAt: at.UnixMilli(),
 			Lineage: &contractb.Lineage{GenomeHash: h},
 		}); err != nil {
@@ -262,22 +336,63 @@ func TestAReplayDoesNotRequeueACrossingPastTheHorizon(t *testing.T) {
 	if err := seed.Close(); err != nil {
 		t.Fatal(err)
 	}
-
-	withHorizon := horizonArchive(t, dir, 24*time.Hour)
-	if got := withHorizon.PendingGaps(); got != 1 {
-		t.Fatalf("the replay queued %d gaps, want 1 (the recent crossing only)", got)
-	}
-	if _, _, expired := withHorizon.EvictionCounters(); expired != 1 {
-		t.Fatalf("the replay counted %d retired gaps, want 1", expired)
+	if err := os.Remove(filepath.Join(dir, rollupSidecarName)); err != nil {
+		t.Fatal(err)
 	}
 
-	// The same ledger, no horizon: M4's behaviour, both hashes queued forever.
-	noHorizon := horizonArchive(t, dir, 0)
-	if got := noHorizon.PendingGaps(); got != 2 {
-		t.Fatalf("with no horizon the replay queued %d gaps, want 2", got)
+	first := horizonArchive(t, dir, 48*time.Hour)
+	if got := first.PendingGaps(); got != 2 {
+		t.Fatalf("the first start queued %d gaps, want 2", got)
 	}
-	if _, _, expired := noHorizon.EvictionCounters(); expired != 0 {
-		t.Fatalf("an archive with no horizon retired %d gaps", expired)
+	if first.replayRawRecords != 2 {
+		t.Fatalf("the first start parsed %d raw records, want the whole ledger's 2",
+			first.replayRawRecords)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// (1) and (2): the same horizon, and the queue comes back out of the file.
+	same := horizonArchive(t, dir, 48*time.Hour)
+	if got := same.PendingGaps(); got != 2 {
+		t.Fatalf("the restart resumed %d gaps, want the persisted 2", got)
+	}
+	if _, _, expired := same.EvictionCounters(); expired != 0 {
+		t.Fatalf("the restart retired %d gaps, want 0", expired)
+	}
+	if err := same.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// (3): a shorter horizon on the same state drains what has aged out of it,
+	// exactly as a full replay would have declined to queue it.
+	shorter := horizonArchive(t, dir, 6*time.Hour)
+	if got := shorter.PendingGaps(); got != 1 {
+		t.Fatalf("a 6 h horizon resumed %d gaps, want 1: the 12 h-old crossing has aged out",
+			got)
+	}
+	if _, _, expired := shorter.EvictionCounters(); expired != 1 {
+		t.Fatalf("the load-time drain counted %d retirements, want 1", expired)
+	}
+	if _, live := shorter.pending[aged]; live {
+		t.Error("the aged gap is still queued after a load-time drain")
+	}
+	if _, live := shorter.pending[fresh]; !live {
+		t.Error("the fresh gap was drained")
+	}
+	if err := shorter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The retirement is DURABLE: turning the horizon back up does not un-retire
+	// it, and the counter does not count it a second time.
+	back := horizonArchive(t, dir, 48*time.Hour)
+	if got := back.PendingGaps(); got != 1 {
+		t.Fatalf("raising the horizon back re-queued a retired gap: %d queued, want 1", got)
+	}
+	if _, _, expired := back.EvictionCounters(); expired != 1 {
+		t.Fatalf("genomeGapsExpired is %d after a restart, want the persisted all-time 1",
+			expired)
 	}
 }
 

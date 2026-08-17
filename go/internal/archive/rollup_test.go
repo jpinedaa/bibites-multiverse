@@ -1,6 +1,7 @@
 package archive
 
 import (
+	"compress/gzip"
 	"fmt"
 	"math/rand"
 	"os"
@@ -131,8 +132,22 @@ func openRollupArchive(t *testing.T, dir string) *Archive {
 func rollupDump(a *Archive) string {
 	var b strings.Builder
 	a.mu.Lock()
-	fmt.Fprintf(&b, "records=%d lines=%d skipped=%d\n",
-		a.recordCount, a.ledgerLines, a.ledgerSkipped)
+	fmt.Fprintf(&b, "records=%d skipped=%d gapsExpired=%d dupRefused=%d\n",
+		a.recordCount, a.ledgerSkipped, a.evict.gapsExpired, a.duplicatesRefused)
+	// THE GENOME-GAP QUEUE is a persisted aggregate since phase 3, so it belongs
+	// in the definition of "the state": a tail replay that rebuilt a different
+	// queue from the same records would pass every other line of this dump.
+	gaps := make([]string, 0, len(a.pending))
+	for hash := range a.pending {
+		gaps = append(gaps, hash)
+	}
+	sort.Strings(gaps)
+	for _, hash := range gaps {
+		f := a.pending[hash]
+		fmt.Fprintf(&b, "gap %s crossedAt=%d peer=%s mig=%s entity=%d migrant=%v species=%q\n",
+			hash, f.crossedAt.UnixMilli(), f.sourcePeer, f.migrationID, f.entityID,
+			f.migrant, f.speciesKey)
+	}
 	fmt.Fprintf(&b, "first=%d last=%d typeOverflow=%d peerOverflow=%d\n",
 		a.tally.firstMs, a.tally.lastMs, a.tally.typeOverflow, a.tally.peerOverflow)
 	for _, k := range sortedKeys(a.tally.byType) {
@@ -307,9 +322,9 @@ func TestTheSidecarPlusATailEqualsAFullReplay(t *testing.T) {
 			if !a.rollupLoaded {
 				t.Fatal("the last archive did not load a sidecar at all")
 			}
-			if covered.Records == 0 || covered.Records >= len(recs) {
+			if covered.Record == 0 || covered.Record >= int64(len(recs)) {
 				t.Fatalf("the sidecar covered %d of %d records: this is not a tail replay",
-					covered.Records, len(recs))
+					covered.Record, len(recs))
 			}
 			if got := rollupDump(a); got != want {
 				t.Fatalf("the sidecar plus its tail is not the full replay\n%s",
@@ -476,7 +491,7 @@ func TestEveryPersistedWriteSiteMarksItsKeyDirty(t *testing.T) {
 	clear()
 	a.mu.Lock()
 	a.countRecordLocked(Record{Type: RecordAck, RecordedAt: at, SourcePeer: "peer-a"},
-		a.ledgerLines)
+		a.ledgerPos)
 	counts, peers, index := a.rollupDirty.counts, a.rollupDirty.peers, len(a.rollupDirty.index)
 	a.mu.Unlock()
 	if !counts {
@@ -786,62 +801,157 @@ func TestALoadedSidecarKeepsTheLedgerDamageCount(t *testing.T) {
 	if b.recordCount != records+len(recs)-80 {
 		t.Errorf("records=%d, want %d", b.recordCount, records+len(recs)-80)
 	}
-	// The line count is records plus damage, which is what the tail replay skips
-	// on: get that wrong and the tail starts on the wrong record.
-	if b.ledgerLines != b.recordCount+b.ledgerSkipped {
-		t.Errorf("lines=%d, want records+skipped=%d",
-			b.ledgerLines, b.recordCount+b.ledgerSkipped)
+	// The cursor ends at the end of the raw record, because that is what the next
+	// tail replay resumes from: get it wrong and the tail starts mid-record.
+	if want := rawEndOffset(t, dir); b.ledgerPos.Offset != want {
+		t.Errorf("the cursor ends at offset %d of %q, want the end of the raw record %d",
+			b.ledgerPos.Offset, b.ledgerPos.Segment, want)
 	}
+	if b.ledgerPos.Record != int64(b.recordCount) {
+		t.Errorf("the cursor covers %d records against a fold of %d",
+			b.ledgerPos.Record, b.recordCount)
+	}
+}
+
+// rawEndOffset is the length of the LAST source in the replay's ordered run,
+// which is where a cursor that has read everything must sit.
+func rawEndOffset(t *testing.T, dir string) int64 {
+	t.Helper()
+	srcs, err := ledgerSources(dir)
+	if err != nil {
+		t.Fatalf("ledgerSources: %v", err)
+	}
+	if len(srcs) == 0 {
+		return 0
+	}
+	last := srcs[len(srcs)-1]
+	info, err := os.Stat(last.Path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
 }
 
 // ---------------------------------------------------------------- the plan
 
-// TestTheReplayPlanKeepsTheRawWindowTheGuardsNeed is the design's honest half,
-// asserted: the sidecar bounds the AGGREGATE cost of a restart and does not
-// bound the raw one. The duplicate guard's fingerprint seeds are per process by
-// design and the genome-gap queue is phase 3's to persist, so both are rebuilt
-// from raw records — and an archive with NO horizon has to read all of them.
-func TestTheReplayPlanKeepsTheRawWindowTheGuardsNeed(t *testing.T) {
+// TestTheReplayPlanScansExactlyTheDuplicateWindow is the phase-3 claim, asserted
+// on the plan itself: the ONE thing that cannot be persisted is the duplicate
+// guard (its fingerprint seeds are per process by design), so the raw scan
+// reaches back exactly cfg.DedupWindow behind the sidecar's cursor and no
+// further. The genome horizon does not enter into it any more — the gap queue is
+// persisted — and that is what turns a 720 h raw scan into a 48 h one, and a 48 h
+// one into an hour when the window comes down.
+func TestTheReplayPlanScansExactlyTheDuplicateWindow(t *testing.T) {
 	now := time.Now()
 	st := newRollupState()
-	st.cursor = rollupCursor{Lines: 5000, Records: 5000}
-	for h := 0; h < 48; h++ {
+	st.cursor = LedgerPos{Segment: "2026-08-17-0000", Offset: 500_000, Record: 5000}
+	for h := 0; h < 72; h++ {
 		hour := now.Add(-time.Duration(h) * time.Hour).UnixMilli()
 		hour -= hour % rollupIndexStrideMs
-		st.index[hour] = rollupCursor{Lines: 5000 - h*100, Records: 5000 - h*100}
+		st.index[hour] = LedgerPos{Segment: "2026-08-17-0000",
+			Offset: int64(500_000 - h*1000), Record: int64(5000 - h*10)}
 	}
 
-	noHorizon := &Archive{cfg: Config{DedupWindow: 48 * time.Hour}}
-	plan := noHorizon.planReplay(st, now)
-	if plan.ScanFrom != 0 {
-		t.Errorf("with no retention horizon the plan scans from line %d, want 0: the gap "+
-			"queue needs every record there has ever been", plan.ScanFrom)
+	// A 48 h window with a 72 h index: the scan starts inside the index and
+	// behind the cursor, and the span it names is the window.
+	a := &Archive{cfg: Config{DedupWindow: 48 * time.Hour, GenomeHorizon: 720 * time.Hour}}
+	plan := a.planReplay(st, now)
+	if !plan.FromSidecar {
+		t.Fatal("a plan with a cursor is not FromSidecar")
 	}
-	if plan.AggFrom != 5000 {
-		t.Errorf("AggFrom=%d, want the sidecar's cursor 5000", plan.AggFrom)
-	}
-
-	withHorizon := &Archive{cfg: Config{DedupWindow: time.Hour, GenomeHorizon: 6 * time.Hour}}
-	plan = withHorizon.planReplay(st, now)
-	if plan.ScanFrom == 0 || plan.ScanFrom >= plan.AggFrom {
-		t.Errorf("with a 6 h horizon the plan scans from line %d of %d: it should start "+
-			"inside the window and behind the sidecar", plan.ScanFrom, plan.AggFrom)
-	}
-	if plan.RawSpan != 6*time.Hour {
-		t.Errorf("RawSpan=%s, want the larger of the horizon and the dedup window",
+	if plan.RawSpan != 48*time.Hour {
+		t.Errorf("RawSpan=%s, want the duplicate window 48h whatever the 720h horizon says",
 			plan.RawSpan)
 	}
+	if plan.Floor.Record != 5000 || plan.Floor.Offset != 500_000 {
+		t.Errorf("Floor=%+v, want the sidecar's cursor at record 5000, offset 500000",
+			plan.Floor)
+	}
+	if plan.From.Record >= plan.Floor.Record || plan.From.Record == 0 {
+		t.Errorf("the scan starts at record %d against a floor of %d: it should start "+
+			"inside the window and behind the sidecar",
+			plan.From.Record, plan.Floor.Record)
+	}
+	// One hour is one hour of index entries closer to the cursor. This is the
+	// measurement the deployment will make when the fleet has crossed.
+	short := &Archive{cfg: Config{DedupWindow: time.Hour, GenomeHorizon: 720 * time.Hour}}
+	shortPlan := short.planReplay(st, now)
+	if shortPlan.From.Record <= plan.From.Record {
+		t.Errorf("a 1 h window starts at record %d and a 48 h one at %d: the shorter "+
+			"window must start LATER", shortPlan.From.Record, plan.From.Record)
+	}
+	if shortPlan.RawSpan != time.Hour {
+		t.Errorf("RawSpan=%s, want 1h", shortPlan.RawSpan)
+	}
 
-	// The dedup window is the floor when it is the wider of the two.
-	wideDedup := &Archive{cfg: Config{DedupWindow: 24 * time.Hour, GenomeHorizon: time.Hour}}
-	if got := wideDedup.planReplay(st, now).RawSpan; got != 24*time.Hour {
-		t.Errorf("RawSpan=%s, want 24h", got)
+	// A window wider than the index can answer for scans from the start of what
+	// is on the host. An index that cannot say where the window begins is not a
+	// licence to guess.
+	wide := &Archive{cfg: Config{DedupWindow: 400 * time.Hour}}
+	if got := wide.planReplay(st, now); !got.From.IsStart() {
+		t.Errorf("with a window older than the index the scan starts at %+v, want the "+
+			"beginning of the raw window", got.From)
 	}
 
 	// No sidecar at all is the replay this archive has always had.
-	if got := withHorizon.planReplay(nil, now); got.ScanFrom != 0 || got.AggFrom != 0 ||
+	if got := a.planReplay(nil, now); !got.From.IsStart() || !got.Floor.IsStart() ||
 		got.FromSidecar {
 		t.Errorf("with no sidecar the plan is %+v, want a full replay", got)
+	}
+}
+
+// TestARestartReadsOnlyTheDuplicateWindowOfRaw is the same claim measured
+// end to end rather than on the plan: two archives over the same 900-record
+// ledger, one with a duplicate window that covers the whole of it and one with a
+// window that covers a sliver, and the second parses a fraction of the raw the
+// first does — with IDENTICAL aggregates.
+func TestARestartReadsOnlyTheDuplicateWindowOfRaw(t *testing.T) {
+	// The records span 900 * 30 s = 7.5 h, ending now.
+	step := int64(30_000)
+	n := 900
+	base := time.Now().UnixMilli() - int64(n)*step
+	recs := syntheticRecords(4242, n, base, step)
+
+	run := func(window time.Duration) (*Archive, string) {
+		dir := t.TempDir()
+		appendRecords(t, dir, recs)
+		cfg := Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test",
+			DedupWindow: window}
+		first, err := New(cfg)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		want := rollupDump(first)
+		if err := first.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		second, err := New(cfg)
+		if err != nil {
+			t.Fatalf("New restart: %v", err)
+		}
+		if got := rollupDump(second); got != want {
+			t.Fatalf("a %s-window restart is not the full replay\n%s",
+				window, firstDiff(want, got))
+		}
+		return second, dir
+	}
+
+	wide, _ := run(24 * time.Hour)
+	defer wide.Close()
+	narrow, _ := run(30 * time.Minute)
+	defer narrow.Close()
+
+	if wide.replayRawRecords != n {
+		t.Errorf("a 24 h window over a 7.5 h ledger parsed %d records, want all %d",
+			wide.replayRawRecords, n)
+	}
+	if narrow.replayRawRecords >= wide.replayRawRecords {
+		t.Errorf("a 30 min window parsed %d raw records and a 24 h one parsed %d: the "+
+			"short window is the whole saving", narrow.replayRawRecords, wide.replayRawRecords)
+	}
+	if narrow.replayRawRecords > n/2 {
+		t.Errorf("a 30 min window over a 7.5 h ledger parsed %d of %d records; it should "+
+			"be a small fraction", narrow.replayRawRecords, n)
 	}
 }
 
@@ -906,13 +1016,25 @@ func TestTheHonestyFieldsSayWhatIsAggregateAndWhatIsRaw(t *testing.T) {
 	if view.RollupSavedAtMs == 0 {
 		t.Error("rollupSavedAtMs is 0 after a save")
 	}
-	if view.RawWindowFromMs != recs[0].RecordedAt {
-		t.Errorf("rawWindowFromMs=%d, want the first record %d: phase 1 retires no raw "+
-			"line, so the raw window is the whole record",
-			view.RawWindowFromMs, recs[0].RecordedAt)
-	}
 	if view.Records != len(recs) {
 		t.Errorf("ledgerRecords=%d, want %d", view.Records, len(recs))
+	}
+	// WHAT THE START COST, measured. A first start reads every record there is,
+	// so the two say so; a restart from the sidecar says something much smaller,
+	// which is the whole point and is asserted in the restart tests.
+	if view.ReplayRawRecords != len(recs) {
+		t.Errorf("replayRawRecords=%d after a full replay, want %d",
+			view.ReplayRawRecords, len(recs))
+	}
+	if view.ReplayRawSeconds < 0 {
+		t.Errorf("replayRawSeconds=%v", view.ReplayRawSeconds)
+	}
+	if view.ReplayFromRetired {
+		t.Error("replayFromRetired is set on an archive whose raw record is all here")
+	}
+	if view.DuplicatesRefused != 0 {
+		t.Errorf("duplicatesRefused=%d on an archive nothing has been offered to twice",
+			view.DuplicatesRefused)
 	}
 	_ = a.Close()
 
@@ -920,9 +1042,9 @@ func TestTheHonestyFieldsSayWhatIsAggregateAndWhatIsRaw(t *testing.T) {
 	// coverage it does not have.
 	fresh := openRollupArchive(t, t.TempDir())
 	defer fresh.Close()
-	if v := fresh.StatusView(); v.RollupCoveredRecords != 0 || v.RawWindowFromMs != 0 {
-		t.Errorf("a fresh archive publishes covered=%d rawFrom=%d, want 0 and 0",
-			v.RollupCoveredRecords, v.RawWindowFromMs)
+	if v := fresh.StatusView(); v.RollupCoveredRecords != 0 || v.ReplayRawRecords != 0 {
+		t.Errorf("a fresh archive publishes covered=%d replayRawRecords=%d, want 0 and 0",
+			v.RollupCoveredRecords, v.ReplayRawRecords)
 	}
 }
 
@@ -992,4 +1114,230 @@ func TestTheCursorNeverGoesBackwards(t *testing.T) {
 		t.Fatalf("the aggregates changed when the raw record went away\n%s",
 			firstDiff(want, got))
 	}
+}
+
+// ---------------------------------------------------------------- phase 3
+
+// TestDuplicatesRefusedIsCountedAndPersisted. A refused duplicate is a real
+// event that leaves NO OTHER TRACE anywhere: nothing is appended, nothing is
+// logged per occurrence, and the ledger is by construction the ledger without
+// it. §25's B38 and decision 0006 both rest on the counter — during the
+// transition a non-zero value names a peer still running a build that
+// re-forwards, and it is the evidence that says whether the 48 h duplicate
+// window may come down to an hour — so it is all-time and it survives a restart.
+func TestDuplicatesRefusedIsCountedAndPersisted(t *testing.T) {
+	dir := t.TempDir()
+	a := openRollupArchive(t, dir)
+
+	if a.markSeen(RecordMigration, "mig-1") {
+		t.Fatal("a key nobody has offered before was refused")
+	}
+	if !a.markSeen(RecordMigration, "mig-1") {
+		t.Fatal("the second copy of a key was not refused")
+	}
+	if !a.markSeen(RecordMigration, "mig-1") {
+		t.Fatal("the third copy of a key was not refused")
+	}
+	// An empty key is never seen at all: a record with no migrationId cannot be
+	// deduplicated, and counting it would invent refusals nobody made.
+	if a.markSeen(RecordMigration, "") {
+		t.Fatal("an empty key was refused")
+	}
+	if got := a.StatusView().DuplicatesRefused; got != 2 {
+		t.Fatalf("duplicatesRefused=%d, want 2", got)
+	}
+	if err := a.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	b := openRollupArchive(t, dir)
+	defer b.Close()
+	if got := b.StatusView().DuplicatesRefused; got != 2 {
+		t.Fatalf("duplicatesRefused=%d after a restart, want the persisted 2: a counter "+
+			"that resets cannot answer 'has anything been refused since the release'", got)
+	}
+}
+
+// TestTheCursorSurvivesARotationAndAGzippedSegment. The cursor is a POSITION
+// now, and a position naming the live file is about a file that ROTATES: the
+// bytes move into a segment and a fresh live file starts at offset 0 with
+// different records. Seeking to the old offset in the new file would skip
+// records and fold the rest against the wrong numbers.
+//
+// Two guards, and this exercises both: a rotation re-points every position the
+// roll-up holds at the segment that took the bytes, and the floor line records
+// the live file's own first record so a load can tell a stale position from a
+// good one. Whichever fires, the invariant is the same one the whole design
+// rests on — THE SIDECAR PLUS ITS TAIL IS THE FULL REPLAY.
+func TestTheCursorSurvivesARotationAndAGzippedSegment(t *testing.T) {
+	day := int64(24 * 60 * 60 * 1000)
+	base := (time.Now().UnixMilli()/day)*day - 3*day
+	// 300 records over three days, so the ledger rotates twice under the fold.
+	recs := syntheticRecords(90210, 300, base, day/100)
+
+	cfg := func(dir string) Config {
+		return Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test",
+			DedupWindow: 96 * time.Hour}
+	}
+
+	whole := t.TempDir()
+	appendRecords(t, whole, recs)
+	ref, err := New(cfg(whole))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	want := rollupDump(ref)
+	_ = ref.Close()
+
+	// The same records, folded in three passes with a restart between each, and
+	// the segments compressed under the archive between two of them.
+	dir := t.TempDir()
+	for _, cut := range [][2]int{{0, 120}, {120, 240}, {240, 300}} {
+		appendRecords(t, dir, recs[cut[0]:cut[1]])
+		a, err := New(cfg(dir))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if err := a.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		segs, err := LedgerSegments(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range segs {
+			if s.Compressed || s.Retired {
+				continue
+			}
+			if _, _, err := compressSegment(dir, s.Name, gzip.BestSpeed); err != nil {
+				t.Fatalf("compress %s: %v", s.Name, err)
+			}
+		}
+	}
+	b, err := New(cfg(dir))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer b.Close()
+	if segs, err := LedgerSegments(dir); err != nil || len(segs) < 2 {
+		t.Fatalf("the fixture produced %d segments (%v), want at least 2 rotations",
+			len(segs), err)
+	}
+	if got := rollupDump(b); got != want {
+		t.Fatalf("a tail replay across rotations and compressions is not the full replay\n%s",
+			firstDiff(want, got))
+	}
+}
+
+// TestACursorInARetiredSegmentIsSaidRatherThanGuessed. A position naming a
+// segment that has left this host is a caller whose state is older than the raw
+// window — an archive restored from a backup, or one that was down for longer
+// than the window. The records between the cursor and the oldest surviving
+// segment are gone with it.
+//
+// There are two honest answers and one dishonest one. The dishonest one is to
+// pick a different start and carry on, which silently drops or doubles records.
+// This one keeps the aggregates, folds everything still present on top, and SAYS
+// SO on the status surface, because the hole is real and only
+// `deploy/coldcopy.sh --restore` can close it.
+func TestACursorInARetiredSegmentIsSaidRatherThanGuessed(t *testing.T) {
+	day := int64(24 * 60 * 60 * 1000)
+	base := (time.Now().UnixMilli()/day)*day - 3*day
+	// 200 records at a hundredth of a day is two days of ledger ending yesterday,
+	// so the live file's day is over and the maintenance pass will close it.
+	recs := syntheticRecords(5150, 200, base, day/100)
+
+	// A directory whose cursor sits in a CLOSED SEGMENT: the records are folded
+	// and the live file is then rotated shut, which is the ordinary state of an
+	// archive across a midnight.
+	seed := func() (dir string, cursor LedgerPos, records int) {
+		dir = t.TempDir()
+		appendRecords(t, dir, recs)
+		a, err := New(Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test"})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		// The maintenance pass closes a live file whose day is over, with no
+		// append behind it — which is how a cursor comes to name a segment.
+		a.LedgerMaintenanceNow(time.Now())
+		a.mu.Lock()
+		cursor, records = a.ledgerPos, a.recordCount
+		a.mu.Unlock()
+		if cursor.Segment == "" {
+			t.Fatalf("the fixture left the cursor in the live file (%+v)", cursor)
+		}
+		if err := a.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return dir, cursor, records
+	}
+	retire := func(dir, name string) {
+		for _, suffix := range []string{plainSuffix, gzSuffix} {
+			_ = os.Remove(filepath.Join(segmentsDir(dir), name+suffix))
+		}
+		// The receipt outlives the segment: it is what a restore is planned from.
+		if err := os.WriteFile(
+			filepath.Join(segmentsDir(dir), name+gzSuffix+receiptSuffix),
+			[]byte(`{"segment":"`+name+gzSuffix+`"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := func(dir string) Config {
+		return Config{DataDir: dir, PeerID: "archive-test", RelayURL: "ws://test"}
+	}
+
+	// CASE 1: the cursor is older than everything still here. Every segment is
+	// retired and new crossings have landed since, so what is present has never
+	// been folded and all of it is.
+	t.Run("older than everything present", func(t *testing.T) {
+		dir, _, records := seed()
+		segs, err := LedgerSegments(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sg := range segs {
+			retire(dir, sg.Name)
+		}
+		fresh := syntheticRecords(777, 40, time.Now().UnixMilli(), 1000)
+		appendRecords(t, dir, fresh)
+
+		b, err := New(cfg(dir))
+		if err != nil {
+			t.Fatalf("New after a retirement: %v", err)
+		}
+		defer b.Close()
+		if !b.replayFromRetired || !b.StatusView().ReplayFromRetired {
+			t.Error("an archive whose cursor names a retired segment does not say so")
+		}
+		if b.recordCount != records+len(fresh) {
+			t.Errorf("recordCount=%d, want the persisted %d plus the %d new records",
+				b.recordCount, records, len(fresh))
+		}
+	})
+
+	// CASE 2: the cursor is NOT older than what is here — which retirement
+	// cannot produce and a raw record replaced under a running deployment can.
+	// Re-folding would double every counter, so nothing is folded.
+	t.Run("not older than what is present", func(t *testing.T) {
+		dir, cursor, records := seed()
+		segs, err := LedgerSegments(dir)
+		if err != nil || len(segs) < 2 {
+			t.Fatalf("the fixture produced %d segments (%v), want at least 2", len(segs), err)
+		}
+		retire(dir, cursor.Segment)
+
+		b, err := New(cfg(dir))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		defer b.Close()
+		if !b.replayFromRetired {
+			t.Error("the archive does not say its cursor named a segment that has gone")
+		}
+		if b.recordCount != records {
+			t.Errorf("recordCount=%d, want the persisted %d: the records still here were "+
+				"already folded and re-folding them doubles every counter",
+				b.recordCount, records)
+		}
+	})
 }
