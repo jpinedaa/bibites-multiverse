@@ -248,6 +248,37 @@ jobs:
             exit 1
           fi
 
+      # restart-archive.sh's scratch directory holds a COPY OF deploy.env, so a
+      # run that ends without removing it leaves every deployed parameter in
+      # /tmp until somebody notices. Two host directories had been sitting there
+      # for exactly that reason. TMPDIR points the scratch at an empty directory
+      # so this counts only what these runs created, and the run that MUST leave
+      # nothing is the one that fails: the refusal happens after the scratch
+      # directory exists, which is the path the old code never cleaned.
+      - name: the restart scripts leave no scratch behind
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          gate="$(mktemp -d)"
+          TMPDIR="$scratch" deploy/restart-relay.sh --dry-run --reason 'CI leak check' >/dev/null
+          TMPDIR="$scratch" deploy/restart-archive.sh --dry-run --reason 'CI leak check' >/dev/null
+          : >"$gate/peer-gate.map"
+          if TMPDIR="$scratch" MV_GATEDIR="$gate" \
+             deploy/restart-archive.sh --dry-run --reason 'CI leak check' >/dev/null 2>&1; then
+            echo "!! a gate file that already exists did not stop the run" >&2
+            exit 1
+          fi
+          left="$(find "$scratch" -mindepth 1 -maxdepth 1 -print)"
+          if [ -n "$left" ]; then
+            echo "!! the restart scripts left scratch behind:" >&2
+            printf '%s\n' "$left" >&2
+            echo "   Each of these can hold a copy of deploy.env. Scratch must come" >&2
+            echo "   from rl_mktemp_d, which the EXIT trap in restart-lib.sh clears." >&2
+            exit 1
+          fi
+          rm -rf "$scratch" "$gate"
+          echo "restart scratch: nothing left behind"
+
   installer:
     name: installer
     runs-on: ubuntu-latest

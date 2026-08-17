@@ -106,8 +106,14 @@ T_RELAY_START=""; T_SUBSCRIBED=""; T_PEERS=""
 REPLAY_SEV="not read"; REPLAY_MSG=""
 REPLAY_SECONDS="not measured"
 
-TMPD="$(mktemp -d "${TMPDIR:-/tmp}/multiverse-restart-archive.XXXXXX")"
-cleanup_tmp() { rm -rf "$TMPD"; }
+# Scratch holds a COPY OF deploy.env (see check_replay_headroom), so it comes
+# from the library rather than from a bare mktemp -d: rl_mktemp_d registers the
+# directory with the same EXIT trap that takes the gate down, and every path out
+# of this script — a refused preflight, a failed restart, an interrupt, a
+# --dry-run — removes it.
+TMPD=""
+rl_mktemp_d archive TMPD ||
+  die "cannot create a private work directory under ${TMPDIR:-/tmp}"
 
 # ---------------------------------------------------------------- preflight
 
@@ -297,7 +303,7 @@ announce_reminder
 # THE GATE GOES UP BEFORE THE RELAY STOPS. Raising it afterwards would leave the
 # window between the relay starting and the gate being written, which is the
 # race this removes.
-rl_gate_up || { cleanup_tmp; die "could not raise the gate. Nothing was restarted."; }
+rl_gate_up || die "could not raise the gate. Nothing was restarted."
 
 step "stop the relay — the participant outage and the complete record start here"
 rl_mark_log
@@ -374,7 +380,6 @@ if [ "$RC" = 0 ]; then
 fi
 
 receipt
-cleanup_tmp
 
 if [ "$RC" != 0 ]; then
   printf '\nCRIT: the archive restart did not complete cleanly. The gate is down.\n' >&2
