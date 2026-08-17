@@ -28,19 +28,21 @@ Keep these records outside the public repository:
 | `health-snapshot.sh` | Records one numeric reading of the live map. It keeps the numbers and decides nothing. |
 | `service-host-sample` | Records one sample of this host: CPU, load, memory, disk, per-unit state, and TCP counters. |
 | `backup.sh` | Creates local identity and archive backups. It also prints recovery guidance. |
+| `coldcopy.sh` | Copies each closed ledger segment to an object store, verifies it against the store, and writes the receipt without which the archive removes nothing. |
 | `install-stream-origin.sh` | Installs an optional private RTMP and loopback HLS origin. |
 | `viewers-presence.sh` | Publishes whether anyone is watching the broadcast, so the publisher can stop while nobody is. |
 | `tls-deploy-hook.sh` | Installs a renewed certificate and reloads nginx. |
 | `test-front-door.sh` | Renders and checks the nginx configuration. |
 | `test-units.sh` | Checks the systemd units, including the archive's start-time dependencies. |
-| `test-monitor.sh` | Drives the monitor's transfer, billing, hosts-pin, replay-headroom and swap arithmetic against fake counters and a fake clock. |
+| `test-monitor.sh` | Drives the monitor's transfer, billing, hosts-pin, replay, record-layer and swap arithmetic against fake counters, a fake status document and a fake clock. |
+| `test-coldcopy.sh` | Drives `coldcopy.sh` through a fake AWS CLI, including every way the store can disagree. It makes no API call and reads no credential. |
 | `test-viewers-presence.sh` | Drives `viewers-presence.sh` against a fake access log, fake metrics and a fixed clock. |
 | `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
 | `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
 | `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
 | `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses, including a part-day response that pins the billing lag. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
-| `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, and viewer-presence signal. |
+| `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, off-host segment copy, and viewer-presence signal. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates, and the front door's log rotation policy. |
 | `www/announcements/` | The announcements page nginx serves from disk, and the seed for its notices file. |
 | `SIZING.md` | Stable capacity measurements and sizing formulas. |
@@ -66,7 +68,9 @@ The following values identify one deployment:
 
 - `MV_DOMAIN` and `MV_CERT_EXTRA_NAMES`.
 - `MV_ACME_EMAIL`.
-- `MV_RETENTION` and `MV_ARCHIVE_GENOME_HORIZON`.
+- `MV_RETENTION`, `MV_ARCHIVE_GENOME_HORIZON` and `MV_LEDGER_WINDOW`.
+- `MV_COLDCOPY` and `MV_COLDCOPY_URI`. The URI names a live resource, so it
+  belongs on the host and in private operations storage and never in Git.
 - `MV_PERIOD_START` and `MV_PERIOD_END`.
 - `MV_ALERT_KIND`, `MV_ALERT_URL`, and `MV_ALERT_COMMAND`.
 - `MV_BUNDLE` and `MV_TRANSFER_ALLOWANCE_GB`, which must state the same bundle.
@@ -335,6 +339,120 @@ The other two run on the host and read the archive on loopback.
 The last form samples a window and prints the table rows a deployment record needs.
 One reading before and one after cannot show a fault that resolves between them.
 
+## The off-host copy of the record
+
+The archive keeps every ANSWER for ever.
+It keeps the RAW CROSSING LINES on this host for a window, and only for a window,
+and it keeps them off the host for the run.
+`coldcopy.sh` is what puts them off the host, and it is also the gate that lets
+the archive remove one.
+
+**No segment is removed until a receipt confirms a copy that matches the bytes on
+this disk.** The gate is in the archive's own code. There is no timeout and no
+override. So a cold archive that has stopped working costs disk and never
+record.
+
+### Turn it on
+
+Set three values in `/etc/multiverse/deploy.env`:
+
+```sh
+MV_COLDCOPY=s3
+MV_COLDCOPY_URI=s3://<bucket>/<prefix>
+MV_COLDCOPY_STORAGE_CLASS=STANDARD
+```
+
+`MV_COLDCOPY_URI` names a live resource. Keep it on the host and in private
+operations storage, and never in this repository.
+
+Prefer a destination the instance can read and write **without a key on the
+host**. A provider object store that is attached to the instance gives temporary
+credentials through the instance metadata service, so no long-lived secret ever
+lands on a public-facing box. If the destination needs a key instead, put the
+key in its designated secret manager, record its name, owner and rotation date
+in private operations storage, and set only `MV_COLDCOPY_PROFILE` here.
+
+`STANDARD` is the shipped storage class and it is the one to keep unless the
+store both prices classes separately and allows the class you choose.
+An infrequent-access class looks cheaper and is denied outright by some buckets'
+own policies; the symptom is that every upload returns 403, no receipt is
+written, and nothing is ever retired.
+
+Then, in order:
+
+```sh
+sudo deploy/provision.sh --only packages    # installs the AWS CLI
+sudo deploy/provision.sh --only systemd     # installs and enables the hourly timer
+sudo -u multiverse /opt/multiverse/deploy/coldcopy.sh --check
+sudo -u multiverse /opt/multiverse/deploy/coldcopy.sh --dry-run
+sudo -u multiverse /opt/multiverse/deploy/coldcopy.sh --list
+```
+
+**`--check` before anything else.** The AWS CLI is not on this host by default,
+and a destination that is unreachable, misnamed or denied fails in exactly the
+same way as one that is absent: no receipt, so nothing retires, so the disk
+fills while every other reading looks healthy. `--check` reads the destination
+and uploads nothing. `provision.sh --only verify` runs it too.
+
+`--check` cannot prove that a write will be accepted. Only the first real run
+does that. Read its output.
+
+### Read what is waiting
+
+`ledgerSegmentsAwaitingColdCopy` on `/api/status` is the number that should be
+zero. It counts closed segments that are past the window and have no confirmed
+off-host copy.
+
+```sh
+curl -s http://127.0.0.1:8796/api/status | jq '{
+  segments: .ledgerSegments,
+  awaiting: .ledgerSegmentsAwaitingColdCopy,
+  retired:  .ledgerRetiredTotal,
+  rawFrom:  .ledgerRawWindowFromMs,
+  windowMs: .ledgerWindowMs }'
+```
+
+`monitor.sh` watches it, and it is the only thing on this host that watches the
+object store at all:
+
+```sh
+sudo -u multiverse /opt/multiverse/deploy/monitor.sh --only archive --quiet --verbose
+```
+
+| Reading | What it means |
+|---|---|
+| `0` | Every segment past the window has a confirmed copy. Retirement is working. |
+| A small number, for less than an hour | A segment has just closed. The timer runs hourly. |
+| The same number for a day | The copy is failing rather than lagging. Run `coldcopy.sh --check`. |
+| Rising, with the raw window far past the configured one | The window is doing nothing. Nothing has been lost — the disk is what is at risk. |
+
+`coldcopy.sh --list` prints the same picture from the host's own directory,
+including retired segments, which appear as a receipt with no file beside it.
+That receipt is the only record on this host of where those bytes went, and it
+is deliberately kept after the segment is removed.
+
+### Bring a segment back
+
+```sh
+sudo -u multiverse /opt/multiverse/deploy/coldcopy.sh --restore 2026-08-16-0000.jsonl.gz
+```
+
+It refuses to overwrite a segment that is already present.
+It verifies the fetched object's `sha256` against the receipt and checks that
+the bytes are a valid compressed stream, and it puts nothing into place until
+both pass. A file that hashes correctly and will not decompress is still no
+record.
+
+The archive picks a restored segment up on its next start: segments are read in
+order by the day inside the name, and a restored one simply reappears in the
+run. It will be retired again once it is past the window and its receipt is
+present, so keep the receipt only if you want it kept.
+
+Restoring a segment does not repair a fold that has a hole in it. If
+`/api/status` reports `replayFromRetired`, the archive is saying that its saved
+cursor named a segment that had already left this host; restore the segment
+first, then restart the archive so the fold is rebuilt across it.
+
 ## Daily billing reconciliation
 
 `monitor.sh` watches the transfer allowance from this host's own NIC counter.
@@ -514,7 +632,10 @@ relay back in front of a replaying archive. `RESTART-POLICY.md`, "Host reboot", 
 and the drop-in that phase installs is the hold-down that survives it.
 
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
-Batch archive changes because replay time grows with the ledger.
+Batch archive changes: a restart costs a held-down relay, and that outage is a
+participant outage even though it is now bounded by the duplicate window rather
+than by the length of the run. Read the projected cost from
+`monitor.sh --only replay`'s `replay-cost` verdict before you announce one.
 
 An archive change that alters what the archive retains per record is not finished until
 `MV_REPLAY_RESIDENT_B`, `MV_REPLAY_PEAK_B` and `MV_ARCHIVE_GOMEMLIMIT` are re-derived in
@@ -525,6 +646,7 @@ Apply them with `provision.sh --only envfiles`; the archive reads them at start.
 Use `test-front-door.sh` after an nginx template or announcements-page change.
 Use `test-units.sh` after a systemd unit change.
 Use `test-monitor.sh` after a `monitor.sh` change.
+Use `test-coldcopy.sh` after a `coldcopy.sh` change.
 Use `test-viewers-presence.sh` after a `viewers-presence.sh` change.
 Use `test-ce-reconcile.sh` after a `ce-reconcile.sh` change.
 Use `test-ci-gate.sh` after a `ci-gate.sh` change.

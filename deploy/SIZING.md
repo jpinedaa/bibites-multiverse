@@ -46,6 +46,12 @@ The two archive rows describe the build of `2026-08-16` and change when that bui
 The archive resident set is also the replay peak; they are one number.
 "Archive memory" owns both rows and states the workload they were measured on.
 
+**Both archive rows are per-record models and the build they describe was
+replaced on `2026-08-17`.** After the record roll-up neither retained state nor
+resident set follows the record count. Use them only to size a replay of a raw
+ledger that has no state sidecar beside it; "The archive after the roll-up" has
+the model for what is deployed.
+
 ## Durable growth
 
 Use this conservative rule:
@@ -91,7 +97,9 @@ Add at least the log ceiling, operating-system space, and recovery headroom.
 Do not provision a volume to the exact model result.
 
 A genome horizon bounds stored blobs after the horizon reaches steady state.
-It does not bound the ledger or archive memory.
+Since the record roll-up it also sets the raw ledger's own window, unless a
+deployment overrides that window; see "The raw ledger window" below.
+It does not bound archive memory. The duplicate window does.
 
 ## Archive memory
 
@@ -108,6 +116,12 @@ Use this model:
 resident_B = ledger_records * bytes_per_record
 replay_peak_B = resident_B
 ```
+
+**That model describes a build with no state sidecar.** It is still the right
+one for a restore from a raw ledger alone, and it is still what `monitor.sh`'s
+`replay` gate computes, deliberately, because it errs toward calling a host
+full. For the deployed archive read "The archive after the roll-up" below: the
+record count stopped being the input.
 
 `bytes_per_record` is a property of the build and of the host's core count.
 It is not a constant of this project.
@@ -213,6 +227,89 @@ That design used approximately `1.03` to `1.29 KB` for each record at peak.
 The streaming implementation applies and releases one record at a time.
 The file format and wire contracts did not change.
 
+### The archive after the roll-up
+
+**The record roll-up of `2026-08-17` removed the growth term.**
+Before it, every restart re-derived the archive's whole fold from the raw ledger,
+so retained state followed the record count and so did replay time.
+The fold is now durable, in a state sidecar beside the ledger, and the only raw a
+restart still parses is one duplicate window.
+
+Use this model:
+
+```text
+resident_B ~= bounded_aggregates_B
+            + min(keys_in_the_whole_ledger, 2 * keys_in_one_duplicate_window) * 26 B
+            + queued_genome_gaps * 1.2 KB
+```
+
+Every term is bounded and none of them follows the ledger's length.
+
+| Term | What bounds it |
+|---|---|
+| Bounded aggregates | The approved retained state: 4,096 species, 8,192 genome fingerprints for each species, brain-coverage buckets, lanes, ancestry edges. "What the archive retains" lists them. |
+| Duplicate keys | The duplicate window, times the crossing rate. Two generations of the table. |
+| Genome-gap queue | The genome horizon. A gap is only ever queued for a crossing inside it, and a restart drains what aged out while the process was down. |
+
+Measured, on two pinned cores, replaying one copy of the production ledger of
+`2026-08-16` — `5,408,123` records — with the roll-up build:
+
+| Duplicate window | Raw records inside it | Settled resident set |
+|---|---:|---:|
+| `48h` | `5,166,645` | `620.9 MiB` |
+| `1h` | `91,858` | `485.6 MiB` |
+
+The `135 MiB` between those two rows is the duplicate table, and it is the only
+term that moved: `26 B` for each key, exactly as the table in "What the archive
+retains" predicts.
+
+**That copy carries no genome store, so every hash it names is a gap**:
+`273,252` of them, which is about `313 MiB` of the figures above and is the
+reason both rows are large. The live service reports one or two gaps. The same
+binary on the same file with a horizon that empties the queue settled at
+`176.7 MiB`, against `161.5 MiB` for the build before the roll-up — **`9 percent`
+more resident for a fold that no longer has to be rebuilt.**
+
+**Size the gap queue against a restore, not against the service.**
+A restore from the ledger alone, with no genome store, is the shape that fills
+that queue, and it is the shape "What the archive retains" already tells you to
+size against.
+
+### The state sidecar
+
+`<archive-data>/rollup.jsonl` is the durable half of the fold.
+
+| Quantity | Measured value |
+|---|---:|
+| File after folding a `5,408,123`-record ledger | `6.5 MB` |
+| For each ledger record | `1.2 B`, against `338 B` for each record of raw |
+| Appends at the shipped `30 s` save interval | `123 MiB` each day |
+| Appends at `60 s` | `69 MiB` each day |
+| Appends at `300 s` | `20 MiB` each day |
+| For each genome gap still open when a save runs | `239 B` |
+| On-disk size at steady state | at most `3` times the live state, then it compacts |
+
+It is append-and-compact, in the shape `brains.jsonl` already used: a save
+appends the keys that moved, and the file is rewritten whole when it grows past
+`3` times the state it holds. So the `123 MiB` a day is write volume and not
+growth. The file on disk stays around `20 MB` for the workload above.
+
+**The save interval does not bound loss**, which is what makes it a free knob:
+everything behind the sidecar's cursor is still in the raw record and the next
+start folds it. It trades write volume against a few seconds of replay tail, and
+never against a fact. `80 percent` of that volume is two "recent sample" terms
+that exist so a restart's numbers are exact — the lanes' five-minute flow window
+and each species' six newest crossings.
+
+**The gap queue costs what the gap queue is.** `239 B` for each gap that is open
+at a save. One or two on the live service; `273,252` on a copy with no genome
+store beside it, which is `65 MB` of the sidecar and is an artefact of the copy.
+
+**Losing this file costs replay time and no answer.** Every value in it is
+re-derivable from the raw lines. `backup.sh` copies it daily for that reason and
+for no other: the recovery for a damaged one is to delete it and pay one full
+replay.
+
 ### Collector headroom, and what `GOMEMLIMIT` does
 
 The resident set is larger than the retained state, and the difference is collector headroom.
@@ -270,11 +367,22 @@ Sustained swap activity means that the instance needs more memory or less retain
 
 ### A worked horizon, and what it does not bound
 
-This example is dated and it is not a purchase recommendation.
-Vendor prices and the live forecast stay in private operations storage.
-The arithmetic is the reusable part, not the answer.
+**This section is history, and it is kept because the arithmetic is reusable and
+because the date it computed is why the roll-up exists.**
 
-Inputs, all measured on `2026-08-16`:
+It was written on `2026-08-16`, against the build of that date, in which the
+archive's retained state grew with every ledger record there had ever been. On
+that build the memory horizon was `9` to `13` days away. The record roll-up
+shipped on `2026-08-17` and removed the growth term the whole calculation is
+built on: retained state is now the bounded aggregates plus one duplicate
+window of keys, and neither follows the record count.
+
+**So do not read the dates below as a forecast for the running service.** Read
+the method, and then read "The archive after the roll-up" for the model that
+describes what is deployed. The one line to carry forward unchanged is the
+growth band, because it is a property of the workload and not of the build.
+
+Inputs, all measured on `2026-08-16`, on the build of that date:
 
 - `5,545,189` ledger records at `20:25Z`.
 - `338 B` for each record on disk.
@@ -304,17 +412,25 @@ days           = 35,400,000 / 3,900,000 =  9.1        (fast rate, conservative b
 That is **`9` to `13` days from `2026-08-16`**, so between `2026-08-25` and `2026-08-30`.
 It is the day the collector starts to bind hard, not the day the service fails.
 
+**That date was never reached and cannot be, on this build.** It assumes
+`31 B` of retained state for every record in the ledger for ever. Since the
+roll-up the retained terms are all bounded — see the next section — so the
+record ceiling is not a moving date but a fixed one that this workload does not
+approach. The row for it is left in the table below as the state it describes.
+
 Compare the states of the same host, at the same two rates:
 
-| State | Ceiling reached at | Days from `2026-08-16` |
+| State, all on the `2026-08-16` build | Ceiling reached at | Days from `2026-08-16` |
 |---|---:|---:|
-| Before the change, limit inert at `5GiB` | `7.5` million records | `0.5` to `0.7` |
-| Before the change, binding limit | `14.3` million records | `2.2` to `2.9` |
-| After the change, limit inert | `25` million records | `5.0` to `6.5` |
-| After the change, binding limit at `1100MiB` | `41` to `45` million records | `9` to `13` |
+| Before the fingerprint change, limit inert at `5GiB` | `7.5` million records | `0.5` to `0.7` |
+| Before the fingerprint change, binding limit | `14.3` million records | `2.2` to `2.9` |
+| After the fingerprint change, limit inert | `25` million records | `5.0` to `6.5` |
+| After the fingerprint change, binding limit at `1100MiB` | `41` to `45` million records | `9` to `13` |
+| **After the roll-up (`2026-08-17`)** | **no record ceiling** | **not a date** |
 
-Disk is not the binding term on this host.
+Disk was not the binding term on this host on that date either.
 `46 GB` were free on `2026-08-16`, which is `35` to `45` days at `1.0` to `1.3 GB` each day.
+The raw ledger window makes that term flat too; "The raw ledger window" has the figures.
 
 Larger sizes at the same rates and the same measured constants:
 
@@ -325,11 +441,20 @@ Larger sizes at the same rates and the same measured constants:
 | `large_3_0` | 8 GB | 160 GB | `47` to `68` days | `111` to `144` days | `$44` |
 
 Read that table for what it is: **every cell is a date and none of them is a bound.**
-Retained state grows with each ledger record, and nothing in the list stops it.
-Two things bound it, and only two:
+It describes the build of `2026-08-16`, in which retained state grew with each
+ledger record and nothing in the list stopped it.
+
+**Three things bound it, and the record roll-up shipped the third.**
 
 - a lower crossing rate, which means a lower `S`;
-- an on-disk index, so that resident memory follows the working set instead of the record count.
+- the **duplicate window**, which bounds the largest retained term and therefore
+  bounds resident memory. It is the change that turned the table above into
+  history: see "What the archive retains" and "The raw ledger window";
+- the **raw ledger window**, which bounds the crossing lines held on the disk.
+
+An on-disk index — resident memory following the working set instead of the
+record count — was the fourth option and it was not needed. The window did the
+same work for the memory term and for the disk term at once.
 
 A larger instance and a tighter limit buy weeks.
 Revisit the size decision inside that window, and record the date on which it was revisited.
@@ -349,6 +474,102 @@ The live service shape costs about `64 B`, so the selected value carries `1.7` t
 and still describes a replay this host can really be asked to run.
 Both constants take the same value because the peak and the settled resident set are one number;
 `monitor.sh` keeps its `max()` against a future model change.
+
+**The gate is now a conservative model of a bounded process, and it says so.**
+When the archive publishes `rollupCoveredRecords`, the `replay` verdict adds a
+sentence naming the record-count model as an over-estimate and pointing here.
+Do not correct these constants from that sentence. Correct them from a
+measurement on this host, and note that under the roll-up the honest model is
+the three-term one in "The archive after the roll-up", not one number for each
+record. The question of what a restart COSTS moved to its own check,
+`replay-cost`, which reads the archive's own measurement of its last start.
+
+## The raw ledger window
+
+The archive rotates its ledger into one segment for each UTC day and compresses
+each segment once it is closed.
+Rotation and compression are always on. They remove nothing, so they change no
+published commitment.
+
+A **window** is the separate step that removes.
+`MV_LEDGER_WINDOW` is a Go duration, and empty takes `MV_ARCHIVE_GENOME_HORIZON`.
+This is one horizon and three mechanisms: the genome store evicts blobs past it,
+the fetch queue retires gaps whose crossing is past it, and the raw ledger keeps
+exactly the crossings whose gaps can still be fetched.
+
+**A window removes raw crossing lines and nothing else.**
+Every answer the archive publishes — lane totals, species counts, ancestry,
+brain history, the record counter, the first record it ever folded — is an
+aggregate and is kept for ever at every setting.
+
+### The retirement gate
+
+**No segment leaves this host without a confirmed copy of it somewhere else.**
+The archive removes a closed segment only when all five of these hold:
+
+1. the segment is closed, so never the live file;
+2. the segment is compressed;
+3. its day is older than the window;
+4. a receipt beside it parses and names that segment;
+5. the receipt's size and `sha256` match the file as it is on this disk **now**,
+   recomputed rather than trusted, and the receipt names a destination and a
+   checksum the store itself returned after the upload.
+
+`deploy/coldcopy.sh` writes that receipt, and it writes it only after reading
+the object back out of the store.
+There is no timeout, no override, and no "old enough to risk it".
+
+**So a cold archive that has stopped working costs disk and never record.**
+It shows as `ledgerSegmentsAwaitingColdCopy` climbing on `/api/status`, which
+`monitor.sh` watches, and as the volume filling.
+With no destination configured at all, no receipt is ever written and nothing is
+ever removed, whatever the window says. That is the safe default.
+
+### Compression and the disk figures
+
+Measured on one copy of the production ledger of `2026-08-16`:
+`1,836,382,633 B` became `304,026,573 B`, which is `6.04` times, at `gzip -1`.
+All arithmetic here uses a conservative `5.75`.
+
+`gzip -1` is deliberate. The ledger is JSON lines and compresses well at any
+level, and CPU is the scarce thing on a two-vCPU box that is also serving a live
+map.
+
+At `338 B` for each record and the `3.0` to `3.9` million records each day this
+workload measured:
+
+```text
+slow   3.0 M x 338 B = 1.014 GB each day
+fast   3.9 M x 338 B = 1.318 GB each day
+
+a 30-day window on the host = the live day plain + 29 closed days compressed
+slow   1.014 + 29 x 1.014 / 5.75 = 6.13 GB
+fast   1.318 + 29 x 1.318 / 5.75 = 7.97 GB
+```
+
+| Raw ledger on the host | Today | Compression only, no window | A 30-day window |
+|---|---:|---:|---:|
+| Growth | `1.0` to `1.3 GB` each day | `0.18` to `0.23 GB` each day | flat |
+| After 90 days | `94` to `121 GB` | `16` to `21 GB` | **`6.1` to `8.0 GB`** |
+
+**Compression alone already fits a 90-day run in `16` to `21 GB`**, and it
+changes no published commitment. The window is a separate decision, it needs its
+own participant notice, and it needs a destination for the off-host copy before
+it can take effect at all.
+
+**Size the off-host store for the whole run and not for the window**: the cold
+archive keeps everything, so `16` to `21 GB` compressed is the figure, and the
+upload is `0.18` to `0.23 GB` each day.
+
+Count that upload against the instance's transfer allowance.
+Data transfer counts in both directions at the instance, and this workload is
+already at the allowance; see "Network transfer".
+
+`backup.sh`'s daily copy shrank by the same order.
+It copies the live segment, which is at most one UTC day, and never a closed
+segment: a closed segment is already compressed and already immutable, and a
+second local copy of it would double the largest thing on the disk for no
+protection.
 
 ## World process memory
 
@@ -411,11 +632,57 @@ serve perfectly well; the same host stalls hard at 96 percent memory.
 
 ## Replay time
 
-Use this formula:
+**A restart reads one duplicate window of raw records, not the whole ledger.**
+Use this model:
 
 ```text
-replay_seconds = ledger_records / measured_records_per_second
+raw_records_read = min(the raw window on this host, MV_ARCHIVE_DEDUP_WINDOW)
+                   expressed in records, at this map's crossing rate
+replay_seconds   = raw_records_read / measured_records_per_second
+                 + the cost of reaching the window's start
 ```
+
+The archive publishes both halves of the first term, measured at its own last
+start: `replayRawRecords` and `replayRawSeconds` on `/api/status`.
+`monitor.sh`'s `replay-cost` check projects the NEXT restart from them and from
+this box's own record rate, and `restart-archive.sh` prints that projection
+before it does anything.
+Use the projection, not the last elapsed time: the first start after the roll-up
+lands reads the whole ledger once, and every start after it reads a window.
+
+**The second term is not free and it has no formula.**
+Reaching the window's start is an `lseek` on a plain segment or on the live
+file, and a decompress-and-discard on a compressed one, because a gzip stream
+cannot seek. Measured: `5.9 s` to skip `1.8 GB`. In ordinary running the window
+starts inside a recent day and the skip is small. The one-off legacy segment
+that the first start after this deployment creates is the worst case, and it
+ages out with the window.
+
+Measured, on two pinned cores against one copy of the production ledger of
+`2026-08-16` — `5,408,123` records, `1.8 GB` — with a legacy segment and a
+state sidecar in place:
+
+| Start | Raw records parsed | To answering `/healthz` |
+|---|---:|---:|
+| The build before the roll-up, full replay | `5,408,123` | `83.5 s` |
+| First start after the roll-up, which folds everything once | `5,408,123` | `70.6 s` |
+| A later restart, `48h` duplicate window | `5,166,645` (`95.5 percent`) | **`51.5 s`** |
+| A later restart, `1h` duplicate window | `91,858` (`1.70 percent`) | **`14.3 s`** |
+
+Two things that table says and that the formula alone does not.
+
+**A window wider than the record is not a window.** That copy spans `41.3 h`, so
+a `48 h` duplicate window is `95.5 percent` of it and the `51.5 s` is the durable
+fold alone. The `14.3 s` row is the same binary on the same state with a window
+that is genuinely shorter than the record, and it is the shape a long-running
+deployment is in.
+
+**`6.3 s` of that `14.3 s` is reaching the window's start**, through a
+compressed legacy segment. Parsing `91,858` records is under two seconds.
+
+Those are development-box figures. The service host measured `1.37` times
+slower on the same file; multiply a two-core development measurement by `1.37`
+to project it.
 
 Measure the rate on the target host. Do not carry a rate between hosts.
 
@@ -436,17 +703,32 @@ Use the most recent measurement, never the best one.
 The duplicate-suppression fingerprint change replayed the same file `6` to `26 percent` faster.
 Wall time was the least repeatable measurement in that set, so do not plan against one figure.
 
-Replay time grows with every retained ledger record.
-Recalculate it before each planned archive restart.
+Replay time no longer grows with every retained ledger record.
+It grows with the duplicate window and with the crossing rate, and it is flat in
+the length of the run.
+Recalculate it before each planned archive restart anyway: the crossing rate
+moves, and `monitor.sh` is what recalculates it.
 
 An archive does not subscribe during replay.
 If the relay stays live, every crossing during replay creates a gap in the archive record.
 The record-preserving sequence holds the relay down for the whole replay,
 so the replay time is also the participant outage.
-At `61,000` records each second, `10` million records cost `164 s`
-and `40` million cost about `11` minutes.
 
-Replay time is not what ends this host's life. Memory is.
+**Lowering the duplicate window is the one change that lowers this number.**
+`MV_ARCHIVE_DEDUP_WINDOW` ships at `48h`, which is sized against how far behind
+the oldest sidecar on the map can be and not against a relay retransmit.
+`duplicatesRefused` on `/api/status` is the evidence for lowering it: it is
+all-time, it is published even when it is zero, and zero is what says the fleet
+has crossed.
+
+The figures the old model produced are kept for the case it still describes —
+an archive with no state sidecar, which is any archive replaying from a raw
+record it has no fold for. At `61,000` records each second, `10` million records
+cost `164 s` and `40` million cost about `11` minutes.
+
+Neither replay time nor memory is what ends this host's life now.
+Both are bounded by the duplicate window, and the disk is bounded by the ledger
+window. What is left is the crossing rate itself.
 
 ## Network transfer
 

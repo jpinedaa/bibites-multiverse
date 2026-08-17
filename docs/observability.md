@@ -198,6 +198,40 @@ freshness rule is fixed at 30 seconds: a stats block older than that makes
 every stat on that slot unknown. `metrics.jsonl` is the same object once a
 minute, durably.
 
+**The record roll-up added a layer under it, and eleven fields that describe
+it.** The archive's aggregates are now durable and its raw ledger is a run of
+daily segments, so the page has to answer two questions that used to be one:
+what can this archive still say, and what raw does it still hold to say it
+from. Every field below is on `/api/status`; the first two are the ones a
+person reads and the rest are what `monitor.sh` gates on.
+
+| Field | What it says |
+|---|---|
+| `ledgerFirstRecordMs` | Where the AGGREGATES reach back to. The first record this archive ever folded, kept for ever. |
+| `ledgerRawWindowFromMs` | Where the RAW LINES reach back to. **The honesty field**: it is what stops "no crossings before this" being read as "none recorded" when it means "none kept". Present even when no window is set, because it is a fact about the disk and not about the policy. |
+| `rollupCoveredRecords`, `rollupSavedAtMs` | How much of the record the durable fold covers, and when it last saved. |
+| `replayRawRecords`, `replayRawSeconds` | What the LAST start actually cost, measured by the archive itself. A claim about restart time that nobody measures is a claim nobody can check. |
+| `replayFromRetired` | The one bad case, and it is loud: the saved cursor named a raw segment that has left this host, so the fold has a hole it cannot close by itself. Absent on every healthy archive. |
+| `duplicatesRefused` | Records the duplicate guard refused, all-time. **Not omitted when it is zero**, because zero is the answer that matters: it is the evidence that the duplicate window may safely come down, and a refusal leaves no other trace anywhere. |
+| `ledgerSegments`, `ledgerRawBytes` | Closed segments present on this host and what they occupy as stored. |
+| `ledgerWindowMs` | The raw window in force. |
+| `ledgerSegmentsAwaitingColdCopy` | **The number that should be zero.** Segments past the window with no confirmed off-host copy. |
+| `ledgerRetiredTotal`, `ledgerRetiredBytes` | What this process removed after confirming a copy, and the bytes it freed. |
+
+**These fields are refreshed by the archive's maintenance pass and not by the
+status request**, so a page load never walks a directory. That has one
+consequence for anything that reads them: the pass at start compresses before
+it refreshes, which is 21 seconds on a real legacy segment, so a document
+captured in the first minute after a restart shows zero segments on a perfectly
+healthy archive. `monitor.sh` treats a zero `rollupSavedAtMs` beside zero
+segments as "not reported yet" rather than as "nothing there", and anything
+else reading these fields has to do the same.
+
+**The sampler is unaffected.** `service-host-sample` reads `/proc` and systemd
+unit properties and takes nothing from `/api/status`, so none of the above
+changes it, its interval, or its file. Layer 1 is where the archive's memory and
+its replay peak are recorded, and it records them the same way it did before.
+
 Two things this layer does not yet answer, both of which are the difference
 between a disconnect that explains itself and one that does not:
 
@@ -248,6 +282,8 @@ capacity risks.
 | A publisher spending a quarter of the allowance on an empty room | `deploy/viewers-presence.sh`: MediaMTX `hls_sessions` and non-loopback `/watch` and `/stream/` requests in the front-door access log, published at `/api/viewers` | 10 s, free |
 | Billing truth behind the transfer rows above | `deploy/ce-reconcile.sh`: one Cost Explorer `get-cost-and-usage` call — DAILY granularity, `UsageQuantity` and `UnblendedCost`, grouped by usage type, filtered to the one service — plus two free instance-metric calls | daily, `$0.01` a day and `$0.31` a month |
 | Whether that reconciliation is still running | `monitor.sh` `billing`: the age of the file the reconciliation ships, and the overage quantity in it | 5 min, free |
+| The hourly off-host segment copy drawing on the same allowance | `monitor.sh` `transfer` counts it like any other byte: the upload leaves the instance, and the allowance is counted in both directions. `deploy/SIZING.md` "The raw ledger window" has the volume | 5 min, free |
+| An object store that is being paid for and is not receiving anything | `monitor.sh` `cold-copy`: `ledgerSegmentsAwaitingColdCopy`. Nothing else on this host looks at the store | 5 min, free |
 | Anything unexpected | A cost budget and an anomaly monitor scaled to this account | continuous |
 
 These facts shape this layer and each has cost someone an hour:
@@ -422,11 +458,25 @@ is running, unless an approved rollback names it.
 
 ### Restart cost is part of the plan
 
-The archive rebuilds its ledger on start, and crossings during that replay are
-absent rather than delayed — a permanent gap in the record. A recent restart
-replayed 3.7 million records in 57 seconds and cost exactly that much history.
-So archive-side instrumentation is batched into one restart, its replay cost
-stated in advance, and never shipped to collect a single diagnostic number.
+The archive rebuilds its view of the record on start, and crossings during that
+replay are absent rather than delayed — a permanent gap in the record. So
+archive-side instrumentation is batched into one restart, its replay cost stated
+in advance, and never shipped to collect a single diagnostic number.
+
+**The cost is now measured rather than modelled, and it is bounded.** A restart
+rebuilds its aggregates from a state sidecar and parses only one duplicate
+window of raw records; the archive publishes what that cost at its own last
+start, and `monitor.sh`'s `replay-cost` check projects the next one from it. An
+earlier version of this paragraph cited a restart that replayed 3.7 million
+records in 57 seconds and said the cost grew with the record. It did, on that
+build. Stating the cost in advance now means reading a projection, not
+multiplying a record count.
+
+**Two things nothing else on the host watches**, both added for that reason: a
+state sidecar that stopped saving, which breaks nothing and turns the next
+restart back into a full replay, and closed segments with no confirmed off-host
+copy, which is the only signal that the cold archive has stopped working. Each
+one is invisible in every other reading.
 
 A relay restart is cheaper in records and more expensive in blast radius: it
 disconnects every peer at once. Neither is done casually, and both leave a
@@ -585,6 +635,29 @@ what is actually running.
   deployed build**: a change to what the archive retains per record leaves the
   gate describing a binary that is no longer running, so retuning them belongs
   in the same deployment as the change.
+- **The record layer's four checks.** `monitor.sh` gained `replay-cost`,
+  `cold-copy`, `rollup` and `duplicates` beside the memory gate, and
+  `--only archive` runs the last three on their own. `replay-cost` projects the
+  next restart's held-down-relay time from `replayRawSeconds` and
+  `replayRawRecords` — which the archive measures at its own start — and from
+  the record rate this box samples for itself; it falls back to saying so, and
+  naming the record-count model as the only remaining estimate, against a
+  binary that publishes neither field. `cold-copy` watches
+  `ledgerSegmentsAwaitingColdCopy`, and it is **the only thing on this host that
+  watches the object store at all**: no segment is removed without a receipt, so
+  a cold archive that stopped working costs disk rather than record, weeks
+  later, in a different check. `rollup` watches `rollupSavedAtMs`. `duplicates`
+  watches `duplicatesRefused`, which is the evidence for lowering the duplicate
+  window and therefore the restart cost. `deploy/test-monitor.sh` covers all
+  four off-host, including the first-maintenance-pass reading that would
+  otherwise fire on every healthy restart.
+- **The off-host copy of the ledger segments.** `deploy/coldcopy.sh` runs hourly
+  under `multiverse-coldcopy.timer`, copies each closed compressed segment once,
+  verifies it by reading the object back out of the store, and writes the
+  receipt without which the archive removes nothing. `--check` answers "would
+  this work" without writing an object, and `provision.sh --only verify` runs it.
+  The timer is enabled only when a destination is configured; with none, no
+  receipt is written and nothing is ever retired, which is the safe default.
 - **The archive's anonymous memory and replay peak, in the record.** The
   service-host sampler records `anonBytes`, `fileBytes`, `mainRssAnonBytes`,
   `mainVmHwmBytes` and `mainPid` per unit beside the `MemoryCurrent` it already
