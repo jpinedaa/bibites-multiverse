@@ -266,7 +266,7 @@ out="$(run "$BASE" transfer $FLAT)"
 eq  'the trailing rate warns at eighty percent' "$(sev_of "$out" transfer)" WARN
 has 'the warning names the trailing projection' "$out" 'the last 24 h project a full month of'
 has 'the warning states the billing rate'       "$out" '$0.09/GB'
-has 'the warning carries the same measured levers' "$out" '88 GB/month for each crossing per second'
+has 'the warning carries the same measured levers' "$out" '21 GB/month for each crossing per second'
 
 seed_warm "$GIB" "$(( BASE - 86400 ))" 4000 4000
 out="$(run "$BASE" transfer $FLAT)"
@@ -276,11 +276,15 @@ has 'the critical line points at the levers'             "$out" 'deploy/SIZING.m
 # THE LEVERS ARE THE POINT OF THE ALERT. An operator who reads this line at 03:00
 # acts on the number in it, so the numbers are pinned to SIZING.md's measured
 # model here: peer traffic is a crossing-rate term and NOT a time-scale term, and
-# the retired "50 GB per unit of S" rule must never come back.
-has 'the critical line gives the measured peer lever'    "$out" '88 GB/month for each crossing per second'
+# the retired "50 GB per unit of S" rule must never come back. The peer figure is
+# the COMPRESSED one since 2026-08-17, because that is the wire the host runs;
+# the uncompressed 88 stays beside it so a map without the extension still reads
+# a true number.
+has 'the critical line gives the measured peer lever'    "$out" '21 GB/month for each crossing per second'
+has 'the critical line keeps the uncompressed figure'    "$out" '88 GB/month uncompressed'
 has 'the critical line says time scale is not a lever'   "$out" 'does NOT fall with time scale'
-has 'the critical line gives the measured viewer lever'  "$out" '1,150 GB/month'
-has 'the critical line gives the ingest lever'           "$out" '780 GB/month'
+has 'the critical line gives the measured viewer lever'  "$out" '475 GB/month at 1.5 Mbit/s'
+has 'the critical line gives the ingest lever'           "$out" '470 GB/month'
 hasnt 'the critical line no longer sells the retired rule' "$out" '50 GB/month per unit'
 has 'the critical line names the interface it read'      "$out" '/proc/net/dev on eth0'
 
