@@ -103,6 +103,34 @@ type Status struct {
 	GenomesEvicted      int   `json:"genomesEvicted,omitempty"`
 	GenomesEvictedBytes int64 `json:"genomesEvictedBytes,omitempty"`
 	GapsExpired         int   `json:"genomeGapsExpired,omitempty"`
+	// THE SEGMENTED LEDGER (segments.go). These five say what the archive still
+	// holds the RAW LINES for, which is a different and smaller thing than what
+	// it can still answer: every aggregate is kept forever, and these describe
+	// the file layer under it.
+	//
+	// LedgerSegments is closed segments PRESENT on this host, live file
+	// excluded. LedgerRawBytes is what they occupy plus the live file, as stored
+	// — so a compressed segment counts its compressed size, because that is the
+	// number the volume cares about.
+	//
+	// LedgerRawWindowFromMs IS THE HONESTY FIELD. It is the start of the oldest
+	// raw record still on this host, and it is what a reader needs in order to
+	// know that "no crossings before this" means "none recorded" rather than
+	// "none kept". It is present even when the window is off, because it is a
+	// fact about the disk rather than about the policy.
+	//
+	// LedgerSegmentsAwaitingColdCopy is segments past the window with no usable
+	// off-host receipt. IT IS THE NUMBER THAT SHOULD BE ZERO: a segment is never
+	// removed without one, so a cold archive that has stopped working shows up
+	// here and in disk usage, and never as a record that is gone. LedgerRetired
+	// is what this process removed after confirming a copy.
+	LedgerSegments                 int   `json:"ledgerSegments"`
+	LedgerRawBytes                 int64 `json:"ledgerRawBytes"`
+	LedgerRawWindowFromMs          int64 `json:"ledgerRawWindowFromMs,omitempty"`
+	LedgerWindowMs                 int64 `json:"ledgerWindowMs,omitempty"`
+	LedgerSegmentsAwaitingColdCopy int   `json:"ledgerSegmentsAwaitingColdCopy"`
+	LedgerRetired                  int   `json:"ledgerRetiredTotal"`
+	LedgerRetiredBytes             int64 `json:"ledgerRetiredBytes,omitempty"`
 	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
 	// over. A rate with no window on it is not a measurement.
 	FlowWindowMs int64 `json:"flowWindowMs"`
@@ -136,12 +164,12 @@ type SlotView struct {
 	// StatsKnown is false when no stats block has arrived or the one that did is
 	// older than statsStaleMs. Every stat below is then UNKNOWN, and the page
 	// says so rather than showing a stale number as state.
-	StatsKnown          bool                   `json:"statsKnown"`
-	StatsAgeMs          int64                  `json:"statsAgeMs,omitempty"`
-	Population          *int                   `json:"population,omitempty"`
-	EggCount            *int                   `json:"eggCount,omitempty"`
-	CustodyDepth *int `json:"custodyDepth,omitempty"`
-	PacedDepth   *int `json:"pacedDepth,omitempty"`
+	StatsKnown   bool  `json:"statsKnown"`
+	StatsAgeMs   int64 `json:"statsAgeMs,omitempty"`
+	Population   *int  `json:"population,omitempty"`
+	EggCount     *int  `json:"eggCount,omitempty"`
+	CustodyDepth *int  `json:"custodyDepth,omitempty"`
+	PacedDepth   *int  `json:"pacedDepth,omitempty"`
 	// LostForwardTotal is what migration costs on this map: organisms this peer
 	// forwarded once and never heard an answer for (§6.3.1, §25 B37). `heldDepth`
 	// and `bouncedTimeoutTotal` stood here; they went with the bounded hold, and
@@ -255,10 +283,10 @@ type LaneView struct {
 
 // Totals are the map-wide numbers, each of which is a SUM OF KNOWN VALUES only.
 type Totals struct {
-	LiveSlots     int  `json:"liveSlots"`
-	DarkSlots     int  `json:"darkSlots"`
-	Holes         int  `json:"holes"`
-	Population    *int `json:"population,omitempty"`
+	LiveSlots    int  `json:"liveSlots"`
+	DarkSlots    int  `json:"darkSlots"`
+	Holes        int  `json:"holes"`
+	Population   *int `json:"population,omitempty"`
 	CustodyDepth *int `json:"custodyDepth,omitempty"`
 	PacedDepth   *int `json:"pacedDepth,omitempty"`
 	LostForward  *int `json:"lostForwards,omitempty"`
@@ -368,6 +396,14 @@ func (a *Archive) StatusView() Status {
 		GenomesEvicted:      a.evict.evicted,
 		GenomesEvictedBytes: a.evict.bytes,
 		GapsExpired:         a.evict.gapsExpired,
+
+		LedgerSegments:                 a.seg.segments,
+		LedgerRawBytes:                 a.seg.rawBytes,
+		LedgerRawWindowFromMs:          a.seg.windowFromMs,
+		LedgerWindowMs:                 a.ledgerWindow().Milliseconds(),
+		LedgerSegmentsAwaitingColdCopy: a.seg.awaitingColdCopy,
+		LedgerRetired:                  a.seg.retired,
+		LedgerRetiredBytes:             a.seg.retiredBytes,
 
 		AchievedWindowMs: achievedWindow.Milliseconds(),
 

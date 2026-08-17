@@ -32,6 +32,7 @@ package archive
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,8 +40,10 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"multiverse/internal/contractb"
+	"multiverse/internal/fsutil"
 	"multiverse/internal/wire"
 )
 
@@ -99,21 +102,71 @@ type Record struct {
 	ServedBy   string `json:"servedBy,omitempty"`
 }
 
-// Ledger is the append-only record file.
+// Ledger is the append-only record file: the LIVE segment of the record.
+//
+// Everything in this type is about <data-dir>/migrations.jsonl and only about
+// it. The closed segments behind it are immutable and belong to segments.go;
+// this type's one dealing with them is rotation, which closes the live file into
+// one of them by rename and opens a fresh one.
 type Ledger struct {
 	mu   sync.Mutex
+	dir  string
 	path string
 	f    *os.File
 	// repaired is the size of an unterminated final line dropped when this
 	// process opened the file. It is 0 for every ledger closed cleanly.
 	repaired int64
+	// day is the UTC day of the records currently in the live file, "" when it
+	// is empty. It is taken from the RECORDS' own recordedAt and never from the
+	// wall clock (segments.go, "THE ROTATION RULE"), and it is what the next
+	// append compares itself against to decide whether to rotate.
+	day time.Time
+	// firstMs is the recordedAt of the live file's first record, 0 when it is
+	// empty. It answers "where does the raw window start" on an archive that has
+	// no closed segments yet.
+	firstMs int64
+	// rotations counts what this process closed, for the status view and the
+	// tests. rotatedName is the newest one and rotateErr is the last rotation
+	// that failed — kept rather than returned, because a rotation failure must
+	// not fail the append that triggered it (see Append).
+	rotations   int
+	rotatedName string
+	rotateErr   error
+	// migrated names the legacy segment the first start produced, "" otherwise.
+	migrated string
+	// reconciled is what the startup crash reconciliation did.
+	reconciled SegmentReconcile
 }
 
 const ledgerName = "migrations.jsonl"
 
-// OpenLedger opens or creates <dir>/migrations.jsonl for appending, dropping an
-// unterminated final line first (see repairTornTail).
+// OpenLedger opens or creates <dir>/migrations.jsonl for appending.
+//
+// Four things happen here and the ORDER IS THE CRASH STORY:
+//
+//  1. OPEN and REPAIR THE TORN TAIL, exactly as before, and BEFORE anything
+//     else — a partial record that was never durable must not be carried into
+//     an immutable segment by the migration below, where nothing could ever
+//     repair it again.
+//  2. MIGRATE. If <dir>/segments does not exist and the repaired ledger is not
+//     empty, this is the first start on a whole-file ledger: it is renamed
+//     WHOLE into one legacy segment and a fresh live file is opened behind it.
+//     Nothing is read, nothing is rewritten, no record moves.
+//  3. RECONCILE. Resolve what a crash left in the segments directory — a
+//     half-written compression, a segment present in both forms. This MUST
+//     happen before anything replays, and the replay is defensive about it
+//     anyway (readSegmentDir prefers the plain file), so a directory nobody
+//     reconciled still replays each record exactly once.
+//  4. READ THE LIVE FILE'S DAY off its last record, so a restart continues the
+//     segment it was writing rather than rotating on the first append.
 func OpenLedger(dir string) (*Ledger, error) {
+	return OpenLedgerLog(dir, func(string, ...any) {})
+}
+
+// OpenLedgerLog is OpenLedger with somewhere to say what it did. The migration
+// and the reconciliation are once-in-a-lifetime events on a production data
+// directory and both deserve a line in the log rather than a silent rename.
+func OpenLedgerLog(dir string, log func(msg string, kv ...any)) (*Ledger, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -124,16 +177,184 @@ func OpenLedger(dir string) (*Ledger, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &Ledger{path: path, f: f}
+	l := &Ledger{dir: dir, path: path, f: f}
 	if err := l.repairTornTail(); err != nil {
 		f.Close()
 		return nil, err
 	}
+	if err := l.migrateIfMonolithic(log); err != nil {
+		l.Close()
+		return nil, err
+	}
+	rec, err := reconcileSegments(dir, log)
+	if err != nil {
+		l.Close()
+		return nil, err
+	}
+	l.reconciled = rec
+	if err := fsutil.SyncDir(dir); err != nil {
+		l.Close()
+		return nil, err
+	}
+	l.readDay()
 	return l, nil
 }
 
-// Path is the ledger file.
+// migrateIfMonolithic is "Migration, in one restart", step 3, performed on an
+// already-open and already-repaired live file: the whole existing ledger becomes
+// one legacy segment by rename, and a fresh empty live file is opened behind it.
+//
+// IT RUNS EXACTLY ONCE in the life of a data directory, and the marker is the
+// EXISTENCE of <dir>/segments rather than a state file — a marker that can be
+// lost is a migration that can run twice, and running twice would rename a live
+// file that already has a legacy segment beside it.
+func (l *Ledger) migrateIfMonolithic(log func(string, ...any)) error {
+	sd := segmentsDir(l.dir)
+	if _, err := os.Stat(sd); err == nil {
+		return nil // already segmented
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	info, err := l.f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() == 0 {
+		// A fresh data directory, or one whose ledger was a torn tail and
+		// nothing else. There is nothing to migrate, and creating the directory
+		// here is the last time the question is asked.
+		return mkdirSync(l.dir, sd)
+	}
+	first, last := ledgerDayBounds(l.path, info.ModTime())
+	if err := l.f.Sync(); err != nil {
+		return err
+	}
+	if err := l.f.Close(); err != nil {
+		l.f = nil
+		return err
+	}
+	l.f = nil
+	if err := mkdirSync(l.dir, sd); err != nil {
+		return err
+	}
+	name := legacySegmentName(first, last, 0)
+	if err := os.Rename(l.path, filepath.Join(sd, name+plainSuffix)); err != nil {
+		l.f, _ = os.OpenFile(l.path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
+		return err
+	}
+	_ = fsutil.SyncDir(sd)
+	f, err := os.OpenFile(l.path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	l.f = f
+	if err := fsutil.SyncDir(l.dir); err != nil {
+		return err
+	}
+	l.migrated = name
+	log("archive: the existing ledger was renamed WHOLE into one legacy segment; nothing was rewritten",
+		"segment", name+plainSuffix, "bytes", info.Size(),
+		"firstDay", first.Format(dayLayout), "lastDay", last.Format(dayLayout),
+		"rollback", "cat/zcat the segments in order followed by migrations.jsonl reproduces the "+
+			"file byte for byte",
+		"note", "this segment is compressed on the next maintenance pass and retires under the "+
+			"ordinary window rule, which needs a cold-copy receipt first")
+	return nil
+}
+
+// readDay takes the live file's day from its LAST record and its start from its
+// FIRST, in two small reads at the two ends.
+func (l *Ledger) readDay() {
+	info, err := l.f.Stat()
+	if err != nil || info.Size() == 0 {
+		return
+	}
+	first, last := ledgerDayBounds(l.path, info.ModTime())
+	l.day = last
+	if ms, ok := firstRecordedAt(l.path); ok {
+		l.firstMs = ms
+	} else {
+		l.firstMs = first.UnixMilli()
+	}
+}
+
+// firstRecordedAt is the live file's own start, for ledgerRawWindowFromMs on an
+// archive that has not rotated yet.
+func firstRecordedAt(path string) (int64, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, false
+	}
+	defer f.Close()
+	buf := make([]byte, 1<<16)
+	n, err := f.ReadAt(buf, 0)
+	if n == 0 && err != nil {
+		return 0, false
+	}
+	for _, line := range completeLines(buf[:n], true) {
+		if ms, ok := recordedAtOf(line); ok {
+			return ms, true
+		}
+	}
+	return 0, false
+}
+
+// Path is the LIVE ledger file. The closed segments are LedgerSegments(dir).
 func (l *Ledger) Path() string { return l.path }
+
+// Dir is the data directory the live file and the segments directory share.
+func (l *Ledger) Dir() string { return l.dir }
+
+// Migrated names the legacy segment the first start under segmentation
+// produced, or "" on every later start.
+func (l *Ledger) Migrated() string { return l.migrated }
+
+// Reconciled is what the startup crash reconciliation had to fix.
+func (l *Ledger) Reconciled() SegmentReconcile { return l.reconciled }
+
+// Rotations is how many segments this process has closed.
+func (l *Ledger) Rotations() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rotations
+}
+
+// FirstRecordedAtMs is the live file's first record, 0 when it is empty.
+func (l *Ledger) FirstRecordedAtMs() int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.firstMs
+}
+
+// HintBytes is what the duplicate set sizes itself from: the live file plus an
+// UNCOMPRESSED estimate of the newest closed segments, bounded to the two that
+// can hold a key inside the 48 h duplicate window.
+//
+// Size() was that estimate when the ledger was one file. Under segmentation the
+// live file is at most one day, so Size() alone would under-size the map at
+// every start and pay for it in rehashes through the whole replay. The gz
+// estimate is the measured 5.75x rounded DOWN to 5, so the hint is never
+// smaller than the truth.
+func (l *Ledger) HintBytes() int64 {
+	total := l.Size()
+	segs, err := LedgerSegments(l.dir)
+	if err != nil {
+		return total
+	}
+	for i, n := len(segs)-1, 0; i >= 0 && n < 2; i-- {
+		s := segs[i]
+		if s.Retired {
+			continue
+		}
+		n++
+		if s.Compressed {
+			total += s.Bytes * gzipEstimate
+			continue
+		}
+		total += s.Bytes
+	}
+	return total
+}
 
 // Size is the ledger's length in bytes, after any torn tail this open dropped.
 // It is one stat call and never a read, and it exists so a caller can SIZE what
@@ -247,6 +468,18 @@ func (l *Ledger) repairTornTail() error {
 // So the write is all-or-nothing: on any error the file is truncated back to the
 // length it had before the attempt. The caller still gets the error and still
 // must not ACK; what changes is that the failure costs this record only.
+// ROTATION HAPPENS HERE, BEFORE THE WRITE, and it is the only thing this method
+// gained under segmentation. If this record's own day is after the day the live
+// file holds, the live file is closed into a segment by rename and a fresh one
+// is opened, and only then is the record appended — so the record lands in the
+// file named for ITS day and the segment name's promise holds by construction.
+//
+// A ROTATION THAT FAILS DOES NOT FAIL THE APPEND. The record is what matters and
+// the file layout is not: on a rotation error the record is written into the
+// current live file, which then simply spans two days and is named for the later
+// one at its next successful rotation. Refusing the append instead would turn a
+// full-disk rename failure into a refused crossing, which is the wrong trade in
+// exactly the incident this whole design comes from.
 func (l *Ledger) Append(rec Record) error {
 	b, err := json.Marshal(rec)
 	if err != nil {
@@ -255,6 +488,7 @@ func (l *Ledger) Append(rec Record) error {
 	b = append(b, '\n')
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.maybeRotateLocked(rec.RecordedAt)
 	before, statErr := l.size()
 	n, err := l.f.Write(b)
 	if err != nil {
@@ -267,7 +501,144 @@ func (l *Ledger) Append(rec Record) error {
 		l.truncateBack(before, statErr)
 		return fmt.Errorf("archive: short ledger write, %d of %d bytes", n, len(b))
 	}
-	return l.f.Sync()
+	if err := l.f.Sync(); err != nil {
+		return err
+	}
+	// The live file's day is only moved by a record that reached the disk. A
+	// failed append must not advance it, or a rotation would name a segment for
+	// a day whose only record was never durable.
+	if rec.RecordedAt > 0 {
+		if day := dayOfMs(rec.RecordedAt); l.day.IsZero() || day.After(l.day) {
+			l.day = day
+		}
+		if l.firstMs == 0 || rec.RecordedAt < l.firstMs {
+			l.firstMs = rec.RecordedAt
+		}
+	}
+	return nil
+}
+
+// dayOfMs is one record's UTC day.
+func dayOfMs(ms int64) time.Time { return time.UnixMilli(ms).UTC().Truncate(24 * time.Hour) }
+
+// maybeRotateLocked closes the live file into a segment when the incoming
+// record belongs to a later UTC day than the records already in it.
+//
+// A record whose day is BEFORE the live day does not rotate — see segments.go's
+// header. A record with no recordedAt at all does not rotate either: a record
+// with no clock cannot claim a day.
+func (l *Ledger) maybeRotateLocked(recordedAt int64) {
+	if recordedAt <= 0 || l.day.IsZero() {
+		return
+	}
+	if !dayOfMs(recordedAt).After(l.day) {
+		return
+	}
+	if err := l.rotateLocked(l.day); err != nil {
+		// Deliberately not fatal — see Append's comment. The next append tries
+		// again, so a transient failure costs one oversized segment and nothing
+		// else.
+		l.rotateErr = err
+	}
+}
+
+// RotateNow closes the live file into a segment immediately, whatever day it
+// holds. It exists for the tests, for the maintenance pass's "the process has
+// been up across a midnight with no traffic" case, and for an operator who wants
+// a segment closed before taking a copy of it.
+//
+// A rotation of an EMPTY live file is a no-op: an empty segment is a file whose
+// name makes a claim about a day it holds no record for.
+func (l *Ledger) RotateNow() (string, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	day := l.day
+	if day.IsZero() {
+		return "", nil
+	}
+	return l.rotatedName, l.rotateLocked(day)
+}
+
+// rotateLocked is the rotation, in four steps. A crash at any of them loses
+// nothing:
+//
+//	1 fsync and close the live file        crash: the live file is intact and
+//	                                       still the live file; the next append
+//	                                       rotates again
+//	2 rename it into segments/<day>-<seq>  crash: rename is atomic — the bytes
+//	                                       are at one name or the other, never
+//	                                       at neither
+//	3 fsync both directories               crash: as 2; the rename is redone or
+//	                                       already durable
+//	4 open a fresh empty live file         crash: the live file is absent, and
+//	                                       OpenLedger creates it empty
+//
+// The sequence number is chosen by looking at what is already in the directory
+// and the target is re-checked immediately before the rename, so no rotation
+// ever renames over a segment.
+func (l *Ledger) rotateLocked(day time.Time) error {
+	if info, err := l.f.Stat(); err != nil || info.Size() == 0 {
+		// Nothing to close. Adopt the new day silently.
+		l.day = time.Time{}
+		l.firstMs = 0
+		return err
+	}
+	sd := segmentsDir(l.dir)
+	if err := os.MkdirAll(sd, 0o755); err != nil {
+		return err
+	}
+	name, target, err := freeSegmentName(sd, day)
+	if err != nil {
+		return err
+	}
+	if err := l.f.Sync(); err != nil {
+		return err
+	}
+	if err := l.f.Close(); err != nil {
+		l.f = nil
+		return err
+	}
+	l.f = nil
+	if err := os.Rename(l.path, target); err != nil {
+		// Reopen so the archive keeps recording: a rename that failed must not
+		// cost the next crossing.
+		l.f, _ = os.OpenFile(l.path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
+		return err
+	}
+	_ = fsutil.SyncDir(sd)
+	f, err := os.OpenFile(l.path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	l.f = f
+	if err := fsutil.SyncDir(l.dir); err != nil {
+		return err
+	}
+	l.day = time.Time{}
+	l.firstMs = 0
+	l.rotations++
+	l.rotatedName = name
+	l.rotateErr = nil
+	return nil
+}
+
+// freeSegmentName picks the lowest sequence number for day that is not already
+// taken, in either form, and returns the name and the full path to rename to.
+func freeSegmentName(sd string, day time.Time) (string, string, error) {
+	for seq := 0; seq < 10000; seq++ {
+		name := segmentName(day, seq)
+		plain := filepath.Join(sd, name+plainSuffix)
+		gz := filepath.Join(sd, name+gzSuffix)
+		if _, err := os.Stat(plain); err == nil {
+			continue
+		}
+		if _, err := os.Stat(gz); err == nil {
+			continue
+		}
+		return name, plain, nil
+	}
+	return "", "", fmt.Errorf("archive: %s already holds 10000 segments for %s",
+		sd, day.Format(dayLayout))
 }
 
 // truncateBack undoes a failed append. Best effort: if it fails too, the next
@@ -320,11 +691,128 @@ type LedgerDamage struct {
 	// costs nothing that was ever durable (see repairTornTail) and is reported
 	// apart from Lines for exactly that reason. Reading a ledger the archive
 	// holds open sees 0 here, because OpenLedger has already repaired it.
+	//
+	// IT IS ONLY EVER THE LIVE FILE'S. A closed segment is renamed out of a file
+	// that was newline-terminated, so an unterminated final line in one is
+	// damage that arrived after the segment closed, and it is counted in Lines.
+	// See segments.go, "B20 RESTATED FOR SEGMENTS".
 	TornTail int64
+	// Segments counts CLOSED SEGMENTS that could not be read at all — a
+	// truncated gzip stream, an unreadable file — and SegmentBytes is what they
+	// occupied. Each one is skipped WHOLE and the replay carries on into the
+	// next: every record behind a bad segment is still readable and stopping
+	// there would be the 2026-08-08 loss with a new cause. SegmentReasons names
+	// which and why, because "one segment is unreadable" and "which day is gone"
+	// are different questions and only the second one can be acted on.
+	//
+	// It is a joined string rather than a slice so that LedgerDamage STAYS
+	// COMPARABLE: every test in this package asserts a clean replay with
+	// `damage != (LedgerDamage{})`, and that is a better property to keep than a
+	// tidier type for a field that is empty on every healthy archive.
+	Segments       int
+	SegmentBytes   int64
+	SegmentReasons string
 }
 
-// Any is true when the ledger held a complete line that could not be replayed.
-func (d LedgerDamage) Any() bool { return d.Lines > 0 }
+// Any is true when the replay could not read something a record was in — a
+// complete line, or a whole segment.
+func (d LedgerDamage) Any() bool { return d.Lines > 0 || d.Segments > 0 }
+
+// add folds one source's damage into a running total.
+func (d *LedgerDamage) add(o LedgerDamage) {
+	d.Lines += o.Lines
+	d.Bytes += o.Bytes
+	d.TornTail += o.TornTail
+	d.Segments += o.Segments
+	d.SegmentBytes += o.SegmentBytes
+	if o.SegmentReasons != "" {
+		if d.SegmentReasons != "" {
+			d.SegmentReasons += "; "
+		}
+		d.SegmentReasons += o.SegmentReasons
+	}
+}
+
+// LedgerPos is a resumable position in the segmented ledger, and it is the
+// interface the roll-up sidecar resumes on.
+//
+// Segment is a segment's NAME — "2026-08-16-0000" — or "" for the live file.
+// Offset is a byte offset into that segment's UNCOMPRESSED bytes, so the same
+// position means the same record whether the segment is still plain or has since
+// been compressed; a compression does not invalidate a saved position, which is
+// the whole reason the offset is not a file offset. Record is how many records
+// had been delivered before this point, and it is exactly Archive.recordCount —
+// a damaged line is skipped and does NOT advance it, because it never became a
+// record.
+//
+// THE OFFSET ONLY EVER ADVANCES OVER A COMPLETE, NEWLINE-TERMINATED LINE. An
+// unterminated tail in the live file is not counted into it, because the next
+// process truncates those bytes away (repairTornTail) and a position that
+// included them would start the next replay in the middle of a record.
+type LedgerPos struct {
+	Segment string `json:"segment,omitempty"`
+	Offset  int64  `json:"offset"`
+	Record  int64  `json:"record"`
+}
+
+// IsStart is the zero position: replay everything.
+func (p LedgerPos) IsStart() bool { return p.Segment == "" && p.Offset == 0 && p.Record == 0 }
+
+// ledgerSource is one file in the replay's ordered run: a closed segment, or
+// the live file (Name "").
+type ledgerSource struct {
+	Name       string
+	Path       string
+	Compressed bool
+	Bytes      int64
+	Live       bool
+}
+
+// ledgerSources is the ordered run a replay walks: every present closed segment,
+// oldest first, then the live file. Retired segments are not in it — their bytes
+// are off-host — and that is the honest shape: the run has a start, and
+// LedgerRawWindowFrom is where it is.
+func ledgerSources(dir string) ([]ledgerSource, error) {
+	segs, err := LedgerSegments(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []ledgerSource
+	for _, s := range segs {
+		if s.Retired || s.Path == "" {
+			continue
+		}
+		out = append(out, ledgerSource{
+			Name: s.Name, Path: s.Path, Compressed: s.Compressed, Bytes: s.Bytes,
+		})
+	}
+	live := filepath.Join(dir, ledgerName)
+	if info, err := os.Stat(live); err == nil {
+		out = append(out, ledgerSource{Path: live, Bytes: info.Size(), Live: true})
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	} else {
+		// A data directory with segments and no live file is what a crash
+		// between a rotation's rename and its reopen leaves. The replay is still
+		// complete; it just ends at the last segment.
+		out = append(out, ledgerSource{Path: live, Live: true})
+	}
+	return out, nil
+}
+
+// LedgerSources names the files a replay would read, in order, for tools and
+// tests. The live file is last and its name is "".
+func LedgerSources(dir string) ([]string, error) {
+	srcs, err := ledgerSources(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(srcs))
+	for _, s := range srcs {
+		out = append(out, s.Name)
+	}
+	return out, nil
+}
 
 // ScanLedger replays every record in dir's ledger, in write order, hands each
 // one to fn, and reports what it could not read.
@@ -369,45 +857,236 @@ func (d LedgerDamage) Any() bool { return d.Lines > 0 }
 // position, and a skipped line simply never contributes. The one honest cost is
 // that a skipped record is not in the dedup set, so if a peer re-sends exactly
 // that migration or NACK it is recorded a second time.
+// UNDER SEGMENTATION IT IS A RUN OF FILES, and the run is the record. Every
+// closed segment in order, oldest first, then the live file. A segmented replay
+// delivers exactly the records a monolithic replay of the same lines would, in
+// the same order, with the same damage accounting — which is a testable claim
+// and is tested (segments_test.go, TestSegmentedReplayEqualsMonolithic, and the
+// real-ledger check beside it).
 func ScanLedger(dir string, fn func(Record)) (LedgerDamage, error) {
+	dmg, _, err := ScanLedgerFrom(dir, LedgerPos{}, func(rec Record, _ LedgerPos) { fn(rec) })
+	return dmg, err
+}
+
+// ScanLedgerFrom is ScanLedger resumed: it replays from `from` — the zero value
+// being the very beginning — and hands fn each record together with the position
+// IMMEDIATELY AFTER it, which is the position to persist in order to resume
+// there next time.
+//
+// THIS IS THE SOURCE THE ROLL-UP SIDECAR TAILS. The sidecar saves the position
+// of the last record it folded; at the next start it loads its own state and
+// replays from that position, so a restart costs the sidecar plus the tail
+// rather than the whole record. The position survives a compression, because the
+// offset is into the segment's UNCOMPRESSED bytes.
+//
+// A position naming a segment that is no longer on the host returns
+// ErrPositionRetired and delivers nothing. That is a caller whose state is older
+// than the raw window, and the only honest answers are "replay what is left and
+// know your state has a hole" or "fetch the segment back from the cold archive".
+// Guessing a different start would silently drop records.
+//
+// DAMAGE COUNTS ONLY WHAT THIS CALL REPLAYED. A resumed replay does not re-count
+// the damaged lines an earlier one already accounted for.
+func ScanLedgerFrom(dir string, from LedgerPos, fn func(Record, LedgerPos)) (LedgerDamage, LedgerPos, error) {
 	var dmg LedgerDamage
-	f, err := os.Open(filepath.Join(dir, ledgerName))
-	if errors.Is(err, os.ErrNotExist) {
+	pos := from
+	srcs, err := ledgerSources(dir)
+	if err != nil {
+		return dmg, pos, err
+	}
+	start := 0
+	if !from.IsStart() {
+		start = -1
+		for i, s := range srcs {
+			if s.Name == from.Segment {
+				start = i
+				break
+			}
+		}
+		if start < 0 {
+			return dmg, pos, fmt.Errorf("%w: %q", ErrPositionRetired, from.Segment)
+		}
+	}
+	for i := start; i < len(srcs); i++ {
+		s := srcs[i]
+		skip := int64(0)
+		if i == start {
+			// pos already carries from.Offset and from.Record. The NAME still
+			// has to be adopted: a zero start position names the live file ("")
+			// while the first source is usually a segment, and a position handed
+			// back to the caller from inside the first source must name the file
+			// it is actually in.
+			skip = from.Offset
+		} else {
+			pos.Offset = 0
+		}
+		pos.Segment = s.Name
+		d, err := scanOneSource(s, skip, 0, &pos, fn)
+		dmg.add(d)
+		if err != nil {
+			return dmg, pos, err
+		}
+	}
+	return dmg, pos, nil
+}
+
+// scanOneSource replays one segment or the live file, from `skip` bytes into its
+// uncompressed content.
+//
+// A CLOSED SEGMENT THAT WILL NOT OPEN OR WILL NOT DECOMPRESS IS SKIPPED WHOLE
+// AND COUNTED, and the caller carries on into the next one. The live file is
+// different: a live file that will not open is the archive's own state and the
+// error is returned.
+// limit, when non-zero, stops the scan as soon as pos.Record reaches it. It is
+// how LedgerPositionOfRecord finds the position of the Nth record without
+// reading past it.
+func scanOneSource(s ledgerSource, skip, limit int64, pos *LedgerPos, fn func(Record, LedgerPos)) (LedgerDamage, error) {
+	var dmg LedgerDamage
+	f, err := os.Open(s.Path)
+	if errors.Is(err, os.ErrNotExist) && s.Live {
 		return dmg, nil
 	}
 	if err != nil {
-		return dmg, err
+		if s.Live {
+			return dmg, err
+		}
+		return segmentUnreadable(s, err), nil
 	}
 	defer f.Close()
 
-	r := bufio.NewReaderSize(f, 1<<20)
+	var src io.Reader = f
+	if s.Compressed {
+		zr, err := gzip.NewReader(bufio.NewReaderSize(f, 1<<20))
+		if err != nil {
+			return segmentUnreadable(s, err), nil
+		}
+		defer zr.Close()
+		src = zr
+	} else if skip > 0 {
+		// A plain segment or the live file seeks. This is the O(1) half of the
+		// resume and the reason a hot sidecar restart is seconds rather than
+		// minutes.
+		if _, err := f.Seek(skip, io.SeekStart); err != nil {
+			return dmg, err
+		}
+		skip = 0
+	}
+	r := bufio.NewReaderSize(src, 1<<20)
+	if skip > 0 {
+		// A gzip stream has no seek: the only way to a byte offset is through
+		// the bytes. It is still far cheaper than parsing them.
+		if _, err := io.CopyN(io.Discard, r, skip); err != nil {
+			if s.Live {
+				return dmg, err
+			}
+			return segmentUnreadable(s, err), nil
+		}
+	}
 	for {
 		line, err := readLine(r)
 		if len(line) > 0 {
 			switch {
 			case errors.Is(err, io.EOF):
-				// No newline on the last line, so the write that put it there
-				// landed short and the record was never durable — whether or not
-				// what arrived happens to parse. Drop it, and say how much.
-				dmg.TornTail = int64(len(line))
+				if s.Live {
+					// No newline on the last line, so the write that put it
+					// there landed short and the record was never durable —
+					// whether or not what arrived happens to parse. Drop it, and
+					// say how much. The offset does NOT advance over it: the
+					// next open truncates those bytes away.
+					dmg.TornTail = int64(len(line))
+					break
+				}
+				// A CLOSED segment does not have torn tails (segments.go, B20
+				// restated): it was renamed out of a newline-terminated file, so
+				// a missing newline here is damage that arrived afterwards.
+				dmg.Lines++
+				dmg.Bytes += int64(len(line))
 			default:
+				pos.Offset += int64(len(line)) + 1
 				var rec Record
 				if json.Unmarshal(line, &rec) != nil {
 					dmg.Lines++
 					dmg.Bytes += int64(len(line))
 					break
 				}
-				fn(rec)
+				pos.Record++
+				fn(rec, *pos)
+				if limit > 0 && pos.Record >= limit {
+					return dmg, nil
+				}
 			}
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return dmg, err
+			if s.Live {
+				return dmg, err
+			}
+			d := segmentUnreadable(s, err)
+			dmg.add(d)
+			return dmg, nil
 		}
 	}
 	return dmg, nil
+}
+
+func segmentUnreadable(s ledgerSource, err error) LedgerDamage {
+	return LedgerDamage{
+		Segments:       1,
+		SegmentBytes:   s.Bytes,
+		SegmentReasons: s.Name + ": " + err.Error(),
+	}
+}
+
+// LedgerPositionOfRecord converts "I have folded N records" into a position the
+// fast resume can use. It is the bridge for a caller that persisted a record
+// COUNT rather than a position — a roll-up state written before positions
+// existed, or one rebuilt from a full replay.
+//
+// It costs one walk of the record, parsing each line only far enough to know
+// whether it counts, because record numbering skips damaged lines and a line
+// count is therefore not a record count. That is a real cost and it is why the
+// position, not the count, is the thing to persist: this function is the
+// once-ever conversion, and ScanLedgerFrom is the everyday path.
+func LedgerPositionOfRecord(dir string, n int64) (LedgerPos, error) {
+	var pos LedgerPos
+	if n <= 0 {
+		return pos, nil
+	}
+	srcs, err := ledgerSources(dir)
+	if err != nil {
+		return pos, err
+	}
+	for _, s := range srcs {
+		pos.Segment = s.Name
+		pos.Offset = 0
+		before := pos.Record
+		if _, err := scanOneSource(s, 0, n, &pos, func(Record, LedgerPos) {}); err != nil {
+			return pos, err
+		}
+		if pos.Record >= n && pos.Record > before {
+			return pos, nil
+		}
+	}
+	// Fewer records exist than the caller has folded. That is a caller whose
+	// state is ahead of the record — a restored ledger, or a sidecar copied from
+	// another host — and the position at the end of what exists is the only
+	// answer that does not replay something twice.
+	return pos, nil
+}
+
+// ScanLedgerFromRecord is LedgerPositionOfRecord followed by ScanLedgerFrom:
+// replay everything after the caller's Nth record. It returns the position it
+// started from as well, so the caller can persist a position and never pay for
+// this walk again.
+func ScanLedgerFromRecord(dir string, n int64, fn func(Record, LedgerPos)) (LedgerDamage, LedgerPos, LedgerPos, error) {
+	from, err := LedgerPositionOfRecord(dir, n)
+	if err != nil {
+		return LedgerDamage{}, from, from, err
+	}
+	dmg, end, err := ScanLedgerFrom(dir, from, fn)
+	return dmg, from, end, err
 }
 
 // ReadLedger is ScanLedger materialised: the same replay, the same skip-with-

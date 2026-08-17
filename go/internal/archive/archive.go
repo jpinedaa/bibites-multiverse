@@ -136,6 +136,33 @@ type Config struct {
 	// a minute; it exists so a test does not have to wait one.
 	EvictionInterval time.Duration
 
+	// LedgerWindow is how long a CLOSED LEDGER SEGMENT is kept on this host
+	// (segments.go, "THE WINDOW"). It is a raw-lines rule and never an answers
+	// rule: every aggregate the archive publishes is kept forever either way.
+	//
+	//	> 0  that duration
+	//	  0  THE DEFAULT: whatever GenomeHorizon is, which is itself 0 — off.
+	//	     One horizon, three mechanisms (§23, B34, extended to the raw
+	//	     ledger): a raw window equal to the genome horizon holds exactly the
+	//	     crossings whose gaps can still be fetched.
+	//	< 0  OFF explicitly, whatever the horizon is: rotate and compress, retire
+	//	     nothing.
+	//
+	// A SEGMENT PAST THE WINDOW IS STILL NOT REMOVED WITHOUT A CONFIRMED
+	// OFF-HOST COPY. See coldcopy.go: no receipt, no retirement, forever if need
+	// be.
+	LedgerWindow time.Duration
+	// LedgerMaintenanceInterval is how often the segment pass runs — compress
+	// what is closed, retire what is past the window and confirmed off-host,
+	// refresh the status counters. Defaults to five minutes. NEGATIVE disables
+	// the loop entirely, for a test that drives LedgerMaintenanceNow by hand.
+	LedgerMaintenanceInterval time.Duration
+	// DisableLedgerCompression leaves closed segments in their plain form. It
+	// exists for tests and for a host with no CPU to spare; a plain segment is
+	// never retired, because the only thing that leaves this host is a verified
+	// .jsonl.gz with a receipt.
+	DisableLedgerCompression bool
+
 	// BroadcastPeerID is the peer id of the world the shared camera at /watch is
 	// pointed at. NOTHING ON THE WIRE CARRIES THIS: a world does not announce
 	// that it is being filmed, so the deployment that runs the publisher is the
@@ -347,6 +374,12 @@ type Archive struct {
 	outstanding map[string]*fetch
 	sessionGen  int64
 	closed      bool
+	// seg is the segmented ledger's counters: how many closed segments are on
+	// this host, how many bytes they hold, where the raw window starts, how many
+	// are waiting for a cold-copy receipt, and how many have been retired. It is
+	// refreshed by the maintenance pass rather than by the status request, so a
+	// page load never walks a directory. See segments.go.
+	seg segState
 	// evict is the retention horizon's cursor and its counters (§23, B33/B34).
 	// It is the zero value, and every path that reads it returns early, on an
 	// archive with no horizon — which is every archive by default. See
@@ -391,7 +424,13 @@ type rateWindow struct {
 // New opens the archive's store and returns it. Nothing is dialled yet.
 func New(cfg Config) (*Archive, error) {
 	cfg.applyDefaults()
-	ledger, err := OpenLedger(cfg.DataDir)
+	// OpenLedgerLog, not OpenLedger: the first start on a whole-file ledger
+	// renames it into one legacy segment and a crash reconciliation may finish a
+	// compression the last process died inside. Both happen once and both belong
+	// in the log rather than in a directory listing nobody reads.
+	ledger, err := OpenLedgerLog(cfg.DataDir, func(msg string, kv ...any) {
+		cfg.Logger.Warn(msg, kv...)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +455,7 @@ func New(cfg Config) (*Archive, error) {
 		deny:        deny,
 		lanes:       map[lanePair]*lane{},
 		simRates:    map[int]*achievedRate{},
-		seen:        newDedupWindow(dedupHint(ledger.Size()), cfg.DedupWindow, time.Now()),
+		seen:        newDedupWindow(dedupHint(ledger.HintBytes()), cfg.DedupWindow, time.Now()),
 		pending:     map[string]*fetch{},
 		sentWindow:  map[string]*rateWindow{},
 		inFlight:    map[string]int{},
@@ -628,6 +667,9 @@ func (a *Archive) Start(ctx context.Context) error {
 	go func() { defer a.wg.Done(); a.metricsLoop() }()
 	// Nothing at all unless a horizon was configured (§23, B33). See eviction.go.
 	a.startEviction()
+	// Rotation, compression of what is closed, and retirement of what is past
+	// the window AND confirmed off-host. See segments.go.
+	a.startLedgerMaintenance()
 	a.log.Info("archive: started", "relay", a.cfg.RelayURL, "dataDir", a.cfg.DataDir,
 		"ledger", a.ledger.Path(), "metrics", a.metrics.Path(), "statusPage", a.HTTPAddr())
 	return nil

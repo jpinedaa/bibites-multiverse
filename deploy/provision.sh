@@ -521,6 +521,14 @@ MULTIVERSE_LOG_LEVEL=$MV_LOG_LEVEL
 # the contract's default; 720h is the announced 30 days. It prunes genome BLOBS
 # and never the ledger. See deploy.env.example.
 MULTIVERSE_GENOME_HORIZON=${MV_ARCHIVE_GENOME_HORIZON:-}
+# The RAW LEDGER's window. Empty takes MULTIVERSE_GENOME_HORIZON, which is the
+# intended setting and is why there is no default here: one horizon, three
+# mechanisms (§23 B34, extended to the raw ledger). A negative value keeps every
+# closed segment forever whatever the horizon is. IT IS THE RAW LINES ONLY —
+# every answer the archive publishes is kept forever at every setting — and a
+# segment past the window is still not removed unless deploy/coldcopy.sh has
+# written a receipt confirming an off-host copy. See deploy.env.example.
+MULTIVERSE_LEDGER_WINDOW=${MV_LEDGER_WINDOW:-}
 # The memory verdict, as Go sees it. Empty means unset. It is a SOFT limit: it
 # removes collector headroom from the resident set and cannot fail a replay, and
 # it is selected from the host's archive ceiling. See SIZING.md, "Archive memory".
@@ -757,6 +765,7 @@ phase_systemd() {
            multiverse-monitor.service multiverse-monitor.timer \
            multiverse-backup.service multiverse-backup.timer \
            multiverse-host-sample.service multiverse-host-sample.timer \
+           multiverse-coldcopy.service multiverse-coldcopy.timer \
            multiverse-viewers.service multiverse-viewers.timer; do
     run install -m 0644 -o root -g root "$KIT_DIR/systemd/$u" "/etc/systemd/system/$u"
   done
@@ -808,6 +817,21 @@ EOF
   run systemctl enable multiverse-relay.service multiverse-archive.service
   run systemctl enable --now multiverse-monitor.timer multiverse-backup.timer \
     multiverse-host-sample.timer multiverse-viewers.timer
+  # The off-host segment copy is enabled ONLY when a destination is configured.
+  # Its unit treats MV_COLDCOPY=off as a success, so enabling it unconditionally
+  # would be harmless but dishonest: a timer running hourly to print "off" is a
+  # timer an operator stops reading. The archive is safe either way — with no
+  # receipt it removes nothing.
+  if [ "${MV_COLDCOPY:-off}" != off ]; then
+    run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/archive/segments
+    run systemctl enable --now multiverse-coldcopy.timer
+    say "off-host segment copy: ON, to ${MV_COLDCOPY_URI:-UNSET}"
+  else
+    run systemctl disable --now multiverse-coldcopy.timer 2>/dev/null || true
+    say "off-host segment copy: OFF (MV_COLDCOPY unset or off). The archive keeps every"
+    say "    closed segment: with no confirmed off-host copy it retires nothing, whatever"
+    say "    the ledger window says."
+  fi
   # start, not restart: re-running provision must not cost the map an outage.
   # An upgrade is a deliberate act and RESTART-POLICY.md is where it is written.
   run systemctl start multiverse-relay.service

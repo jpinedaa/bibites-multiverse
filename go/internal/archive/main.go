@@ -68,6 +68,20 @@ func runMain(args []string, stderr io.Writer) int {
 			"setting, and a pruned hash stays a lineage node that answers exactly like a hash no "+
 			"peer ever served. The same horizon retires a genome gap whose crossing is older "+
 			"than it (§23, B34)")
+	// The raw ledger's window (segments.go). It is a SIBLING of the genome
+	// horizon and it defaults to it, because the two are one number: a raw
+	// window equal to the horizon holds exactly the crossings whose genome gaps
+	// can still be fetched (§23, B34, extended to the ledger).
+	ledgerWindow := fs.Duration("ledger-window",
+		envSignedDuration("MULTIVERSE_LEDGER_WINDOW", 0),
+		"how long a CLOSED LEDGER SEGMENT is kept on this host, as a Go duration. 0 — THE "+
+			"DEFAULT — takes whatever --genome-horizon is, which is itself 0 and keeps every "+
+			"segment forever; a NEGATIVE value keeps every segment forever whatever the horizon "+
+			"is. IT IS THE RAW LINES ONLY: every answer the archive publishes — lane totals, "+
+			"species aggregates, ancestry, brain history — is kept forever at every setting, and "+
+			"a segment past the window is STILL NOT REMOVED unless a cold-copy receipt confirms "+
+			"an off-host copy that matches the bytes on this disk. No receipt, no removal, "+
+			"forever if need be; ledgerSegmentsAwaitingColdCopy is what says so")
 	// §25's B38: the duplicate set's window. It is a knob for the same reason the
 	// horizon is one — the deployment, not the contract, knows how far behind its
 	// oldest peer can be.
@@ -135,6 +149,7 @@ func runMain(args []string, stderr io.Writer) int {
 		RequestsPerMinute:   *maxGenomeRPM,
 		DenyListFile:        *denyList,
 		GenomeHorizon:       *genomeHorizon,
+		LedgerWindow:        *ledgerWindow,
 		DedupWindow:         *dedupWindow,
 		BroadcastPeerID:     strings.TrimSpace(*broadcastPeer),
 		HomepageRepo:        strings.TrimSpace(*homepageRepo),
@@ -287,6 +302,22 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d < 0 {
+		return fallback
+	}
+	return d
+}
+
+// envSignedDuration is envDuration for a knob whose NEGATIVE value means
+// something — --ledger-window's explicit "off". envDuration refuses a negative
+// because the safe direction for a knob that deletes is off, and for that flag
+// off IS the negative, so the two cannot share one parser.
+func envSignedDuration(name string, fallback time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
 		return fallback
 	}
 	return d

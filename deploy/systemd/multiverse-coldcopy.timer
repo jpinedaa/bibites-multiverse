@@ -1,0 +1,21 @@
+[Unit]
+Description=Copy closed ledger segments off this host, hourly
+Documentation=file:///opt/multiverse/deploy/coldcopy.sh
+
+[Timer]
+# Hourly, not daily. A segment is closed at UTC midnight and compressed within
+# five minutes of that; the sooner it is off-host the shorter the period in
+# which the record has one copy. The script itself does nothing when every
+# closed segment already has a receipt, so 23 of the 24 runs are a directory
+# listing.
+OnCalendar=hourly
+# Away from backup.sh's own hourly tick, so the two do not read the same disk at
+# the same minute.
+RandomizedDelaySec=600
+AccuracySec=1min
+# A box that was off must still copy what it missed: an uncopied segment is a
+# segment the archive cannot retire, and the disk is what pays for it.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

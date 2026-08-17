@@ -21,8 +21,18 @@
 #     they get a full timestamped copy every hour and a week of history.
 #
 #   TIER 2 — THE RECORD, daily, tens of gigabytes, one generation.
-#     <archive-data>/migrations.jsonl   the ledger. 337 B/record measured; tens of
-#                                       millions of records over the announced run.
+#     <archive-data>/migrations.jsonl   the LIVE ledger segment — at most one UTC
+#                                       day of records. 338 B/record measured.
+#     <archive-data>/segments/          the closed segments, already compressed by
+#                                       the archive and already immutable. THIS
+#                                       SCRIPT DOES NOT COPY THEM: they are the
+#                                       one thing here that is already in its
+#                                       final form, and a second local copy of a
+#                                       compressed segment doubles the largest
+#                                       thing on the disk for no protection this
+#                                       tier does not already give. Their copy is
+#                                       tier 3, and it is a GATE as well as a
+#                                       backup — see below.
 #     <archive-data>/metrics.jsonl      1.6 MB/day/slot, speed-independent.
 #     <archive-data>/genomes/           content-addressed, ~14.2 KB per object.
 #     Append-only and immutable-once-written, which is what makes the cheap forms
@@ -31,6 +41,11 @@
 #   TIER 3 — OFF-HOST, and it is not this script's. See "the off-host half".
 #     A local copy survives a mistake. It does not survive the instance. Use a
 #     checked provider snapshot or another approved off-host copy.
+#     deploy/coldcopy.sh is the half of this tier that IS in the kit: it copies
+#     each closed ledger segment to an object store, verifies it by reading the
+#     object's checksum back, and writes the receipt WITHOUT WHICH THE ARCHIVE
+#     REMOVES NOTHING. It does not cover ring.json, peers.json, metrics.jsonl or
+#     the genome store; those still need the provider snapshot.
 #
 #   monitor.sh watches whether this ran. A backup timer that quietly stopped is
 #   invisible until the day it is needed.
@@ -122,13 +137,30 @@ RESTORING — read the whole of the relevant section before typing anything.
    journals hold entries addressed to slots that no longer mean the same thing.
 
 3. migrations.jsonl — the ledger
-   Stop the archive, decompress in place, start it.
+   THE LEDGER IS A RUN OF FILES, not one file. The archive reads
+   <archive-data>/segments/ in day order and then <archive-data>/migrations.jsonl,
+   so a restore has to think about both halves:
+
+     the LIVE file      at most one UTC day of records. This is what the copy
+                        below holds, and it is the half that can be lost.
+     the SEGMENTS       closed, compressed and immutable. They are not in this
+                        backup. A missing one is fetched back with
+                        `deploy/coldcopy.sh --restore <name>.jsonl.gz`, which
+                        verifies the digest against the receipt before it puts
+                        the file into place.
+
+   Restoring the live file:
 
      systemctl stop multiverse-archive
      gunzip -c /var/lib/multiverse/backup/record/<stamp>/migrations.jsonl.gz \
        > /var/lib/multiverse/archive/migrations.jsonl
      chown multiverse:multiverse /var/lib/multiverse/archive/migrations.jsonl
      systemctl start multiverse-archive
+
+   A copy taken BEFORE a rotation holds records that are now in a segment, so
+   restoring it over a live file that has already rotated would replay those
+   records twice. Check what the copy's last line says and what
+   `ls /var/lib/multiverse/archive/segments/` holds before you type this.
 
    WHAT IT COSTS: every crossing between the snapshot and now is gone and NOT
    recoverable — no peer and no relay holds a copy of the archive's record. The
@@ -285,7 +317,13 @@ backup_record() {
     printf 'free percent     %s\n' "$(free_pct)"
     printf 'ring.json        %s bytes\n' "$(stat -c %s "$RELAY_DATA/ring.json" 2>/dev/null || echo absent)"
     printf 'peers.json       %s bytes\n' "$(stat -c %s "$RELAY_DATA/peers.json" 2>/dev/null || echo absent)"
-    printf 'migrations.jsonl %s bytes\n' "$(stat -c %s "$ARCHIVE_DATA/migrations.jsonl" 2>/dev/null || echo absent)"
+    printf 'migrations.jsonl %s bytes (LIVE segment only)\n' "$(stat -c %s "$ARCHIVE_DATA/migrations.jsonl" 2>/dev/null || echo absent)"
+    printf 'closed segments  %s file(s), %s bytes\n' \
+      "$(find "$ARCHIVE_DATA/segments" -maxdepth 1 -name '*.jsonl' -o -maxdepth 1 -name '*.jsonl.gz' 2>/dev/null | wc -l)" \
+      "$(find "$ARCHIVE_DATA/segments" -maxdepth 1 \( -name '*.jsonl' -o -name '*.jsonl.gz' \) -printf '%s\n' 2>/dev/null | awk '{t+=$1} END {print t+0}')"
+    printf 'cold-copy receipts %s\n' "$(find "$ARCHIVE_DATA/segments" -maxdepth 1 -name '*.receipt' 2>/dev/null | wc -l)"
+    printf 'ledger window    %s\n' "${MV_LEDGER_WINDOW:-<the genome horizon>}"
+    printf 'off-host copy    %s %s\n' "${MV_COLDCOPY:-off}" "${MV_COLDCOPY_URI:-}"
     printf 'metrics.jsonl    %s bytes\n' "$(stat -c %s "$ARCHIVE_DATA/metrics.jsonl" 2>/dev/null || echo absent)"
     printf 'genome objects   %s\n' "$(find "$ARCHIVE_DATA/genomes" -type f 2>/dev/null | wc -l)"
     printf 'ledger copy      %s\n' "$MV_BACKUP_LEDGER"
@@ -327,6 +365,11 @@ THE OFF-HOST HALF, which this script cannot do and which is the one that matters
 
   Check current storage and transfer prices before you select the policy.
   This repository does not contain a current quote or deployment forecast.
+
+  deploy/coldcopy.sh covers ONE part of this tier: the closed ledger segments.
+  It is also the gate on the archive's raw-ledger window — no receipt, no
+  removal, forever if need be. It does NOT cover ring.json, peers.json,
+  metrics.jsonl or the genome store.
 
   TAKE ONE BY HAND BEFORE ANY OF THESE: a binary upgrade, a retention-rule
   change, a restore, and the wind-down. WIND-DOWN.md requires a final checked
