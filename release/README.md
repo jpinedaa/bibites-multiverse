@@ -436,32 +436,35 @@ and never depends on what a previous build left behind.
 They are copies, not the working tree, so a mod rebuild or a `git clean` in a checkout cannot
 change what a release is built from. Refresh them on purpose when the game version moves.
 
-**Copies, and specifically not symlinks.** Both game payloads must be real directories.
-`make-release.sh`'s `validate_game_payload()` refuses a payload containing a symbolic link, and it
-asks with `find "$source" -type l -print -quit`. `find` does not dereference its own starting
-point, so a `$source` that *is* a symlink matches on the first entry and the build stops with
-`<platform> game payload contains a symbolic link` naming the payload root. The refusal is the
-lesser half of the problem: because `find` never descends into a symlinked root, pointing these at
-a symlink also means **the payload is never scanned for the symlinks the check exists to catch**.
-A symlink here does not weaken the gate, it removes it.
+**One rule covers all of it: an input copy is exactly what a player would have — `cp -a`, then
+leave it alone.** The first release cut through this workflow broke that rule three times in three
+different ways, and none of the three failures named its own cause.
 
-**And do not make any of it read-only — not the directories, and not the files.** The instinct is
-right and the mechanism is wrong: these are copies the owner owns, so read-only guards against a
-slip rather than an attacker, and it costs far more than it buys. Both copy-in paths use `cp -a`,
-which preserves the source's modes exactly and stamps the source directory's own mode onto the
-destination:
+**Not symlinks.** Both game payloads must be real directories. `validate_game_payload()` refuses a
+payload containing a symbolic link, and asks with `find "$source" -type l -print -quit`. `find`
+does not dereference its own starting point, so a `$source` that *is* a symlink matches on the
+first entry and the build stops with `<platform> game payload contains a symbolic link` naming the
+payload root — which reads as though the game directory were dirty. The refusal is the smaller
+half: because `find` never descends into a symlinked root, a symlink there also means **the
+payload is never scanned for the symlinks the check exists to catch**. It does not weaken the
+gate, it removes it.
+
+**Not read-only — neither the directories nor the files.** The instinct is right and the mechanism
+is wrong: these are copies the owner owns, so read-only guards against a slip rather than an
+attacker, and it costs far more than it buys. Both copy-in paths use `cp -a`, which preserves the
+source's modes exactly and stamps the source directory's own mode onto the destination —
 `release.yml` does `cp -a "$MV_RELEASE_GAME_REFS/." bibites-mod/libs/`, and `stage_complete()`
-does `cp -a "$source/." "$complete/game/"`. A `chmod -R a-w` on an input tree therefore travels
-into the workspace and into `release/dist/`, and the next run's `actions/checkout` cannot clean
-what it finds: it deletes what it can, takes `.git` with it, and the job dies in checkout with
-`fatal: --local can only be used inside a git repository` — a failure that names nothing about
-permissions and points at the wrong place entirely. The recovery is
-`find _work -type d ! -writable -exec chmod u+w {} +` and then removing the work tree.
+does `cp -a "$source/." "$complete/game/"`. So a `chmod -R a-w` on an input tree reaches two places
+it was never aimed at:
 
-So a read-only **directory** reaches the workspace and the next `actions/checkout` cannot clean
-it, and a read-only **file** reaches the shipped archive. The second is the one with teeth: the
-Linux game payload's modes are copied into `bibites-multiverse-<version>-linux-x64-complete.zip`
-untouched, and `make-release.sh` reads them back out of the finished archive —
+*A read-only directory reaches the workspace.* The next run's `actions/checkout` cannot clean what
+it finds: it deletes what it can, takes `.git` with it, and the job dies in checkout with
+`fatal: --local can only be used inside a git repository` — which points nowhere near a permission.
+Recovery is `find _work -type d ! -writable -exec chmod u+w {} +`, then remove the work tree.
+
+*A read-only file reaches the shipped archive.* This is the one with teeth. The Linux game
+payload's modes are copied into `bibites-multiverse-<version>-linux-x64-complete.zip` untouched,
+and `make-release.sh` reads them back out of the finished archive:
 
 ```sh
 unzip -Z "$DIST/$LINUX_COMPLETE_ZIP_NAME" "$STAGE_NAME/game/The Bibites.x86_64" \
@@ -471,11 +474,8 @@ unzip -Z "$DIST/$LINUX_COMPLETE_ZIP_NAME" "$STAGE_NAME/game/The Bibites.x86_64" 
 `chmod -R a-w` turns the game's `-rwxr-xr-x` into `-r-xr-xr-x`, the archive carries `-r-x`, and the
 build refuses on the last check before the content checks — after staging both payloads, writing
 both manifests, building all four archives and compiling the 56 MB Windows setup. The kit's own
-shell scripts survive this, which makes it more confusing rather than less: `make-release.sh`
-`chmod +x`es those itself, so only the game payload carries an input's mode all the way to a user.
-
-**The rule that follows: an input copy must be byte-for-byte and mode-for-mode what a player would
-have.** Copy with `cp -a` and then leave it alone.
+shell scripts survive it, which makes it more confusing rather than less: `make-release.sh`
+`chmod +x`es those itself, so the game payload is the only file whose input mode reaches a player.
 
 ```sh
 # What the layout must satisfy, checked directly.
@@ -484,6 +484,7 @@ find "$IN/windows-game" -type l -print -quit     # empty
 find "$IN/linux-game"   -type l -print -quit     # empty
 find "$IN" -type d ! -writable                   # empty
 [ "$(stat -c %a "$IN/linux-game/The Bibites.x86_64")" = 755 ] && echo ok
+diff -rq "$IN/linux-game" <the pristine game directory>   # no differences
 ```
 
 ### The runner's `.env`
