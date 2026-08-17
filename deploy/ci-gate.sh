@@ -396,10 +396,17 @@ verb_receipt() {
   # The recorded binary checksums, verbatim. phase_binaries writes this file, so
   # it is the host's own claim about what is installed rather than a re-derived
   # one — and it is what a receipt can be checked against later.
-  if [ -r /etc/multiverse/BINARIES.sha256 ]; then
-    while read -r sum name; do
+  # Read through sudo. /etc/multiverse is 0750 root:multiverse and this script
+  # runs as `ubuntu`, which is not in that group and cannot even traverse the
+  # directory — so an unprivileged read here reports "unreadable" on a perfectly
+  # healthy host, which is what the first real CI receipt recorded.
+  local binrec
+  binrec="$($MV_CI_SUDO cat /etc/multiverse/BINARIES.sha256 2>/dev/null || true)"
+  if [ -n "$binrec" ]; then
+    printf '%s\n' "$binrec" | while read -r sum name; do
+      [ -n "${name:-}" ] || continue
       printf 'binary_%s=%s\n' "$(printf '%s' "$name" | tr '.-' '__')" "$sum"
-    done < /etc/multiverse/BINARIES.sha256
+    done
   else
     printf 'binary_record=unreadable\n'
   fi
