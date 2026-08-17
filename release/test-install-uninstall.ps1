@@ -35,7 +35,10 @@
          mints - takes -ReplaceWorldIdentity, and is refused without it; so is a
          secret nothing can name, a claim only an ordinary text file makes, a
          file that is not a credential, and a -RelayUrl pointed at another map. A
-         credential behind a blank first line is still a credential.
+         credential behind a blank first line is still a credential. THE SIDECAR
+         LOG is read as the last witness: one identity in it is adopted with the
+         relay from the same line, two are refused and listed, and a kit
+         unpacked beside the data root counts as a place to look.
          -RemoveWorldData is the one path that ends the world.
 
 .PARAMETER KitDir
@@ -888,6 +891,105 @@ $install = Invoke-Script $installer @{
 Check "-RelayUrl at another map is refused" ($install.ExitCode -eq 1) $install.Output
 Check "the refusal names both maps" `
     (($install.Output -match 'relay\.example\.test') -and ($install.Output -match 'two\.example\.test')) $install.Output
+
+# THE SIDECAR'S OWN LOG is the last witness a data root keeps, and the state a
+# pre-profiles kit unpacked somewhere else leaves behind. slog writes one
+# key=value per attribute and the sidecar's logger carries peer= on every line.
+function New-SidecarLog {
+    param([string]$Path, [string]$Peer, [string]$Relay)
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    $lines = @(
+        'time=2026-08-16T12:00:00.000Z level=WARN msg="sidecar: no peer credential configured"',
+        ('time=2026-08-16T12:00:00.100Z level=INFO msg="sidecar: listening" peer=' + $Peer +
+         ' addr=127.0.0.1:8787 path=/contract-a/v2 relay=' + $Relay +
+         ' dataDir=x preferredSlot=0 relayCredential=configured'),
+        ('time=2026-08-16T12:00:02.000Z level=INFO msg="contract B: slot granted" peer=' + $Peer +
+         ' slot=3 position=1,0 reason=granted map=m slotCount=5 lanes="E->4 N->2"')
+    )
+    Add-Content -LiteralPath $Path -Value $lines -Encoding ASCII
+}
+
+# Adoption never reaches a network, so these run whenever the kit carries the
+# packaged map; the enrolling half of this gate is proved on Linux against the
+# suite's fake enrollment endpoint.
+if (Test-Path -LiteralPath (Join-Path $KitDir 'public-map.json')) {
+    $gLogOne = Join-Path $gRoot 'log-one-world'
+    $gLogOnePeer = 'public-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    $gLogOneSecret = ('a' * 64)
+    New-Item -ItemType Directory -Force -Path $gLogOne | Out-Null
+    Set-Content -LiteralPath (Join-Path $gLogOne 'peer-secret.txt') -Value $gLogOneSecret -Encoding ASCII
+    New-SidecarLog (Join-Path $gLogOne 'logs\sidecar.log') $gLogOnePeer 'wss://relay.example.test/contract-b/v4'
+    $install = Invoke-Script $installer @{
+        RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gLogOne; InstallRoot = $gProgram
+    }
+    Check "one identity in the sidecar log is adopted" ($install.ExitCode -eq 0) $install.Output
+    Check "it names the log line it read" `
+        ($install.Output -match 'sidecar\.log \("sidecar: listening"\)') $install.Output
+    Check "it never asked the map for an identity" `
+        (-not ($install.Output -match 'requesting a unique identity')) $install.Output
+    $recordLog = Get-Content -Raw -LiteralPath (Join-Path $gLogOne 'install-record.json') | ConvertFrom-Json
+    Check "the record names the world the log named" ($recordLog.peerId -ceq $gLogOnePeer)
+    Check "and the map that log line named" `
+        ($recordLog.relayUrl -ceq 'wss://relay.example.test/contract-b/v4')
+    Check "the credential is byte-identical afterwards" `
+        ((Get-Content -Raw -LiteralPath (Join-Path $gLogOne 'peer-secret.txt')).Trim() -ceq $gLogOneSecret)
+    Check "the name is written beside the journal, where a later install finds it first" `
+        ((Get-Content -Raw -LiteralPath (Join-Path $gLogOne 'data\peer-id')).Trim() -ceq $gLogOnePeer)
+
+    # Two worlds in the logs: the installer will not choose, and says which two.
+    $gLogTwo = Join-Path $gRoot 'log-two-worlds'
+    $gLogPeerA = 'public-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    $gLogPeerB = 'public-cccccccccccccccccccccccccccccccc'
+    $gLogTwoSecret = ('c' * 64)
+    New-Item -ItemType Directory -Force -Path $gLogTwo | Out-Null
+    Set-Content -LiteralPath (Join-Path $gLogTwo 'peer-secret.txt') -Value $gLogTwoSecret -Encoding ASCII
+    New-SidecarLog (Join-Path $gLogTwo 'logs\sidecar.log.1') $gLogPeerA 'wss://relay.example.test/contract-b/v4'
+    New-SidecarLog (Join-Path $gLogTwo 'logs\sidecar.log') $gLogPeerB 'wss://relay.example.test/contract-b/v4'
+    $install = Invoke-Script $installer @{
+        RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gLogTwo; InstallRoot = $gProgram
+    }
+    Check "two identities in the logs are refused" ($install.ExitCode -eq 1) $install.Output
+    Check "that refusal carries INS-ENROLL" ($install.Output -match 'INS-ENROLL') $install.Output
+    Check "the refusal says the installer read the log itself" `
+        ($install.Output -match 'READ THE SIDECAR LOG') $install.Output
+    Check "it lists both worlds" `
+        (($install.Output -match $gLogPeerA) -and ($install.Output -match $gLogPeerB)) $install.Output
+    Check "it changed nothing" `
+        ((Get-Content -Raw -LiteralPath (Join-Path $gLogTwo 'peer-secret.txt')).Trim() -ceq $gLogTwoSecret)
+
+    # The remedy it prints has to work, and it wins over the log.
+    New-Item -ItemType Directory -Force -Path (Join-Path $gLogTwo 'data') | Out-Null
+    Set-Content -LiteralPath (Join-Path $gLogTwo 'data\peer-id') -Value $gLogPeerB -Encoding ASCII
+    $install = Invoke-Script $installer @{
+        RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gLogTwo; InstallRoot = $gProgram
+    }
+    Check "naming one of them installs it" ($install.ExitCode -eq 0) $install.Output
+    $recordLog = Get-Content -Raw -LiteralPath (Join-Path $gLogTwo 'install-record.json') | ConvertFrom-Json
+    Check "the named world is the one in the record" ($recordLog.peerId -ceq $gLogPeerB)
+}
+
+# A kit unpacked BESIDE the data root, which is where an advanced ZIP goes. Its
+# start script names this data root, and that is a stronger claim than a log.
+$gBesideKit = Join-Path $gRoot 'beside-the-kit'
+$gBesideData = Join-Path $gBesideKit 'data-root'
+New-Item -ItemType Directory -Force -Path $gBesideData | Out-Null
+Set-Content -LiteralPath (Join-Path $gBesideData 'peer-secret.txt') -Value ('d' * 64) -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $gBesideKit 'Start-Multiverse.ps1') -Encoding ASCII -Value @(
+    "`$GameDir     = '$gGame'",
+    "`$DataRoot    = '$gBesideData'",
+    "`$RelayUrl    = 'wss://beside.example.test/contract-b/v4'",
+    "`$PeerId      = 'priv-beside'"
+)
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gBesideData
+    InstallRoot = $gProgram; RelayUrl = 'wss://beside.example.test/contract-b/v4'
+}
+Check "a kit unpacked beside the data root is found" ($install.ExitCode -eq 0) $install.Output
+Check "it adopts the world that start script names" `
+    ($install.Output -match 'peer priv-beside') $install.Output
+$recordBeside = Get-Content -Raw -LiteralPath (Join-Path $gBesideData 'install-record.json') | ConvertFrom-Json
+Check "on the map that start script names" `
+    ($recordBeside.relayUrl -ceq 'wss://beside.example.test/contract-b/v4')
 
 # The one path that does end a world says so, and takes the credential with it.
 $uninstall = Invoke-Script $gUninstaller @{ DataRoot = $gData; RemoveWorldData = $true }

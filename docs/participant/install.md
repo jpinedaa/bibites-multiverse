@@ -214,6 +214,23 @@ launcher's `profiles\*.json`, from the previous `Start-Multiverse.ps1`, or from 
 `peer-secret.txt` exactly as it is**. That works for a private map as well as the public one: an
 adopted world keeps its own relay, and the installer says so rather than moving it.
 
+**The last place it looks is the sidecar's own log**, `logs\sidecar.log` and the rotated files
+beside it. The sidecar writes `peer=<identity>` on every line, because the identity is an attribute
+of its logger, and its startup line carries `relay=` as well — so a data root whose install record,
+profiles and start script are all gone still says which world it is, and the installer reads it
+rather than telling you to. It prints the log line it took the identity from. **One** identity in
+those logs is an answer; **two** means the folder has run two worlds, and the installer lists them
+with where each was found and asks you to put the right one in `data\peer-id` rather than choosing
+for you. It reads the head and the tail of at most a few log files, never the whole of a log that
+can reach 100 MiB.
+
+**Where it looks for a kit is bounded and named**: the application directory this setup is
+installing into, the folder this kit was unpacked in, `%LOCALAPPDATA%\Programs\Bibites Multiverse`,
+the data root itself, and the data root's parent — because an advanced ZIP is usually unpacked
+beside the data it writes. A profile or a start script counts only when it names **this** data root.
+There is deliberately no wider search: an installer that walks a disk looking for a world is one
+nobody can predict.
+
 **A secret is replaced in one case only, and it is the case that is meant to replace one.** If you
 pass a join string that names the world already in that folder — a **slot handover**, which mints a
 new secret for the same identity — the file is rewritten and the old one is kept beside it as

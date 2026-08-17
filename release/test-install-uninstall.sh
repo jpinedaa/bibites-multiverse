@@ -36,6 +36,10 @@
 #      anything executable.
 #   H  a complete package. The same installer must create a versioned managed
 #      runtime without --game-dir, and uninstall only unchanged payload files.
+#   K  the sidecar's own log as an identity source: one world in it is adopted
+#      with the relay from the same line, two worlds are refused and listed, the
+#      printed remedy works, a folder whose logs name two worlds is not enrolled
+#      over without the switch, and a kit unpacked beside the data root counts.
 #   J  what may adopt a world and what may never overwrite one: a credential
 #      behind a blank first line, a file that is not a credential at all, a name
 #      whose secret is gone, a join string backed only by a hand-written claim,
@@ -889,6 +893,153 @@ check "adopting tightened its mode again" \
   "$(b test "$(stat -c '%a' "$J5/peer-secret.txt")" = 600)"
 check "without touching what is in it" \
   "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$J5/peer-secret.txt" "$J8_SECRET")"
+
+# ---------------------------------------------------------------- K
+
+scenario "K - the sidecar's own log as the last witness a data root keeps"
+
+K_ROOT="$SANDBOX/K"; K_GAME="$K_ROOT/game"; K_REQUESTS="$K_ROOT/requests.jsonl"
+K_ARGS="$K_ROOT/curl-args.txt"; K_STATE="$K_ROOT/unused.state"
+new_sandbox_game "$K_GAME"
+mkdir -p "$K_ROOT"
+: > "$K_REQUESTS"
+K_PUBLIC_RELAY='wss://bibitesmultiverse.com/contract-b/v4'
+k_install() { # $@ -> installer arguments, with the fake enrollment endpoint on PATH
+  run_script env PATH="$I_FAKE_BIN:$PATH" \
+    FAKE_ENROLL_REQUESTS="$K_REQUESTS" FAKE_ENROLL_STATE="$K_STATE" \
+    FAKE_ENROLL_ARGS="$K_ARGS" FAKE_ENROLL_FAIL_FIRST=0 \
+    FAKE_ENROLL_RELAY_URL="$K_PUBLIC_RELAY" \
+    bash "$INSTALLER" --game-dir "$K_GAME" "$@"
+}
+k_requests() { wc -l < "$K_REQUESTS" | tr -d ' '; }
+# The lines the sidecar really writes: slog's text format, one key=value per
+# attribute, with peer= on every line because the identity is an attribute of
+# the logger itself (go/internal/sidecar/sidecar.go).
+k_write_log() { # $1 file, $2 peer, $3 relay
+  mkdir -p "$(dirname "$1")"
+  {
+    printf 'time=2026-08-16T12:00:00.000Z level=WARN msg="sidecar: no peer credential configured"\n'
+    printf 'time=2026-08-16T12:00:00.100Z level=INFO msg="sidecar: listening" peer=%s addr=127.0.0.1:8787 path=/contract-a/v2 relay=%s dataDir=%s preferredSlot=0 relayCredential=configured\n' \
+      "$2" "$3" "$(dirname "$1")"
+    printf 'time=2026-08-16T12:00:02.000Z level=INFO msg="contract B: slot granted" peer=%s slot=3 position=1,0 reason=granted map=m slotCount=5 lanes="E->4 N->2"\n' "$2"
+  } >> "$1"
+}
+
+# K1 - one world in the log, and nothing else left in the folder at all. This is
+# the state a pre-profiles kit unpacked somewhere else leaves behind.
+K1="$K_ROOT/one-world"
+K1_PEER='public-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+K1_SECRET="$(printf 'a%.0s' $(seq 1 64))"
+mkdir -p "$K1"
+printf '%s\n' "$K1_SECRET" > "$K1/peer-secret.txt"
+chmod 600 "$K1/peer-secret.txt"
+K1_BEFORE="$(sha256sum "$K1/peer-secret.txt" | cut -d' ' -f1)"
+k_write_log "$K1/logs/sidecar.log" "$K1_PEER" "$K_PUBLIC_RELAY"
+K1_COUNT="$(k_requests)"
+k_install --data-root "$K1"
+check "one identity in the sidecar log is adopted" "$(b test "$RC" -eq 0)" "$OUT"
+check "it names the log line it read" \
+  "$(b contains 'sidecar.log ("sidecar: listening")' "$OUT")"
+check "it adopts that world" "$(b contains "peer $K1_PEER" "$OUT")"
+check "it spends no identity on it" "$(b test "$(k_requests)" = "$K1_COUNT")"
+check "the credential is byte-identical afterwards" \
+  "$(b bash -c 'test "$(sha256sum "$1" | cut -d" " -f1)" = "$2"' _ "$K1/peer-secret.txt" "$K1_BEFORE")"
+check "the record names the world the log named" \
+  "$(b grep -qF "\"peerId\": \"$K1_PEER\"" "$K1/install-record.json")"
+check "and the map that log line named" \
+  "$(b grep -qF "\"relayUrl\": \"$K_PUBLIC_RELAY\"" "$K1/install-record.json")"
+check "the name is written beside the journal, where a later install finds it first" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$K1/data/peer-id" "$K1_PEER")"
+
+# K2 - a PRIVATE world's relay comes out of the same line.
+K2="$K_ROOT/private-world"
+K2_PEER='priv-logged'
+K2_RELAY='wss://private.example.test/contract-b/v4'
+mkdir -p "$K2"
+printf '%s\n' "$(printf 'b%.0s' $(seq 1 64))" > "$K2/peer-secret.txt"
+chmod 600 "$K2/peer-secret.txt"
+k_write_log "$K2/logs/sidecar.log" "$K2_PEER" "$K2_RELAY"
+K2_COUNT="$(k_requests)"
+k_install --data-root "$K2"
+check "a private world in the log is adopted with its own map" "$(b test "$RC" -eq 0)" "$OUT"
+check "it says which map that is" "$(b contains "$K2_RELAY" "$OUT")"
+check "the record carries that map" \
+  "$(b grep -qF "\"relayUrl\": \"$K2_RELAY\"" "$K2/install-record.json")"
+check "it asked the public map for nothing" "$(b test "$(k_requests)" = "$K2_COUNT")"
+
+# K3 - two worlds in the logs: the installer will not choose, and says which two.
+K3="$K_ROOT/two-worlds"
+K3_PEER_A='public-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+K3_PEER_B='public-cccccccccccccccccccccccccccccccc'
+K3_SECRET="$(printf 'c%.0s' $(seq 1 64))"
+mkdir -p "$K3"
+printf '%s\n' "$K3_SECRET" > "$K3/peer-secret.txt"
+chmod 600 "$K3/peer-secret.txt"
+k_write_log "$K3/logs/sidecar.log.1" "$K3_PEER_A" "$K_PUBLIC_RELAY"
+k_write_log "$K3/logs/sidecar.log" "$K3_PEER_B" "$K_PUBLIC_RELAY"
+K3_COUNT="$(k_requests)"
+k_install --data-root "$K3"
+check "two identities in the logs stop with INS-ENROLL" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal says the installer read the log itself" \
+  "$(b contains 'READ THE SIDECAR LOG' "$OUT")"
+check "it lists the first world" "$(b contains "$K3_PEER_A" "$OUT")"
+check "it lists the second" "$(b contains "$K3_PEER_B" "$OUT")"
+check "it says where to put the one that is right" \
+  "$(b contains "$K3/data/peer-id" "$OUT")"
+check "it changed nothing" \
+  "$(b bash -c 'test "$(cat "$1")" = "$2"' _ "$K3/peer-secret.txt" "$K3_SECRET")"
+check "and asked the map for nothing" "$(b test "$(k_requests)" = "$K3_COUNT")"
+
+# The remedy the refusal prints has to work, and it wins over the log.
+printf '%s\n' "$K3_PEER_B" > "$K3/data/peer-id"
+k_install --data-root "$K3"
+check "naming one of them installs it" "$(b test "$RC" -eq 0)" "$OUT"
+check "the named world is the one in the record" \
+  "$(b grep -qF "\"peerId\": \"$K3_PEER_B\"" "$K3/install-record.json")"
+check "naming it sends no enrollment request" "$(b test "$(k_requests)" = "$K3_COUNT")"
+
+# K4 - two worlds in the logs and no secret at all: nothing here can be kept, and
+# taking a new identity over their journal is still a decision.
+K4="$K_ROOT/two-worlds-no-secret"
+mkdir -p "$K4"
+k_write_log "$K4/logs/sidecar.log.1" "$K3_PEER_A" "$K_PUBLIC_RELAY"
+k_write_log "$K4/logs/sidecar.log" "$K3_PEER_B" "$K_PUBLIC_RELAY"
+K4_COUNT="$(k_requests)"
+k_install --data-root "$K4"
+check "a folder whose logs name two worlds is not enrolled over" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal names both of them" \
+  "$(b bash -c 'case "$1" in *"$2"*) case "$1" in *"$3"*) exit 0 ;; esac ;; esac; exit 1' _ "$OUT" "$K3_PEER_A" "$K3_PEER_B")" "$OUT"
+check "the refusal names the switch that accepts the cost" \
+  "$(b contains '--replace-world-identity' "$OUT")"
+check "it enrolled nothing" "$(b test "$(k_requests)" = "$K4_COUNT")"
+k_install --data-root "$K4" --replace-world-identity
+check "the switch takes a new identity there" "$(b test "$RC" -eq 0)" "$OUT"
+check "and it enrolled exactly once" "$(b test "$(k_requests)" = "$((K4_COUNT + 1))")"
+
+# K5 - a kit unpacked BESIDE the data root, which is where an advanced ZIP goes.
+# Its start script names this data root, and that is a stronger claim than a log.
+K5="$K_ROOT/beside-the-kit/data"
+mkdir -p "$K5"
+K5_PEER='priv-beside'
+K5_RELAY='wss://beside.example.test/contract-b/v4'
+printf '%s\n' "$(printf 'd%.0s' $(seq 1 64))" > "$K5/peer-secret.txt"
+chmod 600 "$K5/peer-secret.txt"
+cat > "$K_ROOT/beside-the-kit/start-multiverse.sh" <<EOF
+#!/usr/bin/env bash
+GAME_DIR='$K_GAME'
+DATA_ROOT='$K5'
+RELAY_URL='$K5_RELAY'
+PEER_ID='$K5_PEER'
+EOF
+K5_COUNT="$(k_requests)"
+k_install --data-root "$K5"
+check "a kit unpacked beside the data root is found" "$(b test "$RC" -eq 0)" "$OUT"
+check "it adopts the world that start script names" "$(b contains "peer $K5_PEER" "$OUT")"
+check "on the map that start script names" \
+  "$(b grep -qF "\"relayUrl\": \"$K5_RELAY\"" "$K5/install-record.json")"
+check "and asked the map for nothing" "$(b test "$(k_requests)" = "$K5_COUNT")"
 
 # ---------------------------------------------------------------- the verdict
 
