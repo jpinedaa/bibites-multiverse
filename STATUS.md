@@ -25,7 +25,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 |---|---|
 | Release | [`v0.2.6`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.6) |
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.4` |
+| Plugin | `0.6.5` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
 | Network protocol | `contract-b/4.0` |
 | Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
