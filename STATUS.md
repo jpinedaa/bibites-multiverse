@@ -1,8 +1,8 @@
 # Project status
 
-Last updated: 2026-08-16 UTC.
+Last updated: 2026-08-17 UTC.
 
-Bibites Multiverse `0.2.6` is public. The first announced service period runs from
+Bibites Multiverse `0.2.7` is public. The first announced service period runs from
 **August 14 through November 14, 2026**.
 
 ## Current public phase
@@ -23,7 +23,7 @@ Use the [live map](https://bibitesmultiverse.com/live) for the public view of th
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.2.6`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.6) |
+| Release | [`v0.2.7`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.7) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.5` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -52,6 +52,9 @@ from the folder being written to stops them.
 Release `0.2.6` makes installing again over an existing data root keep that world: the installer
 adopts the identity already there instead of refusing with `INS-ENROLL`, and an uninstall keeps
 the credential with the journal.
+Release `0.2.7` ships the `0.6.5` plugin (durable fertility setting), reads a world's identity from
+its own sidecar log when the record is gone, and is the first release built and published by the
+release workflow.
 Private maps still accept a private join-string file on both platforms.
 
 ## Milestone state

@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.2.6` on **2026-08-16**, against the code and
+strangers. This audit was updated for release `0.2.7` on **2026-08-17**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
