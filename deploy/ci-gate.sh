@@ -232,7 +232,14 @@ verb_verify() {
   # touching it.
   step "monitor freshness (read only — the monitor is NOT run from CI)"
   say "timer:   $(systemctl is-active multiverse-monitor.timer 2>/dev/null || echo unknown)"
-  say "service: $(systemctl show -p ExecMainStatus --value multiverse-monitor.service 2>/dev/null || echo unknown) (last exit status)"
+  # 0 IS THE HEALTHY VALUE EVEN WHILE A CHECK IS CRIT. monitor.sh carries
+  # severity in the alert and in its printed `worst:` line, so a completed pass
+  # exits 0 whatever it found; a non-zero here means the pass could not run,
+  # and 2 is the unreadable /etc/multiverse/deploy.env that silences alerting
+  # altogether. It is reported rather than failed on, because ExecMainStatus
+  # still holds the previous tick's value for up to five minutes after a kit is
+  # installed.
+  say "service: $(systemctl show -p ExecMainStatus --value multiverse-monitor.service 2>/dev/null || echo unknown) (last exit status; 0 is healthy even at CRIT, non-zero means the pass could not RUN)"
   # Read through sudo: /var/lib/multiverse is 0750 multiverse:multiverse and this
   # script runs as `ubuntu`, which cannot traverse it.
   local newest

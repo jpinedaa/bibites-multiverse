@@ -658,6 +658,58 @@ printf 'this is not json\n' >"$STATE/monitor/billing.json"
 out="$(run "$BASE" billing)"
 eq  'a corrupt file is a warning and not a crash' "$(sev_of "$out" billing)" WARN
 
+# ------------------------------------------------------- 16. exit status
+#
+# THE EXIT CODE SAYS WHETHER THE MONITOR RAN, NOT WHAT IT FOUND. It used to say
+# both: a WARN or a CRIT exited 1, so a Type=oneshot unit driven by a
+# five-minute timer sat in `failed` almost permanently while the monitor was
+# doing its job. `systemctl is-failed multiverse-monitor.service` stopped
+# meaning anything, and a deploy pipeline under `set -o pipefail` broke on it.
+# Severity travels in the alert and in the `worst:` line; these cases hold the
+# exit code to the one thing it still has to say.
+
+reset_state
+printf '127.0.0.1 localhost\n127.0.0.1 multiverse.example\n' >"$HOSTS"
+out="$(run "$BASE" hosts-pin)"; rc=$?
+eq  'an OK pass exits 0'                             "$rc" 0
+eq  'and the verdict is still OK'                    "$(sev_of "$out" hosts-pin)" OK
+
+# A WARN. Three consecutive passes with half the swap in use is the sizing
+# signal from section 14, reached here for its exit code.
+reset_state
+meminfo 1953544 2097152 1048576
+run "$BASE" swap >/dev/null
+run "$(( BASE + 300 ))" swap >/dev/null
+out="$(run "$(( BASE + 600 ))" swap)"; rc=$?
+eq  'a WARN pass exits 0 as well'                    "$rc" 0
+eq  'and the WARN is still reported'                 "$(sev_of "$out" swap)" WARN
+has 'and the worst line still carries it'            "$out" 'worst: WARN'
+
+# A CRIT. The missing loopback pin from section 12, which is the most expensive
+# verdict this script can reach without a network.
+reset_state
+printf '127.0.0.1 localhost\n' >"$HOSTS"
+out="$(run "$BASE" hosts-pin)"; rc=$?
+eq  'a CRIT pass exits 0 too'                        "$rc" 0
+eq  'and the CRIT is still reported'                 "$(sev_of "$out" hosts-pin)" CRIT
+has 'and the worst line still carries it'            "$out" 'worst: CRIT'
+
+# CANNOT RUN IS STILL NON-ZERO, and it is the only thing left that is. An
+# environment file the monitor cannot read means no thresholds, no alert
+# channel and no pass at all, and nothing else on the host would notice.
+missing="$TMP/there-is-no-deploy-env"
+rm -f "$missing"
+err="$(env MV_ENV_FILE="$missing" MV_STATE="$STATE" "$MON" --only swap --quiet 2>&1)"; rc=$?
+eq  'a missing environment file exits 2'             "$rc" 2
+has 'and it names the file it could not find'        "$err" "$missing"
+
+# The same code for an argument it does not accept, because both are "this pass
+# never started".
+err="$(env MV_ENV_FILE="$ENVF" MV_STATE="$STATE" "$MON" --only nonesuch --quiet 2>&1)"; rc=$?
+eq  'an unknown --only group exits 2'                "$rc" 2
+err="$(env MV_ENV_FILE="$ENVF" MV_STATE="$STATE" "$MON" --nonesuch 2>&1)"; rc=$?
+eq  'an unknown argument exits 2'                    "$rc" 2
+
 # ---------------------------------------------------------------- result
 
 printf '\n'

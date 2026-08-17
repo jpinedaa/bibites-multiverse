@@ -10,7 +10,7 @@
 #   monitor.sh              one pass; alert on anything that CHANGED
 #   monitor.sh --verbose    one pass, print every check
 #   monitor.sh --test       send one alert and exit — prove the channel works
-#   monitor.sh --quiet      no alerts, exit code only (1 if anything is not OK)
+#   monitor.sh --quiet      no alerts; the verdict is printed, never sent
 #   monitor.sh --only NAME  run one group and nothing else: 'transfer',
 #                           'hosts-pin', 'replay', 'swap' or 'billing'.
 #                           deploy/test-monitor.sh drives the transfer, billing
@@ -19,6 +19,31 @@
 #                           reconciliation file and a fake clock, on a
 #                           workstation, without root and without touching the
 #                           network.
+#
+# THE EXIT STATUS SAYS WHETHER THE MONITOR RAN. It does not say whether the
+# service is well.
+#
+#   0   the pass completed. OK, WARN and CRIT all exit 0.
+#   1   only from --test, and only when the alert channel itself failed.
+#   2   the pass could not start: no readable environment file, or an argument
+#       this does not accept.
+#
+# A WARN or a CRIT travels in the alert, in the `worst:` line on stdout and in
+# the sev.* state under MV_STATE. It used to travel in the exit code as well,
+# and that was wrong twice over. multiverse-monitor.service is Type=oneshot, so
+# every tick of the five-minute timer left the unit `failed` while the monitor
+# was doing exactly its job: `systemctl is-failed` stopped meaning anything,
+# three operations records in one night named it, and a deploy pipeline running
+# under `set -o pipefail` broke on it. A non-zero status here now means the
+# WATCHER could not run — the one fault no check of its own can report.
+#
+# To read the verdict from a script, parse the `worst:` line, which prints on
+# every --verbose run and on every run that is not OK:
+#
+#     monitor.sh --quiet --verbose | awk '/^worst:/ { print $2 }'
+#
+# or read the per-check lines --verbose prints, which is what
+# deploy/restart-archive.sh does for its replay gate.
 #
 # WHAT IT WATCHES, and why each one is on the list rather than a longer one:
 #
@@ -311,7 +336,10 @@ while [ $# -gt 0 ]; do
       fi
       echo "the alert channel is NOT working: kind=$MV_ALERT_KIND url set=$([ -n "$MV_ALERT_URL" ] && echo yes || echo no)" >&2
       exit 1 ;;
-    -h|--help) sed -n '2,121p' "$0"; exit 0 ;;
+    # The header block, whatever length it has grown to: everything from the
+    # line after the shebang down to the `set` that ends it, minus that line.
+    # A hard-coded last line is a comment that silently truncates its own help.
+    -h|--help) sed -n '2,/^set -uo pipefail$/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "monitor: unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -1174,4 +1202,9 @@ fi
 if [ "$VERBOSE" = 1 ] || [ "$WORST" != OK ]; then
   printf '\nworst: %s%s\n' "$WORST" "$SUMMARY"
 fi
-[ "$WORST" = OK ]
+
+# A COMPLETED PASS EXITS 0, WHATEVER IT FOUND. See "THE EXIT STATUS" in the
+# header: severity is the alert's job and the `worst:` line's job, and this
+# unit is a Type=oneshot whose failure state has to keep meaning "the watcher
+# did not run".
+exit 0

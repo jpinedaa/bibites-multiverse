@@ -593,7 +593,10 @@ func journalEntry(t *testing.T, s *Sidecar, migrationID string) *journal.State {
 
 // startArchive brings up an in-process multiverse-archive against the rig's
 // relay, on a short retry ladder so a test does not wait a minute for the first
-// re-ask, with the status page on an ephemeral port.
+// re-ask, with the status page on an ephemeral port. IT RETURNS ONLY ONCE THE
+// RELAY HAS THE SUBSCRIBER IN ITS FAN-OUT REGISTRY, which is what makes every
+// "the archive recorded it" assertion in this package a wait rather than a race
+// — see the comment on the readiness gate below.
 func startArchive(t *testing.T, rl *testRelay) *archive.Archive {
 	t.Helper()
 	// §22 B27: the archive is a client of the same wire with a DIFFERENT GRANT,
@@ -622,5 +625,21 @@ func startArchive(t *testing.T, rl *testRelay) *archive.Archive {
 		t.Fatalf("archive: start: %v", err)
 	}
 	t.Cleanup(func() { _ = a.Close() })
+	// Start only SPAWNS the relay link; the dial, the HANDSHAKE and the relay's
+	// registration all happen behind it. That gap is a lost-copy race and not a
+	// slow one: §5.1 copies a routed frame to the subscribers the relay holds AT
+	// THAT MOMENT and there is no replay for one that arrives afterwards, so a
+	// test that ships an organism before its archive is registered waits forever
+	// for a record that will never be written. No deadline can rescue that, which
+	// is why the gate is here rather than a bigger number at the call sites.
+	//
+	// A PEER_STATUS is the proof, because the registry is the only place it can
+	// come from: the archive holds no slot and asks the relay for nothing, so the
+	// first broadcast it receives says the relay is fanning out to it. The
+	// subscriber's arrival is itself registry churn, so that broadcast is one
+	// coalescing window away (~40 ms on this rig) and never a stats-timer wait.
+	waitFor(t, 15*time.Second, "the archive to be subscribed to the relay", func() bool {
+		return a.StatusView().HaveStatus
+	})
 	return a
 }

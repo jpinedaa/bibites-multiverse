@@ -148,6 +148,41 @@ jobs:
       - name: viewer presence
         run: deploy/test-viewers-presence.sh
 
+      # The broadcast world's presentation, identity and startup ordering.
+      # install.sh mints this world its own map credential and protects it with
+      # a Windows ACL, and run-windows.ps1 starts a sidecar, a game and OBS in
+      # an order that a wrong edit silently inverts — a publisher started before
+      # the sidecar broadcasts a world that is not on the map, and a watcher
+      # started before OBS takes the stream down as soon as it can reach it.
+      # The script asserts against the sources and sources install.sh for its
+      # functions without ever running the installer, so it needs no Windows, no
+      # game and no network: only jq, which the image has.
+      - name: broadcast configuration
+        run: deploy/local-broadcast/test-config.sh
+
+      # HONEST SKIP, and here on purpose. test-watch-viewers.sh drives the real
+      # watch-viewers.ps1 — the script that decides whether the broadcast
+      # publishes at all — through `powershell.exe` and translates its paths
+      # with `wslpath`, so it runs only on a WSL host with Windows interop. No
+      # GitHub-hosted image is one: ubuntu-latest has `pwsh` but no
+      # `powershell.exe` and no `wslpath`, and windows-latest has
+      # `powershell.exe` but no `wslpath`, so moving this to the windows job
+      # would skip there too. It is run rather than left out so that the skip
+      # stays a clean, explained skip instead of an error, and so the day the
+      # test loses its WSL dependency it starts covering CI without a change
+      # here. deploy/local-broadcast/test-config.sh calls it on a real WSL
+      # workstation, which is where its cases actually run today.
+      - name: broadcast viewer watcher (WSL only; skips here)
+        run: |
+          set -euo pipefail
+          out="$(deploy/local-broadcast/test-watch-viewers.sh)"
+          printf '%s\n' "$out"
+          case "$out" in
+            *'SKIP, no '*|*': PASS'*) ;;
+            *) echo "!! test-watch-viewers.sh neither ran nor skipped cleanly" >&2
+               exit 1 ;;
+          esac
+
       # ci-gate.sh is the forced command pinned to the deployment key, and the
       # account it runs as has passwordless sudo — so its refusals are the whole
       # boundary, not error handling. Most of that suite is an attempt to get

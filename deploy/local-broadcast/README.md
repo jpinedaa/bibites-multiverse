@@ -81,10 +81,18 @@ Run the watcher against written presence documents and a fake obs-websocket serv
 ./deploy/local-broadcast/test-watch-viewers.sh
 ```
 
-Its first half uses `-WhatIf`, which opens no socket at all.
+Its first half uses `-WhatIf`, so it reaches no OBS at all and cannot disturb a live broadcast.
 Its second half drives the real obs-websocket path against `fake-obs-websocket.py`, because a
 watcher whose socket code cannot work still passes every `-WhatIf` case.
-Neither half needs OBS, and neither can reach a running broadcast.
+Neither half needs OBS on the machine.
+
+It needs `powershell.exe` and `wslpath`, which means a WSL host with Windows interop, and it prints
+`SKIP` anywhere else.
+`test-config.sh` calls it at the end of its own Windows half.
+
+`test-config.sh` itself needs no Windows and no game, so the `checks` workflow runs it on every
+pull request; the watcher test is run there too and can only skip, because no GitHub-hosted runner
+is a WSL host.
 
 ### Stream profile
 
