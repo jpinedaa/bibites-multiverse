@@ -47,6 +47,17 @@ package archive
 // /api/status — so an operator reads what a restart cost rather than a model of
 // it, and so monitor.sh can gate on the measurement.
 //
+// THERE IS A SECOND TERM AND THE VALIDATION FOUND IT: getting TO the window's
+// start. On a plain segment or the live file that is an lseek and costs nothing.
+// On a COMPRESSED segment a gzip stream has no seek, so it is a
+// decompress-and-discard of every byte before the start — measured at 5.9 s to
+// skip 1.80 GB of the one-off legacy segment on the validation box, against
+// 6.3 s for the whole restart. In ordinary running the window's start is inside
+// a recent segment, so the skip is at most one day; the legacy segment the
+// migration produces is the worst case and it happens once. If it ever matters
+// more than that, the fix is an offset index per segment and not a shorter
+// window.
+//
 // PHASE 1 COULD NOT SAY THAT, and the difference is what phase 3 built. Two
 // things used to force the raw scan back to max(DedupWindow, GenomeHorizon) —
 // 720 h on the deployment, and the WHOLE RECORD on an archive with no horizon:
