@@ -296,7 +296,16 @@ the owner's machine rather than on a hosted runner.
 
 Settle the tested build first. `release/check-drift.sh` must be green before you tag anything: an
 untested tree stops the build on the release machine minutes in, after the game payload has already
-been staged. It is **not** green today — see *Day one* below.
+been staged. It is green on `main` today, at mod `0.6.7` recorded on 2026-08-17.
+
+**Then settle the release machine's own game**, which no check in a pull request can see. Gate 3b
+compares three copies of the plugin — the one this tree builds, the one the record names, and the
+one installed in the release machine's Steam game — and the third goes stale the moment the
+recorded plugin moves. On that machine, in this checkout, run `bibites-mod/deploy.sh` with no
+arguments: it builds `bibites-mod/BibitesMultiverse.csproj` and copies `BibitesMultiverse.dll` into
+`…/Steam/steamapps/common/The Bibites/BepInEx/plugins/`. Do it **before** the runner takes the job.
+The refusal otherwise arrives three minutes and two cross-builds in, and reads *"the plugin in this
+machine's game is a different build again"*.
 
 The machine side of *The release runner* is built and smoke-tested; the `release` environment
 exists, deliberately without a required reviewer. Read that section before the first tag, because
@@ -309,6 +318,8 @@ git switch -c release/<version>
 release/bump-version.sh <version>
 #    work through the review list it prints. The dates, the matrix's "published" and "tested"
 #    strings, and STATUS.md's release paragraph are yours to write, not the tool's
+#    RELEASE-PAGE.md's "What is new", "Upgrading" and "Known limitations" sections are yours too:
+#    they describe ONE release, they carry no version literal, and no tool rewrites them
 release/bump-version.sh --check
 git add -- $(git diff --name-only)      # exactly what the bump touched, nothing else
 git commit -m "Set the release to <version>"
@@ -674,14 +685,15 @@ pgrep -af Runner.Listener      # nothing
 The runner is registered, its inputs are in place, and the front of the release job has been proved
 against a real dispatch. Two things are still not true, and both belong before the first tag.
 
-**The tested build on `main` is out of date**, so `release/check-drift.sh` fails and the
-`consistency` job is red on every pull request — including the one that introduces CI. The mod
-moved to `0.6.5` after the recorded build and nobody has tested that plugin yet. Clear the debt
-rather than paper over it, and clear it first: it is the four legs under *Building*, applied once
-to catch up — build the `0.6.5` plugin, deploy it to this machine's game, run it, then
-`release/record-tested-build.sh` and paste the block, with `0.6.5` on both matrix rows and in
-`dev_environment.md`. Merging CI into a `main` that is genuinely releasable is the whole point of
-doing it first.
+**The tested build on `main` is current — that debt is cleared.** When this section was written it
+was not: the mod had moved past the recorded build, nobody had run that plugin, `check-drift.sh`
+failed, and the `consistency` job was red on every pull request including the one that introduced
+CI. It was cleared the only way it can be — the four legs under *Building*, applied once to catch
+up: build the plugin, deploy it to a game, run it, then `release/record-tested-build.sh` and paste
+the block. `docs/support-matrix.md` now records mod `0.6.7` with a sidecar that ran on Windows on
+2026-08-17, and checks A, B and C pass. **What this leaves behind is a standing step rather than a
+one-off**: the release machine's own game holds the third copy gate 3b compares, so refresh it with
+`bibites-mod/deploy.sh` whenever the recorded plugin moves — see *Cutting a release*.
 
 **Nothing has run yet.** Do not make `checks.yml` a required status check until it has been green
 at least once. `go test ./...` and the nginx leg of the front-door check have never run on a hosted

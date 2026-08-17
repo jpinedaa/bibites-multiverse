@@ -56,8 +56,8 @@ root="$(dirname "$data")"
 
 **On Windows the launcher does this for you**: **Run a health check** in the launcher's window runs
 the diagnostic with that world's own relay and credential filled in, and prints the command line it
-used above the report. The window's details pane opens by itself to show it. `--credential-file` names the file and never the secret; no flag in this system
-takes a secret as a value.
+used above the report. The window's details pane opens by itself to show it. `--credential-file`
+names the file and never the secret; no flag in this system takes a secret as a value.
 
 Everything below writes them short. **The flags are the same on both platforms**; what differs is
 the file name and where your data directory is. **They read; they do not start anything**, and you
@@ -147,7 +147,8 @@ link. **On a packaged install it needs nothing else**: your game folder and the 
 come from the `install-record.json` the installer left in your data root, which is also how it
 knows where to look for the mod's log. **A world the launcher created has no install record of its
 own** — it shares the game folder the installer bound, so point `--data-dir` at that world and, if
-a check asks for the game, give it the same game folder `profile show NAME` prints. The specification it is built from is
+a check asks for the game, give it the same game folder `profile show NAME` prints. The
+specification it is built from is
 [`../sidecar-diagnose-spec.md`](../sidecar-diagnose-spec.md), which lists every check, its pass
 criterion and the taxonomy entry its failure points at.
 

@@ -484,6 +484,33 @@ M3's `multiverse-archive` is the centralized ancestor of this module, not a comp
 one recorder on one host, no DHT, no per-peer choice. It hashes genomes with the same
 `bb8-schema` projection, so its records stay meaningful to whatever M7 builds.
 
+### 7. `multiverse-launcher` — The Participant's Front Door (M5)
+**What it is:** The program a player opens. It owns every local world on one computer: the
+world profiles, the process ledger, and the order the sidecar and the game are started and
+stopped in.
+**Depends on:** the sidecar (it starts one per world and reads its `/my-slot`), the mod (it
+sets the command file a lossless stop is asked through), and the installer's own record.
+**Tested by:** unit tests over the whole tag-free half, plus the install and uninstall suites.
+
+**Owns:**
+- One profile per world — its map identity, data root, game folder, sidecar port and settings
+- Start and stop, in the order that keeps a world whole: the sidecar first, then the game;
+  a stop asks the mod to save and quit, and only forces what will not go
+- The wait a start is judged by — a place on the map, then the mod actually reaching the
+  sidecar — rather than reporting success the moment a process exists
+- Create, clone and delete, with the gate a deletion has to pass
+- Handing `--diagnose` this world's own relay and credential, so the check answers about the
+  map the world is on
+
+**Two executables, one behaviour (2026-08-17).** `BibitesMultiverseLauncher.exe` is a Win32
+window: a list of every world, what each is doing, and whether its mod has really reached the
+map — the one fact that separates a world the map shows as live from a world that is actually
+feeding it (`LOCAL-CONFIGRACE`, `LOCAL-STARVATION`). `multiverse-launcher.exe` is the same
+launcher's commands and console menu, and is what a script calls, because no shell waits for a
+process in the Windows GUI subsystem. **The window decides nothing about a world**: every action
+is one call into the same core, so the two files cannot drift apart on a refusal, a wait or a
+stop. Linux keeps its generated shell scripts.
+
 ---
 
 ## Contracts
@@ -740,6 +767,10 @@ graph LR
 Note the mod no longer depends on `bb8-schema` (D4). `multiverse-archive` hangs off the
 relay's host, not off any sidecar's process — it reads envelopes and pulls genomes, and
 nothing in the migration path waits for it.
+
+`multiverse-launcher` is deliberately absent from this graph: it starts, stops and reads the
+two local processes and speaks neither contract, so nothing on the migration path waits for
+it — and closing its window stops nothing.
 
 ---
 

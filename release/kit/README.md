@@ -59,6 +59,15 @@ folder. The installer checks the game build against `support-matrix.json` and st
 entry. Then it installs BepInEx, the plugin, the credential, the start and stop scripts, and
 `profiles\default.json` — the world profile the launcher reads.
 
+**Stop your worlds before you install again.** Windows does not let anything replace a program
+while it runs, and the launcher, the commands, the sidecar and the mod are all files this setup
+replaces. So it asks first: if any of them is running out of the folders this run writes into, it
+stops at its very first step, names each program with its process id and path, and **changes
+nothing at all**. Close them — **Stop every world** in the launcher's window, or
+`multiverse-launcher.exe stop --all`, then close the window itself and the game — and run the setup
+again. **It never ends anything for you**, because a world ended rather than stopped loses
+everything it has simulated since its last save.
+
 **Installing again over the same data root keeps that world.** An upgrade or a repair is not a new
 world: step 6 reads the identity already in `%LOCALAPPDATA%\BibitesMultiverse` — from
 `install-record.json`, from a pending enrollment record carrying that same secret, from

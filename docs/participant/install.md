@@ -196,7 +196,8 @@ do.
 
 **The window remembers its size and position**, whether you had the details pane open and how tall
 you left it, in `%APPDATA%\Bibites Multiverse\launcher-window.json`. Deleting that file costs
-nothing.
+you the layout and nothing else — no world, no setting and no identity is in it — and the
+uninstaller leaves it, because the installer never wrote it.
 
 **Closing the window does not stop anything.** The worlds keep running, which is what the line
 along the bottom of the window says, and the title bar tells you how many are up. Stop them with

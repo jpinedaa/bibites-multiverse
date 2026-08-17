@@ -523,7 +523,7 @@ which is where a one-off belongs.
 5. **Now the regression.** While that start is still printing, send the pane `WM_VSCROLL` `SB_TOP`
    (or scroll to the top by hand). Read `EM_GETFIRSTVISIBLELINE` — call it `before`.
 6. Wait for at least ten more lines to arrive (watch `EM_GETLINECOUNT` grow).
-7. **Assert (the one that failed at `5becf8a`):** `EM_GETFIRSTVISIBLELINE` is **still `before`**. A
+7. **Assert (the one that failed at `81af447`):** `EM_GETFIRSTVISIBLELINE` is **still `before`**. A
    machine previously measured it jumping from `0` to `286` on the very next appended line: walk's
    `AppendText` replaces the selection at the end of the document and the EDIT control scrolls the
    caret into view as part of that, before this program is consulted. The window now reads the first

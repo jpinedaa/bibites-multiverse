@@ -27,8 +27,8 @@ Every service notice — planned work, a change of terms — is published on the
 
 | Item | Current state |
 |---|---|
-| Network protocol in force | `contract-b/4.1`. Release `0.2.8` speaks `contract-b/4.0` and its additions are optional, so a `0.2.8` world joins unchanged |
-| Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. The service half is deployed; the participant-side change ships with the next release |
+| Network protocol in force | `contract-b/4.1`, which the current release speaks. An older world speaking `contract-b/4.0` still joins unchanged: every difference is optional |
+| Crossing between worlds | **At-most-once.** A world hands an organism over once; if it does not arrive it is lost, the loss is counted, and nothing re-sends it or brings it home. Both halves are now deployed: the service since 2026-08-17, and the participant half with the current release |
 | Record retention | Three periods, in force since 2026-08-17. See below |
 
 **The map keeps three things for three different times.** The
@@ -53,9 +53,9 @@ request.
 |---|---|
 | Release | [`v0.2.8`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.8) |
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.5` |
+| Plugin | `0.6.7` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
-| Network protocol | `contract-b/4.0` — what this release speaks. The hosted service speaks `contract-b/4.1`; see [Hosted service](#hosted-service) |
+| Network protocol | `contract-b/4.1` — what this release speaks, and what the hosted service speaks; see [Hosted service](#hosted-service). A world on `contract-b/4.0` still joins |
 | Windows package | Single setup executable with the authorized portable game, application shortcuts, and uninstall registration. An existing game is optional |
 | Windows launcher | The shortcuts open `BibitesMultiverseLauncher.exe`, a window that lists every world on this computer with what is running, whether its mod has reached the map, its speed and its slot, and starts, stops, creates, clones, deletes and diagnoses them. A per-session switch runs one session with or without a window. The same launcher's commands and console menu ship beside it as `multiverse-launcher.exe`, which is what a script calls. One game folder supports five worlds at once |
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
@@ -66,9 +66,12 @@ request.
 | Release process | Every pull request and every push to `main` runs the project's automated checks, and a version tag builds and publishes the release from the owner's own machine. The homepage follows the published release on its own |
 
 The release page provides checksums. The participant installer compares the game build with
-the support matrix before it changes the game directory. The Windows GUI starts the connected
-world after installation by default. The launcher runs a world headless, and the generated
-start script keeps its own headless switch.
+the support matrix before it changes the game directory, and it refuses an install over a world
+that is still running before it has changed anything. The Windows GUI starts the connected
+world after installation by default. A world starts at ten times the game's own speed, which the
+in-game speed slider still moves. The launcher runs a world headless, and a stop asks the world
+to save and quit through its own mod, so a headless world loses nothing either; the generated
+start script keeps its own headless switch and the same stop.
 The packaged public join configuration contains service addresses, not a shared world secret.
 Release `0.2.1` added a Linux complete package and automatic enrollment to the Linux installer.
 The releases after it added the single-file Windows setup and normal application shortcuts.

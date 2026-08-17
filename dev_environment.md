@@ -550,6 +550,22 @@ release/bump-version.sh --check
 release/check-drift.sh
 ```
 
+**The PowerShell half can be run here too.** `release/pscheck.ps1` parses every shipped `.ps1`, and
+PowerShell 7 installs into this WSL user without touching the system: `dotnet tool install --global
+PowerShell` puts `pwsh` in `~/.dotnet/tools`. **It needs `DOTNET_ROOT` as well as `PATH`** — the
+tool's app host looks for the runtime under it and says only *"You must install .NET to run this
+application"* when it is unset, on a machine where the runtime is right there:
+
+```sh
+DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH" \
+  pwsh -NoProfile -File release/pscheck.ps1 'release/kit/*.ps1' farend/setup-farend.ps1 \
+    release/test-install-uninstall.ps1 release/test-installer-wait.ps1 'deploy/local-broadcast/*.ps1'
+```
+
+That is the same file list `.github/workflows/checks.yml` parses. It parses; it does not execute.
+`release/test-installer-wait.ps1` and `release/test-install-uninstall.ps1` still need a real
+Windows machine to RUN.
+
 The first proves that every place naming the release agrees with `release/make-release.sh`.
 The second proves that this tree is still the build that was tested, and that the plugin version
 agrees across `bibites-mod/src/MultiversePlugin.cs`, both rows of `docs/support-matrix.md`,
@@ -663,6 +679,17 @@ Archive replay skips a damaged line and continues with later records.
 It reports the skipped line count and byte count.
 
 Tests for any new append-only file must cover short writes, replay, and valid records after damage.
+
+**A rewrite of such a file cannot rename over a handle this process still holds — on Windows.**
+Go opens files without `FILE_SHARE_DELETE`, so `MoveFileEx(REPLACE_EXISTING)` refuses the
+replacement and the compaction fails every time, while the timer that drives it runs perfectly.
+Linux hides it completely: the rename succeeds there and the old inode outlives the handle, so
+every test passed and two live Windows sidecars still reached 718 MB and 132 MB of journal. The
+sidecar now closes the append handle, renames, and re-opens it, under the write lock. Asking for
+`FILE_SHARE_DELETE` instead would let the rename through and leave the writer appending into a
+file with no name — fsynced, acknowledged, and gone at the next start. Retry the rename a few
+times inside a few tens of milliseconds: another process reading the same file (`--diagnose`
+replays this journal) can refuse it even when this process holds no handle.
 
 ### Archive replay and growth
 
@@ -833,6 +860,9 @@ Do not present a historical rig value as current service state.
 - With output redirection, `Start-Process -PassThru` returns a process object that holds no
   handle, and its `ExitCode` then reads as `$null`. Read `.Handle` once while the process is
   alive if the exit code is going to be needed.
+- On Windows, a rename over a file this process still has open fails with *"Access is denied."* —
+  see *Append-only recovery*. Close the handle across the rename; do not open with
+  `FILE_SHARE_DELETE`.
 - NSIS `${GetSize}` enumerates every file under the path it is given. Point it at a program
   directory, never at a data root a journal grows inside: 145k files took 27.5 minutes, with the
   setup already invisible and its payload still unpacked in `%TEMP%`.

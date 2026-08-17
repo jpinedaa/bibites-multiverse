@@ -24,7 +24,9 @@ builds, test rigs, and durable technical findings. Nothing in `docs/` copies tha
 
 **Two of these travel with the release rather than only living here.** `support-matrix.md`'s
 machine-readable block is copied into **every** release archive as `support-matrix.json`. Each
-installer therefore uses the refusal text from the published page. `defaults-audit.md` is linked
+installer therefore uses the refusal text from the published page, and the Windows installer keeps
+that file in the application directory as well, because `--diagnose` reads it again — beside the
+sidecar's own executable — to say which game build a machine is on. `defaults-audit.md` is linked
 from the release page, because a reader must know what a bare install does before running it.
 
 **Every page here covers both platforms and the editions this release publishes.** The recommended

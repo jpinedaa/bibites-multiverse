@@ -157,9 +157,18 @@ per-user uninstall entry for Windows Settings.
 machine-wide registry value, or administrator requirement. The two launch shortcuts use the
 project icon and open `BibitesMultiverseLauncher.exe`, the window. **Nothing has a shortcut to the
 commands**: `multiverse-launcher.exe` is installed beside the window for a script to call and is
-opened by no icon, and the window's own Worlds menu is what opens it in a console. The generated
+opened by no icon, and the window's own **Open** menu (*Open the commands window*) is what opens
+it in a console. The generated
 `Start-Multiverse.ps1` stays beside them for advanced and scripted use, and no shortcut points at
 it either. The window requests `asInvoker` in its manifest and nothing above it.
+
+**One more file, and the installer does not write it.** The window remembers where it was —
+size, position, maximised, whether the details pane was open and where its dividers were left — in
+`%APPDATA%\Bibites Multiverse\launcher-window.json`, written when it closes. It carries numbers
+and two flags: no identity, no secret, no path, nothing about a world. It is **not** in the install
+record, because the installer never wrote it, so **the uninstaller leaves it** — which is the same
+rule the uninstall follows everywhere: it removes what its record owns and nothing else. Deleting
+it by hand costs a person their window layout.
 
 **The cost.** The desktop receives one icon. Windows Settings receives one application entry.
 The uninstaller removes both shortcut locations and the application entry, and both executables:

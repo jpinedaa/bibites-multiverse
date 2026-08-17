@@ -34,8 +34,10 @@ synchronized mega-simulation. It is an evolutionary continent made from worlds t
 
 > [!IMPORTANT]
 > **Bibites Multiverse `0.2.8` is public.** The Windows download is one setup executable with an
-> authorized portable copy of *The Bibites*. It installs the Bibites Multiverse launcher, which
-> starts, stops, and watches your worlds and can run more than one of them. The Linux complete
+> authorized portable copy of *The Bibites*. It installs the Bibites Multiverse launcher — a
+> window that lists your worlds, says what each one is doing and whether it has really reached the
+> map, and starts, stops, creates, clones and checks them. Its commands ship beside it as
+> `multiverse-launcher.exe` for scripts. The Linux complete
 > download includes the native game. Add-on downloads remain available for an existing game. Get
 > them from the
 > [release page](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.2.8), and check the
@@ -171,8 +173,8 @@ simulation remains active.
 
 One Windows computer can run several worlds at the same time. **Create a world...** in the
 launcher window, or `multiverse-launcher.exe profile create NAME --world NAME --sidecar-port 8788`,
-adds a world with its own map identity, data folder, and sidecar port. One game folder supports five worlds at
-once. Each extra world enrolls its own identity on the public map.
+adds a world with its own map identity, data folder, and sidecar port. One game folder supports
+five worlds at once. Each extra world enrolls its own identity on the public map.
 
 The Windows GUI uses the included portable game by default. You can instead select an existing
 game. The GUI searches Steam and common install locations before it asks for a folder. Setup
