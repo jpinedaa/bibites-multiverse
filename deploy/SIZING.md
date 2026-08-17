@@ -423,18 +423,28 @@ Peer traffic is the largest term. It is set by the **simulation throughput of th
 that runs the worlds**, not by any world's configured time scale:
 
 ```text
-peer_GB_per_month  = 88 * total_crossings_per_second + 5.9 * slot_count^2
+peer_GB_per_month = 21 * total_crossings_per_second + 5.9 * slot_count^2   compressed wire
+peer_GB_per_month = 88 * total_crossings_per_second + 5.9 * slot_count^2   uncompressed wire
 crossings_per_second_of_one_world = 0.010 * population * achieved_time_scale
 ```
 
 Both terms count both directions. The first term is organism migration: one envelope for
-each edge crossing, measured at approximately `17.9 KB` on the wire. The second term is
-the periodic map-status broadcast, which every peer and the archive receives, so its
-map-wide cost grows with the square of the slot count.
+each edge crossing, measured at approximately `17.9 KB` on the uncompressed wire. The
+second term is the periodic map-status broadcast, which every peer and the archive
+receives, so its map-wide cost grows with the square of the slot count.
 
-A seven-slot reference map measured `2,508 GB` each month across all peers: `82 percent`
-migration payloads, `12 percent` status broadcasts, `3 percent` genome responses, and the
-balance in acknowledgements and pings. Duplicate migration identifiers were `0` to `1`
+`88` is the reference measurement on an uncompressed wire, and it stays because it is what
+was measured. `21` is `88` divided by the whole-wire reduction of `4.09` measured on the
+live map on `2026-08-17`, after the peer wire began negotiating compression. Use `21` to
+plan a compressed map at about the current world size, and treat it as derived rather than
+measured: the `4.09` covers migration and status frames together, and this line applies it
+to the migration term alone. Re-measure after a change to the world size, the status
+cadence, or the wire format. "The peer wire is compressed now" below states the
+measurement and its limits.
+
+A seven-slot reference map on the uncompressed wire measured `2,508 GB` each month across
+all peers: `82 percent` migration payloads, `12 percent` status broadcasts, `3 percent`
+genome responses, and the balance in acknowledgements and pings. Duplicate migration identifiers were `0` to `1`
 for each stream, so the volume is real work and not a retry storm.
 
 **Peer cost looks constant for each peer, and that is a property of the host.** Six worlds
@@ -453,19 +463,53 @@ An earlier rule in this document gave peer traffic as `50 GB` each month for eac
 `S`. At the reference map that result lands close to the measured total by accident. Its
 shape is wrong, and the shape is what a capacity decision uses.
 
-The status coefficient is a measurement of the current build and is an upper bound: the
+The status coefficient is an upper bound and it has not been re-measured on its own. The
 reference map emitted status frames about six times more often than its own design
-intends.
+intends, and the relay release of `2026-08-16` fixed that cadence. `5.9` therefore
+describes the map before that fix and overstates the map after it. It is the smaller of
+the two terms, so the over-estimate is conservative in the safe direction.
 
-**The peer wire is uncompressed JSON.** WebSocket `permessage-deflate` is disabled at
-every endpoint and the reverse proxy does not compress the upgrade. Offline `deflate` at
-level `6`, with a `32 KiB` window and per-stream context takeover, measured `9.0x` on
-migration payloads, `9.8x` on status frames, `10.4x` on genome responses, and `8.5x`
-overall. **Negotiated transport compression is the largest available reduction in this
-document and costs no simulation throughput and no fidelity.** Budget `7x` to `8.5x`, or
-about `4.5x` without context takeover. Each compression state costs approximately
-`260 KB` of memory for each connection, so choose a smaller window or no context takeover
-on a map of more than a few dozen peers.
+#### The peer wire is compressed now
+
+The peer wire was uncompressed JSON. WebSocket `permessage-deflate` is now negotiated at
+every peer endpoint, and the relay reports `peer wire compression offered=true` at start.
+**It was the largest available reduction in this document, it cost no simulation
+throughput and no fidelity, and it is done.**
+
+Offline `deflate` at level `6`, with a `32 KiB` window and per-stream context takeover,
+measured `9.0x` on migration payloads, `9.8x` on status frames, `10.4x` on genome
+responses, and `8.5x` overall. **The live map measured `4.09x`, and the gap is not a fault
+in the compressor.** The same relay release also fixed the `PEER_STATUS` cadence, and that
+fix removed the most compressible bytes from the wire before compression could remove
+them. **Two reductions that act on the same bytes are partly substitutes: their separate
+factors do not multiply.** Measure the pair, never the pieces added together.
+
+Measured on the service host at `2026-08-17T01:05Z`, six cloud worlds, at a work rate
+about `1.7x` higher than the earlier uncompressed reading:
+
+| Quantity | Reading |
+|---|---:|
+| Six peers, outbound | `8.807 GB` each day |
+| Six peers, inbound | `8.351 GB` each day |
+| Six peers, both directions | `531.9 GB` each month |
+| The same six before the change | `2,173 GB` each month |
+| Whole-wire factor | `4.09` |
+| For each slot | `3.9` to `4.8` outbound, `3.5` to `4.4` inbound |
+| One peer, each direction | `1.4` to `1.6 GB` each day |
+| Archive loopback subscription | `36.6` to `9.14 GB` each day |
+
+The archive subscribes over loopback, so its `4.0x` saving never reaches the billed
+interface. It is real work removed from the host all the same.
+
+The seventh slot is a world on another machine, and it reaches the relay over the public
+interface. Its own socket measured `0.90 GB` outbound and `0.92 GB` inbound each day at
+`2026-08-17T01:46Z`, from a 60-second sample, which is about `56 GB` each month. It runs
+the same source as the other six and negotiates compression too.
+
+Budget `7x` to `8.5x` only for a wire whose status cadence has not already been fixed, and
+about `4.5x` without context takeover. Each compression state costs approximately `260 KB`
+of memory for each connection, so choose a smaller window or no context takeover on a map
+of more than a few dozen peers.
 
 ### Video
 
@@ -476,31 +520,46 @@ rather than for every minute anyone watches:
 ingest_GB_per_month = 312 * publish_Mbit_per_second      while publishing
 ```
 
-A `2.5 Mbit/s` publisher costs approximately `780 GB` each month while it runs. Against a
-`3,072 GB` allowance that is a quarter of the budget, and a publisher that runs
-continuously spends all of it on an empty room.
+**The publisher runs at `1,500 kbit/s` CBR since `2026-08-16`, so a continuous
+publishing-month costs approximately `470 GB`.** It ran at `2.5 Mbit/s` before that, which
+cost approximately `780 GB`: a quarter of a `3,072 GB` allowance, spent on an empty room.
+The publish bitrate is the lever that multiplies this term and every viewer term together,
+which is why it is the first one to reach for.
 
-**Publish on demand, and the empty-room term goes to approximately zero.** The steady
-state with no audience is no publisher and therefore no ingest; the service pays the rate
-above only for the hours somebody watches. This costs the first viewer a wait of about
-twenty seconds while the publisher starts, and it needs a presence signal the publisher
-can read — see [`../docs/live-broadcast.md`](../docs/live-broadcast.md), "Publish on
-demand". Lowering the publish bitrate is the independent lever and multiplies both this
-term and every viewer term: `2.5` to `1.5 Mbit/s` takes a publishing-month from about
-`780 GB` to about `470 GB`.
+**Publish on demand, and the empty-room term goes to approximately zero.** This is live.
+The steady state with no audience is no publisher and therefore no ingest; the service pays
+the rate above only for the minutes somebody watches. Measured on `2026-08-17`: the
+publisher starts `16 s` after the first external request for the stream, stops after
+`181 s` with no viewer, and the origin reports `rtmp_conns 0` in between. It needs a
+presence signal the publisher can read — see
+[`../docs/live-broadcast.md`](../docs/live-broadcast.md), "Publish on demand".
 
 Viewer cost is not the media rate:
 
 ```text
-viewer_GB_per_month = 790        non-low-latency HLS, 2.5 Mbit/s media
-viewer_GB_per_month = 1150       low-latency HLS, same media
+viewer_GB_per_month = 475        fmp4 HLS, 1.5 Mbit/s media    the current origin
+viewer_GB_per_month = 790        fmp4 HLS, 2.5 Mbit/s media
+viewer_GB_per_month = 1150       low-latency HLS, 2.5 Mbit/s media
 ```
 
-The first line is the current origin. The media is `2.52 Mbit/s` as designed. Low-latency
-HLS delivered `3.69 Mbit/s`, because it re-fetches its playlist approximately as often as
-it delivers a media part: a measured `1.035` to `1` playlist-to-part ratio, with
-`31.8 percent` of delivered bytes in playlists. Dropping it removed that overhead and
-moved viewer latency from about `1 s` to about `6` to `8 s`.
+`790` is the measured line, taken when the origin carried `2.52 Mbit/s` of media. The
+origin now carries `1.5 Mbit/s`, and `475` is that measurement scaled by the bitrate:
+
+```text
+1.5 / 2.5 * 790 = 474
+```
+
+The scaling holds because this variant's delivery overhead is a small fixed cost for each
+segment rather than a share of each byte, so halving the media halves the total. The
+origin's own playlist agrees: it advertises `AVERAGE-BANDWIDTH=1507906`, which is
+`1.51 Mbit/s` including container overhead against `1.50 Mbit/s` of video. Replace `475`
+with a direct measurement once one continuous viewer has been observed long enough to make
+one.
+
+Low-latency HLS delivered `3.69 Mbit/s` for `2.5 Mbit/s` of media, because it re-fetches
+its playlist approximately as often as it delivers a media part: a measured `1.035` to `1`
+playlist-to-part ratio, with `31.8 percent` of delivered bytes in playlists. Dropping it
+removed that overhead and moved viewer latency from about `1 s` to about `6` to `8 s`.
 
 **Low-latency HLS is also the variant a cache cannot help.** Each playlist request stays
 open until the next part exists, so an edge cannot serve it from a stored object. The
@@ -508,8 +567,12 @@ non-low-latency variant is therefore the precondition for a content delivery net
 an alternative to one.
 
 Match the segment target to the encoder keyframe interval. A server extends a segment
-until the segment contains a keyframe, so a `1 s` target against a `2 s` keyframe
-interval produces `2 s` segments and a configuration that describes nothing.
+until the segment contains a keyframe, so a `1 s` target against a `2 s` keyframe interval
+produces `2 s` segments and a configuration that describes nothing. The current origin
+matches them, measured on `2026-08-17`: the publisher encodes a keyframe every `60` frames
+at `30` frames each second, which is `2 s`, and the delivered segments measure `2.00 s`.
+The playlist advertises `#EXT-X-TARGETDURATION:4`, which is the server's own ceiling and
+not the segment length. Read the segment durations when you check this, never the target.
 
 Measure a stalled client separately from a viewer. One stuck low-latency player measured
 `8.7` playlist requests for each media part and delivered no media at all, and it cost
@@ -532,18 +595,42 @@ endpoints or change cadence without changing this document.
 ### The consequence
 
 Use a CDN or a managed video service before direct-origin transfer exceeds its approved
-budget. At the measured rate, ten continuous viewers is not a capacity question but a
-four-figure monthly bill.
+budget. At `475 GB` for each continuous viewer, ten continuous viewers is not a capacity
+question but a four-figure monthly bill.
 
-A map that carries seven peers and one continuous publisher spends approximately
-`3,300 GB` each month before the first viewer arrives. With an on-demand publisher the
-same map spends approximately `2,500 GB` with nobody watching, and pays the publisher and
-the viewer together only while somebody is. Size the allowance from the crossing rate and
-the slot count, and treat each watched hour as an addition to it.
+Before the peer wire was compressed and the publisher moved to `1.5 Mbit/s` on demand, a
+seven-peer map with one continuous publisher spent approximately `3,300 GB` each month
+before the first viewer arrived, and approximately `2,500 GB` with an on-demand publisher
+and nobody watching. Both figures are history. They are kept because they are what a
+`3,072 GB` allowance was first measured against.
 
-Compress the peer wire before you buy a larger allowance. The peer term is `76 percent`
-of that figure and compresses about `8.5` times, which is a larger reduction than any
-other change in this document and costs no simulation throughput.
+**Steady state with zero audience, after the change.** The same seven-slot map, with the
+compressed wire and the on-demand publisher, projects this on `2026-08-17`:
+
+| Term | Reading each month |
+|---|---:|
+| Six cloud peers, both directions | `532 GB` |
+| The seventh peer, on another machine | `56 GB` |
+| Publisher ingest with an empty room | approximately `0` |
+| Console, pages, and the presence document | small; see "Console" |
+| **Total** | **approximately `590 GB`** |
+
+That is about `19 percent` of a `3,072 GB` allowance. The same map projected over
+`114 percent` of it before the change.
+
+**Read that as a first reading, not as a month.** It is a projection from short samples
+taken hours after the deployment: the six-peer figure is one reading at
+`2026-08-17T01:05Z`, and the seventh is a 60-second sample at `01:46Z`. A host's own
+trailing-24-hour projection still carries the uncompressed hours inside its window and
+falls over the following day as they leave it, so a projection read too early reports the
+old service. Confirm the figure against the transfer check over several days, and against
+the provider's own metered quantity over several settled days, before you plan on it; see
+[`../docs/observability.md`](../docs/observability.md), "Layer 4 — Cost".
+
+Size the allowance from the crossing rate and the slot count, and treat each watched hour
+as an addition to it. The peer wire is already compressed, so the next reduction, if the
+map grows or an audience arrives, is a cache in front of the video — which the
+non-low-latency variant already allows.
 
 ## Sizing procedure
 

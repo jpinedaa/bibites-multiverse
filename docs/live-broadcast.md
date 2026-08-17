@@ -32,6 +32,11 @@ nginx publishes HLS below `/stream/` over HTTPS.
 
 The origin uses the `fmp4` HLS variant with two-second segments, not low-latency HLS.
 The delay from the simulation to a viewer is then approximately 6 to 8 seconds.
+The publisher encodes a keyframe every 2 seconds, so a segment ends where the origin wants
+one to end.
+Measured on 2026-08-17: `hlsVariant: fmp4`, segments of `2.00` seconds, and a playlist that
+advertises `#EXT-X-TARGETDURATION:4` and `AVERAGE-BANDWIDTH=1507906`.
+The target duration is the origin's own ceiling and not the segment length.
 Low-latency HLS gives approximately 1 second and costs about 45 percent more transfer for each
 viewer, because it re-fetches its playlist about as often as it delivers media.
 This is a spectator camera with no interaction, so no viewer action is synchronous with the video.
@@ -227,9 +232,11 @@ The archive remains the durable migration record.
 
 ## Publish on demand
 
-The publisher costs approximately 780 GB of inbound transfer each month while it runs.
-It costs that amount with no audience, which is a quarter of the service's transfer allowance
-spent on an empty room.
+The publisher costs approximately 470 GB of inbound transfer each month while it runs, at
+the 1,500 kbit/s it publishes today.
+It cost approximately 780 GB at the earlier 2.5 Mbit/s, which was a quarter of the service's
+transfer allowance spent on an empty room.
+It costs that amount with no audience.
 The publisher therefore runs only while somebody watches.
 
 The service host cannot start the publisher.
@@ -277,9 +284,24 @@ It does not record or publish a viewer address, a session identifier, or a reque
 
 The broadcast page polls the playlist every 5 seconds, and that poll is the request the signal
 reads.
-The first viewer therefore waits approximately 20 seconds while the publisher starts.
+The first viewer therefore waits while the publisher starts.
 The page says so and keeps retrying, instead of showing a player with nothing in it.
 After about a minute of waiting the page reports a fault instead of a start.
+
+### What it measured
+
+The loop ran end to end on 2026-08-17.
+
+| Step | Measurement |
+|---|---|
+| Start | `StartStream` 16 seconds after the first external request |
+| Stop | `StopStream` after 181 seconds with no viewer |
+| Idle origin | `rtmp_conns 0` while the publisher is stopped |
+| An unprompted visitor | The loop started, served, and stopped for one, 01:26:23Z to 01:30:14Z |
+
+The 16 seconds are the whole path: the presence document refreshes, the Windows watcher reads it,
+OBS starts, and the origin accepts the RTMP connection.
+Read those numbers as one observation of a live loop, not as a specification.
 
 The Windows publisher's own watcher is a separate component with its own record.
 This document owns the endpoint contract, not the watcher.
@@ -294,7 +316,8 @@ The stack uses an AWS Deep Learning Base AMI with an NVIDIA driver.
 Xorg creates a virtual `1280x720` display.
 
 In the target design, FFmpeg captures that display at 30 frames each second.
-NVENC produces a 2.5-Mbit/s H.264 stream with a two-second keyframe interval.
+NVENC produces a 1,500-kbit/s H.264 stream with a two-second keyframe interval.
+That is the bitrate the local Windows fallback publishes today.
 
 The stack has no inbound security-group rules.
 Systems Manager provides the operator shell.
@@ -323,6 +346,10 @@ identity for every later installation.
 One exclusive lock covers identity preflight, runtime updates, and startup.
 The preflight finishes before the installer stops a live process or replaces a runtime file.
 OBS captures the game process and uses NVENC to publish H.264.
+It publishes 1,500 kbit/s CBR with a two-second keyframe interval.
+Those settings need the OBS **advanced** output mode: the simple mode has no
+keyframe-interval control, so NVENC chose its own and the origin then cut long segments.
+Read [`deploy/local-broadcast/`](../deploy/local-broadcast/README.md) for the encoder profile.
 A WSL service opens a private RTMP tunnel through AWS Systems Manager.
 A dedicated `tmux` session supervises the Windows sidecar, game, and OBS processes.
 
@@ -405,11 +432,12 @@ The private operations record must track interruption events and restart evidenc
 ## Capacity
 
 Transfer sets the audience limit, and the viewer cost is not the media rate.
-One continuously open viewer of the 2.5-Mbit/s stream costs approximately 790 GB each month, which
-is the cost of the `fmp4` variant this origin now uses.
-Low-latency HLS cost approximately 1,150 GB for the same media, of which 32 percent was playlist
-re-fetching.
-The publisher's own ingest costs approximately 780 GB each month while it runs.
+One continuously open viewer of the 1.5-Mbit/s stream costs approximately 475 GB each month, in
+the `fmp4` variant this origin uses.
+That figure is the measured 790 GB of a 2.5-Mbit/s viewer, scaled by the bitrate.
+Low-latency HLS cost approximately 1,150 GB for 2.5 Mbit/s of media, of which 32 percent was
+playlist re-fetching.
+The publisher's own ingest costs approximately 470 GB each month while it runs.
 With no audience the publisher does not run, so steady-state ingest with an empty room is
 approximately zero.
 Direct-origin viewing therefore has a small audience limit.
