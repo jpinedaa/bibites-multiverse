@@ -226,11 +226,56 @@ jobs:
       # test-front-door.sh self-skips `nginx -t` when nginx or openssl is
       # absent, so installing them is what turns this from a text grep into a
       # real configuration check.
+      #
+      # APT IS THE ONLY PART OF THIS JOB THAT TOUCHES THE NETWORK, and so the
+      # only part that can hang. A hosted runner resolves its Ubuntu mirror
+      # through a mirrorlist and falls back to archive.ubuntu.com when the
+      # Azure one does not answer — and apt's own default is to wait forever on
+      # a transfer that has stalled rather than failed. Run 32069398306 spent
+      # 9 m 18 s inside a single `apt-get update` fetch of one InRelease file
+      # and took the whole job budget with it. That surfaces as a CANCELLED job
+      # whose last line is "The operation was canceled", with no failing step
+      # and no failing command: the least diagnosable shape a CI result has,
+      # for a cause that has nothing to do with the change under test.
+      #
+      # So the network is bounded three times over, each bound catching what
+      # the one inside it cannot:
+      #
+      #   Acquire::*::Timeout   a transfer that stops moving fails, instead of
+      #                         holding the connection open indefinitely.
+      #   timeout(1)            the command dies however it wedged, including
+      #                         ways no apt option covers.
+      #   timeout-minutes       the STEP is what the log blames, so the next
+      #                         reader sees "install nginx" and not a job that
+      #                         merely ran out of time.
+      #
+      # Only with a bound in place is a retry safe. An unreachable mirror is
+      # the ordinary flake and must not fail a pull request over a change that
+      # is fine; a mirror unreachable three times running is a real outage, and
+      # then this says so in three minutes with the reason on screen.
       - name: install nginx for the front-door check
+        timeout-minutes: 7
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends nginx-light openssl
+          apt_get() {
+            local attempt
+            for attempt in 1 2 3; do
+              if sudo timeout 90 apt-get \
+                   -o Acquire::Retries=3 \
+                   -o Acquire::http::Timeout=20 \
+                   -o Acquire::https::Timeout=20 \
+                   "$@"; then
+                return 0
+              fi
+              echo "    apt-get $1: attempt $attempt did not finish; retrying" >&2
+              sleep $((attempt * 5))
+            done
+            echo "!! apt-get $1 failed three times. The runner's package mirror" >&2
+            echo "   is unreachable; this is not a finding about the change." >&2
+            return 1
+          }
+          apt_get update
+          apt_get install -y --no-install-recommends nginx-light openssl
           # nginx opens its compiled-in default error log BEFORE it reads -c,
           # and creates its temp paths under /var/lib/nginx. As an ordinary
           # user `nginx -t` would emit permission alerts there and could exit
@@ -318,11 +363,34 @@ jobs:
       # uses, so it is deliberately used only for this stub compile. The
       # release build keeps its own MAKENSIS, which is what the reproducible
       # checksum claim in release/README.md rests on.
+      #
+      # Bounded and retried exactly as the scripts job's nginx install is, and
+      # for the same reason — see the long comment there. This job is two steps
+      # long and one of them is this one, so an unbounded apt here does not
+      # merely slow the job down, it IS the job.
       - name: install NSIS
+        timeout-minutes: 7
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends nsis nsis-common
+          apt_get() {
+            local attempt
+            for attempt in 1 2 3; do
+              if sudo timeout 90 apt-get \
+                   -o Acquire::Retries=3 \
+                   -o Acquire::http::Timeout=20 \
+                   -o Acquire::https::Timeout=20 \
+                   "$@"; then
+                return 0
+              fi
+              echo "    apt-get $1: attempt $attempt did not finish; retrying" >&2
+              sleep $((attempt * 5))
+            done
+            echo "!! apt-get $1 failed three times. The runner's package mirror" >&2
+            echo "   is unreachable; this is not a finding about the change." >&2
+            return 1
+          }
+          apt_get update
+          apt_get install -y --no-install-recommends nsis nsis-common
           makensis -VERSION
 
       - name: compile the Windows installer against a stub payload
