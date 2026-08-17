@@ -38,7 +38,7 @@ Keep these records outside the public repository:
 | `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
 | `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
 | `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
-| `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses. |
+| `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses, including a part-day response that pins the billing lag. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, and viewer-presence signal. |
 | `nginx/` | HTTP challenge and shared HTTPS front-door templates, and the front door's log rotation policy. |
@@ -381,6 +381,20 @@ The ratio is published instead, and the monitor's `billing` check warns when it 
 
 The ratio compares the days Cost Explorer has settled, never month-to-date against month-to-date.
 Cost Explorer lags, so the second comparison would show a difference that is only the lag.
+
+A day is settled only after it has been over for `MV_BILLING_CE_LAG_HOURS`, which defaults to 18.
+A day is not settled because it has data in it.
+The newest day Cost Explorer returns always has data and always has less data than the day
+contains, so counting it compares a whole day of counter against a part day of invoice.
+The first real run of this tool reported `1.37` from two instruments that agree to `1.01`, for
+exactly that reason.
+
+At 06:30 UTC this makes the newest settled day the day before yesterday.
+That is the honest reading. A fresher one would be a part day.
+
+Transfer quantities come from settled days only.
+A billed overage is reported from every day, settled or not, because it is money the provider has
+already charged and not half of a comparison.
 
 Run the reconciliation once a day from a machine that is reliably awake.
 Record the exact schedule in private operations storage, because the schedule names a host.

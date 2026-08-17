@@ -228,6 +228,87 @@ env MV_BILLING_NOW="$NOW" MV_BILLING_HOST= MV_LIGHTSAIL_INSTANCE= \
 eq  'no instance name is a failure rather than a silent half-reading' "$?" 1
 has 'and it says which knob names it' "$(cat "$TMP/err")" 'MV_LIGHTSAIL_INSTANCE'
 
+# ------------------------------------------------- 5. the lag, and a part day
+#
+# THE DEFECT THIS SECTION EXISTS FOR, found by the first real shipped run on
+# 2026-08-17. Cost Explorer lags about fourteen hours, so the NEWEST day it
+# returns always has data and always has LESS data than the day contains. The
+# first version treated any day with a quantity as settled, which compared a
+# whole day of instance metric against a part day of invoice.
+#
+# In production that read ratioIn 1.37 and ratioOut 1.17 out of two instruments
+# that agree to 1.01, and it would have been the monitor's first-ever billing
+# alert -- saying the instruments disagree, while both were correct.
+#
+# ce-response-partial-day.json is that shape: two whole days, then a day holding
+# about 42% of one, which is the 34-of-48-hours Cost Explorer actually had.
+
+AUG4NOON="$(date -u -d '2026-08-04T12:00:00Z' +%s)"
+
+out="$(run "$DATA/ce-response-partial-day.json" MV_BILLING_NOW="$AUG4NOON")"
+eq  'a day that has data but is not yet over-plus-the-lag is not settled' \
+    "$(field "$out" ceThroughDate)" 2026-08-02
+eq  'so only the whole days count'          "$(field "$out" ceSettledDays)" 2
+eq  'and the invoice side holds only whole days' "$(field "$out" ceInGiB)"  120.0
+eq  'in both directions'                    "$(field "$out" ceOutGiB)" 80.0
+# THE WHOLE POINT. The metric side is cut to the same two days, so the ratio is
+# the measured 1.01 instead of the lag wearing a ratio's clothes.
+eq  'the ratio is the residual, not the lag' "$(field "$out" ratioIn)"  1.01
+eq  'in both directions'                     "$(field "$out" ratioOut)" 1.01
+has 'and the part day is named rather than silently dropped' \
+    "$(printf '%s' "$out" | tr -d ' \n')" '"2026-08-03"'
+
+# PIN THE DEFECT ITSELF. MV_BILLING_CE_LAG_HOURS=0 is exactly the old rule --
+# any day with data counts -- so this case fails the day someone reverts it.
+out="$(run "$DATA/ce-response-partial-day.json" MV_BILLING_NOW="$AUG4NOON" MV_BILLING_CE_LAG_HOURS=0)"
+eq  'with no lag allowance the part day is counted again' \
+    "$(field "$out" ceSettledDays)" 3
+eq  'and the invoice side is short by the part of the day it lacks' \
+    "$(field "$out" ceInGiB)" 145.0
+eq  'which is what produced the false disagreement in production' \
+    "$(field "$out" ratioIn)" 1.2538
+# 0.10 either side of 1 is the monitor's band. 1.25 is outside it, so the old
+# rule really would have raised the alert.
+pass 'and 1.2538 is outside the monitor band that 1.01 sits comfortably inside'
+
+# THE SCHEDULE'S CONSEQUENCE, stated as a test so it cannot drift. At 06:30 UTC
+# yesterday has been over for six and a half hours, which is less than the lag,
+# so the newest settled day is the day BEFORE yesterday. That is the honest
+# reading; a fresher one would be a part day.
+AUG4_0630="$(date -u -d '2026-08-04T06:30:00Z' +%s)"
+out="$(run "$DATA/ce-response.json" MV_BILLING_NOW="$AUG4_0630")"
+eq  'at 06:30Z the newest settled day is the day before yesterday' \
+    "$(field "$out" ceThroughDate)" 2026-08-02
+eq  'and the ratio stays honest there too' "$(field "$out" ratioIn)" 1.01
+
+# EARLY IN A MONTH THERE IS NOTHING COMPLETE, and that is unknown rather than
+# zero. The reading still ships; the monitor decides what to make of it.
+AUG2_0600="$(date -u -d '2026-08-02T06:00:00Z' +%s)"
+out="$(run "$DATA/ce-response.json" MV_BILLING_NOW="$AUG2_0600")"
+eq  'a month whose first day is not yet complete has no settled day' \
+    "$(field "$out" ceThroughDate)" null
+eq  'and no ratio, which is not a ratio of 1'  "$(field "$out" ratioIn)" null
+has 'and it says data exists but no day is complete' \
+    "$(cat "$TMP/err")" 'no COMPLETE day'
+
+# THE ASYMMETRY, ON PURPOSE. A transfer quantity from a part day is half of a
+# comparison and is held back. A billed overage from a part day is money the
+# provider has already charged, and holding it back to keep a ratio tidy would
+# delay the one alert here that is not an inference.
+out="$(run "$DATA/ce-response-overage.json" MV_BILLING_NOW="$AUG4NOON")"
+eq  'the invoice quantities still come from whole days only' \
+    "$(field "$out" ceInGiB)" 120.0
+eq  'but a billed overage on the part day is reported at once' \
+    "$(field "$out" ceOverageGiB)" 12.5
+eq  'and so is its cost'                    "$(field "$out" ceOverageUsd)" 1.125
+
+# The lag is a knob, because the vendor's lag is the vendor's to change.
+out="$(run "$DATA/ce-response-partial-day.json" MV_BILLING_NOW="$AUG4NOON" MV_BILLING_CE_LAG_HOURS=48)"
+eq  'a longer lag allowance holds more days back' "$(field "$out" ceThroughDate)" 2026-08-01
+out="$(run "$DATA/ce-response.json" MV_BILLING_NOW="$AUG4NOON" MV_BILLING_CE_LAG_HOURS=notanumber)"
+eq  'a lag that is not a number is refused rather than assumed' "$?" 1
+has 'and it names the knob'  "$(cat "$TMP/err")" 'MV_BILLING_CE_LAG_HOURS'
+
 # ---------------------------------------------------------------- result
 
 printf '\n'
