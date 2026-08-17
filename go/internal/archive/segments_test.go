@@ -421,6 +421,117 @@ func TestMigrationOfAnEmptyOrAbsentLedgerIsANoOp(t *testing.T) {
 	}
 }
 
+// TestAPreCreatedSegmentsDirectoryDoesNotSuppressTheMigration is the 2026-08-17
+// production defect, in a test.
+//
+// provision.sh creates <archive-data>/segments before the archive has ever run,
+// because multiverse-coldcopy.service names it in ReadWritePaths and systemd
+// refuses to start a unit whose ReadWritePaths is absent. The migration read
+// that empty directory as "already segmented" and skipped itself: the
+// monolithic ledger was never renamed, no legacy segment was ever made, and the
+// only thing that eventually closed the file was the next day boundary — under
+// a name that does not say which days are inside it. Nothing was lost. The
+// marker simply meant something other than what it was read as.
+func TestAPreCreatedSegmentsDirectoryDoesNotSuppressTheMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ledgerName)
+	for i, at := range []time.Time{
+		day("2026-07-01").Add(time.Hour),
+		day("2026-08-16").Add(time.Hour),
+	} {
+		b, _ := json.Marshal(rec(string(rune('a'+i)), at))
+		appendLine(t, path, string(b)+"\n")
+	}
+	before := fileSHA(t, path)
+
+	// Exactly what `provision.sh --only directories` leaves behind.
+	if err := os.MkdirAll(segmentsDir(dir), 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := OpenLedger(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	want := "legacy-2026-07-01-to-2026-08-16-0000"
+	if l.Migrated() != want {
+		t.Fatalf("Migrated() = %q, want %q — an EMPTY pre-created segments directory "+
+			"suppressed the one-time migration", l.Migrated(), want)
+	}
+	if got := fileSHA(t, filepath.Join(segmentsDir(dir), want+plainSuffix)); got != before {
+		t.Fatal("the legacy segment is not byte-identical to the ledger it was made from")
+	}
+	if !exists(migratedMarker(dir)) {
+		t.Fatal("the migration did not leave its marker, so it would run again")
+	}
+	recs, dmg := scanAll(t, dir)
+	if got := strings.Join(ids(recs), ","); got != "a,b" {
+		t.Fatalf("replay after migration read %q, want a,b", got)
+	}
+	if dmg != (LedgerDamage{}) {
+		t.Fatalf("migration introduced damage: %+v", dmg)
+	}
+}
+
+// TestTheMarkerIsWhatStopsTheMigrationRunningTwice pins the three states the
+// marker has to separate, because the middle one is the whole defect.
+func TestTheMarkerIsWhatStopsTheMigrationRunningTwice(t *testing.T) {
+	// 1. Marker present, ledger non-empty: no migration, whatever else is there.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ledgerName)
+	b, _ := json.Marshal(rec("a", day("2026-08-16").Add(time.Hour)))
+	appendLine(t, path, string(b)+"\n")
+	if err := writeMigratedMarker(dir); err != nil {
+		t.Fatal(err)
+	}
+	l, err := OpenLedger(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Migrated() != "" {
+		t.Fatalf("the marker did not stop the migration: %q", l.Migrated())
+	}
+	_ = l.Close()
+
+	// 2. A SEGMENT present but no marker: an archive that migrated under the
+	// build before this one, or one that has already rotated. Still no
+	// migration — renaming now would put a live file beside segments that
+	// already hold older records — and the marker is written so the question is
+	// answered cheaply next time.
+	dir = t.TempDir()
+	path = filepath.Join(dir, ledgerName)
+	appendLine(t, path, string(b)+"\n")
+	sd := segmentsDir(dir)
+	if err := os.MkdirAll(sd, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	appendLine(t, filepath.Join(sd, "2026-08-15-0000"+plainSuffix), string(b)+"\n")
+	l, err = OpenLedger(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Migrated() != "" {
+		t.Fatalf("a directory with a segment in it was migrated again: %q", l.Migrated())
+	}
+	if !exists(migratedMarker(dir)) {
+		t.Fatal("the marker was not adopted for a directory that was already segmented")
+	}
+	_ = l.Close()
+
+	// 3. The marker is not a segment, and nothing reports it as a stray file.
+	st, err := readSegmentDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Unknown) != 0 {
+		t.Fatalf("the marker is reported as an unrecognised file on every start: %v", st.Unknown)
+	}
+	if len(st.Segments) != 1 {
+		t.Fatalf("segments = %d, want 1 — the marker was counted as one", len(st.Segments))
+	}
+}
+
 // TestRollbackIsAConcatenation is the design's rollback claim: segments are
 // ordered, append-only and never rewritten, so the segments in order followed by
 // the live file reproduce a byte-exact migrations.jsonl that the previous binary

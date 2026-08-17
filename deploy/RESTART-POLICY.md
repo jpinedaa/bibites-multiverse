@@ -540,6 +540,12 @@ The monitor must alert a person when a unit enters the failed state.
 The host protects relay availability under memory pressure.
 An archive failure loses record coverage, but a relay failure stops the map.
 
+A restart a package manager performs is also an unplanned restart of this class, however planned the
+deployment around it was. It is the worst-shaped one, because it restarts the relay and the archive
+together and therefore loses record rather than only availability.
+[Package installs and needrestart](#package-installs-and-needrestart) is how it is prevented; if it
+happens anyway, measure the record gap from the relay log and explain it afterwards like any other.
+
 A world that the kernel kills for memory on the world host is an unplanned restart of this class.
 [World recycle](#world-recycle) exists to convert it into a planned one before the kernel acts.
 An unplanned world restart also loses its applied time scale unless the unit dependency named in
@@ -548,6 +554,49 @@ that section is installed.
 Do not improvise a destructive recovery on a live service.
 Capture logs and state first.
 Use the private incident runbook to resolve exact resources and commands.
+
+## Package installs and needrestart
+
+A package manager can restart a service. It does not read this policy.
+
+`needrestart` runs after every apt transaction and restarts any service whose binary or libraries
+have been replaced on disk. It does not know about the deployment lock, the peer gate, the relay
+hold-down, or the order this document puts them in, and it restarts the relay and the archive
+*together* rather than holding the relay down for the archive's replay. That is the one restart
+shape that loses record permanently: the relay is serving again in under a second while the archive
+has its whole replay ahead of it, and every crossing forwarded in between is written nowhere.
+
+On 2026-08-17 an ad-hoc `apt install`, run to fetch an unrelated tool three minutes after new
+binaries had been staged into place and before the deliberate restart sequence had begun, was turned
+by `needrestart` into exactly that. It cost 134.063 s of permanent record, 96.44 s of it with the
+relay live and nothing recording it. The private operations record owns the incident.
+
+**The rules, and the ordering one is the cheap half:**
+
+1. **Every apt transaction happens BEFORE binaries are staged.** `provision.sh` orders its
+   `packages` phase ahead of its `binaries` phase for this reason, and a deployment plan that
+   reorders them is wrong. Once a new binary is on disk, the running service and its file disagree,
+   and that disagreement is precisely what `needrestart` acts on.
+2. **No apt transaction runs between staging binaries and the deliberate restart.** Not
+   `provision.sh --only packages`, not an operator's `apt install`, not a manual
+   `unattended-upgrade`. If a package turns out to be needed at that point, finish the restart
+   sequence first and install it afterwards.
+3. **No apt transaction runs while a relay hold-down is in force.** A hold-down exists to keep the
+   relay down across a boot or a replay; an apt transaction inside it can start services the
+   hold-down is holding, and `provision.sh --only systemd` is already forbidden there for the same
+   reason.
+4. **The host carries the override**, so that a rule nobody remembers is not the only protection.
+   `provision.sh`'s `needrestart` phase installs `/etc/needrestart/conf.d/90-multiverse.conf`:
+   `$nrconf{override_rc}{qr(^multiverse-)} = 0` marks every multiverse unit as never-auto-restart,
+   and `$nrconf{restart} = q(l)` puts the whole host in list-only mode so nothing else is restarted
+   by apt either. The mode line is written only when nothing else on the host already pins one.
+   `provision.sh --only verify` checks the file and the rule.
+5. **`provision.sh` also exports `NEEDRESTART_MODE=l` for its own apt calls.** That covers a host
+   whose override has been removed by hand, and it covers nothing else — an operator's own apt
+   command is covered by rule 4 alone.
+
+Read this before any deployment that installs packages and replaces binaries in the same visit.
+The deployment lock coordinates operators. `needrestart` is not an operator.
 
 ## Pre-restart checks
 
@@ -564,6 +613,9 @@ Complete these checks before a planned restart:
 6. Record the reason, approval, and rollback condition.
 7. Send the required notice on the announcements page. [`ANNOUNCEMENT.md`](ANNOUNCEMENT.md) names
    that channel and states what the notice must contain.
+8. Confirm that no apt transaction is going to run between now and the restart, and that the
+   `needrestart` override is in place. [Package installs and needrestart](#package-installs-and-needrestart)
+   states both, and check 8 exists because the alternative was found by measuring the hole it left.
 
 If projected archive memory is critical, do not restart the archive.
 Increase capacity or reduce the approved retained state first.

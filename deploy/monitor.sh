@@ -15,7 +15,10 @@
 #                           'hosts-pin', 'replay', 'archive', 'swap' or
 #                           'billing'. 'replay' is the two restart checks —
 #                           deploy/restart-archive.sh reads its verdict — and
-#                           'archive' is the three record-layer checks.
+#                           'archive' is the three record-layer checks. Both of
+#                           those fetch /api/status first, and say so when they
+#                           cannot: a group that printed nothing used to read as
+#                           a group that found nothing wrong.
 #                           deploy/test-monitor.sh drives the transfer, billing
 #                           and replay-headroom arithmetic through this against
 #                           fake /proc files, a fake status document, a fake
@@ -484,6 +487,28 @@ check_archive_healthz() {
   fi
   report archive-healthz OK "serving /api/status"
   return 0
+}
+
+# need_status puts the archive's status document where the checks that read it
+# will find it. The default path gets it from check_archive_healthz above; every
+# --only group that reads the document has to ask for it itself.
+#
+# 2026-08-17: BEFORE THIS EXISTED THEY DID NOT ASK. Every check in the `replay`
+# and `archive` groups opens with `[ -s "$STATUS_JSON" ] || return 0`, and only
+# check_archive_healthz — which ran in the default path alone — ever wrote that
+# file. So `monitor.sh --only replay` and `--only archive` printed NOTHING and
+# reported `worst: OK` on a completely healthy host. That is not a cosmetic
+# defect: deploy/restart-archive.sh reads its replay-headroom gate out of
+# `monitor.sh --only replay`, so the gate that is supposed to refuse a restart
+# whose replay will not fit in RAM was reading an empty line and finding no
+# verdict to refuse on.
+#
+# A document already in place is used as it is, and no fetch is attempted:
+# deploy/test-monitor.sh points MV_STATUS_JSON at a fixture, and a fetch would
+# replace the thing under test with whatever this workstation is running.
+need_status() {
+  [ -s "$STATUS_JSON" ] && return 0
+  check_archive_healthz
 }
 
 check_map() {
@@ -1570,11 +1595,11 @@ case "${ONLY:-}" in
   # replay still fit in RAM, and what will it cost the map in seconds. That
   # script reads the 'replay' line for its gate and prints the 'replay-cost'
   # line as RESTART-POLICY.md's pre-restart replay estimate.
-  replay) check_replay_headroom; check_restart_cost ;;
+  replay) need_status; check_replay_headroom; check_restart_cost ;;
   # The record layer: the state sidecar that makes a restart cheap, the off-host
   # copy that lets a segment be removed at all, and the duplicate counter that
   # says whether the window may come down.
-  archive) check_rollup; check_cold_copy; check_duplicates ;;
+  archive) need_status; check_rollup; check_cold_copy; check_duplicates ;;
   swap) check_swap ;;
   billing) check_billing ;;
   *) echo "monitor: --only accepts 'transfer', 'hosts-pin', 'replay', 'archive', 'swap' or 'billing', not '$ONLY'" >&2; exit 2 ;;

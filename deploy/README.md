@@ -631,6 +631,16 @@ Never run it while a reboot hold-down is in force: it undoes a `systemctl disabl
 relay back in front of a replaying archive. `RESTART-POLICY.md`, "Host reboot", holds the order,
 and the drop-in that phase installs is the hold-down that survives it.
 
+**Install packages before you stage binaries, and never between staging and the restart.**
+`needrestart` runs after every apt transaction and restarts services whose binaries have been
+replaced on disk — the relay and the archive together, outside the peer gate and the relay
+hold-down, which is the one restart shape that loses record permanently. `provision.sh` runs its
+`needrestart` phase first and installs `/etc/needrestart/conf.d/90-multiverse.conf` so that no apt
+transaction on the host can restart a multiverse unit, and it exports `NEEDRESTART_MODE=l` for its
+own apt calls. Neither of those makes the ordering optional.
+`RESTART-POLICY.md`, "Package installs and needrestart", carries the rule and the incident that
+produced it.
+
 Read `RESTART-POLICY.md` before a relay, archive, or host restart.
 Batch archive changes: a restart costs a held-down relay, and that outage is a
 participant outage even though it is now bounded by the duplicate window rather
@@ -668,8 +678,20 @@ Keep on the host:
 - The installed kit in `/opt/multiverse/deploy/`, and the staging copy it was installed from.
 - The previous kit staging copy.
 - The installed binaries in `/opt/multiverse/bin/`, and the previous binaries beside them.
-- The staging directory that `ship.sh` writes, `MV_STAGE_DIR`. Each run overwrites it, so it always
-  holds the current artifacts and never accumulates.
+- The staging directory that `ship.sh` writes, `MV_STAGE_DIR`. Each `ship.sh` run overwrites the
+  artifacts and their `SHA256SUMS`, so it never accumulates. **An artifact put there by hand is a
+  different matter**: `provision.sh --only binaries` reads whatever sits under the canonical
+  `<cmd>-linux-<arch>` names, and a leftover from an earlier deployment under those names is
+  indistinguishable from a fresh one. It happened on 2026-08-17 — the phase reported `already
+  current` for all three binaries and installed nothing, truthfully, about the wrong files. The
+  phase now verifies `SHA256SUMS` before it compares anything, prints the staged and installed
+  checksum for each artifact, and says loudly when it installed nothing. Pin what a run must
+  install and it refuses instead:
+
+  ```sh
+  sudo provision.sh --only binaries \
+    --expect-sha256 archive=<sha256> --expect-sha256 relay=<sha256>
+  ```
 - The last two `.bak-*` copies of any file under `/etc/multiverse/`. Nothing in this kit writes
   those; an operator makes them by hand, and only the operator removes them.
 
