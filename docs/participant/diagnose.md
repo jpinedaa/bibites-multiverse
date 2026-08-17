@@ -37,6 +37,28 @@ them. The `data` directory these commands want is `<that world's data root>\data
 is the whole story on Linux, where a second world means a second unpacked kit with its own
 `--data-root`.
 
+**`--diagnose` reports on the configuration you hand it, so hand it your map.** With `--data-dir`
+alone the sidecar uses its own default relay — a local address — and the two checks that are about
+your world's place on the map, `relay-reachable` and `credential`, then answer about a relay your
+world has nothing to do with. Add the relay your world dials and the file its secret lives in:
+
+```powershell
+$root = Split-Path $data -Parent
+.\multiverse-sidecar.exe --diagnose --data-dir $data `
+    --relay (Get-Content "$data\relay-url") --credential-file "$root\peer-secret.txt"
+```
+
+```sh
+root="$(dirname "$data")"
+./multiverse-sidecar --diagnose --data-dir "$data" \
+    --relay "$(head -n 1 "$data/relay-url")" --credential-file "$root/peer-secret.txt"
+```
+
+**On Windows the launcher does this for you**: **Check this world** in the launcher's window runs the
+diagnostic with that world's own relay and credential filled in, and prints the command line it used
+above the report. `--credential-file` names the file and never the secret; no flag in this system
+takes a secret as a value.
+
 Everything below writes them short. **The flags are the same on both platforms**; what differs is
 the file name and where your data directory is. **They read; they do not start anything**, and you
 can run either one while your world is running.

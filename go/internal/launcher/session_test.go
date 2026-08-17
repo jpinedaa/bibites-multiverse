@@ -384,6 +384,28 @@ func TestSessionStartRefusesTheSameWayTheCommandDoes(t *testing.T) {
 	mustContain(t, "the refusal", h.err(), "there is no world called 'nowhere' here")
 }
 
+// THE WINDOW'S "Check this world" HANDS THE DIAGNOSTIC THE WORLD'S OWN MAP.
+// It ran with the local folders alone once, which left the sidecar on its
+// default relay and reported a healthy world as two failures; the command line
+// this session prints is the one thing a person can compare against the flags
+// they would have typed, so it is asserted here as well as in diagnoseArgs.
+func TestSessionDiagnosePassesTheRelayAndTheCredential(t *testing.T) {
+	h := newHarness(t)
+	p := h.profile("default", "Multiverse", 8787)
+
+	s := h.session()
+	// The placeholder sidecar is not a program, so the run itself fails; the
+	// command line has already been printed by then, which is what is under test.
+	s.Diagnose("default")
+
+	line := h.out()
+	mustContain(t, "the diagnostic's command line", line, "--diagnose")
+	mustContain(t, "the diagnostic's command line", line, "--relay "+testRelayURL)
+	mustContain(t, "the diagnostic's command line", line, "--data-dir "+p.DataDir())
+	mustContain(t, "the diagnostic's command line", line, "--credential-file "+p.CredentialFile())
+	mustContain(t, "the diagnostic's command line", line, "--game-dir "+p.GameDir)
+}
+
 // The diagnostic is the sidecar's, and an installation without one says so
 // rather than reporting nothing.
 func TestSessionDiagnoseNeedsTheSidecar(t *testing.T) {

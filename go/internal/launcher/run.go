@@ -436,6 +436,35 @@ func sidecarArgs(p Profile) []string {
 	}
 }
 
+// diagnoseArgs is the command line the sidecar's read-only diagnostic is run
+// with, and it names THE SAME PROFILE FIELDS sidecarArgs names, on purpose.
+//
+// THE MAP FLAGS ARE NOT DECORATION. The diagnostic reports on the configuration
+// it is given (docs/sidecar-diagnose-spec.md §1), and the sidecar's own default
+// relay is a local one — ws://127.0.0.1:8795. Run with the two local folders
+// alone, a perfectly healthy world on the public map is asked whether it can
+// reach a relay it has nothing to do with, and answers FAIL relay-reachable and
+// FAIL credential: a front door telling somebody their world is broken when what
+// is broken is the question. --relay and --credential-file are what make the
+// diagnostic about THIS world.
+//
+// THERE IS DELIBERATELY NO --support-matrix. The sidecar looks for
+// support-matrix.json beside its own executable, which is this install root, and
+// the installer puts a copy there (internal/sidecar/diagnose.go, supportMatrix).
+// Naming it here would be a second source of truth for a path the sidecar
+// already knows.
+//
+// No --json either: this output is read by a person, in the launcher's log pane.
+func diagnoseArgs(p Profile) []string {
+	return []string{
+		"--diagnose",
+		"--relay", p.RelayURL,
+		"--data-dir", p.DataDir(),
+		"--credential-file", p.CredentialFile(),
+		"--game-dir", p.GameDir,
+	}
+}
+
 func gameArgs(headless bool) []string {
 	if headless {
 		return []string{"-batchmode", "-nographics"}

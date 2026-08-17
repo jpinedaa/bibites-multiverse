@@ -413,13 +413,19 @@ func (s *Session) Create(spec CreateSpec) int {
 }
 
 // Diagnose runs the sidecar's own read-only diagnostic against one world, with
-// the flags docs/participant/diagnose.md tells a participant to run it with,
-// and puts its whole output where everything else this session says goes.
+// the flags that make it about THAT world (diagnoseArgs), and puts its whole
+// output where everything else this session says goes.
 //
 // IT IS THE SIDECAR'S ANSWER, NOT THIS PROGRAM'S. The launcher adds no check of
 // its own here: twenty-one of them already exist in one place, with a taxonomy
 // id and an actor on every failure, and a second opinion from a second program
 // is how two front doors start disagreeing about a machine.
+//
+// WHAT THE LAUNCHER OWES IT IS THE QUESTION. A diagnostic is only as honest as
+// the configuration it is handed, and this program is the one thing on the
+// machine that knows which relay and which credential a given world runs with.
+// Handing it less than that is how a healthy world gets reported as a broken
+// one; see diagnoseArgs.
 func (s *Session) Diagnose(name string) int {
 	p, err := s.a.install.ResolveProfile(name)
 	if err != nil {
@@ -429,7 +435,7 @@ func (s *Session) Diagnose(name string) int {
 	if !fileExists(exe) {
 		return s.a.fail("this installation has no %s. Re-run the installer", exe)
 	}
-	args := []string{"--diagnose", "--data-dir", p.DataDir(), "--game-dir", p.GameDir}
+	args := diagnoseArgs(p)
 	s.a.print("%s %s", exe, strings.Join(args, " "))
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = p.DataRoot
