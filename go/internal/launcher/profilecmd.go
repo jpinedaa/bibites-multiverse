@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -103,7 +104,13 @@ func (a *app) profileList(args []string) int {
 		a.warn("skipping a profile that could not be read: %v", problem)
 	}
 	if a.asJSON {
-		return a.emitJSON(profiles)
+		// The same rule status --json follows: the document goes out, and an
+		// installation nothing could be read from is a refusal in both forms.
+		a.emitJSON(profiles)
+		if len(profiles) == 0 {
+			return a.fail("%v", errNoProfiles)
+		}
+		return exitOK
 	}
 	if len(profiles) == 0 {
 		return a.fail("%v", errNoProfiles)
@@ -357,8 +364,8 @@ func (a *app) profileSet(args []string) int {
 
 func (a *app) profileDelete(args []string) int {
 	fs := newFlagSet("profile delete", a.stderr)
-	removeWorldData := fs.Bool("remove-world-data", false,
-		"also delete this world's data folder, including its journal")
+	removeData := fs.Bool("remove-world-data", false,
+		"also delete this world's journal, logs and credential under its data folder")
 	positional, err := parseInterleaved(fs, args)
 	if err != nil {
 		return exitUsage
@@ -387,7 +394,7 @@ func (a *app) profileDelete(args []string) int {
 	// on the installed application would take that whole tree with it. A
 	// refusal here deletes NOTHING - not even the profile file - so the state
 	// on disk still describes what exists.
-	if *removeWorldData {
+	if *removeData {
 		if err := validateRemovable(p, profiles, a.install); err != nil {
 			return a.fail("--remove-world-data will not delete '%s': %v.\nNothing was deleted, "+
 				"including the profile itself. Fix the world's data folder first, or delete the "+
@@ -396,17 +403,19 @@ func (a *app) profileDelete(args []string) int {
 	}
 
 	a.print("%s", custodyWarning)
-	if *removeWorldData {
+	if *removeData {
 		if _, found := readInstallRecord(p.DataRoot); found {
 			a.print("%s", installRecordWarning)
 		}
-		a.print("  This will delete %s and everything under it.", p.DataRoot)
+		a.print("  This will delete this world's own entries under %s: %s.",
+			p.DataRoot, strings.Join(worldOwnedEntries(), ", "))
+		a.print("  Anything else in that folder is left where it is, and named when it is.")
 	}
 	// The typed name is required for --remove-world-data EVEN under --yes: a
 	// blanket "answer yes to everything" must not be able to destroy a
 	// directory tree without naming it. Without --remove-world-data, --yes
 	// still answers the question.
-	if *removeWorldData || !a.assumeYes {
+	if *removeData || !a.assumeYes {
 		typed := a.ask(fmt.Sprintf("type the world's name to delete it (%s): ", p.Name))
 		if !strings.EqualFold(typed, p.Name) {
 			return a.fail("that is not '%s'. Nothing was deleted", p.Name)
@@ -417,11 +426,27 @@ func (a *app) profileDelete(args []string) int {
 	}
 	a.print("deleted %s", a.install.ProfilePath(p.Name))
 
-	if *removeWorldData {
-		if err := os.RemoveAll(p.DataRoot); err != nil {
-			return a.fail("the profile is gone, but %s could not be deleted: %v", p.DataRoot, err)
+	if *removeData {
+		// removeWorldData deletes THIS WORLD'S entries and leaves the rest. What
+		// it left is printed by name, because "deleted the folder" was a claim
+		// about other people's files that was true only by accident.
+		removed, kept, rootRemoved, err := removeWorldData(p.DataRoot)
+		if rootRemoved && err == nil {
+			a.print("deleted %s, including its journal", p.DataRoot)
+		} else {
+			for _, name := range removed {
+				a.print("deleted %s", filepath.Join(p.DataRoot, name))
+			}
 		}
-		a.print("deleted %s, including its journal", p.DataRoot)
+		if err != nil {
+			return a.fail("the profile is gone, but %s could not be emptied: %v", p.DataRoot, err)
+		}
+		if !rootRemoved {
+			a.print("kept %s: %d thing(s) in it are not this world's, and every one was left "+
+				"exactly where it is - %s", p.DataRoot, len(kept), strings.Join(kept, ", "))
+			a.print("%s", keptEntriesNote)
+		}
+		a.print("%s", gameSaveNote(p.World))
 	} else {
 		a.print("kept %s - the journal, the logs and the credential are still there", p.DataRoot)
 	}
@@ -437,10 +462,32 @@ func (a *app) profileDelete(args []string) int {
 // installRecordWarning fires when the world being removed is the one the
 // installer created: its data root holds install-record.json, which
 // Uninstall-BibitesMultiverse.ps1 reads to undo the mod installation.
+//
+// THE RECORD IS KEPT, and so is everything else this world does not own. It used
+// to go with the folder, which left the uninstaller unable to find what it had
+// installed - and on a complete-edition install the same RemoveAll took
+// runtimes\, the game itself.
 const installRecordWarning = `  This world's data folder holds install-record.json, which the uninstaller reads to
-  undo the mod installation. Deleting it leaves the uninstaller unable to remove
-  BepInEx and the plugin from the game folder. Run the uninstaller first if you mean
-  to remove the whole installation.`
+  undo the mod installation, and it is LEFT IN PLACE - deleting a world is not
+  uninstalling this software. Run Uninstall-BibitesMultiverse.ps1 if you mean to
+  remove the whole installation.`
+
+// keptEntriesNote explains what "left in place" is protecting. Every name in it
+// has been in a real data root on a real machine.
+const keptEntriesNote = `  A data folder is not always only one world's: the complete edition keeps THE GAME
+  in runtimes\, the installer keeps its record beside it, an interrupted install
+  leaves an orphaned credential no map can print again, and a computer that has
+  hosted more than one deployment keeps those worlds' folders here too. Delete what
+  you recognise, by hand.`
+
+// gameSaveNote says where the world's actual save file is, because "including its
+// journal" reads like "including everything" and the game's own saves are
+// somewhere else entirely - which is correct, and worth saying out loud.
+func gameSaveNote(world string) string {
+	return fmt.Sprintf("  The game's own save of '%s' is NOT here and was not touched: the game keeps "+
+		"its\n  save files in its own Savefiles folder, and nothing in this launcher writes or "+
+		"deletes\n  them. Remove it from inside the game if you want it gone.", world)
+}
 
 // custodyWarning is what docs/participant/leave.md says, said here because
 // deleting a profile is the moment a participant is most likely to believe the

@@ -68,6 +68,25 @@ namespace BibitesMultiverse
             return ReadBool(EnvEnabled, false);
         }
 
+        /// <summary>
+        /// True when this process is configured to hold a broadcast time scale — the director then
+        /// re-asserts it on every poll, so nothing else can own the speed. Read without
+        /// <see cref="ReadFloat"/> on purpose: this is a question, and asking it must not log a
+        /// second warning about a value the director itself already reported.
+        /// </summary>
+        internal static bool OwnsTimeScale()
+        {
+            if (!Requested())
+            {
+                return false;
+            }
+
+            string text = (MultiverseConfig.Env(EnvTimeScale) ?? string.Empty).Trim();
+            return text.Length > 0
+                && float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value)
+                && value >= 0f;
+        }
+
         private void Awake()
         {
             zoom = ReadFloat(EnvZoom, DefaultZoom, 0.1f);

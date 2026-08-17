@@ -52,83 +52,158 @@ func TestProfileRoundTrip(t *testing.T) {
 }
 
 // TestInstallerWrittenProfileParses is the anti-drift pin between the launcher
-// and release/kit/Install-BibitesMultiverse.ps1: the file in testdata is what
+// and release/kit/Install-BibitesMultiverse.ps1: each file in testdata is what
 // that script's ConvertTo-Json emits for a reference install.
+//
+// BOTH EDITIONS ARE HERE, and the second one is the whole reason this test is
+// worth having. The add-on edition binds to a game the participant already owns,
+// so its gameDir is somewhere else entirely; the COMPLETE edition copies the game
+// into <data root>\runtimes\<assembly sha256>, so its gameDir is INSIDE its own
+// dataRoot. Only the add-on layout was pinned here, so a rule that refused a
+// dataRoot overlapping its own game folder passed every test and then refused
+// every complete-edition install on a real machine: 'profile list' answered
+// "this installation has no world profiles yet" and the desktop icon opened a
+// launcher that could do nothing.
 func TestInstallerWrittenProfileParses(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("testdata", "installer-default-profile.json"))
+	const completeRuntime = `C:\Users\alice\AppData\Local\BibitesMultiverse\runtimes\` +
+		"12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE"
+
+	cases := []struct {
+		name     string
+		file     string
+		gameDir  string
+		dataRoot string
+	}{
+		{
+			name:     "the add-on edition, bound to a game already installed",
+			file:     "installer-default-profile.json",
+			gameDir:  `C:\Program Files (x86)\Steam\steamapps\common\The Bibites`,
+			dataRoot: `C:\Users\alice\AppData\Local\BibitesMultiverse`,
+		},
+		{
+			name:     "the complete edition, whose game lives under its own data root",
+			file:     "installer-complete-profile.json",
+			gameDir:  completeRuntime,
+			dataRoot: `C:\Users\alice\AppData\Local\BibitesMultiverse`,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("testdata", test.file))
+			if err != nil {
+				t.Fatalf("read testdata: %v", err)
+			}
+
+			// It has to load through the same path a real profile does, file name
+			// agreement included.
+			install := Install{Root: t.TempDir()}
+			if err := os.MkdirAll(install.ProfilesDir(), 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if err := os.WriteFile(install.ProfilePath("default"), raw, 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			p, err := install.LoadProfile("default")
+			if err != nil {
+				t.Fatalf("LoadProfile: %v", err)
+			}
+
+			if keys := jsonKeys(t, string(raw)); !equalStrings(keys, profileKeyOrder) {
+				t.Fatalf("the installer's key order is %v, want %v", keys, profileKeyOrder)
+			}
+
+			want := Profile{
+				Format:         "bibites-multiverse/launcher-profile/1",
+				Name:           "default",
+				GameDir:        test.gameDir,
+				DataRoot:       test.dataRoot,
+				SidecarPort:    8787,
+				World:          "Multiverse",
+				Headless:       false,
+				ExportEdges:    "E,N,W,S",
+				ExcludeSpecies: "Basic bibite",
+				SaveMinutes:    10,
+				SaveKeep:       6,
+				SaveOnQuit:     true,
+				PeerID:         "public-9af42a17616742e7a6e8c62cb8b95f4f",
+				RelayURL:       "wss://bibitesmultiverse.com/contract-b/v4",
+				CreatedUTC:     "2026-08-16T09:41:07Z",
+			}
+			if p != want {
+				t.Fatalf("the installer's profile did not parse as expected:\n got %+v\nwant %+v", p, want)
+			}
+
+			// Every value's JSON TYPE matters as much as its value: a port written
+			// as a string would parse into a different program and fail here.
+			var generic map[string]any
+			if err := json.Unmarshal(raw, &generic); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			wantTypes := map[string]string{
+				"format": "string", "name": "string", "gameDir": "string", "dataRoot": "string",
+				"sidecarPort": "number", "world": "string", "headless": "bool",
+				"exportEdges": "string", "excludeSpecies": "string", "saveMinutes": "number",
+				"saveKeep": "number", "saveOnQuit": "bool", "peerId": "string",
+				"relayUrl": "string", "createdUtc": "string",
+			}
+			for key, want := range wantTypes {
+				value, found := generic[key]
+				if !found {
+					t.Fatalf("the installer's profile has no %q", key)
+				}
+				if got := jsonTypeName(value); got != want {
+					t.Fatalf("%q is a %s, want a %s", key, got, want)
+				}
+			}
+			if len(generic) != len(wantTypes) {
+				t.Fatalf("the installer's profile has %d keys, want %d", len(generic), len(wantTypes))
+			}
+			if !relayURLPattern.MatchString(p.RelayURL) {
+				t.Fatalf("the installer's relayUrl is not a wss:// URL: %s", p.RelayURL)
+			}
+			if !strings.HasPrefix(p.PeerID, "public-") {
+				t.Fatalf("the installer's peerId is not a public-map identity: %s", p.PeerID)
+			}
+
+			// The whole profile has to survive the writer's rules too, not only the
+			// reader's: 'profile set' re-validates everything it writes back.
+			if err := validateProfilePaths(p, install); err != nil {
+				t.Fatalf("validateProfilePaths refused the installer's own profile: %v", err)
+			}
+		})
+	}
+
+	// And the exception is EXACTLY the installer's layout: the same data root with
+	// a game folder anywhere else inside it is still the hazard it always was.
+	complete, err := os.ReadFile(filepath.Join("testdata", "installer-complete-profile.json"))
 	if err != nil {
 		t.Fatalf("read testdata: %v", err)
 	}
-
-	// It has to load through the same path a real profile does, file name
-	// agreement included.
-	install := Install{Root: t.TempDir()}
-	if err := os.MkdirAll(install.ProfilesDir(), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(install.ProfilePath("default"), raw, 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	p, err := install.LoadProfile("default")
-	if err != nil {
-		t.Fatalf("LoadProfile: %v", err)
-	}
-
-	if keys := jsonKeys(t, string(raw)); !equalStrings(keys, profileKeyOrder) {
-		t.Fatalf("the installer's key order is %v, want %v", keys, profileKeyOrder)
-	}
-
-	want := Profile{
-		Format:         "bibites-multiverse/launcher-profile/1",
-		Name:           "default",
-		GameDir:        `C:\Program Files (x86)\Steam\steamapps\common\The Bibites`,
-		DataRoot:       `C:\Users\alice\AppData\Local\BibitesMultiverse`,
-		SidecarPort:    8787,
-		World:          "Multiverse",
-		Headless:       false,
-		ExportEdges:    "E,N,W,S",
-		ExcludeSpecies: "Basic bibite",
-		SaveMinutes:    10,
-		SaveKeep:       6,
-		SaveOnQuit:     true,
-		PeerID:         "public-9af42a17616742e7a6e8c62cb8b95f4f",
-		RelayURL:       "wss://bibitesmultiverse.com/contract-b/v4",
-		CreatedUTC:     "2026-08-16T09:41:07Z",
-	}
-	if p != want {
-		t.Fatalf("the installer's profile did not parse as expected:\n got %+v\nwant %+v", p, want)
-	}
-
-	// Every value's JSON TYPE matters as much as its value: a port written as a
-	// string would parse into a different program and fail here.
-	var generic map[string]any
-	if err := json.Unmarshal(raw, &generic); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	wantTypes := map[string]string{
-		"format": "string", "name": "string", "gameDir": "string", "dataRoot": "string",
-		"sidecarPort": "number", "world": "string", "headless": "bool",
-		"exportEdges": "string", "excludeSpecies": "string", "saveMinutes": "number",
-		"saveKeep": "number", "saveOnQuit": "bool", "peerId": "string",
-		"relayUrl": "string", "createdUtc": "string",
-	}
-	for key, want := range wantTypes {
-		value, found := generic[key]
-		if !found {
-			t.Fatalf("the installer's profile has no %q", key)
+	for _, gameDir := range []string{
+		`C:\Users\alice\AppData\Local\BibitesMultiverse`,
+		`C:\Users\alice\AppData\Local\BibitesMultiverse\runtimes`,
+		`C:\Users\alice\AppData\Local\BibitesMultiverse\data`,
+		`C:\Users\alice\AppData\Local\BibitesMultiverse\game`,
+	} {
+		install := Install{Root: t.TempDir()}
+		if err := os.MkdirAll(install.ProfilesDir(), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
 		}
-		if got := jsonTypeName(value); got != want {
-			t.Fatalf("%q is a %s, want a %s", key, got, want)
+		var generic map[string]any
+		if err := json.Unmarshal(complete, &generic); err != nil {
+			t.Fatalf("unmarshal: %v", err)
 		}
-	}
-	if len(generic) != len(wantTypes) {
-		t.Fatalf("the installer's profile has %d keys, want %d", len(generic), len(wantTypes))
-	}
-	if !relayURLPattern.MatchString(p.RelayURL) {
-		t.Fatalf("the installer's relayUrl is not a wss:// URL: %s", p.RelayURL)
-	}
-	if !strings.HasPrefix(p.PeerID, "public-") {
-		t.Fatalf("the installer's peerId is not a public-map identity: %s", p.PeerID)
+		generic["gameDir"] = gameDir
+		body, err := json.Marshal(generic)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if err := os.WriteFile(install.ProfilePath("default"), body, 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if _, err := install.LoadProfile("default"); err == nil {
+			t.Fatalf("a gameDir of %q was accepted inside its own data root", gameDir)
+		}
 	}
 }
 

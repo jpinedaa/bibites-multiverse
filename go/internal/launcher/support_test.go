@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -30,10 +33,12 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakeSidecarMain writes what the slot wait reads, then sits there until it is
-// stopped. Its stderr is the log file the launcher redirected.
+// fakeSidecarMain writes what the slot wait reads, serves the own-slot endpoint
+// the mod-connected wait reads, then sits there until it is stopped. Its stderr
+// is the log file the launcher redirected.
 func fakeSidecarMain() int {
-	switch os.Getenv("LAUNCHER_FAKE_SIDECAR") {
+	mode := os.Getenv("LAUNCHER_FAKE_SIDECAR")
+	switch mode {
 	case "refuse":
 		fmt.Fprintln(os.Stderr, "sidecar: placement claim refused: another peer holds that slot")
 	case "silent":
@@ -44,14 +49,120 @@ func fakeSidecarMain() int {
 			fmt.Fprintln(os.Stderr, "sidecar: contract B: slot granted slot=3 position=0,0")
 		}()
 	}
+	// The real sidecar binds the Contract A listener it was given and serves
+	// /my-slot on it (go/internal/sidecar/ownslot.go). "nomod" is the world whose
+	// game never reaches the mod — the LOCAL-CONFIGRACE shape.
+	if addr := fakeListenArg(); addr != "" && mode != "nolisten" {
+		go serveFakeOwnSlot(addr, mode != "nomod")
+	}
 	time.Sleep(2 * time.Minute)
 	return 0
 }
 
-// fakeGameMain stands in for a Unity instance: it runs until it is asked to stop.
+// fakeListenArg reads --listen off this fake's own command line, exactly as the
+// launcher wrote it in sidecarArgs.
+func fakeListenArg() string {
+	for i, arg := range os.Args {
+		if arg == "--listen" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+	return ""
+}
+
+// serveFakeOwnSlot answers the one endpoint the launcher's mod wait reads, with
+// the one field it reads from it.
+func serveFakeOwnSlot(addr string, connected bool) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/my-slot", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"schema":"multiverse-own-slot/1","mod":{"connected":%t,"modVersion":"9.9.9"}}`,
+			connected)
+	})
+	server := &http.Server{Addr: addr, Handler: mux}
+	server.ListenAndServe()
+}
+
+// fakeGameMain stands in for a Unity instance: it runs until it is asked to
+// stop. In the world called deafWorld it stands in for one that was asked and
+// did NOT go — the timeout path, which is a different sentence to the person
+// watching and a different amount of lost world.
+//
+// IT ANNOUNCES ITSELF IN THE WORLD'S DATA DIRECTORY, and waitForFakeGame is how
+// a test waits for that. A process that has not finished starting has not
+// installed its signal handling either, and Unity is far slower to get there
+// than this is: a stop delivered into that window kills a game that would have
+// closed, and a test that does it is testing the window rather than the stop.
 func fakeGameMain() int {
+	world := os.Getenv("MULTIVERSE_WORLD")
+	if world == deafWorld {
+		signal.Ignore(syscall.SIGTERM)
+	}
+	if cmdFile := os.Getenv(cmdFileEnvName); cmdFile != "" &&
+		world != deafWorld && world != modlessWorld {
+		go fakeCommandPump(cmdFile, world)
+	}
+	if token := os.Getenv("MULTIVERSE_CONTRACT_A_TOKEN_FILE"); token != "" {
+		os.WriteFile(filepath.Join(filepath.Dir(token), fakeGameReadyName), nil, 0o644)
+	}
 	time.Sleep(2 * time.Minute)
 	return 0
+}
+
+// fakeCommandPump is the MOD'S half of MULTIVERSE_CMD_FILE, written to
+// bibites-mod/src/DevCommands.cs rather than to what the launcher happens to
+// send: poll the path, ignore content that does not end in a newline, DELETE the
+// file once it is taken, append '<token> OK|ERROR <details>' to <file>.log, and
+// for 'quit' go a moment later — the mod's own half-second pause before
+// Application.Quit(), which is what gives it time to write its answer.
+func fakeCommandPump(path, world string) {
+	for {
+		time.Sleep(10 * time.Millisecond)
+		raw, err := os.ReadFile(path)
+		if err != nil || len(raw) == 0 || !strings.HasSuffix(string(raw), "\n") {
+			continue
+		}
+		os.Remove(path)
+		fields := strings.Fields(string(raw))
+		if len(fields) < 2 {
+			continue
+		}
+		token, verb := fields[0], fields[1]
+		if world == mumWorld {
+			continue
+		}
+		status, details := "OK", "quitting"
+		if world == refusingWorld {
+			status, details = "ERROR", "no world is loaded"
+		}
+		answers, err := os.OpenFile(path+cmdLogSuffix, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(answers, "%s %s %s\n", token, status, details)
+		answers.Close()
+		if verb == modQuitVerb && status == "OK" {
+			time.Sleep(20 * time.Millisecond)
+			os.Exit(0)
+		}
+	}
+}
+
+// fakeGameReadyName is the fake game's "I am up" marker, in the world's own data
+// directory, where the launcher already writes.
+const fakeGameReadyName = "fake-game-ready"
+
+// waitForFakeGame blocks until the game this world just started is really there.
+func waitForFakeGame(t *testing.T, p Profile) {
+	t.Helper()
+	marker := filepath.Join(p.DataDir(), fakeGameReadyName)
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		if fileExists(marker) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the fake game never announced itself at %s", marker)
 }
 
 // harness is one fake installation: an install root with a sidecar and a
@@ -66,9 +177,33 @@ type harness struct {
 	stderr     bytes.Buffer
 	stdin      io.Reader
 	now        time.Time
+	// nowStep advances the injected clock on every read. It is zero by default,
+	// because the golden stamps need a frozen clock; a test that exercises a
+	// TIMEOUT sets it, so the deadline arrives without anybody waiting for it.
+	nowStep time.Duration
 }
 
 const testRelayURL = "wss://bibitesmultiverse.com/contract-b/v4"
+
+// The save names that make the fake game behave like a world in some particular
+// trouble. They travel in MULTIVERSE_WORLD, which the launcher sets for every
+// world it starts, so a test picks a behaviour by naming its world.
+//
+// Any OTHER name gets a fake game that behaves like a healthy modded one: it
+// answers the mod command file and quits when asked to (see fakeCommandPump).
+const (
+	// deafWorld reads no command file AND ignores SIGTERM: nothing can ask it to
+	// go, so it drives the force-after-the-timeout path.
+	deafWorld = "Deaf"
+	// modlessWorld reads no command file and closes on SIGTERM, which is a world
+	// started before the launcher set MULTIVERSE_CMD_FILE, or one whose mod never
+	// loaded. It drives the fallback to the window.
+	modlessWorld = "Modless"
+	// mumWorld takes the command and never answers it.
+	mumWorld = "Mum"
+	// refusingWorld answers ERROR.
+	refusingWorld = "Refusing"
+)
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
@@ -155,6 +290,22 @@ func (h *harness) profile(name, world string, port int) Profile {
 	return p
 }
 
+// managedProfile writes a COMPLETE EDITION world: the game lives INSIDE this
+// world's own data root, at <dataRoot>/runtimes/<assembly sha256>, which is what
+// release/kit/Install-BibitesMultiverse.ps1 produces and what the launcher used
+// to refuse to read.
+func (h *harness) managedProfile(name, world string, port int) Profile {
+	h.t.Helper()
+	p := h.profile(name, world, port)
+	p.GameDir = filepath.Join(p.DataRoot, runtimesDirName,
+		"12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE")
+	h.makeGameDir(p.GameDir)
+	if err := h.install().SaveProfile(p); err != nil {
+		h.t.Fatalf("SaveProfile: %v", err)
+	}
+	return p
+}
+
 // writeRawProfile puts a profile file on disk without going through any
 // validation, which is what a hand-edited or truncated file looks like.
 func (h *harness) writeRawProfile(name, body string) {
@@ -175,7 +326,14 @@ func (h *harness) run(args ...string) int {
 	return run(full, stdin, &h.stdout, &h.stderr,
 		func(string) string { return "" },
 		func() (string, error) { return filepath.Join(h.root, LauncherExeName), nil },
-		func() time.Time { return h.now })
+		h.clock)
+}
+
+// clock is the time the launcher sees: frozen unless a test asked it to move.
+func (h *harness) clock() time.Time {
+	now := h.now
+	h.now = h.now.Add(h.nowStep)
+	return now
 }
 
 // runWith drives the entry point with a scripted stdin, for the commands that

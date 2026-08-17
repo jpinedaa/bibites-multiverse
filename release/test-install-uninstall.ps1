@@ -133,6 +133,20 @@ Check "the GUI offers the included portable game" `
     ($guiText -match 'Use the included portable game')
 Check "the GUI offers an existing game" `
     ($guiText -match 'Use a game that is already installed')
+# START-AFTER-INSTALL IS WHY THESE THREE ARE HERE. `Start-Process -Wait` waits on
+# a job object that is not empty until the child AND every descendant has ended,
+# and the default install ends by starting a sidecar and a game that are meant to
+# outlive it - so the window never came back, and the setup around it never wrote
+# the uninstaller, the shortcuts or the Uninstall registry key. The behaviour is
+# measured in release/test-installer-wait.ps1; this is the source-level guard,
+# and it reads code lines only so the comment that explains it cannot satisfy it.
+$guiCode = ((Get-Content -LiteralPath $guiInstaller) | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+Check "the GUI never starts a process with -Wait, which waits on the descendant tree" `
+    (-not ($guiCode -match 'Start-Process[^\r\n]*\s-Wait\b'))
+Check "the GUI waits on the process object it started" `
+    ($guiCode -match '\.WaitForExit\(\)')
+Check "the GUI keeps the handle its exit code is read through" `
+    ($guiCode -match '\$process\.Handle')
 $probe = (& $guiInstaller -Probe | Out-String) | ConvertFrom-Json
 Check "the game search finds a real installed game" `
     (Test-Path -LiteralPath (Join-Path ([string]$probe.foundGame) 'The Bibites.exe') -PathType Leaf)
@@ -310,8 +324,8 @@ Set-Content -Path (Join-Path $aGame 'BepInEx\config\dev.multiverse.bibites.cfg')
 Set-Content -Path (Join-Path $aGame 'BepInEx\LogOutput.log') -Value 'a log' -Encoding ASCII
 Set-Content -Path (Join-Path $aGame 'BepInEx\cache\chainloader.dat') -Value 'cache' -Encoding ASCII
 
-# The generated start script: it has to parse, and it has to set all five
-# settings explicitly - including the ones that match the mod's own default,
+# The generated start script: it has to parse, and it has to set every one of
+# its settings explicitly - including the ones that match the mod's own default,
 # which is the whole point of writing them out (Decision 7).
 $startScript = Join-Path $KitDir 'Start-Multiverse.ps1'
 if (Test-Path $startScript) {
@@ -325,10 +339,31 @@ if (Test-Path $startScript) {
                            'MULTIVERSE_MIGRATION_EXCLUDE = ''Basic bibite''',
                            'MULTIVERSE_SAVE_MINUTES      = ''10''',
                            'MULTIVERSE_SAVE_KEEP         = ''6''',
-                           'MULTIVERSE_SAVE_ON_QUIT      = ''true''')) {
+                           'MULTIVERSE_SAVE_ON_QUIT      = ''true''',
+                           'MULTIVERSE_STARTUP_TIME_SCALE = ''10''')) {
         Check ("the start script sets " + $setting.Split('=')[0].Trim() + " explicitly") `
             ($startText.Contains('$env:' + $setting))
     }
+    # THE SILENT-FAILURE GATE. A start script that does not check whether the mod
+    # reached the sidecar is a start script that reports success for a world
+    # sitting at the main menu (LOCAL-CONFIGRACE).
+    foreach ($probe in @('/my-slot',
+                         'THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR',
+                         'LOCAL-CONFIGRACE',
+                         'LOCAL-STARVATION',
+                         'the game joined the map: mod connected',
+                         'this is a warning, not a failure')) {
+        Check ("the start script checks that the mod connected (" + $probe + ")") `
+            ($startText.Contains($probe))
+    }
+    # THE LOSSLESS-STOP GATE. A headless game has no window, so there is no close
+    # request to post to it; the mod's command file is the only ask it can hear,
+    # and the mod reads its path once, at start. A start script that does not set
+    # it is a world that can only ever be killed (LOCAL-HEADLESSSTOP).
+    Check "the start script names this world's mod command file" `
+        ($startText.Contains('$env:MULTIVERSE_CMD_FILE = Join-Path $DataRoot ''cmd.txt'''))
+    Check "the start script clears a command an interrupted stop left behind" `
+        ($startText.Contains('Remove-Item -LiteralPath $env:MULTIVERSE_CMD_FILE'))
     Check "the start script carries no secret" (-not ($startText -match $aSecret))
     Check "the start script passes the credential as a file, never as a value" `
         ($startText -match "--credential-file")
@@ -356,6 +391,27 @@ if (Test-Path $stopScript) {
         ($stopText -match 'Get-Process -Id \$processId')
     Check "the stop script never trusts WaitForExit for a process it did not start" `
         (-not ($stopText -match 'WaitForExit'))
+    # THE ASK MUST NOT CARRY /T, and the FORCE must. /T walks the process tree and
+    # refuses the whole call when any member of it needs /F - and the game always
+    # spawns a windowless UnityCrashHandler64.exe, so an ask with /T never reached
+    # the game and every stop skipped save-on-quit.
+    Check "the stop script asks with taskkill and no /T" `
+        ($stopText.Contains('& taskkill.exe /PID $processId *> $null'))
+    Check "the stop script forces with the process tree, which takes the crash handler" `
+        ($stopText.Contains('& taskkill.exe /PID $processId /T /F'))
+    Check "the stop script never asks with /T" `
+        (-not ($stopText -match 'taskkill\.exe /PID \$processId /T \*'))
+    # A headless world is asked through its mod, which is the only ask it hears.
+    foreach ($probe in @('function Request-ModQuit',
+                         'Move-Item -LiteralPath $temporary -Destination $CmdFile -Force',
+                         'nothing is reading $CmdFile',
+                         'MULTIVERSE_CMD_FILE was set',
+                         'it is saving and shutting down')) {
+        Check ("the stop script asks the mod to quit first (" + $probe + ")") `
+            ($stopText.Contains($probe))
+    }
+    Check "the stop script passes the game's command file to the stop" `
+        ($stopText.Contains("Stop-Recorded (Join-Path `$DataRoot 'game.pid') 'the game' 30 (Join-Path `$DataRoot 'cmd.txt')"))
     Check "the stop script keeps the pid file when it could not stop the process" `
         ($stopText -match 'COULD NOT STOP')
 }

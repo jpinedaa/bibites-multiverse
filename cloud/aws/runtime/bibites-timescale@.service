@@ -19,6 +19,12 @@ Requires=bibites-game@%i.service
 #
 # PartOf propagates the parent's stop and restart to this unit, so the oneshot
 # is re-queued and the scale is re-applied whenever the world is brought back.
+#
+# THE MOD NOW APPLIES THE SAME NUMBER ITSELF at world load, from
+# MULTIVERSE_STARTUP_TIME_SCALE in world.env, so a restart no longer depends on
+# this unit being re-queued to leave x1 behind. This unit stays because it is
+# still the only way to move a RUNNING world, and because it is the one that
+# reports failure.
 PartOf=bibites-game@%i.service
 
 [Service]

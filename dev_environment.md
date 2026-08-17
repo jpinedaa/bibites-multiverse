@@ -50,7 +50,7 @@ source at a glance.
 | Component | Public development baseline |
 |---|---|
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.5` |
+| Plugin | `0.6.7` |
 | Contract A | `contract-a/2.4` |
 | Contract B | `contract-b/4.1` |
 | Genome projection | `bb8-genome/1` |
@@ -262,7 +262,8 @@ Every pull request and every push to `main` runs `.github/workflows/checks.yml` 
 runners. That workflow needs no game file and no secret. It runs `go vet` for this host and for
 Windows, `go test ./...`, the cross-builds the release and the hosting kit ship, `bash -n` over
 every tracked shell script, `deploy/test-units.sh`, `deploy/test-front-door.sh`, a stub compile of
-the Windows installer script, a PowerShell parse on Windows, and two consistency gates.
+the Windows installer script, a PowerShell parse on Windows with `release/test-installer-wait.ps1`
+beside it, and two consistency gates.
 
 Run the two gates by hand before you push a change to the mod, the sidecar, or the release
 version:
@@ -438,6 +439,11 @@ The target is not proof of simulation throughput.
 The plugin's headless governor option can disable the minimum-FPS servo.
 It does not change the user's persisted game configuration.
 
+`SimulationManager.Start` resets the target to x1 on every simulation scene.
+That is a hardcoded write, not a persisted setting: nothing on disk holds a speed.
+The plugin re-applies `MULTIVERSE_STARTUP_TIME_SCALE` on each world load, once.
+It does not re-apply it afterwards, so the slider and the `timescale` verb keep the speed.
+
 Use achieved speed for performance claims.
 Record population and simulation tick rate beside every speed comparison.
 
@@ -544,7 +550,18 @@ Do not present a historical rig value as current service state.
 - Target .NET Standard 2.1. Unity 6 assemblies cannot build against the old 2.0 target.
 - Stop the game before plugin deployment. Windows locks the loaded DLL.
 - Run Windows interop commands from a Windows-mounted working directory.
+- `Start-Process -Wait` waits on a job object that is not empty until the child and every
+  descendant has ended. Wait on the returned process object when the child starts a sidecar
+  or a game that is meant to outlive it.
+- With output redirection, `Start-Process -PassThru` returns a process object that holds no
+  handle, and its `ExitCode` then reads as `$null`. Read `.Handle` once while the process is
+  alive if the exit code is going to be needed.
+- NSIS `${GetSize}` enumerates every file under the path it is given. Point it at a program
+  directory, never at a data root a journal grows inside: 145k files took 27.5 minutes, with the
+  setup already invisible and its payload still unpacked in `%TEMP%`.
 - Name each forwarded environment variable in `WSLENV`.
+- BepInEx saves the whole config file from inside every `Config.Bind`. Suspend `SaveOnConfigSet`
+  around a bind burst and save once, or every entry is another window for a sharing violation.
 - Map BepInEx logs by content, not launch order.
 - If `LogOutput.log` contains required evidence, copy it before a restart.
 - Use the readiness flag instead of a fixed sleep before world loading.

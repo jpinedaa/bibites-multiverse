@@ -53,12 +53,25 @@ func (a *app) runMenu() int {
 
 // renderMenu draws one frame. The spacing is deliberate: the two status words
 // line up under each other from one frame to the next.
+//
+// THE FIELD IS 24 WIDE, the same as the status output's, because "running (pid
+// 11004)" is 19 characters and the 12 this used to reserve pushed 'game' out of
+// its column the moment a world was actually running — which is every frame the
+// alignment was there for. 24 holds the longest form the operating system can
+// produce, "running (pid 4294967295)".
 func (a *app) renderMenu(p Profile) {
 	a.print("Bibites Multiverse launcher %s", Release)
 	a.print("   profile '%s'   world '%s'   port %d   headless %s",
 		p.Name, p.World, p.SidecarPort, onOff(p.Headless))
-	a.print("   sidecar %-12s game %s",
+	a.print("   sidecar %-24s game %s",
 		pidState(p.SidecarPidFile(), a.install.SidecarExe()), pidState(p.GamePidFile(), p.GameExe()))
+	// The header names ONE world, and this menu can start, stop and delete only
+	// that one. A second world running out of this installation is invisible here
+	// otherwise, which is how a participant stops "the" world and leaves another
+	// holding a slot on the map.
+	if others := a.otherRunningWorlds(p.Name); len(others) > 0 {
+		a.print("   also running: %s", strings.Join(others, ", "))
+	}
 	a.print("")
 	a.print("   1) Start this world            [Enter]")
 	a.print("   2) Stop this world")
@@ -69,6 +82,24 @@ func (a *app) renderMenu(p Profile) {
 	a.print("   7) Delete a world")
 	a.print("   8) Open this world's log folder")
 	a.print("   0) Quit")
+}
+
+// otherRunningWorlds names every world of this installation, except the one
+// given, whose game or sidecar is running. A profile that cannot be read is
+// silently not running: the menu is not the place that reports broken files.
+func (a *app) otherRunningWorlds(self string) []string {
+	profiles, _ := a.install.loadProfiles()
+	var running []string
+	for _, other := range profiles {
+		if strings.EqualFold(other.Name, self) {
+			continue
+		}
+		if livePid(other.GamePidFile(), other.GameExe()) != 0 ||
+			livePid(other.SidecarPidFile(), a.install.SidecarExe()) != 0 {
+			running = append(running, other.Name)
+		}
+	}
+	return running
 }
 
 // fatalInteractive keeps a double-clicked console window on screen long enough

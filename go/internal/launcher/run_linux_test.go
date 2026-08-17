@@ -74,12 +74,27 @@ func TestStartStopWithFakeBinaries(t *testing.T) {
 	}
 	mustContain(t, "the refusal", h.err(), fmt.Sprintf("nothing can listen on 127.0.0.1:%d", busy))
 
-	// Stopping asks before it forces, and clears the ledger.
+	// Stopping asks before it forces, and clears the ledger. The game has to be
+	// UP first: a process still starting has not installed its signal handling,
+	// and stopping it then proves nothing about asking it to close.
+	waitForFakeGame(t, p)
 	if code := h.run("stop", "default"); code != exitOK {
 		t.Fatalf("stop: %d\n%s", code, h.err())
 	}
-	mustContain(t, "the stop output", h.out(), fmt.Sprintf("stopped the game (pid %d)", gamePid))
-	mustContain(t, "the stop output", h.out(), fmt.Sprintf("stopped the sidecar (pid %d)", sidecarPid))
+	// It went of its own accord rather than being killed, and the output says by
+	// WHICH ask - the whole difference between a world that saved on the way out
+	// and one that did not. The game has a mod to ask; the sidecar has not.
+	mustContain(t, "the stop output", h.out(), fmt.Sprintf(
+		"stopped the game (pid %d) - it was asked through the mod, and it saved and quit", gamePid))
+	mustContain(t, "the stop output", h.out(), fmt.Sprintf(
+		"stopped the sidecar (pid %d) - it was asked to close, and it closed", sidecarPid))
+	mustNotContain(t, "the stop output", h.out(), "forced")
+	mustNotContain(t, "the stop output", h.err(), "LOCAL-HEADLESSSTOP")
+	// The request and its answer are cleaned up behind it: a 'quit' still sitting
+	// in the command file would be taken by the next start of this world.
+	if fileExists(p.CommandFile()) {
+		t.Fatalf("%s survived the stop", p.CommandFile())
+	}
 	if fileExists(p.SidecarPidFile()) || fileExists(p.GamePidFile()) {
 		t.Fatal("stop left a pid file behind")
 	}
@@ -90,7 +105,7 @@ func TestStartStopWithFakeBinaries(t *testing.T) {
 	// The launcher's own event log recorded the whole thing, and holds no secret.
 	events := readFile(t, p.LauncherLog())
 	for _, want := range []string{"sidecar.started", "slot.granted", "game.started",
-		"game.stopped", "sidecar.stopped"} {
+		"game.quit-asked", "game.stopped", "sidecar.stopped"} {
 		mustContain(t, "the launcher log", events, want)
 	}
 	mustNotContain(t, "the launcher log", events, strings.Repeat("a", 64))
@@ -188,6 +203,7 @@ func TestNoWriteOutsideOwnedRoots(t *testing.T) {
 	if code := h.run("start", "second"); code != exitOK {
 		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
 	}
+	waitForFakeGame(t, second)
 	if code := h.run("stop", "second"); code != exitOK {
 		t.Fatalf("stop: %d\n%s", code, h.err())
 	}
@@ -213,16 +229,280 @@ func TestNoWriteOutsideOwnedRoots(t *testing.T) {
 	}
 }
 
+// TestStopForcesOnlyWhatWillNotClose: a game that was asked and did not go is
+// forced AFTER the timeout, and the message says so. The three forced reasons
+// used to be one sentence - "forced immediately (there was nothing to ask)" -
+// printed even for a windowed game that would have saved if it had been asked.
+func TestStopForcesOnlyWhatWillNotClose(t *testing.T) {
+	fastPolling(t)
+	h := newHarness(t)
+	h.useRealFakes()
+	p := h.profile("default", deafWorld, freeTestPort(t))
+	t.Cleanup(func() { killRecorded(p) })
+
+	if code := h.run("start"); code != exitOK {
+		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	gamePid := readPidFile(p.GamePidFile())
+	if gamePid == 0 {
+		t.Fatal("the game's pid was not recorded")
+	}
+	waitForFakeGame(t, p)
+
+	// The injected clock moves, so the timeout arrives without anybody waiting.
+	h.nowStep = 400 * time.Millisecond
+	if code := h.run("stop", "--timeout", "2"); code != exitOK {
+		t.Fatalf("stop: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	mustContain(t, "the stop output", h.out(),
+		fmt.Sprintf("stopped the game (pid %d), forced after 2s", gamePid))
+	mustContain(t, "the stop output", h.out(), "asked to close and had not closed by then")
+	if processAlive(gamePid) {
+		t.Fatal("the game that would not close is still running")
+	}
+	// It was asked, so this is not the no-window case and the note that names the
+	// lost interval must NOT be printed.
+	mustNotContain(t, "the stop output", h.err(), "LOCAL-HEADLESSSTOP")
+}
+
+// TestHeadlessStopIsLosslessThroughTheMod is LOCAL-HEADLESSSTOP's remedy, run.
+// A headless world has no window, so the operating system has nothing to post a
+// close request to and the stop used to kill it - losing everything since its
+// last save. The mod's own command file needs no window, and this is the whole
+// path: the launcher writes 'quit', the mod answers OK and shuts the game down
+// through Application.Quit(), which is the shutdown save-on-quit runs in.
+func TestHeadlessStopIsLosslessThroughTheMod(t *testing.T) {
+	fastPolling(t)
+	h := newHarness(t)
+	h.useRealFakes()
+	p := h.profile("default", "Multiverse", freeTestPort(t))
+	if code := h.run("profile", "set", "default", "--headless"); code != exitOK {
+		t.Fatalf("profile set --headless: %d\n%s", code, h.err())
+	}
+	t.Cleanup(func() { killRecorded(p) })
+
+	if code := h.run("start"); code != exitOK {
+		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	waitForFakeGame(t, p)
+	gamePid := readPidFile(p.GamePidFile())
+
+	if code := h.run("stop"); code != exitOK {
+		t.Fatalf("stop: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	mustContain(t, "the stop output", h.out(), fmt.Sprintf(
+		"stopped the game (pid %d) - it was asked through the mod, and it saved and quit", gamePid))
+	// NOT the headless-loss note, and NOT a force: that is the whole point.
+	mustNotContain(t, "the stop output", h.err(), "LOCAL-HEADLESSSTOP")
+	mustNotContain(t, "the stop output", h.out(), "forced")
+	mustContain(t, "the launcher log", readFile(t, p.LauncherLog()), "game.quit-asked")
+}
+
+// TestStopFallsBackWhenNothingReadsTheCommandFile: a world started before this
+// launcher set MULTIVERSE_CMD_FILE has no consumer for it and never will, since
+// the mod reads that variable once at plugin start. The stop must notice within
+// a second, say so, take its own request back, and stop the world the old way.
+func TestStopFallsBackWhenNothingReadsTheCommandFile(t *testing.T) {
+	fastPolling(t)
+	h := newHarness(t)
+	h.useRealFakes()
+	p := h.profile("default", modlessWorld, freeTestPort(t))
+	t.Cleanup(func() { killRecorded(p) })
+
+	if code := h.run("start"); code != exitOK {
+		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	waitForFakeGame(t, p)
+	gamePid := readPidFile(p.GamePidFile())
+
+	if code := h.run("stop"); code != exitOK {
+		t.Fatalf("stop: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	mustContain(t, "the fallback", h.out(), "nothing is reading "+p.CommandFile())
+	mustContain(t, "the fallback", h.out(), cmdFileEnvName)
+	mustContain(t, "the fallback", h.out(), "Start this world again once")
+	mustContain(t, "the stop output", h.out(), fmt.Sprintf(
+		"stopped the game (pid %d) - it was asked to close, and it closed", gamePid))
+	// The request must not be left where the next start of this world would find
+	// it: a leftover 'quit' shuts a world down seconds after it comes up.
+	if fileExists(p.CommandFile()) {
+		t.Fatalf("%s was left behind by a stop that fell back", p.CommandFile())
+	}
+	mustContain(t, "the launcher log", readFile(t, p.LauncherLog()), "why=no-consumer")
+}
+
+// TestStartTakesBackAStaleQuitCommand: the same leftover, from the other side.
+// The mod polls its command file every 200 ms from the moment it loads, so a
+// 'quit' an interrupted stop left behind would be obeyed within a second of the
+// world coming up - a world that shuts itself down just after it started.
+func TestStartTakesBackAStaleQuitCommand(t *testing.T) {
+	fastPolling(t)
+	h := newHarness(t)
+	h.useRealFakes()
+	p := h.profile("default", "Multiverse", freeTestPort(t))
+	t.Cleanup(func() { killRecorded(p) })
+	writeFile(t, p.CommandFile(), "stale-token quit\n", 0o644)
+	writeFile(t, p.CommandLogFile(), "stale-token OK quitting\n", 0o644)
+
+	if code := h.run("start"); code != exitOK {
+		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	waitForFakeGame(t, p)
+	if fileExists(p.CommandFile()) {
+		t.Fatalf("%s survived the start, so the world would be quit by it", p.CommandFile())
+	}
+	gamePid := readPidFile(p.GamePidFile())
+	if !processAlive(gamePid) {
+		t.Fatal("the world quit itself on a command left behind by an earlier stop")
+	}
+	if code := h.run("stop"); code != exitOK {
+		t.Fatalf("stop: %d\n%s", code, h.err())
+	}
+}
+
+// TestManagedRuntimeWorldRunsAndIsNeverWrittenIn is the complete edition end to
+// end: the profile the installer writes loads, starts, stops - and the game
+// under <data root>/runtimes, which the launcher's own data root now contains,
+// comes out byte for byte unchanged.
+func TestManagedRuntimeWorldRunsAndIsNeverWrittenIn(t *testing.T) {
+	fastPolling(t)
+	h := newHarness(t)
+	h.useRealFakes()
+	p := h.managedProfile("default", "Multiverse", freeTestPort(t))
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	copyExecutable(t, self, p.GameExe())
+	t.Cleanup(func() { killRecorded(p) })
+
+	// The profile the installer writes is one this launcher will act on.
+	if code := h.run("profile", "list"); code != exitOK {
+		t.Fatalf("profile list exited %d\n%s", code, h.err())
+	}
+	mustContain(t, "the listing", h.out(), "default")
+	mustNotContain(t, "the listing", h.err(), "could not be read")
+
+	before := snapshot(t, p.ManagedRuntimeRoot())
+	if code := h.run("start"); code != exitOK {
+		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	waitForFakeGame(t, p)
+	if code := h.run("stop"); code != exitOK {
+		t.Fatalf("stop: %d\n%s", code, h.err())
+	}
+	if diff := compareSnapshots(before, snapshot(t, p.ManagedRuntimeRoot())); diff != "" {
+		t.Fatalf("the managed game runtime was changed:\n%s", diff)
+	}
+	// Everything the world needs landed BESIDE runtimes\, not in it.
+	for _, path := range []string{p.SidecarLog(), p.LauncherLog(), p.DataDir()} {
+		if !fileExists(path) && !dirExists(path) {
+			t.Fatalf("%s was not written", path)
+		}
+	}
+}
+
+// TestMenuNamesTheOtherWorldsThatAreRunning: the header names ONE world and the
+// menu acts on that one, so a second world running out of this installation was
+// invisible - and a participant who "stopped the world" left it holding a slot.
+func TestMenuNamesTheOtherWorldsThatAreRunning(t *testing.T) {
+	h := newHarness(t)
+	h.useRealFakes()
+	other := h.profile("other", "Other", 8790)
+	p := h.profile("default", "Multiverse", 8787)
+	removeFile(t, p.CredentialFile())
+
+	// Nothing else is running yet, so the line is absent.
+	h.stdin = strings.NewReader("0\n")
+	if code := h.run(); code != exitOK {
+		t.Fatalf("the menu exited %d\n%s", code, h.err())
+	}
+	mustNotContain(t, "the menu", h.out(), "also running")
+
+	pid := spawnPlaceholder(t, filepath.Join(h.gameDir, gameExeName))
+	if err := writePidFile(other.GamePidFile(), pid); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+	h.stdin = strings.NewReader("0\n")
+	if code := h.run(); code != exitOK {
+		t.Fatalf("the menu exited %d\n%s", code, h.err())
+	}
+	mustContain(t, "the menu", h.out(), "also running: other")
+}
+
 // fastPolling shortens the two poll loops so a test does not spend real seconds
 // waiting on a fake process.
 func fastPolling(t *testing.T) {
 	t.Helper()
 	slotWas, exitWas := slotPollInterval, exitPollInterval
+	modPollWas, modWaitWas := modPollInterval, modWaitTimeout
+	quitPollWas := modQuitPollInterval
 	slotPollInterval = 20 * time.Millisecond
 	exitPollInterval = 20 * time.Millisecond
+	modPollInterval = 20 * time.Millisecond
+	modWaitTimeout = 2 * time.Second
+	modQuitPollInterval = 20 * time.Millisecond
 	t.Cleanup(func() {
 		slotPollInterval, exitPollInterval = slotWas, exitWas
+		modPollInterval, modWaitTimeout = modPollWas, modWaitWas
+		modQuitPollInterval = quitPollWas
 	})
+}
+
+// A world whose game reaches the sidecar says so on one line, and a world whose
+// game does not says so much more loudly. Neither is a failure exit: the start
+// itself worked, and the mod-side fix for the cause is what makes it rare.
+//
+// This is the gate on LOCAL-CONFIGRACE going silent again. Before it, a mod that
+// configured itself off produced a completely successful start: sidecar up, slot
+// taken, game running, nothing said.
+func TestStartReportsWhetherTheModConnected(t *testing.T) {
+	fastPolling(t)
+	h := newHarness(t)
+	h.useRealFakes()
+	p := h.profile("default", "Multiverse", freeTestPort(t))
+	t.Cleanup(func() { killRecorded(p) })
+
+	if code := h.run("start"); code != exitOK {
+		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	mustContain(t, "the start output", h.out(), "the game joined the map: mod connected, speed x10.")
+	if strings.Contains(h.err(), "HAS NOT REACHED THE SIDECAR") {
+		t.Fatalf("a connected world warned anyway:\n%s", h.err())
+	}
+	// The event log carries the same fact for a supporter reading it later.
+	mustContain(t, "the event log", readFile(t, p.LauncherLog()), "mod.connected")
+
+	if code := h.run("stop", "default"); code != exitOK {
+		t.Fatalf("stop: %d\n%s", code, h.err())
+	}
+
+	// The same start, against a sidecar whose game never arrives.
+	t.Setenv("LAUNCHER_FAKE_SIDECAR", "nomod")
+	quiet := h.profile("quiet", "Quiet", freeTestPort(t))
+	t.Cleanup(func() { killRecorded(quiet) })
+
+	if code := h.run("start", "quiet"); code != exitOK {
+		t.Fatalf("a world whose mod never connects must still exit %d, got %d\n%s",
+			exitOK, code, h.err())
+	}
+	for _, want := range []string{
+		"HAS NOT REACHED THE SIDECAR",
+		"LOCAL-CONFIGRACE",
+		"LOCAL-STARVATION",
+		"this is a warning, not a failure",
+		quiet.BepInExLog(),
+	} {
+		mustContain(t, "the mod-wait warning", h.err(), want)
+	}
+	if strings.Contains(h.out(), "the game joined the map") {
+		t.Fatalf("a world with no mod claimed it joined:\n%s", h.out())
+	}
+	mustContain(t, "the event log", readFile(t, quiet.LauncherLog()), "mod.not-connected")
+
+	if code := h.run("stop", "quiet"); code != exitOK {
+		t.Fatalf("stop quiet: %d\n%s", code, h.err())
+	}
 }
 
 // spawnPlaceholder starts a process that stands in for a running game. It is

@@ -175,6 +175,18 @@ $LauncherName = 'BibitesMultiverseLauncher.exe'
 $ProfilesDirName = 'profiles'
 $ProfileFormat = 'bibites-multiverse/launcher-profile/1'
 
+# The speed a world starts at, written into $StartName beside the mod's other
+# settings. It is a constant rather than a parameter, like the portal switches
+# and unlike the save settings: it is not part of this world's identity, and the
+# in-game speed slider already moves it for a session. The launcher writes the
+# same value (go/internal/launcher/run.go).
+$StartupTimeScale = '10'
+
+# How long the start script waits for the game's mod to reach the sidecar before
+# it warns. The game seeds a world on a first start, which is the slow case, so
+# this is generous; it never fails the start (LOCAL-CONFIGRACE).
+$ModWaitSeconds = 120
+
 $discoveryScript = Join-Path $Here 'Find-BibitesGame.ps1'
 if (-not (Test-Path -LiteralPath $discoveryScript -PathType Leaf)) {
     Write-Host "STOP [INS-CHECKSUM]: Find-BibitesGame.ps1 is missing." -ForegroundColor Red
@@ -1606,11 +1618,15 @@ Say "                     $SaveKeep copies of your world on your disk. The inter
 Say "                     often your world pauses to write itself out"
 Say "  save on quit       $SaveOnQuit"
 Say "                     your world is written out when the game closes, so stopping is not losing"
+Say "  speed              starts at x$StartupTimeScale"
+Say "                     the game's own speed is x1, and the map around you does not run that slow."
+Say "                     Your machine is not asked for more than it can draw: the game holds the"
+Say "                     speed down to keep the picture smooth. The in-game slider still moves it"
 Write-Host ""
-Say "All four are set explicitly in $StartName, and you can edit them there. The"
-Say "names in that file are the mod's own: MULTIVERSE_EXPORT_EDGES,"
-Say "MULTIVERSE_MIGRATION_EXCLUDE, MULTIVERSE_SAVE_MINUTES, MULTIVERSE_SAVE_KEEP"
-Say "and MULTIVERSE_SAVE_ON_QUIT."
+Say "Every one of them is set explicitly in $StartName, and you can edit them"
+Say "there. The names in that file are the mod's own: MULTIVERSE_EXPORT_EDGES,"
+Say "MULTIVERSE_MIGRATION_EXCLUDE, MULTIVERSE_SAVE_MINUTES, MULTIVERSE_SAVE_KEEP,"
+Say "MULTIVERSE_SAVE_ON_QUIT and MULTIVERSE_STARTUP_TIME_SCALE."
 
 # ---------------------------------------------------------------- 9. the scripts
 
@@ -1697,12 +1713,32 @@ $env:MULTIVERSE_SIDECAR_PORT      = $SidecarPort
 $env:MULTIVERSE_WORLD             = $World
 $env:MULTIVERSE_PORTAL            = 'true'
 $env:MULTIVERSE_PORTAL_FLOURISHES = 'true'
+# The speed your world starts at. The game itself resets every world it loads to
+# x1, in code, so without this line your world would start ten times slower than
+# the map around it. It is a TARGET: the game holds the applied speed below it
+# whenever your machine cannot draw fast enough, which costs simulation speed and
+# not smoothness. Drag the speed slider in game to change it for a session, or
+# edit this line to change what every start does. 'off' means the game's own x1.
+$env:MULTIVERSE_STARTUP_TIME_SCALE = '@@STARTUPTIMESCALE@@'
 # The link between the game and the sidecar runs on this machine's loopback and
 # is authenticated: the sidecar mints this file at its first start, readable by
 # you only, and the game presents its contents on every connection. It is NOT
 # the map credential - different secret, different file, different wire - and
 # the mod never writes its value to any log.
 $env:MULTIVERSE_CONTRACT_A_TOKEN_FILE = Join-Path $dataDir 'contract-a.token'
+# The channel this world is ASKED TO SAVE AND QUIT through. A game started with
+# -batchmode -nographics has no window, so there is no close request to post to
+# it and stopping it any other way loses everything since its last save
+# (LOCAL-HEADLESSSTOP). This file needs no window, and it is what makes
+# .\@@STOPNAME@@ - and the launcher's own 'stop' - lossless for a headless world.
+# The mod reads this variable ONCE, at start, so a world already running without
+# it can only be stopped the old way.
+$env:MULTIVERSE_CMD_FILE = Join-Path $DataRoot 'cmd.txt'
+# A COMMAND LEFT BEHIND MUST NOT QUIT THE WORLD THIS START IS BRINGING UP: the
+# mod polls that file every 200 ms from the moment it loads, so a 'quit' an
+# interrupted stop left there would be obeyed a second after the game appeared.
+Remove-Item -LiteralPath $env:MULTIVERSE_CMD_FILE -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath ($env:MULTIVERSE_CMD_FILE + '.log') -Force -ErrorAction SilentlyContinue
 
 $sidecarPidFile = Join-Path $DataRoot 'sidecar.pid'
 $gamePidFile    = Join-Path $DataRoot 'game.pid'
@@ -1816,6 +1852,52 @@ Write-Host ""
 Write-Host "game started (pid $($game.Id)); it loads the world '$World' by itself,"
 Write-Host "and seeds it on the first start. It saves itself every @@SAVEMINUTES@@ minutes."
 Write-Host "logs: $log  and  $GameDir\BepInEx\LogOutput.log"
+
+# THE GAME STARTING IS NOT THE GAME JOINING. A mod that cannot configure itself
+# loads, logs, and then does nothing: no world is loaded, no heartbeat is sent,
+# and the game sits at the main menu while the sidecar holds your slot and every
+# other part of this script reports success. That is LOCAL-CONFIGRACE, and it was
+# silent until this check existed. The sidecar already knows the answer, so ask
+# it: /my-slot on its own loopback listener is read-only and needs no token.
+$bepInExLog = Join-Path $GameDir 'BepInEx\LogOutput.log'
+$modWaitSeconds = @@MODWAITSECONDS@@
+$modConnected = $false
+Write-Host ""
+Write-Host "waiting up to $modWaitSeconds s for the game's mod to reach the sidecar..."
+for ($waited = 0; $waited -lt $modWaitSeconds; $waited++) {
+    try {
+        $view = Invoke-RestMethod -Uri "http://127.0.0.1:$SidecarPort/my-slot" `
+                                  -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+        if ($view.mod.connected) { $modConnected = $true; break }
+    } catch {
+        # Not listening yet, or too old to serve the path. Either is "not yet".
+    }
+    Start-Sleep -Seconds 1
+}
+
+if ($modConnected) {
+    Write-Host "the game joined the map: mod connected, speed x@@STARTUPTIMESCALE@@." -ForegroundColor Green
+} else {
+    Write-Host ""
+    Write-Host "!! THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR after $modWaitSeconds s." -ForegroundColor Yellow
+    Write-Host "   Your world is NOT on the map yet: the sidecar holds your slot, and the map shows" -ForegroundColor Yellow
+    Write-Host "   it live with no game behind it. Nothing is lost and nothing is broken here." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "   Look in the game's own log:"
+    Write-Host "     $bepInExLog"
+    Write-Host "   An error line beginning '[M2]' is the settings-file trap, LOCAL-CONFIGRACE. No"
+    Write-Host "   'Bibites Multiverse <version> loaded' line at all is LOCAL-STARVATION - the"
+    Write-Host "   plugin is not being loaded. Both are in docs/error-taxonomy.md."
+    Write-Host ""
+    Write-Host "   The remedy for either is to restart this world:"
+    Write-Host "     .\@@STOPNAME@@"
+    Write-Host "     .\@@STARTNAME@@"
+    Write-Host "   If it happens twice in a row, report it with that log and the code above."
+    Write-Host ""
+    Write-Host "   The world and the sidecar are still running; this is a warning, not a failure."
+}
+
+Write-Host ""
 Write-Host "Leave both running. Run .\@@STOPNAME@@ when you are done."
 '@
 
@@ -1840,7 +1922,7 @@ $DataRoot = '@@DATAROOT@@'
 # Ask before forcing. A close request is what runs the game's own quit path, so
 # save-on-quit still happens; the force is the fallback.
 #
-# TWO RULES THIS FUNCTION KEEPS, AND WHY:
+# FOUR RULES THESE TWO FUNCTIONS KEEP, AND WHY:
 #   1. Only a process that is really gone is reported as stopped, and only then
 #      is its pid file deleted. The pid file is the ledger the uninstall and the
 #      launcher both read; deleting it while the process lives would hide a
@@ -1851,8 +1933,64 @@ $DataRoot = '@@DATAROOT@@'
 #      -batchmode -nographics - makes taskkill refuse with a non-zero exit.
 #      There is nothing to wait for in that case, so it is forced at once
 #      instead of burning the whole timeout.
+#   3. THE ASK NEVER CARRIES /T. /T walks the process TREE and refuses the whole
+#      call when any member of it needs /F - and the game ALWAYS spawns a
+#      windowless UnityCrashHandler64.exe. With /T on the ask, every stop of
+#      every world, windowed or not, fell through to the force and skipped
+#      save-on-quit. The FORCE carries /T, which is where the tree belongs: that
+#      is the case where the crash handler has to go with its parent.
+#   4. A game with a mod is asked through the mod FIRST (Request-ModQuit), which
+#      is the only ask a headless world can hear.
+function Request-ModQuit {
+    param([string]$CmdFile)
+    if (-not $CmdFile) { return $false }
+    $answers = $CmdFile + '.log'
+    $token = 'stop-{0}-{1}' -f $PID, [DateTime]::UtcNow.Ticks
+    Remove-Item -LiteralPath $CmdFile -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $answers -Force -ErrorAction SilentlyContinue
+    # Renamed into place, never written in place: the mod discards a command
+    # file that does not end in a newline, and a rename makes it appear whole.
+    $temporary = $CmdFile + '.tmp'
+    try {
+        [IO.File]::WriteAllText($temporary, "$token quit`n", (New-Object Text.UTF8Encoding $false))
+        Move-Item -LiteralPath $temporary -Destination $CmdFile -Force
+    } catch {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+    $taken = $false
+    for ($i = 0; $i -lt 5; $i++) {
+        if (-not (Test-Path -LiteralPath $CmdFile)) { $taken = $true; break }
+        Start-Sleep -Milliseconds 200
+    }
+    if (-not $taken) {
+        # Take the request back: the next start of this world would obey it.
+        Remove-Item -LiteralPath $CmdFile -Force -ErrorAction SilentlyContinue
+        Write-Host "nothing is reading $CmdFile, so this world's mod cannot be asked to quit."
+        Write-Host "It was started before MULTIVERSE_CMD_FILE was set, or its mod is not loaded."
+        Write-Host "Start this world again once and the next stop is lossless. Asking the window instead."
+        return $false
+    }
+    for ($i = 0; $i -lt 20; $i++) {
+        foreach ($line in @(Get-Content -LiteralPath $answers -ErrorAction SilentlyContinue)) {
+            $fields = $line -split '\s+'
+            if ($fields.Count -ge 2 -and $fields[0] -eq $token) {
+                if ($fields[1] -eq 'OK') {
+                    Write-Host "this world's mod took the quit request; it is saving and shutting down."
+                    return $true
+                }
+                Write-Host "this world's mod refused the quit request. Asking the window instead."
+                return $false
+            }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    Write-Host "this world's mod took the quit request and did not answer it. Asking the window instead."
+    return $false
+}
+
 function Stop-Recorded {
-    param([string]$File, [string]$Name, [int]$WaitSeconds = 30)
+    param([string]$File, [string]$Name, [int]$WaitSeconds = 30, [string]$CmdFile)
     if (-not (Test-Path $File)) { return }
     $id = (Get-Content -Path $File | Select-Object -First 1)
     $processId = 0
@@ -1864,14 +2002,23 @@ function Stop-Recorded {
         Remove-Item -Path $File -Force
         return
     }
-    $global:LASTEXITCODE = 1
-    & taskkill.exe /PID $processId /T *> $null
-    if ($LASTEXITCODE -eq 0) {
+    $asked = $false
+    if ($CmdFile) { $asked = Request-ModQuit $CmdFile }
+    if (-not $asked) {
+        $global:LASTEXITCODE = 1
+        & taskkill.exe /PID $processId *> $null
+        $asked = ($LASTEXITCODE -eq 0)
+    }
+    if ($asked) {
         $deadline = (Get-Date).AddSeconds($WaitSeconds)
         while ((Get-Date) -lt $deadline -and
                (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
             Start-Sleep -Milliseconds 500
         }
+    }
+    if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+        & taskkill.exe /PID $processId /T /F *> $null
+        Start-Sleep -Milliseconds 500
     }
     if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
         Stop-Process -Id $processId -Force
@@ -1885,7 +2032,7 @@ function Stop-Recorded {
     Remove-Item -Path $File -Force
 }
 
-Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game' 30
+Stop-Recorded (Join-Path $DataRoot 'game.pid') 'the game' 30 (Join-Path $DataRoot 'cmd.txt')
 Start-Sleep -Seconds 1
 
 if ($GameOnly) {
@@ -1919,6 +2066,8 @@ function Expand-Template {
                  Replace('@@SAVEMINUTES@@',    [string]$SaveMinutes).
                  Replace('@@SAVEKEEP@@',       [string]$SaveKeep).
                  Replace('@@SAVEONQUIT@@',     $saveOnQuitValue).
+                 Replace('@@STARTUPTIMESCALE@@', $StartupTimeScale).
+                 Replace('@@MODWAITSECONDS@@', [string]$ModWaitSeconds).
                  Replace('@@SIDECARPORT@@',    [string]$SidecarPort).
                  Replace('@@STARTNAME@@',      $StartName).
                  Replace('@@STOPNAME@@',       $StopName)

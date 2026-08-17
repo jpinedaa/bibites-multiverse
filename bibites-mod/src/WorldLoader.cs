@@ -76,6 +76,11 @@ namespace BibitesMultiverse
                     yield break;
                 }
 
+                // Seeding runs at its own fixed speed and leaves the world live, so the configured
+                // startup speed — which was already applied when the seeding scene became ready — has
+                // been overwritten by it. Put it back, once, on the world the participant now has.
+                GetComponent<StartupTimescale>()?.Apply("the end of seeding");
+
                 // The seeding run already left that world loaded and running, so there is nothing to
                 // load a second time. Reloading it would only throw away the simulated time.
                 MultiversePlugin.Log.LogInfo(

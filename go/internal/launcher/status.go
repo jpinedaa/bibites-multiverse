@@ -20,6 +20,18 @@ type Status struct {
 	InstallRoot string          `json:"installRoot"`
 	Active      string          `json:"active"`
 	Profiles    []ProfileStatus `json:"profiles"`
+	// Problems is every reason this report is not the whole picture: a profile
+	// file that could not be read, and — when nothing could be read at all — the
+	// refusal the human form prints. It is ADDITIVE and omitted when empty, so a
+	// healthy installation's document is byte for byte the one this schema has
+	// always emitted.
+	//
+	// IT EXISTS BECAUSE SILENCE WAS WORSE THAN AN ERROR. `status --all --json`
+	// answered {"active": "", "profiles": []} and exit 0 while a world was
+	// running, whenever the profile behind it failed to load — the same call the
+	// human form exits 1 on. Anything watching this output read "nothing is
+	// installed here" from a launcher that simply could not read its own files.
+	Problems []string `json:"problems,omitempty"`
 }
 
 // ProfileStatus is one world's settings and what is running for it.
@@ -49,14 +61,18 @@ type ProcessStatus struct {
 	Running bool `json:"running"`
 }
 
-// collectStatus reads the ledger for the profiles it is given.
-func (a *app) collectStatus(profiles []Profile, active string) Status {
+// collectStatus reads the ledger for the profiles it is given, and carries the
+// reasons any others are missing from it.
+func (a *app) collectStatus(profiles []Profile, active string, problems []error) Status {
 	status := Status{
 		Format:      StatusFormat,
 		Release:     Release,
 		InstallRoot: a.install.Root,
 		Active:      active,
 		Profiles:    make([]ProfileStatus, 0, len(profiles)),
+	}
+	for _, problem := range problems {
+		status.Problems = append(status.Problems, problem.Error())
 	}
 	for _, p := range profiles {
 		sidecarPid, sidecarRunning := describePid(p.SidecarPidFile(), a.install.SidecarExe())
@@ -84,18 +100,26 @@ func (a *app) collectStatus(profiles []Profile, active string) Status {
 	return status
 }
 
-// runStatus prints the status of one world or of every world.
+// runStatus prints the status of one world or of every world. The two output
+// forms report the SAME facts and exit the SAME way: a report that could read
+// nothing is a refusal in both, whatever the format.
 func (a *app) runStatus(name string, all bool) int {
 	var profiles []Profile
+	var problems []error
 	active, activeErr := a.install.ActiveName()
 	if all {
-		found, problems := a.install.loadProfiles()
+		found, readProblems := a.install.loadProfiles()
+		problems = readProblems
 		for _, problem := range problems {
 			a.warn("skipping a profile that could not be read: %v", problem)
 		}
 		if len(found) == 0 {
 			if a.asJSON {
-				return a.emitJSON(a.collectStatus(nil, ""))
+				// The document still goes out — a reader wants to know WHICH
+				// installation answered nothing — and the exit code still says
+				// this call failed.
+				a.emitJSON(a.collectStatus(nil, "", append(problems, errNoProfiles)))
+				return exitRefused
 			}
 			return a.fail("%v", errNoProfiles)
 		}
@@ -113,7 +137,7 @@ func (a *app) runStatus(name string, all bool) int {
 	if activeErr != nil {
 		active = ""
 	}
-	status := a.collectStatus(profiles, active)
+	status := a.collectStatus(profiles, active, problems)
 	if a.asJSON {
 		return a.emitJSON(status)
 	}
@@ -135,6 +159,9 @@ func (a *app) emitJSON(value any) int {
 func (a *app) printStatus(status Status) {
 	a.print("Bibites Multiverse launcher %s", status.Release)
 	a.print("installed in %s", status.InstallRoot)
+	for _, problem := range status.Problems {
+		a.print("  a world could not be read: %s", problem)
+	}
 	for _, p := range status.Profiles {
 		marker := " "
 		if p.Active {

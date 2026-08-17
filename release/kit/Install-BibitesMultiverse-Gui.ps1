@@ -9,8 +9,62 @@
 [CmdletBinding()]
 param(
     [switch]$Probe,
-    [string]$InstallRoot = ''
+    [string]$InstallRoot = '',
+    # Dot-source this file with -DefineOnly to load the function below without
+    # opening a window, writing the setup log or touching anything else. It is
+    # how release/test-installer-wait.ps1 calls the real wait; nothing that
+    # installs ever passes it.
+    [switch]$DefineOnly
 )
+
+# ------------------------------------------------------------ the install wait
+# WHY THIS IS NOT `Start-Process -Wait`. Windows PowerShell implements that
+# switch with a JOB OBJECT, and it waits until the job is EMPTY - the child AND
+# every descendant the child leaves running. The last thing a default install
+# does is start a world: Install-BibitesMultiverse.ps1 runs the Start-Multiverse
+# script it just generated, which launches multiverse-sidecar.exe and
+# The Bibites.exe and returns. Those two outlive the installer on purpose, so
+# the job never emptied and -Wait never came back. This window sat on
+# "Installing. Keep this window open." with the install already finished, and
+# because this script never exited, the setup around it never reached the steps
+# that come after it: no uninstaller, no shortcuts, no Uninstall registry key,
+# and the unpacked payload left behind in %TEMP%.
+#
+# Waiting on the process object waits for THAT process and nothing under it.
+# This is not the case Install-BibitesMultiverse.ps1's stop script refuses
+# WaitForExit for: what makes WaitForExit lie there is a handle the script
+# cannot open for a process it did not start, and this is the handle
+# Start-Process has just handed back.
+#
+# READING .Handle IS LOAD-BEARING. With redirection, Start-Process -PassThru
+# returns a process object that holds no handle of its own, and $process.ExitCode
+# then reads as $null - which this window would show as a failed install after
+# every successful one. Touching .Handle once, while the process is certainly
+# alive, caches the handle the exit code is later read through. `-Wait` used to
+# do that for us.
+function Invoke-BibitesInstaller {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Engine,
+        [Parameter(Mandatory = $true)][string]$Arguments,
+        [Parameter(Mandatory = $true)][string]$StandardOutput,
+        [Parameter(Mandatory = $true)][string]$StandardError
+    )
+    $process = Start-Process -FilePath $Engine -ArgumentList $Arguments -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $StandardOutput -RedirectStandardError $StandardError
+    if (-not $process) { throw 'the installer process did not start' }
+    try { $null = $process.Handle } catch { }
+    # No timeout: this returns when the process has ended and its redirected
+    # output has been written, which is what both dialogs below read.
+    $process.WaitForExit()
+    $code = $process.ExitCode
+    if ($null -eq $code) {
+        throw 'the installer finished and its exit code could not be read'
+    }
+    return $code
+}
+
+if ($DefineOnly) { return }
 
 # ---------------------------------------------------------------- diagnostic log
 # Written before strict error handling so any startup failure is captured in a
@@ -258,8 +312,10 @@ $install.Add_Click({
     [System.Windows.Forms.Application]::DoEvents()
 
     try {
-        $process = Start-Process -FilePath $engine -ArgumentList $quoted -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $log -RedirectStandardError ($log + '.err')
-        if ($process.ExitCode -ne 0) {
+        $exitCode = Invoke-BibitesInstaller -Engine $engine -Arguments $quoted `
+            -StandardOutput $log -StandardError ($log + '.err')
+        Write-SetupLog "installer exit=$exitCode"
+        if ($exitCode -ne 0) {
             $detail = ''
             if (Test-Path -LiteralPath $log) {
                 # Enough lines to carry a whole refusal, not only its last word:

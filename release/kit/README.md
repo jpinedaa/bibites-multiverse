@@ -126,9 +126,11 @@ BibitesMultiverseLauncher.exe status --all
 ```
 
 `stop` asks the game to close before it forces it, so save-on-quit runs. **A headless world has no
-window to close** and is stopped outright, so it can lose the time since its last save — that is
-`LOCAL-HEADLESSSTOP` in `error-taxonomy.md`, and a short save interval or one `--no-headless`
-session is the answer.
+window to close**, so it is asked through its own mod instead — the `quit` verb on this world's
+command file, which runs the same shutdown and saves — and a headless stop loses nothing. The one
+world that cannot be asked is one that was already running before this release was installed: the
+mod learns its command file's name at start. Start it again once. That is `LOCAL-HEADLESSSTOP` in
+`error-taxonomy.md`.
 
 The generated scripts remain available in the installed application directory. They hold the
 values this world was installed with:
@@ -218,6 +220,7 @@ checked on every write, so any other edit, and any start, is refused until that 
 | `MULTIVERSE_SAVE_MINUTES` | `saveMinutes` | `10` | How often your world pauses to write itself out |
 | `MULTIVERSE_SAVE_KEEP` | `saveKeep` | `6` | Six copies of your world on your disk |
 | `MULTIVERSE_SAVE_ON_QUIT` | `saveOnQuit` | `true` | Your world is written out when the game closes |
+| `MULTIVERSE_STARTUP_TIME_SCALE` | not in the profile | `10` | Your world starts at x10 rather than the game's own x1. It is a target: the game holds the speed down to keep your frame rate up, so a slower machine runs slower and stays smooth. The speed slider in the game moves it for a session; `off` here means the game's own x1 |
 
 ## Uninstall
 

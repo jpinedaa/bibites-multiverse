@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.6.5";
+        public const string Version = "0.6.7";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -36,6 +36,13 @@ namespace BibitesMultiverse
             gameObject.AddComponent<RoundTripCommand>();
             Log.LogInfo($"Round-trip dev command armed — press {RoundTripCommand.Hotkey} inside a running simulation.");
 
+            // ONE CONFIG-FILE WRITE PER GAME START, NOT FOURTEEN. BepInEx 5.4 saves the whole file
+            // from inside every Bind, and each of those writes is a window in which any other holder
+            // of the path — a second instance, an anti-virus, a search indexer walking a freshly
+            // installed plugin folder — makes the bind throw. Suspend the per-entry save here, bind
+            // everything, and write once at the end of Awake (LOCAL-CONFIGRACE).
+            bool configSaves = MultiverseConfig.SuspendSaves(Config);
+
             MultiverseConfig config = ReadConfig();
 
             // Armed before anything can save. Like the saver below it is deliberately NOT gated on the
@@ -53,6 +60,12 @@ namespace BibitesMultiverse
             // would spend the first seconds fighting it.
             MinFpsGovernor.Apply(Guid);
 
+            // Also the game's own behaviour rather than the multiverse's, and also not gated on the
+            // client: SimulationManager.Start resets every world it loads to x1, in code, and this is
+            // what puts the configured speed back. Created before the world loader below, so it is
+            // already watching when a world arrives.
+            StartStartupTimescale();
+
             // The saver is created **before** the client, because the client hands it the "a MIGRATE_IN
             // is waiting" gate of Risk 3 at Initialize time and AddComponent runs Awake immediately.
             StartWorldSaver(config);
@@ -60,8 +73,46 @@ namespace BibitesMultiverse
             StartDevCommands(config);
             StartSpectatorDirector();
             StartAutoTest();
+
+            // Every entry is bound by now, so this is the only write, and its failure is a warning
+            // rather than the end of the client: see MultiverseConfig.PersistConfig.
+            MultiverseConfig.PersistConfig(Config, configSaves);
         }
 
+        /// <summary>
+        /// The speed a world starts at (<see cref="StartupTimescale"/>). Armed for every instance,
+        /// because the reset to x1 it answers is the game's own and happens whether or not this world
+        /// is on a map.
+        /// </summary>
+        private void StartStartupTimescale()
+        {
+            try
+            {
+                gameObject.AddComponent<StartupTimescale>();
+            }
+            catch (Exception e)
+            {
+                Log.LogError(
+                    $"{StartupTimescale.Prefix} the startup time scale could not be armed — every world this game " +
+                    $"loads will start at the game's own x1: {e}");
+            }
+        }
+
+        /// <summary>
+        /// The configuration, and it never returns null for a reason a file can cause.
+        ///
+        /// **This used to be the silent killer.** Any throw here — in practice a
+        /// <c>Sharing violation</c> from inside BepInEx's own <c>ConfigFile.Save</c>, which it calls
+        /// from every <c>Bind</c> — turned the whole Contract A client off. The game then loaded, the
+        /// mod framework reported a clean start, no world was ever auto-loaded, no heartbeat was ever
+        /// sent, and the installer, the launcher and the sidecar all reported success while the game
+        /// sat at the main menu (LOCAL-CONFIGRACE; observed on a fresh single install, 2026-08-17).
+        ///
+        /// The settings are not in that file in any case. Every one of them is read from the
+        /// environment afterwards, and a packaged install sets all of them there. So a file that
+        /// cannot be read costs its shipped defaults for that start and nothing else, and the client
+        /// stays on.
+        /// </summary>
         private MultiverseConfig ReadConfig()
         {
             MultiverseConfig config;
@@ -71,8 +122,21 @@ namespace BibitesMultiverse
             }
             catch (Exception e)
             {
-                Log.LogError($"[M2] configuration failed — the multiverse client stays off: {e}");
-                return null;
+                Log.LogError(
+                    "[M2] the settings file could not be used at all — this world carries on with the shipped " +
+                    "defaults and its own environment, which is where a packaged install keeps every setting. " +
+                    $"The multiverse client stays ON. {e}");
+                try
+                {
+                    config = MultiverseConfig.Read(null);
+                }
+                catch (Exception fatal)
+                {
+                    Log.LogError(
+                        "[M2] configuration failed even with no file involved — the multiverse client stays off. " +
+                        $"This is a defect in the mod rather than a machine problem; please report it: {fatal}");
+                    return null;
+                }
             }
 
             config.LogSummary();
@@ -186,26 +250,38 @@ namespace BibitesMultiverse
 
         private void StartAutoTest()
         {
-            ConfigEntry<bool> autoTest = Config.Bind(
-                "M1",
-                "AutoTest",
-                false,
-                "Run the unattended M1 exit test at startup: load the '" + AutoTest.SaveName + "' world, " +
-                "round-trip one organism, watch it for 30 simulated seconds, save the world, then quit. " +
-                "The environment variable " + AutoTestEnvironmentVariable + "=1 turns it on as well.");
+            bool autoTest = false;
+            try
+            {
+                autoTest = Config.Bind(
+                    "M1",
+                    "AutoTest",
+                    false,
+                    "Run the unattended M1 exit test at startup: load the '" + AutoTest.SaveName + "' world, " +
+                    "round-trip one organism, watch it for 30 simulated seconds, save the world, then quit. " +
+                    "The environment variable " + AutoTestEnvironmentVariable + "=1 turns it on as well.").Value;
+            }
+            catch (Exception e)
+            {
+                // Same rule as every other entry: a settings file that will not co-operate costs this
+                // one default and nothing else. The environment variable below still turns it on.
+                Log.LogWarning(
+                    $"[M1] the AutoTest entry could not be read from the settings file ({e.GetType().Name}: " +
+                    $"{e.Message}) — treating it as off. {AutoTestEnvironmentVariable} still works.");
+            }
 
             string fromEnvironment = ReadEnvironmentFlag();
-            bool enabled = autoTest.Value || IsTruthy(fromEnvironment);
+            bool enabled = autoTest || IsTruthy(fromEnvironment);
             if (!enabled)
             {
                 Log.LogInfo(
-                    $"Auto-test is off ([M1] AutoTest={autoTest.Value}, {AutoTestEnvironmentVariable}=" +
+                    $"Auto-test is off ([M1] AutoTest={autoTest}, {AutoTestEnvironmentVariable}=" +
                     $"{(string.IsNullOrEmpty(fromEnvironment) ? "<unset>" : fromEnvironment)}).");
                 return;
             }
 
             Log.LogInfo(
-                $"Auto-test is ON ([M1] AutoTest={autoTest.Value}, {AutoTestEnvironmentVariable}=" +
+                $"Auto-test is ON ([M1] AutoTest={autoTest}, {AutoTestEnvironmentVariable}=" +
                 $"{(string.IsNullOrEmpty(fromEnvironment) ? "<unset>" : fromEnvironment)}).");
             gameObject.AddComponent<AutoTest>();
         }

@@ -126,7 +126,7 @@ build can reuse. You can check yourself before downloading anything — the matr
 one-line command for each platform.
 
 **A row is keyed on a game version AND a platform**, and today the matrix has two: game
-**0.6.3.1** on Windows/Steam, and game **0.6.3.1** on Linux/itch.io, both with mod `0.6.5` and
+**0.6.3.1** on Windows/Steam, and game **0.6.3.1** on Linux/itch.io, both with mod `0.6.7` and
 sidecar `m5.0`. The same version is two different files — they differ by 512 bytes, in the native
 file-dialog shim — so **each installer looks up only its own platform's rows.** Running the wrong
 archive on the right game is `INS-GAMEBUILD`, and the refusal prints the rows so you can see which
@@ -375,11 +375,17 @@ two seconds.
 outright on Windows, which skipped the game's own shutdown and therefore skipped save-on-quit. The
 launcher's **Stop this world**, `BibitesMultiverseLauncher.exe stop`, and the generated
 `Stop-Multiverse.ps1` all ask the game to close first and force it only after the wait — 30 seconds
-for the game, 10 for the sidecar. **A headless world is the exception:** it has no window to close,
-so Windows cannot ask it, and the stop forces it. A headless world can lose the simulation since
-its last save when you stop it, so give one a shorter save interval if that matters to you. That
-is `LOCAL-HEADLESSSTOP` in [`../error-taxonomy.md`](../error-taxonomy.md), which has the whole of
-it — including the one way to stop a headless world without losing anything.
+for the game, 10 for the sidecar. **A headless world has no window to close**, so Windows cannot
+ask it that way — and it is not asked that way. The launcher asks the game's own mod to save and
+quit, through a command file this world alone reads, and that runs the same shutdown a window
+close would: **a headless world stopped by this release loses nothing.** The window remains the
+fallback for a world whose mod cannot be asked, and the stop tells you which one happened.
+
+**One world cannot be asked: one that was already running before you installed this release.** The
+mod reads the name of its command file once, when the game starts, so a world started by an older
+build never learnt it. Stop it, start it again, and every stop after that is lossless — the stop
+says as much when it meets that case. That is `LOCAL-HEADLESSSTOP` in
+[`../error-taxonomy.md`](../error-taxonomy.md).
 
 ## More than one world on this computer
 
@@ -430,6 +436,16 @@ side is a separate act, described in [leave.md](leave.md).
 world's journal, logs and credential — it asks **even when you pass the global `--yes`**. A blanket
 "answer yes to everything" must not be able to erase a world's data without naming it. `--yes` still
 answers every other question, including a plain `profile delete`.
+
+**`--remove-world-data` deletes that world's own entries and nothing else**: `data\` (the journal),
+`logs\`, `peer-secret.txt`, and the launcher's own `game.pid`, `sidecar.pid`, `launcher.lock` and
+`enrollment-pending.json`. Anything else in that folder is **left where it is and named on your
+screen** — because a data folder is not always only one world's. A complete-edition install keeps
+**the game itself** there, under `runtimes\`; the installer keeps `install-record.json` beside it,
+which the uninstaller reads; an interrupted install can leave an orphaned credential no map can
+print again; and a computer that has hosted more than one deployment keeps those worlds' folders
+there too. None of those is this world's to delete. **Your game's own save file is somewhere else
+entirely** — see *Where your worlds live* — and nothing here writes or deletes it.
 
 **All of your worlds save into one folder** — the game keeps its saves per user, not per game copy
 (see *Where your worlds live* below). So each world needs a name no other world on this computer
@@ -522,11 +538,18 @@ way a start script spells an assignment differs
 | Migration exclusion | `MULTIVERSE_MIGRATION_EXCLUDE` (installer: `-ExcludeSpecies` / `--exclude-species`) | `excludeSpecies` | `Basic bibite` | It keeps founder stock off the lanes. **An empty value turns the policy off**, which floods a shared map with seed genomes and looks entirely normal in the census while it happens — so the installer and the launcher both refuse an empty value and make you say `-NoMigrationExclusion` / `--no-migration-exclusion` if you mean it, and print what it costs when you do |
 | Save interval and retained saves | `MULTIVERSE_SAVE_MINUTES`, `MULTIVERSE_SAVE_KEEP` (installer: `-SaveMinutes`, `-SaveKeep` / `--save-minutes`, `--save-keep`) | `saveMinutes`, `saveKeep` | `10` and `6` | Six copies of your world on your disk that you did not budget for — measured at about 2.4–2.9 MB in total on this project's own worlds. The interval is also how often your world pauses to write itself out — see [diagnose.md](diagnose.md). With several worlds on one computer, give each a different interval |
 | Save on quit | `MULTIVERSE_SAVE_ON_QUIT` (installer: `-SaveOnQuit on\|off` / `--save-on-quit on\|off`) | `saveOnQuit` | `true` | Your world is written out when the game closes, so stopping is not losing. Every stop path waits for that save rather than killing the game outright, except a headless world on Windows, which has no window to close |
+| Speed | `MULTIVERSE_STARTUP_TIME_SCALE` | not in the profile — edit the start script | `10` | Your world starts at **x10** rather than the game's own x1, which is the speed the rest of the map runs at. It costs nothing on disk and nothing on the network; it costs CPU on your computer, and the game itself limits that — it holds the speed down to keep your frame rate at 15, so a slower machine simply runs slower and stays smooth. `off` means the game's own x1 |
 
-The same names appear in the game's own settings file — `<game folder>\BepInEx\config\`
+**The speed is the one you can change without editing anything.** Drag the speed slider in the
+game and it stays where you put it for the rest of that session — nothing re-applies the default
+while a world is loaded. The variable decides where the *next* start begins, and every start after
+that.
+
+The first four names appear in the game's own settings file — `<game folder>\BepInEx\config\`
 `dev.multiverse.bibites.cfg` on Windows, `<game folder>/BepInEx/config/dev.multiverse.bibites.cfg`
 on Linux — as `ExportEdges`, `MigrationExcludeSpecies`, `SaveMinutes`, `SaveKeep` and
-`SaveOnQuit`. **The environment wins**, because the mod reads it before that file. That is also why
+`SaveOnQuit`. The speed is not among them: it has no entry in that file on purpose, because every
+world on one computer shares that one file and they would fight over it. **The environment wins**, because the mod reads it before that file. That is also why
 several worlds can share one game folder on Windows: each game process gets its own environment.
 Edit the profile on Windows or the start script on Linux; the config file is there for somebody
 starting the game another way.
@@ -535,7 +558,7 @@ starting the game another way.
 you change a world's settings in the launcher, and the launcher says so when you do. On Windows the
 launcher is what your world runs from; the script stays for scripted and advanced use.
 
-Every default this release ships with — these four, and the two the operator side has — is
+Every default this release ships with — these five, and the two the operator side has — is
 audited in [`../defaults-audit.md`](../defaults-audit.md), with what a bare install does and a
 verdict.
 

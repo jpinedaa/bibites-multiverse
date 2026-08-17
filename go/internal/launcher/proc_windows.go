@@ -9,7 +9,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -87,13 +87,53 @@ func protectUserFile(path string) error {
 }
 
 // gracefulStop asks the process to close, so a world's save-on-quit runs.
-// taskkill without /F posts WM_CLOSE. A headless game (-batchmode -nographics)
-// has no window, so taskkill answers "can only be terminated forcefully"; that
-// is reported as an error and the caller forces immediately.
-func gracefulStop(pid int) error {
-	cmd := exec.Command(systemTool("taskkill.exe"), "/PID", strconv.Itoa(pid), "/T")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("taskkill could not ask pid %d to close: %w: %s", pid, err, string(out))
+// taskkill without /F posts WM_CLOSE — see taskkillGracefulArgs for why the /T
+// that used to be here made that ask fail on EVERY game, windowed or not.
+//
+// A headless game (-batchmode -nographics) has no window, so taskkill answers
+// "can only be terminated forcefully". That is askImpossible rather than a
+// failure: the caller forces at once instead of waiting out the timeout.
+func gracefulStop(pid int) (askResult, error) {
+	cmd := exec.Command(systemTool("taskkill.exe"), taskkillGracefulArgs(pid)...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return askAccepted, nil
+	}
+	return classifyTaskkill(err, string(out)),
+		fmt.Errorf("taskkill could not ask pid %d to close: %w: %s", pid, err,
+			strings.TrimSpace(string(out)))
+}
+
+// forceStop is the last resort on Windows: taskkill /T /F, which is
+// TerminateProcess on the pid AND on its children, so whatever the process was
+// writing is lost — which is exactly why gracefulStop is tried first.
+//
+// THE TREE IS THE POINT HERE, for one child in particular: the game always
+// spawns UnityCrashHandler64.exe --attach <game pid>. That handler waits on its
+// parent and exits with it, so a game that CLOSES needs nothing done about it;
+// a game that is killed is the case where /T is what keeps the handler from
+// lingering with a dead process to attach to.
+func forceStop(pid int) error {
+	cmd := exec.Command(systemTool("taskkill.exe"), taskkillForceArgs(pid)...)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	// It may simply have gone in the meantime, which is the outcome asked for.
+	if probeProcess(pid) == processDead {
+		return nil
+	}
+	// taskkill is a program, and a machine that cannot run it still has to be
+	// able to stop a world: fall back to TerminateProcess on the pid itself.
+	process, findErr := os.FindProcess(pid)
+	if findErr != nil {
+		return fmt.Errorf("taskkill could not stop pid %d (%w: %s), and the process could not "+
+			"be opened: %v", pid, err, strings.TrimSpace(string(out)), findErr)
+	}
+	defer process.Release()
+	if killErr := process.Kill(); killErr != nil {
+		return fmt.Errorf("taskkill could not stop pid %d (%w: %s), and terminating it directly "+
+			"failed: %v", pid, err, strings.TrimSpace(string(out)), killErr)
 	}
 	return nil
 }

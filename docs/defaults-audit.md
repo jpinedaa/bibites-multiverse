@@ -38,6 +38,7 @@ facts shape every verdict:
 | Windows application registration | The single-file setup | Creates per-user desktop and Start Menu shortcuts plus one uninstall entry | **PASS** — no administrator access, service, task, or machine-wide setting |
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
+| `MULTIVERSE_STARTUP_TIME_SCALE` | The mod | Every world starts at x10 instead of the game's x1 | **PASS** — it is a target the game itself governs down to protect the frame rate, it costs no disk and no network, and a player moves it with the speed slider they already have |
 
 A fifth flag belongs beside the first, and this audit adds it rather than leaving it implied:
 **the sidecar's `--insecure-no-contract-a-token`**. It *is* shipped, inside the package.
@@ -240,6 +241,53 @@ division for a symptom that is usually a fact of life.
 
 **Verdict: PASS WITH A STATED COST.**
 
+## 5. `MULTIVERSE_STARTUP_TIME_SCALE`
+
+**Today.** `10`, applied by the mod once per world load. It is new in this audit because the
+default it replaces was never a setting at all: **the game resets every world it loads to x1 in
+code** (`SimulationManager.Start` writes `targetTimeScale` and `engineTimeScale` back to 1 on a new
+game, a loaded save and an autosave reload alike). There is no stored speed anywhere —
+`targetTimeScale` is a `[NonSerialized]` static with no `PlayerPrefs` key and the world archive
+does not carry one — so nothing an installer writes to disk could have changed it. A default speed
+can only be applied from inside the running game.
+
+**A bare install.** The world comes up and runs at **x10**: the same thing as dragging the in-game
+speed slider to `X 10.00`, and nothing more. The installer and the launcher both write the value
+explicitly, so it is visible and editable in `Start-Multiverse.ps1` / `start-multiverse.sh` beside
+the other four.
+
+**What it spends, and what it does not.** It spends **nothing on disk and nothing on the network**:
+a faster world does not save more often (the save timer is wall-clock) and does not talk more (the
+heartbeat is wall-clock too). What it spends is **CPU on the machine that runs it** — and that
+spend is bounded by the game rather than by this setting:
+
+- `TimeController.CheckMinFPS` is a servo, not a floor. It drives the *applied* speed toward
+  whatever keeps the frame rate at `UserSettings.minimumFPS`, which ships at **15**. A machine that
+  cannot hold x10 runs slower and stays smooth; it does not stutter.
+- `Time.maximumDeltaTime` is pinned to `Time.fixedDeltaTime`, so one rendered frame advances at
+  most one simulation tick and the achieved rate cannot exceed `fps/simTPS` whatever the target
+  says.
+
+So x10 is a **ceiling a participant's machine is allowed to approach**, not a load it is made to
+carry. A weak machine ends up where it would have ended up anyway; a strong one is no longer left
+ten times slower than the map around it for no reason anybody chose.
+
+**Why it is not x1.** The map's own worlds run in this range, and an inbound migration is paced in
+**simulated** minutes: a world left at x1 drains its arrival queue ten times slower than its
+neighbours fill it, which reads on the page as a slot with a deepening backlog and no fault in it.
+The project's own cloud fleet learned the same thing from the other end — a world that systemd
+restarted after an OOM kill came back at the game's x1 and ran there for over an hour with the
+largest population on the map and a queue it could not drain (slot-5, 2026-08-16).
+
+**Changing it.** Three ways, in the order a participant will reach for them: the **speed slider in
+the game**, which owns the speed for the rest of the session the moment it is touched — nothing
+re-asserts this default while a world is loaded; `timescale <x>` on the command file for a scripted
+world; and the variable itself in the start script for every future start. `off` there means the
+game's own x1, on purpose. A value that is not a number in the game's own `0.1`–`100` range is
+refused with a warning and leaves x1 in place, so a typo cannot pause or stall a world.
+
+**Verdict: PASS.**
+
 ---
 
 ## What this audit does not cover
@@ -257,7 +305,7 @@ division for a symptom that is usually a fact of life.
 
 This audit is a release artifact and goes stale with the release. For the next one:
 
-1. Re-read the four defaults **in the source**, not in this document.
+1. Re-read the defaults **in the source**, not in this document.
 2. Re-run the guard tests: `nice -n 19 go test ./internal/relay -run 'InsecureNoToken|Servable'`.
 3. Re-run `release/test-install-uninstall.ps1 -RealGameDir <Windows-game>`, whose suite fails on an installer that prints an
    execution-policy bypass or an `--insecure` instruction.

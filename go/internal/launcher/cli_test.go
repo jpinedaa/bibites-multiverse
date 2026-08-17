@@ -3,8 +3,11 @@ package launcher
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"multiverse/internal/sidecar"
 )
 
 // TestNoSecretFlagExists enforces the rule the sidecar and the installer both
@@ -37,7 +40,7 @@ func TestNoSecretFlagExists(t *testing.T) {
 }
 
 // TestStartDryRunPlan is the golden form of the launch: the five sidecar flags
-// and the ten MULTIVERSE_* variables, in their frozen order.
+// and the twelve MULTIVERSE_* variables, in their frozen order.
 func TestStartDryRunPlan(t *testing.T) {
 	h := newHarness(t)
 	p := h.profile("default", "Multiverse", 8787)
@@ -71,11 +74,13 @@ game: %s
     MULTIVERSE_WORLD=Multiverse
     MULTIVERSE_PORTAL=true
     MULTIVERSE_PORTAL_FLOURISHES=true
+    MULTIVERSE_STARTUP_TIME_SCALE=10
     MULTIVERSE_CONTRACT_A_TOKEN_FILE=%s
+    MULTIVERSE_CMD_FILE=%s
 `,
 		h.install().SidecarExe(), testRelayURL, p.DataDir(), p.CredentialFile(),
 		p.DataRoot, p.SidecarLogOut(), p.SidecarLog(),
-		p.GameExe(), p.GameDir, p.ContractATokenFile())
+		p.GameExe(), p.GameDir, p.ContractATokenFile(), p.CommandFile())
 	if h.out() != want {
 		t.Fatalf("the dry-run plan drifted.\n got:\n%s\nwant:\n%s", h.out(), want)
 	}
@@ -91,9 +96,18 @@ game: %s
 	}
 	mustContain(t, "the headless plan", h.out(), "  arguments: -batchmode -nographics")
 
-	// The ten variables are exactly ten, and they are the mod's own names.
-	if got := len(multiverseEnv(p)); got != 10 {
-		t.Fatalf("the game is given %d MULTIVERSE_* variables, want 10", got)
+	// The twelve variables are exactly twelve, and they are the mod's own names.
+	if got := len(multiverseEnv(p)); got != 12 {
+		t.Fatalf("the game is given %d MULTIVERSE_* variables, want 12", got)
+	}
+	// MULTIVERSE_CMD_FILE is what makes a HEADLESS stop lossless, and it has to
+	// be this world's own file: two worlds out of one game folder sharing one
+	// command file would quit each other.
+	second := p
+	second.Name, second.World = "second", "Second"
+	second.DataRoot = filepath.Join(filepath.Dir(p.DataRoot), "BibitesMultiverse-second")
+	if p.CommandFile() == second.CommandFile() {
+		t.Fatalf("two worlds share the command file %s", p.CommandFile())
 	}
 	// A leftover variable in the parent environment is replaced, not appended.
 	merged := gameEnvironment([]string{"MULTIVERSE_WORLD=stale", "PATH=/bin"}, p)
@@ -168,6 +182,55 @@ func TestStatusJSONSchema(t *testing.T) {
 	mustNotContain(t, "the status JSON", h.out(), "secret")
 }
 
+// TestStatusJSONReportsWhatItCouldNotRead: the machine-readable form has to fail
+// the way the human one does. `status --all --json` answered
+// {"active": "", "profiles": []} and exit 0 while a world was running - because
+// the profile behind it would not load - so anything watching that output read
+// "nothing is installed here" from a launcher that simply could not read its own
+// files. The human form exited 1 and said why.
+func TestStatusJSONReportsWhatItCouldNotRead(t *testing.T) {
+	h := newHarness(t)
+	h.writeRawProfile("default", "{ this is not json")
+
+	if code := h.run("status", "--all", "--json"); code != exitRefused {
+		t.Fatalf("status --all --json exited %d, want %d\n%s", code, exitRefused, h.out())
+	}
+	mustContain(t, "the JSON", h.out(), `"problems"`)
+	mustContain(t, "the JSON", h.out(), "default.json")
+	mustContain(t, "the JSON", h.out(), "no world profiles yet")
+	// The two forms agree on the exit code, which is the whole point.
+	if code := h.run("status", "--all"); code != exitRefused {
+		t.Fatalf("the human form exited %d, want %d", code, exitRefused)
+	}
+	// 'profile list' answers the same way.
+	if code := h.run("profile", "list", "--json"); code != exitRefused {
+		t.Fatalf("profile list --json exited %d, want %d", code, exitRefused)
+	}
+
+	// A readable world BESIDE the broken file reports normally and exits 0 - one
+	// stray file must not hide the worlds that do parse - and still names it.
+	h.profile("second", "Second", 8788)
+	if code := h.run("status", "--all", "--json"); code != exitOK {
+		t.Fatalf("status --all --json exited %d, want %d\n%s", code, exitOK, h.err())
+	}
+	var parsed Status
+	if err := json.Unmarshal([]byte(h.out()), &parsed); err != nil {
+		t.Fatalf("the status is not valid JSON: %v", err)
+	}
+	if len(parsed.Profiles) != 1 {
+		t.Fatalf("the report holds %d worlds, want 1", len(parsed.Profiles))
+	}
+	if len(parsed.Problems) != 1 {
+		t.Fatalf("the report holds %d problems, want 1: %v", len(parsed.Problems), parsed.Problems)
+	}
+	mustContain(t, "the problem", parsed.Problems[0], "default.json")
+	// The human form prints the same fact.
+	if code := h.run("status", "--all"); code != exitOK {
+		t.Fatalf("the human form exited %d\n%s", code, h.err())
+	}
+	mustContain(t, "the human status", h.out(), "a world could not be read")
+}
+
 // TestMenuScript drives the console menu the way a person does: an empty line
 // selects Start, and 0 quits.
 func TestMenuScript(t *testing.T) {
@@ -189,7 +252,7 @@ func TestMenuScript(t *testing.T) {
 
 	frame := fmt.Sprintf(`Bibites Multiverse launcher %s
    profile 'default'   world 'Multiverse'   port %d   headless off
-   sidecar stopped      game stopped
+   sidecar stopped                  game stopped
 
    1) Start this world            [Enter]
    2) Stop this world
@@ -256,5 +319,15 @@ func TestUsageAndExitCodes(t *testing.T) {
 	// A global flag is accepted after the command name too.
 	if code := h.run("status", "--all", "--json"); code != exitOK {
 		t.Fatalf("status --all --json exited %d\n%s", code, h.err())
+	}
+}
+
+// The launcher asks the sidecar's own-slot endpoint whether the game's mod has
+// arrived, and it spells that path itself rather than importing the sidecar into
+// the launcher binary. This is the seam that keeps the two spellings equal.
+func TestOwnSlotPathMatchesTheSidecar(t *testing.T) {
+	if ownSlotPath != sidecar.OwnSlotPath {
+		t.Fatalf("the launcher asks for %q and the sidecar serves %q",
+			ownSlotPath, sidecar.OwnSlotPath)
 	}
 }

@@ -1,10 +1,12 @@
 package launcher
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestImageMatches is the rule that decides whether a recorded pid is still the
@@ -43,6 +45,78 @@ func TestImageMatches(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestStopCommandLines pins the two Windows command lines. proc_windows.go
+// cannot run here, so the thing that broke every save-on-quit — a /T on the
+// GRACEFUL ask — is held to its rule where a test can reach it.
+func TestStopCommandLines(t *testing.T) {
+	graceful := strings.Join(taskkillGracefulArgs(11004), " ")
+	if graceful != "/PID 11004" {
+		t.Fatalf("the graceful ask is `taskkill %s`, want `taskkill /PID 11004`", graceful)
+	}
+	if strings.Contains(graceful, "/T") {
+		t.Fatal("the graceful ask carries /T, which walks the game's process tree, meets the " +
+			"windowless UnityCrashHandler64.exe and refuses the whole call - so the game is " +
+			"never asked to close and its save-on-quit never runs")
+	}
+	if strings.Contains(graceful, "/F") {
+		t.Fatal("the graceful ask carries /F, which is TerminateProcess: there is nothing " +
+			"graceful about it")
+	}
+	force := strings.Join(taskkillForceArgs(11004), " ")
+	if force != "/PID 11004 /T /F" {
+		t.Fatalf("the force is `taskkill %s`, want `taskkill /PID 11004 /T /F`", force)
+	}
+}
+
+// TestTaskkillClassification uses taskkill's own words, as they came off the
+// machine. "can only be terminated forcefully" is not a failure - it is the
+// answer "this process has no window", and it means force NOW rather than after
+// a timeout nobody is waiting on.
+func TestTaskkillClassification(t *testing.T) {
+	const noWindow = "ERROR: The process with PID 11004 could not be terminated.\r\n" +
+		"Reason: This process can only be terminated forcefully (with /F option)."
+	const childRefused = "ERROR: The process with PID 23180 (child process of PID 11004) could " +
+		"not be terminated.\r\nReason: This process can only be terminated forcefully (with /F option)."
+	const notFound = "ERROR: The process \"11004\" not found."
+
+	cases := []struct {
+		name   string
+		err    error
+		output string
+		want   askResult
+	}{
+		{"it was asked", nil, "SUCCESS: Sent termination signal to the process with PID 11004.", askAccepted},
+		{"it has no window", errors.New("exit status 1"), noWindow, askImpossible},
+		{"its crash handler has no window", errors.New("exit status 128"), childRefused, askImpossible},
+		{"it is not there", errors.New("exit status 128"), notFound, askFailed},
+		{"taskkill itself would not run", errors.New("file does not exist"), "", askFailed},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := classifyTaskkill(test.err, test.output); got != test.want {
+				t.Fatalf("classifyTaskkill = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+// TestForcedReasonTellsTheThreeApart: "forced immediately (there was nothing to
+// ask)" was printed for a WINDOWED game too, which told a participant their save
+// was lost when it was not - and hid the case where it really was.
+func TestForcedReasonTellsTheThreeApart(t *testing.T) {
+	noWindow := forcedReason(stopForcedNoWindow, 30*time.Second)
+	timedOut := forcedReason(stopForcedTimeout, 30*time.Second)
+	askBroke := forcedReason(stopForcedAskFailed, 30*time.Second)
+
+	if noWindow == timedOut || noWindow == askBroke || timedOut == askBroke {
+		t.Fatalf("two of the three forced reasons read the same:\n%s\n%s\n%s",
+			noWindow, timedOut, askBroke)
+	}
+	mustContain(t, "the no-window reason", noWindow, "no window")
+	mustContain(t, "the timeout reason", timedOut, "30s")
+	mustContain(t, "the timeout reason", timedOut, "asked to close")
 }
 
 // TestProbeProcessAnswersForThisProcess pins the three states against the two

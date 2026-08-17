@@ -292,11 +292,19 @@ if [ -f "$START" ]; then
     "MULTIVERSE_MIGRATION_EXCLUDE='Basic bibite'" \
     "MULTIVERSE_SAVE_MINUTES='10'" \
     "MULTIVERSE_SAVE_KEEP='6'" \
-    "MULTIVERSE_SAVE_ON_QUIT='true'"
+    "MULTIVERSE_SAVE_ON_QUIT='true'" \
+    "MULTIVERSE_STARTUP_TIME_SCALE='10'"
   do
     check "the start script sets ${setting%%=*} explicitly" \
       "$(b contains "export $setting" "$START_TEXT")"
   done
+  # The mod's command channel. Nothing on Linux needs it - stop-multiverse.sh
+  # sends SIGTERM, which a headless game handles - but the world is told about it
+  # anyway, so one world answers one request whichever front door reaches it.
+  check "the start script names this world's mod command file" \
+    "$(b contains 'export MULTIVERSE_CMD_FILE="$DATA_ROOT/cmd.txt"' "$START_TEXT")"
+  check "the start script clears a command an interrupted stop left behind" \
+    "$(b contains 'rm -f "$MULTIVERSE_CMD_FILE" "$MULTIVERSE_CMD_FILE.log"' "$START_TEXT")"
   check "the start script carries no secret" "$(b bash -c '! grep -qF "$2" <<<"$1"' _ "$START_TEXT" "$A_SECRET")"
   check "the start script passes the credential as a file, never as a value" \
     "$(b contains -- '--credential-file' "$START_TEXT")"
@@ -306,6 +314,22 @@ if [ -f "$START" ]; then
     "$(b bash -c '! grep -qE "WSLENV=|export WSLENV" "$1"' _ "$START")"
   check "the start script sets the contract-A token path as a plain path" \
     "$(b contains 'MULTIVERSE_CONTRACT_A_TOKEN_FILE="$DATA_DIR/contract-a.token"' "$START_TEXT")"
+  # THE SILENT-FAILURE GATE. A start script that does not check whether the mod
+  # reached the sidecar is a start script that reports success for a world sitting
+  # at the main menu (LOCAL-CONFIGRACE).
+  for probe in \
+    '/my-slot' \
+    'THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR' \
+    'LOCAL-CONFIGRACE' \
+    'LOCAL-STARVATION' \
+    'the game joined the map: mod connected'
+  do
+    check "the start script checks that the mod connected ($probe)" \
+      "$(b contains -- "$probe" "$START_TEXT")"
+  done
+  check "the start script's mod check is a warning, not a failure" \
+    "$(b contains 'this is a warning, not a failure' "$START_TEXT")"
+
   check "the start script warns about one instance per game folder" \
     "$(b contains 'ONE INSTANCE PER GAME FOLDER' "$START_TEXT")"
   check "the start script sets no SSL_CERT_FILE on a public map" \

@@ -102,7 +102,7 @@ namespace BibitesMultiverse
                 $"hotkey={ForceExportHotkey} familyReport={FamilyReportSeconds:F0}s. " +
                 "Verbs: export <family|any|id> [edge], place <family|any|id> <x> <y> [vx] [vy], " +
                 "edge <open|closed> [E|N|W|S|all], camera <size> [x] [y], flourish <export|entry> [x] [y], " +
-                "census, count <id>, family, save [name], timescale <x>, autosave <on|off>, " +
+                "census, count <id>, family, save [name], timescale [x], autosave <on|off>, " +
                 "speciesaudit [repair], speciespoison [clean], quit.");
         }
 
@@ -839,9 +839,28 @@ namespace BibitesMultiverse
             Report(token, true, $"world='{name}' path='{path}' bytes={bytes} population={GameBridge.LivingPopulation()}");
         }
 
+        /// <summary>
+        /// <c>timescale x</c> sets the speed; <c>timescale</c> with no argument only reports it, which
+        /// is how a verifier reads what a world is actually running at without moving it. Both answers
+        /// start with <c>targetTimeScale=</c>, so a caller that greps for that prefix still matches.
+        ///
+        /// The two numbers differ on purpose. <c>targetTimeScale</c> is what was asked for — the value
+        /// under the game's speed slider — and <c>Time.timeScale</c> is what the game's minimum-FPS
+        /// servo is applying right now, which climbs toward the target over a few seconds and stays
+        /// below it on a machine that cannot draw fast enough.
+        /// </summary>
         private void TimeScale(string token, string argument)
         {
-            if (!float.TryParse(argument, NumberStyles.Float, CultureInfo.InvariantCulture, out float scale) || scale < 0f)
+            string wanted = (argument ?? string.Empty).Trim();
+            if (wanted.Length == 0)
+            {
+                Report(token, true,
+                    $"targetTimeScale={CurrentTarget()} Time.timeScale={Time.timeScale:F2} " +
+                    "(read only — pass a number to change it)");
+                return;
+            }
+
+            if (!float.TryParse(wanted, NumberStyles.Float, CultureInfo.InvariantCulture, out float scale) || scale < 0f)
             {
                 Report(token, false, $"'{argument}' is not a time scale");
                 return;
@@ -849,6 +868,19 @@ namespace BibitesMultiverse
 
             WorldSeeder.SetTimeScale(scale, Prefix);
             Report(token, true, $"targetTimeScale={scale.ToString("F2", CultureInfo.InvariantCulture)} Time.timeScale={Time.timeScale:F2}");
+        }
+
+        /// <summary>The game's requested speed, or <c>?</c> when there is no TimeController to ask.</summary>
+        private static string CurrentTarget()
+        {
+            try
+            {
+                return TimeController.targetTimeScale.val.ToString("F2", CultureInfo.InvariantCulture);
+            }
+            catch (Exception)
+            {
+                return "?";
+            }
         }
     }
 }
