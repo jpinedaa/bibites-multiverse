@@ -245,7 +245,7 @@ reads. The installers ignore it; the release gates do not.
 ```json
 {
   "matrix": "bibites-multiverse/support-matrix/3",
-  "release": "0.2.7",
+  "release": "0.2.8",
   "published": "2026-08-17",
   "testedBuild": {
     "mod": "0.6.5",
