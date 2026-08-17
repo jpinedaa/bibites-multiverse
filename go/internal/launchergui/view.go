@@ -222,11 +222,11 @@ func speedWords(world launcher.WorldView) string {
 	if !world.Mod.Connected || world.Mod.TimeScale == 0 {
 		return "-"
 	}
-	target := "x" + trimFloat(world.Mod.TimeScale)
+	target := "x" + roundedFloat(world.Mod.TimeScale)
 	if world.Mod.Achieved == 0 {
 		return target
 	}
-	return target + " (" + trimFloat(world.Mod.Achieved) + " achieved)"
+	return target + " (" + roundedFloat(world.Mod.Achieved) + " achieved)"
 }
 
 func slotWords(world launcher.WorldView) string {
@@ -240,10 +240,19 @@ func slotWords(world launcher.WorldView) string {
 	return slot
 }
 
-// trimFloat renders a speed the way the launcher renders a save interval: 10,
-// not 10.000000.
-func trimFloat(value float64) string {
+// roundedFloat renders a MEASUREMENT: three significant figures, because the
+// achieved time scale is a live reading and its last decimals are noise in a
+// column that is redrawn every two seconds.
+func roundedFloat(value float64) string {
 	return strconv.FormatFloat(value, 'g', 3, 64)
+}
+
+// exactFloat renders a SETTING, the way the launcher itself renders a save
+// interval: 10, not 10.000000 — and never 1.44e+03, which is what three
+// significant figures would make of the longest interval the core accepts, in a
+// field somebody is about to edit and save.
+func exactFloat(value float64) string {
+	return strconv.FormatFloat(value, 'g', -1, 64)
 }
 
 // ---------------------------------------------------------------- the buttons
@@ -396,7 +405,7 @@ func FormFor(p launcher.Profile) WorldForm {
 		Headless:       p.Headless,
 		ExportEdges:    p.ExportEdges,
 		ExcludeSpecies: p.ExcludeSpecies,
-		SaveMinutes:    trimFloat(p.SaveMinutes),
+		SaveMinutes:    exactFloat(p.SaveMinutes),
 		SaveKeep:       strconv.Itoa(p.SaveKeep),
 		SaveOnQuit:     p.SaveOnQuit,
 		GameDir:        p.GameDir,

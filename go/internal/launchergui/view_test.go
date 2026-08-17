@@ -299,6 +299,26 @@ func TestEditFlagsSendOnlyWhatChanged(t *testing.T) {
 	if strings.Join(EditFlags(before, form), " ") != "--save-on-quit off" {
 		t.Fatalf("clearing save-on-quit produced %v", EditFlags(before, form))
 	}
+
+	// A SETTING IS RENDERED EXACTLY. Three significant figures would show the
+	// longest save interval the core accepts as 1.44e+03 in a field somebody is
+	// about to edit, and a measurement's rounding has no business there.
+	long := before
+	long.SaveMinutes = 1440
+	if got := FormFor(long).SaveMinutes; got != "1440" {
+		t.Fatalf("a 1440-minute interval renders as %q", got)
+	}
+	precise := before
+	precise.SaveMinutes = 12.345
+	if got := FormFor(precise).SaveMinutes; got != "12.345" {
+		t.Fatalf("a 12.345-minute interval renders as %q", got)
+	}
+	// And an untouched form of either still asks for no change.
+	for _, p := range []launcher.Profile{long, precise} {
+		if flags := EditFlags(p, FormFor(p)); len(flags) != 0 {
+			t.Fatalf("an unchanged form of a %g-minute world produced %v", p.SaveMinutes, flags)
+		}
+	}
 }
 
 // The log pane's lines: one stamp per line, whole lines only, and a blank line
