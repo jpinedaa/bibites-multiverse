@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"multiverse/internal/launcher"
 )
 
 // THE PROGRESS PHRASES ARE READ OFF THE CORE'S OWN OUTPUT, so the lines below
@@ -66,7 +68,11 @@ func TestProgressFollowsAWholeStart(t *testing.T) {
 	// costs a phrase and nothing else, so an unrecognised line is silent rather
 	// than a guess.
 	for _, line := range []string{
-		"09:41:07  Bibites Multiverse launcher 0.2.8, installed in C:\\Program Files",
+		// The window's own opening line, which names the release. It is written
+		// with launcher.Release rather than a literal, because this repository
+		// allows the release version to be spelled out only where
+		// release/bump-version.sh says it may be.
+		"09:41:07  Bibites Multiverse launcher " + launcher.Release + ", installed in C:\\Program Files",
 		"",
 		"---",
 		"09:41:07  ",
@@ -413,5 +419,112 @@ func TestAReaderWhoScrolledUpIsPutBack(t *testing.T) {
 	}
 	if LogFollowsTail(0, 15, 299) {
 		t.Fatal("a pane scrolled to the top followed anyway")
+	}
+}
+
+// THE REFUSALS, AS THE CORE ACTUALLY PRINTS THEM.
+//
+// A machine watched all three of these happen and reported the panel saying
+// "'world2' was not created. The details below say why." while the core's own
+// sentence sat one line lower in a pane nobody had opened. The strings below are
+// copied from internal/launcher — validate.go, profilecmd.go and lock.go — with
+// the heading the window writes above them and the blank line the log emits, in
+// the order they arrive. Feeding a whole transcript is the point: the rule is
+// "the last flush-left line wins", and only a transcript can prove it picked the
+// right one.
+func TestTheThreeRefusalsAMachineSawReachThePanel(t *testing.T) {
+	cases := []struct {
+		name       string
+		job        Job
+		transcript []string
+		want       string
+	}{
+		{
+			// go/internal/launcher/validate.go: the port a new world was given is
+			// already another world's.
+			name: "a create refused for a port that is taken",
+			job:  Job{Kind: JobCreate, World: "world2"},
+			transcript: []string{
+				"> create world2 and enroll a new identity on the map",
+				"",
+				"the profile 'default' already uses port 8787. Every world needs its own",
+			},
+			want: "the profile 'default' already uses port 8787. Every world needs its own",
+		},
+		{
+			// go/internal/launcher/profilecmd.go: the typed name did not match. The
+			// custody warning is printed first and is INDENTED, which is what the
+			// flush-left rule is for.
+			name: "a delete refused because the name did not match",
+			job:  Job{Kind: JobDelete, World: "multi-2"},
+			transcript: []string{
+				"> delete multi-2",
+				"",
+				"  Deleting this world here is NOT leaving the map. Your credential still authenticates",
+				"  until the operator drops it, and your sidecar may still be holding organisms it took",
+				"  custody of for somebody else. Custody is local: nobody else can drain it for you.",
+				"that is not 'multi-2'. Nothing was deleted",
+			},
+			want: "that is not 'multi-2'. Nothing was deleted",
+		},
+		{
+			// go/internal/launcher/lock.go: a second launcher holds this world.
+			name: "a start refused by the other launcher's lock",
+			job:  Job{Kind: JobStart, World: "default"},
+			transcript: []string{
+				"> start default",
+				"",
+				"another launcher is starting or stopping this world " +
+					`(C:\Users\p\AppData\Local\BibitesMultiverse\launcher.lock was taken 0s ago by pid 12000). ` +
+					"Wait for it to finish",
+			},
+			want: "another launcher is starting or stopping this world " +
+				`(C:\Users\p\AppData\Local\BibitesMultiverse\launcher.lock was taken 0s ago by pid 12000). ` +
+				"Wait for it to finish",
+		},
+	}
+	for _, test := range cases {
+		// This is what the window does: clear at the start of the job, then take
+		// every line as it is written.
+		said := ""
+		for _, line := range test.transcript {
+			if quotable, ok := SaidLine(line); ok {
+				said = quotable
+			}
+		}
+		if said != test.want {
+			t.Fatalf("%s: kept %q, want %q", test.name, said, test.want)
+		}
+		result := test.job.Result(1, said)
+		if result.Good {
+			t.Fatalf("%s: a refusal was called a success", test.name)
+		}
+		if !strings.Contains(result.Text, test.want) {
+			t.Fatalf("%s: the panel would say %q, which does not carry the core's own sentence",
+				test.name, result.Text)
+		}
+		// And it still names what was being attempted, because the core's
+		// sentence on its own does not always say.
+		if !strings.Contains(result.Text, test.job.failedHead()) {
+			t.Fatalf("%s: the panel would say %q, which does not say what failed", test.name, result.Text)
+		}
+	}
+}
+
+// The heading the window writes is not the core talking, and neither is a blank
+// line — so neither may ever be what a failure quotes.
+func TestTheWindowsOwnLinesAreNeverQuotedBackAtIt(t *testing.T) {
+	for _, job := range []Job{
+		{Kind: JobStart, World: "default"},
+		{Kind: JobCreate, World: "world2"},
+		{Kind: JobDelete, World: "multi-2"},
+		{Kind: JobStopAll},
+	} {
+		if _, ok := SaidLine("> " + job.Heading()); ok {
+			t.Fatalf("the pane's own heading was quotable: %q", job.Heading())
+		}
+	}
+	if _, ok := SaidLine(""); ok {
+		t.Fatal("a blank line was quotable")
 	}
 }

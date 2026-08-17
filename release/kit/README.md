@@ -121,8 +121,9 @@ this window exists to make visible.
 **Stop** when it is running — the check box **Run without a game window (headless)**, and this
 world's save name, port, speed, folder and identity on the map. While anything is happening a bar
 spins and a line says what stage it has reached; when it is over, one green or red line stays on
-screen. **Show details** opens the whole of what the launcher did, and it opens **by itself**
-whenever something goes wrong.
+screen beside that world. **Show details** opens the whole of what the launcher did, and it opens
+**by itself** whenever something goes wrong — with the launcher's own sentence about it in the panel
+as well.
 
 The rest is in two menus. **World**: **Run a health check**, **Edit settings...**,
 **Clone this world...**, **Delete this world...**, **Set as the default world**,

@@ -220,7 +220,7 @@ func stoppedNamed(name string) launcher.WorldView {
 func TestThePanelSaysOneThingAboutOneWorld(t *testing.T) {
 	world := aWorld()
 	snap := launcher.Snapshot{Worlds: []launcher.WorldView{world}}
-	panel := PanelFor(&world, snap, Busy{})
+	panel := PanelFor(&world, snap, Busy{}, NewResultLog())
 	if panel.World != "default" {
 		t.Fatalf("the panel names %q", panel.World)
 	}
@@ -252,7 +252,7 @@ func TestThePanelSaysOneThingAboutOneWorld(t *testing.T) {
 	if byLabel[FactSave] != "Multiverse" || byLabel[FactPort] != "8787" {
 		t.Fatalf("the facts are %v", byLabel)
 	}
-	if byLabel[FactSpeed] != "x10 asked for, x6.5 achieved" {
+	if byLabel[FactSpeed] != "x10 (target), x6.5 (achieved)" {
 		t.Fatalf("the speed reads %q", byLabel[FactSpeed])
 	}
 	if byLabel[FactIdentity] != world.PeerID || byLabel[FactData] != world.DataRoot {
@@ -262,13 +262,13 @@ func TestThePanelSaysOneThingAboutOneWorld(t *testing.T) {
 	// A world that has not measured a span yet reports the target alone rather
 	// than claiming zero.
 	world.Mod.Achieved = 0
-	if got := PanelFor(&world, snap, Busy{}).Facts[2].Value; got != "x10 asked for" {
+	if got := PanelFor(&world, snap, Busy{}, NewResultLog()).Facts[2].Value; got != "x10 (target)" {
 		t.Fatalf("an unmeasured speed reads %q", got)
 	}
 
 	// A stopped world offers Start.
 	stopped := stoppedWorld()
-	if got := PanelFor(&stopped, snap, Busy{}).Primary.Caption; got != ButtonStart {
+	if got := PanelFor(&stopped, snap, Busy{}, NewResultLog()).Primary.Caption; got != ButtonStart {
 		t.Fatalf("a stopped world's button is %q", got)
 	}
 
@@ -276,7 +276,7 @@ func TestThePanelSaysOneThingAboutOneWorld(t *testing.T) {
 	// button cannot be pressed — including for a job about a DIFFERENT world,
 	// because there is one action goroutine and it is occupied.
 	busy := Job{Kind: JobCreate, World: "world2"}.Busy()
-	during := PanelFor(&stopped, snap, busy)
+	during := PanelFor(&stopped, snap, busy, NewResultLog())
 	if !during.Working || during.Primary.Enabled {
 		t.Fatalf("a busy window offered its primary action: %+v", during)
 	}
@@ -290,7 +290,7 @@ func TestThePanelSaysOneThingAboutOneWorld(t *testing.T) {
 func TestTheFirstRunSaysWhatToDo(t *testing.T) {
 	world := stoppedWorld()
 	one := launcher.Snapshot{Worlds: []launcher.WorldView{world}}
-	hint := PanelFor(&world, one, Busy{}).Hint
+	hint := PanelFor(&world, one, Busy{}, NewResultLog()).Hint
 	if !strings.Contains(hint, ButtonStart) {
 		t.Fatalf("a first run is told %q", hint)
 	}
@@ -299,7 +299,7 @@ func TestTheFirstRunSaysWhatToDo(t *testing.T) {
 	// instruction under every stopped world is noise.
 	second := stoppedNamed("second")
 	two := launcher.Snapshot{Worlds: []launcher.WorldView{world, second}}
-	if got := PanelFor(&world, two, Busy{}).Hint; got != "" {
+	if got := PanelFor(&world, two, Busy{}, NewResultLog()).Hint; got != "" {
 		t.Fatalf("an experienced installation is told %q", got)
 	}
 
@@ -307,12 +307,12 @@ func TestTheFirstRunSaysWhatToDo(t *testing.T) {
 	// else is installed.
 	orphan := aWorld()
 	orphan.Mod = launcher.ModView{Answered: true}
-	if got := PanelFor(&orphan, two, Busy{}).Hint; !strings.Contains(got, "details") {
+	if got := PanelFor(&orphan, two, Busy{}, NewResultLog()).Hint; !strings.Contains(got, "details") {
 		t.Fatalf("a world that is not on the map is told %q", got)
 	}
 
 	// Nothing installed at all: the panel is not blank, and it names the button.
-	empty := PanelFor(nil, launcher.Snapshot{}, Busy{})
+	empty := PanelFor(nil, launcher.Snapshot{}, Busy{}, NewResultLog())
 	if empty.Headline == "" || !strings.Contains(empty.Hint, ButtonCreate) {
 		t.Fatalf("an empty installation's panel is %+v", empty)
 	}
@@ -448,14 +448,8 @@ func TestCaptionsAreUniqueAndPlain(t *testing.T) {
 	// PLAIN WORDS. Nothing a person reads on a control names a thing only this
 	// project has. Those words are all still in the window — in the details pane,
 	// which is where the program's own output goes.
-	jargon := []string{"profile", "sidecar", "contract", "peer", "enroll", "headless "}
 	for _, caption := range captions {
-		lower := strings.ToLower(caption)
-		for _, word := range jargon {
-			if strings.Contains(lower, word) {
-				t.Fatalf("the caption %q uses the internal word %q", caption, word)
-			}
-		}
+		mustBePlain(t, "the caption", caption)
 	}
 
 	// Every tooltip says something the caption does not, because a tooltip that
@@ -473,6 +467,8 @@ func TestCaptionsAreUniqueAndPlain(t *testing.T) {
 		if len(tip) <= len(caption) {
 			t.Fatalf("the tooltip for %q is %q, which says no more than the caption does", caption, tip)
 		}
+		// A tooltip is read by the same person as the caption above it.
+		mustBePlain(t, "the tooltip for "+caption, tip)
 	}
 }
 
@@ -561,21 +557,6 @@ func TestDefaultNoteSaysWhichValuesAreThePackagedOnes(t *testing.T) {
 	}
 }
 
-// The core's notes are printed under a heading in a terminal, so they carry an
-// indentation that reads as a mistake in a dialog.
-func TestDedentFlattensTheCoresOwnNotes(t *testing.T) {
-	got := Dedent(launcher.PublicMapNote())
-	if strings.Contains(got, "\n") || strings.HasPrefix(got, " ") {
-		t.Fatalf("the note still carries its layout: %q", got)
-	}
-	if !strings.Contains(got, "per-address enrollment limit") {
-		t.Fatalf("the note lost its content: %q", got)
-	}
-	if strings.Contains(Dedent(launcher.CustodyWarning()), "  ") {
-		t.Fatal("the custody warning still carries a double space")
-	}
-}
-
 // The name a create dialog opens on has to be one the core would accept, and it
 // has to be chosen BEFORE the defaults that are derived from it.
 func TestNextFreeWorldName(t *testing.T) {
@@ -604,5 +585,211 @@ func TestConsoleExePathIsBesideTheWindow(t *testing.T) {
 	}
 	if filepath.Dir(got) != filepath.Join("somewhere", "Bibites Multiverse") {
 		t.Fatalf("the forwarded program is not beside the window: %q", got)
+	}
+}
+
+// mustBePlain is the wording rule, applied to one string a participant reads.
+//
+// The words it bans are this program's own names for its parts, plus a path into
+// the repository it was built from. Every one of them is still in the window —
+// in the details pane, which is the core's own output and is deliberately left
+// in the core's own vocabulary.
+func mustBePlain(t *testing.T, what, text string) {
+	t.Helper()
+	lower := strings.ToLower(text)
+	for _, word := range InternalWords() {
+		if strings.Contains(lower, word) {
+			t.Fatalf("%s %q uses the internal word %q", what, text, word)
+		}
+	}
+}
+
+// THE DIALOGS ARE PRIMARY UI TOO, which the first round forgot: the create
+// dialog told a participant that "the map applies a per-address enrollment
+// limit", the delete dialog that "your sidecar may still be holding organisms it
+// took custody of", and both pointed at docs/participant/leave.md — a file on a
+// stranger's disk that nobody who installed a game has ever seen.
+func TestDialogProseIsPlainAndPointsAtTheWebsite(t *testing.T) {
+	prose := DialogProse()
+	if len(prose) < 20 {
+		t.Fatalf("only %d dialog sentences are covered; a new one that is not on the list is one nothing reads", len(prose))
+	}
+	for _, text := range prose {
+		if strings.TrimSpace(text) == "" {
+			t.Fatal("a dialog sentence is empty")
+		}
+		mustBePlain(t, "the dialog text", text)
+		// No repository path reaches a participant. InternalWords covers "docs/"
+		// and ".md"; this covers the separator the other way round.
+		if strings.Contains(text, `docs\`) {
+			t.Fatalf("a dialog names a file in this repository: %q", text)
+		}
+	}
+
+	// The two warnings that MUST survive being reworded, because they are the
+	// two things a person cannot undo by clicking again.
+	if !strings.Contains(ProseAnotherIdentity, "limits how many worlds") {
+		t.Fatalf("the create dialog no longer explains the map's limit: %q", ProseAnotherIdentity)
+	}
+	for _, note := range []string{ProseDeletingIsNotLeaving, ProseCustody} {
+		if !strings.Contains(note, DocsURL) {
+			t.Fatalf("a leaving note points nowhere a participant can go: %q", note)
+		}
+		if !strings.Contains(strings.ToLower(note), "not take it off the map") {
+			t.Fatalf("a leaving note no longer says deleting is not leaving: %q", note)
+		}
+	}
+	// The custody warning's whole point is that only this computer can pass on
+	// what it is holding, and that starting the world once is the fix.
+	for _, phrase := range []string{"only this computer", "Start it once"} {
+		if !strings.Contains(ProseCustody, phrase) {
+			t.Fatalf("the delete dialog lost %q: %s", phrase, ProseCustody)
+		}
+	}
+}
+
+// THE RESULT LINE IS ONE WORLD'S, which a machine caught it not being: a health
+// check on multi-2 left "The health check found no faults" in the panel, and
+// selecting default then showed default's headline, "Stopped", stacked on top of
+// multi-2's result as though the two belonged together.
+func TestAResultBelongsToTheWorldItIsAbout(t *testing.T) {
+	first := aWorld()
+	second := stoppedNamed("multi-2")
+	snap := launcher.Snapshot{Worlds: []launcher.WorldView{first, second}}
+	names := []string{"default", "multi-2"}
+
+	results := NewResultLog()
+	check := Job{Kind: JobCheck, World: "multi-2"}
+	results.Record(check.ResultAbout(), check.Result(0, ""), names)
+
+	if got := PanelFor(&second, snap, Busy{}, results).Result.Text; !strings.Contains(got, "health check") {
+		t.Fatalf("the world that was checked shows %q", got)
+	}
+	if got := PanelFor(&first, snap, Busy{}, results).Result.Text; got != "" {
+		t.Fatalf("a world nothing happened to shows %q", got)
+	}
+
+	// A second world's own action does not disturb the first's.
+	start := Job{Kind: JobStart, World: "default"}
+	results.Record(start.ResultAbout(), start.Result(0, ""), names)
+	if got := PanelFor(&second, snap, Busy{}, results).Result.Text; !strings.Contains(got, "health check") {
+		t.Fatalf("multi-2's result was lost when default was started: %q", got)
+	}
+	if got := PanelFor(&first, snap, Busy{}, results).Result.Text; got != "Started 'default'." {
+		t.Fatalf("default shows %q", got)
+	}
+
+	// The NEXT action about a world clears its line while it runs, so nothing
+	// claims the last outcome while the next one is happening.
+	results.Record(start.ResultAbout(), Result{}, names)
+	if got := PanelFor(&first, snap, Busy{}, results).Result.Text; got != "" {
+		t.Fatalf("a running action left the previous result up: %q", got)
+	}
+
+	// And nothing is shown at all while an action is running, whichever world it
+	// is about.
+	busy := Job{Kind: JobStart, World: "default"}.Busy()
+	if got := PanelFor(&second, snap, busy, results).Result; got.Text != "" {
+		t.Fatalf("a result was shown during an action: %q", got.Text)
+	}
+}
+
+// 'Stop every world' is about every world there is, so its result belongs beside
+// all of them.
+func TestAGlobalActionsResultIsShownOnEveryWorld(t *testing.T) {
+	names := []string{"default", "multi-2"}
+	results := NewResultLog()
+	job := Job{Kind: JobStopAll}
+	results.Record(job.ResultAbout(), job.Result(0, ""), names)
+	for _, name := range names {
+		if got := results.For(name).Text; got != "Stopped every world." {
+			t.Fatalf("%s shows %q", name, got)
+		}
+	}
+}
+
+// A result about a world that is NOT in the list — a create that was refused, a
+// delete that succeeded — has no row to live beside, and it is the one a person
+// most needs to read. It is shown whatever is selected, until the next action.
+func TestAResultWithNoRowIsShownAnyway(t *testing.T) {
+	names := []string{"default"}
+	results := NewResultLog()
+	create := Job{Kind: JobCreate, World: "world2"}
+	results.Record(create.ResultAbout(), create.Result(1, "the sidecar port 70000 is outside 1024-65535"), names)
+
+	got := results.For("default")
+	if !strings.Contains(got.Text, "70000") || got.Good {
+		t.Fatalf("a refused create shows %+v", got)
+	}
+	// It is the LOOSE one, so a world with a result of its own still shows that.
+	start := Job{Kind: JobStart, World: "default"}
+	results.Record(start.ResultAbout(), start.Result(0, ""), names)
+	if got := results.For("default").Text; got != "Started 'default'." {
+		t.Fatalf("the world's own result was not preferred: %q", got)
+	}
+
+	// A delete names a world that is on its way out of the list, so it goes to
+	// the same place.
+	del := Job{Kind: JobDelete, World: "default"}
+	if about := del.ResultAbout(); len(about.Worlds) != 0 || about.Every {
+		t.Fatalf("a delete's result was pinned to a row that is about to go: %+v", about)
+	}
+
+	// A world that leaves the list takes its result with it, so a world made
+	// again under a name somebody has used before opens clean.
+	results.Forget("default")
+	if got := results.For("default").Text; got != "" {
+		t.Fatalf("a forgotten world still shows %q", got)
+	}
+}
+
+// The status bar counted "2 world(s)", which is a plural rule left for the
+// reader to apply.
+func TestTheStatusBarCountsInEnglish(t *testing.T) {
+	if got := WorldCountWords(1); got != "1 world" {
+		t.Fatalf("one world reads %q", got)
+	}
+	if got := WorldCountWords(2); got != "2 worlds" {
+		t.Fatalf("two worlds read %q", got)
+	}
+	if got := WorldCountWords(0); got != "0 worlds" {
+		t.Fatalf("no worlds read %q", got)
+	}
+	line := StatusBarText(launcher.Snapshot{
+		Worlds:      []launcher.WorldView{aWorld()},
+		InstallRoot: `C:\Program Files\Bibites Multiverse`,
+	})
+	if strings.Contains(line, "(s)") {
+		t.Fatalf("the status bar still hedges its plural: %q", line)
+	}
+	if !strings.Contains(line, CloseHint) || !strings.Contains(line, "1 world") {
+		t.Fatalf("the status bar reads %q", line)
+	}
+}
+
+// Every colour is drawn by name in one place in the window, and that place is
+// built from this list. A colour missing from it would be a state drawn in
+// whatever the last case happened to set.
+func TestEveryColourIsAccountedFor(t *testing.T) {
+	all := Colours()
+	seen := make(map[Colour]bool, len(all))
+	for _, colour := range all {
+		if seen[colour] {
+			t.Fatalf("colour %d is listed twice", colour)
+		}
+		seen[colour] = true
+	}
+	// Every state StatusFor can produce uses one of them.
+	worlds := []launcher.WorldView{aWorld(), stoppedWorld()}
+	orphan := aWorld()
+	orphan.Mod = launcher.ModView{Answered: true}
+	worlds = append(worlds, orphan)
+	for _, world := range worlds {
+		if !seen[StatusFor(world, Busy{}).Colour] {
+			t.Fatalf("a state is drawn in a colour that is not in Colours(): %+v", StatusFor(world, Busy{}))
+		}
+	}
+	if !seen[StatusFor(stoppedWorld(), Busy{World: "default", Short: "Starting..."}).Colour] {
+		t.Fatal("the working state is drawn in a colour that is not in Colours()")
 	}
 }

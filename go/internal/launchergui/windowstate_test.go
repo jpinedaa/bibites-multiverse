@@ -29,7 +29,8 @@ func TestTheWindowStateIsKeptAwayFromTheWorlds(t *testing.T) {
 }
 
 func TestWindowStateRoundTrips(t *testing.T) {
-	state := WindowState{X: 120, Y: 80, Width: 1200, Height: 800, Maximized: true, Details: true}
+	state := WindowState{X: 120, Y: 80, Width: 1200, Height: 800, Maximized: true, Details: true,
+		Split: map[string]string{"main/details": "612 244"}}
 	raw, err := state.Encode()
 	if err != nil {
 		t.Fatalf("encoding: %v", err)
@@ -43,8 +44,13 @@ func TestWindowStateRoundTrips(t *testing.T) {
 	}
 	back.Format = ""
 	state.Format = ""
-	if back != state {
+	if back.X != state.X || back.Y != state.Y || back.Width != state.Width ||
+		back.Height != state.Height || back.Maximized != state.Maximized ||
+		back.Details != state.Details {
 		t.Fatalf("read back %+v, wrote %+v", back, state)
+	}
+	if len(back.Split) != 1 || back.Split["main/details"] != "612 244" {
+		t.Fatalf("the dividers read back as %v", back.Split)
 	}
 }
 
@@ -114,5 +120,93 @@ func TestAWindowIsNeverRestoredOffTheScreen(t *testing.T) {
 	// A screen this program could not measure is not one to place a window on.
 	if _, ok := (WindowState{X: 0, Y: 0, Width: 1000, Height: 700}).Fit(0, 0, 0, 0); ok {
 		t.Fatal("a window was placed on a screen of no size")
+	}
+}
+
+// THE DIVIDERS ARE REMEMBERED IN THIS FILE and not in a second one. walk knows
+// how to save a splitter's position but ships an INI of its own to save it into;
+// this keeps the strings walk writes beside the size and the position, so there
+// is one file to find, to document and to delete.
+//
+// THEY ARE KEYED BY WALK'S OWN PATH, which is what keeps the two splitters in
+// this window apart: the details divider and the world list's, nested inside it.
+// A single shared value was handed to both by the first attempt at this, so
+// restoring the height of the details pane also set the width of the world list
+// to it.
+func TestTheDividersTravelInTheSameFile(t *testing.T) {
+	raw, err := WindowState{X: 0, Y: 0, Width: 1200, Height: 800, Split: map[string]string{
+		"main/details":        "612 244",
+		"main/details/worlds": "300 900",
+	}}.Encode()
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	if !strings.Contains(string(raw), `"main/details": "612 244"`) {
+		t.Fatalf("the divider is not in the file: %s", raw)
+	}
+	back, ok := DecodeWindowState(raw)
+	if !ok || back.Split["main/details"] != "612 244" || back.Split["main/details/worlds"] != "300 900" {
+		t.Fatalf("read back %v", back.Split)
+	}
+
+	// It is ADDITIVE: a file written by the build before this one still opens,
+	// and simply has no dividers in it.
+	older := `{"format":"` + WindowStateFormat + `","x":10,"y":10,"width":1000,"height":700,"details":true}`
+	back, ok = DecodeWindowState([]byte(older))
+	if !ok {
+		t.Fatal("a file from the previous build was refused")
+	}
+	if len(back.Split) != 0 || !back.Details || back.Width != 1000 {
+		t.Fatalf("an older file read back as %+v", back)
+	}
+
+	// A window that never opened the pane writes no divider rather than a zero
+	// one: walk stores the height of every child including a hidden one, and a
+	// saved zero would open the pane at no height forever.
+	empty, err := WindowState{X: 0, Y: 0, Width: 1200, Height: 800}.Encode()
+	if err != nil {
+		t.Fatalf("encoding: %v", err)
+	}
+	if strings.Contains(string(empty), "split") {
+		t.Fatalf("an unopened pane wrote a divider: %s", empty)
+	}
+}
+
+// A CLOSED PANE IS NOT A MEASUREMENT. walk writes the pixel height of every
+// child of a splitter including a hidden one, and a hidden one measures zero —
+// so a position saved while the details pane was closed would re-open it at no
+// height forever, with its divider sitting on the bottom edge of the window and
+// nothing above it to grab.
+func TestOnlyRealDividerPositionsAreKept(t *testing.T) {
+	got := UsableSplit(map[string]string{
+		"main/details":        "612 244",
+		"main/details/worlds": "300 900",
+	})
+	if len(got) != 2 {
+		t.Fatalf("two good positions became %v", got)
+	}
+
+	// The case this exists for: the pane was never opened, so walk measured it
+	// as nothing.
+	got = UsableSplit(map[string]string{
+		"main/details":        "856 0",
+		"main/details/worlds": "300 900",
+	})
+	if _, ok := got["main/details"]; ok {
+		t.Fatalf("a pane of no height was kept: %v", got)
+	}
+	if got["main/details/worlds"] != "300 900" {
+		t.Fatalf("the other divider was dropped with it: %v", got)
+	}
+
+	// Anything that is not two or more positive numbers is not a position.
+	for _, junk := range []string{"", "   ", "600", "600 abc", "600 -4", "0 0"} {
+		if kept := UsableSplit(map[string]string{"main/details": junk}); kept != nil {
+			t.Fatalf("%q was kept as a divider position: %v", junk, kept)
+		}
+	}
+	// Nothing at all writes nothing at all, so the field stays out of the file.
+	if UsableSplit(nil) != nil {
+		t.Fatal("an empty set of dividers became a value")
 	}
 }

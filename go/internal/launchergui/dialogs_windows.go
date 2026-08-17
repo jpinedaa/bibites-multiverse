@@ -31,8 +31,14 @@ import (
 )
 
 // dialogWidth is wide enough for a Windows path in a single line edit, which is
-// what most of these fields hold.
-const dialogWidth = 640
+// what most of these fields hold. It was 640, and a machine found the game
+// folder cut off in two dialogs at that width.
+const dialogWidth = 780
+
+// labelWidth is the first column of every grid in every dialog, so that the
+// fields line up down the whole form. Each group used to size its own column,
+// which put three groups' fields at three different left edges in one dialog.
+const labelWidth = 210
 
 // noteColour is the grey the "(the default)" notes and the explanations are
 // drawn in: present, and not competing with the field beside it.
@@ -70,25 +76,21 @@ func runEditDialog(owner walk.Form, p launcher.Profile) (WorldForm, bool, error)
 				Title:  "This world",
 				Layout: d.Grid{Columns: 3},
 				Children: []d.Widget{
-					d.Label{Text: "Save name"},
-					d.LineEdit{AssignTo: &save, Text: form.Save,
-						ToolTipText: "The name of the save file the game loads for this world."},
+					label("Save name"),
+					d.LineEdit{AssignTo: &save, Text: form.Save, ToolTipText: TipDialogSave},
 					note(""),
 
-					d.Label{Text: "Port"},
-					d.LineEdit{AssignTo: &port, Text: form.Port,
-						ToolTipText: "The port on this computer this world talks to the map through. " +
-							"Every world needs its own."},
+					label("Port"),
+					d.LineEdit{AssignTo: &port, Text: form.Port, ToolTipText: TipDialogPort},
 					note(DefaultNote(form.Port, strconv.Itoa(launcher.DefaultSidecarPort))),
 
-					d.Label{Text: "Game window"},
+					label("Game window"),
 					d.CheckBox{AssignTo: &headless, Text: CheckHeadless, Checked: form.Headless,
 						ToolTipText: HeadlessTip},
 					note(""),
 
-					d.Label{Text: "The folder the game is installed in"},
-					d.LineEdit{AssignTo: &gameDir, Text: form.GameDir,
-						ToolTipText: "Where The Bibites is installed. The launcher starts that copy."},
+					label("The folder the game is installed in"),
+					d.LineEdit{AssignTo: &gameDir, Text: form.GameDir, ToolTipText: TipDialogGameDir},
 					note(""),
 				},
 			},
@@ -96,17 +98,13 @@ func runEditDialog(owner walk.Form, p launcher.Profile) (WorldForm, bool, error)
 				Title:  "Who may leave, and where",
 				Layout: d.Grid{Columns: 3},
 				Children: []d.Widget{
-					d.Label{Text: "Edges organisms may cross"},
-					d.LineEdit{AssignTo: &edges, Text: form.ExportEdges,
-						ToolTipText: "Which sides of your world are doors: E, N, W and S, " +
-							"separated by commas. Every door works both ways."},
+					label("Edges organisms may cross"),
+					d.LineEdit{AssignTo: &edges, Text: form.ExportEdges, ToolTipText: TipDialogEdges},
 					note(DefaultNote(form.ExportEdges, launcher.DefaultExportEdges)),
 
-					d.Label{Text: "Species that never leave"},
+					label("Species that never leave"),
 					d.LineEdit{AssignTo: &species, Text: form.ExcludeSpecies,
-						CueBanner: "empty means every species may leave",
-						ToolTipText: "Species named here stay in your world. Emptying this field " +
-							"turns the whole rule off, which the launcher reports as the real change it is."},
+						CueBanner: "empty means every species may leave", ToolTipText: TipDialogSpecies},
 					note(DefaultNote(form.ExcludeSpecies, launcher.DefaultExcludeSpecies)),
 				},
 			},
@@ -114,30 +112,24 @@ func runEditDialog(owner walk.Form, p launcher.Profile) (WorldForm, bool, error)
 				Title:  "Saving",
 				Layout: d.Grid{Columns: 3},
 				Children: []d.Widget{
-					d.Label{Text: "Save every N minutes"},
-					d.LineEdit{AssignTo: &minutes, Text: form.SaveMinutes,
-						ToolTipText: "How often this world writes itself out. 0 turns the timer off. " +
-							"A world with no game window loses everything since its last save if it " +
-							"has to be forced, so keep this short for one of those."},
+					label("Save every N minutes"),
+					d.LineEdit{AssignTo: &minutes, Text: form.SaveMinutes, ToolTipText: TipDialogMinutes},
 					note(DefaultNote(form.SaveMinutes, exactFloat(launcher.DefaultSaveMinutes))),
 
-					d.Label{Text: "Saves kept"},
-					d.LineEdit{AssignTo: &keep, Text: form.SaveKeep,
-						ToolTipText: "How many of those saves are kept before the oldest is removed."},
+					label("Saves kept"),
+					d.LineEdit{AssignTo: &keep, Text: form.SaveKeep, ToolTipText: TipDialogKeep},
 					note(DefaultNote(form.SaveKeep, strconv.Itoa(launcher.DefaultSaveKeep))),
 
-					d.Label{Text: "When the game closes"},
-					d.CheckBox{AssignTo: &onQuit, Text: "Write the world out before it quits",
-						Checked:     form.SaveOnQuit,
-						ToolTipText: "Saves once more on the way out, so a normal stop loses nothing."},
+					label("When the game closes"),
+					d.CheckBox{AssignTo: &onQuit, Text: CheckSaveOnQuit, Checked: form.SaveOnQuit,
+						ToolTipText: TipDialogOnQuit},
 					note(""),
 				},
 			},
 			d.TextLabel{
 				MinSize:   d.Size{Width: dialogWidth - 40},
 				TextColor: noteColour,
-				Text: "Only what you change is written. Everything else about this world is left " +
-					"exactly as it is.",
+				Text:      ProseOnlyWhatChanged,
 			},
 			d.Composite{
 				Layout: d.HBox{},
@@ -180,6 +172,12 @@ func note(text string) d.Widget {
 	return d.TextLabel{Text: text, TextColor: noteColour, MinSize: d.Size{Width: 130}}
 }
 
+// label is a field's caption at the ONE width every grid in every dialog uses,
+// so the fields line up down the whole form rather than per group box.
+func label(text string) d.Widget {
+	return d.Label{Text: text, MinSize: d.Size{Width: labelWidth}}
+}
+
 // runCreateDialog asks for A NAME, and nothing else unless it is asked for.
 //
 // IT IS STEP ONE OF TWO, and step two is the window itself: this dialog closes
@@ -216,8 +214,7 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 	trouble := ""
 	open := false
 	if defaultsErr != nil {
-		trouble = "This installation has no world to copy from, so the folder the game is " +
-			"installed in has to be filled in below: " + defaultsErr.Error()
+		trouble = ProseNoWorldToCopyFrom
 		open = true
 	}
 	advancedCaption := ButtonShowAdvanced
@@ -233,12 +230,7 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 		MinSize:       d.Size{Width: dialogWidth, Height: 400},
 		Layout:        d.VBox{},
 		Children: []d.Widget{
-			d.TextLabel{
-				MinSize: d.Size{Width: dialogWidth - 40},
-				Text: "A world is a simulation on this computer with its own place on the public " +
-					"map. It gets its own save file, its own folder and its own identity, and it " +
-					"stays on the map until you take it off.",
-			},
+			d.TextLabel{MinSize: d.Size{Width: dialogWidth - 40}, Text: ProseWhatIsAWorld},
 			d.TextLabel{
 				MinSize: d.Size{Width: dialogWidth - 40}, TextColor: bannerColour, Text: trouble,
 				Visible: trouble != "",
@@ -246,17 +238,15 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 			d.Composite{
 				Layout: d.Grid{Columns: 2},
 				Children: []d.Widget{
-					d.Label{Text: "A name for the new world"},
-					d.LineEdit{AssignTo: &name, Text: spec.Name,
-						ToolTipText: "What you will call it here. It is not the name of the save file."},
+					label("A name for the new world"),
+					d.LineEdit{AssignTo: &name, Text: spec.Name, ToolTipText: TipDialogName},
 				},
 			},
 			d.Composite{
 				Layout: d.HBox{MarginsZero: true},
 				Children: []d.Widget{
 					d.PushButton{AssignTo: &advanced, Text: advancedCaption,
-						ToolTipText: "Everything else about the new world. All of it is already " +
-							"filled in with values that work.",
+						ToolTipText: TipDialogAdvanced,
 						OnClicked: func() {
 							open = !open
 							more.SetVisible(open)
@@ -274,32 +264,27 @@ func runCreateDialog(owner walk.Form, spec launcher.CreateSpec, defaultsErr erro
 				Visible:  open,
 				Layout:   d.Grid{Columns: 2, MarginsZero: true},
 				Children: []d.Widget{
-					d.Label{Text: "Its save name"},
-					d.LineEdit{AssignTo: &world, Text: spec.World,
-						ToolTipText: "The save file the game will load for it."},
+					label("Its save name"),
+					d.LineEdit{AssignTo: &world, Text: spec.World, ToolTipText: TipDialogSave},
 
-					d.Label{Text: "Its port"},
+					label("Its port"),
 					d.LineEdit{AssignTo: &port, Text: strconv.Itoa(spec.Port),
-						ToolTipText: "The port it talks to the map through. This is the lowest one " +
-							"no other world on this computer holds."},
+						ToolTipText: TipDialogNewPort},
 
-					d.Label{Text: "Its own folder"},
-					d.LineEdit{AssignTo: &dataRoot, Text: spec.DataRoot,
-						ToolTipText: "Where its journal, its logs and its credential will live. " +
-							"No two worlds may share one."},
+					label("Its own folder"),
+					d.LineEdit{AssignTo: &dataRoot, Text: spec.DataRoot, ToolTipText: TipDialogDataRoot},
 
-					d.Label{Text: "The folder the game is installed in"},
-					d.LineEdit{AssignTo: &gameDir, Text: spec.GameDir,
-						ToolTipText: "Where The Bibites is installed. It is the same for every world."},
+					label("The folder the game is installed in"),
+					d.LineEdit{AssignTo: &gameDir, Text: spec.GameDir, ToolTipText: TipDialogGameDir},
 
-					d.Label{Text: "Game window"},
+					label("Game window"),
 					d.CheckBox{AssignTo: &headless, Text: CheckHeadless, Checked: spec.Headless,
 						ToolTipText: HeadlessTip},
 				},
 			},
 			d.TextLabel{
 				MinSize: d.Size{Width: dialogWidth - 40}, TextColor: noteColour,
-				Text: Dedent(launcher.PublicMapNote()) + " " + Dedent(launcher.LeavingNote()),
+				Text: ProseAnotherIdentity + " " + ProseDeletingIsNotLeaving,
 			},
 			d.Composite{
 				Layout: d.HBox{},
@@ -356,23 +341,17 @@ func runCloneDialog(owner walk.Form, source, suggested string) (string, bool, er
 		MinSize:       d.Size{Width: dialogWidth, Height: 260},
 		Layout:        d.VBox{},
 		Children: []d.Widget{
-			d.TextLabel{
-				MinSize: d.Size{Width: dialogWidth - 40},
-				Text: "The copy takes this world's settings. Its identity on the map, its own " +
-					"folder, its port and its save name are all new, because two worlds cannot " +
-					"share any of them. Nothing living in this world is copied.",
-			},
+			d.TextLabel{MinSize: d.Size{Width: dialogWidth - 40}, Text: ProseCloneCopies},
 			d.Composite{
 				Layout: d.Grid{Columns: 2},
 				Children: []d.Widget{
-					d.Label{Text: "A name for the copy"},
-					d.LineEdit{AssignTo: &name, Text: suggested,
-						ToolTipText: "What you will call the new world here."},
+					label("A name for the copy"),
+					d.LineEdit{AssignTo: &name, Text: suggested, ToolTipText: TipDialogCopyName},
 				},
 			},
 			d.TextLabel{
 				MinSize: d.Size{Width: dialogWidth - 40}, TextColor: noteColour,
-				Text: Dedent(launcher.PublicMapNote()),
+				Text: ProseAnotherIdentity,
 			},
 			d.Composite{
 				Layout: d.HBox{},
@@ -426,27 +405,21 @@ func runDeleteDialog(owner walk.Form, name, dataRoot string) (string, bool, bool
 		MinSize:       d.Size{Width: dialogWidth, Height: 380},
 		Layout:        d.VBox{},
 		Children: []d.Widget{
-			d.TextLabel{
-				MinSize: d.Size{Width: dialogWidth - 40},
-				Text:    Dedent(launcher.CustodyWarning()),
-			},
+			d.TextLabel{MinSize: d.Size{Width: dialogWidth - 40}, Text: ProseCustody},
 			d.CheckBox{
-				AssignTo: &removeData,
-				Text:     CheckRemoveWorldData,
-				ToolTipText: "Deletes this world's journal, its logs and its credential from " +
-					dataRoot + ". Anything else in that folder is left where it is.",
+				AssignTo:    &removeData,
+				Text:        CheckRemoveWorldData,
+				ToolTipText: TipDialogRemove,
 			},
 			d.TextLabel{
 				MinSize: d.Size{Width: dialogWidth - 40}, TextColor: noteColour,
-				Text: "That folder is " + dataRoot + ". The game's own save file is NOT in it and " +
-					"is never touched: it stays with the game, whichever box you tick.",
+				Text: "That folder is " + dataRoot + ". " + ProseSaveFileIsSafe,
 			},
 			d.Composite{
 				Layout: d.Grid{Columns: 2},
 				Children: []d.Widget{
-					d.Label{Text: "Type " + name + " to confirm"},
-					d.LineEdit{AssignTo: &typed, CueBanner: name,
-						ToolTipText: "The launcher deletes nothing unless this matches the world's name."},
+					label("Type " + name + " to confirm"),
+					d.LineEdit{AssignTo: &typed, CueBanner: name, ToolTipText: TipDialogTypeName},
 				},
 			},
 			d.Composite{

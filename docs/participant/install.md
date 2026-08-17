@@ -162,7 +162,8 @@ plain words and in colour:
 
 **The red line is the one to know about.** A world can be running and still not be on the map: your
 place is held, the map shows you live, and nothing is actually crossing. The window says so in red
-and tells you where to look, which is the whole reason it exists.
+and tells you where to look, which is the whole reason it exists. Selecting a world does not take its
+colour away.
 
 **On the right is the world you selected**, and one big button: **Start** when it is stopped,
 **Stop** when it is running. Under it is **Run without a game window (headless)** — this world's own
@@ -174,12 +175,13 @@ the same thing the big button does.
 **While anything is happening, the window says what.** A bar spins and a line reads *"Waiting for
 the map to give this world a place..."*, then *"The game is starting..."*, then *"Waiting for the
 game to join the map (up to two minutes)..."*. When it is over, one green or red line stays on
-screen until the next thing you do — so you can look away for the minute a start takes.
+screen beside **that** world until the next thing you do to it — so you can look away for the minute
+a start takes, and so two worlds never share one answer.
 
 **Nothing is ever silent.** Press **Show details** and the whole of what the launcher did appears,
-timestamped. It opens **by itself** whenever something goes wrong, and a failure quotes the
-launcher's own sentence in the panel — *"Could not start 'default': the sidecar port 70000 is
-outside 1024-65535"* — rather than a shrug.
+timestamped, in a pane you can drag taller or shorter. It opens **by itself** whenever something goes
+wrong, and a failure quotes the launcher's own sentence in the panel — *"'world2' was not created:
+the profile 'default' already uses port 8787. Every world needs its own"* — rather than a shrug.
 
 **The rest is in two menus,** so the window is not a wall of buttons:
 
@@ -192,8 +194,9 @@ Right-clicking a world in the list offers the same things. Anything the launcher
 greyed rather than pressed and then explained, and every control has a tooltip saying what it will
 do.
 
-**The window remembers its size and position**, and whether you had the details pane open, in
-`%APPDATA%\Bibites Multiverse\launcher-window.json`. Deleting that file costs nothing.
+**The window remembers its size and position**, whether you had the details pane open and how tall
+you left it, in `%APPDATA%\Bibites Multiverse\launcher-window.json`. Deleting that file costs
+nothing.
 
 **Closing the window does not stop anything.** The worlds keep running, which is what the line
 along the bottom of the window says, and the title bar tells you how many are up. Stop them with

@@ -65,9 +65,9 @@ Assert each of these exists, spelled exactly like this.
 | `Run without a game window (headless)` | check box |
 | `Open the data folder` | small button, beside the **Data folder** value |
 | `Copy this world's identity` | small button, beside the **Map identity** value |
-| `Edit settings...` | button |
-| `Run a health check` | button |
-| `Show details` / `Hide details` | one button; the caption says what pressing it will do |
+| `Edit settings...` | button, in the secondary row |
+| `Run a health check` | button, in the same row |
+| `Show details` / `Hide details` | one button, in the same row; the caption says what pressing it will do |
 
 **Along the bottom**
 
@@ -105,13 +105,26 @@ Assert each of these exists, spelled exactly like this.
 - List columns: `World`, `Status`.
 - Panel facts, in this order: `Save name:`, `Port:`, `Speed:`, `Data folder:`, `Map identity:`.
 - Details pane header: `Everything the launcher did this session, newest at the bottom:`.
-- Status bar: `Your worlds keep running when you close this window   -   N world(s) in <install root>`.
+- Status bar: `Your worlds keep running when you close this window   -   1 world in <install root>`
+  — **`1 world`, `2 worlds`; never `world(s)`.**
 - Edit dialog group boxes: `This world`, `Who may leave, and where`, `Saving`.
 
-**Assert (the wording rule):** no caption, label, group box, check box or tooltip anywhere in the
-window contains the words **profile**, **sidecar**, **contract**, **peer** or **enroll**. Those words
-belong to the program and they are all still present — inside the details pane, which is the core's
-own output and is deliberately left in the core's own vocabulary.
+**Panel order, top to bottom** — assert it reads down without a hole in it:
+
+world name (large, bold) · headline (coloured) · hint (only sometimes) · progress bar (only while
+something runs) · result line (only after something ran) · **`Start`/`Stop`** · the check box,
+**left-aligned under that button** · the row `Edit settings...` `Run a health check`
+`Show details` · the five facts · empty space. There must be **no gap** between the secondary row
+and the facts, and no control pinned to the bottom of the panel.
+
+**Assert (the wording rule):** no caption, label, group box, check box, **tooltip, or sentence in
+any dialog** contains the words **profile**, **sidecar**, **contract**, **peer**, **enroll**,
+**journal**, **credential**, **BepInEx**, or any path into the source repository (**`docs/`**,
+anything ending **`.md`**). Those words belong to the program and they are all still present — inside
+the details pane, which is the core's own output and is deliberately left in the core's own
+vocabulary. This rule covers the dialogs, which is where the previous round leaked: the create dialog
+said *"the map applies a per-address enrollment limit"*, the delete dialog said *"your sidecar may
+still be holding organisms it took custody of"*, and both pointed at `docs/participant/leave.md`.
 
 **Assert (tooltips):** hovering each control in the two tables above shows a tooltip, and no tooltip
 merely repeats its caption.
@@ -135,20 +148,35 @@ merely repeats its caption.
    panel is on the RIGHT, and **the details pane is not visible at all** — no log, no monospaced
    text, nothing below the splitter but the two bottom buttons and the status bar.
 7. **Assert:** the status bar reads
-   `Your worlds keep running when you close this window   -   1 world(s) in <install root>`.
+   `Your worlds keep running when you close this window   -   1 world in <install root>` — **not**
+   `1 world(s)`.
+8. **Assert (the first painted frame is already right):** with a world already running before the
+   window is opened, the very first frame shows the world in the list AND the caption
+   `Bibites Multiverse - 1 of N worlds running`. The bare caption with an empty list, even for a
+   moment, means the first reading is being waited for rather than taken.
 
 ## 2. The world list is the installation, in two columns
 
 1. **Assert:** one row, for the world the installer made: `World` = `* default` (the `*` marks the
    default world), `Status` = `Stopped`, drawn in **grey**.
-2. **Assert:** no banner is shown above the list.
-3. **Assert (the panel):** the world's name `default` in a larger bold face; under it the headline
+2. **Assert (the selected row keeps its colour):** the selected row is drawn on a **pale wash of its
+   own state's colour** with the state's colour on the text — not on the system's blue highlight with
+   white text. Select a green world and a red one in turn: each stays green and red while selected.
+   The one row a person's eye is on is the one row that must not lose its signal.
+3. **Assert:** no banner is shown above the list.
+4. **Assert (the panel):** the world's name `default` in a larger bold face; under it the headline
    `Stopped`; under that, because this is a one-world installation that is not running,
    `This is your world. Click Start to join the map.`
-4. **Assert (the facts):** `Save name:` the installed world, `Port:` `8787`, `Speed:` `-`,
+5. **Assert (the facts):** `Save name:` the installed world, `Port:` `8787`, `Speed:` `-`,
    `Data folder:` the world's data root, `Map identity:` a `public-…` string.
-5. **Assert:** the big button reads `Start`; `Run without a game window (headless)` is unticked;
-   there is **no** progress bar and **no** coloured result line.
+6. **Assert (nothing is cut without saying so):** the `Data folder:` value either fits, or is
+   shortened **in the middle with an ellipsis** keeping the drive and the last folder
+   (`C:\Users\…\BibitesMultiverse-multi-2`). It must never simply stop mid-word where the
+   `Open the data folder` button begins. Hovering it shows the whole path in a tooltip.
+7. **Assert:** the big button reads `Start`, is **taller than the other buttons, in a bold face, and
+   carries the accent border** Windows draws round a default button; `Run without a game window
+   (headless)` is unticked and its **left edge lines up with the left edge of that button**; there is
+   **no** progress bar and **no** coloured result line.
 
 ## 3. Start, and the one fact that matters
 
@@ -172,8 +200,8 @@ merely repeats its caption.
    panel reading `Started 'default'.` — and it STAYS there until the next action.
 5. **Assert (the important one):** the `Status` cell reads `On the map - speed x10` in **green**, and
    the panel headline reads `Running - on the map (place N) - speed x10`.
-6. **Assert:** the `Speed:` fact becomes `x10 asked for` and then `x10 asked for, x<achieved>
-   achieved` once the sidecar has measured a span.
+6. **Assert:** the `Speed:` fact becomes `x10 (target)` and then `x10 (target), x<achieved>
+   (achieved)` once the sidecar has measured a span.
 7. **Assert:** the big button's caption has flipped to `Stop`.
 8. **Assert (the title bar):** the caption is now `Bibites Multiverse - 1 of 1 worlds running`.
 9. **Assert:** the details pane is **still closed**. A start that worked says so in one green line
@@ -194,14 +222,51 @@ plugin removed, but any world whose game never joins will do.
    `Nothing is reaching the map from this world. Open the details below for what to do.`
 4. **Assert:** `Open` → `Open the game's own log` opens Explorer with that log selected.
 
-### 3c. A start that is refused says why, in the core's own words
+### 3c. A refusal says why IN THE PANEL, in the core's own words
 
-1. Start the same world twice — or hold the world's `launcher.lock` — so that the core refuses.
-2. **Assert:** the result line is **red** and carries the core's own sentence after the job, e.g.
-   `Could not start 'default': another launcher is starting or stopping this world (…)`. It must not
-   read only "the operation failed"; the launcher's own refusals are the best sentences in the
-   program and the panel quotes them.
-3. **Assert:** the details pane opened by itself.
+**This is the assertion that failed last round**, on all three refusal paths: the panel said
+`Could not start 'default'. The details below say why.` while the core's own sentence sat one line
+lower in a pane nobody had opened. The cause was where the line was picked up — off the pane's own
+hundred-millisecond batch, by which time the action had already finished, because a refusal is
+printed and returned from in microseconds. It is now taken on the goroutine that writes it.
+
+Drive all three:
+
+| Make it happen | The panel's red line must contain |
+|---|---|
+| Start the same world in two windows at once, or hold its `launcher.lock` | `Could not start 'default': another launcher is starting or stopping this world (…). Wait for it to finish` |
+| `Create a world...` with a port another world already has | `'world2' was not created: the profile 'default' already uses port 8787. Every world needs its own` |
+| `Delete this world...` and type the wrong name | `'multi-2' was not deleted: that is not 'multi-2'. Nothing was deleted` |
+
+1. **Assert:** each red line carries **both** halves — what was being attempted, and the core's own
+   sentence after a colon. A line ending `. The details below say why.` means the core's sentence was
+   not captured, and is a failure of this section even though the pane has the sentence in it.
+2. **Assert:** the details pane opened by itself in each case, and the same sentence is in it.
+3. **Assert:** the sentence quoted is the **refusal**, not the last line of the block explaining it.
+   The delete case proves this: the custody warning is printed first and is indented, and the
+   flush-left refusal below it is the one that must be quoted.
+
+### 3d. The result line belongs to ONE world
+
+**This also failed last round:** a health check on `multi-2` left
+`The health check found no faults…` in the panel, and selecting `default` then showed default's
+headline `Stopped` stacked straight on top of multi-2's result, as though the two were one world's.
+
+1. With two worlds, select `multi-2` and press **Run a health check**. Wait for it to finish.
+2. **Assert:** `multi-2`'s panel carries the green result line.
+3. Select `default`.
+4. **Assert:** `default`'s panel shows its headline and **no result line at all** — nothing has
+   happened to `default` yet.
+5. Select `multi-2` again. **Assert:** its result line is still there, unchanged.
+6. Start `default`. **Assert:** `default` now shows `Started 'default'.`, and selecting `multi-2`
+   still shows its own health-check line. Two worlds, two results, neither borrowed.
+7. Press **Stop every world**. **Assert:** when it finishes, `Stopped every world.` is shown beside
+   **both** worlds — that action really is about all of them.
+8. Press **Create a world...** and let it fail (a taken port). **Assert:** the red line is shown
+   **whatever world is selected**: the world it names does not exist and has no row to live beside,
+   and it is the line a person most needs to read.
+9. **Assert:** while any action is running, **no** result line is shown on any world — the panel is
+   showing what is happening instead.
 
 ## 4. The window setting is a setting now, and it persists
 
@@ -255,18 +320,23 @@ which is where a one-off belongs.
    one plain sentence about what a world is. The ONLY field is `A name for the new world`,
    pre-filled with a name no world has.
 3. **Assert:** the identity and leaving notes are immediately **above** the `Create this world`
-   button, not at the top: the per-address enrollment limit and *"Deleting a world here is not
-   leaving the map"*.
+   button, not at the top, and both are in plain words with **no repository path in them**:
+   *"the map limits how many worlds one address may create in a short time"* and
+   *"Deleting a world here does not take it off the map. See bibitesmultiverse.com for how to leave
+   it properly."* The words *enrollment*, *per-address*, *sidecar* and `docs/participant/leave.md`
+   must not appear.
 4. Press **Show advanced settings**.
 5. **Assert:** the caption flips to `Hide advanced settings` and five more fields appear —
    `Its save name`, `Its port` (the lowest free one, `8788`), `Its own folder` (beside the first
    world's), `The folder the game is installed in` (the same as the existing world's), and
    `Run without a game window (headless)`.
+5b. **Assert:** every field's caption is left-aligned on **one** column, and the game folder is
+   readable rather than cut off at the edge of the dialog.
 6. **Type `70000` into `Its port`** and press **Create this world**.
 7. **Assert:** nothing is created; the details pane opens by itself and the panel's red result line
    quotes the core: `'world2' was not created: the sidecar port 70000 is outside 1024-65535`. **The
    map must not have been contacted** — check that no `enrollment-pending.json` appeared in the new
-   data folder.
+   data folder. (See section 3c: a line ending `. The details below say why.` fails this step.)
 8. Repeat with a valid port and press **Create this world**.
 9. **Assert (step two is the window, not a second dialog):** the dialog closes at once and the PANEL
    shows `Creating 'world2' - asking the map for a new identity...` with a spinning bar, then
@@ -284,7 +354,9 @@ which is where a one-off belongs.
 
 1. Select a world, **Edit settings...**.
 2. **Assert:** the fields are in three labelled groups — `This world`, `Who may leave, and where`,
-   `Saving` — and each field carries a tooltip.
+   `Saving` — and each field carries a tooltip. **Every field in all three groups starts at the same
+   left edge**; three groups sizing their own label column put the fields at three different X
+   positions last round.
 3. **Assert (which values are defaults):** beside `Port` the grey note reads `(the default)` for
    `8787` and `(default: 8787)` for anything else; the same for `Edges organisms may cross`,
    `Species that never leave`, `Save every N minutes` and `Saves kept`.
@@ -308,16 +380,22 @@ which is where a one-off belongs.
 ## 8. Delete, which has to be hard
 
 1. Select the clone. `World` → **Delete this world...**.
-2. **Assert:** the dialog carries the custody warning (*"Deleting this world here is NOT leaving the
-   map"*) as flowing text — not indented like terminal output — offers the check box
-   `Also delete this world's own folder`, names the folder, and says in plain words that
-   **the game's own save file is not in it and is never touched**.
+2. **Assert:** the dialog carries the custody warning as flowing text — not indented like terminal
+   output — offers the check box `Also delete this world's own folder`, names the folder, and says in
+   plain words that **the game's own save file is not in it and is never touched**.
+   **Assert the wording**, which is the whole of what a person has to act on: it says deleting here
+   *"does NOT take it off the map"*, that this world *"may also still be holding creatures that were
+   on their way somewhere else, and only this computer can pass them on"*, that the fix is to
+   *"Start it once and let it finish doing that"*, and it points at `bibitesmultiverse.com`. The
+   words *sidecar*, *custody*, *credential*, *journal* and `docs/participant/leave.md` must not
+   appear.
 3. **Assert:** the field reads `Type <name> to confirm`.
 4. Press Enter without typing anything.
 5. **Assert:** **Cancel** is the default button — nothing is deleted by pressing Enter.
 6. Re-open it, type a **wrong** name, press **Delete it permanently**.
 7. **Assert:** the red result line quotes the core — `'world3' was not deleted: that is not
-   'world3'. Nothing was deleted` — the pane is open, and the world is still in the list.
+   'world3'. Nothing was deleted` — the pane is open, and the world is still in the list. The
+   indented custody warning printed above that refusal must **not** be what gets quoted.
 8. Re-open it, tick the check box, type the right name, press **Delete it permanently**.
 9. **Assert:** the pane carries the custody warning, this world's own entries, `deleted
    …\profiles\world3.json`, and either `deleted <data root>, including its journal` or a
@@ -361,6 +439,14 @@ which is where a one-off belongs.
 2. **Assert:** the caption flips to `Hide details`, a monospaced pane appears below the splitter with
    `Everything the launcher did this session, newest at the bottom:` above it and
    `Copy the details` beside that, and the newest line is on screen.
+2b. **Assert (it is a pane, not a slot):** it is **at least ten lines tall**, and on a window with
+   room to spare it takes something like a third of the height. Three lines — which is what it
+   opened as on an 840-pixel window last round — is a log nobody can read. Measure it: shrink the
+   window to its minimum (900 x 560) and the pane must still be at least ten lines.
+2c. **Assert (it is draggable):** there is a divider between the panel above and the pane below, and
+   dragging it up and down resizes both. The world list and the panel above shrink to give it room.
+   There is a second divider between the world list and the panel; dragging that resizes those two,
+   and **must not** move the details divider.
 3. **Assert:** its first two lines are the release and the install root, then the hint naming
    `multiverse-launcher.exe`. Every line carries a `HH:MM:SS` stamp, and each action is preceded by
    a `> ` heading (`> start default`, `> stop default`, `> check default`,
@@ -383,22 +469,34 @@ which is where a one-off belongs.
 9. Scroll back to the bottom. **Assert:** it follows again.
 10. Press **Copy the details**. **Assert:** the whole pane is on the clipboard and the panel says
     `Copied the details to the clipboard.`
-11. Press **Hide details**. **Assert:** the pane disappears, the splitter above it takes the space,
-    and the caption is `Show details` again.
+11. Press **Hide details**. **Assert:** the pane disappears **and its divider with it**, the worlds
+    and the panel take the whole space, and the caption is `Show details` again.
 
 ## 11. It remembers where it was
 
-1. With the details pane **open**, move and resize the window, then close it with its X.
+1. With the details pane **open**, move and resize the window, **drag the divider so the pane is
+   about half the window**, then close it with its X.
 2. **Assert:** `%APPDATA%\Bibites Multiverse\launcher-window.json` exists, carries
    `"format": "bibites-multiverse/launcher-window/1"`, and its `x`, `y`, `width`, `height` and
-   `details` match what you left.
-3. Re-open the window. **Assert:** it opens at that size and position with the details pane open.
+   `details` match what you left. **Assert:** it also carries a `"split"` object with an entry per
+   divider (`"main/details"` and `"main/details/worlds"`), each two pixel sizes.
+3. Re-open the window. **Assert:** it opens at that size and position, with the details pane open
+   **and the divider where you left it**.
+3b. **Assert:** there is **no second preferences file** — nothing under
+   `%APPDATA%\<anything else>` and no `.ini` anywhere. One file holds the lot.
 4. Maximise it, close it, re-open it. **Assert:** it comes back maximised, and un-maximising it
    returns it to the size from step 1 — the file keeps the restored rectangle, not the maximised one.
 5. Edit the file to `"x": 9000` and re-open. **Assert:** the window opens at its default size on the
    screen rather than off the edge of it.
 6. Replace the file's contents with `not json` and re-open. **Assert:** the window opens normally and
    says nothing about it.
+6b. Delete the whole `"split"` object from a good file and re-open. **Assert:** the window opens with
+   sensible default dividers — the field is additive, and a file from the previous build must still
+   work.
+6c. Open the window, **never** press `Show details`, and close it. **Assert:** the `"split"` entry
+   for `main/details` is either absent or unchanged from before — never a pair containing `0`. A
+   hidden splitter child measures zero, and a zero saved here re-opens the pane at no height with its
+   divider on the bottom edge of the window.
 7. **Assert:** nothing was written into `profiles\` — a stray `.json` in there is read as a world and
    would raise the red banner (section 14).
 8. **Assert:** `Help` → `About` names that file's path.
@@ -519,8 +617,10 @@ item's text colour (`NM_CUSTOMDRAW` sets it per cell) or by eye.
 | **game running, never joined the map** | `NOT on the map` | `Running, but NOT on the map - see the details` | **red `RGB(176,0,0)`** |
 | game running with nothing holding its place | `NOT on the map` | `The game is running, but this world has no link to the map - see the details` | red |
 
-The selected row is deliberately **not** recoloured: Windows draws it on the highlight colour, and a
-dark green on that blue is harder to read than the system's own white.
+**The selected row keeps its colour.** It is drawn on a pale wash of its own state's hue with the
+state's colour on the text, instead of on Windows' blue highlight — because the first attempt at this
+suppressed the colour on exactly the row a person's eye is on, so selecting the world you were
+worried about made its red go away.
 
 ---
 
@@ -534,6 +634,10 @@ reach them:
    the resource object, and they are the one thing a missing `go generate` breaks silently.
 2. **Does the `Status` column agree with the details pane** (sections 3.5 and 3b.3)? That
    distinction is the reason this window exists.
-3. **Does the details pane leave a reader where they put themselves** (section 10.7)? That is the
-   regression this round fixes, and it is measurable to the line.
-4. **Does anything in the window still use an internal word** (section 0's wording rule)?
+3. **Does the details pane leave a reader where they put themselves** (section 10.7)? Measurable to
+   the line.
+4. **Does a refusal reach the panel in the core's own words** (section 3c)? All three paths, and the
+   exact red line for each.
+5. **Does a result stay with the world it is about** (section 3d)?
+6. **Does anything in the window or its dialogs still use an internal word** (section 0's wording
+   rule)?

@@ -114,6 +114,13 @@ const (
 	ColourRed
 )
 
+// Colours is every colour there is, so that the one place a Colour becomes a
+// Windows colour can be built from this list rather than from a switch that
+// quietly loses a case.
+func Colours() []Colour {
+	return []Colour{ColourGrey, ColourGreen, ColourAmber, ColourRed}
+}
+
 // ---------------------------------------------------------------- the states
 
 // State is what one world is doing, as a person would describe it.
@@ -355,6 +362,9 @@ type Panel struct {
 	Working bool
 	// Facts is FactLabels' values, in that order and always that length.
 	Facts []Fact
+	// Result is the last thing that happened TO THIS WORLD, or the zero value
+	// when nothing has. It is not shown while something is happening.
+	Result Result
 	// Headless is the checkbox's state: what the world's own setting says.
 	Headless bool
 	// Primary is the big button.
@@ -374,7 +384,7 @@ type Primary struct {
 //
 // selected is nil when nothing is selected, which is the state an installation
 // with no world at all is permanently in.
-func PanelFor(selected *launcher.WorldView, snap launcher.Snapshot, busy Busy) Panel {
+func PanelFor(selected *launcher.WorldView, snap launcher.Snapshot, busy Busy, results *ResultLog) Panel {
 	panel := Panel{Primary: Primary{Caption: ButtonStart, Tip: StartTip}}
 	if selected == nil {
 		panel.Headline = "No world is selected."
@@ -383,6 +393,7 @@ func PanelFor(selected *launcher.WorldView, snap launcher.Snapshot, busy Busy) P
 			panel.Hint = "Click '" + ButtonCreate + "' to make one."
 		}
 		panel.Facts = emptyFacts()
+		panel.Result = results.For("")
 		return panel
 	}
 	status := StatusFor(*selected, busy)
@@ -392,6 +403,7 @@ func PanelFor(selected *launcher.WorldView, snap launcher.Snapshot, busy Busy) P
 	panel.Headless = selected.Headless
 	panel.Facts = factsFor(*selected)
 	panel.Hint = hintFor(*selected, snap, status)
+	panel.Result = results.For(selected.Name)
 
 	// WHILE ANYTHING AT ALL IS RUNNING, THE PANEL SAYS WHAT IT IS. There is one
 	// action goroutine, so an action about another world — a create, which has no
@@ -402,6 +414,7 @@ func PanelFor(selected *launcher.WorldView, snap launcher.Snapshot, busy Busy) P
 		panel.Working = true
 		panel.Colour = ColourAmber
 		panel.Hint = ""
+		panel.Result = Result{}
 		if busy.Phrase != "" {
 			panel.Headline = busy.Phrase
 		} else {
@@ -461,11 +474,11 @@ func speedFact(world launcher.WorldView) string {
 	if !world.Mod.Connected || world.Mod.TimeScale == 0 {
 		return "-"
 	}
-	target := "x" + roundedFloat(world.Mod.TimeScale) + " asked for"
+	target := "x" + roundedFloat(world.Mod.TimeScale) + " (target)"
 	if world.Mod.Achieved == 0 {
 		return target
 	}
-	return target + ", x" + roundedFloat(world.Mod.Achieved) + " achieved"
+	return target + ", x" + roundedFloat(world.Mod.Achieved) + " (achieved)"
 }
 
 func identityFact(world launcher.WorldView) string {
@@ -516,6 +529,20 @@ func countWords(n int) string {
 		return "one file"
 	}
 	return fmt.Sprintf("%d files", n)
+}
+
+// WorldCountWords is the status bar's count. "2 world(s)" is a programmer
+// writing a plural rule into the thing a participant reads.
+func WorldCountWords(n int) string {
+	if n == 1 {
+		return "1 world"
+	}
+	return fmt.Sprintf("%d worlds", n)
+}
+
+// StatusBarText is the whole of the line along the bottom.
+func StatusBarText(snap launcher.Snapshot) string {
+	return fmt.Sprintf("%s   -   %s in %s", CloseHint, WorldCountWords(len(snap.Worlds)), snap.InstallRoot)
 }
 
 // ---------------------------------------------------------------- the captions
@@ -604,8 +631,8 @@ const (
 	EditTip        = "Changes this world's own settings: its save name, its port, how often it saves, and more."
 	CloneTip       = "Makes a new world with this one's settings. Its identity, folder, port and save name are new, because two worlds cannot share any of them."
 	DeleteTip      = "Removes this world from this computer. You will be asked to type its name first."
-	DiagnoseTip    = "Checks this world end to end - its files, its game build, its credential and the map - and reports every result below."
-	OpenDataTip    = "Opens this world's own folder in Explorer: its journal, its logs and its credential live there."
+	DiagnoseTip    = "Checks this world from end to end - its files, the game build, the key that proves it is itself, and the map - and reports every result below."
+	OpenDataTip    = "Opens this world's own folder: what it is holding for other worlds, its logs and the key that proves it is itself all live there."
 	OpenLogsTip    = "Opens the folder holding this world's launcher and map logs."
 	OpenGameLogTip = "Opens the game's own log file, which is where to look when the game starts but never joins the map."
 	OpenConsoleTip = "Opens the same launcher as a text window with a numbered menu. It is the one a script should call."
@@ -617,6 +644,108 @@ const (
 	WorldsTip  = "Every world on this computer. Double-click one, or press Enter, to start or stop it."
 	RefreshTip = "Reads every world again now, rather than waiting for the next couple of seconds to pass."
 )
+
+// ---------------------------------------------------------------- dialog prose
+
+// WHAT THE DIALOGS SAY, and why it is written HERE rather than taken from the
+// core.
+//
+// The core has its own sentences for all of this (launcher.PublicMapNote,
+// LeavingNote, CustodyWarning) and it still prints them — into the details pane,
+// after the action, where the program's own vocabulary belongs and where an
+// advanced reader wants a repository path. But a dialog is the primary UI, and a
+// machine reading the previous round found the core's words leaking straight
+// into it: "the map applies a per-address enrollment limit", "your sidecar may
+// still be holding organisms it took custody of", and a link to
+// docs/participant/leave.md — a file on a stranger's disk that a participant has
+// never seen.
+//
+// So these say the SAME FACTS in words somebody who has only ever played the
+// game can act on, and they point at the website rather than at this repository.
+// A test walks every one of them for the words that must not appear.
+const (
+	ProseWhatIsAWorld = "A world is a simulation on this computer with its own place on the public " +
+		"map. It gets its own save file, its own folder and its own identity, and it stays on the " +
+		"map until you take it off."
+
+	// ProseAnotherIdentity is launcher.PublicMapNote, said plainly. The fact that
+	// matters is that making worlds quickly can be refused for a while, and that
+	// it is the map refusing rather than anything on this computer.
+	ProseAnotherIdentity = "Every world you make takes another identity on the public map, and the " +
+		"map limits how many worlds one address may create in a short time - so several worlds made " +
+		"quickly can be refused for a while. Waiting a few minutes is the whole of the fix."
+
+	// ProseDeletingIsNotLeaving is launcher.LeavingNote, said plainly and
+	// pointing at the website instead of at a file in this repository.
+	ProseDeletingIsNotLeaving = "Deleting a world here does not take it off the map. See " +
+		DocsURL + " for how to leave it properly."
+
+	// ProseCustody is launcher.CustodyWarning, said plainly. The core's version
+	// says "your sidecar may still be holding organisms it took custody of for
+	// somebody else", which is three ideas and two of this program's own words.
+	ProseCustody = "Deleting this world here does NOT take it off the map: it stays known there " +
+		"until the map's operator drops it. This world may also still be holding creatures that " +
+		"were on their way somewhere else, and only this computer can pass them on. Start it once " +
+		"and let it finish doing that before you delete it. " + DocsURL + " explains how to leave " +
+		"for good."
+
+	ProseCloneCopies = "The copy takes this world's settings. Its identity on the map, its own " +
+		"folder, its port and its save name are all new, because two worlds cannot share any of " +
+		"them. Nothing living in this world is copied."
+
+	ProseOnlyWhatChanged = "Only what you change is written. Everything else about this world is " +
+		"left exactly as it is."
+
+	ProseSaveFileIsSafe = "The game's own save file is NOT in that folder and is never touched: it " +
+		"stays with the game, whichever box you tick."
+
+	ProseNoWorldToCopyFrom = "This installation has no world to copy from, so the folder the game " +
+		"is installed in has to be filled in below."
+)
+
+// The dialogs' field tooltips. They are here for the same reason as the prose
+// above: one test reads them all.
+const (
+	TipDialogName     = "What you will call it here. It is not the name of the save file."
+	TipDialogCopyName = "What you will call the new world here."
+	TipDialogSave     = "The name of the save file the game loads for this world."
+	TipDialogPort     = "The port on this computer this world talks to the map through. Every world needs its own."
+	TipDialogNewPort  = "The port it talks to the map through. This is the lowest one no other world on this computer holds."
+	TipDialogDataRoot = "Where this world's own files live: what it is holding for other worlds, its logs, and the key that proves it is itself."
+	TipDialogGameDir  = "Where The Bibites is installed. The launcher starts that copy, and it is the same for every world."
+	TipDialogEdges    = "Which sides of your world are doors: E, N, W and S, separated by commas. Every door works both ways."
+	TipDialogSpecies  = "Species named here stay in your world. Emptying this field turns the whole rule off, which the launcher reports as the real change it is."
+	TipDialogMinutes  = "How often this world writes itself out. 0 turns the timer off. A world with no game window loses everything since its last save if it has to be forced, so keep this short for one of those."
+	TipDialogKeep     = "How many of those saves are kept before the oldest is removed."
+	TipDialogOnQuit   = "Saves once more on the way out, so a normal stop loses nothing."
+	TipDialogAdvanced = "Everything else about the new world. All of it is already filled in with values that work."
+	TipDialogRemove   = "Deletes this world's own folder: what it is holding for other worlds, its logs and its key. Anything else in that folder is left where it is."
+	TipDialogTypeName = "The launcher deletes nothing unless this matches the world's name."
+	CheckSaveOnQuit   = "Write the world out before it quits"
+)
+
+// DialogProse is every sentence and tooltip the dialogs show, for the test that
+// walks them. A new one that is not on this list is one nothing reads.
+func DialogProse() []string {
+	return []string{
+		ProseWhatIsAWorld, ProseAnotherIdentity, ProseDeletingIsNotLeaving, ProseCustody,
+		ProseCloneCopies, ProseOnlyWhatChanged, ProseSaveFileIsSafe, ProseNoWorldToCopyFrom,
+		TipDialogName, TipDialogCopyName, TipDialogSave, TipDialogPort, TipDialogNewPort,
+		TipDialogDataRoot, TipDialogGameDir, TipDialogEdges, TipDialogSpecies, TipDialogMinutes,
+		TipDialogKeep, TipDialogOnQuit, TipDialogAdvanced, TipDialogRemove, TipDialogTypeName,
+	}
+}
+
+// InternalWords are the words that must not appear anywhere a participant reads
+// in this window: this program's own names for its parts, and a path into the
+// repository it was built from. Every one of them is still in the details pane,
+// which is the core's own output and is left in the core's own vocabulary.
+func InternalWords() []string {
+	return []string{
+		"profile", "sidecar", "contract", "peer", "enroll", "journal", "credential",
+		"docs/", ".md", "bepinex", "mod ",
+	}
+}
 
 // ---------------------------------------------------------------- the actions
 
@@ -820,17 +949,6 @@ func onOff(value bool) string {
 }
 
 func trim(value string) string { return strings.TrimSpace(value) }
-
-// Dedent strips the leading indentation the core's notes carry, which is there
-// because they are printed under a heading in a terminal. In a dialog the same
-// indentation reads as a mistake.
-func Dedent(text string) string {
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	for i, line := range lines {
-		lines[i] = strings.TrimSpace(line)
-	}
-	return strings.Join(lines, " ")
-}
 
 // ---------------------------------------------------------------- forwarding
 

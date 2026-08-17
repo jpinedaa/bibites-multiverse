@@ -198,6 +198,15 @@ const FailureDetailLimit = 220
 // usual causes, the remedy — indented under them (a.warn("  %s", ...)). So the
 // last flush-left line before a non-zero exit is the refusal itself rather than
 // the fourth line of a list explaining it.
+//
+// WHERE IT MUST BE CALLED, which is the whole of a bug a machine found: on the
+// goroutine that WRITES, as the line is written, and never off the pane. The
+// window's first attempt read it while draining the pane's own hundred-
+// millisecond batch, and a refusal is printed and returned from in microseconds
+// — so the action had already finished, and the panel showed "'world2' was not
+// created. The details below say why." while the core's own sentence, "the
+// profile 'default' already uses port 8787. Every world needs its own", sat one
+// line further down in a pane nobody had opened.
 func SaidLine(line string) (string, bool) {
 	body := TrimStamp(line)
 	if body == "" || body != strings.TrimLeft(body, " \t") {
@@ -272,6 +281,107 @@ func (j Job) failedHead() string {
 		return "The health check found a fault"
 	}
 	return "That did not work"
+}
+
+// ---------------------------------------------------------------- where a result goes
+
+// ResultAbout says WHICH WORLD a result belongs beside.
+//
+// IT MATTERS BECAUSE ONE LINE WAS SHARED BY EVERY WORLD. A health check on
+// multi-2 left "The health check found no faults" in the panel, and selecting
+// default then showed default's own headline, "Stopped", with multi-2's result
+// underneath it — two worlds' facts stacked as though they were one world's.
+type ResultAbout struct {
+	// Worlds is the world names the result belongs to.
+	Worlds []string
+	// Every is a job about every world at once, whichever worlds those turn out
+	// to be when it finishes.
+	Every bool
+}
+
+// ResultAbout is where this job's result belongs.
+func (j Job) ResultAbout() ResultAbout {
+	switch j.Kind {
+	case JobStopAll:
+		return ResultAbout{Every: true}
+	case JobCreate, JobClone, JobDelete:
+		// THE LIST IS ABOUT TO CHANGE UNDER IT. A created world is not in the
+		// reading this result is recorded against, and a deleted one is about to
+		// leave it — and a create that was REFUSED names a world that will never
+		// exist, which is the result a person most needs to read. None of them
+		// has a row to live beside, so they are shown whatever is selected until
+		// the next action. See ResultLog.
+		return ResultAbout{}
+	}
+	return ResultAbout{Worlds: []string{j.World}}
+}
+
+// ResultLog is the last thing that happened to each world, and it is the whole
+// of what the panel's coloured line is drawn from.
+//
+// A result is REPLACED by the next action about the same world and by nothing
+// else, so a world that has been sitting there for ten minutes still says how it
+// got there.
+type ResultLog struct {
+	byWorld map[string]Result
+	// loose is a result with no row to live beside — see ResultAbout. It is
+	// shown for any world that has no result of its own, and it is cleared by the
+	// next action whatever that action is about.
+	loose Result
+}
+
+// NewResultLog makes an empty one.
+func NewResultLog() *ResultLog {
+	return &ResultLog{byWorld: make(map[string]Result)}
+}
+
+// Record writes one result down. A zero Result CLEARS the same places instead,
+// which is what starting an action does: the line under a world must not go on
+// claiming the last thing that happened while the next thing is happening.
+//
+// names is the worlds that exist right now, and it decides whether a result has
+// a row to live beside at all.
+func (r *ResultLog) Record(about ResultAbout, result Result, names []string) {
+	if r.byWorld == nil {
+		r.byWorld = make(map[string]Result)
+	}
+	r.loose = Result{}
+	targets := about.Worlds
+	if about.Every {
+		targets = names
+	}
+	matched := false
+	for _, target := range targets {
+		for _, name := range names {
+			if strings.EqualFold(target, name) {
+				matched = true
+				if result.Text == "" {
+					delete(r.byWorld, strings.ToLower(name))
+				} else {
+					r.byWorld[strings.ToLower(name)] = result
+				}
+			}
+		}
+	}
+	if !matched {
+		r.loose = result
+	}
+}
+
+// For is the line to show beside one world.
+func (r *ResultLog) For(world string) Result {
+	if r == nil {
+		return Result{}
+	}
+	if result, ok := r.byWorld[strings.ToLower(world)]; ok {
+		return result
+	}
+	return r.loose
+}
+
+// Forget drops a world's result, for a world that has left the list.
+func (r *ResultLog) Forget(world string) {
+	delete(r.byWorld, strings.ToLower(world))
 }
 
 // ---------------------------------------------------------------- the phrases

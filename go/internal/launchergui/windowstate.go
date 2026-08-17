@@ -25,6 +25,8 @@ package launchergui
 import (
 	"encoding/json"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // WindowStateFormat is the schema string the file carries, for the same reason
@@ -56,6 +58,21 @@ type WindowState struct {
 	// Details is whether the details pane was open. It is remembered because
 	// somebody who works with it open is working with it open.
 	Details bool `json:"details"`
+	// Split is where the window's dividers were left: the one above the details
+	// pane, and the one between the world list and the panel.
+	//
+	// IT IS WALK'S OWN STATE, KEY AND ALL. Marking a Splitter Persistent makes
+	// walk read and write one string per splitter through walk.App().Settings(),
+	// keyed by a path it builds from the window's and the widget's names. This
+	// field is that whole map, so nothing in this program has to guess at either
+	// the key or the encoding — see splitSettings in window_windows.go, which is
+	// the walk.Settings that puts it here rather than in an INI file of walk's
+	// own under a second folder.
+	//
+	// HEIGHTS AND NOT FRACTIONS, because that is what walk stores; a window
+	// re-opened on a different screen therefore gets the same-sized pane rather
+	// than the same-shaped one, and dragging it once fixes that forever.
+	Split map[string]string `json:"split,omitempty"`
 }
 
 // WindowStatePath is the file, given the user's configuration folder — which on
@@ -144,4 +161,45 @@ func clamp(value, low, high int) int {
 		return high
 	}
 	return value
+}
+
+// UsableSplit is which of walk's remembered divider positions are worth keeping.
+//
+// A CLOSED PANE IS NOT A MEASUREMENT. walk writes the pixel height of every
+// child of a splitter, INCLUDING A HIDDEN ONE, and a hidden one measures zero —
+// so saving while the details pane was closed would record a pane of no height
+// and re-open it that way forever, with a divider sitting on the bottom edge of
+// the window and nothing above it to grab.
+//
+// The whole entry is dropped rather than repaired, because the file is seeded
+// back into walk's settings before walk ever writes to it: dropping keeps the
+// last position the pane had while it was open, which is the one somebody chose.
+func UsableSplit(values map[string]string) map[string]string {
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		if key == "" || !usableSizes(value) {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// usableSizes answers whether every one of walk's space-separated child sizes is
+// a real measurement.
+func usableSizes(state string) bool {
+	fields := strings.Fields(state)
+	if len(fields) < 2 {
+		return false
+	}
+	for _, field := range fields {
+		size, err := strconv.Atoi(field)
+		if err != nil || size <= 0 {
+			return false
+		}
+	}
+	return true
 }

@@ -70,9 +70,17 @@ const (
 	defaultWindowWidth  = 1080
 	defaultWindowHeight = 700
 	// primaryButtonWidth and primaryButtonHeight are what make Start the button
-	// a person's eye lands on. It is the only oversized control in the window.
-	primaryButtonWidth  = 190
-	primaryButtonHeight = 40
+	// a person's eye lands on. It is the only oversized control in the window,
+	// and it also carries the default-button border and a bold face — three
+	// signals, because on a themed Windows any one of them alone is subtle.
+	primaryButtonWidth  = 200
+	primaryButtonHeight = 44
+	// detailsMinHeight is about ten lines of the pane plus its header. The pane
+	// opened three lines tall on an 840-pixel window before this existed, which
+	// is a log nobody can read and a control nobody would think to drag.
+	detailsMinHeight = 190
+	// splitterHandle is wide enough to find with a mouse without being a bar.
+	splitterHandle = 6
 )
 
 // Options is what the executable hands the window.
@@ -91,6 +99,7 @@ func Run(opts Options) error {
 		opts.Now = time.Now
 	}
 	u := &ui{
+		results: NewResultLog(),
 		actions: make(chan func(), 1),
 		wake:    make(chan struct{}, 1),
 		refresh: make(chan struct{}, 1),
@@ -116,12 +125,19 @@ func Run(opts Options) error {
 		walk.MsgBox(nil, WindowTitle, err.Error(), walk.MsgBoxIconError|walk.MsgBoxOK)
 		return err
 	}
+	// THE FIRST READING IS TAKEN HERE, ON THIS THREAD, BEFORE THE LOOP STARTS.
+	// Asking the refresher for it instead left the first painted frame showing an
+	// empty list and the bare caption "Bibites Multiverse" while two worlds were
+	// running, for as long as it took the message loop to reach the refresher's
+	// Synchronize — which a machine caught in a screenshot. A snapshot reads
+	// local files and loopback, so this costs milliseconds on a healthy machine
+	// and at worst one probe timeout on a wedged one, which is a wait with the
+	// right thing on screen at the end of it rather than the wrong thing at the
+	// start.
+	u.applySnapshot(u.session.Snapshot())
 	go u.refresher()
 	go u.actor()
 	go u.logPump()
-	// The first reading is asked for before the loop starts, so the list is
-	// filled by the time the window is on screen rather than two seconds after.
-	u.askForRefresh()
 	u.mw.Run()
 	close(u.done)
 	return nil
@@ -148,14 +164,18 @@ type ui struct {
 	headless   *walk.CheckBox
 	// factValue is the panel's grid, by label. factHolders is where declarative
 	// writes the labels before Create has run.
-	factValue   map[string]*walk.TextLabel
+	factValue   map[string]*walk.Label
 	factHolders []factHolder
 
 	// The details pane, which is collapsed until it is wanted or until something
-	// goes wrong.
+	// goes wrong. detailsSplit is the divider above it, and where a person leaves
+	// it is remembered; settings is the four-line walk.Settings that lets walk do
+	// the remembering into this window's own file rather than an INI of its own.
 	detailsToggle *walk.PushButton
 	detailsPane   *walk.Composite
+	detailsSplit  *walk.Splitter
 	logView       *walk.TextEdit
+	settings      *splitSettings
 
 	statusBar *walk.StatusBarItem
 
@@ -171,10 +191,9 @@ type ui struct {
 	job      Job
 	busy     bool
 	phrase   string
-	// said is the last flush-left line the core printed during the job that is
-	// running, which is what a failure quotes. See SaidLine.
-	said        string
-	result      Result
+	// results is the last thing that happened to each world, so the coloured
+	// line under a headline is about the world that headline is about.
+	results     *ResultLog
 	detailsOpen bool
 	// settingHeadless is up while the refresher is writing the checkbox, so that
 	// the write does not read as a person having clicked it. Without it every
@@ -184,6 +203,15 @@ type ui struct {
 	// mu guards what crosses a thread boundary and nothing else.
 	mu      sync.Mutex
 	pending []string
+	// said is the last flush-left line the core printed since the running action
+	// started, which is what a failure quotes.
+	//
+	// IT IS CAPTURED ON THE WRITING GOROUTINE, in appendLine, and that is the fix
+	// for a bug a machine found: reading it off the pane's own hundred-
+	// millisecond batch lost every refusal, because a refusal is printed and
+	// returned from in microseconds and the action had already finished by the
+	// time the batch was drained. See SaidLine.
+	said string
 
 	actions chan func()
 	wake    chan struct{}
@@ -197,7 +225,7 @@ func (u *ui) build() error {
 	u.model = &worldModel{}
 	u.buttons = make(map[string][]**walk.PushButton)
 	u.menus = make(map[string][]**walk.Action)
-	u.factValue = make(map[string]*walk.TextLabel, len(FactLabels()))
+	u.factValue = make(map[string]*walk.Label, len(FactLabels()))
 
 	columns := make([]d.TableViewColumn, 0, len(Columns()))
 	for _, column := range Columns() {
@@ -206,10 +234,13 @@ func (u *ui) build() error {
 
 	window := d.MainWindow{
 		AssignTo: &u.mw,
-		Title:    WindowTitle,
-		MinSize:  d.Size{Width: MinWindowWidth, Height: MinWindowHeight},
-		Size:     d.Size{Width: defaultWindowWidth, Height: defaultWindowHeight},
-		Layout:   d.VBox{},
+		// Name is half of the key the splitter's remembered position is stored
+		// under (WindowBase.path is parent/child), so it must not be empty.
+		Name:    "main",
+		Title:   WindowTitle,
+		MinSize: d.Size{Width: MinWindowWidth, Height: MinWindowHeight},
+		Size:    d.Size{Width: defaultWindowWidth, Height: defaultWindowHeight},
+		Layout:  d.VBox{},
 		MenuItems: []d.MenuItem{
 			d.Menu{
 				Text: MenuWorld,
@@ -260,14 +291,32 @@ func (u *ui) build() error {
 			// on one line and the text would run off the edge of the screen.
 			d.TextLabel{AssignTo: &u.banner, Text: "", TextColor: bannerColour,
 				MinSize: d.Size{Width: MinWindowWidth - 60}},
-			d.HSplitter{
-				StretchFactor: 3,
+			d.VSplitter{
+				AssignTo:      &u.detailsSplit,
+				Name:          "details",
+				Persistent:    true,
+				HandleWidth:   splitterHandle,
+				StretchFactor: 1,
 				Children: []d.Widget{
-					u.worldList(columns),
-					u.panel(),
+					d.HSplitter{
+						// Named, so it gets a key of its own and is remembered
+						// too. It is the names that keep the two splitters apart
+						// in the settings; an unnamed one would be handed the
+						// other's state — see splitSettings.
+						Name:        "worlds",
+						Persistent:  true,
+						HandleWidth: splitterHandle,
+						// The list needs two columns and the panel needs room for
+						// a path, so the panel gets two thirds.
+						StretchFactor: 1,
+						Children: []d.Widget{
+							u.worldList(columns),
+							u.panel(),
+						},
+					},
+					u.details(),
 				},
 			},
-			u.details(),
 			d.Composite{
 				Layout: d.HBox{MarginsZero: true},
 				Children: []d.Widget{
@@ -278,6 +327,10 @@ func (u *ui) build() error {
 			},
 		},
 	}
+	// The settings have to exist before anything asks walk to read state.
+	u.settings = newSplitSettings()
+	walk.App().SetSettings(u.settings)
+
 	if err := window.Create(); err != nil {
 		return err
 	}
@@ -293,7 +346,19 @@ func (u *ui) build() error {
 	if icon := windowIcon(); icon != nil {
 		u.mw.SetIcon(icon)
 	}
+	// THE THIRD SIGNAL THAT THIS IS THE BUTTON. It is already the biggest and the
+	// only bold one; BS_DEFPUSHBUTTON adds the accent border Windows draws round
+	// the button a dialog would press on Enter. There is no default button on a
+	// main window, so this is drawing rather than behaviour — the Enter key is
+	// handled on the world list, where the selection is.
+	u.primary.SendMessage(win.BM_SETSTYLE, uintptr(win.BS_DEFPUSHBUTTON), 1)
 	u.restorePlacement()
+	// AFTER the size is set, because what walk stores for a splitter is pixel
+	// heights: restoring them into a window that is about to be resized only
+	// gives them straight back to be redistributed.
+	if u.settings.any() {
+		u.mw.RestoreState()
+	}
 	u.mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) { u.savePlacement() })
 	u.applyActions()
 	fmt.Fprintf(u.log, "Bibites Multiverse launcher %s, installed in %s\n",
@@ -311,8 +376,8 @@ func (u *ui) worldList(columns []d.TableViewColumn) d.Widget {
 		Columns:               columns,
 		LastColumnStretched:   true,
 		MultiSelection:        false,
-		StretchFactor:         2,
-		MinSize:               d.Size{Width: 240},
+		StretchFactor:         1,
+		MinSize:               d.Size{Width: 230},
 		ToolTipText:           WorldsTip,
 		OnCurrentIndexChanged: u.onSelectionChanged,
 		// Enter and a double-click both do the world's OWN primary action, which
@@ -345,9 +410,11 @@ func (u *ui) worldList(columns []d.TableViewColumn) d.Widget {
 // that acts on it.
 func (u *ui) panel() d.Widget {
 	return d.Composite{
-		Layout:        d.VBox{},
-		StretchFactor: 3,
-		MinSize:       d.Size{Width: 420},
+		Layout: d.VBox{},
+		// Two thirds of the width. The list needs two columns; the panel needs
+		// room for a Windows path and a button beside it.
+		StretchFactor: 2,
+		MinSize:       d.Size{Width: 470},
 		Children: []d.Widget{
 			d.TextLabel{AssignTo: &u.worldName, Text: "",
 				Font: d.Font{Family: uiFontFamily, PointSize: 13, Bold: true}},
@@ -362,30 +429,39 @@ func (u *ui) panel() d.Widget {
 				Children: []d.Widget{
 					d.PushButton{AssignTo: &u.primary, Text: ButtonStart, ToolTipText: StartTip,
 						MinSize:   d.Size{Width: primaryButtonWidth, Height: primaryButtonHeight},
+						Font:      d.Font{Family: uiFontFamily, PointSize: 11, Bold: true},
 						OnClicked: u.onPrimary},
 					d.HSpacer{},
 				},
 			},
-			d.CheckBox{AssignTo: &u.headless, Text: CheckHeadless, ToolTipText: HeadlessTip,
-				OnCheckedChanged: u.onHeadlessChanged},
-			u.factGrid(),
+			// THE CHECKBOX BELONGS TO THE BUTTON ABOVE IT, so it is put in a row
+			// of its own with the spacer on the right. Left to a VBox it was laid
+			// out at the row's centre — 220 pixels to the right of the button it
+			// qualifies, lined up with nothing.
+			d.Composite{
+				Layout: d.HBox{MarginsZero: true},
+				Children: []d.Widget{
+					d.CheckBox{AssignTo: &u.headless, Text: CheckHeadless, ToolTipText: HeadlessTip,
+						OnCheckedChanged: u.onHeadlessChanged},
+					d.HSpacer{},
+				},
+			},
+			// ONE ROW OF SECONDARY BUTTONS, and the details toggle is in it. It
+			// used to be pinned to the bottom of the panel by a spacer, which put
+			// fifty-eight pixels of nothing above it and read as a gap where
+			// something had failed to load.
 			d.Composite{
 				Layout: d.HBox{MarginsZero: true},
 				Children: []d.Widget{
 					u.button(ButtonEdit, EditTip, u.onEdit),
 					u.button(ButtonDiagnose, DiagnoseTip, u.onDiagnose),
-					d.HSpacer{},
-				},
-			},
-			d.VSpacer{},
-			d.Composite{
-				Layout: d.HBox{MarginsZero: true},
-				Children: []d.Widget{
 					d.PushButton{AssignTo: &u.detailsToggle, Text: ButtonShowDetails,
 						ToolTipText: DetailsTip, OnClicked: u.onToggleDetails},
 					d.HSpacer{},
 				},
 			},
+			u.factGrid(),
+			d.VSpacer{},
 		},
 	}
 }
@@ -397,11 +473,17 @@ func (u *ui) panel() d.Widget {
 func (u *ui) factGrid() d.Widget {
 	children := make([]d.Widget, 0, len(FactLabels())*3)
 	for _, label := range FactLabels() {
-		holder := new(*walk.TextLabel)
+		holder := new(*walk.Label)
 		u.factHolders = append(u.factHolders, factHolder{label: label, into: holder})
 		children = append(children,
-			d.Label{Text: label + ":"},
-			d.TextLabel{AssignTo: holder, Text: "", MinSize: d.Size{Width: 200}},
+			d.Label{Text: label + ":", MinSize: d.Size{Width: factLabelWidth}},
+			// A LABEL AND NOT A TEXT LABEL, for one reason: only walk's Label
+			// carries an ellipsis mode, and SS_PATHELLIPSIS is Windows' own answer
+			// to a folder wider than the space it has. The value used to be cut
+			// dead at the pixel the button beside it began, mid-word, with nothing
+			// to say it had been cut. The whole value is in the tooltip either way.
+			d.Label{AssignTo: holder, Text: "", MinSize: d.Size{Width: 180},
+				EllipsisMode: ellipsisFor(label)},
 		)
 		switch label {
 		case FactData:
@@ -417,13 +499,31 @@ func (u *ui) factGrid() d.Widget {
 	return d.Composite{Layout: d.Grid{Columns: 3, MarginsZero: true}, Children: children}
 }
 
+// factLabelWidth keeps the values in one column, so the grid reads down rather
+// than zig-zagging with the length of each label.
+const factLabelWidth = 90
+
+// ellipsisFor picks Windows' own shortening. A folder is shortened in the
+// middle, keeping the drive and the last folder — which is the half that says
+// WHICH world this is — and everything else is shortened at the end.
+func ellipsisFor(label string) d.EllipsisMode {
+	if label == FactData {
+		return d.EllipsisPath
+	}
+	return d.EllipsisEnd
+}
+
 // details is the whole truth, collapsed. It holds the core's own output, which
 // is the only place in this window the program's own vocabulary appears.
 func (u *ui) details() d.Widget {
 	return d.Composite{
-		AssignTo:      &u.detailsPane,
-		Layout:        d.VBox{MarginsZero: true},
+		AssignTo: &u.detailsPane,
+		Layout:   d.VBox{MarginsZero: true},
+		// A pane worth opening. The stretch factor decides its share of a window
+		// with room to spare; the minimum decides what it gets on a small one,
+		// and it is what stopped this opening three lines tall.
 		StretchFactor: 2,
+		MinSize:       d.Size{Height: detailsMinHeight},
 		Children: []d.Widget{
 			d.Composite{
 				Layout: d.HBox{MarginsZero: true},
@@ -465,13 +565,37 @@ var (
 		ColourAmber: walk.RGB(160, 96, 0),
 		ColourRed:   walk.RGB(176, 0, 0),
 	}
+	// selectedBackFor is the wash behind the selected row: the same hue as its
+	// text, lightened until black text on it would still be readable. It replaces
+	// the system highlight for that row, which is the only way to keep a state's
+	// colour on the row a person is actually looking at.
+	selectedBackFor = map[Colour]walk.Color{
+		ColourGrey:  walk.RGB(226, 230, 235),
+		ColourGreen: walk.RGB(219, 240, 226),
+		ColourAmber: walk.RGB(252, 238, 214),
+		ColourRed:   walk.RGB(252, 224, 224),
+	}
 	bannerColour = walk.RGB(160, 0, 0)
+	hintColour   = walk.RGB(72, 72, 72)
 )
+
+// Every colour has an entry in both tables. A missing one would draw a state as
+// black on black, which is a state with no signal at all.
+func init() {
+	for _, colour := range Colours() {
+		if _, ok := colourFor[colour]; !ok {
+			panic("launchergui: no text colour for colour")
+		}
+		if _, ok := selectedBackFor[colour]; !ok {
+			panic("launchergui: no selected background for colour")
+		}
+	}
+}
 
 // factHolder is one row of the facts grid, waiting for declarative to create it.
 type factHolder struct {
 	label string
-	into  **walk.TextLabel
+	into  **walk.Label
 }
 
 // button registers one push button under its caption, which is how the harness
@@ -527,23 +651,32 @@ func (m *worldModel) Value(row, col int) interface{} {
 
 // styleCell paints the status column in the colour of the state it names.
 //
-// THE SELECTED ROW IS LEFT ALONE. Windows draws it on the highlight colour, and
-// a dark green on that blue is harder to read than the system's own white — so
-// the one row a person is looking at keeps the colours the rest of Windows would
-// give it, and every other row carries the signal.
+// THE SELECTED ROW KEEPS ITS COLOUR TOO, and the first attempt at this was
+// wrong: it skipped the selected row so that Windows' own highlight stayed
+// legible, which meant the ONE row a person's eye is on was the one row with no
+// signal on it — select the world you are worried about and its red goes away.
+//
+// So the selection is drawn instead of suppressed: a pale wash of the state's
+// own colour behind both cells, with the state's colour on the text. It reads as
+// a selection because the whole row is tinted and no other row is, and it reads
+// as the state because it is the state's hue. Windows' blue is not used, so
+// nothing is fighting a system colour for contrast.
 func (u *ui) styleCell(style *walk.CellStyle) {
+	row := style.Row()
+	if row < 0 || row >= len(u.model.rows) {
+		return
+	}
+	colour := u.model.rows[row].Status.Colour
+	selected := u.table != nil && row == u.table.CurrentIndex()
+	if selected {
+		style.BackgroundColor = selectedBackFor[colour]
+		style.TextColor = colourFor[colour]
+		return
+	}
 	if style.Col() != ColStatus {
 		return
 	}
-	if style.Row() < 0 || style.Row() >= len(u.model.rows) {
-		return
-	}
-	if u.table != nil && style.Row() == u.table.CurrentIndex() {
-		return
-	}
-	if colour, ok := colourFor[u.model.rows[style.Row()].Status.Colour]; ok {
-		style.TextColor = colour
-	}
+	style.TextColor = colourFor[colour]
 }
 
 // ---------------------------------------------------------------- the threads
@@ -581,9 +714,6 @@ func (u *ui) actor() {
 			return
 		case fn := <-u.actions:
 			fn()
-			// Anything the core left half-written — a prompt, which a session
-			// answers rather than asks — goes to the pane now.
-			u.log.Flush()
 			u.askForRefresh()
 		}
 	}
@@ -613,9 +743,19 @@ func (u *ui) logPump() {
 }
 
 // appendLine is called by the Log, from whatever goroutine printed.
+//
+// IT IS ALSO WHERE THE CORE'S LAST WORD IS TAKEN, and that placement is the
+// whole of a fix. Reading it later, off the pane's own batch, lost every
+// refusal: a refusal is printed and returned from in microseconds, so the action
+// had already finished and the panel said "'world2' was not created. The details
+// below say why." while the core's own sentence sat one line further down. Here
+// the line is seen by the goroutine that wrote it, before the action returns.
 func (u *ui) appendLine(line string) {
 	u.mu.Lock()
 	u.pending = append(u.pending, line)
+	if said, ok := SaidLine(line); ok {
+		u.said = said
+	}
 	u.mu.Unlock()
 	select {
 	case u.wake <- struct{}{}:
@@ -626,8 +766,9 @@ func (u *ui) appendLine(line string) {
 // ---------------------------------------------------------------- the UI thread
 
 // writeLines appends to the pane, keeps it bounded, and READS WHAT IT IS
-// APPENDING: the same lines are the progress phrase in the panel, the core's own
-// last word for a failure, and the reason the pane opens itself.
+// APPENDING: the same lines are the progress phrase in the panel and the reason
+// the pane opens itself. (The core's last word for a failure is taken in
+// appendLine instead, and the comment there says why it cannot be taken here.)
 //
 // AND IT PUTS THE READER BACK. See LinesToRestore: deciding not to follow is not
 // enough, because walk's AppendText scrolls the caret into view itself, so the
@@ -639,9 +780,6 @@ func (u *ui) writeLines(lines []string) {
 		if u.busy {
 			if phrase, ok := ProgressFor(line); ok {
 				u.setPhrase(phrase)
-			}
-			if said, ok := SaidLine(line); ok {
-				u.said = said
 			}
 		}
 		if IsAlarm(line) {
@@ -754,6 +892,13 @@ func (u *ui) logFollowsTail() bool {
 
 // applySnapshot redraws everything, keeping the selection on the world it was on.
 func (u *ui) applySnapshot(snap launcher.Snapshot) {
+	// A world that has left the list takes its result with it, so a world made
+	// again under a name somebody has used before does not open on the last thing
+	// that happened to a different world. It is read BEFORE the new reading
+	// replaces the old one.
+	for _, gone := range goneFrom(u.worldNames(), snap.Worlds) {
+		u.results.Forget(gone)
+	}
 	u.snapshot = snap
 	u.model.rows = RowsFrom(snap, u.busyView())
 	u.model.PublishRowsReset()
@@ -785,8 +930,7 @@ func (u *ui) applySnapshot(snap launcher.Snapshot) {
 		u.banner.SetVisible(false)
 	}
 	u.mw.SetTitle(WindowTitleFor(snap))
-	u.statusBar.SetText(fmt.Sprintf("%s   -   %d world(s) in %s",
-		CloseHint, len(snap.Worlds), snap.InstallRoot))
+	u.statusBar.SetText(StatusBarText(snap))
 	u.applyActions()
 }
 
@@ -857,7 +1001,7 @@ func (u *ui) applyActions() {
 			}
 		}
 	}
-	u.applyPanel(PanelFor(selected, u.snapshot, u.busyView()), actions)
+	u.applyPanel(PanelFor(selected, u.snapshot, u.busyView(), u.results), actions)
 }
 
 // applyPanel moves one decided Panel into the widgets. NOTHING IS DECIDED HERE.
@@ -865,25 +1009,22 @@ func (u *ui) applyPanel(panel Panel, actions Actions) {
 	u.worldName.SetText(panel.World)
 	u.headline.SetText(panel.Headline)
 	u.headline.SetTextColor(colourFor[panel.Colour])
-	setLabel(u.hint, panel.Hint, walk.RGB(64, 64, 64))
+	setLabel(u.hint, panel.Hint, hintColour)
 	u.spinner.SetVisible(panel.Working)
 	if panel.Working {
 		// PBM_SETMARQUEE is re-asserted on every show: a bar that was hidden
 		// mid-animation does not always take it up again by itself.
 		u.spinner.SetMarqueeMode(true)
 	}
-	// The result of the LAST action stays until the next one starts, so somebody
-	// who looked away for the ninety seconds a start takes still learns how it
-	// went.
-	if panel.Working {
-		u.resultLine.SetVisible(false)
-	} else if u.result.Text != "" {
-		colour := colourFor[ColourGreen]
-		if !u.result.Good {
-			colour = colourFor[ColourRed]
-		}
-		setLabel(u.resultLine, u.result.Text, colour)
+	// THE RESULT IS THIS WORLD'S, and it stays until the next action about this
+	// world — so somebody who looked away for the ninety seconds a start takes
+	// still learns how it went, and somebody who selects another world is not
+	// shown that other world's headline over this one's outcome.
+	colour := colourFor[ColourGreen]
+	if !panel.Result.Good {
+		colour = colourFor[ColourRed]
 	}
+	setLabel(u.resultLine, panel.Result.Text, colour)
 	u.primary.SetText(panel.Primary.Caption)
 	u.primary.SetToolTipText(panel.Primary.Tip)
 	u.primary.SetEnabled(panel.Primary.Enabled)
@@ -942,13 +1083,20 @@ func (u *ui) start(job Job, run func() int) {
 	u.busy = true
 	u.job = job
 	u.phrase = job.Progress()
+	u.results.Record(job.ResultAbout(), Result{}, u.worldNames())
+	u.mu.Lock()
 	u.said = ""
-	u.result = Result{}
+	u.mu.Unlock()
 	u.applyActions()
 	fmt.Fprintf(u.log, "\n> %s\n", job.Heading())
 	select {
 	case u.actions <- func() {
 		code := run()
+		// ANYTHING HALF-WRITTEN GOES TO THE PANE BEFORE THE RESULT IS DECIDED.
+		// The core writes a prompt without a newline, and a session answers
+		// rather than asks — so the last thing it said can be sitting in the
+		// log's own buffer at the moment the exit code arrives.
+		u.log.Flush()
 		u.mw.Synchronize(func() { u.finish(job, code) })
 	}:
 	default:
@@ -978,12 +1126,34 @@ func (u *ui) setPhrase(phrase string) {
 func (u *ui) finish(job Job, code int) {
 	u.busy = false
 	u.phrase = ""
-	u.result = job.Result(code, u.said)
-	if !u.result.Good {
+	u.mu.Lock()
+	said := u.said
+	u.mu.Unlock()
+	result := job.Result(code, said)
+	u.results.Record(job.ResultAbout(), result, u.worldNames())
+	if !result.Good {
 		u.setDetails(true)
 	}
 	u.applyActions()
 	u.askForRefresh()
+}
+
+// worldNames is the worlds that exist right now, which is what decides whether
+// a result has a row to live beside.
+func (u *ui) worldNames() []string {
+	names := make([]string, 0, len(u.snapshot.Worlds))
+	for _, world := range u.snapshot.Worlds {
+		names = append(names, world.Name)
+	}
+	return names
+}
+
+// say records something the WINDOW decided — a copy, an edit that changed
+// nothing — beside the world it is about, through the same log every action's
+// result goes through, so one rule decides what the coloured line says.
+func (u *ui) say(result Result, worlds ...string) {
+	u.results.Record(ResultAbout{Worlds: worlds}, result, u.worldNames())
+	u.applyActions()
 }
 
 // ---------------------------------------------------------------- the actions
@@ -1093,9 +1263,8 @@ func (u *ui) onEdit() {
 	}
 	flags := EditFlags(current, form)
 	if len(flags) == 0 {
-		u.result = Result{Text: "Nothing about '" + name + "' was changed.", Good: true}
 		fmt.Fprintf(u.log, "nothing about '%s' was changed.\n", name)
-		u.applyActions()
+		u.say(Result{Text: "Nothing about '" + name + "' was changed.", Good: true}, name)
 		return
 	}
 	u.start(Job{Kind: JobEdit, World: name, Flags: flags},
@@ -1227,9 +1396,8 @@ func (u *ui) onCopyPeerID() {
 		u.warn(err.Error())
 		return
 	}
-	u.result = Result{Text: "Copied this world's identity on the map.", Good: true}
 	fmt.Fprintf(u.log, "copied this world's identity on the map: %s\n", world.PeerID)
-	u.applyActions()
+	u.say(Result{Text: "Copied this world's identity on the map.", Good: true}, world.Name)
 }
 
 func (u *ui) onCopyLog() {
@@ -1237,8 +1405,8 @@ func (u *ui) onCopyLog() {
 		u.warn(err.Error())
 		return
 	}
-	u.result = Result{Text: "Copied the details to the clipboard.", Good: true}
-	u.applyActions()
+	// Not about any one world, so it is shown whatever is selected.
+	u.say(Result{Text: "Copied the details to the clipboard.", Good: true})
 }
 
 // onOpenConsole opens the console launcher, which is the same program with the
@@ -1316,6 +1484,62 @@ func (u *ui) warn(message string) {
 
 // ---------------------------------------------------------------- the placement
 
+// splitSettings is a walk.Settings of a dozen useful lines.
+//
+// WHY THIS EXISTS. walk already knows how to remember a splitter's position:
+// mark it Persistent, call the window's SaveState and RestoreState, and it reads
+// and writes one string per splitter through walk.App().Settings(). What walk
+// SHIPS as a Settings is an INI file under %APPDATA%\<organisation>\<product> —
+// a second preferences file beside the one this window already keeps, in a
+// folder named after two fields nothing else in this program sets.
+//
+// So the mechanism is walk's and the storage is ours: this holds the strings
+// walk writes, and windowstate.go carries the whole map in the same JSON as the
+// size and the position.
+//
+// IT IS KEYED, AND THAT IS NOT INCIDENTAL. A first attempt held one value and
+// answered every Get with it, on the grounds that there is one splitter worth
+// remembering. There are TWO splitters — the details divider and the world
+// list's, nested inside it — and walk's Splitter.RestoreState descends into its
+// own children whether or not they are Persistent. A single shared value was
+// therefore handed to the inner splitter as well, whose two children happen to
+// match the two numbers, so restoring the height of the details pane also
+// silently set the width of the world list to it.
+type splitSettings struct {
+	values map[string]string
+}
+
+func newSplitSettings() *splitSettings {
+	return &splitSettings{values: make(map[string]string)}
+}
+
+func (s *splitSettings) Get(key string) (string, bool) {
+	value, ok := s.values[key]
+	return value, ok
+}
+func (s *splitSettings) Timestamp(string) (time.Time, bool)  { return time.Time{}, false }
+func (s *splitSettings) Put(key, value string) error         { s.values[key] = value; return nil }
+func (s *splitSettings) PutExpiring(key, value string) error { return s.Put(key, value) }
+func (s *splitSettings) Remove(key string) error             { delete(s.values, key); return nil }
+func (s *splitSettings) ExpireDuration() time.Duration       { return 0 }
+func (s *splitSettings) SetExpireDuration(time.Duration)     {}
+func (s *splitSettings) Load() error                         { return nil }
+func (s *splitSettings) Save() error                         { return nil }
+
+// seed fills it from the file.
+func (s *splitSettings) seed(saved map[string]string) {
+	for key, value := range saved {
+		s.values[key] = value
+	}
+}
+
+// any answers whether there is anything worth restoring.
+func (s *splitSettings) any() bool { return len(s.values) > 0 }
+
+// usable is what goes back into the file. The rule it applies is UsableSplit's,
+// in windowstate.go, where it can be tested.
+func (s *splitSettings) usable() map[string]string { return UsableSplit(s.values) }
+
 // placementPath is where this window's size and position are kept. It is the
 // user's own roaming application data, for the two reasons in windowstate.go:
 // not in a world's data folder, and not in the profiles folder.
@@ -1356,6 +1580,11 @@ func (u *ui) restorePlacement() {
 	if state.Details {
 		u.detailsToggle.SetText(ButtonHideDetails)
 	}
+	// The divider between the worlds and the details pane. walk reads this back
+	// itself, from the settings object above, when the window's state is
+	// restored — which happens after the size is set, because the sizes it holds
+	// are pixels and a splitter about to be resized would only redistribute them.
+	u.settings.seed(state.Split)
 	fitted, usable := state.Fit(
 		int(win.GetSystemMetrics(win.SM_XVIRTUALSCREEN)),
 		int(win.GetSystemMetrics(win.SM_YVIRTUALSCREEN)),
@@ -1393,6 +1622,7 @@ func (u *ui) savePlacement() {
 		Height:    int(rect.Bottom - rect.Top),
 		Maximized: placement.ShowCmd == win.SW_SHOWMAXIMIZED,
 		Details:   u.detailsOpen,
+		Split:     u.splitState(),
 	}
 	raw, err := state.Encode()
 	if err != nil {
@@ -1402,4 +1632,29 @@ func (u *ui) savePlacement() {
 		return
 	}
 	os.WriteFile(path, raw, 0o644)
+}
+
+// splitState is where the dividers were left. walk writes them into the settings
+// above; usable is what decides which of them are worth keeping.
+func (u *ui) splitState() map[string]string {
+	u.mw.SaveState()
+	return u.settings.usable()
+}
+
+// goneFrom is the names in was that are not in now.
+func goneFrom(was []string, now []launcher.WorldView) []string {
+	var gone []string
+	for _, name := range was {
+		found := false
+		for i := range now {
+			if strings.EqualFold(now[i].Name, name) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			gone = append(gone, name)
+		}
+	}
+	return gone
 }

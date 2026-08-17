@@ -242,23 +242,30 @@ at a glance; never silent** — which is what the layout is for:
 
 ```
 +-------------------------- banner, red, hidden unless something is wrong -----+
-| world list (2 columns)   |  world name                                       |
-|  World  | Status         |  headline, in the colour of the state             |
-|  * default | On the map  |  hint, only when there is one thing to do         |
-|  second | Stopped        |  [====== marquee, only while something runs =====]|
-|                          |  green/red result of the last action              |
-|                          |  [        Start / Stop        ]  <- the one button|
-|                          |  [x] Run without a game window (headless)         |
-|                          |  Save name / Port / Speed / Data folder / Map     |
-|                          |     identity, with Open and Copy beside two of    |
-|                          |  [Edit settings...] [Run a health check]          |
-|                          |  [Show details]                                   |
-+------------------------------------------------------------------------------+
-| details pane: the core's own output, timestamped. HIDDEN by default.          |
+| world list (2 cols) |  world name                                            |
+|  World  | Status    |  headline, in the colour of the state                  |
+|  * default | On map |  hint, only when there is one thing to do              |
+|  second | Stopped   |  [======= marquee, only while something runs ========] |
+|                     |  green/red result OF THIS WORLD's last action          |
+|                     |  [    Start / Stop    ]  <- bold, tall, default border |
+|                     |  [x] Run without a game window (headless)              |
+|                     |  [Edit settings...] [Run a health check] [Show details]|
+|                     |  Save name / Port / Speed / Data folder / Map identity,|
+|                     |     with Open and Copy beside two of them              |
++============================= draggable divider ==============================+
+| details pane: the core's own output, timestamped. HIDDEN by default, at least |
+| ten lines tall when shown, and its height is remembered.                      |
 +------------------------------------------------------------------------------+
 | [Create a world...] [Stop every world]                                        |
 +------------------------------------------------------------------------------+
 ```
+
+**The result line is per world.** A `ResultLog` (details.go) keeps the last `Result` for each world
+and one "loose" result for a job whose world has no row to live beside — a create that was refused
+names a world that will never exist, and a delete names one that is about to leave the list. The
+panel shows the selected world's, or the loose one, and nothing at all while an action runs. The
+first shape of this was a single field on the window, which put a health check on one world under
+another world's headline.
 
 The **state table** — one row per state, and no two rows may ever read alike. The pair that must
 never collapse is the last two green/red rows: a world whose link is up has a place on the map, and
@@ -284,6 +291,22 @@ every fact comes from `Session.Snapshot`, so a line this file fails to recognise
 never a fact. That is deliberately cheaper than a progress hook the core would have to call, which
 would be a second contract between two packages for the sake of a caption.
 
+**Where `SaidLine` is called is part of the design, not an implementation detail.** It runs in
+`appendLine`, on the goroutine that WRITES the line, and never off the pane's own batch. The first
+version read it while draining the hundred-millisecond batch and lost every refusal there is: a
+refusal is printed and returned from in microseconds, so the action had already finished and the
+panel said `'world2' was not created. The details below say why.` while the core's own sentence —
+`the profile 'default' already uses port 8787. Every world needs its own` — sat one line lower in a
+pane nobody had opened. `TestTheThreeRefusalsAMachineSawReachThePanel` feeds the real transcripts.
+
+**The dialogs get their own plain-words sentences** (`Prose*` in `view.go`) rather than the core's.
+The core still prints `PublicMapNote`, `LeavingNote` and `CustodyWarning` — into the details pane,
+where the program's own vocabulary belongs and where a repository path is useful. A dialog is primary
+UI, and the core's words leaked straight into it: *"the map applies a per-address enrollment limit"*,
+*"your sidecar may still be holding organisms it took custody of"*, and a link to
+`docs/participant/leave.md`. `DialogProse()` lists every sentence and tooltip the dialogs show and a
+test walks all of them against `InternalWords()`.
+
 **walk limitations hit, and what was done instead:**
 
 - **No expander widget.** `Show details` / `Hide details` is a plain `PushButton` whose caption says
@@ -294,9 +317,32 @@ would be a second contract between two packages for the sake of a caption.
   its dropdown is a `TrackPopupMenu` modal loop, which the Windows harness has never driven. The menu
   bar (`World`, `Open`) and the list's context menu are ordinary `HMENU`s the harness already drives,
   and the same captions are keyed to the same actions.
-- **`TableView` colour is per cell, via `StyleCell`.** Only the `Status` column is coloured, and the
-  **selected** row is deliberately skipped: Windows draws it on the highlight colour and a dark green
-  on that blue reads worse than the system's own white.
+- **`TableView` colour is per cell, via `StyleCell`.** The unselected rows get the state's colour on
+  the `Status` column. The **selected** row is not skipped — that was the first attempt, and it took
+  the signal off the one row a person's eye is on, so selecting the world you were worried about made
+  its red go away. It is drawn instead: `BackgroundColor` a pale wash of the state's hue across both
+  cells, `TextColor` the state's colour. Windows' blue highlight is replaced rather than fought.
+- **Only walk's `Label` has an ellipsis mode**, so the panel's fact VALUES are `Label` and not
+  `TextLabel`: `EllipsisPath` (`SS_PATHELLIPSIS`) on the data folder, `EllipsisEnd` elsewhere. Before
+  that, a path was cut dead at the pixel the button beside it began, mid-word, with nothing to say it
+  had been. The whole value is in the tooltip either way.
+- **The splitters' positions are walk's mechanism with our storage.** Marking a `Splitter`
+  `Persistent` makes walk read and write one string per splitter through `walk.App().Settings()` —
+  and what walk ships as a `Settings` is an INI under `%APPDATA%\<organisation>\<product>`, a second
+  preferences file in a folder named after two fields nothing else in this program sets.
+  `splitSettings` in `window_windows.go` is a dozen-line `walk.Settings` whose map
+  `windowstate.go` carries in the same JSON as the size and the position (`split`, additive).
+  **It is keyed by walk's own path, and that is not incidental**: the first attempt held one value
+  and answered every `Get` with it, on the grounds that there is one splitter worth remembering.
+  There are two — the details divider and the world list's, nested inside it — and
+  `Splitter.RestoreState` descends into its own children whether or not they are `Persistent`, so
+  the single value was handed to the inner splitter as well, whose two children happen to match the
+  two numbers. Restoring the height of the details pane would have silently set the width of the
+  world list to it. Both splitters are named, so both get exact keys and both are remembered.
+- **A closed pane is not a measurement.** walk writes the height of every splitter child including a
+  hidden one, which is zero. `UsableSplit` (tag-free, tested) drops any entry that is not two or more
+  positive numbers, and because the file is seeded back into walk's settings before walk writes to
+  them, dropping keeps the last position the pane had while it was open.
 - **`TextEdit.AppendText` scrolls the view itself.** It selects the end of the document and replaces
   the selection, and the EDIT control scrolls the caret into view during `EM_REPLACESEL` — so
   deciding not to follow was never enough. A machine measured the first visible line jumping from 0
@@ -311,7 +357,8 @@ would be a second contract between two packages for the sake of a caption.
   message loop, which runs after walk has finished starting.
 
 **Where the window's own preferences live:** `%APPDATA%\Bibites Multiverse\launcher-window.json`
-(`windowstate.go`), holding size, position, maximised and whether the details pane was open. **Not**
+(`windowstate.go`), holding size, position, maximised, whether the details pane was open, and where
+its divider was left. **Not**
 in a world's data root, which is the machine's custody record, and **not** in the install root's
 `profiles\` folder, where every `.json` is read as a world and one that will not parse raises the
 red banner on every start.
