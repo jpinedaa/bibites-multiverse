@@ -49,12 +49,16 @@ jobs:
       - name: go vet (host)
         run: go vet ./...
 
-      # The launcher is a Windows program written on Linux, so the only place
-      # its Windows build is checked is here and in make-release.sh:411-413.
+      # The launcher is a Windows program written on Linux, so the only place its
+      # Windows build is checked is here and in make-release.sh's launcher step.
+      # The window (internal/launchergui) is Win32 through and through — walk has
+      # no other target — so a host vet never opens a line of it.
       - name: go vet (windows)
         env:
           GOOS: windows
-        run: go vet ./cmd/multiverse-launcher ./internal/launcher
+        run: |
+          go vet ./cmd/multiverse-launcher ./cmd/multiverse-launcher-gui \
+                 ./internal/launcher ./internal/launchergui
 
       - name: go test
         timeout-minutes: 20
@@ -83,8 +87,30 @@ jobs:
               echo "    ok  $cmd linux/$arch"
             done
           done
+          # The window ships as BibitesMultiverseLauncher.exe, built for the
+          # Windows GUI subsystem so that a double-clicked shortcut opens a window
+          # with no console behind it. Its resource object — the Common Controls 6
+          # manifest and the application icon — is build output and is generated
+          # here exactly as make-release.sh generates it.
+          go tool rsrc -manifest cmd/multiverse-launcher-gui/app.manifest \
+            -ico ../release/kit/bibites-multiverse.ico \
+            -arch amd64 -o cmd/multiverse-launcher-gui/rsrc_windows_amd64.syso
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -trimpath -ldflags "-H=windowsgui" \
+              -o "$out/BibitesMultiverseLauncher.exe" ./cmd/multiverse-launcher-gui
+          echo "    ok  multiverse-launcher-gui windows/amd64"
           file "$out/sidecar-windows-amd64" | grep -q 'PE32+' \
             || { echo "!! the Windows sidecar is not a PE32+ executable" >&2; exit 1; }
+          # THE TWO SUBSYSTEMS ARE THE REASON THERE ARE TWO LAUNCHERS: a window
+          # built as a console program flashes a console up, and commands built as
+          # a window program are not waited for by any shell, which silently
+          # breaks every script that chains two of them.
+          file "$out/BibitesMultiverseLauncher.exe" | grep -q 'PE32+ executable (GUI)' \
+            || { echo "!! the launcher window is not a GUI-subsystem image" >&2
+                 file "$out/BibitesMultiverseLauncher.exe" >&2; exit 1; }
+          file "$out/multiverse-launcher-windows-amd64" | grep -q 'PE32+ executable (console)' \
+            || { echo "!! the launcher's commands are not a console image" >&2
+                 file "$out/multiverse-launcher-windows-amd64" >&2; exit 1; }
           file "$out/relay-linux-amd64" | grep -q 'statically linked' \
             || { echo "!! the relay did not build statically; CGO_ENABLED=0 is the requirement" >&2; exit 1; }
 

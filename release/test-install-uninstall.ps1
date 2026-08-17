@@ -249,6 +249,10 @@ Check "the stop script was written" (Test-Path (Join-Path $KitDir 'Stop-Multiver
 # reads. The profile states this same world in the launcher's own format, and
 # it must never carry the credential: that stays in peer-secret.txt.
 Check "the launcher is in the kit" (Test-Path (Join-Path $KitDir 'BibitesMultiverseLauncher.exe'))
+# The window and its commands are two files, and step 9 refuses to install with
+# either one missing (INS-CHECKSUM), so a kit with one of them is a kit that
+# cannot be installed at all.
+Check "the launcher's commands are in the kit" (Test-Path (Join-Path $KitDir 'multiverse-launcher.exe'))
 $profilesDir        = Join-Path $KitDir 'profiles'
 $defaultProfilePath = Join-Path $profilesDir 'default.json'
 $activeProfilePath  = Join-Path $profilesDir 'active.txt'
@@ -675,6 +679,8 @@ Check "the application directory contains the sidecar" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-sidecar.exe'))
 Check "the application directory contains the launcher" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'BibitesMultiverseLauncher.exe'))
+Check "the application directory contains the launcher's commands" `
+    (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-launcher.exe'))
 Check "the application directory contains the map the launcher enrolls new worlds with" `
     (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json'))
 Check "the application directory contains the launcher's default profile" `
@@ -694,6 +700,8 @@ Check "the installed sidecar was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-sidecar.exe')))
 Check "the installed launcher was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'BibitesMultiverseLauncher.exe')))
+Check "the installed launcher's commands were removed" `
+    (-not (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-launcher.exe')))
 Check "the installed public map was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'public-map.json')))
 Check "the launcher's profiles directory was removed" `

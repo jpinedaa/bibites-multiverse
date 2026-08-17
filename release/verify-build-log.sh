@@ -61,6 +61,8 @@ REQUIRED=(
   'every archive contains LICENSE, THIRD_PARTY_NOTICES\.md, and the public join configuration|the licence and join config are in every archive (make-release.sh:768)'
   'the Windows add-on archive contains BibitesMultiverseLauncher\.exe|the add-on archive ships the launcher (make-release.sh:778)'
   'the Windows complete archive and the setup payload contain BibitesMultiverseLauncher\.exe|the setup shortcuts point at a file that exists (make-release.sh:784)'
+  'the Windows add-on archive contains multiverse-launcher\.exe, which is what a script calls|the commands ship beside the window (make-release.sh:889)'
+  'the window is a GUI-subsystem image and the commands are a console one|the two launchers were built for the two subsystems, which is why there are two (make-release.sh:535)'
   'stable-named copies for the homepage: bibites-multiverse-windows-x64-setup\.exe bibites-multiverse-linux-x64-complete\.zip|the two release-independent names the homepage links were published (make-release.sh:790)'
   '^=== ready, and NOTHING IS PUBLISHED$|the build reached its end (make-release.sh:881)'
 )

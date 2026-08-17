@@ -22,9 +22,10 @@
       * BepInEx itself and its generated files - ONLY if the installer put
         BepInEx there. If BepInEx was already installed on this machine, it is
         left completely alone
-      * the installed application - BibitesMultiverseLauncher.exe, the sidecar,
-        the icon and everything else the installer copied beside them - as long
-        as each file is still the one it left there
+      * the installed application - BibitesMultiverseLauncher.exe, the launcher's
+        window, and multiverse-launcher.exe, its commands, with the sidecar, the
+        icon and everything else the installer copied beside them - as long as
+        each file is still the one it left there
       * Start-Multiverse.ps1 and Stop-Multiverse.ps1
       * the launcher's profiles directory: one file for every world this
         install added, the name of the world the launcher had selected, and
@@ -339,7 +340,7 @@ foreach ($profilePath in $profileFiles) {
             Stop-Uninstall ("The world '$($profileData.name)' is still running: $pidFilePath names a " +
                             "live $($profilePidFiles[$pidFileName]). Stop every world first - open " +
                             "Bibites Multiverse and choose Stop, or run " +
-                            "BibitesMultiverseLauncher.exe stop --all. If that world is not really " +
+                            "multiverse-launcher.exe stop --all. If that world is not really " +
                             "running, delete $pidFilePath and run this again. Nothing was removed.")
         }
     }

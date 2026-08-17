@@ -31,8 +31,8 @@ data="${XDG_DATA_HOME:-$HOME/.local/share}/bibites-multiverse/data"   # unless y
 **`--data-dir` names ONE world, and on Windows you may have more than one.** Every world the
 launcher created has its own data folder, so the path above is only the world the installer made —
 run either command against another world's folder and you get a clean report for a world that is
-not the one failing. `BibitesMultiverseLauncher.exe status --all` names every world on this
-computer with its data folder, and `BibitesMultiverseLauncher.exe profile show NAME` shows one of
+not the one failing. `multiverse-launcher.exe status --all` names every world on this
+computer with its data folder, and `multiverse-launcher.exe profile show NAME` shows one of
 them. The `data` directory these commands want is `<that world's data root>\data`. The path above
 is the whole story on Linux, where a second world means a second unpacked kit with its own
 `--data-root`.
@@ -206,7 +206,7 @@ multiverse-sidecar --release-inflight <migrationId> bounce|drop
 
 Written out for your platform in [leave.md](leave.md); the flags are the same on both. Point
 `--data-dir` at the data root of the world you are asking about — on Windows,
-`BibitesMultiverseLauncher.exe status --all` names each one.
+`multiverse-launcher.exe status --all` names each one.
 
 The list says, for each organism handed over, when it went and how long is left before it is
 written off as lost. The release prints the entry, then the duplication risk, and waits for a

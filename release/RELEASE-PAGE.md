@@ -43,11 +43,16 @@ or select the folder yourself. **Start after installation** is selected by defau
 after the map grants this installation a place. Setup creates desktop and Start Menu launch icons.
 It also registers Bibites Multiverse in Windows Settings for uninstall.
 
-The setup installs `BibitesMultiverseLauncher.exe`, and the icons open it. The launcher starts and
-stops the world, shows its status, and can run the world headless — with no game window, through
-`start --headless`, and back again with `start --no-headless`. It can
-also run more than one world on this computer. Each world has its own map identity, its own data
-folder, and its own sidecar port.
+The setup installs `BibitesMultiverseLauncher.exe`, and the icons open it. **The launcher is now a
+window.** It lists every world on this computer and keeps the list up to date while they run: what
+is running, whether the game's mod has really reached the map, the speed the world is achieving,
+and its place on the map. Buttons start and stop a world, and one of them runs a single session
+with or without a game window without changing the world's own setting. It can also create, clone
+and delete worlds: each has its own map identity, its own data folder, and its own sidecar port.
+Closing the window leaves the worlds running, which the window says.
+
+The same launcher's commands and console menu ship beside it as `multiverse-launcher.exe`, which is
+what a script or a scheduled task should call.
 
 The Windows complete ZIP remains available for advanced or script-based installation. It opens
 the same GUI through `Install-BibitesMultiverse.cmd`. `Start-Multiverse.ps1` and

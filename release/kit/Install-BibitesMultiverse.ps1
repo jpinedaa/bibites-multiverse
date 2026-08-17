@@ -1639,7 +1639,14 @@ $InstallRoot = (Resolve-Path $InstallRoot).Path
 
 $programFiles = @()
 if ($manageProgramFiles) {
-    foreach ($name in @($LauncherName, $SidecarName, 'Uninstall-BibitesMultiverse.ps1',
+    # THE LAUNCHER IS TWO FILES. $LauncherName is the window the shortcuts open,
+    # and multiverse-launcher.exe beside it is the same launcher's commands and
+    # console menu - the file a script calls, and the file the window itself runs
+    # when it is given a command line. A shell does not wait for a process in the
+    # Windows GUI subsystem, so one file could not be both. Both are recorded
+    # below, so the uninstall removes both.
+    foreach ($name in @($LauncherName, 'multiverse-launcher.exe', $SidecarName,
+                         'Uninstall-BibitesMultiverse.ps1',
                          'public-map.json', 'README.md', 'LICENSE',
                          'THIRD_PARTY_NOTICES.md', 'bibites-multiverse.ico')) {
         $source = Join-Path $Here $name
@@ -2198,7 +2205,8 @@ Say "export edges : $ExportEdges   (all four is the shipped default)"
 if ($ExcludeSpecies) { Say "never leaves : $ExcludeSpecies" } else { Say "never leaves : nothing - the exclusion policy is OFF" }
 Say "saves        : every $SaveMinutes minutes, keeping $SaveKeep, save on quit $SaveOnQuit"
 Say "your files   : $DataRoot"
-Say "app launcher : $InstallRoot\$LauncherName"
+Say "app launcher : $InstallRoot\$LauncherName   (the window the icons open)"
+Say "its commands : $InstallRoot\multiverse-launcher.exe   (what a script calls)"
 Say "its profiles : $profilesDir   (this world is 'default')"
 if ($caImported) { Say "certificate  : $caThumbprint imported into your own user store" }
 else             { Say "certificate  : nothing imported into any trust store" }
@@ -2217,6 +2225,7 @@ if ($StartAfterInstall) {
 } else {
     Say "Next: open the Bibites Multiverse icon, or run  .\$LauncherName  here. It"
     Say "      starts this world, stops it, and can add another world on this machine."
+    Say "      For a command line or a script, run  .\multiverse-launcher.exe  instead."
 }
 Say "Advanced: .\$StartName and .\$StopName still run this world from a console, with"
 Say "the values this install was made with. The uninstall script here removes all of it."

@@ -160,7 +160,7 @@ Windows loses one instance loudly. **Linux keeps every instance and shreds the l
 them at once**, so the first thing you reach for when something is wrong is the thing that is
 already gone.
 
-**`BibitesMultiverseLauncher.exe`, which manages up to five worlds from one Windows game folder,
+**The Windows launcher, which manages up to five worlds from one Windows game folder,
 is not part of the Linux kit in this release**, so this rule stands unchanged here: one game
 instance per game folder.
 

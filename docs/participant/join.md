@@ -69,7 +69,7 @@ installer stops with `INS-ENROLL` and keeps the pending identity for a safe retr
 remain connected when the operator disables new enrollment.
 
 **Each extra world on one computer enrolls again.** On Windows,
-`BibitesMultiverseLauncher.exe profile create NAME` runs this same enrollment for the new world, so
+`multiverse-launcher.exe profile create NAME` runs this same enrollment for the new world, so
 that world takes another public identity and counts against both limits. Several worlds created in
 quick succession can meet the per-address limit; the launcher prints the `Retry-After` value the
 service returns, and its pending record makes the retry safe.
@@ -147,7 +147,7 @@ quietly downgraded.
 public-map configuration.
 
 **The Windows launcher takes the same file for an extra private-map world**:
-`BibitesMultiverseLauncher.exe profile create NAME --join-string-file .\join.txt`. Add
+`multiverse-launcher.exe profile create NAME --join-string-file .\join.txt`. Add
 `--relay-url wss://<relay-host>/contract-b/v4` **only** when the file holds the identity half on
 its own — a whole `multiverse-join/1` line already carries the relay address, and the launcher
 never takes one from the flag over one the file carries. On the public map the flag is refused
