@@ -91,7 +91,7 @@ func TestReleaseOverThePathTakesTwoCallsAndKeepsTheHeldEntryReport(t *testing.T)
 		}
 	}
 	held, _ := report["heldEntriesAddressedHere"].(string)
-	if !strings.Contains(held, "heldDepth") || !strings.Contains(held, "--list-inflight") {
+	if !strings.Contains(held, "lostForwardTotal") || !strings.Contains(held, "--list-inflight") {
 		t.Fatalf("the held-entry report no longer says where the other half of the answer lives: %q",
 			held)
 	}

@@ -31,11 +31,6 @@ const (
 	// branches release nothing — and it is why this value did not move with it
 	// (contract-a.md §7.5, §8, §20 A45).
 	defaultHeartbeatDeliveryGrace = 1500 * time.Millisecond
-	// defaultForwardRetryMax caps the exponential backoff a re-forward to a LIVE
-	// destination climbs to: 5 s, 10 s, 20 s, 40 s, then this. It bounds the
-	// re-forward hammer at a live-but-slow peer without touching the dark-side
-	// cadence or the hold clock (contract-b-m4.md §9.3, B5).
-	defaultForwardRetryMax = 60 * time.Second
 )
 
 // Config is the sidecar's runtime configuration. The four required knobs are
@@ -119,21 +114,20 @@ type Config struct {
 	// Contract B tunables (contract-b-m4.md §12).
 	RelayBackoffMin time.Duration
 	RelayBackoffMax time.Duration
-	ForwardRetry    time.Duration
-	// ForwardRetryMax caps the exponential backoff a re-forward to a LIVE
-	// destination climbs to (§9.3, B5). Re-forwards toward a DARK destination
-	// keep the flat ForwardRetry cadence, because that retry is the only conduit
-	// the non-delivery proof has and the hold clock accrues against it.
-	ForwardRetryMax time.Duration
-	BounceTimeout   time.Duration
-	// HoldTimeout is the ACCRUED dark time before a held entry bounces home by
-	// itself (§9.3). The clock runs only while the destination is dark and this
-	// sidecar can see it.
-	HoldTimeout time.Duration
-	// HoldAccrualFlush is how often that accrual is written to the journal. A
-	// crash loses at most this much, in the safe direction.
-	HoldAccrualFlush time.Duration
-	// MaxReroutes bounds the re-routes one entry may take (§9.2).
+	// ForwardRetry is the cadence at which an entry that has NOT yet reached a
+	// live relay connection is offered to one again. It never re-sends a frame
+	// that was written: a written frame is written once (§25, B37).
+	ForwardRetry  time.Duration
+	BounceTimeout time.Duration
+	// ForwardTimeout is how long a `sent` entry waits for its answer before this
+	// sidecar records it LOST (§9.3, §25 B37). Nothing is re-sent at the deadline
+	// and nothing comes home: it closes a record the sender can no longer resolve.
+	ForwardTimeout time.Duration
+	// MaxReroutes bounds the re-routes one entry may take (§9.2). A NEGATIVE
+	// value turns re-routing off altogether, so an organism refused at its first
+	// destination bounces home instead of trying a second one. That is the one
+	// knob that makes migration a single hop, and it is here rather than in a
+	// code path so the owner can take it without a release.
 	MaxReroutes             int
 	StatsInterval           time.Duration
 	GenomeRequestsPerMinute int
@@ -189,10 +183,8 @@ func DefaultConfig() Config {
 		RelayBackoffMin:         contractb.RelayBackoffMin,
 		RelayBackoffMax:         contractb.RelayBackoffMax,
 		ForwardRetry:            contractb.ForwardRetry,
-		ForwardRetryMax:         defaultForwardRetryMax,
 		BounceTimeout:           contractb.BounceTimeout,
-		HoldTimeout:             contractb.HoldTimeout,
-		HoldAccrualFlush:        contractb.HoldAccrualFlush,
+		ForwardTimeout:          contractb.ForwardTimeout,
 		MaxReroutes:             contractb.MaxReroutes,
 		StatsInterval:           contractb.StatsInterval,
 		GenomeRequestsPerMinute: contractb.GenomeRequestsPerMinute,
@@ -271,19 +263,15 @@ func (c *Config) applyDefaults() {
 	if c.ForwardRetry <= 0 {
 		c.ForwardRetry = d.ForwardRetry
 	}
-	if c.ForwardRetryMax <= 0 {
-		c.ForwardRetryMax = d.ForwardRetryMax
-	}
 	if c.BounceTimeout <= 0 {
 		c.BounceTimeout = d.BounceTimeout
 	}
-	if c.HoldTimeout <= 0 {
-		c.HoldTimeout = d.HoldTimeout
+	if c.ForwardTimeout <= 0 {
+		c.ForwardTimeout = d.ForwardTimeout
 	}
-	if c.HoldAccrualFlush <= 0 {
-		c.HoldAccrualFlush = d.HoldAccrualFlush
-	}
-	if c.MaxReroutes <= 0 {
+	// 0 is "unset" and takes the default; a NEGATIVE value is a choice — no
+	// re-routes at all — and applyDefaults must not overwrite a choice.
+	if c.MaxReroutes == 0 {
 		c.MaxReroutes = d.MaxReroutes
 	}
 	if c.StatsInterval <= 0 {

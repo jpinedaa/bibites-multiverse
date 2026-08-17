@@ -87,7 +87,10 @@ type Options struct {
 	// without the registry changing (§6.5).
 	StatsBroadcast time.Duration
 	// ForwardRecordRetention is how long a forwarded migrationId is remembered
-	// for the neverForwarded proof (§5.2).
+	// for the neverForwarded proof (§5.2). It used to be sized at twice the
+	// sender's hold; §25's B37 removed the hold, and what it covers now is a
+	// re-routed entry's later attempts and an old sidecar still retrying across
+	// the transition.
 	ForwardRecordRetention time.Duration
 	// NoWireCompression stops this relay OFFERING permessage-deflate (§24, B35).
 	//
@@ -1933,10 +1936,12 @@ func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bo
 
 // sendForwardReceipt is B26's whole relay-side obligation (§5.2, §6.12).
 //
-// ONE FORWARD, ONE RECEIPT. A re-forward or a re-route of the same migrationId
-// produces another, because it is a statement about a WRITE and not about a
-// migration — a sender holding two under one migrationId has forwarded twice,
-// which is a fact about its own retries and never a duplicated organism.
+// ONE FORWARD, ONE RECEIPT. A re-route of the same migrationId produces another,
+// because it is a statement about a WRITE and not about a migration — a sender
+// holding two under one migrationId has written the frame twice, which is a fact
+// about its own re-routes and never a duplicated organism. A conforming sender
+// since §25's B37 never writes the same frame to the same destination twice at
+// all; the relay does not care either way and counts writes.
 //
 // IT GOES TO THE SENDER'S OWN CONNECTION and nowhere else. That is not an
 // optimisation: §5.1's fan-out set is unchanged and a subscriber is NOT copied,

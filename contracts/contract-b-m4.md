@@ -1,9 +1,9 @@
 # Contract B — Sidecar ↔ Relay ↔ Sidecar ↔ Archive Wire Specification
 
-**Version:** `contract-b/4.0` (amended — §22, B32; `contract-b/3.5` before it, §19 B19)
+**Version:** `contract-b/4.1` (amended — §25, B37; `contract-b/4.0` before it, §22 B32)
 **Amended:** 2026-08-05, from the Go implementation (commit `823a70f`). Four resolutions are
 folded into the body and recorded in **§14** — **B4** the missing `statsBroadcastIntervalMs`
-default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3), **B6** the
+default (§6.5, §12), **B5** the retry a held entry must keep running (§9.2, §9.3 — **superseded — §25, B37**), **B6** the
 narrowing of the duplicate re-ACK to a tombstone (§6.6, §6.7), **B7** the fan-out of the
 relay's own non-delivery answers and the NACK dedup key (§5.1). All four are clarifying; the
 version does not move. Contract A's matching set is `contract-a.md` §15, A26 and A27.
@@ -190,8 +190,10 @@ restating it.
 In scope for M4: one **grid** — a 3×2 map of six slots across two physical machines on a LAN,
 growing to a seventh in the exit test — one relay, one archive; coordinate addressing beside
 the slot number; per-axis route-around past a dark slot or a hole; insertion between two live
-slots on either axis; slot handover; an explicit relay answer that proves non-delivery; the
-bounded hold and its automatic bounce; population and operational stats on the map view (the
+slots on either axis; slot handover; an explicit relay answer that proves non-delivery;
+~~the bounded hold and its automatic bounce~~ — **superseded — §25, B37**: a forwarded frame is
+forwarded once, and an organism that never arrives is lost rather than held; population and
+operational stats on the map view (the
 "ring view" of D15); and ~~the shared token on the wire, carried unchanged from M3 (D9)~~ —
 **superseded — §22, B22**: the shared token is replaced by a per-peer credential bound to the
 `peerId`.
@@ -487,7 +489,7 @@ Identical in shape to Contract A §3 — five fields, no more:
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "b7d1e0c4-9f2a-4c31-8b6d-2e0a41f5c7a9",
   "sentAt": 1785693600123,
@@ -575,6 +577,37 @@ on existing objects, new *reasons* on existing codes, and one new close code. **
 close `4000` on the retired `/contract-b/v3` path (§3), exactly as `contract-b/2` and
 `contract-b/3` did.
 
+**`contract-b/4.1` is the sixth minor, and it is a minor although a RULE was removed**
+(added — §25, B37). §25 deletes the bounded hold: a forwarded frame is forwarded once, an
+unanswered one is recorded lost, and nothing comes home on a timer. "A rule is being replaced"
+is §22 B32's own test for a **major**, so the answer has to be argued rather than asserted, and
+§24 argued the same shape one set earlier:
+
+1. **The identifier is a statement about FRAMES, and no frame changes.** No message type, no
+   field, no enum value, no NACK code and no close code is removed. `MIGRATION_PAYLOAD`,
+   `MIGRATION_ACK`, `MIGRATION_NACK` — `neverForwarded` and `relaySessionId` included — and
+   `FORWARD_RECEIPT` all keep their shape and their meaning. What changed is what ONE PEER does
+   with ITS OWN JOURNAL.
+2. **The replaced rule has an installed base that keeps working, in both directions.** A
+   sidecar built before this set still holds and re-forwards; against a `contract-b/4.1` relay
+   and archive it produces exactly the pre-§25 wire, and its retries are absorbed where they
+   were always absorbed — the destination deduplicates on `migrationId` against its journal and
+   its tombstones (§6.6), and the archive deduplicates on the record's key (§5.1, §25 B38). A
+   `contract-b/4.1` sidecar against an older relay simply never uses the retry that relay
+   expected. **Neither combination loses or duplicates an organism**, which is the property
+   §22 B32 priced and the one this set must not spend.
+3. **The minor is for the one additive OPTIONAL field**, `stats.lostForwardTotal` (§6.3.1) —
+   exactly the test §15's B10, §16's B12, §18's B17 and §19's B19 each answered with a minor.
+   **`heldDepth` and `bouncedTimeoutTotal` are RETIRED, not removed**: a `contract-b/4.1`
+   sidecar stops sending them, which §6.3.1's *every field is optional, and absence is a value*
+   rule has permitted since the block existed, and a reader renders them as **unknown**. Their
+   names are reserved and MUST NOT be reused.
+4. **A major would do active harm.** B25's `minContractVersion` lets an operator refuse peers
+   below a published floor, and the path move a major carries (§3) closes the old path with
+   `4000`. Either would evict a world for running last month's build in order to apply a change
+   that costs that world nothing — and this project moves its fleet by publication and cannot
+   make a participant upgrade (D25). **`/contract-b/v4` does not move.**
+
 **One rule §22 adds is deliberately *not* a compatibility rule, and the distinction has to be
 read here** (added — §22, B25). B25's minimum **contract**-version gate refuses a peer whose
 `protocolVersion` is below a published floor — and that floor may sit at a **minor**. That
@@ -653,7 +686,7 @@ the peer grant**: the same mechanism, a different permission.
 | No sending | A `MIGRATION_PAYLOAD` from a subscriber is answered `MIGRATION_NACK` / `NOT_A_MEMBER` and is **not** forwarded. |
 | What a subscriber may send | `HANDSHAKE`, `PING`, `PONG`, `GENOME_REQUEST`. Nothing else. |
 | No claim | A `SECTOR_CLAIM` from a subscriber is refused with `granted: false, reason: "role_has_no_slot"`. |
-| Duplicates | A re-forwarded or re-routed migration produces a second copy. The archive deduplicates a `MIGRATION_PAYLOAD` and a `MIGRATION_ACK` on `migrationId`, exactly as a sidecar does — and a **re-routed** copy carries a different `destSlot` with the same `migrationId`, which is not a duplicate organism but the same organism on a new lane (§6.6, §9). **A `MIGRATION_NACK` deduplicates on the pair `migrationId` + `code`** (amended — §14, B7), because one migration legitimately produces several different refusals on its way to a lane — a `PEER_OFFLINE` on the first attempt and a `NOT_FORWARDED` on the retry are two facts, not one fact twice, and collapsing them would erase the sequence a re-route has to be read against. |
+| Duplicates | A re-routed migration produces a second copy, and so does a sidecar older than §25's B37 running the retry that set removed. The archive deduplicates a `MIGRATION_PAYLOAD` and a `MIGRATION_ACK` on `migrationId`, exactly as a sidecar does — **inside a bounded window since §25, B38**, because a legitimate duplicate stopped existing when the re-forward did and what is left arrives within minutes — and a **re-routed** copy carries a different `destSlot` with the same `migrationId`, which is not a duplicate organism but the same organism on a new lane (§6.6, §9). **A `MIGRATION_NACK` deduplicates on the pair `migrationId` + `code`** (amended — §14, B7), because one migration legitimately produces several different refusals on its way to a lane — a `PEER_OFFLINE` on the first attempt and a `NOT_FORWARDED` on the retry are two facts, not one fact twice, and collapsing them would erase the sequence a re-route has to be read against. |
 | Full state, no polling | A subscriber also receives every `PEER_STATUS` broadcast, which is what lets the status page render the whole map without asking anybody anything (§10.1). |
 
 The M3 reasoning for the copy over a slot-less ring member is unchanged and still holds: a
@@ -675,10 +708,10 @@ never forwarded reached no sidecar and created no custody.
 | What does not count | A frame the relay refused before writing: no such slot, no live peer for that slot, the destination's outbound queue full, the relay draining. |
 | The session | The relay mints a `relaySessionId` (a UUID) at process start and reports it in `HANDSHAKE_ACK` (§6.2) and in every relay-generated `MIGRATION_NACK` (§6.8). The record covers **that session only**. |
 | The answer | A relay-generated `MIGRATION_NACK` carries `neverForwarded: true` **only** when the `migrationId` is absent from the record of the current session. Otherwise it carries `false`. |
-| Memory | One `migrationId` and one timestamp per forwarded migration. At T1's measured rate — 1 799 hops an hour — 48 hours is about 86 000 entries, a few megabytes. It is in memory, and it is deliberately **not** durable: a relay restart is exactly the event that invalidates the proof, and persisting it would claim knowledge the new process does not have. |
-| **The receipt** (added — §22, B26) | The relay **MUST** send the **sender** one `FORWARD_RECEIPT` (§6.12) per `MIGRATION_PAYLOAD` it forwards, at the moment the frame is written to a destination connection — the same moment that puts the `migrationId` in the record above. One forward, one receipt; a re-forward of the same `migrationId` produces another. The receipt carries the `relaySessionId` in force, so the sender learns the scope of the fact along with the fact. |
+| Memory | One `migrationId` and one timestamp per forwarded migration. At T1's measured rate — 1 799 hops an hour — 48 hours is about 86 000 entries, a few megabytes. It is in memory, and it is deliberately **not** durable: a relay restart is exactly the event that invalidates the proof, and persisting it would claim knowledge the new process does not have. **The 48 hours used to be sized at twice the sender's hold** (§12); §25's B37 removed the hold, and what the retention now covers is a **re-routed** entry's later attempts and a sidecar older than B37 still retrying. The value does not move. |
+| **The receipt** (added — §22, B26) | The relay **MUST** send the **sender** one `FORWARD_RECEIPT` (§6.12) per `MIGRATION_PAYLOAD` it forwards, at the moment the frame is written to a destination connection — the same moment that puts the `migrationId` in the record above. One forward, one receipt; a **re-route** of the same `migrationId` produces another, and so does a retry from a sender older than §25's B37. The receipt carries the `relaySessionId` in force, so the sender learns the scope of the fact along with the fact. |
 | **What the receipt is for** (added — §22, B26) | It moves the forwarding record **into the sender's own durable journal** (§7.4, §9.2). A sender that holds a receipt knows the frame was forwarded under a named session and does not need to ask; a sender that holds **no** receipt for an entry it wrote to a live relay connection knows only that it does not know, which is exactly what `sent` already means. |
-| **What the receipt is NOT** (added — §22, B26) | Not a delivery acknowledgement — §6.7's `MIGRATION_ACK` is, and it comes from the destination sidecar after custody. Not custody. Not an answer. **Not proof of non-delivery, and never proof of delivery**: a receipt states that the relay wrote bytes, and §5.2's own rule says a written frame and a delivered frame are indistinguishable. The safe direction of §9.2 is unchanged in every particular — a receipt can only ever move an entry *toward* holding, never toward re-routing. |
+| **What the receipt is NOT** (added — §22, B26) | Not a delivery acknowledgement — §6.7's `MIGRATION_ACK` is, and it comes from the destination sidecar after custody. Not custody. Not an answer. **Not proof of non-delivery, and never proof of delivery**: a receipt states that the relay wrote bytes, and §5.2's own rule says a written frame and a delivered frame are indistinguishable. The safe direction of §9.2 is unchanged in every particular — a receipt can only ever move an entry *toward* leaving it where it is, never toward re-routing (amended — §25, B37: *toward holding*, before that set removed the hold). |
 
 **Why the receipt, and why now** (added — §22, B26). §13 item 6 named this fix, priced it at
 one frame per migration, and declined it because *"a relay restart is rare and
@@ -709,13 +742,20 @@ correctness decision on another machine's clock, which D5 forbids. The session i
 test exact and clock-free: the sender records the `relaySessionId` under which the entry was
 first handed to a live relay connection, and the proof counts only when the two ids match
 (§9.2). A **link flap** keeps the id and keeps the proof; a **relay restart** changes it and
-the sender falls back to holding.
+the sender has no proof at all — which since §25's B37 means the entry simply waits out
+`forwardTimeoutMs` and is recorded lost (§9.3).
 
 **The failure direction is deliberate.** Every ambiguity resolves toward `neverForwarded:
-false` — toward holding, toward waiting, toward the bounded hold and eventually the bounce —
-because holding costs a delay and re-routing on a bad proof costs a duplicated organism. Risk
-2 names the implementation that gets this wrong: one that treats **silence** as proof.
-Silence is never proof in this contract; only a relay statement or a peer NACK is.
+false` — toward doing nothing at all with the entry (amended — §25, B37: toward the bounded
+hold and eventually the bounce, before that set removed both) — because doing nothing costs at
+worst one organism and re-routing on a bad proof costs a duplicated one. Risk 2 names the
+implementation that gets this wrong: one that treats **silence** as proof. Silence is never
+proof in this contract; only a relay statement or a peer NACK is.
+
+**And the direction got cheaper to hold to, not more expensive** (added — §25, B37). Before
+that set, refusing a doubtful proof cost a 24-hour wait and then an automatic bounce that could
+duplicate the organism after all — the one exception at-most-once carried. It now costs a
+record marked `lost`. **The safe answer no longer has a duplication case hiding behind it.**
 
 ---
 
@@ -808,7 +848,7 @@ first implies the second** (added — §22, B25):
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "HANDSHAKE",
   "messageId": "9d1a4b77-2c60-4c1e-9f03-77a1c8e4b510",
   "sentAt": 1785693597011,
@@ -851,7 +891,7 @@ Authorization: Bearer peer-lan-slot5.9f3c1a2b7e4d05688c1f0a37d5b9e264
 ```
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "HANDSHAKE",
   "messageId": "5e2b90c1-77af-4d13-b0a6-31c8e5079f42",
   "sentAt": 1785693597100,
@@ -918,7 +958,7 @@ side can do it for them (D25).
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "HANDSHAKE_ACK",
   "messageId": "0b4e2a13-5d77-4b90-8a21-6f0c19d4e772",
   "sentAt": 1785693597019,
@@ -979,7 +1019,7 @@ world in the map and nothing useful to do about it.
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "SECTOR_CLAIM",
   "messageId": "4c7f0d92-8a11-4e63-bb05-2d971a0c3e44",
   "sentAt": 1785693597033,
@@ -995,7 +1035,7 @@ world in the map and nothing useful to do about it.
       "eggCount": 37,
       "custodyDepth": 2,
       "pacedDepth": 0,
-      "heldDepth": 0,
+      "lostForwardTotal": 0,
       "lastSave": {
         "atMs": 1785693540118,
         "simulatedTime": 119303.50,
@@ -1027,7 +1067,7 @@ Part 4, in one frame:
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "SECTOR_CLAIM",
   "messageId": "8e3a05c7-19bd-4f42-a0e6-72c4198bd3f0",
   "sentAt": 1785694011500,
@@ -1038,7 +1078,7 @@ Part 4, in one frame:
     "borderEdges": ["E", "N", "W", "S"],
     "gameVersion": "0.6.3.1",
     "modConnected": true,
-    "stats": { "population": 0, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+    "stats": { "population": 0, "custodyDepth": 0, "pacedDepth": 0, "lostForwardTotal": 0,
                "species": [] }
   }
 }
@@ -1064,8 +1104,9 @@ memory (Risk 4).
 | `eggCount` | number (int) | no | Live eggs, when the mod reports them. |
 | `custodyDepth` | number (int) | no | Journal entries this sidecar holds custody of right now: outbound entries awaiting `MIGRATION_ACK` plus inbound entries awaiting `MIGRATE_IN_ACK`. |
 | `pacedDepth` | number (int) | no | Inbound entries waiting on the delivery rate limit (`contract-a.md` §7.5). A depth that never falls names a limit set too low. |
-| `heldDepth` | number (int) | no | Outbound entries in the **held** state of §9.2 — forwarded, unproven, destination dark. |
-| `bouncedTimeoutTotal` | number (int) | no | Cumulative count of entries this sidecar has bounced home because the hold timeout expired. A monotonic counter, reset only by losing the journal. **An automatic bounce is a fact the operator reads, not a silent repair** (§9.3). |
+| `lostForwardTotal` | number (int) | no | **What migration costs on this map** (added — §25, B37). Cumulative count of organisms this sidecar handed to the relay and never heard an answer for within `forwardTimeoutMs` (§9.3). A monotonic counter, reset only by losing the journal. **A loss is a fact the operator reads, not a silent repair** — it is the reading that replaced `bouncedTimeoutTotal`, and it names the same event with the organism no longer coming home. A rising count names a lane whose far end keeps disappearing mid-crossing, not a defect. |
+| ~~`heldDepth`~~ | — | — | **RETIRED — §25, B37.** It counted outbound entries in the `held` state, and there is no such state. A `contract-b/4.1` sidecar does not send it; a peer that still does is older than that set, and a reader renders it as unknown or ignores it. **The name is reserved and MUST NOT be reused.** |
+| ~~`bouncedTimeoutTotal`~~ | — | — | **RETIRED — §25, B37.** It counted entries a hold timeout bounced home, and nothing bounces on a timeout. Same rules as the row above; **the name is reserved and MUST NOT be reused.** |
 | `simulatedTime` | float | no | The world's simulated seconds, from the last `HEARTBEAT`. It is what makes a paced rate interpretable. |
 | `timeScale` | float | no | **How fast the world is running** (added — §18, B16), copied from the last `HEARTBEAT.timeScale` (`contract-a.md` §5.2) and **never computed here**. `5` is five simulated seconds per real second; `0` is a world standing still, which is a **reading and not a gap** — a reader renders it as such and does not confuse it with absence. Absent means **unknown**: no mod is connected, or no heartbeat has arrived on this session yet. It is the interpretive key to `simulatedTime` and to the two fields below: both advance and are spent in the world's own time, not the wall's. |
 | `inboundRatePerSimMinute` | float | no | **The delivery rate limit this sidecar is configured with** (added — §18, B16), from `contract-a.md` §7.5 and its `--inbound-rate` knob (§18, A40). A **setting**, not a measurement, and the sidecar always knows its own — so absence here means the peer's build predates this field, never that it has no limit. **A reader MUST render an absent value as unknown and MUST NOT substitute the shipped default**, which has been changed three times (2.0 → 12.0 → 100.0 on 2026-08-07 alone). It is what makes `pacedDepth` readable: twelve entries queued behind 120 a simulated minute is a blink, and twelve behind 2.0 is six minutes. |
@@ -1176,7 +1217,7 @@ whenever a peer's effective neighbour on either axis changes — not only when t
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "SECTOR_GRANT",
   "messageId": "e2b90c47-1f35-4d02-9c68-51a7d3b0f981",
   "sentAt": 1785693731655,
@@ -1314,7 +1355,7 @@ the two disagree the display is stale.
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "PEER_STATUS",
   "messageId": "77c0e1a4-63b8-4f19-8d2a-9e40b7c15206",
   "sentAt": 1785693731650,
@@ -1326,7 +1367,7 @@ the two disagree the display is stale.
       { "slot": 1, "position": { "col": 0, "row": 0 }, "peerId": "peer-main-slot1",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731644,
-        "stats": { "population": 231, "custodyDepth": 1, "pacedDepth": 0, "heldDepth": 0,
+        "stats": { "population": 231, "custodyDepth": 1, "pacedDepth": 0, "lostForwardTotal": 0,
                    "modVersion": "0.6.1", "contractAVersion": "contract-a/2.3",
                    "migrationExclude": ["Basic bibite"], "saveMinutes": 10.0,
                    "saveKeep": 6, "saveOnQuit": true, "worldWrapping": true,
@@ -1340,32 +1381,32 @@ the two disagree the display is stale.
       { "slot": 2, "position": { "col": 1, "row": 0 }, "peerId": "peer-main-slot2",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731641,
-        "stats": { "population": 208, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+        "stats": { "population": 208, "custodyDepth": 0, "pacedDepth": 0, "lostForwardTotal": 0,
                    "species": [ ... 7 entries, elided ... ] },
         "statsAsOfMs": 1785693731641 },
       { "slot": 3, "position": { "col": 2, "row": 0 }, "peerId": "peer-main-slot3",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731639,
-        "stats": { "population": 197, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+        "stats": { "population": 197, "custodyDepth": 0, "pacedDepth": 0, "lostForwardTotal": 0,
                    "species": [ ... 5 entries, elided ... ] },
         "statsAsOfMs": 1785693731639 },
       { "slot": 4, "position": { "col": 0, "row": 1 }, "peerId": "peer-lan-slot4",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731630,
-        "stats": { "population": 244, "custodyDepth": 3, "pacedDepth": 11, "heldDepth": 2,
+        "stats": { "population": 244, "custodyDepth": 3, "pacedDepth": 11, "lostForwardTotal": 2,
                    "species": [ ... 32 entries, elided ... ], "truncated": true },
         "statsAsOfMs": 1785693731630 },
       { "slot": 5, "position": { "col": 1, "row": 1 }, "peerId": "peer-lan-slot5",
         "live": false, "modConnected": false, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693719004,
         "darkSinceMs": 1785693719004,
-        "stats": { "population": 226, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0,
+        "stats": { "population": 226, "custodyDepth": 0, "pacedDepth": 0, "lostForwardTotal": 0,
                    "species": [ ... 9 entries, elided ... ] },
         "statsAsOfMs": 1785693718991 },
       { "slot": 6, "position": { "col": 2, "row": 1 }, "peerId": "peer-main-slot6",
         "live": true, "modConnected": true, "gameVersion": "0.6.3.1",
         "simulationSize": 2000.0, "exportEdges": ["E", "N"], "lastSeenMs": 1785693731647,
-        "stats": { "population": 189, "custodyDepth": 0, "pacedDepth": 0, "heldDepth": 0 },
+        "stats": { "population": 189, "custodyDepth": 0, "pacedDepth": 0, "lostForwardTotal": 0 },
         "statsAsOfMs": 1785693731647 }
     ],
     "you": { "slot": 4, "position": { "col": 0, "row": 1 },
@@ -1521,9 +1562,12 @@ The receiving sidecar **MUST**, in this order:
    **The second row is the one that matters, and pacing is why** (Risk 9). A paced delivery
    can sit in this journal for minutes of simulated time. ACKing it here would release the
    sender's custody at the moment the organism is *least* delivered — journaled at the
-   receiver, not yet spawned — and if that receiver then dies, both sides have let go. The
-   sender's retry costs nothing: it lands right back in this branch, and §9.3's hold clock
-   does not run while the destination is live.
+   receiver, not yet spawned — and if that receiver then dies, both sides have let go. **The
+   sender is not waiting on this answer to act** (amended — §25, B37): since that set it has
+   no retry to spend and no clock running against a live destination, so the cost of the
+   silence is a delay in a record and never an action. **The rule matters more, not less, for
+   the peers that still retry**: every sidecar older than B37 produces exactly this duplicate,
+   and this row is what keeps it harmless (§25, B37, *the transition*).
 
    **A re-routed frame deduplicates on exactly the same key**, which is what makes a re-route
    that races a late delivery safe: the second arrival is a duplicate, not a second organism.
@@ -1566,7 +1610,7 @@ argument.
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "1f9c40ab-7d22-4e58-9b31-05c7e2a8d640",
   "sentAt": 1785693600151,
@@ -1613,7 +1657,7 @@ geometry and the species block are untouched, and **only `destSlot` changed** �
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "MIGRATION_PAYLOAD",
   "messageId": "5c07b2e9-84a1-4d36-97f0-1eb3d8a05c74",
   "sentAt": 1785693733120,
@@ -1671,8 +1715,11 @@ table is aligned to this section, and this section is the authority (§14, B6).
 
 **Pacing does not change this rule, and Risk 9 is the reason to say so out loud.** A paced
 delivery can sit in the receiver's journal for minutes of simulated time before the mod sees
-it, and the `MIGRATION_ACK` waits that whole time. That silence is not an orphan, and §9.2's
-hold clock is what keeps the sender from treating it as one. Moving the ACK earlier — to the
+it, and the `MIGRATION_ACK` waits that whole time. That silence is not an orphan, and nothing
+on the sender's side treats it as one: it does not re-send, and the only deadline it carries is
+`forwardTimeoutMs`, which closes a record rather than moving an organism (amended — §25, B37;
+§9.2's hold clock was what kept the sender honest before that set removed it). Moving the ACK
+earlier — to the
 journal write — would fix the silence by breaking the thing the chain exists for: the spawn
 is the proof of delivery.
 
@@ -1692,7 +1739,7 @@ genome long after the migration completed (§10).
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "MIGRATION_ACK",
   "messageId": "58d2c0b9-3417-4a6f-9e28-b1d05c7a2f33",
   "sentAt": 1785693600402,
@@ -1746,10 +1793,12 @@ load-bearing sentence in this document, and the one an implementation is most li
 violate by adding a NACK to a later failure path. See §9.
 
 **A relay NACK is a statement about one attempt; `neverForwarded` is the statement about the
-migration.** A sender that reads `SLOT_VACANT` on its third re-forward learns nothing about
-its first: an earlier attempt may have been forwarded to a peer that then died silently. This
-is exactly the trap Risk 2 describes, and the boolean is the only thing that gets a sender
-out of it (§5.2, §9.2).
+migration.** A sender that reads `SLOT_VACANT` on a **re-routed** attempt learns nothing about
+the first one: the earlier attempt may have been forwarded to a peer that then died silently.
+This is exactly the trap Risk 2 describes, and the boolean is the only thing that gets a sender
+out of it (§5.2, §9.2). **The rule is unchanged and its reach narrowed** (amended — §25, B37):
+a conforming sender no longer makes a third attempt at the same destination, so the attempts
+this row separates are the re-routes and nothing else.
 
 **The class change on `SLOT_VACANT` is a wire semantic change and needs care in review.** An
 M3 sidecar reads it as transient and retries; an M4 sidecar reads it as permanent and stops
@@ -1764,7 +1813,7 @@ anything for this migration — the frame that authorizes a re-route:
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "MIGRATION_NACK",
   "messageId": "b3160fe2-95ad-4c77-8f10-2a4e6c9b0715",
   "sentAt": 1785693733095,
@@ -1783,12 +1832,13 @@ anything for this migration — the frame that authorizes a re-route:
 ```
 
 The same situation after a relay restart. Everything about the map is identical; the relay
-simply cannot speak for the period before it started, so it says `false` and the sender
-**holds** instead of re-routing:
+simply cannot speak for the period before it started, so it says `false` and the sender **does
+not re-route** (amended — §25, B37: before that set it *held*, and the entry ran a 24-hour
+clock; it now waits out `forwardTimeoutMs` and is recorded lost, §9.3):
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "MIGRATION_NACK",
   "messageId": "9a41c7e0-3b62-4d85-91fa-6c0e28d3b417",
   "sentAt": 1785693840210,
@@ -1831,7 +1881,7 @@ request it cannot serve as an error.
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "GENOME_REQUEST",
   "messageId": "6a20f7c8-4b3d-4e51-9017-c8b25d0a4f16",
   "sentAt": 1785693605010,
@@ -1877,7 +1927,7 @@ busy and the request shed.
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "GENOME_RESPONSE",
   "messageId": "3f7b1e05-0a94-4d2c-91b7-6d08e5c3a220",
   "sentAt": 1785693605033,
@@ -1916,7 +1966,7 @@ number at all.
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "PING",
   "messageId": "d90c4b71-52ae-4f38-b6c0-1a7e35d20894",
   "sentAt": 1785693731630,
@@ -1927,8 +1977,7 @@ number at all.
       "eggCount": 41,
       "custodyDepth": 3,
       "pacedDepth": 11,
-      "heldDepth": 2,
-      "bouncedTimeoutTotal": 0,
+      "lostForwardTotal": 2,
       "simulatedTime": 120507.75,
       "lastSave": {
         "atMs": 1785693540118,
@@ -1972,16 +2021,16 @@ about the migration.
 | Rule | Statement |
 |---|---|
 | When | At the write, not before it and not after the write completes. §5.2's *what counts as forwarded* is unchanged: **any attempted write** counts, including one that later fails, because a partial write and a peer that dies with bytes in its buffer are indistinguishable. |
-| One per forward | A re-forward or a re-route of the same `migrationId` produces another receipt. A sender that holds two receipts under one `migrationId` has forwarded twice; that is a fact about its own retries, never a duplicate organism (the `migrationId` is preserved and the destination deduplicates — §6.6). |
+| One per forward | A **re-route** of the same `migrationId` produces another receipt. A sender that holds two receipts under one `migrationId` has written the frame twice; that is a fact about its own re-routes, never a duplicate organism (the `migrationId` is preserved and the destination deduplicates — §6.6). **A conforming sender since §25's B37 writes a frame once per DESTINATION and never re-forwards**, so a second receipt names a second destination — and a sender older than that set may still produce several under one destination, which this rule has always covered. |
 | What the sender does with it | **Records it against the journal entry, durably** (§7.4, §9.2), and nothing else. It sends no answer. A receipt changes no handoff state on its own: an entry that is `sent` stays `sent`. |
 | Not delivery | It is **not** `MIGRATION_ACK`. Custody moves when the destination sidecar journals and its mod acknowledges (§9.1); a receipt says the relay wrote bytes at a socket. |
-| Not proof of non-delivery | And it can never become one. `neverForwarded` (§6.8) is still the only statement that authorizes a re-route, and a receipt only ever makes the safe answer *more* certain: an entry with a receipt was forwarded, so it holds. |
+| Not proof of non-delivery | And it can never become one. `neverForwarded` (§6.8) is still the only statement that authorizes a re-route, and a receipt only ever makes the safe answer *more* certain: an entry with a receipt was forwarded, so it stays where it is (amended — §25, B37: *so it holds*, before that set removed the hold). |
 | Best effort, and the failure direction is safe | A receipt the sender never sees costs nothing but the certainty it would have added — the entry stays `sent`, which is where the receipt would have kept it anyway. The relay **MUST NOT** delay, block or fail a forward on account of a receipt it could not send. |
 | Bounded | A receipt is subject to the same per-peer outbound queue as everything else. If the sender's outbound queue is full, the receipt is dropped, not queued indefinitely — see the row above for why that is safe. |
 
 ```json
 {
-  "protocol": "contract-b/4.0",
+  "protocol": "contract-b/4.1",
   "type": "FORWARD_RECEIPT",
   "messageId": "3f2a71b8-4c09-4d6e-9a15-8b0c7e42d391",
   "sentAt": 1785693732104,
@@ -2251,7 +2300,7 @@ rather than lifting it.
 | sidecar | `<data-dir>/peer-id` | One line, the `peerId` | The peer becomes a stranger and takes a second slot, stranding its old one. Generated once, on first start, if absent. |
 | sidecar | `<data-dir>/slot` | One line, the granted slot number | Only the `preferredSlot` hint; rule 1 recovers the slot from `peerId` anyway. |
 | sidecar | `<data-dir>/position` | One line, `col,row` | Only the `preferredPosition` hint, and only useful to a peer that lost its `peerId` too. Written on every granted `SECTOR_GRANT`. |
-| sidecar | journal | Custody, tombstones, the recorded `destSlot`, **the handoff state, the `relaySessionId` of the first hand-off, the accrued hold time and the re-route count** (§9.2) | Organisms. This is the one file whose loss is not recoverable, and D2 accepts that as loss. |
+| sidecar | journal | Custody, tombstones, the recorded `destSlot`, **the handoff state, the `relaySessionId` of the first hand-off, `sentAt` and the re-route count** (§9.2; `sentAt` replaced *the accrued hold time* — §25, B37) | Organisms. This is the one file whose loss is not recoverable, and D2 accepts that as loss. |
 
 The relay writes `ring.json` **before** it answers a `SECTOR_CLAIM` that created or changed a
 reservation — an answered grant that is not on disk can hand the same slot to two peers across
@@ -2262,8 +2311,8 @@ journal: losing them costs a placement mix-up, never an organism.
 
 **The journal's new fields are load-bearing and must survive a restart.** §9.2 depends on
 every one of them: the handoff state says whether custody may have moved, the `relaySessionId`
-scopes the proof, the accrued hold time is what a bounded hold counts, and the re-route count
-is what bounds it. A sidecar that reconstructs any of them from memory at startup has lost
+scopes the proof, `sentAt` is when `forwardTimeoutMs` starts running (amended — §25, B37: *the
+accrued hold time is what a bounded hold counts*), and the re-route count bounds the re-route. A sidecar that reconstructs any of them from memory at startup has lost
 the safety property, not just the bookkeeping.
 
 ### 7.5 Operator commands — release, handover, and the custody rules around them
@@ -2286,7 +2335,7 @@ still does nothing else.
 | `multiverse-relay --release-slot <n>` | relay, at startup **or over the admin path** (amended — §22, B28) | Removes slot `n` from `ring.json` and leaves its position a **hole**. Surviving slots keep their numbers, their positions and their relative order. The number is not reused: `maxSlotEverIssued` never decreases. **This is the operator's answer for a position that will never be filled again** (added — §22, B29): the position rejoins the map as an ordinary hole that the next newcomer fills before any axis grows, and the address stays retired forever, so every journal entry that names it still gets its permanent `SLOT_VACANT`. |
 | `multiverse-relay --handover-slot <n> <newPeerId>` | relay, at startup **or over the admin path** (amended — §22, B28) | **New in M4** (D15). Rebinds the reservation — slot number **and** position — to a different `peerId`. The map does not change shape and no lane moves. **It is also the credential recovery path** (added — §22, B22): a stranger who lost their join string is handed their own slot back under a new `peerId` and a freshly minted credential. There is no other recovery, and §3.1 says so rather than implying it. |
 | `multiverse-relay --evict-peer <peerId> [--for <duration>]` | relay, at startup or over the admin path | **New in `contract-b/4.0`** (added — §22, B28). Closes that peer's connection with `4005` and refuses it for the stated period, or until lifted. **It releases nothing**: the reservation, the slot number and the position all survive untouched, so the peer's return is an ordinary `reason: "reclaimed"` and its journal is still addressable throughout. Eviction is a **liveness** act, not a placement act, and the map treats an evicted peer exactly as it treats a dark one (§8). It is what `m5_considerations.md` DQ7 leaves for a peer that will not stop when suppressing its text at the renderer was not enough. |
-| `multiverse-sidecar --release-inflight <migrationId> bounce\|drop` | the sidecar that holds the journal | **New in M4** (D2, D12). Releases one **held** entry by hand, before the hold timeout expires (§9.3). **It stays on the sidecar's own machine and gets no admin path**, because custody is local (D2) and the machine is a stranger's. The receipt B26 adds is what reduces how often anybody needs it (§5.2, §13 item 6). |
+| `multiverse-sidecar --release-inflight <migrationId> bounce\|drop` | the sidecar that holds the journal | **New in M4** (D2, D12). Resolves one unresolved outbound entry by hand, before `forwardTimeoutMs` records it lost (§9.3). **It stays on the sidecar's own machine and gets no admin path**, because custody is local (D2) and the machine is a stranger's. The receipt B26 adds is what reduces how often anybody needs it (§5.2, §13 item 6). **Since §25's B37 it is the ONLY way left to duplicate an organism on this map** — nothing bounces a forwarded entry automatically any more — and §9.3 requires the command to say so in its own output before it acts. |
 
 **The admin path, and the four properties that make it safe** (added — §22, B28).
 
@@ -2334,23 +2383,24 @@ confirmation for, the full ring-side consequence: the slot, its position, its `p
 long it has been dark, which peers' effective lanes change, and which positions become holes.
 
 **What the relay cannot print, and what does instead.** `m4_considerations.md` Question 3 asks
-both commands to list the held entries that name the slot. The relay **cannot**: journals live
+both commands to list the unresolved entries that name the slot. The relay **cannot**: journals live
 on six other machines and D2 keeps custody local — a relay that could enumerate them would be
 a relay that reads journals. The division is therefore:
 
 | Question | Answered by |
 |---|---|
 | What happens to the map? | The relay command's own pre-act report. |
-| Who is holding organisms addressed to this slot? | `PEER_STATUS.slots[].stats.heldDepth` (§6.3.1) — visible on the status page and in `ringstat` for every peer at once. |
-| **Which** entries, and what are they? | `multiverse-sidecar --list-inflight [--dest-slot <n>]`, on the machine that holds the journal. It prints each entry's `migrationId`, `entityId`, `destSlot`, handoff state, accrued hold and deadline. |
+| Who has already LOST organisms addressed to this slot? | `PEER_STATUS.slots[].stats.lostForwardTotal` (§6.3.1) — visible on the status page and in `ringstat` for every peer at once (amended — §25, B37: this row read `stats.heldDepth` before that set, and there is no held depth). |
+| **Which** entries are unresolved, and what are they? | `multiverse-sidecar --list-inflight [--dest-slot <n>]`, on the machine that holds the journal. It prints each entry's `migrationId`, `entityId`, `destSlot`, handoff state, when it was forwarded and how long is left before it is recorded lost. |
 
 The operator therefore makes one decision with the facts in view; the facts simply come from
 two places, because custody does.
 
 **The admin path changes none of that division** (added — §22, B28). The relay still cannot
 enumerate journals it is forbidden to read, so the report it returns over the path is the
-report it printed at a console — the map's half — and `heldDepth` on `PEER_STATUS` is still
-where an operator sees who is holding organisms addressed to the slot. What **does** change
+report it printed at a console — the map's half — and `lostForwardTotal` on `PEER_STATUS` is
+where an operator sees who has already lost organisms addressed to the slot (amended — §25,
+B37; it read `heldDepth` before that set). What **does** change
 with a public map is who can run the third row: `--list-inflight` is typed on the machine that
 holds the journal, and after M5 that machine is usually a stranger's. **The operator's honest
 answer becomes "ask the peer"**, and the support surface WP7 owes has to say so rather than
@@ -2484,14 +2534,23 @@ status page and `ringstat` render as "slot 5 bypassed since 04:12, receiving not
 
 ---
 
-## 9. Custody — the chain, the handoff state, the re-route and the bounded hold
+## 9. Custody — the chain, the handoff state, the re-route and the loss
 
 Contract A owns steps 1, 2, 4 and 5 of `system_decomposition.md`'s custody chain. Contract B
-owns the middle. **M4 adds one bounded exception to at-most-once and nothing else**, and D2's
-amended text is the authority for it: an organism forwarded to a slot that then went dark,
-with no proof of non-delivery, is held for a configurable timeout — 24 hours by default — and
-then bounces home by itself. The owner signed that off on 2026-08-05 and accepts the residual
-duplication risk it names (§9.3).
+owns the middle. **AT-MOST-ONCE CARRIES NO EXCEPTION** (amended — §25, B37).
+
+~~M4 adds one bounded exception to at-most-once and nothing else: an organism forwarded to a
+slot that then went dark, with no proof of non-delivery, is held for a configurable timeout —
+24 hours by default — and then bounces home by itself. The owner signed that off on 2026-08-05
+and accepts the residual duplication risk it names (§9.3).~~ **Superseded — §25, B37**, by the
+same owner on 2026-08-17: *"we don't mind much on bibites being lost, we can see migrating as
+dangerous, and then there wouldn't be duplicates while making things simpler."*
+
+**MIGRATION IS DANGEROUS, and that is the design rather than a defect in it.** An organism is
+handed to its destination **once**. It is never handed over again, no clock accrues against it,
+and it never comes home on a timer. If it does not arrive, it is **lost** — recorded, counted
+and readable on the map (§6.3.1, `lostForwardTotal`), and gone. The exception §9.3 used to
+carry, and every mechanism that existed to bound it, are removed together.
 
 ### 9.1 The chain
 
@@ -2534,33 +2593,41 @@ Every outbound journal entry therefore carries a **handoff state**, durable (§7
 | State | Meaning | Custody may have moved? |
 |---|---|---|
 | `pending` | Journaled. Never written to a live relay connection. | **No** |
-| `sent` | Written to a live relay connection, no terminal answer yet. Carries the `relaySessionId` in force at that first write — **and, since `contract-b/4.0`, the relay's own `FORWARD_RECEIPT` for that write when one arrived** (amended — §22, B26). The receipt does not change the state; it is the evidence that the state is right. | **Yes — unknowably** |
-| `held` | `sent`, and the destination is observed dark. The hold clock accrues here and nowhere else (§9.3). | **Yes — unknowably** |
+| `sent` | Written to a live relay connection, no terminal answer yet. Carries the `relaySessionId` in force at that write — **and, since `contract-b/4.0`, the relay's own `FORWARD_RECEIPT` for it when one arrived** (amended — §22, B26) — **and `sentAt`, the instant `forwardTimeoutMs` runs from** (added — §25, B37). The receipt does not change the state; it is the evidence that the state is right. | **Yes — unknowably** |
+| ~~`held`~~ | ~~`sent`, and the destination is observed dark. The hold clock accrues here and nowhere else.~~ **REMOVED — §25, B37.** A dark destination is no longer a state change: there was nothing left for the state to authorize once the re-forward and the timeout bounce were gone. A journal written before that set replays a `held` entry as **`sent`**, which is what it always meant. | — |
 | `refused` | A statement arrived that proves no custody moved. | **No** |
 | `done` | `MIGRATION_ACK` received. Becomes a tombstone. | It moved, and completed. |
+| `lost` | `sent`, and no terminal answer arrived within `forwardTimeoutMs` (added — §25, B37). **Terminal.** The entry becomes a tombstone, `stats.lostForwardTotal` increments, and the organism is gone. It is a tombstone rather than a deletion so that a late `MIGRATION_ACK` is still recognised (§9.3). | **Yes — and unknowably forever** |
 
 Transitions:
 
 ```
-journal write ─────────────────► pending
-pending ── written to relay ───► sent          (record relaySessionId)
-sent ── MIGRATION_ACK ─────────► done
-sent ── proof of no custody ───► refused
-sent ── destination dark ──────► held
-held ── destination live ──────► sent          (clock stops, accrual is kept)
-held ── proof of no custody ───► refused
-held ── accrual ≥ holdTimeout ─► bounced home  (§9.3)
+journal write ─────────────────────► pending
+pending ── written to relay ───────► sent      (record relaySessionId and sentAt)
+sent ── MIGRATION_ACK ─────────────► done
+sent ── proof of no custody ───────► refused
+sent ── forwardTimeoutMs elapsed ──► lost      (§9.3)
 refused / pending ── lane exists ─► re-route, then pending against the new destSlot
 refused / pending ── no lane, bounceTimeoutMs ─► bounced home
 ```
 
-**A bounce is a terminal action, not a sixth state.** The entry leaves the outbound journal,
-becomes an inbound delivery into this peer's own mod (§9.4), and leaves a tombstone behind.
-The tombstone matters: a `MIGRATION_ACK` that arrives *after* a timeout bounce is absorbed
-rather than re-processed — and **logged at error level**, because it is the accepted
-duplication case of §9.3 announcing itself. That late ACK is the only signal the map will ever
-give that a bounded hold produced two organisms, and an implementation that swallows an ACK
-for an unknown `migrationId` silently throws it away.
+**THERE IS NO ARROW OUT OF `sent` THAT THIS PEER DECIDES** (amended — §25, B37). Two of the
+three are answers from somebody else, and the third is a deadline that resolves a **record**
+rather than an organism. Nothing re-sends the frame; nothing brings it home. The removed
+arrows were `sent → held`, `held → sent`, `held → refused` and `held → bounced home`.
+
+**A bounce is a terminal action, not a state.** The entry leaves the outbound journal, becomes
+an inbound delivery into this peer's own mod (§9.4), and leaves a tombstone behind. **Both
+remaining bounces are cases where no custody moved** — a payload refusal, and an entry that
+reached nobody and has no lane — so a bounce is never a guess (§9.4).
+
+**A late `MIGRATION_ACK` against a `lost` tombstone is GOOD NEWS, and it must still be read.**
+It says the organism did arrive and its acknowledgement outran the deadline. **Exactly one
+organism exists** — nothing was bounced home in the meantime — so the sidecar logs it, counts
+it, and treats it as the signal that `forwardTimeoutMs` is set shorter than this map's slowest
+honest answer. An implementation that swallows an ACK for an unknown `migrationId` silently
+throws that signal away. ~~It is the accepted duplication case of §9.3 announcing itself.~~
+**Superseded — §25, B37: there is no duplication case left to announce.**
 
 **What counts as proof of no custody**, and nothing else does:
 
@@ -2587,7 +2654,7 @@ for an unknown `migrationId` silently throws it away.
 | Never forwarded | `pending`, or a relay `SLOT_VACANT` / `PEER_OFFLINE` / `NOT_FORWARDED` carrying a matched `neverForwarded: true` | **Re-route** along the same axis to the current effective neighbour. Keep the `migrationId`. Rewrite `destSlot`. |
 | Refused for a peer-local reason | `MIGRATION_NACK` with `OVERLOADED`, `SIM_SIZE_MISMATCH` or `MOD_ABSENT` | **Re-route.** The receiver stated it took no custody, and another slot accepts the same organism. |
 | Refused for a payload reason | `MIGRATION_NACK` with `INVALID_PAYLOAD`, `KIND_UNSUPPORTED`, `VERSION_UNSUPPORTED` or `MALFORMED_MESSAGE` | **Bounce home.** Every slot refuses this organism, so the map is not the answer. **`VERSION_UNSUPPORTED` is the first of B31's four kept gates** (added — §22, B31): the importing mod refuses a payload whose game version it has no dialect for, permanently, and D22's diagnostic-only rule does **not** retire it. `contract-a.md` **§21, A48** owns the mod-side statement — it keeps that document's §9.2 `VERSION_UNSUPPORTED` and its close `4002` as two of the four named exceptions, and states the diagnostic-only rule for `MIGRATE_OUT.gameVersion`, `parents[].gameVersion` and `MIGRATE_IN.gameVersion`; this row is the Contract B consequence and it is unchanged. |
-| Forwarded, then silence | none | **Hold, then bounce** (§9.3). Retry the recorded `destSlot` on the retry cadence — flat toward a dark destination, backing off exponentially toward a live one (amended — §14, B8); the retry is idempotent because the destination deduplicates. |
+| Forwarded, then silence | none | **Nothing, and then a record** (amended — §25, B37). The frame is **not** re-forwarded, the entry is **not** re-routed and the organism is **not** brought home. At `forwardTimeoutMs` the entry becomes a `lost` tombstone and `stats.lostForwardTotal` increments (§9.3). ~~Hold, then bounce: retry the recorded `destSlot` on the retry cadence — flat toward a dark destination, backing off exponentially toward a live one (§14, B5, B8).~~ |
 
 **Re-route mechanics.**
 
@@ -2600,88 +2667,100 @@ for an unknown `migrationId` silently throws it away.
 | It is bounded | `reroute.count` increments on each rewrite and **MUST NOT** exceed `maxReroutes` (4). Beyond that the entry bounces home. An organism circling a broken axis is a symptom, not a delivery strategy. |
 | It is reported | Each re-route is a log line and a metric, and the frame carries its own `reroute.proof`. Part 2 of the exit test requires every in-flight entry to state which answer it took and why. |
 
-**Why `pending` is worth a state of its own.** Without it, an entry the sender never even
-managed to send would be indistinguishable from one that was sent into silence, and the safe
-answer for the ambiguous case — hold for a day — would be applied to the case that is not
-ambiguous at all. Most re-routes in a real outage are `pending` entries: the west neighbour
-noticed the gap before it wrote anything.
+**Why `pending` is worth a state of its own, and it matters MORE since §25's B37.** Without
+it, an entry the sender never even managed to send would be indistinguishable from one that
+was sent into silence, and the safe answer for the ambiguous case would be applied to the case
+that is not ambiguous at all. That answer used to be *hold for a day*; it is now *lose the
+organism*, so the distinction stopped costing a delay and started costing a life. **Most
+re-routes in a real outage are `pending` entries**: the west neighbour noticed the gap before
+it wrote anything, and every one of those still crosses.
 
-### 9.3 The bounded hold, and the clock that runs only while the destination is dark
+**And it is why proof-based re-routing stays.** §25's B37 removes the answer to SILENCE and
+nothing else. A `MIGRATION_NACK` that proves no custody moved is a **statement**, not silence;
+re-routing under one cannot duplicate an organism, because the party that would have held the
+second copy has said in as many words that it holds none. Removing the re-route as well would
+lose an organism every time a destination was merely busy or briefly absent — the ordinary
+case — to buy nothing at all. **The operator's switch, for a map that wants a single hop and no
+second destination, is `maxReroutes` (§12): a NEGATIVE value turns re-routing off, and an entry
+that would have re-routed bounces home instead.** It is a knob rather than a code path so that
+the choice costs a restart and not a release.
 
-An entry in `held` is a forwarded organism with no proof of non-delivery and a dark
-destination. It waits. **The wait is bounded**, and then the organism comes home.
+### 9.3 The loss, and the deadline that only ever closes a record
+
+**Amended — §25, B37. The bounded hold is gone**, and with it the clock, the accrual, the
+retry that fed it, the automatic bounce it ended in and the one duplication case at-most-once
+carried. This section is what replaced them, and it is shorter because it does less.
+
+An entry in `sent` is a forwarded organism with no proof of non-delivery. **The sender does
+nothing about it.** It cannot tell a delivery whose acknowledgement was lost from a delivery
+that never happened, it will not guess in either direction, and there is no action available
+to it that is safe in both cases. It waits for an answer, and if none comes it writes the
+organism off.
 
 | Rule | Statement |
 |---|---|
-| The clock | `holdTimeoutMs`, default **86 400 000 ms (24 hours)**, of **accrued** hold time. |
-| **The retry keeps running** | A `held` entry **MUST** keep re-forwarding its **recorded** `destSlot` on the ordinary `forwardRetryMs` cadence, dark destination and all (added — §14, B5). The retry does **not** reset the handoff state, and it does **not** reset or pause the accrual. §9.2 row 4 states the same rule from the other side; it is repeated here because this is the section an implementer reads while building the hold, and a hold that stops retrying is the natural thing to build. The **dark** cadence stays flat because this retry is the proof's only conduit; it is the retry toward a **live** destination that backs off (§14, B8). |
-| **When it runs** | Only while **all three** hold: the entry is in `held`; the sender has a **live relay connection**; and the destination slot is, in the sender's latest `PEER_STATUS`, **not live** (`live: false`) or **absent from the map** entirely. |
-| **When it stops** | The moment any of those stops being true. The destination coming back stops it. The **sender** losing its own relay connection stops it. A relay restart stops it until the sender reconnects and sees the map again. |
-| What it never counts | Time while the destination is **live**. A live peer with a deep paced backlog is **slow, not orphaned** (Risk 9), and pacing can make a live peer silent for a long simulated while. Counting that time would bounce an organism that was about to be spawned — and that is a duplication, not a delay. |
-| What it never counts, either | Time while the **sender** is blind. A sender whose own machine slept for a night must not wake with an expired clock: it never observed the destination dark, it only failed to observe anything. T1 was exactly that machine. |
-| Where it lives | In the journal entry, as **accrued milliseconds**, flushed at least every `holdAccrualFlushMs` (60 000) and on clean shutdown. On restart the sidecar **resumes the accrual** and **MUST NOT** start a fresh timer. |
-| Why accrual and not a deadline | `m4_considerations.md` says "the deadline lives in the journal entry" and means "the timer survives a restart and never resets". A wall-clock deadline cannot express a clock that stops, so the entry carries the accrual instead. It satisfies the requirement more strictly: a restart cannot lose time already served, and cannot invent time that was never served. |
-| A crash | Loses at most one flush interval of accrual, in the safe direction: the entry waits slightly longer. |
-| At the timeout | The sidecar **bounces the organism home by itself** — an ordinary Contract A `MIGRATE_IN` with `bounceBack: true` into its own mod, on the edge it left from (§9.4) — records the reason on the entry, increments `stats.bouncedTimeoutTotal` (§6.3.1), and logs one loud line. |
-| Reporting | **An automatic bounce is a fact the operator reads, not a silent repair.** The status page and `ringstat` both name every bounce a timeout caused, with the migration, the entity, the destination slot and the accrued hold. |
+| The deadline | `forwardTimeoutMs`, default **86 400 000 ms (24 hours)**, measured from `sentAt` — the wall clock at the **first and only** write of this entry to a live relay connection (§7.4). |
+| **Nothing is re-sent** | A `sent` entry **MUST NOT** be forwarded again, to its recorded `destSlot` or to any other. One organism, one hand-over. The re-forward is what the bounded hold existed to bound, and removing it removes the bound's reason to exist. |
+| **Nothing comes home** | At the deadline the sidecar **MUST NOT** deliver the organism to its own mod. That bounce was the accepted duplication case; there is no accepted duplication case. |
+| At the deadline | The entry becomes a **`lost` tombstone**: `handoff: lost`, `status: done`, the reason recorded on the entry. The sidecar increments `stats.lostForwardTotal` (§6.3.1) and logs **one loud line at error level**, naming the `migrationId`, the `entityId`, the `destSlot`, the exit edge and whether a `FORWARD_RECEIPT` was ever held for it. |
+| Why a tombstone and not a deletion | So a late `MIGRATION_ACK` is still recognised (below), and so `--list-inflight` stops showing an entry nobody can act on. It is purged with every other tombstone on `exportRetentionSeconds`. |
+| It is a **wall clock**, and that is now safe | The accrual it replaced existed because expiry MOVED AN ORGANISM: a sender that had never observed the destination dark must not wake from a night's sleep and bounce something that was on its way. Expiry now only closes a record, so a sidecar that slept through the deadline records a loss that had already happened, and the two-condition clock buys nothing worth its complexity. |
+| A restart | Resumes the same deadline, because `sentAt` is durable (§7.4). It neither restarts it nor resolves it. A pre-§25 journal has no `sentAt`; the entry's own `journaledAt` stands in, which is earlier than the forward it stands for and therefore the safe direction. |
+| Reporting | **A loss is a fact the operator reads, not a silent repair.** The status page and `ringstat` both show `lostForwardTotal` per peer, and `--own-slot` shows this world's own unresolved depth beside it. |
 
-**The retry is the only conduit the proof has, and without it `held` is a trap** (§14, B5).
-The relay never volunteers a `neverForwarded` statement. It mints one **only** in answer to a
-`MIGRATION_PAYLOAD` it declined to forward (§5.2, §6.8), so a sender that stops sending stops
-being told anything. Follow the consequence through: a sender that hands the relay a frame
-for a slot that is *already* dark has an entry in `sent`, then `held`, while the relay's
-forwarding record holds nothing for that `migrationId` — the proof of non-delivery exists and
-is waiting, and the only way to collect it is to ask again. Stop retrying and
-`held → refused → re-route` becomes unreachable: **every** held entry then runs the full
-24-hour clock and bounces, including the large majority that could have re-routed in seconds.
-That is not a degraded version of route-around. It is route-around switched off for exactly
-the case it was built for.
+**A late `MIGRATION_ACK` is the map telling you the deadline is too short.** The far peer took
+custody, its acknowledgement took longer than `forwardTimeoutMs` to arrive, and the entry was
+already written off. **Exactly one organism exists** — nothing was bounced home in the meantime
+— so the record was wrong and the world was not. The sidecar **MUST** log it, name the
+`migrationId` and the `entityId`, and count it; the remedy it names is to raise
+`forwardTimeoutMs`, not to change anything about custody.
 
-The retry is safe to run into the dark for the same reason it is safe anywhere: the
-destination deduplicates on `migrationId` (§6.6 step 1), so a delivery that did happen is
-answered as a duplicate and a delivery that did not is answered with the proof.
+**What was given up, stated so nobody rediscovers it as a bug.**
 
-**The accepted duplication case, named so nobody is surprised by it.** One path produces two
-organisms: the far sidecar took custody, died before its acknowledgement left, the sender's
-hold expired and bounced the organism home, and the far sidecar later returned and replayed
-its own journal to its own mod. It needs an invisible delivery **and** a return after the
-timeout. The owner weighed it against the alternative and chose it: an unbounded hold strands
-an organism in a file nobody reads, and a stranded organism is invisible, whereas a
-duplication is at least visible in a whole-map entity-ID count. **At-most-once carries this
-one exception and no other. Do not widen it.**
+| Case | Before | Now |
+|---|---|---|
+| The destination took custody, died before its ACK, and never returned | Held 24 h, then bounced home. One organism, and it survived. | **Lost.** |
+| The destination took custody, died before its ACK, and returned after the timeout | Held 24 h, bounced home, then the far peer replayed its journal: **two organisms**. The accepted exception. | One organism, at the destination. The record says lost and a late ACK corrects it. |
+| A `sent` entry left by a sender that crashed between the write and the relay's answer | The retry re-asked, the relay answered `neverForwarded: true`, and the entry re-routed within a retry interval (§14, B5). | **Lost.** The retry was the proof's only conduit, and it is gone. |
+| A `pending` entry, or one refused by a statement | Re-routed. | **Re-routed, unchanged.** No custody moved, so nothing can duplicate. |
 
-**And it is detectable after the fact.** When the far peer returns, delivers the organism it
-had custody of and sends its `MIGRATION_ACK`, that ACK arrives at a sender whose entry is
-already a bounce tombstone. The sidecar **MUST** log it at error level, name the
-`migrationId` and the `entityId`, and count it in a `duplicateSuspected` metric. It is the
-only automatic signal that this exception fired, and the exit test's whole-map entity-ID count
-is the manual one.
+**The third row is the real cost of this set and it is named rather than buried.** B5's whole
+argument was that the retry is how a non-delivery proof reaches a sender that already forwarded,
+so removing the retry makes `sent → refused → re-route` unreachable for an entry a *previous
+process* wrote. The window is narrow — the relay answers a declined forward in milliseconds, so
+only a crash between the write and the answer lands in it — and the owner took the trade
+knowingly on 2026-08-17, against the simplicity of a system with no duplication case in it at
+all. **A conforming implementation MUST NOT re-add the retry to recover it.**
 
-**The manual escape hatch.** `multiverse-sidecar --release-inflight <migrationId>
-bounce|drop` releases one held entry by hand before the timeout expires. It is the custody
-twin of `--release-slot`, it runs on the machine that holds the journal, and it
-**MUST** print the duplication risk in its own output before acting. `--list-inflight`
-(§7.5) is how the operator finds the entry.
+**The manual escape hatch, and it is now the only one.** `multiverse-sidecar
+--release-inflight <migrationId> bounce|drop` resolves one unresolved entry by hand before the
+deadline. It is the custody twin of `--release-slot`, it runs on the machine that holds the
+journal, and it **MUST** print the duplication risk in its own output before acting.
+**`bounce` on an entry in `sent` is the ONLY WAY LEFT TO DUPLICATE AN ORGANISM ON THIS MAP**,
+and the printed warning MUST say so: nothing automatic does it any more, so the operator is
+not firing one of two mechanisms but the only one. `--list-inflight` (§7.5) is how the operator
+finds the entry, and the `FORWARD_RECEIPT` block it prints (§6.12, §22 B26) is the evidence
+that decision turns on.
 
-**A destination whose slot is vacant will run the whole clock, and that is deliberate.** A
-released slot never returns (§2), so holding cannot help — but the hold is not about hope,
-it is about the possibility that custody already moved to a peer that is gone. One rule, one
-timeout, one place to reason about it; the operator who does not want to wait has
-`--release-inflight`.
+**A destination whose slot is vacant is lost at the deadline like any other, and that is
+deliberate.** A released slot never returns (§2), so there was never anything to wait for; the
+wait existed for the possibility that custody had already moved to a peer that is gone, and
+that possibility now resolves as a loss rather than as a bounce. One rule, one deadline, one
+place to reason about it.
 
 ### 9.4 Bounce-back
 
-**Custody chain step 6 says a remote NACK or a timeout re-injects the organism into the
-origin sim, and the timeout half is where duplication lives.** The rule is narrowed —
-unchanged from M2 and M3 in its first three rows, with M4's bounded hold as the fourth
-(`contract-a.md` §13, A6):
+**Custody chain step 6 said a remote NACK or a timeout re-injects the organism into the origin
+sim, and the timeout half was where duplication lived. THE TIMEOUT HALF IS GONE** (amended —
+§25, B37). Every remaining bounce is a case where **no custody moved**, so a bounce is never a
+guess and can never make a second organism (`contract-a.md` §13, A6, amended in the same wave):
 
 | Situation | Origin sidecar's action |
 |---|---|
 | `MIGRATION_NACK` received, any code | **Bounce**, or re-route first where §9.2's table says so. A NACK is only ever sent before durable custody (§6.8), so it proves the organism is not at the destination. |
 | The forward never reached a live peer — the relay link is down, or `destSlot` is vacant — for longer than `bounceTimeoutMs`, **and route-around has no lane to offer** | **Bounce.** The frame was never handed to anyone. |
-| The forward reached a live peer and no answer came back, and the destination is **live** | **Hold and re-forward.** Never bounce. The destination deduplicates, so a re-forward is free, and holding converts a possible duplication into a bounded delay. The re-forward cadence backs off exponentially to `forwardRetryMaxMs` — free is not the same as costless at scale (amended — §14, B8). |
-| The forward reached a live peer and no answer came back, and the destination is **dark** | **Hold with the clock of §9.3**, then bounce at the timeout. |
+| The forward reached a live peer and no answer came back — destination **live** or **dark**, it makes no difference | **Nothing, then a `lost` record at `forwardTimeoutMs`** (§9.3). Not a re-forward, not a re-route, not a bounce. ~~Hold and re-forward toward a live destination, backing off to `forwardRetryMaxMs` (§14, B8); hold with §9.3's clock toward a dark one and bounce at the timeout.~~ **Superseded — §25, B37.** |
+| An operator runs `--release-inflight <id> bounce` on an entry in `sent` | **Bounce**, and it is the only bounce in this table that may duplicate an organism. The command prints the risk before it acts (§9.3). |
 
 A bounce re-delivers the organism to the origin's own mod as a Contract A `MIGRATE_IN` with
 `bounceBack: true`, **on the edge it left from** — the origin's own `exitEdge`, `"E"` or
@@ -2708,12 +2787,14 @@ for everyone else (`m4_considerations.md`, Question 4):
    liveness change.
 2. **Replay the inbound entries.** Every un-acknowledged `MIGRATE_IN`, in journal order,
    through the rate limit (`contract-a.md` §7.5).
-3. **Re-evaluate the outbound entries under §9.2.** A `pending` entry re-routes; a `sent` or
-   `held` entry retries its recorded destination and keeps its accrued hold.
+3. **Re-evaluate the outbound entries under §9.2.** A `pending` entry re-routes; a `sent`
+   entry keeps its `sentAt` and waits for an answer it will probably not get (amended — §25,
+   B37: it used to retry its recorded destination and keep its accrued hold).
 4. **Reassert custody against the mod.** A new `sessionId` triggers `contract-a.md` §7.4.
 
-**No backlog waits at a returning peer.** Its neighbours re-routed only the entries they had
-never forwarded, so nothing accumulated behind the gap in *their* journals. What did
+**No backlog waits at a returning peer, and less than ever** (amended — §25, B37). Its
+neighbours re-routed only the entries they had never forwarded, and the entries they *had*
+forwarded are not re-sent at all, so nothing accumulated behind the gap in *their* journals. What did
 accumulate is the peer's own inbound queue from before it went dark, and that is exactly the
 dam the delivery rate limit paces (`contract-a.md` §7.5, §15 A20).
 
@@ -2924,7 +3005,7 @@ crossing" is now one of those claims.
    dictate a receiver's geometry.
 8. **The non-delivery proof is a field on an existing message, not a new message pair**
    (§5.2, §6.8). A `FORWARD_QUERY` / `FORWARD_STATUS` pair was the obvious alternative and it
-   is worse: the sender's re-forward **is** the query, so a separate ask would be a second
+   is worse: the sender's forward **is** the query, so a separate ask would be a second
    round trip carrying no new information, and a proof that can be requested independently of
    an attempt invites an implementation that asks once and caches the answer — which is
    exactly how a stale proof becomes a duplicated organism.
@@ -2946,12 +3027,13 @@ crossing" is now one of those claims.
     deterministically, without an operator — and it reproduces the exit test's 3×2 shape from
     six opinion-free claims. On a one-row map it is exactly the old tail rule: the first hole,
     or a new column at the right-hand end.
-12. **The relay's pre-act report cannot list held entries, and the split is stated instead**
-    (§7.5). Question 3 asks `--release-slot` and `--handover-slot` to list the held entries
+12. **The relay's pre-act report cannot list unresolved entries, and the split is stated
+    instead** (§7.5). Question 3 asks `--release-slot` and `--handover-slot` to list the entries
     that name the slot. Journals live on the peers' own machines and D2 keeps custody local, so
     a relay that could enumerate them would be a relay that reads journals — which is a bigger
     change to D1 than anything else in this milestone. The relay prints the map-side
-    consequences; `stats.heldDepth` (§6.3.1) shows which peers are holding anything at all on
+    consequences; `stats.lostForwardTotal` (§6.3.1, amended — §25 B37) shows which peers have
+    already lost anything addressed to it on
     the status page; and `multiverse-sidecar --list-inflight --dest-slot <n>` prints the
     entries themselves on the machine that owns them. The operator still decides with the facts
     in view.
@@ -2979,14 +3061,16 @@ crossing" is now one of those claims.
 | `wireCompression` | `on` | relay | **New after `contract-b/4.0`** (added — §24, B35). Whether this relay **offers** `permessage-deflate` on a Contract B upgrade (§3). `--ws-compression`, `MULTIVERSE_RELAY_WS_COMPRESSION`. It is a knob for D20's reason — the transfer bill is a number only the operator can see — and it is a **complete** off switch on its own, because the extension needs both ends: a relay that stops offering it returns the whole map to uncompressed frames as each peer reconnects, with no participant action. **A client has no matching knob and MUST NOT be given one**, for the reason B23 gives its TLS verification none: nothing in a participant's hands measures this. |
 | `statsIntervalMs` | `5000` | sidecar | Minimum spacing between stats-bearing `PING`s (§6.11). |
 | `statsStaleMs` | `30000` | archive | Age at which a `stats` block renders as unknown rather than as state (§10.1). |
-| `forwardRetryMs` | `5000` | sidecar | Re-forward cadence for a journaled outbound entry with no answer — flat toward a dark destination, and the backoff floor toward a live one (§14, B8). |
-| `forwardRetryMaxMs` | `60000` | sidecar | **New after M4** (added — §14, B8). Ceiling of the doubling re-forward backoff toward a **live** destination that has not answered (§9.2, §9.4). Resets on any state change or liveness flip. A dark destination keeps the flat `forwardRetryMs` (§9.3, B5). |
-| `bounceTimeoutMs` | `20000` | sidecar | How long an outbound entry that never reached a live peer, **and has no lane to re-route to**, waits before it is bounced home (§9.2, §9.4). |
-| `migrationAckTimeoutMs` | `30000` | sidecar | Informational deadline for `MIGRATION_ACK`; expiry re-forwards, it never bounces (§9.4). |
-| `holdTimeoutMs` | `86400000` | sidecar | **New in M4.** Accrued dark time before a held entry bounces home by itself — 24 hours (D2, signed off 2026-08-05). The clock runs only while the destination is dark and the sender can see it (§9.3). |
-| `holdAccrualFlushMs` | `60000` | sidecar | **New in M4.** How often the accrued hold time is flushed to the journal entry. A crash loses at most this much, in the safe direction (§9.3). |
-| `maxReroutes` | `4` | sidecar | **New in M4.** Re-routes one entry may take before it bounces home instead (§9.2). |
-| `forwardRecordRetentionSeconds` | `172800` | relay | **New in M4.** How long the relay remembers a forwarded `migrationId`, in memory, for the `neverForwarded` proof — 48 hours, twice the default hold (§5.2). |
+| `forwardRetryMs` | `5000` | sidecar | Cadence at which an entry that has **not yet reached a live relay connection** is offered to one again (amended — §25, B37). It never re-sends a frame that was written: a written frame is written once (§9.3). |
+| ~~`forwardRetryMaxMs`~~ | ~~`60000`~~ | — | **REMOVED — §25, B37.** It capped a doubling backoff on the re-forward toward a live destination (§14, B8), and there is no re-forward to back off. |
+| `bounceTimeoutMs` | `20000` | sidecar | How long an outbound entry that never reached a live peer, **and has no lane to re-route to**, waits before it is bounced home (§9.2, §9.4). Unchanged: no custody moved, so this bounce cannot duplicate. |
+| `migrationAckTimeoutMs` | `30000` | sidecar | Informational deadline for `MIGRATION_ACK`. **Purely informational since §25, B37**: expiry re-forwards nothing, and it never bounces (§9.4). |
+| `forwardTimeoutMs` | `86400000` | sidecar | **New in `contract-b/4.1`** (added — §25, B37). How long a forwarded entry waits for its answer before the sender records it **lost** — 24 hours, the value `holdTimeoutMs` carried. It is a **wall clock measured from `sentAt`** and a bookkeeping deadline: nothing is re-sent at it and nothing comes home, so a sender that slept through it records a loss that had already happened (§9.3). |
+| ~~`holdTimeoutMs`~~ | ~~`86400000`~~ | — | **REMOVED — §25, B37**, with the bounded hold it timed. Its 24-hour value lives on in `forwardTimeoutMs`, which does something entirely different with it. |
+| ~~`holdAccrualFlushMs`~~ | ~~`60000`~~ | — | **REMOVED — §25, B37.** There is no accrual to flush. |
+| `maxReroutes` | `4` | sidecar | **New in M4.** Re-routes one entry may take before it bounces home instead (§9.2). **A NEGATIVE value turns re-routing off entirely** (added — §25, B37): an entry that would have re-routed bounces home instead, which makes migration a single hop with no second destination. It is the owner's switch for that choice, and it costs a restart rather than a release. |
+| `forwardRecordRetentionSeconds` | `172800` | relay | **New in M4.** How long the relay remembers a forwarded `migrationId`, in memory, for the `neverForwarded` proof — 48 hours. ~~Twice the default hold.~~ It is no longer sized against anything on the sending side (§25, B37); what it covers is a re-routed entry's later attempts and a sidecar older than B37 still retrying, and it matches `archiveDedupWindowMs` for the same reason (§25, B38). |
+| `archiveDedupWindowMs` | `172800000` | archive | **New in `contract-b/4.1`** (added — §25, B38). How long the archive remembers a record's §5.1 duplicate key — 48 hours. A duplicate that arrives inside the window is refused; one that arrives later is appended a second time. The retention is a **floor**: at least this, at most twice it, and the memory is at most two windows of keys. `--dedup-window`, `MULTIVERSE_ARCHIVE_DEDUP_WINDOW`. |
 | `inboundQueueMax` | `64` | sidecar | Shared with `contract-a.md` §10. Also the ceiling a paced backlog hits, which is what turns pacing into upstream backpressure (`contract-a.md` §7.5). |
 | `exportRetentionSeconds` | `3600` | sidecar | Tombstone lifetime. Shared with `contract-a.md` §10. |
 | `speciesCensusMax` | `32` | both | **New after M4** (added — §16, B11). Shared with `contract-a.md` §10. Upper bound on `stats.species` entries. A block that arrives with more is trimmed to the first 32 with one warning and `truncated: true`, never a refusal and never a close — the same answer `contract-a.md` §5.2 gives on the other wire. It is what bounds a `PEER_STATUS` broadcast carrying one census per slot (§6.3.1). |
@@ -3031,8 +3115,9 @@ milliseconds. It writes `journal.log.tmp`, fsyncs it, renames it over
 `journal.log` and syncs the directory, which is the same discipline `contract-a.md`
 §11.1 already required of `Open`; a crash before the rename leaves the original whole and a
 crash after it leaves a journal that replays to the identical state. **Compaction
-must preserve `accruedHoldMs`** (§9.3): the hold clock is an accrual carried in
-the entry, and a rewrite that dropped it would silently reset every hold in the
+must preserve `sentAt`** (§9.3, amended — §25 B37; it read `accruedHoldMs` before that set):
+`forwardTimeoutMs` is measured from it, and a rewrite that dropped it would silently restart
+every unresolved forward's deadline in the
 rig.
 
 **What is still unbounded, and deliberately so:** the archive's
@@ -3087,8 +3172,8 @@ came to assert against a number that had moved underneath it twice.
 | Interaction with this wire | Effect of the raise |
 |---|---|
 | `OVERLOADED` backpressure (§6.6, §6.8) | **Less often, not differently.** `inboundQueueMax` (64) is unchanged; a faster drain means the queue reaches it more rarely. Every rule about the refusal, the proof it constitutes, and the re-route it triggers is untouched. |
-| The hold clock (§9.3, Risk 9) | **Unchanged, and slightly safer.** The clock already runs only while the destination is **dark**, so a paced backlog at a live peer never accrued hold time. A shorter backlog shortens the window in which a slow peer *looks* like a silent one at all. |
-| `forwardRetryMs` / `forwardRetryMaxMs` (§14, B8) | Unchanged. A live destination that is draining faster answers sooner, so the doubling backoff climbs less often. |
+| The hold clock (§9.3, Risk 9) | **Removed — §25, B37**, and the risk it managed with it. A paced backlog at a live peer never accrued hold time; nothing accrues at all now, and a slow peer that eventually answers resolves its entry the moment it does. |
+| `forwardRetryMs` (§9.2) | Unchanged in meaning, narrower in reach since §25's B37: it paces the offer of an entry that reached nobody, and a live destination that is draining faster has nothing to do with it. `forwardRetryMaxMs` is gone with the backoff it capped. |
 | `maxReroutes` (§9.2) | Unchanged. Fewer `OVERLOADED` refusals means fewer re-routes consumed by congestion rather than by darkness. |
 
 **There is no answering-side timeout for `GENOME_REQUEST`, and its absence is deliberate.**
@@ -3101,12 +3186,14 @@ time out. `genomeRequestTimeoutMs` is therefore a **requester-side** budget only
 answer that arrives after it is still attributable through the echoed `genomeHash` (§6.10)
 and may simply be used.
 
-**Two defaults are worth a second look before the rig runs long.** `holdTimeoutMs` at 24
-hours is the owner's call and is a policy, not a measurement — it trades a stranded organism
-against the accepted duplication case (§9.3). `forwardRecordRetentionSeconds` at 48 hours is
-sized from it: a record shorter than the hold means an entry can outlive the evidence that
-would have let it re-route, which is safe and wasteful. Keep the second at least twice the
-first.
+**Two defaults are worth a second look before the rig runs long, and §25's B37 changed what
+each of them trades.** `forwardTimeoutMs` at 24 hours is the owner's call and a policy, not a
+measurement — but it no longer trades a stranded organism against a duplication case, because
+there is no duplication case. **It trades only how long a record stays open**: too short costs
+a wrong record and a late-ACK log line, too long costs a `--list-inflight` full of entries
+nobody can act on. `forwardRecordRetentionSeconds` and `archiveDedupWindowMs` are both 48 hours
+and are now sized against the same thing — how far behind this map's oldest peer may be, which
+during the transition means a sidecar that still retries.
 
 ---
 
@@ -3169,7 +3256,10 @@ the authoritative statement of what is open on this wire.
    `--evict-peer` beside the two, keeps the printed consequence report as a two-call
    confirmation, and keeps all three off the wire catalogue.
 6. **CLOSED — §22, B26.** *The forwarding record does not survive a relay restart* (§5.2). Every outstanding
-   `sent` entry loses its chance of a proof at that moment and falls back to the bounded hold.
+   `sent` entry loses its chance of a proof at that moment and falls back to the bounded hold
+   (**and since §25's B37 there is no hold to fall back to: the entry is lost at
+   `forwardTimeoutMs`**, which makes B26's receipt worth more than when it was written, not
+   less).
    That is correct, and it is also a real cost the first time a relay is restarted under load:
    entries that could have been re-routed in seconds wait out a 24-hour clock instead. A
    durable record is not the fix — a record that outlives the process would assert what the
@@ -3285,7 +3375,15 @@ the **relay**.
 
 **Enforced by:** the relay.
 
-### B5 — A held entry keeps retrying, and that retry is the only conduit for the proof (§9.2, §9.3)
+### B5 — A held entry keeps retrying, and that retry is the only conduit for the proof (§9.2, §9.3) — **SUPERSEDED — §25, B37**
+
+> **Superseded in full on 2026-08-17 (§25, B37).** There is no `held` state and no retry. B5's
+> analysis is still correct, and it is the reason §25 states a cost rather than claiming there
+> is none: the retry WAS the only conduit a non-delivery proof had for an entry a previous
+> process forwarded, so removing it makes `sent → refused → re-route` unreachable for exactly
+> that case. B37 names it in its own table and the owner took it knowingly. **Nothing below is
+> normative.** It is kept because a reader who proposes re-adding the retry should first read
+> the argument that put it there.
 
 **The conflict.** §9.2's rule table, row 4, says a forwarded-then-silent entry should "hold,
 then bounce — retry the recorded `destSlot` on the retry cadence". §9.3 then describes the
@@ -3390,7 +3488,14 @@ reconciliation pass collapsed both call sites onto one key function.
 **Enforced by:** the relay, for the fan-out; the archive, for the key — and for keeping the
 key single-sourced, which is the part that broke.
 
-### B8 — Dedup precedes the decode, and a live destination's retry backs off (§6.6, §9.2, §9.3, §9.4, §12)
+### B8 — Dedup precedes the decode, and a live destination's retry backs off (§6.6, §9.2, §9.3, §9.4, §12) — **SENDER HALF SUPERSEDED — §25, B37**
+
+> **The RECEIVER half stands and is more load-bearing than ever** (§25, B37): dedup before the
+> decode is what makes a pre-B37 sidecar's retry cost the destination an O(1) lookup instead of
+> a multi-MiB unmarshal, and those senders are the installed base this map keeps serving. **The
+> SENDER half is superseded in full**: there is no re-forward to back off, `forwardRetryMaxMs`
+> is removed from §12, and the hammer B8 bounded cannot come back, because the code that swung
+> it is gone.
 
 *Folded in on 2026-08-06, from the slot-6 livelock. `contract-a.md` §15 A29 carries the
 Contract A half of the same incident.*
@@ -4029,7 +4134,7 @@ whatever the operator's shell redirect caught.
 | Rule | Statement |
 |---|---|
 | The journal compacts on a timer | A sidecar MUST rewrite its journal to the entries it still holds at least every `journalCompactMinutes`, not only at `Open`. The rewrite uses the same crash-safe discipline `contract-a.md` §11.1 already requires — scratch file, fsync, rename, directory sync — so a crash before the rename leaves the original whole and a crash after it leaves a journal that replays to the identical state. |
-| The accrual survives it | A compaction MUST preserve `accruedHoldMs` on every entry (§9.3). The hold clock is an accrual carried in the entry precisely so a restart can neither lose time already served nor invent time that was never served; a rewrite that dropped it would reset every hold in the rig without a single log line. |
+| The deadline survives it | A compaction MUST preserve `sentAt` on every entry (§9.3, amended — §25 B37; it read `accruedHoldMs` before that set). `forwardTimeoutMs` is measured from it precisely so a restart can neither restart an unresolved forward's deadline nor resolve it early; a rewrite that dropped it would give every one of them a fresh day in the rig without a single log line. |
 | The purge record stays | `PurgeExpired` still appends a durable purge record even though the next compaction would erase the tombstone anyway. `contract-a.md` §11.1 makes every journal write durable before it counts and keeps tombstones out of memory-only state, and the saving does not justify carving an exception out of that: a purge record is one short line per tombstone that ever expires, while the growth term was the `create` record of every migration that ever ran, each carrying its payload. |
 | A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
 | A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
@@ -4047,7 +4152,7 @@ out of. A cleanup on the error path costs one syscall on a path already failing.
 **Enforced by:** the **sidecar**, for scheduling the compaction outside its
 custody lock and for treating a failed reopen after the rename as a reason to
 stop journaling rather than to keep appending to an unlinked file; the
-**journal**, for the rewrite's crash safety and for carrying `accruedHoldMs`
+**journal**, for the rewrite's crash safety and for carrying `sentAt`
 through it; the **archive**, for the same all-or-nothing append on its ledger and
 for reading past a damaged line rather than stopping at one it can never rewrite;
 **every process**, for bounding a log it was given the path of; the
@@ -4418,7 +4523,7 @@ night.
 
 | Rule | Statement |
 |---|---|
-| One receipt per forward | Sent to the **sender** at the moment the relay writes a `MIGRATION_PAYLOAD` to a destination connection — the same moment that puts the `migrationId` in §5.2's record. A re-forward produces another. |
+| One receipt per forward | Sent to the **sender** at the moment the relay writes a `MIGRATION_PAYLOAD` to a destination connection — the same moment that puts the `migrationId` in §5.2's record. A **re-route** produces another, and so does a retry from a sender older than §25's B37. |
 | It carries the session | `relaySessionId` rides the receipt, so the sender learns the **scope** of the fact with the fact (§5.2). |
 | It lands in the journal | The sender records it durably against the entry (§7.4) and answers nothing. |
 | **It changes no safety rule** | §9.2 is untouched in every particular. A receipt is **not** delivery, **not** custody, **not** proof of non-delivery, and it can never authorize a re-route. Its only direction is *toward holding*: an entry with a receipt was forwarded, so it holds. |
@@ -5098,3 +5203,162 @@ timer is "a floor on freshness, not a second source of frames".
 one that can get this wrong; and the **archive and every operator surface**, for continuing to age
 a stats block by `statsAsOfMs` rather than by the frame it arrived in — which is what makes a 5 s
 publication cadence indistinguishable from a 0.76 s one to every reader that follows §6.5.
+
+---
+
+## 25. Migration is dangerous (`contract-b/4.1`, 2026-08-17)
+
+**This set removes a mechanism rather than adding one, and the owner asked for it in one
+sentence.** On 2026-08-17 at about 00:15Z:
+
+> *"yeah just remove the hold in the reforwarding"* — and, on the reasoning:
+> *"we don't mind much on bibites being lost, we can see migrating as dangerous, and then there
+> wouldn't be duplicates while making things simpler."*
+
+**What that reverses.** §9 has carried, since the owner's sign-off of 2026-08-05, exactly one
+bounded exception to at-most-once: an organism forwarded to a slot that then went dark, with no
+proof of non-delivery, was **held** for `holdTimeoutMs` — 24 hours by default — and then
+**bounced home by itself**. The exception was accepted knowingly and its residual duplication
+case was named in the contract (§9.3). Everything the map grew around it — the `held` handoff
+state, the accrual in the journal entry, the retry that fed the proof (§14, B5), the
+exponential backoff that bounded the retry (§14, B8), the automatic bounce, `heldDepth`,
+`bouncedTimeoutTotal`, `duplicateSuspected` and two §12 tunables — existed to keep that one
+exception bounded.
+
+**The same owner removed the exception on 2026-08-17, and the mechanism goes with it.** The
+trade is stated in the direction the owner stated it: **losing an organism is acceptable, and
+duplicating one is not.** Migrating is the dangerous act, and it is dangerous in one direction
+only. That is a smaller system, not a differently-tuned one: the branch that could produce two
+organisms is gone, so nothing has to bound it, count it, report it or explain it.
+
+**Two amendments, and they are independent.** **B37** removes the hold. **B38** bounds the
+archive's duplicate set, which was unbounded *because* a re-forward could arrive a year later
+and B37 is what stops that. Either lands without the other, and a deployment that takes B37
+alone is correct and simply keeps paying for a set it no longer needs.
+
+**The version answer is in §4**, argued line by line the way §22's B32 and §24 each argued
+theirs: no frame changes, both directions of a mixed fleet interoperate, one additive OPTIONAL
+stats field is added and two are retired rather than removed. **The identifier is
+`contract-b/4.1` and `/contract-b/v4` does not move.**
+
+**Contract A takes no set and no version change.** A bounce-back is still an ordinary
+`MIGRATE_IN` with `bounceBack: true` on the origin's own exit edge (`contract-a.md` §5.7,
+§15 A25), the mod has no timeout concept and needs none (`contract-a.md` §16), and the
+`MIGRATE_IN_NACK` hold at the DESTINATION — an arrival refused permanently and parked for an
+operator (`contract-a.md` §13, A7) — is a different mechanism that shares a word and is
+untouched. What Contract A does take is **marked text**: its §13 A6 row 3 and its D2 mapping
+row now point here.
+
+### B37 — The bounded hold, the re-forward and the timeout bounce are removed; at-most-once carries no exception (§1, §4, §5.1, §5.2, §6.3.1, §6.6, §6.7, §6.8, §6.12, §7.4, §7.5, §9, §11, §12, §13 item 6, §14 B5, §14 B8)
+
+*Owner decision, 2026-08-17. It reverses the M4 sign-off of 2026-08-05 recorded in D2 and in
+§9, and `system_decomposition.md` D2 carries the reversal on its own side.*
+
+**Gap.** None. This is not a defect being fixed or a conflict being reconciled; it is a design
+decision being taken back. The mechanism worked, was tested and was correct against the rule it
+was built for. The rule changed.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **A forwarded frame is forwarded once** | Once a `MIGRATION_PAYLOAD` has been written to a live relay connection, a sidecar **MUST NOT** write it again — not to the recorded `destSlot`, not to any other slot, not on any cadence, not after any restart. The entry is `sent` and only an **answer** moves it. |
+| **Silence resolves to a loss, never to an action** | An entry in `sent` with no terminal answer within `forwardTimeoutMs` becomes a **`lost` tombstone**: the organism is gone, `stats.lostForwardTotal` increments, and one error-level line names it (§9.3). Nothing is delivered to any mod. |
+| **The `held` state is removed** | A dark destination is no longer a state change for a forwarded entry. A journal written before this set replays a `held` entry as **`sent`**, which is what it always meant; an implementation that replayed it as an unknown string would leave the entry in no case of its own state machine. |
+| **Nothing accrues** | `holdTimeoutMs` and `holdAccrualFlushMs` are removed from §12, and `accruedHoldMs` from the journal entry. `sentAt` replaces it: a plain wall-clock instant, durable, written at the one write. A wall clock is safe **because expiry no longer moves an organism** — it closes a record, so a sender that slept through the deadline records a loss that had already happened. |
+| **Proof-based re-routing STAYS, in full** | §9.2's evidence table is untouched. A `pending` entry re-routes on the sender's own record; a `refused` entry re-routes under a peer-local NACK or a matched relay `neverForwarded`. **A statement is not silence**, and re-routing under one cannot duplicate an organism because the only party that could hold a second copy has said it holds none. Removing it as well would lose an organism every time a destination was merely busy — the ordinary case — for no gain. |
+| **And it has an off switch, for an owner who wants one** | `maxReroutes` (§12) takes a **NEGATIVE** value meaning *never re-route*: an entry that would have re-routed bounces home instead. It is a knob rather than a code path precisely so this choice can be revisited without a release. |
+| **The remaining bounces are all proof-based** | §9.4's table keeps three rows and loses the timeout: a payload refusal, an entry that reached nobody and has no lane after `bounceTimeoutMs`, and the operator's `--release-inflight`. **No automatic bounce can duplicate an organism any more.** |
+| **`--release-inflight` becomes the only duplication path** | It stays, unchanged in shape. Its printed risk text **MUST** say that it is the only way left to duplicate an organism on this map, rather than one of two ways (§9.3). |
+| **A late `MIGRATION_ACK` is good news and MUST still be read** | Against a `lost` tombstone it means the organism arrived and its answer outran the deadline. Exactly one organism exists. The sidecar logs it, counts it and names the remedy — raise `forwardTimeoutMs` — and `duplicateSuspected` is removed, because the case it counted cannot occur. |
+| **The stats block: one field added, two retired** | `lostForwardTotal` is added (§6.3.1). `heldDepth` and `bouncedTimeoutTotal` are **retired**: a `contract-b/4.1` sidecar stops sending them, a reader renders them unknown, and **their names are reserved and MUST NOT be reused**. |
+| **The destination and the archive change nothing** | Dedup on `migrationId` against the journal and its tombstones (§6.6), the narrow re-ACK rule (§14, B6) and the archive's own dedup (§5.1) all stand exactly as written. They were defences against a duplicate arriving; duplicates still arrive, from peers older than this set and from defective ones, and these are what make them harmless. **A conforming implementation MUST keep every one of them.** |
+
+**What it costs, named rather than buried.** Three cases that used to end with the organism
+alive now end with it lost:
+
+1. The destination took custody, died before its acknowledgement, and never came back.
+2. The destination took custody, died, and came back **before** the old 24-hour timeout — under
+   the old rule the sender's retry would have found it. There is no retry.
+3. A `sent` entry left by a sender that **crashed between the write and the relay's answer**.
+   §14's B5 is the full argument: the retry was the proof's only conduit for an entry a
+   previous process wrote, so `sent → refused → re-route` is unreachable for that entry. The
+   window is milliseconds wide and the consequence is one organism.
+
+**What it buys.** The system has no duplication case at all. Every branch that could produce a
+second organism is deleted rather than bounded, so nothing has to keep the bound correct: no
+clock with two conditions, no accrual to persist and compact, no retry cadence to tune, no
+backoff to cap, no `duplicateSuspected` metric, no error-level line explaining that the map may
+now hold two copies of something. **The map's entity-ID count becomes an invariant instead of
+an exit-test measurement.**
+
+#### The transition, and why it needs no lockstep
+
+**Old sidecars keep working, and they keep holding and retrying.** This project moves its fleet
+by publication and cannot make a participant upgrade (D25, `release/README.md`). A sidecar built
+before this set, against a `contract-b/4.1` relay and archive:
+
+| It does | The map's answer |
+|---|---|
+| Re-forwards a frame every `forwardRetryMs` | The relay forwards it, exactly as it always did, and issues a `FORWARD_RECEIPT` per write (§6.12). |
+| Sends a duplicate to a destination that already journaled it | The destination deduplicates and answers **nothing** (§6.6, §14 B6). Unchanged. |
+| Sends a duplicate to a destination that already delivered it | The destination re-ACKs with `duplicate: true`. Unchanged. |
+| Sends a duplicate copy to the archive through the fan-out | The archive refuses it inside `archiveDedupWindowMs` (§25, B38). |
+| Holds an entry for 24 hours and bounces it home | Its own world gets its own organism back, and may duplicate it exactly as §9.3 said before this set. **Nobody else's world is affected.** The exception was always local to the sender that ran it. |
+| Publishes `heldDepth` and `bouncedTimeoutTotal` | Ignored. The names are reserved, so nothing else claims them. |
+
+**Nothing breaks in the other direction either.** A `contract-b/4.1` sidecar against an older
+relay never uses the retry that relay expected; the relay forwards, receipts and NACKs as
+before, and its 48-hour forwarding record is simply consulted less often.
+
+**The release order is therefore free, and one order is still better.** Relay and archive first
+— they are the operator's own machines and they carry the dedup that absorbs old senders — then
+the sidecar release, at each participant's own pace. **`minContractVersion` (§22, B25) MUST NOT
+be raised to `contract-b/4.1`** to force the crossing: it would evict a world for running last
+month's build in order to apply a change that costs that world nothing.
+
+**Enforced by:** the **sending sidecar**, which is the only party that can get this wrong and
+the only one that changes; the **receiving sidecar and the archive**, for keeping every dedup
+rule exactly as it is, forever, because the peers that need them are the ones this map cannot
+upgrade; and the **operator**, for `forwardTimeoutMs`, for `maxReroutes`, and for reading
+`lostForwardTotal` as a map fact rather than as a fault.
+
+### B38 — The archive's duplicate set becomes a bounded window (§5.1, §10, §12)
+
+*From B37. It is the one structure whose unboundedness had a reason, and B37 removed the
+reason.*
+
+**Gap.** §5.1's duplicate set holds one key for every record the ledger carries, and
+**nothing was ever deleted from it**. That was correct and deliberate: `migrations.jsonl` is
+never rewritten, so a re-forwarded migration recorded a second time would put a permanent
+duplicate row in the record, and a re-forward could arrive at any distance in time. The set was
+therefore the one retained structure that grew with the ledger — 128 MiB at the 2026-08-16
+production size of 5.4 M keys, measured, and the largest single term in the archive's resident
+memory (`deploy/SIZING.md`).
+
+**B37 removed the re-forward.** A conforming sender hands each migration to the relay exactly
+once. What can still produce a second copy of one record is a **sidecar older than B37** running
+its retry loop, and a **defective peer** — and both of those arrive within seconds or minutes of
+the original, never a year later.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| The window | `archiveDedupWindowMs` (§12), default **172 800 000 ms (48 hours)**. A duplicate that arrives inside it is refused, exactly as before. |
+| It is a FLOOR, not a deadline | The set is two generations rotated on the window, so a key is remembered for **at least** one window and **at most** two. A correctness argument may rely on the floor and nothing else. |
+| What it costs to exceed it | A duplicate that arrives later is **appended to the ledger a second time**, and the ledger is never rewritten. That is a duplicate ROW in the permanent record and never a duplicated organism, and it is stated as the price rather than hidden as a defect. |
+| Memory | At most **two windows of keys**, whatever the age of the record. At the 2026-08-16 production rate the arithmetic is in `deploy/SIZING.md`, and the model is a **constant** rather than a function of the ledger. |
+| Nothing is deleted from a generation | Which is what preserves the open-addressed table's whole reason for existing: no tombstones, no degradation, 25 bytes a key. The oldest generation is **dropped whole** and its memory returns in one piece. |
+| The seeds are per WINDOW, not per generation | Two generations that hashed a key differently would answer different questions, and a rotation would silently forget what it was meant to keep. |
+| The replay rebuilds the window, never the record | A restart inserts only the keys whose records fall inside the window, walking the **ledger's own timestamps**. The cost of a restart stops growing with the age of the record, and the answer is the same one the live path would have given. |
+| The ledger is untouched | B38 bounds a **memory structure**. `migrations.jsonl` is still kept forever, nothing evicts from it, and D11 is not in question (§10, §23 B33). |
+
+**The operator's knob, and when to move it.** Raise `archiveDedupWindowMs` while the fleet
+still holds sidecars older than B37 **and** the archive has the memory for it; the cost is
+linear in the window. Lower it on a memory-bound archive once the fleet has crossed. **Zero is
+not a value**: an archive with no window would record a duplicate row for every retry a single
+old peer sent.
+
+**Enforced by:** the **archive**, and nobody else. No frame changes, no peer can observe the
+window, and no other component holds a copy of this set.

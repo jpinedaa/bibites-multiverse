@@ -93,9 +93,19 @@ import (
 // session, one additive OPTIONAL field on parents[], one added close-code enum
 // value. Nothing is removed and no type changes. One milestone, one wave, two
 // honest answers from two documents' own rules.
+// Contract B takes a MINOR of its own for §25's B37 and B38, `contract-b/4.1`,
+// and its path does NOT move. Removing the bounded hold changes what ONE PEER
+// does with its own journal: no message type, field, enum value, NACK code or
+// close code is removed, both directions of a mixed fleet interoperate byte for
+// byte, and the destination's dedup absorbs an old sidecar's retry exactly as it
+// always did. The minor is for the one ADDITIVE OPTIONAL field on the peer stats
+// block, `lostForwardTotal` (§6.3.1) — the same test §15, §16, §18 and §19 each
+// answered the same way. `heldDepth` and `bouncedTimeoutTotal` are retired
+// rather than removed: a sidecar simply stops sending them, which §6.3.1's
+// "absence is a value" rule has always permitted, and their names are reserved.
 const (
 	ProtocolA = "contract-a/2.4"
-	ProtocolB = "contract-b/4.0"
+	ProtocolB = "contract-b/4.1"
 )
 
 // Shared size limits (contract-a.md §10, contract-b-m4.md §12).

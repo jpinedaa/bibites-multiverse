@@ -1024,8 +1024,12 @@ func TestEveryRetiredPathAnswersWith4000(t *testing.T) {
 	if contractb.ContractBPath != "/contract-b/v4" {
 		t.Fatalf("the live path is %q, want /contract-b/v4 (B32)", contractb.ContractBPath)
 	}
-	if wire.ProtocolB != "contract-b/4.0" {
-		t.Fatalf("the protocol identifier is %q, want contract-b/4.0 (B32)", wire.ProtocolB)
+	// THE MAJOR IS WHAT THE PATH IS BOUND TO, and the minor deliberately is not
+	// (§4). Pinning the whole identifier here made a minor bump — §25's
+	// contract-b/4.1, which changes no frame — fail a test about retired paths.
+	if !strings.HasPrefix(wire.ProtocolB, "contract-b/4.") {
+		t.Fatalf("the protocol identifier is %q, want a contract-b/4.x on /contract-b/v4 (B32)",
+			wire.ProtocolB)
 	}
 }
 

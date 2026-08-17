@@ -23,10 +23,10 @@ import (
 	"multiverse/internal/wire"
 )
 
-// fakeClock is the injectable time source of §9.3. The hold clock counts a
-// TWENTY-FOUR HOUR accrual, and the only honest way to test a rule about hours
-// is to control the clock the rule reads — the alternative is to test a
-// different, shorter rule and hope it is the same one.
+// fakeClock is the injectable time source of §9.3. forwardTimeoutMs is TWENTY-
+// FOUR HOURS, and the only honest way to test a rule about hours is to control
+// the clock the rule reads — the alternative is to test a different, shorter
+// rule and hope it is the same one.
 type fakeClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -417,12 +417,10 @@ func TestBurstArrivesPacedNotAllAtOnce(t *testing.T) {
 		return st.TimeScale != nil && *st.TimeScale > 0
 	})
 	aStats := a.side.Stats()
-	if aStats.BouncedTimeoutTotal == nil || *aStats.BouncedTimeoutTotal != 0 {
-		t.Fatalf("the sender bounced %v entries while the destination was live; "+
-			"a live peer with a deep paced backlog is SLOW, NOT ORPHANED", aStats.BouncedTimeoutTotal)
-	}
-	if aStats.HeldDepth == nil || *aStats.HeldDepth != 0 {
-		t.Fatalf("heldDepth = %v against a live destination", aStats.HeldDepth)
+	if aStats.LostForwardTotal == nil || *aStats.LostForwardTotal != 0 {
+		t.Fatalf("the sender wrote off %v entries while the destination was live and draining; "+
+			"a live peer with a deep paced backlog is SLOW, NOT ORPHANED",
+			aStats.LostForwardTotal)
 	}
 }
 
@@ -463,83 +461,16 @@ func (s *logSpy) logger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(s, &slog.HandlerOptions{Level: slog.LevelInfo}))
 }
 
-// TestJournaledDuplicateIsNotReAcked pins §14 B6, and it pins the NARROW half of
-// it: a duplicate MIGRATION_PAYLOAD that hits an entry which is JOURNALED BUT NOT
-// TOMBSTONED is answered with NOTHING.
+// TestJournaledDuplicateIsNotReAcked MOVED to transition_test.go with §25's
+// B37, as TestAnOldSidecarsRetryIsStillAbsorbedExactlyOnce.
 //
-// Why this rule needs a test of its own. "A dedup hit is answered MIGRATION_ACK
-// immediately" is the natural sentence to write, this document used to carry it
-// in §6.6, and it is a silent organism-loss bug: an early ACK releases the
-// SENDER'S custody before the delivery it claims. The first copy is still in the
-// receiver's journal waiting for its mod, and if the receiver dies there, both
-// sides have let go of the same organism and nothing logs anything. §6.7 puts
-// the custody transfer at the receiving mod's SPAWN, and only a tombstone proves
-// that spawn happened.
-//
-// Arrival pacing (contract-a.md §15 A20) is what makes this worth pinning rather
-// than reasoning about: "journaled but not yet delivered" used to last
-// microseconds and now lasts minutes of simulated time by design.
-//
-// The rig: the destination's world is stopped, so the payload is journaled and
-// never delivered, and the sender's forward retry supplies the duplicates.
-func TestJournaledDuplicateIsNotReAcked(t *testing.T) {
-	spy := newLogSpy(t)
-	g := newGrid(t, 2, gridOptions{
-		layout:    layoutRow(2),
-		heartbeat: 100 * time.Millisecond,
-		tune: func(i int, c *Config) {
-			if i == 1 {
-				c.Logger = spy.logger()
-			}
-		},
-	})
-	a, b := g.node(0), g.node(1)
-
-	b.mod.setPaused(true)
-	time.Sleep(200 * time.Millisecond)
-
-	id := a.mod.migrateOut(testEntityID, contracta.EdgeE, 0.5)
-	waitFor(t, 10*time.Second, "slot 2 to journal the payload", func() bool {
-		return custodyOf(b.side, id) != "absent"
-	})
-	// Two duplicates, so this is the steady state and not one lucky ordering.
-	waitFor(t, 15*time.Second, "at least two duplicate MIGRATION_PAYLOADs to arrive", func() bool {
-		return spy.count("duplicate MIGRATION_PAYLOAD") >= 2
-	})
-
-	if reAcked := spy.count("reAcked=true"); reAcked != 0 {
-		t.Fatalf("the receiver re-ACKed %d duplicate(s) against a journaled, un-delivered "+
-			"entry; B6 answers those with NOTHING", reAcked)
-	}
-	// The decisive assertion is on the SENDER. An ACK is only observable by what
-	// it does, and what it does is release custody.
-	if got := custodyOf(a.side, id); got != "out/in_flight" {
-		t.Fatalf("the sender's custody is %q, want out/in_flight; a duplicate against a "+
-			"journaled entry must not release it", got)
-	}
-	if h := handoffOf(a.side, id); h != journal.HandoffSent {
-		t.Fatalf("the sender's handoff is %q, want %q", h, journal.HandoffSent)
-	}
-	if got := b.world.spawnCount(id); got != 0 {
-		t.Fatalf("the stopped world spawned the organism %d time(s)", got)
-	}
-	// Nothing bounced: the destination is LIVE, only slow (Risk 9, §9.3).
-	if st := a.side.Stats(); st.BouncedTimeoutTotal != nil && *st.BouncedTimeoutTotal != 0 {
-		t.Fatalf("the sender bounced %d entr(y|ies) against a live destination",
-			*st.BouncedTimeoutTotal)
-	}
-
-	// B6's stated cost of the narrow rule is zero, and this is what that means:
-	// the sender's own retry lands right back in the same branch, and the spawn
-	// releases it with no further action from either side.
-	b.mod.setPaused(false)
-	waitFor(t, 20*time.Second, "the delivery to complete once the world runs again", func() bool {
-		return custodyOf(a.side, id) == "out/done" && custodyOf(b.side, id) == "in/done"
-	})
-	if got := b.world.spawnCount(id); got != 1 {
-		t.Fatalf("the organism spawned %d times, want exactly 1", got)
-	}
-}
+// §14 B6's rule is untouched — a duplicate MIGRATION_PAYLOAD that hits an entry
+// which is JOURNALED BUT NOT TOMBSTONED is answered with NOTHING, because an
+// early ACK releases the sender's custody before the delivery it claims and
+// both sides then let go of one organism. What changed is where a duplicate
+// comes from: the sender's own retry produced it, and B37 removed the retry. So
+// the test drives it from the two sources that remain and will remain forever —
+// a peer older than B37, and a defective one.
 
 func deliveredCount(m *fakeMod, ids []string) int {
 	want := map[string]bool{}
@@ -561,17 +492,24 @@ func deliveredCount(m *fakeMod, ids []string) int {
 	return len(seen)
 }
 
-// --------------------------------------------------------------- the hold
+// ------------------------------------------------------- the loss, not a hold
 
-// TestAccruedHoldClockRunsOnlyInTheDarkAndBouncesAtTheTimeout covers §9.3 in
-// full: the three simultaneous conditions, the accrual persisted in the journal
-// entry, the resume across a restart, and the automatic bounce.
+// TestAForwardedOrganismIsLostNeverHeldAndNeverBounced is §25's B37 end to end,
+// and it is the test the removed hold-clock test turned into.
 //
-// It uses an injectable clock, because the rule is about a twenty-four hour
-// accrual and the only honest way to test that rule is to control the clock it
-// reads.
-func TestAccruedHoldClockRunsOnlyInTheDarkAndBouncesAtTheTimeout(t *testing.T) {
-	const holdTimeout = 10 * time.Minute
+// The shape is the one the bounded hold was written for and is now the shape
+// migration accepts: the destination takes custody, dies before its
+// acknowledgement leaves, and never comes back. FROM THE SENDER THIS IS
+// INDISTINGUISHABLE FROM "the frame never arrived" — that has not changed, and
+// it is why nothing may be re-sent or brought home on it. What changed is the
+// answer: the entry is not held, not re-forwarded, not bounced. At
+// forwardTimeoutMs it becomes a `lost` tombstone and a counter the map can read,
+// and the organism is gone.
+//
+// It uses an injectable clock, because the rule is about twenty-four hours and
+// the only honest way to test that rule is to control the clock it reads.
+func TestAForwardedOrganismIsLostNeverHeldAndNeverBounced(t *testing.T) {
+	const forwardTimeout = 10 * time.Minute
 	clock := newFakeClock()
 
 	rl := startRelay(t)
@@ -584,8 +522,7 @@ func TestAccruedHoldClockRunsOnlyInTheDarkAndBouncesAtTheTimeout(t *testing.T) {
 	}
 	cfgA := fastConfig(t, rl, "peer-a")
 	cfgA.Clock = clock.Now
-	cfgA.HoldTimeout = holdTimeout
-	cfgA.HoldAccrualFlush = time.Millisecond // flush on any advance, so a test can read it
+	cfgA.ForwardTimeout = forwardTimeout
 	// Every deadline in this process reads the injected clock, so a jump of
 	// simulated hours would otherwise read as a silent mod. The heartbeat
 	// timeout is not what this test is about, so it is put out of reach.
@@ -611,76 +548,49 @@ func TestAccruedHoldClockRunsOnlyInTheDarkAndBouncesAtTheTimeout(t *testing.T) {
 	waitFor(t, 10*time.Second, "the entry to reach the sent handoff state", func() bool {
 		return handoffOf(sideA, migrationID) == journal.HandoffSent
 	})
-	sessionOnEntry := journalEntry(t, sideA, migrationID).RelaySessionID
-	if sessionOnEntry != rl.relay.SessionID() {
+	entry := journalEntry(t, sideA, migrationID)
+	if entry.RelaySessionID != rl.relay.SessionID() {
 		t.Fatalf("the entry recorded relaySessionId %q, want the live relay's %q",
-			sessionOnEntry, rl.relay.SessionID())
+			entry.RelaySessionID, rl.relay.SessionID())
+	}
+	if entry.SentAtMs == 0 {
+		t.Fatal("the entry has no sentAt: the one deadline an outbound entry carries never started")
 	}
 
-	// The destination dies with the organism in its journal. From the sender
-	// this is INDISTINGUISHABLE from "the frame never arrived", and that is
-	// exactly why it holds instead of re-routing.
+	// The destination dies with the organism in its journal.
 	modB.abort()
 	_ = sideB.Close()
-	waitFor(t, 10*time.Second, "the entry to enter the held state", func() bool {
-		return handoffOf(sideA, migrationID) == journal.HandoffHeld
+	waitFor(t, 10*time.Second, "sideA to observe slot 2 dark", func() bool {
+		return sideA.RelayConnected() && !destLiveOf(sideA, 2)
 	})
 
-	// Condition set 1: held, relay link up, destination dark. The clock runs.
-	clock.Advance(2 * time.Minute)
-	waitFor(t, 10*time.Second, "the hold clock to accrue two minutes", func() bool {
-		return journalEntry(t, sideA, migrationID).AccruedHoldMs >= (2 * time.Minute).Milliseconds()
-	})
-	accrued := journalEntry(t, sideA, migrationID).AccruedHoldMs
-
-	// Condition 2 breaks: THE SENDER GOES BLIND. A sender whose machine slept
-	// for a night must not wake with an expired clock — it never observed the
-	// destination dark, it only failed to observe anything.
-	rl.kill()
-	waitFor(t, 10*time.Second, "the sidecar to lose its relay link", func() bool {
-		return !sideA.RelayConnected()
-	})
-	time.Sleep(200 * time.Millisecond)
-	clock.Advance(6 * time.Minute)
-	time.Sleep(400 * time.Millisecond)
-	if got := journalEntry(t, sideA, migrationID).AccruedHoldMs; got > accrued+time.Second.Milliseconds() {
-		t.Fatalf("the hold clock accrued %s while the SENDER was blind (was %s); §9.3 stops it",
-			time.Duration(got)*time.Millisecond, time.Duration(accrued)*time.Millisecond)
+	// THE HOLD IS GONE, so a dark destination is not a state change. Nine tenths
+	// of the timeout passes with the destination dark and the sender watching,
+	// and the entry does not move: no held state, no re-forward, no bounce.
+	clock.Advance(9 * forwardTimeout / 10)
+	time.Sleep(500 * time.Millisecond)
+	st := journalEntry(t, sideA, migrationID)
+	if st.Handoff != journal.HandoffSent {
+		t.Fatalf("handoff = %q against a dark destination, want sent — silence is not proof and "+
+			"there is no state between sent and resolved", st.Handoff)
+	}
+	if st.ForwardReceipts != 1 {
+		t.Fatalf("forwardReceipts = %d, want exactly 1: the frame is forwarded once", st.ForwardReceipts)
+	}
+	if got := reportedLost(sideA); got != 0 {
+		t.Fatalf("lostForwardTotal = %d before the timeout", got)
 	}
 
-	// The relay comes back — with a NEW session id, which invalidates every
-	// proof the old one could have given (§5.2). The clock resumes where it
-	// stopped; it does not restart.
-	rl.restart()
-	waitFor(t, 20*time.Second, "the sidecar to reconnect to the NEW relay process", func() bool {
-		return sideA.RelayConnected() && sideA.RelaySessionID() == rl.relay.SessionID()
-	})
-	// It must see the map again before the clock can start: §9.3's third
-	// condition is the destination's liveness in the sender's LATEST
-	// PEER_STATUS.
-	waitFor(t, 10*time.Second, "the map view to come back", func() bool {
-		return sideA.Slot() == 1 && handoffOf(sideA, migrationID) == journal.HandoffHeld
-	})
-	time.Sleep(200 * time.Millisecond)
-	clock.Advance(3 * time.Minute)
-	waitFor(t, 10*time.Second, "the hold clock to resume", func() bool {
-		return journalEntry(t, sideA, migrationID).AccruedHoldMs >= (5 * time.Minute).Milliseconds()
-	})
-	resumed := journalEntry(t, sideA, migrationID).AccruedHoldMs
-	if resumed >= (9 * time.Minute).Milliseconds() {
-		t.Fatalf("the clock counted the blind period: %s accrued",
-			time.Duration(resumed)*time.Millisecond)
-	}
-
-	// A restart RESUMES the accrual and MUST NOT start a fresh timer.
+	// A restart neither restarts the deadline nor resolves the entry: sentAt is
+	// durable and the entry replays as `sent`.
 	_ = sideA.Close()
 	modA.abort()
 	reopened := startSidecar(t, cfgA)
-	if got := journalEntry(t, reopened, migrationID).AccruedHoldMs; got < resumed {
-		t.Fatalf("the accrual fell from %d to %d across a restart", resumed, got)
+	if got := journalEntry(t, reopened, migrationID); got.SentAtMs != st.SentAtMs {
+		t.Fatalf("sentAt moved across a restart: %d then %d", st.SentAtMs, got.SentAtMs)
 	}
-	if got := handoffOf(reopened, migrationID); got != journal.HandoffHeld {
-		t.Fatalf("the handoff state is %q after a restart, want held", got)
+	if got := handoffOf(reopened, migrationID); got != journal.HandoffSent {
+		t.Fatalf("the handoff state is %q after a restart, want sent", got)
 	}
 	worldA2 := newWorld()
 	modA2 := dialFakeMod(t, fakeModOptions{
@@ -688,46 +598,55 @@ func TestAccruedHoldClockRunsOnlyInTheDarkAndBouncesAtTheTimeout(t *testing.T) {
 	waitFor(t, 20*time.Second, "the restarted sidecar to see the map again", func() bool {
 		return reopened.RelayConnected() && reopened.Slot() == 1
 	})
-	// One custody tick has to observe the dark destination before any wall of
-	// simulated hours can be attributed to it: the clock counts OBSERVED dark
-	// time, not elapsed time.
-	time.Sleep(300 * time.Millisecond)
-	// The clock RESUMES rather than restarting: one more minute lands on top of
-	// what was already served.
-	clock.Advance(time.Minute)
-	waitFor(t, 10*time.Second, "the resumed clock to keep accruing", func() bool {
-		return journalEntry(t, reopened, migrationID).AccruedHoldMs > resumed
-	})
 
-	// At the timeout the sidecar bounces the organism HOME BY ITSELF, on the
-	// edge it left from, and says so loudly.
-	clock.Advance(holdTimeout)
-	env, _ := modA2.waitFrom(0, 20*time.Second,
-		func(e wire.Envelope) bool { return e.Type == contracta.TypeMigrateIn })
-	in := decodeAs[contracta.MigrateIn](t, env)
-	if in.MigrationID != migrationID {
-		t.Fatalf("the bounce carried %s, want %s", in.MigrationID, migrationID)
-	}
-	if !in.BounceBack {
-		t.Fatal("an automatic bounce must carry bounceBack = true")
-	}
-	if in.EntryEdge != contracta.EdgeE {
-		t.Fatalf("the bounce came home on %s, want the origin's own exit edge E", in.EntryEdge)
-	}
-	waitFor(t, 10*time.Second, "the bounce to be counted", func() bool {
-		st := reopened.Stats()
-		return st.BouncedTimeoutTotal != nil && *st.BouncedTimeoutTotal == 1
+	// At the timeout the organism is RECORDED LOST. Nothing is delivered to this
+	// world's mod — that is the whole difference from the bounded hold, and it is
+	// what makes at-most-once carry no exception at all.
+	clock.Advance(forwardTimeout)
+	waitFor(t, 20*time.Second, "the forward to be recorded lost", func() bool {
+		return reportedLost(reopened) == 1
 	})
-	if got := journalEntry(t, reopened, migrationID); !got.BouncedTimeout {
-		t.Fatal("the tombstone does not record that a hold timeout caused the bounce")
+	lost := journalEntry(t, reopened, migrationID)
+	if lost.Handoff != journal.HandoffLost {
+		t.Fatalf("the tombstone handoff is %q, want lost", lost.Handoff)
+	}
+	if lost.Status != journal.StatusDone {
+		t.Fatalf("the lost entry is %q, want a done tombstone that still recognises a late ACK",
+			lost.Status)
+	}
+	if lost.Direction != journal.Out || lost.BounceBack {
+		t.Fatal("a lost forward was turned into a bounce-back; §25 B37 removed the timeout bounce")
+	}
+	// The origin's world sees nothing come home. It is asserted by LOOKING
+	// rather than by waiting, and after a settling pause, because a false pass
+	// here is the duplication this change exists to remove.
+	time.Sleep(time.Second)
+	if n := modA2.countType(contracta.TypeMigrateIn); n != 0 {
+		t.Fatalf("the origin mod was handed %d MIGRATE_IN frame(s) at the timeout: the organism "+
+			"came home, which is exactly the duplication §25 B37 removes", n)
+	}
+	if worldA2.spawnCount(migrationID) != 0 {
+		t.Fatal("the origin world spawned the organism again")
 	}
 }
 
-// TestALiveDestinationNeverRunsTheHoldClock is Risk 9's assertion, isolated: a
-// live peer with a deep paced backlog is SLOW, NOT ORPHANED, and counting that
-// time would bounce an organism that was about to be spawned — which is a
-// duplication, not a delay.
-func TestALiveDestinationNeverRunsTheHoldClock(t *testing.T) {
+// reportedLost reads lostForwardTotal off the peer stats block — the one field
+// §25's B37 adds to §6.3.1, and the map's only reading of what migration costs.
+func reportedLost(s *Sidecar) int {
+	st := s.Stats()
+	if st.LostForwardTotal == nil {
+		return -1
+	}
+	return *st.LostForwardTotal
+}
+
+// TestALiveButSilentDestinationIsNeverWrittenOffEarly is Risk 9's assertion in
+// its new form. A live peer with a deep paced backlog is SLOW, NOT ORPHANED. It
+// used to matter because counting that time would have BOUNCED an organism that
+// was about to be spawned; it still matters, for a smaller reason that is worth
+// keeping honest — a record written off while the organism is on its way is a
+// wrong record, and the late ACK that follows it says so.
+func TestALiveButSilentDestinationIsNeverWrittenOffEarly(t *testing.T) {
 	clock := newFakeClock()
 	rl := startRelay(t)
 	for i, pos := range []contractb.Position{{Col: 0, Row: 0}, {Col: 1, Row: 0}} {
@@ -738,8 +657,7 @@ func TestALiveDestinationNeverRunsTheHoldClock(t *testing.T) {
 	}
 	cfgA := fastConfig(t, rl, "peer-a")
 	cfgA.Clock = clock.Now
-	cfgA.HoldTimeout = time.Minute
-	cfgA.HoldAccrualFlush = time.Millisecond
+	cfgA.ForwardTimeout = time.Hour
 	cfgA.HeartbeatTimeout = time.Hour
 	cfgB := fastConfig(t, rl, "peer-b")
 
@@ -760,42 +678,54 @@ func TestALiveDestinationNeverRunsTheHoldClock(t *testing.T) {
 		return handoffOf(sideA, migrationID) == journal.HandoffSent
 	})
 
-	// Ten times the hold timeout passes with the destination LIVE and silent.
-	clock.Advance(10 * time.Minute)
+	// Most of the timeout passes with the destination LIVE and silent.
+	clock.Advance(50 * time.Minute)
 	time.Sleep(600 * time.Millisecond)
 
 	st := journalEntry(t, sideA, migrationID)
-	if st.AccruedHoldMs != 0 {
-		t.Fatalf("the hold clock accrued %s against a LIVE destination",
-			time.Duration(st.AccruedHoldMs)*time.Millisecond)
-	}
 	if st.Handoff != journal.HandoffSent {
 		t.Fatalf("handoff = %q against a live destination, want sent", st.Handoff)
 	}
 	if st.Status == journal.StatusDone || st.Direction == journal.In {
-		t.Fatal("the entry bounced home while its destination was live")
+		t.Fatal("the entry was resolved while its destination was live and holding it")
+	}
+	if got := reportedLost(sideA); got != 0 {
+		t.Fatalf("lostForwardTotal = %d against a LIVE destination inside forwardTimeoutMs", got)
 	}
 }
 
 // --------------------------------------------------------------- the proof
 
-// TestRerouteNeedsAMatchedProofAndHoldsOnSilence covers §9.2's evidence table
-// end to end, and the failure direction that makes it safe.
+// TestRerouteNeedsAProofAndSilenceIsNeverOne covers §9.2's evidence table end to
+// end, and the failure direction that makes it safe.
 //
-// Both halves run the same shape: a journaled entry in the SENT state whose
-// destination has gone dark, with a re-route target available on the same axis.
-// The only difference is the relaySessionId recorded on the entry — the exact
-// thing a relay restart changes.
-func TestRerouteNeedsAMatchedProofAndHoldsOnSilence(t *testing.T) {
-	t.Run("matched proof re-routes", func(t *testing.T) {
+// Both halves run the same shape: a journaled entry naming a destination that
+// has gone dark, with a re-route target available on the same axis. The only
+// difference is the entry's HANDOFF STATE, which is the whole of the rule.
+//
+//	pending   the frame reached nobody. The sender's own record is the proof,
+//	          and the organism takes the other lane.
+//	sent      the frame was written to a live relay connection. Custody may have
+//	          moved and no statement says otherwise, so nothing happens: not a
+//	          re-route, not a re-forward, not a bounce home.
+//
+// THE SECOND ARM IS §25 B37's NAMED COST, and it is asserted rather than
+// described. Before B37 that entry ran a 24-hour hold — kept re-forwarding, and
+// the re-forward was how the relay's proof reached it, so a `sent` entry left by
+// a crashed process usually re-routed within a retry interval. B37 removed the
+// re-forward, so it does not: it waits out forwardTimeoutMs and is recorded
+// lost. The owner took that trade knowingly (2026-08-17), and this test is where
+// anyone who reverses it will find out.
+func TestRerouteNeedsAProofAndSilenceIsNeverOne(t *testing.T) {
+	t.Run("a pending entry re-routes on its own record", func(t *testing.T) {
 		runRerouteProof(t, true)
 	})
-	t.Run("a relay restart invalidates the proof and the entry holds", func(t *testing.T) {
+	t.Run("a forwarded entry has no proof and stays where it is", func(t *testing.T) {
 		runRerouteProof(t, false)
 	})
 }
 
-func runRerouteProof(t *testing.T, matched bool) {
+func runRerouteProof(t *testing.T, pending bool) {
 	rl := startRelay(t)
 	ids := []string{"peer-a", "peer-b", "peer-c"}
 	for i, pos := range []contractb.Position{{Col: 0, Row: 0}, {Col: 1, Row: 0}, {Col: 2, Row: 0}} {
@@ -812,17 +742,15 @@ func runRerouteProof(t *testing.T, matched bool) {
 	worldC := newWorld()
 	dialFakeMod(t, fakeModOptions{url: sideC.URL(), world: worldC, heartbeat: 200 * time.Millisecond})
 
-	// The sender's journal, as a restart would leave it: the frame WAS written
-	// to a live relay connection, so custody may have moved, and the entry
-	// carries the session that write happened under.
-	session := rl.relay.SessionID()
-	if !matched {
-		// The relay restarted since: a new process cannot speak for what the old
-		// one forwarded.
-		session = wire.NewUUID()
-	}
+	// The sender's journal, as a restart would leave it. In the `sent` arm the
+	// frame WAS written to a live relay connection under the session recorded on
+	// the entry — every ingredient of a proof except a statement.
 	cfgA := fastConfig(t, rl, "peer-a")
-	migrationID := seedSentEntry(t, cfgA.DataDir, 2, session)
+	handoff := journal.HandoffSent
+	if pending {
+		handoff = journal.HandoffPending
+	}
+	migrationID := seedOutEntry(t, cfgA.DataDir, 2, rl.relay.SessionID(), handoff)
 
 	sideA := startSidecar(t, cfgA)
 	waitSlot(t, sideA, 1)
@@ -833,7 +761,7 @@ func runRerouteProof(t *testing.T, matched bool) {
 	waitLane(t, sideA, contracta.EdgeE, 3)
 	modA.waitEdge(contracta.EdgeE, true, 10*time.Second)
 
-	if matched {
+	if pending {
 		waitFor(t, 15*time.Second, "the organism to be re-routed onto the healed lane", func() bool {
 			return worldC.spawnCount(migrationID) == 1
 		})
@@ -844,27 +772,39 @@ func runRerouteProof(t *testing.T, matched bool) {
 		if st.RerouteCount != 1 || st.RerouteFrom != 2 {
 			t.Fatalf("reroute count %d from slot %d, want 1 from 2", st.RerouteCount, st.RerouteFrom)
 		}
-		if st.RerouteProof != contractb.ProofRelayNeverForwarded {
-			t.Fatalf("reroute proof = %q, want relay_never_forwarded", st.RerouteProof)
+		if st.RerouteProof != contractb.ProofNeverSent {
+			t.Fatalf("reroute proof = %q, want never_sent", st.RerouteProof)
 		}
 		return
 	}
 
-	// No proof: the entry HOLDS at the destination it recorded, however long the
-	// silence lasts and however available the other lane is.
-	waitFor(t, 15*time.Second, "the entry to enter the held state", func() bool {
-		return handoffOf(sideA, migrationID) == journal.HandoffHeld
-	})
-	time.Sleep(1500 * time.Millisecond)
+	// No statement: the entry STAYS at the destination it recorded, however long
+	// the silence lasts and however available the other lane is. It is not
+	// re-routed, not re-forwarded and not brought home.
+	time.Sleep(2 * time.Second)
 	st := journalEntry(t, sideA, migrationID)
+	if st.Handoff != journal.HandoffSent {
+		t.Fatalf("handoff = %q; silence moves a forwarded entry nowhere", st.Handoff)
+	}
 	if st.Entry.DestSlot != 2 {
-		t.Fatalf("destSlot = %d without a matched proof; §9.2 says hold", st.Entry.DestSlot)
+		t.Fatalf("destSlot = %d without a proof of non-delivery; §9.2 forbids the rewrite",
+			st.Entry.DestSlot)
 	}
 	if st.RerouteCount != 0 {
-		t.Fatalf("the entry re-routed %d times on an unmatched proof", st.RerouteCount)
+		t.Fatalf("the entry re-routed %d times on silence", st.RerouteCount)
+	}
+	if st.ForwardReceipts != 0 {
+		t.Fatalf("the entry was forwarded %d more times; §25 B37 forwards a frame once",
+			st.ForwardReceipts)
+	}
+	if st.Direction != journal.Out || st.BounceBack {
+		t.Fatal("the entry came home on silence, which is the duplication §25 B37 removes")
 	}
 	if got := worldC.spawnCount(migrationID); got != 0 {
 		t.Fatalf("slot 3 spawned the organism %d times without a proof of non-delivery", got)
+	}
+	if got := worldA.spawnCount(migrationID); got != 0 {
+		t.Fatalf("the origin world re-spawned the organism %d times", got)
 	}
 }
 
@@ -872,6 +812,14 @@ func runRerouteProof(t *testing.T, matched bool) {
 // then died: custody may have moved, the entry names the session that write
 // happened under, and only a statement scoped to that session can free it.
 func seedSentEntry(t *testing.T, dataDir string, destSlot int, session string) string {
+	t.Helper()
+	return seedOutEntry(t, dataDir, destSlot, session, journal.HandoffSent)
+}
+
+// seedOutEntry is the same in either handoff state, which is what lets one test
+// run the two sides of §9.2's rule over identical bytes.
+func seedOutEntry(t *testing.T, dataDir string, destSlot int, session string,
+	handoff journal.Handoff) string {
 	t.Helper()
 	jr, err := journal.Open(filepath.Join(dataDir, "journal"))
 	if err != nil {
@@ -899,9 +847,14 @@ func seedSentEntry(t *testing.T, dataDir string, destSlot int, session string) s
 	}, false); err != nil {
 		t.Fatalf("seed journal: %v", err)
 	}
-	if _, err := jr.Apply(migrationID, journal.Update{
-		Status: journal.StatusInFlight, Handoff: journal.HandoffSent,
-		RelaySessionID: &session}); err != nil {
+	u := journal.Update{Handoff: handoff}
+	if handoff == journal.HandoffSent {
+		sentAt := time.Now().UnixMilli()
+		u.Status = journal.StatusInFlight
+		u.RelaySessionID = &session
+		u.SentAtMs = &sentAt
+	}
+	if _, err := jr.Apply(migrationID, u); err != nil {
 		t.Fatalf("seed handoff: %v", err)
 	}
 	if err := jr.Close(); err != nil {
@@ -1144,7 +1097,8 @@ func TestPeerStatusRepublishesPeerStats(t *testing.T) {
 	if first.StatsAsOfMs == 0 {
 		t.Fatal("stats arrived with no statsAsOfMs; a reader MUST be able to age them")
 	}
-	if first.Stats.CustodyDepth == nil || first.Stats.PacedDepth == nil || first.Stats.HeldDepth == nil {
+	if first.Stats.CustodyDepth == nil || first.Stats.PacedDepth == nil ||
+		first.Stats.LostForwardTotal == nil {
 		t.Fatalf("the stats block is missing an operational depth: %+v", first.Stats)
 	}
 	// The REPUBLISH: a later broadcast carries a newer statsAsOfMs with no
@@ -1216,11 +1170,16 @@ func TestHeartbeatSaveReceiptReachesPeerStatus(t *testing.T) {
 // --------------------------------------------------------------- operator
 
 // TestListAndReleaseInflight covers §7.5 and §9.3's manual escape hatch: the
-// operator finds the entries the relay cannot enumerate, and releases one by
-// hand before the timeout expires.
+// operator finds the entries the relay cannot enumerate, and resolves one by
+// hand before forwardTimeoutMs writes it off.
+//
+// Since §25's B37 it is also THE ONLY WAY LEFT TO DUPLICATE AN ORGANISM on this
+// map: nothing bounces a forwarded entry automatically any more, so a `bounce`
+// here is a person deciding, against the receipt evidence, that the far side
+// never took custody. The risk text is checked for that reason.
 func TestListAndReleaseInflight(t *testing.T) {
 	dir := t.TempDir()
-	held := seedSentEntry(t, dir, 5, "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95")
+	unresolved := seedSentEntry(t, dir, 5, "5f0b9c31-77ad-4e26-9a4c-1b83d206ef95")
 	other := seedOutboundCustodyTo(t, dir, 9)
 
 	entries, err := ListInflight(dir, 0, 24*time.Hour)
@@ -1234,18 +1193,21 @@ func TestListAndReleaseInflight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListInflight --dest-slot: %v", err)
 	}
-	if len(only) != 1 || only[0].MigrationID != held {
+	if len(only) != 1 || only[0].MigrationID != unresolved {
 		t.Fatalf("--dest-slot 5 returned %+v", only)
 	}
 	if only[0].Handoff != string(journal.HandoffSent) || only[0].DestSlot != 5 {
 		t.Fatalf("the listed entry is %+v, want the sent entry for slot 5", only[0])
 	}
-	if only[0].Deadline <= 0 || only[0].Deadline > 24*time.Hour {
-		t.Fatalf("deadline = %s, want the remaining hold budget", only[0].Deadline)
+	if only[0].SentAt.IsZero() {
+		t.Fatal("the listed entry has no sentAt, so the report cannot say when it will be written off")
+	}
+	if only[0].LostIn <= 0 || only[0].LostIn > 24*time.Hour {
+		t.Fatalf("lostIn = %s, want what is left of forwardTimeoutMs", only[0].LostIn)
 	}
 
 	// bounce: the organism comes home to THIS world on the edge it left by.
-	msg, err := ReleaseInflight(dir, held, "bounce")
+	msg, err := ReleaseInflight(dir, unresolved, "bounce")
 	if err != nil {
 		t.Fatalf("ReleaseInflight bounce: %v", err)
 	}
@@ -1256,7 +1218,7 @@ func TestListAndReleaseInflight(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, _ := jr.Get(held)
+	st, _ := jr.Get(unresolved)
 	if st.Direction != journal.In || !st.BounceBack || st.Status != journal.StatusOpen {
 		t.Fatalf("after a bounce the entry is %+v, want an open inbound bounce-back", st)
 	}
@@ -1282,9 +1244,15 @@ func TestListAndReleaseInflight(t *testing.T) {
 	if _, err := ReleaseInflight(dir, wire.NewUUID(), "bounce"); err == nil {
 		t.Fatal("releasing an unknown migrationId reported success")
 	}
-	// The risk text is not optional: §9.3 REQUIRES the command to print it.
+	// The risk text is not optional: §9.3 REQUIRES the command to print it, and
+	// since B37 it has to say that this command is the only remaining way to
+	// duplicate an organism rather than one of two.
 	if len(InflightRisk) < 100 {
 		t.Fatal("--release-inflight does not print the duplication risk")
+	}
+	if !strings.Contains(InflightRisk, "ONLY WAY LEFT TO") {
+		t.Fatalf("the risk text no longer says this command is the only way left to duplicate "+
+			"an organism (§25, B37):\n%s", InflightRisk)
 	}
 }
 
@@ -1365,8 +1333,7 @@ func TestStatusPageShowsTheWholeMap(t *testing.T) {
 	if !live.StatsKnown || live.Population == nil {
 		t.Fatalf("slot 1's stats are %+v; a live peer's population must be known", live)
 	}
-	if live.CustodyDepth == nil || live.PacedDepth == nil || live.HeldDepth == nil ||
-		live.BouncedTimeoutTotal == nil {
+	if live.CustodyDepth == nil || live.PacedDepth == nil || live.LostForwardTotal == nil {
 		t.Fatalf("slot 1 is missing an operational depth: %+v", live)
 	}
 	// A dark slot is BYPASSED SINCE a named moment, and its stats age out to

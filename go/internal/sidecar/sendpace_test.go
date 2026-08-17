@@ -60,7 +60,7 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 	// The peer that was dark: its journal already holds the backlog before its
 	// process exists, which is what a rejoin after hours away looks like.
 	cfgA := fastConfig(t, rl, "peer-a")
-	ids := seedOutboundBacklog(t, cfgA.DataDir, 2, backlog, rl.relay.SessionID())
+	ids := seedOutboundBacklog(t, cfgA.DataDir, 2, backlog)
 
 	sideA := startSidecar(t, cfgA)
 	waitSlot(t, sideA, 1)
@@ -277,11 +277,11 @@ func TestControlFramesAreNotStarvedBehindADrain(t *testing.T) {
 
 // ------------------------------------------------------------------ helpers
 
-// seedOutboundBacklog writes the journal of a sidecar that forwarded a crowd of
-// organisms and then went dark: every entry is InFlight and handed over, under a
-// named relay session, exactly as seedSentEntry writes one. It is the state slot
-// 6 came back to.
-func seedOutboundBacklog(t *testing.T, dataDir string, destSlot, n int, session string) []string {
+// seedOutboundBacklog writes the journal of a sidecar whose world kept exporting
+// while its relay link was down: every entry is journaled, durable, and PENDING
+// — handed to nobody. It is the state slot 6 came back to, and since §25's B37
+// it is the only backlog a conforming sender can put on the wire at all.
+func seedOutboundBacklog(t *testing.T, dataDir string, destSlot, n int) []string {
 	t.Helper()
 	jr, err := journal.Open(filepath.Join(dataDir, "journal"))
 	if err != nil {
@@ -312,9 +312,13 @@ func seedOutboundBacklog(t *testing.T, dataDir string, destSlot, n int, session 
 		}, false); err != nil {
 			t.Fatalf("seed journal entry %d: %v", i, err)
 		}
+		// PENDING, not sent: the frame reached nobody. That is what a rejoin
+		// backlog IS since §25's B37 — a world that kept exporting while its
+		// relay link was down — and it is the only backlog a conforming sender
+		// can still put on the wire, because a frame it already wrote is never
+		// written again.
 		if _, err := jr.Apply(migrationID, journal.Update{
-			Status: journal.StatusInFlight, Handoff: journal.HandoffSent,
-			RelaySessionID: &session}); err != nil {
+			Handoff: journal.HandoffPending}); err != nil {
 			t.Fatalf("seed handoff %d: %v", i, err)
 		}
 		ids = append(ids, migrationID)

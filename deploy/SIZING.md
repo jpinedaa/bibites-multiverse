@@ -125,12 +125,62 @@ Retained state is what the archive still holds after the collector runs.
 Resident set is what the kernel counts against host memory, and what the kernel kills for.
 The two are different numbers and they answer different questions.
 
-The largest retained term is the duplicate-suppression set.
+The largest retained term was the duplicate-suppression set.
 It holds one entry for each ledger record that carries a `migrationId`.
-It is never evicted, because a re-forwarded migration must stay refusable.
-It held approximately 88 percent of archive resident memory before the change below.
+It held approximately 88 percent of archive resident memory before the first change below.
 That set now holds a 128-bit fingerprint of each key instead of the key,
 which lowered its cost from `89 B` to `26 B` for each key.
+
+**It is now also bounded in time, and the memory model became a constant.**
+Before `contract-b/4.1` the set could never forget a key.
+A sender could re-forward a frame a year later, `migrations.jsonl` is never rewritten,
+and a second copy of one record would put a permanent duplicate row in the record.
+`contract-b-m4.md` §25 B37 removed the re-forward: a sender hands each migration over once.
+What can still produce a second copy is a sidecar older than that amendment running its retry,
+or a defective peer, and both arrive within seconds.
+`contract-b-m4.md` §25 B38 therefore gave the set a window, `archiveDedupWindowMs`,
+which is `48 hours` by default and `--dedup-window` or `MULTIVERSE_ARCHIVE_DEDUP_WINDOW`
+on the command line.
+
+The set is two generations of the same table, and it rotates on the window.
+A key is refused for **at least** one window and **at most** two.
+Nothing is deleted from a generation, which is what keeps the table free of tombstones;
+the oldest generation is dropped whole and its memory returns in one piece.
+
+**The arithmetic an operator can check.**
+The set holds the smaller of two numbers, and never more than either:
+
+```text
+keys_held  = min(keys_in_the_whole_ledger, 2 * keys_in_one_window)
+set_bytes  = keys_held * 26 B
+```
+
+`26 B` for each key is the measured cost of the fingerprint set at the load factor it keeps.
+The `2 *` is the two generations. The `min` is why this change can never cost memory:
+a ledger younger than two windows holds every key it ever held, exactly as before.
+
+Read `keys_in_one_window` off your own ledger. One crossing writes two keys,
+one `MIGRATION` record and one `MIGRATION_ACK` record, and a `GENOME` record writes none.
+
+| Crossings each second, map-wide | Keys in a 48-hour window | Set at steady state |
+|---:|---:|---:|
+| `1` | `173,000` | `9 MB` |
+| `5` | `864,000` | `45 MB` |
+| `15` | `2,592,000` | `135 MB` |
+| `25` | `4,320,000` | `225 MB` |
+
+**The number stops growing, and that is the whole of the change.**
+The production copy of `2026-08-16T19:35:41Z` holds `5,134,867` keys and costs `128 MiB`.
+Unbounded, that figure rises for as long as the service runs: the same traffic for a year
+reaches tens of millions of keys and gigabytes of resident set, and every restart pays it again.
+Bounded, it settles at the table above and stays there.
+The restart cost settles with it, because the replay inserts only the keys
+whose records fall inside the window.
+
+Raise the window while the map still holds sidecars older than `contract-b/4.1`,
+and only while the archive has the memory for it. The cost is linear in the window.
+Do not set it to zero. An archive with no window records a duplicate row
+for every retry one old peer sends.
 
 These measurements replay one copy of the production ledger of `2026-08-16T19:35:41Z`.
 The copy holds `5,408,123` records, `5,134,867` duplicate keys and `1,836,382,633` bytes.

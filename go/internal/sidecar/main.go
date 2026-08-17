@@ -60,13 +60,22 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	insecureContractA := fs.Bool("insecure-no-contract-a-token", envBool(modtoken.InsecureEnvVar),
 		"accept a mod connection with no bearer token, and log one loud warning per accepted "+
 			"connection. For a single-machine rehearsal and for nothing else (contract-a.md §21, A47)")
-	// holdTimeoutMs is a contract-b-m4.md §12 tunable and had no knob. Its
-	// default is 24 hours, which is a policy, not a measurement (§9.3) — and a
-	// rig that wants to SEE the automatic bounce cannot wait a day for it.
-	holdTimeout := fs.Duration("hold-timeout", envDuration("MULTIVERSE_HOLD_TIMEOUT", 0),
-		"accrued dark time before a held entry bounces home by itself (contract-b-m4.md §9.3, "+
-			"holdTimeoutMs). 0 keeps the 24-hour default. The clock runs only while the "+
-			"destination is dark and this sidecar can see it")
+	// forwardTimeoutMs is a contract-b-m4.md §12 tunable. Its default is 24
+	// hours, which is a policy, not a measurement (§9.3) — and a rig that wants
+	// to SEE a forward written off cannot wait a day for it.
+	forwardTimeout := fs.Duration("forward-timeout", envDuration("MULTIVERSE_FORWARD_TIMEOUT", 0),
+		"how long a forwarded organism waits for its answer before this sidecar records it "+
+			"LOST (contract-b-m4.md §9.3, forwardTimeoutMs). 0 keeps the 24-hour default. "+
+			"Nothing is re-sent at the deadline and nothing comes home: migration is "+
+			"at-most-once")
+	// maxReroutes is §9.2's bound, and a NEGATIVE value turns re-routing off.
+	// The owner asked for the switch to be a knob rather than a release.
+	maxReroutes := fs.Int("max-reroutes", envInt("MULTIVERSE_MAX_REROUTES", 0),
+		"how many times an organism REFUSED at its destination may be offered to another slot "+
+			"on the same axis (contract-b-m4.md §9.2, maxReroutes). 0 keeps the default of 4. "+
+			"A NEGATIVE value turns re-routing off, so a refused organism bounces home instead "+
+			"of trying a second slot. A re-route needs a proof that no custody moved, so it can "+
+			"never duplicate an organism")
 	// inboundRatePerSimMinute was a compiled Go constant with no flag and no
 	// environment variable, reachable only by editing source — and it has now
 	// needed retuning three times (contract-a.md §18, A40). A tunable an operator
@@ -229,11 +238,23 @@ func Main(args []string, stdout, stderr io.Writer) int {
 			"single-machine rehearsal and no document this project ships may tell a player to " +
 			"pass it (contract-a.md §21, A47)")
 	}
-	if *holdTimeout > 0 {
-		cfg.HoldTimeout = *holdTimeout
-		logger.Warn("sidecar: holdTimeoutMs overridden; a held entry bounces home sooner than the "+
-			"contract default, and §9.3's accepted duplication case widens with it",
-			"holdTimeout", *holdTimeout, "default", DefaultConfig().HoldTimeout)
+	if *forwardTimeout > 0 {
+		cfg.ForwardTimeout = *forwardTimeout
+		logger.Warn("sidecar: forwardTimeoutMs overridden; an unanswered forward is written off "+
+			"sooner than the contract default. It costs no organism — nothing is re-sent or "+
+			"returned either way — but a value below this map's slowest honest answer turns "+
+			"late acknowledgements into lost records",
+			"forwardTimeout", *forwardTimeout, "default", DefaultConfig().ForwardTimeout)
+	}
+	if *maxReroutes != 0 {
+		cfg.MaxReroutes = *maxReroutes
+		if *maxReroutes < 0 {
+			logger.Warn("sidecar: re-routing is OFF; an organism refused at its destination " +
+				"bounces home instead of being offered to another slot on the same axis")
+		} else {
+			logger.Warn("sidecar: maxReroutes overridden", "maxReroutes", *maxReroutes,
+				"default", DefaultConfig().MaxReroutes)
+		}
 	}
 	if *heartbeatTimeout > 0 {
 		cfg.HeartbeatTimeout = *heartbeatTimeout
@@ -403,7 +424,7 @@ func mySlotCommand(dataDir string, timeout time.Duration, asJSON bool, stdout, s
 // listInflightCommand answers §7.5's third question — WHICH entries name this
 // slot, and what are they — on the machine that owns them.
 func listInflightCommand(dataDir string, destSlot int, stdout, stderr io.Writer) int {
-	entries, err := ListInflight(dataDir, destSlot, DefaultConfig().HoldTimeout)
+	entries, err := ListInflight(dataDir, destSlot, DefaultConfig().ForwardTimeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "sidecar: %v\n"+
 			"(the sidecar for this data directory must be stopped: the journal is a single-writer file)\n", err)
@@ -418,9 +439,13 @@ func listInflightCommand(dataDir string, destSlot int, stdout, stderr io.Writer)
 		fmt.Fprintf(stdout, "%s  entity %d  %s/%s\n", e.MigrationID, e.EntityID, e.Direction, e.Status)
 		if e.Direction == "out" {
 			fmt.Fprintf(stdout, "    destSlot %d via %s   handoff %s\n", e.DestSlot, e.ExitEdge, e.Handoff)
-			fmt.Fprintf(stdout, "    accrued hold %s   deadline in %s   (the clock runs only while the\n",
-				e.AccruedHold.Truncate(time.Second), e.Deadline.Truncate(time.Second))
-			fmt.Fprintf(stdout, "    destination is dark AND this sidecar can see it)\n")
+			if e.SentAt.IsZero() {
+				fmt.Fprintf(stdout, "    never written to a live relay connection: no custody has moved\n")
+			} else {
+				fmt.Fprintf(stdout, "    forwarded %s   recorded lost in %s   (it is NOT re-sent and\n",
+					e.SentAt.UTC().Format(time.RFC3339), e.LostIn.Truncate(time.Second))
+				fmt.Fprintf(stdout, "    does not come home: migration is at-most-once)\n")
+			}
 			if e.Reroutes > 0 {
 				fmt.Fprintf(stdout, "    re-routed %d time(s) from slot %d under %s\n",
 					e.Reroutes, e.RerouteFrom, e.RerouteProof)
@@ -471,7 +496,7 @@ func releaseInflightCommand(dataDir, migrationID, action string, yes bool, stdou
 		fmt.Fprintf(stderr, "sidecar: --release-inflight needs bounce or drop as the next argument\n")
 		return 2
 	}
-	entries, err := ListInflight(dataDir, 0, DefaultConfig().HoldTimeout)
+	entries, err := ListInflight(dataDir, 0, DefaultConfig().ForwardTimeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "sidecar: %v\n", err)
 		return 1
@@ -480,9 +505,9 @@ func releaseInflightCommand(dataDir, migrationID, action string, yes bool, stdou
 		if e.MigrationID != migrationID {
 			continue
 		}
-		fmt.Fprintf(stdout, "\n%s  entity %d  destSlot %d via %s  handoff %s  accrued hold %s\n",
+		fmt.Fprintf(stdout, "\n%s  entity %d  destSlot %d via %s  handoff %s  recorded lost in %s\n",
 			e.MigrationID, e.EntityID, e.DestSlot, e.ExitEdge, e.Handoff,
-			e.AccruedHold.Truncate(time.Second))
+			e.LostIn.Truncate(time.Second))
 		// B26's whole operator payoff, printed where a person is about to decide
 		// (§6.12, §7.5). The receipt is what tells a bounce that MIGHT duplicate
 		// from one that IS known to have been forwarded.

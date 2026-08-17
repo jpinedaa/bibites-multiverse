@@ -56,9 +56,8 @@ print("ledgerRecords   %s   genomeGaps %s   skippedLines %s"
 print("totals          live %s  dark %s  holes %s  unknown %s  pop %s"
       % (t.get("liveSlots"), t.get("darkSlots"), t.get("holes"),
          t.get("unknownSlots"), t.get("population")))
-print("queues          custody %s  paced %s  held %s  timeoutBounces %s"
-      % (t.get("custodyDepth"), t.get("pacedDepth"), t.get("heldDepth"),
-         t.get("timeoutBounces")))
+print("queues          custody %s  paced %s  lostForwards %s"
+      % (t.get("custodyDepth"), t.get("pacedDepth"), t.get("lostForwards")))
 print("migrations      %s at %s/min" % (t.get("migrations"), t.get("perMinute")))
 print("")
 print("slot peerId    live mod  pop  ts    achieved sm/sk edges mod     contract-a")
@@ -109,9 +108,11 @@ if len(open_lanes) != declared:
     else:
         bad.append("%d of %d lanes open" % (len(open_lanes), declared))
 
-# heldDepth and timeoutBounces are the HARD zeros: a held entry is an organism
-# waiting on a dark destination, and a timeout bounce is one that gave up.
-for k in ("heldDepth", "timeoutBounces"):
+# lostForwards is the HARD zero: a lost forward is an organism handed to the
+# relay and never heard of again, and since contract-b-m4.md §25 B37 it does not
+# come home. A healthy rig loses none. It replaced heldDepth and timeoutBounces,
+# which counted the two halves of the bounded hold that set removed.
+for k in ("lostForwards",):
     if t.get(k):
         bad.append("%s is %s, want 0" % (k, t.get(k)))
 # custodyDepth and pacedDepth are NOT. Both flicker on a busy map — the live

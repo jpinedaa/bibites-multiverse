@@ -131,7 +131,7 @@ A20, A21):
 
 | Decision | What it forces on this contract |
 |---|---|
-| **D2** — durable custody, at-most-once | `migrationId` is the idempotency key. `MIGRATE_OUT_ACK` is emitted only after a durable journal write. Both sides deduplicate. Loss is preferred over duplication. **Amended by M4:** at-most-once carries exactly one bounded exception, and it lives entirely on Contract B — an orphaned outbound entry is held while its destination is dark and bounces home at the timeout (`contract-b-m4.md` §9). Nothing on this wire changes: a bounce is still an ordinary `MIGRATE_IN` with `bounceBack: true` (§15, A25). |
+| **D2** — durable custody, at-most-once | `migrationId` is the idempotency key. `MIGRATE_OUT_ACK` is emitted only after a durable journal write. Both sides deduplicate. Loss is preferred over duplication. ~~**Amended by M4:** at-most-once carries exactly one bounded exception, and it lives entirely on Contract B — an orphaned outbound entry is held while its destination is dark and bounces home at the timeout (`contract-b-m4.md` §9).~~ **Reversed 2026-08-17 (`contract-b-m4.md` §25, B37): at-most-once carries NO exception.** An orphaned outbound entry is recorded **lost** rather than held and returned, so the *loss is preferred over duplication* sentence above is now the whole rule. **Nothing on this wire changes either way**: a bounce is still an ordinary `MIGRATE_IN` with `bounceBack: true` (§15, A25), the mod has no timeout concept and needs none, and this document keeps `contract-a/2.4`. |
 | **D4** — the bb8 body is opaque to the mod | The organism payload travels as a **JSON string**, not a nested object, plus a `gameVersion` tag. All structural validation is sidecar-side, in `bb8-schema`, in both directions. **The mod never parses it for meaning** and never deserializes it into a typed model. On import it rewrites a fixed, named set of JSON paths — the eight position numbers, and now `$.genes.speciesID` — and reads nothing else out of the blob (amended — §16, A31). |
 | **D3** — map-edge borders | The mod reports `exitEdge` + `exitPosition` + `velocity` + `heading`. It never reports a destination. The sidecar reports `entryEdge` + `entryPosition`; it never reports absolute world coordinates. |
 | **D5** — no global clock | Every timestamp in this contract is informational. No side makes a correctness decision from another side's clock. |
@@ -1819,12 +1819,15 @@ is what it may be running instead, and a depth read against the wrong cap is not
 Nothing on **this** wire changes for it — `HEARTBEAT.timeScale`, which the same block also
 republishes, has been mandatory since `contract-a/2.0`.
 
-> **The pacing interacts with the sender's hold timeout, and the answer is on the other
+> **The pacing interacts with the sender's own deadline, and the answer is on the other
 > wire** (Risk 9). Pacing delays `MIGRATE_IN`, which delays `MIGRATE_IN_ACK`, which delays
 > the `MIGRATION_ACK` the sender is waiting for — so a deep backlog at a **live** peer looks
-> like silence from the outside. `contract-b-m4.md` §9 answers it: the sender's hold clock
-> runs **only while the destination is dark**, so a slow peer is never mistaken for an
-> orphaned one. Do not answer it here by moving the custody gate: `MIGRATION_ACK` follows the
+> like silence from the outside. `contract-b-m4.md` §9 answers it, and since §25's B37 it
+> answers it more simply: the sender does **nothing** to a forwarded entry whatever its
+> destination is doing, so a slow peer cannot be mistaken for an orphaned one because the
+> sender does not act on the distinction at all. It closes the record at `forwardTimeoutMs`,
+> 24 hours, and a paced backlog that outlives that is a world in far worse trouble than one
+> late acknowledgement. ~~The sender's hold clock runs only while the destination is dark.~~ Do not answer it here by moving the custody gate: `MIGRATION_ACK` follows the
 > receiving mod's `MIGRATE_IN_ACK`, and that gate is what makes the spawn the proof of
 > delivery.
 
@@ -2463,9 +2466,16 @@ have been lost. D2 forbids duplication and prefers loss.
 |---|---|
 | A Contract B `MIGRATION_NACK` arrived, any code | **Bounce.** `contract-b-m4.md` §6.8 forbids a NACK after durable custody, so a NACK proves custody never moved. |
 | The forward never reached a live peer — relay link down, or the destination ring slot vacant — for longer than `bounceTimeoutMs` | **Bounce.** The frame was never handed to anyone. |
-| The forward reached a live peer and no answer came back | **Hold and re-forward.** Never bounce. The destination deduplicates on `migrationId`, so a re-forward costs nothing and holding turns a possible duplication into a bounded delay. |
+| The forward reached a live peer and no answer came back | **Nothing, and then a loss** (amended — `contract-b-m4.md` §25, B37). Never bounce. The frame is not re-forwarded and the organism is not returned; at `forwardTimeoutMs` the entry is recorded **lost**. ~~Hold and re-forward: the destination deduplicates on `migrationId`, so a re-forward costs nothing and holding turns a possible duplication into a bounded delay.~~ |
 
-**Enforced by:** the sidecar. Already specified in `contract-b-m4.md` §9 (and in the
+**The list is still exactly two bounces, and that is the point of this amendment**
+(amended 2026-08-17). Both remaining rows are cases where **no custody moved**, so a bounce
+is never a guess. The row that was a guess — the forwarded-then-silent one — used to hold and
+eventually bounce anyway, which is the duplication A6 was written to prevent arriving through
+the back door. It now ends in a loss instead, and the ambiguity above has no half-answer left
+in it.
+
+**Enforced by:** the sidecar. Already specified in `contract-b-m4.md` §9 and §25 (and in the
 superseded `contract-b-m2.md` §7, where it was written first);
 this amendment aligns Contract A's wording with it. The mod needs no change — a
 bounce-back is an ordinary `MIGRATE_IN` with `bounceBack: true`.
@@ -3156,9 +3166,9 @@ here is one that was never asked for.*
 
 | Unchanged | Why it is worth stating |
 |---|---|
-| **The message catalogue.** Nine types, same directions, same answers. | M4 adds no message to this wire. Route-around, healing, insertion, handover, the non-delivery proof and the bounded hold are **all** Contract B (`contract-b-m4.md` §6.8, §7, §9). |
-| **The custody chain.** `MIGRATE_OUT_ACK` after the durable journal write; `MIGRATION_ACK` after the receiving mod's `MIGRATE_IN_ACK`. | D2's one bounded exception is a *sender-side hold* on the other wire. Nothing about the moment custody moves has changed, and no pacing, hold or re-route may move that gate. |
-| **A bounce-back is an ordinary `MIGRATE_IN` with `bounceBack: true`.** | An automatic bounce at the hold timeout arrives at the mod exactly like a bounce after a NACK. The mod has no timeout concept and needs none. |
+| **The message catalogue.** Nine types, same directions, same answers. | M4 adds no message to this wire. Route-around, healing, insertion, handover, the non-delivery proof and the bounded hold were **all** Contract B (`contract-b-m4.md` §6.8, §7, §9) — and so is the 2026-08-17 removal of that hold (§25, B37), which is why this wire keeps `contract-a/2.4` through it. |
+| **The custody chain.** `MIGRATE_OUT_ACK` after the durable journal write; `MIGRATION_ACK` after the receiving mod's `MIGRATE_IN_ACK`. | D2's one bounded exception was a *sender-side hold* on the other wire, and it is gone (`contract-b-m4.md` §25, B37). Nothing about the moment custody moves has changed under either rule, and no pacing or re-route may move that gate. |
+| **A bounce-back is an ordinary `MIGRATE_IN` with `bounceBack: true`.** | It arrives at the mod exactly the same way whatever caused it. ~~An automatic bounce at the hold timeout~~ — there is no longer one (`contract-b-m4.md` §25, B37) — and the mod has no timeout concept and needs none, which is why removing the timeout cost this wire nothing. |
 | **The mod learns no topology.** No coordinate, no slot position, no neighbour, no skipped slot, no map shape. `ringSlot` stays a configured label. | This is the property D8 bought and D13 is designed around. It is also the easiest thing to lose while "just adding one field for the status page". |
 | **`entryPosition` still mirrors `exitPosition`.** | Arrival-position spreading would flatten the entry histogram and break D3's transverse continuity. D15 parks it: the dam caused the crowd, and pacing is the answer (§15, A20). Revisit only if the crowding metric still shows a crowd after pacing works. |
 | **Velocity and heading are copied, never mirrored** — on both axes. | A north hop is a translation along `y`, exactly as an east hop is along `x`. Nothing about the grid introduces a reflection or an axis swap. |
@@ -4072,7 +4082,7 @@ do.
 |---|---|---|---|
 | `inboundRatePerSimMinute` | `2.0` | **`12.0`** | **Five times the projected median under two-way lanes** — A20's own rule, applied to the topology that ships. D17 roughly doubles per-slot inbound surface from two lanes to four, taking the measured 1.19 median to ~2.4, and 5 × 2.4 = 12. |
 | `inboundRateBurst` | `5` | **`15`** | The bucket exists so a *clump* is never delayed, and clumping is set by organism behaviour per lane. Four inbound lanes clump about twice as hard as two, and the bucket should hold a comparable slice of simulated time. |
-| The knob itself | none | `--inbound-rate`, `MULTIVERSE_INBOUND_RATE` | `holdTimeoutMs` set this precedent in M4 for exactly this reason. A tunable an operator cannot retune from the metric that measures it is not a tunable, and this one has now needed retuning twice. |
+| The knob itself | none | `--inbound-rate`, `MULTIVERSE_INBOUND_RATE` | `holdTimeoutMs` set this precedent in M4 for exactly this reason (it is `forwardTimeoutMs` since `contract-b-m4.md` §25, B37, and the precedent is unchanged). A tunable an operator cannot retune from the metric that measures it is not a tunable, and this one has now needed retuning twice. |
 
 **And it needed retuning a third time, the same day** (signed off by the owner, 2026-08-07).
 The `12.0` row above is a **projection**: 12.0 is five times a two-way median of ~2.4 that was

@@ -246,7 +246,13 @@ func (r *testRelay) serve(ln net.Listener) {
 		}
 		tracked = relay.TLSListener(tracked, reloader, minVersion)
 	}
-	go func() { _ = r.srv.Serve(tracked) }()
+	// The serving goroutine holds its OWN reference. kill() sets r.srv to nil
+	// from the test goroutine, and reading the field from in here raced with
+	// that — flakily, on both this branch and the one before it, and the
+	// consequence was a nil Serve and a segfaulting test binary rather than a
+	// wrong answer.
+	httpSrv := r.srv
+	go func() { _ = httpSrv.Serve(tracked) }()
 }
 
 func (r *testRelay) url() string {

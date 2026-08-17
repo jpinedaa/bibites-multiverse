@@ -101,10 +101,10 @@ func RenderRingstat(w io.Writer, s Status) {
 	// achievedWindowMs — and pace is queued/cap per SIMULATED minute of that
 	// world. They are the same cells the map draws, so the two operator
 	// surfaces cannot disagree about them either.
-	fmt.Fprintf(w, "%-5s %-7s %-22s %-9s %s %10s %8s %10s %6s %8s %s\n",
+	fmt.Fprintf(w, "%-5s %-7s %-22s %-9s %s %10s %8s %10s %8s %s\n",
 		"slot", "pos", "peer", "state", padCell("speed→got", 13),
-		"population", "custody", "pace", "held", "bounced", "last save")
-	fmt.Fprintln(w, strings.Repeat("-", 128))
+		"population", "custody", "pace", "lost", "last save")
+	fmt.Fprintln(w, strings.Repeat("-", 121))
 	for _, v := range s.Slots {
 		state := "live"
 		if !v.Live {
@@ -119,12 +119,12 @@ func RenderRingstat(w io.Writer, s Status) {
 				save += fmt.Sprintf(" (%dms)", v.LastSave.DurationMs)
 			}
 		}
-		fmt.Fprintf(w, "%-5d %-7s %-22s %-9s %s %10s %8s %10s %6s %8s %s\n",
+		fmt.Fprintf(w, "%-5d %-7s %-22s %-9s %s %10s %8s %10s %8s %s\n",
 			v.Slot, fmt.Sprintf("(%d,%d)", v.Position.Col, v.Position.Row),
 			trunc(v.PeerID, 22), state, padCell(speedPair(v), 13),
 			opt(v.Population), opt(v.CustodyDepth),
-			optShort(v.PacedDepth)+"/"+scale(v.InboundRatePerSimMinute), opt(v.HeldDepth),
-			opt(v.BouncedTimeoutTotal), save)
+			optShort(v.PacedDepth)+"/"+scale(v.InboundRatePerSimMinute),
+			opt(v.LostForwardTotal), save)
 	}
 	if len(s.Holes) > 0 {
 		holes := make([]string, 0, len(s.Holes))
@@ -162,11 +162,11 @@ func RenderRingstat(w io.Writer, s Status) {
 	renderCensus(w, s)
 
 	t := s.Totals
-	fmt.Fprintf(w, "\ntotals: %d live, %d dark, %d hole(s); population %s, custody %s, paced %s, held %s\n",
+	fmt.Fprintf(w, "\ntotals: %d live, %d dark, %d hole(s); population %s, custody %s, paced %s\n",
 		t.LiveSlots, t.DarkSlots, t.Holes,
-		opt(t.Population), opt(t.CustodyDepth), opt(t.PacedDepth), opt(t.HeldDepth))
-	fmt.Fprintf(w, "        %s bounce(s) caused by a hold timeout; %d slot(s) reporting nothing\n",
-		opt(t.TimeoutBounce), t.UnknownSlots)
+		opt(t.Population), opt(t.CustodyDepth), opt(t.PacedDepth))
+	fmt.Fprintf(w, "        %s forward(s) recorded lost; %d slot(s) reporting nothing\n",
+		opt(t.LostForward), t.UnknownSlots)
 	fmt.Fprintf(w, "        %d envelope(s) recorded, %.2f/min across every lane\n",
 		t.Migrations, t.PerMinute)
 	fmt.Fprintf(w, "\nan unknown is a slot that reported nothing, or reported it too long ago.\n"+

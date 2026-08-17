@@ -381,7 +381,14 @@ func TestM3InFlightEntryReplaysAsSent(t *testing.T) {
 }
 
 // TestM4InFlightEntryKeepsItsRecordedHandoff is the other half: an M4 record
-// carries handoff explicitly and the migration rule must never overwrite it.
+// carries handoff explicitly and the M3 migration rule must never overwrite it.
+//
+// The recorded value here is `held`, which is the state §25's B37 retired, so
+// this covers the SECOND migration in the same function: a pre-B37 journal
+// replays its held entries as `sent`, because that is what `held` always meant —
+// written to a live relay connection, custody may have moved. Replaying it as
+// the literal string would leave the entry in no case of the sender's state
+// machine: never resolved, never counted, never even logged.
 func TestM4InFlightEntryKeepsItsRecordedHandoff(t *testing.T) {
 	dir := t.TempDir()
 	lines := `{"op":"create","migrationId":"11111111-1111-4111-8111-111111111111","at":1,` +
@@ -400,8 +407,12 @@ func TestM4InFlightEntryKeepsItsRecordedHandoff(t *testing.T) {
 	}
 	defer j.Close()
 	st, _ := j.Get("11111111-1111-4111-8111-111111111111")
-	if st.Handoff != HandoffHeld {
-		t.Fatalf("handoff = %q, want %q — a recorded handoff always wins", st.Handoff, HandoffHeld)
+	if st.Handoff != HandoffSent {
+		t.Fatalf("handoff = %q, want %q — a recorded pre-B37 `held` replays as `sent`",
+			st.Handoff, HandoffSent)
+	}
+	if !st.Handoff.CustodyMayHaveMoved() {
+		t.Fatal("a replayed `held` entry reports that custody cannot have moved; §9.2 would re-route it")
 	}
 }
 

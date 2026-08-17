@@ -775,6 +775,21 @@ func (m *fakeMod) waitType(typ string, timeout time.Duration) wire.Envelope {
 	return env
 }
 
+// countType is waitFrom's negative twin: how many frames of one type have
+// arrived so far, with no waiting and no fatal. A rule that says a frame MUST
+// NOT be sent can only be asserted by looking, never by waiting.
+func (m *fakeMod) countType(typ string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, e := range m.frames {
+		if e.Type == typ {
+			n++
+		}
+	}
+	return n
+}
+
 func (m *fakeMod) seenTypes() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
