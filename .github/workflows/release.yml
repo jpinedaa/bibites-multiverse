@@ -9,28 +9,38 @@
 # repository therefore chooses the contents of this file, and can delete every
 # guard in it. Nothing written here can prevent that.
 #
-# The controls that actually contain it are all outside this file:
+# The controls that actually contain it are all outside this file. Today the
+# repository has exactly one principal with write access, who is also its only
+# admin, so only the first is in place — the rest would restrain nobody but the
+# owner, and release/README.md carries the commands that add them on the day a
+# second maintainer appears:
 #
-#   1. A repository RULESET on tags `v*` — restrict creations, updates and
-#      deletions, bypass = repository admin only. This is the primary control,
-#      ahead of everything else, because a tag-supplied workflow cannot revoke
-#      it.
-#   2. The `release` ENVIRONMENT with a required reviewer. GitHub auto-creates a
-#      named environment with NO protection rules if it does not exist, so
-#      `environment: release` below is worth exactly as much as the environment
-#      the owner configured. Verify it, do not assume it:
+#   1. IN PLACE. The runner is started BY HAND, for ONE job: `./run.sh --once`.
+#      It is never installed as a service. A queued job is picked up the moment
+#      the runner starts, so INSPECT THE QUEUE FIRST:
+#        gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml
+#      and cancel anything you did not push. With one maintainer this is not one
+#      control among several; it is the control.
+#   2. PARTLY. The `release` ENVIRONMENT exists, deliberately with NO required
+#      reviewer: an approval that only ever asks the person who started the run
+#      is a keystroke. It was created rather than left to GitHub, which
+#      auto-creates a named environment with no protection rules and no notice,
+#      and it carries a deployment ref policy (tag `v*`, branch `main` for
+#      workflow_dispatch). So `environment: release` below is worth exactly as
+#      much as the environment the owner configured. Verify it, do not assume
+#      it:
 #        gh api repos/jpinedaa/bibites-multiverse/environments/release \
 #          --jq '.protection_rules[] | select(.type=="required_reviewers")'
-#      Empty output means there is no gate.
-#   3. The runner is started BY HAND, for ONE job: `./run.sh --once`. It is
-#      never installed as a service. A queued job is picked up the moment the
-#      runner starts, so INSPECT THE QUEUE FIRST:
-#        gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml
-#      and cancel anything you did not push.
-#   4. Branch protection on `main` requiring `checks.yml`, so "the tag is on
-#      main" means something.
-#   5. A dedicated runner user with no read access to ~/.aws, ~/.ssh,
-#      ~/.multiverse or the deployment repository.
+#      Empty output means there is no approval gate. That is today's state.
+#   3. NOT YET. A repository RULESET on tags `v*` — restrict creations, updates
+#      and deletions, bypass = repository admin only. This becomes the primary
+#      control the moment anyone else can push, because a tag-supplied workflow
+#      cannot revoke it.
+#   4. NOT YET. Branch protection on `main` requiring `checks.yml`, so "the tag
+#      is on main" means something.
+#   5. NOT YET. A dedicated runner user with no read access to ~/.aws, ~/.ssh,
+#      ~/.multiverse or the deployment repository. The runner runs as the
+#      owner's own account today.
 #
 # The first step below refuses to run for anyone but the owner. It is belt and
 # braces only: an attacker who writes the tag's tree deletes it. It exists to
@@ -457,8 +467,13 @@ jobs:
           # NO --allow-dirty, EVER. That flag marks a rehearsal that must never
           # be published, and verify-build-log.sh below refuses a log that
           # carries its banner.
+          # `${NSISDIR:-}`, not `$NSISDIR`: the toolchain preflight above
+          # deliberately accepts an unset NSISDIR ("makensis must find its
+          # own"), and under `set -u` a bare expansion here would contradict it
+          # by killing the step. The runner .env sets it; this keeps the two
+          # steps from disagreeing if it ever does not.
           set +e
-          MAKENSIS="$MAKENSIS" NSISDIR="$NSISDIR" ./release/make-release.sh \
+          MAKENSIS="$MAKENSIS" NSISDIR="${NSISDIR:-}" ./release/make-release.sh \
             --windows-game-dir "$MV_RELEASE_WINDOWS_GAME" \
             --linux-game-dir   "$MV_RELEASE_LINUX_GAME" \
             --game-redistribution-notice release/GAME-REDISTRIBUTION-NOTICE.txt \

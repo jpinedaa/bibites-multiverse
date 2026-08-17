@@ -276,10 +276,10 @@ Settle the tested build first. `release/check-drift.sh` must be green before you
 untested tree stops the build on the release machine minutes in, after the game payload has already
 been staged. It is **not** green today — see *Day one* below.
 
-And before the first tag is ever pushed, the four gates under *The release runner* have to be in
-place. The `release` environment above all: a workflow that names an environment which does not
-exist gets one auto-created with no protection rule, so the approval pause is missing rather than
-loud.
+The machine side of *The release runner* is built and smoke-tested; the `release` environment
+exists, deliberately without a required reviewer. Read that section before the first tag, because
+it says which controls are in place, which were left out while there is one maintainer, and what
+has to change the day there are two.
 
 ```sh
 # 1  bump the release string, on a branch off a clean main
@@ -300,9 +300,9 @@ git push origin v<version>
 
 # 3  on the release machine: read the queue, then run the runner for exactly one job
 gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml --limit 5
-cd ~/actions-runner && ./run.sh --once
+cd /srv/bibites-release/runner && ./run.sh --once
 
-# 4  approve the `release` environment when it asks, then watch
+# 4  watch it. There is no approval pause while there is one maintainer
 gh run watch --repo jpinedaa/bibites-multiverse
 ```
 
@@ -386,40 +386,137 @@ GitHub executes the workflow file **as it exists in the tag's own tree**, not as
 can simply be deleted from it, the `if: github.repository == …` guard still passes, `runs-on:`
 still names this machine, and any `run:` step then executes as the runner user on the box that
 holds this project's production access. Nothing written in this repository can prevent that,
-because the attacker would be writing the file. **The controls that matter are the four gates
-below, and none of them live in a workflow.**
+because the attacker would be writing the file. **The controls that matter live outside the
+workflow, and they are listed below.**
 
-### The machine
+**Who can do that today: one person.** `jpinedaa/bibites-multiverse` is public, and its only
+principal with write access is the owner, who is also its only admin. A tag ruleset and branch
+protection would therefore restrain nobody but the owner — so they are deliberately **not** in
+place, and the commands that add them are kept under *When a second maintainer joins* rather than
+run now. What is in place is the part that is worth something with one maintainer: the runner is
+not a daemon, and nothing reaches this machine unless somebody starts it by hand for one job.
 
-1. **A dedicated user, and fixed read-only input paths.** That user must not be able to read the
-   owner's cloud credentials, SSH keys, world identities, the broadcast identity, or the private
-   operations checkout. One deliberate exception: it **must** be able to read the plugin installed
-   in this machine's game
-   (`…/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll`), or check 4
-   silently stops running. The workflow refuses in its first seconds when that file is unreadable,
-   and `verify-build-log.sh` refuses again afterwards.
-2. **Register at repository scope, with the labels `self-hosted`, `linux`, `X64`, and
-   `bibites-release` — and do not install it as a service.** One job at a time: the owner runs
-   `./run.sh --once`, the job runs, the process exits. That turns an always-listening agent on the
-   machine that holds production access into a tool that is started on purpose.
-3. **The runner's `.env` supplies the paths and the toolchain.** Never the repository, and never a
-   GitHub secret:
+### The machine, as built
 
-   | Variable | What it must be |
-   |---|---|
-   | `MV_RELEASE_GAME_REFS` | the directory holding the 13 reference assemblies, `BibitesAssembly.dll` among them. Copied into `bibites-mod/libs/` |
-   | `MV_RELEASE_BEPINEX_CACHE` | a directory holding `BepInEx_win_x64_*.zip` and `BepInEx_linux_x64_*.zip`. Copied into `farend/dist/cache/`; without it the build reaches the network instead |
-   | `MV_RELEASE_WINDOWS_GAME` | a clean Windows game directory containing `The Bibites.exe` |
-   | `MV_RELEASE_LINUX_GAME` | a clean Linux game directory containing an executable `The Bibites.x86_64` |
-   | `LINUX_GAME_DIR` | optional. The unpacked Linux game the matrix row's hash is checked against; it defaults to `MV_RELEASE_LINUX_GAME` |
-   | `MAKENSIS`, `NSISDIR` | the same NSIS build every release has used, and its data directory |
-   | `GOROOT`, `DOTNET_ROOT` | the Go and .NET toolchains `make-release.sh` builds with |
+| | |
+|---|---|
+| Runner directory | `/srv/bibites-release/runner` (the linux-x64 tarball from `actions/runner`, its published SHA-256 checked before unpacking) |
+| Runs as | **`ubuntu`** — the owner's own account, not a dedicated user |
+| Registered as | name `aorus-x570-wsl`, repository scope, labels `self-hosted`, `Linux`, `X64`, `bibites-release`, work directory `_work` |
+| Service | **none.** `./run.sh --once` per release, by hand |
+| Inputs | `/srv/bibites-release/inputs`, outside every checkout |
+| NSIS | the distribution's `nsis` / `nsis-common` `3.09`, at `/usr/bin/makensis` with `/usr/share/nsis` |
 
-### The four gates, in the order they matter
+**Running as `ubuntu` is a deliberate trade-off, and it is the weakest thing here.** The design
+asked for a dedicated user with no read access to `~/.aws`, `~/.ssh`, `~/.multiverse` or the private
+operations checkout. `ubuntu` reads all of them. The argument for it is that a separate user buys
+nothing while the owner is the only principal who can push a tag or dispatch the workflow: the code
+the runner would execute is the owner's own. The argument against it is that the separation is
+exactly what would contain a hostile tag on the day somebody else has write access — so **a
+dedicated runner user belongs in the same sitting as the second maintainer's account**, beside the
+changes under *When a second maintainer joins*.
 
-**1. A ruleset restricting who may create or update a `v*` tag.** This is the primary control: it
+One access the runner needs whatever user it runs as: read on the plugin installed in this
+machine's game (`…/Steam/steamapps/common/The Bibites/BepInEx/plugins/BibitesMultiverse.dll`), or
+check 4 silently stops running. The workflow refuses in its first seconds when that file is
+unreadable, and `verify-build-log.sh` refuses again afterwards.
+
+### The inputs, outside every checkout
+
+`actions/checkout` wipes the workspace between runs, so `release.yml` copies these in on every run
+and never depends on what a previous build left behind.
+
+| `/srv/bibites-release/inputs/…` | What it is |
+|---|---|
+| `game-refs/` | a read-only copy of the 13 reference assemblies (`BibitesAssembly.dll` among them) |
+| `bepinex-cache/` | a read-only copy of both `BepInEx_*_x64_*.zip` archives. Without them the build downloads instead, and the release's SHA pins stop being a local guarantee |
+| `windows-game` | a symlink to the clean Windows game directory |
+| `linux-game` | a symlink to the clean Linux game directory. It must be a *fully unpacked* game: the matrix row's hash is checked against its `The Bibites_Data/Managed/BibitesAssembly.dll`, and the check downgrades to a note when that file is not there |
+
+They are copies and symlinks, not the working tree, so a mod rebuild or a `git clean` in a checkout
+cannot change what a release is built from. Refresh them on purpose when the game version moves.
+
+### The runner's `.env`
+
+`/srv/bibites-release/runner/.env` — never the repository, and never a GitHub secret. The runner
+exports every line of it into the job.
+
+| Variable | What it must be |
+|---|---|
+| `MV_RELEASE_GAME_REFS` | the directory holding the 13 reference assemblies, `BibitesAssembly.dll` among them. Copied into `bibites-mod/libs/` |
+| `MV_RELEASE_BEPINEX_CACHE` | a directory holding `BepInEx_win_x64_*.zip` and `BepInEx_linux_x64_*.zip`. Copied into `farend/dist/cache/`; without it the build reaches the network instead |
+| `MV_RELEASE_WINDOWS_GAME` | a clean Windows game directory containing `The Bibites.exe` |
+| `MV_RELEASE_LINUX_GAME` | a clean Linux game directory containing an executable `The Bibites.x86_64` |
+| `LINUX_GAME_DIR` | the unpacked Linux game the matrix row's hash is checked against. It defaults to `MV_RELEASE_LINUX_GAME`; it is set explicitly here so the value is stated once |
+| `MAKENSIS` | the same NSIS build every release has used |
+| `NSISDIR` | its data directory. An installed `makensis` finds its own, so this is strictly optional — it is set anyway, because a value that is stated is a value that can be checked, and because the preflight then reports `NSISDIR set` rather than leaving the reader to wonder |
+| `GOROOT`, `DOTNET_ROOT` | the Go and .NET toolchains `make-release.sh` builds with. `release.yml` resolves both from here and puts them on the job's `PATH` itself |
+| `GOPATH` | the machine's real `GOPATH`. A job reads no login profile, so without this Go takes its default (`~/go`) and re-downloads the whole module cache |
+| `PATH` | pinned explicitly. `config.sh` writes the configuring shell's `PATH` into `.path`, which on this machine carried some sixty Windows interop entries; pinning it in `.env` makes the job independent of the shell `./run.sh` was started from. Nothing in the release build calls a Windows executable |
+
+The NSIS entry is the one with history behind it. The design (E6) warned that releases so far used a
+hand-unpacked NSIS under `/tmp`, that `/tmp` does not survive a reboot, and that the distribution
+package was "a different build" — which would have quietly changed the setup's checksum. It is not
+a different build: the `makensis` the distribution installs is **byte-identical** to the copy
+`0.2.5` and `0.2.6` were built with, because the hand-unpacked copy was that same package unpacked
+by hand. The reproducible-checksum claim survives the move to `/usr/bin/makensis`.
+
+### The gates that are in place
+
+**1. The runner is started by hand, for one job, only when a release is expected.** With one
+maintainer this is not one control among several; it is *the* control. `./run.sh --once` runs a single
+job and exits. Never install it as a service: a service is an always-listening agent on the machine
+that holds production access, and it takes whatever is queued, whenever it was queued and by
+whoever queued it. Look at the queue before you start it:
+
+```sh
+gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml --limit 5
+gh run view <id> --repo jpinedaa/bibites-multiverse     # the commit must be the tag you just pushed
+gh run cancel <id> --repo jpinedaa/bibites-multiverse   # anything you did not start
+```
+
+That a queued job waits for the runner is the convenience which makes the order of tagging and
+starting free. It is also the path by which a job you did not start would reach the machine. Look
+first, then start.
+
+**2. The `release` environment exists, so that GitHub did not create it.** A job that names an
+environment which does not exist gets it **auto-created, with no protection rule on it**. A missing
+environment is not a loud failure; it is a gate silently not being there — and worse, one that
+*looks* configured in the workflow file. It was created deliberately instead, and **without a
+required reviewer**: an approval prompt that only ever asks the one person who started the run is
+a keystroke, not a control. What it does carry is a deployment ref policy, so the environment is a
+real statement about which refs may release rather than an empty name:
+
+```sh
+gh api repos/jpinedaa/bibites-multiverse/environments/release/deployment-branch-policies \
+    --jq '.branch_policies[] | [.type, .name] | @tsv'
+# tag     v*     — every real release
+# branch  main   — workflow_dispatch, which runs on main and checks out the tag input
+```
+
+Read this as it is, not as more than it is:
+
+```sh
+gh api repos/jpinedaa/bibites-multiverse/environments/release \
+    --jq '.protection_rules[] | select(.type=="required_reviewers")'
+```
+
+Empty output means there is no approval gate. **That is the current, deliberate state.** The value
+of having created the environment anyway is that adding the reviewer later is one command against
+an object that already exists, instead of a discovery that the gate was never there.
+
+**3. The actor guard in `release.yml`.** The first step refuses any run whose `github.actor` is not
+the owner. It is belt and braces and it says so: a hostile tag's own tree can delete the step. It
+stops the honest accident, which is the failure mode that actually exists here.
+
+### When a second maintainer joins
+
+The moment anybody else has write access, three things change on the same day, before their account
+is created. Each is written out here so that nothing has to be re-derived under time pressure.
+
+**A ruleset restricting who may create or update a `v*` tag.** This becomes the primary control: it
 is the only one a tag-supplied workflow file cannot revoke, because it stops the tag from existing
-at all. Put it in place before the runner is ever registered.
+at all.
 
 *In the UI:* Settings → Rules → Rulesets → **New ruleset → New tag ruleset**. Name it, set
 Enforcement to **Active**, target tags matching `v*`, tick **Restrict creations**, **Restrict
@@ -439,14 +536,10 @@ gh api repos/jpinedaa/bibites-multiverse/rulesets --jq '.[] | [.name, .target, .
 
 `actor_id: 5` is the repository-admin role.
 
-**2. The `release` environment, created before the first tag is ever pushed.** A job that names an
-environment which does not exist gets it **auto-created, with no protection rule on it**. A missing
-environment is therefore not a loud failure; it is the gate silently not being there. Create it
-first, with the owner as a required reviewer and a deployment policy limited to `v*` tags.
+**A required reviewer on the `release` environment.** The environment is already there, so this is
+an edit, not a creation — and the deployment ref policy above stays as it is.
 
-*In the UI:* Settings → Environments → **New environment** → `release` → tick **Required
-reviewers** and add yourself → Deployment branches and tags → **Selected branches and tags** → Add
-rule → ref type **Tag**, pattern `v*`.
+*In the UI:* Settings → Environments → `release` → tick **Required reviewers** and add yourself.
 
 ```sh
 owner=$(gh api users/jpinedaa --jq .id)
@@ -454,18 +547,13 @@ gh api -X PUT repos/jpinedaa/bibites-multiverse/environments/release --input - <
 { "reviewers": [ { "type": "User", "id": $owner } ],
   "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
 JSON
-gh api -X POST repos/jpinedaa/bibites-multiverse/environments/release/deployment-branch-policies \
-    -f name='v*' -f type=tag
-```
-
-Verify it, and read empty output as *there is no gate*:
-
-```sh
 gh api repos/jpinedaa/bibites-multiverse/environments/release \
     --jq '.protection_rules[] | select(.type=="required_reviewers")'
 ```
 
-**3. Branch protection on `main`.** Until `main` is protected, "the tag is on `main`" is only as
+The verification is the point: empty output still means there is no gate.
+
+**Branch protection on `main`.** Until `main` is protected, "the tag is on `main`" is only as
 strong as `main` is. Require a pull request, and set Actions → **Fork pull request workflows** to
 require approval for all outside collaborators in the same sitting.
 
@@ -481,24 +569,37 @@ JSON
 Start with an empty `contexts` list, and add `go`, `scripts`, `installer`, `powershell` and
 `consistency` once they have been green at least once — see *Day one* below.
 
-**4. Start the runner by hand, for one job, only when a release is expected.** `./run.sh --once`
-runs a single job and exits. Never install it as a service: a service is an always-listening agent
-on the machine that holds production access, and it takes whatever is queued, whenever it was
-queued and by whoever queued it. Look at the queue before you start it:
+**And a dedicated runner user**, per *The machine, as built* above: one that cannot read `~/.aws`,
+`~/.ssh`, `~/.multiverse` or the private operations checkout, but can still read the plugin in this
+machine's game. Re-register the runner as that user and move `/srv/bibites-release` to it.
+
+### Smoke-testing the runner without publishing anything
+
+`workflow_dispatch` on a tag that **already has a release** exercises the whole front of the job —
+the runner picks it up, the label match is proved, and every cheap guard runs — and then stops at
+*The release does not exist yet*, before a single proprietary byte is copied.
 
 ```sh
-gh run list --repo jpinedaa/bibites-multiverse --workflow release.yml --limit 5
-gh run view <id> --repo jpinedaa/bibites-multiverse     # the commit must be the tag you just pushed
-gh run cancel <id> --repo jpinedaa/bibites-multiverse   # anything you did not start
+cd /srv/bibites-release/runner && ./run.sh --once &      # exits after one job
+gh workflow run release.yml --repo jpinedaa/bibites-multiverse -f tag=<an existing tag>
+gh run watch --repo jpinedaa/bibites-multiverse
+gh run view <id> --repo jpinedaa/bibites-multiverse --log
 ```
 
-That a queued job waits for the runner is the convenience which makes the order of tagging and
-starting free. It is also the path by which a job you did not start would reach the machine. Look
-first, then start.
+Read the step list, not just the red cross: what is being tested is *where* it stopped. A tag older
+than this CI package stops earlier still, at *The version surface agrees with the tag*, because
+`release/bump-version.sh` does not exist in that tag's tree — the workflow runs from `main`, the
+scripts run from the checkout. Either stop proves the machine; neither builds or publishes
+anything. Afterwards, make sure the runner process really exited:
+
+```sh
+pgrep -af Runner.Listener      # nothing
+```
 
 ### Day one
 
-Two things are not true yet, and both belong before the first tag.
+The runner is registered, its inputs are in place, and the front of the release job has been proved
+against a real dispatch. Two things are still not true, and both belong before the first tag.
 
 **The tested build on `main` is out of date**, so `release/check-drift.sh` fails and the
 `consistency` job is red on every pull request — including the one that introduces CI. The mod
@@ -512,7 +613,8 @@ doing it first.
 **Nothing has run yet.** Do not make `checks.yml` a required status check until it has been green
 at least once. `go test ./...` and the nginx leg of the front-door check have never run on a hosted
 runner, and a first run read under a red banner teaches nobody anything. Watch one green run, then
-add the five job names to the branch protection above.
+add the five job names to the branch protection under *When a second maintainer joins* — which is
+also the sitting in which that branch protection starts existing.
 
 **No secret is needed, and none is stored.** `GITHUB_TOKEN` with `contents: write` publishes the
 release. There is no personal access token, and no game byte is ever uploaded to GitHub as a build
