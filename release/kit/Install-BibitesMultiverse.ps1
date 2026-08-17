@@ -774,6 +774,10 @@ function Get-FirstLine {
 $SidecarLogEndLines  = 500
 $SidecarLogFileLimit = 12
 $script:sidecarLogCandidates = @()
+# Whether any line carried a peer= at all, even one this installer would not use.
+# It answers a different question from the candidate list: not "which world is
+# this" but "did a sidecar ever run here".
+$script:sidecarLogSawPeer = $false
 
 function Get-LogAttribute {
     param([string]$Line, [string]$Name)
@@ -803,6 +807,7 @@ function Find-SidecarLogIdentities {
             if (-not $line) { continue }
             $peer = Get-LogAttribute $line 'peer'
             if (-not $peer) { continue }
+            $script:sidecarLogSawPeer = $true
             if ($peer.Length -gt 256 -or $peer -notmatch '^[\x21-\x7e]+$') { continue }
             $relay = Get-LogAttribute $line 'relay'
             if ($relay -notmatch '^wss://[^\s]+$') { $relay = '' }
@@ -982,6 +987,51 @@ if ($existingIdentity) {
     $existingPeerId = [string]$existingIdentity.peerId
     $existingSource = [string]$existingIdentity.source
     $existingProven = [bool]$existingIdentity.proven
+}
+
+# DID A SIDECAR EVER RUN IN THIS DATA ROOT? Its first start, in this order
+# (go/internal/sidecar/sidecar.go, New): creates <data root>\data; mints
+# data\contract-a.token, mode 0600, BEFORE the listener binds; opens
+# data\journal\journal.log, which journal.Open creates even when there is
+# nothing to replay; opens data\genomes; then writes data\peer-id and
+# data\listen.addr, and data\slot and data\position once the map grants a
+# place. THIS INSTALLER CREATES <data root>\data EMPTY and writes nothing into
+# it until the credential is settled, so ANY entry inside it is a sidecar's, and
+# a peer= in a sidecar log says the same thing from the other side.
+#
+# <data root>\logs is deliberately not part of this: the graphical setup writes
+# its own install-<utc>.log there, and that is not a world having run.
+function Test-WorldEverRan {
+    param([string]$Root)
+    if ($script:sidecarLogSawPeer) { return $true }
+    $dataPath = Join-Path $Root 'data'
+    if (Test-Path -LiteralPath $dataPath -PathType Container) {
+        $entries = @(Get-ChildItem -LiteralPath $dataPath -Force -ErrorAction SilentlyContinue)
+        if ($entries.Count -gt 0) { return $true }
+    }
+    return $false
+}
+
+# THE ORPHAN OF AN INTERRUPTED INSTALL. A secret with no name anywhere is
+# normally a refusal, because the world it belongs to is somewhere and only a
+# person can say where. But a secret in a data root NO SIDECAR EVER RAN IN
+# belongs to no world at all: the earlier install got as far as the credential
+# and stopped, so nothing ever claimed a slot, nothing was ever addressed to it,
+# and there is nothing on the map to strand. That is not a choice to put to
+# somebody - it is a decision this installer can make. It still never deletes:
+# the secret is renamed aside, protected, and named on screen.
+if ($existingSecretHeld -and (-not $existingIdentity) -and (-not (Test-WorldEverRan $DataRoot))) {
+    $orphanPath = "$credentialPath." + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ') + '.orphan'
+    Move-Item -LiteralPath $credentialPath -Destination $orphanPath -Force
+    [void](Protect-UserFile $orphanPath 'the orphaned map credential')
+    Write-Host ""
+    Say "$credentialPath was an orphan: an earlier install got that secret and stopped before"
+    Say "this world ever ran, so no sidecar has ever written in $DataRoot, that identity never"
+    Say "claimed a place on the map, and nothing on this machine can name it. It is KEPT, as"
+    Say "$orphanPath, and this install enrolls a new identity below."
+    Write-Host ""
+    $existingSecretHeld = $false
+    $existingSecret = ''
 }
 
 # The relay this package ships, when it ships one. It is read even on a private

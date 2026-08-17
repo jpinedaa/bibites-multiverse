@@ -771,11 +771,16 @@ SIDECAR_LOG_END_LINES=500
 SIDECAR_LOG_FILE_LIMIT=12
 SIDECAR_LOG_ROWS=''
 SIDECAR_LOG_COUNT=0
+# Whether any line carried a peer= at all, even one this installer would not use.
+# It answers a different question from the row list: not "which world is this"
+# but "did a sidecar ever run here".
+SIDECAR_LOG_SAW_PEER=0
 find_sidecar_log_identities() {
   # $1 the data root. Sets SIDECAR_LOG_ROWS to one "peerId<TAB>relayUrl<TAB>where"
   # line per DISTINCT identity, and SIDECAR_LOG_COUNT to how many.
   SIDECAR_LOG_ROWS=''
   SIDECAR_LOG_COUNT=0
+  SIDECAR_LOG_SAW_PEER=0
   local logs="$1/logs" file scanned=0 raw='' rows=''
   [ -d "$logs" ] || return 0
   for file in "$logs"/sidecar.log*; do
@@ -794,6 +799,7 @@ find_sidecar_log_identities() {
         {
           peer = attr($0, "peer")
           if (peer == "") next
+          seen_any = 1
           if (peer ~ /[^\041-\176]/ || length(peer) > 256) next
           relay = attr($0, "relay")
           if (relay !~ /^wss:\/\/[^ \t]+$/) relay = ""
@@ -801,13 +807,15 @@ find_sidecar_log_identities() {
           w = where
           if (msg != "") w = where " (\"" msg "\")"
           print peer "\t" relay "\t" w
-        }' || true )"
+        }
+        END { if (seen_any) print "\t\t\tSAW-PEER" }' || true )"
     if [ -n "$rows" ]; then
       raw="$raw$rows
 "
     fi
   done
   [ -n "$raw" ] || return 0
+  case "$raw" in *"	SAW-PEER"*) SIDECAR_LOG_SAW_PEER=1 ;; esac
   SIDECAR_LOG_ROWS="$(printf '%s\n' "$raw" | awk -F'\t' '
     $1 == "" { next }
     {
@@ -953,6 +961,52 @@ EXISTING_PEER_ID="$FOUND_PEER_ID"
 EXISTING_IDENTITY_SOURCE="$FOUND_SOURCE"
 EXISTING_IDENTITY_RELAY="$FOUND_RELAY_URL"
 EXISTING_IDENTITY_PROVEN="$FOUND_PROVEN"
+
+# DID A SIDECAR EVER RUN IN THIS DATA ROOT? Its first start, in this order
+# (go/internal/sidecar/sidecar.go, New): creates <data root>/data; mints
+# data/contract-a.token, mode 0600, BEFORE the listener binds; opens
+# data/journal/journal.log, which journal.Open creates even when there is nothing
+# to replay; opens data/genomes; then writes data/peer-id and data/listen.addr,
+# and data/slot and data/position once the map grants a place. THIS INSTALLER
+# CREATES <data root>/data EMPTY and writes nothing into it until the credential
+# is settled, so ANY entry inside it is a sidecar's, and a peer= in a sidecar log
+# says the same thing from the other side.
+#
+# <data root>/logs is deliberately not part of this: an install log is not a
+# world having run.
+world_ever_ran() {
+  if [ "$SIDECAR_LOG_SAW_PEER" -eq 1 ]; then
+    return 0
+  fi
+  [ -d "$1/data" ] || return 1
+  if [ -n "$(ls -A "$1/data" 2>/dev/null || true)" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# THE ORPHAN OF AN INTERRUPTED INSTALL. A secret with no name anywhere is
+# normally a refusal, because the world it belongs to is somewhere and only a
+# person can say where. But a secret in a data root NO SIDECAR EVER RAN IN
+# belongs to no world at all: the earlier install got as far as the credential
+# and stopped, so nothing ever claimed a slot, nothing was ever addressed to it,
+# and there is nothing on the map to strand. That is not a choice to put to
+# somebody - it is a decision this installer can make. It still never deletes:
+# the secret is renamed aside, kept private, and named on screen.
+if [ "$EXISTING_SECRET_HELD" -eq 1 ] && [ -z "$EXISTING_PEER_ID" ] && ! world_ever_ran "$DATA_ROOT"; then
+  ORPHAN_PATH="$CREDENTIAL_PATH.$(date -u +%Y%m%dT%H%M%SZ).orphan"
+  mv -f "$CREDENTIAL_PATH" "$ORPHAN_PATH"
+  chmod 600 "$ORPHAN_PATH" 2>/dev/null || true
+  printf '\n'
+  say "$CREDENTIAL_PATH was an orphan: an earlier install got that secret and stopped before"
+  say "this world ever ran, so no sidecar has ever written in $DATA_ROOT, that identity never"
+  say "claimed a place on the map, and nothing on this machine can name it. It is KEPT, as"
+  say "$ORPHAN_PATH, and this install enrolls a new identity below."
+  printf '\n'
+  EXISTING_SECRET_HELD=0
+  EXISTING_SECRET=''
+fi
+
 
 if [ -z "$JOIN_STRING_FILE" ] && [ -z "$RELAY_URL" ] && [ -f "$PUBLIC_MAP_PATH" ]; then
   USE_PUBLIC_MAP=1

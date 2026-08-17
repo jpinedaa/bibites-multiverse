@@ -77,6 +77,11 @@ this application directory, the folder the kit was unpacked in,
 `%LOCALAPPDATA%\Programs\Bibites Multiverse`, the data root, and the data root's parent, because an
 advanced ZIP is usually unpacked beside the data it writes.
 
+**A secret no world ever used is an orphan, not a question.** If an earlier install got a
+credential and stopped before the world ever ran — nothing inside `<data root>\data`, no `peer=` in
+a sidecar log — that secret belongs to no world and holds no place on the map: setup renames it to
+`peer-secret.txt.<utc>.orphan`, keeps it, and enrolls a new identity.
+
 **A secret is replaced only when something vouches for the world it belongs to** — this data
 root's own install record, or a pending record carrying that very secret — and the replaced one is
 kept beside the new file as `peer-secret.txt.<utc>.old`. A claim that only an ordinary text file
