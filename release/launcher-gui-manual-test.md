@@ -25,7 +25,7 @@ what the core said arrive on screen.**
 |---|---|
 | Package | a Windows package built from this branch |
 | Install root | wherever the setup put it, e.g. `%LOCALAPPDATA%\Programs\Bibites Multiverse` |
-| Files that must be there | `BibitesMultiverseLauncher.exe`, `multiverse-launcher.exe`, `multiverse-sidecar.exe`, `public-map.json`, `bibites-multiverse.ico`, `profiles\default.json` |
+| Files that must be there | `BibitesMultiverseLauncher.exe`, `multiverse-launcher.exe`, `multiverse-sidecar.exe`, `public-map.json`, `support-matrix.json`, `bibites-multiverse.ico`, `profiles\default.json` |
 | A second world | created during the run, so start with one |
 
 Automation hooks, if the harness drives this rather than a person:
@@ -39,7 +39,9 @@ Automation hooks, if the harness drives this rather than a person:
 - They are real Win32 controls (`walk` creates `SysListView32`, `Button`, `Edit`, `msctls_statusbar32`),
   so MSAA sees the whole tree without any accessibility work of our own.
 - The world list is a list view; read its rows for the assertions below.
-- The log pane is a read-only multiline `Edit`: `WM_GETTEXT` is the whole session's log.
+- The log pane is a read-only multiline `Edit`: `WM_GETTEXT` is the whole session's log. It follows
+  its own newest line, so `EM_GETFIRSTVISIBLELINE` + the visible line count reaches
+  `EM_GETLINECOUNT` while nobody has scrolled up (see section 3, step 8).
 
 ---
 
@@ -83,6 +85,16 @@ Automation hooks, if the harness drives this rather than a person:
 6. **Assert:** the `Speed` column becomes `x10` and then `x10 (<achieved> achieved)` once the sidecar
    has measured a span, and `Slot` becomes this world's slot number.
 7. **Assert:** the buttons come back, **Start** is now greyed and **Stop** is enabled.
+8. **Assert (the log pane follows):** while all that printed, the pane showed its **newest** lines
+   without anybody touching it — the last line on screen is the last line printed. Drive it with
+   `EM_GETLINECOUNT` and `EM_GETFIRSTVISIBLELINE`: with the window in the foreground and the pane
+   never scrolled by hand, the first visible line must be within a screenful of the line count, not
+   `0`. (`0` with a line count of 191 is what a machine reported before `scrollLogToEnd`:
+   walk's `AppendText` restores the selection it saved, so `ScrollToCaret` was scrolling a caret
+   that had been put back at the top.)
+9. **Assert (and it stops following when you read):** scroll the pane up by more than a line while a
+   world is starting. New lines keep arriving and **the view stays where you put it**. Scroll back to
+   the bottom and it follows again.
 
 ### 3b. The failure that must never be silent
 
@@ -114,10 +126,16 @@ plugin removed, but any world whose game never joins will do.
 
 1. With a world running — **headless**, which is the case that used to lose a save — click **Stop**.
 2. **Assert:** the log says
-   `stopped the game (pid N) - it was asked through the mod, and it saved and quit`, then
-   `stopped the sidecar (pid N) - it was asked to close, and it closed`.
+   `stopped the game (pid N) - it was asked through the mod, and it saved and quit`, then a sidecar
+   line. **The sidecar's line is about the sidecar**: every sidecar this launcher starts is detached
+   and windowless, so on Windows it reads
+   `stopped the sidecar (pid N) - ended directly; a sidecar keeps nothing unsaved - its journal is
+   written as it goes`. (Where a sidecar does take a close request — Linux — it reads
+   `it was asked to close, and it closed`.)
 3. **Assert:** the log does **not** contain `forced immediately: it has no window`, and does not
-   contain the `LOCAL-HEADLESSSTOP` note. A headless stop through this window loses nothing.
+   contain the `LOCAL-HEADLESSSTOP` note. A headless stop through this window loses nothing. That
+   sentence is the signature `docs/error-taxonomy.md` tells a person to search for after a lost
+   save, and it is now only ever printed about a **game**.
 4. **Assert:** both process columns return to `stopped` within one refresh, and `On the map` to `-`.
 5. Start two worlds, then click **Stop every world**.
 6. **Assert:** the log carries a `--- <name>` header for each world and both are stopped.
@@ -177,11 +195,27 @@ plugin removed, but any world whose game never joins will do.
 ## 9. Check this world
 
 1. Click **Check this world**.
-2. **Assert:** the log carries the command line it ran (`…\multiverse-sidecar.exe --diagnose
-   --data-dir … --game-dir …`) and then the diagnostic's whole output, twenty-one checks with their
-   verdicts.
-3. **Assert:** a diagnostic that finds a fault does not look like a launcher failure: the output is
-   there, followed by `the diagnostic finished with: exit status N`.
+2. **Assert:** the log carries the command line it ran, and it names **this world's map**, not only
+   its folders:
+
+   ```
+   …\multiverse-sidecar.exe --diagnose --relay wss://… --data-dir … --credential-file …\peer-secret.txt --game-dir …
+   ```
+
+   `--relay` and `--credential-file` are the whole point of this assertion. Without them the sidecar
+   falls back to its own default relay, `ws://127.0.0.1:8795/contract-b/v4`, and a perfectly healthy
+   world is told `FAIL relay-reachable` and `FAIL credential` — which is what this button did before
+   (`diagnoseArgs`, `go/internal/launcher/run.go`).
+3. **Assert:** then the diagnostic's whole output, each check with its verdict. On a healthy world on
+   the public map that is **all passes and exit 0** — the run this was written from reported
+   `16 PASS` — and in particular:
+   - `relay-reachable` and `credential` **pass**, rather than failing about a relay this world has
+     nothing to do with;
+   - `game-version` names the build rather than answering `UNKNOWN … a packaged install keeps its
+     copy in the folder it was installed from`. That answer means `support-matrix.json` is missing
+     from the install root; the installer's step 9 copies it there.
+4. **Assert:** a diagnostic that finds a real fault does not look like a launcher failure: the output
+   is there, followed by `the diagnostic finished with: exit status N`.
 
 ## 10. Closing the window stops nothing
 
