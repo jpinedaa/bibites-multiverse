@@ -215,11 +215,20 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 	if e == nil {
 		if len(a.species.byKey) >= speciesAggMax {
 			a.species.overflow++
+			// The overflow counter is published, so it is persisted (rollup.go).
+			a.rollupDirty.ledger = true
 			return
 		}
 		e = &speciesAgg{genomes: map[uint64]struct{}{}}
 		a.species.byKey[key] = e
 	}
+	// THIS SPECIES CHANGED, and the durable half of this aggregate is written
+	// incrementally, so the key is marked here — once, at the top, for every path
+	// below that can move a field. A write site that forgets to mark its key
+	// produces a number that is STALE rather than absent, and nothing on any page
+	// would say so; rollupDirty's comment enumerates every such site and
+	// rollup_test.go asserts the list.
+	a.rollupDirty.species[key] = true
 	e.crossings++
 	if e.firstMs == 0 || rec.RecordedAt < e.firstMs {
 		e.firstMs = rec.RecordedAt
@@ -231,7 +240,17 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 		if len(e.genomes) >= speciesGenomeMax {
 			e.genomesTruncated = true
 		} else {
-			e.genomes[fingerprint(rec.Lineage.GenomeHash)] = struct{}{}
+			fp := fingerprint(rec.Lineage.GenomeHash)
+			// A SET IS THE ONE THING LAST-WRITER-WINS CANNOT EXPRESS CHEAPLY, so
+			// the sidecar carries the NEW fingerprints of a save rather than the
+			// whole set, and unions them on load (rollup.go, the "sg" line):
+			// writing all 8 192 of a busy species every time it crosses is the
+			// full-rewrite cost that shape exists to refuse. Which is why the
+			// insert is tested rather than blind.
+			if _, dup := e.genomes[fp]; !dup {
+				e.genomes[fp] = struct{}{}
+				a.rollupDirty.genomes[key] = append(a.rollupDirty.genomes[key], fp)
+			}
 		}
 		// The FULL hash of the newest crossing, kept once. The fingerprint set
 		// above is a count and is deliberately unjoinable (see speciesAgg.genomes);
@@ -260,11 +279,16 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 			if rec.RecordedAt > 0 &&
 				(a.species.edgeFirstMs == 0 || rec.RecordedAt < a.species.edgeFirstMs) {
 				a.species.edgeFirstMs = rec.RecordedAt
+				// The genealogy's floor is persisted: it is a MINIMUM over the whole
+				// record, so a window that no longer holds the record's beginning
+				// cannot re-derive it (rollup.go).
+				a.rollupDirty.ledger = true
 			}
 			// LATEST WRITER WINS for the edge itself; see speciesAgg.parent.
 			if rec.RecordedAt >= e.parentAtMs {
 				if e.parentKey == "" {
 					a.species.edges++
+					a.rollupDirty.ledger = true
 				}
 				e.parent = rec.Species.ParentGenericName + " " + rec.Species.ParentSpecificName
 				e.parentKey = pkey

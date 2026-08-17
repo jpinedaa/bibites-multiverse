@@ -103,6 +103,30 @@ type Status struct {
 	GenomesEvicted      int   `json:"genomesEvicted,omitempty"`
 	GenomesEvictedBytes int64 `json:"genomesEvictedBytes,omitempty"`
 	GapsExpired         int   `json:"genomeGapsExpired,omitempty"`
+	// THE ROLL-UP HONESTY FIELDS (rollup.go). They exist so a page can say WHICH
+	// PART OF ITS ANSWER IS AGGREGATE AND WHICH IS RAW, which stops mattering
+	// only if the raw record is kept forever — and the record roll-up is the
+	// decision that it is not. THE NAMES ARE STABLE: pages, `monitor.sh` and the
+	// M5 evidence record read them.
+	//
+	// RollupCoveredRecords is how many ledger records the ON-DISK roll-up state
+	// covers as of its last successful save. A restart folds exactly these from
+	// the sidecar and replays what is behind them. 0 means nothing has been
+	// written yet, which is a brand-new archive and never a loss.
+	//
+	// RollupSavedAtMs is when that state was last written. A value that stops
+	// advancing is a sidecar that is failing to save, and the counter beside it
+	// will go on rising — which is exactly the shape an operator needs to see.
+	//
+	// RawWindowFromMs is the earliest RAW record still on this host. Under phase
+	// 1 nothing retires, so it is the first record ever folded and equals the
+	// beginning of the record; phase 2 gives the raw stream a window and this
+	// becomes the window's start, at which point it and the aggregate's own floor
+	// are two different dates and every caption that says "the record reaches
+	// back to" has to choose between them deliberately.
+	RollupCoveredRecords int   `json:"rollupCoveredRecords"`
+	RollupSavedAtMs      int64 `json:"rollupSavedAtMs"`
+	RawWindowFromMs      int64 `json:"rawWindowFromMs"`
 	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
 	// over. A rate with no window on it is not a measurement.
 	FlowWindowMs int64 `json:"flowWindowMs"`
@@ -276,10 +300,20 @@ type lane struct {
 	total  int
 	recent []int64 // recordedAt milliseconds, bounded to flowWindow
 	lastAt int64
+	// firstAt is the recordedAt of the FIRST crossing this archive was copied on
+	// this lane. Nothing renders it, and it is here because a rate without a span
+	// is not a measurement: M5's per-lane flow evidence is total/(last-first), and
+	// once the raw record has a window that span cannot be recovered from the
+	// records still on the host. It is persisted with the rest of the fold
+	// (rollup.go) for the same reason the ancestry floor is.
+	firstAt int64
 }
 
 func (l *lane) observe(atMs int64) {
 	l.total++
+	if atMs > 0 && (l.firstAt == 0 || atMs < l.firstAt) {
+		l.firstAt = atMs
+	}
 	l.lastAt = atMs
 	l.recent = append(l.recent, atMs)
 	l.trim(atMs)
@@ -363,6 +397,10 @@ func (a *Archive) StatusView() Status {
 		Records:            a.recordCount,
 		LedgerSkipped:      a.ledgerSkipped,
 		FlowWindowMs:       flowWindow.Milliseconds(),
+
+		RollupCoveredRecords: a.rollupCovered.Records,
+		RollupSavedAtMs:      a.rollupSavedAtMs,
+		RawWindowFromMs:      a.rawFromMs(),
 
 		GenomeHorizonMs:     a.cfg.GenomeHorizon.Milliseconds(),
 		GenomesEvicted:      a.evict.evicted,

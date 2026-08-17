@@ -271,6 +271,15 @@ type brainAgg struct {
 	// rather than rewriting the whole file every time (brainsave.go).
 	dirtyBuckets map[int64]bool
 	dirtySpecies map[string]bool
+	// dirtySeen and newDedup are the SAME IDEA FOR THE OTHER FILE. The coverage
+	// denominator and its frontier dedup window are LEDGER-derived, so they are
+	// the roll-up state sidecar's to persist and not brains.jsonl's (rollup.go);
+	// they are tracked here because they live here, under this lock, with the
+	// aggregate they describe. newDedup carries only the fingerprints ADDED since
+	// the last save, because a set is what an append-only file cannot rewrite
+	// cheaply.
+	dirtySeen map[int64]bool
+	newDedup  map[int64][]uint64
 	// loaded says a sidecar was replayed at startup, and lost says one existed
 	// and could not be used. Both are published: an aggregate that starts empty
 	// because there was no file is a new archive, and one that starts empty
@@ -287,6 +296,8 @@ func newBrainAgg() *brainAgg {
 		dedup:        map[int64]map[uint64]uint8{},
 		dirtyBuckets: map[int64]bool{},
 		dirtySpecies: map[string]bool{},
+		dirtySeen:    map[int64]bool{},
+		newDedup:     map[int64][]uint64{},
 	}
 }
 
@@ -312,6 +323,9 @@ func (g *brainAgg) mark(bucket int64, hash string, bit uint8) bool {
 		for k := range g.dedup {
 			if k < cut {
 				delete(g.dedup, k)
+				// Its unsaved additions go with it: a set the fold no longer
+				// consults is a set the sidecar must not carry (rollup.go).
+				delete(g.newDedup, k)
 			}
 		}
 	}
@@ -352,6 +366,7 @@ func (g *brainAgg) bucketFor(key int64) *brainBucket {
 		}
 		delete(g.buckets, oldest)
 		delete(g.dirtyBuckets, oldest)
+		delete(g.dirtySeen, oldest)
 		g.bucketsDropped++
 	}
 	b := newBrainBucket()
@@ -380,11 +395,24 @@ func (a *Archive) observeBrainSeen(atMs int64, hash string) {
 		return
 	}
 	b.seen++
-	// IT IS NOT MARKED DIRTY, BECAUSE seen IS NEVER PERSISTED. It is derived from
-	// the ledger, the ledger is replayed at every start anyway, and re-deriving it
-	// is a map lookup per record with no disk read at all. Writing it to the
-	// sidecar as well would put one fact in two places and give a restart a way to
-	// disagree with the record about how many genomes crossed.
+	// IT IS PERSISTED NOW, AND IT WAS NOT, and the reversal is the whole point of
+	// the record roll-up. The old rule was right for as long as its premise was:
+	// seen is derived from the ledger, the ledger was replayed IN FULL at every
+	// start, and writing it down as well would have put one fact in two places
+	// and given a restart a way to disagree with the record. The premise ends
+	// when the raw record stops being replayed in full — a denominator nobody was
+	// keeping while a segment was on the host cannot be computed for the period
+	// that segment covers once it has gone. It goes in the ROLL-UP state sidecar
+	// and not in brains.jsonl, because it is the LEDGER fold's half of this
+	// aggregate and brains.jsonl owns the ARRIVAL fold's half (rollup.go).
+	g.dirtySeen[key] = true
+	if _, tracked := g.dedup[key]; tracked {
+		// Inside the dedup window, so the fingerprint that suppressed the second
+		// crossing of this genome has to survive a restart too — otherwise a tail
+		// replay would count it a second time in a bucket the sidecar already
+		// holds. Only bit 1: bit 2 is the HELD fold's and brains.jsonl owns it.
+		g.newDedup[key] = append(g.newDedup[key], fingerprint(hash))
+	}
 }
 
 // observeBrainHeld folds ONE MEASURED GENOME into the bucket of the crossing
