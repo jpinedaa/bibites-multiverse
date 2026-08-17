@@ -218,11 +218,71 @@ func TestNoWriteOutsideOwnedRoots(t *testing.T) {
 func fastPolling(t *testing.T) {
 	t.Helper()
 	slotWas, exitWas := slotPollInterval, exitPollInterval
+	modPollWas, modWaitWas := modPollInterval, modWaitTimeout
 	slotPollInterval = 20 * time.Millisecond
 	exitPollInterval = 20 * time.Millisecond
+	modPollInterval = 20 * time.Millisecond
+	modWaitTimeout = 2 * time.Second
 	t.Cleanup(func() {
 		slotPollInterval, exitPollInterval = slotWas, exitWas
+		modPollInterval, modWaitTimeout = modPollWas, modWaitWas
 	})
+}
+
+// A world whose game reaches the sidecar says so on one line, and a world whose
+// game does not says so much more loudly. Neither is a failure exit: the start
+// itself worked, and the mod-side fix for the cause is what makes it rare.
+//
+// This is the gate on LOCAL-CONFIGRACE going silent again. Before it, a mod that
+// configured itself off produced a completely successful start: sidecar up, slot
+// taken, game running, nothing said.
+func TestStartReportsWhetherTheModConnected(t *testing.T) {
+	fastPolling(t)
+	h := newHarness(t)
+	h.useRealFakes()
+	p := h.profile("default", "Multiverse", freeTestPort(t))
+	t.Cleanup(func() { killRecorded(p) })
+
+	if code := h.run("start"); code != exitOK {
+		t.Fatalf("start: %d\n%s\n%s", code, h.out(), h.err())
+	}
+	mustContain(t, "the start output", h.out(), "the game joined the map: mod connected, speed x10.")
+	if strings.Contains(h.err(), "HAS NOT REACHED THE SIDECAR") {
+		t.Fatalf("a connected world warned anyway:\n%s", h.err())
+	}
+	// The event log carries the same fact for a supporter reading it later.
+	mustContain(t, "the event log", readFile(t, p.LauncherLog()), "mod.connected")
+
+	if code := h.run("stop", "default"); code != exitOK {
+		t.Fatalf("stop: %d\n%s", code, h.err())
+	}
+
+	// The same start, against a sidecar whose game never arrives.
+	t.Setenv("LAUNCHER_FAKE_SIDECAR", "nomod")
+	quiet := h.profile("quiet", "Quiet", freeTestPort(t))
+	t.Cleanup(func() { killRecorded(quiet) })
+
+	if code := h.run("start", "quiet"); code != exitOK {
+		t.Fatalf("a world whose mod never connects must still exit %d, got %d\n%s",
+			exitOK, code, h.err())
+	}
+	for _, want := range []string{
+		"HAS NOT REACHED THE SIDECAR",
+		"LOCAL-CONFIGRACE",
+		"LOCAL-STARVATION",
+		"this is a warning, not a failure",
+		quiet.BepInExLog(),
+	} {
+		mustContain(t, "the mod-wait warning", h.err(), want)
+	}
+	if strings.Contains(h.out(), "the game joined the map") {
+		t.Fatalf("a world with no mod claimed it joined:\n%s", h.out())
+	}
+	mustContain(t, "the event log", readFile(t, quiet.LauncherLog()), "mod.not-connected")
+
+	if code := h.run("stop", "quiet"); code != exitOK {
+		t.Fatalf("stop quiet: %d\n%s", code, h.err())
+	}
 }
 
 // spawnPlaceholder starts a process that stands in for a running game. It is

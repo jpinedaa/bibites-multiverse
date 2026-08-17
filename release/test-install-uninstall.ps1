@@ -344,6 +344,18 @@ if (Test-Path $startScript) {
         Check ("the start script sets " + $setting.Split('=')[0].Trim() + " explicitly") `
             ($startText.Contains('$env:' + $setting))
     }
+    # THE SILENT-FAILURE GATE. A start script that does not check whether the mod
+    # reached the sidecar is a start script that reports success for a world
+    # sitting at the main menu (LOCAL-CONFIGRACE).
+    foreach ($probe in @('/my-slot',
+                         'THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR',
+                         'LOCAL-CONFIGRACE',
+                         'LOCAL-STARVATION',
+                         'the game joined the map: mod connected',
+                         'this is a warning, not a failure')) {
+        Check ("the start script checks that the mod connected (" + $probe + ")") `
+            ($startText.Contains($probe))
+    }
     Check "the start script carries no secret" (-not ($startText -match $aSecret))
     Check "the start script passes the credential as a file, never as a value" `
         ($startText -match "--credential-file")

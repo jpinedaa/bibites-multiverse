@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"multiverse/internal/sidecar"
 )
 
 // TestNoSecretFlagExists enforces the rule the sidecar and the installer both
@@ -257,5 +259,15 @@ func TestUsageAndExitCodes(t *testing.T) {
 	// A global flag is accepted after the command name too.
 	if code := h.run("status", "--all", "--json"); code != exitOK {
 		t.Fatalf("status --all --json exited %d\n%s", code, h.err())
+	}
+}
+
+// The launcher asks the sidecar's own-slot endpoint whether the game's mod has
+// arrived, and it spells that path itself rather than importing the sidecar into
+// the launcher binary. This is the seam that keeps the two spellings equal.
+func TestOwnSlotPathMatchesTheSidecar(t *testing.T) {
+	if ownSlotPath != sidecar.OwnSlotPath {
+		t.Fatalf("the launcher asks for %q and the sidecar serves %q",
+			ownSlotPath, sidecar.OwnSlotPath)
 	}
 }

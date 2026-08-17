@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,10 +31,12 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// fakeSidecarMain writes what the slot wait reads, then sits there until it is
-// stopped. Its stderr is the log file the launcher redirected.
+// fakeSidecarMain writes what the slot wait reads, serves the own-slot endpoint
+// the mod-connected wait reads, then sits there until it is stopped. Its stderr
+// is the log file the launcher redirected.
 func fakeSidecarMain() int {
-	switch os.Getenv("LAUNCHER_FAKE_SIDECAR") {
+	mode := os.Getenv("LAUNCHER_FAKE_SIDECAR")
+	switch mode {
 	case "refuse":
 		fmt.Fprintln(os.Stderr, "sidecar: placement claim refused: another peer holds that slot")
 	case "silent":
@@ -44,8 +47,38 @@ func fakeSidecarMain() int {
 			fmt.Fprintln(os.Stderr, "sidecar: contract B: slot granted slot=3 position=0,0")
 		}()
 	}
+	// The real sidecar binds the Contract A listener it was given and serves
+	// /my-slot on it (go/internal/sidecar/ownslot.go). "nomod" is the world whose
+	// game never reaches the mod — the LOCAL-CONFIGRACE shape.
+	if addr := fakeListenArg(); addr != "" && mode != "nolisten" {
+		go serveFakeOwnSlot(addr, mode != "nomod")
+	}
 	time.Sleep(2 * time.Minute)
 	return 0
+}
+
+// fakeListenArg reads --listen off this fake's own command line, exactly as the
+// launcher wrote it in sidecarArgs.
+func fakeListenArg() string {
+	for i, arg := range os.Args {
+		if arg == "--listen" && i+1 < len(os.Args) {
+			return os.Args[i+1]
+		}
+	}
+	return ""
+}
+
+// serveFakeOwnSlot answers the one endpoint the launcher's mod wait reads, with
+// the one field it reads from it.
+func serveFakeOwnSlot(addr string, connected bool) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/my-slot", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"schema":"multiverse-own-slot/1","mod":{"connected":%t,"modVersion":"9.9.9"}}`,
+			connected)
+	})
+	server := &http.Server{Addr: addr, Handler: mux}
+	server.ListenAndServe()
 }
 
 // fakeGameMain stands in for a Unity instance: it runs until it is asked to stop.

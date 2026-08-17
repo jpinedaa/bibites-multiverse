@@ -307,6 +307,22 @@ if [ -f "$START" ]; then
     "$(b bash -c '! grep -qE "WSLENV=|export WSLENV" "$1"' _ "$START")"
   check "the start script sets the contract-A token path as a plain path" \
     "$(b contains 'MULTIVERSE_CONTRACT_A_TOKEN_FILE="$DATA_DIR/contract-a.token"' "$START_TEXT")"
+  # THE SILENT-FAILURE GATE. A start script that does not check whether the mod
+  # reached the sidecar is a start script that reports success for a world sitting
+  # at the main menu (LOCAL-CONFIGRACE).
+  for probe in \
+    '/my-slot' \
+    'THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR' \
+    'LOCAL-CONFIGRACE' \
+    'LOCAL-STARVATION' \
+    'the game joined the map: mod connected'
+  do
+    check "the start script checks that the mod connected ($probe)" \
+      "$(b contains -- "$probe" "$START_TEXT")"
+  done
+  check "the start script's mod check is a warning, not a failure" \
+    "$(b contains 'this is a warning, not a failure' "$START_TEXT")"
+
   check "the start script warns about one instance per game folder" \
     "$(b contains 'ONE INSTANCE PER GAME FOLDER' "$START_TEXT")"
   check "the start script sets no SSL_CERT_FILE on a public map" \

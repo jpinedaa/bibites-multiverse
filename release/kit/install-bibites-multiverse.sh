@@ -79,6 +79,11 @@ PLATFORM='Linux'
 # in-game speed slider already moves it for a session.
 STARTUP_TIME_SCALE='10'
 
+# How long the start script waits for the game's mod to reach the sidecar before
+# it warns. The game seeds a world on a first start, which is the slow case, so
+# this is generous; it never fails the start (LOCAL-CONFIGRACE).
+MOD_WAIT_SECONDS=120
+
 JOIN_STRING_FILE=''
 RELAY_URL=''
 CA_FILE=''
@@ -1754,7 +1759,68 @@ printf '      %s   (what the game itself printed)\n' "$GAME_LOG"
 printf 'ONE INSTANCE PER GAME FOLDER. Two of them share that BepInEx log, both keep\n'
 printf 'writing to it, and it ends as mostly NUL bytes while everything else works.\n'
 printf 'See LOCAL-LOGSHRED in docs/error-taxonomy.md.\n'
-printf 'Leave both running. Run ./%s when you are done.\n' '@@STOPNAME@@'
+
+# THE GAME STARTING IS NOT THE GAME JOINING. A mod that cannot configure itself
+# loads, logs, and then does nothing: no world is loaded, no heartbeat is sent,
+# and the game sits at the main menu while the sidecar holds this world's slot
+# and every other line above reports success. That is LOCAL-CONFIGRACE, and it
+# was silent until this check existed. The sidecar already knows the answer:
+# /my-slot on its own loopback listener is read-only and needs no token.
+#
+# The answer is indented JSON and "connected" appears in more than one object in
+# it, so the scan below is anchored on the "mod" object rather than on the word.
+# `multiverse-sidecar --my-slot` is the supported reader of the same endpoint.
+BEPINEX_LOG="$GAME_DIR/BepInEx/LogOutput.log"
+MOD_WAIT_SECONDS=@@MODWAITSECONDS@@
+
+mod_connected() {
+  curl --fail --silent --max-time 2 "http://127.0.0.1:$SIDECAR_PORT/my-slot" 2>/dev/null |
+    awk '
+      /^  "mod": \{/  { inmod = 1; next }
+      inmod && /^  \}/ { inmod = 0 }
+      inmod && /"connected": true/ { found = 1 }
+      END { exit !found }
+    '
+}
+
+MOD_OK=0
+if ! command -v curl >/dev/null 2>&1; then
+  printf '\ncurl is not on PATH here, so this script cannot check whether the mod reached\n'
+  printf 'the sidecar. Read it yourself with: %s --data-dir %s --my-slot\n' "$SIDECAR" "$DATA_DIR"
+else
+  printf '\nwaiting up to %s s for the game'"'"'s mod to reach the sidecar ...\n' "$MOD_WAIT_SECONDS"
+  WAITED=0
+  while [ "$WAITED" -lt "$MOD_WAIT_SECONDS" ]; do
+    if mod_connected; then MOD_OK=1; break; fi
+    WAITED=$(( WAITED + 1 ))
+    sleep 1
+  done
+
+  if [ "$MOD_OK" -eq 1 ]; then
+    printf 'the game joined the map: mod connected, speed x@@STARTUPTIMESCALE@@.\n'
+  else
+    {
+      printf '\n!! THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR after %s s.\n' "$MOD_WAIT_SECONDS"
+      printf '   Your world is NOT on the map yet: the sidecar holds your slot, and the map\n'
+      printf '   shows it live with no game behind it. Nothing is lost and nothing is broken.\n'
+      printf '\n'
+      printf '   Look in the game'"'"'s own log:\n'
+      printf '     %s\n' "$BEPINEX_LOG"
+      printf '   An error line beginning "[M2]" is the settings-file trap, LOCAL-CONFIGRACE.\n'
+      printf '   No "Bibites Multiverse <version> loaded" line at all is LOCAL-STARVATION -\n'
+      printf '   the plugin is not being loaded. Both are in docs/error-taxonomy.md.\n'
+      printf '\n'
+      printf '   The remedy for either is to restart this world:\n'
+      printf '     ./%s\n' '@@STOPNAME@@'
+      printf '     ./%s\n' '@@STARTNAME@@'
+      printf '   If it happens twice in a row, report it with that log and the code above.\n'
+      printf '\n'
+      printf '   The world and the sidecar are still running; this is a warning, not a failure.\n'
+    } >&2
+  fi
+fi
+
+printf '\nLeave both running. Run ./%s when you are done.\n' '@@STOPNAME@@'
 START_TEMPLATE
 
 IFS= read -r -d '' STOP_BODY <<'STOP_TEMPLATE' || true
@@ -1847,6 +1913,7 @@ expand_template() {
   body="${body//@@SAVEKEEP@@/$SAVE_KEEP}"
   body="${body//@@SAVEONQUIT@@/$SAVE_ON_QUIT_VALUE}"
   body="${body//@@STARTUPTIMESCALE@@/$STARTUP_TIME_SCALE}"
+  body="${body//@@MODWAITSECONDS@@/$MOD_WAIT_SECONDS}"
   body="${body//@@SIDECARPORT@@/$SIDECAR_PORT}"
   body="${body//@@CAFILE@@/$CA_STORED}"
   body="${body//@@GAMEEXE@@/$GAME_EXE}"

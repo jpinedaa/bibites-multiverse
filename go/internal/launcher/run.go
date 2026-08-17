@@ -1,8 +1,10 @@
 package launcher
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +35,38 @@ var slotPollInterval = 500 * time.Millisecond
 
 // defaultSlotWait matches the generated Start-Multiverse.ps1's 60 seconds.
 const defaultSlotWait = 60 * time.Second
+
+// THE GAME STARTING IS NOT THE GAME JOINING, and until this check existed
+// nothing on the start path knew the difference.
+//
+// A mod that fails to configure itself loads, logs, and then does nothing: no
+// world is auto-loaded, no heartbeat is ever sent, and the game sits at the main
+// menu. The sidecar still takes a slot, so the map shows this world live with no
+// game behind it — and the launcher, the installer and the sidecar all reported
+// success. That is LOCAL-CONFIGRACE, and it was observed on a fresh single
+// install on 2026-08-17. The mod no longer switches itself off for that reason,
+// but "the mod is running and talking" is a fact worth reading rather than
+// assuming, and it is cheap: the sidecar already knows.
+//
+// IT IS NEVER FATAL. A world that has not connected yet is the ordinary case for
+// the first minute of a first start — the game seeds a world before it loads
+// one — so a timeout is a loud warning and an exit code of zero. The remedy is a
+// restart, and the fix for the cause is in the mod.
+var modWaitTimeout = 120 * time.Second
+
+// modPollInterval is how often /my-slot is asked. A variable so a test does not
+// spend real seconds on it.
+var modPollInterval = time.Second
+
+// modProbeTimeout bounds one loopback request. The sidecar is on this machine;
+// a request that takes longer than this is a request that is not going to answer.
+const modProbeTimeout = 2 * time.Second
+
+// ownSlotPath is the sidecar's read-only own-slot endpoint, sidecar.OwnSlotPath.
+// It is repeated here rather than imported: the launcher and the sidecar are two
+// separate programs, and the launcher has no other reason to carry the sidecar's
+// package graph. A test pins the two spellings together.
+const ownSlotPath = "/my-slot"
 
 type startOptions struct {
 	headless bool
@@ -310,8 +344,86 @@ func (a *app) startGame(p Profile, opts startOptions, events *eventLog) int {
 	a.say("It saves itself every %s minutes, keeping %d, and runs at x%s.",
 		formatMinutes(p.SaveMinutes), p.SaveKeep, startupTimeScale)
 	a.say("logs: %s  and  %s", p.SidecarLog(), p.BepInExLog())
+	a.waitForMod(p, events)
 	a.say("Leave both running. Stop this world when you are done.")
 	return exitOK
+}
+
+// waitForMod reads the one fact the rest of the start sequence cannot see: has
+// the game's mod actually connected to this world's sidecar?
+//
+// It asks the sidecar, over the read-only loopback endpoint the sidecar already
+// serves for `--my-slot` (go/internal/sidecar/ownslot.go). No second process is
+// spawned, no token is needed, and nothing is written.
+func (a *app) waitForMod(p Profile, events *eventLog) {
+	a.say("")
+	a.say("waiting up to %.0f s for the game's mod to reach the sidecar...", modWaitTimeout.Seconds())
+
+	client := &http.Client{Timeout: modProbeTimeout}
+	// BOUNDED BY ATTEMPTS RATHER THAN BY A CLOCK. Every other wait here reads
+	// a.now(), which the tests freeze; a wait that must actually end cannot be
+	// one of those. Two knobs decide it, and a test shrinks both.
+	attempts := int(modWaitTimeout / modPollInterval)
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 1; ; attempt++ {
+		if version, ok := probeModConnected(client, p.SidecarPort); ok {
+			events.event("info", "mod.connected", "world", p.World, "modVersion", version)
+			a.print("the game joined the map: mod connected, speed x%s.", startupTimeScale)
+			return
+		}
+		if attempt >= attempts {
+			break
+		}
+		time.Sleep(modPollInterval)
+	}
+
+	events.event("warn", "mod.not-connected", "world", p.World,
+		"waitedSeconds", strconv.Itoa(int(modWaitTimeout.Seconds())))
+	a.warn("")
+	a.warn("!! THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR after %.0f s.",
+		modWaitTimeout.Seconds())
+	a.warn("   Your world is NOT on the map yet: the sidecar holds your slot, and the map shows")
+	a.warn("   it live with no game behind it. Nothing is lost and nothing is broken here.")
+	a.warn("")
+	a.warn("   Look in the game's own log:")
+	a.warn("     %s", p.BepInExLog())
+	a.warn("   An error line beginning '[M2]' is the settings-file trap, LOCAL-CONFIGRACE. No")
+	a.warn("   'Bibites Multiverse <version> loaded' line at all is LOCAL-STARVATION — the plugin")
+	a.warn("   is not being loaded. Both are in docs/error-taxonomy.md.")
+	a.warn("")
+	a.warn("   The remedy for either is to restart this world:")
+	a.warn("     %s stop %s", LauncherExeName, p.Name)
+	a.warn("     %s start %s", LauncherExeName, p.Name)
+	a.warn("   If it happens twice in a row, report it with that log and the code above.")
+	a.warn("")
+	a.warn("   The world and the sidecar are still running; this is a warning, not a failure.")
+}
+
+// probeModConnected asks the sidecar's own-slot endpoint whether a game is
+// connected. Every failure — no listener yet, a body it cannot read, a sidecar
+// too old to serve the path — reads as "not yet", because this is a wait.
+func probeModConnected(client *http.Client, port int) (string, bool) {
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, ownSlotPath)
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", false
+	}
+	var view struct {
+		Mod struct {
+			Connected  bool   `json:"connected"`
+			ModVersion string `json:"modVersion"`
+		} `json:"mod"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		return "", false
+	}
+	return view.Mod.ModVersion, view.Mod.Connected
 }
 
 // sidecarArgs is the exact command line the generated Start-Multiverse.ps1

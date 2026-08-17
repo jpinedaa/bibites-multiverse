@@ -182,6 +182,11 @@ $ProfileFormat = 'bibites-multiverse/launcher-profile/1'
 # same value (go/internal/launcher/run.go).
 $StartupTimeScale = '10'
 
+# How long the start script waits for the game's mod to reach the sidecar before
+# it warns. The game seeds a world on a first start, which is the slow case, so
+# this is generous; it never fails the start (LOCAL-CONFIGRACE).
+$ModWaitSeconds = 120
+
 $discoveryScript = Join-Path $Here 'Find-BibitesGame.ps1'
 if (-not (Test-Path -LiteralPath $discoveryScript -PathType Leaf)) {
     Write-Host "STOP [INS-CHECKSUM]: Find-BibitesGame.ps1 is missing." -ForegroundColor Red
@@ -1834,6 +1839,52 @@ Write-Host ""
 Write-Host "game started (pid $($game.Id)); it loads the world '$World' by itself,"
 Write-Host "and seeds it on the first start. It saves itself every @@SAVEMINUTES@@ minutes."
 Write-Host "logs: $log  and  $GameDir\BepInEx\LogOutput.log"
+
+# THE GAME STARTING IS NOT THE GAME JOINING. A mod that cannot configure itself
+# loads, logs, and then does nothing: no world is loaded, no heartbeat is sent,
+# and the game sits at the main menu while the sidecar holds your slot and every
+# other part of this script reports success. That is LOCAL-CONFIGRACE, and it was
+# silent until this check existed. The sidecar already knows the answer, so ask
+# it: /my-slot on its own loopback listener is read-only and needs no token.
+$bepInExLog = Join-Path $GameDir 'BepInEx\LogOutput.log'
+$modWaitSeconds = @@MODWAITSECONDS@@
+$modConnected = $false
+Write-Host ""
+Write-Host "waiting up to $modWaitSeconds s for the game's mod to reach the sidecar..."
+for ($waited = 0; $waited -lt $modWaitSeconds; $waited++) {
+    try {
+        $view = Invoke-RestMethod -Uri "http://127.0.0.1:$SidecarPort/my-slot" `
+                                  -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+        if ($view.mod.connected) { $modConnected = $true; break }
+    } catch {
+        # Not listening yet, or too old to serve the path. Either is "not yet".
+    }
+    Start-Sleep -Seconds 1
+}
+
+if ($modConnected) {
+    Write-Host "the game joined the map: mod connected, speed x@@STARTUPTIMESCALE@@." -ForegroundColor Green
+} else {
+    Write-Host ""
+    Write-Host "!! THE GAME STARTED BUT ITS MOD HAS NOT REACHED THE SIDECAR after $modWaitSeconds s." -ForegroundColor Yellow
+    Write-Host "   Your world is NOT on the map yet: the sidecar holds your slot, and the map shows" -ForegroundColor Yellow
+    Write-Host "   it live with no game behind it. Nothing is lost and nothing is broken here." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "   Look in the game's own log:"
+    Write-Host "     $bepInExLog"
+    Write-Host "   An error line beginning '[M2]' is the settings-file trap, LOCAL-CONFIGRACE. No"
+    Write-Host "   'Bibites Multiverse <version> loaded' line at all is LOCAL-STARVATION - the"
+    Write-Host "   plugin is not being loaded. Both are in docs/error-taxonomy.md."
+    Write-Host ""
+    Write-Host "   The remedy for either is to restart this world:"
+    Write-Host "     .\@@STOPNAME@@"
+    Write-Host "     .\@@STARTNAME@@"
+    Write-Host "   If it happens twice in a row, report it with that log and the code above."
+    Write-Host ""
+    Write-Host "   The world and the sidecar are still running; this is a warning, not a failure."
+}
+
+Write-Host ""
 Write-Host "Leave both running. Run .\@@STOPNAME@@ when you are done."
 '@
 
@@ -1938,6 +1989,7 @@ function Expand-Template {
                  Replace('@@SAVEKEEP@@',       [string]$SaveKeep).
                  Replace('@@SAVEONQUIT@@',     $saveOnQuitValue).
                  Replace('@@STARTUPTIMESCALE@@', $StartupTimeScale).
+                 Replace('@@MODWAITSECONDS@@', [string]$ModWaitSeconds).
                  Replace('@@SIDECARPORT@@',    [string]$SidecarPort).
                  Replace('@@STARTNAME@@',      $StartName).
                  Replace('@@STOPNAME@@',       $StopName)

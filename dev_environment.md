@@ -50,7 +50,7 @@ source at a glance.
 | Component | Public development baseline |
 |---|---|
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.6` |
+| Plugin | `0.6.7` |
 | Contract A | `contract-a/2.4` |
 | Contract B | `contract-b/4.1` |
 | Genome projection | `bb8-genome/1` |
@@ -560,6 +560,8 @@ Do not present a historical rig value as current service state.
   directory, never at a data root a journal grows inside: 145k files took 27.5 minutes, with the
   setup already invisible and its payload still unpacked in `%TEMP%`.
 - Name each forwarded environment variable in `WSLENV`.
+- BepInEx saves the whole config file from inside every `Config.Bind`. Suspend `SaveOnConfigSet`
+  around a bind burst and save once, or every entry is another window for a sharing violation.
 - Map BepInEx logs by content, not launch order.
 - If `LogOutput.log` contains required evidence, copy it before a restart.
 - Use the readiness flag instead of a fixed sleep before world loading.

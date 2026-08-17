@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading;
 using BepInEx.Configuration;
 
 namespace BibitesMultiverse
@@ -153,9 +154,178 @@ namespace BibitesMultiverse
         /// <summary>The first declared export edge, which is the rig's default target for a forced export.</summary>
         internal Edge PrimaryExportEdge => (ExportEdges.Count > 0) ? ExportEdges[0] : Edge.None;
 
+        /// <summary>How many times a config-file save is tried before the file is given up on.</summary>
+        internal const int SaveAttempts = 5;
+
+        /// <summary>Milliseconds between save attempts. Five attempts is under a second in the worst case.</summary>
+        internal const int SaveRetryMillis = 200;
+
+        /// <summary>
+        /// Stop BepInEx writing the config file on every single <c>Bind</c>, and say what it was doing
+        /// before. The caller restores it through <see cref="PersistConfig"/>.
+        ///
+        /// **This is the fix for LOCAL-CONFIGRACE.** With <c>SaveOnConfigSet</c> left at its default of
+        /// <c>true</c>, BepInEx 5.4 rewrites <c>BepInEx/config/dev.multiverse.bibites.cfg</c> from
+        /// inside **every** <c>Bind</c> call — fourteen whole-file writes in the first second of a
+        /// game's life, each one a window in which any other holder of that path makes the mod throw.
+        /// Two instances racing each other is one way to lose it; an anti-virus or a search indexer
+        /// walking a freshly installed plugin tree is another, and that one needs no second instance
+        /// at all (observed on a single fresh install, 2026-08-17). Suspending the saves collapses
+        /// fourteen windows into one.
+        /// </summary>
+        internal static bool SuspendSaves(ConfigFile file)
+        {
+            if (file == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                bool was = file.SaveOnConfigSet;
+                file.SaveOnConfigSet = false;
+                return was;
+            }
+            catch (Exception e)
+            {
+                MultiversePlugin.Log.LogWarning(
+                    $"[M2] config: could not suspend the per-entry config save ({e.GetType().Name}: {e.Message}). " +
+                    "Every bind will write the file, which is the LOCAL-CONFIGRACE window. Nothing else changes.");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Write the config file once, retrying a few times, and restore the per-entry save behaviour.
+        ///
+        /// **A failure here is never fatal and never turns anything off.** Every value is already bound
+        /// in memory and every one of them is overridden by the environment anyway, which is what a
+        /// packaged install sets (release/kit's start scripts, go/internal/launcher/run.go). The file is
+        /// only the persistence of defaults, for somebody starting the game another way. Losing it costs
+        /// a hand-editable file, not a world's membership of the map — and the old behaviour, where this
+        /// exact failure switched the whole Contract A client off and left the game sitting at the main
+        /// menu, cost exactly that.
+        /// </summary>
+        internal static bool PersistConfig(ConfigFile file, bool restoreSaveOnSet)
+        {
+            if (file == null)
+            {
+                return true;
+            }
+
+            string path = "<unknown>";
+            try
+            {
+                path = file.ConfigFilePath;
+            }
+            catch (Exception)
+            {
+                // Reported in the failure line below only; the save is what matters.
+            }
+
+            Exception last = null;
+            for (int attempt = 1; attempt <= SaveAttempts; attempt++)
+            {
+                try
+                {
+                    file.Save();
+                    if (attempt > 1)
+                    {
+                        MultiversePlugin.Log.LogInfo(
+                            $"[M2] config: the settings file was written on attempt {attempt} of {SaveAttempts} " +
+                            $"({path}). Something else was holding it; it let go.");
+                    }
+
+                    RestoreSaves(file, restoreSaveOnSet);
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    last = e;
+                    if (attempt < SaveAttempts)
+                    {
+                        try
+                        {
+                            Thread.Sleep(SaveRetryMillis);
+                        }
+                        catch (Exception)
+                        {
+                            // A sleep that will not sleep still leaves the retry worth making.
+                        }
+                    }
+                }
+            }
+
+            MultiversePlugin.Log.LogWarning(
+                $"[M2] config: the settings file could not be written after {SaveAttempts} attempts over " +
+                $"{(SaveAttempts - 1) * SaveRetryMillis} ms — {path}: " +
+                $"{(last == null ? "no reason given" : last.GetType().Name + ": " + last.Message)}. " +
+                "THIS WORLD IS FINE AND CARRIES ON. Every setting is already loaded, and a packaged install " +
+                "takes its settings from the game's environment rather than from that file, so nothing about " +
+                "this world changes. The file keeps whatever it held before. Usually this is an anti-virus or " +
+                "a search indexer holding a freshly installed plugin folder, or a second game instance writing " +
+                "the same file at the same moment (LOCAL-CONFIGRACE in docs/error-taxonomy.md); both let go on " +
+                "their own, and the next start writes the file.");
+            RestoreSaves(file, restoreSaveOnSet);
+            return false;
+        }
+
+        private static void RestoreSaves(ConfigFile file, bool value)
+        {
+            try
+            {
+                file.SaveOnConfigSet = value;
+            }
+            catch (Exception)
+            {
+                // It was only ever an optimisation; nothing here writes an entry afterwards.
+            }
+        }
+
+        /// <summary>
+        /// One bound setting, as a value rather than as an entry, and it **cannot throw**.
+        ///
+        /// A config file that will not read or will not write costs the shipped default for that one
+        /// entry and nothing else — the environment is read afterwards either way, and on a packaged
+        /// install the environment is what carries every setting. <paramref name="file"/> may be
+        /// <c>null</c>, which is how <see cref="Read"/> builds a configuration with no file at all when
+        /// the file is unusable.
+        /// </summary>
+        private static T BindValue<T>(ConfigFile file, string section, string key, T defaultValue, string description)
+        {
+            if (file == null)
+            {
+                return defaultValue;
+            }
+
+            try
+            {
+                return file.Bind(section, key, defaultValue, description).Value;
+            }
+            catch (Exception e)
+            {
+                MultiversePlugin.Log.LogWarning(
+                    $"[M2] config: the [{section}] {key} entry could not be read from the settings file " +
+                    $"({e.GetType().Name}: {e.Message}) — using the shipped default " +
+                    $"'{defaultValue}'. The environment still overrides it, and nothing is switched off.");
+                return defaultValue;
+            }
+        }
+
+        /// <summary>
+        /// Every setting, from the BepInEx config file and then from the environment, which wins.
+        ///
+        /// <paramref name="config"/> may be <c>null</c>: that reads every entry as its shipped default
+        /// and touches no file, which is exactly what a fresh config file would have produced. It is the
+        /// last-resort path, so that no failure of that file can ever leave this world off the map.
+        ///
+        /// The caller suspends the per-entry save around this (<see cref="SuspendSaves"/>) and writes the
+        /// file once at the end (<see cref="PersistConfig"/>).
+        /// </summary>
         internal static MultiverseConfig Read(ConfigFile config)
         {
-            ConfigEntry<string> edgeEntry = config.Bind(
+            string edgeValue = BindValue(
+                config,
                 "M4",
                 "ExportEdges",
                 string.Empty,
@@ -166,7 +336,8 @@ namespace BibitesMultiverse
                 "The environment variable " + EnvExportEdges + " overrides this, and " +
                 EnvExportEdge + " / " + EnvOpenEdge + " are still read as a single-edge form.");
 
-            ConfigEntry<string> excludeEntry = config.Bind(
+            string excludeValue = BindValue(
+                config,
                 "M4",
                 "MigrationExcludeSpecies",
                 MigrationExclusion.DefaultNames,
@@ -179,7 +350,8 @@ namespace BibitesMultiverse
                 "read-only there and no other party acts on it. The environment variable " +
                 EnvMigrationExclude + " overrides this, including when it is set to an empty value.");
 
-            ConfigEntry<int> slotEntry = config.Bind(
+            int slotValue = BindValue(
+                config,
                 "M3",
                 "RingSlot",
                 0,
@@ -187,13 +359,15 @@ namespace BibitesMultiverse
                 "with 4001 when it disagrees. 0 omits the field. The environment variable " + EnvRingSlot +
                 " overrides this.");
 
-            ConfigEntry<int> portEntry = config.Bind(
+            int portValue = BindValue(
+                config,
                 "M3",
                 "SidecarPort",
                 ContractA.DefaultPort,
                 "The loopback port the Contract A sidecar listens on. The environment variable " + EnvPort + " overrides this.");
 
-            ConfigEntry<float> widthEntry = config.Bind(
+            float widthValue = BindValue(
+                config,
                 "M3",
                 "BorderWidth",
                 0f,
@@ -203,7 +377,8 @@ namespace BibitesMultiverse
                 MinimumWidth.ToString(CultureInfo.InvariantCulture) + " u. The environment variable " +
                 EnvBorderWidth + " overrides this.");
 
-            ConfigEntry<float> saveMinutesEntry = config.Bind(
+            float saveMinutesValue = BindValue(
+                config,
                 "M4",
                 "SaveMinutes",
                 DefaultSaveMinutes,
@@ -211,7 +386,8 @@ namespace BibitesMultiverse
                 "own autosave stays off either way — an autosave reloads the scene under a live rig. The " +
                 "environment variable " + EnvSaveMinutes + " overrides this.");
 
-            ConfigEntry<int> saveKeepEntry = config.Bind(
+            int saveKeepValue = BindValue(
+                config,
                 "M4",
                 "SaveKeep",
                 DefaultSaveKeep,
@@ -219,14 +395,16 @@ namespace BibitesMultiverse
                 "name, so MULTIVERSE_WORLD always names the newest. The environment variable " +
                 EnvSaveKeep + " overrides this.");
 
-            ConfigEntry<bool> saveOnQuitEntry = config.Bind(
+            bool saveOnQuitValue = BindValue(
+                config,
                 "M4",
                 "SaveOnQuit",
                 true,
                 "Save the loaded world when the application quits (D14). The environment variable " +
                 EnvSaveOnQuit + " overrides this.");
 
-            ConfigEntry<bool> portalEntry = config.Bind(
+            bool portalValue = BindValue(
+                config,
                 "M4",
                 "Portal",
                 true,
@@ -235,14 +413,16 @@ namespace BibitesMultiverse
                 "lanes (WP7, m4_portal_findings.md, D17). The environment variable " + EnvPortal +
                 " overrides this.");
 
-            ConfigEntry<bool> flourishEntry = config.Bind(
+            bool flourishValue = BindValue(
+                config,
                 "M4",
                 "PortalFlourishes",
                 true,
                 "Draw an expanding ring at each export and each arrival (m4_portal_findings.md §4.2). " +
                 "The environment variable " + EnvPortalFlourishes + " overrides this.");
 
-            ConfigEntry<int> sortingEntry = config.Bind(
+            int sortingValue = BindValue(
+                config,
                 "M4",
                 "PortalSortingOrder",
                 -50,
@@ -250,7 +430,8 @@ namespace BibitesMultiverse
                 "sorting order in code, so the values for bibites, pellets and zones are unknown " +
                 "statically (m4_portal_findings.md §5.3 item 4). Negative sits behind organisms.");
 
-            ConfigEntry<float> entryWidthEntry = config.Bind(
+            float entryWidthValue = BindValue(
+                config,
                 "M4",
                 "PortalEntryWidth",
                 0f,
@@ -259,7 +440,8 @@ namespace BibitesMultiverse
                 "entryMargin, which puts the lane's inner face exactly where an arriving organism is " +
                 "placed — W + entryMargin from the map edge (contract-a.md §4.3).");
 
-            ConfigEntry<bool> debugIngestEntry = config.Bind(
+            bool debugIngestValue = BindValue(
+                config,
                 "M4",
                 "DebugIngest",
                 false,
@@ -271,12 +453,12 @@ namespace BibitesMultiverse
 
             MultiverseConfig result = new MultiverseConfig();
 
-            string edgeText = Prefer(Prefer(Prefer(Env(EnvExportEdges), Env(EnvExportEdge)), Env(EnvOpenEdge)), edgeEntry.Value);
+            string edgeText = Prefer(Prefer(Prefer(Env(EnvExportEdges), Env(EnvExportEdge)), Env(EnvOpenEdge)), edgeValue);
             result.ParseExportEdges(edgeText);
 
             // §18 A39 — read on **presence**, not on emptiness: an explicitly empty value is how an
             // operator disables the policy, and Prefer would read that as "unset" and restore the default.
-            string excludeText = Env(EnvMigrationExclude) ?? excludeEntry.Value;
+            string excludeText = Env(EnvMigrationExclude) ?? excludeValue;
             result.Exclusion.Configure(excludeText);
 
             string portText = Prefer(Env(EnvPort), string.Empty);
@@ -288,17 +470,17 @@ namespace BibitesMultiverse
                 }
                 else
                 {
-                    MultiversePlugin.Log.LogError($"[M2] config: {EnvPort}='{portText}' is not a valid port — using {portEntry.Value}.");
-                    result.Port = portEntry.Value;
+                    MultiversePlugin.Log.LogError($"[M2] config: {EnvPort}='{portText}' is not a valid port — using {portValue}.");
+                    result.Port = portValue;
                 }
             }
             else
             {
-                result.Port = portEntry.Value;
+                result.Port = portValue;
             }
 
             string slotText = Prefer(Env(EnvRingSlot), string.Empty);
-            int slot = slotEntry.Value;
+            int slot = slotValue;
             if (!string.IsNullOrEmpty(slotText)
                 && !int.TryParse(slotText.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out slot))
             {
@@ -330,21 +512,21 @@ namespace BibitesMultiverse
                     MultiversePlugin.Log.LogError($"[M2] config: {EnvBorderWidth}='{widthText}' is not a positive number — deriving W from S.");
                 }
             }
-            else if (widthEntry.Value > 0f)
+            else if (widthValue > 0f)
             {
-                result.BorderWidthOverride = widthEntry.Value;
+                result.BorderWidthOverride = widthValue;
             }
 
             result.WorldToLoad = (Env(EnvWorld) ?? string.Empty).Trim();
 
-            result.SaveMinutes = ReadFloat(EnvSaveMinutes, saveMinutesEntry.Value, 0f);
-            result.SaveKeep = Math.Max(0, ReadInt(EnvSaveKeep, saveKeepEntry.Value));
-            result.SaveOnQuit = ReadBool(EnvSaveOnQuit, saveOnQuitEntry.Value);
-            result.Portal = ReadBool(EnvPortal, portalEntry.Value);
-            result.PortalFlourishes = ReadBool(EnvPortalFlourishes, flourishEntry.Value);
-            result.PortalSortingOrder = sortingEntry.Value;
-            result.PortalEntryWidth = Math.Max(0f, entryWidthEntry.Value);
-            result.DebugIngest = ReadBool(EnvDebugIngest, debugIngestEntry.Value);
+            result.SaveMinutes = ReadFloat(EnvSaveMinutes, saveMinutesValue, 0f);
+            result.SaveKeep = Math.Max(0, ReadInt(EnvSaveKeep, saveKeepValue));
+            result.SaveOnQuit = ReadBool(EnvSaveOnQuit, saveOnQuitValue);
+            result.Portal = ReadBool(EnvPortal, portalValue);
+            result.PortalFlourishes = ReadBool(EnvPortalFlourishes, flourishValue);
+            result.PortalSortingOrder = sortingValue;
+            result.PortalEntryWidth = Math.Max(0f, entryWidthValue);
+            result.DebugIngest = ReadBool(EnvDebugIngest, debugIngestValue);
 
             return result;
         }
