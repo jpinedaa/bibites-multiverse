@@ -270,7 +270,10 @@ The hosted entry point is [bibitesmultiverse.com](https://bibitesmultiverse.com/
 The first announced service period runs from **August 14 through November 14, 2026**.
 Read the [project status](STATUS.md) for the release and milestone state.
 
-The homepage explains the experiment and shows a live summary. The
+The homepage explains the experiment and shows a live summary. Its download section walks a
+Windows reader through the install in five steps — the setup, the SmartScreen warning, Install
+itself, the launcher, and stopping — and points at the
+[install guide](docs/participant/install.md) for Linux. The
 [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
 lineages, and world settings.
 
