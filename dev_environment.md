@@ -71,7 +71,10 @@ The plugin workflow needs these local inputs:
 
 - A supported game installation.
 - BepInEx in that game directory.
-- A .NET SDK that can build .NET Standard 2.1.
+- A .NET SDK that can build .NET Standard 2.1. The scripts do not assume where it is: they take
+  `DOTNET_ROOT` when it holds a `dotnet`, else the `dotnet` on `PATH`, else they probe
+  `~/.dotnet`, `/usr/local/dotnet`, `/usr/share/dotnet` and `/usr/lib/dotnet`, and say what they
+  looked for when none of those holds one. The resolution is `bibites-mod/lib/dotnet-env.sh`.
 - `ilspycmd` for the generated decompile.
 - WSL for the included Windows game-control scripts.
 
@@ -552,12 +555,15 @@ release/check-drift.sh
 
 **The PowerShell half can be run here too.** `release/pscheck.ps1` parses every shipped `.ps1`, and
 PowerShell 7 installs into this WSL user without touching the system: `dotnet tool install --global
-PowerShell` puts `pwsh` in `~/.dotnet/tools`. **It needs `DOTNET_ROOT` as well as `PATH`** — the
-tool's app host looks for the runtime under it and says only *"You must install .NET to run this
-application"* when it is unset, on a machine where the runtime is right there:
+PowerShell` puts `pwsh` in `~/.dotnet/tools` — that is where a global tool goes whatever
+`DOTNET_ROOT` says, and it is not where the SDK has to be. **It needs `DOTNET_ROOT` as well as
+`PATH`** — the tool's app host looks for the runtime under it and says only *"You must install .NET
+to run this application"* when it is unset or wrong, on a machine where the runtime is right there.
+`bibites-mod/lib/dotnet-env.sh` already answers that question, so borrow it rather than guessing a
+path:
 
 ```sh
-DOTNET_ROOT="$HOME/.dotnet" PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH" \
+. bibites-mod/lib/dotnet-env.sh && dotnet_env && \
   pwsh -NoProfile -File release/pscheck.ps1 'release/kit/*.ps1' farend/setup-farend.ps1 \
     release/test-install-uninstall.ps1 release/test-installer-wait.ps1 'deploy/local-broadcast/*.ps1'
 ```
