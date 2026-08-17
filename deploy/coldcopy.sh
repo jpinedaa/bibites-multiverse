@@ -26,10 +26,18 @@
 # behind the gate this script opens.
 #
 #   coldcopy.sh                  copy every closed segment that has no receipt
+#   coldcopy.sh --check          can this host copy at all? Make no upload
 #   coldcopy.sh --list           what is copied, what is waiting, and how much
 #   coldcopy.sh --verify         re-read every receipt's object from the store
 #   coldcopy.sh --restore NAME   fetch one segment back and verify it
 #   coldcopy.sh --dry-run        say what would be copied; make no call
+#
+# RUN `--check` BEFORE THE FIRST REAL COPY, and after any change to the
+# destination. It is the one mode that answers "would this work" without writing
+# an object: the CLI is on PATH, the URI names a bucket, and a LIST of the
+# prefix returns. Every way this can be misconfigured has the same symptom
+# otherwise — no receipt, so nothing retires, so the disk this protects fills up
+# while every number on the status page looks reasonable.
 set -uo pipefail
 
 ENV_FILE="${MV_ENV_FILE:-/etc/multiverse/deploy.env}"
@@ -57,10 +65,22 @@ set -a; . "$ENV_FILE"; set +a
 # profile is the alternative. THE VALUE OF A KEY NEVER APPEARS IN THIS FILE OR
 # IN THE PARAMETER FILE — see "which product" below.
 : "${MV_COLDCOPY_PROFILE:=}"
-# STANDARD_IA halves the storage price for an object nobody reads. It has a
-# 30-day minimum billable life and a per-GB retrieval charge, which is the right
-# shape for this: a segment is written once and read only in a recovery.
-: "${MV_COLDCOPY_STORAGE_CLASS:=STANDARD_IA}"
+# THE STORAGE CLASS, AND WHY THE DEFAULT IS THE PLAIN ONE.
+#
+# STANDARD_IA looks right on paper for an object written once and read only in a
+# recovery: about half the storage price, a 30-day minimum billable life and a
+# per-GB retrieval charge. It was this script's default, and against a Lightsail
+# bucket EVERY UPLOAD FAILED with an explicit deny in the bucket's own policy —
+# measured, one class per PUT: STANDARD and GLACIER_IR allowed, STANDARD_IA,
+# ONEZONE_IA and INTELLIGENT_TIERING each a 403. A bucket that bills a flat
+# bundle price charges the same for every class, so the cheaper class bought
+# nothing there and cost every receipt.
+#
+# So the default is the class every S3-compatible store accepts. A deployment
+# whose store prices classes separately, and allows the cheaper one, sets it in
+# deploy.env; there is no code change in it either way. put_and_verify below
+# refuses to retry a denial silently, and names this variable when it fails.
+: "${MV_COLDCOPY_STORAGE_CLASS:=STANDARD}"
 # The AWS CLI, overridable so deploy/test-coldcopy.sh can drive this script
 # without an account.
 : "${MV_COLDCOPY_AWS:=aws}"
@@ -85,10 +105,11 @@ now_ms(){ date -u +%s%3N; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --list) MODE=list ;;
+    --check) MODE=check ;;
     --verify) MODE=verify ;;
     --restore) MODE=restore; RESTORE_NAME="${2:-}"; shift ;;
     --dry-run) DRY=1 ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -uo pipefail$/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "coldcopy: unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -145,6 +166,39 @@ receipt_of() { printf '%s/%s.receipt' "$SEGMENTS" "$1"; }
 
 # ---------------------------------------------------------------- the actions
 
+# is_denial — does this CLI output say the STORE refused the request, rather
+# than the CLI refusing a flag? Matched on the store's own vocabulary, because
+# the exit status of `aws` is 255 or 1 for both.
+is_denial() {
+  case "$1" in
+    *AccessDenied*|*"Access Denied"*|*"explicit deny"*|*"not authorized to perform"*|\
+    *"(403)"*|*"status code: 403"*|*InvalidStorageClass*|*"storage class"*) return 0 ;;
+  esac
+  return 1
+}
+
+# deny_report — the loud failure. It names the storage class FIRST because that
+# is the setting that produced this in practice, and because it is the one an
+# operator can change without a release.
+deny_report() {
+  warn "the store REFUSED the upload of $1. This is a denial, not a retryable fault,"
+  warn "    and nothing else was tried."
+  warn ""
+  warn "    storage class : MV_COLDCOPY_STORAGE_CLASS=$MV_COLDCOPY_STORAGE_CLASS"
+  warn "    destination   : s3://$BUCKET/$(key_for "$1")"
+  warn "    profile       : ${MV_COLDCOPY_PROFILE:-<none: the credentials this host already has>}"
+  warn "    endpoint      : ${MV_COLDCOPY_ENDPOINT:-<AWS S3>}"
+  warn ""
+  warn "    A bucket policy can deny a storage class outright: a Lightsail bucket"
+  warn "    allows STANDARD and GLACIER_IR and denies STANDARD_IA, ONEZONE_IA and"
+  warn "    INTELLIGENT_TIERING, and a bucket billed at a flat bundle price charges"
+  warn "    the same for all of them. If this deployment set a class, try STANDARD."
+  warn ""
+  warn "    NO RECEIPT WAS WRITTEN, so the segment stays on this host and nothing"
+  warn "    retires. Run 'coldcopy.sh --check' after changing anything."
+  warn "    the store said: $2"
+}
+
 # put_and_verify uploads one segment and, only if the store agrees about what it
 # now holds, writes the receipt.
 #
@@ -170,9 +224,23 @@ put_and_verify() {
   # silently ignoring it, so the second form is the fallback.
   if ! out="$(awscli s3api put-object --bucket "$BUCKET" --key "$key" --body "$path" \
         --storage-class "$MV_COLDCOPY_STORAGE_CLASS" --checksum-algorithm SHA256 2>&1)"; then
+    # A DENIAL IS NOT A FLAG PROBLEM AND MUST NOT BE RETRIED QUIETLY. The retry
+    # below drops --checksum-algorithm and changes nothing else, so a store that
+    # refused the request itself refuses it again and the operator reads
+    # "retrying without it" followed by a failure that names neither cause. The
+    # measured case is a bucket policy that denies a STORAGE CLASS: every upload
+    # fails, no receipt is ever written, nothing retires, and the disk fills.
+    if is_denial "$out"; then
+      deny_report "$name" "$out"
+      return 1
+    fi
     say "the store refused --checksum-algorithm; retrying without it (ETag will be the check)"
     if ! out="$(awscli s3api put-object --bucket "$BUCKET" --key "$key" --body "$path" \
           --storage-class "$MV_COLDCOPY_STORAGE_CLASS" 2>&1)"; then
+      if is_denial "$out"; then
+        deny_report "$name" "$out"
+        return 1
+      fi
       warn "upload of $name FAILED: $out"
       warn "    nothing was written on this host: no receipt, so the segment stays."
       return 1
@@ -328,6 +396,107 @@ do_restore() {
   say "is present, so keep the receipt if you want it kept."
 }
 
+# do_check — "would a copy work?", answered without writing an object.
+#
+# EVERY WAY THIS CAN BE MISCONFIGURED HAS THE SAME SYMPTOM: no receipt, so the
+# archive retires nothing, so the disk fills while /api/status still reads
+# sensibly and ledgerSegmentsAwaitingColdCopy climbs. Two of those ways were
+# found by trying, not by reading: the AWS CLI was not installed on the service
+# host at all, and the shipped storage class was denied by the bucket's own
+# policy. So this exists to be run BEFORE the first real copy and after any
+# change to the destination.
+#
+# WHAT IT CANNOT PROVE: that a PUT will be accepted. A bucket can allow a LIST
+# and deny a write, and only a write finds that out. It says so rather than
+# implying otherwise, and the first real run is still the proof.
+do_check() {
+  step "can this host copy a segment off-box?"
+  local bad=0
+
+  if [ "$MV_COLDCOPY" = off ]; then
+    warn "MV_COLDCOPY=off. Nothing is copied and therefore NOTHING IS EVER RETIRED,"
+    warn "    whatever MV_LEDGER_WINDOW says. That is the safe default, not a fault."
+    warn "    Set MV_COLDCOPY=s3 and MV_COLDCOPY_URI to turn the off-host copy on."
+    return 3
+  fi
+  say "mode                 $MV_COLDCOPY"
+
+  if command -v "$MV_COLDCOPY_AWS" >/dev/null 2>&1; then
+    say "aws cli              $(command -v "$MV_COLDCOPY_AWS")  ($("$MV_COLDCOPY_AWS" --version 2>&1 | head -1))"
+  else
+    warn "aws cli              NOT ON PATH as '$MV_COLDCOPY_AWS'."
+    warn "    The service host does not get one by default. deploy/provision.sh installs"
+    warn "    it in the packages phase: sudo deploy/provision.sh --only packages"
+    bad=$((bad + 1))
+  fi
+
+  if [ -z "$MV_COLDCOPY_URI" ]; then
+    warn "MV_COLDCOPY_URI     UNSET. It is a live resource id and lives in this host's"
+    warn "    deploy.env and in the private operations record, never in the repository."
+    bad=$((bad + 1))
+  elif split_uri "$MV_COLDCOPY_URI"; then
+    say "bucket               $BUCKET"
+    say "prefix               ${PREFIX:-<none>}"
+  else
+    bad=$((bad + 1))
+  fi
+
+  say "storage class        $MV_COLDCOPY_STORAGE_CLASS  (a PUT is the only thing that proves it)"
+  say "endpoint             ${MV_COLDCOPY_ENDPOINT:-<AWS S3>}"
+  say "profile              ${MV_COLDCOPY_PROFILE:-<none: the credentials this host already has>}"
+
+  if [ "$bad" = 0 ]; then
+    # THE READ. head-bucket first: it is the cheapest proof that the bucket
+    # exists, that this host has a credential for it, and that the region and
+    # endpoint are right. A store that does not grant it is not a failure — the
+    # LIST below is the one that matters, because it reads the PREFIX this
+    # script writes into.
+    local out
+    if out="$(awscli s3api head-bucket --bucket "$BUCKET" 2>&1)"; then
+      say "head-bucket          ok"
+    else
+      say "head-bucket          refused (not fatal): $(printf '%s' "$out" | head -1)"
+    fi
+    if out="$(awscli s3api list-objects-v2 --bucket "$BUCKET" --prefix "$(key_for '')" --max-keys 1 2>&1)"; then
+      local n
+      n="$(printf '%s' "$out" | grep -c '"Key"')"
+      say "list of the prefix   ok ($n object(s) shown of however many are there)"
+    else
+      warn "list of the prefix   FAILED: $out"
+      warn "    This is the credential, the bucket name, the region or the endpoint."
+      if is_denial "$out"; then
+        warn "    The store denied the request rather than failing to find it."
+      fi
+      bad=$((bad + 1))
+    fi
+  fi
+
+  # The receipts land beside the segments, and a directory this process cannot
+  # write is a copy that succeeds off-host and is never recorded on it.
+  if [ -d "$SEGMENTS" ]; then
+    if [ -w "$SEGMENTS" ]; then
+      say "segments directory   $SEGMENTS (writable)"
+    else
+      warn "segments directory   $SEGMENTS is NOT WRITABLE by $(id -un)."
+      warn "    An upload would succeed and its receipt would not be written, so the"
+      warn "    segment would be uploaded again on every run and never retire."
+      bad=$((bad + 1))
+    fi
+  else
+    say "segments directory   $SEGMENTS does not exist yet: no segment has been closed."
+  fi
+
+  say ""
+  if [ "$bad" = 0 ]; then
+    say "READY. Nothing was uploaded. The first real run is still the proof that a"
+    say "PUT is allowed; read its output, then 'coldcopy.sh --list'."
+    return 0
+  fi
+  warn "$bad problem(s). No segment can leave this host until they are fixed, and"
+  warn "    the archive retires nothing meanwhile — which is the designed safety."
+  return 1
+}
+
 do_list() {
   step "the off-host copy of the record"
   say "segments directory   $SEGMENTS"
@@ -366,6 +535,13 @@ do_list() {
 }
 
 # ---------------------------------------------------------------- run
+
+# --check runs before every gate below, because the gates are what it reports on:
+# a missing CLI and an unset URI are two of the things it exists to find, and a
+# host with no closed segment yet is exactly when an operator wants to run it.
+if [ "$MODE" = check ]; then
+  do_check; exit $?
+fi
 
 if [ ! -d "$SEGMENTS" ]; then
   say "no $SEGMENTS yet: this archive has not closed a segment."

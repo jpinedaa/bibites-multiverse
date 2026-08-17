@@ -60,7 +60,7 @@ cat > "$TMP/fake-aws" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${MV_CC_CALLS:-/dev/null}"
 op=""
-for a in "$@"; do case "$a" in put-object|head-object|get-object) op="$a"; break;; esac; done
+for a in "$@"; do case "$a" in put-object|head-object|get-object|head-bucket|list-objects-v2) op="$a"; break;; esac; done
 # The body/key this call named, so the fake can answer about the right file.
 body=""; key=""
 prev=""
@@ -72,12 +72,31 @@ case "$op" in
   put-object)
     case "${MV_CC_MODE:-ok}" in
       put-fails) echo "An error occurred (AccessDenied)" >&2; exit 1 ;;
+      # The measured Lightsail-bucket refusal: an explicit deny in a
+      # resource-based policy, produced by the STORAGE CLASS and by nothing
+      # else. It denies every PUT, whatever flags come with it.
+      class-denied)
+        echo "An error occurred (AccessDenied) when calling the PutObject operation:" >&2
+        echo "User is not authorized to perform: s3:PutObject with an explicit deny in a resource-based policy" >&2
+        exit 1 ;;
       no-checksum-flag)
         for a in "$@"; do [ "$a" = "--checksum-algorithm" ] && {
           echo "Unknown options: --checksum-algorithm" >&2; exit 255; }; done ;;
     esac
     echo '{"ETag": "\"deadbeef\""}'
     ;;
+  head-bucket)
+    case "${MV_CC_MODE:-ok}" in
+      no-bucket) echo "An error occurred (404) when calling the HeadBucket operation" >&2; exit 255 ;;
+    esac
+    echo '{}' ;;
+  list-objects-v2)
+    case "${MV_CC_MODE:-ok}" in
+      no-bucket|list-denied)
+        echo "An error occurred (AccessDenied) when calling the ListObjectsV2 operation" >&2
+        exit 255 ;;
+    esac
+    echo '{"KeyCount": 0}' ;;
   head-object)
     src="${MV_CC_SRC:-}/$(basename "$key")"
     bytes="$(stat -c %s "$src" 2>/dev/null || echo 0)"
@@ -255,6 +274,101 @@ R11="$(newstate order legacy-2026-07-01-to-2026-08-13-0000 2026-08-14-0000)"
 MODE=ok run "$R11" >/dev/null
 first="$(head -1 "$R11/calls.txt")"
 has "order: the legacy segment is copied first" "$first" "legacy-2026-07-01"
+
+# 13. THE SHIPPED DEFAULT STORAGE CLASS. It was STANDARD_IA, and a Lightsail
+#     bucket denies that class outright: measured, STANDARD and GLACIER_IR
+#     allowed and STANDARD_IA, ONEZONE_IA and INTELLIGENT_TIERING each a 403.
+#     On the old default every upload failed, no receipt was ever written and
+#     nothing retired — the window nominally on and doing nothing.
+R12="$(newstate default-class 2026-08-14-0000)"
+sed -i '/^MV_COLDCOPY_STORAGE_CLASS=/d' "$R12/deploy.env"
+MODE=ok run "$R12" >/dev/null
+has "default class: the shipped default is STANDARD" \
+    "$(cat "$R12/calls.txt")" "--storage-class STANDARD "
+if grep -q -- '--storage-class STANDARD_IA' "$R12/calls.txt"; then
+  fail "default class: STANDARD_IA is still the default and this bucket family denies it"
+else
+  pass "default class: STANDARD_IA is not the default"
+fi
+
+# 14. A DENIAL IS NOT RETRIED SILENTLY. The retry drops --checksum-algorithm and
+#     changes nothing else, so a store that refused the request refuses it again
+#     — and the operator reads "retrying without it" and then a failure naming
+#     neither cause. The class is the setting that produced this in practice, so
+#     it is the first thing the message names.
+R13="$(newstate denied 2026-08-14-0000)"
+MODE=class-denied out="$(run "$R13")"
+eq  "denied: no receipt"                    "$(receipts "$R13")" "0"
+has "denied: it says the store refused"     "$out" "REFUSED the upload"
+has "denied: it names the storage class"    "$out" "MV_COLDCOPY_STORAGE_CLASS=STANDARD_IA"
+has "denied: it names the class to try"     "$out" "try STANDARD"
+has "denied: it says no receipt was written" "$out" "NO RECEIPT WAS WRITTEN"
+if printf '%s' "$out" | grep -qF 'retrying without it'; then
+  fail "denied: it retried a denial as though it were a rejected flag"
+else
+  pass "denied: it did not retry the denial"
+fi
+eq  "denied: exactly one PUT was attempted" \
+    "$(grep -c 's3api put-object' "$R13/calls.txt")" "1"
+
+# 15. --check answers "would a copy work" WITHOUT writing an object. Every way
+#     this can be misconfigured has the same symptom otherwise: no receipt, so
+#     nothing retires, so the disk fills while the status page reads sensibly.
+R14="$(newstate check 2026-08-14-0000)"
+MODE=ok out="$(run "$R14" --check)"; rc=$?
+eq  "check: a working destination exits 0"  "$rc" "0"
+has "check: it says it is ready"            "$out" "READY"
+has "check: it names the bucket"            "$out" "example-cold"
+has "check: it reads the prefix"            "$out" "list of the prefix   ok"
+has "check: it says a PUT is the only proof of the class" "$out" "only thing that proves it"
+eq  "check: no receipt is written"          "$(receipts "$R14")" "0"
+if grep -q 's3api put-object' "$R14/calls.txt"; then
+  fail "check: it uploaded something" "$(cat "$R14/calls.txt")"
+else
+  pass "check: it uploads nothing"
+fi
+
+# A store that will not answer for the prefix is the whole point of the mode.
+R15="$(newstate check-bad 2026-08-14-0000)"
+MODE=list-denied out="$(run "$R15" --check)"; rc=$?
+eq  "check: an unreadable prefix fails"     "$rc" "1"
+has "check: and says the read failed"       "$out" "list of the prefix   FAILED"
+has "check: and says nothing retires meanwhile" "$out" "retires nothing meanwhile"
+
+# The two findings that would have stopped the first segment leaving the host:
+# no AWS CLI on the box, and no destination configured.
+R16="$(newstate check-nocli 2026-08-14-0000)"
+sed -i "s|^MV_COLDCOPY_AWS=.*|MV_COLDCOPY_AWS=$TMP/there-is-no-aws-here|" "$R16/deploy.env"
+out="$(run "$R16" --check)"; rc=$?
+eq  "check: a missing CLI fails"            "$rc" "1"
+has "check: and names the phase that installs it" "$out" "--only packages"
+
+R17="$(newstate check-nouri 2026-08-14-0000)"
+sed -i 's|^MV_COLDCOPY_URI=.*|MV_COLDCOPY_URI=|' "$R17/deploy.env"
+out="$(run "$R17" --check)"; rc=$?
+eq  "check: an unset URI fails"             "$rc" "1"
+has "check: and says where the value lives" "$out" "never in the repository"
+
+# off is the safe default and --check says so rather than reporting a fault.
+R18="$(newstate check-off 2026-08-14-0000)"
+sed -i 's/^MV_COLDCOPY=s3$/MV_COLDCOPY=off/' "$R18/deploy.env"
+out="$(run "$R18" --check)"; rc=$?
+eq  "check: off exits 3"                    "$rc" "3"
+has "check: off says nothing is ever retired" "$out" "NOTHING IS EVER RETIRED"
+
+# 16. --check runs on a host that has never closed a segment, which is exactly
+#     when an operator wants it: before the first rotation, not after it.
+R19="$TMP/check-empty"
+rm -rf "$R19"; mkdir -p "$R19"
+cat > "$R19/deploy.env" <<EOF
+MV_STATE=$R19
+MV_COLDCOPY=s3
+MV_COLDCOPY_URI=s3://example-cold/ledger
+MV_COLDCOPY_AWS=$TMP/fake-aws
+EOF
+out="$(MV_ENV_FILE="$R19/deploy.env" MV_CC_CALLS="$R19/calls.txt" MV_CC_MODE=ok "$CC" --check 2>&1)"; rc=$?
+eq  "check: no segments directory is still a pass" "$rc" "0"
+has "check: and it says why the directory is absent" "$out" "no segment has been closed"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" = 0 ]

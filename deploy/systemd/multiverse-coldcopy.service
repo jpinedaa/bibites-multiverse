@@ -31,5 +31,8 @@ LockPersonality=true
 # It never deletes a segment: removal is the archive's, behind the receipt.
 ReadWritePaths=/var/lib/multiverse/archive/segments
 
-[Install]
-WantedBy=timers.target
+# NO [Install] SECTION, and that is deliberate: the timer is what is enabled and
+# the timer is what pulls this in. multiverse-backup.service and
+# multiverse-monitor.service are the same shape. A WantedBy=timers.target here
+# would put a oneshot copy into the boot sequence, where its three-hour
+# TimeoutStartSec would be waited on by a target that has nothing to do with it.
