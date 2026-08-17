@@ -94,14 +94,58 @@ func serveFakeOwnSlot(addr string, connected bool) {
 // than this is: a stop delivered into that window kills a game that would have
 // closed, and a test that does it is testing the window rather than the stop.
 func fakeGameMain() int {
-	if os.Getenv("MULTIVERSE_WORLD") == deafWorld {
+	world := os.Getenv("MULTIVERSE_WORLD")
+	if world == deafWorld {
 		signal.Ignore(syscall.SIGTERM)
+	}
+	if cmdFile := os.Getenv(cmdFileEnvName); cmdFile != "" &&
+		world != deafWorld && world != modlessWorld {
+		go fakeCommandPump(cmdFile, world)
 	}
 	if token := os.Getenv("MULTIVERSE_CONTRACT_A_TOKEN_FILE"); token != "" {
 		os.WriteFile(filepath.Join(filepath.Dir(token), fakeGameReadyName), nil, 0o644)
 	}
 	time.Sleep(2 * time.Minute)
 	return 0
+}
+
+// fakeCommandPump is the MOD'S half of MULTIVERSE_CMD_FILE, written to
+// bibites-mod/src/DevCommands.cs rather than to what the launcher happens to
+// send: poll the path, ignore content that does not end in a newline, DELETE the
+// file once it is taken, append '<token> OK|ERROR <details>' to <file>.log, and
+// for 'quit' go a moment later — the mod's own half-second pause before
+// Application.Quit(), which is what gives it time to write its answer.
+func fakeCommandPump(path, world string) {
+	for {
+		time.Sleep(10 * time.Millisecond)
+		raw, err := os.ReadFile(path)
+		if err != nil || len(raw) == 0 || !strings.HasSuffix(string(raw), "\n") {
+			continue
+		}
+		os.Remove(path)
+		fields := strings.Fields(string(raw))
+		if len(fields) < 2 {
+			continue
+		}
+		token, verb := fields[0], fields[1]
+		if world == mumWorld {
+			continue
+		}
+		status, details := "OK", "quitting"
+		if world == refusingWorld {
+			status, details = "ERROR", "no world is loaded"
+		}
+		answers, err := os.OpenFile(path+cmdLogSuffix, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			continue
+		}
+		fmt.Fprintf(answers, "%s %s %s\n", token, status, details)
+		answers.Close()
+		if verb == modQuitVerb && status == "OK" {
+			time.Sleep(20 * time.Millisecond)
+			os.Exit(0)
+		}
+	}
 }
 
 // fakeGameReadyName is the fake game's "I am up" marker, in the world's own data
@@ -141,10 +185,25 @@ type harness struct {
 
 const testRelayURL = "wss://bibitesmultiverse.com/contract-b/v4"
 
-// deafWorld is the save name that makes the fake game ignore SIGTERM, so a test
-// can drive the timeout path. It travels in MULTIVERSE_WORLD, which the launcher
-// sets for every world it starts.
-const deafWorld = "Deaf"
+// The save names that make the fake game behave like a world in some particular
+// trouble. They travel in MULTIVERSE_WORLD, which the launcher sets for every
+// world it starts, so a test picks a behaviour by naming its world.
+//
+// Any OTHER name gets a fake game that behaves like a healthy modded one: it
+// answers the mod command file and quits when asked to (see fakeCommandPump).
+const (
+	// deafWorld reads no command file AND ignores SIGTERM: nothing can ask it to
+	// go, so it drives the force-after-the-timeout path.
+	deafWorld = "Deaf"
+	// modlessWorld reads no command file and closes on SIGTERM, which is a world
+	// started before the launcher set MULTIVERSE_CMD_FILE, or one whose mod never
+	// loaded. It drives the fallback to the window.
+	modlessWorld = "Modless"
+	// mumWorld takes the command and never answers it.
+	mumWorld = "Mum"
+	// refusingWorld answers ERROR.
+	refusingWorld = "Refusing"
+)
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()

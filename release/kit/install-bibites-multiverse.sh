@@ -1633,6 +1633,17 @@ export MULTIVERSE_STARTUP_TIME_SCALE='@@STARTUPTIMESCALE@@'
 # variable says is what the mod opens.
 export MULTIVERSE_CONTRACT_A_TOKEN_FILE="$DATA_DIR/contract-a.token"
 
+# The channel this world is asked to save and quit through, and the one the
+# Windows launcher's 'stop' uses to make a HEADLESS stop lossless. Nothing here
+# needs it - stop-multiverse.sh sends SIGTERM, which a headless game handles
+# perfectly well on Linux - but the world is told about it anyway, so the same
+# world answers the same request whichever front door reaches it. The mod reads
+# this variable ONCE, at start.
+export MULTIVERSE_CMD_FILE="$DATA_ROOT/cmd.txt"
+# A COMMAND LEFT BEHIND MUST NOT QUIT THE WORLD THIS START IS BRINGING UP: the
+# mod polls that file every 200 ms from the moment it loads.
+rm -f "$MULTIVERSE_CMD_FILE" "$MULTIVERSE_CMD_FILE.log"
+
 running() { # $1 pid file -> 0 when that process is alive
   local pid
   [ -f "$1" ] || return 1

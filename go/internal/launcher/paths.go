@@ -28,6 +28,15 @@ const (
 	gamePidFileName    = "game.pid"
 	lockFileName       = "launcher.lock"
 
+	// cmdFileName is the mod's command channel for one world, named by
+	// MULTIVERSE_CMD_FILE. cmdLogSuffix is not ours to choose: the mod appends
+	// its answers to <command file>.log (bibites-mod/src/DevCommands.cs).
+	cmdFileName  = "cmd.txt"
+	cmdLogSuffix = ".log"
+	// cmdTempSuffix is what a command is written to before it is renamed onto
+	// cmdFileName, so the mod never sees half of one.
+	cmdTempSuffix = ".tmp"
+
 	dataDirName = "data"
 	// runtimesDirName is where the COMPLETE EDITION puts the game it manages:
 	// <data root>\runtimes\<assembly sha256>, written by
@@ -144,6 +153,15 @@ func (p Profile) GamePidFile() string { return filepath.Join(p.DataRoot, gamePid
 // LockFile is held only while the launcher is starting or stopping this world.
 func (p Profile) LockFile() string { return filepath.Join(p.DataRoot, lockFileName) }
 
+// CommandFile is where this world's mod is asked to do something — today, only
+// to save and quit. IT IS PER WORLD, under the world's own data root, because
+// two worlds out of one game folder must not read each other's commands.
+func (p Profile) CommandFile() string { return filepath.Join(p.DataRoot, cmdFileName) }
+
+// CommandLogFile is where the mod answers. The launcher empties it before each
+// request, so it is one exchange rather than a growing file.
+func (p Profile) CommandLogFile() string { return p.CommandFile() + cmdLogSuffix }
+
 // SidecarLog is the sidecar's stderr, which is where the slot-granted line
 // lands and where the slot wait reads.
 func (p Profile) SidecarLog() string { return filepath.Join(p.LogDir(), sidecarLogName) }
@@ -203,6 +221,9 @@ func worldOwnedEntries() []string {
 		sidecarPidFileName,
 		gamePidFileName,
 		lockFileName,
+		cmdFileName,
+		cmdFileName + cmdLogSuffix,
+		cmdFileName + cmdTempSuffix,
 	}
 }
 

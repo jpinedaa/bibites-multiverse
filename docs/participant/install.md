@@ -375,11 +375,17 @@ two seconds.
 outright on Windows, which skipped the game's own shutdown and therefore skipped save-on-quit. The
 launcher's **Stop this world**, `BibitesMultiverseLauncher.exe stop`, and the generated
 `Stop-Multiverse.ps1` all ask the game to close first and force it only after the wait — 30 seconds
-for the game, 10 for the sidecar. **A headless world is the exception:** it has no window to close,
-so Windows cannot ask it, and the stop forces it. A headless world can lose the simulation since
-its last save when you stop it, so give one a shorter save interval if that matters to you. That
-is `LOCAL-HEADLESSSTOP` in [`../error-taxonomy.md`](../error-taxonomy.md), which has the whole of
-it — including the one way to stop a headless world without losing anything.
+for the game, 10 for the sidecar. **A headless world has no window to close**, so Windows cannot
+ask it that way — and it is not asked that way. The launcher asks the game's own mod to save and
+quit, through a command file this world alone reads, and that runs the same shutdown a window
+close would: **a headless world stopped by this release loses nothing.** The window remains the
+fallback for a world whose mod cannot be asked, and the stop tells you which one happened.
+
+**One world cannot be asked: one that was already running before you installed this release.** The
+mod reads the name of its command file once, when the game starts, so a world started by an older
+build never learnt it. Stop it, start it again, and every stop after that is lossless — the stop
+says as much when it meets that case. That is `LOCAL-HEADLESSSTOP` in
+[`../error-taxonomy.md`](../error-taxonomy.md).
 
 ## More than one world on this computer
 

@@ -298,6 +298,13 @@ if [ -f "$START" ]; then
     check "the start script sets ${setting%%=*} explicitly" \
       "$(b contains "export $setting" "$START_TEXT")"
   done
+  # The mod's command channel. Nothing on Linux needs it - stop-multiverse.sh
+  # sends SIGTERM, which a headless game handles - but the world is told about it
+  # anyway, so one world answers one request whichever front door reaches it.
+  check "the start script names this world's mod command file" \
+    "$(b contains 'export MULTIVERSE_CMD_FILE="$DATA_ROOT/cmd.txt"' "$START_TEXT")"
+  check "the start script clears a command an interrupted stop left behind" \
+    "$(b contains 'rm -f "$MULTIVERSE_CMD_FILE" "$MULTIVERSE_CMD_FILE.log"' "$START_TEXT")"
   check "the start script carries no secret" "$(b bash -c '! grep -qF "$2" <<<"$1"' _ "$START_TEXT" "$A_SECRET")"
   check "the start script passes the credential as a file, never as a value" \
     "$(b contains -- '--credential-file' "$START_TEXT")"

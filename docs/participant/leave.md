@@ -23,10 +23,11 @@ save-on-quit runs. On Windows, the launcher's **Stop this world** — or
 `BibitesMultiverseLauncher.exe stop`, or `stop --all` for every world on the computer — asks the
 game to close and waits up to thirty seconds for that save before it insists. `Stop-Multiverse.ps1`
 does the same, and `stop-multiverse.sh` waits up to twenty seconds on Linux. A clean quit with its
-save has measured at about two seconds. **A headless world on Windows is the exception**: it has no
-window to close, so it is stopped outright and can lose the time since its last save. That is
-`LOCAL-HEADLESSSTOP` in [`../error-taxonomy.md`](../error-taxonomy.md), which gives the two ways
-around it. A world
+save has measured at about two seconds. **A headless world on Windows has no window to close**, so it
+is asked through its own mod instead — the same shutdown, and the same save, by a route that needs
+no window. The one world that cannot be asked that way is one that was already running before this
+release was installed; start it again once. That is `LOCAL-HEADLESSSTOP` in
+[`../error-taxonomy.md`](../error-taxonomy.md). A world
 killed outright loses everything since its last save, which is a loss of *your* progress and never
 of anybody's organisms: custody lives in the journal, not in the world file.
 

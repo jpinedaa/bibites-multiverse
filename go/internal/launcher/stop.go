@@ -21,6 +21,10 @@ import (
 // UnityCrashHandler64.exe the game always spawns, and refuses the whole call —
 // so EVERY Windows stop, windowed or headless, was reported as "forced
 // immediately (there was nothing to ask)" and every save-on-quit was skipped.
+//
+// AND A HEADLESS WORLD IS NOT ASKED THROUGH A WINDOW AT ALL. It is asked through
+// its own mod, in modquit.go, which is what makes a headless stop lossless. The
+// window remains the fallback, for a world whose mod is not there to ask.
 const (
 	defaultGameStopTimeout    = 30 * time.Second
 	defaultSidecarStopTimeout = 10 * time.Second
@@ -55,7 +59,16 @@ func (a *app) runStop(p Profile, opts stopOptions) int {
 
 	report := func(format string, args ...any) { a.print(format, args...) }
 	warn := func(format string, args ...any) { a.warn(format, args...) }
-	outcome := stopProcess(p.GamePidFile(), p.GameExe(), "the game", gameTimeout, a.now, report, warn)
+	outcome := stopProcess(stopRequest{
+		pidFile:  p.GamePidFile(),
+		wantExe:  p.GameExe(),
+		what:     "the game",
+		timeout:  gameTimeout,
+		now:      a.now,
+		askFirst: func() bool { return a.askWorldToQuit(p, events) },
+		report:   report,
+		warn:     warn,
+	})
 	events.event("info", "game.stopped", "world", p.World)
 	// Only the game has a save to lose, and only the no-window case loses it.
 	if outcome == stopForcedNoWindow {
@@ -69,8 +82,16 @@ func (a *app) runStop(p Profile, opts stopOptions) int {
 		return exitOK
 	}
 
-	stopProcess(p.SidecarPidFile(), a.install.SidecarExe(), "the sidecar", sidecarTimeout,
-		a.now, report, warn)
+	// The sidecar has no mod and no window; it is asked the only way there is.
+	stopProcess(stopRequest{
+		pidFile: p.SidecarPidFile(),
+		wantExe: a.install.SidecarExe(),
+		what:    "the sidecar",
+		timeout: sidecarTimeout,
+		now:     a.now,
+		report:  report,
+		warn:    warn,
+	})
 	events.event("info", "sidecar.stopped", "world", p.World)
 	a.say("The journal in %s is kept. Do not delete it: it is this machine's record of every "+
 		"organism it is holding for somebody.", p.DataDir())

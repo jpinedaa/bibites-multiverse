@@ -3,6 +3,7 @@ package launcher
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -39,7 +40,7 @@ func TestNoSecretFlagExists(t *testing.T) {
 }
 
 // TestStartDryRunPlan is the golden form of the launch: the five sidecar flags
-// and the eleven MULTIVERSE_* variables, in their frozen order.
+// and the twelve MULTIVERSE_* variables, in their frozen order.
 func TestStartDryRunPlan(t *testing.T) {
 	h := newHarness(t)
 	p := h.profile("default", "Multiverse", 8787)
@@ -75,10 +76,11 @@ game: %s
     MULTIVERSE_PORTAL_FLOURISHES=true
     MULTIVERSE_STARTUP_TIME_SCALE=10
     MULTIVERSE_CONTRACT_A_TOKEN_FILE=%s
+    MULTIVERSE_CMD_FILE=%s
 `,
 		h.install().SidecarExe(), testRelayURL, p.DataDir(), p.CredentialFile(),
 		p.DataRoot, p.SidecarLogOut(), p.SidecarLog(),
-		p.GameExe(), p.GameDir, p.ContractATokenFile())
+		p.GameExe(), p.GameDir, p.ContractATokenFile(), p.CommandFile())
 	if h.out() != want {
 		t.Fatalf("the dry-run plan drifted.\n got:\n%s\nwant:\n%s", h.out(), want)
 	}
@@ -94,9 +96,18 @@ game: %s
 	}
 	mustContain(t, "the headless plan", h.out(), "  arguments: -batchmode -nographics")
 
-	// The eleven variables are exactly eleven, and they are the mod's own names.
-	if got := len(multiverseEnv(p)); got != 11 {
-		t.Fatalf("the game is given %d MULTIVERSE_* variables, want 11", got)
+	// The twelve variables are exactly twelve, and they are the mod's own names.
+	if got := len(multiverseEnv(p)); got != 12 {
+		t.Fatalf("the game is given %d MULTIVERSE_* variables, want 12", got)
+	}
+	// MULTIVERSE_CMD_FILE is what makes a HEADLESS stop lossless, and it has to
+	// be this world's own file: two worlds out of one game folder sharing one
+	// command file would quit each other.
+	second := p
+	second.Name, second.World = "second", "Second"
+	second.DataRoot = filepath.Join(filepath.Dir(p.DataRoot), "BibitesMultiverse-second")
+	if p.CommandFile() == second.CommandFile() {
+		t.Fatalf("two worlds share the command file %s", p.CommandFile())
 	}
 	// A leftover variable in the parent environment is replaced, not appended.
 	merged := gameEnvironment([]string{"MULTIVERSE_WORLD=stale", "PATH=/bin"}, p)

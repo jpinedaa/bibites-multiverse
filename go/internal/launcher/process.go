@@ -259,6 +259,10 @@ const (
 	// stopAsked: it was asked to close and it closed. On a game with a window
 	// this is the outcome save-on-quit runs in.
 	stopAsked
+	// stopAskedMod: it was asked through its own mod's quit verb, it answered,
+	// and it saved and quit. THE ONLY OUTCOME A HEADLESS WORLD LOSES NOTHING IN,
+	// because it is the only ask that does not need a window (modquit.go).
+	stopAskedMod
 	// stopForcedNoWindow: there was nothing to ask, so the force was immediate.
 	stopForcedNoWindow
 	// stopForcedTimeout: it was asked, it did not close in time, it was forced.
@@ -269,62 +273,97 @@ const (
 	stopFailed
 )
 
+// stopRequest is one process to stop. It is a struct rather than a parameter
+// list because of askFirst: a stop now has TWO ways to ask, and which one is
+// available is a property of what is being stopped rather than of how.
+type stopRequest struct {
+	pidFile string
+	wantExe string
+	// what names the process in every line a person reads: "the game".
+	what    string
+	timeout time.Duration
+	now     func() time.Time
+	// askFirst is an ask better than the operating system's, when there is one:
+	// the game's own mod, which saves and quits and needs no window (modquit.go).
+	// It answers whether the request was accepted. Nil — the sidecar has no such
+	// channel — or false, and the ordinary close request is used instead.
+	askFirst func() bool
+	report   func(string, ...any)
+	warn     func(string, ...any)
+}
+
 // stopProcess is the shared game/sidecar stop: identify, ask, wait, force, and
 // remove the record only when the process is actually gone.
-func stopProcess(pidFile, wantExe, what string, timeout time.Duration, now func() time.Time,
-	report func(string, ...any), warn func(string, ...any)) stopOutcome {
-
-	pid := readPidFile(pidFile)
+func stopProcess(req stopRequest) stopOutcome {
+	pid := readPidFile(req.pidFile)
 	if pid == 0 {
-		os.Remove(pidFile)
+		os.Remove(req.pidFile)
 		return stopNothingRecorded
 	}
 	switch probeProcess(pid) {
 	case processDead:
-		report("%s was not running (pid %d is gone)", what, pid)
-		os.Remove(pidFile)
+		req.report("%s was not running (pid %d is gone)", req.what, pid)
+		os.Remove(req.pidFile)
 		return stopWasNotRunning
 	case processOpaque:
-		warn("pid %d cannot be inspected from here: %s may be running as another user or "+
-			"elevated. Stop it from the same account that started it", pid, what)
+		req.warn("pid %d cannot be inspected from here: %s may be running as another user or "+
+			"elevated. Stop it from the same account that started it", pid, req.what)
 	}
-	if identifyProcess(pid, wantExe) == identityMismatch {
-		warn("pid %d is no longer %s - the operating system has given that number to another "+
-			"program. The stale record was removed and NOTHING was stopped", pid, what)
-		os.Remove(pidFile)
+	if identifyProcess(pid, req.wantExe) == identityMismatch {
+		req.warn("pid %d is no longer %s - the operating system has given that number to another "+
+			"program. The stale record was removed and NOTHING was stopped", pid, req.what)
+		os.Remove(req.pidFile)
 		return stopStaleRecord
 	}
 
+	// THE MOD IS ASKED FIRST WHEN THERE IS ONE, window or no window. It is the
+	// only ask a headless world can hear, and for a world with a window it is the
+	// same shutdown by a more certain route.
 	outcome := stopAsked
-	result, askErr := gracefulStop(pid)
-	switch {
-	case result == askImpossible:
-		// Expected for anything without a window. Force at once rather than
-		// spend the whole timeout waiting for an answer nobody can give.
-		outcome = stopForcedNoWindow
-	case result == askFailed:
-		warn("%s (pid %d) could not be asked to close: %v", what, pid, askErr)
-		outcome = stopForcedAskFailed
-	case !waitForExit(pid, timeout, now):
+	if req.askFirst != nil && req.askFirst() {
+		outcome = stopAskedMod
+	} else {
+		result, askErr := gracefulStop(pid)
+		switch result {
+		case askImpossible:
+			// Expected for anything without a window. Force at once rather than
+			// spend the whole timeout waiting for an answer nobody can give.
+			outcome = stopForcedNoWindow
+		case askFailed:
+			req.warn("%s (pid %d) could not be asked to close: %v", req.what, pid, askErr)
+			outcome = stopForcedAskFailed
+		}
+	}
+	if outcome == stopAsked || outcome == stopAskedMod {
+		if waitForExit(pid, req.timeout, req.now) {
+			req.report("stopped %s (pid %d) - %s", req.what, pid, askedWords(outcome))
+			os.Remove(req.pidFile)
+			return outcome
+		}
 		outcome = stopForcedTimeout
 	}
-	if outcome == stopAsked {
-		report("stopped %s (pid %d) - it was asked to close, and it closed", what, pid)
-		os.Remove(pidFile)
-		return outcome
-	}
 	if err := forceStop(pid); err != nil {
-		warn("could not stop %s (pid %d): %v. Its record was kept, so it can still be found",
-			what, pid, err)
+		req.warn("could not stop %s (pid %d): %v. Its record was kept, so it can still be found",
+			req.what, pid, err)
 		return stopFailed
 	}
-	if !waitForExit(pid, forceSettleTimeout, now) {
-		warn("%s (pid %d) did not exit after being forced. Its record was kept", what, pid)
+	if !waitForExit(pid, forceSettleTimeout, req.now) {
+		req.warn("%s (pid %d) did not exit after being forced. Its record was kept", req.what, pid)
 		return stopFailed
 	}
-	report("stopped %s (pid %d), forced %s", what, pid, forcedReason(outcome, timeout))
-	os.Remove(pidFile)
+	req.report("stopped %s (pid %d), forced %s", req.what, pid, forcedReason(outcome, req.timeout))
+	os.Remove(req.pidFile)
 	return outcome
+}
+
+// askedWords says WHICH ask worked, because the two are worth different things:
+// one is a window message the game may or may not have had time to act on, and
+// the other is the mod reporting that it saved.
+func askedWords(outcome stopOutcome) string {
+	if outcome == stopAskedMod {
+		return "it was asked through the mod, and it saved and quit"
+	}
+	return "it was asked to close, and it closed"
 }
 
 // forcedReason says WHY the force happened, which is the whole of what a person

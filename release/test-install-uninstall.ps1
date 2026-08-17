@@ -356,6 +356,14 @@ if (Test-Path $startScript) {
         Check ("the start script checks that the mod connected (" + $probe + ")") `
             ($startText.Contains($probe))
     }
+    # THE LOSSLESS-STOP GATE. A headless game has no window, so there is no close
+    # request to post to it; the mod's command file is the only ask it can hear,
+    # and the mod reads its path once, at start. A start script that does not set
+    # it is a world that can only ever be killed (LOCAL-HEADLESSSTOP).
+    Check "the start script names this world's mod command file" `
+        ($startText.Contains('$env:MULTIVERSE_CMD_FILE = Join-Path $DataRoot ''cmd.txt'''))
+    Check "the start script clears a command an interrupted stop left behind" `
+        ($startText.Contains('Remove-Item -LiteralPath $env:MULTIVERSE_CMD_FILE'))
     Check "the start script carries no secret" (-not ($startText -match $aSecret))
     Check "the start script passes the credential as a file, never as a value" `
         ($startText -match "--credential-file")
@@ -383,6 +391,27 @@ if (Test-Path $stopScript) {
         ($stopText -match 'Get-Process -Id \$processId')
     Check "the stop script never trusts WaitForExit for a process it did not start" `
         (-not ($stopText -match 'WaitForExit'))
+    # THE ASK MUST NOT CARRY /T, and the FORCE must. /T walks the process tree and
+    # refuses the whole call when any member of it needs /F - and the game always
+    # spawns a windowless UnityCrashHandler64.exe, so an ask with /T never reached
+    # the game and every stop skipped save-on-quit.
+    Check "the stop script asks with taskkill and no /T" `
+        ($stopText.Contains('& taskkill.exe /PID $processId *> $null'))
+    Check "the stop script forces with the process tree, which takes the crash handler" `
+        ($stopText.Contains('& taskkill.exe /PID $processId /T /F'))
+    Check "the stop script never asks with /T" `
+        (-not ($stopText -match 'taskkill\.exe /PID \$processId /T \*'))
+    # A headless world is asked through its mod, which is the only ask it hears.
+    foreach ($probe in @('function Request-ModQuit',
+                         'Move-Item -LiteralPath $temporary -Destination $CmdFile -Force',
+                         'nothing is reading $CmdFile',
+                         'MULTIVERSE_CMD_FILE was set',
+                         'it is saving and shutting down')) {
+        Check ("the stop script asks the mod to quit first (" + $probe + ")") `
+            ($stopText.Contains($probe))
+    }
+    Check "the stop script passes the game's command file to the stop" `
+        ($stopText.Contains("Stop-Recorded (Join-Path `$DataRoot 'game.pid') 'the game' 30 (Join-Path `$DataRoot 'cmd.txt')"))
     Check "the stop script keeps the pid file when it could not stop the process" `
         ($stopText -match 'COULD NOT STOP')
 }

@@ -315,6 +315,14 @@ func (a *app) startGame(p Profile, opts startOptions, events *eventLog) int {
 	if err := writePidFile(p.GamePidFile(), 0); err != nil {
 		return a.fail("could not write %s, so the game was not started: %v", p.GamePidFile(), err)
 	}
+	// A COMMAND LEFT BEHIND MUST NOT QUIT THE WORLD THIS START IS BRINGING UP.
+	// The mod polls its command file every 200 ms from the moment the plugin
+	// loads, so a 'quit' an interrupted stop left there would be taken and obeyed
+	// within a second of the game appearing — a world that shuts itself down just
+	// after it started, for a reason nothing on screen explains.
+	os.Remove(p.CommandFile())
+	os.Remove(p.CommandLogFile())
+	os.Remove(p.CommandFile() + cmdTempSuffix)
 	cmd := exec.Command(p.GameExe(), gameArgs(opts.headless)...)
 	cmd.Dir = p.GameDir
 	cmd.Env = gameEnvironment(os.Environ(), p)
@@ -466,6 +474,12 @@ func multiverseEnv(p Profile) [][2]string {
 		{"MULTIVERSE_PORTAL_FLOURISHES", "true"},
 		{"MULTIVERSE_STARTUP_TIME_SCALE", startupTimeScale},
 		{"MULTIVERSE_CONTRACT_A_TOKEN_FILE", p.ContractATokenFile()},
+		// The channel `stop` asks this world to save and quit through. Setting it
+		// is what makes a HEADLESS stop lossless: a headless game has no window
+		// for a close request, and this file is the only way in that does not need
+		// one. See modquit.go. It is per world, so two worlds out of one game
+		// folder never read each other's commands.
+		{cmdFileEnvName, p.CommandFile()},
 	}
 }
 
@@ -479,7 +493,7 @@ func multiverseEnv(p Profile) [][2]string {
 // participant moves it for a session with the in-game speed slider.
 const startupTimeScale = "10"
 
-// gameEnvironment merges this world's eleven variables into the parent
+// gameEnvironment merges this world's twelve variables into the parent
 // environment. A variable this world sets REPLACES a pre-existing one rather
 // than being appended beside it, so a leftover MULTIVERSE_WORLD in the parent
 // shell cannot decide which world is loaded.
