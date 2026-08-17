@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -64,10 +65,25 @@ func runMain(args []string, stderr io.Writer) int {
 		"how long a genome BLOB is kept in <data-dir>/genomes after it was last stored or last "+
 			"served, as a Go duration (720h is the hosted run's 30 days). 0 — THE DEFAULT — keeps "+
 			"every blob forever, which is what this archive has always done (contract-b-m4.md "+
-			"§23, B33). IT NEVER TOUCHES THE LEDGER: migrations.jsonl is kept forever at every "+
-			"setting, and a pruned hash stays a lineage node that answers exactly like a hash no "+
+			"§23, B33). IT NEVER TOUCHES THE LEDGER: no setting of THIS knob removes a crossing "+
+			"line, and a pruned hash stays a lineage node that answers exactly like a hash no "+
 			"peer ever served. The same horizon retires a genome gap whose crossing is older "+
-			"than it (§23, B34)")
+			"than it (§23, B34), and the ledger's own window reads the same number when a "+
+			"deployment sets one — one horizon, three mechanisms (§26, B40)")
+	// The raw ledger's window (segments.go). It is a SIBLING of the genome
+	// horizon and it defaults to it, because the two are one number: a raw
+	// window equal to the horizon holds exactly the crossings whose genome gaps
+	// can still be fetched (§23, B34, extended to the ledger).
+	ledgerWindow := fs.Duration("ledger-window",
+		envSignedDuration("MULTIVERSE_LEDGER_WINDOW", 0),
+		"how long a CLOSED LEDGER SEGMENT is kept on this host, as a Go duration. 0 — THE "+
+			"DEFAULT — takes whatever --genome-horizon is, which is itself 0 and keeps every "+
+			"segment forever; a NEGATIVE value keeps every segment forever whatever the horizon "+
+			"is. IT IS THE RAW LINES ONLY: every answer the archive publishes — lane totals, "+
+			"species aggregates, ancestry, brain history — is kept forever at every setting, and "+
+			"a segment past the window is STILL NOT REMOVED unless a cold-copy receipt confirms "+
+			"an off-host copy that matches the bytes on this disk. No receipt, no removal, "+
+			"forever if need be; ledgerSegmentsAwaitingColdCopy is what says so")
 	// §25's B38: the duplicate set's window. It is a knob for the same reason the
 	// horizon is one — the deployment, not the contract, knows how far behind its
 	// oldest peer can be.
@@ -78,12 +94,22 @@ func runMain(args []string, stderr io.Writer) int {
 			"window is refused; one that arrives later is appended to the ledger a second time. "+
 			"Migration is at-most-once with no re-forward (§25, B37), so the only sources of a "+
 			"duplicate left are a sidecar older than B37 still retrying and a defective peer, "+
-			"and both arrive within minutes. Raising it costs memory in proportion")
+			"and both arrive within minutes. Raising it costs memory in proportion. IT IS ALSO "+
+			"WHAT A RESTART COSTS: the roll-up state carries every aggregate, so the only thing "+
+			"a restart still reads raw is this window of records — about 100 s at 48h on the "+
+			"deployment's ledger and 2-3 s at 1h. LOWER IT TO 1h ONCE THE PARTICIPANT RELEASE "+
+			"HAS BEEN OUT FOR A CYCLE: 48h is sized against how far behind the map's oldest "+
+			"pre-4.1 sidecar can be, not against a relay retransmit, and duplicatesRefused on "+
+			"/api/status is the evidence — while it is rising, old builds are still out there "+
+			"and the window is doing work; once it has stopped rising across a release cycle, "+
+			"an hour is three orders of magnitude of margin (decision 0006, follow-up 3)")
 	// DQ7's operator-side render deny list (§22, B30).
 	denyList := fs.String("deny-list", env("MULTIVERSE_ARCHIVE_DENY_LIST", ""),
 		"file of species names and peer:<peerId> entries this archive's PAGE AND JSON refuse to "+
 			"render, one per line, # for a comment. It suppresses THE VIEW AND NOT THE RECORD: "+
-			"the ledger goes on holding what happened, and nothing here evicts from it (D11, §10). "+
+			"the record goes on holding what happened, and nothing here removes anything from "+
+			"it (D11, §10). The ledger's own window ages LINES BY DATE and is not a takedown "+
+			"either: it cannot name a peer, a species or an organism (§26, B40). "+
 			"The file is re-read in place, so moderating costs an edit and never a restart")
 	// Display only, and told rather than observed: no frame on either wire says
 	// which world a camera is pointed at.
@@ -135,6 +161,7 @@ func runMain(args []string, stderr io.Writer) int {
 		RequestsPerMinute:   *maxGenomeRPM,
 		DenyListFile:        *denyList,
 		GenomeHorizon:       *genomeHorizon,
+		LedgerWindow:        *ledgerWindow,
 		DedupWindow:         *dedupWindow,
 		BroadcastPeerID:     strings.TrimSpace(*broadcastPeer),
 		HomepageRepo:        strings.TrimSpace(*homepageRepo),
@@ -194,6 +221,13 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "archive: %v\n", err)
 		return 1
 	}
+	// WHAT THIS LISTING COVERS, SAID BEFORE IT IS READ. `list` reads the RAW
+	// LINES, and the raw lines are a window now: a segment past it that has a
+	// confirmed off-host copy is removed from this host, so a listing that began
+	// "here is every crossing" would be wrong the first day one retired. The
+	// aggregates on /api/status are the part that is kept forever, and this is
+	// the part that is not.
+	printLedgerWindow(stdout, *dataDir)
 	shown, gaps, unhashable := 0, 0, 0
 	for _, m := range migrations {
 		// contract-b-m4.md §10: the gap report names "a hash that no peer can
@@ -269,6 +303,55 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// printLedgerWindow says which raw lines are on this host, in the ordered run a
+// replay walks: every closed segment still present, then the live file. A
+// retired segment is named with its receipt, because "where did the first month
+// go" has to be answerable on the host itself.
+func printLedgerWindow(w io.Writer, dir string) {
+	segs, err := LedgerSegments(dir)
+	if err != nil {
+		return
+	}
+	present, retired := 0, 0
+	first, last := "", ""
+	for _, s := range segs {
+		if s.Retired {
+			retired++
+			continue
+		}
+		present++
+		if first == "" {
+			first = s.FirstDay.Format(dayLayout)
+		}
+		last = s.LastDay.Format(dayLayout)
+	}
+	if present == 0 && retired == 0 {
+		// A ledger that has never rotated: the live file is the whole of it and
+		// nothing has left, so there is no window to caption.
+		return
+	}
+	live := "the live file"
+	if ms, ok := firstRecordedAt(filepath.Join(dir, ledgerName)); ok {
+		live = "the live file from " + time.UnixMilli(ms).UTC().Format(time.RFC3339)
+	}
+	if first == "" {
+		fmt.Fprintf(w, "raw window on this host: %s\n", live)
+	} else {
+		fmt.Fprintf(w, "raw window on this host: %d closed segment(s), %s to %s, plus %s\n",
+			present, first, last, live)
+	}
+	if retired > 0 {
+		fmt.Fprintf(w,
+			"  %d older segment(s) have been copied off-host and removed from this disk; "+
+				"their receipts are in %s/segments and `deploy/coldcopy.sh --restore <name>` "+
+				"brings one back\n", retired, dir)
+	}
+	fmt.Fprintf(w,
+		"  this listing is the RAW LINES ONLY. Every aggregate the archive publishes — lane "+
+			"totals, species counts, ancestry, the record counter — is kept forever and is on "+
+			"/api/status\n\n")
+}
+
 func held(ok bool) string {
 	if ok {
 		return "[held]"
@@ -287,6 +370,22 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d < 0 {
+		return fallback
+	}
+	return d
+}
+
+// envSignedDuration is envDuration for a knob whose NEGATIVE value means
+// something — --ledger-window's explicit "off". envDuration refuses a negative
+// because the safe direction for a knob that deletes is off, and for that flag
+// off IS the negative, so the two cannot share one parser.
+func envSignedDuration(name string, fallback time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
 		return fallback
 	}
 	return d

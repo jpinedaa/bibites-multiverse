@@ -72,8 +72,15 @@ type evictState struct {
 	// (§20, B20). The archive's store never had a sweep to collect them.
 	scratch int
 	// gapsExpired counts gap entries retired from retry because their crossing
-	// is older than the horizon — both the ones a running pump retires and the
-	// ones a startup replay declines to queue at all.
+	// is older than the horizon — the ones a running pump retires, the ones a
+	// replay declines to queue at all, and the ones a restored queue is drained
+	// of at load.
+	//
+	// IT IS ALL-TIME AND PERSISTED (rollup.go's floor line), unlike the three
+	// counters above it. It had to become so: it used to count what THE REPLAY
+	// declined, which made it a fact about how much raw a restart happened to
+	// read rather than about the record, and it was the only published number
+	// that moved when the raw scan got shorter.
 	gapsExpired int
 	lastAt      time.Time
 }
@@ -100,8 +107,9 @@ func (a *Archive) evictionLoop() {
 		"horizon", a.cfg.GenomeHorizon.String(), "pass", interval.String(),
 		"store", a.genomes.Dir(),
 		"scope", "the content-addressed genome store ONLY",
-		"note", "the migration ledger is kept FOREVER and nothing evicts from it (D11, "+
-			"contract-b-m4.md §10, §23 B33). A pruned hash stays a lineage node and answers "+
+		"note", "this pass NEVER removes a migration ledger line (D11, contract-b-m4.md §10, "+
+			"§23 B33); the record of what crossed is kept forever, and the ledger's own window "+
+			"is a separate knob (§26, B40). A pruned hash stays a lineage node and answers "+
 			"exactly like a hash no peer ever served")
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -157,7 +165,8 @@ func (a *Archive) evictPass(now time.Time) bb8.EvictResult {
 			"examined", res.Examined, "horizon", a.cfg.GenomeHorizon.String(),
 			"totalRemoved", totalEvicted, "totalBytes", totalBytes,
 			"gapsRetired", totalGaps,
-			"ledger", "untouched: nothing evicts from the record (§23, B33)")
+			"ledger", "untouched by this pass: the record of what crossed is kept forever "+
+				"and the ledger's window is a separate knob (§23, B33; §26, B40)")
 	}
 	return res
 }
@@ -182,7 +191,12 @@ func (a *Archive) gapPastHorizonLocked(crossedAt, now time.Time) bool {
 func (a *Archive) retireGapLocked(f *fetch, now time.Time) {
 	a.clearInFlightLocked(f)
 	delete(a.pending, f.hash)
+	// The queue is durable now (rollup.go): a retirement that left the entry in
+	// the sidecar would be undone by the next restart, and the counter beside it
+	// would climb by the same entry every time.
+	a.markGapGoneLocked(f.hash)
 	a.evict.gapsExpired++
+	a.rollupDirty.counts = true
 	// Debug, not Info, and the pass's summary line carries the total. §21's
 	// incident included 231 log lines from one pass over a backlog; a retirement
 	// that logs per entry would produce one per gap at exactly the moment a

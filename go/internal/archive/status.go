@@ -103,6 +103,92 @@ type Status struct {
 	GenomesEvicted      int   `json:"genomesEvicted,omitempty"`
 	GenomesEvictedBytes int64 `json:"genomesEvictedBytes,omitempty"`
 	GapsExpired         int   `json:"genomeGapsExpired,omitempty"`
+	// THE ROLL-UP HONESTY FIELDS (rollup.go). They exist so a page can say WHICH
+	// PART OF ITS ANSWER IS AGGREGATE AND WHICH IS RAW, which stops mattering
+	// only if the raw record is kept forever — and the record roll-up is the
+	// decision that it is not. THE NAMES ARE STABLE: pages, `monitor.sh` and the
+	// M5 evidence record read them.
+	//
+	// RollupCoveredRecords is how many ledger records the ON-DISK roll-up state
+	// covers as of its last successful save. A restart folds exactly these from
+	// the sidecar and replays what is behind them. 0 means nothing has been
+	// written yet, which is a brand-new archive and never a loss.
+	//
+	// RollupSavedAtMs is when that state was last written. A value that stops
+	// advancing is a sidecar that is failing to save, and the counter beside it
+	// will go on rising — which is exactly the shape an operator needs to see.
+	//
+	// The earliest RAW record still on this host is LedgerRawWindowFromMs, in
+	// the segment block below — one fact, one name. The roll-up state keeps its
+	// own rawFromMs in the sidecar's floor line, because that one is durable
+	// state rather than a view.
+	// ReplayRawRecords and ReplayRawSeconds are WHAT THE LAST START ACTUALLY
+	// COST: how many raw records the restart parsed, and how long it took. They
+	// are here because the whole roll-up rests on a claim about restart time —
+	// the raw scan is min(age of the raw window, the duplicate window) of records
+	// at the host's measured 62 000-72 000 a second — and a claim about restart
+	// time that nobody measures is a claim nobody can check. An operator, and
+	// monitor.sh, gate on the measurement rather than on the model.
+	//
+	// ReplayFromRetired is the one bad case, and it is loud: the saved cursor
+	// named a raw segment that has left this host, so the aggregates have a hole
+	// between the cursor and the oldest segment still here. It is absent on every
+	// healthy archive.
+	//
+	// DuplicatesRefused is ALL-TIME and persisted (§25, B38): records the guard
+	// refused as duplicates since this archive began. It is NOT omitempty,
+	// deliberately — 0 is the answer that matters, because it is what says the
+	// fleet has crossed and the duplicate window may safely come down. A refusal
+	// leaves no other trace anywhere: nothing is appended, and the record is by
+	// construction the record without it.
+	// THE TWO FLOORS, and they are two on purpose. LedgerFirstRecordMs is where
+	// the AGGREGATES reach back to — the first record this archive ever folded,
+	// which is kept forever — and LedgerRawWindowFromMs below is where the RAW
+	// LINES reach back to, which is the window. AncestrySinceMs is the third,
+	// narrower one: the oldest crossing that names a parent, which is what the
+	// genealogy can draw from.
+	//
+	// A page that has only one of them has to guess which it is, and the guess a
+	// reader makes is "the record starts here" — which after the roll-up is true
+	// of the first and false of the second. `/api/species/tree` has published
+	// ancestrySinceMs all along; it is repeated here so one request answers
+	// "what can this archive still say, and about what period".
+	LedgerFirstRecordMs  int64   `json:"ledgerFirstRecordMs,omitempty"`
+	AncestrySinceMs      int64   `json:"ancestrySinceMs,omitempty"`
+	RollupCoveredRecords int     `json:"rollupCoveredRecords"`
+	RollupSavedAtMs      int64   `json:"rollupSavedAtMs"`
+	ReplayRawRecords     int     `json:"replayRawRecords"`
+	ReplayRawSeconds     float64 `json:"replayRawSeconds"`
+	ReplayFromRetired    bool    `json:"replayFromRetired,omitempty"`
+	DuplicatesRefused    int     `json:"duplicatesRefused"`
+	// THE SEGMENTED LEDGER (segments.go). These five say what the archive still
+	// holds the RAW LINES for, which is a different and smaller thing than what
+	// it can still answer: every aggregate is kept forever, and these describe
+	// the file layer under it.
+	//
+	// LedgerSegments is closed segments PRESENT on this host, live file
+	// excluded. LedgerRawBytes is what they occupy plus the live file, as stored
+	// — so a compressed segment counts its compressed size, because that is the
+	// number the volume cares about.
+	//
+	// LedgerRawWindowFromMs IS THE HONESTY FIELD. It is the start of the oldest
+	// raw record still on this host, and it is what a reader needs in order to
+	// know that "no crossings before this" means "none recorded" rather than
+	// "none kept". It is present even when the window is off, because it is a
+	// fact about the disk rather than about the policy.
+	//
+	// LedgerSegmentsAwaitingColdCopy is segments past the window with no usable
+	// off-host receipt. IT IS THE NUMBER THAT SHOULD BE ZERO: a segment is never
+	// removed without one, so a cold archive that has stopped working shows up
+	// here and in disk usage, and never as a record that is gone. LedgerRetired
+	// is what this process removed after confirming a copy.
+	LedgerSegments                 int   `json:"ledgerSegments"`
+	LedgerRawBytes                 int64 `json:"ledgerRawBytes"`
+	LedgerRawWindowFromMs          int64 `json:"ledgerRawWindowFromMs,omitempty"`
+	LedgerWindowMs                 int64 `json:"ledgerWindowMs,omitempty"`
+	LedgerSegmentsAwaitingColdCopy int   `json:"ledgerSegmentsAwaitingColdCopy"`
+	LedgerRetired                  int   `json:"ledgerRetiredTotal"`
+	LedgerRetiredBytes             int64 `json:"ledgerRetiredBytes,omitempty"`
 	// FlowWindowMs is the span LaneView.RecentHops and PerMinute are measured
 	// over. A rate with no window on it is not a measurement.
 	FlowWindowMs int64 `json:"flowWindowMs"`
@@ -136,12 +222,12 @@ type SlotView struct {
 	// StatsKnown is false when no stats block has arrived or the one that did is
 	// older than statsStaleMs. Every stat below is then UNKNOWN, and the page
 	// says so rather than showing a stale number as state.
-	StatsKnown          bool                   `json:"statsKnown"`
-	StatsAgeMs          int64                  `json:"statsAgeMs,omitempty"`
-	Population          *int                   `json:"population,omitempty"`
-	EggCount            *int                   `json:"eggCount,omitempty"`
-	CustodyDepth *int `json:"custodyDepth,omitempty"`
-	PacedDepth   *int `json:"pacedDepth,omitempty"`
+	StatsKnown   bool  `json:"statsKnown"`
+	StatsAgeMs   int64 `json:"statsAgeMs,omitempty"`
+	Population   *int  `json:"population,omitempty"`
+	EggCount     *int  `json:"eggCount,omitempty"`
+	CustodyDepth *int  `json:"custodyDepth,omitempty"`
+	PacedDepth   *int  `json:"pacedDepth,omitempty"`
 	// LostForwardTotal is what migration costs on this map: organisms this peer
 	// forwarded once and never heard an answer for (§6.3.1, §25 B37). `heldDepth`
 	// and `bouncedTimeoutTotal` stood here; they went with the bounded hold, and
@@ -255,10 +341,10 @@ type LaneView struct {
 
 // Totals are the map-wide numbers, each of which is a SUM OF KNOWN VALUES only.
 type Totals struct {
-	LiveSlots     int  `json:"liveSlots"`
-	DarkSlots     int  `json:"darkSlots"`
-	Holes         int  `json:"holes"`
-	Population    *int `json:"population,omitempty"`
+	LiveSlots    int  `json:"liveSlots"`
+	DarkSlots    int  `json:"darkSlots"`
+	Holes        int  `json:"holes"`
+	Population   *int `json:"population,omitempty"`
 	CustodyDepth *int `json:"custodyDepth,omitempty"`
 	PacedDepth   *int `json:"pacedDepth,omitempty"`
 	LostForward  *int `json:"lostForwards,omitempty"`
@@ -276,10 +362,20 @@ type lane struct {
 	total  int
 	recent []int64 // recordedAt milliseconds, bounded to flowWindow
 	lastAt int64
+	// firstAt is the recordedAt of the FIRST crossing this archive was copied on
+	// this lane. Nothing renders it, and it is here because a rate without a span
+	// is not a measurement: M5's per-lane flow evidence is total/(last-first), and
+	// once the raw record has a window that span cannot be recovered from the
+	// records still on the host. It is persisted with the rest of the fold
+	// (rollup.go) for the same reason the ancestry floor is.
+	firstAt int64
 }
 
 func (l *lane) observe(atMs int64) {
 	l.total++
+	if atMs > 0 && (l.firstAt == 0 || atMs < l.firstAt) {
+		l.firstAt = atMs
+	}
 	l.lastAt = atMs
 	l.recent = append(l.recent, atMs)
 	l.trim(atMs)
@@ -364,10 +460,27 @@ func (a *Archive) StatusView() Status {
 		LedgerSkipped:      a.ledgerSkipped,
 		FlowWindowMs:       flowWindow.Milliseconds(),
 
+		LedgerFirstRecordMs:  a.tally.firstMs,
+		AncestrySinceMs:      a.species.edgeFirstMs,
+		RollupCoveredRecords: int(a.rollupCovered.Record),
+		RollupSavedAtMs:      a.rollupSavedAtMs,
+		ReplayRawRecords:     a.replayRawRecords,
+		ReplayRawSeconds:     a.replayRawSeconds,
+		ReplayFromRetired:    a.replayFromRetired,
+		DuplicatesRefused:    a.duplicatesRefused,
+
 		GenomeHorizonMs:     a.cfg.GenomeHorizon.Milliseconds(),
 		GenomesEvicted:      a.evict.evicted,
 		GenomesEvictedBytes: a.evict.bytes,
 		GapsExpired:         a.evict.gapsExpired,
+
+		LedgerSegments:                 a.seg.segments,
+		LedgerRawBytes:                 a.seg.rawBytes,
+		LedgerRawWindowFromMs:          a.seg.windowFromMs,
+		LedgerWindowMs:                 a.ledgerWindow().Milliseconds(),
+		LedgerSegmentsAwaitingColdCopy: a.seg.awaitingColdCopy,
+		LedgerRetired:                  a.seg.retired,
+		LedgerRetiredBytes:             a.seg.retiredBytes,
 
 		AchievedWindowMs: achievedWindow.Milliseconds(),
 

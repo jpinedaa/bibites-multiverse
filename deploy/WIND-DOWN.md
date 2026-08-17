@@ -61,15 +61,32 @@ The completed parameter file records the selection in `MV_RETENTION`.
 
 The public kit supports these policy shapes:
 
-| Rule | Ledger | Genome blobs |
-|---|---|---|
-| `keep-everything` | Keep the full ledger. | Keep all stored blobs. |
-| `bounded-ledger` | Keep only the announced post-run horizon. | Apply the announced blob rule. |
-| `prune-genomes` | Keep the full ledger. | Remove blobs outside the announced horizon during the run. |
-| `graduate` | Export the approved catalog seed. | Apply the announced catalog policy. |
+| Rule | Record of what crossed | Raw crossing lines | Genome blobs |
+|---|---|---|---|
+| `keep-everything` | Keep it all. | Keep every line on the server. | Keep all stored blobs. |
+| `bounded-ledger` | Keep only the announced post-run horizon. | Keep only that horizon. | Apply the announced blob rule. |
+| `prune-genomes` | Keep it all. | Keep every line on the server. | Remove blobs outside the announced horizon during the run. |
+| `graduate` | Export the approved catalog seed. | Apply the announced catalog policy. | Apply the announced catalog policy. |
+| `rollup-window` | Keep it all, for the run and beyond. | Keep them on the server for the announced window, and off the server for the run. | Remove blobs outside the announced horizon during the run. |
+
+`rollup-window` is three tiers and not two, so it needs its own explanation.
+
+The record of what crossed is every count, date, and family link.
+It is kept for the whole run and beyond. Nothing removes a species, a count, or
+a family link.
+
+The raw crossing lines are the individual entries behind those counts.
+The server keeps them for the announced window, which is the same period as the
+genome horizon. A line older than the window is on the off-server copy only.
+
+A line does not leave the server until a confirmed copy exists off the server.
+The operator cannot make it leave sooner.
+This is a capacity rule, not a deletion service. It cannot name a peer, a
+species, or an organism, so it is not a takedown and must not be offered as one.
 
 The deployment must explain the exact result before participants join.
 Do not change to a shorter horizon without a new participant notice.
+Announce a change from `keep-everything` to `rollup-window` before you apply it.
 
 ### Credential verifiers
 

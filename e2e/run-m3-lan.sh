@@ -330,10 +330,13 @@ archive_hop() {
   fi
 }
 
-# The archive ledger is durable and cumulative: it still holds every hop of every
-# earlier run. A wait that matches any record on a lane therefore succeeds
-# instantly on a rig that has run before — which is exactly what happened the
-# first time phase 3 ran, and it "proved" a crossing recorded an hour earlier.
+# The archive ledger is durable and cumulative WITHIN ITS RETENTION WINDOW: it
+# still holds every hop of every earlier run inside that window (and every hop
+# ever, when no window is set, which is the default). A wait that matches any
+# record on a lane therefore succeeds instantly on a rig that has run before —
+# which is exactly what happened the first time phase 3 ran, and it "proved" a
+# crossing recorded an hour earlier. The window narrows the trap and does not
+# close it: a rig that ran an hour ago is inside any window worth setting.
 # Every wait is bounded below by a timestamp, and the archive's header line
 # starts with an RFC3339 UTC time, so a string compare is the whole filter.
 archive_mark() { date -u -d "@$(( $(now) - 2 ))" +%Y-%m-%dT%H:%M:%SZ; }

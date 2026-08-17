@@ -276,10 +276,25 @@ Planned restarts are announced. Unplanned restarts get an explanation afterwards
 **The map's record disposition is written before the run starts.** Reminders begin 30 days
 before the end. Your journal, saves, and genomes remain on your machine.
 
-**The map deletes one type of file on a stated schedule.** It keeps the crossing record and
-ancestry for the whole run and beyond. It keeps the related genome files for **30 days**. An
-older organism remains in the record, but the map might no longer have its genome. Your copy
-remains on your machine.
+**The map keeps three things for three different times, and says which is which.**
+
+- **For the whole run and beyond**, it keeps the record itself: every species that crossed, how
+  often, when it first and last did, and which species it descended from. Nothing removes a
+  species, a count, or a family link.
+- **For 30 days**, it keeps the individual crossing lines behind those counts — one line for each
+  organism that crossed. After 30 days the line is off the server. The crossing is still counted
+  and the family link is still there.
+- **For 30 days**, it keeps the related genome files. An older organism stays in the record, but
+  the map might no longer have its genome. Your copy remains on your machine.
+
+The operator keeps a compressed copy of the crossing lines away from the server for the length of
+the run, and a line only leaves the server once that copy is confirmed. It is not served from the
+map and it is not a copy you can ask for a deletion from — see
+[`leave.md`](leave.md), "What you cannot take with you".
+
+**A crossing that never arrives never enters the record.** An organism is handed over once; if
+the destination does not answer, it is lost, the map counts the loss, and there is nothing to
+recover — the record is what happened, and a crossing that did not complete is not part of it.
 
 ## When the map refuses you
 

@@ -101,6 +101,42 @@ precedent. Contract A takes **no** set and keeps its own prohibition: that wire 
 between two processes on one machine (`contract-a.md` §2), its bytes cross no network, and this
 set does not reach it. Affected body text carries an `(amended — §24, Bx)` marker, and **§24 wins
 over the body and over §14 to §23 wherever they disagree.**
+**Amended:** 2026-08-17, amendment set `contract-b/4.1 + B37–B38` (**§25**), from the owner's
+direction of 2026-08-17 — *remove the hold in the re-forwarding; losing an organism is
+acceptable and duplicating one is not*. **B37** deletes the bounded hold, the re-forward and
+the automatic timeout bounce: a forwarded frame is written **once**, an entry with no terminal
+answer within `forwardTimeoutMs` becomes a `lost` tombstone, and at-most-once carries no
+exception at all. **B38** bounds the archive's duplicate set to `archiveDedupWindowMs`, which
+was unbounded only because a re-forward could arrive a year later. `lostForwardTotal` is added
+and `heldDepth` and `bouncedTimeoutTotal` are **retired with their names reserved**. §4's own
+test answers **minor** — no frame changes, both directions of a mixed fleet interoperate, and
+the additions are OPTIONAL — so the identifier moves to **`contract-b/4.1`** and
+`/contract-b/v4` does not. Contract A takes **no** set and no version change. Affected body
+text carries an `(amended — §25, Bx)` marker, and **§25 wins over the body and over §14 to §24
+wherever they disagree.**
+*(This entry was written on 2026-08-17 by §26's author: §25 landed in the body without one, and
+an amendment log that skips a set is a log a reader stops trusting. Every claim in it is
+§25's own, restated rather than extended.)*
+**Amended:** 2026-08-17, amendment set **B39–B41** (**§26**), from the owner's ratification of
+2026-08-17 — *keep the answers forever and the raw lines for a window*. §23 changed §10's
+never-evict rule on one of its two halves and left the other alone; this set changes the other,
+and does it by **splitting the record into what it says and how it says it**. The
+**aggregates** — every species' crossing counts and first and last sighting, every ancestry
+edge and the ancestry floor, every lane's cumulative flow, every peer's record count, the
+coverage denominator and the record counter — become **durable, kept forever, and the source
+every surface reads** (**B39**). The **per-crossing lines** gain a window equal to the genome
+horizon, are compressed once closed, and are removed only after an off-host copy is confirmed
+(**B40**). **One horizon, now three mechanisms** (§23 B34's rule extended). **B41 was drafted
+and withdrawn**: it would have bounded the archive's duplicate set, and §25's B38 reached the
+contract first and did it. **The number is spent and MUST NOT be reused**, on the same rule
+§25 applied to two retired field names. **No message, field, enum value, code, close code or
+routing input changes**, and no peer can tell a windowed archive from an unwindowed one by
+anything in a frame: the archive is a read-only subscriber that answers no `GENOME_REQUEST`,
+so the window is observable only on its own status page. §4's own test therefore answers
+**neither major nor minor** and the identifier **stays at `contract-b/4.1`**, on §23's and
+§24's precedent — §25 moved it, and this set does not. Contract A takes **no** set. Affected
+body text carries an `(amended — §26, Bx)` marker, and **§26 wins over the body and over §14
+to §25 wherever they disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -2835,6 +2871,10 @@ tunable above — it is the record, and nothing evicts from it (§20, B20). **Si
 may be given a retention horizon instead of a cap** (amended — §23, B33): still no
 least-recently-served **cap** and no byte budget, but an operator-set age past which a **blob**
 is pruned — **unset by default**, and never, at any setting, applied to the ledger.
+**The ledger has its own window since 2026-08-17** (amended — §26, B40), read from the same
+number: the genome horizon, the fetch queue's retirement and the ledger's window are one value
+(§26, B40). It is still not the genome horizon that touches a line — it is the ledger's own
+knob, and the aggregate the lines fold into is kept forever (§26, B39).
 
 **Fetch behaviour, archive side.**
 
@@ -2895,6 +2935,19 @@ horizon that is **unset by default at this contract's level** and turned on by a
 The growth arithmetic stays WP3's deliverable and now has a second number beside it — the age at
 which the bytes stop accumulating. Risk 7 becomes a **policy**: a genome nobody fetched inside
 the horizon is permanently unfetchable, and the archive counts what it abandoned (§23, B34).
+
+**The second half landed on 2026-08-17, and it is the other change this paragraph asked for**
+(amended — §26, B39/B40). The owner's ratification splits **the record** from **the lines that
+carry it**. What §10 has always meant by *the record* — who crossed, how often, from where,
+descended from what, first and last seen when — becomes a **durable aggregate that is written
+down and kept forever**, and it is what every surface and every evidence item reads (§26, B39).
+The **per-crossing lines** in `migrations.jsonl` gain a window equal to the genome horizon, are
+compressed once closed, and leave the host only after an off-host copy is confirmed (§26, B40).
+**Nothing here may evict from the record** is therefore still the rule of this section, and the
+sentence above about the ledger now reads as a rule about the aggregate rather than about every
+line behind it. §22's B30 is untouched and is worth reading beside this one: **a window ages
+lines by date and is not a takedown mechanism** — it cannot name a peer, a species, a hash or
+an organism, and M5 still promises removal from the view and not from the record.
 
 ### 10.1 What the status page may claim, and what it must call unknown
 
@@ -3092,7 +3145,8 @@ crossing" is now one of those claims.
 | `genomeInFlightPerPeer` | `8` | requester | **New after M4** (added — §21, B21). Unanswered `GENOME_REQUEST`s one requester may be carrying to one peer at any instant, independent of the rate. At `genomeRequestTimeoutMs` it still admits more than `genomeRequestsPerMinute` permits, so it too never binds before the rate does. |
 | `genomeCacheRetentionDays` | `30` | sidecar | Genome cache lifetime, least-recently-served. |
 | `genomeCacheMaxBytes` | `2147483648` | sidecar | 2 GiB cap on `<data-dir>/genomes/`. |
-| `genomeRetentionHorizon` | *unset* | archive | **New after `contract-b/4.0`** (added — §23, B33). Decision 3's retention horizon: how long a genome **blob** is kept after it was last stored or last served, as a duration. **Unset means nothing evicts, and that is the default** — the M4 behaviour this document specified until §23, and the safe direction for a knob that deletes. A deployment turns it on: `--genome-horizon`, `MULTIVERSE_GENOME_HORIZON`, `720h` on the M5 hosted run. It applies to the **genome store only**; `migrations.jsonl` is kept forever at every setting. The **same** value retires a gap whose crossing is older than it (§23, B34) — one number, two mechanisms, or the archive re-fetches what it just evicted. |
+| `genomeRetentionHorizon` | *unset* | archive | **New after `contract-b/4.0`** (added — §23, B33). Decision 3's retention horizon: how long a genome **blob** is kept after it was last stored or last served, as a duration. **Unset means nothing evicts, and that is the default** — the M4 behaviour this document specified until §23, and the safe direction for a knob that deletes. A deployment turns it on: `--genome-horizon`, `MULTIVERSE_GENOME_HORIZON`, `720h` on the M5 hosted run. It applies to the **genome store only**; ~~`migrations.jsonl` is kept forever at every setting~~ — **amended — §26, B40**: no setting of *this* knob touches a line, and the ledger's own window is the separate knob in the row below. The **same** value retires a gap whose crossing is older than it (§23, B34) — one number, **three** mechanisms since §26's B40, or the archive re-fetches what it just evicted. |
+| `ledgerWindow` | *unset* | archive | **New after `contract-b/4.1`** (added — §26, B40). How long a closed `migrations.jsonl` segment is kept on the host, measured from its newest record, as a duration. **Unset means the ledger is kept whole, and that is the default** — the behaviour of every release before §26, and the safe direction for a knob that deletes. A deployment turns it on: `720h` on the M5 hosted run, which is `genomeRetentionHorizon`'s own value because §26's B40 makes them one number. An implementation MUST refuse a negative value and MUST treat an unparsable one as unset. Setting it does **not** shorten the record: the aggregates behind the lines are kept forever (§26, B39), and a segment past the window is kept anyway until its off-host copy is confirmed. |
 | `journalCompactMinutes` | `15` | sidecar | **New after M4** (added — §20, B20). How often the journal is rewritten to the entries it still holds. `--journal-compact-minutes`, `MULTIVERSE_JOURNAL_COMPACT_MINUTES`. |
 | `logRotateMb` | `100` | all | **New after M4** (added — §20, B20). Size at which a process rotates its own log. `--log-file` names the file, `--log-rotate-mb` the cap, and a negative value disables rotation. With no `--log-file` the process logs to stderr and bounds nothing, which is the pre-M4 behaviour and still the default. |
 | `logKeep` | `5` | all | **New after M4** (added — §20, B20). Rotated generations kept beside `--log-file`. The disk ceiling for one process is `logRotateMb × (logKeep + 1)`. |
@@ -4138,8 +4192,8 @@ whatever the operator's shell redirect caught.
 | The purge record stays | `PurgeExpired` still appends a durable purge record even though the next compaction would erase the tombstone anyway. `contract-a.md` §11.1 makes every journal write durable before it counts and keeps tombstones out of memory-only state, and the saving does not justify carving an exception out of that: a purge record is one short line per tombstone that ever expires, while the growth term was the `create` record of every migration that ever ran, each carrying its payload. |
 | A process may own its log | A peer MAY be given the path of its own log file, and when it is, it MUST bound it: rotate at `logRotateMb` and keep `logKeep` generations, so its ceiling is `logRotateMb × (logKeep + 1)`. Rotation MUST fall between two records and never inside one. Given no path, it logs to a caller-supplied stream and bounds nothing, which is the pre-M4 behaviour and stays the default for tests and interactive runs. |
 | A failed write cleans up after itself | Every rename-into-place in this system — the genome store's, the journal's, the relay's map — MUST remove its scratch file on the error path. The store's sweep MUST also collect scratch files old enough that no live write can own them, because a process killed between the write and the rename cannot run its own cleanup. |
-| A failed append leaves no bytes behind, and a replay says what it could not read (the ledger's half added 2026-08-09) | Every append-only file here — a sidecar's journal, the archive's `migrations.jsonl` — MUST truncate back to its pre-write length when an append fails or lands **short**, so no fragment is left for the next append to splice a whole record onto, and MUST drop an unterminated final line before appending again. A replay MUST report what it could not read rather than ending in silence. Where the file is rewritten as a matter of course — the journal, which compacts at `Open` — a replay MAY stop at the damage and report the history it discarded behind it. Where the file is **never** rewritten — the archive's ledger, whose contents nothing may evict (§10) — a replay MUST **skip** the damaged line and keep every record behind it, because the damage is permanent and stopping would make the loss grow with the file, without bound, forever. |
-| What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. **Two of the three still are, and the genome store is now the operator's choice** (amended — §23, B33): `migrations.jsonl` and `metrics.jsonl` are unbounded exactly as this row says, and the **genome store** grows without bound only while `genomeRetentionHorizon` is unset — which is its default, so this row remains true of every deployment that has not decided otherwise. Where a horizon **is** set, the store's steady state is the horizon's worth of blobs and the sizing question becomes a rate rather than a total. Nothing changes for the ledger, at any setting. |
+| A failed append leaves no bytes behind, and a replay says what it could not read (the ledger's half added 2026-08-09) | Every append-only file here — a sidecar's journal, the archive's `migrations.jsonl` — MUST truncate back to its pre-write length when an append fails or lands **short**, so no fragment is left for the next append to splice a whole record onto, and MUST drop an unterminated final line before appending again. A replay MUST report what it could not read rather than ending in silence. Where the file is rewritten as a matter of course — the journal, which compacts at `Open` — a replay MAY stop at the damage and report the history it discarded behind it. Where the file is **never** rewritten — the archive's ledger, whose contents nothing may evict (§10) — a replay MUST **skip** the damaged line and keep every record behind it, because the damage is permanent and stopping would make the loss grow with the file, without bound, forever. **Segmentation does not weaken that argument and this row's reasoning is restated rather than assumed** (amended — §26, B40): a segment is closed once and never rewritten, so damage inside one is exactly as permanent as damage in the single file was, for the life of that segment. What §26 changes is only that the damage now leaves the host with its segment instead of being read past forever, and that the aggregate the replay feeds (§26, B39) counts the line it could not read rather than losing the fact. |
+| What stays unbounded is named | The archive's `migrations.jsonl` and its genome store are the record of what happened and nothing evicts from them (§10). They grow with **traffic**, not with uptime. `metrics.jsonl` grows with **time**, at one sample per `metricsInterval`. An operator sizes a disk for these three; no peer will ever reclaim them. **Two of the three still are, and the genome store is now the operator's choice** (amended — §23, B33): `migrations.jsonl` and `metrics.jsonl` are unbounded exactly as this row says, and the **genome store** grows without bound only while `genomeRetentionHorizon` is unset — which is its default, so this row remains true of every deployment that has not decided otherwise. Where a horizon **is** set, the store's steady state is the horizon's worth of blobs and the sizing question becomes a rate rather than a total. ~~Nothing changes for the ledger, at any setting.~~ **One of the three is left, and it is `metrics.jsonl`** (amended — §26, B39/B40). The ledger's per-crossing lines are bounded by `ledgerWindow` (§12) when a deployment sets one, and their steady state is likewise a rate rather than a total; the **aggregate** they fold into is kept forever and is bounded by construction, because its size follows the number of species, lanes, peers and buckets and not the number of crossings. **What the operator now sizes for is a window plus a fold, not a file that only grows.** Unset, this row still reads exactly as it was written, which is the default. |
 
 **What the outage cost, as evidence for *A failed write cleans up after itself*.** When the volume filled,
 every genome write in the rig failed inside `os.WriteFile` — after the file
@@ -4157,7 +4211,10 @@ through it; the **archive**, for the same all-or-nothing append on its ledger an
 for reading past a damaged line rather than stopping at one it can never rewrite;
 **every process**, for bounding a log it was given the path of; the
 **genome store**, for its error path and its sweep; and the **operator**, for
-sizing a disk against a ledger that no rule in this document will ever shrink.
+sizing a disk against a ledger that no rule in this document will ever shrink
+(amended — §26, B40: **§26 is that rule**, and what the operator now sizes for is
+the window they set, the fold behind it, and the segments still waiting for an
+off-host copy).
 
 ## 21. The fetch queue's own bounds (2026-08-10)
 
@@ -5016,7 +5073,7 @@ was: keep everything and buy the disk, or keep the record and let the bytes age.
 
 | Rule | Statement |
 |---|---|
-| **The ledger never evicts, at any setting** | `migrations.jsonl` keeps every record forever, and no configuration of this horizon may touch one. That includes the `GENOME` line naming a blob that has since been pruned: **the record of what the archive held outlives what it holds**, so "we had it, `peer-lan-slot4` served it, it aged out" stays answerable. D11 is unchanged and §20 B20's rule that a replay must read past permanent damage still applies to a file nothing rewrites. |
+| **The ledger never evicts, at any setting** | ~~`migrations.jsonl` keeps every record forever, and no configuration of this horizon may touch one.~~ **Superseded on its scope, kept on its point — §26, B39/B40.** The original text is left above rather than rewritten, because it is what this set decided on 2026-08-12 and a reader of §23 must see it. What holds unchanged is that **no configuration of the GENOME horizon may touch a line**; what §26 adds is the ledger's *own* window (`ledgerWindow`, §12), a separate knob under a separate set. The rest of this row is untouched **for the life of the line, and no longer**: **the record of what the archive held outlives what it holds** — "we had it, `peer-lan-slot4` served it, it aged out" — stays answerable from the `GENOME` line for the window and from the off-host copy for the run, and it is **not** on B39's normative list of folds kept forever. **A per-hash provenance question is a window question**, and §26 says so out loud rather than letting a reader infer otherwise from this row. D11 is unchanged and §20 B20's rule that a replay must read past permanent damage still applies, segment by segment. |
 | **The genome store gains a horizon, and it is OFF at the contract level** | `genomeRetentionHorizon` (§12) is **unset by default**, and unset means M4's behaviour exactly: nothing evicts, no pass runs, no counter appears. A **deployment** turns it on — the M5 hosted run sets `720h` — which keeps the default on the side where a mistake costs disk rather than data. An implementation MUST refuse a negative value and MUST treat an unparsable one as unset, for the same reason. |
 | **The horizon is measured from last stored or last served** | Not from the crossing, and not from the file's creation. The store already refreshes an entry's mtime on a re-store and on every read (§10's least-recently-served cache rule), so the horizon runs from the last time anybody wanted the blob. **A blob served inside the horizon keeps its whole horizon** — it is never evicted mid-horizon — and a store that measured from first write would delete a genome served an hour ago. |
 | **A pass is bounded in work, and it yields** | §21's B21 discipline, applied to a sweep instead of a fetch, and mandatory for the same reason. One pass MUST examine a bounded number of shards and entries, remove a bounded number, resume where the last pass stopped over a **stable** order, and release the store's own lock at least every chunk of removals. The archive's fetch pump calls into that store **while holding the lock its relay read loop needs**, so a sweep that held the store's lock across a whole pass would starve the read loop through the far end of the same chain — and a subscriber that stops reading is one the relay closes. That incident cost 7,789 crossings. |
@@ -5049,7 +5106,7 @@ the same number.
 
 | Rule | Statement |
 |---|---|
-| **One horizon, both mechanisms** | The gap queue and the store MUST use the **same** horizon. Two numbers, or a horizon on one side only, produce an archive that re-fetches what it just evicted — indefinitely, at the fetch rate, for every departed peer's backlog. |
+| **One horizon, both mechanisms** | The gap queue and the store MUST use the **same** horizon. Two numbers, or a horizon on one side only, produce an archive that re-fetches what it just evicted — indefinitely, at the fetch rate, for every departed peer's backlog. **Three mechanisms since 2026-08-17** (amended — §26, B40): the ledger's window joins them and reads the same number, because a gap is only ever queued for a crossing inside the horizon, so a window equal to the horizon holds exactly the crossings whose gaps can still be fetched. |
 | **The gap's clock is the crossing's recorded time** | Not the moment this process first noticed the gap. A requester's "first seen" is set by its own replay and therefore **resets at every restart**, so a retention rule built on it would make every gap younger than the last reboot and would never retire one. The archive already records `recordedAt` on every migration; that is the crossing's own time and it survives everything. |
 | **A retired gap leaves the queue and stays in the record** | Retirement removes the entry from the **retry set** and from nothing else. §10's *keep the hash forever* is a rule about the ledger and is untouched: the hash is still a lineage node, still in the gap report, still `[MISSING]` in the read path. **What stops is the asking.** |
 | **A replay MUST NOT re-queue a crossing already past the horizon** | The startup replay hands every hash in the ledger to the tracker, so without this rule an archive rebuilds its whole retired backlog on every restart and pays for it in resident memory as well as in work — which is the term `wp3_hosting_options.md` measures against the box's RAM. |
@@ -5352,7 +5409,7 @@ the original, never a year later.
 | Nothing is deleted from a generation | Which is what preserves the open-addressed table's whole reason for existing: no tombstones, no degradation, 25 bytes a key. The oldest generation is **dropped whole** and its memory returns in one piece. |
 | The seeds are per WINDOW, not per generation | Two generations that hashed a key differently would answer different questions, and a rotation would silently forget what it was meant to keep. |
 | The replay rebuilds the window, never the record | A restart inserts only the keys whose records fall inside the window, walking the **ledger's own timestamps**. The cost of a restart stops growing with the age of the record, and the answer is the same one the live path would have given. |
-| The ledger is untouched | B38 bounds a **memory structure**. `migrations.jsonl` is still kept forever, nothing evicts from it, and D11 is not in question (§10, §23 B33). |
+| The ledger is untouched | B38 bounds a **memory structure**, and that is still exactly what it does. ~~`migrations.jsonl` is still kept forever~~ — **amended — §26, B40**: the lines gain a window of their own under a separate set, the aggregate they fold into is kept forever (§26, B39), and D11 is not in question either way (§10, §23 B33). B38's own window is unchanged by that and stays `archiveDedupWindowMs`. |
 
 **The operator's knob, and when to move it.** Raise `archiveDedupWindowMs` while the fleet
 still holds sidecars older than B37 **and** the archive has the memory for it; the cost is
@@ -5362,3 +5419,147 @@ old peer sent.
 
 **Enforced by:** the **archive**, and nobody else. No frame changes, no peer can observe the
 window, and no other component holds a copy of this set.
+
+---
+
+## 26. The record's two halves (2026-08-17)
+
+§23 recorded the owner's answer to Decision 3 and was careful to say what it did not touch:
+
+> **The migration ledger is kept forever. The genome BLOBS are pruned to a horizon.**
+
+That narrowness was right for the question it answered, and it left one thing unexamined —
+**whether "the ledger" and "the record" are the same object.** They are not, and the difference
+is what this set is.
+
+The ledger is a file of per-crossing lines. The record is what those lines are folded into: who
+crossed, how often, from where, descended from what, first seen when. The archive already
+computes the second from the first at every start and **has never written it down**, so the only
+way it can answer any question is to keep every line forever. **This set writes the answers
+down.**
+
+> **The record — the aggregates, the ancestry and the statistics — is kept forever. The
+> per-crossing lines are kept for a window equal to the genome horizon, compressed once closed,
+> and removed only after an off-host copy is confirmed.**
+
+**The owner ratified it on 2026-08-17**, in the shape it is written here, against a measurement:
+at the deployment's own rate the per-crossing lines are `1.0`–`1.3 GB` a day, and *"kept for the
+whole run and beyond"* was **not funded to the end of its own announced run on the host it was
+made on**. A bigger volume moves the date and changes nothing about the shape. What this set
+does instead is stop paying for the answer twice — once in the lines, and once in the fold the
+archive rebuilds from them at every start.
+
+**What is given up is stated once, out loud.** A question nobody was asking while a segment was
+on the host **cannot be asked of that period afterwards**, except of the off-host copy. That is
+a real loss, it is not reduced by careful implementation, and it is why **B40 makes the off-host
+copy a precondition of removal** rather than a recommendation beside it. What is **not** given
+up: no crossing disappears from the counts, no species loses its history, no ancestry edge is
+dropped, and the ancestry floor keeps meaning what it meant.
+
+**This set is not a takedown mechanism and must never be offered as one.** §22's B30 line stands
+exactly as written: **M5 promises removal from the view and does not promise removal from the
+record.** A window ages lines **by date**. It cannot name a peer, a species, a hash or an
+organism, and a request to remove one is answered exactly as it was before this set existed.
+
+**Two amendments, and they are one set.** **B39** makes the aggregates durable. **B40** gives
+the lines a window. They are not separable for the reason §23 gave about its own pair: a window
+without a durable fold destroys the answers along with the lines, and a durable fold without a
+window solves nothing the deployment is actually failing at.
+
+**B41 was drafted and is withdrawn.** It would have bounded the archive's duplicate set, which
+was unbounded only because a re-forward could arrive a year later. **§25's B38 reached the
+contract first and did it**, sized against how far behind the map's oldest peer may be —
+`archiveDedupWindowMs`, 48 hours — rather than against this set's shorter draft. Restating it
+here would put two numbers in the contract for one structure. **The number B41 is spent and MUST
+NOT be reused**, on the same rule §25 applied to `heldDepth` and `bouncedTimeoutTotal`.
+
+**This set does not change the wire.** No message type, no field, no enum value, no NACK code,
+no close code, no change to custody, dedup, the fan-out, hashing, routing or admission control.
+The archive is a **read-only subscriber** (§5.1, §22 B27) that answers no `GENOME_REQUEST` at
+all, so a windowed archive and an unwindowed one are indistinguishable to every other party on
+the map; the window is observable only on the archive's own status page. **§4's test therefore
+answers neither major nor minor, and the identifier stays at `contract-b/4.1`** — §25 moved it
+and this set does not, on the precedent §23 and §24 each set for themselves.
+
+### B39 — The aggregates become durable and are kept forever (§5.1, §10, §10.1, §20 B20, §23 B33)
+
+*Owner ratification, 2026-08-17. Milestone-internal — no D-row of its own — and it moves D6 and
+D11 on the same side §23 moved them: the catalog inherits a complete fold whose raw lines age
+out.*
+
+**Gap.** The archive computes the whole record at every start and writes none of it down. Every
+number on the status page, every species row, every ancestry edge and every evidence item is a
+fold over `migrations.jsonl` held in memory, rebuilt by replaying the file from its first byte.
+That is why the file could never be shortened: **the only durable copy of the answer was the
+question.** It is also why an archive restart is a participant outage that grows with the record
+— the relay is held down for the whole replay — and why the replay's cost at the announced end
+of the run is measured in tens of minutes rather than in the `90 s` it costs today.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **The record is the aggregate, and it is durable** | An implementation that windows its ledger **MUST** persist, and **MUST** keep forever, every fold its surfaces and its evidence read: per-species crossing counts with first and last sighting, distinct-genome counts, parent-species edges and the earliest record that ever carried one, per-lane cumulative counts, per-source-peer record counts, the total record count and the count of lines a replay could not parse, the brain-coverage denominator for each bucket, and the eviction and gap counters. **A fold that is not on this list is not kept**, which is why the list is normative and not illustrative: an aggregate nobody wrote down before a segment left the host cannot be computed for that period afterwards. |
+| **A missing or unreadable roll-up is a loss and says so** | It **MUST NOT** be treated as a run of zeroes. The archive rebuilds what it can from the segments it still holds, publishes the earliest point its knowledge now begins at, and says out loud what it lost — the same shape the brain sidecar's loss rule and the genealogy's ancestry floor already use (§10.1, *unknown is a value*). **A zero would be a claim about the world made out of a failure of the record.** |
+| **The roll-up is written incrementally** | A full rewrite on a timer costs the size of the whole state every time it runs. The file **MUST** append what changed and **MUST** be rewritten only when it exceeds a fixed multiple of its live content. This is the rule the brain sidecar already states, and it is here for the same reason: one persistence discipline in the package, not two. |
+| **The aggregates never contradict the segments they still hold** | Loading the roll-up and replaying the records behind its cut **MUST** produce the same state as replaying every record it covers. This is a testable property, it is the one a validation phase exists to prove, and it is the only defence against a fold site that stopped marking itself changed. |
+| **The ancestry floor stays fixed, because it is an aggregate** | The earliest record that ever named a parent is on the list above, so the floor does **NOT** become a rolling date when the window turns over. A surface that reports it **MUST** report the earliest crossing this archive ever recorded with a parent, not the earliest one it still holds a line for. |
+
+**Enforced by:** the **archive**, for marking every fold write site as changed, for the
+append-and-compact discipline, for the loss rule and for publishing where its knowledge begins;
+and the **operator**, for reading a roll-up loss as a hole in the record rather than as a quiet
+day.
+
+### B40 — The ledger gains a window, and removal is gated on an off-host copy (§10, §12, §20 B20, §23 B33, §23 B34)
+
+*Owner ratification, 2026-08-17: **"B+D, 30-day raw window"**, with the off-host copy in the
+project's own cloud account. It is the change §10's closing paragraph named in advance —
+a retention rule for the ledger is a change to D11 rather than a configuration of it, so this
+is that change, recorded and bounded.*
+
+**Gap.** `migrations.jsonl` grows with traffic and nothing shortens it. §20's B20 named it among
+the unbounded files and put the sizing problem on the operator; §22's B27 put it on somebody
+else's timetable; §23 left it alone deliberately. The measurement of 2026-08-16 is what closes
+the question: the remaining announced run is more new ledger than the service host's volume
+holds, so the promise was going to be broken by a full disk rather than by a decision.
+
+**Resolution.**
+
+| Rule | Statement |
+|---|---|
+| **One horizon, now three mechanisms** | The genome store's eviction, the fetch queue's retirement and the ledger's window **MUST** read the **same** number. §23's B34 gave the reason for the first two; the third joins them because a gap is only ever queued for a crossing inside the horizon, so a window equal to the horizon holds **exactly** the crossings whose gaps can still be fetched, and the fetch queue rebuilds from the window with nothing lost. **A shorter window abandons live gaps silently. A longer one buys nothing.** |
+| **The window is off by default** | Unset means the ledger is kept whole, which is the behaviour of every release before this set, and it keeps the default on the side where a mistake costs disk rather than data. A **deployment** turns it on — the M5 hosted run sets `720h`, which is `genomeRetentionHorizon`'s own value by the rule above. An implementation **MUST** refuse a negative value and **MUST** treat an unparsable one as unset. |
+| **A segment is closed, then compressed, then never rewritten** | Rotation **MUST** be atomic within the directory and **MUST NOT** rewrite a record. At every point of a rotation, and after any crash during one, **at least one complete copy of every record MUST exist**. A startup **MUST** reconcile a rotation it finds half-done rather than assume one. |
+| **A segment is NOT removed until its off-host copy is confirmed** | The window is a bound on the host, not a decision to destroy. Removal **MUST** be conditional on a recorded confirmation that the segment exists somewhere the host's own failure does not reach. An implementation with no such confirmation **MUST** keep the segment and **MUST** publish that it is over its window. **This is the rule that makes the window a capacity measure rather than a deletion.** |
+| **The window is published** | The horizon in force, the oldest record still held, the record count inside the window and the count of segments awaiting an off-host copy **MUST** appear on the status surface, in the style of `genomeGaps` and `genomesEvicted` beside them. An operator **MUST** be able to tell *"a window is set and nothing has aged out yet"* from *"this archive windows nothing"* — §10.1's unknown-is-a-value rule applied to one more knob. |
+| **A replay reads past damage exactly as before** | §20's B20 is unchanged in effect and its reasoning is restated rather than assumed: a damaged line is skipped and every record behind it is kept. **A segment is never rewritten**, so damage inside one is as permanent as damage in the single file was, for the life of that segment. What changes is that the damage leaves the host with its segment instead of being read past forever, and that B39's count of unreadable lines outlives both. |
+| **The window is not a takedown, and cannot be made into one** | It selects **by date and by nothing else**. An implementation **MUST NOT** offer, and an operator **MUST NOT** accept, a request to retire a segment early, or to exclude a peer, a species, a hash or an organism from one. §22's B30 is the rule and this row is only its restatement at a new surface. |
+
+**What it costs, named rather than buried.** Three things become true and stay true:
+
+1. **Per-crossing questions become window questions.** *"Which individual crossed when"* is
+   answerable for the window on the host, for the run in the off-host copy, and on no live
+   surface at all.
+2. **A new aggregate cannot be added retroactively** to a period whose segments have gone. Cheap
+   while an off-host copy exists; impossible if it does not. This is the strongest argument for
+   making that copy a policy rather than a courtesy, and it is why B39's list is normative.
+3. **The evidence claim moves with it.** *"Exactly once, proved by an entity-identifier census
+   over the whole ledger"* stops being computable on the host once the window turns over. Since
+   §25's B37 the claim is **at-most-once by construction, with losses counted** — no component
+   re-forwards, no component bounces, a migration to a dark destination is a **counted loss**,
+   and the evidence is `lostForwardTotal`, `duplicatesRefused` and the per-lane totals B39 keeps
+   forever. **A missed record is not reconstructible from anything**, and no surface may imply
+   that it is.
+
+**What it buys.** Disk stops being a date and becomes a flat number. An archive restart stops
+being a participant outage that grows with the record and becomes a few seconds, permanently,
+because B39's fold is loaded rather than recomputed. And the off-host backup of the record stops
+being a project and becomes a daily upload of one immutable segment.
+
+**Enforced by:** the **archive**, for the atomic rotation, for the crash reconciliation, for
+gating removal on a recorded confirmation and for publishing the window; the **operator**, for
+choosing the number deliberately, for keeping the off-host destination real, and for knowing
+that the number they choose is the age at which this system stops being able to answer *"which
+organism was that"*; and **every participant-facing document**, for stating the three tiers —
+the record forever, the lines for the window and then off-host, the genome blobs for the
+horizon — in one set of terms.

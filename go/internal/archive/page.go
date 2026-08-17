@@ -1314,11 +1314,11 @@ var G = {
  unknown:["unknown","A number that is missing, or older than the freshness rule allows, is shown as unknown — never as zero. A world that has told us nothing is unknown, not empty. An honest gap beats a confident zero."],
  exactlyonce:["at-most-once","The promise the whole thing is built on, and it is one-sided on purpose: a creature is NEVER duplicated. It is in one world, or in transit, or in the next world — never in two places at once. The price is that it can be lost instead. A creature is handed to its destination exactly once and never sent again, so one that does not arrive is gone, and a lost creature simply reads as a natural death. Migrating is the dangerous thing; nothing here will ever make a copy of a creature to make it safer."],
  relay:["relay","The small server in the middle. Every world's helper connects to it and to nothing else, so there is exactly one map and one set of rules."],
- archive:["archive","The program serving this page. It listens to everything the relay broadcasts, keeps a permanent record of every migration and a copy of every genome, and never asks a world for anything — so watching can never slow the traffic down."],
+ archive:["archive","The program serving this page. It listens to everything the relay broadcasts, keeps a permanent record of what has crossed — every species, every count, every family link — and a copy of every genome, and never asks a world for anything — so watching can never slow the traffic down. The line-by-line detail behind those counts is kept for a stated period and then held away from the server; the counts themselves are kept for the whole run and beyond."],
  envelope:["envelope","One message carrying one creature between two worlds. The counts here are the envelopes this archive was copied on."],
  epoch:["epoch","A counter the relay bumps every time the map itself changes. If it jumps, a world joined, left or moved."],
- genomegap:["genome gap","A genome the archive knows exists — it has the fingerprint — but has not managed to fetch a copy of yet. It keeps the fingerprint forever. Whether it can still fetch a copy tomorrow depends on the retention horizon below: with no horizon set, yes, indefinitely; with one set, the asking stops once the crossing is older than the horizon, because a copy fetched after that would be deleted again on the next sweep."],
- horizon:["retention horizon","How long a copy of a genome is kept after it was last stored or last read. THE RECORD OF WHAT HAPPENED IS KEPT FOREVER AND IS NEVER AFFECTED BY THIS — every crossing, every fingerprint, every family link stays. What ages out is the genetic material itself, which is the bulky part, and only if nobody asked for it inside the horizon. This row is absent entirely when no horizon is set, which is the default: then nothing is ever deleted."],
+ genomegap:["genome gap","A genome the archive knows exists — it has the fingerprint — but has not managed to fetch a copy of yet. It keeps the fingerprint for as long as it keeps the crossing line that carried it, and the crossing itself is counted in the record whether or not the genome ever arrives. Whether it can still fetch a copy tomorrow depends on the retention horizon below: with no horizon set, yes, indefinitely; with one set, the asking stops once the crossing is older than the horizon, because a copy fetched after that would be deleted again on the next sweep."],
+ horizon:["retention horizon","How long a copy of a genome is kept after it was last stored or last read. THE RECORD OF WHAT HAPPENED IS KEPT FOREVER AND IS NEVER AFFECTED BY THIS — every species that crossed, how often, when it first and last did, and which species it descended from. What ages out is the genetic material itself, which is the bulky part, and only if nobody asked for it inside the horizon. The line-by-line detail of individual crossings has its own period, shown beside this one when it is set. This row is absent entirely when no horizon is set, which is the default: then no genome is ever deleted."],
  flow:["flow window","The per-minute rates on this page are measured over the last few minutes, not over all time, so they describe what is happening now."],
  alive:["alive right now","The species list is built from what the worlds are reporting THIS SECOND, and from nothing else. A kind that lived here yesterday and died out is not on it, however many times it crossed a lane while it was here. That is a deliberate refusal: a list built from crossings would be a list of travellers and their ancestors, which is a different thing from a list of residents and reads as though extinct kinds were still alive."],
  crossings:["crossings","How many times this archive has recorded a creature of this species walking from one world into another, since the archive started keeping records. It is a count of TRIPS, not of creatures: one restless creature crossing ten times counts ten. A species with no crossings is not a species that never moves — it may simply have arisen after the last time anything of its kind travelled."],
@@ -1344,7 +1344,7 @@ var G = {
  braingap:["a gap, not a zero","A break in either line means this archive measured no genome at all in that stretch, and it is drawn as a break on purpose. A zero would say the creatures on this map had no brains, which is a statement about the world made out of a hole in the record. Two quite different things make a hole: nothing crossed (the map was down \u2014 45 of this record\u2019s first 183 hours had no crossing at all, including one stretch of a whole day), or things crossed and none of their genomes were ever read. The strip below the lines tells you which."],
  minimap:["where it lives","The little grid of dots beside a species, laid out the way the map itself is laid out — this map is three worlds wide and two high, so it is three dots by two, and a different map would draw a different grid. A filled dot is a world where this species is alive right now. A hollow dot is a world that sent its census and did not name it. A dashed amber dot is a world reporting no census at all, which is UNKNOWN and never 'not there'. A seat nobody has claimed is drawn as nothing."],
  trend:["the 24-hour line","A small line of this species' population across the whole map over the last day, from the archive's own sample file — the shape, not the numbers. A gap in the line is a stretch where no world reported a census, which is unknown and never a zero. Every one of these lines comes from a single answer covering every living species at once, so the column costs one request rather than one per species. This record began when the archive did, so a short line is a short record and not a young species."],
- recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive holds that named a parent at all — anything older than it is a crossing that named none. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw. THE DATE IS USUALLY OLDER THAN THE PICTURE, which is why it is printed at the left margin of the clock rather than drawn on it: the drawing is fitted to the oldest bar it actually holds, and reserving the space back to this date would leave most of the plot empty and more of it empty every hour. Where the date does fall inside the picture it is drawn there, as a dashed line, because then it separates a stretch where no family line can begin from one where they can."],
+ recordfloor:["the record begins here","A species drawn with nothing above it, and ancestors above it all the same. The number beside the label is how many generations of them the record holds: every one is extinct with no other living line, so the whole run is collapsed into the row you can see rather than drawn as a column of names nothing alive belongs to. Above the top of that run the record simply stops: ancestry here is only ever carried by a crossing, and the date on the tab is the earliest crossing this archive ever recorded that named a parent at all — anything older than it is a crossing that named none. It does NOT move when older crossing lines age off the server: the date is part of the record the archive keeps for good, not a reading of what it still holds line by line. So the top of a family here is the edge of the record, not the first creature of its kind. That is why the game's starting species is not the root of this tree: its descendants are all here, but the links back to it were never recorded, and a link nobody recorded is not one this page will draw. THE DATE IS USUALLY OLDER THAN THE PICTURE, which is why it is printed at the left margin of the clock rather than drawn on it: the drawing is fitted to the oldest bar it actually holds, and reserving the space back to this date would leave most of the plot empty and more of it empty every hour. Where the date does fall inside the picture it is drawn there, as a dashed line, because then it separates a stretch where no family line can begin from one where they can."],
  noancestry:["no recorded ancestry","This species is alive, and no crossing of it has ever named a parent species — so the record cannot say where it came from, and it is drawn on its own. That is not a fault in the species and not a fault in the map: ancestry here is a by-product of TRAVEL, and a kind that has stayed home has left no record to carry it. A separate note is used for a species whose ancestry IS recorded but whose whole family has died out; those two are different facts and are never given the same label."],
  settings:["settings","What a world was TOLD to do, as opposed to what it is doing. Everything else on this page is a measurement or a receipt; these are the knobs behind them — how often it saves, which species it refuses to export, whether its edges wrap. They are the reason a number elsewhere looks the way it does, and they are read-only here on purpose."],
  readonly:["read-only","This page shows settings and changes none of them. Changing another machine's world from a web page is a much bigger thing than showing one — it needs a login, a rule about who may change what, an answer for what happens when two people change the same thing at once, and a record of who changed it — and none of that is a small extension of showing a value. It is deliberately left for later."],
@@ -3000,7 +3000,7 @@ function lfStats(x, hid, seed){
     f.appendChild(document.createTextNode(" "));
     f.appendChild(el("b", null, trDay(x.ancestrySinceMs)));
     f.appendChild(document.createTextNode(
-      " UTC — the oldest crossing kept here that names a parent"));
+      " UTC — the oldest crossing this archive ever recorded that names a parent"));
     host.appendChild(f);
   }
   if (x.cycleGuard > 0 || x.walkCapped > 0 || x.nodesCapped){
@@ -5468,14 +5468,40 @@ function renderMap(d){
          + Math.round((d.flowWindowMs||300000)/60000)+" min)")
     + kv(t("genomegap","genome gaps"), d.genomeGaps)
     + kv("ledger records", d.ledgerRecords)
+    // THE DUPLICATE GUARD'S OWN NUMBER. A refusal leaves no other trace — the
+    // record is by construction the record without it — so this row is the only
+    // place anybody can see the guard working. It is shown at 0, deliberately:
+    // 0 is the answer that says the fleet has crossed and the window may come
+    // down (decision 0006).
+    + kv("duplicate records refused", d.duplicatesRefused||0)
+    // WHAT THE RAW LINES COVER, shown only once the archive actually windows
+    // them. Every aggregate above is kept forever; these are the lines behind
+    // them, and after a segment retires the two reach back to different dates.
+    + (d.ledgerWindowMs && d.ledgerRawWindowFromMs
+         ? kv("raw crossing lines held",
+              (d.ledgerSegments||0)+" segment(s) from "+trDay(d.ledgerRawWindowFromMs)
+              + ' <span class="muted">(the answers above are kept forever)</span>')
+           + (d.ledgerSegmentsAwaitingColdCopy
+                ? kv("segments awaiting an off-host copy",
+                     '<span class="bad">'+d.ledgerSegmentsAwaitingColdCopy+"</span>")
+                : "")
+         : "")
     // Absent entirely unless a retention horizon is set, which is the default:
     // an absent row is how a reader knows nothing is being pruned, and 0 would
     // read as "a horizon that deletes nothing" instead. The ledger line beside
-    // it is not decoration — it is the whole of what this feature does not do.
+    // it says what the horizon does NOT do — and once a ledger window is in
+    // force it has to say what the window DOES, or the row is a promise the
+    // deployment has already stopped keeping.
     + (d.genomeHorizonMs
          ? kv(t("horizon","genome retention horizon"),
               (d.genomeHorizonMs/86400000).toFixed(1)+" days"
-              + ' <span class="muted">(the ledger is kept forever)</span>')
+              + ' <span class="muted">('
+              + (d.ledgerWindowMs
+                   ? "the raw crossing lines are kept "
+                     + (d.ledgerWindowMs/86400000).toFixed(0)
+                     + " days and the record of what crossed is kept forever"
+                   : "the record of what crossed is kept forever")
+              + ')</span>')
            + kv("genome copies pruned past it",
                 (d.genomesEvicted||0)+" ("
                 + ((d.genomesEvictedBytes||0)/1048576).toFixed(1)+" MiB)")

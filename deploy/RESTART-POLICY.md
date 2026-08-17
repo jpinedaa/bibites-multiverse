@@ -2,7 +2,8 @@
 
 The relay and archive are separate services.
 A relay restart is usually short.
-An archive restart replays the ledger, and its cost grows with that ledger.
+An archive restart replays part of the ledger, and its cost is bounded by one
+setting rather than by the length of the run.
 The host that runs worlds has one class of its own, and that class is automatic.
 
 This policy describes reusable behavior.
@@ -15,7 +16,7 @@ Private operations storage owns each restart window, approval, receipt, and inci
 | Certificate reload | nginx loads a renewed pair. The relay and archive continue. | No notice is normally necessary. |
 | World recycle | One world on the world host stops and starts again. The relay, the archive, and every other world continue. | No notice is normally necessary. It is automatic and recurring. |
 | Relay only | Peers disconnect, reconnect, and reclaim their slots. The website and the archive continue. About 30 to 60 seconds. | Announce a planned restart. |
-| Archive only | The website stops while the archive replays the ledger. A restart that keeps the record complete also stops the relay. | Announce it and state the expected replay time. |
+| Archive only | The website stops while the archive replays one duplicate window of the ledger. A restart that keeps the record complete also stops the relay. The first start after the record roll-up replays the whole ledger once. | Announce it and state the expected replay time, read from the `replay-cost` check. |
 | Host reboot | The relay and archive stop. The archive replays after boot. | Announce it and schedule it. |
 | Unplanned restart | The effect matches the failed service and includes diagnosis time. | Explain it after service returns. |
 
@@ -171,12 +172,63 @@ If you raise the gate by hand, remove it by hand in the same session.
 
 ## Archive restart
 
-The archive replays every ledger record before it serves current views.
-Use current record count and a measured replay rate for the estimate.
+The archive rebuilds its aggregates from a state sidecar and then replays one
+duplicate window of raw records before it serves current views.
+It does not replay the whole ledger.
 
-Archive memory is one term, not two.
-The replay peak and the settled resident set are the same number, measured.
-Use this estimate:
+### The first start after the record roll-up is different, and only the first
+
+The first start of a build that carries the record roll-up does three things
+that no later start does:
+
+1. It renames the existing single ledger file into one legacy segment, whole.
+   Nothing is read, nothing is rewritten, and no record moves.
+2. It replays every record once, because there is no state sidecar yet.
+   **Estimate that one start with the old whole-ledger model below.**
+3. It writes the first state sidecar from that replay.
+
+Every start after it is bounded by the duplicate window.
+The legacy segment is then compressed once, in the background, and it ages out
+with the window like any other.
+
+Rollback from that state is one concatenation: the segments in day order
+followed by the live file reproduce the original file exactly, and the previous
+binary reads it unchanged.
+
+### Estimating a restart
+
+**Read the projection; do not compute it.**
+`monitor.sh` publishes it and `restart-archive.sh` prints it before it acts:
+
+```sh
+sudo -u multiverse /opt/multiverse/deploy/monitor.sh --only replay --quiet --verbose
+```
+
+That prints two verdicts and they answer different questions.
+
+| Check | Question | Source |
+|---|---|---|
+| `replay` | Will the replay still fit in RAM? | A record-count model, from `deploy.env`'s constants. It is the gate `restart-archive.sh` refuses on. |
+| `replay-cost` | What will the restart cost the map, in seconds? | `replayRawSeconds` and `replayRawRecords`, which the archive MEASURED at its own last start, times this box's own record rate over the duplicate window. |
+
+**The estimate now comes from a measurement rather than from a formula.**
+The archive publishes what its last start actually cost.
+The projection multiplies the measured cost for each raw record by the records
+that will be inside `MV_ARCHIVE_DEDUP_WINDOW` at the next start.
+Do not use the last elapsed time as the estimate: the first start after this
+deployment reads the whole ledger once and every start after it reads a window.
+
+Two costs the projection does not carry, and both are worth knowing:
+
+- **Reaching the window's start.** It is free inside a plain segment or the live
+  file and a decompress-and-discard inside a compressed one, because a gzip
+  stream cannot seek. Measured at 5.9 s for 1.8 GB. The legacy segment above is
+  the worst case and it happens once.
+- **The gap queue.** A restore with no genome store beside the ledger fills the
+  genome-gap queue, which is memory rather than time.
+
+For an archive that has no state sidecar — the first start above, or a restore
+from a raw ledger alone — the old whole-ledger model still applies:
 
 ```text
 replay_seconds = ledger_records / measured_records_per_second
@@ -188,14 +240,19 @@ replay_peak_bytes = resident_bytes
 They are a property of the deployed build and of the host's core count.
 [`SIZING.md`](SIZING.md), "Archive memory", owns the current values and the measurement
 behind them, and it also gives the rule for `MV_ARCHIVE_GOMEMLIMIT`.
+"Replay time" in the same document owns the bounded model and its measurements.
 
 Measure the replay rate on the target host when possible.
-Do not use an old elapsed time as the estimate for a growing ledger.
 The reference benchmark replayed 37,000 to 49,000 records each second; a two-vCPU
 production host measured 61,000 to 73,000, and the rate falls slowly as the ledger grows.
 
 An archive that is not subscribed cannot record map activity.
 If the map continues during replay, the permanent record has a gap.
+
+**The sequence below does not change.**
+The relay is still held down for the whole replay, the archive still binds its
+HTTP port only when the replay ends, and the subscription is still what says the
+restart is complete. What changed is how long the middle step takes.
 
 ### Restart with a complete record
 
@@ -426,8 +483,9 @@ This is the ordered form of the rules above, for one operator, in one session.
 It adds no rule. Each step names the section that states it.
 
 1. Complete every [pre-restart check](#pre-restart-checks).
-   Count the current ledger records and estimate the replay with the target
-   host's measured rate, not with an earlier elapsed time.
+   Read the projected replay from `monitor.sh --only replay`'s `replay-cost`
+   verdict, not from an earlier elapsed time. A reboot replays the archive,
+   so this is the participant outage the announcement has to state.
 2. Confirm that projected archive memory is below the critical threshold.
    If it is critical, stop here: [pre-restart checks](#pre-restart-checks)
    forbids the restart until capacity rises or approved retained state falls.
@@ -498,7 +556,10 @@ Complete these checks before a planned restart:
 1. Run `monitor.sh --verbose`.
 2. Check free disk space and projected memory.
 3. Count current ledger records.
-4. Estimate replay time with the target-host rate.
+4. Read the projected replay time from the `replay-cost` check.
+   `restart-archive.sh` prints it, and it is a projection of the NEXT restart
+   from the archive's own measurement of the last one. Do not use an elapsed
+   time from before the record roll-up landed.
 5. Create and check the identity backup.
 6. Record the reason, approval, and rollback condition.
 7. Send the required notice on the announcements page. [`ANNOUNCEMENT.md`](ANNOUNCEMENT.md) names
@@ -516,6 +577,12 @@ The ratio is a model of record count, not a measurement of the running process.
 It is driven by the `deploy.env` constants `MV_REPLAY_RESIDENT_B` and `MV_REPLAY_PEAK_B`,
 so only three things move it: fewer records, more RAM, or constants that a measurement
 on this host's own ledger has corrected.
+
+Since the record roll-up that model is deliberately conservative and the check
+says so on every pass: retained state is now the bounded aggregates plus one
+duplicate window of keys, so a record-count projection grows while the process
+does not. Keep it as the gate — it errs toward calling the host full, which is
+the safe error — and read `replay-cost` for the question it does not answer.
 **Retune those constants whenever the binary's per-record footprint changes**, as it did
 when the duplicate-suppression set began holding a fingerprint instead of a key.
 A stale constant is the failure mode in both directions: too high and the gate forbids a
@@ -536,6 +603,12 @@ Run these checks in order:
 5. Check that the verifier-store count is unchanged.
 6. Run `monitor.sh --verbose`.
 7. Record the actual outage and replay times.
+8. Compare the actual replay against the `replay-cost` projection.
+   The archive republishes `replayRawSeconds` and `replayRawRecords` at every
+   start, so a projection that was wrong is visible immediately and is worth
+   recording. Check that `rollupSavedAtMs` starts moving again: a state sidecar
+   that stopped saving turns the next restart back into a full replay and
+   nothing else on the host would report it.
 
 An active archive without a relay subscription does not record crossings.
 Treat this state as a failed restart.

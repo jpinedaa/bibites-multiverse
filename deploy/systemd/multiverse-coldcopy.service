@@ -1,0 +1,38 @@
+[Unit]
+# TIER 3 of backup.sh's three, and the one backup.sh says is "not this script's":
+# the off-host copy. It is also the GATE on the archive's raw-ledger window — the
+# archive will not remove a closed segment from this host until this timer has
+# written a receipt confirming the segment exists in the object store and matches
+# the bytes on this disk.
+Description=Bibites Multiverse off-host copy of closed ledger segments
+Documentation=file:///opt/multiverse/deploy/coldcopy.sh
+After=multiverse-archive.service
+
+[Service]
+Type=oneshot
+User=multiverse
+Group=multiverse
+ExecStart=/opt/multiverse/deploy/coldcopy.sh
+# MV_COLDCOPY=off exits 3 and that is the CONFIGURED DEFAULT, not a fault: with
+# no cold archive the ledger window can never take effect and nothing is
+# removed. Without this the unit is failed on every host that has not opted in.
+SuccessExitStatus=0 3
+# It reads a few hundred megabytes and pushes them over the network on a box
+# that is also serving a live map.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3h
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+LockPersonality=true
+# It writes ONLY receipts and its own log, both inside the segments directory.
+# It never deletes a segment: removal is the archive's, behind the receipt.
+ReadWritePaths=/var/lib/multiverse/archive/segments
+
+# NO [Install] SECTION, and that is deliberate: the timer is what is enabled and
+# the timer is what pulls this in. multiverse-backup.service and
+# multiverse-monitor.service are the same shape. A WantedBy=timers.target here
+# would put a oneshot copy into the boot sequence, where its three-hour
+# TimeoutStartSec would be waited on by a target that has nothing to do with it.

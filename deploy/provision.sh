@@ -157,7 +157,7 @@ phase_preflight() {
      of defence behind monitor.sh's certificate check." ;;
   esac
   case "${MV_RETENTION:-}" in
-    keep-everything|bounded-ledger|prune-genomes|graduate)
+    keep-everything|bounded-ledger|prune-genomes|graduate|rollup-window)
       say "retention rule: $MV_RETENTION" ;;
     *)
       warn "MV_RETENTION is '${MV_RETENTION:-unset}'. Decision 3 requires the rule to EXIST"
@@ -257,6 +257,19 @@ phase_preflight() {
 phase_packages() {
   step "packages"
   local want=(nginx certbot ufw jq curl ca-certificates unattended-upgrades bc)
+  # THE AWS CLI IS NOT ON THIS HOST BY DEFAULT. `deploy/coldcopy.sh` needs it,
+  # and coldcopy.sh is the GATE on the raw-ledger window: with no CLI there is
+  # no upload, with no upload there is no receipt, and with no receipt the
+  # archive retires nothing and the disk fills. The failure is silent in every
+  # place an operator would look — the timer runs, the archive is healthy, the
+  # status page reads sensibly — which is why the package is installed here and
+  # checked in `verify` rather than left to a runbook step.
+  #
+  # It is installed only when this deployment has a destination. A host with no
+  # cold archive has nothing for it to do, and the package is 100+ MB.
+  if [ -n "${MV_COLDCOPY_URI:-}" ] || [ "${MV_COLDCOPY:-off}" != off ]; then
+    want+=(awscli)
+  fi
   local missing=()
   local p
   for p in "${want[@]}"; do
@@ -268,7 +281,25 @@ phase_packages() {
   fi
   say "installing: ${missing[*]}"
   run env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-  run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
+  # IDEMPOTENT AND OFFLINE-SAFE. This phase is re-run on every provision, and a
+  # host with no archive mirror reachable must not lose the fifteen other things
+  # this script does afterwards. So the install is allowed to fail: what it
+  # leaves behind is a printed follow-up and a `verify` check that names the one
+  # thing that is missing.
+  if ! run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"; then
+    warn "apt-get install failed for: ${missing[*]}"
+    warn "    Provisioning CONTINUES. Re-run '--only packages' when the archive"
+    warn "    mirror is reachable, and read the 'verify' phase for what is still"
+    warn "    missing. If the AWS CLI is the one that failed, no ledger segment"
+    warn "    can leave this host and the archive therefore retires nothing —"
+    warn "    which is safe, and is not what the deployment record says happened."
+    return 0
+  fi
+  # Ubuntu 24.04's `awscli` package is v2. Record what actually landed: the
+  # deployment record has to name the version that wrote the first receipt.
+  if command -v aws >/dev/null 2>&1; then
+    say "aws cli: $(aws --version 2>&1 | head -1)"
+  fi
 }
 
 # ---------------------------------------------------------------- account
@@ -306,6 +337,12 @@ phase_directories() {
   run install -d -m 0755 -o root -g root "$GATE_DIR"
   run install -d -m 0755 -o root -g root "$MV_PREFIX" "$BIN"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE" "$RELAY_DATA" "$ARCHIVE_DATA"
+  # The closed ledger segments and their cold-copy receipts. The archive creates
+  # this itself on its first start after the roll-up, and coldcopy.sh's unit
+  # names it in ReadWritePaths — systemd refuses to start a unit whose
+  # ReadWritePaths does not exist, so the timer would fail at every tick on a
+  # host that had not yet rotated a segment.
+  run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$ARCHIVE_DATA/segments"
   run install -d -m 0750 -o "$MV_USER" -g "$MV_GROUP" "$MV_STATE/backup" "$MV_STATE/monitor"
   # 0751, not 0750: nginx runs as www-data, which is not in the multiverse
   # group, and it must be able to REACH its own log directory below. The
@@ -529,6 +566,22 @@ MULTIVERSE_LOG_LEVEL=$MV_LOG_LEVEL
 # the contract's default; 720h is the announced 30 days. It prunes genome BLOBS
 # and never the ledger. See deploy.env.example.
 MULTIVERSE_GENOME_HORIZON=${MV_ARCHIVE_GENOME_HORIZON:-}
+# The RAW LEDGER's window. Empty takes MULTIVERSE_GENOME_HORIZON, which is the
+# intended setting and is why there is no default here: one horizon, three
+# mechanisms (§23 B34, extended to the raw ledger). A negative value keeps every
+# closed segment forever whatever the horizon is. IT IS THE RAW LINES ONLY —
+# every answer the archive publishes is kept forever at every setting — and a
+# segment past the window is still not removed unless deploy/coldcopy.sh has
+# written a receipt confirming an off-host copy. See deploy.env.example.
+MULTIVERSE_LEDGER_WINDOW=${MV_LEDGER_WINDOW:-}
+# The duplicate guard's window (§25, B38). Empty takes the contract's default of
+# 48h. IT IS ALSO WHAT A RESTART COSTS: since the roll-up the replay parses only
+# min(the raw window on this host, this value) of raw records, so this is the
+# number monitor.sh projects the next restart's outage from. It is written here
+# rather than left implicit BECAUSE monitor.sh reads MV_ARCHIVE_DEDUP_WINDOW out
+# of deploy.env to make that projection — the two must be one value, and they
+# are only one value if this line exists. See deploy.env.example.
+MULTIVERSE_ARCHIVE_DEDUP_WINDOW=${MV_ARCHIVE_DEDUP_WINDOW:-}
 # The memory verdict, as Go sees it. Empty means unset. It is a SOFT limit: it
 # removes collector headroom from the resident set and cannot fail a replay, and
 # it is selected from the host's archive ceiling. See SIZING.md, "Archive memory".
@@ -552,8 +605,10 @@ EOF
     write_file /etc/multiverse/deny-list 0644 "root:$MV_GROUP" <<'EOF'
 # B30's operator-side render deny list. One species name or peer:<peerId> per
 # line; # starts a comment. It suppresses THE VIEW AND NOT THE RECORD — the
-# ledger goes on holding what happened and nothing here evicts from it, so
-# removal from the record is not promised and must not be promised to anybody.
+# record goes on holding what happened and nothing here removes anything from
+# it, so removal from the record is not promised and must not be promised to
+# anybody. The ledger's own window ages LINES BY DATE and is not a takedown
+# either: it cannot name a peer, a species or an organism.
 # The archive re-reads this file in place: moderating costs an edit, never a
 # restart.
 EOF
@@ -765,6 +820,7 @@ phase_systemd() {
            multiverse-monitor.service multiverse-monitor.timer \
            multiverse-backup.service multiverse-backup.timer \
            multiverse-host-sample.service multiverse-host-sample.timer \
+           multiverse-coldcopy.service multiverse-coldcopy.timer \
            multiverse-viewers.service multiverse-viewers.timer; do
     run install -m 0644 -o root -g root "$KIT_DIR/systemd/$u" "/etc/systemd/system/$u"
   done
@@ -816,6 +872,21 @@ EOF
   run systemctl enable multiverse-relay.service multiverse-archive.service
   run systemctl enable --now multiverse-monitor.timer multiverse-backup.timer \
     multiverse-host-sample.timer multiverse-viewers.timer
+  # The off-host segment copy is enabled ONLY when a destination is configured.
+  # Its unit treats MV_COLDCOPY=off as a success, so enabling it unconditionally
+  # would be harmless but dishonest: a timer running hourly to print "off" is a
+  # timer an operator stops reading. The archive is safe either way — with no
+  # receipt it removes nothing.
+  if [ "${MV_COLDCOPY:-off}" != off ]; then
+    run install -d -m 0755 -o "$MV_USER" -g "$MV_GROUP" /var/lib/multiverse/archive/segments
+    run systemctl enable --now multiverse-coldcopy.timer
+    say "off-host segment copy: ON, to ${MV_COLDCOPY_URI:-UNSET}"
+  else
+    run systemctl disable --now multiverse-coldcopy.timer 2>/dev/null || true
+    say "off-host segment copy: OFF (MV_COLDCOPY unset or off). The archive keeps every"
+    say "    closed segment: with no confirmed off-host copy it retires nothing, whatever"
+    say "    the ledger window says."
+  fi
   # start, not restart: re-running provision must not cost the map an outage.
   # An upgrade is a deliberate act and RESTART-POLICY.md is where it is written.
   run systemctl start multiverse-relay.service
@@ -938,6 +1009,29 @@ phase_verify() {
       "runuser -u $MV_USER -- test -r '$ENV_FILE'"
   chk "admin path is NOT bound" \
       "! grep -q '^MULTIVERSE_RELAY_ADMIN_LISTEN=..*' /etc/multiverse/relay.env"
+
+  # THE RAW-LEDGER WINDOW'S THREE PARTS, checked because all three fail
+  # silently. The archive segments its ledger whatever this deployment does, so
+  # the directory below exists on every host; what varies is whether anything
+  # can leave it. With no off-host copy the archive retires nothing and the disk
+  # is what pays — visibly, but weeks later and in a different check.
+  chk "archive segments directory exists" \
+      "test -d $ARCHIVE_DATA/segments"
+  if [ -n "${MV_COLDCOPY_URI:-}" ] || [ "${MV_COLDCOPY:-off}" != off ]; then
+    # The two findings that would each, alone, have stopped the first segment
+    # ever leaving this host.
+    chk "aws cli is installed"        "command -v aws"
+    chk "coldcopy timer active"       "systemctl is-active --quiet multiverse-coldcopy.timer"
+    chk "coldcopy destination is set" "test -n '${MV_COLDCOPY_URI:-}'"
+    # --check makes no upload. It reads the destination, so it proves the
+    # credential, the bucket, the region and the endpoint in one call.
+    chk "coldcopy can reach its destination" \
+        "runuser -u $MV_USER -- $MV_PREFIX/deploy/coldcopy.sh --check"
+  else
+    say "off-host copy is not configured (MV_COLDCOPY unset or off), so the aws cli,"
+    say "    the coldcopy timer and the destination are not checked. The archive"
+    say "    retires NOTHING in this state, whatever MV_LEDGER_WINDOW says."
+  fi
 
   # Only when this deployment has a CI deployment key. The key's PUBLIC half
   # goes in deploy.env as MV_CI_DEPLOY_KEY_PUB; the private half lives in the

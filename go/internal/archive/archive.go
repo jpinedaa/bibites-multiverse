@@ -31,6 +31,7 @@ package archive
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -135,6 +136,33 @@ type Config struct {
 	// EvictionInterval is how often one bounded eviction pass runs. Defaults to
 	// a minute; it exists so a test does not have to wait one.
 	EvictionInterval time.Duration
+
+	// LedgerWindow is how long a CLOSED LEDGER SEGMENT is kept on this host
+	// (segments.go, "THE WINDOW"). It is a raw-lines rule and never an answers
+	// rule: every aggregate the archive publishes is kept forever either way.
+	//
+	//	> 0  that duration
+	//	  0  THE DEFAULT: whatever GenomeHorizon is, which is itself 0 — off.
+	//	     One horizon, three mechanisms (§23, B34, extended to the raw
+	//	     ledger): a raw window equal to the genome horizon holds exactly the
+	//	     crossings whose gaps can still be fetched.
+	//	< 0  OFF explicitly, whatever the horizon is: rotate and compress, retire
+	//	     nothing.
+	//
+	// A SEGMENT PAST THE WINDOW IS STILL NOT REMOVED WITHOUT A CONFIRMED
+	// OFF-HOST COPY. See coldcopy.go: no receipt, no retirement, forever if need
+	// be.
+	LedgerWindow time.Duration
+	// LedgerMaintenanceInterval is how often the segment pass runs — compress
+	// what is closed, retire what is past the window and confirmed off-host,
+	// refresh the status counters. Defaults to five minutes. NEGATIVE disables
+	// the loop entirely, for a test that drives LedgerMaintenanceNow by hand.
+	LedgerMaintenanceInterval time.Duration
+	// DisableLedgerCompression leaves closed segments in their plain form. It
+	// exists for tests and for a host with no CPU to spare; a plain segment is
+	// never retired, because the only thing that leaves this host is a verified
+	// .jsonl.gz with a receipt.
+	DisableLedgerCompression bool
 
 	// BroadcastPeerID is the peer id of the world the shared camera at /watch is
 	// pointed at. NOTHING ON THE WIRE CARRIES THIS: a world does not announce
@@ -313,7 +341,57 @@ type Archive struct {
 	// and read past. It is 0 for every healthy archive, it never falls once a
 	// damaged line exists — the ledger is never rewritten — and it is the
 	// difference between recordCount and `wc -l` on the file.
+	//
+	// SINCE THE ROLL-UP SIDECAR it is also PERSISTED (rollup.go): a tail replay
+	// does not re-read the region the sidecar covers, so it cannot re-discover
+	// the damage in it, and a number that fell to zero because the archive
+	// stopped looking would be worse than no number at all.
 	ledgerSkipped int
+	// ---- the roll-up state sidecar (rollup.go), the record roll-up.
+	//
+	// ledgerPos is THE CURSOR: the position in the segmented ledger, and the
+	// record number, that the aggregates cover. It is exact because every live
+	// append writes first and folds second under one lock (store.go, AppendAt),
+	// so the fold and the offset can never disagree. tally is the per-type,
+	// per-peer and first/last record accounting the M5 evidence needs.
+	// rollupIndex maps an hour of ledger time to the position its first record
+	// sits at, so a replay that needs only the newest N hours of RAW records can
+	// seek to where they start. rollupDirty is what has changed since the last
+	// save, per key.
+	ledgerPos       LedgerPos
+	tally           recordTally
+	rollup          *rollupSidecar
+	rollupIndex     map[int64]LedgerPos
+	rollupDirty     rollupDirty
+	rollupCovered   LedgerPos
+	rollupSavedAtMs int64
+	rollupLoaded    bool
+	rollupLost      bool
+	rollupSavedAt   time.Time
+	// ---- what the LAST START cost, measured rather than modelled, and what the
+	// duplicate guard has refused since the archive began.
+	//
+	// replayRawRecords and replayRawSeconds are the raw scan: how many records it
+	// parsed and how long it took. They are published because the whole roll-up
+	// rests on a claim about restart time, and a claim about restart time that
+	// nobody measures is a claim nobody can check — monitor.sh gates on these
+	// rather than on a model of the record count.
+	//
+	// replayFromRetired says the saved cursor named a segment that has left this
+	// host, so the scan restarted at the oldest segment still present and the
+	// aggregates have a hole between the two. replayConverted says the saved
+	// position could not be used as it stood and was rebuilt by one walk.
+	//
+	// duplicatesRefused is ALL-TIME and persisted (§25, B38, and decision 0006):
+	// during the transition a non-zero value is a peer still running a build that
+	// re-forwards, and afterwards it is a defect report. It is the number that
+	// says whether the 48 h duplicate window can safely come down to an hour, and
+	// a guard whose refusals nobody counts is a guard nobody can trust.
+	replayRawRecords  int
+	replayRawSeconds  float64
+	replayFromRetired bool
+	replayConverted   bool
+	duplicatesRefused int
 	// seen is the §5.1 duplicate rule: one entry for every duplicate key the
 	// record holds WITHIN THE LAST cfg.DedupWindow, so a re-copied envelope is
 	// refused rather than appended a second time. It used to remember every key
@@ -347,6 +425,12 @@ type Archive struct {
 	outstanding map[string]*fetch
 	sessionGen  int64
 	closed      bool
+	// seg is the segmented ledger's counters: how many closed segments are on
+	// this host, how many bytes they hold, where the raw window starts, how many
+	// are waiting for a cold-copy receipt, and how many have been retired. It is
+	// refreshed by the maintenance pass rather than by the status request, so a
+	// page load never walks a directory. See segments.go.
+	seg segState
 	// evict is the retention horizon's cursor and its counters (§23, B33/B34).
 	// It is the zero value, and every path that reads it returns early, on an
 	// archive with no horizon — which is every archive by default. See
@@ -391,7 +475,13 @@ type rateWindow struct {
 // New opens the archive's store and returns it. Nothing is dialled yet.
 func New(cfg Config) (*Archive, error) {
 	cfg.applyDefaults()
-	ledger, err := OpenLedger(cfg.DataDir)
+	// OpenLedgerLog, not OpenLedger: the first start on a whole-file ledger
+	// renames it into one legacy segment and a crash reconciliation may finish a
+	// compression the last process died inside. Both happen once and both belong
+	// in the log rather than in a directory listing nobody reads.
+	ledger, err := OpenLedgerLog(cfg.DataDir, func(msg string, kv ...any) {
+		cfg.Logger.Warn(msg, kv...)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -416,14 +506,44 @@ func New(cfg Config) (*Archive, error) {
 		deny:        deny,
 		lanes:       map[lanePair]*lane{},
 		simRates:    map[int]*achievedRate{},
-		seen:        newDedupWindow(dedupHint(ledger.Size()), cfg.DedupWindow, time.Now()),
+		seen:        newDedupWindow(dedupHint(ledger.HintBytes()), cfg.DedupWindow, time.Now()),
 		pending:     map[string]*fetch{},
 		sentWindow:  map[string]*rateWindow{},
 		inFlight:    map[string]int{},
 		outstanding: map[string]*fetch{},
 		species:     newSpeciesLedger(),
 		brainAgg:    newBrainAgg(),
+		tally:       newRecordTally(),
+		rollupIndex: map[int64]LedgerPos{},
+		rollupDirty: newRollupDirty(),
 	}
+	// THE ROLL-UP STATE IS LOADED BEFORE ONE RECORD IS FOLDED (rollup.go). It is
+	// the durable half of the fold below: with it, the replay reads only what the
+	// sidecar does not already cover; without it, the replay is exactly what it
+	// has always been and the first save writes the state it produced.
+	rollupPath := filepath.Join(cfg.DataDir, rollupSidecarName)
+	rolled, usable, err := loadRollupState(rollupPath)
+	if err != nil {
+		return nil, err
+	}
+	if !usable {
+		// A file exists and this build cannot use it. THAT IS A LOSS AND IT IS
+		// SAID SO — but never a reason to refuse to run, because everything in it
+		// is derivable from the raw record that is still here.
+		a.rollupLost = true
+		a.log.Error("archive: the roll-up state sidecar could not be read; "+
+			"the aggregates are being rebuilt by a FULL replay and the old file is "+
+			"kept as .unreadable", "path", rollupPath)
+		if err := keepUnreadable(rollupPath); err != nil {
+			return nil, err
+		}
+		rolled = nil
+	}
+	a.applyRollupState(rolled)
+	// "Loaded" means the sidecar covered something. A file holding only a header
+	// — a save that was interrupted before its first floor line — is a full
+	// replay and a first roll-up, exactly as no file at all is.
+	a.rollupLoaded = rolled != nil && rolled.cursor.Record > 0
 	// Replay what is already recorded, so a restart neither duplicates a record
 	// nor forgets a gap. "Keep the hash forever" (§10): a hash with no genome
 	// is still a lineage node, and a fetch that failed for a year can succeed
@@ -440,62 +560,89 @@ func New(cfg Config) (*Archive, error) {
 	// the apply loop when those were two passes, which on a multi-million-record
 	// ledger was already minutes into the restart; the gaps a replay discovers
 	// are all due on the first tick either way.
+	//
+	// AND IT IS NOW A TAIL REPLAY WHEN A SIDECAR SAYS IT CAN BE. planReplay
+	// (rollup.go) returns TWO cut points over one pass: Floor is where the
+	// aggregate fold resumes, because everything before it is already in the
+	// sidecar, and From is where the RAW-derived state — the duplicate guard,
+	// whose fingerprint seeds are per process and cannot be persisted — has to be
+	// rebuilt from. THE DISTANCE BETWEEN THEM IS EXACTLY cfg.DedupWindow, or the
+	// raw window when that is shorter, and nothing else reaches back: the
+	// genome-gap queue used to and is persisted now.
+	//
+	// THE RESTART-TIME MODEL, and it is a model of ONE number:
+	//
+	//	raw records parsed = min(age of the raw window, cfg.DedupWindow) of records
+	//	wall time          = that / ~62 000-72 000 records a second on this host
+	//
+	// which is about 100 s at the shipped 48 h window on a 7 M-record ledger, and
+	// 2-3 s at the 1 h the guard needs once the fleet has crossed. Both halves are
+	// measured below and published (replayRawRecords, replayRawSeconds), because
+	// the deployment gates on them.
 	now := time.Now()
-	damage, err := ScanLedger(cfg.DataDir, func(rec Record) {
-		a.recordCount++
-		if rec.MigrationID != "" {
-			// Rebuild the key the live path uses, not a lookalike. A NACK
-			// dedups on migrationId+code (§14, B7), so replaying it under
-			// migrationId alone would never match and every re-copied NACK
-			// would be recorded a second time after a restart.
-			// THE REPLAY ONLY REBUILDS THE WINDOW, not the record (§25, B38). A
-			// key whose record is older than the window is not inserted at all:
-			// the live path would not have refused a copy of it either, and
-			// inserting it would make the set the size of the ledger again for
-			// the first window after every restart. recordedAt is the LEDGER's
-			// clock, so the rotation below walks the ledger's own time.
-			if at := time.UnixMilli(rec.RecordedAt); rec.RecordedAt > 0 &&
-				now.Sub(at) < a.cfg.DedupWindow {
-				a.seen.add(a.seen.fingerprint(rec.Type,
-					dedupKey(rec.Type, rec.MigrationID, rec.Code)), at)
+	plan := a.planReplay(rolled, now)
+	// THE FLOOR IS RESOLVED AGAINST WHAT IS ACTUALLY ON THE HOST before anything
+	// is read, because a floor naming a segment that has been retired is a state
+	// older than the raw window and the two possible answers are very different.
+	// resolveFloor (rollup.go) picks between them and says which.
+	if plan.FromSidecar {
+		floor, missing, foldAll := a.resolveFloor(cfg.DataDir, plan.Floor)
+		if missing {
+			a.replayFromRetired = true
+			note := "the aggregates are KEPT and NOTHING is re-folded: the cursor is not " +
+				"older than the raw lines still here, so re-folding them would double every " +
+				"counter"
+			if foldAll {
+				note = "the aggregates are KEPT and every record still present is folded on " +
+					"top; the records between the cursor and the oldest segment still here " +
+					"are NOT in the aggregates and cannot be recovered without " +
+					"deploy/coldcopy.sh --restore"
 			}
+			a.log.Error("archive: the roll-up cursor names a raw segment that is no longer "+
+				"on this host", "cursorSegment", plan.Floor.Segment,
+				"cursorRecord", plan.Floor.Record, "foldWhatIsLeft", foldAll, "note", note)
+			plan.Floor = floor
 		}
-		if rec.Type != RecordMigration {
-			return
+	}
+	rawStart := time.Now()
+	prev := plan.From
+	raw := 0
+	// past is the scan's own verdict, taken by POSITION rather than by record
+	// number: false means the roll-up state already holds the fold of this
+	// record and only the duplicate guard is rebuilt from it.
+	fold := func(rec Record, pos LedgerPos, past bool) {
+		raw++
+		if past {
+			a.countRecordLocked(rec, prev)
 		}
-		// The lane counters are rebuilt from the ledger, so a restart does not
-		// reset the flow the operator was reading.
-		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.ExitEdge, rec.RecordedAt)
-		// And so is the species aggregate, ON THIS ONE PASS. It is the whole
-		// reason the species tab can answer "how often has this species ever
-		// crossed" without reading the ledger again: the replay the archive
-		// already performs at startup is the only full scan there is, and every
-		// later answer is a map lookup (species.go, rule 1).
-		a.observeSpeciesLocked(rec)
-		if rec.Lineage == nil {
-			return
-		}
-		migrantHash, speciesKey := migrantHashOf(rec)
-		// THE COVERAGE DENOMINATOR, and the ONE half of the brain aggregate the
-		// replay rebuilds. It costs a map lookup per record and no disk at all:
-		// a crossing's genome hash is a fact the ledger already holds. The other
-		// half — what was inside the genome — is NOT re-derived here, because
-		// deriving it means reading and parsing every blob in the store; it comes
-		// out of the sidecar (brainhist.go rule 3), and an hour this archive holds
-		// no measurement for is a gap, never a zero.
-		a.observeBrainSeen(rec.RecordedAt, migrantHash)
-		for _, h := range hashesOf(rec) {
-			// The CROSSING's own time, not the replay's: a horizon that measured
-			// from the restart would re-queue a backlog it retired yesterday, and
-			// pay for it in resident memory as well as in work (§23, B34).
-			a.trackLocked(h, speciesKey, rec.SourcePeer, rec.MigrationID, rec.EntityID,
-				time.UnixMilli(rec.RecordedAt), now)
-		}
-	})
+		a.replayRawLocked(rec, past, now)
+		prev = pos
+	}
+	damage, end, err := scanLedgerFromFloor(cfg.DataDir, plan.From, plan.Floor, fold)
+	if errors.Is(err, ErrPositionRetired) {
+		// The RAW SCAN's start named a segment that has gone — an hour-index
+		// entry older than the window. The floor is unaffected and has already
+		// been resolved, so the scan simply starts at the beginning of what is
+		// here and the duplicate guard is rebuilt from a little less than the
+		// window asked for. Nothing is folded twice: the floor decides that, and
+		// it decides it by position.
+		a.log.Warn("archive: the raw scan wanted to start in a segment that is no longer on "+
+			"this host; it starts at the oldest segment still here",
+			"wantedSegment", plan.From.Segment,
+			"note", "the duplicate guard covers a little less than --dedup-window for this "+
+				"one start; no aggregate is affected")
+		plan.From = LedgerPos{}
+		prev, raw = LedgerPos{}, 0
+		rawStart = time.Now()
+		damage, end, err = scanLedgerFromFloor(cfg.DataDir, plan.From, plan.Floor, fold)
+	}
 	if err != nil {
 		return nil, err
 	}
-	a.ledgerSkipped = damage.Lines
+	a.replayRawRecords = raw
+	a.replayRawSeconds = time.Since(rawStart).Seconds()
+	a.replayConverted = plan.Converted
+	a.ledgerSkipped += damage.Lines
 	if n := ledger.Repaired(); n > 0 {
 		// A write the previous process never finished. Nothing durable was lost
 		// — the record was never ACKed — but an operator reading `wc -l` against
@@ -522,6 +669,62 @@ func New(cfg Config) (*Archive, error) {
 		a.log.Warn("archive: resumed with genomes still missing", "gaps", n,
 			"records", a.recordCount)
 	}
+	// THE CURSOR IS WHERE THE SCAN ENDED, with the fold's own record count on it.
+	// The two agree by construction — the fold counts exactly the records the
+	// scan delivered past the floor — and writing the count in rather than
+	// trusting the scan's is what keeps them together after the retired-position
+	// fallback above, where the scan renumbers from zero over what is left.
+	a.ledgerPos = LedgerPos{Segment: end.Segment, Offset: end.Offset,
+		Record: int64(a.recordCount)}
+	// THE GAP QUEUE A SIDECAR RESTORED IS DRAINED OF WHAT AGED OUT while this
+	// archive was down, so a loaded queue is in the state a full replay would
+	// have produced rather than in the state it was saved in (rollup.go).
+	if gone, held := a.expireLoadedGapsLocked(now); gone > 0 || held > 0 {
+		a.log.Info("archive: drained the restored genome-gap queue",
+			"retiredPastHorizon", gone, "alreadyHeld", held, "remaining", len(a.pending),
+			"horizon", a.cfg.GenomeHorizon.String())
+	}
+	// The roll-up sidecar is opened for APPENDING only; loadRollupState above has
+	// already read it, because the state has to be in the aggregates before one
+	// record is folded on top of it.
+	rollupSave, err := openRollupSidecar(cfg.DataDir)
+	if err != nil {
+		// Same rule as the brain sidecar: an aggregate that cannot be written is
+		// an aggregate being lost as it is made, and it is still not a reason to
+		// refuse to run. The next start replays in full.
+		a.log.Error("archive: the roll-up state sidecar could not be opened; "+
+			"the fold will not be kept across this run and the next start replays in full",
+			"path", rollupPath, "err", err)
+	} else {
+		a.rollup = rollupSave
+	}
+	if !a.rollupLoaded {
+		// NO SIDECAR, SO THIS REPLAY IS THE FIRST ROLL-UP. Write it whole and at
+		// once rather than waiting for the first tick: an archive killed in its
+		// first thirty seconds would otherwise pay for the whole replay twice.
+		a.mu.Lock()
+		a.rollupDirty.everything = true
+		a.mu.Unlock()
+		if err := a.rollup.Save(a); err != nil {
+			a.log.Error("archive: the first roll-up state could not be written", "err", err)
+		}
+	}
+	rate := 0.0
+	if a.replayRawSeconds > 0 {
+		rate = float64(a.replayRawRecords) / a.replayRawSeconds
+	}
+	a.log.Info("archive: replayed the record",
+		"records", a.recordCount, "skippedLines", a.ledgerSkipped,
+		"fromRollup", plan.FromSidecar, "rollupCoveredRecords", plan.Floor.Record,
+		"rawRecordsParsed", a.replayRawRecords,
+		"rawSeconds", fmt.Sprintf("%.2f", a.replayRawSeconds),
+		"rawRecordsPerSecond", fmt.Sprintf("%.0f", rate),
+		"rawRebuildSpan", plan.RawSpan.String(),
+		"scannedFromSegment", plan.From.Segment, "scannedFromOffset", plan.From.Offset,
+		"positionConverted", plan.Converted, "positionRetired", a.replayFromRetired,
+		"genomeGaps", len(a.pending), "genomeGapsExpired", a.evict.gapsExpired,
+		"duplicatesRefused", a.duplicatesRefused,
+		"rollup", a.rollup.Path())
 	// THE BRAIN SIDECAR IS LOADED AFTER THE LEDGER REPLAY, and the order is a
 	// correctness requirement rather than a preference. The replay rebuilds the
 	// COVERAGE DENOMINATOR by walking the record forwards, which the aggregate
@@ -566,6 +769,101 @@ func New(cfg Config) (*Archive, error) {
 	}
 	a.logRetiredAtStartup()
 	return a, nil
+}
+
+// replayRawLocked is the fold ONE ledger record contributes to during a replay.
+//
+// agg says whether the record is behind the roll-up sidecar's cursor. When it is
+// false the record is already in the aggregates — the sidecar holds the fold of
+// it — and ONE THING ONLY is rebuilt from it: the duplicate guard, whose
+// per-process fingerprint seeds make it unpersistable by design (dedup.go).
+// Every aggregate the sidecar owns is skipped, and that skip is the whole
+// saving.
+//
+// THE GENOME-GAP QUEUE IS NOW ON THE agg SIDE, and that is phase 3's change. It
+// used to be rebuilt from the raw record inside the retention horizon, which is
+// what forced a restart to read 720 h — or, on an archive with no horizon, the
+// whole record. It is persisted now (rollup.go, the "gq" lines), so it is folded
+// exactly once per crossing like every other aggregate, and the raw scan is
+// bounded by the duplicate window alone.
+//
+// It runs on New's goroutine before anything else is started, so it takes no
+// lock; the Locked suffix says which lock its callers would need.
+func (a *Archive) replayRawLocked(rec Record, agg bool, now time.Time) {
+	if rec.MigrationID != "" {
+		// Rebuild the key the live path uses, not a lookalike. A NACK dedups on
+		// migrationId+code (§14, B7), so replaying it under migrationId alone
+		// would never match and every re-copied NACK would be recorded a second
+		// time after a restart.
+		// THE REPLAY ONLY REBUILDS THE WINDOW, not the record (§25, B38). A key
+		// whose record is older than the window is not inserted at all: the live
+		// path would not have refused a copy of it either, and inserting it would
+		// make the set the size of the ledger again for the first window after
+		// every restart. recordedAt is the LEDGER's clock, so the rotation below
+		// walks the ledger's own time.
+		//
+		// IT IS FOLDED WHETHER OR NOT agg, and that is the reason a tail replay
+		// cannot be shorter than cfg.DedupWindow: this set's fingerprint seeds
+		// are drawn per process on purpose (dedup.go), so no sidecar can hold it
+		// and only the raw record can rebuild it.
+		if at := time.UnixMilli(rec.RecordedAt); rec.RecordedAt > 0 &&
+			now.Sub(at) < a.cfg.DedupWindow {
+			a.seen.add(a.seen.fingerprint(rec.Type,
+				dedupKey(rec.Type, rec.MigrationID, rec.Code)), at)
+		}
+	}
+	if rec.Type != RecordMigration {
+		return
+	}
+	if agg {
+		// The lane counters are rebuilt from the ledger, so a restart does not
+		// reset the flow the operator was reading.
+		a.observeLaneLocked(rec.SourceSlot, rec.DestSlot, rec.ExitEdge, rec.RecordedAt)
+		// And so is the species aggregate, ON THIS ONE PASS. It is the whole
+		// reason the species tab can answer "how often has this species ever
+		// crossed" without reading the ledger again: the replay the archive
+		// already performs at startup is the only full scan there is, and every
+		// later answer is a map lookup (species.go, rule 1).
+		a.observeSpeciesLocked(rec)
+	}
+	if rec.Lineage == nil {
+		return
+	}
+	migrantHash, speciesKey := migrantHashOf(rec)
+	if agg {
+		// THE COVERAGE DENOMINATOR, and the ONE half of the brain aggregate the
+		// replay rebuilds. It costs a map lookup per record and no disk at all: a
+		// crossing's genome hash is a fact the ledger already holds. The other
+		// half — what was inside the genome — is NOT re-derived here, because
+		// deriving it means reading and parsing every blob in the store; it comes
+		// out of brains.jsonl (brainhist.go rule 3), and an hour this archive
+		// holds no measurement for is a gap, never a zero.
+		//
+		// SINCE THE ROLL-UP SIDECAR THE DENOMINATOR IS PERSISTED TOO (rollup.go).
+		// brainsave.go argued it should not be, correctly, because the full replay
+		// re-derived it for free — and that argument ends the day the raw record
+		// stops being replayed in full. A denominator nobody was keeping while a
+		// segment was on the host cannot be computed for the period it covers
+		// once the segment has gone.
+		a.observeBrainSeen(rec.RecordedAt, migrantHash)
+	}
+	if !agg {
+		return
+	}
+	for _, h := range hashesOf(rec) {
+		// The CROSSING's own time, not the replay's: a horizon that measured from
+		// the restart would re-queue a backlog it retired yesterday, and pay for
+		// it in resident memory as well as in work (§23, B34).
+		//
+		// AN AGGREGATE LIKE THE REST OF THEM. What the sidecar covers is not
+		// re-queued and not re-declined, so genomeGapsExpired counts each crossing
+		// once for the life of the archive rather than once per replay — which is
+		// the one number phase 1's validation could not make identical across a
+		// restart, because it was a fact about the replay and not about the
+		// record.
+		a.trackLocked(h, speciesKey, rec.SourcePeer, rec.MigrationID, rec.EntityID,
+			time.UnixMilli(rec.RecordedAt), now)
+	}
 }
 
 // lineageHash is one wanted genome and WHOSE it is. The distinction costs a bool
@@ -628,6 +926,9 @@ func (a *Archive) Start(ctx context.Context) error {
 	go func() { defer a.wg.Done(); a.metricsLoop() }()
 	// Nothing at all unless a horizon was configured (§23, B33). See eviction.go.
 	a.startEviction()
+	// Rotation, compression of what is closed, and retirement of what is past
+	// the window AND confirmed off-host. See segments.go.
+	a.startLedgerMaintenance()
 	a.log.Info("archive: started", "relay", a.cfg.RelayURL, "dataDir", a.cfg.DataDir,
 		"ledger", a.ledger.Path(), "metrics", a.metrics.Path(), "statusPage", a.HTTPAddr())
 	return nil
@@ -692,6 +993,12 @@ func (a *Archive) Close() error {
 	// newest buckets rather than as a run of zeroes.
 	if err := a.brainSave.Close(a.brainAgg); err != nil {
 		a.log.Warn("archive: brain history close failed", "err", err)
+	}
+	// And the ledger fold's, so an orderly shutdown leaves a sidecar that covers
+	// every record the ledger holds and the next start reads nothing but the
+	// raw window it needs for the duplicate guard and the gap queue.
+	if err := a.rollup.Close(a); err != nil {
+		a.log.Warn("archive: roll-up state close failed", "err", err)
 	}
 	return a.ledger.Close()
 }
@@ -949,7 +1256,8 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 		ExitEdge:    p.ExitEdge,
 		Timestamp:   p.Timestamp,
 	}
-	if err := a.ledger.Append(rec); err != nil {
+	off, rotated, err := a.ledger.AppendAt(rec)
+	if err != nil {
 		a.log.Error("archive: ledger append failed", "migrationId", p.MigrationID, "err", err)
 		return true
 	}
@@ -967,7 +1275,8 @@ func (a *Archive) onMigration(env wire.Envelope) bool {
 
 	now := time.Now()
 	a.mu.Lock()
-	a.recordCount++
+	at := a.notePositionLocked(off, rotated)
+	a.countRecordLocked(rec, at)
 	a.observeLaneLocked(p.SourceSlot, p.DestSlot, p.ExitEdge, rec.RecordedAt)
 	// The same envelope, kept a second way for a second question. The lane
 	// counter answers HOW FAST; the feed answers WHO, just now (§17, B14). Both
@@ -1047,6 +1356,10 @@ func (a *Archive) observeLaneLocked(from, to int, edge string, atMs int64) {
 		a.lanes[key] = l
 	}
 	l.observe(atMs)
+	// The lane's durable half (rollup.go). It is marked here rather than at the
+	// call sites because this is the aggregate's ONE writer, which is what makes
+	// the dirty set auditable at all.
+	a.rollupDirty.lanes[key] = true
 }
 
 func (a *Archive) onAck(env wire.Envelope) bool {
@@ -1057,10 +1370,11 @@ func (a *Archive) onAck(env wire.Envelope) bool {
 	if a.markSeen(RecordAck, ack.MigrationID) {
 		return true
 	}
-	a.mu.Lock()
-	a.recordCount++
-	a.mu.Unlock()
-	_ = a.ledger.Append(Record{
+	// The record is built before the counters so BOTH see the same one: the
+	// per-type and per-peer tallies of rollup.go are folded from the record
+	// itself, exactly as the replay folds it, so the live path and the restart
+	// pass identical input to identical code.
+	rec := Record{
 		Type:        RecordAck,
 		RecordedAt:  time.Now().UnixMilli(),
 		MigrationID: ack.MigrationID,
@@ -1068,7 +1382,8 @@ func (a *Archive) onAck(env wire.Envelope) bool {
 		DestPeer:    ack.DestPeer,
 		EntityID:    ack.EntityID,
 		Duplicate:   ack.Duplicate,
-	})
+	}
+	a.appendAndCount(rec, ack.MigrationID)
 	return true
 }
 
@@ -1080,10 +1395,7 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 	if a.markSeen(RecordNack, dedupKey(RecordNack, nack.MigrationID, nack.Code)) {
 		return true
 	}
-	a.mu.Lock()
-	a.recordCount++
-	a.mu.Unlock()
-	_ = a.ledger.Append(Record{
+	rec := Record{
 		Type:        RecordNack,
 		RecordedAt:  time.Now().UnixMilli(),
 		MigrationID: nack.MigrationID,
@@ -1091,7 +1403,8 @@ func (a *Archive) onNack(env wire.Envelope) bool {
 		DestPeer:    nack.DestPeer,
 		Code:        nack.Code,
 		Message:     nack.Message,
-	})
+	}
+	a.appendAndCount(rec, nack.MigrationID)
 	return true
 }
 
@@ -1122,7 +1435,23 @@ func (a *Archive) markSeen(typ, key string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.seen.add(fp, now)
+	if !a.seen.add(fp, now) {
+		return false
+	}
+	// A REFUSAL IS A REAL EVENT AND IT LEAVES NO OTHER TRACE. Nothing is
+	// appended, nothing is logged per occurrence, and the record the archive
+	// keeps is by construction the record without it — so without this counter
+	// the guard's whole working is invisible. §25's B38 and decision 0006 both
+	// rest on it: during the transition a non-zero value names a peer still
+	// running a build that re-forwards, afterwards it is a defect report, and it
+	// is the evidence that says whether the 48 h window may come down to an hour.
+	//
+	// ALL-TIME AND PERSISTED (rollup.go's floor line), because a counter that
+	// resets at every restart cannot answer "has anything been refused since the
+	// participant release".
+	a.duplicatesRefused++
+	a.rollupDirty.counts = true
+	return true
 }
 
 // ---------------------------------------------------------------- genome fetch
@@ -1144,15 +1473,25 @@ func (a *Archive) trackLocked(h lineageHash, speciesKey, sourcePeer, migrationID
 		return
 	}
 	if f, ok := a.pending[hash]; ok {
-		if f.sourcePeer == "" {
-			f.sourcePeer = sourcePeer
+		// AN EXISTING ENTRY CAN STILL MOVE, and every move has to reach the
+		// sidecar: the queue is durable now, so a field upgraded after its "gq"
+		// line was written and never marked again would come back from the file
+		// as the older answer. The whole-fold audit in rollup_test.go caught
+		// exactly that, which is the reason both marks are here rather than only
+		// at the creation site below.
+		moved := false
+		if f.sourcePeer == "" && sourcePeer != "" {
+			f.sourcePeer, moved = sourcePeer, true
 		}
 		// A HASH NAMED AS A MIGRANT ANYWHERE IS A MIGRANT'S. The same genome can
 		// be a parent's on one record and the migrant's own on another — a
 		// creature whose parent also travelled — and the measurable one is the
 		// answer that wins, because the other is not an answer at all.
 		if h.own && !f.migrant {
-			f.migrant, f.speciesKey = true, speciesKey
+			f.migrant, f.speciesKey, moved = true, speciesKey, true
+		}
+		if moved {
+			a.markGapNewLocked(hash)
 		}
 		return
 	}
@@ -1160,6 +1499,7 @@ func (a *Archive) trackLocked(h lineageHash, speciesKey, sourcePeer, migrationID
 	// with a recent one is still wanted, and the recent crossing's entry keeps it.
 	if a.gapPastHorizonLocked(crossedAt, now) {
 		a.evict.gapsExpired++
+		a.rollupDirty.counts = true
 		return
 	}
 	f := &fetch{
@@ -1177,6 +1517,9 @@ func (a *Archive) trackLocked(h lineageHash, speciesKey, sourcePeer, migrationID
 	}
 	a.pending[hash] = f
 	a.pendingOrder = append(a.pendingOrder, hash)
+	// The queue's durable half (rollup.go). This is its ONE creation site, which
+	// is what makes the dirty set auditable.
+	a.markGapNewLocked(hash)
 }
 
 func (a *Archive) tickLoop() {
@@ -1198,6 +1541,18 @@ func (a *Archive) tickLoop() {
 				a.brainSavedAt = now
 				if err := a.brainSave.Save(a.brainAgg); err != nil {
 					a.log.Warn("archive: brain history save failed", "err", err)
+				}
+			}
+			// The LEDGER FOLD's durable half, on the same timer and behind its own
+			// interval, and for the same reason: an append of what moved since the
+			// last one, which at the measured rate is a handful of species, the
+			// lanes that carried something, the counters and one floor line. What a
+			// hard kill costs is thirty seconds of records, and the tail replay
+			// reads exactly those back. See rollup.go.
+			if now.Sub(a.rollupSavedAt) >= rollupSaveInterval {
+				a.rollupSavedAt = now
+				if err := a.rollup.Save(a); err != nil {
+					a.log.Warn("archive: roll-up state save failed", "err", err)
 				}
 			}
 		}
@@ -1271,6 +1626,7 @@ func (a *Archive) pumpChunk(now time.Time, scanBudget, sendBudget int) (scanned,
 			// Resolved by some other path: retire it and do NOT push it back.
 			a.clearInFlightLocked(f)
 			delete(a.pending, hash)
+			a.markGapGoneLocked(hash)
 			continue
 		}
 		if a.gapPastHorizonLocked(f.crossedAt, now) {
@@ -1547,15 +1903,18 @@ func (a *Archive) onGenomeResponse(env wire.Envelope) bool {
 	if foldSeries {
 		brain, brainOK = bb8.BrainStats(resp.Body.BB8)
 	}
+	rec := Record{
+		Type:       RecordGenome,
+		RecordedAt: now.UnixMilli(),
+		GenomeHash: resp.GenomeHash,
+		ServedBy:   resp.SourcePeer,
+	}
 	a.mu.Lock()
 	delete(a.pending, resp.GenomeHash)
-	// A GENOME line is a ledger record and is counted like one. It was not until
-	// 2026-08-12, and the omission made `ledgerRecords` drift BELOW `wc -l` from
-	// the first fetch after every boot — 8,060,891 against 8,156,869 lines on the
-	// deployment, 1.2% low — because the startup replay counts these lines and
-	// the live path did not. The counter and the file now answer the same
-	// question, and `ledgerSkipped` is once again the whole of the difference.
-	a.recordCount++
+	// The gap is closed, so its "gq" line gets its tombstone (rollup.go). A queue
+	// entry that outlived the blob it was waiting for would be re-asked at every
+	// restart for as long as the horizon allows.
+	a.markGapGoneLocked(resp.GenomeHash)
 	a.mu.Unlock()
 	if brainOK {
 		// THE PER-HASH PARSE CACHE IS FILLED, not merely consulted, and that
@@ -1566,15 +1925,44 @@ func (a *Archive) onGenomeResponse(env wire.Envelope) bool {
 		a.fillBrainCache(resp.GenomeHash, brain)
 		a.observeBrainHeld(crossedAtMs, foldSpecies, resp.GenomeHash, brain)
 	}
-	_ = a.ledger.Append(Record{
-		Type:       RecordGenome,
-		RecordedAt: now.UnixMilli(),
-		GenomeHash: resp.GenomeHash,
-		ServedBy:   resp.SourcePeer,
-	})
+	// A GENOME line is a ledger record and is counted like one. It was not until
+	// 2026-08-12, and the omission made `ledgerRecords` drift BELOW `wc -l` from
+	// the first fetch after every boot — 8,060,891 against 8,156,869 lines on the
+	// deployment, 1.2% low — because the startup replay counts these lines and
+	// the live path did not. The counter and the file now answer the same
+	// question, and `ledgerSkipped` is once again the whole of the difference.
+	a.appendAndCount(rec, resp.GenomeHash)
 	a.log.Info("archive: stored a genome fetched by hash",
 		"genomeHash", resp.GenomeHash, "servedBy", resp.SourcePeer)
 	return true
+}
+
+// appendAndCount is the live path's WRITE FIRST, FOLD SECOND for the three
+// records that carry no other fold: an ACK, a NACK and a GENOME line.
+//
+// THE ORDER IS THE WHOLE POINT. The roll-up cursor is a position now (rollup.go),
+// and a position is only exact if the fold that produced it and the write that
+// placed it move under one lock. Folding first would let a save land between the
+// two and write a cursor covering a record the file does not hold yet, and the
+// next tail replay would fold that record a second time — a doubled counter,
+// which is the one failure this design cannot tolerate because it looks like
+// data.
+//
+// A FAILED APPEND IS NOT COUNTED, and that is a change: the error used to be
+// discarded, so a record the disk refused still moved ledgerRecords and the
+// counter disagreed with the file forever afterwards. The crossing is still
+// recorded by the MIGRATION line that has already landed; what is lost is the
+// ACK or the GENOME line, and it is said out loud.
+func (a *Archive) appendAndCount(rec Record, id string) {
+	off, rotated, err := a.ledger.AppendAt(rec)
+	if err != nil {
+		a.log.Error("archive: ledger append failed", "type", rec.Type, "id", id, "err", err)
+		return
+	}
+	a.mu.Lock()
+	at := a.notePositionLocked(off, rotated)
+	a.countRecordLocked(rec, at)
+	a.mu.Unlock()
 }
 
 func (a *Archive) sendLocked(typ string, data any) bool {
