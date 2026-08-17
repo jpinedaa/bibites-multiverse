@@ -141,6 +141,20 @@ type Status struct {
 	// fleet has crossed and the duplicate window may safely come down. A refusal
 	// leaves no other trace anywhere: nothing is appended, and the record is by
 	// construction the record without it.
+	// THE TWO FLOORS, and they are two on purpose. LedgerFirstRecordMs is where
+	// the AGGREGATES reach back to — the first record this archive ever folded,
+	// which is kept forever — and LedgerRawWindowFromMs below is where the RAW
+	// LINES reach back to, which is the window. AncestrySinceMs is the third,
+	// narrower one: the oldest crossing that names a parent, which is what the
+	// genealogy can draw from.
+	//
+	// A page that has only one of them has to guess which it is, and the guess a
+	// reader makes is "the record starts here" — which after the roll-up is true
+	// of the first and false of the second. `/api/species/tree` has published
+	// ancestrySinceMs all along; it is repeated here so one request answers
+	// "what can this archive still say, and about what period".
+	LedgerFirstRecordMs  int64   `json:"ledgerFirstRecordMs,omitempty"`
+	AncestrySinceMs      int64   `json:"ancestrySinceMs,omitempty"`
 	RollupCoveredRecords int     `json:"rollupCoveredRecords"`
 	RollupSavedAtMs      int64   `json:"rollupSavedAtMs"`
 	ReplayRawRecords     int     `json:"replayRawRecords"`
@@ -446,6 +460,8 @@ func (a *Archive) StatusView() Status {
 		LedgerSkipped:      a.ledgerSkipped,
 		FlowWindowMs:       flowWindow.Milliseconds(),
 
+		LedgerFirstRecordMs:  a.tally.firstMs,
+		AncestrySinceMs:      a.species.edgeFirstMs,
 		RollupCoveredRecords: int(a.rollupCovered.Record),
 		RollupSavedAtMs:      a.rollupSavedAtMs,
 		ReplayRawRecords:     a.replayRawRecords,

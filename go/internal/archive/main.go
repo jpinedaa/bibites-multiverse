@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -92,7 +93,15 @@ func runMain(args []string, stderr io.Writer) int {
 			"window is refused; one that arrives later is appended to the ledger a second time. "+
 			"Migration is at-most-once with no re-forward (§25, B37), so the only sources of a "+
 			"duplicate left are a sidecar older than B37 still retrying and a defective peer, "+
-			"and both arrive within minutes. Raising it costs memory in proportion")
+			"and both arrive within minutes. Raising it costs memory in proportion. IT IS ALSO "+
+			"WHAT A RESTART COSTS: the roll-up state carries every aggregate, so the only thing "+
+			"a restart still reads raw is this window of records — about 100 s at 48h on the "+
+			"deployment's ledger and 2-3 s at 1h. LOWER IT TO 1h ONCE THE PARTICIPANT RELEASE "+
+			"HAS BEEN OUT FOR A CYCLE: 48h is sized against how far behind the map's oldest "+
+			"pre-4.1 sidecar can be, not against a relay retransmit, and duplicatesRefused on "+
+			"/api/status is the evidence — while it is rising, old builds are still out there "+
+			"and the window is doing work; once it has stopped rising across a release cycle, "+
+			"an hour is three orders of magnitude of margin (decision 0006, follow-up 3)")
 	// DQ7's operator-side render deny list (§22, B30).
 	denyList := fs.String("deny-list", env("MULTIVERSE_ARCHIVE_DENY_LIST", ""),
 		"file of species names and peer:<peerId> entries this archive's PAGE AND JSON refuse to "+
@@ -209,6 +218,13 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "archive: %v\n", err)
 		return 1
 	}
+	// WHAT THIS LISTING COVERS, SAID BEFORE IT IS READ. `list` reads the RAW
+	// LINES, and the raw lines are a window now: a segment past it that has a
+	// confirmed off-host copy is removed from this host, so a listing that began
+	// "here is every crossing" would be wrong the first day one retired. The
+	// aggregates on /api/status are the part that is kept forever, and this is
+	// the part that is not.
+	printLedgerWindow(stdout, *dataDir)
 	shown, gaps, unhashable := 0, 0, 0
 	for _, m := range migrations {
 		// contract-b-m4.md §10: the gap report names "a hash that no peer can
@@ -282,6 +298,55 @@ func listMain(args []string, stdout, stderr io.Writer) int {
 			damage.TornTail)
 	}
 	return 0
+}
+
+// printLedgerWindow says which raw lines are on this host, in the ordered run a
+// replay walks: every closed segment still present, then the live file. A
+// retired segment is named with its receipt, because "where did the first month
+// go" has to be answerable on the host itself.
+func printLedgerWindow(w io.Writer, dir string) {
+	segs, err := LedgerSegments(dir)
+	if err != nil {
+		return
+	}
+	present, retired := 0, 0
+	first, last := "", ""
+	for _, s := range segs {
+		if s.Retired {
+			retired++
+			continue
+		}
+		present++
+		if first == "" {
+			first = s.FirstDay.Format(dayLayout)
+		}
+		last = s.LastDay.Format(dayLayout)
+	}
+	if present == 0 && retired == 0 {
+		// A ledger that has never rotated: the live file is the whole of it and
+		// nothing has left, so there is no window to caption.
+		return
+	}
+	live := "the live file"
+	if ms, ok := firstRecordedAt(filepath.Join(dir, ledgerName)); ok {
+		live = "the live file from " + time.UnixMilli(ms).UTC().Format(time.RFC3339)
+	}
+	if first == "" {
+		fmt.Fprintf(w, "raw window on this host: %s\n", live)
+	} else {
+		fmt.Fprintf(w, "raw window on this host: %d closed segment(s), %s to %s, plus %s\n",
+			present, first, last, live)
+	}
+	if retired > 0 {
+		fmt.Fprintf(w,
+			"  %d older segment(s) have been copied off-host and removed from this disk; "+
+				"their receipts are in %s/segments and `deploy/coldcopy.sh --restore <name>` "+
+				"brings one back\n", retired, dir)
+	}
+	fmt.Fprintf(w,
+		"  this listing is the RAW LINES ONLY. Every aggregate the archive publishes — lane "+
+			"totals, species counts, ancestry, the record counter — is kept forever and is on "+
+			"/api/status\n\n")
 }
 
 func held(ok bool) string {

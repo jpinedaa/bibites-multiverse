@@ -5468,14 +5468,40 @@ function renderMap(d){
          + Math.round((d.flowWindowMs||300000)/60000)+" min)")
     + kv(t("genomegap","genome gaps"), d.genomeGaps)
     + kv("ledger records", d.ledgerRecords)
+    // THE DUPLICATE GUARD'S OWN NUMBER. A refusal leaves no other trace — the
+    // record is by construction the record without it — so this row is the only
+    // place anybody can see the guard working. It is shown at 0, deliberately:
+    // 0 is the answer that says the fleet has crossed and the window may come
+    // down (decision 0006).
+    + kv("duplicate records refused", d.duplicatesRefused||0)
+    // WHAT THE RAW LINES COVER, shown only once the archive actually windows
+    // them. Every aggregate above is kept forever; these are the lines behind
+    // them, and after a segment retires the two reach back to different dates.
+    + (d.ledgerWindowMs && d.ledgerRawWindowFromMs
+         ? kv("raw crossing lines held",
+              (d.ledgerSegments||0)+" segment(s) from "+trDay(d.ledgerRawWindowFromMs)
+              + ' <span class="muted">(the answers above are kept forever)</span>')
+           + (d.ledgerSegmentsAwaitingColdCopy
+                ? kv("segments awaiting an off-host copy",
+                     '<span class="bad">'+d.ledgerSegmentsAwaitingColdCopy+"</span>")
+                : "")
+         : "")
     // Absent entirely unless a retention horizon is set, which is the default:
     // an absent row is how a reader knows nothing is being pruned, and 0 would
     // read as "a horizon that deletes nothing" instead. The ledger line beside
-    // it is not decoration — it is the whole of what this feature does not do.
+    // it says what the horizon does NOT do — and once a ledger window is in
+    // force it has to say what the window DOES, or the row is a promise the
+    // deployment has already stopped keeping.
     + (d.genomeHorizonMs
          ? kv(t("horizon","genome retention horizon"),
               (d.genomeHorizonMs/86400000).toFixed(1)+" days"
-              + ' <span class="muted">(the ledger is kept forever)</span>')
+              + ' <span class="muted">('
+              + (d.ledgerWindowMs
+                   ? "the raw crossing lines are kept "
+                     + (d.ledgerWindowMs/86400000).toFixed(0)
+                     + " days and every answer is kept forever"
+                   : "the ledger is kept forever")
+              + ')</span>')
            + kv("genome copies pruned past it",
                 (d.genomesEvicted||0)+" ("
                 + ((d.genomesEvictedBytes||0)/1048576).toFixed(1)+" MiB)")

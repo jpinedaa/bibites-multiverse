@@ -2,8 +2,14 @@ package archive
 
 import (
 	"bytes"
+	"compress/gzip"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"multiverse/internal/bb8"
 	"multiverse/internal/contractb"
@@ -80,5 +86,109 @@ func TestListGapReportCountsOnlyUnresolvedHashes(t *testing.T) {
 	}
 	if strings.Contains(gapsOnly, "m-ordinary") {
 		t.Fatalf("--gaps listed a parent_gone entry as a gap:\n%s", gapsOnly)
+	}
+}
+
+// TestListReadsTheSegmentedLedgerAndSaysWhatItCovers is phase 3's read path,
+// and it has two halves.
+//
+// THE FIRST IS EQUALITY. `archive list` reads the RAW LINES, and after phase 2
+// the raw lines are a run of files rather than one. A listing over the segmented
+// directory must be the listing over the monolith it was made from, record for
+// record — anything else is the 2026-08-08 loss wearing a friendlier face.
+//
+// THE SECOND IS THE CAPTION. A listing that began "here is every crossing" was
+// true while nothing evicted and is false the first day a segment retires, so
+// the command states the window it covers before it lists anything.
+func TestListReadsTheSegmentedLedgerAndSaysWhatItCovers(t *testing.T) {
+	day := int64(24 * 60 * 60 * 1000)
+	base := (time.Now().UnixMilli()/day)*day - 3*day
+	rec := func(i int) Record {
+		return Record{
+			Type: RecordMigration, RecordedAt: base + int64(i)*(day/10),
+			MigrationID: fmt.Sprintf("m-%02d", i), EntityID: int32(i),
+			SourceSlot: 1, DestSlot: 2, SourcePeer: "peer-a",
+			Lineage: &contractb.Lineage{GenomeHash: fmt.Sprintf("bb8-%02d", i)},
+		}
+	}
+
+	// THE MONOLITH, written by hand rather than through OpenLedger, because
+	// OpenLedger is what segments a directory: this is the shape every archive
+	// before phase 2 had, and it is the thing the segmented listing has to equal.
+	mono := t.TempDir()
+	var raw bytes.Buffer
+	for i := 0; i < 40; i++ {
+		b, err := json.Marshal(rec(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw.Write(append(b, '\n'))
+	}
+	if err := os.WriteFile(filepath.Join(mono, ledgerName), raw.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var before, errOut bytes.Buffer
+	if code := Main([]string{"list", "--data-dir", mono}, &before, &errOut); code != 0 {
+		t.Fatalf("list exited %d: %s", code, errOut.String())
+	}
+	if strings.Contains(before.String(), "raw window on this host") {
+		t.Error("a ledger that has never been segmented captions a window it does not have")
+	}
+
+	// THE SAME BYTES, SEGMENTED. Opening renames the whole file into one legacy
+	// segment; the appends that follow rotate on the day boundary, so the
+	// listing then spans a legacy segment, a closed day segment and the live
+	// file.
+	seg := t.TempDir()
+	copyFile(t, filepath.Join(mono, ledgerName), filepath.Join(seg, ledgerName))
+	l, err := OpenLedger(seg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 40; i < 65; i++ {
+		if err := l.Append(rec(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	segs, err := LedgerSegments(seg)
+	if err != nil || len(segs) < 2 {
+		t.Fatalf("the fixture produced %d segments (%v), want at least 2", len(segs), err)
+	}
+	// And compress them, because a listing has to read a gz exactly as it reads
+	// a plain file.
+	for _, s := range segs {
+		if s.Compressed {
+			continue
+		}
+		if _, _, err := compressSegment(seg, s.Name, gzip.BestSpeed); err != nil {
+			t.Fatalf("compress %s: %v", s.Name, err)
+		}
+	}
+
+	var after bytes.Buffer
+	if code := Main([]string{"list", "--data-dir", seg}, &after, &errOut); code != 0 {
+		t.Fatalf("list over segments exited %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(after.String(), "raw window on this host") {
+		t.Errorf("a segmented listing does not say what it covers:\n%s", after.String())
+	}
+	if !strings.Contains(after.String(), "RAW LINES ONLY") {
+		t.Errorf("a segmented listing does not say the aggregates outlive it:\n%s", after.String())
+	}
+	if !strings.Contains(after.String(), "65 migration(s) shown") {
+		t.Errorf("the segmented listing does not show all 65 records:\n%s", after.String())
+	}
+	// EVERY LINE THE MONOLITHIC LISTING HELD IS IN THE SEGMENTED ONE.
+	for _, want := range strings.Split(strings.TrimSpace(before.String()), "\n") {
+		if want == "" || strings.Contains(want, "migration(s) shown") {
+			continue
+		}
+		if !strings.Contains(after.String(), want) {
+			t.Fatalf("the segmented listing lost a line the monolithic one had:\n%q", want)
+		}
 	}
 }
