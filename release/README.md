@@ -47,7 +47,7 @@ raised only after the release that satisfies it exists.
 `make-release.sh` refuses to build if the Windows and Linux copies disagree. The sidecar,
 BepInEx flavor, and installer differ by platform.
 
-The build creates an add-on archive for each platform. Release `0.2.6` publishes one executable
+The build creates an add-on archive for each platform. Release `0.2.7` publishes one executable
 Windows setup as the recommended Windows download, and every Windows package carries
 `BibitesMultiverseLauncher.exe`. It publishes a complete Linux archive as the
 recommended Linux download; the Linux kit keeps its shell scripts and ships no launcher in this
@@ -458,7 +458,7 @@ The NSIS entry is the one with history behind it. The design (E6) warned that re
 hand-unpacked NSIS under `/tmp`, that `/tmp` does not survive a reboot, and that the distribution
 package was "a different build" — which would have quietly changed the setup's checksum. It is not
 a different build: the `makensis` the distribution installs is **byte-identical** to the copy
-`0.2.5` and `0.2.6` were built with, because the hand-unpacked copy was that same package unpacked
+`0.2.5` and `0.2.7` were built with, because the hand-unpacked copy was that same package unpacked
 by hand. The reproducible-checksum claim survives the move to `/usr/bin/makensis`.
 
 ### The gates that are in place
@@ -642,7 +642,7 @@ unavailable. It is how the last two releases were published, before the workflow
 3. **Read `dist/RELEASE-PAGE.md`.** The build refuses unresolved template fields. Make sure that
    the generated page describes the intended artifacts and public map.
 4. **Tag the commit the artifacts were built from**, and push the tag:
-   `git tag v0.2.6 && git push origin v0.2.6`. The page's links point into the tag, so the
+   `git tag v0.2.7 && git push origin v0.2.7`. The page's links point into the tag, so the
    documentation a reader follows is the documentation this release shipped with.
 5. **Create the release** with `dist/RELEASE-PAGE.md` as its body. Attach both add-on archives,
    each complete archive that you built, the Windows setup, the two stable-named copies, and
@@ -650,14 +650,14 @@ unavailable. It is how the last two releases were published, before the workflow
    optional:** the homepage links them through `/releases/latest/download/`, so a release published
    without them breaks both download buttons, and the version globs below do not match them.
    ```sh
-   gh release create v0.2.6 \
-       release/dist/bibites-multiverse-0.2.6-*.zip \
-       release/dist/bibites-multiverse-0.2.6-*.exe \
+   gh release create v0.2.7 \
+       release/dist/bibites-multiverse-0.2.7-*.zip \
+       release/dist/bibites-multiverse-0.2.7-*.exe \
        release/dist/bibites-multiverse-windows-x64-setup.exe \
        release/dist/bibites-multiverse-linux-x64-complete.zip \
        release/dist/SHA256SUMS \
        --repo jpinedaa/bibites-multiverse --verify-tag --latest \
-       --title "Bibites Multiverse 0.2.6" \
+       --title "Bibites Multiverse 0.2.7" \
        --notes-file release/dist/RELEASE-PAGE.md
    ```
 6. **Verify what you published**, because nothing else will: `sha256sum -c SHA256SUMS`, each
