@@ -204,8 +204,8 @@ func TestTheDividerNamesAreOursAndNotWalksPath(t *testing.T) {
 // nothing above it to grab.
 func TestOnlyRealDividerPositionsAreKept(t *testing.T) {
 	got := UsableSplit(map[string]string{
-		"main/details":        "612 244",
-		"main/details/worlds": "300 900",
+		SplitNameDetails: "612 244",
+		SplitNameWorlds:  "300 900",
 	})
 	if len(got) != 2 {
 		t.Fatalf("two good positions became %v", got)
@@ -214,24 +214,89 @@ func TestOnlyRealDividerPositionsAreKept(t *testing.T) {
 	// The case this exists for: the pane was never opened, so walk measured it
 	// as nothing.
 	got = UsableSplit(map[string]string{
-		"main/details":        "856 0",
-		"main/details/worlds": "300 900",
+		SplitNameDetails: "856 0",
+		SplitNameWorlds:  "300 900",
 	})
-	if _, ok := got["main/details"]; ok {
+	if _, ok := got[SplitNameDetails]; ok {
 		t.Fatalf("a pane of no height was kept: %v", got)
 	}
-	if got["main/details/worlds"] != "300 900" {
+	if got[SplitNameWorlds] != "300 900" {
 		t.Fatalf("the other divider was dropped with it: %v", got)
 	}
 
 	// Anything that is not two or more positive numbers is not a position.
 	for _, junk := range []string{"", "   ", "600", "600 abc", "600 -4", "0 0"} {
-		if kept := UsableSplit(map[string]string{"main/details": junk}); kept != nil {
+		if kept := UsableSplit(map[string]string{SplitNameDetails: junk}); kept != nil {
 			t.Fatalf("%q was kept as a divider position: %v", junk, kept)
 		}
 	}
 	// Nothing at all writes nothing at all, so the field stays out of the file.
 	if UsableSplit(nil) != nil {
 		t.Fatal("an empty set of dividers became a value")
+	}
+}
+
+// AN UPGRADE MUST NOT LEAVE TWO SPELLINGS IN THE FILE. Until this release the
+// dividers were stored under walk's own widget path; a machine upgrading found
+// "main/clientComposite/details" sitting in launcher-window.json beside the new
+// "details", and the stale pair would have stayed there forever.
+func TestAnOlderFilesDividerNamesAreMigratedAndTheStaleOnesDropped(t *testing.T) {
+	// Exactly what the machine found after an upgrade.
+	upgraded := UsableSplit(map[string]string{
+		"main/clientComposite/details":        "700 200",
+		"main/clientComposite/details/worlds": "280 900",
+		SplitNameDetails:                      "612 244",
+		SplitNameWorlds:                       "300 900",
+	})
+	if len(upgraded) != 2 {
+		t.Fatalf("an upgraded file kept %d entries: %v", len(upgraded), upgraded)
+	}
+	// The CURRENT spelling wins, and it wins every time rather than depending on
+	// which order Go happened to walk the map in.
+	for i := 0; i < 50; i++ {
+		again := UsableSplit(map[string]string{
+			"main/clientComposite/details": "700 200",
+			SplitNameDetails:               "612 244",
+		})
+		if again[SplitNameDetails] != "612 244" {
+			t.Fatalf("the current spelling lost to the old one: %v", again)
+		}
+	}
+
+	// A file holding ONLY the old spelling keeps its positions, under the new
+	// names: an upgrade must not throw away where somebody put their dividers.
+	migrated := UsableSplit(map[string]string{
+		"main/clientComposite/details":        "700 200",
+		"main/clientComposite/details/worlds": "280 900",
+	})
+	if migrated[SplitNameDetails] != "700 200" || migrated[SplitNameWorlds] != "280 900" {
+		t.Fatalf("an old file's positions were lost: %v", migrated)
+	}
+	for key := range migrated {
+		if strings.Contains(key, "/") {
+			t.Fatalf("a walk widget path survived into the file: %q", key)
+		}
+	}
+
+	// A divider this build does not have is dropped rather than carried around.
+	pruned := UsableSplit(map[string]string{
+		SplitNameDetails: "612 244",
+		"somethingElse":  "100 200",
+		"":               "100 200",
+	})
+	if len(pruned) != 1 || pruned[SplitNameDetails] != "612 244" {
+		t.Fatalf("an unknown divider was kept: %v", pruned)
+	}
+
+	// And it happens on the way IN, so a file written by an older build stops
+	// carrying that build's spelling the first time this one reads it.
+	older := `{"format":"` + WindowStateFormat + `","x":10,"y":10,"width":1000,"height":700,` +
+		`"split":{"main/clientComposite/details":"700 200","details":"612 244"}}`
+	back, ok := DecodeWindowState([]byte(older))
+	if !ok {
+		t.Fatal("a file from the previous build was refused")
+	}
+	if len(back.Split) != 1 || back.Split[SplitNameDetails] != "612 244" {
+		t.Fatalf("reading an upgraded file gave %v", back.Split)
 	}
 }

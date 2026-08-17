@@ -174,6 +174,15 @@ type Result struct {
 // would be throwing away the best sentence in the program. So `said` is the last
 // thing the core said before it gave up (see SaidLine), and it is what a failure
 // shows.
+// THE QUOTE IS NEVER EDITED, and that is the one deliberate exception to this
+// window's plain-words rule. Everything a person reads here is written in words
+// that name nothing only this project has — except the half of a failure that is
+// the core speaking, which is passed through exactly as it was printed. A
+// launcher that paraphrased its own refusals would be a launcher whose window and
+// whose log disagreed about what went wrong, and the log is what gets pasted into
+// a bug report. Where a core message can say "world" instead of an internal name
+// it now does (validatePort in internal/launcher/validate.go); where it cannot,
+// the sentence still wins.
 func (j Job) Result(code int, said string) Result {
 	if code == 0 {
 		return Result{Text: j.succeeded(), Good: true}

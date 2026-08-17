@@ -128,6 +128,10 @@ func DecodeWindowState(raw []byte) (WindowState, bool) {
 	if state.Format != WindowStateFormat {
 		return WindowState{}, false
 	}
+	// The dividers are normalised on the way IN as well as on the way out, so a
+	// file written by an older build stops carrying that build's spelling the
+	// first time this one saves.
+	state.Split = UsableSplit(state.Split)
 	return state, true
 }
 
@@ -187,24 +191,52 @@ func clamp(value, low, high int) int {
 	return value
 }
 
-// UsableSplit is which of walk's remembered divider positions are worth keeping.
+// SplitNames is every divider this build knows about. A name that is not on it
+// is not one this window has, so it does not belong in this window's file.
+func SplitNames() []string { return []string{SplitNameDetails, SplitNameWorlds} }
+
+// UsableSplit is which remembered divider positions are worth keeping, and it is
+// the ONE rule — applied when the file is read and again when it is written, so
+// a file cannot hold anything the current build would not have put there.
+//
+// It does three things.
 //
 // A CLOSED PANE IS NOT A MEASUREMENT. walk writes the pixel height of every
 // child of a splitter, INCLUDING A HIDDEN ONE, and a hidden one measures zero —
 // so saving while the details pane was closed would record a pane of no height
 // and re-open it that way forever, with a divider sitting on the bottom edge of
-// the window and nothing above it to grab.
+// the window and nothing above it to grab. The whole entry is dropped rather
+// than repaired, because the file is seeded back into walk's settings before
+// walk ever writes to it: dropping keeps the last position the pane had while it
+// was open.
 //
-// The whole entry is dropped rather than repaired, because the file is seeded
-// back into walk's settings before walk ever writes to it: dropping keeps the
-// last position the pane had while it was open, which is the one somebody chose.
+// A KEY FROM AN OLDER BUILD IS MIGRATED, NOT KEPT BESIDE THE NEW ONE. Until this
+// release the dividers were stored under walk's own widget path,
+// "main/clientComposite/details"; an upgraded installation had both spellings in
+// its file at once, and the stale pair would have sat there forever. SplitAlias
+// takes the last segment of either spelling, so an old value simply arrives
+// under the current name — and a value already under the current name WINS, so
+// re-reading a file that holds both is not a coin toss.
+//
+// A NAME THIS BUILD DOES NOT HAVE IS DROPPED. A divider that no longer exists is
+// a line in somebody's preferences that nothing will ever read again.
 func UsableSplit(values map[string]string) map[string]string {
+	known := make(map[string]bool, len(SplitNames()))
+	for _, name := range SplitNames() {
+		known[name] = true
+	}
 	out := make(map[string]string, len(values))
-	for key, value := range values {
-		if key == "" || !usableSizes(value) {
-			continue
+	// Two passes, so the winner does not depend on Go's map order: anything that
+	// needed aliasing is an older spelling, and anything already spelled the
+	// current way overwrites it.
+	for _, exact := range []bool{false, true} {
+		for key, value := range values {
+			name := SplitAlias(key)
+			if (key == name) != exact || !known[name] || !usableSizes(value) {
+				continue
+			}
+			out[name] = value
 		}
-		out[key] = value
 	}
 	if len(out) == 0 {
 		return nil

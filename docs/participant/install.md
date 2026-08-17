@@ -181,7 +181,7 @@ a start takes, and so two worlds never share one answer.
 **Nothing is ever silent.** Press **Show details** and the whole of what the launcher did appears,
 timestamped, in a pane you can drag taller or shorter. It opens **by itself** whenever something goes
 wrong, and a failure quotes the launcher's own sentence in the panel — *"'world2' was not created:
-the profile 'default' already uses port 8787. Every world needs its own"* — rather than a shrug.
+the world 'default' already uses port 8787. Every world needs its own"* — rather than a shrug.
 
 **The rest is in two menus,** so the window is not a wall of buttons:
 

@@ -120,7 +120,16 @@ and the facts, and no control pinned to the bottom of the panel.
 **Assert (the wording rule):** no caption, label, group box, check box, **tooltip, or sentence in
 any dialog** contains the words **profile**, **sidecar**, **contract**, **peer**, **enroll**,
 **journal**, **credential**, **BepInEx**, or any path into the source repository (**`docs/`**,
-anything ending **`.md`**). Those words belong to the program and they are all still present — inside
+anything ending **`.md`**).
+
+> **The one exemption: the quoted half of a failure.** A red result line is two halves — what the
+> launcher was attempting, which obeys the rule, and after the colon the **core's own sentence,
+> passed through exactly as it was printed**. That half is deliberately never edited: a launcher
+> that paraphrased its own refusals would be one whose window and whose log disagreed about what
+> went wrong, and the log is what gets pasted into a bug report. Where a core message could equally
+> say "world", it now does — `validatePort` used to say *"the profile 'default' already uses port
+> 8787"* and now says *"the world 'default'…"* — but where it cannot, the sentence still wins.
+> **Do not report an internal word after the colon of a red result line as a failure of this rule.** Those words belong to the program and they are all still present — inside
 the details pane, which is the core's own output and is deliberately left in the core's own
 vocabulary. This rule covers the dialogs, which is where the previous round leaked: the create dialog
 said *"the map applies a per-address enrollment limit"*, the delete dialog said *"your sidecar may
@@ -239,24 +248,30 @@ Drive all three:
 | Make it happen | The panel's red line must contain |
 |---|---|
 | Start the same world in two windows at once, or hold its `launcher.lock` | `Could not start 'default': another launcher is starting or stopping this world (…). Wait for it to finish` |
-| `Create a world...` with a port another world already has | `'world2' was not created: the profile 'default' already uses port 8787. Every world needs its own` |
+| `Create a world...` with a port another world already has | `'world2' was not created: the world 'default' already uses port 8787. Every world needs its own` |
 | `Delete this world...` and type the wrong name | `'multi-2' was not deleted: that is not 'multi-2'. Nothing was deleted` |
 
-1. **Assert:** each red line carries **both** halves — what was being attempted, and the core's own
+1. **Assert (it is RED):** measure it. The result line must be drawn in `RGB(176, 0, 0)` on a
+   failure and `RGB(0, 112, 48)` on a success. It rendered in the system's near-black in every state
+   last round — a walk static draws its text in a *child* window, and `SetTextColor` only invalidates
+   the parent, so the child kept the pixels it already had whenever the colour changed but the text
+   did not. Check both directions: run something that succeeds, then something that fails, and
+   confirm the same line changes colour.
+2. **Assert:** each red line carries **both** halves — what was being attempted, and the core's own
    sentence after a colon. A line ending `. The details below say why.` means the core's sentence was
    not captured, and is a failure of this section even though the pane has the sentence in it. **An
    empty result line, or the previous action's line still sitting there, is the other failure** and
    is what the create and delete rows caught last round.
-2. **Assert:** the details pane opened by itself in each case, and the same sentence is in it.
-2b. **The exact sequence that failed:** press **Stop every world** and let it finish, so every world
+3. **Assert:** the details pane opened by itself in each case, and the same sentence is in it.
+3b. **The exact sequence that failed:** press **Stop every world** and let it finish, so every world
    shows a green `Stopped every world.` Now open **Create a world...** and give it a port another
    world already has. **Assert:** the moment it is refused, **every** world in the list shows the red
    `'world2' was not created: ...` — `Stopped every world.` must be gone from all of them, because it
    has been overtaken. Repeat with a wrong-name delete.
-2c. **Assert (nothing comes back from the dead):** after that, start one world. Its own green line
+3c. **Assert (nothing comes back from the dead):** after that, start one world. Its own green line
    appears; the OTHER world goes **blank** rather than reverting to `Stopped every world.`, which was
    overtaken two actions ago.
-3. **Assert:** the sentence quoted is the **refusal**, not the last line of the block explaining it.
+4. **Assert:** the sentence quoted is the **refusal**, not the last line of the block explaining it.
    The delete case proves this: the custody warning is printed first and is indented, and the
    flush-left refusal below it is the one that must be quoted.
 
@@ -526,6 +541,19 @@ which is where a one-off belongs.
    for `"details"` is either absent or unchanged from before — never a pair containing `0`. A
    hidden splitter child measures zero, and a zero saved here re-opens the pane at no height with its
    divider on the bottom edge of the window.
+6d. **The upgrade, which left two spellings behind last round.** Put a file holding the OLD key
+   names in place and open the window:
+
+   ```json
+   { "format": "bibites-multiverse/launcher-window/1", "x": 60, "y": 60,
+     "width": 1200, "height": 800, "details": true,
+     "split": { "main/clientComposite/details": "700 200",
+                "main/clientComposite/details/worlds": "280 900" } }
+   ```
+
+   **Assert:** the window opens with the dividers where that file put them — the positions are
+   migrated, not thrown away — and after closing it the file holds **only** `"details"` and
+   `"worlds"`. No key containing a `/` may survive, and no stale pair may sit beside the new one.
 7. **Assert:** nothing was written into `profiles\` — a stray `.json` in there is read as a world and
    would raise the red banner (section 14).
 8. **Assert:** `Help` → `About` names that file's path.
@@ -670,5 +698,7 @@ reach them:
 5. **Does a result stay with the world it is about, and does the newest one win** (sections 3d and
    3c.2b)? The create and delete refusals are the two that have been silent.
 6. **Is there exactly one divider on screen when the details pane is hidden** (section 10.12)?
-7. **Does anything in the window or its dialogs still use an internal word** (section 0's wording
-   rule)?
+7. **Is the result line actually coloured** (section 3c.1)? Measure the pixels; this is the one
+   thing that has looked right and been wrong.
+8. **Does anything in the window or its dialogs still use an internal word** (section 0's wording
+   rule, and its one exemption)?

@@ -260,12 +260,21 @@ at a glance; never silent** — which is what the layout is for:
 +------------------------------------------------------------------------------+
 ```
 
-**The result line is per world.** A `ResultLog` (details.go) keeps the last `Result` for each world
-and one "loose" result for a job whose world has no row to live beside — a create that was refused
-names a world that will never exist, and a delete names one that is about to leave the list. The
-panel shows the selected world's, or the loose one, and nothing at all while an action runs. The
-first shape of this was a single field on the window, which put a health check on one world under
-another world's headline.
+**The result line is per world, and ordered by RECENCY.** A `ResultLog` (details.go) keeps the last
+`Result` for each world and one "loose" result for a job whose world has no row to live beside — a
+create that was refused names a world that will never exist, and a delete names one that is about to
+leave the list. The panel shows whichever of the two is **newer**, and nothing at all while an action
+runs.
+
+That ordering is the second bug a machine found here, and it was subtle. The first shape was a single
+field on the window, which put a health check on one world under another world's headline. The second
+preferred a world's own result over the loose one whatever their ages, on the reasoning that a
+world's own line is more specific — and then `Stop every world` wrote a line against *every* world,
+so the next refused create was newer, was correct, was the only thing the person needed, and was
+invisible behind `Stopped every world.` on every row. **Specificity is not recency, and it is recency
+a person is reading.** A loose result also DROPS the per-world lines it overtakes rather than merely
+outranking them, so that clearing it at the next action cannot resurrect a success that had already
+been superseded.
 
 The **state table** — one row per state, and no two rows may ever read alike. The pair that must
 never collapse is the last two green/red rows: a world whose link is up has a place on the map, and
@@ -296,8 +305,16 @@ would be a second contract between two packages for the sake of a caption.
 version read it while draining the hundred-millisecond batch and lost every refusal there is: a
 refusal is printed and returned from in microseconds, so the action had already finished and the
 panel said `'world2' was not created. The details below say why.` while the core's own sentence —
-`the profile 'default' already uses port 8787. Every world needs its own` — sat one line lower in a
+`the world 'default' already uses port 8787. Every world needs its own` — sat one line lower in a
 pane nobody had opened. `TestTheThreeRefusalsAMachineSawReachThePanel` feeds the real transcripts.
+
+**The quoted half of a failure is exempt from the wording rule, and that is deliberate.** A red
+result line is what the launcher was attempting — which obeys the rule — plus the core's own sentence
+after a colon, passed through exactly as printed. A launcher that paraphrased its own refusals would
+be one whose window and whose log disagreed about what went wrong, and the log is what gets pasted
+into a bug report. Where a core message can equally say "world" it now does: `validatePort` said
+*"the profile 'default' already uses port 8787"* and now says *"the world 'default'…"*, pinned by
+`TestPortRules`. Where it cannot, the sentence still wins.
 
 **The dialogs get their own plain-words sentences** (`Prose*` in `view.go`) rather than the core's.
 The core still prints `PublicMapNote`, `LeavingNote` and `CustodyWarning` — into the details pane,
@@ -313,6 +330,22 @@ test walks all of them against `InternalWords()`.
   what pressing it will do, toggling `Visible` on a `Composite`. walk's `SetVisible` calls
   `RequestLayout`, and its box layouts skip invisible children, so the space is genuinely reclaimed.
   An arrow glyph was rejected: it only says "expander" to people who already knew.
+- **A coloured static must be redrawn WITH ITS CHILDREN.** A walk static is two windows: an outer one
+  whose WndProc answers `WM_CTLCOLORSTATIC` with the text colour, and a real child `static` control
+  that draws the text. Changing the text calls `setWindowText` on the child, which repaints it and so
+  asks the parent for the colour again; changing only the COLOUR calls `Invalidate` on the outer
+  window, and invalidating a parent does not reach a child window. So the panel's result line
+  rendered in the system's near-black in every state while the headline beside it — whose text
+  changes whenever its colour does — was perfect. `setLabel` sets the colour on both sides of the
+  text and finishes with `RedrawWindow(..., RDW_ALLCHILDREN|RDW_UPDATENOW)`; every coloured label in
+  the window goes through it.
+- **A splitter does not hide its own handle.** Hiding a splitter child makes walk mark the matching
+  handle's *layout item* invisible (`splitterlayout.go`, `reset`) so it is left out of the
+  arithmetic — but nothing hides the handle's own window, so it stays on screen at whatever bounds it
+  last had. A machine found a nine-pixel-tall, window-wide bar across the bottom of the window with
+  nothing under it, which could still be dragged and which resized a pane nobody could see.
+  `showDetails` hides the handle by hand; `detailsHandle` finds it at index 1, because walk keeps
+  handles at the odd indices of a splitter's children — the same arithmetic its own layout uses.
 - **Grouped secondary actions are MENUS, not `SplitButton` dropdowns.** walk has `SplitButton`, but
   its dropdown is a `TrackPopupMenu` modal loop, which the Windows harness has never driven. The menu
   bar (`World`, `Open`) and the list's context menu are ordinary `HMENU`s the harness already drives,
@@ -332,8 +365,8 @@ test walks all of them against `InternalWords()`.
   preferences file in a folder named after two fields nothing else in this program sets.
   `splitSettings` in `window_windows.go` is a dozen-line `walk.Settings` whose map
   `windowstate.go` carries in the same JSON as the size and the position (`split`, additive).
-  **It is keyed by walk's own path, and that is not incidental**: the first attempt held one value
-  and answered every `Get` with it, on the grounds that there is one splitter worth remembering.
+  **It is keyed per splitter, and that is not incidental**: the first attempt held one value and
+  answered every `Get` with it, on the grounds that there is one splitter worth remembering.
   There are two — the details divider and the world list's, nested inside it — and
   `Splitter.RestoreState` descends into its own children whether or not they are `Persistent`, so
   the single value was handed to the inner splitter as well, whose two children happen to match the
@@ -343,6 +376,11 @@ test walks all of them against `InternalWords()`.
   hidden one, which is zero. `UsableSplit` (tag-free, tested) drops any entry that is not two or more
   positive numbers, and because the file is seeded back into walk's settings before walk writes to
   them, dropping keeps the last position the pane had while it was open.
+- **An older file's divider names are migrated, not kept beside the new ones.** `UsableSplit` is one
+  rule applied on read AND on write: it aliases every key, keeps only the names this build has, and
+  drops any value that is not two or more positive numbers. A file written before the rename held
+  both spellings at once; now the old positions arrive under the current names and the old keys go.
+  The tie-break is explicit rather than map order — a key already spelled the current way wins.
 - **The names in the file are ours, not walk's path.** walk keys a splitter's state by a path built
   from the name of every window between the form and the widget, which comes out as
   `main/clientComposite/details` — correct, stable, and a piece of another library's furniture in a

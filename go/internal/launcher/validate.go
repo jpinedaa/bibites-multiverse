@@ -123,7 +123,12 @@ func validatePort(port int, others []Profile) error {
 	}
 	for _, other := range others {
 		if other.SidecarPort == port {
-			return fmt.Errorf("the profile '%s' already uses port %d. Every world needs its own",
+			// THE WORD IS "WORLD" AND NOT "PROFILE". A profile is the file a
+			// world is written down in, and this sentence is read by somebody who
+			// has one world and is making another — including in the graphical
+			// launcher, which quotes the core's refusals into its panel verbatim
+			// rather than paraphrasing them.
+			return fmt.Errorf("the world '%s' already uses port %d. Every world needs its own",
 				other.Name, port)
 		}
 	}

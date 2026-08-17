@@ -447,9 +447,9 @@ func TestTheThreeRefusalsAMachineSawReachThePanel(t *testing.T) {
 			transcript: []string{
 				"> create world2 and enroll a new identity on the map",
 				"",
-				"the profile 'default' already uses port 8787. Every world needs its own",
+				"the world 'default' already uses port 8787. Every world needs its own",
 			},
-			want: "the profile 'default' already uses port 8787. Every world needs its own",
+			want: "the world 'default' already uses port 8787. Every world needs its own",
 		},
 		{
 			// go/internal/launcher/profilecmd.go: the typed name did not match. The

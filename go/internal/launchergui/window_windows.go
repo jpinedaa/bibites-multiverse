@@ -922,12 +922,7 @@ func (u *ui) applySnapshot(snap launcher.Snapshot) {
 		u.selected = ""
 	}
 
-	if banner := BannerFor(snap); banner != "" {
-		u.banner.SetText(banner)
-		u.banner.SetVisible(true)
-	} else {
-		u.banner.SetVisible(false)
-	}
+	setLabel(u.banner, BannerFor(snap), bannerColour)
 	u.mw.SetTitle(WindowTitleFor(snap))
 	u.statusBar.SetText(StatusBarText(snap))
 	u.applyActions()
@@ -1006,8 +1001,11 @@ func (u *ui) applyActions() {
 // applyPanel moves one decided Panel into the widgets. NOTHING IS DECIDED HERE.
 func (u *ui) applyPanel(panel Panel, actions Actions) {
 	u.worldName.SetText(panel.World)
-	u.headline.SetText(panel.Headline)
-	u.headline.SetTextColor(colourFor[panel.Colour])
+	// Through setLabel like the others, so the one rule about repainting a
+	// coloured static applies to every coloured static in the window. The
+	// headline is never empty for a selected world, and an empty one is a panel
+	// with no world in it, which has nothing to say anyway.
+	setLabel(u.headline, panel.Headline, colourFor[panel.Colour])
 	setLabel(u.hint, panel.Hint, hintColour)
 	u.spinner.SetVisible(panel.Working)
 	if panel.Working {
@@ -1048,12 +1046,44 @@ func (u *ui) applyPanel(panel Panel, actions Actions) {
 	u.headless.SetEnabled(actions.Headless)
 }
 
-// setLabel writes a label and hides it when there is nothing to say, so an empty
-// line does not sit in the layout pushing everything below it down.
+// setLabel writes a label in a colour, and hides it when there is nothing to
+// say, so an empty line does not sit in the layout pushing everything below it
+// down.
+//
+// WHY IT REDRAWS BY HAND, which is a walk limitation a machine measured: the
+// result line rendered in the system's near-black in every state, while the
+// headline beside it carried its colour perfectly. The difference is that the
+// headline's TEXT changes whenever its colour does, and the result line's often
+// does not.
+//
+// A walk static is TWO windows: an outer one whose WndProc answers
+// WM_CTLCOLORSTATIC with the text colour, and a real child "static" control that
+// draws the text. Changing the text calls setWindowText on the CHILD, which
+// repaints it and so asks the parent for the colour again. Changing only the
+// colour calls Invalidate on the OUTER window — and invalidating a parent does
+// not reach a child window, so the child kept the pixels it already had and the
+// new colour was never asked for. RDW_ALLCHILDREN is the whole of the
+// difference; RDW_UPDATENOW makes it happen before the next thing is drawn
+// rather than whenever the queue gets round to it.
+//
+// The colour is set BEFORE the text as well as after it, so that a repaint the
+// text change schedules already has the right one.
 func setLabel(label *walk.TextLabel, text string, colour walk.Color) {
-	label.SetText(text)
 	label.SetTextColor(colour)
+	label.SetText(text)
 	label.SetVisible(text != "")
+	if text == "" {
+		return
+	}
+	label.SetTextColor(colour)
+	redrawWithChildren(label)
+}
+
+// redrawWithChildren repaints a widget AND the child windows inside it, which is
+// what walk's own Invalidate does not do.
+func redrawWithChildren(widget walk.Widget) {
+	win.RedrawWindow(widget.Handle(), nil, 0,
+		win.RDW_INVALIDATE|win.RDW_ERASE|win.RDW_ALLCHILDREN|win.RDW_UPDATENOW)
 }
 
 // setDetails opens or closes the details pane, and remembers which.

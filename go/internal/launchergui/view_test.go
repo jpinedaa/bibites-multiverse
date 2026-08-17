@@ -841,9 +841,9 @@ func TestAFreshRefusalIsNeverHiddenByAnOlderSuccess(t *testing.T) {
 	create := Job{Kind: JobCreate, World: "world2"}
 	results.Record(create.ResultAbout(), Result{}, names) // the job starts
 	results.Record(create.ResultAbout(),
-		create.Result(1, "the profile 'default' already uses port 8787. Every world needs its own"), names)
+		create.Result(1, "the world 'default' already uses port 8787. Every world needs its own"), names)
 
-	want := "'world2' was not created: the profile 'default' already uses port 8787. Every world needs its own"
+	want := "'world2' was not created: the world 'default' already uses port 8787. Every world needs its own"
 	for _, name := range names {
 		got := results.For(name)
 		if got.Text != want {
@@ -903,5 +903,32 @@ func TestStartingAnActionDropsTheLooseResult(t *testing.T) {
 	results.Record(start.ResultAbout(), Result{}, names)
 	if got := results.For("default").Text; got != "" {
 		t.Fatalf("the last action's line outlived it: %q", got)
+	}
+}
+
+// THE QUOTE WINS, and it is the one deliberate exception to the plain-words
+// rule. A failure's second half is the core speaking, passed through exactly as
+// it was printed; a launcher that paraphrased its own refusals would be one
+// whose window and whose log disagreed about what went wrong, and the log is
+// what gets pasted into a bug report.
+//
+// So this asserts the OPPOSITE of mustBePlain for that half: whatever the core
+// said arrives unedited, internal words and all.
+func TestAQuotedRefusalIsNeverEditedToObeyTheWordingRule(t *testing.T) {
+	job := Job{Kind: JobDelete, World: "multi-2"}
+	// A sentence with an internal word in it that the core could not avoid.
+	said := "the sidecar for 'multi-2' is running (pid 4242). Stop this world first"
+	got := job.Result(1, said).Text
+	if !strings.HasSuffix(got, said) {
+		t.Fatalf("the core's sentence was edited on its way to the panel: %q", got)
+	}
+	// The half the WINDOW wrote still obeys the rule.
+	mustBePlain(t, "the window's half of a failure", job.failedHead())
+	for _, kind := range []JobKind{JobStart, JobStop, JobStopAll, JobSetDefault, JobEdit,
+		JobHeadless, JobCreate, JobClone, JobDelete, JobCheck} {
+		one := Job{Kind: kind, World: "default", Other: "world2"}
+		mustBePlain(t, "a job's own words", one.failedHead())
+		mustBePlain(t, "a job's own words", one.succeeded())
+		mustBePlain(t, "a job's own words", one.Progress())
 	}
 }
