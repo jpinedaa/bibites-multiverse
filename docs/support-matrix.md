@@ -30,8 +30,8 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.5` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.0`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.5` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.0`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.7` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.0`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.7` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.0`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -186,10 +186,10 @@ one record rather than a per-row one because the plugin is a single file for bot
 
 | | |
 |---|---|
-| Mod version | `0.6.5` |
-| `BibitesMultiverse.dll` SHA-256 | `0f11651b759600703d4669e3330e0a1b677a798840f09cfc8858a33466b88152` |
-| `bibites-mod/` tree | `fd5955dd08a4d748f3b7b670ad32d2111c96aff5` |
-| `cmd/sidecar` source commit | `80d36dad5757319b50d6b8452747e3694ff39480` |
+| Mod version | `0.6.7` |
+| `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
+| `bibites-mod/` tree | `f7aa583e263ebba61737c305c4d557f94faa823a` |
+| `cmd/sidecar` source commit | `8f3c7faf86eabb2d90cf6be7220239da2495d4a5` |
 | `cmd/sidecar` input digest | `fc692779e94a73dcc60a99de16c5abfd2d94517ffd0111c74b8cae3624c28f75` |
 | Tested on | 2026-08-17 |
 
@@ -248,13 +248,13 @@ reads. The installers ignore it; the release gates do not.
   "release": "0.2.8",
   "published": "2026-08-17",
   "testedBuild": {
-    "mod": "0.6.5",
-    "pluginSha256": "0f11651b759600703d4669e3330e0a1b677a798840f09cfc8858a33466b88152",
-    "bibitesModTree": "fd5955dd08a4d748f3b7b670ad32d2111c96aff5",
-    "sidecarSourceCommit": "80d36dad5757319b50d6b8452747e3694ff39480",
+    "mod": "0.6.7",
+    "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
+    "bibitesModTree": "f7aa583e263ebba61737c305c4d557f94faa823a",
+    "sidecarSourceCommit": "8f3c7faf86eabb2d90cf6be7220239da2495d4a5",
     "sidecarInputsSha256": "fc692779e94a73dcc60a99de16c5abfd2d94517ffd0111c74b8cae3624c28f75",
     "testedOn": "2026-08-17",
-    "evidence": "the local broadcast world ran this plugin on the public map for about ten hours from a clean start on 2026-08-16: BepInEx loaded Bibites Multiverse 0.6.5, the world held its slot, saved every ten minutes, and exchanged migrations on all four edges with no error from the mod; the sidecar binary it ran differs from this record's source by one change, the Contract B compression negotiation"
+    "evidence": "two fresh installs from an NSIS setup built from this commit ran this plugin on the Windows complete edition on 2026-08-17: 29/29 installer and 11/11 timescale assertions on each run, BepInEx loaded Bibites Multiverse 0.6.7, the world applied [M5-SPEED] targetTimeScale x1 -> x10 at world load and held timeScale 10 with an achieved 9.96-10.0, the sidecar reported mod.connected on /my-slot and held slot 9 on wss://bibitesmultiverse.com/contract-b/v4, both a headless and a visual start were exercised, a 6-minute soak at x10 logged no error, a second world on slot 10 ran alongside it, and each stop lost nothing through the cmd-file quit ([M4-SAVE] why=quit)"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
@@ -265,7 +265,7 @@ reads. The installers ignore it; the release gates do not.
       "store": "Steam",
       "storeBuild": "app 2736860, buildid 22383127",
       "assemblySha256": "12455E485199CDBCAEA5978B8B0095EEDCBDD09D1FB87EFD65CCACB15D96E7EE",
-      "mod": "0.6.5",
+      "mod": "0.6.7",
       "sidecar": "m5.0",
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "win_x64",
@@ -279,7 +279,7 @@ reads. The installers ignore it; the release gates do not.
       "store": "itch.io",
       "storeBuild": "upload 16838443, archive sha256 E15695D7944B4DED9E6D29A21518D00E9689C1A2B8CEB7288D51651ADCE57F4E",
       "assemblySha256": "5B145A0A941C3560888BAFBB320D984D7290A63467C9F65022FDB02878847ECA",
-      "mod": "0.6.5",
+      "mod": "0.6.7",
       "sidecar": "m5.0",
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "linux_x64",
