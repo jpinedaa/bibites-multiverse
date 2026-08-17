@@ -1378,6 +1378,25 @@ is answered with the same call: the catalog inherits a complete graph whose leav
 of its own — but it moves D6: `system_decomposition.md`'s D6 row and the archive research row
 now record that the graduation call comes forward out of M7. WP3 carries the work; D24's
 announced ending is its deadline.
+**AMENDED 2026-08-17 — the answer's own distinction, taken further.** The `2026-08-12` answer
+drew the line at *"the lineage record — who crossed, when, and the ancestry links — is
+permanent"* and then kept **every per-crossing line** in order to be able to say it, because the
+archive had never written the lineage record down and rebuilt it by replay at every start.
+Measurement since then shows that keeping the lines is what the promise cannot afford and that
+keeping the answer is what the promise is actually about: on the public deployment the lines run
+`1.0`–`1.3 GB` a day, and the remaining announced run is more of them than the service host's
+volume holds — *"kept for the whole run and beyond"* was not funded to the end of its own run.
+So the archive now **writes the lineage record down** — species counts with first and last
+sighting, ancestry edges and the ancestry floor, per-lane and per-peer totals, the coverage
+denominator, the record counter — and keeps that **forever**, while the per-crossing lines are
+kept for a window **equal to the genome horizon**, compressed once closed, and removed from the
+host only after an off-host copy is confirmed. **Who crossed, when, how often, and descended
+from what are permanent, exactly as the sentence above always said.** The line that recorded one
+individual crossing is kept for `30` days on the host and off-host for the length of the run.
+The owner ratified the shape and the window on `2026-08-17` (*"B+D, 30-day raw window"*).
+`contract-b-m4.md` §26 is the amendment; the arithmetic and the four shapes that were compared
+are in `archive_rollup_design.md`. **This paragraph is an addition and not a rewrite** — the
+`2026-08-12` answer above is what was decided on that date and stays as it was written.
 
 **4. Who operates the public relay, and under what commitment?**
 `system_decomposition.md`'s research table still lists this as open, and D9 answered it only

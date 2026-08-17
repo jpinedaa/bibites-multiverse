@@ -65,10 +65,11 @@ func runMain(args []string, stderr io.Writer) int {
 		"how long a genome BLOB is kept in <data-dir>/genomes after it was last stored or last "+
 			"served, as a Go duration (720h is the hosted run's 30 days). 0 — THE DEFAULT — keeps "+
 			"every blob forever, which is what this archive has always done (contract-b-m4.md "+
-			"§23, B33). IT NEVER TOUCHES THE LEDGER: migrations.jsonl is kept forever at every "+
-			"setting, and a pruned hash stays a lineage node that answers exactly like a hash no "+
+			"§23, B33). IT NEVER TOUCHES THE LEDGER: no setting of THIS knob removes a crossing "+
+			"line, and a pruned hash stays a lineage node that answers exactly like a hash no "+
 			"peer ever served. The same horizon retires a genome gap whose crossing is older "+
-			"than it (§23, B34)")
+			"than it (§23, B34), and the ledger's own window reads the same number when a "+
+			"deployment sets one — one horizon, three mechanisms (§26, B40)")
 	// The raw ledger's window (segments.go). It is a SIBLING of the genome
 	// horizon and it defaults to it, because the two are one number: a raw
 	// window equal to the horizon holds exactly the crossings whose genome gaps
@@ -106,7 +107,9 @@ func runMain(args []string, stderr io.Writer) int {
 	denyList := fs.String("deny-list", env("MULTIVERSE_ARCHIVE_DENY_LIST", ""),
 		"file of species names and peer:<peerId> entries this archive's PAGE AND JSON refuse to "+
 			"render, one per line, # for a comment. It suppresses THE VIEW AND NOT THE RECORD: "+
-			"the ledger goes on holding what happened, and nothing here evicts from it (D11, §10). "+
+			"the record goes on holding what happened, and nothing here removes anything from "+
+			"it (D11, §10). The ledger's own window ages LINES BY DATE and is not a takedown "+
+			"either: it cannot name a peer, a species or an organism (§26, B40). "+
 			"The file is re-read in place, so moderating costs an edit and never a restart")
 	// Display only, and told rather than observed: no frame on either wire says
 	// which world a camera is pointed at.

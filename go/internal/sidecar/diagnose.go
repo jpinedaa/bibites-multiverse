@@ -1042,7 +1042,7 @@ func (d *diag) checkDiskHeadroom() CheckResult {
 	}
 	if free < promised {
 		return fail(id, "there is less room left than this install has already promised to write",
-			"free space on this volume and keep it free. Nothing in this system shrinks a "+
+			"free space on this volume and keep it free. Nothing on THIS machine shrinks a "+
 				"durable record: the genome cache, the journal and the logs grow with traffic, "+
 				"and a full disk has previously torn an append-only custody log",
 			ActorYou, []string{"LOCAL-DISK", "AOUT-JOURNAL_FULL", "AOUT-JOURNAL_ERROR"}, det...)
