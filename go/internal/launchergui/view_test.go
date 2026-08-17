@@ -443,3 +443,37 @@ func TestConsoleExePathIsBesideTheWindow(t *testing.T) {
 		t.Fatalf("the forwarded program is not beside the window: %q", got)
 	}
 }
+
+// TestLogFollowsTail. The pane held 191 lines with its first visible line still
+// 0 on a real machine, so the follow rule is pinned here: at the bottom it
+// follows, one line up it still does, further up it leaves the reader alone.
+func TestLogFollowsTail(t *testing.T) {
+	// 40 lines of text in a 10-line pane: the range is 0..39 and the last
+	// position the bar can take is 30.
+	const page, max = 10, 39
+	cases := []struct {
+		name string
+		pos  int
+		want bool
+	}{
+		{"at the bottom", 30, true},
+		{"one line off the bottom, which is a partial row", 29, true},
+		{"two lines up, which is a reader", 28, false},
+		{"at the top of a long log", 0, false},
+	}
+	for _, test := range cases {
+		if got := LogFollowsTail(test.pos, page, max); got != test.want {
+			t.Fatalf("%s: LogFollowsTail(%d, %d, %d) = %v, want %v",
+				test.name, test.pos, page, max, got, test.want)
+		}
+	}
+
+	// Nothing to scroll — everything fits, or the bar could not be read — is
+	// always a follow. A pane that stopped following is the defect this fixes.
+	if !LogFollowsTail(0, 0, 0) {
+		t.Fatal("a pane with no scroll bar does not follow its own newest line")
+	}
+	if !LogFollowsTail(0, 40, 39) {
+		t.Fatal("a pane taller than its text does not follow its own newest line")
+	}
+}

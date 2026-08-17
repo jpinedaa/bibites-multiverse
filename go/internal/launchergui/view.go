@@ -582,6 +582,35 @@ func (l *Log) stampLocked() string {
 	return l.now().Format("15:04:05") + "  " + text
 }
 
+// ---------------------------------------------------------------- the log pane
+
+// LogFollowsTail answers the one question an appending log pane has to ask
+// before it scrolls: is the reader at the bottom, watching it happen, or have
+// they scrolled up to read something?
+//
+// A pane that always jumps to the newest line drags a person off the line they
+// were reading every hundred milliseconds, and a start prints for two minutes.
+// A pane that never jumps shows the two oldest lines of a session forever, which
+// is the bug this was written for. So it follows while the bar is at the bottom
+// and stops the moment it is not.
+//
+// The three numbers are the vertical scroll bar's own, as Windows reports them
+// (SCROLLINFO with SIF_RANGE|SIF_PAGE|SIF_POS, normalised so the range starts at
+// zero): the first visible line, how many lines are visible, and the last line
+// the range covers. Windows leaves nMax at the LAST LINE rather than the last
+// line one can scroll to, so at the bottom is pos+page == max+1 — and one line
+// of slack is allowed, because a pane whose last line is half-hidden by a
+// partial row is still a pane somebody is watching.
+//
+// page == 0 means there is no scroll bar to read: everything fits, and following
+// costs nothing.
+func LogFollowsTail(pos, page, max int) bool {
+	if page <= 0 {
+		return true
+	}
+	return pos+page >= max
+}
+
 // ---------------------------------------------------------------- forwarding
 
 // ConsoleExePath is the console launcher beside this executable.

@@ -38,9 +38,11 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	d "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 
 	"multiverse/internal/launcher"
 )
@@ -429,6 +431,9 @@ func (u *ui) appendLine(line string) {
 
 // writeLines appends to the pane and keeps it bounded.
 func (u *ui) writeLines(lines []string) {
+	// Whether to follow is decided BEFORE the append, because appending is what
+	// moves the bottom away from wherever the reader is.
+	follow := u.logFollowsTail()
 	// A Windows edit control's line ending is CRLF; a bare newline draws as one
 	// long line.
 	u.logView.AppendText(strings.Join(lines, "\r\n") + "\r\n")
@@ -447,8 +452,55 @@ func (u *ui) writeLines(lines []string) {
 		}
 		u.logView.SetText("[the older half of this session's log was trimmed here; " +
 			"each world's own log folder keeps the whole of it]\r\n" + text[cut:])
+		// A trim replaces the whole document, so nobody is where they were. The
+		// newest line is the one place worth landing.
+		follow = true
 	}
-	u.logView.ScrollToCaret()
+	if follow {
+		u.scrollLogToEnd()
+	}
+}
+
+// scrollLogToEnd puts the newest line on screen.
+//
+// WHY ScrollToCaret ALONE DID NOTHING, which is what a machine showed: 191 lines
+// in the pane and EM_GETFIRSTVISIBLELINE still 0. walk's AppendText saves the
+// current selection, appends at the end, AND PUTS THE SELECTION BACK
+// (walk/textedit.go). In a pane nobody has ever clicked in, that selection is
+// (0,0) — so by the time ScrollToCaret sends EM_SCROLLCARET the caret is back at
+// the very top, and the control does exactly what it was asked: it scrolls the
+// caret into view, at line 0. It was not a scroll that failed; it was a scroll to
+// the wrong place.
+//
+// So the caret is moved to the end HERE, after the append, and then the pane is
+// asked twice: EM_SCROLLCARET, which is the caret's way, and WM_VSCROLL
+// SB_BOTTOM, which needs no caret at all. The second is the belt to the first's
+// braces — this is a READ-ONLY edit, which is exactly the kind that is entitled
+// to ignore a caret operation, and it costs one message.
+//
+// A SELECTION SOMEBODY MADE IS NOT MOVED. If there is one, only the scroll
+// message is sent: dragging a person's own selection out from under them to copy
+// a line is worse than not following.
+func (u *ui) scrollLogToEnd() {
+	if start, end := u.logView.TextSelection(); start == end {
+		length := u.logView.TextLength()
+		u.logView.SetTextSelection(length, length)
+		u.logView.ScrollToCaret()
+	}
+	u.logView.SendMessage(win.WM_VSCROLL, uintptr(win.SB_BOTTOM), 0)
+}
+
+// logFollowsTail reads the pane's scroll bar and answers whether the newest line
+// should be scrolled to. When the bar cannot be read the answer is yes: a log
+// that follows is the behaviour somebody asked for, and a log that silently
+// stopped following is the defect.
+func (u *ui) logFollowsTail() bool {
+	info := win.SCROLLINFO{FMask: win.SIF_RANGE | win.SIF_PAGE | win.SIF_POS}
+	info.CbSize = uint32(unsafe.Sizeof(info))
+	if !win.GetScrollInfo(u.logView.Handle(), win.SB_VERT, &info) {
+		return true
+	}
+	return LogFollowsTail(int(info.NPos-info.NMin), int(info.NPage), int(info.NMax-info.NMin))
 }
 
 // applySnapshot redraws the list, keeping the selection on the world it was on.
