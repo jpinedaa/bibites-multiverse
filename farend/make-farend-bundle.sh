@@ -122,8 +122,9 @@ if [ -f "$GAME_MANAGED" ] \
   echo "!! Run $REPO/bibites-mod/sync-game-refs.sh, then build again." >&2
   echo >&2
 fi
-export DOTNET_ROOT="$HOME/.dotnet"
-export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+# shellcheck source=../bibites-mod/lib/dotnet-env.sh
+. "$REPO/bibites-mod/lib/dotnet-env.sh"
+dotnet_env || exit 1
 dotnet build "$REPO/bibites-mod/BibitesMultiverse.csproj" -c Release -v quiet
 PLUGIN="$REPO/bibites-mod/bin/Release/BibitesMultiverse.dll"
 [ -f "$PLUGIN" ] || { echo "deploy.sh produced no $PLUGIN" >&2; exit 1; }

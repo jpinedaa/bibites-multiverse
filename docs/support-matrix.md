@@ -188,7 +188,7 @@ one record rather than a per-row one because the plugin is a single file for bot
 |---|---|
 | Mod version | `0.6.7` |
 | `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
-| `bibites-mod/` tree | `f7aa583e263ebba61737c305c4d557f94faa823a` |
+| `bibites-mod/` tree | `bc3d8733e323a837d87dd0423bdd2f24862432bc` |
 | `cmd/sidecar` source commit | `3a17907668a8871812e90a9ab061644487db0dc2` |
 | `cmd/sidecar` input digest | `ef7c01abc02f967ba03e6f29a1bb52e628c1d9f2b7d8cd15f9c06a66ff226d7b` |
 | Tested on | 2026-08-17 |
@@ -213,6 +213,15 @@ it, then record what ran: [`release/README.md`](../release/README.md) has the pr
 `release/record-tested-build.sh` prints the block ready to paste. The `mod` field on both rows
 moves in the same edit, because a release names one plugin version and this is where that number
 is decided.
+
+**The tree hash moves on its own in exactly one case.** `bibites-mod/` also holds developer
+scripts — `deploy.sh`, `sync-game-refs.sh`, `game.sh`, `lib/` — that the plugin is not built from.
+Changing one of them moves the directory's tree hash and cannot move the plugin's bytes, so
+re-point `bibitesModTree` at the new tree in the same commit and leave the rest of the record
+alone: `pluginSha256`, `testedOn` and `evidence` describe the test that happened. Prove it rather
+than assert it — rebuild with `dotnet build bibites-mod/BibitesMultiverse.csproj -c Release` and
+check the result still hashes to `pluginSha256`. Anything under `bibites-mod/src/` or
+`BibitesMultiverse.csproj` is a build input, and that is a re-test, not a re-point.
 
 ---
 
@@ -250,7 +259,7 @@ reads. The installers ignore it; the release gates do not.
   "testedBuild": {
     "mod": "0.6.7",
     "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
-    "bibitesModTree": "f7aa583e263ebba61737c305c4d557f94faa823a",
+    "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
     "sidecarSourceCommit": "3a17907668a8871812e90a9ab061644487db0dc2",
     "sidecarInputsSha256": "ef7c01abc02f967ba03e6f29a1bb52e628c1d9f2b7d8cd15f9c06a66ff226d7b",
     "testedOn": "2026-08-17",

@@ -2,10 +2,12 @@
 # Build the plugin and copy it into the game's BepInEx plugins folder.
 set -euo pipefail
 
-export DOTNET_ROOT="$HOME/.dotnet"
-export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
-
 MOD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=lib/dotnet-env.sh
+. "$MOD_DIR/lib/dotnet-env.sh"
+dotnet_env || exit 1
+
 GAME="/mnt/c/Program Files (x86)/Steam/steamapps/common/The Bibites"
 PLUGINS="$GAME/BepInEx/plugins"
 GAME_DLL="$GAME/The Bibites_Data/Managed/BibitesAssembly.dll"
