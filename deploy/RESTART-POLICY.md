@@ -143,6 +143,11 @@ nginx -t && systemctl reload nginx
 connection never reaches the relay.
 The map's loopback entries are exact keys and nginx consults exact keys before any regular
 expression, so the archive on `127.0.0.1` is never gated however broadly that file is written.
+
+`/etc/multiverse/nginx-gates` is the default and is `MV_GATEDIR` in `deploy.env`.
+`provision.sh` renders it into the front door and `restart-lib.sh` writes the gate file into it,
+both from that one key, so a host that moves the directory moves both halves together.
+Read the deployed value before you type the paths below on a host you did not provision.
 Removing the file and reloading takes the gate down.
 
 While the gate is up, the archive is the only Contract B client that can reach the relay.

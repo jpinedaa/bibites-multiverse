@@ -174,6 +174,39 @@ Read the three that watch money rather than availability:
 
 The transfer figures use the provider's GB of 2^30 bytes, counted in both directions.
 
+### `monitor.sh` exit codes
+
+The exit code says whether the monitor ran. It does not say whether the service is well.
+
+| Code | Meaning |
+|---|---|
+| `0` | The pass completed. `OK`, `WARN` and `CRIT` all exit `0`. |
+| `1` | Only from `--test`, and only when the alert channel itself failed. |
+| `2` | The pass could not start: no readable `/etc/multiverse/deploy.env`, or an argument the script does not accept. |
+
+A `WARN` or a `CRIT` travels in the alert, in the `worst:` line the run prints, and in the `sev.*`
+state under `MV_STATE`.
+It does not travel in the exit code.
+`multiverse-monitor.service` is a `Type=oneshot` driven by a five-minute timer, so a severity
+carried in the exit code left the unit `failed` almost permanently while the monitor was doing
+exactly its job.
+`systemctl is-failed multiverse-monitor.service` then meant nothing, and a deployment pipeline
+running under `set -o pipefail` broke on it.
+A non-zero status now means the watcher could not run, which is the one fault no check of its own
+can report.
+
+To read the verdict from a script, parse the `worst:` line:
+
+```sh
+sudo -u multiverse /opt/multiverse/deploy/monitor.sh --quiet --verbose | awk '/^worst:/ { print $2 }'
+```
+
+`--quiet` sends no alert, but it still writes the shared `sev.*` state, so a pass run out of band
+records what it saw as already alerted and the timer never announces it.
+Point `MV_STATE` at a temporary directory when a script reads the monitor.
+`restart-archive.sh` reads its replay gate exactly that way, from the per-check lines `--verbose`
+prints.
+
 ## Operating deploys through CI
 
 A deployment can be driven by a continuous-integration system instead of by hand.
@@ -565,6 +598,8 @@ Its replay cases hold the archive memory gate to physical RAM: the same reading 
 present must keep the same ratio and the same severity.
 Its billing cases hold the check to reporting absence: a reconciliation that never arrived and one
 that stopped arriving must both be readings, not silence.
+Its exit-status cases hold the code to one meaning: `OK`, `WARN` and `CRIT` all exit `0`, and only
+a pass that could not start exits `2`.
 
 `test-ce-reconcile.sh` needs no AWS account.
 It runs `ce-reconcile.sh --from-file` against a saved response in `deploy/testdata/` and a fake

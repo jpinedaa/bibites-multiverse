@@ -88,6 +88,7 @@ KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MV_STATE:=/var/lib/multiverse}"
 : "${MV_LOGDIR:=/var/log/multiverse}"
 : "${MV_NGINX_LOGDIR:=/var/log/multiverse/nginx}"
+: "${MV_GATEDIR:=/etc/multiverse/nginx-gates}"
 : "${MV_TLSDIR:=/etc/multiverse/tls}"
 : "${MV_STAGE_DIR:=/home/ubuntu/multiverse-stage}"
 : "${MV_RELAY_PORT:=443}"
@@ -123,7 +124,14 @@ VIEWERS_ROOT="$WWW_ROOT/multiverse-status"
 ARCHIVE_SECRET=/etc/multiverse/archive.secret
 # Where restart-relay.sh drops the peer gate. The front-door template globs this
 # directory, so an empty one is the normal state and a valid configuration.
-GATE_DIR=/etc/multiverse/nginx-gates
+#
+# It is MV_GATEDIR because restart-lib.sh already reads that knob, and the two
+# have to name the same directory: this script renders it into the front door
+# and creates it, and restart-lib.sh writes the gate file into it. A host that
+# moved the directory in deploy.env used to get a relay gate written where
+# nginx never looks — the gate would report itself raised and every peer would
+# still be let straight through.
+GATE_DIR="$MV_GATEDIR"
 CONTRACT_B_PATH=/contract-b/v4
 ADVERTISE_URL="wss://${MV_DOMAIN}${CONTRACT_B_PATH}"
 [ "$MV_RELAY_PORT" = 443 ] || ADVERTISE_URL="wss://${MV_DOMAIN}:${MV_RELAY_PORT}${CONTRACT_B_PATH}"
