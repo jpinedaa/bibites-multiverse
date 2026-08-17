@@ -38,7 +38,9 @@
          credential behind a blank first line is still a credential. THE SIDECAR
          LOG is read as the last witness: one identity in it is adopted with the
          relay from the same line, two are refused and listed, and a kit
-         unpacked beside the data root counts as a place to look.
+         unpacked beside the data root counts as a place to look. A secret in a
+         data root NO sidecar ever ran in is an orphan of an interrupted
+         install: it is renamed aside, kept, and the install goes on.
          -RemoveWorldData is the one path that ends the world.
 
 .PARAMETER KitDir
@@ -724,21 +726,57 @@ Check "the refusal names the world that is here and the one offered" `
 Check "the refusal left the credential alone" `
     ((Get-Content -Raw -LiteralPath $gCredential).Trim() -eq $gSecret)
 
-# A secret with nothing left to name its world is never overwritten either.
+# A secret with nothing left to name its world, in a folder a world HAS run in,
+# is never overwritten. The journal is what says a world ran here: sidecar.New
+# opens it before anything else, and this installer never writes inside data\.
 $gOrphan = Join-Path $gRoot 'orphan'
-New-Item -ItemType Directory -Force -Path $gOrphan | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $gOrphan 'data\journal') | Out-Null
 $gOrphanSecret = ('a' * 64)
 Set-Content -LiteralPath (Join-Path $gOrphan 'peer-secret.txt') -Value $gOrphanSecret -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $gOrphan 'data\journal\journal.log') -Value '{"seq":1}' -Encoding ASCII
 $install = Invoke-Script $installer @{
     RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gOrphan
     InstallRoot = $gProgram; JoinStringFile = $gJoin
 }
-Check "a secret no file can name is refused rather than replaced" ($install.ExitCode -eq 1) $install.Output
+Check "a secret no file can name, where a world has run, is refused" ($install.ExitCode -eq 1) $install.Output
 Check "that refusal carries INS-ENROLL" ($install.Output -match 'INS-ENROLL') $install.Output
 Check "the refusal names the file it would have overwritten" `
     ($install.Output -match 'peer-secret\.txt') $install.Output
 Check "the unnamed secret is exactly as it was" `
     ((Get-Content -Raw -LiteralPath (Join-Path $gOrphan 'peer-secret.txt')).Trim() -eq $gOrphanSecret)
+Check "nothing was renamed aside" `
+    (@(Get-ChildItem -LiteralPath $gOrphan -Filter 'peer-secret.txt.*.orphan' -File -ErrorAction SilentlyContinue).Count -eq 0)
+
+# THE ORPHAN OF AN INTERRUPTED INSTALL: a secret in a data root no sidecar ever
+# ran in belongs to no world, so it is renamed aside and the install goes on.
+# This runs on the join-string path, so nothing here reaches a network; the
+# enrolling half is proved on Linux against the suite's fake endpoint.
+$gNeverRan = Join-Path $gRoot 'never-ran'
+New-Item -ItemType Directory -Force -Path $gNeverRan | Out-Null
+$gNeverRanSecret = ('e' * 64)
+Set-Content -LiteralPath (Join-Path $gNeverRan 'peer-secret.txt') -Value $gNeverRanSecret -Encoding ASCII
+$gNeverRanJoin = Join-Path $gRoot 'never-ran-join.txt'
+$gNeverRanNew = -join ((1..64) | ForEach-Object { '0123456789abcdef'[(Get-Random -Maximum 16)] })
+Set-Content -Path $gNeverRanJoin `
+    -Value "multiverse-join/1 wss://relay.example.test/contract-b/v4 never-ran-world.$gNeverRanNew" `
+    -Encoding ASCII
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $gGame; DataRoot = $gNeverRan
+    InstallRoot = $gProgram; JoinStringFile = $gNeverRanJoin
+}
+Check "a secret no world ever used installs rather than refusing" ($install.ExitCode -eq 0) $install.Output
+Check "it says the secret was an orphan" ($install.Output -match 'was an orphan') $install.Output
+Check "it says why - the world never ran" ($install.Output -match 'stopped before') $install.Output
+$gOrphans = @(Get-ChildItem -LiteralPath $gNeverRan -Filter 'peer-secret.txt.*.orphan' -File -ErrorAction SilentlyContinue)
+Check "the orphaned secret is KEPT, not deleted" ($gOrphans.Count -eq 1)
+if ($gOrphans.Count -eq 1) {
+    Check "and it is the secret that was there" `
+        ((Get-Content -Raw -LiteralPath $gOrphans[0].FullName).Trim() -ceq $gNeverRanSecret)
+}
+Check "the world is the one the join string names" `
+    ((Get-Content -Raw -LiteralPath (Join-Path $gNeverRan 'install-record.json') | ConvertFrom-Json).peerId -ceq 'never-ran-world')
+Check "and its secret is in place" `
+    ((Get-Content -Raw -LiteralPath (Join-Path $gNeverRan 'peer-secret.txt')).Trim() -ceq $gNeverRanNew)
 
 # The secret of a world the install record itself names may be replaced, and the
 # one it replaces is kept, never destroyed.

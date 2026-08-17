@@ -224,6 +224,15 @@ with where each was found and asks you to put the right one in `data\peer-id` ra
 for you. It reads the head and the tail of at most a few log files, never the whole of a log that
 can reach 100 MiB.
 
+**A secret that no world ever used is not a question, and setup does not ask one.** An install
+that got its credential and stopped before the world ever ran leaves a `peer-secret.txt` behind that
+belongs to nothing: no sidecar has written in that data root, so no slot was ever claimed and there
+is nothing on the map to strand. Setup renames it to `peer-secret.txt.<utc>.orphan`, keeps it,
+says why on your screen, and goes on to enroll a new identity. **What tells the two apart** is
+whether a sidecar ever ran: anything at all inside `<data root>\data` — the journal, the Contract A
+token, the genome cache, `peer-id` — or a `peer=` line in a sidecar log. Any of those and the
+refusal above stands, because a real world is out there.
+
 **Where it looks for a kit is bounded and named**: the application directory this setup is
 installing into, the folder this kit was unpacked in, `%LOCALAPPDATA%\Programs\Bibites Multiverse`,
 the data root itself, and the data root's parent — because an advanced ZIP is usually unpacked

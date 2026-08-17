@@ -36,6 +36,10 @@
 #      anything executable.
 #   H  a complete package. The same installer must create a versioned managed
 #      runtime without --game-dir, and uninstall only unchanged payload files.
+#   L  a secret nothing ever used: an install that stopped before the world ever
+#      ran leaves a credential belonging to no world, so it is renamed aside and
+#      a new identity is enrolled - while a journal, or any sidecar log line with
+#      a peer in it, still means a world exists and the refusal stands.
 #   K  the sidecar's own log as an identity source: one world in it is adopted
 #      with the relay from the same line, two worlds are refused and listed, the
 #      printed remedy works, a folder whose logs name two worlds is not enrolled
@@ -671,18 +675,21 @@ check "--remove-world-data removes the credential" \
 check "--remove-world-data says the world ends on the map" \
   "$(b contains 'end of this world on the map' "$OUT")"
 
-# A secret with nothing left to name it is the one state the installer refuses:
-# overwriting it would destroy the only recoverable half of an identity.
+# A secret with nothing left to name it, in a folder a world HAS run in, is the
+# state the installer refuses: overwriting it would destroy the only recoverable
+# half of an identity that still holds a place on the map. The journal is what
+# says a world ran here - scenario L covers the folder where none ever did.
 I_ORPHAN="$I_ROOT/orphan"
-mkdir -p "$I_ORPHAN"
+mkdir -p "$I_ORPHAN/data/journal"
 printf '%s\n' '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' > "$I_ORPHAN/peer-secret.txt"
 chmod 600 "$I_ORPHAN/peer-secret.txt"
+printf '{"seq":1}\n' > "$I_ORPHAN/data/journal/journal.log"
 run_script env PATH="$I_FAKE_BIN:$PATH" \
   FAKE_ENROLL_REQUESTS="$I_REQUESTS" FAKE_ENROLL_STATE="$I_STATE" \
   FAKE_ENROLL_ARGS="$I_ARGS" \
   FAKE_ENROLL_RELAY_URL='wss://bibitesmultiverse.com/contract-b/v4' \
   bash "$INSTALLER" --game-dir "$I_GAME" --data-root "$I_ORPHAN"
-check "a secret no file can name stops with INS-ENROLL" \
+check "a secret no file can name, where a world has run, stops with INS-ENROLL" \
   "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
 check "the refusal names the file it would not overwrite" \
   "$(b contains "$I_ORPHAN/peer-secret.txt" "$OUT")"
@@ -1040,6 +1047,118 @@ check "it adopts the world that start script names" "$(b contains "peer $K5_PEER
 check "on the map that start script names" \
   "$(b grep -qF "\"relayUrl\": \"$K5_RELAY\"" "$K5/install-record.json")"
 check "and asked the map for nothing" "$(b test "$(k_requests)" = "$K5_COUNT")"
+
+# ---------------------------------------------------------------- L
+
+scenario "L - a secret no world ever used is an orphan, not a question"
+
+L_ROOT="$SANDBOX/L"; L_GAME="$L_ROOT/game"; L_REQUESTS="$L_ROOT/requests.jsonl"
+L_ARGS="$L_ROOT/curl-args.txt"; L_STATE="$L_ROOT/unused.state"
+new_sandbox_game "$L_GAME"
+mkdir -p "$L_ROOT"
+: > "$L_REQUESTS"
+L_PUBLIC_RELAY='wss://bibitesmultiverse.com/contract-b/v4'
+l_install() {
+  run_script env PATH="$I_FAKE_BIN:$PATH" \
+    FAKE_ENROLL_REQUESTS="$L_REQUESTS" FAKE_ENROLL_STATE="$L_STATE" \
+    FAKE_ENROLL_ARGS="$L_ARGS" FAKE_ENROLL_FAIL_FIRST=0 \
+    FAKE_ENROLL_RELAY_URL="$L_PUBLIC_RELAY" \
+    bash "$INSTALLER" --game-dir "$L_GAME" "$@"
+}
+l_requests() { wc -l < "$L_REQUESTS" | tr -d ' '; }
+l_orphans() { ls "$1"/peer-secret.txt.*.orphan 2>/dev/null | wc -l | tr -d ' '; }
+
+# L1 - the reported state: an earlier install got a secret and stopped before the
+# world ever ran. No sidecar has written here, so that identity holds no place on
+# the map and there is nothing for a person to decide.
+L1="$L_ROOT/never-ran"
+L1_SECRET="$(printf 'e%.0s' $(seq 1 64))"
+mkdir -p "$L1"
+printf '%s\n' "$L1_SECRET" > "$L1/peer-secret.txt"
+chmod 600 "$L1/peer-secret.txt"
+L1_COUNT="$(l_requests)"
+l_install --data-root "$L1"
+check "a secret no world ever used installs rather than refusing" "$(b test "$RC" -eq 0)" "$OUT"
+check "it says the secret was an orphan" "$(b contains 'was an orphan' "$OUT")"
+check "it says why - the world never ran" "$(b contains 'stopped before' "$OUT")"
+check "it enrolled exactly one new identity" "$(b test "$(l_requests)" = "$((L1_COUNT + 1))")"
+check "the orphaned secret is KEPT, not deleted" "$(b test "$(l_orphans "$L1")" = 1)"
+check "and it is the secret that was there" \
+  "$(b bash -c 'grep -qxF "$2" "$1"/peer-secret.txt.*.orphan' _ "$L1" "$L1_SECRET")"
+check "the kept copy is mode 0600" \
+  "$(b bash -c 'test "$(stat -c %a "$1"/peer-secret.txt.*.orphan)" = 600' _ "$L1")"
+check "the new credential is a different secret" \
+  "$(b bash -c 'test "$(cat "$1/peer-secret.txt")" != "$2"' _ "$L1" "$L1_SECRET")"
+check "the record names a new public identity" \
+  "$(b grep -Eq '"peerId": "public-[0-9a-f]{32}"' "$L1/install-record.json")"
+
+# L2 - an install log in logs/ is not a world having run: the graphical setup
+# writes one there, and an empty data/ is what this installer itself creates.
+L2="$L_ROOT/install-log-only"
+mkdir -p "$L2/data" "$L2/logs"
+printf '%s\n' "$(printf 'f%.0s' $(seq 1 64))" > "$L2/peer-secret.txt"
+chmod 600 "$L2/peer-secret.txt"
+printf 'setup said hello\n' > "$L2/logs/install-20260101T000000Z.log"
+L2_COUNT="$(l_requests)"
+l_install --data-root "$L2"
+check "an empty data folder and an install log still read as an orphan" "$(b test "$RC" -eq 0)" "$OUT"
+check "it enrolled exactly one new identity" "$(b test "$(l_requests)" = "$((L2_COUNT + 1))")"
+check "the orphaned secret is kept" "$(b test "$(l_orphans "$L2")" = 1)"
+
+# L3 - a journal means a sidecar ran here, so a world exists somewhere and the
+# refusal stands, whatever the logs were rotated away.
+L3="$L_ROOT/has-journal"
+L3_SECRET="$(printf 'g%.0s' $(seq 1 64))"
+mkdir -p "$L3/data/journal"
+printf '%s\n' "$L3_SECRET" > "$L3/peer-secret.txt"
+chmod 600 "$L3/peer-secret.txt"
+printf '{"seq":1}\n' > "$L3/data/journal/journal.log"
+L3_COUNT="$(l_requests)"
+l_install --data-root "$L3"
+check "a secret beside a journal is still refused" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "the refusal is the one about naming the world" \
+  "$(b contains 'says which' "$OUT")"
+check "nothing was renamed" "$(b test "$(l_orphans "$L3")" = 0)"
+check "the secret is exactly as it was" \
+  "$(b bash -c 'test "$(cat "$1/peer-secret.txt")" = "$2"' _ "$L3" "$L3_SECRET")"
+check "and nothing was enrolled" "$(b test "$(l_requests)" = "$L3_COUNT")"
+
+# L4 - a sidecar log that names a peer this installer cannot use is still proof
+# that a sidecar ran here.
+L4="$L_ROOT/unusable-peer-line"
+L4_SECRET="$(printf 'h%.0s' $(seq 1 64))"
+mkdir -p "$L4/logs"
+printf '%s\n' "$L4_SECRET" > "$L4/peer-secret.txt"
+chmod 600 "$L4/peer-secret.txt"
+printf 'time=2026-01-01T00:00:00Z level=INFO msg="sidecar: listening" peer="two words" relay=%s\n' \
+  "$L_PUBLIC_RELAY" > "$L4/logs/sidecar.log"
+L4_COUNT="$(l_requests)"
+l_install --data-root "$L4"
+check "a peer line the installer cannot use still counts as a world having run" \
+  "$(b bash -c 'test "$1" -eq 1 && case "$2" in *INS-ENROLL*) exit 0 ;; *) exit 1 ;; esac' _ "$RC" "$OUT")" "$OUT"
+check "nothing was renamed there either" "$(b test "$(l_orphans "$L4")" = 0)"
+check "and nothing was enrolled" "$(b test "$(l_requests)" = "$L4_COUNT")"
+
+# L5 - the same rule frees the join-string path: an orphan is not a world, so a
+# private map's join string is not blocked by one.
+L5="$L_ROOT/orphan-then-join"
+L5_SECRET="$(printf 'i%.0s' $(seq 1 64))"
+L5_NEW_SECRET="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+mkdir -p "$L5"
+printf '%s\n' "$L5_SECRET" > "$L5/peer-secret.txt"
+chmod 600 "$L5/peer-secret.txt"
+printf 'multiverse-join/1 wss://private.example.test/contract-b/v4 priv-l5.%s\n' "$L5_NEW_SECRET" \
+  > "$L_ROOT/l5-join.txt"
+L5_COUNT="$(l_requests)"
+l_install --data-root "$L5" --join-string-file "$L_ROOT/l5-join.txt"
+check "a join string over an orphan installs" "$(b test "$RC" -eq 0)" "$OUT"
+check "the world is the one the join string names" \
+  "$(b grep -qF '"peerId": "priv-l5"' "$L5/install-record.json")"
+check "the join string's secret is in place" \
+  "$(b bash -c 'test "$(cat "$1/peer-secret.txt")" = "$2"' _ "$L5" "$L5_NEW_SECRET")"
+check "the orphan is kept beside it" "$(b test "$(l_orphans "$L5")" = 1)"
+check "and no enrollment request was sent" "$(b test "$(l_requests)" = "$L5_COUNT")"
 
 # ---------------------------------------------------------------- the verdict
 
