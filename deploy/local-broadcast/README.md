@@ -81,6 +81,15 @@ Run the watcher's decisions without touching OBS:
 ./deploy/local-broadcast/test-watch-viewers.sh
 ```
 
+Every case runs with `-WhatIf`, so it reaches no OBS and cannot disturb a live broadcast.
+It needs `powershell.exe` and `wslpath`, which means a WSL host with Windows interop, and it prints
+`SKIP` anywhere else.
+`test-config.sh` calls it at the end of its own Windows half.
+
+`test-config.sh` itself needs no Windows and no game, so the `checks` workflow runs it on every
+pull request; the watcher test is run there too and can only skip, because no GitHub-hosted runner
+is a WSL host.
+
 ### Stream profile
 
 The encoder publishes `1280x720` at 30 frames each second and `1500` kbit/s of video with `64`
