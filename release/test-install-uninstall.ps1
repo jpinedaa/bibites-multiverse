@@ -133,6 +133,20 @@ Check "the GUI offers the included portable game" `
     ($guiText -match 'Use the included portable game')
 Check "the GUI offers an existing game" `
     ($guiText -match 'Use a game that is already installed')
+# START-AFTER-INSTALL IS WHY THESE THREE ARE HERE. `Start-Process -Wait` waits on
+# a job object that is not empty until the child AND every descendant has ended,
+# and the default install ends by starting a sidecar and a game that are meant to
+# outlive it - so the window never came back, and the setup around it never wrote
+# the uninstaller, the shortcuts or the Uninstall registry key. The behaviour is
+# measured in release/test-installer-wait.ps1; this is the source-level guard,
+# and it reads code lines only so the comment that explains it cannot satisfy it.
+$guiCode = ((Get-Content -LiteralPath $guiInstaller) | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+Check "the GUI never starts a process with -Wait, which waits on the descendant tree" `
+    (-not ($guiCode -match 'Start-Process[^\r\n]*\s-Wait\b'))
+Check "the GUI waits on the process object it started" `
+    ($guiCode -match '\.WaitForExit\(\)')
+Check "the GUI keeps the handle its exit code is read through" `
+    ($guiCode -match '\$process\.Handle')
 $probe = (& $guiInstaller -Probe | Out-String) | ConvertFrom-Json
 Check "the game search finds a real installed game" `
     (Test-Path -LiteralPath (Join-Path ([string]$probe.foundGame) 'The Bibites.exe') -PathType Leaf)

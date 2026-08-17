@@ -262,7 +262,8 @@ Every pull request and every push to `main` runs `.github/workflows/checks.yml` 
 runners. That workflow needs no game file and no secret. It runs `go vet` for this host and for
 Windows, `go test ./...`, the cross-builds the release and the hosting kit ship, `bash -n` over
 every tracked shell script, `deploy/test-units.sh`, `deploy/test-front-door.sh`, a stub compile of
-the Windows installer script, a PowerShell parse on Windows, and two consistency gates.
+the Windows installer script, a PowerShell parse on Windows with `release/test-installer-wait.ps1`
+beside it, and two consistency gates.
 
 Run the two gates by hand before you push a change to the mod, the sidecar, or the release
 version:
@@ -544,6 +545,12 @@ Do not present a historical rig value as current service state.
 - Target .NET Standard 2.1. Unity 6 assemblies cannot build against the old 2.0 target.
 - Stop the game before plugin deployment. Windows locks the loaded DLL.
 - Run Windows interop commands from a Windows-mounted working directory.
+- `Start-Process -Wait` waits on a job object that is not empty until the child and every
+  descendant has ended. Wait on the returned process object when the child starts a sidecar
+  or a game that is meant to outlive it.
+- With output redirection, `Start-Process -PassThru` returns a process object that holds no
+  handle, and its `ExitCode` then reads as `$null`. Read `.Handle` once while the process is
+  alive if the exit code is going to be needed.
 - Name each forwarded environment variable in `WSLENV`.
 - Map BepInEx logs by content, not launch order.
 - If `LogOutput.log` contains required evidence, copy it before a restart.

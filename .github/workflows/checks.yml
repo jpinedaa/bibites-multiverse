@@ -322,9 +322,19 @@ jobs:
             'release/kit/*.ps1',
             'farend/setup-farend.ps1',
             'release/test-install-uninstall.ps1',
+            'release/test-installer-wait.ps1',
             'deploy/local-broadcast/*.ps1'
           )
           ./release/pscheck.ps1 @paths
+
+      # BLOCKING, and deliberately `shell: powershell` — Windows PowerShell 5.1
+      # is the engine the setup runs the installer window on, and the job-object
+      # wait this test is about is that engine's. It needs no game, no network
+      # and no install: a stub installer under the runner's temp folder stands in
+      # for the real one, and its grandchild is a PowerShell that sleeps.
+      - name: the installer window waits for the installer, not for the world
+        shell: powershell
+        run: ./release/test-installer-wait.ps1
 
       # ADVISORY (E11). Style findings are worth seeing, but a first run must
       # not turn into an open-ended cleanup. Only parse errors block, above.

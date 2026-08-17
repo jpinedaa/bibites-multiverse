@@ -39,6 +39,7 @@ raised only after the release that satisfies it exists.
 | `lib/sidecar-manifest.sh` | The input manifest behind check 3 below, sourced by `make-release.sh`, `check-drift.sh` and `record-tested-build.sh`, so CI runs the gate itself rather than a lookalike |
 | `tracked-binaries.txt` | Every binary file this repository is allowed to track. The `consistency` job diffs the real set against it, so a game assembly cannot land unnoticed |
 | `test-install-uninstall.ps1` | The proof that the Windows uninstall leaves the game as it found it |
+| `test-installer-wait.ps1` | The proof that the installer window waits for the installer and not for the world it starts. Needs no game, no network and no install: it runs the GUI's own wait against a stub, on Windows PowerShell 5.1, and CI runs it |
 | `test-install-uninstall.sh` | The same proof for Linux, and it compares permissions as well as hashes. Runnable with no release build: it stages a kit out of this checkout |
 | `../go/cmd/multiverse-launcher/` | Not in this directory, but built here: `make-release.sh` cross-compiles it into every Windows package as `BibitesMultiverseLauncher.exe`, the installed application the shortcuts open |
 | `dist/` | Build output. **Not tracked** — see `.gitignore`, which says why |
@@ -253,7 +254,7 @@ appears nowhere in it, so a pull request from a fork is safe to run.
 | `go` | `go vet` for this host and for Windows, `go test ./...`, and the same cross-builds the release and the hosting kit perform | `cd go && go vet ./... && go test ./...` |
 | `scripts` | `bash -n` over every tracked `*.sh`, then `deploy/test-units.sh` and `deploy/test-front-door.sh` against a real nginx | `bash -n` over the scripts, then the two `deploy/test-*.sh` |
 | `installer` | `windows-installer.nsi` compiles against a stub payload | `release/check-nsis.sh` |
-| `powershell` | every shipped `*.ps1` parses; PSScriptAnalyzer runs beside it, advisory only | `pwsh -NoProfile -File release/pscheck.ps1 release/kit/*.ps1 farend/setup-farend.ps1` — Windows only |
+| `powershell` | every shipped `*.ps1` parses; the installer window's wait returns while the world it started is still running; PSScriptAnalyzer runs beside them, advisory only | `pwsh -NoProfile -File release/pscheck.ps1 release/kit/*.ps1 farend/setup-farend.ps1` and `powershell.exe -NoProfile -ExecutionPolicy Bypass -File release/test-installer-wait.ps1` — Windows only |
 | `consistency` | `release/bump-version.sh --check`, `release/check-drift.sh`, and the tracked binary files against `release/tracked-binaries.txt` | `release/bump-version.sh --check && release/check-drift.sh` |
 
 `consistency` checks out shallow. Nothing in it reads history: `check-drift.sh` compares this tree
@@ -261,7 +262,9 @@ against values recorded in `docs/support-matrix.md`, and both sides of every com
 HEAD's own tree. A step that walks history has to restore `fetch-depth: 0` in the same change.
 
 **What CI still cannot do.** The two install-and-uninstall suites need a real game, and
-`test-install-uninstall.ps1` needs Windows as well: CI parses that file, it does not run it. The
+`test-install-uninstall.ps1` needs Windows as well: CI parses that file, it does not run it.
+`test-installer-wait.ps1` needs neither, so CI runs that one on Windows PowerShell 5.1 — the engine
+the setup uses, and the one whose `Start-Process -Wait` waits on a whole descendant tree. The
 launcher's Windows process primitives — the detached spawn, the owner-only credential file, and the
 ask-before-forcing stop — compile here and are proved only on Windows. And the build's strongest
 checks, 1, 2, and 4 above, need the proprietary game bytes, which is why the release build runs on
