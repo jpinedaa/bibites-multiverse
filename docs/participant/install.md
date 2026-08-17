@@ -522,11 +522,18 @@ way a start script spells an assignment differs
 | Migration exclusion | `MULTIVERSE_MIGRATION_EXCLUDE` (installer: `-ExcludeSpecies` / `--exclude-species`) | `excludeSpecies` | `Basic bibite` | It keeps founder stock off the lanes. **An empty value turns the policy off**, which floods a shared map with seed genomes and looks entirely normal in the census while it happens — so the installer and the launcher both refuse an empty value and make you say `-NoMigrationExclusion` / `--no-migration-exclusion` if you mean it, and print what it costs when you do |
 | Save interval and retained saves | `MULTIVERSE_SAVE_MINUTES`, `MULTIVERSE_SAVE_KEEP` (installer: `-SaveMinutes`, `-SaveKeep` / `--save-minutes`, `--save-keep`) | `saveMinutes`, `saveKeep` | `10` and `6` | Six copies of your world on your disk that you did not budget for — measured at about 2.4–2.9 MB in total on this project's own worlds. The interval is also how often your world pauses to write itself out — see [diagnose.md](diagnose.md). With several worlds on one computer, give each a different interval |
 | Save on quit | `MULTIVERSE_SAVE_ON_QUIT` (installer: `-SaveOnQuit on\|off` / `--save-on-quit on\|off`) | `saveOnQuit` | `true` | Your world is written out when the game closes, so stopping is not losing. Every stop path waits for that save rather than killing the game outright, except a headless world on Windows, which has no window to close |
+| Speed | `MULTIVERSE_STARTUP_TIME_SCALE` | not in the profile — edit the start script | `10` | Your world starts at **x10** rather than the game's own x1, which is the speed the rest of the map runs at. It costs nothing on disk and nothing on the network; it costs CPU on your computer, and the game itself limits that — it holds the speed down to keep your frame rate at 15, so a slower machine simply runs slower and stays smooth. `off` means the game's own x1 |
 
-The same names appear in the game's own settings file — `<game folder>\BepInEx\config\`
+**The speed is the one you can change without editing anything.** Drag the speed slider in the
+game and it stays where you put it for the rest of that session — nothing re-applies the default
+while a world is loaded. The variable decides where the *next* start begins, and every start after
+that.
+
+The first four names appear in the game's own settings file — `<game folder>\BepInEx\config\`
 `dev.multiverse.bibites.cfg` on Windows, `<game folder>/BepInEx/config/dev.multiverse.bibites.cfg`
 on Linux — as `ExportEdges`, `MigrationExcludeSpecies`, `SaveMinutes`, `SaveKeep` and
-`SaveOnQuit`. **The environment wins**, because the mod reads it before that file. That is also why
+`SaveOnQuit`. The speed is not among them: it has no entry in that file on purpose, because every
+world on one computer shares that one file and they would fight over it. **The environment wins**, because the mod reads it before that file. That is also why
 several worlds can share one game folder on Windows: each game process gets its own environment.
 Edit the profile on Windows or the start script on Linux; the config file is there for somebody
 starting the game another way.
@@ -535,7 +542,7 @@ starting the game another way.
 you change a world's settings in the launcher, and the launcher says so when you do. On Windows the
 launcher is what your world runs from; the script stays for scripted and advanced use.
 
-Every default this release ships with — these four, and the two the operator side has — is
+Every default this release ships with — these five, and the two the operator side has — is
 audited in [`../defaults-audit.md`](../defaults-audit.md), with what a bare install does and a
 verdict.
 

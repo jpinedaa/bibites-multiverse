@@ -73,6 +73,12 @@ UNINSTALL_NAME='uninstall-bibites-multiverse.sh'
 GAME_EXE='The Bibites.x86_64'
 PLATFORM='Linux'
 
+# The speed a world starts at, written into $START_NAME beside the mod's other
+# settings. It is a constant rather than an option, like the portal switches and
+# unlike the save settings: it is not part of this world's identity, and the
+# in-game speed slider already moves it for a session.
+STARTUP_TIME_SCALE='10'
+
 JOIN_STRING_FILE=''
 RELAY_URL=''
 CA_FILE=''
@@ -1527,11 +1533,15 @@ say "                     $SAVE_KEEP copies of your world on your disk. The inte
 say "                     often your world pauses to write itself out"
 say "  save on quit       $SAVE_ON_QUIT"
 say "                     your world is written out when the game closes, so stopping is not losing"
+say "  speed              starts at x$STARTUP_TIME_SCALE"
+say "                     the game's own speed is x1, and the map around you does not run that slow."
+say "                     Your machine is not asked for more than it can draw: the game holds the"
+say "                     speed down to keep the picture smooth. The in-game slider still moves it"
 printf '\n'
-say "All four are set explicitly in $START_NAME, and you can edit them there. The"
-say "names in that file are the mod's own: MULTIVERSE_EXPORT_EDGES,"
-say "MULTIVERSE_MIGRATION_EXCLUDE, MULTIVERSE_SAVE_MINUTES, MULTIVERSE_SAVE_KEEP"
-say "and MULTIVERSE_SAVE_ON_QUIT."
+say "Every one of them is set explicitly in $START_NAME, and you can edit them"
+say "there. The names in that file are the mod's own: MULTIVERSE_EXPORT_EDGES,"
+say "MULTIVERSE_MIGRATION_EXCLUDE, MULTIVERSE_SAVE_MINUTES, MULTIVERSE_SAVE_KEEP,"
+say "MULTIVERSE_SAVE_ON_QUIT and MULTIVERSE_STARTUP_TIME_SCALE."
 
 # ---------------------------------------------------------------- 9. the scripts
 
@@ -1600,6 +1610,13 @@ export MULTIVERSE_SIDECAR_PORT="$SIDECAR_PORT"
 export MULTIVERSE_WORLD="$WORLD"
 export MULTIVERSE_PORTAL='true'
 export MULTIVERSE_PORTAL_FLOURISHES='true'
+# The speed your world starts at. The game itself resets every world it loads to
+# x1, in code, so without this line your world would start ten times slower than
+# the map around it. It is a TARGET: the game holds the applied speed below it
+# whenever your machine cannot draw fast enough, which costs simulation speed and
+# not smoothness. Drag the speed slider in game to change it for a session, or
+# edit this line to change what every start does. 'off' means the game's own x1.
+export MULTIVERSE_STARTUP_TIME_SCALE='@@STARTUPTIMESCALE@@'
 # The link between the game and the sidecar runs on this machine's loopback and
 # is authenticated: the sidecar mints this file at its first start, readable by
 # you only, and the game presents its contents on every connection. It is NOT
@@ -1829,6 +1846,7 @@ expand_template() {
   body="${body//@@SAVEMINUTES@@/$SAVE_MINUTES}"
   body="${body//@@SAVEKEEP@@/$SAVE_KEEP}"
   body="${body//@@SAVEONQUIT@@/$SAVE_ON_QUIT_VALUE}"
+  body="${body//@@STARTUPTIMESCALE@@/$STARTUP_TIME_SCALE}"
   body="${body//@@SIDECARPORT@@/$SIDECAR_PORT}"
   body="${body//@@CAFILE@@/$CA_STORED}"
   body="${body//@@GAMEEXE@@/$GAME_EXE}"

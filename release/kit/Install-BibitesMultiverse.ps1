@@ -175,6 +175,13 @@ $LauncherName = 'BibitesMultiverseLauncher.exe'
 $ProfilesDirName = 'profiles'
 $ProfileFormat = 'bibites-multiverse/launcher-profile/1'
 
+# The speed a world starts at, written into $StartName beside the mod's other
+# settings. It is a constant rather than a parameter, like the portal switches
+# and unlike the save settings: it is not part of this world's identity, and the
+# in-game speed slider already moves it for a session. The launcher writes the
+# same value (go/internal/launcher/run.go).
+$StartupTimeScale = '10'
+
 $discoveryScript = Join-Path $Here 'Find-BibitesGame.ps1'
 if (-not (Test-Path -LiteralPath $discoveryScript -PathType Leaf)) {
     Write-Host "STOP [INS-CHECKSUM]: Find-BibitesGame.ps1 is missing." -ForegroundColor Red
@@ -1606,11 +1613,15 @@ Say "                     $SaveKeep copies of your world on your disk. The inter
 Say "                     often your world pauses to write itself out"
 Say "  save on quit       $SaveOnQuit"
 Say "                     your world is written out when the game closes, so stopping is not losing"
+Say "  speed              starts at x$StartupTimeScale"
+Say "                     the game's own speed is x1, and the map around you does not run that slow."
+Say "                     Your machine is not asked for more than it can draw: the game holds the"
+Say "                     speed down to keep the picture smooth. The in-game slider still moves it"
 Write-Host ""
-Say "All four are set explicitly in $StartName, and you can edit them there. The"
-Say "names in that file are the mod's own: MULTIVERSE_EXPORT_EDGES,"
-Say "MULTIVERSE_MIGRATION_EXCLUDE, MULTIVERSE_SAVE_MINUTES, MULTIVERSE_SAVE_KEEP"
-Say "and MULTIVERSE_SAVE_ON_QUIT."
+Say "Every one of them is set explicitly in $StartName, and you can edit them"
+Say "there. The names in that file are the mod's own: MULTIVERSE_EXPORT_EDGES,"
+Say "MULTIVERSE_MIGRATION_EXCLUDE, MULTIVERSE_SAVE_MINUTES, MULTIVERSE_SAVE_KEEP,"
+Say "MULTIVERSE_SAVE_ON_QUIT and MULTIVERSE_STARTUP_TIME_SCALE."
 
 # ---------------------------------------------------------------- 9. the scripts
 
@@ -1697,6 +1708,13 @@ $env:MULTIVERSE_SIDECAR_PORT      = $SidecarPort
 $env:MULTIVERSE_WORLD             = $World
 $env:MULTIVERSE_PORTAL            = 'true'
 $env:MULTIVERSE_PORTAL_FLOURISHES = 'true'
+# The speed your world starts at. The game itself resets every world it loads to
+# x1, in code, so without this line your world would start ten times slower than
+# the map around it. It is a TARGET: the game holds the applied speed below it
+# whenever your machine cannot draw fast enough, which costs simulation speed and
+# not smoothness. Drag the speed slider in game to change it for a session, or
+# edit this line to change what every start does. 'off' means the game's own x1.
+$env:MULTIVERSE_STARTUP_TIME_SCALE = '@@STARTUPTIMESCALE@@'
 # The link between the game and the sidecar runs on this machine's loopback and
 # is authenticated: the sidecar mints this file at its first start, readable by
 # you only, and the game presents its contents on every connection. It is NOT
@@ -1919,6 +1937,7 @@ function Expand-Template {
                  Replace('@@SAVEMINUTES@@',    [string]$SaveMinutes).
                  Replace('@@SAVEKEEP@@',       [string]$SaveKeep).
                  Replace('@@SAVEONQUIT@@',     $saveOnQuitValue).
+                 Replace('@@STARTUPTIMESCALE@@', $StartupTimeScale).
                  Replace('@@SIDECARPORT@@',    [string]$SidecarPort).
                  Replace('@@STARTNAME@@',      $StartName).
                  Replace('@@STOPNAME@@',       $StopName)

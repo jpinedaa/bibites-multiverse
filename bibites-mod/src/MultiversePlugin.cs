@@ -11,7 +11,7 @@ namespace BibitesMultiverse
     {
         public const string Guid = "dev.multiverse.bibites";
         public const string Name = "Bibites Multiverse";
-        public const string Version = "0.6.5";
+        public const string Version = "0.6.6";
 
         /// <summary>Set this to 1/true/yes to turn the auto-test on without editing the config file.</summary>
         public const string AutoTestEnvironmentVariable = "MULTIVERSE_AUTOTEST";
@@ -53,6 +53,12 @@ namespace BibitesMultiverse
             // would spend the first seconds fighting it.
             MinFpsGovernor.Apply(Guid);
 
+            // Also the game's own behaviour rather than the multiverse's, and also not gated on the
+            // client: SimulationManager.Start resets every world it loads to x1, in code, and this is
+            // what puts the configured speed back. Created before the world loader below, so it is
+            // already watching when a world arrives.
+            StartStartupTimescale();
+
             // The saver is created **before** the client, because the client hands it the "a MIGRATE_IN
             // is waiting" gate of Risk 3 at Initialize time and AddComponent runs Awake immediately.
             StartWorldSaver(config);
@@ -60,6 +66,25 @@ namespace BibitesMultiverse
             StartDevCommands(config);
             StartSpectatorDirector();
             StartAutoTest();
+        }
+
+        /// <summary>
+        /// The speed a world starts at (<see cref="StartupTimescale"/>). Armed for every instance,
+        /// because the reset to x1 it answers is the game's own and happens whether or not this world
+        /// is on a map.
+        /// </summary>
+        private void StartStartupTimescale()
+        {
+            try
+            {
+                gameObject.AddComponent<StartupTimescale>();
+            }
+            catch (Exception e)
+            {
+                Log.LogError(
+                    $"{StartupTimescale.Prefix} the startup time scale could not be armed — every world this game " +
+                    $"loads will start at the game's own x1: {e}");
+            }
         }
 
         private MultiverseConfig ReadConfig()

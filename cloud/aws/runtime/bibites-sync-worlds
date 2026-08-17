@@ -128,6 +128,15 @@ while IFS= read -r row; do
     printf 'MULTIVERSE_WORLD=%q\n' "$world_name"
     printf 'MULTIVERSE_PORTAL=%q\n' false
     printf 'MULTIVERSE_PORTAL_FLOURISHES=%q\n' false
+    # THE SPEED THE WORLD COMES UP AT, applied by the mod itself at world load.
+    # bibites-timescale@ still sends the same number over the command file, and
+    # it still has to: it is what moves a running world without a restart. What
+    # this line buys is the restart the oneshot cannot see — the game's own code
+    # resets every world it loads to x1, so before it a world that systemd
+    # restarted after an OOM kill came back at x1 and stayed there (observed on
+    # slot-5, 2026-08-16). Now the world comes back at its own target with no
+    # unit involved.
+    printf 'MULTIVERSE_STARTUP_TIME_SCALE=%q\n' "$target"
     printf 'MULTIVERSE_CONTRACT_A_TOKEN_FILE=%q\n' "$sidecar_data/contract-a.token"
     printf 'MULTIVERSE_CMD_FILE=%q\n' "$command_file"
   } > "$env_file.new"

@@ -37,7 +37,7 @@ func TestNoSecretFlagExists(t *testing.T) {
 }
 
 // TestStartDryRunPlan is the golden form of the launch: the five sidecar flags
-// and the ten MULTIVERSE_* variables, in their frozen order.
+// and the eleven MULTIVERSE_* variables, in their frozen order.
 func TestStartDryRunPlan(t *testing.T) {
 	h := newHarness(t)
 	p := h.profile("default", "Multiverse", 8787)
@@ -71,6 +71,7 @@ game: %s
     MULTIVERSE_WORLD=Multiverse
     MULTIVERSE_PORTAL=true
     MULTIVERSE_PORTAL_FLOURISHES=true
+    MULTIVERSE_STARTUP_TIME_SCALE=10
     MULTIVERSE_CONTRACT_A_TOKEN_FILE=%s
 `,
 		h.install().SidecarExe(), testRelayURL, p.DataDir(), p.CredentialFile(),
@@ -91,9 +92,9 @@ game: %s
 	}
 	mustContain(t, "the headless plan", h.out(), "  arguments: -batchmode -nographics")
 
-	// The ten variables are exactly ten, and they are the mod's own names.
-	if got := len(multiverseEnv(p)); got != 10 {
-		t.Fatalf("the game is given %d MULTIVERSE_* variables, want 10", got)
+	// The eleven variables are exactly eleven, and they are the mod's own names.
+	if got := len(multiverseEnv(p)); got != 11 {
+		t.Fatalf("the game is given %d MULTIVERSE_* variables, want 11", got)
 	}
 	// A leftover variable in the parent environment is replaced, not appended.
 	merged := gameEnvironment([]string{"MULTIVERSE_WORLD=stale", "PATH=/bin"}, p)

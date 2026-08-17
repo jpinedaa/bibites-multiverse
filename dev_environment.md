@@ -50,7 +50,7 @@ source at a glance.
 | Component | Public development baseline |
 |---|---|
 | Supported game | *The Bibites* `0.6.3.1` |
-| Plugin | `0.6.5` |
+| Plugin | `0.6.6` |
 | Contract A | `contract-a/2.4` |
 | Contract B | `contract-b/4.1` |
 | Genome projection | `bb8-genome/1` |
@@ -438,6 +438,11 @@ The target is not proof of simulation throughput.
 
 The plugin's headless governor option can disable the minimum-FPS servo.
 It does not change the user's persisted game configuration.
+
+`SimulationManager.Start` resets the target to x1 on every simulation scene.
+That is a hardcoded write, not a persisted setting: nothing on disk holds a speed.
+The plugin re-applies `MULTIVERSE_STARTUP_TIME_SCALE` on each world load, once.
+It does not re-apply it afterwards, so the slider and the `timescale` verb keep the speed.
 
 Use achieved speed for performance claims.
 Record population and simulation tick rate beside every speed comparison.

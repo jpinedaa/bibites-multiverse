@@ -307,7 +307,8 @@ func (a *app) startGame(p Profile, opts startOptions, events *eventLog) int {
 	if opts.headless {
 		a.print("It runs with nothing drawn. The simulation is unchanged; only the picture is gone.")
 	}
-	a.say("It saves itself every %s minutes, keeping %d.", formatMinutes(p.SaveMinutes), p.SaveKeep)
+	a.say("It saves itself every %s minutes, keeping %d, and runs at x%s.",
+		formatMinutes(p.SaveMinutes), p.SaveKeep, startupTimeScale)
 	a.say("logs: %s  and  %s", p.SidecarLog(), p.BepInExLog())
 	a.say("Leave both running. Stop this world when you are done.")
 	return exitOK
@@ -351,11 +352,22 @@ func multiverseEnv(p Profile) [][2]string {
 		{"MULTIVERSE_WORLD", p.World},
 		{"MULTIVERSE_PORTAL", "true"},
 		{"MULTIVERSE_PORTAL_FLOURISHES", "true"},
+		{"MULTIVERSE_STARTUP_TIME_SCALE", startupTimeScale},
 		{"MULTIVERSE_CONTRACT_A_TOKEN_FILE", p.ContractATokenFile()},
 	}
 }
 
-// gameEnvironment merges this world's ten variables into the parent
+// startupTimeScale is the speed every world starts at, and it is a literal here
+// for the same reason MULTIVERSE_PORTAL is: it is a mod setting the package
+// chooses, not a per-world identity, and an old profile has no field for it to
+// come from. The game itself resets every world it loads to x1 in code, so
+// without this line a participant's world starts at x1 however fast the map
+// around it runs. It is a TARGET — the game's minimum-FPS servo holds the
+// applied value below it on a machine that cannot draw fast enough — and a
+// participant moves it for a session with the in-game speed slider.
+const startupTimeScale = "10"
+
+// gameEnvironment merges this world's eleven variables into the parent
 // environment. A variable this world sets REPLACES a pre-existing one rather
 // than being appended beside it, so a leftover MULTIVERSE_WORLD in the parent
 // shell cannot decide which world is loaded.

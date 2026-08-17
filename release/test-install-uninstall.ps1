@@ -324,8 +324,8 @@ Set-Content -Path (Join-Path $aGame 'BepInEx\config\dev.multiverse.bibites.cfg')
 Set-Content -Path (Join-Path $aGame 'BepInEx\LogOutput.log') -Value 'a log' -Encoding ASCII
 Set-Content -Path (Join-Path $aGame 'BepInEx\cache\chainloader.dat') -Value 'cache' -Encoding ASCII
 
-# The generated start script: it has to parse, and it has to set all five
-# settings explicitly - including the ones that match the mod's own default,
+# The generated start script: it has to parse, and it has to set every one of
+# its settings explicitly - including the ones that match the mod's own default,
 # which is the whole point of writing them out (Decision 7).
 $startScript = Join-Path $KitDir 'Start-Multiverse.ps1'
 if (Test-Path $startScript) {
@@ -339,7 +339,8 @@ if (Test-Path $startScript) {
                            'MULTIVERSE_MIGRATION_EXCLUDE = ''Basic bibite''',
                            'MULTIVERSE_SAVE_MINUTES      = ''10''',
                            'MULTIVERSE_SAVE_KEEP         = ''6''',
-                           'MULTIVERSE_SAVE_ON_QUIT      = ''true''')) {
+                           'MULTIVERSE_SAVE_ON_QUIT      = ''true''',
+                           'MULTIVERSE_STARTUP_TIME_SCALE = ''10''')) {
         Check ("the start script sets " + $setting.Split('=')[0].Trim() + " explicitly") `
             ($startText.Contains('$env:' + $setting))
     }

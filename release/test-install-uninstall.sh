@@ -292,7 +292,8 @@ if [ -f "$START" ]; then
     "MULTIVERSE_MIGRATION_EXCLUDE='Basic bibite'" \
     "MULTIVERSE_SAVE_MINUTES='10'" \
     "MULTIVERSE_SAVE_KEEP='6'" \
-    "MULTIVERSE_SAVE_ON_QUIT='true'"
+    "MULTIVERSE_SAVE_ON_QUIT='true'" \
+    "MULTIVERSE_STARTUP_TIME_SCALE='10'"
   do
     check "the start script sets ${setting%%=*} explicitly" \
       "$(b contains "export $setting" "$START_TEXT")"
