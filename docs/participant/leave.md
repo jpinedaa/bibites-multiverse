@@ -142,12 +142,19 @@ is the string this operator conversation needs.
 
 ## What you cannot take with you
 
-**The record.** Every crossing your world made is in the map's archive, and nothing evicts from
-it — that is what makes it a record. If a name from your world needs to stop being shown, the
-operator can suppress it **at the view**: it disappears from the map's page and its terminal
-view, your world is untouched, and nothing is asked of your machine. **What cannot be promised
-is removal from the record.** That distinction is deliberate and it is stated here rather than
-discovered during a support conversation.
+**The record.** Every crossing your world made is counted in the map's archive, and those counts,
+the dates and the family links are kept for the whole run and beyond — that is what makes it a
+record. The individual crossing lines behind them are kept for 30 days on the server, and in a
+compressed copy away from it for the length of the run; a line only leaves the server once that
+copy is confirmed.
+
+**That schedule is a capacity rule and it is not a deletion service.** It ages lines by date. It
+cannot pick out a world, a species or an organism, and asking it to is not something it can do.
+If a name from your world needs to stop being shown, the operator can suppress it **at the
+view**: it disappears from the map's page and its terminal view, your world is untouched, and
+nothing is asked of your machine. **What cannot be promised is removal from the record.** That
+distinction is deliberate and it is stated here rather than discovered during a support
+conversation.
 
 ## When the map itself ends
 

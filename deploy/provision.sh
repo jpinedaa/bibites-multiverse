@@ -552,8 +552,10 @@ EOF
     write_file /etc/multiverse/deny-list 0644 "root:$MV_GROUP" <<'EOF'
 # B30's operator-side render deny list. One species name or peer:<peerId> per
 # line; # starts a comment. It suppresses THE VIEW AND NOT THE RECORD — the
-# ledger goes on holding what happened and nothing here evicts from it, so
-# removal from the record is not promised and must not be promised to anybody.
+# record goes on holding what happened and nothing here removes anything from
+# it, so removal from the record is not promised and must not be promised to
+# anybody. The ledger's own window ages LINES BY DATE and is not a takedown
+# either: it cannot name a peer, a species or an organism.
 # The archive re-reads this file in place: moderating costs an edit, never a
 # restart.
 EOF

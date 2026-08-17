@@ -1383,10 +1383,13 @@ func TestTheTreeBadgesARootThatIsNotTheBeginning(t *testing.T) {
 	}
 
 	// And the tab prints the record's own floor, which is the other half of the
-	// answer: the chain stops where the archive's ancestry starts.
+	// answer: the chain stops where the archive's ancestry starts. The wording is
+	// EVER RECORDED and not STILL KEPT (§26, B39): the floor is an aggregate the
+	// archive keeps forever, so it does not move when older crossing lines age
+	// off the host under the ledger's window.
 	for _, want := range []string{"function trDay", "x.ancestrySinceMs",
 		`termEl("span", "recordfloor", "ancestry recorded since")`,
-		"the oldest crossing kept here that names a parent"} {
+		"the oldest crossing this archive ever recorded that names a parent"} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the tree tab never states the record's floor: %q missing", want)
 		}

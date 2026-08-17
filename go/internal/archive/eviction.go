@@ -100,8 +100,9 @@ func (a *Archive) evictionLoop() {
 		"horizon", a.cfg.GenomeHorizon.String(), "pass", interval.String(),
 		"store", a.genomes.Dir(),
 		"scope", "the content-addressed genome store ONLY",
-		"note", "the migration ledger is kept FOREVER and nothing evicts from it (D11, "+
-			"contract-b-m4.md §10, §23 B33). A pruned hash stays a lineage node and answers "+
+		"note", "this pass NEVER removes a migration ledger line (D11, contract-b-m4.md §10, "+
+			"§23 B33); the record of what crossed is kept forever, and the ledger's own window "+
+			"is a separate knob (§26, B40). A pruned hash stays a lineage node and answers "+
 			"exactly like a hash no peer ever served")
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -157,7 +158,8 @@ func (a *Archive) evictPass(now time.Time) bb8.EvictResult {
 			"examined", res.Examined, "horizon", a.cfg.GenomeHorizon.String(),
 			"totalRemoved", totalEvicted, "totalBytes", totalBytes,
 			"gapsRetired", totalGaps,
-			"ledger", "untouched: nothing evicts from the record (§23, B33)")
+			"ledger", "untouched by this pass: the record of what crossed is kept forever "+
+				"and the ledger's window is a separate knob (§23, B33; §26, B40)")
 	}
 	return res
 }

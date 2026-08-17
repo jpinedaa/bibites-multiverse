@@ -351,8 +351,12 @@ and a change that reaches only the participant pages leaves the product contradi
 - **The live console.** The status page's own tooltips say *"keeps a permanent record of every
   migration"*, *"THE RECORD OF WHAT HAPPENED IS KEPT FOREVER AND IS NEVER AFFECTED BY THIS"* under
   the retention horizon, and the status line reads *"(the ledger is kept forever)"*. These are
-  published text and change with the promise. The genealogy's record-floor caption becomes a
-  **rolling** date rather than a fixed one, and its tooltip currently tells a reader that the top
+  published text and change with the promise. ~~The genealogy's record-floor caption becomes a
+  **rolling** date rather than a fixed one~~ — **corrected 2026-08-17, when the texts were
+  amended: the ratified `contract-b-m4.md` §26 B39 puts the earliest record that ever carried an
+  ancestry edge on the normative list of folds kept forever, so the floor does NOT roll.** One
+  word changed: the caption said the oldest crossing *kept here* and now says the oldest crossing
+  this archive *ever recorded*. Its tooltip currently tells a reader that the top
   of a family is the edge of the record — which after this change is the edge of the aggregate,
   not of the window.
 - **The command-line and diagnostic surfaces.** The `--genome-horizon` help says *"IT NEVER

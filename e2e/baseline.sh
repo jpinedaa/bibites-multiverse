@@ -554,9 +554,12 @@ write_report() {
     printf 'series is in `population-trend.txt`.\n\n'
 
     printf '## The archive — cross-world migration flow\n\n'
-    printf '`migrations.jsonl` holds %s lines. It is CUMULATIVE across every earlier run, so a\n' \
+    printf 'The ledger holds %s lines. It is CUMULATIVE across every earlier run INSIDE THE\n' \
       "$(cat "$dir/archive-lines.txt")"
-    printf 'T1 comparison must subtract these totals rather than read the T1 totals as "overnight".\n\n```\n'
+    printf 'ARCHIVE RETENTION WINDOW, so a T1 comparison must subtract these totals rather than\n'
+    printf 'read the T1 totals as "overnight". Where a window is set, a line count is a count of\n'
+    printf 'what is still ON THE HOST and not of everything ever recorded; the cumulative counts\n'
+    printf 'that never age out are in the archive roll-up, not in this number.\n\n```\n'
     sed -n '1,/^migrantEntityIds:/p' "$dir/archive-summary.txt" | sed '$d'
     printf '```\n\n'
     printf 'The %s distinct migrant entity IDs are listed in full at the end of\n' \
