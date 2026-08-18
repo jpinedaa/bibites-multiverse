@@ -29,7 +29,12 @@
       * Start-Multiverse.ps1 and Stop-Multiverse.ps1
       * the launcher's profiles directory: one file for every world this
         install added, the name of the world the launcher had selected, and
-        each of those worlds' recorded process ids and lock file
+        each of those worlds' recorded process ids and lock file. A profile
+        goes with the installation it describes, with or without
+        -RemoveWorldData - the world's own data is not in it and stays where it
+        is - and that is what leaves the application directory empty, so the
+        step below can take the directory itself away and the setup's own
+        uninstaller finds nothing left to trip over
       * the copy of a private map's certificate authority
       * that certificate authority from your own user trust store, if the
         installer imported it and only then
@@ -231,6 +236,16 @@ Say "installed: $($record.installedUtc)   release $($record.release)"
 Say "game     : $($record.gameDir)"
 Say "world id : $($record.peerId)"
 
+# The data root this install recorded for itself, read once. Every question
+# about what is inside this install's own folder - which game copy is the
+# managed one, which paths a profile may name - is measured against it, because
+# the record's dataRoot and the paths beside it were written by one run of the
+# installer and cannot disagree with each other.
+$recordedDataRoot = ''
+if ($record.PSObject.Properties.Match('dataRoot').Count -gt 0) {
+    $recordedDataRoot = [string]$record.dataRoot
+}
+
 # WHERE THE LEDGER IS KEPT. Beside the world's own logs, because the data root
 # survives an ordinary uninstall whole - the journal, the logs and the credential
 # are what this script keeps by default, and a reader sent here by a refusal
@@ -359,6 +374,12 @@ function Get-LauncherProfile {
 # drive root, and not this install's game folder, application directory,
 # profiles directory or the user's own profile folder - nor a parent of any of
 # them. When the answer is "I cannot tell", the file is left alone.
+#
+# WHAT COUNTS AS "this install's game folder" IS Get-ProtectedRoot'S ANSWER, not
+# the record's gameDir read raw: the complete edition's game folder lives INSIDE
+# the data root, and protecting a folder this same run reclaims made every
+# complete-edition data root fail this check and left the profiles - and the
+# application directory holding them - behind for ever.
 function Test-SafeDataRoot {
     param([string]$Path, [string[]]$Protected = @())
     if (-not $Path) { return $false }
@@ -375,7 +396,13 @@ function Test-SafeDataRoot {
         $target = $target.TrimEnd('\', '/')
         if (-not $target) { continue }
         if ($me -eq $target) { return $false }
-        if ($target.StartsWith(($me + '\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+        # The platform's own separator rather than a literal backslash: both
+        # sides have been through GetFullPath, which on Windows normalises a
+        # forward slash to a backslash, so this is the same comparison it always
+        # made - and it is one release/test-runtime-rules.ps1 can drive from a
+        # machine that is not Windows.
+        if ($target.StartsWith(($me + [System.IO.Path]::DirectorySeparatorChar),
+                               [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
     }
     return $true
 }
@@ -431,6 +458,39 @@ function Test-ManagedRuntimePath {
     return $true
 }
 
+function Get-ProtectedRoot {
+    # THE PATHS NO PROFILE MAY NAME AS A WORLD'S DATA ROOT - minus the one this
+    # uninstall removes itself.
+    #
+    # Test-SafeDataRoot refuses a data root that CONTAINS a protected path, and
+    # the game folder is protected: a profile claiming the folder that holds
+    # somebody's game as its data root would have this script deleting inside it.
+    # THE COMPLETE EDITION'S GAME FOLDER IS INSIDE THE DATA ROOT BY DESIGN -
+    # <data root>\runtimes\<sha> - so that rule made every complete-edition data
+    # root "unsafe", against a folder this very run has just reclaimed. What it
+    # cost was never the world's data, which is kept for its own reasons and was
+    # not at risk: it was the profiles. Every profile was left in place "because
+    # its data root is not a path this script will act on", profiles\ was then
+    # not empty, the application folder holding it was not empty either, and the
+    # setup's own uninstaller could not take its directory away - so an install
+    # that had been removed still had a folder, a profile and an entry, all
+    # describing a world that was no longer installed.
+    #
+    # A MANAGED RUNTIME IS THEREFORE NOT PROTECTED FROM THIS SCRIPT, because this
+    # script is what removes it. Nothing else is dropped: the application folder,
+    # the profiles folder, the kit and %USERPROFILE% still refuse, and a game
+    # folder somebody CHOSE - an add-on install's Steam copy, or anything else
+    # Test-ManagedRuntimePath does not accept - is protected exactly as before.
+    param([string[]]$Paths, [string]$DataRoot)
+    $out = New-Object System.Collections.ArrayList
+    foreach ($path in $Paths) {
+        if (-not $path) { continue }
+        if (Test-ManagedRuntimePath ([string]$path) $DataRoot) { continue }
+        [void]$out.Add([string]$path)
+    }
+    return @($out.ToArray())
+}
+
 if (Test-ProcessUnder 'The Bibites' $record.gameDir $GameLockProbe) {
     Stop-Uninstall ("The Bibites is running from $($record.gameDir). Close it first; Windows holds " +
                     "the plugin open while the game runs. Nothing was removed.")
@@ -449,8 +509,11 @@ if ($record.PSObject.Properties.Match('profiles').Count -gt 0 -and
 }
 $profileFiles = @(Get-LauncherProfileFile $profilesRoot)
 
-# The paths no profile may ever name as its data root.
-$protectedRoots = @([string]$record.gameDir, [string]$record.kitDir, $profilesRoot, $env:USERPROFILE)
+# The paths no profile may ever name as its data root - this install's own game
+# folder among them, unless that folder is the managed game copy this run
+# reclaims itself. Get-ProtectedRoot has the whole of that reasoning.
+$protectedRoots = @(Get-ProtectedRoot @([string]$record.gameDir, [string]$record.kitDir,
+                                        $profilesRoot, $env:USERPROFILE) $recordedDataRoot)
 if ($record.PSObject.Properties.Match('program').Count -gt 0 -and
     $record.program.PSObject.Properties.Match('root').Count -gt 0) {
     $protectedRoots += [string]$record.program.root
@@ -465,7 +528,7 @@ foreach ($profilePath in $profileFiles) {
     $profileData = Get-LauncherProfile $profilePath
     if (-not $profileData) { continue }
     $profileRoot = [string]$profileData.dataRoot
-    if (-not (Test-SafeDataRoot $profileRoot (@($protectedRoots) + @([string]$profileData.gameDir)))) { continue }
+    if (-not (Test-SafeDataRoot $profileRoot (@($protectedRoots) + @(Get-ProtectedRoot @([string]$profileData.gameDir) $recordedDataRoot)))) { continue }
     foreach ($pidFileName in $profilePidFiles.Keys) {
         $pidFilePath = Join-Path $profileRoot $pidFileName
         if (Test-ProcessRecorded $pidFilePath $profilePidFiles[$pidFileName]) {
@@ -550,10 +613,6 @@ if (-not $hasRuntime -or -not $record.runtime.managedByThisInstaller) {
     }
 
     $runtimeRoot = [string]$record.runtime.root
-    $recordedDataRoot = ''
-    if ($record.PSObject.Properties.Match('dataRoot').Count -gt 0) {
-        $recordedDataRoot = [string]$record.dataRoot
-    }
 
     # DID ANY FILE THIS INSTALL PUT THERE SURVIVE? That is what decides whether
     # the folder is still somebody's game copy or only what is left of one.
@@ -606,8 +665,9 @@ if (-not $hasRuntime -or -not $record.runtime.managedByThisInstaller) {
             Say "so it goes whole - a game folder with no game in it serves nobody and is exactly"
             Say "what an install over it cannot repair."
             if (-not $DryRun) { Remove-Item -LiteralPath $runtimeRoot -Recurse -Force }
-            [void]$removed.Add(("{0}   ({1} file(s) created by the game and BepInEx after the install, " +
-                                "and the managed game copy around them)") -f $runtimeRoot, $runtimeResidue.Count)
+            [void]$removed.Add(
+                (("{0}   ({1} file(s) created by the game and BepInEx after the install, " +
+                  "and the managed game copy around them)") -f $runtimeRoot, $runtimeResidue.Count))
             Remove-EmptyDirectory (Split-Path -Parent $runtimeRoot) -Pending @($runtimeRoot)
         } else {
             # Directories go only when empty. A changed game file or any file
@@ -666,7 +726,7 @@ if (-not $profilesRoot) {
         if (-not $countData) { continue }
         $countRoot = [string]$countData.dataRoot
         if ($countRoot -eq [string]$record.dataRoot) { continue }
-        if (-not (Test-SafeDataRoot $countRoot (@($protectedRoots) + @([string]$countData.gameDir)))) { continue }
+        if (-not (Test-SafeDataRoot $countRoot (@($protectedRoots) + @(Get-ProtectedRoot @([string]$countData.gameDir) $recordedDataRoot)))) { continue }
         $extraWorlds++
     }
     if ($RemoveWorldData -and $extraWorlds -gt 0) {
@@ -686,7 +746,7 @@ if (-not $profilesRoot) {
         }
         $profileName = [string]$profileData.name
         $profileRoot = [string]$profileData.dataRoot
-        if (-not (Test-SafeDataRoot $profileRoot (@($protectedRoots) + @([string]$profileData.gameDir)))) {
+        if (-not (Test-SafeDataRoot $profileRoot (@($protectedRoots) + @(Get-ProtectedRoot @([string]$profileData.gameDir) $recordedDataRoot)))) {
             [void]$kept.Add(("its data root is not a path this script will act on, so the whole " +
                              "profile stays : {0} (dataRoot '{1}')" -f $profilePath, $profileRoot))
             continue

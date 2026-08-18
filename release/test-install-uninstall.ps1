@@ -322,6 +322,26 @@ Check "a surviving changed file keeps its folder, one directory at a time" `
 Check "the sweep says how many files it removed beyond its own record" `
     ($uninstallerCode -match 'file\(s\) created by the game and BepInEx after the install')
 
+# THE APPLICATION FOLDER HAS TO END UP EMPTY, or the setup's own uninstaller
+# cannot take its directory away. Test-SafeDataRoot refuses a data root that
+# CONTAINS a protected path, and the game folder is protected - but the complete
+# edition's game folder is INSIDE the data root, so every complete-edition data
+# root failed the check, every profile was kept "because its data root is not a
+# path this script will act on", profiles\ stayed, and the folder holding it
+# stayed with it.
+Check "the protected paths go through one filter" `
+    ($uninstallerCode -match 'function Get-ProtectedRoot')
+Check "it drops only the game copy this run reclaims itself" `
+    ($uninstallerCode -match '(?s)function Get-ProtectedRoot.*?if \(Test-ManagedRuntimePath \(\[string\]\$path\) \$DataRoot\) \{ continue \}')
+Check "the install's own game folder goes through it" `
+    ($uninstallerCode -match '\$protectedRoots = @\(Get-ProtectedRoot @\(\[string\]\$record\.gameDir')
+Check "and so does every profile's own game folder, at every place that asks" `
+    ((([regex]::Matches($uninstallerCode, 'Get-ProtectedRoot @\(\[string\]\$\w+Data\.gameDir\)')).Count) -ge 3)
+Check "the data root the filter measures against is the record's own" `
+    ($uninstallerCode -match '\$recordedDataRoot = \[string\]\$record\.dataRoot')
+Check "containment is compared with the platform's own separator" `
+    ($uninstallerCode -match '\$me \+ \[System\.IO\.Path\]::DirectorySeparatorChar')
+
 # "Read the uninstall ledger" is a remedy in docs/error-taxonomy.md, and until
 # this file existed it named nothing: the ledger went to a console window that
 # the entry in Installed apps closes the moment the script ends.
@@ -956,6 +976,14 @@ Check "the installed support matrix was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'support-matrix.json')))
 Check "the launcher's profiles directory was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'profiles')))
+# A profile describes an installation that no longer exists, so it goes with it -
+# and the complete edition's own profile used to be kept, because its data root
+# holds the managed game copy and the check that decides what may be acted on
+# protected that copy from the run removing it.
+Check "the profile was removed rather than kept for its data root" `
+    (-not ($uninstall.Output -match 'not a path this script will act on'))
+Check "the application directory itself went, so the setup's own uninstaller can take it" `
+    (-not (Test-Path -LiteralPath $fProgram))
 
 # THE INSTALL THAT USED TO DIE. Nothing about this run is special: the same
 # package, the same data root, the same world.

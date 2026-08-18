@@ -306,7 +306,11 @@ uninstall reclaims that folder whole** once nothing it recorded is left in it, t
 config the game wrote inside it included. **On Windows it also keeps its ledger as a file**,
 `<data root>\logs\uninstall-<utc>.log` — `%TEMP%` when you pass `-RemoveWorldData`, which deletes
 that folder — because an uninstall started from *Installed apps* has no window left to read
-afterwards. The Linux uninstall prints the same ledger into the terminal you ran it from.
+afterwards. The Linux uninstall prints the same ledger into the terminal you ran it from. **The launcher's
+profiles go with it too** — a profile describes an installation that no longer exists — which is
+what leaves the application folder empty for *Installed apps* to remove. Your world's data is not
+in a profile and stays where it is; installing again reads that world's identity back out of its
+data root.
 
 **The last place it looks is the sidecar's own log**, `logs\sidecar.log` and the rotated files
 beside it. The sidecar writes `peer=<identity>` on every line, because the identity is an attribute

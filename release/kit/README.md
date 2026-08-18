@@ -293,7 +293,10 @@ and kept.
 **It covers every world you added.** It refuses while any of them is still running — stop them with
 `multiverse-launcher.exe stop --all` — and then removes each world's process-id files, the
 profile files, and the `profiles\` directory. Each extra world's journal, logs and credential are
-kept on the same rule.
+kept on the same rule. **A profile goes with the installation it describes**, whether or not you
+pass `-RemoveWorldData`: the world's own data stays where it is, and installing again reads that
+world's identity back out of the data root rather than out of a profile. That is what leaves the
+application directory empty, so **Installed apps** can take the folder itself away.
 
 **Only a game running from the folder in question blocks it.** Another copy of the game elsewhere
 does not, and neither does one running under an account this one cannot inspect: where Windows will

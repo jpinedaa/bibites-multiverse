@@ -797,10 +797,10 @@ if ($RuntimeSelection -eq 'bundled') {
             Say ("  {0} of {1} payload files are gone (the first is {2}), {3} of them differ," -f
                  $missingFiles.Count, $payloadFiles.Count, $missingFiles[0], $changedFiles.Count)
             Say ("  and {0} file(s) are left in it - what the game and BepInEx wrote while it ran." -f $leftBehind.Count)
-            Say "That folder is this package's own copy of the game and holds nothing of yours:"
-            Say "your worlds, this world's journal, its logs and its credential are all outside it."
             # NOTHING IS DELETED AT A PATH THIS CANNOT PROVE. The whole folder
-            # goes, so the path has to be exactly the one this step owns.
+            # goes, so the path has to be exactly the one this step owns - and
+            # the reassurance below is only true of a path that passed, so it is
+            # said after the delete rather than over one that is refused.
             if (-not (Test-ManagedRuntimePath $runtimeRoot $DataRoot $payloadSha)) {
                 Stop-Setup ("The managed runtime at $runtimeRoot is incomplete, and this installer will " +
                             "not remove it: that path is not <data root>\runtimes\<payload sha256>, which " +
@@ -812,6 +812,8 @@ if ($RuntimeSelection -eq 'bundled') {
                 Stop-Setup ("The incomplete managed runtime at $runtimeRoot could not be removed: " +
                             "$($_.Exception.Message)") 'INS-RUNTIME'
             }
+            Say "That folder was this package's own copy of the game and held nothing of yours:"
+            Say "your worlds, this world's journal, its logs and its credential are all outside it."
             Say 'complete edition: removed the incomplete managed runtime whole; the payload is staged again below'
         }
     }
