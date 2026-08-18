@@ -130,25 +130,18 @@ border:1px solid var(--line);border-radius:50%;background:rgba(102,224,172,.1);c
 text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace}
 .walksteps li:not(:last-child):after{content:"";position:absolute;left:14px;top:34px;bottom:2px;border-left:1px solid var(--line)}
 .walksteps b{color:var(--text)}
-.walkmenu{margin:11px 0 0;padding:10px 13px;border:1px solid var(--line);border-radius:9px;
-background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-x:auto}
 .walk code{font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;color:#bfd0c9}
 /* the walkthrough is a full-width second row of the same card rather than a
-   tail on the download column: inside that column it made the column 1515px
-   tall against 492px of checklist, so the checklist read as an empty panel.
-   As its own row the two top columns answer each other and the steps get the
-   card's whole width. Source order stays copy, walk, checklist, which is the
-   reading order the stacked layout below 900px falls back to. */
+   tail on the download column, which leaves the two top columns answering each
+   other. Source order stays copy, walk, checklist, which is the reading order
+   the stacked layout below 900px falls back to. Three short steps no longer
+   need the card's whole width — they used to be set in two columns with a
+   forced break — so the row is wide and the steps keep a reading measure
+   inside it. */
 #join .joincopy{grid-column:1;grid-row:1}
 #join .trust{display:flex;flex-direction:column;justify-content:center;grid-column:2;grid-row:1}
 #join .walk{grid-column:1/-1;grid-row:2;padding:34px 50px 50px;border-top:1px solid var(--line)}
-#join .walksteps{columns:2;column-gap:44px}
-#join .walksteps li{break-inside:avoid}
-/* the break is forced instead of balanced so the same step always ends the
-   first column, and that step is the one whose connector would otherwise
-   dangle into the gutter with nothing under it. */
-#join .walksteps li:nth-child(4){break-before:column}
-#join .walksteps li:nth-child(3):after{content:none}
+#join .walksteps{max-width:760px}
 .gameshot{margin:0 0 18px}.gameshot img{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px}
 .gameshot figcaption{margin-top:8px;font-size:13px;color:var(--muted)}
 /* the screenshot column used to set a row 169px taller than the words beside
@@ -170,14 +163,8 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
 .flowitem:nth-child(4){border-top:1px solid var(--line)}.joinbox{grid-template-columns:1fr}
 /* the card is one column here, so the explicit placement above has to go with
    it: a grid-column:2 against a single-column card would open an implicit
-   second one. The steps become a single run again, which takes all three of
-   the multi-column rules with it — column-count:1 does NOT cancel a forced
-   break, it moves the break into a clipped overflow column and steps 4 and 5
-   disappear — and gives step 3 its connector back, since there is no longer a
-   gutter for it to dangle in. */
+   second one. */
 #join .joincopy,#join .trust,#join .walk{grid-column:1;grid-row:auto}
-#join .walksteps{columns:1}#join .walksteps li:nth-child(4){break-before:auto}
-#join .walksteps li:nth-child(3):after{content:""}
 .trust{border-left:0;border-top:1px solid var(--line)}#game .gameshot{max-width:none}}
 @media(max-width:860px){.nav{min-height:62px;padding-block:10px;flex-wrap:wrap;gap:10px}.links{width:100%;gap:16px;overflow-x:auto;padding-bottom:3px}.links a{white-space:nowrap}}
 @media(max-width:640px){.shell{width:min(calc(100% - 24px),var(--max))}
@@ -269,14 +256,11 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
     <div class="joinbox">
       <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div>__HOMEPAGE_RELEASE__</div>
       <div class="walk">
-        <h3>On Windows, five steps.</h3>
+        <h3>On Windows, three steps.</h3>
         <ol class="walksteps">
           <li><b>Download the setup.</b> It is one file. The checksums page beside these buttons lets you verify it first, if you want to.</li>
-          <li><b>Run it, and expect the warning.</b> This is a community build with no code-signing certificate, so SmartScreen shows <b>Windows protected your PC</b>. Select <b>More info</b>, then <b>Run anyway</b>.</li>
-          <li><b>Press Install.</b> Keep the included copy of <em>The Bibites</em>, or point the setup at a game you already own. It needs no administrator account, no sign-up, and no join code: it gives this world its own identity on the map while it installs, and starts the world when it finishes.</li>
-          <li><b>Open Bibites Multiverse, then press Enter.</b> The desktop and Start Menu icon of that name opens the launcher: it says which world it is set to and whether that world is running, above a short menu. Enter starts it, and the world reaches the <a href="/live">live map</a> about a minute later.<pre class="walkmenu">1) Start this world   [Enter]
-2) Stop this world</pre></li>
-          <li><b>Stop it from the same menu.</b> Option <b>2</b> asks the game to close and waits for its save, so stopping is not losing. Option <b>6</b> creates another world, when you want more than one on this computer.</li>
+          <li><b>Run it and press Install.</b> This is a community build with no code-signing certificate, so SmartScreen shows <b>Windows protected your PC</b>: select <b>More info</b>, then <b>Run anyway</b>.</li>
+          <li><b>That is all of it.</b> The game opens by itself and your world reaches the <a href="/live">live map</a> about a minute later. Everything after that is the <b>Bibites Multiverse</b> icon on your desktop: it opens a window that starts your worlds, stops them without losing anything, and makes more of them.</li>
         </ol>
         <p class="promise">On Linux: unpack the complete package, run <code>./install-bibites-multiverse.sh</code>, then <code>./start-multiverse.sh</code>. The <a href="__HOMEPAGE_DOCS__">install guide</a> has both platforms in full.</p>
       </div>

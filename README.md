@@ -278,9 +278,9 @@ The first announced service period runs from **August 14 through November 14, 20
 Read the [project status](STATUS.md) for the release and milestone state.
 
 The homepage explains the experiment and shows a live summary. Its download section walks a
-Windows reader through the install in five steps — the setup, the SmartScreen warning, Install
-itself, the launcher, and stopping — and points at the
-[install guide](docs/participant/install.md) for Linux. The
+Windows reader through the install in three steps — download it, run it and press Install, and
+the game opens on its own — names the SmartScreen warning and the two words to click, and points
+at the [install guide](docs/participant/install.md) for Linux. The
 [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
 lineages, and world settings.
 

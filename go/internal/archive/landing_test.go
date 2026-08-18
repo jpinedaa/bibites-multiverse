@@ -140,13 +140,17 @@ func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 	}
 }
 
-// The download buttons answer "where do I get it"; a first-time Windows reader
-// then has to survive an unsigned setup, an installer that asks which game to
-// use, and a launcher they have never seen. The walkthrough is the section's
-// answer to that, and this test pins the three things that make it one:
-// the buttons still come first, the steps are numbered and counted, and the
-// SmartScreen panel — the one screen that stops people who did nothing wrong —
-// is named with the two words to click.
+// The download buttons answer "where do I get it"; the walkthrough answers
+// "and then what", in as few steps as the product now takes. It used to take
+// five, because the launcher was a console menu a reader had to be taught to
+// drive. The setup starts the world and the launcher is a window, so the honest
+// answer is three: download, Install, done. This test pins what is left — the
+// buttons still come first, the steps are numbered and counted, the SmartScreen
+// panel (the one screen that stops people who did nothing wrong) is named with
+// the two words to click, and the icon that manages everything afterwards is
+// named once. The retired list below is the other half: instructions for a menu
+// this release does not show must not survive on the page that sends people to
+// it.
 func TestJoinSectionWalksAWindowsNewcomerThroughTheInstall(t *testing.T) {
 	page := landingPageHTML
 	download := strings.Index(page, `href="https://github.com/jpinedaa/bibites-multiverse/releases/latest/download/bibites-multiverse-windows-x64-setup.exe"`)
@@ -178,29 +182,25 @@ func TestJoinSectionWalksAWindowsNewcomerThroughTheInstall(t *testing.T) {
 		t.Fatal("the walkthrough no longer contains a numbered step list")
 	}
 	steps = steps[open:end]
-	if got := strings.Count(steps, "<li>"); got != 5 {
-		t.Errorf("the Windows walkthrough has %d steps, want 5 — and its heading says five", got)
+	if got := strings.Count(steps, "<li>"); got != 3 {
+		t.Errorf("the Windows walkthrough has %d steps, want 3 — and its heading says three", got)
 	}
-	if !strings.Contains(page, "On Windows, five steps.") {
+	if !strings.Contains(page, "On Windows, three steps.") {
 		t.Error("the walkthrough heading no longer names the number of steps the list has")
 	}
 
 	for _, want := range []string{
-		// Download, then the warning, with the two words that get past it.
+		// Download, then the one screen that needs a reader's help.
 		// Verifying the download is offered, not demanded.
 		"The checksums page beside these buttons lets you verify it first, if you want to.",
 		"SmartScreen shows <b>Windows protected your PC</b>",
 		"<b>More info</b>, then <b>Run anyway</b>",
-		// Install: what it asks, and what it does not ask for.
-		"Keep the included copy of <em>The Bibites</em>, or point the setup at a game you already own",
-		"no administrator account, no sign-up, and no join code",
-		// The launcher, the key that starts a world, and where it shows up.
-		"<b>Open Bibites Multiverse, then press Enter.</b>",
-		"1) Start this world",
-		`the <a href="/live">live map</a>`,
-		// Stopping, and the second world.
-		"Option <b>2</b> asks the game to close and waits for its save",
-		"Option <b>6</b> creates another world",
+		// One press, and the setup does the rest.
+		"<b>Run it and press Install.</b>",
+		// What happens without being asked, and the one thing to remember after.
+		`your world reaches the <a href="/live">live map</a>`,
+		"<b>Bibites Multiverse</b> icon on your desktop",
+		"starts your worlds, stops them without losing anything, and makes more of them",
 		// One line for the other platform, pointing at the full guide.
 		"<code>./install-bibites-multiverse.sh</code>",
 		`href="https://github.com/jpinedaa/bibites-multiverse/blob/main/docs/participant/install.md">install guide</a>`,
@@ -209,48 +209,61 @@ func TestJoinSectionWalksAWindowsNewcomerThroughTheInstall(t *testing.T) {
 			t.Errorf("the Windows walkthrough is missing %q", want)
 		}
 	}
+	// The console menu the walkthrough used to teach, and the choices the setup
+	// now makes on its own. A reader told to press Enter at a numbered menu
+	// would be looking for a program this release does not open.
+	for _, retired := range []string{
+		"walkmenu", "1) Start this world", "press Enter",
+		"Option <b>2</b>", "Option <b>6</b>",
+		"point the setup at a game you already own",
+		"no administrator account, no sign-up, and no join code",
+	} {
+		if strings.Contains(page, retired) {
+			t.Errorf("the walkthrough still describes the retired console launcher: %q", retired)
+		}
+	}
 
 	// The steps are prose in a row of their own under the two columns they
 	// follow, so they get their own rules rather than borrowing the flow strip's.
 	for _, want := range []string{
 		`.walksteps li{position:relative;counter-increment:walkstep`,
 		`.walksteps li:before{content:counter(walkstep)`,
-		`.walkmenu{`, `overflow-x:auto}`,
 		// The three placements are one rule between them: the walkthrough is row
 		// two across the whole card, and the two columns above it are pinned to
 		// row one. Inside the download column the walkthrough made that column
 		// 1515px tall while the checklist held 492px of content, so the checklist
-		// read as an empty panel; as its own row the card is 1173px and the two
-		// columns are the same 636px.
+		// read as an empty panel.
 		`#join .joincopy{grid-column:1;grid-row:1}`,
 		`#join .trust{display:flex;flex-direction:column;justify-content:center;grid-column:2;grid-row:1}`,
 		`#join .walk{grid-column:1/-1;grid-row:2`,
-		// Two columns of steps across that width. The break is forced rather than
-		// balanced so that the step which ends the first column is always the same
-		// one, which is what makes the connector rule below nameable: the vertical
-		// line drawn between consecutive steps would otherwise dangle out of the
-		// bottom of column one with nothing under it.
-		`#join .walksteps{columns:2;column-gap:44px}`,
-		`#join .walksteps li{break-inside:avoid}`,
-		`#join .walksteps li:nth-child(4){break-before:column}`,
-		`#join .walksteps li:nth-child(3):after{content:none}`,
+		// Three steps do not fill that width, and prose set across 1080px is not
+		// read. The row stays full width; the steps keep a measure inside it.
+		`#join .walksteps{max-width:760px}`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the walkthrough is missing its layout rule %q", want)
 		}
 	}
+	// Two columns of steps, and the forced break that decided which step ended
+	// the first one, were rules about a five-step list. Three steps in one run
+	// need none of them, and a stale break-before would move a step into an
+	// overflow column the card clips.
+	for _, retired := range []string{
+		`#join .walksteps{columns:2`, `break-before:column`, `break-inside:avoid`,
+		`#join .walksteps{columns:1}`,
+	} {
+		if strings.Contains(page, retired) {
+			t.Errorf("the walkthrough still carries a multi-column rule it no longer has the steps for: %q", retired)
+		}
+	}
 
-	// Below 900px the card is a single column, and every rule above has to be
-	// taken back with it or the stacked page breaks in ways that are invisible
-	// from the desktop one. A grid-column:2 against a one-column card opens an
-	// implicit second column; and column-count:1 does NOT cancel a forced break —
-	// it moves the break into an overflow column, which the card's overflow:hidden
-	// clips, and steps 4 and 5 stop being on the page at all. Checked in a browser
-	// at 800px and 390px: copy, steps, checklist, in that order, no overflow.
+	// Below 900px the card is a single column, and the placement above has to be
+	// taken back with it or the stacked page breaks in a way that is invisible
+	// from the desktop one: a grid-column:2 against a one-column card opens an
+	// implicit second column. Checked in a browser at 800px and 390px: copy,
+	// steps, checklist, in that order, no overflow.
 	for _, want := range []string{
 		`#join .joincopy,#join .trust,#join .walk{grid-column:1;grid-row:auto}`,
-		`#join .walksteps{columns:1}#join .walksteps li:nth-child(4){break-before:auto}`,
-		`#join .walksteps li:nth-child(3):after{content:""}`,
 		// The walkthrough is a card row now, so it carries the card's own padding
 		// and has to narrow with the other two.
 		`.joincopy,.trust,#join .walk{padding:30px 24px}`,
