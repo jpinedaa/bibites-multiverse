@@ -40,7 +40,7 @@ installations.
   "format": "bibites-multiverse/enrollment-request/1",
   "installId": "9af42a17-6167-42e7-a6e8-c62cb8b95f4f",
   "secret": "<64 lower-case hexadecimal characters>",
-  "release": "0.3.0"
+  "release": "0.3.1"
 }
 ```
 

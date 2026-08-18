@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.3.0` on **2026-08-17**, against the code and
+strangers. This audit was updated for release `0.3.1` on **2026-08-18**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -173,6 +173,11 @@ it by hand costs a person their window layout.
 **The cost.** The desktop receives one icon. Windows Settings receives one application entry.
 The uninstaller removes both shortcut locations and the application entry, and both executables:
 each one is in the install record, by path and by hash, so a file a later hand changed is kept.
+**`0.3.1` is the first release where that is true of the folder as well.** In `0.3.0` a complete
+edition's uninstall kept the launcher profile describing the installation it had just removed —
+the rule that decides which paths a profile may name protected the managed game copy from the very
+run reclaiming it — so `profiles\` stayed, the application directory around it stayed, and Windows
+Settings was left with an entry whose folder nothing removed.
 
 **Verdict: PASS.** The setup creates the normal application surface that a player expects. All
 changes are per-user and the uninstaller owns them.
