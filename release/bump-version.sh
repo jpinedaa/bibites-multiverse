@@ -182,12 +182,16 @@ allow 'release/test-install-uninstall.sh' bump 1 \
 	'the install test check name'
 allow 'release/test-install-uninstall.sh' bump 1 '"release":"@@V@@"' \
 	'the install test expected enrollment payload'
-# go/internal/archive/landing.go and its test name no release at all, which is
-# why neither appears here. The page's two download buttons and its checksum
-# link address /releases/latest, and make-release.sh publishes the two
-# stable-named copies those addresses need. If a release literal ever appears in
-# either file again, the scan below reports it and the answer is to take it out,
-# not to add an entry here.
+# go/internal/archive/landing.go, go/internal/archive/release.go and their tests
+# carry no release literal, which is why none of them appears here. The page's
+# two download buttons and its checksum link address /releases/latest, and
+# make-release.sh publishes the two stable-named copies those addresses need.
+# THE PAGE DOES NOW NAME THE RELEASE, and that changes nothing about this rule:
+# the tag is fetched from GitHub's own latest-release endpoint at run time and
+# cached in the archive process (release.go), so no build of that page ever
+# contains the number. The tests name a deliberately fictional tag for the same
+# reason. If a release literal appears in any of those files, the scan below
+# reports it and the answer is to take it out, not to add an entry here.
 # A worked example of a request the installers actually send; its field shape is
 # the contract, so it is pinned like code.
 allow 'contracts/public-enrollment.md' bump 1 '^  "release": "@@V@@"$' \

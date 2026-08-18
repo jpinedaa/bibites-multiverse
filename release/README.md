@@ -389,8 +389,8 @@ Also open each participant archive and probe the Windows setup. Make sure that `
 contains the intended enrollment and relay addresses. It must not contain a world identity or
 secret.
 
-**The homepage needs nothing. No deployment is part of a release.** `bibitesmultiverse.com` names
-no release: its two download buttons and its checksum link address
+**The homepage needs nothing. No deployment is part of a release.** No release number is compiled
+into `bibitesmultiverse.com`: its two download buttons and its checksum link address
 `https://github.com/jpinedaa/bibites-multiverse/releases/latest…`, which GitHub answers out of
 whichever release is newest. `make-release.sh` publishes a byte-for-byte copy of the Windows setup
 and the Linux complete package under the two names that never change —
@@ -399,6 +399,17 @@ the publish step uploads them, because `/releases/latest/download/<name>` only w
 whose name is the same in every release. The moment the release is published, the homepage is
 serving it. Open it afterwards and press both buttons, because a broken link is still a broken
 link — but there is nothing to rebuild, no host value to set, and no relay outage to schedule.
+
+**The page does say which release that is, and it catches up on its own.** Under the download
+buttons the join card carries a `Latest release v0.3.0` line, so a visitor can tell what the
+buttons will hand them. It is not a build-time constant: the archive asks GitHub's
+`/repos/jpinedaa/bibites-multiverse/releases/latest` for `tag_name` once an hour in the
+background and caches the answer in process, so a new release reaches that line within an hour of
+being published, with no deployment. The lookup is anonymous, it is never on the request path, and
+a failure leaves the last known tag in place — or, if none has ever resolved, drops the line
+entirely and renders the page exactly as it read before the line existed. So the line can lag by
+up to an hour or be absent; it cannot be wrong about a release that was never published. Verify it
+the same way you verify the buttons: open the page an hour after publishing and read the line.
 
 A host whose `/etc/multiverse/deploy.env` still carries an `MV_HOMEPAGE_RELEASE=` line is fine:
 nothing reads it any more. Delete it at the next deployment that happens for some other reason.

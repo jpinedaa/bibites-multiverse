@@ -76,6 +76,9 @@ min-height:48px;padding:0 19px;border-radius:8px;text-decoration:none;font-weigh
 .button.primary:hover{background:#87ebc2}.button.secondary{background:rgba(22,34,31,.6)}
 .button.secondary:hover{border-color:var(--muted)}
 .promise{margin-top:22px;color:var(--muted);font-size:13px}
+.release{display:inline-flex;align-items:center;gap:8px;margin:20px 0 0;padding:7px 13px;border:1px solid var(--line);
+border-radius:999px;background:rgba(22,34,31,.6);color:var(--muted);font-size:13px}
+.release b{color:var(--text);font:700 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.02em}
 .topology{position:relative;min-height:480px;border:1px solid var(--line);border-radius:28px;
 background:linear-gradient(145deg,rgba(22,34,31,.92),rgba(10,17,15,.72));overflow:hidden;
 box-shadow:0 32px 80px rgba(0,0,0,.26)}
@@ -264,7 +267,7 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
 
   <section class="shell section" id="join">
     <div class="joinbox">
-      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div></div>
+      <div class="joincopy"><span class="kicker">Join the experiment</span><h2>Give your world neighbors.</h2><p>The Windows setup and Linux complete package below are always the newest release. They include <em>The Bibites</em> __HOMEPAGE_GAME_VERSION__, the mod, and the connector. Each installer creates a unique world identity and keeps its secret on your machine. No join string is required. Add-on packages exist for anyone who already owns a supported copy.</p><div class="actions"><a class="button primary" href="__HOMEPAGE_WINDOWS__">Download for Windows</a><a class="button primary" href="__HOMEPAGE_LINUX__">Download for Linux</a><a class="button secondary" href="__HOMEPAGE_TAG__">Checksums and add-ons&nbsp; →</a></div>__HOMEPAGE_RELEASE__</div>
       <div class="walk">
         <h3>On Windows, five steps.</h3>
         <ol class="walksteps">
@@ -322,24 +325,41 @@ background:rgba(7,16,13,.72);color:#bfd0c9;font:12px/1.75 ui-monospace,SFMono-Re
 </body>
 </html>`
 
+// landingPageHTML is the page WITH NO RELEASE RESOLVED — the fail-silent
+// baseline of the version line below, and the form every reader saw before that
+// line existed. It is what the tests assert against, because it is the version
+// of this page that must be complete and correct on its own.
 var landingPageHTML = renderLandingPage(Config{
 	HomepageRepo:        defaultHomepageRepo(),
 	HomepageGameVersion: defaultHomepageGameVersion(),
-})
+}, "")
 
 // THE DOWNLOAD LINKS NAME NO RELEASE, ON PURPOSE. GitHub answers
 // /releases/latest/download/<name> out of whichever release is newest, and
 // release/make-release.sh publishes a stable-named copy of each of the two
 // packages this page links for exactly that reason. So publishing a release
 // moves this page on its own: no rebuild, no host environment value, and no
-// archive deployment is part of a release any more. The release number is not
-// rendered here either — the page the third button opens carries it, and it is
-// correct there by construction.
+// archive deployment is part of a release any more.
+//
+// THE RELEASE NUMBER BESIDE THEM IS NOT A CONTRADICTION OF THAT — it is the
+// same rule applied to the label. What the buttons gained in staying current
+// they cost the reader in legibility: three buttons that always serve the
+// newest release cannot, by themselves, say WHICH release that is, so a visitor
+// could not tell what they were about to install or whether it had moved since
+// their last visit. `releaseTag` answers that from the SAME authority the
+// buttons resolve against, looked up at run time (release.go) rather than
+// compiled in, so it stays true across releases with no deployment — which is
+// the property the release-independent links were for in the first place. A
+// baked-in number would have traded it away and gone quietly stale.
+//
+// AN EMPTY releaseTag IS A FIRST-CLASS CASE, not a degraded one: the whole
+// version line is dropped and the page is byte-identical to the one that
+// shipped before it. Nothing else on the page depends on it.
 //
 // The Windows walkthrough's install-guide link follows the same rule from the
 // other side: it names the repository's `main`, never a tag, so the page it
 // opens is the guide as it stands rather than the guide a past release shipped.
-func renderLandingPage(cfg Config) string {
+func renderLandingPage(cfg Config, releaseTag string) string {
 	gameVersion := strings.TrimSpace(cfg.HomepageGameVersion)
 	if gameVersion == "" {
 		gameVersion = defaultHomepageGameVersion()
@@ -351,11 +371,33 @@ func renderLandingPage(cfg Config) string {
 	latest := "https://github.com/" + repo + "/releases/latest"
 	return strings.NewReplacer(
 		"__HOMEPAGE_GAME_VERSION__", gameVersion,
+		"__HOMEPAGE_RELEASE__", releaseLine(releaseTag),
 		"__HOMEPAGE_WINDOWS__", latest+"/download/bibites-multiverse-windows-x64-setup.exe",
 		"__HOMEPAGE_LINUX__", latest+"/download/bibites-multiverse-linux-x64-complete.zip",
 		"__HOMEPAGE_TAG__", latest,
 		"__HOMEPAGE_DOCS__", "https://github.com/"+repo+"/blob/main/docs/participant/install.md",
 	).Replace(landingPageTemplate)
+}
+
+// releaseLine renders the version line, or nothing at all.
+//
+// It says "release" and not "version" because the join card already carries a
+// second number — the copy above the buttons names the build of *The Bibites*
+// each package includes — and the two must never be read as one. The game's
+// number is attached to the game's name in the sentence that mentions it; this
+// one is attached to the word "release" and sits under the buttons that fetch
+// it. The tag is rendered as GitHub publishes it, "v" and all, so that it
+// matches what a reader lands on when they follow the third button.
+//
+// The gate on it is tagLooksLikeRelease and not an HTML escape, for the reason
+// given in release.go: the page would rather show nothing than render an
+// answer it does not recognise.
+func releaseLine(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if !tagLooksLikeRelease(tag) {
+		return ""
+	}
+	return `<p class="release">Latest release <b>` + tag + `</b></p>`
 }
 
 func defaultHomepageRepo() string        { return "jpinedaa/bibites-multiverse" }
