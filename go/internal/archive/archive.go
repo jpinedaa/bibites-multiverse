@@ -308,6 +308,12 @@ type Archive struct {
 	// this struct and nowhere near the ledger: suppression is a fact about the
 	// view, and the record goes on holding what happened.
 	deny *DenyList
+	// releases is the landing page's answer to "which release do these buttons
+	// hand me". It is on the serving side too, it touches no record, and the
+	// page is complete without it — see release.go. Non-nil from New; it simply
+	// answers "" until its background lookup has succeeded, which is a state the
+	// page renders correctly.
+	releases *releaseTracker
 
 	mu        sync.Mutex
 	conn      *wsutil.Conn
@@ -504,6 +510,7 @@ func New(cfg Config) (*Archive, error) {
 		genomes:     genomes,
 		metrics:     metrics,
 		deny:        deny,
+		releases:    newReleaseTracker(cfg.HomepageRepo, cfg.Logger),
 		lanes:       map[lanePair]*lane{},
 		simRates:    map[int]*achievedRate{},
 		seen:        newDedupWindow(dedupHint(ledger.HintBytes()), cfg.DedupWindow, time.Now()),
@@ -917,6 +924,10 @@ func (a *Archive) Start(ctx context.Context) error {
 		a.httpSrv = &http.Server{Handler: a.httpHandler(), ReadHeaderTimeout: 10 * time.Second}
 		a.wg.Add(1)
 		go func() { defer a.wg.Done(); a.serveHTTP() }()
+		// Only when there is a page to put it on, and only ever off the request
+		// path (release.go). A failure here changes nothing about the site.
+		a.wg.Add(1)
+		go func() { defer a.wg.Done(); a.releases.run(a.ctx) }()
 	}
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); a.relayLoop() }()

@@ -29,6 +29,19 @@ lists the programs to close, and changes nothing at all. And the *Installed apps
 measured from the program folder rather than by walking every file your world has ever written,
 which on a long-running world took nearly half an hour with the setup already invisible.
 
+**Installing again after an uninstall works.** An uninstall that followed a second install over
+the same included game used to leave the mod framework behind in that copy of the game and remove
+the game from around it, and the setup after that found a game folder with no game in it and
+refused to overwrite it. Setup now says what it found in such a folder, removes it whole and
+unpacks the game again, so it repairs a computer the earlier one stranded. The uninstall takes
+that copy back whole in the first place — framework, log and cache with it — and the launcher
+profile describing an installation that no longer exists goes too, which is what lets *Installed
+apps* remove the entry and its folder. Nothing of yours is in there: your worlds are the game's
+own saves, and your world's journal, logs and credential are beside that folder rather than inside
+it. On Windows the uninstall also keeps its ledger as a file,
+`<data root>\logs\uninstall-<utc>.log`, because an uninstall started from *Installed apps* leaves
+no window to read afterwards.
+
 **A world's disk use stays bounded on Windows.** The sidecar rewrites its own journal on a timer
 to drop what is no longer needed. On Windows that rewrite had never once completed, because it
 renamed its replacement over a file the same program still held open. Two worlds under test had
@@ -57,6 +70,9 @@ a script or a scheduled task must call that file.
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
+- **If an earlier uninstall left setup refusing to install again**, this one repairs it. It removes
+  the game folder its predecessor emptied, unpacks the game there afresh, and says so while it
+  does — there is nothing to delete by hand.
 - **The icons do not change.** They open `BibitesMultiverseLauncher.exe` exactly as before; that
   file is now the window.
 - **Scripts should call `multiverse-launcher.exe`**, which is installed beside it. An old script

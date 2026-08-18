@@ -9,7 +9,7 @@ about your world once it is there.
 
 ## Automatic public enrollment
 
-All participant `0.3.0` packages contain `public-map.json`. This file is the public join
+All participant `0.3.1` packages contain `public-map.json`. This file is the public join
 configuration. It contains the deployed HTTPS enrollment address and WSS relay address. It does
 not contain a world identity or secret.
 

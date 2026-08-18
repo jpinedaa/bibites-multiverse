@@ -12,11 +12,11 @@ string, compiler, SDK, administrator rights, or root.
 
 | Platform | Download | Game source |
 |---|---|---|
-| Windows, recommended | `bibites-multiverse-0.3.0-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
-| Windows, advanced ZIP | `bibites-multiverse-0.3.0-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
-| Windows, add-on | `bibites-multiverse-0.3.0-windows-x64.zip` | your existing Steam copy |
-| Linux, recommended | `bibites-multiverse-0.3.0-linux-x64-complete.zip` | included native game |
-| Linux, add-on | `bibites-multiverse-0.3.0-linux-x64.zip` | your existing itch.io copy |
+| Windows, recommended | `bibites-multiverse-0.3.1-windows-x64-setup.exe` | included portable game, or your existing Steam copy |
+| Windows, advanced ZIP | `bibites-multiverse-0.3.1-windows-x64-complete.zip` | included portable game, or your existing Steam copy |
+| Windows, add-on | `bibites-multiverse-0.3.1-windows-x64.zip` | your existing Steam copy |
+| Linux, recommended | `bibites-multiverse-0.3.1-linux-x64-complete.zip` | included native game |
+| Linux, add-on | `bibites-multiverse-0.3.1-linux-x64.zip` | your existing itch.io copy |
 
 Every participant package includes `public-map.json`, the public join configuration. It contains
 the deployed enrollment and relay addresses. It contains no world identity or secret. Each
@@ -40,11 +40,11 @@ This part is the same on both platforms and it is the one that matters most. Che
 got against the checksum on the page before you run anything:
 
 ```powershell
-(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.3.0-windows-x64-setup.exe).Hash -eq '<the value on the page>'
+(Get-FileHash -Algorithm SHA256 .\bibites-multiverse-0.3.1-windows-x64-setup.exe).Hash -eq '<the value on the page>'
 ```
 
 ```sh
-sha256sum bibites-multiverse-0.3.0-linux-x64-complete.zip
+sha256sum bibites-multiverse-0.3.1-linux-x64-complete.zip
 ```
 
 A match means you have the published file. If it does not match, delete the download and try
@@ -55,7 +55,7 @@ again; if it does not match twice, report it and do not run it. That is `INS-CHE
 Windows marks a downloaded setup or archive. **Clear the mark only after its checksum passes:**
 
 ```powershell
-Unblock-File .\bibites-multiverse-0.3.0-windows-x64-setup.exe
+Unblock-File .\bibites-multiverse-0.3.1-windows-x64-setup.exe
 ```
 
 You can also right-click the setup, select **Properties**, and if present, select **Unblock**. The
@@ -291,6 +291,27 @@ launcher's `profiles\*.json`, from the previous `Start-Multiverse.ps1`, or from 
 `peer-secret.txt` exactly as it is**. That works for a private map as well as the public one: an
 adopted world keeps its own relay, and the installer says so rather than moving it.
 
+**The included game is a copy this package owns, and setup will rebuild it.** A complete-edition
+install keeps the game in `<data root>\runtimes\<assembly sha256>` — one folder, named after the
+hash of the game assembly in it, that only setup writes into. Installing again over a complete one
+reuses it after checking every file. Installing over one that is **no longer a game** — files
+missing, the way an uninstall that left the mod framework behind used to leave it — makes setup say
+what it found there (how many payload files are gone, how many differ, how many files the game and
+BepInEx wrote inside it), remove that folder whole, and unpack the payload again. **Nothing of
+yours is in it**: your worlds are the game's own saves, and this world's journal, logs and
+credential are in the data root beside it, not inside it. The one thing setup will not overwrite is
+a managed game copy that is complete and **changed** — a working game somebody edited on purpose —
+and that refusal is `INS-RUNTIME` in [`../error-taxonomy.md`](../error-taxonomy.md). **The
+uninstall reclaims that folder whole** once nothing it recorded is left in it, the log and the
+config the game wrote inside it included. **On Windows it also keeps its ledger as a file**,
+`<data root>\logs\uninstall-<utc>.log` — `%TEMP%` when you pass `-RemoveWorldData`, which deletes
+that folder — because an uninstall started from *Installed apps* has no window left to read
+afterwards. The Linux uninstall prints the same ledger into the terminal you ran it from. **The launcher's
+profiles go with it too** — a profile describes an installation that no longer exists — which is
+what leaves the application folder empty for *Installed apps* to remove. Your world's data is not
+in a profile and stays where it is; installing again reads that world's identity back out of its
+data root.
+
 **The last place it looks is the sidecar's own log**, `logs\sidecar.log` and the rotated files
 beside it. The sidecar writes `peer=<identity>` on every line, because the identity is an attribute
 of its logger, and its startup line carries `relay=` as well — so a data root whose install record,
@@ -397,24 +418,27 @@ it found. A game genuinely running from that folder is still refused, whoever ow
 check reads `/proc`, so a game **another user** is running out of your game folder is a case it
 cannot see, and it says so.
 
-**The uninstall.** On Windows, use **Settings → Apps → Installed apps → Bibites Multiverse**.
-The advanced command is `Uninstall-BibitesMultiverse.ps1`. On Linux, use
-`./uninstall-bibites-multiverse.sh`. Use `-DryRun` or `--dry-run` first for the ledger. It reads the record the
-installer wrote and removes only what is named in it, checking each file's hash before it goes,
-and prints a line per path for what it removed and what it kept. Four things it deliberately
-keeps: **a file somebody changed after the install** — a changed plugin is reported and left;
-**BepInEx**, whole, if it was on your machine before; **your journal**, which is the record of
-organisms other worlds handed you; and **your world's identity** — `peer-secret.txt`, and
+**The uninstall.** On Windows, use **Settings → Apps → Installed apps → Bibites Multiverse**. The
+advanced command is `Uninstall-BibitesMultiverse.ps1`. On Linux, use
+`./uninstall-bibites-multiverse.sh`. Use `-DryRun` or `--dry-run` first for the ledger: it changes
+nothing and writes nothing, while a real Windows run keeps that ledger as a file —
+`<data root>\logs\uninstall-<utc>.log` — and the Linux one prints it into the terminal you ran it
+from. It reads the record the installer wrote and removes only what is named in it, checking each
+file's hash before it goes, and prints a line per path for what it removed and what it kept. Four
+things it deliberately keeps: **a file somebody changed after the install** — a changed plugin is
+reported and left; **BepInEx**, whole, if it was on your machine before this install — which means
+a game folder you chose, and never this package's own copy of the game, where only setup writes
+and the framework is therefore this install's to take back; **your journal**, which is the record
+of organisms other worlds handed you; and **your world's identity** — `peer-secret.txt`, and
 `data\peer-id` and `data\relay-url` beside the journal — because the world it names still has its
 place on the map and only that secret can claim it. Those last two are removed together, and only
 when you pass `-RemoveWorldData` / `--remove-world-data`, which says on your screen that it is the
-end of that world on the map.
-Its two refusals are the game still running from that folder and this install's own sidecar still
-running — both stop before removing anything, and both name the command that fixes them. **They use
-the same rule as the install**: only a game running from *that* folder counts, and where a process
-cannot be inspected the uninstaller asks the folder's own files whether anything is holding them
-open. It applies that to this install's game folder, to each extra world's game folder, and to the
-sidecar in its own kit directory.
+end of that world on the map. Its two refusals are the game still running from that folder and
+this install's own sidecar still running — both stop before removing anything, and both name the
+command that fixes them. **They use the same rule as the install**: only a game running from
+*that* folder counts, and where a process cannot be inspected the uninstaller asks the folder's
+own files whether anything is holding them open. It applies that to this install's game folder, to
+each extra world's game folder, and to the sidecar in its own kit directory.
 
 **On Windows the uninstall covers every world you added.** It walks the `profiles\` directory,
 refuses while any of those worlds still has a live game or sidecar — `multiverse-launcher.exe
