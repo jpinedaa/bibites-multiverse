@@ -567,14 +567,47 @@ behind it. One is outstanding:
 
 | Identity | World name | Slot | Created | What it needs |
 |---|---|---|---|---|
-| `public-2db3a641ac3a4b6491148ea67c496011` | `LauncherTest` | 10 | 2026-08-17, launcher and installer testing | Release the slot, then drop the credential |
+| `public-1b453bfe0cc64b329b1a701d38c415d9` | not reported | 9 | 2026-08-17, launcher and installer testing | **Decide first, then release.** It was found LIVE and simulating on 2026-08-18, so it is not yet known to be discarded |
 
-Release it with the `release-slot` act on the relay's admin listener — report first, read the
-consequence, then confirm within the token's ten minutes — and drop its credential from the
-verifier store afterwards. The slot NUMBER is never reused, which is the point of a release rather
-than an eviction: nothing that ever crossed to or from that world changes meaning. Add a row here
-when a test enrols, and delete the row when it is released, so a stale identity is a line somebody
-can read rather than a slot nobody can explain.
+Slot 9 is the reason this table has a "decide first" row. It was scheduled for release on
+2026-08-18 alongside three others and the act was aborted at the pre-check: the identity had
+reconnected at `01:26:31Z` and was running a real world — mod `0.6.7`, 15 evolved species, a
+population that moved between samples. A discarded test install and a running one are the same row
+in this table until somebody checks, and a release cannot be undone, so removal is deferred until
+the owner says which it is.
+
+Released on 2026-08-18, rows deleted per the rule below:
+`public-2db3a641ac3a4b6491148ea67c496011` (`LauncherTest`, slot 10),
+`public-58be6bed48fd443194c05c90dabbb541` (slot 11) and
+`public-fcec3baf2d52416fb1be1bdf01b6029a` (slot 12) — all three the same class of owner
+installer-test identity, all three released in one gated act with their credentials dropped.
+Slots 10, 11 and 12 are retired for good and their positions are holes.
+
+Release with the `release-slot` act on the relay's admin listener — report first, read the
+consequence, then confirm within the token's ten minutes — and drop the credential from the
+verifier store afterwards. The console form is the alternative when the relay is already being
+stopped for other reasons: with the unit down, run the binary against the data directory with
+`--release-slot <n> --reason <text> --yes`, which prints the same consequence report and skips only
+the prompt. **It writes its `ADMIN ACT` audit line to stderr and to no file**, so capture that
+output into the change record — the host keeps no copy of it, unlike the admin-listener path.
+
+Whichever form, the slot NUMBER is never reused, which is the point of a release rather than an
+eviction: nothing that ever crossed to or from that world changes meaning. Check liveness
+IMMEDIATELY before the act and not merely before planning it, because a peer that was dark at the
+plan's pre-check can reconnect before it runs; that is precisely what happened to slot 9. Add a row
+here when a test enrols, and delete the row when it is released, so a stale identity is a line
+somebody can read rather than a slot nobody can explain.
+
+**Tracked leftovers — credentials with no slot.** These are a different class: they hold no
+reservation and never appear on the map, so nothing above applies to them and no release act is
+needed. They are listed only so the verifier store has no entry nobody can account for. Dropping
+one is a credential drop alone, which needs a relay restart but no `release-slot`, so it can ride
+along with any planned restart.
+
+| Identity | Status |
+|---|---|
+| `public-80882ff7e6ab4c4184228985f7606aea` | Observed 2026-08-18 in the verifier store, no ring reservation. Left in place |
+| `public-8ccb915869b24c72ab07f1d819ad4ba1` | Observed 2026-08-18 in the verifier store, no ring reservation. Left in place |
 
 Credential creation requires a planned relay restart.
 Collect the approved peer identifiers before the restart.
