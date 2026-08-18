@@ -18,7 +18,7 @@ without knowing which platform it was on would be guessing.
 
 | The test | Who applies it | What it decides |
 |---|---|---|
-| **The wire version** — `contract-b/4.0` between your sidecar and the relay | The **relay**, at your first connection | Whether you are a member of that map. It is the only version question the map has an opinion about |
+| **The wire version** — `contract-b/4.1` between your sidecar and the relay | The **relay**, at your first connection | Whether you are a member of that map. It is the only version question the map has an opinion about |
 | **The game version** — the build of The Bibites this machine runs, from Steam on Windows or from itch.io on Linux | **Your own machine**, through this matrix and the installer's check | Whether a mod and sidecar build exists that works with your game at all |
 
 The mod is a Harmony patch against a named game assembly, so the second test cannot be
@@ -30,8 +30,8 @@ skips it.
 
 | Game version | Platform | Store | Store build | Mod | Sidecar | BepInEx | Wire | Tested against |
 |---|---|---|---|---|---|---|---|---|
-| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.7` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.0`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
-| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.7` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.0`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
+| **0.6.3.1** | Windows | Steam | app `2736860`, buildid `22383127` | `0.6.7` | `m5.0` | `5.4.23.3` `win_x64` | `contract-b/4.1`, `contract-a/2.4` | The six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15 |
+| **0.6.3.1** | Linux | itch.io | upload `16838443` | `0.6.7` | `m5.0` | `5.4.23.3` `linux_x64` | `contract-b/4.1`, `contract-a/2.4` | **One** 14-minute authenticated headless session, 2026-08-12, against a scratch relay: the mod loaded, every subsystem armed, eight saves rotated and pruned, clean quit with its save |
 
 **`0.6.3.1` is the only tested game version, on two platforms**, and each row says what "tested"
 means *for that row* rather than leaving the word to the reader. **The two rows do not carry the
@@ -279,7 +279,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "win_x64",
       "contractA": "contract-a/2.4",
-      "contractB": "contract-b/4.0",
+      "contractB": "contract-b/4.1",
       "tested": "the six-world test deployment ran continuously from 2026-08-11 through publication on 2026-08-15"
     },
     {
@@ -293,7 +293,7 @@ reads. The installers ignore it; the release gates do not.
       "bepInEx": "5.4.23.3",
       "bepInExFlavour": "linux_x64",
       "contractA": "contract-a/2.4",
-      "contractB": "contract-b/4.0",
+      "contractB": "contract-b/4.1",
       "tested": "one 14-minute authenticated headless session on 2026-08-12 against a scratch relay; all six patched types byte-identical to the Windows build"
     }
   ]
