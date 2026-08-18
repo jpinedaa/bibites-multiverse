@@ -5,87 +5,28 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-**The launcher is a window.** The desktop and Start Menu icons open a list of every world on this
-computer, kept up to date while they run: what is running, whether the game's mod has really
-reached the map, the speed the world is achieving, and its place on the map. One big button
-starts or stops the world you selected. Buttons beside it create, clone, delete and check a world,
-and a details pane — closed until something goes wrong, when it opens by itself — carries the
-launcher's own output. Closing the window leaves your worlds running, which the window says.
-
-**A world starts at ten times the game's own speed.** It is a target and not a demand: the game
-holds the speed down to keep your frame rate up, so a slower computer runs slower and stays
-smooth. The speed slider in the game still moves it.
-
-**Stopping a world no longer costs you anything, with or without a game window.** A stop now asks
-the world to save and quit through the mod, which is the same shutdown that closing the game
-window performs. A world running with no window used to be forced, and everything it had simulated
-since its last save was lost.
-
-**The setup finishes, and it refuses before it changes anything.** With **Start after installation**
-selected, the setup used to wait for the world it had just started instead of for its own
-installer, so it never wrote the shortcuts or the *Installed apps* entry. Both now appear. If
-anything of this installation is running when you start setup, it stops at the very first step,
-lists the programs to close, and changes nothing at all. And the *Installed apps* size figure is
-measured from the program folder rather than by walking every file your world has ever written,
-which on a long-running world took nearly half an hour with the setup already invisible.
-
-**Installing again after an uninstall works.** An uninstall that followed a second install over
-the same included game used to leave the mod framework behind in that copy of the game and remove
-the game from around it, and the setup after that found a game folder with no game in it and
-refused to overwrite it. Setup now says what it found in such a folder, removes it whole and
-unpacks the game again, so it repairs a computer the earlier one stranded. The uninstall takes
-that copy back whole in the first place — framework, log and cache with it — and the launcher
-profile describing an installation that no longer exists goes too, which is what lets *Installed
-apps* remove the entry and its folder. Nothing of yours is in there: your worlds are the game's
-own saves, and your world's journal, logs and credential are beside that folder rather than inside
-it. On Windows the uninstall also keeps its ledger as a file,
-`<data root>\logs\uninstall-<utc>.log`, because an uninstall started from *Installed apps* leaves
-no window to read afterwards.
-
-**A world's disk use stays bounded on Windows.** The sidecar rewrites its own journal on a timer
-to drop what is no longer needed. On Windows that rewrite had never once completed, because it
-renamed its replacement over a file the same program still held open. Two worlds under test had
-reached 718 MB and 132 MB of journal before it was found; the same worlds afterwards compacted ten
-times in one session, the largest reclaiming 98 MB.
-
-**An organism crosses once, and a crossing that is lost is counted.** Nothing is re-sent, nothing
-is held back and brought home later. This is the participant half of the change the hosted map
-already made, and it is why the network protocol reads `contract-b/4.1`. A world on the older
-`contract-b/4.0` still joins.
-
-**The health check asks about your own world's map.** *Run a health check* now passes that world's
-own relay address and credential, so the two checks about your place on the map answer about the
-map you are on rather than about a local address you never used. A healthy world on the public map
-reports sixteen passes. The support matrix is installed beside the sidecar as well, so the check
-can name the game build this computer is on.
-
-**And the commands have their own file.** `multiverse-launcher.exe` is the same launcher's commands
-and console menu, installed beside the window. Windows does not let a script wait for a window, so
-a script or a scheduled task must call that file.
+<!-- WRITE THIS SECTION FOR THE RELEASE BEING CUT, from nothing rather than by
+     adding to it. It describes ONE release, because the reader has already
+     installed the one before it; a paragraph left here by a previous release is a
+     change that gets announced as new twice. That is not hypothetical: a release
+     has already shipped with the whole of its predecessor's feature list under
+     this heading, because the section was added to rather than written. The text
+     each release used is on its own published release page and in this file's
+     history, so nothing is lost by clearing it. release/README.md, "Cutting a
+     release", step 1. -->
 
 ## Upgrading from an earlier release
+
+<!-- The two bullets below hold for every release and stay. Add this release's own
+     upgrade notes beside them — what to do before running setup, what does not
+     change, what a script has to be told, and the one thing a world installed by
+     an earlier release cannot do — and take those back out once it has shipped. -->
 
 - **Stop every world before you run the setup.** Use *Stop every world* in the launcher's window,
   or `multiverse-launcher.exe stop --all`. Setup refuses while anything of this installation is
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
-- **If an earlier uninstall left setup refusing to install again**, this one repairs it. It removes
-  the game folder its predecessor emptied, unpacks the game there afresh, and says so while it
-  does — there is nothing to delete by hand.
-- **The icons do not change.** They open `BibitesMultiverseLauncher.exe` exactly as before; that
-  file is now the window.
-- **Scripts should call `multiverse-launcher.exe`**, which is installed beside it. An old script
-  that calls `BibitesMultiverseLauncher.exe` with a command line still works — the window hands the
-  command line over and waits for it — but a shell cannot wait for a window, so a script that
-  chains two commands should name the console program.
-- **The window remembers where it was** in `%APPDATA%\Bibites Multiverse\launcher-window.json`:
-  its size, its position, and where you left the divider. Delete that file to start over.
-- **The first start after upgrading compacts the journal**, which on a long-running world can free
-  a great deal of disk at once.
-- **A world that was already running before you upgraded cannot be asked to quit through its mod**,
-  because the mod reads that setting once when the game starts. Start that world once with this
-  release and every stop after it is lossless.
 
 ## What you need
 
@@ -127,10 +68,12 @@ or select the folder yourself. **Start after installation** is selected by defau
 after the map grants this installation a place. Setup creates desktop and Start Menu launch icons.
 It also registers Bibites Multiverse in Windows Settings for uninstall.
 
-The setup installs `BibitesMultiverseLauncher.exe`, and the icons open it: the window described
-under *What is new*, above. Each world it creates has its own map identity, its own data folder and
-its own sidecar port, and a tick box runs one session with or without a game window without
-changing that world's own setting.
+The setup installs `BibitesMultiverseLauncher.exe`, and the icons open it: a window listing every
+world on this computer, what each one is doing and whether its mod has reached the map, with one
+button to start or stop the world you selected and buttons beside it to create, clone, delete and
+check one. Each world it creates has its own map identity, its own data folder and its own sidecar
+port, and a tick box runs one session with or without a game window without changing that world's
+own setting.
 
 The same launcher's commands and console menu ship beside it as `multiverse-launcher.exe`, which is
 what a script or a scheduled task should call.

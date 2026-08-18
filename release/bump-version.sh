@@ -436,6 +436,11 @@ print_review_list() {
 	note "      Add one saying what $new changes; the earlier sentences stay as they are."
 	note "  $(review_at 'STATUS.md' '^Last updated: ')"
 	note '      the "Last updated" date, and the announced service period below it.'
+	note "  $(review_at 'release/RELEASE-PAGE.md' '^## What is new in ')"
+	note '      "What is new" and "Upgrading from an earlier release". On main each holds a'
+	note "      comment and nothing else. WRITE them for $new rather than adding to them: they"
+	note '      describe ONE release, and a release has already announced its predecessor'"'"'s'
+	note '      whole feature list by being appended to instead of written.'
 }
 
 do_rewrite() {

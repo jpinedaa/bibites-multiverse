@@ -326,8 +326,11 @@ git switch -c release/<version>
 release/bump-version.sh <version>
 #    work through the review list it prints. The dates, the matrix's "published" and "tested"
 #    strings, and STATUS.md's release paragraph are yours to write, not the tool's
-#    RELEASE-PAGE.md's "What is new", "Upgrading" and "Known limitations" sections are yours too:
-#    they describe ONE release, they carry no version literal, and no tool rewrites them
+#    RELEASE-PAGE.md's "What is new" and "Upgrading" sections are yours too, and they are
+#    WRITTEN, not added to: on main each holds a comment and nothing else, because they
+#    describe ONE release, and one release has already announced its predecessor's whole
+#    feature list by being appended to instead. "Known limitations" is standing product text
+#    and stays. No tool rewrites any of the three, and none carries a version literal
 release/bump-version.sh --check
 git add -- $(git diff --name-only)      # exactly what the bump touched, nothing else
 git commit -m "Set the release to <version>"
@@ -396,6 +399,13 @@ one-instance-per-game-folder warning without having to read the Windows sections
 Also open each participant archive and probe the Windows setup. Make sure that `public-map.json`
 contains the intended enrollment and relay addresses. It must not contain a world identity or
 secret.
+
+**Then clear the release page's two per-release sections again.** *What is new* and *Upgrading from
+an earlier release* described the release you have just published; left where they are they become
+the next release's opening claim, which is how one release came to announce the whole of its
+predecessor's feature list as new. Put each back to the comment that stands in for it on `main`.
+Nothing is lost — the text you wrote is on the published release page and in this file's
+history — and the next cycle starts from nothing rather than from somebody else's release.
 
 **The homepage needs nothing. No deployment is part of a release.** No release number is compiled
 into `bibitesmultiverse.com`: its two download buttons and its checksum link address
