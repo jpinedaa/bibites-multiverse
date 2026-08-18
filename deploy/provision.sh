@@ -866,8 +866,12 @@ MULTIVERSE_BROADCAST_PEER=${MV_BROADCAST_PEER_ID:-}
 # Homepage links on the landing page. The release is NOT one of these values and
 # must not become one again: the page's download buttons address GitHub's
 # /releases/latest, so the newest published release is what a visitor gets, and
-# no deployment is part of a release. Only the repository and the game label are
-# rendered here.
+# no deployment is part of a release. The page does NAME that release beside the
+# buttons, and that number is not a value either — the archive resolves it from
+# api.github.com/repos/<REPO>/releases/latest once an hour in the background, so
+# it follows a release on its own and simply is not rendered when the lookup
+# fails. Only the repository and the game label are set here; the repository is
+# also what that lookup follows.
 MULTIVERSE_HOMEPAGE_REPO=${MV_HOMEPAGE_REPO:-}
 MULTIVERSE_HOMEPAGE_GAME_VERSION=${MV_HOMEPAGE_GAME_VERSION:-}
 MULTIVERSE_LOG_FILE=$MV_LOGDIR/archive.log

@@ -77,9 +77,14 @@ The following values identify one deployment:
 - `MV_PUBLIC_ENROLLMENT` and its total, per-address, and window limits.
 - The optional stream-ingest address and source CIDR.
 - Homepage values for the public landing page links: `MV_HOMEPAGE_REPO` and
-  `MV_HOMEPAGE_GAME_VERSION`. The release is not one of them. The page's
-  download buttons address GitHub's `/releases/latest`, so a new release reaches
-  the homepage without a deployment.
+  `MV_HOMEPAGE_GAME_VERSION`. The release is not one of them, and must not
+  become one. The page's download buttons address GitHub's `/releases/latest`,
+  and the release number printed beside them is fetched from that same
+  repository's latest-release endpoint once an hour by the archive itself, so a
+  new release reaches the homepage without a deployment. `MV_HOMEPAGE_REPO` is
+  what that lookup follows: point it at a repository with no published release
+  and the page simply prints no number. The lookup is anonymous, never on the
+  request path, and its failure only ever costs the page that one line.
 
 Never store the completed file in Git.
 Store secret values in a secret manager or in protected files on the host.

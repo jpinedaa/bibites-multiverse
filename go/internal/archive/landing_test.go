@@ -309,7 +309,7 @@ func TestLandingPageUsesHomepageConfigOverrides(t *testing.T) {
 	page := renderLandingPage(Config{
 		HomepageRepo:        "acme/example-bibites",
 		HomepageGameVersion: "9.9.9",
-	})
+	}, "")
 	for _, want := range []string{
 		`<em>The Bibites</em> 9.9.9, the mod, and the connector.`,
 		`href="https://github.com/acme/example-bibites/releases/latest/download/bibites-multiverse-windows-x64-setup.exe"`,
@@ -344,6 +344,121 @@ func TestLandingPageDownloadsNameNoRelease(t *testing.T) {
 	}
 	if strings.Contains(landingPageHTML, "/releases/tag/") {
 		t.Error("landing page still links a release tag; it must use /releases/latest")
+	}
+}
+
+// The download buttons stay release-independent (the test above), which left
+// the page unable to say WHAT it was handing out. The version line is the
+// answer, and its whole contract is here: it names the release beside the
+// buttons, it is the resolved tag rather than a compiled-in constant, and it is
+// ABSENT — not blank, not "unknown", not an error — whenever nothing resolved.
+func TestLandingPageNamesTheReleaseItServes(t *testing.T) {
+	page := renderLandingPage(Config{}, "v9.9.9")
+	if !strings.Contains(page, `<p class="release">Latest release <b>v9.9.9</b></p>`) {
+		t.Fatal("the join card does not name the release its buttons serve")
+	}
+	// Beside the buttons, where a reader deciding whether to press one is
+	// looking — not in a footer, and not above the copy that introduces them.
+	buttons := strings.Index(page, `>Checksums and add-ons`)
+	version := strings.Index(page, `<p class="release">`)
+	walk := strings.Index(page, `<div class="walk">`)
+	if buttons < 0 || version < 0 || walk < 0 {
+		t.Fatalf("join card lost a landmark: buttons %d, version %d, walkthrough %d", buttons, version, walk)
+	}
+	if version < buttons || version > walk {
+		t.Error("the release line is not in the download column beside the buttons")
+	}
+	// It is styled as part of this site rather than as a stray paragraph.
+	for _, want := range []string{
+		`.release{display:inline-flex;`,
+		`.release b{color:var(--text);font:700 13px/1 ui-monospace`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the release line is missing its style rule %q", want)
+		}
+	}
+
+	// THE FAIL-SILENT HALF. Every way of not knowing produces the page that
+	// shipped before this line existed — byte for byte, so there is no
+	// half-rendered state for a reader to interpret.
+	for _, name := range []string{"", "   ", "latest", "stable", `v1"><script>`, strings.Repeat("v1.", 20)} {
+		got := renderLandingPage(Config{
+			HomepageRepo:        defaultHomepageRepo(),
+			HomepageGameVersion: defaultHomepageGameVersion(),
+		}, name)
+		if got != landingPageHTML {
+			t.Errorf("an unusable tag %q changed the page; it must render exactly as the version-less page", name)
+		}
+	}
+	if strings.Contains(landingPageHTML, "Latest release") {
+		t.Error("the version-less page still advertises a release it does not know")
+	}
+	if strings.Contains(page, "__HOMEPAGE_") {
+		t.Error("the rendered landing page still carries an unreplaced __HOMEPAGE_ placeholder")
+	}
+}
+
+// The join card carries TWO numbers — the build of the game each package
+// includes, and the release of this project's own packages. They are different
+// things and a reader who conflates them ends up looking for a game download
+// that does not exist, so each one is attached to what it describes.
+func TestLandingReleaseLineDoesNotCollideWithTheGameBuild(t *testing.T) {
+	page := renderLandingPage(Config{}, "v9.9.9")
+	if !strings.Contains(page, `<em>The Bibites</em> `+defaultHomepageGameVersion()+`, the mod, and the connector.`) {
+		t.Fatal("the game build is no longer attached to the game's name")
+	}
+	if !strings.Contains(page, `Latest release <b>v9.9.9</b>`) {
+		t.Fatal("the release tag is no longer attached to the word release")
+	}
+	// The support matrix's tested game build is what the copy above quotes, and
+	// the two numbers must not have been swapped for one another.
+	if strings.Contains(page, `Latest release <b>`+defaultHomepageGameVersion()) {
+		t.Error("the release line is showing the game's build number")
+	}
+	if strings.Contains(page, `<em>The Bibites</em> v9.9.9`) {
+		t.Error("the game copy is showing this project's release number")
+	}
+}
+
+// The page is served from the live handler, so the seam that matters is the one
+// between the archive's cached tag and the bytes a stranger receives.
+func TestServedLandingPageCarriesTheResolvedRelease(t *testing.T) {
+	a := rigShapedArchive(t)
+	h := a.httpHandler()
+
+	get := func() string {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET / status = %d, want 200", rr.Code)
+		}
+		return rr.Body.String()
+	}
+
+	// Nothing resolved yet — the state every archive is in for its first moments
+	// and stays in on a host with no route to GitHub.
+	if body := get(); strings.Contains(body, "Latest release") {
+		t.Error("the page names a release before one has resolved")
+	}
+
+	a.releases.setTag("v9.9.9", "")
+	if body := get(); !strings.Contains(body, `Latest release <b>v9.9.9</b>`) {
+		t.Error("the served page does not carry the resolved release")
+	}
+	// A new release moves the page with no restart and no redeploy, which is the
+	// entire reason the tag is resolved rather than compiled in.
+	a.releases.setTag("v9.9.10", "")
+	body := get()
+	if !strings.Contains(body, `Latest release <b>v9.9.10</b>`) {
+		t.Error("a newly resolved release did not reach the page")
+	}
+	if strings.Contains(body, "v9.9.9") {
+		t.Error("the page is still serving the previous release tag")
+	}
+	// And the links beside it never became versioned in the process.
+	if strings.Contains(body, "/releases/tag/") || strings.Contains(body, "/releases/download/") {
+		t.Error("the download links picked up a release number; they must stay /releases/latest")
 	}
 }
 

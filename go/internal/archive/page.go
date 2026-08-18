@@ -271,7 +271,10 @@ func (a *Archive) httpHandler() http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write([]byte(renderLandingPage(a.cfg)))
+		// releases.Tag() is a read lock and a string: this handler never waits
+		// on GitHub, and "" renders the page exactly as it did before the
+		// version line existed (release.go, landing.go).
+		_, _ = w.Write([]byte(renderLandingPage(a.cfg, a.releases.Tag())))
 	})
 	return gzipped(mux)
 }
