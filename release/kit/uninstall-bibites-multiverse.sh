@@ -26,8 +26,13 @@
 #     is left completely alone
 #   * start-multiverse.sh and stop-multiverse.sh
 #   * the copy of a private map's certificate authority
-#   * an unchanged managed game payload, when this was the complete edition;
-#     changed and user-added files are kept
+#   * an unchanged managed game payload, when this was the complete edition -
+#     and, once nothing this install recorded is left in
+#     <data root>/runtimes/<sha>, that whole directory with it, including what
+#     the game and BepInEx wrote inside it while it ran. It is this package's own
+#     copy of the game, nothing of yours is in it, and a game directory with no
+#     game left in it is one the next install cannot repair. A game file somebody
+#     CHANGED is still reported and kept, and keeps the directory around it
 #
 # WHAT IT NEVER HAD TO DO, on this platform
 #
@@ -52,7 +57,10 @@
 #     so removing a build must not end the world that ran on it. Installing again
 #     over the same data root reuses it and spends no second identity. It goes
 #     with the journal, under --remove-world-data, and never on its own
-#   * any file the installer did not create, including another mod's plugin
+#   * any file the installer did not create, including another mod's plugin,
+#     ANYWHERE OUTSIDE THIS PACKAGE'S OWN MANAGED GAME COPY - a game directory
+#     you chose is never swept, only the files this install put in it are taken,
+#     and a game you installed yourself is left exactly as it was found
 #
 set -euo pipefail
 
@@ -69,6 +77,36 @@ step() { printf '\n==== %s\n' "$*"; }
 stop_uninstall() { printf '\nSTOP: %s\n' "$*"; exit 1; }
 
 sha256_of() { sha256sum "$1" | cut -d' ' -f1 | tr 'a-f' 'A-F'; }
+
+is_managed_runtime() {
+  # THE ONE DIRECTORY THIS SCRIPT MAY REMOVE WHOLE, and the answer is no for
+  # every other path on the machine. It is the same rule, written the same way,
+  # as the installer's own is_managed_runtime - the two scripts have to agree
+  # about which directory the complete edition owns, and a rule in one place that
+  # the other only approximates is how they would come to disagree.
+  #
+  #   * an absolute path with no `..` anywhere in it
+  #   * its parent is EXACTLY <data root>/runtimes
+  #   * its own name is a 64-character hex SHA-256
+  #
+  # The record's own dataRoot is what it is measured against, because the
+  # record's runtime.root and its dataRoot were written by one run of the
+  # installer and cannot disagree with each other.
+  #
+  # $1 path, $2 data root
+  local path="$1" root="${2:-}" parent leaf
+  [ -n "$path" ] && [ -n "$root" ] || return 1
+  case "$path" in /*) ;; *) return 1 ;; esac
+  case "/$path/" in */../*) return 1 ;; esac
+  path="${path%/}"; root="${root%/}"
+  [ -n "$path" ] && [ -n "$root" ] || return 1
+  parent="$(dirname "$path")"
+  leaf="$(basename "$path")"
+  [ "$parent" = "$root/runtimes" ] || return 1
+  [ "${#leaf}" -eq 64 ] || return 1
+  case "$leaf" in *[!0-9A-Fa-f]*) return 1 ;; esac
+  return 0
+}
 
 usage() {
   cat <<USAGE
@@ -326,20 +364,70 @@ if [ "$(flat_get "$REC" runtime.managedByThisInstaller)" != 'true' ]; then
   add_kept "game runtime : external installation; left whole"
 else
   R_RUNTIME_ROOT="$(flat_get "$REC" runtime.root)"
+  RUNTIME_RECORDED=''
+  RUNTIME_SURVIVORS=0
   i=0
   while :; do
     p="$(flat_get "$REC" "runtime.files.$i.path")"
     [ -n "$p" ] || break
-    remove_recorded "$p" "$(flat_get "$REC" "runtime.files.$i.sha256")" 'the complete edition game payload'
+    want="$(flat_get "$REC" "runtime.files.$i.sha256")"
+    remove_recorded "$p" "$want" 'the complete edition game payload'
+    RUNTIME_RECORDED="$RUNTIME_RECORDED$p
+"
+    # DID ANY FILE THIS INSTALL PUT THERE SURVIVE? That is what decides whether
+    # the directory is still somebody's game copy or only what is left of one.
+    #
+    # It is asked of the hashes rather than of the ledger, and --dry-run is why:
+    # under a dry run every recorded file is still on disk, so "it is there"
+    # means nothing. A recorded file that still MATCHES its recorded hash is one
+    # this run removes (or would); one that is there and DIFFERS is one the
+    # ledger has just reported CHANGED and kept, and that is a survivor.
+    if [ -f "$p" ] && [ "$(sha256_of "$p")" != "$(printf '%s' "$want" | tr 'a-f' 'A-F')" ]; then
+      RUNTIME_SURVIVORS=$((RUNTIME_SURVIVORS + 1))
+    fi
     i=$((i + 1))
   done
 
-  # Remove directories only when empty. A game file somebody changed or any
-  # file somebody added keeps itself and every parent it needs.
   if [ -n "$R_RUNTIME_ROOT" ] && [ -d "$R_RUNTIME_ROOT" ]; then
-    while IFS= read -r -d '' dir; do
-      remove_empty_directory "$dir"
-    done < <(find "$R_RUNTIME_ROOT" -depth -type d -print0)
+    # What is in the directory that this install never recorded: BepInEx's log,
+    # its configuration and its cache, whatever else the game wrote while it ran.
+    RUNTIME_RESIDUE=0
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      if printf '%s\n' "$RUNTIME_RECORDED" | grep -qxF -- "$f"; then continue; fi
+      RUNTIME_RESIDUE=$((RUNTIME_RESIDUE + 1))
+    done < <(find "$R_RUNTIME_ROOT" -type f)
+
+    if [ "$RUNTIME_SURVIVORS" -eq 0 ] && [ "$RUNTIME_RESIDUE" -gt 0 ] &&
+       is_managed_runtime "$R_RUNTIME_ROOT" "$R_DATAROOT"; then
+      # THE MANAGED GAME COPY IS RECLAIMED WHOLE, RESIDUE AND ALL. Not one file
+      # this install recorded is left in <data root>/runtimes/<sha>, so what is
+      # in it is no longer a game: it is BepInEx's log, its configuration, its
+      # cache, and whatever else ran there. Leaving that behind is what broke the
+      # next install - it found a directory with no game in it, refused to
+      # overwrite it, and named a file nobody could put back. This directory is
+      # this package's own and holds nothing of yours; your worlds are the game's
+      # own saves elsewhere, and the journal, the logs and the credential are
+      # OUTSIDE it in the data root, which this script keeps unless you ask for
+      # --remove-world-data.
+      #
+      # A SURVIVING RECORDED FILE STOPS THIS. A game file somebody changed is
+      # reported CHANGED and kept above, and then the directory around it keeps
+      # itself too: this sweep is for rubble, never for a copy something in it is
+      # still vouching for.
+      say "nothing this install recorded is left in $R_RUNTIME_ROOT, and $RUNTIME_RESIDUE file(s) the"
+      say "game and BepInEx wrote while it ran are. That directory is this package's own copy of the"
+      say "game, so it goes whole - a game directory with no game in it serves nobody and is exactly"
+      say "what an install over it cannot repair."
+      [ "$DRY_RUN" -eq 1 ] || rm -rf "$R_RUNTIME_ROOT"
+      add_removed "$R_RUNTIME_ROOT   ($RUNTIME_RESIDUE file(s) created by the game and BepInEx after the install, and the managed game copy around them)"
+    else
+      # Remove directories only when empty. A game file somebody changed or any
+      # file somebody added keeps itself and every parent it needs.
+      while IFS= read -r -d '' dir; do
+        remove_empty_directory "$dir"
+      done < <(find "$R_RUNTIME_ROOT" -depth -type d -print0)
+    fi
   fi
   remove_empty_directory "$(dirname "$R_RUNTIME_ROOT")"
 fi
@@ -441,7 +529,9 @@ if [ "$DRY_RUN" -eq 1 ]; then
 else
   if [ "$(flat_get "$REC" runtime.managedByThisInstaller)" = 'true' ]; then
     printf 'Done. Every unchanged managed game file was removed.\n'
-    say "A changed or user-added runtime file remains in place, if the ledger above names one."
+    say "A changed or user-added runtime file remains in place, if the ledger above names one,"
+    say "and keeps the directory around it. With nothing of this install's left in that directory,"
+    say "the managed game copy goes whole - what the game wrote inside it included."
   else
     printf 'Done. The game is as the installer found it.\n'
     say "You can prove that: the itch.io archive's SHA-256 is published in"

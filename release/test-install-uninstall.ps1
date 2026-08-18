@@ -26,6 +26,15 @@
          with -SkipCaImport: this test never writes to a trust store.
       F  a complete package. The same installer creates a versioned managed
          runtime without -GameDir, and removes only unchanged payload files.
+         Then the whole cycle that used to end in INS-RUNTIME: a world runs and
+         BepInEx writes its log, its config and its cache; a second install goes
+         over the same managed runtime and still records that framework as its
+         own; the uninstall reclaims the managed game copy WHOLE, residue
+         included, and keeps a ledger file of what it did; and a third install
+         starts again from the payload. A husk built here by hand - every
+         recorded game file gone, the framework left - is rebuilt by an install
+         rather than refused. A game file somebody changed is still kept, and
+         still keeps the folder around it.
       G  a world that is already in the data root. An uninstall keeps its
          credential; installing again over it - with the same join string, or
          with none at all - keeps the same identity, spends no second place on
@@ -240,6 +249,96 @@ Check "step 9 has no raw copy of a program file left" `
     ($installerCode -cnotmatch 'Copy-Item -LiteralPath \$source -Destination \$destination')
 Check "that copy re-throws every failure that is not a lock" `
     ($installerCode -match '(?s)function Copy-ProgramFile.*?\n    \} catch \{.*?\n        throw \$failure')
+
+# THE MANAGED GAME COPY, AND THE CYCLE THAT COULD NOT RUN. Install, install
+# again over the same managed runtime, uninstall, install again: the second
+# install found BepInEx already in <data root>\runtimes\<sha>, called it somebody
+# else's, and recorded installedByThisInstaller=false with an empty file list.
+# The uninstall then left the whole framework where it was while removing the
+# game payload it HAD recorded, and the install after that found a folder with
+# BepInEx in it and no game, refused to overwrite it, and named a file
+# (changelog.txt) that nothing could put back. These read CODE LINES ONLY, so
+# the comments that explain the rule cannot satisfy the check.
+$uninstallerCode = ((Get-Content -LiteralPath $uninstaller) | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+Check "one rule decides whose BepInEx a game folder holds" `
+    ($installerCode -match 'function Test-InstallerOwnedBepInEx')
+Check "step 4 asks that rule instead of asking only whether BepInEx is there" `
+    ($installerCode -match 'Test-InstallerOwnedBepInEx -Present \$bepInExHeld')
+Check "BepInEx already in the managed runtime is this install's" `
+    ($installerCode -match '(?s)function Test-InstallerOwnedBepInEx.*?if \(\$RuntimeMode -ne ''bundled''\) \{ return \$false \}.*?return \(Test-ManagedRuntimePath \$GameDir \$DataRoot\)')
+Check "BepInEx already in a game folder somebody else chose is not" `
+    ($installerCode -match '(?s)function Test-InstallerOwnedBepInEx.*?if \(-not \$Present\) \{ return \$true \}')
+Check "a file of the framework already on disk is recorded when the game copy is this package's" `
+    ($installerCode -match 'if \(-not \$bepInExManaged -or \$payloadOwns\.ContainsKey')
+Check "and the game's own files are never recorded as the framework's" `
+    ($installerCode -match '\$payloadOwns\[\$file\.relative\.ToUpperInvariant\(\)\] = \$true')
+Check "nothing is unpacked over a framework that is already in the managed game copy" `
+    ($installerCode -match '(?s)if \(\$bepInExHeld\) \{.*?\} else \{\s*\n\s*Expand-Archive')
+
+# Step 2 rebuilds a managed runtime that is no longer a game, rather than
+# refusing an install nothing could get past. The refusal it replaced is gone,
+# and the one for a runtime that is COMPLETE and DIFFERENT is not.
+Check "step 2 no longer refuses an incomplete managed runtime" `
+    (-not ($installerCode -match 'is incomplete \(\$\(\$file\.relative\) is missing\)'))
+Check "step 2 still refuses a managed runtime that is complete and changed" `
+    ($installerCode -match 'was changed \(\$\(\$changedFiles\[0\]\) differs\)')
+Check "step 2 stages the payload again after removing an incomplete runtime" `
+    ($installerCode -match '\$stageRuntime = \$true' -and $installerCode -match 'if \(\$stageRuntime\) \{')
+Check "step 2 counts what it is about to remove, on screen" `
+    ($installerCode -match '\$leftBehind = @\(Get-ChildItem -LiteralPath \$runtimeRoot -File -Force -Recurse')
+
+# NOTHING IS DELETED AT A PATH EITHER SCRIPT CANNOT PROVE IS THE MANAGED GAME
+# COPY. Both carry the same rule, and both ask it before a recursive delete.
+foreach ($pair in @(@{ name = 'installer'; text = $installerCode },
+                    @{ name = 'uninstall'; text = $uninstallerCode })) {
+    Check ("the $($pair.name) has the managed-runtime path rule") `
+        ($pair.text -match 'function Test-ManagedRuntimePath')
+    Check ("the $($pair.name) rule refuses a path with .. in it") `
+        ($pair.text -match '(?s)function Test-ManagedRuntimePath.*?if \(\$segment -eq ''\.\.''\) \{ return \$false \}')
+    Check ("the $($pair.name) rule requires the parent to be the runtimes folder itself") `
+        ($pair.text -match '(?s)function Test-ManagedRuntimePath.*?\$parent\.TrimEnd\(''\\'', ''/''\) -ne \$runtimes\.TrimEnd')
+    Check ("the $($pair.name) rule requires the leaf to be a sha256") `
+        ($pair.text -match '(?s)function Test-ManagedRuntimePath.*?-notmatch ''\^\[0-9A-Fa-f\]\{64\}\$''')
+}
+Check "step 2 proves the path against the payload's own sha before removing it" `
+    ($installerCode -match 'if \(-not \(Test-ManagedRuntimePath \$runtimeRoot \$DataRoot \$payloadSha\)\)')
+Check "and refuses rather than deleting when it cannot" `
+    ($installerCode -match '(?s)Test-ManagedRuntimePath \$runtimeRoot \$DataRoot \$payloadSha\)\) \{\s*\n\s*Stop-Setup')
+
+# The uninstall's own half: a managed runtime nothing of this install's is left
+# in is rubble, and rubble is what the next install cannot repair.
+Check "the uninstall asks whether any file it recorded survived" `
+    ($uninstallerCode -match '\$runtimeSurvivors \+= \[string\]\$file\.path')
+Check "it asks the hashes rather than the ledger, so -DryRun answers honestly" `
+    ($uninstallerCode -match '(?s)\$runtimeSurvivors = @\(\).*?if \(\(Get-Sha256 \$file\.path\) -eq \(\[string\]\$file\.sha256\)\.ToUpperInvariant\(\)\) \{ continue \}')
+Check "it counts the residue the game and BepInEx left, and nothing it recorded" `
+    ($uninstallerCode -match '\$recordedRuntimePaths\.ContainsKey\(\$_\.FullName\.ToUpperInvariant\(\)\)')
+Check "it sweeps the managed game copy only when nothing of this install's is left" `
+    ($uninstallerCode -match 'if \(\$runtimeSurvivors\.Count -eq 0 -and \$runtimeResidue\.Count -gt 0 -and')
+Check "and only at a path the managed-runtime rule accepts" `
+    ($uninstallerCode -match '\(Test-ManagedRuntimePath \$runtimeRoot \$recordedDataRoot\)\)')
+Check "a surviving changed file keeps its folder, one directory at a time" `
+    ($uninstallerCode -match '(?s)\} else \{\s*\n\s*\$runtimeDirs = @\(Get-ChildItem -LiteralPath \$runtimeRoot -Directory')
+Check "the sweep says how many files it removed beyond its own record" `
+    ($uninstallerCode -match 'file\(s\) created by the game and BepInEx after the install')
+
+# "Read the uninstall ledger" is a remedy in docs/error-taxonomy.md, and until
+# this file existed it named nothing: the ledger went to a console window that
+# the entry in Installed apps closes the moment the script ends.
+Check "every line the uninstall prints goes through one function" `
+    ($uninstallerCode -match 'function Write-Screen')
+Check "its own Say and Step go through it too" `
+    ($uninstallerCode -match 'function Say  \{ param\(\[string\]\$m\) Write-Screen')
+Check "the uninstall writes its ledger to a file" `
+    ($uninstallerCode -match 'function Save-Ledger')
+Check "beside the world's own logs, named like the install log" `
+    ($uninstallerCode -match "'uninstall-' \+ \(Get-Date\)\.ToUniversalTime\(\)\.ToString\('yyyyMMddTHHmmssZ'\)")
+Check "in %TEMP% when the run deletes the folder that would hold it" `
+    ($uninstallerCode -match 'if \(\$RemoveWorldData -and \$env:TEMP\) \{ \$ledgerDir = \$env:TEMP \}')
+Check "a refusal keeps its ledger too" `
+    ($uninstallerCode -match '(?s)function Stop-Uninstall \{.*?Save-Ledger.*?exit 1')
+Check "a dry run writes nothing, this file included" `
+    ($uninstallerCode -match '(?s)function Save-Ledger \{.*?if \(\$DryRun\) \{')
 $probe = (& $guiInstaller -Probe | Out-String) | ConvertFrom-Json
 Check "the game search finds a real installed game" `
     (Test-Path -LiteralPath (Join-Path ([string]$probe.foundGame) 'The Bibites.exe') -PathType Leaf)
@@ -787,14 +886,64 @@ Check "the application directory contains the launcher's default profile" `
 $startF = Get-Content -Raw -LiteralPath (Join-Path $fProgram 'Start-Multiverse.ps1')
 Check "the generated start script points at the managed runtime" ($startF.Contains($fRuntime))
 
-Set-Content -LiteralPath (Join-Path $fRuntime 'user-note.txt') -Value 'keep me' -Encoding ASCII
+# THE CYCLE THAT COULD NOT RUN, end to end. Install, run a world, install again
+# over the same managed runtime, uninstall, install again. The release before
+# this fix stopped dead at the last step - "The managed runtime at ... is
+# incomplete (changelog.txt is missing). It was not overwritten." - with no way
+# past it but deleting a folder by hand.
+
+# What the game and BepInEx write into the game folder once a world has run.
+$fBepInEx = Join-Path $fRuntime 'BepInEx'
+New-Item -ItemType Directory -Force -Path (Join-Path $fBepInEx 'cache') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $fBepInEx 'config') | Out-Null
+Set-Content -LiteralPath (Join-Path $fBepInEx 'LogOutput.log') -Value 'a world ran here' -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $fBepInEx 'config\BepInEx.cfg') -Value '[Logging]' -Encoding ASCII
+Set-Content -LiteralPath (Join-Path $fBepInEx 'cache\chainloader_typeloader.dat') -Value 'cache' -Encoding ASCII
+
+$install = Invoke-Script $fInstaller @{
+    DataRoot = $fData; InstallRoot = $fProgram; JoinStringFile = $fJoin
+}
+Check "installing again over the managed runtime succeeded" ($install.ExitCode -eq 0) $install.Output
+Check "it reused the game copy it had already verified" `
+    ($install.Output -match 'reusing the verified managed game runtime')
+$recordF2 = Get-Content -Raw -LiteralPath (Join-Path $fData 'install-record.json') | ConvertFrom-Json
+# THE BUG THAT MADE THE HUSK. This install found BepInEx already in the managed
+# runtime - because the install before it put it there - and recorded it as
+# somebody else's, with no files. The uninstall then left the whole framework
+# behind while removing the game payload around it.
+Check "it says the framework in that folder is its own" `
+    ($install.Output -match "already in this package's own managed game copy")
+Check "the second install still owns the BepInEx in its own managed runtime" `
+    ($recordF2.bepInEx.installedByThisInstaller -eq $true)
+Check "and records its files, so the uninstall can take them" `
+    (@($recordF2.bepInEx.files).Count -gt 0)
+
+Set-Content -LiteralPath (Join-Path $fRuntime 'user-note.txt') -Value 'left in the game copy' -Encoding ASCII
 $fUninstaller = Join-Path $fProgram 'Uninstall-BibitesMultiverse.ps1'
 $uninstall = Invoke-Script $fUninstaller @{ DataRoot = $fData }
 Check "the complete uninstall succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
 Check "the unchanged game executable was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fRuntime 'The Bibites.exe')))
-Check "a user-added runtime file was kept" (Test-Path -LiteralPath (Join-Path $fRuntime 'user-note.txt'))
-Check "the uninstall explains why the non-empty runtime stays" ($uninstall.Output -match 'not empty, so it stays')
+# Nothing this install recorded is left in that folder, so the folder is not a
+# game any more - and this package's own copy of the game, with the log, the
+# config and the cache the game wrote inside it, goes whole rather than staying
+# behind as something the next install cannot repair.
+Check "the managed game copy went whole, residue and all" `
+    (-not (Test-Path -LiteralPath $fRuntime))
+Check "the uninstall said how much it removed beyond its own record" `
+    ($uninstall.Output -match 'file\(s\) created by the game and BepInEx after the install')
+Check "the runtimes folder went with the last runtime in it" `
+    (-not (Test-Path -LiteralPath (Join-Path $fData 'runtimes')))
+# "Read the uninstall ledger" is a remedy in docs/error-taxonomy.md, and it has
+# to name something a reader can still open after the window has closed.
+$fLedgers = @(Get-ChildItem -LiteralPath (Join-Path $fData 'logs') -Filter 'uninstall-*.log' `
+                            -File -ErrorAction SilentlyContinue)
+Check "the uninstall kept a ledger of its own" ($fLedgers.Count -ge 1)
+if ($fLedgers.Count -ge 1) {
+    $fLedgerText = Get-Content -Raw -LiteralPath ($fLedgers | Sort-Object Name | Select-Object -Last 1).FullName
+    Check "that ledger holds what was removed and what was kept" `
+        ($fLedgerText -match 'what was removed' -and $fLedgerText -match 'what was kept')
+}
 Check "the installed sidecar was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'multiverse-sidecar.exe')))
 Check "the installed launcher was removed" `
@@ -807,6 +956,49 @@ Check "the installed support matrix was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'support-matrix.json')))
 Check "the launcher's profiles directory was removed" `
     (-not (Test-Path -LiteralPath (Join-Path $fProgram 'profiles')))
+
+# THE INSTALL THAT USED TO DIE. Nothing about this run is special: the same
+# package, the same data root, the same world.
+$install = Invoke-Script $fInstaller @{
+    DataRoot = $fData; InstallRoot = $fProgram; JoinStringFile = $fJoin
+}
+Check "installing again after the uninstall succeeded" ($install.ExitCode -eq 0) $install.Output
+Check "nothing about the managed runtime was refused" (-not ($install.Output -match 'INS-RUNTIME'))
+Check "it staged the game payload again" `
+    ($install.Output -match 'installed the verified game payload into a managed runtime')
+Check "the game is back in the managed runtime" `
+    (Test-Path -LiteralPath (Join-Path $fRuntime 'The Bibites.exe'))
+
+# THE HUSK THE UNINSTALL BEFORE THIS FIX LEFT BEHIND, made here exactly as that
+# release made it: every recorded game file gone, the framework still there. A
+# machine that already carries one is healed by an install rather than refused.
+$recordF3 = Get-Content -Raw -LiteralPath (Join-Path $fData 'install-record.json') | ConvertFrom-Json
+foreach ($payloadFile in @($recordF3.runtime.files)) {
+    Remove-Item -LiteralPath ([string]$payloadFile.path) -Force -ErrorAction SilentlyContinue
+}
+Check "the husk has no game left in it" `
+    (-not (Test-Path -LiteralPath (Join-Path $fRuntime 'The Bibites.exe')))
+Check "and still holds the mod framework" (Test-Path -LiteralPath (Join-Path $fRuntime 'BepInEx'))
+$install = Invoke-Script $fInstaller @{
+    DataRoot = $fData; InstallRoot = $fProgram; JoinStringFile = $fJoin
+}
+Check "an install over that husk succeeded" ($install.ExitCode -eq 0) $install.Output
+Check "it said what it found there" ($install.Output -match 'is not the game any more')
+Check "it removed the incomplete copy whole" `
+    ($install.Output -match 'removed the incomplete managed runtime whole')
+Check "and put the game back" (Test-Path -LiteralPath (Join-Path $fRuntime 'The Bibites.exe'))
+
+# A GAME FILE SOMEBODY CHANGED IS STILL KEPT, and keeps the folder around it.
+# The sweep is for rubble; a copy something in it is still vouching for is not
+# rubble, and neither script decides that for you.
+$recordF4 = Get-Content -Raw -LiteralPath (Join-Path $fData 'install-record.json') | ConvertFrom-Json
+$fChangedPayload = [string](@($recordF4.runtime.files)[0].path)
+Add-Content -LiteralPath $fChangedPayload -Value 'changed by hand'
+$uninstall = Invoke-Script (Join-Path $fProgram 'Uninstall-BibitesMultiverse.ps1') @{ DataRoot = $fData }
+Check "the uninstall after a hand-changed game file succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
+Check "it kept that file and said why" ($uninstall.Output -match 'CHANGED since the install')
+Check "the changed file is still there" (Test-Path -LiteralPath $fChangedPayload)
+Check "and the folder around it stayed" (Test-Path -LiteralPath $fRuntime)
 
 # ---------------------------------------------------------------- G
 

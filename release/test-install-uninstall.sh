@@ -36,6 +36,14 @@
 #      anything executable.
 #   H  a complete package. The same installer must create a versioned managed
 #      runtime without --game-dir, and uninstall only unchanged payload files.
+#      Then the whole cycle that used to end in INS-RUNTIME: a world runs and
+#      BepInEx writes its log, its config and its cache; a second install over
+#      the same managed runtime still records that framework as its own; the
+#      uninstall reclaims the managed game copy WHOLE, residue included; and a
+#      third install starts again from the payload. A husk built here by hand -
+#      every recorded game file gone, the framework left - is rebuilt by an
+#      install rather than refused, and a game file somebody changed is still
+#      kept and still keeps the directory around it.
 #   L  a secret nothing ever used: an install that stopped before the world ever
 #      ran leaves a credential belonging to no world, so it is renamed aside and
 #      a new identity is enrolled - while a journal, or any sidecar log line with
@@ -563,15 +571,85 @@ check "the record identifies a bundled managed runtime" \
 check "the generated start script points at the managed runtime" \
   "$(b bash -c 'grep -qF "$2" "$1"' _ "$H_KIT/start-multiverse.sh" "$H_RUNTIME")"
 
-# A file not in the payload ledger belongs to the participant and keeps the
-# runtime directory alive; all unchanged publisher files still go.
-printf 'keep me\n' > "$H_RUNTIME/user-note.txt"
+# THE CYCLE THAT COULD NOT RUN, end to end. Install, run a world, install again
+# over the same managed runtime, uninstall, install again. The release before
+# this fix stopped dead at the last step - "The managed runtime at ... is
+# incomplete (changelog.txt is missing). It was not overwritten." - with no way
+# past it but deleting a directory by hand.
+
+# What the game and BepInEx write into the game directory once a world has run.
+mkdir -p "$H_RUNTIME/BepInEx/cache" "$H_RUNTIME/BepInEx/config"
+printf 'a world ran here\n' > "$H_RUNTIME/BepInEx/LogOutput.log"
+printf '[Logging]\n'        > "$H_RUNTIME/BepInEx/config/BepInEx.cfg"
+printf 'cache\n'            > "$H_RUNTIME/BepInEx/cache/chainloader_typeloader.dat"
+
+run_script bash "$H_KIT/install-bibites-multiverse.sh" --data-root "$H_DATA" \
+  --join-string-file "$H_JOIN"
+check "installing again over the managed runtime succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "it reused the game copy it had already verified" \
+  "$(b contains 'reusing the verified managed game runtime' "$OUT")"
+# THE BUG THAT MADE THE HUSK. This install finds BepInEx already in the managed
+# runtime - because the install before it put it there - and used to record it as
+# somebody else's, with no files, so the uninstall left the whole framework
+# behind while removing the game payload around it.
+check "it says the framework in that directory is its own" \
+  "$(b contains "already in this package's own managed game copy" "$OUT")"
+check "the second install still owns the BepInEx in its own managed runtime" \
+  "$(b grep -q '"installedByThisInstaller": true' "$H_DATA/install-record.json")"
+
+printf 'left in the game copy\n' > "$H_RUNTIME/user-note.txt"
 run_script bash "$H_KIT/uninstall-bibites-multiverse.sh" --data-root "$H_DATA"
 check "the complete uninstall succeeded" "$(b test "$RC" -eq 0)" "$OUT"
 check "the unchanged game executable was removed" "$(b test ! -e "$H_RUNTIME/The Bibites.x86_64")"
-check "a user-added runtime file was kept" "$(b test -f "$H_RUNTIME/user-note.txt")"
-check "the uninstall explains why the non-empty runtime stays" \
-  "$(b contains 'not empty, so it stays' "$OUT")"
+# Nothing this install recorded is left in that directory, so it is not a game
+# any more - and this package's own copy of the game, with the log, the config
+# and the cache the game wrote inside it, goes whole rather than staying behind
+# as something the next install cannot repair.
+check "the managed game copy went whole, residue and all" "$(b test ! -d "$H_RUNTIME")"
+check "the uninstall said how much it removed beyond its own record" \
+  "$(b contains 'file(s) created by the game and BepInEx after the install' "$OUT")"
+check "the runtimes directory went with the last runtime in it" \
+  "$(b test ! -d "$H_DATA/runtimes")"
+
+# THE INSTALL THAT USED TO DIE. Nothing about this run is special: the same
+# package, the same data root, the same world.
+run_script bash "$H_KIT/install-bibites-multiverse.sh" --data-root "$H_DATA" \
+  --join-string-file "$H_JOIN"
+check "installing again after the uninstall succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "nothing about the managed runtime was refused" \
+  "$(if contains 'INS-RUNTIME' "$OUT"; then echo 1; else echo 0; fi)" "$OUT"
+check "it staged the game payload again" \
+  "$(b contains 'installed the verified game payload into a managed runtime' "$OUT")"
+check "the game is back in the managed runtime" "$(b test -x "$H_RUNTIME/The Bibites.x86_64")"
+
+# THE HUSK THE UNINSTALL BEFORE THIS FIX LEFT BEHIND, made here exactly as that
+# release made it: every recorded game file gone, the framework still there. A
+# machine that already carries one is healed by an install rather than refused.
+# Every absolute path the record names inside the managed runtime: the game
+# payload this install staged there, which is exactly what its uninstall took.
+while IFS= read -r H_PAYLOAD_FILE; do
+  [ -n "$H_PAYLOAD_FILE" ] || continue
+  rm -f "$H_PAYLOAD_FILE"
+done < <(grep -o '"path": "[^"]*"' "$H_DATA/install-record.json" | cut -d'"' -f4 | grep -F "$H_RUNTIME/")
+check "the husk has no game left in it" "$(b test ! -e "$H_RUNTIME/The Bibites.x86_64")"
+check "and still holds the mod framework" "$(b test -d "$H_RUNTIME/BepInEx")"
+run_script bash "$H_KIT/install-bibites-multiverse.sh" --data-root "$H_DATA" \
+  --join-string-file "$H_JOIN"
+check "an install over that husk succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "it said what it found there" "$(b contains 'is not the game any more' "$OUT")"
+check "it removed the incomplete copy whole" \
+  "$(b contains 'removed the incomplete managed runtime whole' "$OUT")"
+check "and put the game back" "$(b test -x "$H_RUNTIME/The Bibites.x86_64")"
+
+# A GAME FILE SOMEBODY CHANGED IS STILL KEPT, and keeps the directory around it.
+# The sweep is for rubble; a copy something in it is still vouching for is not
+# rubble, and neither script decides that for you.
+printf 'changed by hand\n' >> "$H_RUNTIME/The Bibites.x86_64"
+run_script bash "$H_KIT/uninstall-bibites-multiverse.sh" --data-root "$H_DATA"
+check "the uninstall after a hand-changed game file succeeded" "$(b test "$RC" -eq 0)" "$OUT"
+check "it kept that file and said why" "$(b contains 'CHANGED since the install' "$OUT")"
+check "the changed file is still there" "$(b test -f "$H_RUNTIME/The Bibites.x86_64")"
+check "and the directory around it stayed" "$(b test -d "$H_RUNTIME")"
 
 # ---------------------------------------------------------------- I
 

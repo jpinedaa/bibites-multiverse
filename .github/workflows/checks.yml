@@ -141,6 +141,14 @@ jobs:
           [ "$fails" -eq 0 ] || exit 1
           echo "    $count shell scripts parse"
 
+      # BLOCKING, and it needs no game and no install: the guard on the one
+      # `rm -rf` the complete edition does, lifted out of the installer and the
+      # uninstall themselves so a rule that changes in one and not in the other
+      # fails here rather than on somebody's machine. Its PowerShell half runs in
+      # the powershell job.
+      - name: the managed-runtime rules
+        run: release/test-runtime-rules.sh
+
       - name: systemd units
         run: deploy/test-units.sh
 
@@ -417,9 +425,19 @@ jobs:
             'farend/setup-farend.ps1',
             'release/test-install-uninstall.ps1',
             'release/test-installer-wait.ps1',
+            'release/test-runtime-rules.ps1',
             'deploy/local-broadcast/*.ps1'
           )
           ./release/pscheck.ps1 @paths
+
+      # BLOCKING, and it needs no game and no install: the guard on the one
+      # recursive delete the complete edition does, and the rule that decides
+      # whose BepInEx a game folder holds. Both are lifted out of the installer
+      # and the uninstall themselves, so a rule that changes in one and not in
+      # the other fails here rather than on somebody's machine.
+      - name: the managed-runtime rules
+        shell: pwsh
+        run: ./release/test-runtime-rules.ps1
 
       # BLOCKING, and deliberately `shell: powershell` — Windows PowerShell 5.1
       # is the engine the setup runs the installer window on, and the job-object

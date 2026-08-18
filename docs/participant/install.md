@@ -291,6 +291,23 @@ launcher's `profiles\*.json`, from the previous `Start-Multiverse.ps1`, or from 
 `peer-secret.txt` exactly as it is**. That works for a private map as well as the public one: an
 adopted world keeps its own relay, and the installer says so rather than moving it.
 
+**The included game is a copy this package owns, and setup will rebuild it.** A complete-edition
+install keeps the game in `<data root>\runtimes\<assembly sha256>` — one folder, named after the
+hash of the game assembly in it, that only setup writes into. Installing again over a complete one
+reuses it after checking every file. Installing over one that is **no longer a game** — files
+missing, the way an uninstall that left the mod framework behind used to leave it — makes setup say
+what it found there (how many payload files are gone, how many differ, how many files the game and
+BepInEx wrote inside it), remove that folder whole, and unpack the payload again. **Nothing of
+yours is in it**: your worlds are the game's own saves, and this world's journal, logs and
+credential are in the data root beside it, not inside it. The one thing setup will not overwrite is
+a managed game copy that is complete and **changed** — a working game somebody edited on purpose —
+and that refusal is `INS-RUNTIME` in [`../error-taxonomy.md`](../error-taxonomy.md). **The
+uninstall reclaims that folder whole** once nothing it recorded is left in it, the log and the
+config the game wrote inside it included. **On Windows it also keeps its ledger as a file**,
+`<data root>\logs\uninstall-<utc>.log` — `%TEMP%` when you pass `-RemoveWorldData`, which deletes
+that folder — because an uninstall started from *Installed apps* has no window left to read
+afterwards. The Linux uninstall prints the same ledger into the terminal you ran it from.
+
 **The last place it looks is the sidecar's own log**, `logs\sidecar.log` and the rotated files
 beside it. The sidecar writes `peer=<identity>` on every line, because the identity is an attribute
 of its logger, and its startup line carries `relay=` as well — so a data root whose install record,

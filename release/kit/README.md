@@ -76,6 +76,18 @@ world: step 6 reads the identity already in `%LOCALAPPDATA%\BibitesMultiverse` �
 untouched. It asks the map for nothing and spends no second place on it, and an adopted world keeps
 its own relay whether that is the public map or a private one.
 
+**The included game is this package's own copy, and setup rebuilds it when it has to.** A complete
+install keeps the game in `<data root>\runtimes\<assembly sha256>`, a folder only setup writes
+into. Installing again over a complete one checks every file and reuses it. Installing over one
+that is no longer a game — game files missing, only the mod framework left, which is what an
+uninstall used to leave behind — makes setup name what it found, remove that folder whole, and
+unpack the game again; nothing of yours is in there, because your worlds are the game's own saves
+and this world's journal, logs and credential are in the data root beside it. A managed copy that
+is complete but **changed** is the one case setup refuses to overwrite (`INS-RUNTIME`). The
+uninstall takes that whole folder back once nothing it recorded is left in it, and keeps its ledger
+in `<data root>\logs\uninstall-<utc>.log` — `%TEMP%` under `-RemoveWorldData`, nothing at all under
+`-DryRun` — because an uninstall started from *Installed apps* leaves no window to read.
+
 **The last place it looks is the sidecar's own log.** Every line the sidecar writes carries
 `peer=<identity>`, and its startup line carries `relay=` beside it, so `logs\sidecar.log` and the
 rotated files beside it still say which world a folder is when nothing else does. Setup reads them

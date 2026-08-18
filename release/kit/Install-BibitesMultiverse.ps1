@@ -465,6 +465,71 @@ function Resolve-RuntimeSelection {
     return 'external'
 }
 
+function Test-ManagedRuntimePath {
+    # THE ONE FOLDER THIS INSTALLER MAY DELETE WHOLE, and the answer is no for
+    # every other path on the machine. Step 2 rebuilds a managed runtime that is
+    # no longer the game payload, and a recursive delete is the sharp end of
+    # this script: the path it is given has to be proven, not trusted, because
+    # the value it comes from is read off a descriptor and joined to a data root
+    # a command line names.
+    #
+    # PROVEN MEANS ALL OF THIS, and any one of them failing is a refusal:
+    #
+    #   * no `..` anywhere in the path as written, refused before normalisation
+    #     can turn it back into a folder that looks legitimate
+    #   * its parent is EXACTLY <data root>\runtimes - not a folder below it, not
+    #     the data root, not a sibling whose name starts the same way
+    #   * its own name is a 64-character hex SHA-256, which is how the installer
+    #     names a runtime and nothing else in that folder is called
+    #   * and, when the caller knows which payload it is installing, that name is
+    #     that payload's hash and no other runtime's
+    #
+    # This is the launcher's removeWorldData rule in the other direction: that
+    # one deletes the entries it owns and keeps everything else, and this one
+    # deletes one folder it owns whole and refuses every path that is not it.
+    param([string]$Path, [string]$DataRoot, [string]$Sha = '')
+    if (-not $Path -or -not $DataRoot) { return $false }
+    if ($Sha -and $Sha -notmatch '^[0-9A-Fa-f]{64}$') { return $false }
+    foreach ($segment in ($Path -split '[\\/]+')) {
+        if ($segment -eq '..') { return $false }
+    }
+    $full = Get-FullPath $Path
+    $runtimes = Get-FullPath (Join-Path (Get-FullPath $DataRoot) 'runtimes')
+    if (-not $full -or -not $runtimes) { return $false }
+    $me = $full.TrimEnd('\', '/')
+    if (-not $me) { return $false }
+    $parent = ''
+    try { $parent = [System.IO.Path]::GetDirectoryName($me) } catch { return $false }
+    if (-not $parent) { return $false }
+    # Windows file names are case-insensitive and so is this, deliberately:
+    # RUNTIMES\ is the same folder as runtimes\ and has to be as safe.
+    if ($parent.TrimEnd('\', '/') -ne $runtimes.TrimEnd('\', '/')) { return $false }
+    $leaf = [System.IO.Path]::GetFileName($me)
+    if ($leaf -notmatch '^[0-9A-Fa-f]{64}$') { return $false }
+    if ($Sha -and $leaf -ne $Sha) { return $false }
+    return $true
+}
+
+function Test-InstallerOwnedBepInEx {
+    # WHOSE BepInEx IS THIS, in ONE place, because everything the uninstall does
+    # with the mod framework turns on the answer and a second copy of the rule is
+    # how the install and the uninstall would come to disagree about it.
+    #
+    #   BepInEx that is not there yet   ours: this run is about to unpack it
+    #   in a game somebody else chose   NOT ours. It was here before this install
+    #                                   and may be another mod's; the uninstall
+    #                                   leaves every file of it alone
+    #   in the managed runtime          OURS, always. <data root>\runtimes\<sha>
+    #                                   is a folder this installer creates from
+    #                                   its own payload and nothing else writes
+    #                                   in, so a BepInEx in it is one an earlier
+    #                                   run of this installer put there
+    param([bool]$Present, [string]$RuntimeMode, [string]$GameDir, [string]$DataRoot)
+    if (-not $Present) { return $true }
+    if ($RuntimeMode -ne 'bundled') { return $false }
+    return (Test-ManagedRuntimePath $GameDir $DataRoot)
+}
+
 Step "0 of 9 - check that nothing of this installation is running"
 
 # WHERE IT LOOKS, AND WHY THOSE FOLDERS AND NO OTHERS. Every folder below is one
@@ -685,18 +750,72 @@ if ($RuntimeSelection -eq 'bundled') {
         Stop-Setup "The complete package's game\ directory contains no files." 'INS-CHECKSUM'
     }
 
+    # A MANAGED RUNTIME IS A CACHE OF THIS PACKAGE'S OWN PAYLOAD. NOTHING IN IT
+    # IS YOURS. <data root>\runtimes\<assembly sha256> holds a copy of the game
+    # this package ships, named after the hash of the game assembly inside it,
+    # and this installer is the only thing that writes there: your worlds are the
+    # game's own saves under %USERPROFILE%\AppData\LocalLow, and your journal,
+    # your logs and this world's credential are in the data root BESIDE it, not
+    # in it. The launcher never writes in it either (docs/error-taxonomy.md §1).
+    #
+    # SO AN INCOMPLETE ONE IS REBUILT RATHER THAN REFUSED. Install, uninstall,
+    # install again used to end here, in a refusal with no way past it but
+    # deleting a folder by hand: the uninstall takes the files it recorded and
+    # leaves what the game and BepInEx wrote after the install, so the folder
+    # survives with no game left in it - and this step then found changelog.txt
+    # missing and said "It was not overwritten." The folder is this package's,
+    # what is left in it is not a game, and the payload to put back is right
+    # here, verified against the manifest by step 1. It is rebuilt, and every
+    # file removed to do it is counted on screen first.
+    #
+    # WHAT IS STILL REFUSED, and why the two cases are not the same: a runtime
+    # that is COMPLETE and DIFFERENT. Every payload file is there and one of them
+    # is not the file this package ships - a game copy somebody changed on
+    # purpose, which still runs. That is not rubble and this installer does not
+    # overwrite it.
+    $stageRuntime = $true
     if (Test-Path -LiteralPath $runtimeRoot -PathType Container) {
+        $missingFiles = New-Object System.Collections.ArrayList
+        $changedFiles = New-Object System.Collections.ArrayList
         foreach ($file in $payloadFiles) {
             $destination = Join-Path $runtimeRoot $file.relative
             if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) {
-                Stop-Setup "The managed runtime at $runtimeRoot is incomplete ($($file.relative) is missing). It was not overwritten." 'INS-RUNTIME'
-            }
-            if ((Get-Sha256 $destination) -ne $file.sha256) {
-                Stop-Setup "The managed runtime at $runtimeRoot was changed ($($file.relative) differs). It was not overwritten." 'INS-RUNTIME'
+                [void]$missingFiles.Add($file.relative)
+            } elseif ((Get-Sha256 $destination) -ne $file.sha256) {
+                [void]$changedFiles.Add($file.relative)
             }
         }
-        Say 'complete edition: reusing the verified managed game runtime'
-    } else {
+        if ($missingFiles.Count -eq 0 -and $changedFiles.Count -eq 0) {
+            Say 'complete edition: reusing the verified managed game runtime'
+            $stageRuntime = $false
+        } elseif ($missingFiles.Count -eq 0) {
+            Stop-Setup ("The managed runtime at $runtimeRoot was changed ($($changedFiles[0]) differs). " +
+                        "It was not overwritten.") 'INS-RUNTIME'
+        } else {
+            $leftBehind = @(Get-ChildItem -LiteralPath $runtimeRoot -File -Force -Recurse -ErrorAction SilentlyContinue)
+            Say ("the managed game runtime in {0} is not the game any more:" -f $runtimeRoot)
+            Say ("  {0} of {1} payload files are gone (the first is {2}), {3} of them differ," -f
+                 $missingFiles.Count, $payloadFiles.Count, $missingFiles[0], $changedFiles.Count)
+            Say ("  and {0} file(s) are left in it - what the game and BepInEx wrote while it ran." -f $leftBehind.Count)
+            Say "That folder is this package's own copy of the game and holds nothing of yours:"
+            Say "your worlds, this world's journal, its logs and its credential are all outside it."
+            # NOTHING IS DELETED AT A PATH THIS CANNOT PROVE. The whole folder
+            # goes, so the path has to be exactly the one this step owns.
+            if (-not (Test-ManagedRuntimePath $runtimeRoot $DataRoot $payloadSha)) {
+                Stop-Setup ("The managed runtime at $runtimeRoot is incomplete, and this installer will " +
+                            "not remove it: that path is not <data root>\runtimes\<payload sha256>, which " +
+                            "is the only folder this step owns. Nothing was changed.") 'INS-RUNTIME'
+            }
+            try {
+                Remove-Item -LiteralPath $runtimeRoot -Recurse -Force
+            } catch {
+                Stop-Setup ("The incomplete managed runtime at $runtimeRoot could not be removed: " +
+                            "$($_.Exception.Message)") 'INS-RUNTIME'
+            }
+            Say 'complete edition: removed the incomplete managed runtime whole; the payload is staged again below'
+        }
+    }
+    if ($stageRuntime) {
         $runtimeParent = Split-Path -Parent $runtimeRoot
         New-Item -ItemType Directory -Force -Path $runtimeParent | Out-Null
         $runtimeTemp = Join-Path $runtimeParent ('.installing-' + [guid]::NewGuid().ToString('N'))
@@ -811,17 +930,49 @@ Step ("4 of 9 - BepInEx {0}" -f $entry.bepInEx)
 $bepInExZipName = "BepInEx_$($entry.bepInExFlavour)_$($entry.bepInEx).zip"
 $bepInExCore    = Join-Path $GameDir 'BepInEx\core\BepInEx.dll'
 $bepInExOurs    = $false
+$bepInExHeld    = Test-Path $bepInExCore
 $bepInExPaths   = New-Object System.Collections.ArrayList
 
-if (Test-Path $bepInExCore) {
+# WHOSE BepInEx IS THIS? Test-InstallerOwnedBepInEx has the rule; this is what
+# answering it wrong cost. A SECOND install over the same managed runtime found
+# BepInEx already there, called it somebody else's, and recorded
+# bepInEx.installedByThisInstaller=false with an empty file list. The uninstall
+# then took its "it was here before us, leave it whole" branch for the framework
+# - and for the log, the configuration and the cache that go with it - while
+# removing the game payload it HAD recorded. What was left in
+# <data root>\runtimes\<sha> was 27 files of BepInEx with no game around them
+# (2.37 MB: no changelog.txt, no The Bibites.exe, no _Data), and the install
+# after that found the folder incomplete and refused to overwrite it. The
+# framework in the managed runtime was never anybody else's: this installer put
+# it there itself, one run earlier.
+$bepInExOwned   = Test-InstallerOwnedBepInEx -Present $bepInExHeld -RuntimeMode $runtimeMode `
+                                             -GameDir $GameDir -DataRoot $DataRoot
+# Ours AND inside this package's own game copy: then a file of the archive that
+# is already on disk is one of this installer's own, and is recorded like the
+# rest rather than being left for nobody to remove.
+$bepInExManaged = $bepInExOwned -and ($runtimeMode -eq 'bundled')
+
+if (-not $bepInExOwned) {
     Say "BepInEx is already installed here; left exactly as it is."
     Say "The uninstall will not touch it either - it removes only what it put there."
 } else {
     $zip = Join-Path $Here $bepInExZipName
     if (-not (Test-Path $zip)) { Stop-Setup "The package is incomplete: $bepInExZipName is missing." 'INS-CHECKSUM' }
 
-    # Every path the archive holds, recorded BEFORE it is unpacked, so the
-    # uninstall removes those files and nothing that was already here.
+    # The game's own files are the runtime record's, never this list's. BepInEx's
+    # archive lays files in the game's own root beside the game's, and one of
+    # them can have a name the game also uses; a game file recorded here would
+    # be claimed by two halves of one record.
+    $payloadOwns = @{}
+    if ($bepInExManaged) {
+        foreach ($file in $payloadFiles) { $payloadOwns[$file.relative.ToUpperInvariant()] = $true }
+    }
+
+    # Every path the archive holds, read BEFORE anything is unpacked, so the
+    # uninstall removes those files and nothing that was already here - except in
+    # this package's own managed game copy, where a file of the archive that is
+    # already on disk is one an earlier run of this installer put there, and is
+    # recorded exactly like the rest.
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
     try {
@@ -829,8 +980,10 @@ if (Test-Path $bepInExCore) {
             if (-not $zipEntry.Name) { continue }
             $rel = $zipEntry.FullName.Replace('/', '\')
             if (Test-Path (Join-Path $GameDir $rel)) {
-                Say "left alone (already here): $rel"
-                continue
+                if (-not $bepInExManaged -or $payloadOwns.ContainsKey($rel.ToUpperInvariant())) {
+                    Say "left alone (already here): $rel"
+                    continue
+                }
             }
             [void]$bepInExPaths.Add($rel)
         }
@@ -838,11 +991,24 @@ if (Test-Path $bepInExCore) {
         $archive.Dispose()
     }
 
-    Expand-Archive -Path $zip -DestinationPath $GameDir -Force
-    if (-not (Test-Path $bepInExCore)) { Stop-Setup "BepInEx did not unpack into $GameDir." }
+    if ($bepInExHeld) {
+        # NOTHING IS UNPACKED OVER IT. The framework in the managed game copy is
+        # already the one this package ships - an earlier run of this installer
+        # unpacked it there, and nothing else writes in that folder. What this
+        # run changes is the RECORD: these files are named as this install's, so
+        # the uninstall takes them with the game copy instead of leaving a folder
+        # holding BepInEx and no game.
+        Say ("BepInEx {0} is already in this package's own managed game copy ({1} files)." -f `
+             $entry.bepInEx, $bepInExPaths.Count)
+        Say "Only this installer writes in that folder, so it is this install's to remove:"
+        Say "the uninstall takes the framework with the game copy rather than leaving it behind."
+    } else {
+        Expand-Archive -Path $zip -DestinationPath $GameDir -Force
+        if (-not (Test-Path $bepInExCore)) { Stop-Setup "BepInEx did not unpack into $GameDir." }
+        Say ("BepInEx {0} installed into the game directory ({1} files)." -f $entry.bepInEx, $bepInExPaths.Count)
+        Say "The first game start after this is slower: BepInEx writes its configuration then."
+    }
     $bepInExOurs = $true
-    Say ("BepInEx {0} installed into the game directory ({1} files)." -f $entry.bepInEx, $bepInExPaths.Count)
-    Say "The first game start after this is slower: BepInEx writes its configuration then."
 }
 
 # ---------------------------------------------------------------- 5. the plugin
