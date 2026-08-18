@@ -115,6 +115,41 @@ stop_setup() {
 
 sha256_of() { sha256sum "$1" | cut -d' ' -f1 | tr 'a-f' 'A-F'; }
 
+is_managed_runtime() {
+  # THE ONE DIRECTORY THIS INSTALLER MAY DELETE WHOLE, and the answer is no for
+  # every other path on the machine. Step 2 rebuilds a managed runtime that is
+  # no longer the game payload, and `rm -rf` is the sharp end of this script: the
+  # path it is given has to be proven, not trusted, because the value it comes
+  # from is a descriptor's field joined to a data root a command line names.
+  #
+  # PROVEN MEANS ALL OF THIS, and any one of them failing is a refusal:
+  #
+  #   * an absolute path with no `..` anywhere in it
+  #   * its parent is EXACTLY <data root>/runtimes - not a directory below it,
+  #     not the data root, not a sibling whose name starts the same way
+  #   * its own name is a 64-character hex SHA-256, which is how the installer
+  #     names a runtime and nothing else in that directory is called
+  #   * and, when the caller knows which payload it is installing, that name is
+  #     that payload's hash and no other runtime's
+  #
+  # $1 path, $2 data root, $3 the expected sha256 or ''
+  local path="$1" root="${2:-}" want="${3:-}" parent leaf
+  [ -n "$path" ] && [ -n "$root" ] || return 1
+  case "$path" in /*) ;; *) return 1 ;; esac
+  case "/$path/" in */../*) return 1 ;; esac
+  path="${path%/}"; root="${root%/}"
+  [ -n "$path" ] && [ -n "$root" ] || return 1
+  parent="$(dirname "$path")"
+  leaf="$(basename "$path")"
+  [ "$parent" = "$root/runtimes" ] || return 1
+  [ "${#leaf}" -eq 64 ] || return 1
+  case "$leaf" in *[!0-9A-Fa-f]*) return 1 ;; esac
+  if [ -n "$want" ]; then
+    [ "$(printf '%s' "$leaf" | tr 'a-f' 'A-F')" = "$(printf '%s' "$want" | tr 'a-f' 'A-F')" ] || return 1
+  fi
+  return 0
+}
+
 usage() {
   cat <<USAGE
 usage: ./$(basename "$0") [options]
@@ -437,16 +472,65 @@ if [ -f "$PAYLOAD_DESCRIPTOR" ]; then
   RUNTIME_FILES="$(cd "$PAYLOAD_GAME_DIR" && find . -type f -printf '%P\n' | LC_ALL=C sort)"
   [ -n "$RUNTIME_FILES" ] || stop_setup "The complete package's game/ directory contains no files." 'INS-CHECKSUM'
 
+  # A MANAGED RUNTIME IS A CACHE OF THIS PACKAGE'S OWN PAYLOAD. NOTHING IN IT IS
+  # YOURS. <data root>/runtimes/<assembly sha256> holds a copy of the game this
+  # package ships, named after the hash of the game assembly inside it, and this
+  # installer is the only thing that writes there: your worlds are the game's own
+  # saves under ~/.config/unity3d, and your journal, your logs and this world's
+  # credential are in the data root BESIDE it, not in it.
+  #
+  # SO AN INCOMPLETE ONE IS REBUILT RATHER THAN REFUSED. Install, uninstall,
+  # install again used to end here, in a refusal with no way past it but deleting
+  # a directory by hand: the uninstall takes the files it recorded and leaves what
+  # the game and BepInEx wrote after the install, so the directory survives with
+  # no game left in it - and this step then found changelog.txt missing and said
+  # "It was not overwritten." The payload to put back is right here, verified
+  # against the manifest by step 1.
+  #
+  # WHAT IS STILL REFUSED: a runtime that is COMPLETE and DIFFERENT. Every
+  # payload file is there and one of them is not the file this package ships - a
+  # game copy somebody changed on purpose, which still runs. That is not rubble
+  # and this installer does not overwrite it.
+  STAGE_RUNTIME=1
   if [ -d "$RUNTIME_ROOT" ]; then
+    RUNTIME_MISSING=0
+    RUNTIME_CHANGED=0
+    RUNTIME_FIRST_MISSING=''
+    RUNTIME_FIRST_CHANGED=''
     while IFS= read -r rel; do
       [ -n "$rel" ] || continue
-      [ -f "$RUNTIME_ROOT/$rel" ] || stop_setup \
-        "The managed runtime at $RUNTIME_ROOT is incomplete ($rel is missing). It was not overwritten." 'INS-RUNTIME'
-      [ "$(sha256_of "$RUNTIME_ROOT/$rel")" = "$(sha256_of "$PAYLOAD_GAME_DIR/$rel")" ] || stop_setup \
-        "The managed runtime at $RUNTIME_ROOT was changed ($rel differs). It was not overwritten." 'INS-RUNTIME'
+      if [ ! -f "$RUNTIME_ROOT/$rel" ]; then
+        RUNTIME_MISSING=$((RUNTIME_MISSING + 1))
+        [ -n "$RUNTIME_FIRST_MISSING" ] || RUNTIME_FIRST_MISSING="$rel"
+      elif [ "$(sha256_of "$RUNTIME_ROOT/$rel")" != "$(sha256_of "$PAYLOAD_GAME_DIR/$rel")" ]; then
+        RUNTIME_CHANGED=$((RUNTIME_CHANGED + 1))
+        [ -n "$RUNTIME_FIRST_CHANGED" ] || RUNTIME_FIRST_CHANGED="$rel"
+      fi
     done <<< "$RUNTIME_FILES"
-    say "complete edition: reusing the verified managed game runtime"
-  else
+    if [ "$RUNTIME_MISSING" -eq 0 ] && [ "$RUNTIME_CHANGED" -eq 0 ]; then
+      say "complete edition: reusing the verified managed game runtime"
+      STAGE_RUNTIME=0
+    elif [ "$RUNTIME_MISSING" -eq 0 ]; then
+      stop_setup \
+        "The managed runtime at $RUNTIME_ROOT was changed ($RUNTIME_FIRST_CHANGED differs). It was not overwritten." 'INS-RUNTIME'
+    else
+      RUNTIME_TOTAL="$(printf '%s\n' "$RUNTIME_FILES" | wc -l | tr -d ' ')"
+      RUNTIME_LEFT="$(find "$RUNTIME_ROOT" -type f | wc -l | tr -d ' ')"
+      say "the managed game runtime in $RUNTIME_ROOT is not the game any more:"
+      say "  $RUNTIME_MISSING of $RUNTIME_TOTAL payload files are gone (the first is $RUNTIME_FIRST_MISSING), $RUNTIME_CHANGED of them differ,"
+      say "  and $RUNTIME_LEFT file(s) are left in it - what the game and BepInEx wrote while it ran."
+      say "That directory is this package's own copy of the game and holds nothing of yours:"
+      say "your worlds, this world's journal, its logs and its credential are all outside it."
+      # NOTHING IS DELETED AT A PATH THIS CANNOT PROVE. The whole directory goes,
+      # so the path has to be exactly the one this step owns.
+      is_managed_runtime "$RUNTIME_ROOT" "$DATA_ROOT" "$PAYLOAD_SHA" || stop_setup \
+        "The managed runtime at $RUNTIME_ROOT is incomplete, and this installer will not remove it: that path is not <data root>/runtimes/<payload sha256>, which is the only directory this step owns. Nothing was changed." 'INS-RUNTIME'
+      rm -rf "$RUNTIME_ROOT" || stop_setup \
+        "The incomplete managed runtime at $RUNTIME_ROOT could not be removed." 'INS-RUNTIME'
+      say "complete edition: removed the incomplete managed runtime whole; the payload is staged again below"
+    fi
+  fi
+  if [ "$STAGE_RUNTIME" -eq 1 ]; then
     mkdir -p "$(dirname "$RUNTIME_ROOT")"
     RUNTIME_TEMP="$(mktemp -d "$(dirname "$RUNTIME_ROOT")/.installing.XXXXXXXX")"
     trap 'rm -rf "$RUNTIME_TEMP"' EXIT
@@ -619,50 +703,99 @@ BEPINEX_CORE="$GAME_DIR/BepInEx/core/BepInEx.dll"
 BEPINEX_OURS='false'
 BEPINEX_PATHS=''
 BEPINEX_COUNT=0
+BEPINEX_HELD=0
+if [ -f "$BEPINEX_CORE" ]; then BEPINEX_HELD=1; fi
 
-if [ -f "$BEPINEX_CORE" ]; then
+# WHOSE BepInEx IS THIS? Everything the uninstall does with the mod framework
+# turns on that one answer, and answering it wrong is what left a game directory
+# with no game in it.
+#
+#   not there yet                  ours: this run is about to unpack it
+#   in a game somebody else chose  NOT ours. It was here before this install and
+#                                  may be another mod's; the uninstall leaves
+#                                  every file of it alone
+#   in the managed runtime         OURS, always. <data root>/runtimes/<sha> is a
+#                                  directory this installer creates from its own
+#                                  payload and nothing else writes in, so a
+#                                  BepInEx in it is one an EARLIER RUN OF THIS
+#                                  INSTALLER unpacked
+#
+# Reading the third case as "already present" is the bug behind the reinstall
+# that could not run: the second install over the same managed runtime recorded
+# bepInEx.installedByThisInstaller=false with an empty file list, the uninstall
+# took its "it was here before us, leave it whole" branch for the framework -
+# and its log, its config and its cache with it - while removing the game payload
+# it HAD recorded, and the install after that found a directory with BepInEx in
+# it and no game, and refused to overwrite it.
+BEPINEX_MANAGED=0
+if [ "$RUNTIME_MODE" = 'bundled' ] && is_managed_runtime "$GAME_DIR" "$DATA_ROOT"; then
+  BEPINEX_MANAGED=1
+fi
+
+if [ "$BEPINEX_HELD" -eq 1 ] && [ "$BEPINEX_MANAGED" -eq 0 ]; then
   say "BepInEx is already installed here; left exactly as it is."
   say "The uninstall will not touch it either - it removes only what it put there."
 else
   ZIP="$HERE/$BEPINEX_ZIP_NAME"
   [ -f "$ZIP" ] || stop_setup "The package is incomplete: $BEPINEX_ZIP_NAME is missing." 'INS-CHECKSUM'
 
-  # Every path the archive holds, recorded BEFORE it is unpacked, so the uninstall
-  # removes those files and nothing that was already here. On Linux the archive
-  # lays four files in the game's own root - run_bepinex.sh, libdoorstop.so,
-  # .doorstop_version and BepInEx's changelog.txt - which is where the Windows
-  # build puts winhttp.dll instead.
+  # Every path the archive holds, recorded BEFORE anything is unpacked, so the
+  # uninstall removes those files and nothing that was already here. On Linux the
+  # archive lays four files in the game's own root - run_bepinex.sh,
+  # libdoorstop.so, .doorstop_version and BepInEx's changelog.txt - which is
+  # where the Windows build puts winhttp.dll instead.
+  #
+  # IN THE MANAGED RUNTIME a file of the archive that is already on disk is one
+  # an earlier run of this installer put there, and is recorded like the rest -
+  # EXCEPT a file the game payload owns. BepInEx's changelog.txt and the game's
+  # have the same name, and a game file recorded here would be claimed by two
+  # halves of one record.
   while IFS= read -r rel; do
     case "$rel" in ''|*/) continue ;; esac
     if [ -e "$GAME_DIR/$rel" ]; then
-      say "left alone (already here): $rel"
-      continue
+      if [ "$BEPINEX_MANAGED" -eq 0 ] || printf '%s\n' "$RUNTIME_FILES" | grep -qxF -- "$rel"; then
+        say "left alone (already here): $rel"
+        continue
+      fi
     fi
     BEPINEX_PATHS="$BEPINEX_PATHS$rel
 "
     BEPINEX_COUNT=$((BEPINEX_COUNT + 1))
   done < <(unzip -Z1 "$ZIP")
 
-  # -n, NEVER OVERWRITE, and it is what makes the line above true rather than
-  # decorative. BepInEx's archive lays a changelog.txt in the game's own root; a
-  # game build that ever ships one of its own would be silently replaced by an
-  # extraction that overwrites, and the uninstall - which removes only what the
-  # record names - would then leave BepInEx's copy behind for good. A file that
-  # was already here is reported, skipped, and left out of the record, all three.
-  unzip -q -n "$ZIP" -d "$GAME_DIR"
-  [ -f "$BEPINEX_CORE" ] || stop_setup "BepInEx did not unpack into $GAME_DIR."
-  BEPINEX_OURS='true'
+  if [ "$BEPINEX_HELD" -eq 1 ]; then
+    # NOTHING IS UNPACKED OVER IT. The framework in the managed game copy is
+    # already the one this package ships - an earlier run of this installer
+    # unpacked it there, and nothing else writes in that directory. What this run
+    # changes is the RECORD: these files are named as this install's, so the
+    # uninstall takes them with the game copy instead of leaving a directory
+    # holding BepInEx and no game.
+    BEPINEX_OURS='true'
+    say "BepInEx $E_BEPINEX is already in this package's own managed game copy ($BEPINEX_COUNT files)."
+    say "Only this installer writes in that directory, so it is this install's to remove:"
+    say "the uninstall takes the framework with the game copy rather than leaving it behind."
+  else
+    # -n, NEVER OVERWRITE, and it is what makes the line above true rather than
+    # decorative. BepInEx's archive lays a changelog.txt in the game's own root; a
+    # game build that ever ships one of its own would be silently replaced by an
+    # extraction that overwrites, and the uninstall - which removes only what the
+    # record names - would then leave BepInEx's copy behind for good. A file that
+    # was already here is reported, skipped, and left out of the record, all three.
+    unzip -q -n "$ZIP" -d "$GAME_DIR"
+    [ -f "$BEPINEX_CORE" ] || stop_setup "BepInEx did not unpack into $GAME_DIR."
+    BEPINEX_OURS='true'
 
-  # The one bit a zip cannot be relied on to carry, on the one file that is
-  # useless without it. Same ordering rule as step 1: this file has just been
-  # written out of an archive whose own checksum was verified in step 1.
-  for needed in run_bepinex.sh libdoorstop.so .doorstop_version; do
-    [ -e "$GAME_DIR/$needed" ] || stop_setup "BepInEx unpacked without $needed, which the launcher needs."
-  done
-  chmod +x "$GAME_DIR/run_bepinex.sh"
-  say "BepInEx $E_BEPINEX installed into the game directory ($BEPINEX_COUNT files)."
-  say "run_bepinex.sh is BepInEx's own launcher, unmodified, and is now executable."
-  say "The first game start after this is slower: BepInEx writes its configuration then."
+    # The one bit a zip cannot be relied on to carry, on the one file that is
+    # useless without it. Same ordering rule as step 1: this file has just been
+    # written out of an archive whose own checksum was verified in step 1.
+    for needed in run_bepinex.sh libdoorstop.so .doorstop_version; do
+      [ -e "$GAME_DIR/$needed" ] || stop_setup "BepInEx unpacked without $needed, which the launcher needs."
+    done
+    chmod +x "$GAME_DIR/run_bepinex.sh"
+    say "BepInEx $E_BEPINEX installed into the game directory ($BEPINEX_COUNT files)."
+    say "run_bepinex.sh is BepInEx's own launcher, unmodified, and is now executable."
+    say "The first game start after this is slower: BepInEx writes its configuration then."
+  fi
 fi
 
 # ---------------------------------------------------------------- 5. the plugin
