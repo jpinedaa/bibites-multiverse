@@ -103,6 +103,19 @@ Credential creation is a startup operation.
 Batch multiple new credentials into one planned relay restart.
 Back up `ring.json` and `peers.json` after the batch.
 
+**Releasing a slot from the console is a startup operation too**, and it is the one shape this
+section does not cover: `--release-slot` runs against the data directory with the unit stopped, so
+it is a stop, an act, and a start rather than a restart, and `restart-relay.sh` cannot carry it.
+Raise the [peer gate](#the-peer-gate) by hand before the stop and lower it after the start, for the
+same reason the script does. Back up `ring.json` and `peers.json` first: a release cannot be undone,
+and the backup is the only thing that restores a credential dropped with it. Done that way the act
+is cheap — one recorded run released three slots inside a gated window of `2.4 s`, with the relay
+process itself down `249 ms` and the last peer back `2.6 s` after the gate went up, so the cost is
+the gate rather than the act. Batch a credential drop into the same window; it needs the same stop
+and no act of its own. [`README.md`](README.md), "Public enrollment and manual join issuance",
+carries the act itself, the rule that a released slot number is never reused, and the audit line
+that the console form writes to stderr and to no file.
+
 Run it with [`restart-relay.sh`](restart-relay.sh):
 
 ```sh

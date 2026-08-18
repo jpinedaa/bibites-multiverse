@@ -566,42 +566,51 @@ keep that installed identity.
 
 Private maps and manually named identities still use `issue-join.sh`.
 
-**Open item — a test identity is still holding a slot.** Installer testing follows the rule above
-and enrols for real, so a discarded test install leaves a real identity on the map with no world
-behind it. One is outstanding:
+**Stale test identities — none outstanding.** Installer testing follows the rule above and enrols
+for real, so a discarded test install leaves a real identity on the map with no world behind it.
+This table carries the ones that still need an act; it is empty as of 2026-08-18, and the rule at
+the end of this section says when a row joins it and when it leaves.
 
 | Identity | World name | Slot | Created | What it needs |
 |---|---|---|---|---|
-| `public-1b453bfe0cc64b329b1a701d38c415d9` | not reported | 9 | 2026-08-17, launcher and installer testing | **Decide first, then release.** It was found LIVE and simulating on 2026-08-18, so it is not yet known to be discarded |
+| — | — | — | — | Nothing outstanding as of 2026-08-18 |
 
-Slot 9 is the reason this table has a "decide first" row. It was scheduled for release on
-2026-08-18 alongside three others and the act was aborted at the pre-check: the identity had
-reconnected at `01:26:31Z` and was running a real world — mod `0.6.7`, 15 evolved species, a
-population that moved between samples. A discarded test install and a running one are the same row
-in this table until somebody checks, and a release cannot be undone, so removal is deferred until
-the owner says which it is.
+Settled on 2026-08-18, rows deleted per the rule below.
 
-Released on 2026-08-18, rows deleted per the rule below:
+**Released**, all three the same class of owner installer-test identity, all three released in one
+gated act with their credentials dropped:
 `public-2db3a641ac3a4b6491148ea67c496011` (`LauncherTest`, slot 10),
 `public-58be6bed48fd443194c05c90dabbb541` (slot 11) and
-`public-fcec3baf2d52416fb1be1bdf01b6029a` (slot 12) — all three the same class of owner
-installer-test identity, all three released in one gated act with their credentials dropped.
+`public-fcec3baf2d52416fb1be1bdf01b6029a` (slot 12).
 Slots 10, 11 and 12 are retired for good and their positions are holes.
+
+**Kept**, and the reason this table needs a "decide first" state at all:
+`public-1b453bfe0cc64b329b1a701d38c415d9`, slot 9. It was scheduled for release alongside those
+three and the act was aborted at the pre-check, because the identity had reconnected at `01:26:31Z`
+and was running a real world — mod `0.6.7`, 15 evolved species, a population that moved between
+samples. A discarded test install and a running one are the same row in this table until somebody
+checks, and a release cannot be undone. The owner decided the same day that it **stays**: it is a
+live world holding slot 9 at `(1,2)` like any other, not a stale identity, and it needs nothing. It
+leaves this table for good rather than waiting in it.
 
 Release with the `release-slot` act on the relay's admin listener — report first, read the
 consequence, then confirm within the token's ten minutes — and drop the credential from the
-verifier store afterwards. The console form is the alternative when the relay is already being
-stopped for other reasons: with the unit down, run the binary against the data directory with
+verifier store afterwards. **The console form is the other path, and it is the one this service has
+actually used**: with the unit stopped, run the binary against the data directory with
 `--release-slot <n> --reason <text> --yes`, which prints the same consequence report and skips only
-the prompt. **It writes its `ADMIN ACT` audit line to stderr and to no file**, so capture that
-output into the change record — the host keeps no copy of it, unlike the admin-listener path.
+the prompt. It costs a relay stop, so it belongs behind the peer gate with `ring.json` and
+`peers.json` backed up first, and a credential drop batches into the same window — `RESTART-POLICY.md`,
+"Relay-only restart", holds that sequence and what it measured. **It writes its `ADMIN ACT` audit
+line to stderr and to no file**, so capture that output into the change record — the host keeps no
+copy of it, unlike the admin-listener path.
 
 Whichever form, the slot NUMBER is never reused, which is the point of a release rather than an
 eviction: nothing that ever crossed to or from that world changes meaning. Check liveness
 IMMEDIATELY before the act and not merely before planning it, because a peer that was dark at the
 plan's pre-check can reconnect before it runs; that is precisely what happened to slot 9. Add a row
-here when a test enrols, and delete the row when it is released, so a stale identity is a line
-somebody can read rather than a slot nobody can explain.
+here when a test enrols, and delete it once the identity is settled — released, or decided to stay —
+recording which above, so a stale identity is a line somebody can read rather than a slot nobody can
+explain.
 
 **Tracked leftovers — credentials with no slot.** These are a different class: they hold no
 reservation and never appear on the map, so nothing above applies to them and no release act is

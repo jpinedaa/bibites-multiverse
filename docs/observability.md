@@ -568,7 +568,12 @@ expires.
 ## Alerting
 
 The monitor alerts on severity change with a repeat while bad and a daily
-heartbeat. That shape is right and stays.
+heartbeat. That shape is right and stays. What it does mean is that a check
+reports only as finely as its severity does: while a check sits at one severity
+the channel stays quiet however much worse the reading gets underneath it, and
+the repeat is the only thing that speaks. A check that saturates early is
+therefore a check that goes quiet early, which is what the peer floor below
+turns into a blind spot.
 
 **Severity travels in the alert, never in the exit code.** A check runner exits
 non-zero when *it* could not run, and zero when it ran and found something —
@@ -587,8 +592,17 @@ Three things about it are wrong today and are part of this standard:
 - The error check counts only `ERROR`-level lines. The relay logs a
   disconnection at `INFO`. Every world can leave and the error count stays
   zero.
-- The expected-peer floor ships as zero, so "every live slot vanished" is a
-  warning rather than a critical.
+- The expected-peer floor ships as zero, so the check watches dark slots only
+  and "every live slot vanished" is a warning rather than a critical. On a map
+  that already has a dark slot it is not even that: the peers check is already
+  at `WARN`, so a collapse changes no severity, sends nothing, and waits for the
+  `MV_ALERT_REPEAT_HOURS` repeat — twelve hours by default — to say it in the
+  same words it used for one dark slot. That is not a hypothetical. On
+  `2026-08-18` a world-host failure took the map down to one live slot and ten
+  dark and no alert was sent, because dark slots had held the check at `WARN`
+  for days. Raising `MV_EXPECTED_PEERS` to the map's peer count once worlds have
+  joined is what closes it, and it is the one threshold in the monitor that has
+  to be raised by hand as the map grows.
 - Silence is indistinguishable from health. A monitor on the service host
   cannot report that the service host is gone. Something off-host must watch
   for the absence of a heartbeat, or an outage of the whole box is
