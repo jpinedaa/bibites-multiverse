@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-17 UTC.
+Last updated: 2026-08-18 UTC.
 
 Bibites Multiverse `0.3.0` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
@@ -97,6 +97,23 @@ running world before it changes anything, the sidecar's journal is bounded on Wi
 time, and the world speaks `contract-b/4.1`, where a crossing that does not arrive is counted
 rather than held.
 Private maps still accept a private join-string file on both platforms.
+
+**A defect in the published release, fixed on `main` and in no release yet.**
+Release `0.3.0` as downloaded can leave a computer unable to install it again. Install it, install
+it again over the same complete-edition game copy, then uninstall: the second install reads the mod
+framework inside that copy as somebody else's, the uninstall leaves the framework there and removes
+the game from around it, and the setup after that finds a game folder with no game in it and
+refuses to overwrite it — `INS-RUNTIME`. Its complete-edition uninstall also leaves a launcher
+profile and the application folder holding it behind whatever the shape of the install, so
+*Installed apps* cannot take that entry away.
+**The workaround, on the release people have**, is to delete that game copy by hand — the one
+folder `%LOCALAPPDATA%\BibitesMultiverse\runtimes\<sha>` — and run setup again. It holds this
+package's own copy of the game and nothing of yours: your worlds are the game's own saves, and this
+world's journal, logs and credential are in the data root beside that folder rather than inside it.
+**A setup carrying the fix needs none of that**: it names what it found in such a folder, removes
+it whole and unpacks the game again, and its own uninstall reclaims that copy — framework, log and
+cache with it — so the cycle strands nobody. Both rows are in
+[`docs/error-taxonomy.md`](docs/error-taxonomy.md), with the uninstall ledger their remedies name.
 
 ## Milestone state
 

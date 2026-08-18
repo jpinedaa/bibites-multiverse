@@ -418,24 +418,27 @@ it found. A game genuinely running from that folder is still refused, whoever ow
 check reads `/proc`, so a game **another user** is running out of your game folder is a case it
 cannot see, and it says so.
 
-**The uninstall.** On Windows, use **Settings → Apps → Installed apps → Bibites Multiverse**.
-The advanced command is `Uninstall-BibitesMultiverse.ps1`. On Linux, use
-`./uninstall-bibites-multiverse.sh`. Use `-DryRun` or `--dry-run` first for the ledger. It reads the record the
-installer wrote and removes only what is named in it, checking each file's hash before it goes,
-and prints a line per path for what it removed and what it kept. Four things it deliberately
-keeps: **a file somebody changed after the install** — a changed plugin is reported and left;
-**BepInEx**, whole, if it was on your machine before; **your journal**, which is the record of
-organisms other worlds handed you; and **your world's identity** — `peer-secret.txt`, and
+**The uninstall.** On Windows, use **Settings → Apps → Installed apps → Bibites Multiverse**. The
+advanced command is `Uninstall-BibitesMultiverse.ps1`. On Linux, use
+`./uninstall-bibites-multiverse.sh`. Use `-DryRun` or `--dry-run` first for the ledger: it changes
+nothing and writes nothing, while a real Windows run keeps that ledger as a file —
+`<data root>\logs\uninstall-<utc>.log` — and the Linux one prints it into the terminal you ran it
+from. It reads the record the installer wrote and removes only what is named in it, checking each
+file's hash before it goes, and prints a line per path for what it removed and what it kept. Four
+things it deliberately keeps: **a file somebody changed after the install** — a changed plugin is
+reported and left; **BepInEx**, whole, if it was on your machine before this install — which means
+a game folder you chose, and never this package's own copy of the game, where only setup writes
+and the framework is therefore this install's to take back; **your journal**, which is the record
+of organisms other worlds handed you; and **your world's identity** — `peer-secret.txt`, and
 `data\peer-id` and `data\relay-url` beside the journal — because the world it names still has its
 place on the map and only that secret can claim it. Those last two are removed together, and only
 when you pass `-RemoveWorldData` / `--remove-world-data`, which says on your screen that it is the
-end of that world on the map.
-Its two refusals are the game still running from that folder and this install's own sidecar still
-running — both stop before removing anything, and both name the command that fixes them. **They use
-the same rule as the install**: only a game running from *that* folder counts, and where a process
-cannot be inspected the uninstaller asks the folder's own files whether anything is holding them
-open. It applies that to this install's game folder, to each extra world's game folder, and to the
-sidecar in its own kit directory.
+end of that world on the map. Its two refusals are the game still running from that folder and
+this install's own sidecar still running — both stop before removing anything, and both name the
+command that fixes them. **They use the same rule as the install**: only a game running from
+*that* folder counts, and where a process cannot be inspected the uninstaller asks the folder's
+own files whether anything is holding them open. It applies that to this install's game folder, to
+each extra world's game folder, and to the sidecar in its own kit directory.
 
 **On Windows the uninstall covers every world you added.** It walks the `profiles\` directory,
 refuses while any of those worlds still has a live game or sidecar — `multiverse-launcher.exe

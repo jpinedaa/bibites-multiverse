@@ -236,9 +236,16 @@ checkout — the two real scripts, the matrix extracted from `docs/support-matri
 BepInEx archive, and stand-ins for the plugin and the sidecar, neither of which it ever executes.
 Both suites include a complete-package scenario: no game path is supplied, the game lands in a
 versioned managed runtime, uninstall removes unchanged payload files, and a user-added file is
-kept. Linux also covers **the other platform's build of the same game version** and **a kit file
-that fails its manifest**. Its public-enrollment scenario also proves safe retry and identity
-reuse without network access.
+kept. **That scenario runs the whole cycle** — install, install again over the same managed game
+copy, uninstall, install once more — because the shape that stranded a machine needs all four: the
+second install still owns the framework in its own game copy and records it, the uninstall takes
+that copy back whole with the residue the game and BepInEx left in it, and the install after that
+finds no `INS-RUNTIME` to refuse. It also stages the payload again over a runtime emptied by hand,
+keeps a payload file changed by hand and the folder around it, and on Windows reads back the
+ledger the uninstall left as a file and asserts that the launcher profile and the application
+directory went, so the setup's own uninstaller can remove the folder. Linux also covers **the
+other platform's build of the same game version** and **a kit file that fails its manifest**. Its
+public-enrollment scenario also proves safe retry and identity reuse without network access.
 
 The Windows setup supports a no-install probe. Run the finished executable with `/PROBE` on
 Windows. A successful probe proves that the executable can unpack its real payload and load the

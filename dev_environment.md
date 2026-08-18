@@ -106,6 +106,18 @@ The quick freshness check compares only `BibitesAssembly.dll`.
 Use `sync-game-refs.sh --force` after the reference list changes.
 If the build cannot resolve a listed assembly, use the force option.
 
+**`bibites-mod/libs/` is gitignored, so `git clean -xfd` deletes it** — along with
+`decompiled/BibitesAssembly/` and the release build's download cache — and the next plugin build
+then fails to resolve every reference at once. Nothing is lost that this repository owns; what is
+gone is a copy of somebody else's bytes, and putting it back is the point of the paragraphs above.
+`sync-game-refs.sh` rebuilds it from the Steam installation it names. **On a machine that has no
+game installed** — this checkout builds on WSL, where there need not be one — the same 13
+assemblies come out of the pieces a release is built from instead: the eleven managed ones from
+`The Bibites_Data/Managed` in the game payload directory `release/make-release.sh` is given with
+`--windows-game-dir`, and `0Harmony.dll` and `BepInEx.dll` from `core/` inside the BepInEx archive
+that script caches under `farend/dist/cache/`. Copy them in by hand; the build asks for nothing
+else, and `libs/.sync-stamp` matters only to the freshness check.
+
 After every game update, review changed APIs and rerun the M1 exit test.
 The game can change an API without changing this repository.
 
