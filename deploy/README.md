@@ -725,23 +725,16 @@ participant outage even though it is now bounded by the duplicate window rather
 than by the length of the run. Read the projected cost from
 `monitor.sh --only replay`'s `replay-cost` verdict before you announce one.
 
-**Open item — the homepage is behind the repository, and only a deployment moves it.** The public
-landing page is compiled into the archive binary (`go/internal/archive/landing.go`), so a change to
-its words reaches `bibitesmultiverse.com` only when that binary is shipped and the archive
-restarts. **A release does not do this**, deliberately: the download buttons and the release number
-beside them resolve at GitHub and at run time, so publishing a release moves the page on its own
-and nothing else about it does. One change is waiting:
-
-| Commit | What changes on the page | State |
-|---|---|---|
-| `fa5f1a6`, 2026-08-18 | The Windows walkthrough drops from five steps to three. The five were written for the console launcher, and two of them taught a reader to press Enter at a numbered menu that the current release's icons no longer open | Merged to `main`, not deployed |
-
-It is a wrong instruction rather than a broken service, so it does not earn a held-down relay of
-its own. Ship it with the next archive deployment that happens for another reason, per the batching
-rule above, and delete this note once the live page reads three steps. Anything else committed
-under `go/internal/archive/` since that host's binary was built rides along with it — the private
-deployment record names the commit the host actually carries, which this repository deliberately
-does not track.
+**The homepage is compiled into the archive binary, and only a deployment moves it.** The public
+landing page lives in `go/internal/archive/landing.go`, so a change to its words reaches
+`bibitesmultiverse.com` only when that binary is shipped and the archive restarts. **A release does
+not do this**, deliberately: the download buttons and the release number beside them resolve at
+GitHub and at run time, so publishing a release moves the page on its own and nothing else about it
+does. A page whose words are wrong is a wrong instruction rather than a broken service, so it does
+not earn a held-down relay of its own: ship it with the next archive deployment that happens for
+another reason, per the batching rule above. Anything else committed under `go/internal/archive/`
+since that host's binary was built rides along with it — the private deployment record names the
+commit the host actually carries, which this repository deliberately does not track.
 
 An archive change that alters what the archive retains per record is not finished until
 `MV_REPLAY_RESIDENT_B`, `MV_REPLAY_PEAK_B` and `MV_ARCHIVE_GOMEMLIMIT` are re-derived in
