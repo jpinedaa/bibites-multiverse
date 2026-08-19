@@ -608,6 +608,10 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 		{"/social-card-watch.png", "image/png", pngMagic, http.StatusOK},
 		{"/social-card-live.png", "image/png", pngMagic, http.StatusOK},
 		{"/game-screenshot.jpg", "image/jpeg", jpegMagic, http.StatusOK},
+		// The number an installed launcher reads. An archive that has resolved
+		// nothing answers an empty document rather than an error, which is why
+		// the body this asserts is a brace.
+		{"/api/release", "application/json", "{", http.StatusOK},
 		{"/robots.txt", "text/plain", "Sitemap: https://bibitesmultiverse.com/sitemap.xml", http.StatusOK},
 		{"/sitemap.xml", "application/xml", "https://bibitesmultiverse.com/live", http.StatusOK},
 		{"/nothing-here", "text/html", "This world is not on the map.", http.StatusNotFound},

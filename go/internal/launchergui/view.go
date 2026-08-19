@@ -79,8 +79,12 @@ func WindowTitleFor(snap launcher.Snapshot) string {
 // their world had shut down when it had not.
 const CloseHint = "Your worlds keep running when you close this window"
 
-// DocsURL is where the menu's documentation item goes.
-const DocsURL = "https://bibitesmultiverse.com"
+// DocsURL is where the menu's documentation item goes, and where the update
+// button goes. ONE ADDRESS, from the core, so the window and the console menu
+// cannot come to name two different places to download the same release, and so
+// that nothing a remote answer carries can decide what this window opens
+// (internal/launcher/update.go).
+const DocsURL = launcher.HomeURL
 
 // The window's smallest useful size. Below this the world list and the panel
 // beside it start to hide their own text, and a saved size smaller than this is
@@ -531,6 +535,25 @@ func BannerFor(snap launcher.Snapshot) string {
 	return ""
 }
 
+// ---------------------------------------------------------------- the update
+
+// UpdateNoticeFor is the line above the world list when a newer release has been
+// published, and "" — the state this window is in almost always — when there is
+// nothing to say.
+//
+// IT IS NOT THE BANNER. The banner is red and it means something is WRONG with
+// this installation; an update is neither wrong nor urgent, and drawing it in
+// the same place in the same colour would teach a participant to ignore the one
+// line that is about a fault. This is its own line, in its own words, with the
+// button that acts on it beside it.
+//
+// THE WORDS COME FROM THE CORE. launcher.UpdateNotice is what the console menu
+// prints, and one sentence for both front doors is the same rule every refusal
+// in this window follows.
+func UpdateNoticeFor(snap launcher.Snapshot) string {
+	return launcher.UpdateNotice(snap.NewerRelease)
+}
+
 func countWords(n int) string {
 	if n == 1 {
 		return "one file"
@@ -585,6 +608,11 @@ const (
 	ButtonQuit        = "Quit"
 	ButtonDocs        = "Documentation (bibitesmultiverse.com)"
 	ButtonAbout       = "About"
+	// ButtonGetUpdate opens the website's download, and it is the ONLY thing
+	// this window does about an update: nothing is fetched, nothing is
+	// replaced, and no world is interrupted. A launcher that updated itself
+	// would be a launcher that could replace the sidecar under a running world.
+	ButtonGetUpdate = "Get the new version"
 
 	// CheckHeadless is the world's own setting, and changing it WRITES the world
 	// — which is the whole difference from the per-session override this window
@@ -650,6 +678,8 @@ const (
 	DetailsTip = "Shows everything the launcher has done this session, newest at the bottom. It opens by itself when something goes wrong."
 	WorldsTip  = "Every world on this computer. Double-click one, or press Enter, to start or stop it."
 	RefreshTip = "Reads every world again now, rather than waiting for the next couple of seconds to pass."
+	GetUpdateTip = "Opens bibitesmultiverse.com in your browser, where the newest version is downloaded from. " +
+		"Nothing here is changed by pressing it, and your worlds keep running."
 )
 
 // ---------------------------------------------------------------- dialog prose

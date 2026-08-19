@@ -18,12 +18,17 @@
                                 come to disagree about a delete.
       Test-InstallerOwnedBepInEx  is the mod framework in this game folder this
                                 install's to record and to remove? In a game
-                                somebody else chose: no. In this package's own
-                                managed game copy: always - this installer put
-                                it there itself, one run earlier. Answering that
-                                wrong is what left a game folder holding 27 files
-                                of BepInEx and no game, which the next install
-                                refused to overwrite (INS-RUNTIME).
+                                somebody else chose: no - unless the PREVIOUS
+                                install's own record says this package put it
+                                there, which is the upgrade case. In this
+                                package's own managed game copy: always - this
+                                installer put it there itself, one run earlier.
+                                Answering that wrong is what left a game folder
+                                holding 27 files of BepInEx and no game, which
+                                the next install refused to overwrite
+                                (INS-RUNTIME) - and, in the other edition, what
+                                left a whole framework in somebody's own Steam
+                                folder after an upgrade and an uninstall.
       Get-ProtectedRoot         which of the paths a launcher profile may never
                                 name as a world's data root still count once the
                                 managed game copy is being reclaimed by the run
@@ -154,6 +159,22 @@ Check "a portable run whose game folder is not the managed runtime is not ours" 
     (-not (Test-InstallerOwnedBepInEx -Present $true -RuntimeMode 'bundled' -GameDir $chosen -DataRoot $root))
 Check "a portable run pointed at the data root itself is not ours" `
     (-not (Test-InstallerOwnedBepInEx -Present $true -RuntimeMode 'bundled' -GameDir $root -DataRoot $root))
+
+# THE UPGRADE. A framework this package unpacked into somebody's own game folder
+# on install one is still this install's on install two: the previous install
+# record says so, and it is the only evidence that exists in a folder this
+# installer does not own. Without it the second install writes an empty file list
+# and the uninstall leaves the whole framework - its log, its config and its
+# cache - in a game folder it promised to put back exactly as it found it.
+Check "one a previous install of this package put in a chosen game folder IS ours" `
+    (Test-InstallerOwnedBepInEx -Present $true -RuntimeMode 'external' -GameDir $chosen -DataRoot $root `
+        -PreviouslyOurs $true)
+Check "and a stranger's is still a stranger's when no record claims it" `
+    (-not (Test-InstallerOwnedBepInEx -Present $true -RuntimeMode 'external' -GameDir $chosen -DataRoot $root `
+        -PreviouslyOurs $false))
+Check "the managed game copy needs no record to be ours" `
+    (Test-InstallerOwnedBepInEx -Present $true -RuntimeMode 'bundled' -GameDir $managed -DataRoot $root `
+        -PreviouslyOurs $false)
 
 # ---------------------------------------------------------------------------
 # A DATA ROOT IS SAFE TO ACT ON, OR IT IS NOT. Test-SafeDataRoot answers that for

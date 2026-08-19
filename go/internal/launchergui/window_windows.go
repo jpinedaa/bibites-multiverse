@@ -154,6 +154,19 @@ type ui struct {
 	model  *worldModel
 	banner *walk.TextLabel
 
+	// The update line: a label and the button beside it, hidden until a newer
+	// release is known and hidden again if it somehow stops being known. It is
+	// deliberately NOT the banner above it — see UpdateNoticeFor.
+	//
+	// THE ROW ITSELF IS WHAT IS HIDDEN, not only the two controls in it: walk
+	// leaves an invisible widget out of its parent's layout, so hiding the
+	// composite is what keeps the normal window — which is every window, almost
+	// always — exactly the shape it was before this row existed. Hiding only the
+	// children would leave a band of nothing above the world list for ever.
+	updateRow    *walk.Composite
+	update       *walk.TextLabel
+	updateButton *walk.PushButton
+
 	// The panel: one world, in plain words.
 	worldName  *walk.TextLabel
 	headline   *walk.TextLabel
@@ -292,6 +305,23 @@ func (u *ui) build() error {
 			d.TextLabel{AssignTo: &u.banner, Text: "", TextColor: bannerColour,
 				Background: labelBackground,
 				MinSize:    d.Size{Width: MinWindowWidth - 60}},
+			// The update line. It sits under the banner and above everything
+			// else because it is about the whole installation rather than about
+			// one world, and it is a row of its own so the button that acts on it
+			// is beside the sentence that explains it rather than in a menu
+			// somebody would have to go looking through.
+			d.Composite{
+				AssignTo: &u.updateRow,
+				Layout:   d.HBox{MarginsZero: true},
+				Children: []d.Widget{
+					d.TextLabel{AssignTo: &u.update, Text: "", TextColor: updateColour,
+						Background: labelBackground,
+						MinSize:    d.Size{Width: MinWindowWidth - 260}},
+					d.PushButton{AssignTo: &u.updateButton, Text: ButtonGetUpdate,
+						ToolTipText: GetUpdateTip, OnClicked: u.onGetUpdate},
+					d.HSpacer{},
+				},
+			},
 			d.VSplitter{
 				AssignTo:      &u.detailsSplit,
 				Name:          SplitNameDetails,
@@ -339,6 +369,7 @@ func (u *ui) build() error {
 		u.factValue[holder.label] = *holder.into
 	}
 	u.banner.SetVisible(false)
+	u.updateRow.SetVisible(false)
 	u.spinner.SetVisible(false)
 	u.resultLine.SetVisible(false)
 	u.hint.SetVisible(false)
@@ -565,6 +596,11 @@ var (
 	}
 	bannerColour = walk.RGB(160, 0, 0)
 	hintColour   = walk.RGB(72, 72, 72)
+	// AND NOT bannerColour. An available version is news, not a fault, and the
+	// one line in this window that is drawn in the colour of something being
+	// wrong has to keep meaning that. This is the same blue the rest of Windows
+	// uses for a link.
+	updateColour = walk.RGB(0, 84, 160)
 )
 
 // labelBackground is what makes a coloured label actually come out in its
@@ -966,6 +1002,11 @@ func (u *ui) applySnapshot(snap launcher.Snapshot) {
 	}
 
 	setLabel(u.banner, BannerFor(snap), bannerColour)
+	// The row goes as one: a "Get the new version" with no sentence beside it
+	// would be a button whose whole meaning was in a tooltip.
+	notice := UpdateNoticeFor(snap)
+	setLabel(u.update, notice, updateColour)
+	u.updateRow.SetVisible(notice != "")
 	u.mw.SetTitle(WindowTitleFor(snap))
 	u.statusBar.SetText(StatusBarText(snap))
 	u.applyActions()
@@ -1557,7 +1598,20 @@ func comSpec() string {
 	return "cmd.exe"
 }
 
-func (u *ui) onDocs() {
+func (u *ui) onDocs() { u.openWebsite() }
+
+// onGetUpdate is the whole of what the update line does. It opens the same page
+// the documentation item does — the homepage IS the download page — and it opens
+// THIS PROGRAM'S OWN CONSTANT. The answer that raised the line carried a version
+// string and nothing else, deliberately, so that no reply from anywhere can
+// decide what this button opens (internal/launcher/update.go).
+func (u *ui) onGetUpdate() {
+	fmt.Fprintf(u.log, "opening %s for the new version. Nothing here is changed by this, "+
+		"and your worlds keep running.\n", DocsURL)
+	u.openWebsite()
+}
+
+func (u *ui) openWebsite() {
 	// url.dll's protocol handler is Windows' own answer to "open this in
 	// whatever the user browses with", and it needs no shell parsing of a string
 	// somebody could have put a quote in.

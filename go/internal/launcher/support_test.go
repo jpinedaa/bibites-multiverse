@@ -323,10 +323,21 @@ func (h *harness) run(args ...string) int {
 		stdin = strings.NewReader("")
 	}
 	full := append([]string{"--install-root", h.root}, args...)
-	return run(full, stdin, &h.stdout, &h.stderr,
-		func(string) string { return "" },
+	return run(full, stdin, &h.stdout, &h.stderr, h.getenv,
 		func() (string, error) { return filepath.Join(h.root, LauncherExeName), nil },
 		h.clock)
+}
+
+// getenv is the environment the launcher sees under test: empty, except that
+// THE UPDATE CHECK IS TURNED OFF. This suite reaches no network, and the menu
+// starts that lookup — so without this line every golden test of the menu would
+// make a request to the real homepage and its answer would decide whether the
+// frame carried an extra line. See update.go, ReleaseCheckURLEnv.
+func (h *harness) getenv(name string) string {
+	if name == NoUpdateCheckEnv {
+		return "1"
+	}
+	return ""
 }
 
 // clock is the time the launcher sees: frozen unless a test asked it to move.

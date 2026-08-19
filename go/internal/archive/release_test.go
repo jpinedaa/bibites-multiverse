@@ -2,6 +2,7 @@ package archive
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -279,6 +280,108 @@ func TestReleaseLookupIsConditionalAfterTheFirstSuccess(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&conditional); got != 3 {
 		t.Errorf("%d lookups were conditional, want 3", got)
+	}
+}
+
+// /api/release IS THE NUMBER FOR A PROGRAM, and the reason it exists is that an
+// installed launcher must not ask GitHub itself: one host resolves the tag once
+// an hour and every launcher asks that host. The two spellings are both here so
+// no caller has to know that this project's tags carry a "v" and its version
+// constants do not.
+func TestReleaseEndpointServesTheResolvedReleaseForAProgram(t *testing.T) {
+	a := rigShapedArchive(t)
+	h := a.httpHandler()
+
+	get := func() (int, string, string) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/release", nil))
+		return rr.Code, rr.Header().Get("Content-Type"), rr.Body.String()
+	}
+
+	// NOT KNOWING IS A 200. Before the first lookup lands, and for ever on a host
+	// with no route to GitHub, the answer is an empty document — because "I do
+	// not know which release is newest" is the truth, and a caller that reads it
+	// as "nothing to say" behaves correctly. An error status here would make a
+	// launcher's silent check look like a fault to whoever reads a web log.
+	code, contentType, body := get()
+	if code != http.StatusOK {
+		t.Fatalf("GET /api/release before anything resolved = %d, want 200", code)
+	}
+	if !strings.Contains(contentType, "application/json") {
+		t.Errorf("Content-Type = %q, want application/json", contentType)
+	}
+	var unknown ReleaseView
+	if err := json.Unmarshal([]byte(body), &unknown); err != nil {
+		t.Fatalf("the unresolved answer is not JSON: %v (%q)", err, body)
+	}
+	if unknown.Tag != "" || unknown.Release != "" {
+		t.Fatalf("an unresolved tracker answered %+v", unknown)
+	}
+
+	a.releases.setTag("v9.9.9", "")
+	code, _, body = get()
+	if code != http.StatusOK {
+		t.Fatalf("GET /api/release = %d, want 200", code)
+	}
+	var resolved ReleaseView
+	if err := json.Unmarshal([]byte(body), &resolved); err != nil {
+		t.Fatalf("the answer is not JSON: %v (%q)", err, body)
+	}
+	if resolved.Tag != "v9.9.9" {
+		t.Errorf("tag = %q, want v9.9.9", resolved.Tag)
+	}
+	if resolved.Release != "9.9.9" {
+		t.Errorf("release = %q, want 9.9.9 - the form a launcher compares against", resolved.Release)
+	}
+
+	// A NEW RELEASE MOVES IT WITH NO RESTART, which is the whole reason the tag
+	// is resolved rather than compiled in, and is what a launcher installed
+	// today will read a year from now.
+	a.releases.setTag("v9.9.10", "")
+	_, _, body = get()
+	if !strings.Contains(body, "9.9.10") {
+		t.Errorf("a newly resolved release did not reach the endpoint: %q", body)
+	}
+}
+
+// The same gate as the page's: this endpoint would rather say nothing than hand
+// a program a value it does not recognise as a version.
+// It needs a tracker and not a whole archive: the gate is on the value, and
+// rigShapedArchive builds a six-world workload this has no use for.
+func TestReleaseEndpointRefusesATagItDoesNotRecognise(t *testing.T) {
+	tr := newReleaseTracker(defaultHomepageRepo(), testLogger())
+	for _, bad := range []string{"", "   ", "latest", "v1 0", "v1<b>"} {
+		tr.setTag(bad, "")
+		if view := tr.View(); view.Tag != "" || view.Release != "" {
+			t.Errorf("a tag of %q was rendered as %+v", bad, view)
+		}
+	}
+	// And a nil tracker — the state a front door must be able to draw — answers
+	// the same empty document rather than panicking.
+	var none *releaseTracker
+	if view := none.View(); view.Tag != "" || view.Release != "" {
+		t.Errorf("a tracker that does not exist answered %+v", view)
+	}
+}
+
+func TestReleaseNumberOf(t *testing.T) {
+	// Fictional versions, for the reason the tag in every test above is
+	// fictional: release/bump-version.sh refuses a release literal that is not
+	// allow-listed, and this function has nothing to do with which release
+	// this is.
+	tests := []struct{ tag, want string }{
+		{"v2.5.4", "2.5.4"},
+		{"V2.5.4", "2.5.4"},
+		{"2.5.4", "2.5.4"},
+		{"v1", "1"},
+		{"version9", "version9"},
+		{"v", "v"},
+	}
+	for _, tc := range tests {
+		if got := releaseNumberOf(tc.tag); got != tc.want {
+			t.Errorf("releaseNumberOf(%q) = %q, want %q", tc.tag, got, tc.want)
+		}
 	}
 }
 

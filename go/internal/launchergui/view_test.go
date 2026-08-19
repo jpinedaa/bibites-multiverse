@@ -447,6 +447,7 @@ func TestCaptionsAreUniqueAndPlain(t *testing.T) {
 		ButtonEdit, ButtonClone, ButtonDelete, ButtonDiagnose,
 		ButtonOpenData, ButtonOpenLogs, ButtonOpenGameLog, ButtonOpenConsole,
 		ButtonCopyPeerID, ButtonCopyLog, ButtonRefresh, ButtonQuit, ButtonDocs, ButtonAbout,
+		ButtonGetUpdate,
 		CheckHeadless, ButtonShowDetails, ButtonHideDetails,
 		ButtonDialogSave, ButtonDialogCreate, ButtonDialogClone, ButtonDialogDelete,
 		ButtonDialogCancel, ButtonShowAdvanced, ButtonHideAdvanced, CheckRemoveWorldData,
@@ -479,6 +480,7 @@ func TestCaptionsAreUniqueAndPlain(t *testing.T) {
 		ButtonOpenGameLog: OpenGameLogTip, ButtonOpenConsole: OpenConsoleTip,
 		ButtonCopyPeerID: CopyPeerIDTip, ButtonCopyLog: CopyLogTip,
 		CheckHeadless: HeadlessTip, ButtonShowDetails: DetailsTip, ButtonRefresh: RefreshTip,
+		ButtonGetUpdate: GetUpdateTip,
 	}
 	for caption, tip := range tips {
 		if len(tip) <= len(caption) {
@@ -486,6 +488,57 @@ func TestCaptionsAreUniqueAndPlain(t *testing.T) {
 		}
 		// A tooltip is read by the same person as the caption above it.
 		mustBePlain(t, "the tooltip for "+caption, tip)
+	}
+}
+
+// THE UPDATE LINE IS ITS OWN LINE, AND IT IS NOT THE BANNER. The banner is red
+// and means something is wrong with this installation; an available version is
+// neither wrong nor urgent, and putting the two in one place would teach a
+// participant to ignore the one that is about a fault. The words themselves come
+// from the core, so the console menu and this window cannot come to say it
+// differently.
+func TestTheUpdateLineIsSeparateFromTheBanner(t *testing.T) {
+	healthy := launcher.Snapshot{Worlds: []launcher.WorldView{aWorld()}}
+	if got := UpdateNoticeFor(healthy); got != "" {
+		t.Fatalf("an installation with nothing to say carries %q", got)
+	}
+
+	withUpdate := healthy
+	withUpdate.NewerRelease = "99.0.0"
+	notice := UpdateNoticeFor(withUpdate)
+	if notice != launcher.UpdateNotice("99.0.0") {
+		t.Fatalf("the window words it as %q and the core as %q",
+			notice, launcher.UpdateNotice("99.0.0"))
+	}
+	for _, want := range []string{"99.0.0", launcher.Release, DocsURL} {
+		if !strings.Contains(notice, want) {
+			t.Errorf("the notice %q does not name %q", notice, want)
+		}
+	}
+	// The banner has no opinion about it either way: a healthy installation with
+	// an update available still has nothing wrong with it.
+	if got := BannerFor(withUpdate); got != "" {
+		t.Fatalf("an available version raised the fault banner: %q", got)
+	}
+	// And a broken installation still says what is broken, update or no update.
+	broken := withUpdate
+	broken.Problems = []string{"profiles\\second.json: unexpected end of JSON input"}
+	if got := BannerFor(broken); got == "" {
+		t.Fatal("an update silenced the fault banner")
+	}
+	if got := UpdateNoticeFor(broken); got == "" {
+		t.Fatal("a fault silenced the update line")
+	}
+}
+
+// The button opens THIS PROGRAM'S OWN address, and it is the same one the
+// documentation item opens, because the homepage is the download page.
+func TestTheUpdateButtonOpensThisProjectsOwnAddress(t *testing.T) {
+	if DocsURL != launcher.HomeURL {
+		t.Fatalf("the window opens %q and the core names %q", DocsURL, launcher.HomeURL)
+	}
+	if !strings.HasPrefix(DocsURL, "https://") {
+		t.Fatalf("the window opens %q, which is not https", DocsURL)
 	}
 }
 

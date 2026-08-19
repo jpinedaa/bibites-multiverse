@@ -15,6 +15,11 @@ import (
 // behaviour today's shortcut gives.
 
 func (a *app) runMenu() int {
+	// THE LOOKUP STARTS HERE AND THE FIRST FRAME DOES NOT WAIT FOR IT. A menu
+	// frame is drawn and then this program blocks on a person reading it, so the
+	// answer lands between two frames rather than in front of the first one —
+	// which is the whole of the cost of never making anybody wait (update.go).
+	a.updates = startUpdateWatch(a.getenv)
 	for {
 		p, err := a.install.ResolveProfile("")
 		if err != nil {
@@ -71,6 +76,12 @@ func (a *app) renderMenu(p Profile) {
 	// holding a slot on the map.
 	if others := a.otherRunningWorlds(p.Name); len(others) > 0 {
 		a.print("   also running: %s", strings.Join(others, ", "))
+	}
+	// A line, in the frame, and never a prompt. There is no choice to make here
+	// and nothing to dismiss: the line appears once a newer release is known and
+	// is simply absent otherwise (update.go).
+	if notice := UpdateNotice(a.updates.Available()); notice != "" {
+		a.print("   %s", notice)
 	}
 	a.print("")
 	a.print("   1) Start this world            [Enter]")

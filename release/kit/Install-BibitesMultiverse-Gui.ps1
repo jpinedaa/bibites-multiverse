@@ -334,11 +334,20 @@ $install.Add_Click({
             if ($exitCode -eq $ExitBusy) {
                 $tail = 60
                 $caption = 'Close Bibites Multiverse first'
-                $headline = 'Nothing was installed and nothing was changed, because part of' +
+                # THE HEADLINE DOES NOT SAY WHAT WAS CHANGED, because this
+                # dialog cannot know. The same exit code carries two refusals:
+                # step 0's, which happens before anything at all is written, and
+                # the one a program STARTED DURING the install raises at step 5
+                # or step 9, by which time the mod and this world's identity are
+                # already in place. The installer's own words say which of the
+                # two happened, in the text below, and a headline that asserted
+                # "nothing was changed" over the second of them was simply wrong
+                # on the one screen a graphical install ever shows.
+                $headline = 'Part of this installation is running, and Windows will not let' +
                             [Environment]::NewLine +
-                            'this installation is running. Windows will not let a setup' +
+                            'a setup replace a program while it runs. What this run did and' +
                             [Environment]::NewLine +
-                            'replace a program while it runs.'
+                            'did not change is below.'
             }
             $detail = ''
             if (Test-Path -LiteralPath $log) {

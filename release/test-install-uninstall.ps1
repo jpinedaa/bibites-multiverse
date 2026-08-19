@@ -10,7 +10,7 @@
     but never changes it. It never touches a trust store, a running process or
     the network.
 
-    Seven scenarios:
+    Eight scenarios:
 
       A  a machine with no BepInEx. The installer adds it; the game then writes
          BepInEx's config, log and cache; the uninstall must leave the tree
@@ -51,6 +51,16 @@
          data root NO sidecar ever ran in is an orphan of an interrupted
          install: it is renamed aside, kept, and the install goes on.
          -RemoveWorldData is the one path that ends the world.
+      H  AN UPGRADE, which is the only thing the homepage download ever does on
+         a machine that already has this - and it passes no settings at all. A
+         world renamed, a port moved, a window turned off and a second world set
+         as the one this installation opens on all survive it; so do the
+         journal, the log and the credential. A file the release before this one
+         shipped and this one does not is removed, and one somebody edited is
+         kept and said so. A setting NAMED on the command line still wins over
+         the kept one. The framework this package unpacked into a game folder
+         somebody else chose is still this install's after two upgrades, so the
+         uninstall at the end takes it back out instead of leaving it there.
 
 .PARAMETER KitDir
     The staged archive contents - the folder holding Install-BibitesMultiverse.ps1,
@@ -229,8 +239,15 @@ Check "it names the launcher's own stop of every world" ($busyRefusal -match 'st
 Check "it names the launcher window's own way to do that" ($busyRefusal -match 'Stop every world')
 Check "it says that nothing was changed" ($busyRefusal -match 'NOTHING WAS CHANGED')
 Check "it says that it ended nothing itself" ($busyRefusal -match 'NOTHING IS ENDED FOR YOU')
-Check "it says what an install that got as far as step 9 had already done" `
+Check "it says what an install that got past step 0 had already done" `
     ($busyRefusal -match 'WHAT THIS INSTALL HAD ALREADY DONE')
+# THE LATE REFUSAL IS REACHED FROM TWO STEPS, so it must not name either: the mod
+# copy at step 5 and the program copy at step 9 both go through Copy-ProgramFile,
+# and a sentence that claimed the identity was settled would be wrong at step 5.
+Check "and it does not claim which steps those were" `
+    (-not ($busyRefusal -match 'WHAT THIS INSTALL HAD ALREADY DONE: BepInEx'))
+Check "the mod is copied through the same lock-aware copy the launcher is" `
+    ($installerCode -match 'Copy-ProgramFile \$pluginSrc \$pluginDst')
 # The exit code is the one thing a caller can act on without reading a word.
 Check "the refusal has an exit code of its own" ($installerCode -match '\$ExitBusy = 3')
 Check "the refusal exits with it" ($busyRefusal -match 'exit \$ExitBusy')
@@ -265,11 +282,24 @@ Check "one rule decides whose BepInEx a game folder holds" `
 Check "step 4 asks that rule instead of asking only whether BepInEx is there" `
     ($installerCode -match 'Test-InstallerOwnedBepInEx -Present \$bepInExHeld')
 Check "BepInEx already in the managed runtime is this install's" `
-    ($installerCode -match '(?s)function Test-InstallerOwnedBepInEx.*?if \(\$RuntimeMode -ne ''bundled''\) \{ return \$false \}.*?return \(Test-ManagedRuntimePath \$GameDir \$DataRoot\)')
+    ($installerCode -match '(?s)function Test-InstallerOwnedBepInEx.*?if \(\$RuntimeMode -eq ''bundled'' -and \(Test-ManagedRuntimePath \$GameDir \$DataRoot\)\) \{ return \$true \}')
 Check "BepInEx already in a game folder somebody else chose is not" `
     ($installerCode -match '(?s)function Test-InstallerOwnedBepInEx.*?if \(-not \$Present\) \{ return \$true \}')
+# THE UPGRADE HALF OF THE SAME RULE. A framework this installer unpacked into
+# somebody's own game folder on install one is still this install's on install
+# two, and the previous record is the only evidence there is for that: without it
+# the second install writes the empty file list again and the uninstall leaves
+# the whole framework in a folder it promised to put back as it found it.
+Check "BepInEx a previous install of this package put there is still this install's" `
+    ($installerCode -match '(?s)function Test-InstallerOwnedBepInEx.*?return \$PreviouslyOurs')
+Check "step 4 asks the previous record whose framework it is" `
+    ($installerCode -match '-PreviouslyOurs \$bepInExWasOurs')
+Check "and it only believes a record that names this very game folder" `
+    ($installerCode -match 'Test-SamePath \(Get-JsonField \$previousInstall\.Record ''gameDir''\) \$GameDir')
 Check "a file of the framework already on disk is recorded when the game copy is this package's" `
-    ($installerCode -match 'if \(-not \$bepInExManaged -or \$payloadOwns\.ContainsKey')
+    ($installerCode -match '\$bepInExManaged -or \$bepInExPreviouslyRecorded\.ContainsKey\(\$relKey\)')
+Check "and a file the previous install recorded is recorded again on an upgrade" `
+    ($installerCode -match '\$bepInExPreviouslyRecorded\[\$previousRel\.ToUpperInvariant\(\)\] = \$true')
 Check "and the game's own files are never recorded as the framework's" `
     ($installerCode -match '\$payloadOwns\[\$file\.relative\.ToUpperInvariant\(\)\] = \$true')
 Check "nothing is unpacked over a framework that is already in the managed game copy" `
@@ -1420,6 +1450,166 @@ Check "the uninstall with -RemoveWorldData succeeded" ($uninstall.ExitCode -eq 0
 Check "-RemoveWorldData removes the credential" (-not (Test-Path -LiteralPath $gCredential))
 Check "-RemoveWorldData says the world ends on the map" `
     ($uninstall.Output -match 'end of this world on the map') $uninstall.Output
+
+# ---------------------------------------------------------------- H
+
+# THE UPGRADE, WHICH IS THE ONLY THING THE HOMEPAGE DOWNLOAD EVER DOES ON A
+# MACHINE THAT ALREADY HAS THIS. The setup executable passes no settings at all,
+# so before this scenario existed a participant who had renamed their world,
+# moved its port, or told it to run without a window got every one of those
+# reset by a run whose whole purpose was to hand them a newer build - and the
+# launcher then opened a save that was not the one they had been playing.
+#
+# The shape is install, CHANGE THINGS THE WAY A PARTICIPANT WOULD, upgrade with
+# no flags at all, and then check that the changes are still there and that the
+# journal, the logs and the credential were never touched. It ends in an
+# uninstall, because what an upgrade records is what the uninstall can put back.
+Scenario "H - an upgrade over an existing install"
+
+$hRoot    = Join-Path $sandbox 'H'
+$hGame    = Join-Path $hRoot 'game'
+$hData    = Join-Path $hRoot 'data'
+$hProgram = Join-Path $hRoot 'program'
+New-SandboxGame -Path $hGame
+$hJoin   = Join-Path $hRoot 'join.txt'
+$hSecret = New-JoinFile $hJoin
+
+$install = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData
+    InstallRoot = $hProgram; JoinStringFile = $hJoin
+    World = 'FirstWorld'; SidecarPort = 8891; SaveMinutes = 4; SaveKeep = 3; ExportEdges = 'E,N'
+}
+Check "the first install succeeded" ($install.ExitCode -eq 0) $install.Output
+$hProfilePath = Join-Path $hProgram 'profiles\default.json'
+$hActivePath  = Join-Path $hProgram 'profiles\active.txt'
+$hRecordPath  = Join-Path $hData 'install-record.json'
+$hCredential  = Join-Path $hData 'peer-secret.txt'
+Check "it did not say it was updating anything" `
+    (-not ($install.Output -match 'updating the Bibites Multiverse')) $install.Output
+
+# WHAT A PARTICIPANT DOES NEXT, done here the way the launcher does it: the
+# profile is edited, a second world is added beside it, and the installation is
+# left opening on that second world.
+$hProfile = Get-Content -Raw -LiteralPath $hProfilePath | ConvertFrom-Json
+$hProfile.world       = 'Eden'
+$hProfile.sidecarPort = 8899
+$hProfile.headless    = $true
+$hProfile.saveKeep    = 9
+$hCreatedUtc          = $hProfile.createdUtc
+$hProfile | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $hProfilePath -Encoding ASCII
+$hSecondProfile = Join-Path $hProgram 'profiles\second.json'
+Copy-Item -LiteralPath $hProfilePath -Destination $hSecondProfile -Force
+Set-Content -LiteralPath $hActivePath -Value 'second' -Encoding ASCII
+
+# The world's own files: the journal it is holding for other worlds, and the
+# logs beside it. Neither is ever an installer's to touch.
+$hJournal = Join-Path $hData 'data\journal.ndjson'
+Set-Content -LiteralPath $hJournal -Value 'one line of a world''s custody' -Encoding ASCII
+$hLog = Join-Path $hData 'logs\sidecar.log'
+Set-Content -LiteralPath $hLog -Value 'a log line' -Encoding ASCII
+$hDataBefore = Get-TreeSnapshot (Join-Path $hData 'data')
+$hLogBefore  = (Get-FileHash -Path $hLog -Algorithm SHA256).Hash
+
+# A FILE THE RELEASE BEFORE THIS ONE SHIPPED AND THIS ONE DOES NOT, recorded the
+# way the previous install would have recorded it, plus one of the same kind that
+# somebody has since edited. The first is this setup's to remove; the second is
+# not, and it says so.
+$hStale  = Join-Path $hProgram 'retired-tool.exe'
+$hTouched = Join-Path $hProgram 'retired-and-edited.exe'
+Set-Content -LiteralPath $hStale   -Value 'a program an older release shipped' -Encoding ASCII
+Set-Content -LiteralPath $hTouched -Value 'another one' -Encoding ASCII
+$hRecord = Get-Content -Raw -LiteralPath $hRecordPath | ConvertFrom-Json
+$hRecord.program.files = @($hRecord.program.files) + @(
+    [pscustomobject]@{ path = $hStale;   sha256 = (Get-FileHash -Path $hStale   -Algorithm SHA256).Hash },
+    [pscustomobject]@{ path = $hTouched; sha256 = (Get-FileHash -Path $hTouched -Algorithm SHA256).Hash })
+$hRecord | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $hRecordPath -Encoding ASCII
+Add-Content -LiteralPath $hTouched -Value 'and a line somebody added' -Encoding ASCII
+
+# THE UPGRADE: exactly the arguments the setup executable passes, and not one
+# setting among them.
+$upgrade = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData; InstallRoot = $hProgram
+}
+Check "the upgrade succeeded" ($upgrade.ExitCode -eq 0) $upgrade.Output
+Check "it said it was updating what was already here" `
+    ($upgrade.Output -match 'updating the Bibites Multiverse') $upgrade.Output
+Check "it said the settings were kept rather than reset" `
+    ($upgrade.Output -match 'keeping the settings this installation already had') $upgrade.Output
+Check "it reused the identity already in the data root" `
+    ($upgrade.Output -match 'reusing the map identity already in') $upgrade.Output
+Check "it asked the map for nothing" `
+    (-not ($upgrade.Output -match 'requesting a unique identity')) $upgrade.Output
+
+$hAfter = Get-Content -Raw -LiteralPath $hProfilePath | ConvertFrom-Json
+Check "the upgrade kept the world the launcher was opening" ($hAfter.world -eq 'Eden')
+Check "and the port it had been moved to" ($hAfter.sidecarPort -eq 8899)
+Check "and the window setting only the launcher can set" ($hAfter.headless -eq $true)
+Check "and how many saves it was keeping" ($hAfter.saveKeep -eq 9)
+Check "and the edges the first install was given" ($hAfter.exportEdges -eq 'E,N')
+Check "an upgrade is not a creation, so the world is not made younger" `
+    ($hAfter.createdUtc -eq $hCreatedUtc)
+Check "the world's identity is untouched" ($hAfter.peerId -eq 'test-world')
+Check "the second world beside it is still there" (Test-Path -LiteralPath $hSecondProfile)
+Check "and the installation still opens on it" `
+    ((Get-Content -Raw -LiteralPath $hActivePath).Trim() -eq 'second')
+
+$hRecordAfter = Get-Content -Raw -LiteralPath $hRecordPath | ConvertFrom-Json
+Check "the record carries the kept settings too" `
+    ($hRecordAfter.world -eq 'Eden' -and [int]$hRecordAfter.sidecarPort -eq 8899 -and
+     $hRecordAfter.settings.exportEdges -eq 'E,N' -and [int]$hRecordAfter.settings.saveKeep -eq 9)
+$hStart = Get-Content -Raw -LiteralPath (Join-Path $hProgram 'Start-Multiverse.ps1')
+Check "and so does the start script, so the two describe one world" `
+    ($hStart -match "'Eden'" -and $hStart -match '8899')
+
+Check "the journal is byte for byte what it was" `
+    ((Compare-Snapshot $hDataBefore (Get-TreeSnapshot (Join-Path $hData 'data'))).Count -eq 0)
+Check "and so is this world's own log" `
+    ((Get-FileHash -Path $hLog -Algorithm SHA256).Hash -eq $hLogBefore)
+Check "the credential was never rewritten" `
+    ((Get-Content -Raw -LiteralPath $hCredential).Trim() -eq $hSecret)
+
+Check "a file the release before this one shipped is gone" (-not (Test-Path -LiteralPath $hStale))
+Check "the upgrade said it removed it" `
+    ($upgrade.Output -match 'the release before this one shipped it') $upgrade.Output
+Check "one somebody edited is KEPT instead" (Test-Path -LiteralPath $hTouched)
+Check "and the upgrade said why" `
+    ($upgrade.Output -match 'it has CHANGED since the') $upgrade.Output
+Check "the launcher itself is still installed" `
+    (Test-Path -LiteralPath (Join-Path $hProgram 'BibitesMultiverseLauncher.exe'))
+
+# A SETTING NAMED ON THE COMMAND LINE IS AN INSTRUCTION, and history never wins
+# over one. This is the other half of the rule and the one that would make the
+# adoption a trap if it were missing.
+$named = Invoke-Script $installer @{
+    RuntimeSelection = 'external'; GameDir = $hGame; DataRoot = $hData; InstallRoot = $hProgram
+    World = 'Named'; SidecarPort = 8877
+}
+Check "an install that names a setting succeeded" ($named.ExitCode -eq 0) $named.Output
+$hNamed = Get-Content -Raw -LiteralPath $hProfilePath | ConvertFrom-Json
+Check "the named world wins over the kept one" ($hNamed.world -eq 'Named')
+Check "and so does the named port" ($hNamed.sidecarPort -eq 8877)
+Check "everything it did not name is still kept" `
+    ($hNamed.saveKeep -eq 9 -and $hNamed.exportEdges -eq 'E,N' -and $hNamed.headless -eq $true)
+
+# WHAT AN UPGRADE RECORDS IS WHAT THE UNINSTALL CAN PUT BACK. The framework this
+# package unpacked into this game folder on the FIRST install is still this
+# install's after two more, so the uninstall takes it back out rather than
+# leaving it in a game folder it promised to leave as it found it.
+Check "the upgrade still owns the framework it put in this game folder" `
+    ($hRecordAfter.bepInEx.installedByThisInstaller -eq $true)
+Check "and still names its files, so the uninstall can take them" `
+    (@($hRecordAfter.bepInEx.files).Count -gt 0)
+
+$hUninstaller = Join-Path $hProgram 'Uninstall-BibitesMultiverse.ps1'
+$uninstall = Invoke-Script $hUninstaller @{ DataRoot = $hData }
+Check "the uninstall after two upgrades succeeded" ($uninstall.ExitCode -eq 0) $uninstall.Output
+Check "the mod framework went out of the game folder" `
+    (-not (Test-Path -LiteralPath (Join-Path $hGame 'BepInEx\core\BepInEx.dll'))) $uninstall.Output
+Check "the game itself is untouched" (Test-Path -LiteralPath (Join-Path $hGame 'The Bibites.exe'))
+Check "the journal survived the uninstall" `
+    ((Compare-Snapshot $hDataBefore (Get-TreeSnapshot (Join-Path $hData 'data'))).Count -eq 0)
+Check "so did the logs" (Test-Path -LiteralPath $hLog)
+Check "and so did this world's identity" (Test-Path -LiteralPath $hCredential)
 
 # ---------------------------------------------------------------- the verdict
 

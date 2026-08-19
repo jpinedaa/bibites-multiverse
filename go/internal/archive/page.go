@@ -185,6 +185,28 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(h)
 	})
+	// WHICH RELEASE IS NEWEST, for a program rather than for a reader. The page
+	// already carries this number in prose (landing.go's release line); this is
+	// the same value in two fields a machine can compare, and it exists so that an
+	// installed launcher can tell a player an update is out WITHOUT every player's
+	// machine calling GitHub. One host asks GitHub once an hour (release.go); every
+	// launcher asks that host.
+	//
+	// IT CARRIES NOTHING BUT THE NUMBER. No world, no identity, no count — so
+	// answering it is not a disclosure, and asking it is not a report: the request
+	// is a bare GET with no query and nothing in it that says who is asking (see
+	// the launcher's own side, internal/launcher/update.go).
+	//
+	// A SHORT PUBLIC CACHE, unlike every live endpoint above it. Those render world
+	// state and must not be cached at all; this renders a value the process itself
+	// only re-resolves once an hour, so five minutes in front of it is five minutes
+	// of the same answer and lets any intermediary absorb a burst of launcher
+	// starts.
+	mux.HandleFunc("/api/release", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_ = json.NewEncoder(w).Encode(a.releases.View())
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))

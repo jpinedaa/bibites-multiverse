@@ -115,6 +115,55 @@ func (t *releaseTracker) Tag() string {
 	return t.tag
 }
 
+// ReleaseView is what /api/release answers with. It exists because the HOMEPAGE
+// ALREADY KNOWS the newest release and an installed launcher does not, and the
+// alternative — every player's machine asking GitHub directly — spends the
+// anonymous rate limit of whatever network that player is on, on a number this
+// host resolved an hour ago and is holding in memory.
+//
+// TWO SPELLINGS OF ONE FACT, and both are here on purpose. Tag is what GitHub
+// publishes and what the page renders, "v" and all, so a reader who follows the
+// release link recognises what they land on. Release is the same value with the
+// tag's "v" taken off — the form that compares against a launcher's own
+// launcher.Release — so no consumer has to know that this project's tags carry a
+// prefix and its version constants do not.
+//
+// NOT KNOWING IS A VALID ANSWER, exactly as it is for the page (release.go rule
+// 2): before the first successful lookup, and forever on a host with no route to
+// GitHub, both fields are absent and the answer is `{}`. That is a 200 and not
+// an error, because "I do not know which release is newest" is the truth and a
+// caller that treats it as "nothing to say" behaves correctly.
+type ReleaseView struct {
+	// Tag is GitHub's own tag, e.g. "v2.5.4". Absent when nothing has resolved.
+	// The example is deliberately not this release: nothing in this file may
+	// name the release, which is the property release/bump-version.sh checks
+	// and the reason the number is resolved at run time at all.
+	Tag string `json:"tag,omitempty"`
+	// Release is the tag without its "v", e.g. "2.5.4" — the form a launcher
+	// compares against its own release constant. Absent for the same reason.
+	Release string `json:"release,omitempty"`
+}
+
+// View is the whole of the release endpoint's involvement with this tracker: a
+// read lock and two strings, so a caller waits on nothing.
+func (t *releaseTracker) View() ReleaseView {
+	tag := t.Tag()
+	if !tagLooksLikeRelease(tag) {
+		return ReleaseView{}
+	}
+	return ReleaseView{Tag: tag, Release: releaseNumberOf(tag)}
+}
+
+// releaseNumberOf strips the tag prefix this project publishes under. It is a
+// prefix strip and nothing more: a tag that does not carry one is already the
+// number, and the value has passed tagLooksLikeRelease before it gets here.
+func releaseNumberOf(tag string) string {
+	if len(tag) > 1 && (tag[0] == 'v' || tag[0] == 'V') && tag[1] >= '0' && tag[1] <= '9' {
+		return tag[1:]
+	}
+	return tag
+}
+
 // validator is the ETag to replay, or "" when nothing has been fetched yet.
 func (t *releaseTracker) validator() string {
 	t.mu.RLock()

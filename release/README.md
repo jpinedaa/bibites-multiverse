@@ -247,6 +247,17 @@ directory went, so the setup's own uninstaller can remove the folder. Linux also
 other platform's build of the same game version** and **a kit file that fails its manifest**. Its
 public-enrollment scenario also proves safe retry and identity reuse without network access.
 
+**The Windows suite's scenario H is the upgrade**, which is the only thing the homepage download
+ever does on a machine that already has this — and the only run of the installer that passes no
+settings at all. It installs, then changes things the way a participant does (renames the world,
+moves its port, turns the window off, adds a second world and leaves the installation opening on
+it), then runs setup again with nothing but the paths. Every one of those survives, the journal and
+the log and the credential are compared byte for byte, a program file the previous release shipped
+and this one does not is removed while one somebody edited is kept, a setting NAMED on the command
+line still wins over the kept one, and the uninstall at the end still takes the mod framework back
+out of a game folder somebody else chose — which it can only do because the upgrade kept recording
+it as this install's.
+
 The Windows setup supports a no-install probe. Run the finished executable with `/PROBE` on
 Windows. A successful probe proves that the executable can unpack its real payload and load the
 embedded GUI.

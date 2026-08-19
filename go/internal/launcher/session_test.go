@@ -29,7 +29,7 @@ func (h *harness) session() *Session {
 		Out:         &h.stdout,
 		Err:         &h.stderr,
 		Now:         h.clock,
-		Getenv:      func(string) string { return "" },
+		Getenv:      h.getenv,
 		Executable:  func() (string, error) { return filepath.Join(h.root, LauncherExeName), nil },
 	})
 	if err != nil {

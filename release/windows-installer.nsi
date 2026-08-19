@@ -27,6 +27,14 @@ OutFile "${OUTPUT_FILE}"
 Icon "${PRODUCT_ICON}"
 UninstallIcon "${PRODUCT_ICON}"
 InstallDir "$LOCALAPPDATA\Programs\Bibites Multiverse"
+; AN UPGRADE LANDS WHERE THE INSTALL IT IS UPGRADING IS. The Install section
+; below writes InstallLocation into this key; reading it back here is what stops
+; a second setup run from putting a whole second installation at the default
+; path beside one somebody had put somewhere else - two application folders, two
+; sets of shortcuts, and one *Installed apps* entry pointing at whichever ran
+; last. With no such key this stays the InstallDir above, which is the path every
+; installation this setup has ever made is at.
+InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\BibitesMultiverse" "InstallLocation"
 BrandingText "Bibites Multiverse"
 
 VIProductVersion "${PRODUCT_VERSION}.0"

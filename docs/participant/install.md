@@ -282,6 +282,24 @@ every world"* in the launcher's window, `multiverse-launcher.exe stop --all` fro
 window and run setup again. Nothing about the upgrade changes: the world, its identity and its
 place on the map are all still there, as the next paragraph describes.
 
+**An upgrade keeps everything you had set.** Setup passes no settings of its own, so a run over an
+existing installation reads what is already here — the launcher's own profile first, because that
+is what you have been editing, and the install record behind it — and keeps every value you did not
+name on this run: **the world's save name, its port, its export edges, how often it saves and how
+many it keeps, whether it runs without a window, and which world this installation opens on.** It
+says *"updating the Bibites Multiverse … already installed here"* when it finds one, and *"keeping
+the settings this installation already had"* when it keeps them. **A flag you do name still wins**:
+`-World`, `-SidecarPort` and the rest are instructions, and history never overrides one. Extra
+worlds you created in the launcher are untouched either way, and so is the folder each of them
+keeps its journal in.
+
+Two more things an upgrade does that a first install has no reason to. **A program file the release
+before this one shipped and this one does not is removed** — by its recorded hash, so one you
+changed yourself is kept and named instead — because a file nothing knows about is a file no
+uninstall can take away. And **the mod framework stays this installation's to remove**: BepInEx that
+setup unpacked into your own game folder the first time is still setup's on every upgrade after it,
+so uninstalling still takes it back out rather than leaving it in your game folder for ever.
+
 **Installing again over the same data root keeps that world.** An upgrade, a repair, a changed
 game folder, a re-run after a stop: none of them is a new world, and none of them asks the map for
 a second identity. The installer reads the identity that is already in the data root — from
@@ -685,6 +703,33 @@ tells you to type it.
 **The Linux kit adds nothing to this list.** It asks for no `sudo`, pipes no download into a
 shell, and writes to no system trust store — a private map's authority is trusted through
 `SSL_CERT_FILE` for one process, which is narrower than trusting it machine-wide, not wider.
+
+## How you hear that there is a newer version
+
+**The launcher checks once, when it opens, and says nothing unless there is something to say.**
+It asks `https://bibitesmultiverse.com/api/release` — the same site the download buttons are on —
+for the newest published version, and if that is newer than the one you have, it shows one line:
+*"Version X is available. This one is Y. Download it at https://bibitesmultiverse.com"*. In the
+window that line comes with a **Get the new version** button, which opens the website in your
+browser. In the console menu it is a line in the menu's own frame.
+
+**Nothing waits on it and nothing is downloaded.** The check runs beside the launcher rather than
+in front of it, so a slow network, a captive portal, a firewall or no network at all costs you
+nothing and tells you nothing — the line is simply not there. **The launcher never replaces
+itself**: pressing the button opens a web page, and installing the new version is the setup you
+download from it, run the ordinary way, over the install you already have.
+
+**What the request contains is a request and nothing else.** It is a plain `GET` with no query
+string, no body, no cookie and nothing that identifies you or your machine — not your worlds, not
+your identity on the map, not even which version you are on. The one thing it sends about itself is
+the name `bibites-multiverse-launcher`, deliberately without a version number, so that "how many
+machines run which release" is not a question this project's own web log can answer.
+
+**To turn it off entirely**, set `MULTIVERSE_NO_UPDATE_CHECK` to any value in your environment. The
+launcher then makes no request at all — not a shorter one, not a cached one, none. A second
+variable, `MULTIVERSE_RELEASE_URL`, points the check at a different address; it exists for a test
+and for the manual rehearsal in `release/launcher-gui-manual-test.md`, and the off switch wins over
+it.
 
 ## Next
 

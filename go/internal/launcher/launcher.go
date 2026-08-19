@@ -83,6 +83,14 @@ type app struct {
 	now    func() time.Time
 	getenv func(string) string
 	client *http.Client
+
+	// updates is the background "is there a newer release" lookup, started by
+	// whichever front door is going to draw its answer and by nothing else — the
+	// menu (menu.go) and a session (session.go). A scripted `start`, `stop` or
+	// `status --json` makes no request at all: nothing in those would print the
+	// answer, so asking would be a network call spent on nobody. nil is the
+	// ordinary state and reads as "nothing to say" (update.go).
+	updates *updateWatch
 }
 
 // Main is the launcher entry point, factored out of package main so the tests

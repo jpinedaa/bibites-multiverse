@@ -297,6 +297,34 @@ function Get-FullPath {
     try { return [System.IO.Path]::GetFullPath($candidate) } catch { return '' }
 }
 
+function Test-SamePath {
+    param([string]$A, [string]$B)
+    if (-not $A -or -not $B) { return $false }
+    $left  = $A.TrimEnd('\', '/')
+    $right = $B.TrimEnd('\', '/')
+    # Windows file names are case-insensitive, so this comparison is too. Every
+    # comparison of a secret or an identity in this script is the opposite, and
+    # is written -ceq / -cne for exactly that reason.
+    return ($left -eq $right)
+}
+
+function Read-JsonFile {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try {
+        return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+function Get-JsonField {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return '' }
+    if ($Object.PSObject.Properties.Match($Name).Count -eq 0) { return '' }
+    return [string]$Object.$Name
+}
+
 function Get-ProcessImage {
     # Every running process of one name, as a name, an id and an image path,
     # because a message somebody can act on needs all three. Win32_Process
@@ -407,11 +435,15 @@ function Stop-Busy {
     Say "program's decision to make."
     Write-Host ""
     if ($Late) {
-        Say "WHAT THIS INSTALL HAD ALREADY DONE: BepInEx, the mod and this world's map"
-        Say "identity are in place, and the identity is reused rather than spent twice, so"
-        Say "running this setup again once nothing is running costs you no second place on"
-        Say "the map. What is missing is the launcher and the files beside it, which is"
-        Say "exactly what that run finishes."
+        # THIS IS REACHED FROM STEP 5 AND FROM STEP 9, so it does not name the
+        # steps it is standing after: every step this run printed above is done
+        # and every step it did not print is not, which is a truer answer than a
+        # list that would be wrong at one of the two.
+        Say "WHAT THIS INSTALL HAD ALREADY DONE is printed above, step by step: every step"
+        Say "you can see finished, and the ones after it did not start. NONE OF IT IS SPENT."
+        Say "This world's map identity is reused rather than asked for twice, so running this"
+        Say "setup again once nothing is running finishes what is left and costs you no"
+        Say "second place on the map."
     } else {
         Say "NOTHING WAS CHANGED. This is the first thing this setup does: it asks before"
         Say "it has even checked its own package, and long before it touches the game, the"
@@ -524,10 +556,132 @@ function Test-InstallerOwnedBepInEx {
     #                                   its own payload and nothing else writes
     #                                   in, so a BepInEx in it is one an earlier
     #                                   run of this installer put there
-    param([bool]$Present, [string]$RuntimeMode, [string]$GameDir, [string]$DataRoot)
+    #
+    #   that THIS install put there     OURS AGAIN, whichever folder it is in.
+    #                                   This is the UPGRADE case and it is the
+    #                                   same mistake as the managed one in the
+    #                                   other edition: the second install over a
+    #                                   Steam or itch game found the framework it
+    #                                   had unpacked itself one run earlier,
+    #                                   called it a stranger's, and wrote an empty
+    #                                   file list - and the uninstall then left
+    #                                   the whole framework, its log, its config
+    #                                   and its cache in somebody's own game
+    #                                   folder for ever. The previous install's
+    #                                   own record is what tells the two apart,
+    #                                   and it is evidence rather than a guess: it
+    #                                   names the game folder it says this about.
+    param([bool]$Present, [string]$RuntimeMode, [string]$GameDir, [string]$DataRoot,
+          [bool]$PreviouslyOurs = $false)
     if (-not $Present) { return $true }
-    if ($RuntimeMode -ne 'bundled') { return $false }
-    return (Test-ManagedRuntimePath $GameDir $DataRoot)
+    if ($RuntimeMode -eq 'bundled' -and (Test-ManagedRuntimePath $GameDir $DataRoot)) { return $true }
+    return $PreviouslyOurs
+}
+
+function Get-PreviousInstall {
+    # WHAT IS ALREADY HERE, read once, so that a setup run over an existing
+    # installation is an UPGRADE and not a fresh install that happens to land on
+    # top of one.
+    #
+    # WHY THIS EXISTS AT ALL. The graphical setup takes no arguments: somebody who
+    # downloads the newest release from the homepage double-clicks it, and every
+    # value this installer has is its own default. Before this, that meant an
+    # upgrade REWROTE the launcher's world with those defaults - a world renamed
+    # to 'Eden' in the launcher went back to 'Multiverse', a port moved off 8787
+    # went back to 8787, and the launcher then opened a save that was not the one
+    # the participant had been playing. THE SAVE FILE WAS NEVER TOUCHED; what was
+    # lost was the installation's memory of which one was theirs, which from where
+    # they sit is the same thing.
+    #
+    # TWO SOURCES, AND THE LIVE ONE WINS. The launcher's own profile is what the
+    # launcher is running right now, and is the file a participant's own edits go
+    # into (`multiverse-launcher profile set`). The install record is what THIS
+    # installer last wrote, which is older the moment anybody changes anything. So
+    # the profile is read first and the record is the fallback.
+    #
+    # BOTH ARE CHECKED AGAINST THIS DATA ROOT, the same rule Find-WorldIdentity
+    # applies to the identity below: a profile that describes a different world's
+    # folder says nothing about this one.
+    #
+    # IT WRITES NOTHING AND IT NEVER REFUSES. A file that is missing, unreadable,
+    # or not what it claims to be leaves Present false and the install proceeds
+    # exactly as it did before this function existed.
+    param([string]$DataRoot, [string]$ProgramRoot)
+
+    $previous = [pscustomobject]@{
+        Present     = $false
+        Record      = $null
+        Profile     = $null
+        ProfilePath = ''
+        Active      = ''
+    }
+    if (-not $DataRoot) { return $previous }
+
+    $record = Read-JsonFile (Join-Path $DataRoot $RecordName)
+    $recordRoot = Get-JsonField $record 'dataRoot'
+    if ($record -and ((-not $recordRoot) -or (Test-SamePath $recordRoot $DataRoot))) {
+        $previous.Record = $record
+        $previous.Present = $true
+    }
+
+    if ($ProgramRoot) {
+        $profilesDir = Join-Path $ProgramRoot $ProfilesDirName
+        $profilePath = Join-Path $profilesDir 'default.json'
+        # $profileData, not $profile: $profile is one of PowerShell's own
+        # automatic variables and shadowing it inside a setup script is a way to
+        # be surprised later.
+        $profileData = Read-JsonFile $profilePath
+        if ($profileData -and (Test-SamePath (Get-JsonField $profileData 'dataRoot') $DataRoot)) {
+            $previous.Profile = $profileData
+            $previous.ProfilePath = $profilePath
+            $previous.Present = $true
+        }
+        # active.txt is honoured only when it names a profile that is still there.
+        # A name left behind by a world somebody deleted would send the launcher
+        # looking for a file this install is not about to write.
+        $activePath = Join-Path $profilesDir 'active.txt'
+        if (Test-Path -LiteralPath $activePath -PathType Leaf) {
+            $active = @(Get-Content -LiteralPath $activePath -ErrorAction SilentlyContinue) |
+                      Select-Object -First 1
+            if ($active) { $active = $active.Trim() }
+            if ($active -and (Test-Path -LiteralPath (Join-Path $profilesDir "$active.json") -PathType Leaf)) {
+                $previous.Active = $active
+            }
+        }
+    }
+    return $previous
+}
+
+function Get-PreviousSetting {
+    # ONE VALUE, FROM THE STRONGEST SOURCE THAT HAS IT. The order is the whole
+    # rule of an upgrade:
+    #
+    #   1. what the participant named ON THIS RUN. A value on the command line is
+    #      an instruction, and an instruction is never overridden by history.
+    #   2. the launcher's profile - what this installation is running now.
+    #   3. the previous install record - what this installer last set.
+    #   4. nothing, and the caller keeps its own default.
+    #
+    # $Named is $PSBoundParameters.ContainsKey(...) at the call site, which is the
+    # only thing that can tell "-World Multiverse" from a default that happens to
+    # equal it.
+    param($Previous, [bool]$Named, [string]$ProfileField, [string]$RecordField, $Current)
+    if ($Named -or -not $Previous.Present) { return $Current }
+    if ($Previous.Profile -and $ProfileField -and
+        $Previous.Profile.PSObject.Properties.Match($ProfileField).Count -gt 0) {
+        return $Previous.Profile.$ProfileField
+    }
+    if ($Previous.Record -and $RecordField) {
+        $source = $Previous.Record
+        foreach ($part in ($RecordField -split '\.')) {
+            if ($null -eq $source -or $source.PSObject.Properties.Match($part).Count -eq 0) {
+                return $Current
+            }
+            $source = $source.$part
+        }
+        return $source
+    }
+    return $Current
 }
 
 Step "0 of 9 - check that nothing of this installation is running"
@@ -598,6 +752,31 @@ if ($plannedGameRoot) {
 
 if ($busy.Count -gt 0) { Stop-Busy -Running @($busy) }
 Say "nothing of this installation is running, so nothing has to be closed first."
+
+# IS THIS AN UPGRADE? Read now, before anything is written, because the answer
+# changes what four later steps do: which world the launcher's profile keeps
+# (step 9), which settings the scripts are generated with (step 8), whose the mod
+# framework is (step 4), and which files an older release left here that this one
+# no longer ships (step 9).
+#
+# THE CANDIDATE ROOTS, RESOLVED WITHOUT CREATING EITHER OF THEM. -DataRoot when
+# it was given, otherwise the same default steps 2 and 5 apply; -InstallRoot when
+# it was given, otherwise the folder this kit was unpacked into. Nothing here
+# makes a directory: an install that is about to refuse must leave no trace, and
+# reading is all this needs.
+$previousInstall = Get-PreviousInstall `
+    -DataRoot   $(if ($DataRoot) { Get-FullPath $DataRoot } else { Join-Path $env:LOCALAPPDATA 'BibitesMultiverse' }) `
+    -ProgramRoot $(if ($InstallRoot) { Get-FullPath $InstallRoot } else { $Here })
+if ($previousInstall.Present) {
+    $previousRelease = Get-JsonField $previousInstall.Record 'release'
+    if ($previousRelease) {
+        Say "updating the Bibites Multiverse $previousRelease already installed here."
+    } else {
+        Say "updating the Bibites Multiverse already installed here."
+    }
+    Say "Your worlds, their journals, their logs and this world's identity all stay where"
+    Say "they are, and every setting you did not name on this run is kept as you left it."
+}
 
 # ---------------------------------------------------------------- 1. the kit
 
@@ -947,8 +1126,34 @@ $bepInExPaths   = New-Object System.Collections.ArrayList
 # after that found the folder incomplete and refused to overwrite it. The
 # framework in the managed runtime was never anybody else's: this installer put
 # it there itself, one run earlier.
+#
+# THE SAME MISTAKE HAD A SECOND HALF, and it is the one an upgrade over a Steam
+# or itch game hits: this installer unpacked the framework into somebody's own
+# game folder on install one, and on install two it saw BepInEx there, called it
+# a stranger's, and wrote the empty list again - so the uninstall left the whole
+# framework, its log, its config and its cache behind in a folder it had promised
+# to put back exactly as it found it. Whose it was is not a guess: the previous
+# install's own record says so, and it names the game folder it says it about.
+$bepInExWasOurs = $false
+$bepInExPreviouslyRecorded = @{}
+if ($previousInstall.Record -and
+    (Test-SamePath (Get-JsonField $previousInstall.Record 'gameDir') $GameDir) -and
+    $previousInstall.Record.PSObject.Properties.Match('bepInEx').Count -gt 0 -and
+    $previousInstall.Record.bepInEx) {
+    $previousBepInEx = $previousInstall.Record.bepInEx
+    # ConvertFrom-Json turns a JSON true into $true, and Get-JsonField hands it
+    # back as the string 'True'.
+    $bepInExWasOurs = ((Get-JsonField $previousBepInEx 'installedByThisInstaller') -eq 'True')
+    if ($bepInExWasOurs -and $previousBepInEx.PSObject.Properties.Match('files').Count -gt 0) {
+        foreach ($previousFile in @($previousBepInEx.files)) {
+            $previousRel = Get-JsonField $previousFile 'path'
+            if ($previousRel) { $bepInExPreviouslyRecorded[$previousRel.ToUpperInvariant()] = $true }
+        }
+    }
+}
 $bepInExOwned   = Test-InstallerOwnedBepInEx -Present $bepInExHeld -RuntimeMode $runtimeMode `
-                                             -GameDir $GameDir -DataRoot $DataRoot
+                                             -GameDir $GameDir -DataRoot $DataRoot `
+                                             -PreviouslyOurs $bepInExWasOurs
 # Ours AND inside this package's own game copy: then a file of the archive that
 # is already on disk is one of this installer's own, and is recorded like the
 # rest rather than being left for nobody to remove.
@@ -981,8 +1186,19 @@ if (-not $bepInExOwned) {
         foreach ($zipEntry in $archive.Entries) {
             if (-not $zipEntry.Name) { continue }
             $rel = $zipEntry.FullName.Replace('/', '\')
+            $relKey = $rel.ToUpperInvariant()
             if (Test-Path (Join-Path $GameDir $rel)) {
-                if (-not $bepInExManaged -or $payloadOwns.ContainsKey($rel.ToUpperInvariant())) {
+                # TWO WAYS A FILE ALREADY ON DISK IS THIS INSTALL'S. It is in this
+                # package's own managed game copy, where nothing else writes; or
+                # the previous install's record names it, which is this
+                # installer's own signed statement that it put that file there -
+                # and is the only evidence available in a game folder somebody
+                # else chose. A GAME FILE IS NEITHER, whatever its name: the
+                # runtime record owns those, and one path claimed by both halves
+                # of one record is a file the uninstall would count twice.
+                $mine = (-not $payloadOwns.ContainsKey($relKey)) -and
+                        ($bepInExManaged -or $bepInExPreviouslyRecorded.ContainsKey($relKey))
+                if (-not $mine) {
                     Say "left alone (already here): $rel"
                     continue
                 }
@@ -1000,10 +1216,17 @@ if (-not $bepInExOwned) {
         # run changes is the RECORD: these files are named as this install's, so
         # the uninstall takes them with the game copy instead of leaving a folder
         # holding BepInEx and no game.
-        Say ("BepInEx {0} is already in this package's own managed game copy ({1} files)." -f `
-             $entry.bepInEx, $bepInExPaths.Count)
-        Say "Only this installer writes in that folder, so it is this install's to remove:"
-        Say "the uninstall takes the framework with the game copy rather than leaving it behind."
+        if ($bepInExManaged) {
+            Say ("BepInEx {0} is already in this package's own managed game copy ({1} files)." -f `
+                 $entry.bepInEx, $bepInExPaths.Count)
+            Say "Only this installer writes in that folder, so it is this install's to remove:"
+            Say "the uninstall takes the framework with the game copy rather than leaving it behind."
+        } else {
+            Say ("BepInEx {0} is already here and the install before this one put it there ({1} files)." -f `
+                 $entry.bepInEx, $bepInExPaths.Count)
+            Say "It stays this install's to remove, so the uninstall still takes the framework out of"
+            Say "your own game folder instead of leaving it there for ever."
+        }
     } else {
         Expand-Archive -Path $zip -DestinationPath $GameDir -Force
         if (-not (Test-Path $bepInExCore)) { Stop-Setup "BepInEx did not unpack into $GameDir." }
@@ -1026,7 +1249,13 @@ $pluginDir  = Join-Path $GameDir 'BepInEx\plugins'
 $pluginDst  = Join-Path $pluginDir $PluginName
 $pluginHeld = Test-Path $pluginDst
 New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
-Copy-Item -Path $pluginSrc -Destination $pluginDst -Force
+# THROUGH THE LOCK-AWARE COPY, like step 9's program files. Step 0 asks what is
+# running before anything is written, so a lock here means a world was started
+# DURING the install - and the mod is the file the running game holds open. A raw
+# "The process cannot access the file ... because it is being used by another
+# process" against a line number in this script is not an answer anybody can act
+# on; Stop-Busy's is.
+Copy-ProgramFile $pluginSrc $pluginDst
 $pluginSha = Get-Sha256 $pluginDst
 if ($pluginHeld) { Say "$PluginName replaced in $pluginDir (an earlier install was here)" }
 else             { Say "$PluginName -> $pluginDir" }
@@ -1143,33 +1372,10 @@ function Protect-UserFile {
 # participant to write by hand. A claim is enough to ADOPT a world, which changes
 # nothing on disk, and never enough to OVERWRITE a secret.
 
-function Test-SamePath {
-    param([string]$A, [string]$B)
-    if (-not $A -or -not $B) { return $false }
-    $left  = $A.TrimEnd('\', '/')
-    $right = $B.TrimEnd('\', '/')
-    # Windows file names are case-insensitive, so this comparison is too. Every
-    # comparison of a secret or an identity in this script is the opposite, and
-    # is written -ceq / -cne for exactly that reason.
-    return ($left -eq $right)
-}
-
-function Read-JsonFile {
-    param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
-    try {
-        return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
-    } catch {
-        return $null
-    }
-}
-
-function Get-JsonField {
-    param($Object, [string]$Name)
-    if ($null -eq $Object) { return '' }
-    if ($Object.PSObject.Properties.Match($Name).Count -eq 0) { return '' }
-    return [string]$Object.$Name
-}
+# Test-SamePath, Read-JsonFile and Get-JsonField used to be defined here. They
+# are up beside Get-FullPath now, because STEP 4 READS THE PREVIOUS INSTALL and a
+# function this file defines below the line that calls it does not exist yet -
+# this is a script, not a module, and its definitions happen in order.
 
 function Get-QuotedValue {
     param([string]$Line)
@@ -1893,10 +2099,39 @@ $caImported   = $false
 $caThumbprint = ''
 $caStored     = ''
 
+# AN UPGRADE MUST NOT FORGET A CERTIFICATE IT IMPORTED. The record is rewritten
+# whole below, and a private-map participant who upgrades without repeating
+# -CaFile would have written `imported: false` over the one statement that lets
+# the uninstall take that authority back out of their own user store - leaving it
+# there for ever, with nothing left on the machine that knows it is there. The
+# carry-forward is CHECKED against the store rather than believed: an authority
+# somebody has already removed by hand is not claimed again.
+if (-not $CaFile -and $previousInstall.Record -and
+    $previousInstall.Record.PSObject.Properties.Match('certificate').Count -gt 0 -and
+    $previousInstall.Record.certificate) {
+    $previousCa = $previousInstall.Record.certificate
+    $previousThumb = Get-JsonField $previousCa 'thumbprint'
+    if ((Get-JsonField $previousCa 'imported') -eq 'True' -and $previousThumb) {
+        $stillThere = @(Get-ChildItem 'Cert:\CurrentUser\Root' -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Thumbprint -eq $previousThumb }).Count -gt 0
+        if ($stillThere) {
+            $caImported   = $true
+            $caThumbprint = $previousThumb
+            $caStored     = Get-JsonField $previousCa 'storedCopy'
+            Say "the certificate this installation imported is still in your own user store,"
+            Say "and this record keeps naming it so the uninstall can still take it out."
+        }
+    }
+}
+
 if (-not $CaFile) {
     # What this says follows the map this world DIALS, not the branch that chose
     # it: an adopted private world reaches this step through the public-map path.
-    Say "NOTHING WAS IMPORTED INTO ANY TRUST STORE, and nothing needs to be."
+    if ($caImported) {
+        Say "NOTHING NEW WAS IMPORTED INTO ANY TRUST STORE by this run."
+    } else {
+        Say "NOTHING WAS IMPORTED INTO ANY TRUST STORE, and nothing needs to be."
+    }
     if ($onPackagedMap) {
         Say "A public map's relay presents a certificate signed by an authority Windows"
         Say "already trusts, so your machine checks it the same way it checks a bank's."
@@ -1976,6 +2211,51 @@ if (-not $CaFile) {
 # ---------------------------------------------------------------- 8. the settings
 
 Step "8 of 9 - the settings this install ships with"
+
+# AN UPGRADE KEEPS WHAT THIS INSTALLATION WAS ALREADY SET TO. The graphical setup
+# passes no settings at all, so before this every value below was the installer's
+# own default - and a participant who had renamed their world, moved its port or
+# changed how often it saves got all of it reset by a run whose entire purpose
+# was to bring them a newer build.
+#
+# THE ADOPTION HAPPENS HERE, BEFORE THE VALIDATION AND BEFORE THE NARRATION, so
+# an adopted value is checked by the same rules a named one is and the screen
+# says what this install actually runs with rather than what its defaults are. A
+# value named on this run is never touched: Get-PreviousSetting's first rule.
+if ($previousInstall.Present) {
+    $World       = [string](Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('World')) `
+                                'world' 'world' $World)
+    $SidecarPort = [int](Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('SidecarPort')) `
+                                'sidecarPort' 'sidecarPort' $SidecarPort)
+    $ExportEdges = [string](Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('ExportEdges')) `
+                                'exportEdges' 'settings.exportEdges' $ExportEdges)
+    $SaveMinutes = [double](Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('SaveMinutes')) `
+                                'saveMinutes' 'settings.saveMinutes' $SaveMinutes)
+    $SaveKeep    = [int](Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('SaveKeep')) `
+                                'saveKeep' 'settings.saveKeep' $SaveKeep)
+    $adoptedSaveOnQuit = Get-PreviousSetting $previousInstall ($PSBoundParameters.ContainsKey('SaveOnQuit')) `
+                                'saveOnQuit' 'settings.saveOnQuit' $SaveOnQuit
+    # The profile spells this as a JSON boolean and the parameter as on|off.
+    if ($adoptedSaveOnQuit -is [bool]) {
+        $SaveOnQuit = if ($adoptedSaveOnQuit) { 'on' } else { 'off' }
+    } elseif ("$adoptedSaveOnQuit" -in @('on', 'off', 'True', 'False')) {
+        $SaveOnQuit = if ("$adoptedSaveOnQuit" -in @('on', 'True')) { 'on' } else { 'off' }
+    }
+    # THE EXCLUSION LIST IS THE ONE WITH TWO SPELLINGS OF "OFF". An empty list is
+    # not a value somebody typed - it is what -NoMigrationExclusion leaves behind,
+    # and adopting it as a bare empty string would trip the refusal below on an
+    # upgrade of an installation that had deliberately turned the policy off.
+    if (-not ($PSBoundParameters.ContainsKey('ExcludeSpecies') -or $NoMigrationExclusion)) {
+        $adoptedExclude = [string](Get-PreviousSetting $previousInstall $false `
+                                        'excludeSpecies' 'settings.excludeSpecies' $ExcludeSpecies)
+        if ($adoptedExclude) {
+            $ExcludeSpecies = $adoptedExclude
+        } elseif ($previousInstall.Profile -or $previousInstall.Record) {
+            $NoMigrationExclusion = $true
+        }
+    }
+    Say "keeping the settings this installation already had; name a flag to change one."
+}
 
 $edgeList = @($ExportEdges -split '[,; \t]+' | Where-Object { $_ } | ForEach-Object { $_.ToUpperInvariant() })
 if ($edgeList.Count -eq 0) {
@@ -2090,6 +2370,43 @@ if ($manageProgramFiles) {
         $programFiles += [pscustomobject]@{
             path   = $destination
             sha256 = (Get-Sha256 $destination)
+        }
+    }
+
+    # WHAT THE RELEASE BEFORE THIS ONE LEFT HERE AND THIS ONE NO LONGER SHIPS.
+    # The record is rewritten whole below, so a file the previous list named and
+    # this one does not would become unremovable by anything in this project: the
+    # uninstall reads the new record, never sees it, and the setup's own
+    # `RMDir "$INSTDIR"` is deliberately NOT recursive - so the application folder
+    # would survive an uninstall and Windows would go on showing a program that
+    # is gone.
+    #
+    # BY HASH, LIKE EVERY OTHER REMOVAL IN THIS PROJECT. A file whose bytes still
+    # match what the previous install left is one nobody has touched since, and
+    # is this installer's to take. One that differs is somebody's own and is kept
+    # and named, exactly as the uninstall keeps it.
+    if ($previousInstall.Record -and
+        $previousInstall.Record.PSObject.Properties.Match('program').Count -gt 0 -and
+        $previousInstall.Record.program -and
+        $previousInstall.Record.program.PSObject.Properties.Match('files').Count -gt 0) {
+        $keep = @{}
+        foreach ($current in $programFiles) { $keep[$current.path.ToUpperInvariant()] = $true }
+        foreach ($old in @($previousInstall.Record.program.files)) {
+            $oldPath = Get-JsonField $old 'path'
+            $oldSha  = Get-JsonField $old 'sha256'
+            if (-not $oldPath -or $keep.ContainsKey($oldPath.ToUpperInvariant())) { continue }
+            if (-not (Test-Path -LiteralPath $oldPath -PathType Leaf)) { continue }
+            if ($oldSha -and (Get-Sha256 $oldPath) -ne $oldSha) {
+                Say "kept: $oldPath is no longer part of this release, but it has CHANGED since the"
+                Say "      install that left it, so it is not this setup's to remove."
+                continue
+            }
+            Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $oldPath) {
+                Say "could not remove $oldPath, which this release no longer ships."
+            } else {
+                Say "removed $oldPath - the release before this one shipped it and this one does not."
+            }
         }
     }
 }
@@ -2515,9 +2832,31 @@ Say "wrote $stopPath"
 # own format, so the app entry point and the scripts above describe one world
 # rather than two. IT HOLDS NO SECRET: the credential stays in its own file,
 # readable by you only, and the launcher never copies it anywhere else.
+#
+# ON AN UPGRADE THIS FILE IS REWRITTEN, NOT REPLACED. Every setting in it that
+# somebody could have changed has already been adopted in step 8, and the three
+# below are the ones that have no installer parameter at all:
+#
+#   headless    the launcher's own switch. Rewriting it as false turned a world
+#               a participant runs with no window back into one that opens one,
+#               every upgrade.
+#   createdUtc  when this world was made. An upgrade is not a creation, and a
+#               stamp moved forward makes the launcher's own record of the world
+#               younger than the journal beside it.
+#   active.txt  which world the launcher opens on. Resetting it to 'default'
+#               bounced a participant with several worlds back to the first one.
 $profilesDir = Join-Path $InstallRoot $ProfilesDirName
 New-Item -ItemType Directory -Force -Path $profilesDir | Out-Null
 $defaultProfilePath = Join-Path $profilesDir 'default.json'
+$profileHeadless = $false
+$profileCreated  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+if ($previousInstall.Profile) {
+    if ($previousInstall.Profile.PSObject.Properties.Match('headless').Count -gt 0) {
+        $profileHeadless = [bool]$previousInstall.Profile.headless
+    }
+    $previousCreated = Get-JsonField $previousInstall.Profile 'createdUtc'
+    if ($previousCreated) { $profileCreated = $previousCreated }
+}
 $defaultProfile = [ordered]@{
     format         = $ProfileFormat
     name           = 'default'
@@ -2525,7 +2864,7 @@ $defaultProfile = [ordered]@{
     dataRoot       = $DataRoot
     sidecarPort    = [int]$SidecarPort
     world          = $World
-    headless       = $false
+    headless       = $profileHeadless
     exportEdges    = $ExportEdges
     excludeSpecies = $ExcludeSpecies
     saveMinutes    = [double]$SaveMinutes
@@ -2533,11 +2872,15 @@ $defaultProfile = [ordered]@{
     saveOnQuit     = ($SaveOnQuit -eq 'on')
     peerId         = $peerId
     relayUrl       = $RelayUrl
-    createdUtc     = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    createdUtc     = $profileCreated
 }
 $defaultProfile | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $defaultProfilePath -Encoding ASCII
-Set-Content -LiteralPath (Join-Path $profilesDir 'active.txt') -Value 'default' -Encoding ASCII
+$activeProfile = if ($previousInstall.Active) { $previousInstall.Active } else { 'default' }
+Set-Content -LiteralPath (Join-Path $profilesDir 'active.txt') -Value $activeProfile -Encoding ASCII
 Say "wrote $defaultProfilePath - the launcher reads it"
+if ($activeProfile -ne 'default') {
+    Say "this installation opens on '$activeProfile', which is left as it was."
+}
 
 # The record the uninstall reads. It names every path this installer created or
 # replaced, with the hash it left behind, so the uninstall can remove exactly
