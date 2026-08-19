@@ -60,12 +60,13 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	insecureContractA := fs.Bool("insecure-no-contract-a-token", envBool(modtoken.InsecureEnvVar),
 		"accept a mod connection with no bearer token, and log one loud warning per accepted "+
 			"connection. For a single-machine rehearsal and for nothing else (contract-a.md §21, A47)")
-	// forwardTimeoutMs is a contract-b-m4.md §12 tunable. Its default is 24
-	// hours, which is a policy, not a measurement (§9.3) — and a rig that wants
-	// to SEE a forward written off cannot wait a day for it.
+	// forwardTimeoutMs is a contract-b-m4.md §12 tunable. Its default is 5
+	// minutes (§27 B42; 24 hours until 2026-08-19), which is a policy, not a
+	// measurement (§9.3) — and a rig that wants to SEE a forward written off
+	// still may not want to wait even that long.
 	forwardTimeout := fs.Duration("forward-timeout", envDuration("MULTIVERSE_FORWARD_TIMEOUT", 0),
 		"how long a forwarded organism waits for its answer before this sidecar records it "+
-			"LOST (contract-b-m4.md §9.3, forwardTimeoutMs). 0 keeps the 24-hour default. "+
+			"LOST (contract-b-m4.md §9.3, forwardTimeoutMs). 0 keeps the 5-minute default. "+
 			"Nothing is re-sent at the deadline and nothing comes home: migration is "+
 			"at-most-once")
 	// maxReroutes is §9.2's bound, and a NEGATIVE value turns re-routing off.

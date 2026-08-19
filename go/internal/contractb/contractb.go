@@ -293,11 +293,15 @@ const (
 	BounceTimeout             = 20 * time.Second
 	MigrationAckTimeout       = 30 * time.Second
 	// ForwardTimeout is how long a forwarded outbound entry waits for its answer
-	// before the sender records it LOST — 24 hours (§9.3, §25 B37). It is a
-	// bookkeeping deadline and nothing else: nothing is re-sent at it and nothing
-	// comes home, so a sender that slept through it records a loss that had
-	// already happened.
-	ForwardTimeout = 24 * time.Hour
+	// before the sender records it LOST — 5 minutes (§9.3; §27 B42 lowered it
+	// from 24 hours on 2026-08-19). It is a bookkeeping deadline and nothing
+	// else: nothing is re-sent at it and nothing comes home, so a sender that
+	// slept through it records a loss that had already happened. Its size also
+	// bounds how long outage backwash pins the export intake gate (§9.3 pending
+	// entries count against contract A's inboundQueueMax), which is what shrank
+	// it: after 2026-08-19's outages, worlds spent hours refusing every export
+	// over forwards a day-long deadline would not release.
+	ForwardTimeout = 5 * time.Minute
 	// MaxReroutes bounds the re-routes one entry may take before it bounces home
 	// instead. An organism circling a broken axis is a symptom, not a delivery
 	// strategy. A NEGATIVE value turns re-routing off entirely, which is the one

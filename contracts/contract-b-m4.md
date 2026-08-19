@@ -137,6 +137,17 @@ so the window is observable only on its own status page. §4's own test therefor
 §24's precedent — §25 moved it, and this set does not. Contract A takes **no** set. Affected
 body text carries an `(amended — §26, Bx)` marker, and **§26 wins over the body and over §14
 to §25 wherever they disagree.**
+**Amended:** 2026-08-19, amendment set **B42** (**§27**), from the owner's direction of
+2026-08-19 — *we don't want the 24 hour thing; it just forwards, and if it's lost it's lost*.
+**B42** lowers `forwardTimeoutMs`'s default from 24 hours to **5 minutes**. The mechanism is
+§25's, untouched: nothing is re-sent at the deadline and nothing comes home; only the number
+moves, and it moves because 2026-08-19's outages showed that open `sent` entries pin the
+export intake (contract A's `inboundQueueMax`) for the deadline's whole length — a day of
+refused exports over organisms already written off in every way but the bookkeeping. **No
+message, field, enum value, code, close code or routing input changes**; §4's own test answers
+neither major nor minor and the identifier **stays at `contract-b/4.1`**, on §26's precedent.
+Contract A takes **no** set. Affected body text carries an `(amended — §27, B42)` marker, and
+**§27 wins over the body and over §14 to §26 wherever they disagree.**
 **Status:** implementation-ready for M4 as written 2026-08-05 from the ratified decisions
 D12–D16 (`system_decomposition.md`), the amended D2, and the work order in
 `m4_considerations.md`, *Contract Changes Needed*; extended by D17–D20, ratified 2026-08-07
@@ -2735,7 +2746,7 @@ organism off.
 
 | Rule | Statement |
 |---|---|
-| The deadline | `forwardTimeoutMs`, default **86 400 000 ms (24 hours)**, measured from `sentAt` — the wall clock at the **first and only** write of this entry to a live relay connection (§7.4). |
+| The deadline | `forwardTimeoutMs`, default **300 000 ms (5 minutes)** (amended — §27, B42; 24 hours until 2026-08-19), measured from `sentAt` — the wall clock at the **first and only** write of this entry to a live relay connection (§7.4). |
 | **Nothing is re-sent** | A `sent` entry **MUST NOT** be forwarded again, to its recorded `destSlot` or to any other. One organism, one hand-over. The re-forward is what the bounded hold existed to bound, and removing it removes the bound's reason to exist. |
 | **Nothing comes home** | At the deadline the sidecar **MUST NOT** deliver the organism to its own mod. That bounce was the accepted duplication case; there is no accepted duplication case. |
 | At the deadline | The entry becomes a **`lost` tombstone**: `handoff: lost`, `status: done`, the reason recorded on the entry. The sidecar increments `stats.lostForwardTotal` (§6.3.1) and logs **one loud line at error level**, naming the `migrationId`, the `entityId`, the `destSlot`, the exit edge and whether a `FORWARD_RECEIPT` was ever held for it. |
@@ -3118,7 +3129,7 @@ crossing" is now one of those claims.
 | ~~`forwardRetryMaxMs`~~ | ~~`60000`~~ | — | **REMOVED — §25, B37.** It capped a doubling backoff on the re-forward toward a live destination (§14, B8), and there is no re-forward to back off. |
 | `bounceTimeoutMs` | `20000` | sidecar | How long an outbound entry that never reached a live peer, **and has no lane to re-route to**, waits before it is bounced home (§9.2, §9.4). Unchanged: no custody moved, so this bounce cannot duplicate. |
 | `migrationAckTimeoutMs` | `30000` | sidecar | Informational deadline for `MIGRATION_ACK`. **Purely informational since §25, B37**: expiry re-forwards nothing, and it never bounces (§9.4). |
-| `forwardTimeoutMs` | `86400000` | sidecar | **New in `contract-b/4.1`** (added — §25, B37). How long a forwarded entry waits for its answer before the sender records it **lost** — 24 hours, the value `holdTimeoutMs` carried. It is a **wall clock measured from `sentAt`** and a bookkeeping deadline: nothing is re-sent at it and nothing comes home, so a sender that slept through it records a loss that had already happened (§9.3). |
+| `forwardTimeoutMs` | `300000` | sidecar | **New in `contract-b/4.1`** (added — §25, B37; default lowered from `86400000` — §27, B42). How long a forwarded entry waits for its answer before the sender records it **lost** — 5 minutes since 2026-08-19; it carried `holdTimeoutMs`'s 24 hours until the owner cut it (§27). It is a **wall clock measured from `sentAt`** and a bookkeeping deadline: nothing is re-sent at it and nothing comes home, so a sender that slept through it records a loss that had already happened (§9.3). |
 | ~~`holdTimeoutMs`~~ | ~~`86400000`~~ | — | **REMOVED — §25, B37**, with the bounded hold it timed. Its 24-hour value lives on in `forwardTimeoutMs`, which does something entirely different with it. |
 | ~~`holdAccrualFlushMs`~~ | ~~`60000`~~ | — | **REMOVED — §25, B37.** There is no accrual to flush. |
 | `maxReroutes` | `4` | sidecar | **New in M4.** Re-routes one entry may take before it bounces home instead (§9.2). **A NEGATIVE value turns re-routing off entirely** (added — §25, B37): an entry that would have re-routed bounces home instead, which makes migration a single hop with no second destination. It is the owner's switch for that choice, and it costs a restart rather than a release. |
@@ -3241,13 +3252,16 @@ answer that arrives after it is still attributable through the echoed `genomeHas
 and may simply be used.
 
 **Two defaults are worth a second look before the rig runs long, and §25's B37 changed what
-each of them trades.** `forwardTimeoutMs` at 24 hours is the owner's call and a policy, not a
-measurement — but it no longer trades a stranded organism against a duplication case, because
-there is no duplication case. **It trades only how long a record stays open**: too short costs
+each of them trades.** `forwardTimeoutMs` is the owner's call and a policy, not a
+measurement — it no longer trades a stranded organism against a duplication case, because
+there is no duplication case. **It trades how long a record stays open**: too short costs
 a wrong record and a late-ACK log line, too long costs a `--list-inflight` full of entries
-nobody can act on. `forwardRecordRetentionSeconds` and `archiveDedupWindowMs` are both 48 hours
-and are now sized against the same thing — how far behind this map's oldest peer may be, which
-during the transition means a sidecar that still retries.
+nobody can act on — and, as 2026-08-19 proved, an export intake wedged shut, because open
+`sent` entries count against contract A's `inboundQueueMax` and a day-long deadline holds that
+gate closed for a day after any multi-world outage. **The owner cut it to 5 minutes for
+exactly that** (§27, B42). `forwardRecordRetentionSeconds` and `archiveDedupWindowMs` are both
+48 hours and are now sized against the same thing — how far behind this map's oldest peer may
+be, which during the transition means a sidecar that still retries.
 
 ---
 
@@ -5563,3 +5577,49 @@ that the number they choose is the age at which this system stops being able to 
 organism was that"*; and **every participant-facing document**, for stating the three tiers —
 the record forever, the lines for the window and then off-host, the genome blobs for the
 horizon — in one set of terms.
+
+## 27. A loss is written off in minutes, not in a day (`contract-b/4.1`, 2026-08-19)
+
+**This set moves one number and adds no mechanism.** On 2026-08-19, reading the day's outage
+backwash, the owner said:
+
+> *"ok so i think we don't want the 24 hour thing it just forwards and if its lost is lost"*
+
+**B42.** `forwardTimeoutMs`'s default becomes **300 000 ms (5 minutes)**. It was 86 400 000 ms
+(24 hours) — the value `holdTimeoutMs` carried into §25, kept when B37 turned the deadline from
+a bounce into bookkeeping. Everything §9.3 says still holds, word for word: a `sent` entry is
+resolved by an answer or by this deadline, **nothing is re-sent at it and nothing comes home**,
+the entry becomes a `lost` tombstone that still recognises a late `MIGRATION_ACK`, and
+`lostForwardTotal` counts it where the map can read it.
+
+**Why the number moved.** §9.3's open `sent` entries occupy the sender's outbound custody, and
+contract A's export intake refuses new `MIGRATE_OUT` when pending outbound custody reaches
+`inboundQueueMax` (64). On 2026-08-19 three overlapping outages — the cloud host's Spot
+reclaim, five laptop worlds' dark window, and a broadcast-host reboot the night before — left
+live worlds holding tens of forwards whose answers had died with dropped sessions. Under a
+24-hour deadline those entries were immovable: senders sat at the intake cap refusing every
+export, and an operator watching a world saw organisms cross a portal band and simply keep
+walking. The deadline's length was doing no protective work — B37 already guaranteed that its
+expiry moves no organism — so its only remaining effect was how long that wedge lasts. Five
+minutes clears an outage's backwash in minutes while still sitting far above this map's
+slowest honest answer (arrival pacing, save stalls and reconnect backoff together stay under a
+minute); an answer slower than that lands on a tombstone and is still recognised.
+
+**What it costs, named.** A destination that takes longer than five minutes to answer — a
+paced arrival queue drained by a very slow world, or a peer that reconnects after a long
+sleep — produces a `lost` record and a late-ACK log line for an organism that actually
+arrived. The record is wrong in the safe direction: the ledger and `duplicatesRefused` still
+reconcile the truth, and no organism is moved, duplicated or destroyed by the error. An
+operator who wants the old patience back sets `--forward-timeout` / `MULTIVERSE_FORWARD_TIMEOUT`
+— the knob §25 shipped — and owns the wedge that comes with it.
+
+**Version.** No message, field, enum value, code, close code or routing input changes. A
+sidecar with either default interoperates with every peer and with the relay unchanged; the
+difference is observable only in its own journal, stats and logs. §4's test answers **neither
+major nor minor**: the identifier **stays at `contract-b/4.1`** and `/contract-b/v4` does not
+move, on §26's precedent.
+
+**Enforced by:** the **sidecar**, whose compiled default this is (`internal/contractb`,
+`ForwardTimeout`); the **operator**, for knowing that raising it re-arms the export wedge this
+set exists to disarm; and **`--diagnose`**, whose `journal-depths` check is where a reader sees
+the count and age of unanswered forwards this deadline governs.
