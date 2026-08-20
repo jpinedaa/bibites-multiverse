@@ -76,6 +76,7 @@ Assert each of these exists, spelled exactly like this.
 | `Create a world...` | button |
 | `Stop every world` | button |
 | `Copy the details` | button, **inside the details pane**, so it is only visible when the pane is |
+| `Get the new version` | button, **above the world list**, beside the update line — hidden unless a newer release has been published, so on an up-to-date machine it is correctly absent (section 18) |
 
 **Menu bar**
 
@@ -702,6 +703,70 @@ which is where a one-off belongs.
 3. Stop everything, close the window, uninstall.
 4. **Assert:** neither `BibitesMultiverseLauncher.exe` nor `multiverse-launcher.exe` is left in the
    application directory, and `release/test-install-uninstall.ps1` passes — it now checks both.
+
+## 18. The update line, which is absent almost always
+
+The whole of what this feature does is add one line and one button. Its normal state is INVISIBLE,
+so the first thing to assert is that it is not there.
+
+1. Open the window on a machine running the newest release, with a working network.
+   **Assert:** there is **no** line above the world list, **no** `Get the new version` button, and
+   the layout is exactly what section 1 describes. Wait two refreshes and assert it again.
+
+2. Disconnect the network entirely (pull the cable, turn Wi-Fi off) and open the window.
+   **Assert:** it opens at the usual speed — no pause, no spinner, no dialog — and there is still
+   no line. **Assert:** the details pane holds nothing about a failed check. Nothing anywhere
+   mentions a version lookup.
+
+3. **The line itself.** With the window closed, point the check at something that answers a newer
+   version. From PowerShell:
+
+   ```powershell
+   $env:MULTIVERSE_RELEASE_URL = 'http://127.0.0.1:8099/api/release'
+   # in a second console, anything that serves this one file at that path:
+   #   {"tag":"v99.0.0","release":"99.0.0"}
+   .\BibitesMultiverseLauncher.exe
+   ```
+
+   **Assert**, within a couple of refreshes of the window opening:
+   - one line above the world list, in **blue** — not the red of the fault banner — reading
+     `Version 99.0.0 is available. This one is <this release>. Download it at https://bibitesmultiverse.com`
+   - a `Get the new version` button beside it, enabled
+   - the red banner is **not** raised, the world list is unchanged, and every button that was
+     enabled before still is
+
+4. **Hovering the button.** **Assert:** the tooltip says the website opens and that nothing here is
+   changed by pressing it.
+
+5. **Pressing it.** **Assert:** the default browser opens `https://bibitesmultiverse.com`, the
+   window stays open and unchanged, **no world is stopped or restarted**, and the details pane gains
+   one line saying the site was opened and that worlds keep running. **Assert:** nothing is
+   downloaded and nothing in the application directory changes.
+
+6. **Start a world while the line is showing.** **Assert:** the start behaves exactly as section 3
+   describes and the line is still there afterwards, unchanged. An update notice must never delay
+   or interfere with a world.
+
+7. **A server that answers rubbish.** Point `MULTIVERSE_RELEASE_URL` at something that answers
+   `HTTP 500`, then at something that answers an HTML sign-in page (a captive portal), then at
+   `{"release":"latest"}`, then at a version OLDER than this one, then at this exact release.
+   **Assert** in every one of those five cases: no line, no button, no dialog, nothing in the
+   details pane, and the window otherwise normal.
+
+8. **The off switch.** Set `MULTIVERSE_NO_UPDATE_CHECK=1` — leaving `MULTIVERSE_RELEASE_URL` set at
+   the server from step 3 — and open the window with a packet capture or Fiddler running.
+   **Assert:** no line, no button, and **no request to either address**: the off switch wins over a
+   moved one. Clear it, leave `MULTIVERSE_RELEASE_URL` empty, and assert the check goes to
+   `bibitesmultiverse.com` again — an empty value is an unset variable, not an off switch.
+
+9. **What the request carries**, with the check pointed at a local server that logs its requests.
+   **Assert:** exactly one `GET`, no query string, no request body, no cookie, and a `User-Agent` of
+   `bibites-multiverse-launcher` with **no version number in it**.
+
+10. **The console menu says the same thing.** With `MULTIVERSE_RELEASE_URL` still pointed at the
+    server from step 3, run `.\multiverse-launcher.exe` on a terminal, press Enter on nothing to
+    redraw, and **assert:** the same sentence appears as a line inside the menu frame, above the
+    numbered choices, and the choices are all still there and still numbered the same.
 
 ---
 

@@ -121,6 +121,11 @@ func NewSession(opts SessionOptions) (*Session, error) {
 	// A question nobody answered is a NO. Every caller of askLine treats
 	// (\"\", false) as "quit" or "no", never as consent.
 	a.prompt = func(string) (string, bool) { return "", false }
+	// The one background lookup a session starts, and it is started HERE rather
+	// than on the first Snapshot so that a window opened and left alone still
+	// learns about a release. It answers into memory; nothing waits on it and
+	// nothing fails if it never answers (update.go).
+	a.updates = startUpdateWatch(a.getenv)
 	return &Session{a: a, probe: &http.Client{Timeout: modProbeTimeout}}, nil
 }
 
@@ -169,6 +174,12 @@ type Snapshot struct {
 	// A window shows it as a banner rather than an empty list, because an empty
 	// list from a launcher that cannot read its own files is a lie.
 	Problems []string
+	// NewerRelease is the release the homepage says is newest, when that is
+	// newer than Release, and "" in every other case — including "the lookup has
+	// not answered", "the lookup failed" and "there is no route out of here".
+	// A front door draws it or does not; there is nothing else to decide
+	// (update.go).
+	NewerRelease string
 }
 
 // WorldView is one world: its profile, its processes, and what the sidecar says
@@ -223,7 +234,11 @@ func (s *Session) Snapshot() Snapshot {
 		InstallRoot: status.InstallRoot,
 		Active:      status.Active,
 		Problems:    status.Problems,
-		Worlds:      make([]WorldView, len(status.Profiles)),
+		// A LOCK AND A STRING. The reading does not become a network call by
+		// carrying this: the lookup ran once, in its own goroutine, when the
+		// session was made.
+		NewerRelease: s.a.updates.Available(),
+		Worlds:       make([]WorldView, len(status.Profiles)),
 	}
 	// THE PROBES RUN TOGETHER. One unanswered loopback request costs
 	// modProbeTimeout, and five worlds in a row would cost five of them — long
