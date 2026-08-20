@@ -94,6 +94,27 @@ bibites_require_s3_filename() {
     bibites_validation_error "$label is not a safe S3 object filename"
 }
 
+bibites_runtime_pointer_document() {
+  local runtime_file="$1" runtime_sha256="$2"
+  bibites_require_sha256 "$runtime_sha256" 'runtime pointer digest' || return 1
+  [ "$runtime_file" = "runtime/$runtime_sha256.tar.gz" ] ||
+    bibites_validation_error \
+      'runtime pointer file must be the content-addressed object for its digest' || return 1
+  jq -cn --arg file "$runtime_file" --arg sha256 "$runtime_sha256" \
+    '{schema:1,runtimeFile:$file,runtimeSha256:$sha256}'
+}
+
+bibites_require_runtime_pointer_document() {
+  local document="$1"
+  jq -e '
+    (keys | sort) == ["runtimeFile", "runtimeSha256", "schema"] and
+    .schema == 1 and
+    (.runtimeSha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+    .runtimeFile == ("runtime/" + .runtimeSha256 + ".tar.gz")
+  ' <<<"$document" >/dev/null ||
+    bibites_validation_error 'runtime pointer is not a valid schema-1 document'
+}
+
 bibites_require_unique_save_basenames() {
   local save_key save_basename
   local -A source_by_basename=()
