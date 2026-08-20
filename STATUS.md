@@ -1,8 +1,8 @@
 # Project status
 
-Last updated: 2026-08-18 UTC.
+Last updated: 2026-08-20 UTC.
 
-Bibites Multiverse `0.3.1` is public. The first announced service period runs from
+Bibites Multiverse `0.3.2` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -51,7 +51,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.1`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.1) |
+| Release | [`v0.3.2`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.2) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.7` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -103,6 +103,12 @@ back whole — framework, log and cache with it — along with the launcher prof
 folder holding it, so *Installed apps* removes the entry it registered. The Windows uninstall also
 keeps its ledger as a file, `<data root>\logs\uninstall-<utc>.log`, because an uninstall started
 from *Installed apps* leaves no window to read afterwards.
+Release `0.3.2` makes a setup run over an installation that is already there an update rather than
+a reset: the world keeps the name, port, headless setting and selection the participant gave it,
+an upgrade over a Steam or itch.io game keeps the mod framework removable from that folder, and a
+program file an earlier release left behind is swept by hash. The launcher also says when a newer
+release has been published — one anonymous background request to the project's own homepage, which
+nothing waits on, which is silent when it fails, and which `MULTIVERSE_NO_UPDATE_CHECK` turns off.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**
@@ -113,7 +119,7 @@ the game from around it, and the setup after that finds a game folder with no ga
 refuses to overwrite it — `INS-RUNTIME`. Its complete-edition uninstall also leaves a launcher
 profile and the application folder holding it behind whatever the shape of the install, so
 *Installed apps* cannot take that entry away.
-**Install `0.3.1` over it and there is nothing to delete by hand**: the setup names what it found in
+**Install `0.3.1` or later over it and there is nothing to delete by hand**: the setup names what it found in
 such a folder, removes it whole and unpacks the game again, and its own uninstall reclaims that
 copy — framework, log and cache with it — with the profile and the application folder, so the cycle
 strands nobody.
