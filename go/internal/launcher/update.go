@@ -294,9 +294,13 @@ func trimReleasePrefix(version string) string {
 // menu and the window cannot come to word it differently. "" when there is
 // nothing to say, which is the state a caller must be able to draw.
 //
-// IT NAMES BOTH NUMBERS. "Version 0.3.2 is available" alone leaves a reader
-// asking which one they have, and the answer is one line further up a menu they
-// may not be looking at — and is not on the window at all.
+// IT NAMES BOTH NUMBERS. "Version <the new one> is available" alone leaves a
+// reader asking which one they have, and the answer is one line further up a
+// menu they may not be looking at — and is not on the window at all. The
+// example is written as a placeholder rather than as a number on purpose: a
+// release literal in this file is a release literal outside the bump's
+// allowlist, and it fails release/bump-version.sh --check on the release that
+// happens to collide with it.
 func UpdateNotice(newer string) string {
 	if newer == "" {
 		return ""

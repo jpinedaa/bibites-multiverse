@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.3.1` on **2026-08-18**, against the code and
+strangers. This audit was updated for release `0.3.2` on **2026-08-20**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -39,6 +39,7 @@ facts shape every verdict:
 | `MULTIVERSE_MIGRATION_EXCLUDE` | The mod | Keeps the game's starter species home | **FIXED IN PACKAGING** — an empty value can no longer be reached by accident, and turning the policy off now takes a switch that says so and prints what it costs. One code-level finding remains, reported not fixed |
 | `MULTIVERSE_SAVE_*` | The mod | A save every 10 minutes, 6 kept, save on quit | **PASS WITH A STATED COST**, and the cost is now measured rather than feared: 330–470 KB per save on the project's own worlds, so about 2.4–2.9 MB for the six kept and the live one |
 | `MULTIVERSE_STARTUP_TIME_SCALE` | The mod | Every world starts at x10 instead of the game's x1 | **PASS** — it is a target the game itself governs down to protect the frame rate, it costs no disk and no network, and a player moves it with the speed slider they already have |
+| The launcher's update check | The launcher | One anonymous background `GET` per launcher run to the project's own homepage, which can only add a line of text and a button | **PASS** — nothing waits on it, it carries no identity and no version, a failure is silent, and `MULTIVERSE_NO_UPDATE_CHECK` makes no request at all |
 
 A fifth flag belongs beside the first, and this audit adds it rather than leaving it implied:
 **the sidecar's `--insecure-no-contract-a-token`**. It *is* shipped, inside the package.
@@ -306,6 +307,42 @@ refused with a warning and leaves x1 in place, so a typo cannot pause or stall a
 
 **Verdict: PASS.**
 
+## 6. The launcher's update check
+
+**Today.** On, and new in `0.3.2`. It is the only thing in a participant install that reaches the
+network without being asked to, so it is audited even though nobody set it: an outbound request a
+bare install makes is a default whatever it is called.
+
+**A bare install.** Opening the launcher starts one `GET` to
+`https://bibitesmultiverse.com/api/release` in the background, reads at most 64 KiB of it, and
+gives up after six seconds. If the answer names a strictly newer, strictly numeric release, the
+launcher draws one line saying so with a button that opens the project's homepage. Nothing else
+happens: no download, no replacement, no world interrupted, and no second request — one lookup per
+launcher run.
+
+**What it discloses.** A bare `GET`: no query, no body, no cookie, no identity, and a `User-Agent`
+of `bibites-multiverse-launcher` with **no version in it**. The host it asks is the project's own,
+which serves the same number to the homepage, so no third party is told that this machine exists.
+"How many people run which release" is deliberately not answerable from what is sent — the request
+is not a report, and this audit's own standard is that a default must not turn a participant into
+one.
+
+**What it cannot do.** The endpoint answers a version string and only a version string; the address
+the button opens is compiled into the program. An endpoint that could hand the launcher a URL would
+be an endpoint that could aim it anywhere, so it is not one. A launcher never fetches or installs
+anything itself.
+
+**When it fails, it says nothing.** No route out, a captive portal, a proxy, a 500, a body that is
+not JSON: every one leaves the line undrawn and prints no error. A world start does not touch this
+code at all, so a machine with no network starts worlds exactly as it did before.
+
+**Changing it.** `MULTIVERSE_NO_UPDATE_CHECK` set to any non-empty value makes no request at all,
+and it wins over `MULTIVERSE_RELEASE_URL`, which moves the address for a test or a private
+rehearsal.
+
+**Verdict: PASS.** One anonymous request to the project's own host, per launcher run, whose entire
+consequence is a line of text and a button — and an off switch that means off.
+
 ---
 
 ## What this audit does not cover
@@ -331,3 +368,6 @@ This audit is a release artifact and goes stale with the release. For the next o
 5. Re-measure the save footprint against the worlds the project is then running.
 6. Grep `docs/` and `release/` for `--insecure` and check that every occurrence is still a
    prohibition.
+7. Re-read what the launcher sends to `/api/release` — the headers as well as the URL — and check
+   that section 6's claim of an anonymous request with no version in it still holds:
+   `nice -n 19 go test ./internal/launcher -run 'Lookup|CheckAddress'`.

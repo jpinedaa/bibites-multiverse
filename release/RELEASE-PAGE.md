@@ -5,15 +5,10 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-<!-- WRITE THIS SECTION FOR THE RELEASE BEING CUT, from nothing rather than by
-     adding to it. It describes ONE release, because the reader has already
-     installed the one before it; a paragraph left here by a previous release is a
-     change that gets announced as new twice. That is not hypothetical: a release
-     has already shipped with the whole of its predecessor's feature list under
-     this heading, because the section was added to rather than written. The text
-     each release used is on its own published release page and in this file's
-     history, so nothing is lost by clearing it. release/README.md, "Cutting a
-     release", step 1. -->
+Running this setup over an installation you already have updates it in place. Your worlds keep
+their names, their settings, their saves and their place on the map, where an earlier setup could
+put some of that back to the installer's defaults. The launcher now also tells you when a newer
+version has been published, with a button that opens the page it is downloaded from.
 
 ## Upgrading from an earlier release
 
