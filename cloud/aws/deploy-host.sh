@@ -76,6 +76,63 @@ bibites_require_account_id "$account" 'authenticated AWS account'
   exit 1
 }
 
+pointer_file=runtime/current.json
+bibites_require_s3_key "$pointer_file" 'runtime pointer object'
+stack_error="$(mktemp)"
+pointer_archive="$(mktemp)"
+trap 'rm -f "$stack_error" "$pointer_archive"' EXIT
+if stack_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation \
+  describe-stacks --stack-name "$stack" --output json 2>"$stack_error")"; then
+  stack_exists=1
+elif grep -Fq 'does not exist' "$stack_error"; then
+  stack_exists=0
+  stack_description=''
+else
+  sed 's/^/CloudFormation stack lookup failed: /' "$stack_error" >&2
+  exit 1
+fi
+
+if pointer_document="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
+  "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - --only-show-errors \
+  2>"$stack_error")"; then
+  bibites_require_runtime_pointer_document "$pointer_document"
+  pointer_missing=0
+elif grep -Eq '(404|NoSuchKey|Not Found)' "$stack_error"; then
+  pointer_missing=1
+else
+  sed 's/^/Runtime pointer lookup failed: /' "$stack_error" >&2
+  exit 1
+fi
+
+if [ "$pointer_missing" -eq 1 ]; then
+  if [ "$stack_exists" -eq 1 ]; then
+    previous_artifact_bucket="$(jq -er '
+      [.Stacks[0].Parameters[] | select(.ParameterKey == "ArtifactBucket") | .ParameterValue] |
+      if length == 1 then .[0] else error("missing legacy ArtifactBucket") end
+    ' <<<"$stack_description")"
+    previous_artifact_prefix="$(jq -er '
+      [.Stacks[0].Parameters[] | select(.ParameterKey == "ArtifactPrefix") | .ParameterValue] |
+      if length == 1 then .[0] else error("missing legacy ArtifactPrefix") end
+    ' <<<"$stack_description")"
+    [ "$previous_artifact_bucket" = "$ARTIFACT_BUCKET" ] &&
+      [ "$previous_artifact_prefix" = "$ARTIFACT_PREFIX" ] || {
+      echo 'legacy stack artifacts differ from the staged target; migrate them explicitly' >&2
+      exit 1
+    }
+    previous_runtime_file="$(jq -er '
+      [.Stacks[0].Parameters[] | select(.ParameterKey == "RuntimeFile") | .ParameterValue] |
+      if length == 1 then .[0] else error("missing legacy RuntimeFile") end
+    ' <<<"$stack_description")"
+    previous_runtime_sha256="$(jq -er '
+      [.Stacks[0].Parameters[] | select(.ParameterKey == "RuntimeSha256") | .ParameterValue] |
+      if length == 1 then .[0] else error("missing legacy RuntimeSha256") end
+    ' <<<"$stack_description")"
+  else
+    previous_runtime_file="$RUNTIME_OBJECT"
+    previous_runtime_sha256="$RUNTIME_SHA256"
+  fi
+fi
+
 subnet_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-subnets \
   --subnet-ids "$BIBITES_SUBNET_ID" --output json)"
 jq -e --arg subnet "$BIBITES_SUBNET_ID" --arg vpc "$BIBITES_VPC_ID" \
@@ -111,6 +168,22 @@ while IFS= read -r parameter; do
 done < <(jq -r '.worlds[].credentialParameter' "$dist/worlds.json")
 [ "$missing" -eq 0 ] || exit 1
 
+if [ "$pointer_missing" -eq 1 ]; then
+  "$repo/cloud/aws/promote-runtime.sh" \
+    "$previous_runtime_file" "$previous_runtime_sha256"
+  pointer_document="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
+    "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - --only-show-errors)"
+  bibites_require_runtime_pointer_document "$pointer_document"
+fi
+
+pointer_runtime_file="$(jq -r .runtimeFile <<<"$pointer_document")"
+pointer_runtime_sha256="$(jq -r .runtimeSha256 <<<"$pointer_document")"
+aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
+  "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_runtime_file" \
+  "$pointer_archive" --only-show-errors
+printf '%s  %s\n' "$pointer_runtime_sha256" "$pointer_archive" | \
+  sha256sum -c - >/dev/null
+
 case "$enable_peering" in
   0) ;;
   1)
@@ -137,8 +210,7 @@ aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation deploy \
     VpcId="$BIBITES_VPC_ID" \
     ArtifactBucket="$ARTIFACT_BUCKET" \
     ArtifactPrefix="$ARTIFACT_PREFIX" \
-    RuntimeFile="$RUNTIME_OBJECT" \
-    RuntimeSha256="$RUNTIME_SHA256" \
+    RuntimeManifestFile="$pointer_file" \
     GameFile="$GAME_FILE" \
     GameSha256="$GAME_SHA256" \
     BepInExFile="$BEPINEX_FILE" \

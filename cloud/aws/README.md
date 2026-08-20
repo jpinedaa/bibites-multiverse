@@ -191,6 +191,9 @@ The script rejects two save keys that have the same basename.
 The script creates a private encrypted S3 bucket when necessary.
 It blocks public access and uploads every artifact and save first.
 It uploads `worlds.json` last, so a host cannot read incomplete references.
+The immutable runtime upload is a candidate only.
+Staging does not change `runtime/current.json`, which names the last runtime that completed host
+activation.
 
 Record the bucket and object prefix in private operations storage.
 
@@ -262,6 +265,14 @@ The instance attaches its tagged data volume during bootstrap.
 Its role can attach only the tagged project instance and volume.
 CloudFormation waits for the host installation signal before it reports success.
 
+A replacement host reads `runtime/current.json` and then downloads the content-addressed archive
+and SHA-256 value in that document.
+The pointer changes only after a runtime activation succeeds.
+The first deployment of this template converts a legacy stack's checked `RuntimeFile` and
+`RuntimeSha256` object into that form before CloudFormation starts.
+Review that first stack change separately: changing the existing launch template can replace the
+Spot instance even though the retained data volume survives.
+
 The host template retains the data volume after stack deletion.
 This protection also leaves a storage charge.
 Track retained volumes in private inventory.
@@ -270,6 +281,10 @@ Track retained volumes in private inventory.
 
 Each sidecar starts before its game.
 The game starts only after the relay grants the sidecar a slot.
+The readiness check reads current `multiverse-sidecar --my-slot --json` state: configured
+credentials, a live relay connection, and a current slot grant.
+It also requires the non-empty Contract A token that the sidecar writes for the game.
+A historical grant line in a rotating log is not readiness evidence.
 
 The game uses `-batchmode -nographics`.
 A shared Xvfb service provides the X11 backend required by the Linux build.
@@ -444,6 +459,16 @@ That installer restores host files, plugin files, units, configuration, and worl
 Exit status `20` means that activation failed and rollback completed.
 Exit status `21` means that activation and rollback both failed.
 
+After a successful activation, the wrapper promotes its content-addressed archive through one S3
+write to `runtime/current.json`.
+The descriptor is the replacement-host source of truth; a failed activation leaves it unchanged.
+If activation succeeds but descriptor publication fails, rerun this idempotent promotion after
+verification:
+
+```sh
+./cloud/aws/promote-runtime.sh
+```
+
 An older stack can lack the `RelayDomain` parameter.
 For that stack only, set an explicit `BIBITES_RELAY_DOMAIN` before the update.
 The wrapper validates the fallback name before it sends a remote command.
@@ -587,12 +612,16 @@ propagates a restart.
 Wait for the world to take its slot again before the next world:
 
 ```sh
-tail -n 200 /srv/bibites/worlds/<world-id>/logs/sidecar.log | grep 'contract B: slot granted'
-sudo bibites-cloud-status
+sudo bibites-cloud-status --json | jq --arg id '<world-id>' \
+  '.[] | select(.id == $id)'
+sudo -u bibites /srv/bibites/bin/multiverse-sidecar \
+  --data-dir /srv/bibites/worlds/<world-id>/sidecar --my-slot --json | jq
 ```
 
 `reason=reclaimed` means the world returned to its own slot and its own position.
+The live sidecar state must report configured credentials, a connected relay, and a current grant.
 `bibites-cloud-status` must report `sidecar=active` and `game=active` for that world.
+Use the sidecar log only as optional context for a failed live check.
 
 Wait at least 60 seconds after each world before the next one.
 Three reasons ask for the wait:
@@ -630,19 +659,20 @@ mv -f /srv/bibites/bin/multiverse-sidecar.new /srv/bibites/bin/multiverse-sideca
 systemctl restart bibites-sidecar@<world-id>.service
 ```
 
-### What this procedure does not make durable
+### Make the sidecar update durable
 
-The launch template bootstraps a replacement instance from the stack's `RuntimeFile` and
-`RuntimeSha256` parameters.
-A replaced instance therefore returns with the runtime those parameters name, and not with any
-file installed in place afterwards.
+The manual sidecar procedure does not move the replacement-host runtime pointer by itself.
+After every world passes the live checks, promote the staged archive:
 
-This applies to every in-place host change and not only to a sidecar.
-Check those two parameters against the installed runtime after any in-place change, and record the
-difference in private operations storage.
+```sh
+. cloud/aws/dist/artifacts.env
+./cloud/aws/promote-runtime.sh "runtime/$RUNTIME_SHA256.tar.gz" "$RUNTIME_SHA256"
+```
 
-Do not update the stack only to close that gap.
-A launch-template change can replace the instance.
+The command checks the source archive and any existing content-addressed copy before it publishes
+`runtime/current.json`.
+A replacement host then installs that complete runtime, including the sidecar just verified.
+Record its digest and public commit in private operations storage.
 
 ## Backups and recovery
 

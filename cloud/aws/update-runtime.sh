@@ -230,7 +230,10 @@ if [ -n "$invocation" ]; then
   jq '{status:.Status,responseCode:.ResponseCode,
     stdout:.StandardOutputContent,stderr:.StandardErrorContent}' <<<"$invocation"
 fi
-[ "$wait_status" -eq 0 ] && exit 0
+if [ "$wait_status" -eq 0 ]; then
+  "$repo/cloud/aws/promote-runtime.sh" "$RUNTIME_OBJECT" "$RUNTIME_SHA256"
+  exit 0
+fi
 
 response_code="$(jq -r '.ResponseCode // empty' <<<"${invocation:-{}}")"
 case "$response_code" in
