@@ -189,9 +189,9 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.7` |
 | `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
 | `bibites-mod/` tree | `bc3d8733e323a837d87dd0423bdd2f24862432bc` |
-| `cmd/sidecar` source commit | `3a17907668a8871812e90a9ab061644487db0dc2` |
-| `cmd/sidecar` input digest | `ef7c01abc02f967ba03e6f29a1bb52e628c1d9f2b7d8cd15f9c06a66ff226d7b` |
-| Tested on | 2026-08-17 |
+| `cmd/sidecar` source commit | `e6cd359f6e79feecf0f6efedef350a8c7b89bec9` |
+| `cmd/sidecar` input digest | `8437fb1c335ab0eb332003f8e4a13d8f9b26ac2bbac356eeb6748b3e46498d49` |
+| Tested on | 2026-08-19 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -207,6 +207,14 @@ mistake, because the sidecar changes far more often than the mod.
 and wrote down what they ran. It catches **forgetting** — a mod change that lands without a test,
 a sidecar change that never reached a tested binary — and it does not prove that a test happened.
 The `evidence` sentence is where the run is described, and it is written by the person who ran it.
+
+**`Tested on` is the date of the most recent leg, not of every value above it.** The sidecar
+changes far more often than the mod, so a re-record often re-attests only the sidecar half while
+the plugin's hash and tree stay exactly where the earlier test left them. That is honest as long
+as the `evidence` sentence says which leg proved what — and it must, including when the run
+happened on a host whose game or mod is not the one this matrix names. Today's record is one of
+those: the sidecar values were re-attested on 2026-08-19 on the live broadcast world, whose host
+runs mod `0.6.5`; the plugin values are unchanged and still rest on the 2026-08-17 test.
 
 **Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
 it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
@@ -260,10 +268,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.7",
     "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
     "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
-    "sidecarSourceCommit": "3a17907668a8871812e90a9ab061644487db0dc2",
-    "sidecarInputsSha256": "ef7c01abc02f967ba03e6f29a1bb52e628c1d9f2b7d8cd15f9c06a66ff226d7b",
-    "testedOn": "2026-08-17",
-    "evidence": "six fresh complete-edition installs from real NSIS setups, runs #12-#17 on this Windows laptop on 2026-08-17, each about 45 installer assertions and all green; the setups were built from commits between 81af447 and this one, whose cmd/sidecar input manifest digests to the recorded value at every commit in that range, so the sidecar that ran is the sidecar this tree builds. Two worlds ran concurrently on slots 9 and 11 of wss://bibitesmultiverse.com/contract-b/v4 through an 18-minute soak of about 4,600 outbound and 4,700 inbound organisms, exercising contract A custody and MIGRATION_PAYLOAD forwarding, contract B inbound custody and MIGRATE_IN delivery, MIGRATION_ACK tombstoning, GENOME_REQUEST service and /my-slot reporting, with no ERROR, WARN, panic or reconnect; --diagnose exited 0 with 16 PASS against the relay and a real credential; journal compaction ran on Windows for the first time, 10 timed compactions across the two worlds at both the 2-minute override and the 15-minute default, the largest reclaiming 97.9 MB (108 MB down to 10 MB), with the journal bounded across cycles; mod 0.6.7 stayed connected throughout and every stop went through the mod quit verb and lost nothing. NOT EXERCISED, and so not claimed: relay disconnect and reconnect, slot loss and re-grant, journal replay after a crash or an interrupted compaction, the roll-up and archive paths, re-route and bounce-back on REFUSED, forward-timeout expiry, --list-inflight and --release-inflight, the private-map path, and compaction under a full or read-only disk"
+    "sidecarSourceCommit": "e6cd359f6e79feecf0f6efedef350a8c7b89bec9",
+    "sidecarInputsSha256": "8437fb1c335ab0eb332003f8e4a13d8f9b26ac2bbac356eeb6748b3e46498d49",
+    "testedOn": "2026-08-19",
+    "evidence": "on 2026-08-19 the sidecar built from e6cd359 (exe sha256 455553d36806a95de3602f1e1169a3efe5c965027b898c79f7e6bebba9a511c5) was deployed to the live public /watch broadcast world at slot 7 of the public map, replacing a sidecar wedged at contract A's inboundQueueMax with 64 forwarded-and-unanswered organisms; it recovered custody of those 64 from the journal, reclaimed slot 7, and exercised B42's forward-timeout expiry for real -- 64 FORWARD LOST write-offs at forwardTimeout=5m0s in half a second, plus 2 more in ordinary live traffic five minutes after their sentAt, lostForwardTotal reaching 66 -- after which MIGRATE_OUT_NACK code=JOURNAL_FULL went from 38,167 refusals to zero across 2,143 exports in an 18-minute soak, custodyDepth fell from 64 to 1-2, all four outbound lanes went from 0 per minute to 5.8/8.6/13.8/7.2 and re-routed onto the two live axes at 49.4 and 65.2 per minute when five peer worlds lost their mods mid-soak, on one relay connection with no reconnect and one slot grant, with 66 ERROR lines all of them FORWARD LOST and --diagnose reporting PASS journal-depths and PASS slot, edges, neighbours, journal-replay, mod-connected and limits; that host runs mod 0.6.5 and game 0.6.3.1 while this record names mod 0.6.7, so this run is SIDECAR-SIDE evidence only and the plugin half of the record -- unchanged pluginSha256 and bibitesModTree -- is not re-attested by it and still rests on the 2026-08-17 record this one replaces: six fresh complete-edition installs from real NSIS setups, and a two-world soak of about 4,600 outbound and 4,700 inbound organisms with mod 0.6.7 connected throughout and every stop through the mod quit verb; NOT EXERCISED by the 2026-08-19 run, and so not claimed: relay disconnect and reconnect, slot loss, journal replay after a crash or an interrupted compaction, the roll-up and archive paths, re-route and bounce-back on REFUSED, --list-inflight and --release-inflight, the private-map path, and compaction under a full or read-only disk"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
