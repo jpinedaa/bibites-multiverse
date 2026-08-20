@@ -7,7 +7,19 @@ test_root="$(mktemp -d)"
 trap 'find "$test_root" -depth -delete' EXIT
 mock_bin="$test_root/bin"
 install -d "$mock_bin"
-printf '%s\n' '#!/usr/bin/env bash' 'exit 0' >"$mock_bin/systemctl"
+printf '%s\n' \
+  '#!/usr/bin/env bash' \
+  'set -euo pipefail' \
+  'if [ "${1:-}" = list-units ]; then' \
+  '  if [[ " $* " == *" --plain "* ]]; then' \
+  '    printf "%s\n" "bibites-timescale@slot-1.service loaded failed failed"' \
+  '  else' \
+  '    printf "%s\n" "● bibites-timescale@slot-1.service loaded failed failed"' \
+  '  fi' \
+  '  exit 0' \
+  'fi' \
+  'if [ "${1:-}" = stop ] && [ "${2:-}" = "●" ]; then exit 1; fi' \
+  'exit 0' >"$mock_bin/systemctl"
 chmod 0755 "$mock_bin/systemctl"
 
 make_runtime() {
