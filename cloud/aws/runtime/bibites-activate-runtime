@@ -116,7 +116,7 @@ stop_runtime_services() {
   else
     failed=1
   fi
-  mapfile -t world_units < <(systemctl list-units --type=service --all \
+  mapfile -t world_units < <(systemctl list-units --type=service --all --plain \
     'bibites-timescale@*.service' 'bibites-game@*.service' \
     'bibites-sidecar@*.service' --no-legend | awk '{print $1}')
   [ "${#world_units[@]}" -eq 0 ] || systemctl stop "${world_units[@]}" || failed=1
