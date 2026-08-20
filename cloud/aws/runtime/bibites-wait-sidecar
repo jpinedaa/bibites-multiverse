@@ -2,20 +2,42 @@
 set -euo pipefail
 
 world="${1:?world id required}"
-env_file="/srv/bibites/worlds/$world/world.env"
+world_root="${BIBITES_WORLD_ROOT:-/srv/bibites/worlds}"
+sidecar_bin="${BIBITES_SIDECAR_BIN:-/srv/bibites/bin/multiverse-sidecar}"
+env_file="$world_root/$world/world.env"
 # shellcheck source=/dev/null
 set -a; . "$env_file"; set +a
 
 deadline=$(( $(date +%s) + 180 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
-  [ -s "$CONTRACT_A_TOKEN_FILE" ] && grep -Fq 'contract B: slot granted' "$SIDECAR_LOG" 2>/dev/null && exit 0
-  grep -Eq 'HTTP 401|certificate did not verify|placement claim refused|below this relay' "$SIDECAR_LOG" 2>/dev/null && {
-    tail -n 30 "$SIDECAR_LOG" >&2
+  # Read the running sidecar's state. A grant line can rotate away, and an old
+  # refusal can remain in the log after a later connection becomes healthy.
+  slot_json="$("$sidecar_bin" --data-dir "$SIDECAR_DATA" \
+    --my-slot --json 2>/dev/null || printf '{}')"
+  if [ -s "$CONTRACT_A_TOKEN_FILE" ] && jq -e '
+    .credentialConfigured == true and
+    .relay.connected == true and
+    .slot.grantSeen == true and
+    .slot.granted == true and
+    (.slot.slot | numbers) > 0
+  ' <<<"$slot_json" >/dev/null; then
+    exit 0
+  fi
+  if jq -e '
+    (.relay.connected != true and
+      (.relay.lastFaultKind == "unauthorized" or
+       .relay.lastFaultKind == "tls" or
+       (.relay.lastFaultKind == "closed" and
+        (.relay.lastFaultReason // "" | contains("below this relay"))))) or
+    (.slot.grantSeen == true and .slot.granted != true)
+  ' <<<"$slot_json" >/dev/null 2>&1; then
+    echo "$world: sidecar reported a permanent relay or slot refusal" >&2
+    echo "$world: run bibites-cloud-status --json for the current sidecar state" >&2
     exit 1
-  }
+  fi
   sleep 1
 done
 
 echo "$world: sidecar did not receive a slot grant within 180 seconds" >&2
-tail -n 30 "$SIDECAR_LOG" >&2 || true
+echo "$world: run bibites-cloud-status --json for the current sidecar state" >&2
 exit 1

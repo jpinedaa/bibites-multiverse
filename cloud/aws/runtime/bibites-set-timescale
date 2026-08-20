@@ -2,13 +2,16 @@
 set -euo pipefail
 
 world="${1:?world id required}"
-env_file="/srv/bibites/worlds/$world/world.env"
+world_root="${BIBITES_WORLD_ROOT:-/srv/bibites/worlds}"
+sidecar_bin="${BIBITES_SIDECAR_BIN:-/srv/bibites/bin/multiverse-sidecar}"
+retry_delay="${BIBITES_SCALE_RETRY_DELAY_SECONDS:-20}"
+env_file="$world_root/$world/world.env"
 # shellcheck source=/dev/null
 set -a; . "$env_file"; set +a
 
 deadline=$(( $(date +%s) + 600 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
-  slot_json="$(/srv/bibites/bin/multiverse-sidecar --data-dir "$SIDECAR_DATA" \
+  slot_json="$("$sidecar_bin" --data-dir "$SIDECAR_DATA" \
     --my-slot --json 2>/dev/null || printf '{}')"
   if jq -e '.mod.connected == true' <<<"$slot_json" >/dev/null; then
     break
@@ -39,5 +42,5 @@ send_scale() {
 # The established rig has observed the first command after a load report x1 and
 # the second stick. Preserve that measured workaround on unattended boots.
 send_scale
-sleep 20
+sleep "$retry_delay"
 send_scale
