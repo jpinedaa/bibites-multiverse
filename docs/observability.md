@@ -420,6 +420,29 @@ not add a collector and does not invent a new severity model:
   the newest 121 service-host samples: about two hours at the sampler's
   one-minute cadence.
 
+### View the dashboard
+
+After the dashboard is deployed, open
+[`https://bibitesmultiverse.com/health`](https://bibitesmultiverse.com/health).
+The JSON projection is at
+[`https://bibitesmultiverse.com/api/health`](https://bibitesmultiverse.com/api/health).
+An HTTP `404` response means that the deployed archive does not contain the dashboard.
+
+Use this procedure to preview the page from a source checkout:
+
+```sh
+cd go
+preview_dir="$(mktemp -d)"
+go run ./cmd/archive \
+  --data-dir "$preview_dir/archive" \
+  --relay ws://127.0.0.1:1/contract-b \
+  --http 127.0.0.1:18796
+```
+
+Then open [`http://127.0.0.1:18796/health`](http://127.0.0.1:18796/health).
+The preview reports unavailable collectors because it does not read the production files.
+Stop the process with `Ctrl-C` when the preview is complete.
+
 The monitor writes a `completed-at` marker only after a full scheduled pass.
 It writes the checks that pass actually ran and the current `sev.<check>` value
 for each, including a first-pass `OK`. An `--only` diagnostic does not replace
