@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,11 +54,18 @@ func migration(atMs int64, from, to int, edge, generic, specific, hash string) R
 // whitespace are ONE species for counting and TWO labels for display. A34
 // normalizes the key; A36 forbids repairing the label.
 func TestSpeciesAggregateIsIncrementalAndKeyedOnTheComparedName(t *testing.T) {
+	if speciesAggMax != 1<<16 {
+		t.Fatalf("species aggregate capacity = %d, want 65,536: the former 4,096 bound "+
+			"was exhausted during the first public week", speciesAggMax)
+	}
 	a, err := New(Config{DataDir: t.TempDir(), PeerID: "archive-test", RelayURL: "ws://test"})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = a.Close() })
+	if a.species.max != speciesAggMax {
+		t.Fatalf("a new archive applies species capacity %d, want %d", a.species.max, speciesAggMax)
+	}
 
 	base := time.Now().Add(-time.Hour).UnixMilli()
 	recs := []Record{
@@ -112,15 +120,17 @@ func TestSpeciesAggregateIsIncrementalAndKeyedOnTheComparedName(t *testing.T) {
 
 	// The bound, and that it is COUNTED rather than silently dropped.
 	a.mu.Lock()
-	for i := 0; i < speciesAggMax; i++ {
-		a.observeSpeciesLocked(migration(base, 1, 2, "E", "Filler", string(rune('a'+i%26))+
-			strings.Repeat("x", i/26+1), "h"))
+	a.species.max = 4
+	for i := 0; len(a.species.byKey) < a.species.max; i++ {
+		a.species.byKey["Filler "+strconv.Itoa(i)] = &speciesAgg{
+			genomes: map[uint64]struct{}{}}
 	}
+	a.observeSpeciesLocked(migration(base, 1, 2, "E", "Overflow", "species", ""))
 	overflow := a.species.overflow
 	tracked := len(a.species.byKey)
 	a.mu.Unlock()
-	if tracked > speciesAggMax {
-		t.Fatalf("the aggregate tracks %d species, over its own bound of %d", tracked, speciesAggMax)
+	if tracked > a.species.max {
+		t.Fatalf("the aggregate tracks %d species, over its test bound of %d", tracked, a.species.max)
 	}
 	if overflow == 0 {
 		t.Fatal("the aggregate hit its bound and did not say so; a truncated answer a " +
