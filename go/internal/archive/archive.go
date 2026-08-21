@@ -105,6 +105,16 @@ type Config struct {
 	// HTTPListen is the status page's bind address, "" for no page. The rig
 	// uses 127.0.0.1:8796; a test uses 127.0.0.1:0.
 	HTTPListen string
+	// MonitorStateDir and HostMetricsFile are the two read-only inputs for the
+	// public production-health dashboard. Empty means unavailable, which is the
+	// portable default: an archive used on a participant LAN has neither file.
+	//
+	// The serving boundary never returns either path, arbitrary files from the
+	// monitor directory, or the monitor's alert text. health.go projects a fixed
+	// allow-list of verdicts and numeric host fields so enabling this surface does
+	// not turn an operator file into a public file browser.
+	MonitorStateDir string
+	HostMetricsFile string
 	// StatsStale is §10.1's honesty threshold: a stats block older than this
 	// renders as UNKNOWN rather than as state.
 	StatsStale time.Duration
@@ -452,6 +462,13 @@ type Archive struct {
 	historyVal    History
 	historyAllAt  time.Time
 	historyAllVal History
+	// The health dashboard tails at most 1 MiB of host samples. Cache that public
+	// projection briefly so several open dashboards do not turn a one-minute
+	// instrument into repeated disk reads. This lock is separate from mu: a file
+	// read must never hold the migration-path lock.
+	healthMu     sync.Mutex
+	healthAt     time.Time
+	healthCached productionHealthView
 	// The species detail's sparkline cache, kept apart from the strip's for the
 	// same reason and bounded in entries as well as in age: a reader clicking
 	// through species must not re-read the sample file per click.

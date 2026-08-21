@@ -871,6 +871,10 @@ MULTIVERSE_ARCHIVE_DATA_DIR=$ARCHIVE_DATA
 MULTIVERSE_ARCHIVE_HTTP=$MV_ARCHIVE_HTTP
 MULTIVERSE_CREDENTIAL_FILE=$ARCHIVE_SECRET
 MULTIVERSE_ARCHIVE_DENY_LIST=/etc/multiverse/deny-list
+# Read-only dashboard inputs. The archive publishes a fixed safe projection of
+# these files; it never serves a path, raw monitor message, billing value or PID.
+MULTIVERSE_MONITOR_STATE_DIR=$MV_STATE/monitor
+MULTIVERSE_HOST_METRICS_FILE=$MV_STATE/metrics/service-host.jsonl
 # The world the shared camera at /watch is showing, which no frame on either wire
 # announces. Empty names no world, and both pages then say so. Display only: it
 # changes no placement, no routing and no record. See deploy.env.example.
@@ -1319,6 +1323,8 @@ phase_verify() {
   chk "archive healthz local"    "curl -fsS --max-time 10 http://$MV_ARCHIVE_HTTP/healthz"
   chk "website over TLS"         "curl -fsS --max-time 15 https://$MV_DOMAIN/"
   chk "status API over TLS"      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/status"
+  chk "health dashboard over TLS" "curl -fsS --max-time 15 https://$MV_DOMAIN/health | grep -q 'Live production evidence'"
+  chk "health API over TLS"       "curl -fsS --max-time 15 https://$MV_DOMAIN/api/health | grep -q '\"serviceHost\"'"
   # The publisher stops when this says nobody is watching, so an endpoint that
   # 404s reads to a watcher as a broken service rather than as an empty room.
   chk "viewer presence over TLS" \

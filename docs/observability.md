@@ -44,7 +44,10 @@ that did.
 runs only on the host it is watching. The service host is the one most likely
 to be sick, and querying a time-series database is memory-hungry precisely when
 memory is short. Collectors may live on a watched host; stores and query
-engines may not.
+engines may not. A dashboard served by the watched host is a convenient view,
+not that store and not the dead-man's switch. If the host is gone, the
+dashboard is gone with it; the retained source files and the off-host observer
+still have to answer what happened.
 
 **A number with a floor publishes its floor.** The map is a rectangle and the
 peer count need not fill it, so a 3×3 grid holding seven peers has two
@@ -157,7 +160,9 @@ times out of 48 while memory sat between 85 and 99 percent. Utilisation says how
 busy a resource is. It does not say whether anything is *waiting*, and waiting is
 what breaks a deadline.
 
-Pressure stall information says it directly, and both hosts sample it:
+Pressure stall information says it directly. The world host samples it; the
+service host does not yet, which is a Layer 1 gap rather than a value the
+dashboard may infer from CPU and memory utilization:
 
 ```text
 /proc/pressure/cpu     full total    time no task could run for want of CPU
@@ -404,6 +409,68 @@ absolute impact, which on an account of this size means it can never fire. It
 must be replaced with thresholds scaled to the actual floor, or it is
 decoration.
 
+## The production-health dashboard
+
+`/health` joins the live results that already reach the service host. It does
+not add a collector and does not invent a new severity model:
+
+- `/api/status` supplies current world, routing, and archive state.
+- `/api/viewers` supplies the ten-second broadcast audience signal.
+- `/api/health` supplies the scheduled monitor's current verdicts and at most
+  the newest 121 service-host samples: about two hours at the sampler's
+  one-minute cadence.
+
+### View the dashboard
+
+After the dashboard is deployed, open
+[`https://bibitesmultiverse.com/health`](https://bibitesmultiverse.com/health).
+The JSON projection is at
+[`https://bibitesmultiverse.com/api/health`](https://bibitesmultiverse.com/api/health).
+An HTTP `404` response means that the deployed archive does not contain the dashboard.
+
+Use this procedure to preview the page from a source checkout:
+
+```sh
+cd go
+preview_dir="$(mktemp -d)"
+go run ./cmd/archive \
+  --data-dir "$preview_dir/archive" \
+  --relay ws://127.0.0.1:1/contract-b \
+  --http 127.0.0.1:18796
+```
+
+Then open [`http://127.0.0.1:18796/health`](http://127.0.0.1:18796/health).
+The preview reports unavailable collectors because it does not read the production files.
+Stop the process with `Ctrl-C` when the preview is complete.
+
+The monitor writes a `completed-at` marker only after a full scheduled pass.
+It writes the checks that pass actually ran and the current `sev.<check>` value
+for each, including a first-pass `OK`. An `--only` diagnostic does not replace
+the full result with its subset. The API dates the result from that marker. A
+marker more than eleven minutes old is stale, whatever its last verdict was.
+The host sample is stale after three minutes. The browser renders both cases as
+unknown and still shows the dated last value for diagnosis.
+
+**The API is a projection, not a file server.** It publishes a fixed allow-list
+of check names, labels, severities, and numeric host fields. It does not publish
+alert messages, filesystem paths, billing values, host identifiers, arbitrary
+monitor files, process IDs, or raw host-capacity totals. Capacity is reduced to
+utilization percentages; current service memory remains a performance result,
+not a machine-size declaration. Service names and systemd states also pass
+through fixed lists. Adding a monitor file does not make it public; adding a
+public field requires an explicit code change and a test.
+
+The dashboard names its missing coverage beside its results. World-host
+performance and PSI still live only in `performance.jsonl`; service-host PSI
+is not sampled; private daily and per-deployment verification does not feed the
+public host; deployment health windows remain in their receipts; raw provider
+metrics and costs remain private even though their safe monitor verdicts are
+shown; no external front-door dead-man exists; the audience signal is not a
+synthetic publisher-start or video-playback test; and there is no continuous
+CPU or heap profiler. Showing those as unavailable is part of the result. It
+prevents an on-host dashboard from being mistaken for the off-host
+observability tier this standard still requires.
+
 ## Deployment tracking
 
 A deployment is a change to a running service, so the record of one has to
@@ -587,6 +654,12 @@ per-check severity, all of which say *which* check and *how bad*. An exit code
 says neither, and spending it on severity throws away the only signal that
 could have reported the watcher's own death.
 
+The per-check files are also the dashboard's current-result contract. Every
+completed pass records successes as well as failures, and writes its completion
+time last. This does not turn the alert channel into a history store: the files
+still hold one verdict each, and the channel still speaks only on a change, a
+repeat, or a recovery.
+
 Three things about it are wrong today and are part of this standard:
 
 - The error check counts only `ERROR`-level lines. The relay logs a
@@ -703,7 +776,10 @@ report its absence.
 ### What does not exist yet
 
 No *continuous* measurement ships off-box: no metrics agent, no time-series
-store, no log shipping, no dashboard, no continuous profiling. The daily
+store, no log shipping, and no continuous profiling. The dashboard and its
+sanitized API now exist in source, but are not part of production until that
+source and the matching monitoring kit are deployed; even then they remain an
+on-host current view, not the missing off-host store or dead-man. The daily
 reconciliation is the one exception and it travels the other way — an operator
 machine reads the provider and writes one file to the host. The Layer 3 path
 probe has not been written. The relay still does not log a close code, so the
