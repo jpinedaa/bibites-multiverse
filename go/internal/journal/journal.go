@@ -988,11 +988,11 @@ type Update struct {
 	// DestSlot is the ONE exception to §7.3's no-rewrite rule, and it carries
 	// its own evidence: a re-route under a proof of non-delivery (§9.2). Every
 	// other entry keeps the destination it recorded.
-	DestSlot       *int
-	RerouteCount   *int
-	RerouteFrom    *int
-	RerouteProof   *string
-	RerouteAtMs    *int64
+	DestSlot     *int
+	RerouteCount *int
+	RerouteFrom  *int
+	RerouteProof *string
+	RerouteAtMs  *int64
 	// The FORWARD_RECEIPT block (§6.12, §22 B26). ForwardReceipts is the new
 	// ABSOLUTE count, not a delta; the caller reads the current one and writes
 	// count+1, so a replayed record can never double-count a forward.
@@ -1018,7 +1018,7 @@ func (j *Journal) Apply(migrationID string, u Update) (*State, error) {
 		Note: u.Note, RelaySessionID: u.RelaySessionID, SentAtMs: u.SentAtMs,
 		DestSlot: u.DestSlot, RerouteCount: u.RerouteCount, RerouteFrom: u.RerouteFrom,
 		RerouteProof: u.RerouteProof, RerouteAtMs: u.RerouteAtMs,
-		ForwardReceipts: u.ForwardReceipts,
+		ForwardReceipts:  u.ForwardReceipts,
 		ReceiptSessionID: u.ReceiptSessionID, ReceiptDestSlot: u.ReceiptDestSlot,
 		ReceiptForwardedAtMs: u.ReceiptForwardedAtMs}
 	if u.Handoff != "" {
