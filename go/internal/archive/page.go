@@ -522,9 +522,10 @@ color:inherit;opacity:.68;margin-top:3px;font-weight:500}
    dendrogram centres an ancestor between its children and then has nowhere to
    put that ancestor's name.
 
-   It scrolls INSIDE its own box, like the map and the tables, because a long
-   species name is 64 bytes a peer chose and must not be able to push the page
-   sideways. */
+   It grows WITH THE PAGE vertically, because every poll replaces the whole SVG
+   and an inner vertical viewport would lose its scroll position while it is
+   empty. It still scrolls inside its own box HORIZONTALLY: a long species name
+   is 64 bytes a peer chose and must not be able to push the page sideways. */
 .spctl{display:flex;gap:8px 14px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
 .spctl input,.spctl select{font:inherit;font-size:12px;color:var(--text);background:var(--cell);
 border:1px solid var(--line);border-radius:8px;padding:7px 9px;min-width:0}
@@ -536,7 +537,7 @@ border-radius:999px;padding:2px 7px;margin:0 5px 3px 0;white-space:nowrap}
 .chip.exl{color:var(--warn);border-color:var(--warn);white-space:pre-wrap;word-break:break-word}
 .chip.bcast{color:var(--lane);border-color:var(--lane);text-decoration:none}
 .chip.bcast:hover,.chip.bcast:focus{color:var(--hot);border-color:var(--hot)}
-.lifewrap{overflow:auto;max-height:min(78vh,1000px);border:1px solid var(--line);
+.lifewrap{overflow-x:auto;overflow-y:hidden;border:1px solid var(--line);
 border-radius:10px;background:var(--cell)}
 svg.life{display:block}
 svg.life .hit{fill:transparent}
@@ -669,8 +670,8 @@ border-bottom:1.2px solid var(--dim);vertical-align:1px;margin-right:5px}
 border-radius:50%;vertical-align:0;margin-right:5px}
 /* ---- THE BRAIN PANEL, under the drawing and sharing its x axis.
    Its own box, directly below the tree's, with no border on top: the two read as
-   one picture with one clock and are two boxes only because the tree scrolls
-   vertically and this must not scroll away with it. Its horizontal scroll is
+   one picture with one clock, while the panel keeps its own vertical scale and
+   remains an aggregate rather than a species row. Its horizontal scroll is
    slaved to the tree's, so the shared axis stays shared even on a window too
    narrow for the drawing. */
 .brainwrap{overflow-x:auto;overflow-y:hidden;border:1px solid var(--line);border-top:0;
@@ -2527,7 +2528,8 @@ function trSpan(parent, cls, text, dx){
    would draw itself over the timeline. The full name is always in the row's
    tooltip, which cannot be overflowed.
 
-   The whole thing scrolls inside its own box, like the map and the tables. */
+   The complete drawing grows vertically with the page. Its own box handles only
+   horizontal overflow. */
 var LF_ROWH = 24, LF_PADT = 44, LF_DETL = 15, LF_DETPAD = 12;
 var LF_GLYPHX = 14, LF_NAMEX = 30, LF_NAMEW = 366, LF_MINIX = 408;
 /* LF_PLOTW is the plot's width when nothing can be measured — a hidden panel has
@@ -2537,11 +2539,6 @@ var LF_GLYPHX = 14, LF_NAMEX = 30, LF_NAMEW = 366, LF_MINIX = 408;
    put it 147px past the right edge of a 1280-wide window with the box scrolled to
    0, so the one mark a reader is looking for was the one mark off the screen. */
 var LF_DOT = 9, LF_SPARKW = 84, LF_PLOTW = 700, LF_PLOTMIN = 280, LF_PLOTPAD = 30;
-/* Room kept for the box's own vertical scrollbar. The width is measured on a box
-   that has not been filled yet, so the scrollbar that the fill puts there is not
-   in the measurement — and a drawing sized to the whole box then overflows it by
-   exactly that much and grows a horizontal scrollbar to say so. */
-var LF_SCROLLW = 16;
 /* The badge line's own height and its left inset. A row that carries no badge is
    not made taller for one. */
 var LF_BADGEH = 13, LF_BADGEX = 6;
@@ -2760,7 +2757,7 @@ function lfCols(x){
   var host = document.getElementById("lfbox");
   var avail = host ? host.clientWidth : 0;
   var plotw = avail > 0
-    ? Math.max(LF_PLOTMIN, avail - plot - LF_PLOTPAD - LF_SCROLLW)
+    ? Math.max(LF_PLOTMIN, avail - plot - LF_PLOTPAD)
     : LF_PLOTW;
   return {mini: LF_MINIX, miniW: miniW, pop: pop, spark: spark, plot: plot,
           plotw: plotw, w: plot + plotw + LF_PLOTPAD};
@@ -5358,12 +5355,11 @@ var lfResizeT = 0;
     var b = ev.target.closest ? ev.target.closest(".seedbtn") : null;
     if (b) toggleSeed();
   });
-  // TWO BOXES, ONE CLOCK. The drawing and the panel under it are separate boxes
-  // only because the drawing scrolls vertically and the panel must not scroll away
-  // with it. On a window too narrow for the drawing they can both scroll
-  // sideways, and two clocks at two offsets would not be one clock — so the
-  // panel's horizontal offset follows the drawing's. It is one-way: the drawing is
-  // where a reader is working.
+  // TWO BOXES, ONE CLOCK. The panel is a separate aggregate with its own vertical
+  // scale, but it uses the tree's time axis. On a window too narrow for the
+  // drawing both boxes can scroll sideways, and two clocks at two offsets would
+  // not be one clock — so the panel's horizontal offset follows the drawing's.
+  // It is one-way: the drawing is where a reader is working.
   var bp = document.getElementById("lfbrain");
   if (box && bp) box.addEventListener("scroll", function(){
     if (bp.scrollLeft !== box.scrollLeft) bp.scrollLeft = box.scrollLeft;

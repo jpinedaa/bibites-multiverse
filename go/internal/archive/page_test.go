@@ -2035,7 +2035,7 @@ func TestTheTimelineFitsItsBoxAndKeepsNowInIt(t *testing.T) {
 
 	for _, want := range []string{"var host = document.getElementById(\"lfbox\");",
 		"var avail = host ? host.clientWidth : 0;",
-		"Math.max(LF_PLOTMIN, avail - plot - LF_PLOTPAD - LF_SCROLLW)",
+		"Math.max(LF_PLOTMIN, avail - plot - LF_PLOTPAD)",
 		"w: plot + plotw + LF_PLOTPAD"} {
 		if !strings.Contains(region, want) {
 			t.Fatalf("the plot is not measured against its own box: %q missing", want)
@@ -2049,6 +2049,9 @@ func TestTheTimelineFitsItsBoxAndKeepsNowInIt(t *testing.T) {
 	}
 	if strings.Contains(region, "f * LF_PLOTW") || strings.Contains(region, "cols.plot + LF_PLOTW") {
 		t.Fatal("something is still drawn against the fixed plot width")
+	}
+	if strings.Contains(region, "LF_SCROLLW") {
+		t.Fatal("the plot still reserves width for the vertical scrollbar that was removed")
 	}
 	if !strings.Contains(region, "String(cols.plot + cols.plotw)") {
 		t.Fatal("the now line is not at the right-hand end of the measured plot")
@@ -2067,10 +2070,19 @@ func TestTheTimelineFitsItsBoxAndKeepsNowInIt(t *testing.T) {
 	if strings.Contains(resize, "fetch") {
 		t.Fatal("a resize fetches; nothing about the data changed")
 	}
-	// The box still scrolls in both directions when even the minimum does not fit,
-	// which is this page's rule for wide content everywhere.
-	if !strings.Contains(page, ".lifewrap{overflow:auto") {
-		t.Fatal("the drawing no longer scrolls inside its own box")
+	// The box still scrolls sideways when even the minimum does not fit. It does
+	// not own a vertical viewport: renderLife empties and rebuilds the SVG on every
+	// poll, and an empty capped box clamps its scroll position back to the top.
+	// The drawing instead contributes its full height to the page, whose scroll
+	// position survives that repaint.
+	if !strings.Contains(page, ".lifewrap{overflow-x:auto;overflow-y:hidden;") {
+		t.Fatal("the drawing does not keep horizontal overflow inside its own box")
+	}
+	for _, forbidden := range []string{".lifewrap{overflow:auto", ".lifewrap{overflow-y:auto",
+		"max-height:min(78vh,1000px)"} {
+		if strings.Contains(page, forbidden) {
+			t.Fatalf("the species drawing still owns a vertical scroll viewport: found %q", forbidden)
+		}
 	}
 }
 
