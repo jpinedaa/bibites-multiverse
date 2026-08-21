@@ -121,10 +121,16 @@ else
   bad "--stage-dir overrides the stale deploy.env stage"
 fi
 
-if grep -Fq 'provision.sh" --only binaries --stage-dir "$STAGE"' "$SUT"; then
+if grep -Fq '"$BINARY_PROVISION" --only binaries --stage-dir "$STAGE"' "$SUT"; then
   ok "deploy.sh forwards the stage that it validated"
 else
   bad "deploy.sh forwards the stage that it validated"
+fi
+
+if grep -Fq '[ "$DRY" = 1 ] && BINARY_PROVISION="$PROVISION"' "$SUT"; then
+  ok "a dry run exercises the staged provisioner"
+else
+  bad "a dry run exercises the staged provisioner"
 fi
 
 echo
