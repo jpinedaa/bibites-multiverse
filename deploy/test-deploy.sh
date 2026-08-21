@@ -12,7 +12,9 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUT="$HERE/deploy.sh"
+PROVISION="$HERE/provision.sh"
 [ -x "$SUT" ] || { echo "test-deploy: $SUT is not executable" >&2; exit 1; }
+[ -x "$PROVISION" ] || { echo "test-deploy: $PROVISION is not executable" >&2; exit 1; }
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/mvdep.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
@@ -87,6 +89,42 @@ elif printf '%s' "$out" | grep -q 'provision.sh'; then
   ok "a kit with no provision.sh is refused, and says so"
 else
   bad "a kit with no provision.sh is refused, and says so"
+fi
+
+echo
+echo "== one staged payload from validation through installation"
+
+# The production workflow exposed this seam: deploy.sh validated the CI payload,
+# but provision.sh sourced deploy.env afterwards and installed the old canonical
+# stage instead. Exercise the provision half with two different artifacts so an
+# override that is parsed but overwritten still fails this test.
+mkdir -p "$TMP/fakebin" "$TMP/stale-stage" "$TMP/intended-stage"
+cat >"$TMP/fakebin/id" <<'SH'
+#!/usr/bin/env sh
+[ "${1:-}" = -u ] && { echo 0; exit 0; }
+exec /usr/bin/id "$@"
+SH
+chmod +x "$TMP/fakebin/id"
+printf 'MV_STAGE_DIR=%s\nMV_PREFIX=%s\nMV_DOMAIN=multiverse.test\n' \
+  "$TMP/stale-stage" "$TMP/prefix" >"$TMP/deploy.env"
+printf 'stale relay\n' >"$TMP/stale-stage/relay-linux-amd64"
+printf 'stale archive\n' >"$TMP/stale-stage/archive-linux-amd64"
+printf 'intended relay\n' >"$TMP/intended-stage/relay-linux-amd64"
+printf 'intended archive\n' >"$TMP/intended-stage/archive-linux-amd64"
+intended_relay="$(sha256sum "$TMP/intended-stage/relay-linux-amd64" | awk '{print $1}')"
+
+if out="$(PATH="$TMP/fakebin:$PATH" "$PROVISION" --env-file "$TMP/deploy.env" \
+    --only binaries --stage-dir "$TMP/intended-stage" --dry-run 2>&1)" &&
+   printf '%s\n' "$out" | grep -Fq "relay: staged    $intended_relay"; then
+  ok "--stage-dir overrides the stale deploy.env stage"
+else
+  bad "--stage-dir overrides the stale deploy.env stage"
+fi
+
+if grep -Fq 'provision.sh" --only binaries --stage-dir "$STAGE"' "$SUT"; then
+  ok "deploy.sh forwards the stage that it validated"
+else
+  bad "deploy.sh forwards the stage that it validated"
 fi
 
 echo
