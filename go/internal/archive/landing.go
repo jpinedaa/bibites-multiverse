@@ -184,7 +184,7 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
     <span>Bibites Multiverse</span>
   </a>
   <nav class="links" aria-label="Primary navigation">
-    <a href="#how">How it works</a><a href="#join">Join</a><a href="/watch">Watch broadcast</a>
+    <a href="#how">How it works</a><a href="#join">Join</a><a href="/watch">Watch broadcast</a><a href="/health">Health</a>
     <a href="/announcements/">Announcements</a>
     <a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>
     <a class="livepill" href="/live"><i class="dot" id="navdot"></i>Live map</a>
@@ -279,7 +279,7 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
     </div>
   </section>
 </main>
-<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/announcements/">Announcements</a><a href="/watch">Watch broadcast</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/">The Bibites on Steam</a><a href="https://thebibites.itch.io/the-bibites">itch.io</a></div></div></footer>
+<footer class="foot"><div class="shell footin"><span>Independent community project · Apache-2.0</span><div class="footlinks"><a href="/announcements/">Announcements</a><a href="/watch">Watch broadcast</a><a href="/live">Live map</a><a href="/health">Production health</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a><a href="https://github.com/jpinedaa/bibites-multiverse/tree/main/docs">Documentation</a><a href="https://store.steampowered.com/app/2736860/The_Bibites_Digital_Life/">The Bibites on Steam</a><a href="https://thebibites.itch.io/the-bibites">itch.io</a></div></div></footer>
 <script>
 (function(){
   function n(v){ return v == null ? "unknown" : Number(v).toLocaleString(); }

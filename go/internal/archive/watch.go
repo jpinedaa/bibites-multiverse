@@ -101,7 +101,7 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
     <svg class="mark" viewBox="-9 -7 19 14" aria-hidden="true"><path fill="currentColor" d="M4.5-1.26 2.16 0l2.34 1.26C4.14 3.06 1.98 4.14-.54 4.14-3.24 4.14-5.58 2.16-6.66 0-5.58-2.16-3.24-4.14-.54-4.14c2.52 0 4.68 1.08 5.04 2.88Z"/><circle cx="1.5" cy="-1.85" r="1" fill="#07100d"/></svg>
     <span>Bibites Multiverse</span>
   </a>
-  <nav aria-label="Primary navigation"><a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch" aria-current="page">Watch broadcast</a><a href="/announcements/">Announcements</a><a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a><a class="maplink" href="/live">Live map&nbsp; →</a></nav>
+  <nav aria-label="Primary navigation"><a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch" aria-current="page">Watch broadcast</a><a href="/health">Health</a><a href="/announcements/">Announcements</a><a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a><a class="maplink" href="/live">Live map&nbsp; →</a></nav>
 </div></header>
 <main id="broadcast" class="shell" tabindex="-1">
   <p class="eyebrow">One world · one shared camera · live</p>
@@ -125,7 +125,7 @@ nav{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}main{padding-top:46px}.pl
   </section>
   <p class="note"><strong>This is a spectator camera, not a control surface.</strong> Watching cannot pause, select, move, feed, kill, or otherwise change the simulation. The video is published only while somebody is watching, so the first arrival waits about twenty seconds for it to start. A brief outage can occur when the broadcast host restarts; the public map and every other world continue independently.</p>
 </main>
-<footer><div class="shell foot"><span>Independent community project · Apache-2.0</span><span class="footlinks"><a href="/#how">How it works</a><a href="/#join">Join</a><a href="/announcements/">Announcements</a><a href="/live">Live map</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a></span></div></footer>
+<footer><div class="shell foot"><span>Independent community project · Apache-2.0</span><span class="footlinks"><a href="/#how">How it works</a><a href="/#join">Join</a><a href="/announcements/">Announcements</a><a href="/live">Live map</a><a href="/health">Production health</a><a href="https://github.com/jpinedaa/bibites-multiverse">Source</a></span></div></footer>
 <script>
 (function(){
   var frame=document.getElementById("player"), cover=document.getElementById("offline");
