@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -131,6 +132,26 @@ func (c *childSidecar) waitFault(timeout time.Duration) {
 	}
 }
 
+func (c *childSidecar) waitSlot(want int, timeout time.Duration) {
+	c.t.Helper()
+	path := filepath.Join(c.dir, "slot")
+	deadline := time.Now().Add(timeout)
+	for {
+		b, err := os.ReadFile(path)
+		if err == nil {
+			got, parseErr := strconv.Atoi(strings.TrimSpace(string(b)))
+			if parseErr == nil && got == want {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			c.t.Fatalf("child sidecar: persisted slot did not become %d within %s; log:\n%s",
+				want, timeout, c.tailLog())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // sigkill is the kill -9 of m2_considerations.md's kill test.
 func (c *childSidecar) sigkill() {
 	c.t.Helper()
@@ -184,6 +205,7 @@ func runCrashCustody(t *testing.T, fault string) {
 	// start first — auto-placement (§7.2 rule 6) is start order on an empty map.
 	dataDir := t.TempDir()
 	childA := startChildSidecar(t, dataDir, relaySrv, "peer-a", fault)
+	childA.waitSlot(1, 20*time.Second)
 
 	cfgB := fastConfig(t, relaySrv, "peer-b")
 	cfgB.MigrateInAckTimeout = 2 * time.Second
