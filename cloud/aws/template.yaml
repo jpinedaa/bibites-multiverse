@@ -23,15 +23,12 @@ Parameters:
     MinLength: 1
     MaxLength: 256
     AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$'
-  RuntimeFile:
+  RuntimeManifestFile:
     Type: String
-    Default: bibites-cloud-runtime.tar.gz
+    Default: runtime/current.json
     MinLength: 1
     MaxLength: 1024
     AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$'
-  RuntimeSha256:
-    Type: String
-    AllowedPattern: '^[0-9a-f]{64}$'
   GameFile:
     Type: String
     Default: TheBibites-0.6.3.1-Linux.zip
@@ -219,9 +216,21 @@ Resources:
             aws --region '${AWS::Region}' ec2 wait volume-in-use --volume-ids '${DataVolume}'
             install -d -m 0755 /opt/bibites-runtime
             aws --region '${AWS::Region}' s3 cp \
-              's3://${ArtifactBucket}/${ArtifactPrefix}/${RuntimeFile}' /tmp/bibites-runtime.tar.gz \
+              's3://${ArtifactBucket}/${ArtifactPrefix}/${RuntimeManifestFile}' \
+              /tmp/bibites-runtime.json --only-show-errors
+            jq -e '
+              (keys | sort) == ["runtimeFile", "runtimeSha256", "schema"] and
+              .schema == 1 and
+              (.runtimeSha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+              .runtimeFile == ("runtime/" + .runtimeSha256 + ".tar.gz")
+            ' /tmp/bibites-runtime.json >/dev/null
+            runtime_file="$(jq -r .runtimeFile /tmp/bibites-runtime.json)"
+            runtime_sha256="$(jq -r .runtimeSha256 /tmp/bibites-runtime.json)"
+            aws --region '${AWS::Region}' s3 cp \
+              's3://${ArtifactBucket}/${ArtifactPrefix}/'"$runtime_file" \
+              /tmp/bibites-runtime.tar.gz \
               --only-show-errors
-            printf '%s  %s\n' '${RuntimeSha256}' /tmp/bibites-runtime.tar.gz | sha256sum -c -
+            printf '%s  %s\n' "$runtime_sha256" /tmp/bibites-runtime.tar.gz | sha256sum -c -
             tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime
             chmod 0755 /opt/bibites-runtime/install-host
             export AWS_REGION='${AWS::Region}'

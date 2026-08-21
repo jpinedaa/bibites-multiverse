@@ -10,8 +10,13 @@ game_zip="$BIBITES_GAME_ZIP"
 bepinex_zip="$BIBITES_BEPINEX_ZIP"
 
 export DOTNET_ROOT="${DOTNET_ROOT:-$HOME/.dotnet}"
-export GOROOT="${GOROOT:-$HOME/go}"
-export PATH="$DOTNET_ROOT:$GOROOT/bin:$PATH"
+export PATH="$DOTNET_ROOT:$PATH"
+# An unset GOROOT tells the selected go executable to use the toolchain it was
+# installed with. Only override that discovery when the operator names a root.
+if [ -n "${GOROOT:-}" ]; then
+  export GOROOT
+  export PATH="$GOROOT/bin:$PATH"
+fi
 
 for command in file go dotnet tar gzip sha256sum unzip; do
   command -v "$command" >/dev/null || { echo "missing $command" >&2; exit 1; }
