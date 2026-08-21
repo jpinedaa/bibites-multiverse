@@ -238,9 +238,12 @@ if [ "$WITH_BINARIES" = 1 ]; then
   fi
 
   step "6  install the binaries  (provision.sh --only binaries)"
-  # The INSTALLED provision.sh, not the staged one: by now they are the same
-  # file, and using the installed copy is what proves step 2 took effect.
-  "$INSTALLED_KIT/provision.sh" --only binaries --stage-dir "$STAGE" "${DRYFLAG[@]}" \
+  # A real run uses the installed copy, which proves that step 2 took effect.
+  # A dry run changes nothing, so the installed copy can be one revision older
+  # and can reject a new option. Use the staged copy for that rehearsal.
+  binary_provision="$INSTALLED_KIT/provision.sh"
+  [ "$DRY" = 1 ] && binary_provision="$PROVISION"
+  "$binary_provision" --only binaries --stage-dir "$STAGE" "${DRYFLAG[@]}" \
     || die "the binaries phase failed"
 
   step "7  prove the installed binaries are the staged binaries"
