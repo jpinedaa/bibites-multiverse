@@ -36,7 +36,7 @@ Do not commit their contents.
 The workstation needs these tools:
 
 - AWS CLI v2 with `s3api put-object --if-none-match` support.
-- `file`, `jq`, `unzip`, `tar`, and `sha256sum`.
+- `file`, `jq`, `unzip`, GNU tar, `gzip` with `-n` support, and `sha256sum`.
 - Go and the .NET SDK for a runtime build.
 - Permission to deploy CloudFormation, IAM, EC2, EBS, S3, SSM, and DLM resources.
 
@@ -171,6 +171,13 @@ export BIBITES_BEPINEX_ZIP=/protected/path/BepInEx-linux-x64.zip
 The build script compiles the sidecar for `linux/amd64`.
 It checks that the result is an x86-64 ELF file.
 It also checks the supported game assembly and creates a content-addressed runtime archive.
+The runtime archive requires GNU tar and a `gzip` implementation with `-n` support.
+The build sorts member names, writes GNU tar headers, fixes every member time to
+`2000-01-01T00:00:00Z`, records numeric owner and group `0`, removes special and writable group or
+other mode bits, and omits the gzip name and time fields.
+Directories and executable inputs become mode `0755`; other files become mode `0644`.
+Thus, equivalent runtime trees produce byte-identical archives even when their input mtimes or
+build times differ.
 
 ## Stage artifacts
 

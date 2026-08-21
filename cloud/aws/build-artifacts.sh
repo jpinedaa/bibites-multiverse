@@ -21,6 +21,29 @@ fi
 for command in file go dotnet tar gzip sha256sum unzip; do
   command -v "$command" >/dev/null || { echo "missing $command" >&2; exit 1; }
 done
+runtime_epoch=946684800
+tar_version="$(tar --version 2>/dev/null)" || {
+  echo 'GNU tar is required to build a deterministic runtime archive' >&2
+  exit 1
+}
+case "$tar_version" in
+  *'GNU tar'*) ;;
+  *)
+    echo 'GNU tar is required to build a deterministic runtime archive' >&2
+    exit 1
+    ;;
+esac
+tar --format=gnu --sort=name --mtime="@$runtime_epoch" \
+  --owner=0 --group=0 --numeric-owner \
+  --mode='a-s,a-t,u+rwX,go+rX,go-w' \
+  -cf /dev/null --files-from /dev/null >/dev/null 2>&1 || {
+    echo 'GNU tar lacks the options required for a deterministic runtime archive' >&2
+    exit 1
+  }
+printf '' | gzip -n >/dev/null 2>&1 || {
+  echo 'gzip with -n support is required to build a deterministic runtime archive' >&2
+  exit 1
+}
 [ -f "$game_zip" ] || { echo "missing game archive: $game_zip" >&2; exit 1; }
 [ -f "$bepinex_zip" ] || { echo "missing BepInEx archive: $bepinex_zip" >&2; exit 1; }
 
@@ -47,10 +70,21 @@ cp "$runtime_src"/* "$dist/runtime/"
 chmod 0755 "$dist/runtime"/bibites-* "$dist/runtime/install-host" \
   "$dist/runtime/install-broadcast-host" "$dist/runtime/multiverse-sidecar"
 
-tar -C "$dist/runtime" -czf "$dist/bibites-cloud-runtime.tar.gz" .
+# Fix every archive metadata field that can vary between equivalent builds.
+# 2000-01-01T00:00:00Z is an archive-format epoch, not a source timestamp.
+runtime_archive="$dist/bibites-cloud-runtime.tar.gz"
+runtime_archive_tmp="$dist/.bibites-cloud-runtime.tar.gz.tmp"
+rm -f "$runtime_archive_tmp"
+trap 'rm -f "$runtime_archive_tmp"' EXIT
+LC_ALL=C tar --format=gnu --sort=name --mtime="@$runtime_epoch" \
+  --owner=0 --group=0 --numeric-owner \
+  --mode='a-s,a-t,u+rwX,go+rX,go-w' \
+  -C "$dist/runtime" -cf - . | gzip -n > "$runtime_archive_tmp"
+mv "$runtime_archive_tmp" "$runtime_archive"
+trap - EXIT
 cp "$game_zip" "$dist/TheBibites-0.6.3.1-Linux.zip"
 cp "$bepinex_zip" "$dist/BepInEx_linux_x64_5.4.23.3.zip"
-runtime_sha="$(sha256sum "$dist/bibites-cloud-runtime.tar.gz" | awk '{print $1}')"
+runtime_sha="$(sha256sum "$runtime_archive" | awk '{print $1}')"
 
 {
   printf 'GAME_FILE=%q\n' 'TheBibites-0.6.3.1-Linux.zip'
