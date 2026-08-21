@@ -5,15 +5,16 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: tools/search-tracked.sh PATTERN [PATHSPEC ...]
+Usage: tools/search-tracked.sh [--] PATTERN [-- PATHSPEC ...]
 
-Search tracked, non-binary repository files. PATTERN is a git-grep regular
-expression. Optional PATHSPEC arguments limit the search from the repository
-root.
+Search tracked, non-binary repository files. PATTERN is a POSIX extended
+regular expression. Optional PATHSPEC arguments limit the search from the
+repository root. Put -- before a pattern equal to -h or --help.
 
 Examples:
   tools/search-tracked.sh 'RuntimeFile|RuntimeSha256'
   tools/search-tracked.sh 'peerId' -- cloud/aws deploy
+  tools/search-tracked.sh -- --help
 EOF
 }
 
@@ -22,12 +23,20 @@ if [ "$#" -eq 0 ]; then
   exit 2
 fi
 
-case "$1" in
-  -h|--help)
-    usage
-    exit 0
-    ;;
-esac
+if [ "$1" = "--" ]; then
+  shift
+  [ "$#" -gt 0 ] || {
+    echo "!! -- must be followed by a pattern" >&2
+    exit 2
+  }
+else
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+  esac
+fi
 
 pattern=$1
 shift
@@ -49,4 +58,8 @@ fi
 
 # git grep reads the index and tracked working-tree files. It does not enumerate
 # ignored or ordinary untracked paths, and it does not follow tracked symlinks.
-exec git -C "$repo_root" grep --no-color -n -I -e "$pattern" -- "$@"
+# Pin the expression and output modes so a user's grep.patternType, grep.column,
+# grep.lineNumber or color.grep configuration cannot change this interface.
+exec git -C "$repo_root" grep \
+  --extended-regexp --no-color --line-number --no-column -I \
+  -e "$pattern" -- "$@"

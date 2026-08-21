@@ -53,13 +53,16 @@ discovery:
 ```sh
 tools/search-tracked.sh 'RuntimeFile|RuntimeSha256'
 tools/search-tracked.sh 'peerId' -- cloud/aws deploy
+tools/search-tracked.sh -- --help                  # search for the literal pattern --help
 ```
 
-The helper searches only files that Git tracks. It does not enumerate ignored or untracked runtime
-data, including credential custody under `cloud/aws/private/`. A plain `rg` normally honors ignore
-rules, but `--no-ignore` and the `-u` options remove that boundary. Do not use those options for a
-broad repository search. Scope an intentional runtime-data inspection to the exact non-secret file
-that owns the evidence; never broaden a source search to include custody directories.
+Patterns use POSIX extended regular expressions. The helper searches only files that Git tracks. It
+does not enumerate ignored or untracked runtime data, including credential custody under
+`cloud/aws/private/`. This boundary applies only to searches routed through the helper; it cannot
+intercept an ad hoc command. A plain `rg` normally honors ignore rules, but `--no-ignore` and the
+`-u` options remove that boundary. Do not use those options for a broad repository search. Scope an
+intentional runtime-data inspection to the exact non-secret file that owns the evidence; never
+broaden a source search to include custody directories.
 
 ## Versions
 
