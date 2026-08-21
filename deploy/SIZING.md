@@ -266,12 +266,12 @@ remains a fixed bound: the archive publishes a non-zero `ledgerOverflow` on
 `/api/species/tree` if the assumption fails again. Treat any non-zero value as a capacity defect,
 not as evidence that the named species never migrated.
 
-Raising the compiled limit stops new loss but does not change a roll-up already written at the old
-limit. During an upgrade from a saturated archive, preserve the old sidecar and rebuild the fold
-from the raw record while every skipped observation is still inside the raw window. If those lines
-have already retired from the host, restore their confirmed cold copies before the rebuild. An
-ordinary restart from the old sidecar cannot recover observations the old process never wrote to
-it.
+Raising the compiled limit stops new loss but does not change an old roll-up.
+During an upgrade from a saturated archive, run `restart-archive.sh --rebuild-rollup`.
+The command preserves the old sidecar and rebuilds the fold from the raw record.
+The command scans the durable segment receipts for an absent raw segment.
+If a raw segment is absent, restore its confirmed cold copy before the rebuild.
+An ordinary restart cannot recover observations that the old process did not write to the sidecar.
 
 Measured, on two pinned cores, replaying one copy of the production ledger of
 `2026-08-16` — `5,408,123` records — with the roll-up build:
