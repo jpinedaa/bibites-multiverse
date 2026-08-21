@@ -121,7 +121,8 @@ The [Species tab](https://bibitesmultiverse.com/live#species) joins live census 
 migration archive. It shows which species are alive, where they live, how their populations are
 changing, and how complex their brains have become. It connects ancestry only when the migration
 record has seen that lineage cross between worlds. Each brain chart fits its visible range, so
-small changes remain clear.
+small changes remain clear. The species list uses the page's vertical scroll. Wide timeline content
+keeps its horizontal scroll inside the drawing.
 
 ### One life at a time
 
