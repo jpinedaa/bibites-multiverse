@@ -189,7 +189,7 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.7` |
 | `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
 | `bibites-mod/` tree | `bc3d8733e323a837d87dd0423bdd2f24862432bc` |
-| `cmd/sidecar` source commit | `e0f9bb217fc3df6daefdc049e152a56b0419aa5b` |
+| `cmd/sidecar` source commit | `c34d5308caa63ecbdec9812ab8c73cd3e439923a` |
 | `cmd/sidecar` input digest | `cd7d606819d16cc464f778f6905156e7f9f30bb0743001bcd3c2c3f9904eb427` |
 | Tested on | 2026-08-21 |
 
@@ -272,10 +272,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.7",
     "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
     "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
-    "sidecarSourceCommit": "e0f9bb217fc3df6daefdc049e152a56b0419aa5b",
+    "sidecarSourceCommit": "c34d5308caa63ecbdec9812ab8c73cd3e439923a",
     "sidecarInputsSha256": "cd7d606819d16cc464f778f6905156e7f9f30bb0743001bcd3c2c3f9904eb427",
     "testedOn": "2026-08-21",
-    "evidence": "on 2026-08-21 the sidecar source at e0f9bb2 was re-attested after gofmt-only changes: its Windows and Linux amd64 binaries were byte-identical to binaries built from the previously recorded e6cd359 source when both were built with CGO disabled, -trimpath, and VCS metadata disabled, and the full Go test and race suites passed; no new live deployment was run, so operational evidence remains the 2026-08-19 live public /watch broadcast-world run at slot 7, where the recorded sidecar recovered 64 journaled forwards, expired 66 lost forwards, cleared JOURNAL_FULL refusals during an 18-minute soak, restored outbound traffic, and passed diagnose; this equivalence re-attests the sidecar half only, while unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised on 2026-08-21: live relay connectivity, slot claim, mod traffic, crash replay, compaction, roll-up, archive, re-route or bounce-back, inflight administration, private-map behavior, and disk-failure paths"
+    "evidence": "on 2026-08-21 the sidecar source at c34d530 was re-attested after gofmt-only changes: its Windows and Linux amd64 binaries were byte-identical to binaries built from the previously recorded e6cd359 source when both were built with CGO disabled, -trimpath, and VCS metadata disabled, and the full Go test and race suites passed; no new live deployment was run, so operational evidence remains the 2026-08-19 live public /watch broadcast-world run at slot 7, where the recorded sidecar recovered 64 journaled forwards, expired 66 lost forwards, cleared JOURNAL_FULL refusals during an 18-minute soak, restored outbound traffic, and passed diagnose; this equivalence re-attests the sidecar half only, while unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised on 2026-08-21: live relay connectivity, slot claim, mod traffic, crash replay, compaction, roll-up, archive, re-route or bounce-back, inflight administration, private-map behavior, and disk-failure paths"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",

@@ -107,6 +107,11 @@ never reached a tested binary. What it gains over a committed reference binary i
 is one reviewable line in a diff. The strongest check in the build is still gate 3b, which
 compares the plugin against the one this machine's game actually loaded.
 
+`sidecarSourceCommit` names the exact commit in the history that carries the attested sidecar
+source. It is not the identity of the patch that produced that source. A rebase or cherry-pick
+changes the commit identity, so repeat the recorded equivalence check from the new commit and
+update this field even when `sidecarInputsSha256` stays unchanged.
+
 ## Building
 
 ```sh
