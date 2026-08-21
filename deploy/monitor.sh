@@ -303,6 +303,7 @@ ONLY=""
 NOW="${MV_NOW:-$(date -u +%s)}"
 WORST=OK
 SUMMARY=""
+SEEN_CHECKS=""
 
 mkdir -p "$STATE" 2>/dev/null || true
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/mvmon.XXXXXX")"
@@ -380,6 +381,15 @@ notify() {
 report() {
   local check="$1" sev="$2" msg="$3"
   local prev last_ts age
+
+  # The dashboard reads only this list and a fixed allow-list of check names.
+  # Record what THIS full pass actually ran so an optional check that is off is
+  # absent rather than reported as a confident success or failure.
+  case " $SEEN_CHECKS " in
+    *" $check "*) ;;
+    *) SEEN_CHECKS="${SEEN_CHECKS:+$SEEN_CHECKS }$check" ;;
+  esac
+
   prev="$(sget "sev.$check" OK)"
   last_ts="$(sget "at.$check" 0)"
   age=$(( NOW - last_ts ))
@@ -409,6 +419,11 @@ report() {
     notify "$sev" "$check" "still: $msg"
     sset "at.$check" "$NOW"
   fi
+
+  # A successful check used to leave no sev.* file until it had first failed.
+  # Severity changes still decide alerts above; this write is the current-result
+  # contract for a reader and makes an all-green first pass observable.
+  sset "sev.$check" "$sev"
 }
 
 # ---------------------------------------------------------------- arguments
@@ -1604,6 +1619,15 @@ case "${ONLY:-}" in
   billing) check_billing ;;
   *) echo "monitor: --only accepts 'transfer', 'hosts-pin', 'replay', 'archive', 'swap' or 'billing', not '$ONLY'" >&2; exit 2 ;;
 esac
+
+# Publish the completed-pass marker LAST. The dashboard treats its absence or
+# age as unknown and never infers health from a partially completed run. An
+# operator's --only probe does not replace the result of the scheduled full
+# pass with a subset.
+if [ -z "$ONLY" ]; then
+  sset checks "$SEEN_CHECKS"
+  sset completed-at "$NOW"
+fi
 
 # The dead man's half. A daily line that says the watcher itself is alive, so
 # that its ABSENCE is a signal rather than a comfort.

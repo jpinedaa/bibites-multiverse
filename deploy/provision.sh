@@ -13,6 +13,7 @@
 #   sudo deploy/provision.sh --list           # the phases, in order
 #
 #   sudo deploy/provision.sh --only binaries \
+#        --stage-dir /path/to/stage \
 #        --expect-sha256 archive=<sha256> --expect-sha256 relay=<sha256>
 #                                             # refuse unless the STAGED artifact
 #                                             # is the build you meant to ship
@@ -32,6 +33,11 @@ set -euo pipefail
 ENV_FILE="${MV_ENV_FILE:-/etc/multiverse/deploy.env}"
 DRY=0
 ONLY=""
+# A deployment can name one immutable staging directory for this run. Keep the
+# command-line value separate until after deploy.env is sourced, because that
+# file also carries the host's default MV_STAGE_DIR and shell sourcing normally
+# overwrites an exported value.
+STAGE_DIR_OVERRIDE=""
 # --expect-sha256 <name>=<sha256>, repeatable. What THIS run is supposed to
 # install, stated by the operator and checked against the staged file before
 # anything is compared or copied. See phase_binaries.
@@ -94,6 +100,7 @@ while [ $# -gt 0 ]; do
     --only) ONLY="${2:?--only needs a phase name}"; shift ;;
     --list) printf '%s\n' $PHASES; exit 0 ;;
     --env-file) ENV_FILE="${2:?--env-file needs a path}"; shift ;;
+    --stage-dir) STAGE_DIR_OVERRIDE="${2:?--stage-dir needs a path}"; shift ;;
     --expect-sha256)
       case "${2:?--expect-sha256 needs <relay|archive|ringstat>=<sha256>}" in
         relay=*|archive=*|ringstat=*) EXPECT_SHA+=("$2") ;;
@@ -111,6 +118,11 @@ done
 
 # shellcheck source=/dev/null
 set -a; . "$ENV_FILE"; set +a
+
+# The invocation is more specific than the host default. deploy.sh has already
+# checked the payload at this path and must not validate one stage, then install
+# from the stale canonical stage named in deploy.env.
+[ -n "$STAGE_DIR_OVERRIDE" ] && MV_STAGE_DIR="$STAGE_DIR_OVERRIDE"
 
 KIT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -859,6 +871,10 @@ MULTIVERSE_ARCHIVE_DATA_DIR=$ARCHIVE_DATA
 MULTIVERSE_ARCHIVE_HTTP=$MV_ARCHIVE_HTTP
 MULTIVERSE_CREDENTIAL_FILE=$ARCHIVE_SECRET
 MULTIVERSE_ARCHIVE_DENY_LIST=/etc/multiverse/deny-list
+# Read-only dashboard inputs. The archive publishes a fixed safe projection of
+# these files; it never serves a path, raw monitor message, billing value or PID.
+MULTIVERSE_MONITOR_STATE_DIR=$MV_STATE/monitor
+MULTIVERSE_HOST_METRICS_FILE=$MV_STATE/metrics/service-host.jsonl
 # The world the shared camera at /watch is showing, which no frame on either wire
 # announces. Empty names no world, and both pages then say so. Display only: it
 # changes no placement, no routing and no record. See deploy.env.example.
@@ -1307,6 +1323,8 @@ phase_verify() {
   chk "archive healthz local"    "curl -fsS --max-time 10 http://$MV_ARCHIVE_HTTP/healthz"
   chk "website over TLS"         "curl -fsS --max-time 15 https://$MV_DOMAIN/"
   chk "status API over TLS"      "curl -fsS --max-time 15 https://$MV_DOMAIN/api/status"
+  chk "health dashboard over TLS" "curl -fsS --max-time 15 https://$MV_DOMAIN/health | grep -q 'Live production evidence'"
+  chk "health API over TLS"       "curl -fsS --max-time 15 https://$MV_DOMAIN/api/health | grep -q '\"serviceHost\"'"
   # The publisher stops when this says nobody is watching, so an endpoint that
   # 404s reads to a watcher as a broken service rather than as an empty room.
   chk "viewer presence over TLS" \

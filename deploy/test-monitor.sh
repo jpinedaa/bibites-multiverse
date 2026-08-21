@@ -1025,6 +1025,34 @@ dev 0 0
 out="$(run "$BASE" transfer "$DEADPORT")"
 hasnt 'transfer still touches no archive'            "$out" 'archive-healthz'
 
+# --------------------------------------- 18. current-result dashboard contract
+#
+# A first successful check used to leave no sev.* file at all: report() compared
+# OK with its default previous OK and wrote only on a change. The dashboard
+# would therefore show every never-failed check as unknown. Run WITHOUT --quiet
+# here because the quiet path has always written the state and would not catch
+# that regression.
+reset_state
+printf '127.0.0.1 localhost\n127.0.0.1 multiverse.example\n' >"$HOSTS"
+out="$(env MV_ENV_FILE="$ENVF" MV_STATE="$STATE" \
+    MV_HOSTS_FILE="$HOSTS" MV_NOW="$BASE" "$MON" --only hosts-pin --verbose 2>&1)"
+eq  'a first successful normal check stores its verdict' "$(sget sev.hosts-pin)" OK
+has 'and still prints the successful result'             "$out" 'hosts-pin'
+
+# An operator's narrow diagnostic is not a completed scheduled pass and must
+# not replace the dashboard's active-check list or freshness marker.
+if [ -e "$STATE/monitor/completed-at" ] || [ -e "$STATE/monitor/checks" ]; then
+  fail 'an --only diagnostic published a completed full-pass marker'
+else
+  pass 'an --only diagnostic leaves the full-pass marker alone'
+fi
+
+# The full-pass branch cannot be driven without faking systemd, nginx, curl,
+# openssl, the certificate tree, and the archive together. Pin the last-write
+# contract structurally here; deploy/provision.sh --only verify exercises the
+# resulting public endpoint on a host.
+has 'the monitor publishes a completed-pass marker' "$(<"$MON")" 'sset completed-at "$NOW"'
+
 # ---------------------------------------------------------------- result
 
 printf '\n'
