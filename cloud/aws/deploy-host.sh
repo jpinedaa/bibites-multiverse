@@ -1,12 +1,37 @@
 #!/usr/bin/env bash
-# Deploy the generic headless-world stack from staged private artifacts.
+# Preview or execute a fail-closed headless-host stack change.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 dist="$repo/cloud/aws/dist"
 template="$repo/cloud/aws/template.yaml"
 validation="$repo/cloud/aws/lib/validation.sh"
+host_change="$repo/cloud/aws/lib/host-change.sh"
 manifest_validator="$repo/cloud/aws/runtime/validate-world-manifest.jq"
+
+execute=0
+change_set_name="${BIBITES_CHANGE_SET_NAME:-}"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --change-set-name)
+      [ "$#" -ge 2 ] || { echo 'missing change-set name' >&2; exit 2; }
+      change_set_name="$2"
+      shift 2
+      ;;
+    --execute)
+      execute=1
+      shift
+      ;;
+    *)
+      echo 'usage: deploy-host.sh --change-set-name NAME [--execute]' >&2
+      exit 2
+      ;;
+  esac
+done
+[ -n "$change_set_name" ] || {
+  echo 'set --change-set-name or BIBITES_CHANGE_SET_NAME for every preview and execution' >&2
+  exit 2
+}
 
 [ -r "$dist/artifacts.env" ] || { echo 'run build-artifacts.sh first' >&2; exit 1; }
 [ -r "$dist/staged.env" ] || { echo 'run stage-artifacts.sh first' >&2; exit 1; }
@@ -14,6 +39,8 @@ manifest_validator="$repo/cloud/aws/runtime/validate-world-manifest.jq"
 
 # shellcheck source=lib/validation.sh
 . "$validation"
+# shellcheck source=lib/host-change.sh
+. "$host_change"
 # shellcheck source=/dev/null
 . "$dist/artifacts.env"
 # shellcheck source=/dev/null
@@ -37,6 +64,7 @@ enable_peering="${BIBITES_ENABLE_LIGHTSAIL_PEERING:-0}"
 bibites_require_account_id "$BIBITES_AWS_ACCOUNT_ID" BIBITES_AWS_ACCOUNT_ID
 bibites_require_region "$AWS_REGION" AWS_REGION
 bibites_require_stack_name "$stack" BIBITES_STACK_NAME
+bibites_require_change_set_name "$change_set_name" change-set
 bibites_require_instance_type "$instance_type" BIBITES_INSTANCE_TYPE
 bibites_require_positive_integer "$data_volume_gib" BIBITES_DATA_VOLUME_GIB 40 16384
 bibites_require_resource_id "$BIBITES_SUBNET_ID" BIBITES_SUBNET_ID subnet
@@ -78,59 +106,93 @@ bibites_require_account_id "$account" 'authenticated AWS account'
 
 pointer_file=runtime/current.json
 bibites_require_s3_key "$pointer_file" 'runtime pointer object'
-stack_error="$(mktemp)"
+lookup_error="$(mktemp)"
 pointer_archive="$(mktemp)"
-trap 'rm -f "$stack_error" "$pointer_archive"' EXIT
+trap 'rm -f "$lookup_error" "$pointer_archive"' EXIT
 if stack_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation \
-  describe-stacks --stack-name "$stack" --output json 2>"$stack_error")"; then
-  stack_exists=1
-elif grep -Fq 'does not exist' "$stack_error"; then
+  describe-stacks --stack-name "$stack" --output json 2>"$lookup_error")"; then
+  stack_status="$(jq -er '.Stacks[0].StackStatus' <<<"$stack_description")"
+  if [ "$stack_status" = REVIEW_IN_PROGRESS ]; then
+    stack_exists=0
+  else
+    stack_exists=1
+    case "$stack_status" in
+      CREATE_COMPLETE|UPDATE_COMPLETE|UPDATE_ROLLBACK_COMPLETE) ;;
+      *) echo "stack $stack is not in a deployable state: $stack_status" >&2; exit 1 ;;
+    esac
+  fi
+elif grep -Fq 'does not exist' "$lookup_error"; then
   stack_exists=0
   stack_description=''
+  stack_status=''
 else
-  sed 's/^/CloudFormation stack lookup failed: /' "$stack_error" >&2
+  sed 's/^/CloudFormation stack lookup failed: /' "$lookup_error" >&2
   exit 1
 fi
 
 if pointer_document="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
   "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - --only-show-errors \
-  2>"$stack_error")"; then
+  2>"$lookup_error")"; then
   bibites_require_runtime_pointer_document "$pointer_document"
   pointer_missing=0
-elif grep -Eq '(404|NoSuchKey|Not Found)' "$stack_error"; then
+elif grep -Eq '(404|NoSuchKey|Not Found)' "$lookup_error"; then
   pointer_missing=1
 else
-  sed 's/^/Runtime pointer lookup failed: /' "$stack_error" >&2
+  sed 's/^/Runtime pointer lookup failed: /' "$lookup_error" >&2
   exit 1
 fi
 
-if [ "$pointer_missing" -eq 1 ]; then
-  if [ "$stack_exists" -eq 1 ]; then
-    previous_artifact_bucket="$(jq -er '
-      [.Stacks[0].Parameters[] | select(.ParameterKey == "ArtifactBucket") | .ParameterValue] |
-      if length == 1 then .[0] else error("missing legacy ArtifactBucket") end
-    ' <<<"$stack_description")"
-    previous_artifact_prefix="$(jq -er '
-      [.Stacks[0].Parameters[] | select(.ParameterKey == "ArtifactPrefix") | .ParameterValue] |
-      if length == 1 then .[0] else error("missing legacy ArtifactPrefix") end
-    ' <<<"$stack_description")"
-    [ "$previous_artifact_bucket" = "$ARTIFACT_BUCKET" ] &&
-      [ "$previous_artifact_prefix" = "$ARTIFACT_PREFIX" ] || {
-      echo 'legacy stack artifacts differ from the staged target; migrate them explicitly' >&2
-      exit 1
-    }
-    previous_runtime_file="$(jq -er '
-      [.Stacks[0].Parameters[] | select(.ParameterKey == "RuntimeFile") | .ParameterValue] |
-      if length == 1 then .[0] else error("missing legacy RuntimeFile") end
-    ' <<<"$stack_description")"
-    previous_runtime_sha256="$(jq -er '
-      [.Stacks[0].Parameters[] | select(.ParameterKey == "RuntimeSha256") | .ParameterValue] |
-      if length == 1 then .[0] else error("missing legacy RuntimeSha256") end
-    ' <<<"$stack_description")"
-  else
-    previous_runtime_file="$RUNTIME_OBJECT"
-    previous_runtime_sha256="$RUNTIME_SHA256"
-  fi
+if [ "$pointer_missing" -eq 0 ]; then
+  runtime_object="$(jq -r .runtimeFile <<<"$pointer_document")"
+  runtime_sha256="$(jq -r .runtimeSha256 <<<"$pointer_document")"
+elif [ "$stack_exists" -eq 1 ]; then
+  previous_artifact_bucket="$(jq -er '
+    [.Stacks[0].Parameters[] | select(.ParameterKey == "ArtifactBucket") | .ParameterValue] |
+    if length == 1 then .[0] else error("missing legacy ArtifactBucket") end
+  ' <<<"$stack_description")"
+  previous_artifact_prefix="$(jq -er '
+    [.Stacks[0].Parameters[] | select(.ParameterKey == "ArtifactPrefix") | .ParameterValue] |
+    if length == 1 then .[0] else error("missing legacy ArtifactPrefix") end
+  ' <<<"$stack_description")"
+  [ "$previous_artifact_bucket" = "$ARTIFACT_BUCKET" ] &&
+    [ "$previous_artifact_prefix" = "$ARTIFACT_PREFIX" ] || {
+    echo 'legacy stack artifacts differ from the staged target; migrate them explicitly' >&2
+    exit 1
+  }
+  runtime_object="$(jq -er '
+    [.Stacks[0].Parameters[] |
+      select(.ParameterKey == "RuntimeObject" or .ParameterKey == "RuntimeFile") |
+      .ParameterValue] |
+    if length == 1 then .[0]
+    else error("missing or ambiguous checked runtime object") end
+  ' <<<"$stack_description")"
+  runtime_sha256="$(jq -er '
+    [.Stacks[0].Parameters[] | select(.ParameterKey == "RuntimeSha256") | .ParameterValue] |
+    if length == 1 then .[0] else error("missing legacy RuntimeSha256") end
+  ' <<<"$stack_description")"
+else
+  runtime_object="$RUNTIME_OBJECT"
+  runtime_sha256="$RUNTIME_SHA256"
+fi
+bibites_require_s3_key "$runtime_object" 'bootstrap runtime object'
+bibites_require_sha256 "$runtime_sha256" 'bootstrap runtime digest'
+
+use_legacy_attachment=false
+host_launch_template_version=1
+if [ "$stack_exists" -eq 1 ]; then
+  stack_resources="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation \
+    list-stack-resources --stack-name "$stack" --output json)"
+  use_legacy_attachment="$(bibites_legacy_attachment_mode "$stack_resources")"
+  host_id="$(jq -er '[.StackResourceSummaries[] | select(
+    .LogicalResourceId == "Host" and .ResourceType == "AWS::EC2::Instance") |
+    .PhysicalResourceId] | if length == 1 then .[0] else error("Host") end' \
+    <<<"$stack_resources")"
+  bibites_require_resource_id "$host_id" 'stack Host resource' i
+  live_host="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-instances \
+    --instance-ids "$host_id" --output json)"
+  IFS=$'\t' read -r bound_host_id launch_template_id host_launch_template_version \
+    <<<"$(bibites_live_host_launch_template_binding "$stack_resources" "$live_host")"
+  [ "$bound_host_id" = "$host_id" ]
 fi
 
 subnet_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-subnets \
@@ -146,9 +208,9 @@ jq -e --arg subnet "$BIBITES_SUBNET_ID" --arg vpc "$BIBITES_VPC_ID" \
   exit 1
 }
 
-instance_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 \
+type_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 \
   describe-instance-types --instance-types "$instance_type" --output json)"
-bibites_require_x86_64_instance_description "$instance_description" "$instance_type"
+bibites_require_x86_64_instance_description "$type_description" "$instance_type"
 
 missing=0
 while IFS= read -r parameter; do
@@ -168,21 +230,98 @@ while IFS= read -r parameter; do
 done < <(jq -r '.worlds[].credentialParameter' "$dist/worlds.json")
 [ "$missing" -eq 0 ] || exit 1
 
-if [ "$pointer_missing" -eq 1 ]; then
-  "$repo/cloud/aws/promote-runtime.sh" \
-    "$previous_runtime_file" "$previous_runtime_sha256"
-  pointer_document="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
-    "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - --only-show-errors)"
-  bibites_require_runtime_pointer_document "$pointer_document"
+aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
+  "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$runtime_object" \
+  "$pointer_archive" --only-show-errors
+printf '%s  %s\n' "$runtime_sha256" "$pointer_archive" | sha256sum -c - >/dev/null
+
+parameters=(
+  "ParameterKey=InstanceType,ParameterValue=$instance_type"
+  "ParameterKey=AvailabilityZone,ParameterValue=$BIBITES_AVAILABILITY_ZONE"
+  "ParameterKey=SubnetId,ParameterValue=$BIBITES_SUBNET_ID"
+  "ParameterKey=VpcId,ParameterValue=$BIBITES_VPC_ID"
+  "ParameterKey=ArtifactBucket,ParameterValue=$ARTIFACT_BUCKET"
+  "ParameterKey=ArtifactPrefix,ParameterValue=$ARTIFACT_PREFIX"
+  "ParameterKey=RuntimeObject,ParameterValue=$runtime_object"
+  "ParameterKey=RuntimeSha256,ParameterValue=$runtime_sha256"
+  "ParameterKey=GameFile,ParameterValue=$GAME_FILE"
+  "ParameterKey=GameSha256,ParameterValue=$GAME_SHA256"
+  "ParameterKey=BepInExFile,ParameterValue=$BEPINEX_FILE"
+  "ParameterKey=BepInExSha256,ParameterValue=$BEPINEX_SHA256"
+  'ParameterKey=ManifestFile,ParameterValue=worlds.json'
+  "ParameterKey=DataVolumeGiB,ParameterValue=$data_volume_gib"
+  "ParameterKey=RelayPrivateIp,ParameterValue=$BIBITES_RELAY_PRIVATE_IP"
+  "ParameterKey=RelayDomain,ParameterValue=$BIBITES_RELAY_DOMAIN"
+  "ParameterKey=CredentialParameterPrefix,ParameterValue=$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
+  "ParameterKey=HostLaunchTemplateVersion,ParameterValue=$host_launch_template_version"
+  "ParameterKey=UseLegacyDataAttachment,ParameterValue=$use_legacy_attachment"
+)
+if [ "$stack_exists" -eq 1 ]; then
+  parameters+=("ParameterKey=UbuntuAmi,UsePreviousValue=true")
+fi
+change_set_type="$(bibites_change_set_type_for_stack_status "$stack_status")"
+
+if [ "$execute" -eq 0 ]; then
+  aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation create-change-set \
+    --stack-name "$stack" --change-set-name "$change_set_name" \
+    --change-set-type "$change_set_type" --template-body "file://$template" \
+    --description 'Preview fail-closed Bibites host-stack change' \
+    --capabilities CAPABILITY_NAMED_IAM --parameters "${parameters[@]}" >/dev/null
+  set +e
+  change_set_description="$(bibites_wait_change_set "$AWS_PROFILE" "$AWS_REGION" \
+    "$stack" "$change_set_name")"
+  change_set_status=$?
+  set -e
+  [ -z "$change_set_description" ] || bibites_change_set_summary "$change_set_description"
+  if [ "$change_set_status" -ne 0 ]; then
+    reason="$(jq -r '.StatusReason // "unknown change-set failure"' \
+      <<<"${change_set_description:-{}}")"
+    echo "change-set preview failed: $reason" >&2
+    exit "$change_set_status"
+  fi
+else
+  change_set_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" \
+    cloudformation describe-change-set --stack-name "$stack" \
+    --change-set-name "$change_set_name" --include-property-values --output json)"
+  jq -e --arg name "$change_set_name" --arg type "$change_set_type" '
+    .ChangeSetName == $name and .ChangeSetType == $type and
+    .Status == "CREATE_COMPLETE" and .ExecutionStatus == "AVAILABLE"
+  ' <<<"$change_set_description" >/dev/null || {
+    echo 'named change set is not the reviewed executable change set for this operation' >&2
+    exit 1
+  }
+  bibites_change_set_summary "$change_set_description"
 fi
 
-pointer_runtime_file="$(jq -r .runtimeFile <<<"$pointer_document")"
-pointer_runtime_sha256="$(jq -r .runtimeSha256 <<<"$pointer_document")"
-aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
-  "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_runtime_file" \
-  "$pointer_archive" --only-show-errors
-printf '%s  %s\n' "$pointer_runtime_sha256" "$pointer_archive" | \
-  sha256sum -c - >/dev/null
+require_change_parameter() {
+  bibites_require_change_set_parameter "$change_set_description" "$1" "$2"
+}
+require_change_parameter InstanceType "$instance_type"
+require_change_parameter AvailabilityZone "$BIBITES_AVAILABILITY_ZONE"
+require_change_parameter SubnetId "$BIBITES_SUBNET_ID"
+require_change_parameter VpcId "$BIBITES_VPC_ID"
+require_change_parameter ArtifactBucket "$ARTIFACT_BUCKET"
+require_change_parameter ArtifactPrefix "$ARTIFACT_PREFIX"
+require_change_parameter RuntimeObject "$runtime_object"
+require_change_parameter RuntimeSha256 "$runtime_sha256"
+require_change_parameter GameFile "$GAME_FILE"
+require_change_parameter GameSha256 "$GAME_SHA256"
+require_change_parameter BepInExFile "$BEPINEX_FILE"
+require_change_parameter BepInExSha256 "$BEPINEX_SHA256"
+require_change_parameter ManifestFile worlds.json
+require_change_parameter DataVolumeGiB "$data_volume_gib"
+require_change_parameter RelayPrivateIp "$BIBITES_RELAY_PRIVATE_IP"
+require_change_parameter RelayDomain "$BIBITES_RELAY_DOMAIN"
+require_change_parameter CredentialParameterPrefix "$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
+require_change_parameter HostLaunchTemplateVersion "$host_launch_template_version"
+require_change_parameter UseLegacyDataAttachment "$use_legacy_attachment"
+bibites_require_safe_host_change_set "$change_set_description"
+
+if [ "$execute" -eq 0 ]; then
+  echo "safe change set $change_set_name is ready; no stack resource was changed"
+  echo "after separate authorization, rerun with the same inputs and --change-set-name $change_set_name --execute"
+  exit 0
+fi
 
 case "$enable_peering" in
   0) ;;
@@ -200,31 +339,40 @@ case "$enable_peering" in
     ;;
 esac
 
-aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation deploy \
-  --stack-name "$stack" --template-file "$template" \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    InstanceType="$instance_type" \
-    AvailabilityZone="$BIBITES_AVAILABILITY_ZONE" \
-    SubnetId="$BIBITES_SUBNET_ID" \
-    VpcId="$BIBITES_VPC_ID" \
-    ArtifactBucket="$ARTIFACT_BUCKET" \
-    ArtifactPrefix="$ARTIFACT_PREFIX" \
-    RuntimeManifestFile="$pointer_file" \
-    GameFile="$GAME_FILE" \
-    GameSha256="$GAME_SHA256" \
-    BepInExFile="$BEPINEX_FILE" \
-    BepInExSha256="$BEPINEX_SHA256" \
-    ManifestFile=worlds.json \
-    DataVolumeGiB="$data_volume_gib" \
-    RelayPrivateIp="$BIBITES_RELAY_PRIVATE_IP" \
-    RelayDomain="$BIBITES_RELAY_DOMAIN" \
-    CredentialParameterPrefix="$BIBITES_CREDENTIAL_PARAMETER_PREFIX"
+aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation execute-change-set \
+  --stack-name "$stack" --change-set-name "$change_set_name"
+previous_stack_marker=''
+if [ "$stack_exists" -eq 1 ]; then
+  previous_stack_marker="$(jq -er '
+    .Stacks[0].LastUpdatedTime // .Stacks[0].CreationTime // ""
+  ' <<<"$stack_description")"
+fi
+set +e
+terminal_description="$(bibites_wait_stack_terminal "$AWS_PROFILE" "$AWS_REGION" \
+  "$stack" 3600 15 "$previous_stack_marker")"
+terminal_status=$?
+set -e
+[ "$terminal_status" -eq 0 ] || {
+  echo "stack $stack did not complete; the runtime pointer was not published" >&2
+  exit "$terminal_status"
+}
 
-instance="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation describe-stacks \
-  --stack-name "$stack" \
-  --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' --output text)"
+instance="$(jq -er '
+  [.Stacks[0].Outputs[] | select(.OutputKey == "InstanceId") | .OutputValue] |
+  if length == 1 then .[0] else error("missing deployed InstanceId output") end
+' <<<"$terminal_description")"
 bibites_require_resource_id "$instance" 'deployed InstanceId output' i
+if [ "$pointer_missing" -eq 1 ]; then
+  "$repo/cloud/aws/promote-runtime.sh" --if-absent \
+    "$runtime_object" "$runtime_sha256"
+  pointer_document="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
+    "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - --only-show-errors)"
+  bibites_require_runtime_pointer_document "$pointer_document"
+  [ "$(jq -r .runtimeSha256 <<<"$pointer_document")" = "$runtime_sha256" ] || {
+    echo 'published runtime pointer differs from the successful stack runtime' >&2
+    exit 1
+  }
+fi
 printf 'stack ready; instance=%s\n' "$instance"
 printf 'session: aws --profile %s --region %s ssm start-session --target %s\n' \
   "$AWS_PROFILE" "$AWS_REGION" "$instance"

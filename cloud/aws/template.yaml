@@ -23,12 +23,14 @@ Parameters:
     MinLength: 1
     MaxLength: 256
     AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$'
-  RuntimeManifestFile:
+  RuntimeObject:
     Type: String
-    Default: runtime/current.json
     MinLength: 1
     MaxLength: 1024
     AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$'
+  RuntimeSha256:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{64}$'
   GameFile:
     Type: String
     Default: TheBibites-0.6.3.1-Linux.zip
@@ -69,9 +71,18 @@ Parameters:
     Type: String
     MaxLength: 1011
     AllowedPattern: '^/[A-Za-z0-9][A-Za-z0-9_.-]*(/[A-Za-z0-9][A-Za-z0-9_.-]*)*$'
+  HostLaunchTemplateVersion:
+    Type: String
+    AllowedPattern: '^[1-9][0-9]*$'
+  UseLegacyDataAttachment:
+    Type: String
+    AllowedValues: ['true', 'false']
   UbuntuAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+Conditions:
+  KeepLegacyDataAttachment: !Equals [!Ref UseLegacyDataAttachment, 'true']
 
 Resources:
   HostSecurityGroup:
@@ -210,27 +221,20 @@ Resources:
             instance_id="$(curl -fsS -H "X-aws-ec2-metadata-token: $metadata_token" \
               http://169.254.169.254/latest/meta-data/instance-id)"
             [[ "$instance_id" =~ ^i-[0-9a-f]{8,17}$ ]]
+            if [ '${UseLegacyDataAttachment}' = true ]; then
+              echo 'legacy DataAttachment mode does not support Host creation or replacement' >&2
+              exit 1
+            fi
             aws --region '${AWS::Region}' ec2 attach-volume \
               --volume-id '${DataVolume}' --instance-id "$instance_id" --device /dev/sdf \
               >/dev/null
             aws --region '${AWS::Region}' ec2 wait volume-in-use --volume-ids '${DataVolume}'
             install -d -m 0755 /opt/bibites-runtime
             aws --region '${AWS::Region}' s3 cp \
-              's3://${ArtifactBucket}/${ArtifactPrefix}/${RuntimeManifestFile}' \
-              /tmp/bibites-runtime.json --only-show-errors
-            jq -e '
-              (keys | sort) == ["runtimeFile", "runtimeSha256", "schema"] and
-              .schema == 1 and
-              (.runtimeSha256 | type == "string" and test("^[0-9a-f]{64}$")) and
-              .runtimeFile == ("runtime/" + .runtimeSha256 + ".tar.gz")
-            ' /tmp/bibites-runtime.json >/dev/null
-            runtime_file="$(jq -r .runtimeFile /tmp/bibites-runtime.json)"
-            runtime_sha256="$(jq -r .runtimeSha256 /tmp/bibites-runtime.json)"
-            aws --region '${AWS::Region}' s3 cp \
-              's3://${ArtifactBucket}/${ArtifactPrefix}/'"$runtime_file" \
+              's3://${ArtifactBucket}/${ArtifactPrefix}/${RuntimeObject}' \
               /tmp/bibites-runtime.tar.gz \
               --only-show-errors
-            printf '%s  %s\n' "$runtime_sha256" /tmp/bibites-runtime.tar.gz | sha256sum -c -
+            printf '%s  %s\n' '${RuntimeSha256}' /tmp/bibites-runtime.tar.gz | sha256sum -c -
             tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime
             chmod 0755 /opt/bibites-runtime/install-host
             export AWS_REGION='${AWS::Region}'
@@ -255,7 +259,15 @@ Resources:
     Properties:
       LaunchTemplate:
         LaunchTemplateId: !Ref HostLaunchTemplate
-        Version: !GetAtt HostLaunchTemplate.LatestVersionNumber
+        Version: !Ref HostLaunchTemplateVersion
+
+  DataAttachment:
+    Condition: KeepLegacyDataAttachment
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId: !Ref Host
+      VolumeId: !Ref DataVolume
 
 Outputs:
   InstanceId:

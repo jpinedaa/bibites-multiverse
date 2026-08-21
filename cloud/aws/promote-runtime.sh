@@ -18,6 +18,15 @@ validation="$repo/cloud/aws/lib/validation.sh"
 : "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
 : "${RUNTIME_OBJECT:?run stage-artifacts.sh again to create an immutable runtime object}"
 
+publish_if_absent=0
+if [ "${1:-}" = --if-absent ]; then
+  publish_if_absent=1
+  shift
+fi
+[ "$#" -le 2 ] || {
+  echo 'usage: promote-runtime.sh [--if-absent] [RUNTIME_OBJECT [RUNTIME_SHA256]]' >&2
+  exit 2
+}
 source_runtime_file="${1:-$RUNTIME_OBJECT}"
 source_runtime_sha256="${2:-$RUNTIME_SHA256}"
 pointer_file=runtime/current.json
@@ -45,7 +54,9 @@ bibites_require_account_id "$account" 'authenticated AWS account'
 archive="$(mktemp)"
 promoted_archive="$(mktemp)"
 object_error="$(mktemp)"
-trap 'rm -f "$archive" "$promoted_archive" "$object_error"' EXIT
+pointer_path="$(mktemp)"
+pointer_error="$(mktemp)"
+trap 'rm -f "$archive" "$promoted_archive" "$object_error" "$pointer_path" "$pointer_error"' EXIT
 aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
   "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$source_runtime_file" "$archive" \
   --only-show-errors
@@ -66,8 +77,38 @@ else
 fi
 
 # One S3 PUT publishes the descriptor only after its content-addressed archive is verified.
-printf '%s\n' "$pointer_document" | \
-  aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp - \
-    "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" \
-    --content-type application/json --only-show-errors
+if [ "$publish_if_absent" -eq 0 ]; then
+  printf '%s\n' "$pointer_document" | \
+    aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp - \
+      "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" \
+      --content-type application/json --only-show-errors
+else
+  printf '%s\n' "$pointer_document" >"$pointer_path"
+  if aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3api put-object \
+    --bucket "$ARTIFACT_BUCKET" --key "$ARTIFACT_PREFIX/$pointer_file" \
+    --body "$pointer_path" --content-type application/json --if-none-match '*' \
+    >/dev/null 2>"$pointer_error"; then
+    :
+  elif grep -Eq '(PreconditionFailed|412)' "$pointer_error"; then
+    if ! current_pointer_document="$(aws --profile "$AWS_PROFILE" \
+      --region "$AWS_REGION" s3 cp \
+      "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - \
+      --only-show-errors 2>"$pointer_error")"; then
+      sed 's/^/Concurrent runtime pointer lookup failed: /' "$pointer_error" >&2
+      exit 1
+    fi
+    bibites_require_runtime_pointer_document "$current_pointer_document"
+    current_runtime_file="$(jq -r .runtimeFile <<<"$current_pointer_document")"
+    current_runtime_sha256="$(jq -r .runtimeSha256 <<<"$current_pointer_document")"
+    if [ "$current_runtime_file" != "$promoted_runtime_file" ] ||
+       [ "$current_runtime_sha256" != "$source_runtime_sha256" ]; then
+      echo 'refusing to overwrite a different runtime pointer published concurrently' >&2
+      exit 1
+    fi
+    echo 'the runtime pointer already identifies this verified archive'
+  else
+    sed 's/^/Conditional runtime pointer publication failed: /' "$pointer_error" >&2
+    exit 1
+  fi
+fi
 printf 'promoted bootstrap runtime %s\n' "$source_runtime_sha256"

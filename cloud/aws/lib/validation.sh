@@ -16,6 +16,16 @@ bibites_require_stack_name() {
     bibites_validation_error "$2 is not a valid CloudFormation stack name"
 }
 
+bibites_require_change_set_name() {
+  [[ "$1" =~ ^[A-Za-z][-A-Za-z0-9]{0,127}$ ]] ||
+    bibites_validation_error "$2 is not a valid CloudFormation change-set name"
+}
+
+bibites_require_launch_template_version() {
+  [[ "$1" =~ ^[1-9][0-9]*$ ]] ||
+    bibites_validation_error "$2 is not a positive launch-template version"
+}
+
 bibites_require_region() {
   [[ "$1" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] ||
     bibites_validation_error "$2 is not a valid AWS region name"
