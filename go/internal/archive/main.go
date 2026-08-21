@@ -43,6 +43,10 @@ func runMain(args []string, stderr io.Writer) int {
 	// 8791 is slot 5's Contract A port (contract-b-m4.md §3, §12).
 	httpListen := fs.String("http", env("MULTIVERSE_ARCHIVE_HTTP", "127.0.0.1:8796"),
 		"bind address for the live status page and its JSON endpoint; empty disables it")
+	monitorStateDir := fs.String("monitor-state-dir", env("MULTIVERSE_MONITOR_STATE_DIR", ""),
+		"read-only monitor state for the public health dashboard; empty reports it unavailable")
+	hostMetricsFile := fs.String("host-metrics-file", env("MULTIVERSE_HOST_METRICS_FILE", ""),
+		"read-only service-host JSONL for the public health dashboard; empty reports it unavailable")
 	metricsInterval := fs.Duration("metrics-interval", time.Minute,
 		"how often a PEER_STATUS sample is appended to metrics.jsonl")
 	credentialFile := fs.String("credential-file", env("MULTIVERSE_CREDENTIAL_FILE", ""),
@@ -157,6 +161,8 @@ func runMain(args []string, stderr io.Writer) int {
 		DataDir:             *dataDir,
 		Logger:              log,
 		HTTPListen:          *httpListen,
+		MonitorStateDir:     *monitorStateDir,
+		HostMetricsFile:     *hostMetricsFile,
 		MetricsInterval:     *metricsInterval,
 		RequestsPerMinute:   *maxGenomeRPM,
 		DenyListFile:        *denyList,
@@ -188,7 +194,7 @@ func runMain(args []string, stderr io.Writer) int {
 	}
 	if addr := a.HTTPAddr(); addr != "" {
 		log.Info("archive: website", "url", "http://"+addr+"/", "console", "http://"+addr+"/live",
-			"json", "http://"+addr+"/api/status",
+			"health", "http://"+addr+"/health", "json", "http://"+addr+"/api/status",
 			"terminal", "ringstat --url http://"+addr)
 	}
 	<-ctx.Done()

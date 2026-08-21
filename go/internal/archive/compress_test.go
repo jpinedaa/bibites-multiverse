@@ -160,7 +160,7 @@ func TestEveryServedSurfaceIsGzippedExactlyWhenAsked(t *testing.T) {
 	ts := httptest.NewServer(a.httpHandler())
 	t.Cleanup(ts.Close)
 
-	for _, path := range []string{"/", "/live", "/api/status", "/api/hops", "/api/species",
+	for _, path := range []string{"/", "/live", "/health", "/api/status", "/api/hops", "/api/species",
 		"/api/species/tree", "/api/species/history?key=Izus+velox", "/api/history"} {
 		t.Run(path, func(t *testing.T) {
 			plainResp, plain := rawGet(t, ts.URL+path, "")

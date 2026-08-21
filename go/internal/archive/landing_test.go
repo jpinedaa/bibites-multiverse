@@ -53,6 +53,7 @@ func TestPublicLiveSurfacesShareOneVisualLanguage(t *testing.T) {
 		"landing": landingPageHTML,
 		"map":     statusPageHTML,
 		"watch":   watchPageHTML,
+		"health":  healthPageHTML,
 	}
 	for name, page := range pages {
 		for _, want := range []string{
@@ -602,6 +603,7 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 		{"/", "text/html", "Evolution has a map.", http.StatusOK},
 		{"/live", "text/html", "species", http.StatusOK},
 		{"/watch", "text/html", "Follow a life in progress.", http.StatusOK},
+		{"/health", "text/html", "System health", http.StatusOK},
 		{"/favicon.svg", "image/svg+xml", "#66e0ac", http.StatusOK},
 		{"/social-card.svg", "image/svg+xml", "Evolution", http.StatusOK},
 		{"/social-card.png", "image/png", pngMagic, http.StatusOK},
@@ -612,8 +614,9 @@ func TestPublicWebsiteRoutesAndAssets(t *testing.T) {
 		// nothing answers an empty document rather than an error, which is why
 		// the body this asserts is a brace.
 		{"/api/release", "application/json", "{", http.StatusOK},
+		{"/api/health", "application/json", `"monitor"`, http.StatusOK},
 		{"/robots.txt", "text/plain", "Sitemap: https://bibitesmultiverse.com/sitemap.xml", http.StatusOK},
-		{"/sitemap.xml", "application/xml", "https://bibitesmultiverse.com/live", http.StatusOK},
+		{"/sitemap.xml", "application/xml", "https://bibitesmultiverse.com/health", http.StatusOK},
 		{"/nothing-here", "text/html", "This world is not on the map.", http.StatusNotFound},
 	}
 	for _, tc := range tests {

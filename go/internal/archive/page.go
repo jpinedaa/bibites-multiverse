@@ -207,9 +207,27 @@ func (a *Archive) httpHandler() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=300")
 		_ = json.NewEncoder(w).Encode(a.releases.View())
 	})
+	// The dashboard's public-safe projection of two on-host instruments. Unlike
+	// /api/status it is never written into metrics.jsonl: it reads an existing
+	// time series and current verdict files, and copying either into the archive's
+	// permanent sample would duplicate the record forever.
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(a.productionHealthView(time.Now()))
+	})
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
+	})
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			serveNotFound(w)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte(healthPageHTML))
 	})
 	mux.HandleFunc("/live", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/live" {
@@ -282,6 +300,7 @@ func (a *Archive) httpHandler() http.Handler {
   <url><loc>https://bibitesmultiverse.com/</loc><priority>1.0</priority></url>
   <url><loc>https://bibitesmultiverse.com/live</loc><priority>0.8</priority></url>
   <url><loc>https://bibitesmultiverse.com/watch</loc><priority>0.8</priority></url>
+  <url><loc>https://bibitesmultiverse.com/health</loc><priority>0.6</priority></url>
   <url><loc>https://bibitesmultiverse.com/announcements/</loc><priority>0.5</priority></url>
 </urlset>
 `))
@@ -1019,7 +1038,7 @@ main{padding-block:12px 48px;gap:12px}.panel{gap:12px}section{padding:14px;borde
       <span>Bibites Multiverse</span>
     </a>
     <nav class="consolelinks" aria-label="Primary navigation">
-      <a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch">Watch broadcast</a>
+      <a href="/#how">How it works</a><a href="/#join">Join</a><a href="/watch">Watch broadcast</a><a href="/health">Health</a>
       <a href="/announcements/">Announcements</a>
       <a href="https://github.com/jpinedaa/bibites-multiverse">GitHub</a>
       <a class="livepill" href="/live" aria-current="page"><i class="navdot"></i>Live map</a>

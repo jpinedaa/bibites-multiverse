@@ -91,6 +91,23 @@ for timer in "$HERE"/systemd/*.timer; do
 done
 [ "$timers" -gt 0 ] || fail "no timer units found in $HERE/systemd"
 
+# The production-health API reads the monitor's current verdict and a bounded
+# tail of the host sampler. Both paths must reach archive.env, and neither may
+# become writable by the archive merely because it is now visible there.
+for setting in \
+  'MULTIVERSE_MONITOR_STATE_DIR=$MV_STATE/monitor' \
+  'MULTIVERSE_HOST_METRICS_FILE=$MV_STATE/metrics/service-host.jsonl'; do
+  grep -Fqx "$setting" "$provision" ||
+    fail "$provision does not write '$setting' to archive.env; the health dashboard
+      would deploy successfully and report that collector as unknown forever"
+done
+grep -Fqx 'ProtectSystem=strict' "$archive" ||
+  fail "$archive must keep ProtectSystem=strict while it reads dashboard inputs"
+if grep -E '^ReadWritePaths=' "$archive" | grep -Eq '(/monitor|/metrics)'; then
+  fail "$archive grants write access to a dashboard input. /api/health is a read-only
+    projection; monitor.sh and service-host-sample remain the only writers."
+fi
+
 # The viewer-presence unit runs as root for one reason — the nginx access log is
 # root:adm — so every other privilege it would inherit has to be given back.
 viewers="$HERE/systemd/multiverse-viewers.service"
