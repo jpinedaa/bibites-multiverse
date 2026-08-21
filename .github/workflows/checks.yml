@@ -141,6 +141,13 @@ jobs:
           [ "$fails" -eq 0 ] || exit 1
           echo "    $count shell scripts parse"
 
+      # Repository-wide diagnostics must not open ignored credential custody or
+      # ordinary untracked runtime data. The test builds a throwaway repository
+      # with tracked, ignored, untracked and symlinked canaries, then drives the
+      # same helper developers use.
+      - name: tracked-only repository search
+        run: tools/test-search-tracked.sh
+
       # BLOCKING, and it needs no game and no install: the guard on the one
       # `rm -rf` the complete edition does, lifted out of the installer and the
       # uninstall themselves so a rule that changes in one and not in the other
