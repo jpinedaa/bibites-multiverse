@@ -89,10 +89,12 @@ deploy_line="$(grep -n 'cloudformation deploy' "$cloud/deploy-broadcast.sh" | cu
 for template in "$cloud/template.yaml" "$cloud/broadcast-template.yaml"; do
   grep -Fq 'CreationPolicy:' "$template"
   grep -Fq 'cloudformation signal-resource' "$template"
-  if grep -Fq 'AWS::EC2::VolumeAttachment' "$template"; then
-    echo "$(basename "$template") still uses a post-instance volume attachment" >&2
-    exit 1
-  fi
 done
+if grep -Fq 'AWS::EC2::VolumeAttachment' "$cloud/broadcast-template.yaml"; then
+  echo 'broadcast-template.yaml still uses a post-instance volume attachment' >&2
+  exit 1
+fi
+grep -Fq '    Condition: KeepLegacyDataAttachment' "$cloud/template.yaml"
+grep -Fq "if [ '\${UseLegacyDataAttachment}' = true ]" "$cloud/template.yaml"
 
 printf 'broadcast and bootstrap contract fixtures passed\n'

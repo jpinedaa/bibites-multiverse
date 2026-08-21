@@ -675,9 +675,9 @@ const (
 	CopyLogTip     = "Copies everything in the details pane to the clipboard, for a bug report."
 	HeadlessTip    = "Runs the game with nothing drawn. The simulation is exactly the same; only the picture is gone. " +
 		"This is this world's own setting, and it takes effect the next time the world starts."
-	DetailsTip = "Shows everything the launcher has done this session, newest at the bottom. It opens by itself when something goes wrong."
-	WorldsTip  = "Every world on this computer. Double-click one, or press Enter, to start or stop it."
-	RefreshTip = "Reads every world again now, rather than waiting for the next couple of seconds to pass."
+	DetailsTip   = "Shows everything the launcher has done this session, newest at the bottom. It opens by itself when something goes wrong."
+	WorldsTip    = "Every world on this computer. Double-click one, or press Enter, to start or stop it."
+	RefreshTip   = "Reads every world again now, rather than waiting for the next couple of seconds to pass."
 	GetUpdateTip = "Opens bibitesmultiverse.com in your browser, where the newest version is downloaded from. " +
 		"Nothing here is changed by pressing it, and your worlds keep running."
 )

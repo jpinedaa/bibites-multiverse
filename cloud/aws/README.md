@@ -35,7 +35,7 @@ Do not commit their contents.
 
 The workstation needs these tools:
 
-- AWS CLI v2.
+- AWS CLI v2 with `s3api put-object --if-none-match` support.
 - `file`, `jq`, `unzip`, `tar`, and `sha256sum`.
 - Go and the .NET SDK for a runtime build.
 - Permission to deploy CloudFormation, IAM, EC2, EBS, S3, SSM, and DLM resources.
@@ -249,7 +249,18 @@ export BIBITES_ENABLE_LIGHTSAIL_PEERING=1
 Deploy and check the host:
 
 ```sh
-./cloud/aws/deploy-host.sh
+export BIBITES_CHANGE_SET_NAME=<reviewed-change-set-name>
+./cloud/aws/deploy-host.sh --change-set-name "$BIBITES_CHANGE_SET_NAME"
+```
+
+The first command creates a named change set and prints its resource changes.
+It does not execute the change set.
+Review the printed change set.
+Then get separate authorization and execute that same named change set:
+
+```sh
+./cloud/aws/deploy-host.sh \
+  --change-set-name "$BIBITES_CHANGE_SET_NAME" --execute
 ./cloud/aws/deploy-backups.sh
 ./cloud/aws/verify-host.sh
 ```
@@ -261,17 +272,39 @@ Use the wrapper instead of a direct CloudFormation deployment.
 The wrapper also checks every manifest credential parameter.
 Each parameter must be a `SecureString` that uses the default `aws/ssm` KMS key.
 
-The instance attaches its tagged data volume during bootstrap.
-Its role can attach only the tagged project instance and volume.
-CloudFormation waits for the host installation signal before it reports success.
+The wrapper permits only two change-set shapes:
 
-A replacement host reads `runtime/current.json` and then downloads the content-addressed archive
-and SHA-256 value in that document.
-The pointer changes only after a runtime activation succeeds.
-The first deployment of this template converts a legacy stack's checked `RuntimeFile` and
-`RuntimeSha256` object into that form before CloudFormation starts.
-Review that first stack change separately: changing the existing launch template can replace the
-Spot instance even though the retained data volume survives.
+- A new stack can add the six expected host resources.
+- An existing stack can modify only `HostLaunchTemplate` without replacement.
+
+The wrapper rejects every Host change.
+It also rejects a DataAttachment change, a DataVolume change, a live IAM or network resource
+change, and an unrelated resource change.
+Do not use a direct CloudFormation deployment to bypass these checks.
+
+For an existing stack, the wrapper reads the launch-template version from the live Host.
+It passes that exact numeric version back to CloudFormation.
+A new stack uses launch-template version `1`.
+A template update can create a dormant launch-template version, but it cannot move the live Host
+to that version.
+
+The wrapper also detects the legacy managed `DataAttachment` resource.
+It keeps that logical resource in the template and in the stack.
+A new stack uses self-attach mode instead, so its Host can complete bootstrap without a
+CloudFormation attachment deadlock.
+
+The bootstrap change set contains an exact runtime object and SHA-256 value.
+UserData does not read the mutable `runtime/current.json` pointer.
+If the pointer does not exist, the wrapper conditionally creates it after the stack reaches a
+successful terminal state.
+The wrapper accepts a concurrent pointer only when it identifies the same verified archive.
+It refuses to overwrite a different concurrent pointer.
+
+Host replacement and adoption are blocked.
+The current Spot and CloudFormation path cannot retain a failed replacement safely in all failure
+states.
+Design and test a separate blue/green candidate-host or external-ownership workflow before you
+replace the Host.
 
 The host template retains the data volume after stack deletion.
 This protection also leaves a storage charge.
@@ -433,7 +466,8 @@ Use an in-place runtime update for scripts, the plugin, or the sidecar:
 ```
 
 CAUTION: Do not deploy the host stack only to update runtime files.
-A launch-template change can replace the instance.
+Use the in-place procedure in this section.
+The host deployment wrapper refuses every live Host change.
 
 CAUTION: This procedure stops every world on the host.
 `bibites-activate-runtime` runs `bibites-stop-worlds` first, which stops the time-scale, game, and
@@ -461,7 +495,7 @@ Exit status `21` means that activation and rollback both failed.
 
 After a successful activation, the wrapper promotes its content-addressed archive through one S3
 write to `runtime/current.json`.
-The descriptor is the replacement-host source of truth; a failed activation leaves it unchanged.
+The descriptor is the next bootstrap candidate; a failed activation leaves it unchanged.
 If activation succeeds but descriptor publication fails, rerun this idempotent promotion after
 verification:
 
@@ -661,7 +695,7 @@ systemctl restart bibites-sidecar@<world-id>.service
 
 ### Make the sidecar update durable
 
-The manual sidecar procedure does not move the replacement-host runtime pointer by itself.
+The manual sidecar procedure does not move the bootstrap runtime pointer by itself.
 After every world passes the live checks, promote the staged archive:
 
 ```sh
@@ -671,7 +705,8 @@ After every world passes the live checks, promote the staged archive:
 
 The command checks the source archive and any existing content-addressed copy before it publishes
 `runtime/current.json`.
-A replacement host then installs that complete runtime, including the sidecar just verified.
+The next reviewed bootstrap change set then binds that complete runtime, including the sidecar just
+verified.
 Record its digest and public commit in private operations storage.
 
 ## Backups and recovery
@@ -680,7 +715,7 @@ Record its digest and public commit in private operations storage.
 Its default policy keeps seven snapshots.
 
 Record the latest checked snapshot in private operations storage.
-Run a controlled reboot or replacement check before you depend on the recovery path.
+Run a controlled reboot and volume-recovery drill before you depend on the recovery path.
 
 After a recovery, make sure that each sidecar reports `reason=reclaimed`.
 Make sure that each world uses its original peer identity and position.

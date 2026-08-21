@@ -24,11 +24,22 @@ reject "$(jq '.extra = true' <<<"$document")" 'unknown field'
 reject "$(jq '.runtimeSha256 = (.runtimeSha256 | ascii_upcase)' <<<"$document")" \
   'uppercase digest'
 
-grep -Fq 'RuntimeManifestFile:' "$repo/cloud/aws/template.yaml"
-if grep -Eq '^  Runtime(File|Sha256):' "$repo/cloud/aws/template.yaml"; then
-  echo 'template still exposes mutable runtime bootstrap parameters' >&2
+grep -Fq '  RuntimeObject:' "$repo/cloud/aws/template.yaml"
+grep -Fq '  RuntimeSha256:' "$repo/cloud/aws/template.yaml"
+grep -Fq "'s3://\${ArtifactBucket}/\${ArtifactPrefix}/\${RuntimeObject}'" \
+  "$repo/cloud/aws/template.yaml"
+grep -Fq "'\${RuntimeSha256}' /tmp/bibites-runtime.tar.gz" \
+  "$repo/cloud/aws/template.yaml"
+if grep -Fq 'runtime/current.json' "$repo/cloud/aws/template.yaml"; then
+  echo 'template bootstrap still dereferences the mutable runtime pointer' >&2
   exit 1
 fi
+grep -Fq 'ParameterKey=RuntimeObject,ParameterValue=$runtime_object' \
+  "$repo/cloud/aws/deploy-host.sh"
+grep -Fq 'require_change_parameter RuntimeSha256 "$runtime_sha256"' \
+  "$repo/cloud/aws/deploy-host.sh"
+grep -Fq -- '"$repo/cloud/aws/promote-runtime.sh" --if-absent' \
+  "$repo/cloud/aws/deploy-host.sh"
 grep -Fq '"$repo/cloud/aws/promote-runtime.sh" "$RUNTIME_OBJECT" "$RUNTIME_SHA256"' \
   "$repo/cloud/aws/update-runtime.sh"
 

@@ -201,8 +201,8 @@ type CustodyState struct {
 	// says whether it is draining.
 	OldestPacedAgeMs      int64 `json:"oldestPacedAgeMs,omitempty"`
 	OldestUnresolvedAgeMs int64 `json:"oldestUnresolvedAgeMs,omitempty"`
-	JournalBytes     int64 `json:"journalBytes"`
-	JournalLive      int   `json:"journalLive"`
+	JournalBytes          int64 `json:"journalBytes"`
+	JournalLive           int   `json:"journalLive"`
 	// JournalDiscardedBytes is what replay threw away behind a torn record AT
 	// THIS PROCESS'S START. Zero on every healthy start.
 	JournalDiscardedBytes int64 `json:"journalDiscardedBytes"`

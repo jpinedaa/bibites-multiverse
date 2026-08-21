@@ -1222,9 +1222,9 @@ func (s *Sidecar) faultPoint(point string) {
 // defaulted, because a slot that reports nothing is unknown, not empty.
 func (s *Sidecar) statsLocked() contractb.PeerStats {
 	st := contractb.PeerStats{
-		CustodyDepth: contractb.IntPtr(s.jr.CountPending(journal.Out) + s.jr.CountPending(journal.In)),
-		PacedDepth:   contractb.IntPtr(s.pacedDepthLocked()),
-		LostForwardTotal:    contractb.IntPtr(s.lostForwardTotal),
+		CustodyDepth:     contractb.IntPtr(s.jr.CountPending(journal.Out) + s.jr.CountPending(journal.In)),
+		PacedDepth:       contractb.IntPtr(s.pacedDepthLocked()),
+		LostForwardTotal: contractb.IntPtr(s.lostForwardTotal),
 		// The delivery rate limit this sidecar is CONFIGURED with (§18, B16).
 		// Always known, because it is this process's own setting and not a
 		// reading of anything else — and it is what makes pacedDepth readable:
@@ -1352,13 +1352,13 @@ func (s *Sidecar) unresolvedDepthLocked() int {
 
 // InflightEntry is one row of --list-inflight (§7.5).
 type InflightEntry struct {
-	MigrationID  string
-	EntityID     int32
-	Direction    string
-	Status       string
-	Handoff      string
-	DestSlot     int
-	ExitEdge     string
+	MigrationID string
+	EntityID    int32
+	Direction   string
+	Status      string
+	Handoff     string
+	DestSlot    int
+	ExitEdge    string
 	// SentAt is when the frame was written to a live relay connection, and
 	// LostIn is what is left of forwardTimeoutMs before the entry is recorded
 	// lost (§9.3). Both are zero on an entry that has never been written.

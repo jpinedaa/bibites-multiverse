@@ -45,6 +45,25 @@ Do not keep a checkout of an old deployed commit as a staging copy. `git clone` 
 `git checkout <sha>` rebuild one in seconds, and a stale copy is indistinguishable from current
 source at a glance.
 
+### Safe repository searches
+
+Use the tracked-only search helper for repository-wide diagnostics, preflight checks, and source
+discovery:
+
+```sh
+tools/search-tracked.sh 'RuntimeFile|RuntimeSha256'
+tools/search-tracked.sh 'peerId' -- cloud/aws deploy
+tools/search-tracked.sh -- --help                  # search for the literal pattern --help
+```
+
+Patterns use POSIX extended regular expressions. The helper searches only files that Git tracks. It
+does not enumerate ignored or untracked runtime data, including credential custody under
+`cloud/aws/private/`. This boundary applies only to searches routed through the helper; it cannot
+intercept an ad hoc command. A plain `rg` normally honors ignore rules, but `--no-ignore` and the
+`-u` options remove that boundary. Do not use those options for a broad repository search. Scope an
+intentional runtime-data inspection to the exact non-secret file that owns the evidence; never
+broaden a source search to include custody directories.
+
 ## Versions
 
 | Component | Public development baseline |
@@ -553,9 +572,10 @@ Never point a development command at a live data directory.
 Every pull request and every push to `main` runs `.github/workflows/checks.yml` on GitHub-hosted
 runners. That workflow needs no game file and no secret. It runs `go vet` for this host and for
 Windows, `go test ./...`, the cross-builds the release and the hosting kit ship, `bash -n` over
-every tracked shell script, `deploy/test-units.sh`, `deploy/test-front-door.sh`, a stub compile of
-the Windows installer script, a PowerShell parse on Windows with `release/test-installer-wait.ps1`
-beside it, and two consistency gates.
+every tracked shell script, the tracked-only repository-search regression,
+`deploy/test-units.sh`, `deploy/test-front-door.sh`, a stub compile of the Windows installer script,
+a PowerShell parse on Windows with `release/test-installer-wait.ps1` beside it, and two consistency
+gates.
 
 Run the two gates by hand before you push a change to the mod, the sidecar, or the release
 version:

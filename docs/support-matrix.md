@@ -189,9 +189,9 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.7` |
 | `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
 | `bibites-mod/` tree | `bc3d8733e323a837d87dd0423bdd2f24862432bc` |
-| `cmd/sidecar` source commit | `e6cd359f6e79feecf0f6efedef350a8c7b89bec9` |
-| `cmd/sidecar` input digest | `8437fb1c335ab0eb332003f8e4a13d8f9b26ac2bbac356eeb6748b3e46498d49` |
-| Tested on | 2026-08-19 |
+| `cmd/sidecar` source commit | `c34d5308caa63ecbdec9812ab8c73cd3e439923a` |
+| `cmd/sidecar` input digest | `cd7d606819d16cc464f778f6905156e7f9f30bb0743001bcd3c2c3f9904eb427` |
+| Tested on | 2026-08-21 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -213,8 +213,12 @@ changes far more often than the mod, so a re-record often re-attests only the si
 the plugin's hash and tree stay exactly where the earlier test left them. That is honest as long
 as the `evidence` sentence says which leg proved what — and it must, including when the run
 happened on a host whose game or mod is not the one this matrix names. Today's record is one of
-those: the sidecar values were re-attested on 2026-08-19 on the live broadcast world, whose host
-runs mod `0.6.5`; the plugin values are unchanged and still rest on the 2026-08-17 test.
+those: the sidecar values were re-attested on 2026-08-21 after a formatting-only change. The
+Windows and Linux `amd64` binaries built from the new source and from the previously recorded
+source were byte-identical with VCS metadata disabled, and the full Go test and race suites
+passed. This is equivalence evidence, not a new live run. Operational evidence still rests on the
+2026-08-19 live broadcast-world run, and the unchanged plugin values still rest on the 2026-08-17
+test.
 
 **Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
 it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
@@ -268,10 +272,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.7",
     "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
     "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
-    "sidecarSourceCommit": "e6cd359f6e79feecf0f6efedef350a8c7b89bec9",
-    "sidecarInputsSha256": "8437fb1c335ab0eb332003f8e4a13d8f9b26ac2bbac356eeb6748b3e46498d49",
-    "testedOn": "2026-08-19",
-    "evidence": "on 2026-08-19 the sidecar built from e6cd359 (exe sha256 455553d36806a95de3602f1e1169a3efe5c965027b898c79f7e6bebba9a511c5) was deployed to the live public /watch broadcast world at slot 7 of the public map, replacing a sidecar wedged at contract A's inboundQueueMax with 64 forwarded-and-unanswered organisms; it recovered custody of those 64 from the journal, reclaimed slot 7, and exercised B42's forward-timeout expiry for real -- 64 FORWARD LOST write-offs at forwardTimeout=5m0s in half a second, plus 2 more in ordinary live traffic five minutes after their sentAt, lostForwardTotal reaching 66 -- after which MIGRATE_OUT_NACK code=JOURNAL_FULL went from 38,167 refusals to zero across 2,143 exports in an 18-minute soak, custodyDepth fell from 64 to 1-2, all four outbound lanes went from 0 per minute to 5.8/8.6/13.8/7.2 and re-routed onto the two live axes at 49.4 and 65.2 per minute when five peer worlds lost their mods mid-soak, on one relay connection with no reconnect and one slot grant, with 66 ERROR lines all of them FORWARD LOST and --diagnose reporting PASS journal-depths and PASS slot, edges, neighbours, journal-replay, mod-connected and limits; that host runs mod 0.6.5 and game 0.6.3.1 while this record names mod 0.6.7, so this run is SIDECAR-SIDE evidence only and the plugin half of the record -- unchanged pluginSha256 and bibitesModTree -- is not re-attested by it and still rests on the 2026-08-17 record this one replaces: six fresh complete-edition installs from real NSIS setups, and a two-world soak of about 4,600 outbound and 4,700 inbound organisms with mod 0.6.7 connected throughout and every stop through the mod quit verb; NOT EXERCISED by the 2026-08-19 run, and so not claimed: relay disconnect and reconnect, slot loss, journal replay after a crash or an interrupted compaction, the roll-up and archive paths, re-route and bounce-back on REFUSED, --list-inflight and --release-inflight, the private-map path, and compaction under a full or read-only disk"
+    "sidecarSourceCommit": "c34d5308caa63ecbdec9812ab8c73cd3e439923a",
+    "sidecarInputsSha256": "cd7d606819d16cc464f778f6905156e7f9f30bb0743001bcd3c2c3f9904eb427",
+    "testedOn": "2026-08-21",
+    "evidence": "on 2026-08-21 the sidecar source at c34d530 was re-attested after gofmt-only changes: its Windows and Linux amd64 binaries were byte-identical to binaries built from the previously recorded e6cd359 source when both were built with CGO disabled, -trimpath, and VCS metadata disabled, and the full Go test and race suites passed; no new live deployment was run, so operational evidence remains the 2026-08-19 live public /watch broadcast-world run at slot 7, where the recorded sidecar recovered 64 journaled forwards, expired 66 lost forwards, cleared JOURNAL_FULL refusals during an 18-minute soak, restored outbound traffic, and passed diagnose; this equivalence re-attests the sidecar half only, while unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised on 2026-08-21: live relay connectivity, slot claim, mod traffic, crash replay, compaction, roll-up, archive, re-route or bounce-back, inflight administration, private-map behavior, and disk-failure paths"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",
