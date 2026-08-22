@@ -5,6 +5,8 @@
 .DESCRIPTION
     The included portable game is the default. A user can select an existing
     game instead. The installer searches the Steam and itch.io locations first.
+    The default completion option starts the connected game and opens the
+    installed launcher window.
 #>
 [CmdletBinding()]
 param(
@@ -147,7 +149,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'Install Bibites Multiverse 0.3.2'
+$form.Text = 'Install Bibites Multiverse 0.3.3'
 $form.StartPosition = 'CenterScreen'
 $form.ClientSize = New-Object System.Drawing.Size(650, 440)
 $form.FormBorderStyle = 'FixedDialog'
@@ -244,7 +246,7 @@ $browse.Add_Click({
 })
 
 $startAfter = New-Object System.Windows.Forms.CheckBox
-$startAfter.Text = 'Start The Bibites and connect after installation'
+$startAfter.Text = 'After installation, start The Bibites, connect, and open the launcher'
 $startAfter.AutoSize = $true
 $startAfter.Checked = $true
 $startAfter.Location = New-Object System.Drawing.Point(30, 300)
@@ -370,8 +372,40 @@ $install.Add_Click({
             Update-GameStatus
             return
         }
-        $message = if ($startAfter.Checked) {
-            'Installation is complete. The game and its Multiverse connection started.'
+        # Starting the world belongs to the core installer above. Opening the
+        # window belongs here: -StartAfterInstall is also a supported advanced
+        # script option, and a command-line install must not unexpectedly open
+        # a graphical application. Both the setup and the advanced ZIP put the
+        # launcher in $InstallRoot (or beside this GUI when no root was given).
+        # A launch failure does not turn a completed install and a running world
+        # into a failed install. Say what happened and leave the icon/executable
+        # available for another try.
+        $launcherOpened = $false
+        $launcherFailure = ''
+        $programRoot = if ($InstallRoot) { $InstallRoot } else { $Here }
+        $launcherPath = Join-Path $programRoot 'BibitesMultiverseLauncher.exe'
+        if ($startAfter.Checked) {
+            try {
+                if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
+                    throw "the installed launcher was not found at $launcherPath"
+                }
+                Start-Process -FilePath $launcherPath -WorkingDirectory $programRoot | Out-Null
+                $launcherOpened = $true
+                Write-SetupLog "opened launcher=$launcherPath"
+            } catch {
+                $launcherFailure = $_.Exception.Message
+                Write-SetupLog "launcher open failed: $launcherFailure"
+            }
+        }
+
+        $message = if ($startAfter.Checked -and $launcherOpened) {
+            'Installation is complete. The game and its Multiverse connection started, and the launcher is open.'
+        } elseif ($startAfter.Checked) {
+            'Installation is complete, and the game and its Multiverse connection started.' +
+            [Environment]::NewLine + [Environment]::NewLine +
+            'The launcher could not open. You can open it later from:' +
+            [Environment]::NewLine + $launcherPath +
+            [Environment]::NewLine + [Environment]::NewLine + $launcherFailure
         } else {
             'Installation is complete. Use the Bibites Multiverse icon when you want to connect.'
         }

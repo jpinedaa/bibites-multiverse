@@ -148,6 +148,8 @@ foreach ($pair in @(@{ name = 'installer'; text = $installerText },
 $guiText = Get-Content -LiteralPath $guiInstaller -Raw
 Check "the GUI selects start-after-install by default" `
     ($guiText -match '\$startAfter\.Checked\s*=\s*\$true')
+Check "the GUI says that the default option opens the launcher too" `
+    ($guiText -match 'After installation, start The Bibites, connect, and open the launcher')
 Check "the GUI offers the included portable game" `
     ($guiText -match 'Use the included portable game')
 Check "the GUI offers an existing game" `
@@ -166,6 +168,12 @@ Check "the GUI waits on the process object it started" `
     ($guiCode -match '\.WaitForExit\(\)')
 Check "the GUI keeps the handle its exit code is read through" `
     ($guiCode -match '\$process\.Handle')
+Check "the GUI locates the graphical launcher in the installed application directory" `
+    ($guiCode -match '\$launcherPath\s*=\s*Join-Path\s+\$programRoot\s+''BibitesMultiverseLauncher\.exe''')
+Check "the GUI opens the launcher when start-after-install was selected" `
+    ($guiCode -match '(?s)if \(\$startAfter\.Checked\) \{.{0,1200}Start-Process -FilePath \$launcherPath -WorkingDirectory \$programRoot')
+Check "a launcher-window failure does not report the completed install as failed" `
+    ($guiCode -match '(?s)catch \{\s*\$launcherFailure = \$_\.Exception\.Message.{0,800}The launcher could not open')
 
 # NOTHING OF THIS INSTALL MAY BE RUNNING WHILE IT IS BEING REPLACED. Windows
 # holds a program's own file open for as long as it runs, so a re-install started

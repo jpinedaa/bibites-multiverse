@@ -57,7 +57,7 @@
 #
 set -euo pipefail
 
-RELEASE='0.3.2'
+RELEASE='0.3.3'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST_NAME='MANIFEST.sha256'
 MATRIX_NAME='support-matrix.json'

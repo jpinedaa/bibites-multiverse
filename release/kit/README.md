@@ -39,9 +39,10 @@ The single-file setup opens this GUI automatically. In the advanced ZIP, double-
 `Install-BibitesMultiverse.cmd`.
 
 The setup's command wrapper uses the `RemoteSigned` policy for its own process only. It does not
-change the policy for your account or computer. The GUI uses the included portable game by default. Its other option
-searches for an existing game and lets you select a folder. The final start checkbox is on by
-default. For advanced installation options, run:
+change the policy for your account or computer. The GUI uses the included portable game by
+default. You can select an existing game folder instead. The final checkbox is selected by
+default. It starts the connected game and opens the installed launcher window. For advanced
+installation options, run:
 
 ```powershell
 .\Install-BibitesMultiverse.ps1

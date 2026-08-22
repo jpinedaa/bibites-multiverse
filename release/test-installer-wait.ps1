@@ -209,6 +209,14 @@ try {
         (-not ($guiCode -match 'Start-Process[^\r\n]*\s-Wait\b'))
     Check "the GUI waits on the process object it started" ($guiCode -match '\.WaitForExit\(\)')
     Check "the GUI keeps the handle its exit code is read through" ($guiCode -match '\.Handle')
+    Check "the default finish option says that it opens the launcher" `
+        ($guiCode -match 'After installation, start The Bibites, connect, and open the launcher')
+    Check "the GUI locates the launcher in the installed application directory" `
+        ($guiCode -match '\$launcherPath\s*=\s*Join-Path\s+\$programRoot\s+''BibitesMultiverseLauncher\.exe''')
+    Check "the GUI opens the launcher only when start-after-install was selected" `
+        ($guiCode -match '(?s)if \(\$startAfter\.Checked\) \{.{0,1200}Start-Process -FilePath \$launcherPath -WorkingDirectory \$programRoot')
+    Check "a launcher-window failure does not report the completed install as failed" `
+        ($guiCode -match '(?s)catch \{\s*\$launcherFailure = \$_\.Exception\.Message.{0,800}The launcher could not open')
 } finally {
     foreach ($grandchildPid in $script:grandchildren) {
         Get-Process -Id $grandchildPid -ErrorAction SilentlyContinue |

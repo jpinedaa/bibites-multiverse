@@ -145,7 +145,8 @@ func TestLandingPageOffersCompletePublicPackages(t *testing.T) {
 // "and then what", in as few steps as the product now takes. It used to take
 // five, because the launcher was a console menu a reader had to be taught to
 // drive. The setup starts the world and the launcher is a window, so the honest
-// answer is three: download, Install, done. This test pins what is left — the
+// answer is three: download, Install, done. The default finish option opens both
+// the game and its launcher window. This test pins what is left — the
 // buttons still come first, the steps are numbered and counted, the SmartScreen
 // panel (the one screen that stops people who did nothing wrong) is named with
 // the two words to click, and the icon that manages everything afterwards is
@@ -199,8 +200,10 @@ func TestJoinSectionWalksAWindowsNewcomerThroughTheInstall(t *testing.T) {
 		// One press, and the setup does the rest.
 		"<b>Run it and press Install.</b>",
 		// What happens without being asked, and the one thing to remember after.
+		"The game and the Bibites Multiverse launcher open by themselves",
 		`your world reaches the <a href="/live">live map</a>`,
 		"<b>Bibites Multiverse</b> icon on your desktop",
+		"opens that launcher again",
 		"starts your worlds, stops them without losing anything, and makes more of them",
 		// One line for the other platform, pointing at the full guide.
 		"<code>./install-bibites-multiverse.sh</code>",
