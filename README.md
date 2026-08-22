@@ -149,9 +149,9 @@ archive.
    file.
 2. On Windows, double-click the setup executable. On Linux, extract the archive and run
    `./install-bibites-multiverse.sh`.
-3. Keep the defaults. Windows opens the included game and creates desktop and Start Menu icons.
-   Later, use the **Bibites Multiverse** icon; it opens the launcher window, where **Start** runs
-   the selected world.
+3. Keep the defaults. Windows opens the included game and the launcher window, and creates desktop
+   and Start Menu icons. Later, use the **Bibites Multiverse** icon to open the launcher again.
+   **Start** runs the selected world.
    On Linux, run `./start-multiverse.sh` after installation.
 
 All participant packages include `public-map.json`, the public join configuration. It contains
@@ -163,7 +163,7 @@ After checksum verification, use these platform steps:
 
 | Platform | Recommended download | Install | Start |
 |---|---|---|---|
-| Windows | [`bibites-multiverse-0.3.2-windows-x64-setup.exe`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.3.2/bibites-multiverse-0.3.2-windows-x64-setup.exe) | Double-click the one downloaded file | Starts after install by default. Later use the **Bibites Multiverse** icon, which opens the launcher |
+| Windows | [`bibites-multiverse-0.3.2-windows-x64-setup.exe`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.3.2/bibites-multiverse-0.3.2-windows-x64-setup.exe) | Double-click the one downloaded file | Opens the game and launcher after install by default. Later use the **Bibites Multiverse** icon |
 | Linux | [`bibites-multiverse-0.3.2-linux-x64-complete.zip`](https://github.com/jpinedaa/bibites-multiverse/releases/download/v0.3.2/bibites-multiverse-0.3.2-linux-x64-complete.zip) | `./install-bibites-multiverse.sh` | `./start-multiverse.sh` |
 
 To run a world without graphics on Windows, tick **Run without a game window (headless)** in the
@@ -279,10 +279,10 @@ The first announced service period runs from **August 14 through November 14, 20
 Read the [project status](STATUS.md) for the release and milestone state.
 
 The homepage explains the experiment and shows a live summary. Its download section walks a
-Windows reader through the install in three steps — download it, run it and press Install, and
-the game opens on its own — names the SmartScreen warning and the two words to click, and points
-at the [install guide](docs/participant/install.md) for Linux. The
-[live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
+Windows reader through three steps: download the setup, run it, and select **Install**. Then the
+game and launcher open automatically. The section names the SmartScreen warning and its two
+required selections. It also links to the [install guide](docs/participant/install.md) for Linux.
+The [live console](https://bibitesmultiverse.com/live) shows the map, migrations, species,
 lineages, and world settings.
 
 The [broadcast page](https://bibitesmultiverse.com/watch) shows one shared game camera.

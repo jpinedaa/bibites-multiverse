@@ -260,7 +260,7 @@ text-align:center;font:700 13px/26px ui-monospace,SFMono-Regular,Menlo,monospace
         <ol class="walksteps">
           <li><b>Download the setup.</b> It is one file. The checksums page beside these buttons lets you verify it first, if you want to.</li>
           <li><b>Run it and press Install.</b> This is a community build with no code-signing certificate, so SmartScreen shows <b>Windows protected your PC</b>: select <b>More info</b>, then <b>Run anyway</b>.</li>
-          <li><b>That is all of it.</b> The game opens by itself and your world reaches the <a href="/live">live map</a> about a minute later. Everything after that is the <b>Bibites Multiverse</b> icon on your desktop: it opens a window that starts your worlds, stops them without losing anything, and makes more of them.</li>
+          <li><b>That is all of it.</b> The game and the Bibites Multiverse launcher open by themselves, and your world reaches the <a href="/live">live map</a> about a minute later. The <b>Bibites Multiverse</b> icon on your desktop opens that launcher again. It starts your worlds, stops them without losing anything, and makes more of them.</li>
         </ol>
         <p class="promise">On Linux: unpack the complete package, run <code>./install-bibites-multiverse.sh</code>, then <code>./start-multiverse.sh</code>. The <a href="__HOMEPAGE_DOCS__">install guide</a> has both platforms in full.</p>
       </div>

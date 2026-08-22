@@ -2,7 +2,7 @@
 
 **Recommended setup:** Windows uses one setup executable. Linux uses a complete archive. Both
 include an authorized copy of *The Bibites* and create a unique public-map identity. The Windows
-GUI can use an existing game and can open the connected game after installation.
+GUI can use an existing game and can open the connected game and launcher after installation.
 
 The Linux installer uses the included native game automatically. The Linux add-on remains
 available if you already have the supported itch.io game. **What you do not need:** a join
@@ -82,10 +82,10 @@ as `multiverse-launcher.exe`. It also registers an
 uninstaller in **Windows Settings → Apps → Installed apps**. All application files stay in your
 user profile. Setup does not need administrator rights.
 
-**Start The Bibites and connect after installation** is selected by default. Clear it if you want
-to install without starting. The setup's command wrapper uses `RemoteSigned` for its own process
-only. It does not change the policy for your account or computer. The package never uses
-`ExecutionPolicy Bypass`.
+**After installation, start The Bibites, connect, and open the launcher** is selected by default.
+If you want to install without starting the game or launcher, clear this checkbox. The setup's
+command wrapper uses `RemoteSigned` for its own process only. It does not change the policy for
+your account or computer. The package never uses `ExecutionPolicy Bypass`.
 
 ### On Linux: there is no mark of the web, and no ritual replaces it
 
@@ -418,7 +418,7 @@ checks for the handful of ordinary programs the script needs, which is `INS-LINU
 **Neither needs administrator rights or root**, adds a service, a scheduled task, or a systemd
 unit. Neither touches your worlds or their backups. The Windows setup adds per-user shortcuts and
 one uninstall entry. The Windows GUI starts the sidecar and game when its final checkbox is
-selected. It is selected by default.
+selected, then opens the installed launcher window. It is selected by default.
 
 **A running game blocks only the copy it is running from.** Both installers refuse to write into a
 game folder while a game is running out of **that** folder — on Windows because the platform holds
