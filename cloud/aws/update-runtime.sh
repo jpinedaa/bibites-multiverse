@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the staged, content-addressed runtime without replacing the EC2 host.
+# Install one staged, content-addressed runtime without replacing the EC2 host.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -11,32 +11,62 @@ validation="$repo/cloud/aws/lib/validation.sh"
 . "$validation"
 # shellcheck source=/dev/null
 . "$dist/artifacts.env"
+# These values belong exclusively to the immutable staging receipt. Do not let
+# a missing receipt field fall back to the caller environment or artifacts.env.
+unset AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX STAGING_SCOPE \
+  RUNTIME_OBJECT RUNTIME_SHA256 GAME_OBJECT GAME_SHA256 \
+  BEPINEX_OBJECT BEPINEX_SHA256 MANIFEST_OBJECT MANIFEST_SHA256
 # shellcheck source=/dev/null
 . "$dist/staged.env"
-: "${RUNTIME_OBJECT:?run stage-artifacts.sh again to create an immutable runtime object}"
-: "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
+
+[ "${STAGING_SCOPE:-}" = runtime-only ] || {
+  echo 'update-runtime.sh requires STAGING_SCOPE=runtime-only from stage-artifacts.sh --runtime-only' >&2
+  exit 1
+}
+for setting in AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX \
+  RUNTIME_OBJECT RUNTIME_SHA256 GAME_OBJECT GAME_SHA256 \
+  BEPINEX_OBJECT BEPINEX_SHA256 MANIFEST_OBJECT MANIFEST_SHA256 \
+  BIBITES_AWS_ACCOUNT_ID BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX; do
+  [ -n "${!setting:-}" ] || {
+    printf 'Set %s before the runtime update.\n' "$setting" >&2
+    exit 1
+  }
+done
 
 bibites_require_account_id "$BIBITES_AWS_ACCOUNT_ID" BIBITES_AWS_ACCOUNT_ID
 bibites_require_region "$AWS_REGION" AWS_REGION
 bibites_require_s3_bucket "$ARTIFACT_BUCKET" ARTIFACT_BUCKET
 bibites_require_s3_prefix "$ARTIFACT_PREFIX" ARTIFACT_PREFIX
-bibites_require_s3_key "$RUNTIME_OBJECT" RUNTIME_OBJECT
-bibites_require_s3_filename "$RUNTIME_FILE" RUNTIME_FILE
-bibites_require_sha256 "$RUNTIME_SHA256" RUNTIME_SHA256
-bibites_require_s3_filename "$GAME_FILE" GAME_FILE
-bibites_require_sha256 "$GAME_SHA256" GAME_SHA256
-bibites_require_s3_filename "$BEPINEX_FILE" BEPINEX_FILE
-bibites_require_sha256 "$BEPINEX_SHA256" BEPINEX_SHA256
+for digest_name in RUNTIME_SHA256 GAME_SHA256 BEPINEX_SHA256 MANIFEST_SHA256; do
+  bibites_require_sha256 "${!digest_name}" "$digest_name"
+done
 [ "$RUNTIME_OBJECT" = "runtime/$RUNTIME_SHA256.tar.gz" ] || {
   echo 'RUNTIME_OBJECT does not match the staged runtime digest' >&2
   exit 1
 }
-runtime_key="$ARTIFACT_PREFIX/$RUNTIME_OBJECT"
-game_key="$ARTIFACT_PREFIX/$GAME_FILE"
-bepinex_key="$ARTIFACT_PREFIX/$BEPINEX_FILE"
-manifest_key="$ARTIFACT_PREFIX/worlds.json"
-for key in "$runtime_key" "$game_key" "$bepinex_key" "$manifest_key"; do
-  bibites_require_s3_key "$key" "runtime object key $key"
+[ "$GAME_OBJECT" = "runtime-inputs/game/$GAME_SHA256.zip" ] || {
+  echo 'GAME_OBJECT does not match the pinned game digest' >&2
+  exit 1
+}
+[ "$BEPINEX_OBJECT" = "runtime-inputs/bepinex/$BEPINEX_SHA256.zip" ] || {
+  echo 'BEPINEX_OBJECT does not match the pinned BepInEx digest' >&2
+  exit 1
+}
+[ "$MANIFEST_OBJECT" = "worlds.$MANIFEST_SHA256.json" ] || {
+  echo 'MANIFEST_OBJECT does not match the pinned manifest digest' >&2
+  exit 1
+}
+for object_name in RUNTIME_OBJECT GAME_OBJECT BEPINEX_OBJECT MANIFEST_OBJECT; do
+  bibites_require_s3_key "${!object_name}" "$object_name"
+  bibites_require_s3_key "$ARTIFACT_PREFIX/${!object_name}" \
+    "$object_name with ARTIFACT_PREFIX"
+done
+bibites_require_ssm_parameter "$BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX" \
+  BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX
+for suffix in access-key-id secret-access-key session-token; do
+  bibites_require_ssm_parameter \
+    "$BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX/$suffix" \
+    "pointer credential parameter $suffix"
 done
 
 account="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" sts get-caller-identity \
@@ -75,40 +105,112 @@ stack_output() {
   ' <<<"$description"
 }
 
-stack_parameter_optional() {
+stack_parameter() {
   local key="$1"
   jq -er --arg key "$key" '
     [.Stacks[0].Parameters[] | select(.ParameterKey == $key) | .ParameterValue] |
-    if length == 0 then ""
-    elif length == 1 and (.[0] | type == "string") and .[0] != "" then .[0]
-    else error("empty or duplicate stack parameter " + $key)
+    if length == 1 and (.[0] | type == "string") and .[0] != ""
+    then .[0]
+    else error("missing, empty, or duplicate stack parameter " + $key)
     end
   ' <<<"$description"
 }
 
 instance="$(stack_output InstanceId)"
 volume="$(stack_output DataVolumeId)"
-relay_private_ip="$(stack_parameter_optional RelayPrivateIp)"
-stack_relay_domain="$(stack_parameter_optional RelayDomain)"
+stack_artifact_bucket="$(stack_parameter ArtifactBucket)"
+stack_artifact_prefix="$(stack_parameter ArtifactPrefix)"
+relay_private_ip="$(stack_parameter RelayPrivateIp)"
+
+bibites_require_s3_bucket "$stack_artifact_bucket" \
+  'ArtifactBucket stack parameter'
+bibites_require_s3_prefix "$stack_artifact_prefix" \
+  'ArtifactPrefix stack parameter'
+[ "$ARTIFACT_BUCKET" = "$stack_artifact_bucket" ] &&
+  [ "$ARTIFACT_PREFIX" = "$stack_artifact_prefix" ] || {
+  echo 'the runtime-only staging target differs from the selected stack artifacts' >&2
+  exit 1
+}
+
+relay_domain_parameters="$(jq -c '
+  [.Stacks[0].Parameters[] |
+    select(.ParameterKey == "RelayDomain") | .ParameterValue]
+' <<<"$description")"
+relay_domain_count="$(jq -r 'length' <<<"$relay_domain_parameters")"
+case "$relay_domain_count" in
+  0)
+    relay_domain="${BIBITES_RELAY_DOMAIN:-}"
+    [ -n "$relay_domain" ] || {
+      echo 'stack has no RelayDomain parameter; set BIBITES_RELAY_DOMAIN' >&2
+      exit 1
+    }
+    ;;
+  1)
+    relay_domain="$(jq -er '
+      .[0] | select(type == "string" and length > 0)
+    ' <<<"$relay_domain_parameters")" || {
+      echo 'stack RelayDomain parameter is empty or invalid' >&2
+      exit 1
+    }
+    if [ -n "${BIBITES_RELAY_DOMAIN:-}" ] &&
+       [ "$BIBITES_RELAY_DOMAIN" != "$relay_domain" ]; then
+      echo 'BIBITES_RELAY_DOMAIN differs from the stack RelayDomain parameter' >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo 'stack has duplicate RelayDomain parameters' >&2
+    exit 1
+    ;;
+esac
+
+credential_prefix_parameters="$(jq -c '
+  [.Stacks[0].Parameters[] |
+    select(.ParameterKey == "CredentialParameterPrefix") | .ParameterValue]
+' <<<"$description")"
+credential_prefix_count="$(jq -r 'length' <<<"$credential_prefix_parameters")"
+case "$credential_prefix_count" in
+  0)
+    credential_parameter_prefix="${BIBITES_CREDENTIAL_PARAMETER_PREFIX:-}"
+    [ -n "$credential_parameter_prefix" ] || {
+      echo 'stack has no CredentialParameterPrefix parameter; set BIBITES_CREDENTIAL_PARAMETER_PREFIX' >&2
+      exit 1
+    }
+    ;;
+  1)
+    credential_parameter_prefix="$(jq -er '
+      .[0] | select(type == "string" and length > 0)
+    ' <<<"$credential_prefix_parameters")" || {
+      echo 'stack CredentialParameterPrefix parameter is empty or invalid' >&2
+      exit 1
+    }
+    if [ -n "${BIBITES_CREDENTIAL_PARAMETER_PREFIX:-}" ] &&
+       [ "$BIBITES_CREDENTIAL_PARAMETER_PREFIX" != "$credential_parameter_prefix" ]; then
+      echo 'BIBITES_CREDENTIAL_PARAMETER_PREFIX differs from the stack CredentialParameterPrefix parameter' >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo 'stack has duplicate CredentialParameterPrefix parameters' >&2
+    exit 1
+    ;;
+esac
 
 bibites_require_resource_id "$instance" 'InstanceId stack output' i
 bibites_require_resource_id "$volume" 'DataVolumeId stack output' vol
 bibites_require_rfc1918_ipv4 "$relay_private_ip" 'RelayPrivateIp stack parameter'
-
-if [ -n "$stack_relay_domain" ]; then
-  relay_domain="$stack_relay_domain"
-  if [ -n "${BIBITES_RELAY_DOMAIN:-}" ] && [ "$BIBITES_RELAY_DOMAIN" != "$relay_domain" ]; then
-    echo 'BIBITES_RELAY_DOMAIN differs from the stack RelayDomain parameter' >&2
+bibites_require_hostname "$relay_domain" 'RelayDomain stack parameter'
+bibites_require_ssm_parameter "$credential_parameter_prefix" \
+  'CredentialParameterPrefix stack parameter'
+case "$BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX" in
+  "$credential_parameter_prefix"/*) ;;
+  *)
+    echo 'pointer credential parameters are outside the host-readable prefix' >&2
     exit 1
-  fi
-else
-  : "${BIBITES_RELAY_DOMAIN:?legacy stack has no RelayDomain; set an explicit validated BIBITES_RELAY_DOMAIN}"
-  relay_domain="$BIBITES_RELAY_DOMAIN"
-fi
-bibites_require_hostname "$relay_domain" BIBITES_RELAY_DOMAIN
-
-volume_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 describe-volumes \
-  --volume-ids "$volume" --output json)"
+    ;;
+esac
+volume_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ec2 \
+  describe-volumes --volume-ids "$volume" --output json)"
 jq -e --arg volume "$volume" --arg instance "$instance" '
   (.Volumes | length) == 1 and
   .Volumes[0].VolumeId == $volume and
@@ -120,7 +222,8 @@ jq -e --arg volume "$volume" --arg instance "$instance" '
 }
 
 managed_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm \
-  describe-instance-information --filters "Key=InstanceIds,Values=$instance" --output json)"
+  describe-instance-information --filters "Key=InstanceIds,Values=$instance" \
+  --output json)"
 jq -e --arg instance "$instance" '
   (.InstanceInformationList | length) == 1 and
   .InstanceInformationList[0].InstanceId == $instance and
@@ -133,31 +236,26 @@ jq -e --arg instance "$instance" '
 
 read -r -d '' remote_script <<'REMOTE' || true
 set -euo pipefail
-[ "$#" -eq 13 ] || { echo 'runtime update received the wrong argument count' >&2; exit 1; }
+[ "$#" -eq 17 ] || { echo 'runtime update received the wrong argument count' >&2; exit 2; }
 
 aws_region="$1"
-data_volume_id="$2"
-artifact_bucket="$3"
-runtime_key="$4"
-runtime_sha256="$5"
-game_key="$6"
-game_sha256="$7"
-bepinex_key="$8"
-bepinex_sha256="$9"
-manifest_key="${10}"
-relay_private_ip="${11}"
-relay_domain="${12}"
-runtime_root="${13}"
-
-[[ "$aws_region" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || exit 2
-[[ "$data_volume_id" =~ ^vol-[0-9a-f]{8,17}$ ]] || exit 2
-[[ "$artifact_bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || exit 2
-[[ "$runtime_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 2
-[[ "$game_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 2
-[[ "$bepinex_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 2
-[[ "$relay_private_ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || exit 2
-[[ "$relay_domain" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || exit 2
-[ "$runtime_root" = /opt/bibites-runtime ] || exit 2
+expected_account="$2"
+data_volume_id="$3"
+artifact_bucket="$4"
+artifact_prefix="$5"
+runtime_object="$6"
+runtime_sha256="$7"
+game_object="$8"
+game_sha256="$9"
+bepinex_object="${10}"
+bepinex_sha256="${11}"
+manifest_object="${12}"
+manifest_sha256="${13}"
+pointer_credential_prefix="${14}"
+relay_private_ip="${15}"
+relay_domain="${16}"
+runtime_root="${17}"
+runtime_key="$artifact_prefix/$runtime_object"
 
 archive="$(mktemp /tmp/bibites-runtime.XXXXXX.tar.gz)"
 new_runtime="$(mktemp -d /opt/bibites-runtime.new.XXXXXX)"
@@ -167,41 +265,45 @@ cleanup() {
 }
 trap cleanup EXIT
 
-aws --region "$aws_region" s3 cp "s3://$artifact_bucket/$runtime_key" "$archive" \
-  --only-show-errors
+aws --region "$aws_region" s3 cp \
+  "s3://$artifact_bucket/$runtime_key" "$archive" --only-show-errors
 printf '%s  %s\n' "$runtime_sha256" "$archive" | sha256sum -c -
 tar -xzf "$archive" -C "$new_runtime"
+test -x "$new_runtime/bibites-update-runtime-transaction"
+test -x "$new_runtime/bibites-activate-runtime"
 test -x "$new_runtime/install-host"
 test -x "$new_runtime/bibites-stop-worlds"
-test -x "$new_runtime/bibites-activate-runtime"
 test -r "$new_runtime/validate-world-manifest.jq"
-jq -n -f "$new_runtime/validate-world-manifest.jq" >/dev/null
-while IFS= read -r script; do
-  bash -n "$script"
-done < <(find "$new_runtime" -maxdepth 1 -type f -name 'bibites-*' -print)
+bash -n "$new_runtime/bibites-update-runtime-transaction"
+bash -n "$new_runtime/bibites-activate-runtime"
 
 set +e
-"$new_runtime/bibites-activate-runtime" \
-  "$new_runtime" "$archive" "$aws_region" "$data_volume_id" \
-  "$artifact_bucket" "$runtime_key" "$runtime_sha256" \
-  "$game_key" "$game_sha256" "$bepinex_key" "$bepinex_sha256" \
-  "$manifest_key" "$relay_private_ip" "$relay_domain" "$runtime_root"
-activate_status=$?
+"$new_runtime/bibites-update-runtime-transaction" \
+  "$new_runtime" "$archive" "$aws_region" "$expected_account" "$data_volume_id" \
+  "$artifact_bucket" "$artifact_prefix" "$runtime_object" "$runtime_sha256" \
+  "$game_object" "$game_sha256" "$bepinex_object" "$bepinex_sha256" \
+  "$manifest_object" "$manifest_sha256" "$pointer_credential_prefix" \
+  "$relay_private_ip" "$relay_domain" "$runtime_root"
+transaction_status=$?
 set -e
-exit "$activate_status"
+exit "$transaction_status"
 REMOTE
 
 remote_arguments=(
   "$AWS_REGION"
+  "$BIBITES_AWS_ACCOUNT_ID"
   "$volume"
   "$ARTIFACT_BUCKET"
-  "$runtime_key"
+  "$ARTIFACT_PREFIX"
+  "$RUNTIME_OBJECT"
   "$RUNTIME_SHA256"
-  "$game_key"
+  "$GAME_OBJECT"
   "$GAME_SHA256"
-  "$bepinex_key"
+  "$BEPINEX_OBJECT"
   "$BEPINEX_SHA256"
-  "$manifest_key"
+  "$MANIFEST_OBJECT"
+  "$MANIFEST_SHA256"
+  "$BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX"
   "$relay_private_ip"
   "$relay_domain"
   /opt/bibites-runtime
@@ -212,38 +314,59 @@ printf -v remote_command 'printf %%s %q | base64 -d | bash -s --%s' \
   "$encoded" "$quoted_arguments"
 parameters="$(jq -nc --arg command "$remote_command" \
   '{commands:[$command],executionTimeout:["3600"]}')"
-command_id="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm send-command \
-  --instance-ids "$instance" --document-name AWS-RunShellScript --parameters "$parameters" \
-  --comment 'Install staged Bibites cloud runtime' --timeout-seconds 120 \
-  --query Command.CommandId --output text)"
-[[ "$command_id" =~ ^[0-9a-f-]{36}$ ]] || {
-  echo "Systems Manager returned an invalid command identifier: $command_id" >&2
-  exit 1
-}
-set +e
-invocation="$(bibites_wait_ssm_invocation "$AWS_PROFILE" "$AWS_REGION" \
-  "$command_id" "$instance" 3720 3)"
-wait_status=$?
-set -e
 
+command_id=
+unknown_partial() {
+  if [[ "$command_id" =~ ^[0-9a-f-]{36}$ ]]; then
+    echo "runtime transaction $command_id has unknown partial state" >&2
+  else
+    echo 'runtime transaction has unknown partial state; command ID is unavailable' >&2
+  fi
+  echo 'Do not retry it blindly; reconcile the SSM command, host runtime, and pointer first.' >&2
+  exit 25
+}
+
+if ! command_id="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" ssm \
+  send-command --instance-ids "$instance" --document-name AWS-RunShellScript \
+  --parameters "$parameters" --comment 'Run guarded Bibites runtime transaction' \
+  --timeout-seconds 120 --query Command.CommandId --output text)"; then
+  echo 'Systems Manager send-command did not return a confirmed result.' >&2
+  unknown_partial
+fi
+[[ "$command_id" =~ ^[0-9a-f-]{36}$ ]] || {
+  echo 'Systems Manager accepted a transaction but returned an invalid command ID' >&2
+  unknown_partial
+}
+printf 'Systems Manager command ID: %s\n' "$command_id"
+
+if invocation="$(bibites_wait_ssm_invocation "$AWS_PROFILE" "$AWS_REGION" \
+  "$command_id" "$instance" 3720 3)"; then
+  wait_status=0
+else
+  wait_status=$?
+fi
 if [ -n "$invocation" ]; then
   jq '{status:.Status,responseCode:.ResponseCode,
     stdout:.StandardOutputContent,stderr:.StandardErrorContent}' <<<"$invocation"
 fi
+
 if [ "$wait_status" -eq 0 ]; then
-  "$repo/cloud/aws/promote-runtime.sh" "$RUNTIME_OBJECT" "$RUNTIME_SHA256"
+  success_response_code="$(jq -r '.ResponseCode // empty' <<<"$invocation")"
+  [ "$success_response_code" = 0 ] || unknown_partial
   exit 0
 fi
-
-response_code="$(jq -r '.ResponseCode // empty' <<<"${invocation:-{}}")"
-case "$response_code" in
-  20)
-    echo 'runtime update failed; the host completed rollback' >&2
-    exit 20
-    ;;
-  21)
-    echo 'runtime update failed; host rollback also failed' >&2
-    exit 21
-    ;;
+case "$wait_status" in
+  2|124) unknown_partial ;;
 esac
-exit "$wait_status"
+invocation_status="$(jq -r '.Status // empty' <<<"${invocation:-null}")"
+case "$invocation_status" in
+  TimedOut|Cancelled|Cancelling) unknown_partial ;;
+  Failed)
+    response_code="$(jq -r '.ResponseCode // empty' <<<"$invocation")"
+    case "$response_code" in
+      2|20|21|22|23|24|73) exit "$response_code" ;;
+      *) unknown_partial ;;
+    esac
+    ;;
+  *) unknown_partial ;;
+esac

@@ -41,10 +41,70 @@ done
 . "$validation"
 # shellcheck source=lib/host-change.sh
 . "$host_change"
+# Keep build identity separate from receipt identity. A missing field in either
+# file must not inherit a value from the caller or from the other file.
+unset RUNTIME_FILE RUNTIME_SHA256 GAME_FILE GAME_SHA256 \
+  BEPINEX_FILE BEPINEX_SHA256
 # shellcheck source=/dev/null
 . "$dist/artifacts.env"
+artifact_runtime_file="${RUNTIME_FILE:-}"
+artifact_runtime_sha256="${RUNTIME_SHA256:-}"
+artifact_game_file="${GAME_FILE:-}"
+artifact_game_sha256="${GAME_SHA256:-}"
+artifact_bepinex_file="${BEPINEX_FILE:-}"
+artifact_bepinex_sha256="${BEPINEX_SHA256:-}"
+# The receipt must supply its own scope, target, and staged identity. Do not let
+# ambient settings make an incomplete receipt look complete.
+unset AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX RUNTIME_OBJECT \
+  STAGING_SCOPE STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256 \
+  MANIFEST_OBJECT MANIFEST_SHA256
 # shellcheck source=/dev/null
 . "$dist/staged.env"
+RUNTIME_FILE="$artifact_runtime_file"
+RUNTIME_SHA256="$artifact_runtime_sha256"
+GAME_FILE="$artifact_game_file"
+GAME_SHA256="$artifact_game_sha256"
+BEPINEX_FILE="$artifact_bepinex_file"
+BEPINEX_SHA256="$artifact_bepinex_sha256"
+[ "${STAGING_SCOPE:-}" = complete ] || {
+  echo 'deploy-host.sh requires STAGING_SCOPE=complete from stage-artifacts.sh' >&2
+  exit 1
+}
+for receipt_name in STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256; do
+  [ -n "${!receipt_name:-}" ] || {
+    echo "the complete staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
+    exit 1
+  }
+  bibites_require_sha256 "${!receipt_name}" "$receipt_name"
+done
+[ "$STAGED_RUNTIME_SHA256" = "${RUNTIME_SHA256:-}" ] &&
+  [ "$STAGED_GAME_SHA256" = "${GAME_SHA256:-}" ] &&
+  [ "$STAGED_BEPINEX_SHA256" = "${BEPINEX_SHA256:-}" ] || {
+  echo 'the complete staging receipt does not match artifacts.env; run stage-artifacts.sh again' >&2
+  exit 1
+}
+[ "${RUNTIME_OBJECT:-}" = "runtime/$STAGED_RUNTIME_SHA256.tar.gz" ] || {
+  echo 'the complete staging receipt runtime object does not match its digest' >&2
+  exit 1
+}
+for receipt_name in MANIFEST_OBJECT MANIFEST_SHA256; do
+  [ -n "${!receipt_name:-}" ] || {
+    echo "the complete staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
+    exit 1
+  }
+done
+bibites_require_sha256 "$MANIFEST_SHA256" MANIFEST_SHA256
+bibites_require_s3_filename "$MANIFEST_OBJECT" MANIFEST_OBJECT
+[ "$MANIFEST_OBJECT" = "worlds.$MANIFEST_SHA256.json" ] || {
+  echo 'the complete staging receipt manifest object does not match its digest' >&2
+  exit 1
+}
+local_manifest_sha256="$(sha256sum "$dist/worlds.json" | awk '{print $1}')"
+[ "$local_manifest_sha256" = "$MANIFEST_SHA256" ] || {
+  echo 'the staged manifest does not match the complete staging receipt' >&2
+  echo 'run stage-artifacts.sh again' >&2
+  exit 1
+}
 
 : "${RUNTIME_OBJECT:?run stage-artifacts.sh again to create an immutable runtime object}"
 : "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
@@ -86,7 +146,7 @@ for key in \
   "$ARTIFACT_PREFIX/$RUNTIME_OBJECT" \
   "$ARTIFACT_PREFIX/$GAME_FILE" \
   "$ARTIFACT_PREFIX/$BEPINEX_FILE" \
-  "$ARTIFACT_PREFIX/worlds.json"; do
+  "$ARTIFACT_PREFIX/$MANIFEST_OBJECT"; do
   bibites_require_s3_key "$key" "deployment object key $key"
 done
 jq -e -f "$manifest_validator" "$dist/worlds.json" >/dev/null
@@ -106,9 +166,13 @@ bibites_require_account_id "$account" 'authenticated AWS account'
 
 pointer_file=runtime/current.json
 bibites_require_s3_key "$pointer_file" 'runtime pointer object'
+pointer_key="$ARTIFACT_PREFIX/$pointer_file"
+bibites_require_s3_key "$pointer_key" 'runtime pointer key'
 lookup_error="$(mktemp)"
 pointer_archive="$(mktemp)"
-trap 'rm -f "$lookup_error" "$pointer_archive"' EXIT
+pointer_path="$(mktemp)"
+current_pointer_path="$(mktemp)"
+trap 'rm -f "$lookup_error" "$pointer_archive" "$pointer_path" "$current_pointer_path"' EXIT
 if stack_description="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation \
   describe-stacks --stack-name "$stack" --output json 2>"$lookup_error")"; then
   stack_status="$(jq -er '.Stacks[0].StackStatus' <<<"$stack_description")"
@@ -130,16 +194,42 @@ else
   exit 1
 fi
 
-if pointer_document="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
-  "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - --only-show-errors \
-  2>"$lookup_error")"; then
-  bibites_require_runtime_pointer_document "$pointer_document"
+fetch_pointer_snapshot() {
+  local destination="$1" metadata
+  : >"$lookup_error"
+  : >"$destination"
+  metadata="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3api get-object \
+    --bucket "$ARTIFACT_BUCKET" --key "$pointer_key" "$destination" \
+    --output json 2>"$lookup_error")" || return 1
+  pointer_snapshot_etag="$(jq -er '
+    .ETag |
+    select(type == "string" and
+      test("^\\\"[0-9A-Fa-f]{32}(-[0-9]+)?\\\"$"))
+  ' <<<"$metadata")" || {
+    echo 'runtime pointer lookup returned an invalid ETag' >&2
+    return 2
+  }
+  pointer_snapshot_document="$(<"$destination")"
+  bibites_require_runtime_pointer_document "$pointer_snapshot_document" || return 2
+  pointer_snapshot_canonical="$(jq -cS . <<<"$pointer_snapshot_document")" || return 2
+}
+
+if fetch_pointer_snapshot "$pointer_path"; then
+  pointer_document="$pointer_snapshot_document"
+  prior_pointer_etag="$pointer_snapshot_etag"
+  prior_pointer_canonical="$pointer_snapshot_canonical"
   pointer_missing=0
-elif grep -Eq '(404|NoSuchKey|Not Found)' "$lookup_error"; then
-  pointer_missing=1
 else
-  sed 's/^/Runtime pointer lookup failed: /' "$lookup_error" >&2
-  exit 1
+  pointer_status=$?
+  if [ "$pointer_status" -eq 1 ] &&
+     grep -Eq '(404|NoSuchKey|Not Found)' "$lookup_error"; then
+    pointer_missing=1
+  elif [ "$pointer_status" -eq 1 ]; then
+    sed 's/^/Runtime pointer lookup failed: /' "$lookup_error" >&2
+    exit 1
+  else
+    exit 1
+  fi
 fi
 
 if [ "$pointer_missing" -eq 0 ]; then
@@ -176,6 +266,12 @@ else
 fi
 bibites_require_s3_key "$runtime_object" 'bootstrap runtime object'
 bibites_require_sha256 "$runtime_sha256" 'bootstrap runtime digest'
+if [ "$pointer_missing" -eq 1 ] && [ "$stack_exists" -eq 1 ] &&
+   [ "$runtime_object" != "runtime/$runtime_sha256.tar.gz" ]; then
+  echo 'the legacy stack runtime is not a matching content-addressed object' >&2
+  echo 'migrate the legacy runtime explicitly before creating the runtime pointer' >&2
+  exit 1
+fi
 
 use_legacy_attachment=false
 host_launch_template_version=1
@@ -248,7 +344,8 @@ parameters=(
   "ParameterKey=GameSha256,ParameterValue=$GAME_SHA256"
   "ParameterKey=BepInExFile,ParameterValue=$BEPINEX_FILE"
   "ParameterKey=BepInExSha256,ParameterValue=$BEPINEX_SHA256"
-  'ParameterKey=ManifestFile,ParameterValue=worlds.json'
+  "ParameterKey=ManifestFile,ParameterValue=$MANIFEST_OBJECT"
+  "ParameterKey=ManifestSha256,ParameterValue=$MANIFEST_SHA256"
   "ParameterKey=DataVolumeGiB,ParameterValue=$data_volume_gib"
   "ParameterKey=RelayPrivateIp,ParameterValue=$BIBITES_RELAY_PRIVATE_IP"
   "ParameterKey=RelayDomain,ParameterValue=$BIBITES_RELAY_DOMAIN"
@@ -308,7 +405,8 @@ require_change_parameter GameFile "$GAME_FILE"
 require_change_parameter GameSha256 "$GAME_SHA256"
 require_change_parameter BepInExFile "$BEPINEX_FILE"
 require_change_parameter BepInExSha256 "$BEPINEX_SHA256"
-require_change_parameter ManifestFile worlds.json
+require_change_parameter ManifestFile "$MANIFEST_OBJECT"
+require_change_parameter ManifestSha256 "$MANIFEST_SHA256"
 require_change_parameter DataVolumeGiB "$data_volume_gib"
 require_change_parameter RelayPrivateIp "$BIBITES_RELAY_PRIVATE_IP"
 require_change_parameter RelayDomain "$BIBITES_RELAY_DOMAIN"
@@ -357,13 +455,37 @@ set -e
   exit "$terminal_status"
 }
 
+if [ "$pointer_missing" -eq 0 ]; then
+  if fetch_pointer_snapshot "$current_pointer_path"; then
+    current_pointer_etag="$pointer_snapshot_etag"
+    if [ "$pointer_snapshot_canonical" != "$prior_pointer_canonical" ]; then
+      echo 'The stack completed, but runtime/current.json changed during the stack operation.' >&2
+      printf 'Runtime pointer ETags: before=%s after=%s\n' \
+        "$prior_pointer_etag" "$current_pointer_etag" >&2
+      echo 'Deployment status: partial. Reconcile runtime/current.json before another deployment.' >&2
+      exit 1
+    fi
+  else
+    pointer_status=$?
+    echo 'The stack completed, but the runtime pointer could not be verified.' >&2
+    if [ "$pointer_status" -eq 1 ] && [ -s "$lookup_error" ]; then
+      sed 's/^/Runtime pointer lookup failed: /' "$lookup_error" >&2
+    fi
+    echo 'Deployment status: partial. Reconcile runtime/current.json before another deployment.' >&2
+    exit 1
+  fi
+fi
+
 instance="$(jq -er '
   [.Stacks[0].Outputs[] | select(.OutputKey == "InstanceId") | .OutputValue] |
   if length == 1 then .[0] else error("missing deployed InstanceId output") end
 ' <<<"$terminal_description")"
 bibites_require_resource_id "$instance" 'deployed InstanceId output' i
 if [ "$pointer_missing" -eq 1 ]; then
-  "$repo/cloud/aws/promote-runtime.sh" --if-absent \
+  AWS_PROFILE="$AWS_PROFILE" AWS_REGION="$AWS_REGION" \
+    BIBITES_AWS_ACCOUNT_ID="$BIBITES_AWS_ACCOUNT_ID" \
+    ARTIFACT_BUCKET="$ARTIFACT_BUCKET" ARTIFACT_PREFIX="$ARTIFACT_PREFIX" \
+    "$repo/cloud/aws/promote-runtime.sh" --if-absent \
     "$runtime_object" "$runtime_sha256"
   pointer_document="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
     "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$pointer_file" - --only-show-errors)"

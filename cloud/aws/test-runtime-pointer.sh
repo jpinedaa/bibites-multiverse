@@ -40,7 +40,29 @@ grep -Fq 'require_change_parameter RuntimeSha256 "$runtime_sha256"' \
   "$repo/cloud/aws/deploy-host.sh"
 grep -Fq -- '"$repo/cloud/aws/promote-runtime.sh" --if-absent' \
   "$repo/cloud/aws/deploy-host.sh"
-grep -Fq '"$repo/cloud/aws/promote-runtime.sh" "$RUNTIME_OBJECT" "$RUNTIME_SHA256"' \
+grep -Fq 's3api get-object' "$repo/cloud/aws/deploy-host.sh"
+grep -Fq 'pointer_snapshot_canonical' "$repo/cloud/aws/deploy-host.sh"
+grep -Fq '[ "${STAGING_SCOPE:-}" = complete ]' \
+  "$repo/cloud/aws/deploy-host.sh"
+grep -Fq '[ "${STAGING_SCOPE:-}" = runtime-only ]' \
   "$repo/cloud/aws/update-runtime.sh"
+grep -Fq 'BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX' \
+  "$repo/cloud/aws/update-runtime.sh"
+grep -Fq '"$new_runtime/bibites-update-runtime-transaction"' \
+  "$repo/cloud/aws/update-runtime.sh"
+if grep -Fq 'promote-runtime.sh' "$repo/cloud/aws/update-runtime.sh"; then
+  echo 'runtime update still publishes outside the host-wide transaction' >&2
+  exit 1
+fi
+if grep -Fq -- '--if-match' "$repo/cloud/aws/promote-runtime.sh"; then
+  echo 'bootstrap promotion still exposes an existing-pointer write' >&2
+  exit 1
+fi
+grep -Fq 'AWS_PROFILE="$AWS_PROFILE" AWS_REGION="$AWS_REGION"' \
+  "$repo/cloud/aws/deploy-host.sh"
+grep -Fq 'BIBITES_AWS_ACCOUNT_ID="$BIBITES_AWS_ACCOUNT_ID"' \
+  "$repo/cloud/aws/deploy-host.sh"
+grep -Fq 'ARTIFACT_BUCKET="$ARTIFACT_BUCKET" ARTIFACT_PREFIX="$ARTIFACT_PREFIX"' \
+  "$repo/cloud/aws/deploy-host.sh"
 
 printf 'runtime-pointer fixtures passed\n'

@@ -9,6 +9,7 @@ set -euo pipefail
 : "${BEPINEX_KEY:?}"
 : "${BEPINEX_SHA256:?}"
 : "${MANIFEST_KEY:?}"
+: "${MANIFEST_SHA256:?}"
 : "${RELAY_PRIVATE_IP:?}"
 : "${RELAY_DOMAIN:?}"
 
