@@ -120,8 +120,16 @@ check() { # $1 what, $2 ok (0/1), $3 detail
 }
 ok()   { check "$1" 0; }
 scenario() { printf '\n==== %s\n' "$*"; }
-contains() { case "$2" in *"$1"*) return 0 ;; esac; return 1; }
+contains() { # [--] $1 needle, $2 text
+  [ "$1" != -- ] || shift
+  case "$2" in *"$1"*) return 0 ;; esac; return 1
+}
 b() { if "$@"; then echo 0; else echo 1; fi; }
+
+check "the text helper matches an option-like literal after --" \
+  "$(b contains -- '--credential-file' 'sidecar --credential-file path')"
+check "the text helper does not reduce an option-like literal to --" \
+  "$(if contains -- '--credential-file' 'sidecar --different-option path'; then echo 1; else echo 0; fi)"
 
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/bibites-multiverse-test-XXXXXXXX")"
 trap '[ "$KEEP_SANDBOX" -eq 1 ] || rm -rf "$SANDBOX"' EXIT
