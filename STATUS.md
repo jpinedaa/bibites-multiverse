@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-22 UTC.
 
-Bibites Multiverse `0.3.2` is public. The first announced service period runs from
+Bibites Multiverse `0.3.3` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
 
 ## Current public phase
@@ -68,7 +68,7 @@ request.
 
 | Item | Public state |
 |---|---|
-| Release | [`v0.3.2`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.2) |
+| Release | [`v0.3.3`](https://github.com/jpinedaa/bibites-multiverse/releases/tag/v0.3.3) |
 | Supported game | *The Bibites* `0.6.3.1` |
 | Plugin | `0.6.7` |
 | Mod-to-sidecar protocol | `contract-a/2.4` |
@@ -84,9 +84,10 @@ request.
 
 The release page provides checksums. The participant installer compares the game build with
 the support matrix before it changes the game directory, and it refuses an install over a world
-that is still running before it has changed anything. The Windows GUI starts the connected
-world after installation by default. A world starts at ten times the game's own speed, which the
-in-game speed slider still moves. The launcher runs a world headless, and a stop asks the world
+that is still running before it has changed anything. By default, the Windows GUI starts the
+connected world and opens the installed launcher after installation. A world starts at ten times
+the game's own speed, which the in-game speed slider still moves. The launcher runs a world
+headless, and a stop asks the world
 to save and quit through its own mod, so a headless world loses nothing either; the generated
 start script keeps its own headless switch and the same stop.
 The packaged public join configuration contains service addresses, not a shared world secret.
@@ -126,6 +127,9 @@ an upgrade over a Steam or itch.io game keeps the mod framework removable from t
 program file an earlier release left behind is swept by hash. The launcher also says when a newer
 release has been published — one anonymous background request to the project's own homepage, which
 nothing waits on, which is silent when it fails, and which `MULTIVERSE_NO_UPDATE_CHECK` turns off.
+Release `0.3.3` opens the installed graphical launcher after the default Windows setup starts the
+connected game. If Windows cannot open it, the installation stays complete and the world stays
+running. Setup shows the launcher's path for another try.
 Private maps still accept a private join-string file on both platforms.
 
 **The defect `0.3.1` fixes, and what a computer `0.3.0` already stranded needs.**

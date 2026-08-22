@@ -167,7 +167,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 
-$Release      = '0.3.2'
+$Release      = '0.3.3'
 $Here         = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ManifestName = 'MANIFEST.sha256'
 $MatrixName   = 'support-matrix.json'

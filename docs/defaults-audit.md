@@ -2,7 +2,7 @@
 
 **Every default this release ships with, what a bare install actually does with it, and a
 verdict.** Decision 7 named four of them and asked for the audit before the software met
-strangers. This audit was updated for release `0.3.2` on **2026-08-20**, against the code and
+strangers. This audit was updated for release `0.3.3` on **2026-08-22**, against the code and
 the package as they ship rather than against how they were described.
 
 **Who this is for:** a reviewer, and the operator. A participant does not need to read it — the
@@ -13,7 +13,7 @@ part of it that affects a player is stated on the release page, in
 
 Somebody downloads a package for their platform, runs its installer, and changes nothing else.
 On Windows, that means the single-file setup, its included game, automatic public enrollment,
-application shortcuts, and the selected start-after-install checkbox. On Linux, it means the
+application shortcuts, and the selected start-and-open checkbox. On Linux, it means the
 complete package, its included game, and automatic public enrollment. The mod settings below stay
 identical on both platforms. Package and enrollment defaults are marked where they differ. Two
 facts shape every verdict:
