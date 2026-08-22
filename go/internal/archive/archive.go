@@ -552,8 +552,10 @@ func New(cfg Config) (*Archive, error) {
 	}
 	if !usable {
 		// A file exists and this build cannot use it. THAT IS A LOSS AND IT IS
-		// SAID SO — but never a reason to refuse to run, because everything in it
-		// is derivable from the raw record that is still here.
+		// SAID SO — but never a reason to refuse to run. The archive rebuilds what
+		// the on-host raw window still contains. If older segments have retired,
+		// their aggregates need the confirmed cold copies; rollupLost keeps that
+		// difference visible instead of claiming the shorter replay is complete.
 		a.rollupLost = true
 		a.log.Error("archive: the roll-up state sidecar could not be read; "+
 			"the aggregates are being rebuilt by a FULL replay and the old file is "+

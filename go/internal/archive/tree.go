@@ -423,9 +423,10 @@ type SpeciesTree struct {
 	// own seats, from the same status frame the leaves came from.
 	Map TreeMap `json:"map"`
 
-	// LedgerOverflow is how many species the aggregate refused to track after
-	// speciesAggMax, carried here because THIS VIEW IS THE SPECIES LIST NOW and a
-	// truncated aggregate a reader cannot see is a wrong answer.
+	// LedgerOverflow is how many migration observations named a species the
+	// aggregate refused to track after speciesAggMax. The same species can be
+	// counted more than once. It is carried here because THIS VIEW IS THE SPECIES
+	// LIST NOW and a truncated aggregate a reader cannot see is a wrong answer.
 	LedgerOverflow int `json:"ledgerOverflow,omitempty"`
 	// LedgerRecords is how many records the whole ledger holds, the same number
 	// the flat index published.

@@ -21,7 +21,7 @@ Keep these records outside the public repository:
 | `ci-gate.sh` | The forced command for a CI deployment key. It accepts a fixed list of verbs and refuses everything else. |
 | `issue-join.sh` | Creates participant credentials during a planned relay restart. |
 | `restart-relay.sh` | Restarts the relay behind a peer gate, then proves the archive resubscribed before the first placement claim. Roughly 30 to 60 seconds. |
-| `restart-archive.sh` | Runs the complete-record archive sequence, guarded by the archive-deploy hold and the replay-headroom verdict. Costs a full ledger replay. |
+| `restart-archive.sh` | Runs the complete-record archive sequence. If the full raw record is present, it can preserve and rebuild a stale roll-up. |
 | `restart-lib.sh` | The half both restart scripts share: the peer gate, the waits, the proof, and the scratch directory its EXIT trap removes. Sourced, never run. |
 | `monitor.sh` | Checks services, capacity, certificates, backups, map health, and the monthly data-transfer allowance. |
 | `ce-reconcile.sh` | Reconciles the host's transfer counter against the invoice once a day. It runs on an operator machine, not on the host. |
@@ -40,6 +40,7 @@ Keep these records outside the public repository:
 | `test-ce-reconcile.sh` | Drives `ce-reconcile.sh` against a saved Cost Explorer response and a fake metric provider. It makes no API call. |
 | `test-ci-gate.sh` | Drives `ci-gate.sh` through its verb allowlist, including the attempts to get past it. |
 | `test-deploy.sh` | Checks `deploy.sh`'s kit listing digest against the method the deployment record defines. |
+| `test-restart-archive.sh` | Makes sure that a roll-up rebuild refuses an incomplete on-host raw record. |
 | `testdata/` | Saved Cost Explorer responses that `test-ce-reconcile.sh` parses, including a part-day response that pins the billing lag. |
 | `local-broadcast/` | Runs the optional Windows GPU broadcast fallback. |
 | `systemd/` | Service and timer units for the relay, archive, monitor, backup, host sampler, off-host segment copy, and viewer-presence signal. |
@@ -837,6 +838,7 @@ deploy/test-viewers-presence.sh
 deploy/test-ce-reconcile.sh
 deploy/test-ci-gate.sh
 deploy/test-deploy.sh
+deploy/test-restart-archive.sh
 ```
 
 Both restart procedures answer `--dry-run`, which walks every step and changes nothing:
@@ -844,7 +846,13 @@ Both restart procedures answer `--dry-run`, which walks every step and changes n
 ```sh
 deploy/restart-relay.sh --dry-run
 deploy/restart-archive.sh --dry-run
+deploy/restart-archive.sh --dry-run --rebuild-rollup
 ```
+
+If an aggregate correction needs a full replay, use `--rebuild-rollup`.
+The command preserves the old sidecar before it starts the archive.
+The command scans the durable segment receipts for an absent raw segment.
+If a raw segment is absent, restore its confirmed cold copy before you run the command.
 
 A dry run leaves no scratch directory behind, and neither does a real run, a refusal or an
 interrupt. `restart-archive.sh` copies `deploy.env` into `${TMPDIR:-/tmp}/multiverse-restart-*` to

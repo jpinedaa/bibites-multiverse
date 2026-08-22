@@ -2940,7 +2940,8 @@ function lfCount(x){
   }
   if (x.ledgerOverflow > 0){
     host.appendChild(document.createTextNode(" · "));
-    host.appendChild(unkEl(x.ledgerOverflow + " species past the aggregate's bound, untracked"));
+    host.appendChild(unkEl(x.ledgerOverflow +
+      " migration observation(s) for species past the aggregate's bound, untracked"));
   }
   // HOW SHORT THE TREND IS, SAID OUT LOUD. The sampled record began when this
   // archive did, which on the running rig is days rather than months, and a
