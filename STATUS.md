@@ -36,16 +36,22 @@ The dashboard shows this known critical result without weakening or hiding it.
 The dashboard is an on-host current view. It is not an external dead-man check or an off-host
 history store. Its Coverage section names the missing tests and profilers.
 
-### Migration-flow correction awaiting deployment
+### Localized migration-flow correction awaiting deployment
 
-On 2026-08-22, the exact five-minute lane view showed simultaneous `0/min` values across
-populated, live worlds. One lane can normally show zero when no organism crosses during one
-window. This sustained map-wide pattern was not normal.
+On 2026-08-22, protected five-minute lane samples showed a localized migration-flow problem.
+Specific live, populated sources had every open outbound lane at `0/min` in repeated samples.
+Aggregate migration across the map continued throughout the sampled period.
+One lane can normally show zero when no organism crosses during one window.
+Repeated zero values across every open outbound lane from a live, populated source need
+investigation.
 
-The relay accepted aggregate migration fan-in faster than one destination could answer under its
-per-connection frame limit. A full destination produced response bursts, reached the 50-frame
-ceiling at frame 51, and lost its relay connection. Reconnects, full queues, and `OVERLOADED`
-answers then reduced crossings across the map.
+The same period contained overload responses and relay capacity shedding from several destination
+paths.
+Code review found that migration traffic from many sources can aggregate at one destination.
+A destination response burst can then reach the per-connection frame limit.
+The relay can then close that destination connection.
+The protected observations correlate with this mechanism, but they do not prove that it caused
+every zero lane.
 
 The correction in this source tree paces physical migration writes for each destination identity.
 It also gives durable destination acknowledgements priority in the sidecar's existing send pace.
