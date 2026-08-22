@@ -422,11 +422,11 @@ not add a collector and does not invent a new severity model:
 
 ### View the dashboard
 
-After the dashboard is deployed, open
+Open the deployed dashboard at
 [`https://bibitesmultiverse.com/health`](https://bibitesmultiverse.com/health).
 The JSON projection is at
 [`https://bibitesmultiverse.com/api/health`](https://bibitesmultiverse.com/api/health).
-An HTTP `404` response means that the deployed archive does not contain the dashboard.
+An HTTP `404` response means that the running archive no longer contains the dashboard.
 
 Use this procedure to preview the page from a source checkout:
 
@@ -689,6 +689,10 @@ what is actually running.
 
 ### What exists today
 
+- **The production-health dashboard.** `/health` presents current service state, the newest
+  scheduled monitor results, and about two hours of service-host samples. `/api/health` supplies
+  its sanitized data. Both routes run on the service host, so they are not an off-host store or
+  dead-man check.
 - **Both host samplers.** The world host's sampler now also records PSI,
   `/proc/vmstat` and per-world resident memory, keeping every field it already
   had. The service host's sampler and its one-minute timer are installed and
@@ -768,18 +772,16 @@ what is actually running.
   `bibites-game@%i` wants `bibites-timescale@%i`, so a world that systemd brings
   back applies its target scale again instead of running silently at `x1`.
 
-Every reading above is a file on the host that produced it, and a person is the
-only reader. The one exception is the reconciliation, which is produced
-elsewhere and read by the monitor — and which is exactly why the monitor has to
-report its absence.
+Most readings above are files on the host that produced them. The dashboard reads scheduled
+monitor results and current service-host samples on that host. The reconciliation is produced
+elsewhere and read by the monitor. The monitor reports when that external reading is absent.
 
 ### What does not exist yet
 
 No *continuous* measurement ships off-box: no metrics agent, no time-series
 store, no log shipping, and no continuous profiling. The dashboard and its
-sanitized API now exist in source, but are not part of production until that
-source and the matching monitoring kit are deployed; even then they remain an
-on-host current view, not the missing off-host store or dead-man. The daily
+sanitized API now run in production. They remain an on-host current view, not the
+missing off-host store or dead-man. The daily
 reconciliation is the one exception and it travels the other way — an operator
 machine reads the provider and writes one file to the host. The Layer 3 path
 probe has not been written. The relay still does not log a close code, so the

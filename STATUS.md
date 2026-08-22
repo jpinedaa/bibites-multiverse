@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-21 UTC.
+Last updated: 2026-08-22 UTC.
 
 Bibites Multiverse `0.3.2` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
@@ -61,7 +61,7 @@ request.
 | Linux package | Complete archive with the authorized native game; an existing-game add-on remains available |
 | Public-map setup | Every participant package includes `public-map.json`. Installation creates a unique credential over HTTPS |
 | Homepage | Links the Windows setup, the Linux complete package, and the checksums of the newest release, and names which release that is. Neither the links nor the number carry a compiled-in version — the links address `/releases/latest` and the number is resolved from GitHub hourly in the background — so a release reaches the homepage with no deployment, and the page drops the number rather than guess if that lookup fails. A three-step Windows walkthrough sits under those links, with one line for Linux |
-| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The current source makes the Species tab expand vertically with the page. Wide timeline content keeps its horizontal scroll inside the drawing. |
+| Live console | Full-screen map fitting, visible-range brain and population charts, all-time and 24-hour population views, shared navigation, and a live homepage status light are deployed. The Species tab expands vertically with the page. The production-health dashboard is available at `/health`, with its sanitized data at `/api/health`. On 2026-08-22, the service rebuilt the species aggregate from the complete raw record. All migrated living species then had recorded ancestry. The one unrecorded living species was excluded seed stock that had never crossed. Wide timeline content keeps its horizontal scroll inside the drawing. |
 | Broadcast world | The broadcast page names the world on camera and draws its place in the map grid. The live map badges that world on its map cell, in the worlds table, and in its settings card, and every badge links back to the broadcast. |
 | Release process | Every pull request and every push to `main` runs the project's automated checks, and a version tag builds and publishes the release from the owner's own machine. The homepage follows the published release on its own |
 

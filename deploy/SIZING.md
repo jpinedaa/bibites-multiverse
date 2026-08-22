@@ -273,6 +273,13 @@ The command scans the durable segment receipts for an absent raw segment.
 If a raw segment is absent, restore its confirmed cold copy before the rebuild.
 An ordinary restart cannot recover observations that the old process did not write to the sidecar.
 
+Production deployed this repair at `0eb1c80` on 2026-08-22. The archive rebuilt the fold from
+`25,400,734` raw records in `406.39` seconds. The participant gate stayed raised for `424` seconds.
+The rebuilt aggregate held `4,379` species and `4,377` ancestry edges, with zero overflow.
+The rebuild reduced unrecorded living species from 14 to one. That remaining species was excluded
+seed stock with zero crossings, so it had no ancestry to record. The command preserved
+the prior roll-up before it replaced the active sidecar.
+
 Measured, on two pinned cores, replaying one copy of the production ledger of
 `2026-08-16` — `5,408,123` records — with the roll-up build:
 
