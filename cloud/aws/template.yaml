@@ -51,10 +51,12 @@ Parameters:
     AllowedPattern: '^[0-9a-f]{64}$'
   ManifestFile:
     Type: String
-    Default: worlds.json
     MinLength: 1
     MaxLength: 256
-    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+    AllowedPattern: '^worlds\.[0-9a-f]{64}\.json$'
+  ManifestSha256:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{64}$'
   DataVolumeGiB:
     Type: Number
     Default: 40
@@ -245,9 +247,17 @@ Resources:
             export BEPINEX_KEY='${ArtifactPrefix}/${BepInExFile}'
             export BEPINEX_SHA256='${BepInExSha256}'
             export MANIFEST_KEY='${ArtifactPrefix}/${ManifestFile}'
+            export MANIFEST_SHA256='${ManifestSha256}'
             export RELAY_PRIVATE_IP='${RelayPrivateIp}'
             export RELAY_DOMAIN='${RelayDomain}'
             /opt/bibites-runtime/install-host
+            # Bootstrap from the receipt-pinned manifest. Ongoing sync follows
+            # the mutable manifest that complete staging publishes last.
+            sed -i \
+              's|^MANIFEST_KEY=.*$|MANIFEST_KEY=${ArtifactPrefix}/worlds.json|' \
+              /etc/bibites-cloud.conf
+            grep -Fxq 'MANIFEST_KEY=${ArtifactPrefix}/worlds.json' \
+              /etc/bibites-cloud.conf
             systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || true
 
   Host:

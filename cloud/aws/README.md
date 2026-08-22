@@ -35,7 +35,7 @@ Do not commit their contents.
 
 The workstation needs these tools:
 
-- AWS CLI v2 with `s3api put-object --if-none-match` support.
+- AWS CLI v2 whose `s3api put-object` model supports both `--if-none-match` and `--if-match`.
 - `file`, `jq`, `unzip`, GNU tar, `gzip` with `-n` support, and `sha256sum`.
 - Go and the .NET SDK for a runtime build.
 - Permission to deploy CloudFormation, IAM, EC2, EBS, S3, SSM, and DLM resources.
@@ -197,10 +197,34 @@ The script rejects two save keys that have the same basename.
 
 The script creates a private encrypted S3 bucket when necessary.
 It blocks public access and uploads every artifact and save first.
-It uploads `worlds.json` last, so a host cannot read incomplete references.
+It creates content-addressed runtime and manifest objects with `If-None-Match: *`.
+It checks each digest-derived object after every conditional PUT result, including a lost success
+response.
+It accepts an existing object only when its content has the expected digest.
+It never replaces an object stored under a digest-derived key.
+It uploads mutable `worlds.json` last, so a host cannot read incomplete references.
 The immutable runtime upload is a candidate only.
 Staging does not change `runtime/current.json`, which names the last runtime that completed host
 activation.
+
+Complete staging writes an owner-only receipt after all uploads succeed.
+The receipt binds the AWS target, the three build digests, and the exact manifest object and digest.
+Complete-stage consumers compare the receipt with the current build and local manifest before they
+call AWS.
+They reject a missing, stale, runtime-only, or ambient-substituted value.
+
+`stage-artifacts.sh --runtime-only` pins every input used by an in-place runtime transaction.
+It checks the locally built runtime, game, and BepInEx archives.
+It also reads and validates the current private `worlds.json` object.
+It then creates and verifies four digest-derived objects: the runtime, game, BepInEx, and manifest
+snapshot.
+The manifest snapshot stays beside `worlds.json`, so its relative save keys keep the same meaning.
+
+Runtime-only staging does not read a local save directory or replace a mutable artifact, save, or
+`worlds.json`.
+It writes an owner-only receipt with every exact object and digest.
+Use this mode only when the protected inputs are unchanged and the transaction will install a
+script, plugin, or sidecar change.
 
 Record the bucket and object prefix in private operations storage.
 
@@ -215,7 +239,8 @@ Apply a private manifest change with this sequence:
 ```
 
 `stage-artifacts.sh` validates the manifest and every referenced save before an AWS mutation.
-It uploads immutable runtime inputs and saves before it replaces `worlds.json`.
+It creates exact runtime and manifest objects before it replaces `worlds.json`.
+It also uploads the game, BepInEx, and save archives before that replacement.
 
 `sync-host.sh` asks the existing host to download that object.
 The host applies the same schema validator before it changes world services.
@@ -278,6 +303,9 @@ Use the wrapper instead of a direct CloudFormation deployment.
 
 The wrapper also checks every manifest credential parameter.
 Each parameter must be a `SecureString` that uses the default `aws/ssm` KMS key.
+It accepts only a complete staging receipt.
+A runtime-only receipt cannot reuse a local manifest or artifact from an older complete stage.
+The change set binds the receipt's content-addressed manifest name and SHA-256 value.
 
 The wrapper permits only two change-set shapes:
 
@@ -302,10 +330,17 @@ CloudFormation attachment deadlock.
 
 The bootstrap change set contains an exact runtime object and SHA-256 value.
 UserData does not read the mutable `runtime/current.json` pointer.
+Bootstrap also downloads the receipt-pinned manifest and checks its SHA-256 value before use.
+After successful installation, the host configuration returns to the ordinary mutable
+`worlds.json` key for later manifest synchronization.
 If the pointer does not exist, the wrapper conditionally creates it after the stack reaches a
 successful terminal state.
 The wrapper accepts a concurrent pointer only when it identifies the same verified archive.
 It refuses to overwrite a different concurrent pointer.
+When the pointer already exists, the wrapper snapshots its content and ETag before the stack
+operation.
+It reads the pointer again after stack success and requires the same canonical descriptor.
+Pointer drift after a completed stack reports a partial deployment that needs reconciliation.
 
 Host replacement and adoption are blocked.
 The current Spot and CloudFormation path cannot retain a failed replacement safely in all failure
@@ -377,14 +412,11 @@ target time scale again without an operator command.
 This matters for every restart the host performs by itself: the time-scale unit is a completed
 `Type=oneshot`, and ordering alone does not run it again.
 
-The host installer does not install this script and does not enable this timer.
-Install and enable both explicitly on a host that runs worlds:
+The host installer installs this script and enables the timer on a host that runs worlds.
+After installation, use a dry run to see which world the recycler would select:
 
 ```sh
-sudo install -m 0755 /opt/bibites-runtime/bibites-recycle-world \
-  /usr/local/libexec/bibites-recycle-world
 sudo /usr/local/libexec/bibites-recycle-world --dry-run
-sudo systemctl enable --now bibites-recycle.timer
 ```
 
 The dry run names the world it would choose and changes nothing.
@@ -467,10 +499,18 @@ Use an in-place runtime update for scripts, the plugin, or the sidecar:
 
 ```sh
 ./cloud/aws/build-artifacts.sh
-./cloud/aws/stage-artifacts.sh
+./cloud/aws/stage-artifacts.sh --runtime-only
 ./cloud/aws/update-runtime.sh
 ./cloud/aws/verify-host.sh
 ```
+
+`update-runtime.sh` accepts only a runtime-only staging record.
+That record pins immutable copies of the current game, BepInEx, and manifest inputs for candidate
+activation and automatic rollback.
+It does not overwrite an existing save or replace mutable `worlds.json` in S3.
+Activation reapplies the pinned manifest, current credentials, environment files, and unit state.
+If an installed save is missing, the installer restores it from the object named in that manifest.
+Use [Apply a manifest update](#apply-a-manifest-update) for a manifest or save change.
 
 CAUTION: Do not deploy the host stack only to update runtime files.
 Use the in-place procedure in this section.
@@ -480,241 +520,114 @@ CAUTION: This procedure stops every world on the host.
 `bibites-activate-runtime` runs `bibites-stop-worlds` first, which stops the time-scale, game, and
 sidecar unit of every world before it installs the new tree.
 It then runs the installer, which also replaces the plugin in each world's game folder.
-When only the sidecar binary changed, use
-[Upgrade the sidecar without a world restart](#upgrade-the-sidecar-without-a-world-restart)
-instead.
+Use the same transaction when only the sidecar changed.
+There is no supported rolling sidecar installation; see
+[Sidecar-only updates](#sidecar-only-updates).
 
-The update wrapper validates every stack value before it stops a world.
-It also confirms that the data volume is attached and the Systems Manager target is online.
+The update needs a one-hour pointer session with only `GetObject` and conditional `PutObject`
+access to `runtime/current.json`.
+Store its three values in default-key `SecureString` parameters below the host-readable prefix:
 
-The host downloads and checks the new runtime before it stops a service.
-A non-blocking host lock rejects a second activation.
-Systems Manager gets one command and an explicit one-hour execution timeout.
+```text
+<temporary-prefix>/access-key-id
+<temporary-prefix>/secret-access-key
+<temporary-prefix>/session-token
+```
+
+Set `BIBITES_POINTER_CREDENTIAL_PARAMETER_PREFIX` to `<temporary-prefix>`.
+The wrapper sends only this prefix to Systems Manager.
+The values do not enter Systems Manager metadata, command output, or an installed service.
+The host reads them after it holds the runtime lock.
+It unsets the credential variables when the transaction exits.
+
+Create these parameters immediately before the update.
+Do not reuse their one-hour session for another operation.
+Delete all three parameters only after the Systems Manager command reaches a reconciled terminal
+state.
+If the wrapper returns `25`, keep them until you reconcile the command, host, and pointer.
+
+The local wrapper validates the receipt and stack before it sends the command.
+It also confirms the attached data volume and an online Systems Manager target.
+Systems Manager receives one command with an explicit one-hour execution limit.
 The wrapper polls that command through a bounded terminal-state check.
 
-If installation fails, the activator stops partial new services.
+The remote transaction waits no more than five minutes for the host runtime lock.
+It holds that lock across the authoritative pointer read, activation, publication, and rollback.
+A second update can wait or return `73`, but it cannot interleave with the first update.
+
+Before it stops a service, the transaction completes these checks:
+
+- The instance role and pointer session belong to the expected AWS account.
+- The staged bucket and prefix match the selected stack and the live host configuration.
+- The host AWS CLI supports conditional encrypted pointer publication.
+- The candidate and prior runtime archives match their SHA-256 values.
+- The pinned game, BepInEx, and manifest objects match the staging receipt.
+- The manifest passes the public schema validator.
+- The host configuration names the ordinary `worlds.json` object exactly once.
+- The live region and relay URL match the transaction target.
+
+The transaction keeps the verified prior archive in a temporary host file during the command.
+Automatic rollback during that command does not depend on a second download of the object.
+
+If installation fails, the activator stops partial candidate services.
 It keeps the failed runtime and archive below `/opt` with a dated `failed` name.
 It then restores the old runtime and runs the old installer.
 That installer restores host files, plugin files, units, configuration, and world services.
 
-Exit status `20` means that activation failed and rollback completed.
-Exit status `21` means that activation and rollback both failed.
+After activation, the transaction restores the ordinary manifest key before pointer publication.
+It then replaces `runtime/current.json` only when the original ETag still matches.
+The new descriptor names the installed runtime and the next bootstrap source.
 
-After a successful activation, the wrapper promotes its content-addressed archive through one S3
-write to `runtime/current.json`.
-The descriptor is the next bootstrap candidate; a failed activation leaves it unchanged.
-If activation succeeds but descriptor publication fails, rerun this idempotent promotion after
-verification:
+If publication reports an error, the transaction reads the pointer again while it holds the lock.
+An identical candidate means that publication succeeded despite the lost response.
+An unchanged prior pointer causes rollback from the retained archive.
+A third or unreadable pointer leaves the candidate active for operator reconciliation.
 
-```sh
-./cloud/aws/promote-runtime.sh
-```
+The transaction uses these distinct terminal results:
 
-An older stack can lack the `RelayDomain` parameter.
-For that stack only, set an explicit `BIBITES_RELAY_DOMAIN` before the update.
-The wrapper validates the fallback name before it sends a remote command.
+| Status | Meaning |
+|---:|---|
+| `2` | Preflight rejected the transaction before a service stopped |
+| `20` | Candidate activation failed, and the prior runtime was restored |
+| `21` | Candidate activation failed, and its rollback also failed |
+| `22` | A pre-publication configuration check or pointer write failed. The prior runtime was restored |
+| `23` | Pointer state is unknown or names a third runtime. The candidate stays active for reconciliation |
+| `24` | Prior-runtime or manifest-configuration recovery failed |
+| `25` | Systems Manager acceptance or final state is unknown; do not retry blindly |
+| `73` | Another runtime transaction held the host lock until the bounded wait ended |
 
-## Upgrade the sidecar without a world restart
+CAUTION: A candidate activation stops and starts every configured game, sidecar, and time-scale
+unit.
+An automatic rollback stops and starts them a second time.
+During either service gap, organisms already written to a socket or accepted into a destination
+transport queue can be lost under the relay's at-most-once forwarding contract.
 
-Use this procedure when the sidecar binary is the only changed part of the runtime.
-It replaces one file and restarts one unit per world.
-It does not stop a game, and it does not move the plugin.
+An older stack can lack the `RelayDomain` and `CredentialParameterPrefix` parameters.
+For that stack only, set `BIBITES_RELAY_DOMAIN` and `BIBITES_CREDENTIAL_PARAMETER_PREFIX`
+explicitly.
+The wrapper validates both fallback values before it sends a remote command.
+The temporary pointer-credential prefix must be below the credential fallback.
+When the stack has either parameter, an explicit value must match it.
 
-The full runtime update in the previous section is the correct tool for a plugin change, a unit
-change, or a script change.
-It is the wrong tool for a sidecar change, because it stops every world at once to install a file
-that no game reads.
+## Sidecar-only updates
 
-### What a sidecar restart costs
+Do not replace sidecar binaries manually or restart sidecars one world at a time in production.
+That procedure cannot hold the runtime activator's host lock across both installed copies and the
+bootstrap-pointer publication.
+A concurrent update or a failed pointer compare-and-swap can therefore leave `/srv`, `/opt`, and
+`runtime/current.json` naming different runtimes.
 
-The world's Contract B link drops for the length of the restart.
-The relay routes organisms around a dark slot while the link is down.
+Use the full transaction in [Runtime updates](#runtime-updates).
+Its runtime-only staging mode creates verified immutable snapshots without replacing the mutable
+game archive, BepInEx archive, saves, or `worlds.json`.
+The transaction replaces the complete runtime, checks both the candidate and rollback archives,
+serializes host activation, and publishes the pointer conditionally.
+Its service interruption and possible second restart during automatic rollback are the cost of
+keeping the installed host and bootstrap source coherent.
 
-The mod's Contract A link drops with it and reconnects on its own backoff, between one and thirty
-seconds, with the same session.
-The mod then re-sends every unresolved `MIGRATE_OUT` frame, unchanged.
-An organism in flight stays inert. It is not lost, and it is not duplicated.
-
-The journal is durable before an acknowledgment, so a queued crossing survives the restart.
-The game keeps running and keeps simulating throughout.
-
-### Build
-
-`build-artifacts.sh` builds the sidecar and the plugin, and it needs the Go toolchain and the .NET
-SDK. Set both roots when they are not on the default path:
-
-```sh
-export GOROOT=/path/to/go
-export DOTNET_ROOT=/path/to/dotnet
-export BIBITES_GAME_ZIP=/protected/path/TheBibites-Linux.zip
-export BIBITES_BEPINEX_ZIP=/protected/path/BepInEx-linux-x64.zip
-./cloud/aws/build-artifacts.sh
-sha256sum cloud/aws/dist/runtime/multiverse-sidecar
-```
-
-Build only the sidecar when the .NET SDK is not available.
-Use the same flags that `build-artifacts.sh` uses, or the result is a different file:
-
-```sh
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go -C go build -buildvcs=false -trimpath -o /tmp/multiverse-sidecar ./cmd/sidecar
-```
-
-### Identity of a deployed sidecar
-
-The build passes `-buildvcs=false`, so the binary carries no commit stamp.
-`go version -m` reports the toolchain, the dependency versions, and the build settings, and it
-reports no `vcs.revision`:
-
-```sh
-go version -m cloud/aws/dist/runtime/multiverse-sidecar
-```
-
-The SHA-256 of the file is therefore the only identity a deployed sidecar has.
-Record that digest together with the public commit in private operations storage.
-`--my-slot` reports a `sidecarVersion`, but that field is a contract version and not a build
-identity: two different builds report the same string.
-
-A binary built before `-buildvcs=false` was added to `build-artifacts.sh` does carry a stamp.
-Read it from a host that has no Go toolchain with `grep` on the file itself:
-
-```sh
-grep -aoE 'vcs\.(revision|time|modified)=[^[:space:]]+' /srv/bibites/bin/multiverse-sidecar
-```
-
-Never send the stderr of that probe to `/dev/null`.
-A missing tool and a true negative give the same empty output.
-
-### Upload
-
-Upload the runtime archive under the content-addressed key that `stage-artifacts.sh` uses.
-The key is immutable, and it does not replace `worlds.json`, so no host picks it up by itself:
-
-```sh
-. cloud/aws/dist/artifacts.env
-aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
-  cloud/aws/dist/bibites-cloud-runtime.tar.gz \
-  "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/runtime/$RUNTIME_SHA256.tar.gz" --only-show-errors
-```
-
-Do not run `stage-artifacts.sh` for this change.
-It also uploads the game archive, the BepInEx archive, and every save, and it replaces
-`worlds.json`. None of those inputs changed.
-
-### Install the binary
-
-Send one Systems Manager command to the host.
-Every step before the rename is a read.
-
-```sh
-stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-install -d -m 0700 "/root/sidecar-backup-$stamp"
-cp -a /srv/bibites/bin/multiverse-sidecar "/root/sidecar-backup-$stamp/multiverse-sidecar"
-sha256sum "/root/sidecar-backup-$stamp/multiverse-sidecar"
-
-work="$(mktemp -d)"
-aws --region "$AWS_REGION" s3 cp "s3://$ARTIFACT_BUCKET/$RUNTIME_KEY" "$work/runtime.tar.gz" \
-  --only-show-errors
-printf '%s  %s\n' "$RUNTIME_SHA256" "$work/runtime.tar.gz" | sha256sum -c -
-tar -xzf "$work/runtime.tar.gz" -C "$work" ./multiverse-sidecar
-printf '%s  %s\n' "$SIDECAR_SHA256" "$work/multiverse-sidecar" | sha256sum -c -
-
-install -m 0755 -o root -g root "$work/multiverse-sidecar" /srv/bibites/bin/multiverse-sidecar.new
-mv -f /srv/bibites/bin/multiverse-sidecar.new /srv/bibites/bin/multiverse-sidecar
-install -m 0755 "$work/multiverse-sidecar" /opt/bibites-runtime/multiverse-sidecar.new
-mv -f /opt/bibites-runtime/multiverse-sidecar.new /opt/bibites-runtime/multiverse-sidecar
-rm -rf "$work"
-```
-
-CAUTION: Replace the running path with `mv` and never with a direct write.
-Linux refuses to open a file that a process is executing.
-`cp` onto that path fails with `Text file busy`.
-`install` does not fail: it deletes the destination and writes a new file instead.
-That recovery works, and it leaves a window in which the path holds a partial file or no file at
-all. A sidecar that restarts inside that window cannot start.
-A rename has no such window. It replaces the directory entry in one step, and each running sidecar
-keeps its old file until it restarts.
-
-The second rename updates `/opt/bibites-runtime/multiverse-sidecar`, which is the file the host
-installer copies from.
-Without it, the next `install-host` run puts the old sidecar back.
-That run happens on a full runtime update and on the rollback path of a failed one.
-
-### Restart one world at a time
-
-```sh
-systemctl restart bibites-sidecar@<world-id>.service
-```
-
-The game unit is not restarted.
-`bibites-game@%i.service` names the sidecar in `Wants=` and `After=`, and neither setting
-propagates a restart.
-
-Wait for the world to take its slot again before the next world:
-
-```sh
-sudo bibites-cloud-status --json | jq --arg id '<world-id>' \
-  '.[] | select(.id == $id)'
-sudo -u bibites /srv/bibites/bin/multiverse-sidecar \
-  --data-dir /srv/bibites/worlds/<world-id>/sidecar --my-slot --json | jq
-```
-
-`reason=reclaimed` means the world returned to its own slot and its own position.
-The live sidecar state must report configured credentials, a connected relay, and a current grant.
-`bibites-cloud-status` must report `sidecar=active` and `game=active` for that world.
-Use the sidecar log only as optional context for a failed live check.
-
-Wait at least 60 seconds after each world before the next one.
-Three reasons ask for the wait:
-
-- Each restart is one departure and one return in the relay's registry.
-  The relay widens its status-broadcast window while registry changes arrive in bursts, so six
-  restarts together make the map noisier for longer than six spaced restarts.
-- The world recycler holds off while any world is dark.
-  Spaced restarts leave it a quiet moment between them.
-- A failure belongs to one named world, and the next world has not moved yet.
-
-### Verify
-
-Read the per-socket byte counters on the host before the first restart and again after the last
-one. Compare the same interval:
-
-```sh
-ss -tinp state established
-```
-
-Each world holds two sockets.
-The Contract B socket goes to the relay address on port `443`, and its rate is what a wire change
-moves.
-The Contract A socket is on `127.0.0.1` between the sidecar and its own game, and its rate is the
-control: a change on that socket means something other than the wire moved.
-
-### Roll back
-
-Install the saved binary the same way, then restart the sidecar units one at a time:
-
-```sh
-install -m 0755 "/root/sidecar-backup-<stamp>/multiverse-sidecar" \
-  /srv/bibites/bin/multiverse-sidecar.new
-mv -f /srv/bibites/bin/multiverse-sidecar.new /srv/bibites/bin/multiverse-sidecar
-systemctl restart bibites-sidecar@<world-id>.service
-```
-
-### Make the sidecar update durable
-
-The manual sidecar procedure does not move the bootstrap runtime pointer by itself.
-After every world passes the live checks, promote the staged archive:
-
-```sh
-. cloud/aws/dist/artifacts.env
-./cloud/aws/promote-runtime.sh "runtime/$RUNTIME_SHA256.tar.gz" "$RUNTIME_SHA256"
-```
-
-The command checks the source archive and any existing content-addressed copy before it publishes
-`runtime/current.json`.
-The next reviewed bootstrap change set then binds that complete runtime, including the sidecar just
-verified.
-Record its digest and public commit in private operations storage.
+The sidecar binary is built with `-buildvcs=false`, so its SHA-256 is its deployed identity.
+Record that digest with the public commit in private operations storage.
+The `sidecarVersion` value from `--my-slot` is a protocol contract version, not a build identity.
 
 ## Backups and recovery
 
@@ -741,8 +654,12 @@ The deployment wrapper performs read-only checks for these properties:
 - The Spot quota covers the selected type's default vCPU count.
 - The relay and RTMP destinations use approved private routes.
 - The publish parameter is a default-key `SecureString`.
-- The staged manifest disables `slot-1`.
+- The immutable manifest snapshot matches its pinned digest, passes schema validation, and disables
+  `slot-1`.
 - The snapshot is complete, encrypted, and owned by the approved account.
+
+The wrapper passes the immutable manifest object and SHA-256 to bootstrap.
+The host checks its digest, schema, and disabled `WorldId` before the installer or success signal.
 
 The route check uses the longest matching AWS route.
 It rejects a more specific blackhole, internet gateway, NAT gateway, or network interface route.

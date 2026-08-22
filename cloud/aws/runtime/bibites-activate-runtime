@@ -2,7 +2,7 @@
 # Activate one validated runtime tree. Restore the old tree after any failure.
 set -euo pipefail
 
-[ "$#" -eq 15 ] || {
+[ "$#" -eq 16 ] || {
   echo 'runtime activation received the wrong argument count' >&2
   exit 2
 }
@@ -19,9 +19,10 @@ game_sha256="$9"
 bepinex_key="${10}"
 bepinex_sha256="${11}"
 manifest_key="${12}"
-relay_private_ip="${13}"
-relay_domain="${14}"
-runtime_root="${15}"
+manifest_sha256="${13}"
+relay_private_ip="${14}"
+relay_domain="${15}"
+runtime_root="${16}"
 old_runtime="$runtime_root.previous"
 lock_file="${BIBITES_RUNTIME_LOCK_FILE:-/run/lock/bibites-runtime-update.lock}"
 
@@ -59,7 +60,8 @@ valid_ipv4() {
 for key in "$runtime_key" "$game_key" "$bepinex_key" "$manifest_key"; do
   valid_key "$key" || die 'invalid artifact object key'
 done
-for digest in "$runtime_sha256" "$game_sha256" "$bepinex_sha256"; do
+for digest in "$runtime_sha256" "$game_sha256" "$bepinex_sha256" \
+  "$manifest_sha256"; do
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die 'invalid artifact digest'
 done
 valid_ipv4 "$relay_private_ip" || die 'invalid relay address'
@@ -86,11 +88,28 @@ fi
 [ -f "$archive" ] || die 'the staged runtime archive is missing'
 [ ! -e "$old_runtime" ] || die 'a previous runtime transaction is unresolved'
 
-exec 9>"$lock_file"
-flock -n 9 || {
-  echo 'another runtime activation holds the host lock' >&2
-  exit 73
-}
+if [ -n "${BIBITES_RUNTIME_LOCK_FD:-}" ]; then
+  [[ "$BIBITES_RUNTIME_LOCK_FD" =~ ^[0-9]+$ ]] &&
+    (( 10#$BIBITES_RUNTIME_LOCK_FD >= 3 &&
+       10#$BIBITES_RUNTIME_LOCK_FD <= 1024 )) ||
+    die 'invalid inherited runtime lock descriptor'
+  inherited_lock_target="$(readlink "/proc/$$/fd/$BIBITES_RUNTIME_LOCK_FD")" ||
+    die 'inherited runtime lock descriptor is not open'
+  canonical_lock_file="$(readlink -f "$lock_file")" ||
+    die 'runtime lock path cannot be resolved'
+  [ "$inherited_lock_target" = "$canonical_lock_file" ] ||
+    die 'inherited runtime lock descriptor names a different file'
+  flock -n "$BIBITES_RUNTIME_LOCK_FD" || {
+    echo 'another runtime activation holds the host lock' >&2
+    exit 73
+  }
+else
+  exec 9>"$lock_file"
+  flock -n 9 || {
+    echo 'another runtime activation holds the host lock' >&2
+    exit 73
+  }
+fi
 
 run_installer() {
   local tree="$1"
@@ -103,6 +122,7 @@ run_installer() {
     BEPINEX_KEY="$bepinex_key" \
     BEPINEX_SHA256="$bepinex_sha256" \
     MANIFEST_KEY="$manifest_key" \
+    MANIFEST_SHA256="$manifest_sha256" \
     RELAY_PRIVATE_IP="$relay_private_ip" \
     RELAY_DOMAIN="$relay_domain" \
     "$tree/install-host"

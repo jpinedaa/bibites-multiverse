@@ -165,9 +165,19 @@ BEPINEX_FILE=bepinex.zip
 BEPINEX_SHA256=2222222222222222222222222222222222222222222222222222222222222222
 EOF
 cat >"$fixture_dist/staged.env" <<'EOF'
+AWS_PROFILE=fixture
+AWS_REGION=us-east-1
 ARTIFACT_BUCKET=fixture-artifacts
 ARTIFACT_PREFIX=cloud/v1
+RUNTIME_OBJECT=runtime/RUNTIME_SHA_PLACEHOLDER.tar.gz
+STAGED_RUNTIME_SHA256=RUNTIME_SHA_PLACEHOLDER
+STAGED_GAME_SHA256=1111111111111111111111111111111111111111111111111111111111111111
+STAGED_BEPINEX_SHA256=2222222222222222222222222222222222222222222222222222222222222222
+MANIFEST_OBJECT=worlds.MANIFEST_SHA_PLACEHOLDER.json
+MANIFEST_SHA256=MANIFEST_SHA_PLACEHOLDER
+STAGING_SCOPE=complete
 EOF
+sed -i "s/RUNTIME_SHA_PLACEHOLDER/$runtime_sha/g" "$fixture_dist/staged.env"
 cat >"$fixture_dist/worlds.json" <<'EOF'
 {"schema":1,"worlds":[{"id":"slot-1","peerId":"slot-1-fixture",
 "worldName":"Fixture-World","sidecarPort":8787,"saveKey":"imports/Fixture-World.zip",
@@ -175,30 +185,38 @@ cat >"$fixture_dist/worlds.json" <<'EOF'
 "preferredSlot":1,"targetTimeScale":1,"saveMinutes":10,"saveKeep":6,
 "enabled":true}]}
 EOF
+manifest_sha="$(sha256sum "$fixture_dist/worlds.json" | awk '{print $1}')"
+sed -i "s/MANIFEST_SHA_PLACEHOLDER/$manifest_sha/g" "$fixture_dist/staged.env"
 chmod 0755 "$fixture_cloud/deploy-host.sh" "$fixture_cloud/promote-runtime.sh"
 
 cat >"$fixture_bin/aws" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 args=" $* "
+printf '%s\n' "$*" >>"$MOCK_AWS_CALL_LOG"
 case "$args" in
   *' sts get-caller-identity '*) printf '123456789012\n' ;;
   *' cloudformation describe-stacks '*)
     case "$MOCK_SCENARIO" in
-      legacy_preview)
-        jq -nc --arg sha "$MOCK_RUNTIME_SHA" '{Stacks:[{
+      legacy_preview|legacy_unaddressed)
+        if [ "$MOCK_SCENARIO" = legacy_preview ]; then
+          legacy_runtime="runtime/$MOCK_RUNTIME_SHA.tar.gz"
+        else
+          legacy_runtime=legacy/runtime.tar.gz
+        fi
+        jq -nc --arg sha "$MOCK_RUNTIME_SHA" --arg runtime "$legacy_runtime" '{Stacks:[{
           StackStatus:"UPDATE_COMPLETE",StackId:"arn:aws:cloudformation:us-east-1:123456789012:stack/fixture/1",
           CreationTime:"old",LastUpdatedTime:"old",Parameters:[
             {ParameterKey:"ArtifactBucket",ParameterValue:"fixture-artifacts"},
             {ParameterKey:"ArtifactPrefix",ParameterValue:"cloud/v1"},
-            {ParameterKey:"RuntimeFile",ParameterValue:"legacy/runtime.tar.gz"},
+            {ParameterKey:"RuntimeFile",ParameterValue:$runtime},
             {ParameterKey:"RuntimeSha256",ParameterValue:$sha}]}]}'
         ;;
       create_preview)
         echo 'Stack with id fixture does not exist' >&2
         exit 255
         ;;
-      create_execute_failure|create_execute_success|create_execute_race_different|create_execute_race_identical)
+      create_execute_failure|create_execute_success|create_execute_race_different|create_execute_race_identical|create_execute_pointer_drift|create_execute_pointer_same)
         if [ -e "$MOCK_EXECUTE_STATE" ]; then
           if [ "$MOCK_SCENARIO" = create_execute_failure ]; then
             printf '%s\n' '{"Stacks":[{"StackStatus":"CREATE_FAILED","CreationTime":"new"}]}'
@@ -215,6 +233,18 @@ case "$args" in
                   --arg sha "$MOCK_RUNTIME_SHA" \
                   '{runtimeSha256:$sha,schema:1,runtimeFile:$file}' \
                   >"$MOCK_POINTER_STATE"
+                ;;
+              create_execute_pointer_drift)
+                other_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+                jq -nc --arg file "runtime/$other_sha.tar.gz" --arg sha "$other_sha" \
+                  '{runtimeSha256:$sha,schema:1,runtimeFile:$file}' \
+                  >"$MOCK_POINTER_STATE"
+                printf '%s\n' '"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"' \
+                  >"$MOCK_POINTER_ETAG_STATE"
+                ;;
+              create_execute_pointer_same)
+                printf '%s\n' '"cccccccccccccccccccccccccccccccc"' \
+                  >"$MOCK_POINTER_ETAG_STATE"
                 ;;
             esac
             printf '%s\n' '{"Stacks":[{"StackStatus":"CREATE_COMPLETE","CreationTime":"new","Outputs":[{"OutputKey":"InstanceId","OutputValue":"i-0123456789abcdef0"}]}]}'
@@ -248,6 +278,25 @@ case "$args" in
     printf '%s\n' '{"Parameters":[{"Name":"/bibites/cloud/slot-1/peer-secret",
       "Type":"SecureString","KeyId":"alias/aws/ssm"}]}'
     ;;
+  *' s3api get-object '*)
+    destination=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        get-object) shift ;;
+        --bucket|--key|--output) shift 2 ;;
+        --*) shift ;;
+        *) destination="$1"; shift ;;
+      esac
+    done
+    [ -n "$destination" ] || exit 65
+    if [ -e "$MOCK_POINTER_STATE" ]; then
+      cp "$MOCK_POINTER_STATE" "$destination"
+      jq -nc --arg etag "$(<"$MOCK_POINTER_ETAG_STATE")" '{ETag:$etag}'
+    else
+      echo 'An error occurred (NoSuchKey): 404 Not Found' >&2
+      exit 1
+    fi
+    ;;
   *' s3 cp '*)
     source=''; destination=''
     while [ "$#" -gt 0 ]; do
@@ -278,13 +327,15 @@ case "$args" in
       exit 255
     fi
     cp "$body" "$MOCK_POINTER_STATE"
+    printf '%s\n' '"dddddddddddddddddddddddddddddddd"' \
+      >"$MOCK_POINTER_ETAG_STATE"
     ;;
   *' cloudformation create-change-set '*)
     printf '%s\n' "$*" >>"$MOCK_AWS_LOG"
     ;;
   *' cloudformation describe-change-set '*)
     if [ "$MOCK_SCENARIO" = legacy_preview ]; then
-      type=UPDATE; runtime=legacy/runtime.tar.gz; version=7; legacy=true
+      type=UPDATE; runtime="runtime/$MOCK_RUNTIME_SHA.tar.gz"; version=7; legacy=true
       changes='[{"ResourceChange":{"LogicalResourceId":"HostLaunchTemplate","ResourceType":"AWS::EC2::LaunchTemplate","Action":"Modify","Replacement":"False"}}]'
     else
       type=CREATE; runtime="runtime/$MOCK_RUNTIME_SHA.tar.gz"; version=1; legacy=false
@@ -297,6 +348,7 @@ case "$args" in
         {"ResourceChange":{"LogicalResourceId":"Host","ResourceType":"AWS::EC2::Instance","Action":"Add","Replacement":"False"}}]'
     fi
     jq -nc --arg type "$type" --arg runtime "$runtime" --arg sha "$MOCK_RUNTIME_SHA" \
+      --arg manifest "$MOCK_MANIFEST_OBJECT" --arg manifest_sha "$MOCK_MANIFEST_SHA" \
       --arg version "$version" --arg legacy "$legacy" --argjson changes "$changes" '{
       ChangeSetName:"fixture-change",ChangeSetType:$type,Status:"CREATE_COMPLETE",
       ExecutionStatus:"AVAILABLE",Parameters:[
@@ -312,7 +364,8 @@ case "$args" in
         {ParameterKey:"GameSha256",ParameterValue:"1111111111111111111111111111111111111111111111111111111111111111"},
         {ParameterKey:"BepInExFile",ParameterValue:"bepinex.zip"},
         {ParameterKey:"BepInExSha256",ParameterValue:"2222222222222222222222222222222222222222222222222222222222222222"},
-        {ParameterKey:"ManifestFile",ParameterValue:"worlds.json"},
+        {ParameterKey:"ManifestFile",ParameterValue:$manifest},
+        {ParameterKey:"ManifestSha256",ParameterValue:$manifest_sha},
         {ParameterKey:"DataVolumeGiB",ParameterValue:"40"},
         {ParameterKey:"RelayPrivateIp",ParameterValue:"10.0.0.5"},
         {ParameterKey:"RelayDomain",ParameterValue:"relay.example.net"},
@@ -342,11 +395,143 @@ run_deploy_fixture() {
     BIBITES_RELAY_PRIVATE_IP=10.0.0.5 BIBITES_RELAY_DOMAIN=relay.example.net \
     BIBITES_CREDENTIAL_PARAMETER_PREFIX=/bibites/cloud BIBITES_INSTANCE_TYPE=m6i.large \
     MOCK_SCENARIO="$scenario" MOCK_RUNTIME_SHA="$runtime_sha" MOCK_ARCHIVE="$archive" \
+    MOCK_MANIFEST_OBJECT="worlds.$manifest_sha.json" \
+    MOCK_MANIFEST_SHA="$manifest_sha" \
     MOCK_AWS_LOG="$test_root/aws.log" MOCK_EXECUTE_STATE="$test_root/executed" \
+    MOCK_AWS_CALL_LOG="$test_root/aws-calls.log" \
     MOCK_POINTER_STATE="$test_root/pointer.json" \
+    MOCK_POINTER_ETAG_STATE="$test_root/pointer.etag" \
     MOCK_CONDITIONAL_LOG="$test_root/conditional.log" \
     "$fixture_cloud/deploy-host.sh" --change-set-name fixture-change "$@"
 }
+
+for invalid_scope in runtime-only missing; do
+  sed -i '/^STAGING_SCOPE=/d' "$fixture_dist/staged.env"
+  if [ "$invalid_scope" = runtime-only ]; then
+    printf 'STAGING_SCOPE=runtime-only\n' >>"$fixture_dist/staged.env"
+  else
+    export STAGING_SCOPE=complete
+  fi
+  : >"$test_root/aws.log"
+  : >"$test_root/aws-calls.log"
+  set +e
+  scope_output="$(run_deploy_fixture create_preview 2>&1)"
+  scope_status=$?
+  set -e
+  [ "$scope_status" -ne 0 ] || {
+    echo "$invalid_scope staging scope reached deployment" >&2
+    exit 1
+  }
+  [ ! -s "$test_root/aws-calls.log" ] || {
+    echo "$invalid_scope staging scope reached AWS" >&2
+    exit 1
+  }
+  grep -Fq 'requires STAGING_SCOPE=complete' <<<"$scope_output"
+  unset STAGING_SCOPE
+done
+sed -i '/^STAGING_SCOPE=/d' "$fixture_dist/staged.env"
+printf 'STAGING_SCOPE=complete\n' >>"$fixture_dist/staged.env"
+
+for stale_name in STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256; do
+  prior_value="$(sed -n "s/^$stale_name=//p" "$fixture_dist/staged.env")"
+  sed -i "s/^$stale_name=.*/$stale_name=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/" \
+    "$fixture_dist/staged.env"
+  : >"$test_root/aws-calls.log"
+  set +e
+  stale_output="$(run_deploy_fixture create_preview 2>&1)"
+  stale_status=$?
+  set -e
+  [ "$stale_status" -ne 0 ]
+  [ ! -s "$test_root/aws-calls.log" ] || {
+    echo "$stale_name mismatch reached AWS" >&2
+    exit 1
+  }
+  grep -Fq 'complete staging receipt does not match artifacts.env' <<<"$stale_output"
+  sed -i "s/^$stale_name=.*/$stale_name=$prior_value/" "$fixture_dist/staged.env"
+done
+
+sed -i '/^STAGED_RUNTIME_SHA256=/d' "$fixture_dist/staged.env"
+export STAGED_RUNTIME_SHA256="$runtime_sha"
+: >"$test_root/aws-calls.log"
+set +e
+missing_digest_output="$(run_deploy_fixture create_preview 2>&1)"
+missing_digest_status=$?
+set -e
+unset STAGED_RUNTIME_SHA256
+[ "$missing_digest_status" -ne 0 ]
+[ ! -s "$test_root/aws-calls.log" ]
+grep -Fq 'complete staging receipt is missing STAGED_RUNTIME_SHA256' \
+  <<<"$missing_digest_output"
+printf 'STAGED_RUNTIME_SHA256=%s\n' "$runtime_sha" >>"$fixture_dist/staged.env"
+
+cp "$fixture_dist/artifacts.env" "$test_root/complete-artifacts.env"
+sed -i '/^RUNTIME_SHA256=/d' "$fixture_dist/artifacts.env"
+export RUNTIME_SHA256="$runtime_sha"
+: >"$test_root/aws-calls.log"
+set +e
+missing_artifact_output="$(run_deploy_fixture create_preview 2>&1)"
+missing_artifact_status=$?
+set -e
+unset RUNTIME_SHA256
+[ "$missing_artifact_status" -ne 0 ]
+[ ! -s "$test_root/aws-calls.log" ] || {
+  echo 'ambient runtime digest filled an incomplete artifacts.env' >&2
+  exit 1
+}
+grep -Fq 'complete staging receipt does not match artifacts.env' \
+  <<<"$missing_artifact_output"
+cp "$test_root/complete-artifacts.env" "$fixture_dist/artifacts.env"
+
+cp "$fixture_dist/staged.env" "$test_root/complete-staged.env"
+for missing_manifest_field in MANIFEST_OBJECT MANIFEST_SHA256; do
+  cp "$test_root/complete-staged.env" "$fixture_dist/staged.env"
+  sed -i "/^$missing_manifest_field=/d" "$fixture_dist/staged.env"
+  if [ "$missing_manifest_field" = MANIFEST_OBJECT ]; then
+    export MANIFEST_OBJECT="worlds.$manifest_sha.json"
+  else
+    export MANIFEST_SHA256="$manifest_sha"
+  fi
+  : >"$test_root/aws-calls.log"
+  set +e
+  missing_manifest_output="$(run_deploy_fixture create_preview 2>&1)"
+  missing_manifest_status=$?
+  set -e
+  unset MANIFEST_OBJECT MANIFEST_SHA256
+  [ "$missing_manifest_status" -ne 0 ]
+  [ ! -s "$test_root/aws-calls.log" ] || {
+    echo "ambient $missing_manifest_field filled an incomplete staging receipt" >&2
+    exit 1
+  }
+  grep -Fq "complete staging receipt is missing $missing_manifest_field" \
+    <<<"$missing_manifest_output"
+done
+
+cp "$test_root/complete-staged.env" "$fixture_dist/staged.env"
+sed -i \
+  's/^MANIFEST_SHA256=.*/MANIFEST_SHA256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/' \
+  "$fixture_dist/staged.env"
+: >"$test_root/aws-calls.log"
+set +e
+stale_manifest_output="$(run_deploy_fixture create_preview 2>&1)"
+stale_manifest_status=$?
+set -e
+[ "$stale_manifest_status" -ne 0 ]
+[ ! -s "$test_root/aws-calls.log" ]
+grep -Fq 'manifest object does not match its digest' <<<"$stale_manifest_output"
+
+cp "$test_root/complete-staged.env" "$fixture_dist/staged.env"
+cp "$fixture_dist/worlds.json" "$test_root/worlds-before-mutation.json"
+printf '\n' >>"$fixture_dist/worlds.json"
+: >"$test_root/aws-calls.log"
+set +e
+changed_manifest_output="$(run_deploy_fixture create_preview 2>&1)"
+changed_manifest_status=$?
+set -e
+[ "$changed_manifest_status" -ne 0 ]
+[ ! -s "$test_root/aws-calls.log" ]
+grep -Fq 'staged manifest does not match the complete staging receipt' \
+  <<<"$changed_manifest_output"
+mv "$test_root/worlds-before-mutation.json" "$fixture_dist/worlds.json"
 
 : >"$test_root/aws.log"
 run_deploy_fixture create_preview >/dev/null
@@ -354,37 +539,97 @@ grep -Fq 'ParameterKey=HostLaunchTemplateVersion,ParameterValue=1' \
   "$test_root/aws.log"
 grep -Fq 'ParameterKey=UseLegacyDataAttachment,ParameterValue=false' \
   "$test_root/aws.log"
+grep -Fq "ParameterKey=ManifestFile,ParameterValue=worlds.$manifest_sha.json" \
+  "$test_root/aws.log"
+grep -Fq "ParameterKey=ManifestSha256,ParameterValue=$manifest_sha" \
+  "$test_root/aws.log"
 
 : >"$test_root/aws.log"
 run_deploy_fixture legacy_preview >/dev/null
 grep -Fq 'ParameterKey=HostLaunchTemplateVersion,ParameterValue=7' "$test_root/aws.log"
 grep -Fq 'ParameterKey=UseLegacyDataAttachment,ParameterValue=true' "$test_root/aws.log"
 
-rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/conditional.log"
+for legacy_mode in preview execute; do
+  : >"$test_root/aws.log"
+  rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/pointer.etag"
+  set +e
+  if [ "$legacy_mode" = execute ]; then
+    legacy_output="$(run_deploy_fixture legacy_unaddressed --execute 2>&1)"
+  else
+    legacy_output="$(run_deploy_fixture legacy_unaddressed 2>&1)"
+  fi
+  legacy_status=$?
+  set -e
+  [ "$legacy_status" -ne 0 ]
+  grep -Fq 'legacy stack runtime is not a matching content-addressed object' \
+    <<<"$legacy_output"
+  [ ! -s "$test_root/aws.log" ] || {
+    echo "legacy missing-pointer $legacy_mode reached a stack mutation" >&2
+    exit 1
+  }
+  [ ! -e "$test_root/executed" ]
+done
+
+rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/pointer.etag" \
+  "$test_root/conditional.log"
 reject 'failed CREATE execution' run_deploy_fixture create_execute_failure --execute
 [ ! -e "$test_root/pointer.json" ]
 [ ! -e "$test_root/conditional.log" ]
 
-rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/conditional.log"
+rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/pointer.etag" \
+  "$test_root/conditional.log"
 run_deploy_fixture create_execute_success --execute >/dev/null
 [ "$(jq -r .runtimeSha256 "$test_root/pointer.json")" = "$runtime_sha" ]
 [ "$(wc -l <"$test_root/conditional.log")" -eq 1 ]
 grep -Fq -- '--if-none-match *' "$test_root/conditional.log"
 
-rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/conditional.log"
+rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/pointer.etag" \
+  "$test_root/conditional.log"
 reject 'different concurrent runtime pointer' \
   run_deploy_fixture create_execute_race_different --execute
 other_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 [ "$(jq -r .runtimeSha256 "$test_root/pointer.json")" = "$other_sha" ]
 [ "$(wc -l <"$test_root/conditional.log")" -eq 1 ]
 
-rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/conditional.log"
+rm -f "$test_root/executed" "$test_root/pointer.json" "$test_root/pointer.etag" \
+  "$test_root/conditional.log"
 run_deploy_fixture create_execute_race_identical --execute >/dev/null
 [ "$(jq -r .runtimeSha256 "$test_root/pointer.json")" = "$runtime_sha" ]
 [ "$(wc -l <"$test_root/conditional.log")" -eq 1 ]
 
+seed_pointer() {
+  local etag="$1"
+  jq -nc --arg file "runtime/$runtime_sha.tar.gz" --arg sha "$runtime_sha" \
+    '{schema:1,runtimeFile:$file,runtimeSha256:$sha}' >"$test_root/pointer.json"
+  printf '%s\n' "$etag" >"$test_root/pointer.etag"
+}
+
+rm -f "$test_root/executed" "$test_root/conditional.log"
+seed_pointer '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+set +e
+pointer_drift_output="$(run_deploy_fixture create_execute_pointer_drift --execute 2>&1)"
+pointer_drift_status=$?
+set -e
+[ "$pointer_drift_status" -ne 0 ]
+[ -e "$test_root/executed" ]
+[ ! -e "$test_root/conditional.log" ]
+other_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+[ "$(jq -r .runtimeSha256 "$test_root/pointer.json")" = "$other_sha" ]
+grep -Fq 'Deployment status: partial' <<<"$pointer_drift_output"
+grep -Fq 'Reconcile runtime/current.json' <<<"$pointer_drift_output"
+
+rm -f "$test_root/executed" "$test_root/conditional.log"
+seed_pointer '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"'
+run_deploy_fixture create_execute_pointer_same --execute >/dev/null
+[ -e "$test_root/executed" ]
+[ ! -e "$test_root/conditional.log" ]
+[ "$(jq -r .runtimeSha256 "$test_root/pointer.json")" = "$runtime_sha" ]
+[ "$(<"$test_root/pointer.etag")" = '"cccccccccccccccccccccccccccccccc"' ]
+
 template="$repo/cloud/aws/template.yaml"
 deploy="$repo/cloud/aws/deploy-host.sh"
+install_host="$repo/cloud/aws/runtime/install-host"
+sync_worlds="$repo/cloud/aws/runtime/bibites-sync-worlds"
 grep -Fq '  HostLaunchTemplateVersion:' "$template"
 grep -Fq '  UseLegacyDataAttachment:' "$template"
 grep -Fq '  KeepLegacyDataAttachment: !Equals' "$template"
@@ -397,6 +642,16 @@ fi
 grep -Fq "if [ '\${UseLegacyDataAttachment}' = true ]" "$template"
 grep -Fq "'s3://\${ArtifactBucket}/\${ArtifactPrefix}/\${RuntimeObject}'" "$template"
 grep -Fq "'\${RuntimeSha256}' /tmp/bibites-runtime.tar.gz" "$template"
+grep -Fq "MANIFEST_KEY=\${ArtifactPrefix}/worlds.json" "$template"
+grep -Fq "export MANIFEST_SHA256='\${ManifestSha256}'" "$template"
+grep -Fq ': "${MANIFEST_SHA256:?}"' "$install_host"
+grep -Fq "printf '%s  %s\\n' \"\$MANIFEST_SHA256\" \"\$stage/worlds.json\"" \
+  "$sync_worlds"
+grep -Fq "AllowedPattern: '^worlds\\.[0-9a-f]{64}\\.json$'" "$template"
+if grep -A2 '^  ManifestFile:' "$template" | grep -Fq 'Default:'; then
+  echo 'ManifestFile still defaults to mutable worlds.json' >&2
+  exit 1
+fi
 if grep -Fq 'runtime/current.json' "$template"; then
   echo 'bootstrap still dereferences the mutable runtime pointer' >&2
   exit 1
@@ -418,5 +673,7 @@ publish_line="$(grep -n '"$repo/cloud/aws/promote-runtime.sh"' "$deploy" | cut -
   exit 1
 }
 grep -Fq -- '"$repo/cloud/aws/promote-runtime.sh" --if-absent' "$deploy"
+grep -Fq 's3api get-object' "$deploy"
+grep -Fq 'Deployment status: partial. Reconcile runtime/current.json' "$deploy"
 
 printf 'host update safety fixtures passed\n'

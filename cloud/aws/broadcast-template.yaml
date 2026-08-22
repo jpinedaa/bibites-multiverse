@@ -17,12 +17,25 @@ Parameters:
     MinLength: 3
     MaxLength: 63
     AllowedPattern: '^(?![0-9]+(\.[0-9]+){3}$)(?!.*\.\.)(?!.*\.\-)(?!.*\-\.)[a-z0-9][a-z0-9.-]*[a-z0-9]$'
+  ArtifactPrefix:
+    Type: String
+    MinLength: 1
+    MaxLength: 256
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$'
   RuntimeKey:
     Type: String
     MinLength: 1
     MaxLength: 1024
     AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$'
   RuntimeSha256:
+    Type: String
+    AllowedPattern: '^[0-9a-f]{64}$'
+  ManifestFile:
+    Type: String
+    MinLength: 1
+    MaxLength: 256
+    AllowedPattern: '^worlds\.[0-9a-f]{64}\.json$'
+  ManifestSha256:
     Type: String
     AllowedPattern: '^[0-9a-f]{64}$'
   DataSnapshotId:
@@ -73,7 +86,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${RuntimeKey}
+                Resource:
+                  - !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${RuntimeKey}
+                  - !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/${ManifestFile}
               - Effect: Allow
                 Action: cloudformation:SignalResource
                 Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
@@ -186,6 +201,15 @@ Resources:
             printf '%s  %s\n' '${RuntimeSha256}' /tmp/bibites-runtime.tar.gz | sha256sum -c -
             tar -xzf /tmp/bibites-runtime.tar.gz -C /opt/bibites-runtime
             chmod 0755 /opt/bibites-runtime/install-broadcast-host
+            aws --region '${AWS::Region}' s3 cp \
+              's3://${ArtifactBucket}/${ArtifactPrefix}/${ManifestFile}' \
+              /tmp/bibites-worlds.json --only-show-errors
+            printf '%s  %s\n' '${ManifestSha256}' /tmp/bibites-worlds.json | sha256sum -c -
+            jq -e -f /opt/bibites-runtime/validate-world-manifest.jq \
+              /tmp/bibites-worlds.json >/dev/null
+            jq -e --arg world '${WorldId}' \
+              'any(.worlds[]; .id == $world and .enabled == false)' \
+              /tmp/bibites-worlds.json >/dev/null
             export AWS_REGION='${AWS::Region}'
             export DATA_VOLUME_ID='${DataVolume}'
             export RELAY_PRIVATE_IP='${RelayPrivateIp}'

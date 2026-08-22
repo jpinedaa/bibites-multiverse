@@ -141,6 +141,17 @@ jobs:
           [ "$fails" -eq 0 ] || exit 1
           echo "    $count shell scripts parse"
 
+      # These fixtures drive the real cloud wrappers through fake AWS and SSM
+      # seams. They cover validation, immutable uploads, pointer conditions,
+      # activation rollback, and partial-failure handling without credentials,
+      # network access, proprietary archives, or a live host.
+      - name: AWS cloud-world transactions
+        run: |
+          set -euo pipefail
+          for test in cloud/aws/test-*.sh; do
+            "$test"
+          done
+
       # Repository-wide diagnostics must not open ignored credential custody or
       # ordinary untracked runtime data. The test builds a throwaway repository
       # with tracked, ignored, untracked and symlinked canaries, then drives the

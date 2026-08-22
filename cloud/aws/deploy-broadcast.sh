@@ -11,14 +11,75 @@ source_checker="$repo/cloud/aws/source-world-stopped.sh"
 
 [ -r "$dist/artifacts.env" ] || { echo 'run build-artifacts.sh first' >&2; exit 1; }
 [ -r "$dist/staged.env" ] || { echo 'run stage-artifacts.sh first' >&2; exit 1; }
+[ -r "$dist/worlds.json" ] || { echo 'stage-artifacts.sh did not stage a manifest' >&2; exit 1; }
 [ -r "$source_checker" ] || { echo 'missing source-world safety check' >&2; exit 1; }
 
 # shellcheck source=lib/validation.sh
 . "$validation"
+# Keep build identity separate from receipt identity. A missing field in either
+# file must not inherit a value from the caller or from the other file.
+unset RUNTIME_FILE RUNTIME_SHA256 GAME_FILE GAME_SHA256 \
+  BEPINEX_FILE BEPINEX_SHA256
 # shellcheck source=/dev/null
 . "$dist/artifacts.env"
+artifact_runtime_file="${RUNTIME_FILE:-}"
+artifact_runtime_sha256="${RUNTIME_SHA256:-}"
+artifact_game_file="${GAME_FILE:-}"
+artifact_game_sha256="${GAME_SHA256:-}"
+artifact_bepinex_file="${BEPINEX_FILE:-}"
+artifact_bepinex_sha256="${BEPINEX_SHA256:-}"
+# The receipt must supply its own scope, target, and staged identity. Do not let
+# ambient settings make an incomplete receipt look complete.
+unset AWS_PROFILE AWS_REGION ARTIFACT_BUCKET ARTIFACT_PREFIX RUNTIME_OBJECT \
+  STAGING_SCOPE STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256 \
+  MANIFEST_OBJECT MANIFEST_SHA256
 # shellcheck source=/dev/null
 . "$dist/staged.env"
+RUNTIME_FILE="$artifact_runtime_file"
+RUNTIME_SHA256="$artifact_runtime_sha256"
+GAME_FILE="$artifact_game_file"
+GAME_SHA256="$artifact_game_sha256"
+BEPINEX_FILE="$artifact_bepinex_file"
+BEPINEX_SHA256="$artifact_bepinex_sha256"
+[ "${STAGING_SCOPE:-}" = complete ] || {
+  echo 'deploy-broadcast.sh requires STAGING_SCOPE=complete from stage-artifacts.sh' >&2
+  exit 1
+}
+for receipt_name in STAGED_RUNTIME_SHA256 STAGED_GAME_SHA256 STAGED_BEPINEX_SHA256; do
+  [ -n "${!receipt_name:-}" ] || {
+    echo "the complete staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
+    exit 1
+  }
+  bibites_require_sha256 "${!receipt_name}" "$receipt_name"
+done
+[ "$STAGED_RUNTIME_SHA256" = "${RUNTIME_SHA256:-}" ] &&
+  [ "$STAGED_GAME_SHA256" = "${GAME_SHA256:-}" ] &&
+  [ "$STAGED_BEPINEX_SHA256" = "${BEPINEX_SHA256:-}" ] || {
+  echo 'the complete staging receipt does not match artifacts.env; run stage-artifacts.sh again' >&2
+  exit 1
+}
+[ "${RUNTIME_OBJECT:-}" = "runtime/$STAGED_RUNTIME_SHA256.tar.gz" ] || {
+  echo 'the complete staging receipt runtime object does not match its digest' >&2
+  exit 1
+}
+for receipt_name in MANIFEST_OBJECT MANIFEST_SHA256; do
+  [ -n "${!receipt_name:-}" ] || {
+    echo "the complete staging receipt is missing $receipt_name; run stage-artifacts.sh again" >&2
+    exit 1
+  }
+done
+bibites_require_sha256 "$MANIFEST_SHA256" MANIFEST_SHA256
+bibites_require_s3_filename "$MANIFEST_OBJECT" MANIFEST_OBJECT
+[ "$MANIFEST_OBJECT" = "worlds.$MANIFEST_SHA256.json" ] || {
+  echo 'the complete staging receipt manifest object does not match its digest' >&2
+  exit 1
+}
+local_manifest_sha256="$(sha256sum "$dist/worlds.json" | awk '{print $1}')"
+[ "$local_manifest_sha256" = "$MANIFEST_SHA256" ] || {
+  echo 'the staged manifest does not match the complete staging receipt' >&2
+  echo 'run stage-artifacts.sh again' >&2
+  exit 1
+}
 
 : "${BIBITES_AWS_ACCOUNT_ID:?set the approved 12-digit AWS account identifier}"
 : "${BIBITES_BROADCAST_SNAPSHOT_ID:?set a completed snapshot made after the source world stopped}"
@@ -61,6 +122,8 @@ bibites_require_s3_bucket "$ARTIFACT_BUCKET" ARTIFACT_BUCKET
 bibites_require_s3_prefix "$ARTIFACT_PREFIX" ARTIFACT_PREFIX
 bibites_require_s3_key "$RUNTIME_OBJECT" RUNTIME_OBJECT
 bibites_require_s3_key "$runtime_key" 'broadcast runtime object key'
+bibites_require_s3_key "$ARTIFACT_PREFIX/$MANIFEST_OBJECT" \
+  'broadcast manifest object key'
 bibites_require_sha256 "$RUNTIME_SHA256" RUNTIME_SHA256
 [[ "$world" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || {
   echo "invalid world identifier: $world" >&2
@@ -146,12 +209,10 @@ jq -e --arg snapshot "$snapshot" --arg owner "$account" '
 bibites_require_default_secure_parameter "$AWS_PROFILE" "$AWS_REGION" \
   "$BIBITES_PUBLISH_PASSWORD_PARAMETER"
 
-manifest="$(aws --profile "$AWS_PROFILE" --region "$AWS_REGION" s3 cp \
-  "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/worlds.json" - --only-show-errors \
-  )"
-jq -e -f "$manifest_validator" <<<"$manifest" >/dev/null
+jq -e -f "$manifest_validator" "$dist/worlds.json" >/dev/null
 jq -e --arg world "$world" \
-  'any(.worlds[]; .id == $world and .enabled == false)' <<<"$manifest" >/dev/null || {
+  'any(.worlds[]; .id == $world and .enabled == false)' \
+  "$dist/worlds.json" >/dev/null || {
     echo "the staged manifest must disable $world before GPU deployment" >&2
     exit 1
   }
@@ -216,8 +277,11 @@ aws --profile "$AWS_PROFILE" --region "$AWS_REGION" cloudformation deploy \
     SubnetId="$BIBITES_SUBNET_ID" \
     VpcId="$BIBITES_VPC_ID" \
     ArtifactBucket="$ARTIFACT_BUCKET" \
+    ArtifactPrefix="$ARTIFACT_PREFIX" \
     RuntimeKey="$runtime_key" \
     RuntimeSha256="$RUNTIME_SHA256" \
+    ManifestFile="$MANIFEST_OBJECT" \
+    ManifestSha256="$MANIFEST_SHA256" \
     DataSnapshotId="$snapshot" \
     RelayPrivateIp="$BIBITES_RELAY_PRIVATE_IP" \
     RelayDomain="$BIBITES_RELAY_DOMAIN" \

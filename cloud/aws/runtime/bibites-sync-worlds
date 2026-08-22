@@ -15,6 +15,13 @@ set -a; . "$conf"; set +a
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 aws --region "$AWS_REGION" s3 cp "s3://$ARTIFACT_BUCKET/$MANIFEST_KEY" "$stage/worlds.json" --only-show-errors
+if [ -n "${MANIFEST_SHA256:-}" ]; then
+  [[ "$MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
+    echo 'invalid pinned manifest digest' >&2
+    exit 1
+  }
+  printf '%s  %s\n' "$MANIFEST_SHA256" "$stage/worlds.json" | sha256sum -c -
+fi
 validator=/opt/bibites-runtime/validate-world-manifest.jq
 [ -r "$validator" ] || { echo "missing $validator" >&2; exit 1; }
 jq -e -f "$validator" "$stage/worlds.json" >/dev/null

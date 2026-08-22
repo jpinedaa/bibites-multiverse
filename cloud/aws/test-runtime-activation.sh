@@ -30,6 +30,7 @@ make_runtime() {
     'set -euo pipefail' \
     'here="$(cd "$(dirname "$0")" && pwd)"' \
     'label="$(cat "$here/label")"' \
+    '[ "$MANIFEST_SHA256" = 3333333333333333333333333333333333333333333333333333333333333333 ]' \
     'printf "%s-install\n" "$label" >>"$MOCK_LOG"' \
     'if [ "$label" = new ]; then exit "${NEW_INSTALL_STATUS:-0}"; fi' \
     'status="${OLD_INSTALL_STATUS:-0}"' \
@@ -61,6 +62,7 @@ run_activation() {
     MOCK_LOG="$log" \
     BIBITES_RUNTIME_TEST_ROOT="$runtime_root" \
     BIBITES_RUNTIME_LOCK_FILE="$lock" \
+    BIBITES_RUNTIME_LOCK_FD="${INHERITED_LOCK_FD:-}" \
     NEW_INSTALL_STATUS="${NEW_INSTALL_STATUS:-0}" \
     OLD_INSTALL_STATUS="${OLD_INSTALL_STATUS:-0}" \
     STOP_STATUS="${STOP_STATUS:-0}" \
@@ -72,7 +74,9 @@ run_activation() {
       1111111111111111111111111111111111111111111111111111111111111111 \
       cloud/v1/bepinex.zip \
       2222222222222222222222222222222222222222222222222222222222222222 \
-      cloud/v1/worlds.json 10.0.0.5 relay.example.net "$runtime_root"
+      cloud/v1/worlds.json \
+      3333333333333333333333333333333333333333333333333333333333333333 \
+      10.0.0.5 relay.example.net "$runtime_root"
 }
 
 setup_case
@@ -91,6 +95,17 @@ grep -Fxq new-install "$log" || {
 }
 [ "$(sed -n '1p' "$log")" = new-stop ] || {
   echo 'successful activation did not stop worlds before installation' >&2
+  exit 1
+}
+
+setup_case
+exec 8>"$lock"
+flock -n 8
+INHERITED_LOCK_FD=8 run_activation >/dev/null
+flock -u 8
+exec 8>&-
+[ "$(cat "$runtime_root/label")" = new ] || {
+  echo 'activation did not reuse the transaction lock descriptor' >&2
   exit 1
 }
 
@@ -163,6 +178,7 @@ run_activation >/dev/null 2>&1
 status=$?
 set -e
 flock -u 8
+exec 8>&-
 [ "$status" -eq 73 ] || {
   echo "lock contention returned $status instead of 73" >&2
   exit 1
@@ -182,9 +198,9 @@ if grep -Fq 'ssm wait command-executed' "$update_wrapper"; then
   exit 1
 fi
 extract_line="$(grep -n 'tar -xzf "$archive"' "$update_wrapper" | cut -d: -f1)"
-activate_line="$(grep -n '"$new_runtime/bibites-activate-runtime"' \
+transaction_line="$(grep -n '"$new_runtime/bibites-update-runtime-transaction"' \
   "$update_wrapper" | tail -n 1 | cut -d: -f1)"
-[ "$extract_line" -lt "$activate_line" ] || {
+[ "$extract_line" -lt "$transaction_line" ] || {
   echo 'runtime update does not pre-stage before activation' >&2
   exit 1
 }

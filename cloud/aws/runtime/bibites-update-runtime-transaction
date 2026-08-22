@@ -1,0 +1,485 @@
+#!/usr/bin/env bash
+# Serialize one host runtime activation with its guarded bootstrap-pointer update.
+set -euo pipefail
+
+[ "$#" -eq 19 ] || {
+  echo 'runtime transaction received the wrong argument count' >&2
+  exit 2
+}
+
+staged_runtime="$1"
+candidate_archive="$2"
+aws_region="$3"
+expected_account="$4"
+data_volume_id="$5"
+artifact_bucket="$6"
+artifact_prefix="$7"
+candidate_runtime_object="$8"
+candidate_runtime_sha256="$9"
+game_object="${10}"
+game_sha256="${11}"
+bepinex_object="${12}"
+bepinex_sha256="${13}"
+manifest_object="${14}"
+manifest_sha256="${15}"
+pointer_credential_prefix="${16}"
+relay_private_ip="${17}"
+relay_domain="${18}"
+runtime_root="${19}"
+lock_file="${BIBITES_RUNTIME_LOCK_FILE:-/run/lock/bibites-runtime-update.lock}"
+cloud_conf="${BIBITES_CLOUD_CONF:-/etc/bibites-cloud.conf}"
+
+die() { printf 'runtime transaction: %s\n' "$*" >&2; exit 2; }
+valid_key() {
+  local value="$1" segment
+  (( ${#value} >= 1 && ${#value} <= 1024 )) || return 1
+  [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || return 1
+  [[ "$value" != */ && "$value" != *//* ]] || return 1
+  local IFS=/
+  read -r -a segments <<<"$value"
+  for segment in "${segments[@]}"; do
+    [[ "$segment" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+  done
+}
+valid_parameter() {
+  local value="$1" segment
+  (( ${#value} >= 2 && ${#value} <= 1011 )) || return 1
+  [[ "$value" == /* && "$value" != */ && "$value" != *//* ]] || return 1
+  local path="${value#/}" IFS=/
+  read -r -a segments <<<"$path"
+  for segment in "${segments[@]}"; do
+    [[ "$segment" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || return 1
+  done
+}
+valid_ipv4() {
+  local value="$1" octet
+  local IFS=.
+  read -r -a octets <<<"$value"
+  [ "${#octets[@]}" -eq 4 ] || return 1
+  for octet in "${octets[@]}"; do
+    [[ "$octet" =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+    (( 10#$octet <= 255 )) || return 1
+  done
+}
+require_installable_runtime() {
+  local tree="$1"
+  [ -d "$tree" ] || return 1
+  [ -x "$tree/install-host" ] || return 1
+  [ -x "$tree/bibites-stop-worlds" ] || return 1
+  [ -r "$tree/validate-world-manifest.jq" ] || return 1
+  jq -n -f "$tree/validate-world-manifest.jq" >/dev/null || return 1
+}
+
+[[ "$aws_region" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]] || die 'invalid AWS region'
+[[ "$expected_account" =~ ^[0-9]{12}$ ]] || die 'invalid expected AWS account'
+[[ "$data_volume_id" =~ ^vol-[0-9a-f]{8,17}$ ]] ||
+  die 'invalid data volume identifier'
+[[ "$artifact_bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] &&
+  [[ "$artifact_bucket" != *..* && "$artifact_bucket" != *.-* &&
+     "$artifact_bucket" != *-.* ]] &&
+  [[ ! "$artifact_bucket" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  die 'invalid artifact bucket'
+valid_key "$artifact_prefix" || die 'invalid artifact prefix'
+for digest in "$candidate_runtime_sha256" "$game_sha256" \
+  "$bepinex_sha256" "$manifest_sha256"; do
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die 'invalid artifact digest'
+done
+[ "$candidate_runtime_object" = "runtime/$candidate_runtime_sha256.tar.gz" ] ||
+  die 'candidate runtime object does not match its digest'
+[ "$game_object" = "runtime-inputs/game/$game_sha256.zip" ] ||
+  die 'game object does not match its digest'
+[ "$bepinex_object" = "runtime-inputs/bepinex/$bepinex_sha256.zip" ] ||
+  die 'BepInEx object does not match its digest'
+[ "$manifest_object" = "worlds.$manifest_sha256.json" ] ||
+  die 'manifest object does not match its digest'
+valid_parameter "$pointer_credential_prefix" ||
+  die 'invalid pointer credential parameter prefix'
+valid_ipv4 "$relay_private_ip" || die 'invalid relay address'
+IFS=. read -r relay_a relay_b _ _ <<<"$relay_private_ip"
+(( 10#$relay_a == 10 ||
+   (10#$relay_a == 172 && 10#$relay_b >= 16 && 10#$relay_b <= 31) ||
+   (10#$relay_a == 192 && 10#$relay_b == 168) )) ||
+  die 'relay address is not private'
+[[ "$relay_domain" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] &&
+  (( ${#relay_domain} <= 253 )) || die 'invalid relay domain'
+
+if [ -n "${BIBITES_RUNTIME_TEST_ROOT:-}" ]; then
+  [ "$runtime_root" = "$BIBITES_RUNTIME_TEST_ROOT" ] || die 'invalid test runtime root'
+else
+  [ "$runtime_root" = /opt/bibites-runtime ] || die 'invalid runtime root'
+  [[ "$staged_runtime" == /opt/bibites-runtime.new.* ]] ||
+    die 'invalid staged runtime path'
+  [[ "$candidate_archive" == /tmp/bibites-runtime.*.tar.gz ]] ||
+    die 'invalid candidate runtime archive path'
+fi
+[ -f "$candidate_archive" ] || die 'candidate runtime archive is missing'
+printf '%s  %s\n' "$candidate_runtime_sha256" "$candidate_archive" | \
+  sha256sum -c - >/dev/null || die 'candidate runtime archive failed verification'
+require_installable_runtime "$staged_runtime" || die 'candidate runtime tree is incomplete'
+[ -x "$staged_runtime/bibites-activate-runtime" ] ||
+  die 'candidate runtime activator is missing'
+
+candidate_runtime_key="$artifact_prefix/$candidate_runtime_object"
+game_key="$artifact_prefix/$game_object"
+bepinex_key="$artifact_prefix/$bepinex_object"
+manifest_key="$artifact_prefix/$manifest_object"
+ordinary_manifest_key="$artifact_prefix/worlds.json"
+pointer_key="$artifact_prefix/runtime/current.json"
+for key in "$candidate_runtime_key" "$game_key" "$bepinex_key" \
+  "$manifest_key" "$ordinary_manifest_key" "$pointer_key"; do
+  valid_key "$key" || die 'invalid artifact object key'
+done
+
+pointer_path=
+pointer_error=
+prior_archive=
+prior_runtime=
+manifest_snapshot=
+game_snapshot=
+bepinex_snapshot=
+candidate_activator_copy=
+access_key_id=
+secret_access_key=
+session_token=
+lock_acquired=0
+manifest_restore_pending=0
+
+classify_manifest_key() {
+  local configured
+  manifest_key_state=invalid
+  [ -f "$cloud_conf" ] || return 0
+  configured="$(awk '
+    /^MANIFEST_KEY=/ { value = $0; count++ }
+    END { if (count != 1) exit 1; print value }
+  ' "$cloud_conf")" || return 0
+  case "$configured" in
+    "MANIFEST_KEY=$ordinary_manifest_key") manifest_key_state=ordinary ;;
+    "MANIFEST_KEY=$manifest_key") manifest_key_state=pinned ;;
+  esac
+}
+
+cloud_conf_matches_transaction() {
+  local expected_region expected_bucket expected_relay
+  expected_region="AWS_REGION=$aws_region"
+  expected_bucket="ARTIFACT_BUCKET=$artifact_bucket"
+  expected_relay="RELAY_URL=wss://$relay_domain/contract-b/v4"
+  [ -f "$cloud_conf" ] || return 1
+  awk -v expected_region="$expected_region" \
+    -v expected_bucket="$expected_bucket" \
+    -v expected_relay="$expected_relay" '
+      /^AWS_REGION=/ { region_total++; if ($0 == expected_region) region_match++ }
+      /^ARTIFACT_BUCKET=/ { bucket_total++; if ($0 == expected_bucket) bucket_match++ }
+      /^RELAY_URL=/ { relay_total++; if ($0 == expected_relay) relay_match++ }
+      END {
+        exit !(region_total == 1 && region_match == 1 &&
+          bucket_total == 1 && bucket_match == 1 &&
+          relay_total == 1 && relay_match == 1)
+      }
+    ' "$cloud_conf"
+}
+
+restore_manifest_key() {
+  local replacement temp count
+  classify_manifest_key
+  case "$manifest_key_state" in
+    ordinary) return 0 ;;
+    pinned) ;;
+    *) return 1 ;;
+  esac
+  replacement="MANIFEST_KEY=$ordinary_manifest_key"
+  temp="$(mktemp "$cloud_conf.XXXXXX")" || return 1
+  if ! awk -v replacement="$replacement" '
+    BEGIN { count = 0 }
+    /^MANIFEST_KEY=/ { print replacement; count++; next }
+    { print }
+    END { if (count != 1) exit 1 }
+  ' "$cloud_conf" >"$temp"; then
+    rm -f "$temp"
+    return 1
+  fi
+  count="$(grep -c '^MANIFEST_KEY=' "$temp")" || {
+    rm -f "$temp"
+    return 1
+  }
+  [ "$count" -eq 1 ] || {
+    rm -f "$temp"
+    return 1
+  }
+  chown --reference="$cloud_conf" "$temp" || {
+    rm -f "$temp"
+    return 1
+  }
+  chmod --reference="$cloud_conf" "$temp" || {
+    rm -f "$temp"
+    return 1
+  }
+  mv -f "$temp" "$cloud_conf" || return 1
+  classify_manifest_key
+  [ "$manifest_key_state" = ordinary ]
+}
+
+restore_after_activation() {
+  [ "$manifest_restore_pending" -eq 1 ] || return 0
+  restore_manifest_key || return 1
+  manifest_restore_pending=0
+}
+
+transaction_exit() {
+  local status=$?
+  trap - EXIT
+  set +e
+  unset access_key_id secret_access_key session_token
+  if [ "$lock_acquired" -eq 1 ] &&
+     [ "$manifest_restore_pending" -eq 1 ] &&
+     ! restore_manifest_key; then
+    echo 'runtime transaction could not restore the ordinary manifest pointer' >&2
+    status=24
+  fi
+  [ -z "$pointer_path" ] || rm -f "$pointer_path"
+  [ -z "$pointer_error" ] || rm -f "$pointer_error"
+  [ -z "$prior_archive" ] || rm -f "$prior_archive"
+  [ -z "$prior_runtime" ] || rm -rf "$prior_runtime"
+  [ -z "$manifest_snapshot" ] || rm -f "$manifest_snapshot"
+  [ -z "$game_snapshot" ] || rm -f "$game_snapshot"
+  [ -z "$bepinex_snapshot" ] || rm -f "$bepinex_snapshot"
+  [ -z "$candidate_activator_copy" ] || rm -f "$candidate_activator_copy"
+  exit "$status"
+}
+trap transaction_exit EXIT
+
+# The SSM command and pointer session are bounded to one hour. Reserve at least
+# 55 minutes for preflight, two possible activations, CAS, and reconciliation.
+lock_wait_seconds="${BIBITES_RUNTIME_LOCK_WAIT_SECONDS:-300}"
+[[ "$lock_wait_seconds" =~ ^(0|[1-9][0-9]{0,2})$ ]] &&
+  (( 10#$lock_wait_seconds <= 300 )) || die 'invalid runtime lock wait'
+exec {transaction_lock_fd}>"$lock_file"
+if ! flock -w "$lock_wait_seconds" "$transaction_lock_fd"; then
+  echo 'another runtime transaction still holds the host lock' >&2
+  exit 73
+fi
+lock_acquired=1
+export BIBITES_RUNTIME_LOCK_FD="$transaction_lock_fd"
+
+instance_account="$(aws --region "$aws_region" sts get-caller-identity \
+  --query Account --output text)" || die 'instance-role account lookup failed'
+[[ "$instance_account" =~ ^[0-9]{12}$ ]] &&
+  [ "$instance_account" = "$expected_account" ] ||
+  die 'instance role belongs to the wrong AWS account'
+
+parameter_value() {
+  local name="$1" description
+  description="$(aws --region "$aws_region" ssm get-parameter \
+    --name "$name" --with-decryption --output json)" || return 1
+  jq -er --arg name "$name" '
+    .Parameter |
+    select(.Name == $name and .Type == "SecureString") |
+    .Value |
+    select(type == "string" and length > 0 and
+      (contains("\n") | not) and (contains("\r") | not))
+  ' <<<"$description"
+}
+
+# The instance role can read these three one-hour parameters, but it cannot
+# publish the pointer. Keep the temporary values out of arguments and output.
+access_key_id="$(parameter_value "$pointer_credential_prefix/access-key-id")" ||
+  die 'pointer access-key parameter is missing or invalid'
+secret_access_key="$(parameter_value "$pointer_credential_prefix/secret-access-key")" ||
+  die 'pointer secret-key parameter is missing or invalid'
+session_token="$(parameter_value "$pointer_credential_prefix/session-token")" ||
+  die 'pointer session-token parameter is missing or invalid'
+[[ "$access_key_id" =~ ^ASIA[A-Z0-9]{16}$ ]] ||
+  die 'pointer access-key parameter is invalid'
+[[ "$secret_access_key" =~ ^[A-Za-z0-9/+=]{40}$ ]] ||
+  die 'pointer secret-key parameter is invalid'
+(( ${#session_token} >= 16 && ${#session_token} <= 4096 )) ||
+  die 'pointer session-token parameter is invalid'
+
+pointer_aws() (
+  unset AWS_PROFILE AWS_DEFAULT_PROFILE
+  export AWS_ACCESS_KEY_ID="$access_key_id"
+  export AWS_SECRET_ACCESS_KEY="$secret_access_key"
+  export AWS_SESSION_TOKEN="$session_token"
+  export AWS_EC2_METADATA_DISABLED=true
+  exec aws --region "$aws_region" "$@"
+)
+
+pointer_account="$(pointer_aws sts get-caller-identity \
+  --query Account --output text)" || die 'pointer-session account lookup failed'
+[[ "$pointer_account" =~ ^[0-9]{12}$ ]] &&
+  [ "$pointer_account" = "$expected_account" ] ||
+  die 'pointer session belongs to the wrong AWS account'
+put_object_model="$(pointer_aws s3api put-object \
+  --generate-cli-skeleton input)" || die 'pointer PutObject model lookup failed'
+jq -e 'has("IfMatch") and has("ServerSideEncryption")' \
+  <<<"$put_object_model" >/dev/null ||
+  die 'AWS CLI lacks conditional encrypted pointer publication support'
+
+pointer_path="$(mktemp)"
+pointer_error="$(mktemp)"
+fetch_pointer() {
+  local destination="$1" identity="${2:-pointer}" metadata
+  case "$identity" in
+    pointer)
+      metadata="$(pointer_aws s3api get-object --bucket "$artifact_bucket" \
+        --key "$pointer_key" "$destination" --output json)" || return 1
+      ;;
+    instance)
+      metadata="$(aws --region "$aws_region" s3api get-object \
+        --bucket "$artifact_bucket" --key "$pointer_key" "$destination" \
+        --output json)" || return 1
+      ;;
+    *) return 1 ;;
+  esac
+  pointer_etag="$(jq -er '
+    .ETag |
+    select(type == "string" and
+      test("^\\\"[0-9A-Fa-f]{32}(-[0-9]+)?\\\"$"))
+  ' <<<"$metadata")" || return 1
+  pointer_document="$(<"$destination")"
+  jq -e '
+    (keys | sort) == ["runtimeFile", "runtimeSha256", "schema"] and
+    .schema == 1 and
+    (.runtimeSha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+    .runtimeFile == ("runtime/" + .runtimeSha256 + ".tar.gz")
+  ' <<<"$pointer_document" >/dev/null || return 1
+  pointer_canonical="$(jq -cS . <<<"$pointer_document")" || return 1
+}
+
+# This is the authoritative pointer snapshot. It occurs only after this
+# transaction owns the same lock used by every runtime activation.
+fetch_pointer "$pointer_path" || die 'runtime pointer lookup failed'
+prior_pointer_etag="$pointer_etag"
+prior_pointer_canonical="$pointer_canonical"
+prior_runtime_object="$(jq -r .runtimeFile <<<"$pointer_document")"
+prior_runtime_sha256="$(jq -r .runtimeSha256 <<<"$pointer_document")"
+prior_runtime_key="$artifact_prefix/$prior_runtime_object"
+valid_key "$prior_runtime_key" || die 'prior runtime object key is invalid'
+
+prior_archive="$(mktemp /tmp/bibites-runtime.XXXXXX.tar.gz)"
+aws --region "$aws_region" s3 cp \
+  "s3://$artifact_bucket/$prior_runtime_key" "$prior_archive" \
+  --only-show-errors
+printf '%s  %s\n' "$prior_runtime_sha256" "$prior_archive" | \
+  sha256sum -c - >/dev/null || die 'prior runtime archive failed verification'
+
+# Prove that every pinned dependency is readable and matches the receipt before
+# the first activation can stop a world or change the active runtime.
+game_snapshot="$(mktemp)"
+aws --region "$aws_region" s3 cp \
+  "s3://$artifact_bucket/$game_key" "$game_snapshot" --only-show-errors
+printf '%s  %s\n' "$game_sha256" "$game_snapshot" | \
+  sha256sum -c - >/dev/null || die 'game snapshot failed verification'
+
+bepinex_snapshot="$(mktemp)"
+aws --region "$aws_region" s3 cp \
+  "s3://$artifact_bucket/$bepinex_key" "$bepinex_snapshot" --only-show-errors
+printf '%s  %s\n' "$bepinex_sha256" "$bepinex_snapshot" | \
+  sha256sum -c - >/dev/null || die 'BepInEx snapshot failed verification'
+
+manifest_snapshot="$(mktemp)"
+aws --region "$aws_region" s3 cp \
+  "s3://$artifact_bucket/$manifest_key" "$manifest_snapshot" \
+  --only-show-errors
+printf '%s  %s\n' "$manifest_sha256" "$manifest_snapshot" | \
+  sha256sum -c - >/dev/null || die 'manifest snapshot failed verification'
+jq -e -f "$staged_runtime/validate-world-manifest.jq" \
+  "$manifest_snapshot" >/dev/null || die 'manifest snapshot failed validation'
+
+candidate_activator_copy="$(mktemp /tmp/bibites-activate-runtime.XXXXXX)"
+cp "$staged_runtime/bibites-activate-runtime" "$candidate_activator_copy"
+chmod 0755 "$candidate_activator_copy"
+
+# The activator is allowed to replace this file with the pinned manifest
+# configuration. Refuse any other starting state, and avoid rewriting an
+# already-ordinary file when the activator fails before changing the host.
+classify_manifest_key
+[ "$manifest_key_state" = ordinary ] && cloud_conf_matches_transaction ||
+  die 'cloud configuration does not match the transaction target and ordinary manifest pointer'
+
+candidate_pointer_document="$(jq -cn \
+  --arg file "$candidate_runtime_object" \
+  --arg sha256 "$candidate_runtime_sha256" \
+  '{schema:1,runtimeFile:$file,runtimeSha256:$sha256}')"
+candidate_pointer_canonical="$(jq -cS . <<<"$candidate_pointer_document")"
+
+reactivate_prior() {
+  local rollback_status=0
+  if [ -z "$prior_runtime" ]; then
+    prior_runtime="$(mktemp -d "$runtime_root.new.XXXXXX")" || return 1
+    tar -xzf "$prior_archive" -C "$prior_runtime" || return 1
+    require_installable_runtime "$prior_runtime" || return 1
+  fi
+  manifest_restore_pending=1
+  BIBITES_RUNTIME_LOCK_FD="$transaction_lock_fd" \
+    "$candidate_activator_copy" \
+      "$prior_runtime" "$prior_archive" "$aws_region" "$data_volume_id" \
+      "$artifact_bucket" "$prior_runtime_key" "$prior_runtime_sha256" \
+      "$game_key" "$game_sha256" "$bepinex_key" "$bepinex_sha256" \
+      "$manifest_key" "$manifest_sha256" "$relay_private_ip" "$relay_domain" \
+      "$runtime_root" || \
+    rollback_status=$?
+  [ "$rollback_status" -eq 0 ] || return 1
+  restore_after_activation
+}
+
+candidate_status=0
+manifest_restore_pending=1
+BIBITES_RUNTIME_LOCK_FD="$transaction_lock_fd" \
+  "$candidate_activator_copy" \
+    "$staged_runtime" "$candidate_archive" "$aws_region" "$data_volume_id" \
+    "$artifact_bucket" "$candidate_runtime_key" "$candidate_runtime_sha256" \
+    "$game_key" "$game_sha256" "$bepinex_key" "$bepinex_sha256" \
+    "$manifest_key" "$manifest_sha256" "$relay_private_ip" "$relay_domain" \
+    "$runtime_root" || \
+  candidate_status=$?
+if ! restore_after_activation; then
+  echo 'candidate activation did not restore the ordinary manifest pointer' >&2
+  if reactivate_prior; then
+    if [ "$candidate_status" -ne 0 ]; then
+      echo 'candidate activation failed; the prior runtime and ordinary manifest are restored' >&2
+      exit 20
+    fi
+    echo 'candidate transaction stopped before pointer publication; the retained prior runtime is active' >&2
+    exit 22
+  fi
+  echo 'candidate transaction recovery or manifest restoration also failed' >&2
+  exit 24
+fi
+case "$candidate_status" in
+  0) ;;
+  20|21) exit "$candidate_status" ;;
+  *) exit "$candidate_status" ;;
+esac
+
+printf '%s\n' "$candidate_pointer_document" >"$pointer_path"
+if pointer_aws s3api put-object --bucket "$artifact_bucket" \
+  --key "$pointer_key" --body "$pointer_path" --content-type application/json \
+  --server-side-encryption AES256 --if-match "$prior_pointer_etag" \
+  >/dev/null 2>"$pointer_error"; then
+  exit 0
+fi
+
+# A lost successful response and a precondition failure are both reconciled
+# from the authoritative pointer while the host lock is still held.
+if ! fetch_pointer "$pointer_path" pointer &&
+   ! fetch_pointer "$pointer_path" instance; then
+  echo 'runtime pointer state is unknown; the candidate runtime remains active' >&2
+  exit 23
+fi
+if [ "$pointer_canonical" = "$candidate_pointer_canonical" ]; then
+  echo 'the runtime pointer identifies the active candidate despite the publication error'
+  exit 0
+fi
+if [ "$pointer_canonical" != "$prior_pointer_canonical" ]; then
+  echo 'runtime pointer changed concurrently; the candidate runtime remains active' >&2
+  exit 23
+fi
+
+# Use the archive retained before activation. Do not depend on the prior S3
+# object still being readable after the host has changed.
+if ! reactivate_prior; then
+  echo 'runtime pointer publication failed; prior runtime reactivation also failed' >&2
+  exit 24
+fi
+echo 'runtime pointer publication failed; the retained prior runtime is active again' >&2
+exit 22

@@ -8,6 +8,17 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 state="$(mktemp)"
 next_state="$(mktemp)"
 trap 'rm -f "$state" "$next_state"' EXIT
+mock_epoch=100
+
+date() {
+  [ "$#" -eq 1 ] && [ "$1" = +%s ] || return 64
+  printf '%s\n' "$mock_epoch"
+}
+
+sleep() {
+  [ "$#" -eq 1 ] && [[ "$1" =~ ^[0-9]+$ ]] || return 64
+  mock_epoch=$((mock_epoch + 10#$1))
+}
 
 set_responses() {
   printf '0\n' >"$state"
@@ -77,14 +88,13 @@ set -e
 }
 
 set_responses Pending
-started="$(date +%s)"
+mock_epoch=100
 set +e
 bibites_wait_ssm_invocation test-profile us-east-1 \
   "$command_id" "$instance_id" 1 1 >/dev/null 2>&1
 status=$?
 set -e
-elapsed=$(( $(date +%s) - started ))
-[ "$status" -eq 124 ] && [ "$elapsed" -le 3 ] || {
+[ "$status" -eq 124 ] && [ "$(sed -n '1p' "$state")" = 1 ] || {
   echo 'bounded-timeout fixture returned the wrong result' >&2
   exit 1
 }
