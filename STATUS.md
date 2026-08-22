@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: 2026-08-21 UTC.
+Last updated: 2026-08-22 UTC.
 
 Bibites Multiverse `0.3.2` is public. The first announced service period runs from
 **August 14 through November 14, 2026**, and reminders begin 30 days before the end.
@@ -16,8 +16,25 @@ The exit test requires all of these results:
 - At least 72 hours of continuous operation.
 - No operator action on a participant's computer.
 
-This page does not report live service health, peer counts, or join-string availability.
-Use the [live map](https://bibitesmultiverse.com/live) for the public view of the experiment.
+Use the [production-health dashboard](https://bibitesmultiverse.com/health) for current test,
+service, host, and coverage results. Use the
+[live map](https://bibitesmultiverse.com/live) for current worlds and migrations.
+
+## Current production health
+
+The production-health dashboard is live. It joins the scheduled five-minute checks with a bounded
+two-hour view of the service host. It also shows current worlds, record integrity, restart cost,
+deployment identity, and broadcast audience state.
+
+At the `2026-08-22T00:06Z` closeout check, availability and record-integrity checks passed.
+All six public routes returned HTTP `200`. Sixteen slots were live, and one previously dark slot
+stayed dark. The dashboard reports the overall result as critical because the old archive-memory
+check still models every permanent record as resident memory. The current archive uses bounded
+roll-up and duplicate-window state, so that model does not describe its current memory shape.
+The dashboard shows this known critical result without weakening or hiding it.
+
+The dashboard is an on-host current view. It is not an external dead-man check or an off-host
+history store. Its Coverage section names the missing tests and profilers.
 
 ## Hosted service
 
@@ -148,6 +165,8 @@ Read the [system design](system_decomposition.md) for milestone scope. Read the
 
 - Read the [participant guide](docs/README.md) before you connect a world.
 - Open the [public map](https://bibitesmultiverse.com/live) to explore migrations and lineages.
+- Open the [production-health dashboard](https://bibitesmultiverse.com/health) to see current
+  production tests, service health, host performance, and coverage gaps.
 - Read the [announcements page](https://bibitesmultiverse.com/announcements/) for service notices.
   It is the only channel the service publishes them on.
 - The optional [shared broadcast](https://bibitesmultiverse.com/watch) follows one participant
