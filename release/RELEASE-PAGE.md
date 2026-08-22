@@ -5,20 +5,34 @@ Your game and saves stay on your computer.
 
 ## What is new in `@@RELEASE@@`
 
-The Windows setup now opens the installed graphical launcher after it starts the connected game.
-Its default completion option names both actions. If Windows cannot open the launcher, the
-installation stays complete and the world stays running. Setup shows the executable path for
-another try.
+<!-- WRITE THIS SECTION FOR THE RELEASE BEING CUT, from nothing rather than by
+     adding to it. It describes ONE release, because the reader has already
+     installed the one before it; a paragraph left here by a previous release is a
+     change that gets announced as new twice. That is not hypothetical: a release
+     has already shipped with the whole of its predecessor's feature list under
+     this heading, because the section was added to rather than written. The text
+     each release used is on its own published release page and in this file's
+     history, so nothing is lost by clearing it. release/README.md, "Cutting a
+     release", step 1. -->
 
 ## Upgrading from an earlier release
+
+<!-- The two bullets below hold for every release and stay. Add this release's own
+     upgrade notes beside them — what to do before running setup, what does not
+     change, what a script has to be told, and the one thing a world installed by
+     an earlier release cannot do — and take those back out once it has shipped.
+     A COMMENT STILL HERE AT BUILD TIME IS PUBLISHED. It is invisible on the
+     rendered page and visible in the body GitHub serves, which is how the first
+     release with nothing to add in this section shipped this block and had it
+     removed from the release by hand afterwards. Until the build strips
+     comments, delete this one before the tag if the section stays as it stands,
+     and put it back with the next release's note. -->
 
 - **Stop every world before you run the setup.** Use *Stop every world* in the launcher's window,
   or `multiverse-launcher.exe stop --all`. Setup refuses while anything of this installation is
   running, and it refuses before it has changed anything.
 - **Install over the top.** Your world keeps its identity, its place on the map, its saves and its
   journal.
-- **Choose what starts when setup finishes.** The default option starts the game, connects it,
-  and opens the launcher. Clear the option to finish without starting either program.
 
 ## What you need
 
