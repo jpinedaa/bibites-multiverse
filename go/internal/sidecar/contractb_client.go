@@ -1191,6 +1191,18 @@ func (s *Sidecar) allowGenomeRequest(requester string) bool {
 // ---------------------------------------------------------------- send helpers
 
 func (s *Sidecar) sendRelayLocked(typ string, data any) bool {
+	return s.sendRelayClassLocked(typ, data, paceDeferred(typ))
+}
+
+// sendRelayReplyLocked sends the immediate answer to one relay-paced migration
+// arrival. These replies must not wait behind a journal drain. The relay bounds
+// their aggregate arrival rate per destination, so they consume the control
+// reserve without becoming an unbounded control stream.
+func (s *Sidecar) sendRelayReplyLocked(typ string, data any) bool {
+	return s.sendRelayClassLocked(typ, data, false)
+}
+
+func (s *Sidecar) sendRelayClassLocked(typ string, data any, deferred bool) bool {
 	if s.relayConn == nil || !s.relayReady {
 		return false
 	}
@@ -1204,10 +1216,10 @@ func (s *Sidecar) sendRelayLocked(typ string, data any) bool {
 	// at the far end, and cfg.Clock exists so §9.3's bounded hold can be tested
 	// over simulated hours. Reading an injectable clock here would let a test
 	// that jumps a day starve a live connection, or one that freezes stop it.
-	if !s.sendPace.admit(time.Now(), len(frame), paceBulk(typ)) {
-		// DELAYED, NEVER DROPPED. The journal entry behind this frame is
-		// untouched, so tickOutbound offers it again on the next tick — this is
-		// the drain running at the published rate, not a failure.
+	if !s.sendPace.admit(time.Now(), len(frame), deferred) {
+		// DELAYED, NEVER DROPPED. The durable state behind this frame stays
+		// retryable, so the custody scheduler offers it again on the next tick.
+		// This is a drain running at the published rate, not a send failure.
 		return false
 	}
 	if err := s.relayConn.Send(frame); err != nil {
@@ -1229,7 +1241,7 @@ func (s *Sidecar) nackUpstream(migrationID, destPeer, code, message string) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sendRelayLocked(contractb.TypeMigrationNack, contractb.MigrationNack{
+	s.sendRelayReplyLocked(contractb.TypeMigrationNack, contractb.MigrationNack{
 		MigrationID: migrationID,
 		SourcePeer:  s.cfg.PeerID,
 		DestPeer:    destPeer,
@@ -1245,7 +1257,7 @@ func (s *Sidecar) ackUpstreamNow(migrationID, destPeer string, entityID int32, d
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.sendRelayLocked(contractb.TypeMigrationAck, contractb.MigrationAck{
+	s.sendRelayReplyLocked(contractb.TypeMigrationAck, contractb.MigrationAck{
 		MigrationID: migrationID,
 		SourcePeer:  s.cfg.PeerID,
 		DestPeer:    destPeer,

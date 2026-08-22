@@ -3,7 +3,7 @@
 **Four things to do, in this order.** Each one answers a different question, and doing them out
 of order is how an evening gets spent on the wrong machine.
 
-1. **Read what the map thinks of your world**, with `multiverse-sidecar --my-slot`.
+1. **Read what your sidecar and the map say about your world**, with `multiverse-sidecar --my-slot`.
 2. **Run `multiverse-sidecar --diagnose`.** It runs the checks a person used to have to run.
 3. **Look the symptom up in the taxonomy.** Every refusal there names its remedy *and* who has
    to apply it.
@@ -63,16 +63,18 @@ Everything below writes them short. **The flags are the same on both platforms**
 the file name and where your data directory is. **They read; they do not start anything**, and you
 can run either one while your world is running.
 
-## 1. Read what the map thinks of your world
+## 1. Read what your sidecar and the map say about your world
 
 ```
 multiverse-sidecar --my-slot
 ```
 
-**Your own sidecar answers this, not the map.** It already knows everything the map has said
-about your world — it was told, on the same broadcast every other peer gets — so this asks the
-map for nothing, works when the map's own page is unreachable, and is about you rather than about
-a grid of six worlds. Add `--json` for the machine-readable form.
+**Your own sidecar answers this, not the map.** It reads the last map broadcast and its local
+journal. The map does not broadcast the pending-ACK depth or its oldest age. This command asks the
+map for nothing.
+
+It works during a map-page outage. It reports your world, not a grid of six worlds. Add `--json`
+for the machine-readable form.
 
 The map also publishes a page with every world on it, including yours, and it is worth reading
 when the question is about somebody else's world rather than your own.
@@ -91,15 +93,16 @@ What to read, and what a healthy reading looks like:
 |---|---|---|
 | Your slot is **live**, with a game connected | both true | Live with no game connected is the worst-looking symptom in this system and it has two very different causes — see `LOCAL-CONFIGRACE` and `LOCAL-STARVATION` in the taxonomy. **On Linux the second of those does not happen**; what happens instead is `LOCAL-LOGSHRED`, where every world works and the log is the casualty |
 | Your **edges** | Every edge you declared reports a live peer | Each closed reason means something different, and only some of them are yours to fix — taxonomy §4 |
-| Your **queue depths** — in custody, paced, unresolved | Small, and moving, with nothing lost | A paced depth that never falls names a delivery rate set too low. Read it against your own configured rate, which is published beside it. An **unresolved** entry is an organism handed to the map once and not answered for yet: it is not re-sent and it does not come home, so if no answer arrives it is recorded **lost** and counted on a line of its own. **Late answers** on that line are good news — the organism did arrive, and the count is telling you `--forward-timeout` is set shorter than this map's slowest honest answer |
+| Your **queue depths** — in custody, paced, pending ACK, unresolved | Small and moving, with nothing lost. A brief pending-ACK queue can be normal. | A paced depth that never decreases identifies a delivery rate that is too low. Read it against your configured rate beside it. **Pending ACK** means that your game received the organism, but the ordinary `MIGRATION_ACK` is still in the response queue. Its age starts after the game accepts delivery.<br><br>These ACKs share the existing wire pace and leave before outbound `MIGRATION_PAYLOAD` frames. Immediate `MIGRATION_NACK` frames and tombstone duplicate `MIGRATION_ACK` frames do not wait in this queue. The pending depth and oldest age are readings. They do not cause a warning.<br><br>An **unresolved** entry is an organism that this sidecar sent to the map once without an answer. The sidecar does not send it again or return it. If no answer arrives, the sidecar records it **lost** on a separate line. A **late answer** is good news. The organism arrived, and `--forward-timeout` is shorter than this map's slowest honest answer. |
 | Your **last save** | Recent, against your own save interval | An absent save with a save interval of zero is a world with its save timer off — a reading, not a gap |
 | Your **speed** | The applied speed and the achieved speed are close | When they come apart, your machine cannot meet the speed you asked for, and **the gap is the news**. Every rate about your world is wrong by that factor |
 | Your **last refusal** | Absent | Present means the relay refused this world for a stated reason, and it is published to every peer rather than only logged, so that a stale world does not read as a dead one. It names one of three things: an incompatible game version, a wire version below the map's floor, or `capacity:` and the limit that fired. **Two refusals deliberately never appear here** — a rejected credential, which reaches no slot at all, and an eviction, which has no shape of its own. An empty field is not proof that nothing was refused |
 | The **other worlds** | Live, with a game connected, on your build | This is the row nobody could read before. When your lanes are quiet and your own world looks healthy, the cause is usually here, and it is on somebody else's machine |
 
-**`--my-slot` shows and does not judge.** It prints the readings; `--diagnose` is what says
-whether one of them is a fault, and who has to act. If your sidecar is not running, `--my-slot`
-has nothing to read and says so — run `--diagnose`, which answers a dozen questions without it.
+**`--my-slot` reports and does not judge.** It reports the readings. `--diagnose` judges the values
+that have a published criterion. It reports the pending-ACK depth and age without a `WARN`
+threshold. If your sidecar is not running, `--my-slot` has nothing to read. Run `--diagnose`,
+which answers a dozen questions without it.
 
 ## 2. Run `--diagnose`
 
@@ -210,17 +213,21 @@ into a slot handover.
 
 Knowing the boundary saves a round trip in both directions.
 
-**They can see**, for every world at once: liveness, slot and position, population, census,
-mod and wire and game versions, save policy, exclusion list, speed, queue depths, **how many
-organisms each world has lost in transit**, and every refusal that reached a slot. They can also
-see the one thing you cannot — **your neighbours' side of a shared failure**.
+**They can see** each world's liveness, slot, position, population, census, versions, save policy,
+exclusion list and speed. They can also see published custody and paced depths, lost-organism
+totals, and each refusal that reached a slot. They can see the one thing you cannot: **your
+neighbours' side of a shared failure**.
 
-**They cannot see inside your world or your journal.** Custody is local by design: the
-organisms your sidecar holds live in a file on your machine, and there is no protocol that
-moves them and no operator command that reads them. When the question is *which* organisms are
-held and what they are, the operator's honest answer is **"ask the peer"**, and the peer is
-you. Two commands answer it, on your machine and nowhere else, and **both need your sidecar
-stopped** because the journal takes one writer:
+**They cannot see inside your world or your journal.** The local `CustodyState` fields
+`pendingAckDepth`, `oldestPendingAckAgeMs`, `unresolvedDepth` and `oldestUnresolvedAgeMs` stay on
+your machine. `--my-slot` and `--diagnose` read these aggregate values from your journal. The map
+does not broadcast them.
+
+The organisms that your sidecar holds also stay in a file on your machine. No protocol moves
+these journal entries, and no operator command reads them. If the question is *which* organisms
+are held, the operator's honest answer is **"ask the peer"**. You are that peer. Two commands
+answer the question on your machine. **Both need your sidecar stopped** because the journal has
+one writer:
 
 ```
 multiverse-sidecar --list-inflight

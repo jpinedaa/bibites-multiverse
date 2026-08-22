@@ -6,17 +6,21 @@ package relay
 // EVERY COUNTER IN THIS FILE COUNTS SOMETHING THE RELAY ALREADY HAS IN ITS
 // HAND: a socket, a frame's length, a frame's type, a registry entry. Nothing
 // here decodes data.body.bb8, data.lineage or data.species, nothing indexes
-// anything, and nothing keeps per-organism state. That is not a coincidence of
-// implementation — it is the whole of D1, which is why the archive is a
-// separate service and why M6 can replace this relay with libp2p. A limit that
-// needed a payload read is a limit this relay may not have, and an abuse limit
-// is not worth spending D1 on.
+// anything, and nothing keeps decoded or durable per-organism state. That is
+// not a coincidence of implementation — it is the whole of D1, which is why
+// the archive is a separate service and why M6 can replace this relay with
+// libp2p. B43's bounded
+// opaque destination queue is transport state, not a decoded organism job. A
+// limit that needed a payload read is a limit this relay may not have, and an
+// abuse limit is not worth spending D1 on.
 //
 // THE RELAY SHEDS THE CONNECTION, NEVER THE MAP. A peer over a limit is closed
-// with 4007 or refused a claim; no other peer's traffic changes, no lane
-// closes, no migration is dropped in flight, SLOT_VACANT still means what §6.8
-// says, and the shed peer is live:false with darkSinceMs set like any other
-// dark peer — which its neighbours route around exactly as they always did.
+// with 4007 or refused a claim; no other peer's connection is shed and no lane
+// closes. Accepted migrations queued to the shed connection follow B43's normal
+// connection-error rule: their forwarding records remain and their queued bytes
+// can be dropped conservatively. SLOT_VACANT still means what §6.8 says, and the
+// shed peer is live:false with darkSinceMs set like any other dark peer — which
+// its neighbours route around exactly as they always did.
 
 import (
 	"fmt"
@@ -64,6 +68,56 @@ func (m *rateMeter) observe(now time.Time, n int64) (total int64, over time.Dura
 type connMeter struct {
 	frames rateMeter
 	bytes  rateMeter
+}
+
+// migrationForwardPace is one destination identity's physical-write schedule.
+// It survives reconnect overlap, so old and new connections share one rate.
+//
+// Reserve implements wsutil.Pacer. A zero result atomically reserves this
+// instant for one write. A positive result changes no state and tells the
+// connection writer when to try again. The writer never holds Conn.mu or
+// Server.mu while it calls this method or waits for the result.
+type migrationForwardPace struct {
+	mu          sync.Mutex
+	nextAllowed time.Time
+	interval    time.Duration
+}
+
+// migrationPaceBinding lets the WebSocket writer exist before HANDSHAKE names
+// the connection's destination identity. Handshake binds it before publishing
+// the peer, so TrySendPaced can never observe the nil state on a routable
+// connection.
+type migrationPaceBinding struct {
+	mu   sync.Mutex
+	pace *migrationForwardPace
+}
+
+func (b *migrationPaceBinding) bind(pace *migrationForwardPace) {
+	b.mu.Lock()
+	b.pace = pace
+	b.mu.Unlock()
+}
+
+func (b *migrationPaceBinding) Reserve(now time.Time) time.Duration {
+	b.mu.Lock()
+	pace := b.pace
+	b.mu.Unlock()
+	if pace == nil {
+		// No paced frame can legitimately precede HANDSHAKE publication. Keep a
+		// broken caller retrying instead of allowing an unpaced physical write.
+		return time.Second
+	}
+	return pace.Reserve(now)
+}
+
+func (p *migrationForwardPace) Reserve(now time.Time) time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if now.Before(p.nextAllowed) {
+		return p.nextAllowed.Sub(now)
+	}
+	p.nextAllowed = now.Add(p.interval)
+	return 0
 }
 
 func newConnMeter() *connMeter {

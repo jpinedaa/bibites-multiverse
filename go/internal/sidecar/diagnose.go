@@ -895,6 +895,7 @@ func (d *diag) checkJournalDepths() CheckResult {
 				c.UnresolvedDepth++
 			}
 		}
+		c.PendingAckDepth, c.OldestPendingAckAgeMs = pendingAckWaiting(states, d.now)
 		c.OldestPacedAgeMs, c.OldestUnresolvedAgeMs = oldestWaiting(states, d.now)
 		c.InboundRatePerSimMinute = contracta.InboundRatePerSimMinute
 		if _, err := os.Stat(d.jr.Path()); errors.Is(err, os.ErrNotExist) {
@@ -902,8 +903,9 @@ func (d *diag) checkJournalDepths() CheckResult {
 				"nothing has taken custody here")
 		}
 	}
-	det := []string{fmt.Sprintf("in custody %d, paced %d, forwarded and unanswered %d, lost %d",
-		c.CustodyDepth, c.PacedDepth, c.UnresolvedDepth, c.LostForwardTotal)}
+	det := []string{fmt.Sprintf(
+		"in custody %d, paced %d, upstream ACKs pending %d, forwarded and unanswered %d, lost %d",
+		c.CustodyDepth, c.PacedDepth, c.PendingAckDepth, c.UnresolvedDepth, c.LostForwardTotal)}
 	if !d.live.OK {
 		det = append(det, "read from the journal on disk; the configured delivery rate is this "+
 			"build's default because no running sidecar named one")
@@ -913,8 +915,12 @@ func (d *diag) checkJournalDepths() CheckResult {
 			"re-sent and does not come home; at forwardTimeoutMs it is recorded lost, because "+
 			"migration is at-most-once (contract-b-m4.md §9.3)", roundMs(c.OldestUnresolvedAgeMs)))
 	}
+	if c.PendingAckDepth > 0 && c.OldestPendingAckAgeMs > 0 {
+		det = append(det, fmt.Sprintf("the oldest completed arrival has waited %s for its durable "+
+			"MIGRATION_ACK to leave this sidecar", roundMs(c.OldestPendingAckAgeMs)))
+	}
 	if c.PacedDepth == 0 {
-		return pass(id, "nothing is queued behind the delivery rate", det...)
+		return pass(id, "no delivery queue is stalled", det...)
 	}
 
 	// Is the paced queue draining at the rate this world configured? The
@@ -1569,7 +1575,8 @@ func (d *diag) checkLimits() CheckResult {
 			"upgrade and never a close",
 		contractb.LimitMaxSubscribers+": a participant never meets it",
 		fmt.Sprintf("this connection is pacing itself at %.0f frames a second and has deferred "+
-			"%d bulk frames to stay there", v.Wire.PacedFramesPerSecond, v.Wire.PacedDeferrals))
+			"%d journal-backed frames to stay there", v.Wire.PacedFramesPerSecond,
+			v.Wire.PacedDeferrals))
 	if len(approaching) > 0 {
 		return warn(id, "this world's own traffic is approaching a limit the map publishes",
 			"bring this world's traffic under the ceiling, or ask the operator to raise that "+

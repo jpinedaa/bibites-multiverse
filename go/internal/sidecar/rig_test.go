@@ -168,6 +168,10 @@ type testRelay struct {
 	// cares about ONE ceiling names only that one — and a test that names one
 	// is testing a knob rather than a constant.
 	limits contractb.Limits
+	// pingInterval is test-only clock compression. Zero keeps the general rig's
+	// 200 ms cadence; pacing tests use a production-proportional cadence so they
+	// do not manufacture ten control frames per second beside a 40/s ceiling.
+	pingInterval time.Duration
 }
 
 // secret mints (or returns) this peer's credential secret against the relay's
@@ -192,7 +196,7 @@ func startRelayWithLimits(t *testing.T, limits contractb.Limits) *testRelay {
 		t.Fatalf("relay listen: %v", err)
 	}
 	r := &testRelay{t: t, addr: ln.Addr().String(), dataDir: t.TempDir(),
-		creds: newTestCreds(t), limits: limits}
+		creds: newTestCreds(t), limits: limits, pingInterval: time.Second}
 	r.serve(ln)
 	t.Cleanup(r.kill)
 	return r
@@ -216,13 +220,17 @@ func startRelayWithTLS(t *testing.T, certFile, keyFile string) *testRelay {
 }
 
 func (r *testRelay) serve(ln net.Listener) {
+	pingInterval := r.pingInterval
+	if pingInterval <= 0 {
+		pingInterval = 200 * time.Millisecond
+	}
 	srv, err := relay.New(relay.Options{
 		Logger:      testLogger(r.t),
 		DataDir:     r.dataDir,
 		Credentials: r.creds.store,
 		// The contract's own behaviour on a short clock: the coalescing window
 		// and the stats republish move, and no rule they gate does.
-		PingInterval:   200 * time.Millisecond,
+		PingInterval:   pingInterval,
 		PeerTimeout:    3 * time.Second,
 		StatusCoalesce: 40 * time.Millisecond,
 		StatsBroadcast: 500 * time.Millisecond,

@@ -753,6 +753,160 @@ Neither replay time nor memory is what ends this host's life now.
 Both are bounded by the duplicate window, and the disk is bounded by the ledger
 window. What is left is the crossing rate itself.
 
+## Relay pacing for frames and responses
+
+Contract B §3.3 defines the transport bounds and §5.2 defines the attempted-write boundary.
+
+`F` is the relay's `maxFramesPerSecond` value. This value is an inbound ceiling for
+each peer connection. The relay publishes it in `HANDSHAKE_ACK` and `PEER_STATUS`.
+Current relays refuse `F < 8` at start.
+
+The relay derives one migration rate from `F`:
+
+```text
+R = max(1, floor(F / 8))
+migration_interval = ceil(1 second / R)
+```
+
+`R` is not a second operator knob. A change to `F` changes both the connection ceiling
+and the migration rate. The production value is `F = 50`, so `R = 6`. The destination
+writer therefore spaces physical migration writes by at least `166,666,667 ns`.
+
+This rate applies separately to each destination peer identity. Different destination
+identities have independent rates. Writers in a reconnect overlap share the identity's
+schedule, so a second connection does not double `R`. Thus `R` is not a map-wide crossing
+limit.
+
+### Destination transport queue
+
+`B` is `maxBytesPerSecond`. Each destination connection has a migration transport queue
+with these two bounds:
+
+```text
+queued_migration_frames <= F
+retained_migration_bytes <= B
+```
+
+Both bounds apply at admission. The production values are `F = 50` and
+`B = 4,194,304 B`.
+
+The relay applies the source frame and byte meters before queue admission. Thus a single
+frame larger than `B` normally closes the source with `4007` before the queue evaluates it.
+The relay then validates the required routing fields and the `migrationId` UUID. An invalid
+or empty `migrationId` closes the source as malformed before queue admission.
+
+Source-meter admission does not guarantee destination queue space. If that space is
+insufficient, the relay returns `NOT_FORWARDED` and does not close the destination.
+
+The queue retains the byte-identical Contract B frame. The relay does not decode the body,
+lineage, or species data. It does not create an organism job. For a frame with valid relay-visible
+Contract B fields, a successful enqueue and its forwarding record form one atomic
+attempted-write boundary.
+
+If admission refuses the queue, the attempt adds no forwarding record. The source handler
+does not wait for capacity or for a writer turn.
+
+These payload bounds apply to capacity planning:
+
+```text
+retained_migration_frames <= destination_connection_count * F
+retained_migration_bytes  <= destination_connection_count * B
+```
+
+The connection count includes a temporary reconnect overlap. These formulas bound retained
+frame bytes. They do not include queue-item, WebSocket, or Go runtime overhead.
+
+### Production control headroom
+
+One written migration can cause one immediate `MIGRATION_ACK` or `MIGRATION_NACK` from
+the destination. The production relay therefore limits this response cadence to six frames
+each second for each destination.
+
+The sidecar derives its bucket for deferred sends from the same published value. The refill rate
+is one half of `F`, and the burst capacity is one quarter of `F`. Deferred traffic cannot
+use half of that burst capacity. This protected half is the immediate control reserve.
+
+The production frame arithmetic is:
+
+| Term | Value at `F = 50` |
+|---|---:|
+| Relay migration write rate for one destination | `6/s` |
+| Minimum migration interval | `166,666,667 ns` |
+| Sidecar deferred refill rate | `25/s` |
+| Sidecar total burst capacity | `12` frames |
+| Protected immediate reserve | `6` frames |
+| Deferred traffic plus bounded migration responses in one second | at most `37` frames |
+| Remaining frame headroom for normal control traffic | at least `13` frames |
+
+The six-frame immediate reserve matches the six-frame migration response cadence. Normal
+`PONG`, stats, and claim traffic uses the remaining headroom. An immediate frame can create
+bucket debt. Deferred traffic then waits until refill clears that debt.
+
+A lower `F` is not a migration-only tuning method. This change also lowers liveness and
+control headroom. Current code rejects values less than eight because those values cannot
+preserve the one-eighth response reserve.
+
+### Sidecar response classes
+
+| Frame class | Send rule | Reason |
+|---|---|---|
+| `MIGRATION_PAYLOAD` | Deferred | The outbound journal offers the frame again. |
+| Ordinary journal `MIGRATION_ACK` | Deferred, with strict priority over payload | `AckedUpstream` stays false until the sidecar transport accepts the frame. |
+| Immediate `MIGRATION_NACK` | Bypasses the deferred gate | Relay pacing bounds the arrivals that cause these replies. |
+| Tombstone re-ACK | Bypasses the deferred gate | The mod proved delivery. This reply does not clear the pending durable ACK. |
+| `PONG` and other liveness control | Bypasses the deferred gate | Liveness cannot wait behind a journal drain. |
+
+Each frame that passes the sidecar gate consumes its frame and byte budgets. Every frame that
+reaches the relay also consumes its meter. A bypass is not a free frame. Immediate control
+can spend unavailable tokens and creates debt.
+
+Deferred frames wait for `HANDSHAKE_ACK`. Before that frame arrives, the sidecar does not
+know the relay's session ceiling. A reconnect therefore cannot release an unpaced journal
+backlog before the relay publishes its limit.
+
+### Writer priority and close behavior
+
+`C` is `MigrationControlBurst`:
+
+```text
+C = MigrationFanInDivisor - 1 = 7
+```
+
+While a migration turn is not due, non-migration frames can move ahead freely. After a turn
+becomes due, at most `C` non-migration frames can move ahead before the migration writes.
+This priority keeps `PONG` and other control traffic responsive without starving migration.
+The formula defines `C`. It is not an operator knob.
+
+Admission never waits for `R`. The source handler returns after a successful enqueue or a
+`NOT_FORWARDED` response. Relay pacing therefore creates no source head-of-line wait and no
+read-recovery credit.
+
+An accepted migration stays in the selected destination connection queue. A connection-local
+close or replacement drops queued migrations. At most one migration that the writer already
+selected can finish. The relay does not move the backlog to the replacement, re-route it, or
+send a later NACK.
+
+The forwarding record already marks these frames as attempted writes. A later drop is
+therefore delivery-ambiguous and follows the at-most-once loss rule. The queue is not custody,
+and this design is not a lossless transport.
+
+A relay-wide drain uses a different close path. It rejects new migration admission with
+`NOT_FORWARDED` and no forwarding record. It drains all ordinary queues and accepted migration
+queues. The migration queues keep their identity rates. All connection drains run concurrently
+with one shared 18-second deadline.
+
+For all supported `F` values, pacing delay alone is at most 15 seconds for a full queue. The
+remaining margin covers scheduling and close work. This margin does not guarantee that all
+queues drain. The shared deadline overrides a longer write timeout and force-closes the
+remainder conservatively.
+
+At the deadline, the relay drops each remaining queue and keeps its forwarding records. It
+sends no late NACK.
+
+At the production rate, a full 50-frame queue needs approximately `50 / 6 = 8.34 seconds`
+of migration write turns. Non-migration frames can add bounded delay. The service-stop window
+must include the full 18-second deadline. The 8.34-second calculation is not a guarantee.
+
 ## Network transfer
 
 **Count both directions, and count in `2^30` bytes.** A transfer allowance is usually
@@ -993,18 +1147,21 @@ Run this procedure during provisioning and after a capacity alert:
 
 1. Sum `achievedTimeScale` to get `S`.
 2. Read the current slot count and the crossing rate.
-3. Calculate daily durable growth.
-4. Read actual free space and recent daily growth.
-5. Count ledger records.
-6. Read `ledgerSpecies` and `ledgerOverflow` from `/api/species/tree`. A non-zero overflow is a
+3. Read `F`, `B`, and the destination connection count. Calculate `R` and the retained
+   migration queue bounds.
+4. Reserve the full 18-second relay drain deadline in the service-stop window.
+5. Calculate daily durable growth.
+6. Read actual free space and recent daily growth.
+7. Count ledger records.
+8. Read `ledgerSpecies` and `ledgerOverflow` from `/api/species/tree`. A non-zero overflow is a
    capacity defect and requires a fold rebuild while the raw source still exists.
-7. Calculate the archive resident set, which is also the replay peak.
-8. Select `MV_ARCHIVE_GOMEMLIMIT` from the host's archive ceiling.
-9. Measure or select a conservative replay rate.
-10. Calculate the remaining disk and memory headroom, and the date each one ends.
-11. Calculate peer, publisher, and viewer transfer, and compare the total with the
+9. Calculate the archive resident set, which is also the replay peak.
+10. Select `MV_ARCHIVE_GOMEMLIMIT` from the host's archive ceiling.
+11. Measure or select a conservative replay rate.
+12. Calculate the remaining disk and memory headroom, and the date each one ends.
+13. Calculate peer, publisher, and viewer transfer, and compare the total with the
     provider allowance and budget in both directions.
-12. Record the result in private operations storage.
+14. Record the result in private operations storage.
 
 Actual recent growth outranks the model when the measurement window is representative.
 The model remains useful for new peers and higher achieved time scales.
@@ -1013,6 +1170,9 @@ The model remains useful for new peers and higher achieved time scales.
 
 Select a host that meets these conditions:
 
+- The relay memory budget includes `B` retained frame bytes for each destination connection,
+  plus the queue and runtime overhead.
+- The service-stop window includes the full 18-second relay drain deadline.
 - The volume holds the announced period plus recovery headroom.
 - The archive resident estimate stays below the approved memory threshold.
 - `MV_ARCHIVE_GOMEMLIMIT` is selected from the host's archive ceiling, and the date on

@@ -8,8 +8,9 @@
 // effective-neighbour walk (§8) and the forwarding record behind the
 // non-delivery proof (§5.2). It stays dumb in the sense that matters — it never
 // parses a body, never validates a payload, never indexes a genome and never
-// stores an organism. The walk reads the registry it already keeps; the record
-// is a set of ids it already routed.
+// takes organism custody or retains decoded organism state. B43's bounded
+// destination queue retains only opaque transport bytes. The walk reads the
+// registry it already keeps; the record is a set of ids it already routed.
 package relay
 
 import (
@@ -158,6 +159,10 @@ type Server struct {
 
 	mu   sync.Mutex
 	grid *Grid
+	// connections includes current and replaced connections until their writer
+	// exits. Relay-wide drain must reach every accepted destination transport
+	// queue, including one on a connection that was replaced concurrently.
+	connections map[*peer]struct{}
 	// live connections by peer id, role "peer".
 	peers map[string]*peer
 	// live connections by peer id, role "archive".
@@ -237,6 +242,10 @@ type peerMeta struct {
 	// reconnect and a per-connection counter would hand a storming peer a fresh
 	// allowance every time it redialled.
 	claims *claimMeter
+	// migrationPace is the per-destination physical-write schedule. It is stored
+	// on the identity metadata so overlapping reconnects share one allowance.
+	// It holds no frame or organism state.
+	migrationPace *migrationForwardPace
 }
 
 type peer struct {
@@ -316,6 +325,15 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 	opts.Limits.ApplyDefaults()
+	if opts.Limits.MaxFramesPerSecond < contractb.MinimumMaxFramesPerSecond {
+		return nil, fmt.Errorf("relay: maxFramesPerSecond must be at least %d to preserve "+
+			"migration control-frame headroom (got %d)",
+			contractb.MinimumMaxFramesPerSecond, opts.Limits.MaxFramesPerSecond)
+	}
+	if opts.Limits.MaxFramesPerSecond > int64(^uint(0)>>1) {
+		return nil, fmt.Errorf("relay: maxFramesPerSecond %d cannot size a transport queue on this platform",
+			opts.Limits.MaxFramesPerSecond)
+	}
 	grid, err := LoadGrid(opts.DataDir)
 	if err != nil {
 		return nil, err
@@ -349,6 +367,7 @@ func New(opts Options) (*Server, error) {
 		sessionID:         wire.NewUUID(),
 		stop:              make(chan struct{}),
 		grid:              grid,
+		connections:       map[*peer]struct{}{},
 		peers:             map[string]*peer{},
 		subscribers:       map[string]*peer{},
 		meta:              map[string]*peerMeta{},
@@ -511,27 +530,52 @@ func (s *Server) MapShape() contractb.MapShape {
 	return s.grid.Shape()
 }
 
-// Drain closes every connection with 4005. A hijacked WebSocket is not tracked
-// by net/http, so http.Server.Shutdown alone would leave peers hanging.
+// Drain closes migration admission, then asks every current or overlapping
+// connection to drain its accepted paced transport queue before close 4005.
+// The shared deadline prevents a dead reader from holding shutdown forever. A
+// hijacked WebSocket is not tracked by net/http, so http.Server.Shutdown alone
+// would leave peers hanging.
 func (s *Server) Drain() {
 	s.mu.Lock()
 	s.draining = true
-	conns := make([]*peer, 0, len(s.peers)+len(s.subscribers))
-	for _, p := range s.peers {
+	conns := make([]*peer, 0, len(s.connections))
+	for p := range s.connections {
 		conns = append(conns, p)
 	}
-	for _, p := range s.subscribers {
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), contractb.MigrationDrainTimeout)
+	defer cancel()
+	var drains sync.WaitGroup
+	for _, p := range conns {
+		drains.Add(1)
+		go func(p *peer) {
+			defer drains.Done()
+			if err := p.conn.ClosePaced(ctx, contractb.CloseShuttingDown, "relay draining"); err != nil && !errors.Is(err, wsutil.ErrClosed) {
+				s.log.Warn("relay: paced connection drain ended before its queue emptied",
+					"peer", p.id, "role", p.role, "err", err,
+					"attemptedForwardsRemainConservative", true)
+			}
+		}(p)
+	}
+	drains.Wait()
+	s.Close()
+}
+
+// Close promptly stops every remaining connection and the publisher. Drain is
+// the only call that preserves paced migration queues; error and test cleanup
+// use this prompt path so a bad socket cannot make a close linger.
+func (s *Server) Close() {
+	s.mu.Lock()
+	s.draining = true
+	conns := make([]*peer, 0, len(s.connections))
+	for p := range s.connections {
 		conns = append(conns, p)
 	}
 	s.mu.Unlock()
 	for _, p := range conns {
-		p.conn.Close(contractb.CloseShuttingDown, "relay draining")
+		p.conn.Close(contractb.CloseShuttingDown, "relay stopping")
 	}
-	s.Close()
-}
-
-// Close stops the publisher. It is idempotent.
-func (s *Server) Close() {
 	s.stopOnce.Do(func() { close(s.stop) })
 	s.wg.Wait()
 }
@@ -769,8 +813,17 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// maxFrameBytes is a knob rather than a constant from B24 onward (§3.3).
-	// Over it the library closes 1009 TOO_BIG, which is what §3.2 asks for.
-	s.handle(r.Context(), wsutil.NewLimited(ws, 128, s.limits.MaxFrameBytes), auth)
+	// Over it the library closes 1009 TOO_BIG, which is what §3.2 asks for. The
+	// paced destination queue reuses the published one-second frame and byte
+	// ceilings as its retention bounds; it introduces no hidden capacity knob.
+	paceBinding := &migrationPaceBinding{}
+	conn := wsutil.NewPacedLimited(ws, 128, s.limits.MaxFrameBytes, wsutil.PacedConfig{
+		Pacer:        paceBinding,
+		MaxFrames:    int(s.limits.MaxFramesPerSecond),
+		MaxBytes:     s.limits.MaxBytesPerSecond,
+		ControlBurst: int(contractb.MigrationControlBurst),
+	})
+	s.handle(r.Context(), conn, auth, paceBinding)
 }
 
 // shedUpgrade turns a capacity refusal that is known before the handshake into
@@ -797,18 +850,26 @@ func (s *Server) shedUpgrade(w http.ResponseWriter, r *http.Request, peerID, bre
 	_ = ws.Close(contractb.CloseCapacity, breach)
 }
 
-func (s *Server) handle(ctx context.Context, conn *wsutil.Conn, auth authed) {
+func (s *Server) handle(ctx context.Context, conn *wsutil.Conn, auth authed,
+	paceBinding *migrationPaceBinding) {
 	// B24's frame and byte meters live for exactly as long as the connection
 	// they measure, and they start counting at the HANDSHAKE: §3.3 says "frames
 	// of any type", and a peer that could spend its whole allowance before it
 	// identified itself would have found the gap rather than the ceiling.
 	meter := newConnMeter()
-	p, err := s.handshake(ctx, conn, auth, meter)
+	p, err := s.handshake(ctx, conn, auth, meter, paceBinding)
 	if err != nil {
 		s.log.Warn("relay: handshake failed", "err", err)
 		<-conn.Done()
 		return
 	}
+	// The writer can stop while this handler is pacing an accepted migration
+	// for another destination. Remove the exact dead pointer promptly; the
+	// deferred call below is an idempotent fallback for every other exit path.
+	go func() {
+		<-p.conn.Done()
+		s.drop(p)
+	}()
 	defer s.drop(p)
 
 	go s.pingLoop(p)
@@ -847,9 +908,10 @@ func (s *Server) handle(ctx context.Context, conn *wsutil.Conn, auth authed) {
 
 // shedForCapacity is B24's "the relay sheds the connection, never the map".
 // This peer's socket closes with 4007 and its slot's lastRefusal names the
-// limit; every other peer's traffic is untouched, no lane closes, and nothing
-// in flight is dropped. Its neighbours route around it exactly as they route
-// around any dark peer (§8).
+// limit. No other peer's connection is shed and no lane closes. Accepted
+// migrations queued to this connection follow B43's conservative connection-
+// error drop rule. Its neighbours route around it exactly as they route around
+// any dark peer (§8).
 func (s *Server) shedForCapacity(p *peer, breach string) {
 	s.mu.Lock()
 	if p.role == contractb.RolePeer {
@@ -866,7 +928,8 @@ func (s *Server) shedForCapacity(p *peer, breach string) {
 }
 
 // handshake reads the mandatory first frame and registers the client.
-func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, meter *connMeter) (*peer, error) {
+func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed,
+	meter *connMeter, paceBinding *migrationPaceBinding) (*peer, error) {
 	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	frame, err := conn.Read(readCtx)
@@ -957,6 +1020,11 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, 
 	}
 
 	s.mu.Lock()
+	if s.draining {
+		s.mu.Unlock()
+		conn.Close(contractb.CloseShuttingDown, "relay draining")
+		return nil, errors.New("relay: draining")
+	}
 	// B25's floor, and it sits BESIDE §6.1's game-version refusal rather than
 	// replacing it: two axes, two tests, and D22 is the decision that they never
 	// meet. This one is the map's MEMBERSHIP test — may this build join this map —
@@ -1045,6 +1113,47 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, 
 	if p.role == contractb.RoleArchive {
 		registry = s.subscribers
 	}
+	// Bind the writer to this identity's shared physical migration schedule
+	// before the connection can become a routing target. The binding contains
+	// no frame and survives only through the identity metadata.
+	paceBinding.bind(s.migrationPaceLocked(p.id))
+	ack := contractb.HandshakeAck{
+		RelayVersion:    Version,
+		ProtocolVersion: wire.ProtocolB,
+		RelaySessionID:  s.sessionID,
+		Map:             s.grid.Shape(),
+		SlotCount:       s.grid.Size(),
+		ReceivedAt:      time.Now().UnixMilli(),
+		// B25: published at connect so a peer can say what it will need BEFORE it
+		// needs it. Absent is no minimum.
+		MinContractVersion: s.minContract,
+		// B24: the FIRST thing on this wire the relay tells a peer about the
+		// relay, and it is here rather than on a later frame because a peer that
+		// learns its ceilings after it has already exceeded them learns them from
+		// a 4007. What is published is what this relay is RUNNING with.
+		Limits: s.limits.Published(),
+	}
+	if p.role == contractb.RolePeer {
+		if res, ok := s.grid.ResOfPeer(p.id); ok {
+			slot, pos := res.Slot, res.Position()
+			ack.AssignedSlot = &slot
+			ack.AssignedPosition = &pos
+		}
+	}
+	ackFrame := mustFrame(s.log, contractb.TypeHandshakeAck, ack)
+	if ackFrame == nil {
+		s.mu.Unlock()
+		conn.Close(contractb.CloseShuttingDown, "relay could not encode HANDSHAKE_ACK")
+		return nil, errors.New("relay: could not encode HANDSHAKE_ACK")
+	}
+	// Queue HANDSHAKE_ACK before this connection becomes a routing target. A
+	// destination can answer a migration immediately, so publishing p first can
+	// put that reply ahead of the mandatory ACK on p's outbound queue.
+	if err := p.conn.Send(ackFrame); err != nil {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("relay: send HANDSHAKE_ACK: %w", err)
+	}
+	s.connections[p] = struct{}{}
 	if old, ok := registry[p.id]; ok {
 		// §6.1: a newer connection THAT AUTHENTICATED AS this peerId takes over,
 		// which makes a crashed-and-restarted sidecar self-healing.
@@ -1071,33 +1180,9 @@ func (s *Server) handshake(ctx context.Context, conn *wsutil.Conn, auth authed, 
 			m.simSize = hs.SimulationSize
 		}
 	}
-	ack := contractb.HandshakeAck{
-		RelayVersion:    Version,
-		ProtocolVersion: wire.ProtocolB,
-		RelaySessionID:  s.sessionID,
-		Map:             s.grid.Shape(),
-		SlotCount:       s.grid.Size(),
-		ReceivedAt:      time.Now().UnixMilli(),
-		// B25: published at connect so a peer can say what it will need BEFORE it
-		// needs it. Absent is no minimum.
-		MinContractVersion: s.minContract,
-		// B24: the FIRST thing on this wire the relay tells a peer about the
-		// relay, and it is here rather than on a later frame because a peer that
-		// learns its ceilings after it has already exceeded them learns them from
-		// a 4007. What is published is what this relay is RUNNING with.
-		Limits: s.limits.Published(),
-	}
-	if p.role == contractb.RolePeer {
-		if res, ok := s.grid.ResOfPeer(p.id); ok {
-			slot, pos := res.Slot, res.Position()
-			ack.AssignedSlot = &slot
-			ack.AssignedPosition = &pos
-		}
-	}
 	s.markChurnLocked()
 	s.mu.Unlock()
 
-	s.send(p, contractb.TypeHandshakeAck, ack)
 	s.log.Info("relay: client connected", "peer", p.id, "role", p.role,
 		"assignedSlot", derefSlot(ack.AssignedSlot), "map", ack.Map, "slotCount", ack.SlotCount,
 		"relaySessionId", s.sessionID)
@@ -1180,6 +1265,20 @@ func (s *Server) claimMeterLocked(peerID string) *claimMeter {
 		m.claims = newClaimMeter()
 	}
 	return m.claims
+}
+
+// migrationPaceLocked returns the physical-write schedule for one destination
+// identity. Overlapping old and new connections receive the same pointer, so a
+// reconnect cannot refill the allowance. The connection writer calls Reserve
+// without holding Server.mu or Conn.mu.
+func (s *Server) migrationPaceLocked(peerID string) *migrationForwardPace {
+	m := s.metaLocked(peerID)
+	if m.migrationPace == nil {
+		m.migrationPace = &migrationForwardPace{
+			interval: contractb.MigrationFanInInterval(s.limits.MaxFramesPerSecond),
+		}
+	}
+	return m.migrationPace
 }
 
 // Limits is §3.3's table as this relay is running it, for the operator console
@@ -1842,6 +1941,56 @@ func (s *Server) broadcastPeerStatus() {
 
 // ---------------------------------------------------------------- routing
 
+type migrationEnqueueResult int
+
+const (
+	migrationEnqueued migrationEnqueueResult = iota
+	migrationSlotVacant
+	migrationPeerOffline
+	migrationQueueFull
+	migrationRelayDraining
+)
+
+// enqueueMigration is the routing and proof transaction. It resolves the
+// current destination, admits the byte-identical frame to that connection's
+// bounded paced transport queue, and records the attempted write before it
+// releases Server.mu. Thus no proof reader can observe an accepted queue item
+// with neverForwarded:true. A full paced queue is different from the ordinary
+// required-frame queue: it refuses this migration without closing the peer.
+func (s *Server) enqueueMigration(destSlot int, migrationID string,
+	frame []byte) (migrationEnqueueResult, Reservation, *peer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.draining {
+		return migrationRelayDraining, Reservation{}, nil, nil
+	}
+	res, reserved := s.grid.ResOfSlot(destSlot)
+	if !reserved {
+		return migrationSlotVacant, Reservation{}, nil, nil
+	}
+	dest := s.peers[res.PeerID]
+	if dest == nil {
+		return migrationPeerOffline, res, nil, nil
+	}
+	select {
+	case <-dest.conn.Done():
+		return migrationPeerOffline, res, nil, nil
+	default:
+	}
+	if err := dest.conn.TrySendPaced(frame); err != nil {
+		if errors.Is(err, wsutil.ErrPacedQueueFull) {
+			return migrationQueueFull, res, dest, nil
+		}
+		return migrationPeerOffline, res, dest, err
+	}
+	if migrationID != "" {
+		if _, ok := s.forwarded[migrationID]; !ok {
+			s.forwarded[migrationID] = time.Now()
+		}
+	}
+	return migrationEnqueued, res, dest, nil
+}
+
 // onMigrationPayload routes on data.destSlot and nothing else. The frame is
 // forwarded byte for byte; body.bb8 and data.lineage are never decoded (§5).
 func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bool {
@@ -1856,6 +2005,10 @@ func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bo
 	}
 	var id contractb.Identity
 	_ = json.Unmarshal(env.Data, &id)
+	if !wire.ValidUUID(id.MigrationID) {
+		p.conn.Close(contractb.CloseMalformedFrame, "migrationId is not a UUID")
+		return false
+	}
 
 	// §5.1: a MIGRATION_PAYLOAD from a subscriber is answered NOT_A_MEMBER and
 	// is not forwarded.
@@ -1876,62 +2029,45 @@ func (s *Server) onMigrationPayload(p *peer, env wire.Envelope, frame []byte) bo
 		return false
 	}
 
-	s.mu.Lock()
-	res, reserved := s.grid.ResOfSlot(routing.DestSlot)
-	var dest *peer
-	darkSince := int64(0)
-	if reserved {
-		dest = s.peers[res.PeerID]
-		if m, ok := s.meta[res.PeerID]; ok {
-			darkSince = m.darkSinceMs
-		}
-	}
-	draining := s.draining
-	s.mu.Unlock()
-
-	switch {
-	case !reserved:
-		// §6.8: destSlot names NO RESERVATION AT ALL — released, handed to
-		// nobody, or never issued. Slot numbers are never reused, so this world
-		// never returns and no retry can ever succeed. PERMANENT.
+	result, res, dest, err := s.enqueueMigration(routing.DestSlot, id.MigrationID, frame)
+	switch result {
+	case migrationRelayDraining:
+		s.nackNoDelivery(p, id.MigrationID, contractb.NackNotForwarded,
+			"the relay is draining and declined to hand this frame over")
+		return true
+	case migrationSlotVacant:
 		s.nackNoDelivery(p, id.MigrationID, contractb.NackSlotVacant,
 			fmt.Sprintf("slot %d names no reservation; slot numbers are never reused, so it never returns",
 				routing.DestSlot))
 		return true
-	case dest == nil:
+	case migrationPeerOffline:
 		msg := fmt.Sprintf("slot %d (%d,%d) is reserved to %s, which is not connected",
 			res.Slot, res.Col, res.Row, res.PeerID)
-		if darkSince > 0 {
-			msg += fmt.Sprintf(", dark for %ds", (time.Now().UnixMilli()-darkSince)/1000)
+		s.mu.Lock()
+		if m, ok := s.meta[res.PeerID]; ok && m.darkSinceMs > 0 {
+			msg += fmt.Sprintf(", dark for %ds", (time.Now().UnixMilli()-m.darkSinceMs)/1000)
+		}
+		s.mu.Unlock()
+		if err != nil {
+			s.log.Warn("relay: destination transport queue stopped before migration admission",
+				"peer", res.PeerID, "migrationId", id.MigrationID, "err", err)
 		}
 		s.nackNoDelivery(p, id.MigrationID, contractb.NackPeerOffline, msg)
 		return true
-	case draining:
+	case migrationQueueFull:
 		s.nackNoDelivery(p, id.MigrationID, contractb.NackNotForwarded,
-			"the relay is draining and declined to hand this frame over")
+			fmt.Sprintf("slot %d (%s) has a full paced migration transport queue; "+
+				"the destination connection stays live", res.Slot, res.PeerID))
 		return true
+	case migrationEnqueued:
+		s.sendForwardReceipt(p, id.MigrationID, routing.DestSlot)
+		s.fanOut(frame)
+		return true
+	default:
+		s.log.Error("relay: impossible migration enqueue result", "result", result,
+			"destinationPresent", dest != nil, "migrationId", id.MigrationID)
+		return false
 	}
-
-	// §5.2: ANY ATTEMPTED WRITE of the frame to a destination peer's connection
-	// counts as forwarded, whether or not that write later fails. A partial
-	// write and a peer that dies with bytes in its receive buffer are
-	// indistinguishable from a complete delivery, so both count.
-	//
-	// The record is written BEFORE the attempt, so no interleaving can produce a
-	// neverForwarded: true for a frame that did go out. Every ambiguity resolves
-	// toward "no proof".
-	s.recordForward(id.MigrationID)
-	if err := dest.conn.Send(frame); err != nil {
-		s.log.Warn("relay: forward failed after the attempt was recorded",
-			"peer", dest.id, "migrationId", id.MigrationID, "err", err)
-	}
-	// §6.12, B26: ONE RECEIPT PER FORWARD, at the write. It is emitted AFTER the
-	// forward has been enqueued and never before it, because "the relay MUST NOT
-	// delay, block or fail a forward on account of a receipt it could not send"
-	// is a rule about ordering as much as about failure.
-	s.sendForwardReceipt(p, id.MigrationID, routing.DestSlot)
-	s.fanOut(frame)
-	return true
 }
 
 // sendForwardReceipt is B26's whole relay-side obligation (§5.2, §6.12).
@@ -2213,13 +2349,17 @@ func (s *Server) forward(dest *peer, frame []byte) {
 
 func (s *Server) drop(p *peer) {
 	s.mu.Lock()
+	delete(s.connections, p)
 	registry := s.peers
 	if p.role == contractb.RoleArchive {
 		registry = s.subscribers
 	}
-	if cur, ok := registry[p.id]; ok && cur == p {
-		delete(registry, p.id)
+	cur, ok := registry[p.id]
+	if !ok || cur != p {
+		s.mu.Unlock()
+		return
 	}
+	delete(registry, p.id)
 	if m, ok := s.meta[p.id]; ok {
 		m.modConnected = false
 		if p.role == contractb.RolePeer {

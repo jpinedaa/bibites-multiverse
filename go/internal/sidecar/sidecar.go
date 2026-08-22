@@ -148,8 +148,9 @@ type Sidecar struct {
 
 type sched struct {
 	// nextForward paces the offer of an entry that has NOT reached a live relay
-	// connection yet, and the re-send of an upstream MIGRATION_ACK. It never
-	// paces a re-forward, because there is no re-forward (§25, B37).
+	// connection yet, and the retry of an upstream MIGRATION_ACK. The ACK retry
+	// runs on TickInterval because the shared wire pacer now owns its rate. It
+	// never paces a re-forward, because there is no re-forward (§25, B37).
 	nextForward time.Time
 	bounceAt    time.Time
 	nextDeliver time.Time
@@ -405,8 +406,9 @@ func (s *Sidecar) PacedFramesPerSecond() float64 {
 	return s.sendPace.framesPerSecond()
 }
 
-// PacedDeferrals is how many bulk frames the pacer has held back on the current
-// session. Rising with no capacity shed is the fix working; see CapacitySheds.
+// PacedDeferrals is how many journal-backed frames the pacer has held back on
+// the current session. Rising with no capacity shed is the fix working; see
+// CapacitySheds.
 func (s *Sidecar) PacedDeferrals() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -497,9 +499,29 @@ func (s *Sidecar) tickLoop() {
 
 func (s *Sidecar) tick(now time.Time) {
 	s.mu.Lock()
-	for _, st := range s.jr.List() {
+	states := s.jr.List()
+	// A completed inbound entry is a durable MIGRATION_ACK waiting to release
+	// the sender's custody. Drain those answers before new outbound payloads use
+	// this tick's shared wire budget. tickInbound marks AckedUpstream only after
+	// the writer accepts the frame, so a deferral stays safe and retryable.
+	for _, st := range states {
+		if st.Direction == journal.In && st.Status == journal.StatusDone {
+			s.tickInbound(st, now)
+		}
+	}
+	// A retry time can land a few microseconds after this tick. Do not let an
+	// outbound payload spend the newly refilled token in that gap. The durable
+	// ACK queue owns the deferred budget until every eligible reply has left.
+	pendingAck := s.hasPendingAckLocked()
+	for _, st := range states {
+		if st.Direction == journal.In && st.Status == journal.StatusDone {
+			continue
+		}
 		switch st.Direction {
 		case journal.Out:
+			if pendingAck {
+				continue
+			}
 			s.tickOutbound(st, now)
 		case journal.In:
 			s.tickInbound(st, now)
@@ -550,6 +572,19 @@ func (s *Sidecar) tick(now time.Time) {
 				"bytesBefore", before, "bytesAfter", after, "reclaimed", before-after)
 		}
 	}
+}
+
+// hasPendingAckLocked reports whether the deferred send budget belongs to a
+// durable ACK. Every outbound entry point uses this gate, including a fresh
+// Contract A export that arrives between custody ticks. Sidecar.mu makes the
+// check and the following send decision one scheduler action.
+func (s *Sidecar) hasPendingAckLocked() bool {
+	for _, st := range s.jr.List() {
+		if st.AwaitsUpstreamAck() {
+			return true
+		}
+	}
+	return false
 }
 
 // tickOutbound is §9.2's state machine, in one place.
@@ -766,14 +801,18 @@ func (s *Sidecar) tickInbound(st *journal.State, now time.Time) {
 	if st.Status == journal.StatusDone {
 		// The mod ACKed, but the upstream MIGRATION_ACK has not gone out yet —
 		// the process may have died between the two. Re-send it.
-		if st.AckedUpstream || st.BounceBack || st.Entry.SourcePeer == "" {
+		if !st.AwaitsUpstreamAck() {
 			return
 		}
 		sc := s.schedFor(id)
 		if now.Before(sc.nextForward) {
 			return
 		}
-		sc.nextForward = now.Add(s.cfg.ForwardRetry)
+		// The send pacer decides when this durable ACK can leave. Retry on the
+		// next custody tick rather than ForwardRetry: the latter is the network
+		// retry for a never-sent payload, and its production value would leave an
+		// ACK backlog idle for seconds after tokens became available.
+		sc.nextForward = now.Add(s.cfg.TickInterval)
 		s.ackUpstreamLocked(st)
 		return
 	}

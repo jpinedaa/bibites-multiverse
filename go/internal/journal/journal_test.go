@@ -289,6 +289,47 @@ func TestPurgeExpiredOnlyTakesOldTombstones(t *testing.T) {
 	}
 }
 
+func TestPurgeExpiredKeepsAnInboundTombstoneUntilItsUpstreamAckLeaves(t *testing.T) {
+	dir := t.TempDir()
+	j, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"ack-pending", "ack-sent"} {
+		entry := sampleEntry(id)
+		entry.SourcePeer = "peer-source"
+		if _, err := j.Create(In, entry, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	completed := time.Now().Add(-2 * time.Hour).UnixMilli()
+	if _, err := j.Apply("ack-pending", Update{
+		Status: StatusDone, CompletedAt: &completed,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	acked := true
+	if _, err := j.Apply("ack-sent", Update{
+		Status: StatusDone, CompletedAt: &completed, Acked: &acked,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := j.PurgeExpired(time.Hour, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("purged %d entries, want only the acknowledged tombstone", n)
+	}
+	if _, ok := j.Get("ack-pending"); !ok {
+		t.Fatal("purge deleted an inbound tombstone before its upstream ACK left")
+	}
+	if _, ok := j.Get("ack-sent"); ok {
+		t.Fatal("purge retained an expired inbound tombstone whose upstream ACK left")
+	}
+}
+
 func TestCompactionShrinksTheLog(t *testing.T) {
 	dir := t.TempDir()
 	j, err := Open(dir)

@@ -88,6 +88,9 @@ type credRelayOptions struct {
 	// which is the operator's kill switch and, for a test, the uncompressed
 	// baseline to measure the compressed arm against.
 	noWireCompression bool
+	// peerTimeout overrides the harness's relaxed 30s liveness window. A focused
+	// liveness test can shorten it without changing the production default.
+	peerTimeout time.Duration
 }
 
 func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
@@ -124,6 +127,10 @@ func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
 	if opts.inMemoryGrid {
 		gridDir = ""
 	}
+	peerTimeout := opts.peerTimeout
+	if peerTimeout == 0 {
+		peerTimeout = 30 * time.Second
+	}
 	srv, err := New(Options{
 		Logger:                    slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError})),
 		DataDir:                   gridDir,
@@ -131,7 +138,7 @@ func startCredRelay(t *testing.T, opts credRelayOptions) *credRelay {
 		MinContractVersion:        opts.minContractVersion,
 		Limits:                    opts.limits,
 		PingInterval:              time.Second,
-		PeerTimeout:               30 * time.Second,
+		PeerTimeout:               peerTimeout,
 		StatusCoalesce:            statusCoalesce,
 		StatusCoalesceMax:         statusCoalesceMax,
 		StatusChurnBurstThreshold: opts.churnThreshold,

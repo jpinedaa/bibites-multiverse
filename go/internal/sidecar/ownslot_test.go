@@ -16,7 +16,38 @@ import (
 	"time"
 
 	"multiverse/internal/contracta"
+	"multiverse/internal/journal"
 )
+
+func TestPendingAckDepthUsesCompletionTimeAndExcludesFinishedReplies(t *testing.T) {
+	now := time.Unix(200, 0)
+	pending := &journal.State{
+		Direction: journal.In,
+		Status:    journal.StatusDone,
+		Entry: journal.Entry{
+			SourcePeer:  "peer-source",
+			JournaledAt: now.Add(-time.Minute).UnixMilli(),
+		},
+		CompletedAt: now.Add(-45 * time.Second).UnixMilli(),
+	}
+	acked := pending.Clone()
+	acked.AckedUpstream = true
+	bounced := pending.Clone()
+	bounced.BounceBack = true
+	open := pending.Clone()
+	open.Status = journal.StatusOpen
+	outbound := pending.Clone()
+	outbound.Direction = journal.Out
+	sourceLess := pending.Clone()
+	sourceLess.Entry.SourcePeer = ""
+
+	depth, age := pendingAckWaiting(
+		[]*journal.State{pending, acked, bounced, open, outbound, sourceLess}, now)
+	if depth != 1 || age != (45*time.Second).Milliseconds() {
+		t.Fatalf("pending ACK depth/age = %d/%dms, want 1/%dms",
+			depth, age, (45 * time.Second).Milliseconds())
+	}
+}
 
 // TestTheOwnSlotViewAnswersTheFourThingsAParticipantMustReadAlone is the
 // deliverable itself. Each of the four is a thing that today lives on the

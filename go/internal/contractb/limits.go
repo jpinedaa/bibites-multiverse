@@ -1,5 +1,7 @@
 package contractb
 
+import "time"
+
 // §3.3's capacity and abuse table, added by §22, B24.
 //
 // THE WHOLE DESIGN CONSTRAINT IS D1. Every limit here is countable at the FRAME
@@ -53,7 +55,59 @@ const (
 	// DefaultMaxSubscribers bounds the FAN-OUT COST of role:"archive" clients.
 	// B27's grant is what bounds the trust; this bounds the copying.
 	DefaultMaxSubscribers = 4
+
+	// MigrationFanInDivisor derives the relay's per-destination migration
+	// forwarding rate from maxFramesPerSecond. The sidecar's shared send bucket
+	// keeps one eighth of that published ceiling outside its journal drain. The
+	// relay spaces migration arrivals at the same rate, so the immediate ACK or
+	// NACK for one arrival cannot turn aggregate fan-in into an unbounded control
+	// burst. This is a derived invariant, not a second operator knob: changing
+	// maxFramesPerSecond changes both rates together.
+	MigrationFanInDivisor int64 = 8
+	// MinimumMaxFramesPerSecond is the smallest supported relay frame ceiling.
+	// One migration response can consume one eighth of the ceiling. The other
+	// seven eighths remain available for PONG, stats, claims, and other control
+	// traffic. A smaller ceiling cannot preserve that control reserve.
+	MinimumMaxFramesPerSecond int64 = MigrationFanInDivisor
+	// MigrationControlBurst is the maximum number of ready ordinary frames that
+	// can leapfrog one queued migration. It gives control traffic priority
+	// without letting a continuous control stream starve an accepted organism.
+	MigrationControlBurst = MigrationFanInDivisor - 1
+	// MigrationDrainTimeout bounds the relay-wide graceful close. A destination
+	// queue retains at most F frames and drains at floor(F/8) per second. Across
+	// all supported F values, that takes at most 15 seconds. The shared deadline
+	// leaves scheduling and close-handshake margin, then force-closes any socket
+	// write that is still blocked and drops its remainder conservatively.
+	MigrationDrainTimeout = 18 * time.Second
 )
+
+// MigrationFanInRate is the number of MIGRATION_PAYLOAD frames that a relay
+// forwards to one destination peer per second. A positive floor keeps a relay
+// usable when it reads a limit from an older relay. Current relays reject a
+// maxFramesPerSecond value below MinimumMaxFramesPerSecond at startup.
+func MigrationFanInRate(maxFramesPerSecond int64) int64 {
+	rate := maxFramesPerSecond / MigrationFanInDivisor
+	if rate < 1 {
+		return 1
+	}
+	return rate
+}
+
+// MigrationFanInInterval is the minimum wall-clock space between migration
+// forwards to one destination. The division rounds up to a nanosecond. Without
+// that ceiling, six truncated intervals fit just inside one second and a relay
+// configured for six frames per second can emit a seventh at the boundary.
+func MigrationFanInInterval(maxFramesPerSecond int64) time.Duration {
+	rate := time.Duration(MigrationFanInRate(maxFramesPerSecond))
+	interval := time.Second / rate
+	if time.Second%rate != 0 {
+		interval++
+	}
+	if interval < time.Nanosecond {
+		return time.Nanosecond
+	}
+	return interval
+}
 
 // The published key names. They are the wire's, spelled once, so a relay, a
 // page and a test cannot disagree about them (§3.3, §6.2, §6.5).

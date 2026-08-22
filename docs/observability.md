@@ -203,6 +203,20 @@ freshness rule is fixed at 30 seconds: a stats block older than that makes
 every stat on that slot unknown. `metrics.jsonl` is the same object once a
 minute, durably.
 
+**A zero lane rate has a window.** Each lane's `/min` value counts archived migration envelopes
+in `flowWindowMs`. The current
+window is exactly five minutes. A single open lane can show `0/min` when no eligible organism
+crossed during that window. This reading alone is normal. Simultaneous zeroes across eligible
+lanes between populated, live worlds are abnormal when they continue through consecutive windows.
+
+If this pattern occurs, inspect `slots[].lastRefusal` for a value that starts with `capacity:`.
+Then compare the source and destination queue readings. At the source, read custody and unresolved
+forwards. At the destination, read custody, paced delivery, and pending ACKs. Public status shows
+`custodyDepth` and `pacedDepth` for each world. The
+[sidecar diagnosis specification](sidecar-diagnose-spec.md) §8 defines the local `--my-slot`
+readings. `pendingAckDepth`, `oldestPendingAckAgeMs`, `unresolvedDepth`, and
+`oldestUnresolvedAgeMs` stay local and do not appear in public status.
+
 **The record roll-up added a layer under it, and eleven fields that describe
 it.** The archive's aggregates are now durable and its raw ledger is a run of
 daily segments, so the page has to answer two questions that used to be one:

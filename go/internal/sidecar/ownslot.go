@@ -186,8 +186,9 @@ type ModState struct {
 // CustodyState is this machine's journal, which is the half of the system no
 // operator can see (contract-b-m4.md §7.5).
 type CustodyState struct {
-	CustodyDepth int `json:"custodyDepth"`
-	PacedDepth   int `json:"pacedDepth"`
+	CustodyDepth    int `json:"custodyDepth"`
+	PacedDepth      int `json:"pacedDepth"`
+	PendingAckDepth int `json:"pendingAckDepth"`
 	// UnresolvedDepth is outbound entries forwarded once with no answer yet, and
 	// LostForwardTotal is how many of them this sidecar has written off since it
 	// last lost its journal (§9.3, §25 B37). `heldDepth` and
@@ -200,6 +201,7 @@ type CustodyState struct {
 	// The oldest waiting entry of each kind. A depth is a number; an AGE is what
 	// says whether it is draining.
 	OldestPacedAgeMs      int64 `json:"oldestPacedAgeMs,omitempty"`
+	OldestPendingAckAgeMs int64 `json:"oldestPendingAckAgeMs,omitempty"`
 	OldestUnresolvedAgeMs int64 `json:"oldestUnresolvedAgeMs,omitempty"`
 	JournalBytes          int64 `json:"journalBytes"`
 	JournalLive           int   `json:"journalLive"`
@@ -259,8 +261,8 @@ type WireState struct {
 	LargestFrameBytes   int64 `json:"largestFrameBytes"`
 	ClaimsLastMinute    int   `json:"claimsLastMinute"`
 	// The pace this sidecar adopted under the published ceiling, and how many
-	// bulk frames it held back to keep it. Rising deferrals with no shed is the
-	// pacing working.
+	// journal-backed frames it held back to keep it. Rising deferrals with no shed
+	// is the pacing working.
 	PacedFramesPerSecond float64 `json:"pacedFramesPerSecond"`
 	PacedDeferrals       int64   `json:"pacedDeferrals"`
 	// WarnFraction is the share of a published limit at which a reading counts
@@ -388,6 +390,7 @@ func (s *Sidecar) modStateLocked(now time.Time) ModState {
 }
 
 func (s *Sidecar) custodyStateLocked(now time.Time) CustodyState {
+	states := s.jr.List()
 	c := CustodyState{
 		CustodyDepth:            s.jr.CountPending(journal.Out) + s.jr.CountPending(journal.In),
 		PacedDepth:              s.pacedDepthLocked(),
@@ -400,8 +403,30 @@ func (s *Sidecar) custodyStateLocked(now time.Time) CustodyState {
 		JournalLive:             s.jr.Live(),
 		JournalDiscardedBytes:   s.jr.Discarded(),
 	}
-	c.OldestPacedAgeMs, c.OldestUnresolvedAgeMs = oldestWaiting(s.jr.List(), now)
+	c.PendingAckDepth, c.OldestPendingAckAgeMs = pendingAckWaiting(states, now)
+	c.OldestPacedAgeMs, c.OldestUnresolvedAgeMs = oldestWaiting(states, now)
 	return c
+}
+
+// pendingAckWaiting counts completed inbound entries whose durable
+// MIGRATION_ACK has not left yet. Its age starts when local delivery completed.
+// An old record without CompletedAt keeps the depth but reports no invented age.
+func pendingAckWaiting(states []*journal.State, now time.Time) (depth int, oldestAge int64) {
+	var oldest int64
+	for _, st := range states {
+		if !st.AwaitsUpstreamAck() {
+			continue
+		}
+		depth++
+		at := st.CompletedAt
+		if at > 0 && (oldest == 0 || at < oldest) {
+			oldest = at
+		}
+	}
+	if nowMs := now.UnixMilli(); oldest > 0 && nowMs > oldest {
+		oldestAge = nowMs - oldest
+	}
+	return depth, oldestAge
 }
 
 // oldestWaiting is the age of the oldest entry waiting on the delivery rate and
@@ -746,6 +771,8 @@ func RenderOwnSlot(w io.Writer, v OwnSlot) {
 	fmt.Fprintf(w, "  in custody   %d\n", v.Custody.CustodyDepth)
 	fmt.Fprintf(w, "  paced        %d waiting on your own delivery rate of %.1f per simulated minute%s\n",
 		v.Custody.PacedDepth, v.Custody.InboundRatePerSimMinute, ageSuffix(v.Custody.OldestPacedAgeMs))
+	fmt.Fprintf(w, "  pending ACK  %d delivered to your game, waiting to release sender custody%s\n",
+		v.Custody.PendingAckDepth, ageSuffix(v.Custody.OldestPendingAckAgeMs))
 	fmt.Fprintf(w, "  unresolved   %d forwarded once, waiting for an answer%s\n",
 		v.Custody.UnresolvedDepth, ageSuffix(v.Custody.OldestUnresolvedAgeMs))
 	if v.Custody.LostForwardTotal > 0 {
@@ -780,9 +807,9 @@ func RenderOwnSlot(w io.Writer, v OwnSlot) {
 		}
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Nothing above is a secret and none of it is private: every field is one the "+
-		"map\nalready broadcasts to every peer. Run `multiverse-sidecar --diagnose` to have it "+
-		"judged.\n")
+	fmt.Fprintf(w, "Nothing above is a secret. Map fields are already public to every peer.\n"+
+		"Queue details come only from this machine's journal and stay on this machine.\n"+
+		"Run `multiverse-sidecar --diagnose` to have it judged.\n")
 }
 
 func versionOrUnknown(v string) string {

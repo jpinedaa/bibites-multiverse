@@ -189,9 +189,9 @@ one record rather than a per-row one because the plugin is a single file for bot
 | Mod version | `0.6.7` |
 | `BibitesMultiverse.dll` SHA-256 | `2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861` |
 | `bibites-mod/` tree | `bc3d8733e323a837d87dd0423bdd2f24862432bc` |
-| `cmd/sidecar` source commit | `c34d5308caa63ecbdec9812ab8c73cd3e439923a` |
-| `cmd/sidecar` input digest | `cd7d606819d16cc464f778f6905156e7f9f30bb0743001bcd3c2c3f9904eb427` |
-| Tested on | 2026-08-21 |
+| `cmd/sidecar` source commit | `93107a6773f49ce3520126e7ffdeac05d78a1f45` |
+| `cmd/sidecar` input digest | `10f4458884fc974db09ed03a18ee12c5d4f02ecfd48cc32f0a20d0b7bd2e7284` |
+| Tested on | 2026-08-22 |
 
 **Three refusals stand on those values.** `release/make-release.sh` will not package a release
 whose freshly built plugin has a different SHA-256, whose `cmd/sidecar` input manifest digests to
@@ -212,13 +212,13 @@ The `evidence` sentence is where the run is described, and it is written by the 
 changes far more often than the mod, so a re-record often re-attests only the sidecar half while
 the plugin's hash and tree stay exactly where the earlier test left them. That is honest as long
 as the `evidence` sentence says which leg proved what — and it must, including when the run
-happened on a host whose game or mod is not the one this matrix names. Today's record is one of
-those: the sidecar values were re-attested on 2026-08-21 after a formatting-only change. The
-Windows and Linux `amd64` binaries built from the new source and from the previously recorded
-source were byte-identical with VCS metadata disabled, and the full Go test and race suites
-passed. This is equivalence evidence, not a new live run. Operational evidence still rests on the
-2026-08-19 live broadcast-world run, and the unchanged plugin values still rest on the 2026-08-17
-test.
+happened on a host whose game or mod is not the one this matrix names. Today's record re-attests
+the sidecar half after the control-response pacing change. The full uncached Go and race suites
+passed. Linux and Windows vet passed. Targeted regressions covered fan-in, durable ACK priority,
+reconnects, replacement, fairness, and bounded drain. The Windows and Linux `amd64` sidecar
+cross-builds produced valid PE and static ELF binaries. This was not a hosted deployment or a
+live game run. Operational evidence still rests on the 2026-08-19 public broadcast-world run.
+The unchanged plugin values still rest on the 2026-08-17 test.
 
 **Updating it is the last act of a test, not the first act of a release.** Build the plugin, run
 it, then record what ran: [`release/README.md`](../release/README.md) has the procedure and
@@ -272,10 +272,10 @@ reads. The installers ignore it; the release gates do not.
     "mod": "0.6.7",
     "pluginSha256": "2bd10461632f3f391ec85e3a8db6496b64ba35f2c3801354da5800a74a9ac861",
     "bibitesModTree": "bc3d8733e323a837d87dd0423bdd2f24862432bc",
-    "sidecarSourceCommit": "c34d5308caa63ecbdec9812ab8c73cd3e439923a",
-    "sidecarInputsSha256": "cd7d606819d16cc464f778f6905156e7f9f30bb0743001bcd3c2c3f9904eb427",
-    "testedOn": "2026-08-21",
-    "evidence": "on 2026-08-21 the sidecar source at c34d530 was re-attested after gofmt-only changes: its Windows and Linux amd64 binaries were byte-identical to binaries built from the previously recorded e6cd359 source when both were built with CGO disabled, -trimpath, and VCS metadata disabled, and the full Go test and race suites passed; no new live deployment was run, so operational evidence remains the 2026-08-19 live public /watch broadcast-world run at slot 7, where the recorded sidecar recovered 64 journaled forwards, expired 66 lost forwards, cleared JOURNAL_FULL refusals during an 18-minute soak, restored outbound traffic, and passed diagnose; this equivalence re-attests the sidecar half only, while unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised on 2026-08-21: live relay connectivity, slot claim, mod traffic, crash replay, compaction, roll-up, archive, re-route or bounce-back, inflight administration, private-map behavior, and disk-failure paths"
+    "sidecarSourceCommit": "93107a6773f49ce3520126e7ffdeac05d78a1f45",
+    "sidecarInputsSha256": "10f4458884fc974db09ed03a18ee12c5d4f02ecfd48cc32f0a20d0b7bd2e7284",
+    "testedOn": "2026-08-22",
+    "evidence": "on 2026-08-22 the sidecar and relay source at 93107a6 passed the full uncached Go and race suites, Linux and Windows vet, targeted aggregate-fan-in, durable-ACK priority, reconnect, replacement, fairness, and hard-deadline drain regressions, and CGO-disabled Windows and Linux amd64 sidecar cross-builds with -trimpath and VCS metadata disabled produced valid PE and static ELF binaries; no hosted deployment or live game run used this source, so operational evidence remains the 2026-08-19 public broadcast-world run for the previously recorded sidecar, while the unchanged pluginSha256 and bibitesModTree still rest on the 2026-08-17 mod 0.6.7 test; not exercised on 2026-08-22: hosted relay connectivity, live slot claims or mod traffic, crash replay, compaction, roll-up, archive operation, private-map behavior, and disk-failure paths"
   },
   "keyedOn": "gameVersion and platform",
   "refusal": "This release supports one game build, and the game on this machine is not it. The mod is a Harmony patch against a named game assembly: on a build it was not compiled against it can fail to load, or load and behave differently, and neither is a thing an installer may risk on your world. Nothing about the map can change this, and there is no flag that skips it. Two ways forward: wait for a release whose matrix lists your build, or put this machine on a build this matrix lists.",

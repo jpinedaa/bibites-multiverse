@@ -751,7 +751,13 @@ func (s *Sidecar) onMigrateOut(sess *modSession, env wire.Envelope) bool {
 	// by a scheduler that reads s.now(): a mix of the two makes the deadline
 	// meaningless in either direction.
 	s.mu.Lock()
-	s.tickOutbound(st, s.now())
+	// A fresh export is also an outbound scheduler entry point. It must honor the
+	// same strict priority as the periodic journal walk, or a continuous stream
+	// of MIGRATE_OUT frames can spend every newly refilled deferred token before
+	// a durable MIGRATION_ACK gets its next custody tick.
+	if !s.hasPendingAckLocked() {
+		s.tickOutbound(st, s.now())
+	}
 	s.mu.Unlock()
 	return true
 }
