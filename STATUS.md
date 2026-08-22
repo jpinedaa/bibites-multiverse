@@ -36,6 +36,25 @@ The dashboard shows this known critical result without weakening or hiding it.
 The dashboard is an on-host current view. It is not an external dead-man check or an off-host
 history store. Its Coverage section names the missing tests and profilers.
 
+### Migration-flow correction awaiting deployment
+
+On 2026-08-22, the exact five-minute lane view showed simultaneous `0/min` values across
+populated, live worlds. One lane can normally show zero when no organism crosses during one
+window. This sustained map-wide pattern was not normal.
+
+The relay accepted aggregate migration fan-in faster than one destination could answer under its
+per-connection frame limit. A full destination produced response bursts, reached the 50-frame
+ceiling at frame 51, and lost its relay connection. Reconnects, full queues, and `OVERLOADED`
+answers then reduced crossings across the map.
+
+The correction in this source tree paces physical migration writes for each destination identity.
+It also gives durable destination acknowledgements priority in the sidecar's existing send pace.
+The relay refuses a migration before its forwarding record when the new bounded destination queue
+is full, and it keeps that destination connected. Local diagnostics now report acknowledgements
+that still wait to release sender custody.
+
+The complete Go test suite passes on this source. This correction is not yet on the hosted service.
+
 ## Hosted service
 
 This section states the terms the hosted map operates under. It is not a health report.

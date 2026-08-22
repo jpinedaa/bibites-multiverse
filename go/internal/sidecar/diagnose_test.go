@@ -591,6 +591,36 @@ func TestTheApproachingALimitBandIsAFractionOfThePublishedCeiling(t *testing.T) 
 	}
 }
 
+func TestJournalDepthsNamesAnUpstreamAckQueueWithoutInventingAVerdict(t *testing.T) {
+	d := &diag{opts: DiagnoseOptions{}, now: time.Now(), results: map[string]CheckResult{}}
+	d.live = ownSlotResult{OK: true, View: OwnSlot{Custody: CustodyState{
+		PendingAckDepth:         12,
+		OldestPendingAckAgeMs:   (31 * time.Second).Milliseconds(),
+		InboundRatePerSimMinute: 20,
+	}}}
+	c := d.checkJournalDepths()
+	if c.Verdict != VerdictPass {
+		t.Fatalf("a pending upstream ACK reading is %s, want PASS without an invented threshold",
+			c.Verdict)
+	}
+	joined := strings.Join(append(c.Detail, c.Says), " ")
+	if !strings.Contains(joined, "ACK") || !strings.Contains(joined, "12") {
+		t.Fatalf("the warning does not name the pending ACK queue and depth: %s", joined)
+	}
+}
+
+func TestJournalDepthsDoesNotInventAnAckAgeForAnOldRecord(t *testing.T) {
+	d := &diag{opts: DiagnoseOptions{}, now: time.Now(), results: map[string]CheckResult{}}
+	d.live = ownSlotResult{OK: true, View: OwnSlot{Custody: CustodyState{
+		PendingAckDepth: 1,
+	}}}
+	c := d.checkJournalDepths()
+	joined := strings.Join(append(c.Detail, c.Says), " ")
+	if strings.Contains(joined, "oldest completed arrival") {
+		t.Fatalf("a pending ACK without completedAt acquired an invented age: %s", joined)
+	}
+}
+
 // TestTheThreeUnmeasuredThresholdsAreLeftUnmeasured is spec §6: three criteria
 // belong to packages that have not measured them, and an implementation arc that
 // invented one would have put a number nobody can defend into a support tool.

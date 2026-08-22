@@ -38,8 +38,8 @@ package sidecar
 //     relay's own read loop, all of which COMPRESS the spacing this end chose.
 //     Frames sent evenly do not arrive evenly.
 //  4. IT COUNTS EVERY FRAME TYPE, including the PONGs the relay itself asks
-//     for and the stats PING of §6.11. A client's bulk traffic must therefore
-//     leave room for traffic the client does not schedule.
+//     for and the stats PING of §6.11. A client's journal-backed traffic must
+//     therefore leave room for traffic the client does not schedule.
 //
 // So the sustained rate is HALF the published ceiling and the burst is a
 // QUARTER of it. A token bucket admits at most capacity+rate in any one second,
@@ -56,9 +56,11 @@ package sidecar
 // unknown relay would be throttling against a number nobody stated.
 //
 // FRAMES ARE DELAYED, NEVER DROPPED. A deferred MIGRATION_PAYLOAD leaves its
-// journal entry exactly as it found it, so the custody scheduler re-offers it on
-// the next tick and the backlog drains slower instead of shorter. Custody is
-// untouched: this is a rate on the wire, not a decision about an organism.
+// outbound journal entry exactly as it found it. A deferred journal-backed
+// MIGRATION_ACK leaves AckedUpstream false. The custody scheduler re-offers
+// either frame on the next tick, so a backlog drains slower instead of shorter.
+// Custody is untouched: this is a rate on the wire, not a decision about an
+// organism.
 
 import (
 	"time"
@@ -76,17 +78,18 @@ const (
 	// second, so a half and a quarter is three quarters of the ceiling at the
 	// absolute worst — and the relay's window has no tolerance at all (2).
 	sendPaceBurstFraction = 0.25
-	// sendPaceReserveFraction is the share of the BUCKET that bulk traffic may
-	// not draw below, so a PONG, a stats PING or a MIGRATION_ACK never queues
-	// behind a drain. It is deliberately half: control traffic is a handful of
-	// frames a second and the reserve only has to be there when one arrives.
+	// sendPaceReserveFraction is the share of the BUCKET that deferred traffic
+	// may not draw below. It leaves room for a PONG, a stats PING, and the
+	// immediate ACK/NACK response to a relay-paced migration arrival. It is
+	// deliberately half: control traffic is a handful of frames a second and
+	// the reserve only has to be there when one arrives.
 	sendPaceReserveFraction = 0.5
 )
 
 // bucket is one token bucket with a floor under it. The floor is what makes
-// control traffic independent of a drain: bulk spends down to the reserve and
-// stops, control spends the reserve and may go into debt, and the refill pays
-// the debt back before anything bulk moves again.
+// control traffic independent of a drain: deferred traffic spends down to the
+// reserve and stops, control spends the reserve and may go into debt, and the
+// refill pays the debt back before deferred traffic moves again.
 type bucket struct {
 	rate     float64
 	capacity float64
@@ -127,12 +130,13 @@ func (b *bucket) refill(elapsed time.Duration) {
 	}
 }
 
-// allowBulk answers for one bulk frame of the given cost. A cost larger than
-// the whole bulk allowance — an 8 MiB payload against a byte budget, which is
-// legal on this wire — is admitted on a FULL bucket rather than never: refusing
-// it forever would turn a rate limit into a dropped organism, and the debt take
-// leaves behind is what keeps the next frame from following it out.
-func (b *bucket) allowBulk(cost float64) bool {
+// allowDeferred answers for one frame that has a durable retry path. A cost
+// larger than the whole deferred allowance — an 8 MiB payload against a byte
+// budget, which is legal on this wire — is admitted on a FULL bucket rather
+// than never. Refusing it forever would turn a rate limit into a dropped
+// organism, and the debt that it takes leaves behind keeps the next frame from
+// following it out.
+func (b *bucket) allowDeferred(cost float64) bool {
 	usable := b.capacity - b.reserve
 	if usable <= 0 {
 		usable = b.capacity
@@ -145,7 +149,7 @@ func (b *bucket) allowBulk(cost float64) bool {
 
 // take spends a cost. It may drive the bucket NEGATIVE, which is deliberate:
 // control frames are never refused, so the only honest way to account for one
-// is a debt the refill has to clear before bulk traffic moves again.
+// is a debt the refill has to clear before deferred traffic moves again.
 func (b *bucket) take(cost float64) { b.tokens -= cost }
 
 // sendPace is one connection's outbound rate, derived from that connection's
@@ -154,7 +158,7 @@ func (b *bucket) take(cost float64) { b.tokens -= cost }
 type sendPace struct {
 	on bool
 	// acked is whether HANDSHAKE_ACK has arrived on this session, and it gates
-	// BULK TRAFFIC ON ITS OWN — before it, no ceiling is known and none can be.
+	// DEFERRED TRAFFIC ON ITS OWN — before it, no ceiling is known and none can be.
 	// The custody scheduler runs on its own tick and does not wait for a
 	// handshake, so without this gate a rejoin whose first tick lands in the
 	// millisecond before the ack would put the WHOLE BACKLOG on the wire
@@ -175,7 +179,7 @@ type sendPace struct {
 	// a republished table that did not change is not treated as a change.
 	publishedFrames int64
 	publishedBytes  int64
-	// deferred counts bulk frames this pacer has held back on the current
+	// deferred counts retryable frames this pacer has held back on the current
 	// session. It is the operator-visible measure of the fix working: a rising
 	// count with no 4007 is a backlog draining under the ceiling.
 	deferred int64
@@ -197,7 +201,7 @@ func (p *sendPace) reset() { *p = sendPace{} }
 // rather than silently unthrottling mid-session.
 func (p *sendPace) configure(limits map[string]int64, now time.Time) bool {
 	changed := false
-	// The ack itself is the gate on bulk traffic, and it opens whether or not the
+	// The ack itself is the gate on deferred traffic, and it opens whether or not the
 	// table came with it: a relay that predates B24 still completes a handshake,
 	// and holding its peer's backlog forever would be a worse answer than M4's.
 	p.acked = true
@@ -220,19 +224,18 @@ func (p *sendPace) configure(limits map[string]int64, now time.Time) bool {
 
 // admit is the whole of the send path's obligation: refill, then decide.
 //
-// A bulk frame is one a BACKLOG can produce without bound, which on this wire is
-// MIGRATION_PAYLOAD and nothing else — every other outbound type is either
-// answering something inbound or on a timer. A bulk frame that is refused is
-// DELAYED: its journal entry is untouched and the custody scheduler offers it
-// again on the next tick.
+// A deferred frame is one that has a durable retry path. MIGRATION_PAYLOAD
+// remains pending when it is refused. A journal-backed MIGRATION_ACK keeps
+// AckedUpstream false. The custody scheduler offers either frame again on the
+// next tick.
 //
 // A control frame is ALWAYS admitted and ALWAYS charged. Refusing one would trade
 // a capacity shed for a liveness timeout (close 4004 inside peerTimeoutMs), which
 // is the same outage with a different close code; charging one is what makes the
 // pacer's arithmetic true — every frame this connection puts on the wire is
 // counted by the relay, so every frame has to be counted here.
-func (p *sendPace) admit(now time.Time, size int, bulk bool) bool {
-	if bulk && !p.acked {
+func (p *sendPace) admit(now time.Time, size int, deferred bool) bool {
+	if deferred && !p.acked {
 		p.deferred++
 		return false
 	}
@@ -240,8 +243,9 @@ func (p *sendPace) admit(now time.Time, size int, bulk bool) bool {
 		return true
 	}
 	p.advance(now)
-	if bulk {
-		if !p.frames.allowBulk(1) || (p.publishedBytes > 0 && !p.bytes.allowBulk(float64(size))) {
+	if deferred {
+		if !p.frames.allowDeferred(1) ||
+			(p.publishedBytes > 0 && !p.bytes.allowDeferred(float64(size))) {
 			p.deferred++
 			return false
 		}
@@ -278,18 +282,21 @@ func (p *sendPace) readyForBulk(now time.Time) bool {
 		return true
 	}
 	p.advance(now)
-	if !p.frames.allowBulk(1) {
+	if !p.frames.allowDeferred(1) {
 		p.deferred++
 		return false
 	}
 	return true
 }
 
-// paceBulk names the one outbound type a journal backlog can produce without
-// bound. Everything else this sidecar sends is an answer (PONG, MIGRATION_ACK,
-// MIGRATION_NACK, GENOME_RESPONSE) or a timer (HANDSHAKE, SECTOR_CLAIM, the
-// stats PING), and the relay's own limits are sized for those without help.
-func paceBulk(typ string) bool { return typ == contractb.TypeMigrationPayload }
+// paceDeferred names the outbound types whose durable state can offer them
+// again. MIGRATION_PAYLOAD remains pending until it is sent. A journal-backed
+// MIGRATION_ACK remains unacknowledged upstream until it is sent. Immediate
+// duplicate ACKs and NACKs use the bounded reply path instead, because the
+// relay paces the migration arrivals that produce them.
+func paceDeferred(typ string) bool {
+	return typ == contractb.TypeMigrationPayload || typ == contractb.TypeMigrationAck
+}
 
 // framesPerSecond is the rate this pacer is running at, or 0 when it is off.
 func (p *sendPace) framesPerSecond() float64 {

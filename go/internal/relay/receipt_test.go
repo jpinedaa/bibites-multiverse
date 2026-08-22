@@ -369,11 +369,12 @@ func TestAnEmptyMigrationIdIsNeverReceipted(t *testing.T) {
 // connections it opens — and a receipt is relay-authored and outbound. The
 // contract's own arithmetic therefore already holds with receipts flowing, and
 // this test pins the structure rather than the number: a sender under a
-// deliberately tiny maxFramesPerSecond forwards, is receipted, and is NOT shed.
+// deliberately small supported maxFramesPerSecond forwards, is receipted, and
+// is NOT shed.
 func TestReceiptsEnterNoPublishedLimit(t *testing.T) {
-	// Five inbound frames a second. The rig below sends four (handshake, claim,
+	// Eight inbound frames a second. The rig below sends four (handshake, claim,
 	// two payloads) and receives more than that back, receipts included.
-	rig := startReceiptRig(t, credRelayOptions{limits: contractb.Limits{MaxFramesPerSecond: 5}})
+	rig := startReceiptRig(t, credRelayOptions{limits: contractb.Limits{MaxFramesPerSecond: 8}})
 	id := rig.forward(2)
 	rig.forwardAgain(id, 2)
 	rig.sender.waitReceipts(t, 2, 3*time.Second)
@@ -396,8 +397,8 @@ func TestReceiptsEnterNoPublishedLimit(t *testing.T) {
 		t.Fatalf("the published table carries %d keys and §3.3 names %d; B26 adds no limit",
 			len(got.Limits), len(contractb.PublishedLimitKeys))
 	}
-	if got.Limits[contractb.LimitMaxFramesPerSecond] != 5 {
-		t.Fatalf("maxFramesPerSecond published as %d, want the 5 this relay runs with",
+	if got.Limits[contractb.LimitMaxFramesPerSecond] != 8 {
+		t.Fatalf("maxFramesPerSecond published as %d, want the 8 this relay runs with",
 			got.Limits[contractb.LimitMaxFramesPerSecond])
 	}
 }

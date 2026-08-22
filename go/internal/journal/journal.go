@@ -236,6 +236,15 @@ type State struct {
 	seq uint64
 }
 
+// AwaitsUpstreamAck reports whether this completed inbound migration still
+// owes its source a durable MIGRATION_ACK. The scheduler, retention rule, and
+// local diagnostics share this predicate so none can silently disagree about
+// which tombstones remain retryable.
+func (s *State) AwaitsUpstreamAck() bool {
+	return s.Direction == In && s.Status == StatusDone && !s.AckedUpstream &&
+		!s.BounceBack && s.Entry.SourcePeer != ""
+}
+
 // Clone returns a copy safe to hand outside the journal's lock.
 func (s *State) Clone() *State {
 	c := *s
@@ -1079,7 +1088,9 @@ func (j *Journal) ordered() []*State {
 	return out
 }
 
-// PurgeExpired drops tombstones older than retention. Tombstones must be
+// PurgeExpired drops tombstones older than retention. An inbound tombstone
+// that still owes its source a MIGRATION_ACK is not expired: AckedUpstream is
+// the durable proof that the response left this sidecar. Tombstones must be
 // durable, so the purge is durable too (contract-a.md §11.1).
 //
 // THE PURGE RECORD STAYS, EVEN THOUGH COMPACTION WOULD ERASE THE TOMBSTONE
@@ -1101,6 +1112,9 @@ func (j *Journal) PurgeExpired(retention time.Duration, now time.Time) (int, err
 	n := 0
 	for _, st := range j.ordered() {
 		if st.Status != StatusDone || st.CompletedAt == 0 || st.CompletedAt > cutoff {
+			continue
+		}
+		if st.AwaitsUpstreamAck() {
 			continue
 		}
 		rec := record{Op: opStatus, MigrationID: st.Entry.MigrationID,

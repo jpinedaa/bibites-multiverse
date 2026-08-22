@@ -50,6 +50,7 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 	// the SENDER's rate: an inboundQueueMax refusal is a different rule (§6.6
 	// step 2) and it would mask the one under test.
 	cfgB := fastConfig(t, rl, "peer-b")
+	cfgB.StatsInterval = time.Second
 	cfgB.InboundQueueMax = 4 * backlog
 	sideB := startSidecar(t, cfgB)
 	waitSlot(t, sideB, 2)
@@ -60,6 +61,7 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 	// The peer that was dark: its journal already holds the backlog before its
 	// process exists, which is what a rejoin after hours away looks like.
 	cfgA := fastConfig(t, rl, "peer-a")
+	cfgA.StatsInterval = time.Second
 	ids := seedOutboundBacklog(t, cfgA.DataDir, 2, backlog)
 
 	sideA := startSidecar(t, cfgA)
@@ -72,11 +74,9 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 			got, publishedFrames, publishedFrames*sendPaceRateFraction)
 	}
 
-	// The drain, watched while it runs. A starved PONG would be as bad as a
-	// shed: the relay closes a silent peer with 4004 inside peerTimeoutMs (3 s
-	// on this rig), and this drain is longer than that, so a link that is still
-	// up at the end is proof that control frames went out THROUGH the backlog
-	// rather than behind it.
+	// The drain lasts longer than this rig's peer timeout. A starved PONG would
+	// therefore close the link with 4004. A link that stays up proves that
+	// control frames move through the deferred backlog rather than behind it.
 	started := time.Now()
 	waitFor(t, 60*time.Second, "the whole backlog to drain", func() bool {
 		if !sideA.RelayConnected() {
@@ -89,7 +89,7 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 					sheds, time.Since(started), publishedFrames)
 			}
 			t.Fatalf("peer-a's link dropped %s into the drain with no capacity shed; a PONG or "+
-				"the stats PING starved behind the backlog and the relay timed this peer out",
+				"the stats PING starved behind the deferred backlog and the relay timed this peer out",
 				time.Since(started))
 		}
 		return doneCount(sideA, ids) == len(ids)
@@ -119,6 +119,148 @@ func TestSlot6RejoinBacklogDrainsWithoutASingleCapacityShed(t *testing.T) {
 		"(paced %v/s, %d deferrals, 0 sheds)",
 		backlog, elapsed.Round(time.Millisecond), publishedFrames,
 		sideA.PacedFramesPerSecond(), sideA.PacedDeferrals())
+}
+
+// TestCompletedInboundBurstDrainsWithoutASingleCapacityShed reproduces the
+// second backlog shape. A paused world can release its full Contract A burst,
+// and each completed inbound entry then owes its sender one MIGRATION_ACK. The
+// acknowledgements are durable, so they must drain under the same published
+// ceiling as outbound payloads instead of leaving in one 50-frame breath.
+func TestCompletedInboundBurstDrainsWithoutASingleCapacityShed(t *testing.T) {
+	const publishedFrames = 40
+	const backlog = 50
+	const outbound = 20
+
+	rl := startRelayWithLimits(t, contractb.Limits{MaxFramesPerSecond: publishedFrames})
+	for i, pos := range []contractb.Position{{Col: 0, Row: 0}, {Col: 1, Row: 0}} {
+		p := pos
+		if _, _, err := rl.relay.ReserveSlot([]string{"peer-a", "peer-b"}[i], &p); err != nil {
+			t.Fatalf("ReserveSlot: %v", err)
+		}
+	}
+	cfgB := fastConfig(t, rl, "peer-b")
+	cfgB.StatsInterval = time.Second
+	cfgB.InboundQueueMax = 4 * outbound
+	sideB := startSidecar(t, cfgB)
+	worldB := newWorld()
+	dialFakeMod(t, fakeModOptions{
+		url: sideB.URL(), world: worldB, heartbeat: 200 * time.Millisecond,
+	})
+	waitSlot(t, sideB, 2)
+
+	cfg := fastConfig(t, rl, "peer-a")
+	cfg.StatsInterval = time.Second
+	ids := seedCompletedInboundBacklog(t, cfg.DataDir, "source-that-is-offline", backlog)
+	outboundIDs := seedOutboundBacklog(t, cfg.DataDir, 2, outbound)
+
+	side := startSidecar(t, cfg)
+	waitSlot(t, side, 1)
+	waitFor(t, 5*time.Second, "peer-a to see slot 2 live", func() bool { return destLiveOf(side, 2) })
+	side.mu.Lock()
+	initialPending := side.custodyStateLocked(side.now()).PendingAckDepth
+	side.mu.Unlock()
+	if initialPending == 0 {
+		t.Fatal("the pending ACK gauge did not see the seeded durable backlog")
+	}
+
+	started := time.Now()
+	waitFor(t, 10*time.Second, "the completed inbound ACK backlog to drain", func() bool {
+		if sheds := side.CapacitySheds(); sheds > 0 {
+			t.Fatalf("the relay shed peer-a with close 4007 (%d times) %s into the ACK drain; "+
+				"journal-backed MIGRATION_ACKs bypassed the published %d frames/s ceiling",
+				sheds, time.Since(started), publishedFrames)
+		}
+		side.mu.Lock()
+		custody := side.custodyStateLocked(side.now())
+		spawned := spawnedOf(worldB, outboundIDs)
+		side.mu.Unlock()
+		if custody.PendingAckDepth > 0 && spawned > 0 {
+			t.Fatalf("%d outbound payloads left while %d older durable ACKs were pending; "+
+				"the custody scheduler did not give ACKs priority", spawned, custody.PendingAckDepth)
+		}
+		return custody.PendingAckDepth == 0 && ackedUpstreamCount(side, ids) == len(ids)
+	})
+
+	if !side.RelayConnected() {
+		t.Fatal("peer-a disconnected while its journal-backed MIGRATION_ACKs drained")
+	}
+	if got := side.CapacitySheds(); got != 0 {
+		t.Fatalf("the ACK drain took %d capacity sheds, want none", got)
+	}
+	if got := side.PacedDeferrals(); got == 0 {
+		t.Fatal("the ACK backlog produced no pacing deferral; it did not use the shared send budget")
+	}
+	if elapsed := time.Since(started); elapsed < time.Second {
+		t.Fatalf("the %d-entry ACK backlog drained in %s; it left as an unpaced burst", backlog, elapsed)
+	}
+	waitFor(t, 10*time.Second, "the outbound backlog to follow the ACK backlog", func() bool {
+		return doneCount(side, outboundIDs) == len(outboundIDs)
+	})
+	if got := spawnedOf(worldB, outboundIDs); got != len(outboundIDs) {
+		t.Fatalf("slot 2 spawned %d of %d outbound organisms after the ACK drain", got, outbound)
+	}
+}
+
+// TestFreshExportWaitsBehindPendingDurableAck covers the Contract A entry point,
+// not only the periodic journal walk. A new MIGRATE_OUT is journaled and ACKed
+// to the game immediately, but it cannot take a deferred wire token while an
+// older completed arrival still owes its source a durable MIGRATION_ACK.
+func TestFreshExportWaitsBehindPendingDurableAck(t *testing.T) {
+	const publishedFrames = 40
+
+	rl := startRelayWithLimits(t, contractb.Limits{MaxFramesPerSecond: publishedFrames})
+	for i, pos := range []contractb.Position{{Col: 0, Row: 0}, {Col: 1, Row: 0}} {
+		p := pos
+		if _, _, err := rl.relay.ReserveSlot([]string{"peer-a", "peer-b"}[i], &p); err != nil {
+			t.Fatalf("ReserveSlot: %v", err)
+		}
+	}
+
+	cfgB := fastConfig(t, rl, "peer-b")
+	sideB := startSidecar(t, cfgB)
+	worldB := newWorld()
+	dialFakeMod(t, fakeModOptions{
+		url: sideB.URL(), world: worldB, heartbeat: 200 * time.Millisecond,
+	})
+	waitSlot(t, sideB, 2)
+
+	cfgA := fastConfig(t, rl, "peer-a")
+	// Keep the periodic scheduler out of the assertion. The test invokes one
+	// custody tick explicitly after it proves that fresh-export dispatch waited.
+	cfgA.TickInterval = time.Hour
+	seeded := seedCompletedInboundBacklog(t, cfgA.DataDir, "source-that-is-offline", 1)
+	sideA := startSidecar(t, cfgA)
+	waitSlot(t, sideA, 1)
+	worldA := newWorld()
+	modA := dialFakeMod(t, fakeModOptions{
+		url: sideA.URL(), world: worldA, heartbeat: 200 * time.Millisecond,
+	})
+	modA.waitEdge(contracta.EdgeE, true, 5*time.Second)
+
+	sideA.mu.Lock()
+	if !sideA.hasPendingAckLocked() {
+		sideA.mu.Unlock()
+		t.Fatal("the seeded durable ACK was not pending before the fresh export")
+	}
+	sideA.mu.Unlock()
+
+	fresh := modA.migrateOut(-12100, contracta.EdgeE, 0.5)
+	modA.waitType(contracta.TypeMigrateOutAck, 5*time.Second)
+	// The mod ACK proves the direct onMigrateOut path finished. With the periodic
+	// ticker parked, any remote spawn here came only from that direct path.
+	time.Sleep(100 * time.Millisecond)
+	if got := worldB.spawnCount(fresh); got != 0 {
+		t.Fatalf("fresh export spawned %d times while a durable ACK was pending; want 0", got)
+	}
+	st, ok := sideA.jr.Get(fresh)
+	if !ok || st.Handoff != journal.HandoffPending {
+		t.Fatalf("fresh export handoff = %+v, present %v; want pending behind durable ACK", st, ok)
+	}
+
+	sideA.tick(sideA.now())
+	waitFor(t, 5*time.Second, "the durable ACK to leave before the fresh export", func() bool {
+		return ackedUpstreamCount(sideA, seeded) == 1 && worldB.spawnCount(fresh) == 1
+	})
 }
 
 // TestAbsentLimitsLeaveTheSendPathUnpaced is §6.2's other reader: a peer talking
@@ -236,8 +378,9 @@ func TestNoBulkFrameLeavesBeforeTheHandshakeIsAcknowledged(t *testing.T) {
 // TestControlFramesAreNotStarvedBehindADrain is the reserve. A drain is bulk
 // traffic and bulk traffic may spend the bucket down to a floor and no further,
 // because the frames that keep a connection ALIVE — the PONG of §6.11, the
-// stats PING, a MIGRATION_ACK that releases somebody else's custody — are not
-// queued behind anything and must not have to wait for a backlog.
+// stats PING, or the immediate reply to a relay-paced migration arrival — are
+// not queued behind anything and must not have to wait for a backlog. A
+// journal-backed MIGRATION_ACK is different: its tombstone makes deferral safe.
 func TestControlFramesAreNotStarvedBehindADrain(t *testing.T) {
 	var p sendPace
 	p.configure(map[string]int64{contractb.LimitMaxFramesPerSecond: 40}, time.Now())
@@ -272,6 +415,65 @@ func TestControlFramesAreNotStarvedBehindADrain(t *testing.T) {
 	// and nothing needs an operator.
 	if !p.admit(now.Add(time.Second), 512, true) {
 		t.Fatal("bulk did not resume a second after the bucket was drained")
+	}
+}
+
+// TestJournalBackedMigrationAcksUseTheDeferredBudget is the regression for a
+// paused world releasing a full inbound burst. Every completed journal entry
+// can offer one MIGRATION_ACK in the same tick. Those ACKs must share the
+// payload budget, while an immediate NACK or tombstone re-ACK uses the control
+// reserve for the relay-paced arrival that caused it.
+func TestJournalBackedMigrationAcksUseTheDeferredBudget(t *testing.T) {
+	if !paceDeferred(contractb.TypeMigrationPayload) {
+		t.Fatal("MIGRATION_PAYLOAD is not on the deferred send path")
+	}
+	if !paceDeferred(contractb.TypeMigrationAck) {
+		t.Fatal("a journal-backed MIGRATION_ACK can bypass the deferred send path")
+	}
+	for _, typ := range []string{
+		contractb.TypeMigrationNack,
+		contractb.TypePong,
+		contractb.TypePing,
+	} {
+		if paceDeferred(typ) {
+			t.Fatalf("%s was classified as a durable retry, but its immediate send path has no journal transition", typ)
+		}
+	}
+}
+
+func TestImmediateMigrationRepliesBypassAnExhaustedDeferredBudget(t *testing.T) {
+	rl := startRelayWithLimits(t, contractb.Limits{MaxFramesPerSecond: 40})
+	if _, _, err := rl.relay.ReserveSlot("peer-a", nil); err != nil {
+		t.Fatalf("ReserveSlot: %v", err)
+	}
+	cfg := fastConfig(t, rl, "peer-a")
+	cfg.TickInterval = time.Hour
+	cfg.StatsInterval = time.Hour
+	side := startSidecar(t, cfg)
+	waitSlot(t, side, 1)
+
+	side.mu.Lock()
+	side.sendPace.frames.tokens = side.sendPace.frames.reserve
+	side.sendPace.bytes.tokens = side.sendPace.bytes.reserve
+	side.sendPace.last = time.Now()
+	deferredBefore := side.sendPace.deferred
+	sentBefore := side.sent.totalFrames
+	side.mu.Unlock()
+
+	side.nackUpstream(wire.NewUUID(), "peer-offline", contractb.NackOverloaded, "test")
+	side.ackUpstreamNow(wire.NewUUID(), "peer-offline", 42, true)
+
+	side.mu.Lock()
+	deferredAfter := side.sendPace.deferred
+	sentAfter := side.sent.totalFrames
+	side.mu.Unlock()
+	if deferredAfter != deferredBefore {
+		t.Fatalf("immediate ACK/NACK increased deferred count from %d to %d; "+
+			"a reply used the journal path", deferredBefore, deferredAfter)
+	}
+	if sentAfter < sentBefore+2 {
+		t.Fatalf("only %d of 2 immediate replies left after the deferred budget was exhausted",
+			sentAfter-sentBefore)
 	}
 }
 
@@ -327,6 +529,60 @@ func seedOutboundBacklog(t *testing.T, dataDir string, destSlot, n int) []string
 		t.Fatalf("seed journal close: %v", err)
 	}
 	return ids
+}
+
+// seedCompletedInboundBacklog writes the durable state left when a mod accepted
+// a burst and the sidecar stopped before it could answer the remote senders.
+// Every entry is done but has AckedUpstream false, so startup must retry it.
+func seedCompletedInboundBacklog(t *testing.T, dataDir, sourcePeer string, n int) []string {
+	t.Helper()
+	jr, err := journal.Open(filepath.Join(dataDir, "journal"))
+	if err != nil {
+		t.Fatalf("seed inbound ACK backlog: %v", err)
+	}
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		id := wire.NewUUID()
+		entityID := int32(12000 + i)
+		if _, err := jr.Create(journal.In, journal.Entry{
+			MigrationID: id,
+			EntityID:    entityID,
+			Kind:        contracta.KindBibite,
+			GameVersion: "0.6.3.1",
+			SourcePeer:  sourcePeer,
+			SourceSlot:  2,
+			DestSlot:    1,
+			Edge:        contracta.EdgeW,
+			JournaledAt: time.Now().UnixMilli(),
+		}, false); err != nil {
+			t.Fatalf("seed inbound ACK entry %d: %v", i, err)
+		}
+		completed := time.Now().UnixMilli()
+		if _, err := jr.Apply(id, journal.Update{
+			Status: journal.StatusDone, Handoff: journal.HandoffDone, CompletedAt: &completed,
+		}); err != nil {
+			t.Fatalf("complete inbound ACK entry %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	if err := jr.Close(); err != nil {
+		t.Fatalf("seed inbound ACK backlog close: %v", err)
+	}
+	return ids
+}
+
+func ackedUpstreamCount(s *Sidecar, ids []string) int {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	n := 0
+	for _, st := range s.CustodySnapshot() {
+		if want[st.Entry.MigrationID] && st.AckedUpstream {
+			n++
+		}
+	}
+	return n
 }
 
 // doneCount is how many of the seeded migrations have been acknowledged and

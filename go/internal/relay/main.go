@@ -103,8 +103,8 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 			"(§3.3). Deliberately loose: one machine legitimately runs several peers")
 	maxFramesPerSecond := fs.Int64("max-frames-per-second",
 		envInt64("MULTIVERSE_MAX_FRAMES_PER_SECOND", contractb.DefaultMaxFramesPerSecond),
-		"frames of any type, per peer connection (§3.3). Sized for a migration burst, not for a "+
-			"steady rate; over it is close 4007")
+		"frames of any type, per peer connection (§3.3). Minimum 8 preserves control-frame "+
+			"headroom; over the configured value is close 4007")
 	maxFrameBytes := fs.Int64("max-frame-bytes",
 		envInt64("MULTIVERSE_MAX_FRAME_BYTES", contractb.DefaultMaxFrameBytes),
 		"largest frame this relay will read (§3.3, §12). Over it is close 1009 TOO_BIG and never "+
