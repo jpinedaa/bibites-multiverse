@@ -276,6 +276,19 @@ sudo /opt/multiverse/deploy/restart-archive.sh --dry-run --reason "<why>"
 sudo /opt/multiverse/deploy/restart-archive.sh --reason "<why>"
 ```
 
+If a corrected aggregate needs old raw records, use the roll-up rebuild option:
+
+```sh
+sudo /opt/multiverse/deploy/restart-archive.sh --dry-run --rebuild-rollup --reason "<why>"
+sudo /opt/multiverse/deploy/restart-archive.sh --rebuild-rollup --reason "<why>"
+```
+
+The option stops the archive before it moves `rollup.jsonl` to a timestamped backup.
+Then the archive rebuilds the roll-up from the raw record.
+The option scans the durable segment receipts for an absent raw segment.
+If a raw segment is absent, restore its confirmed cold copy first.
+Keep the prior roll-up until the deployment record is complete.
+
 The script performs the sequence below, raises the [peer gate](#the-peer-gate) before it stops the
 relay, proves the result from the relay log, and writes a receipt.
 It refuses when an archive-deploy hold is in place, when the replay-headroom verdict is at or above
@@ -618,6 +631,7 @@ Complete these checks before a planned restart:
 1. Run `monitor.sh --verbose`.
 2. Check free disk space and projected memory.
 3. Count current ledger records.
+   If the change rebuilds the roll-up, make sure that no receipt names an absent raw segment.
 4. Read the projected replay time from the `replay-cost` check.
    `restart-archive.sh` prints it, and it is a projection of the NEXT restart
    from the archive's own measurement of the last one. Do not use an elapsed

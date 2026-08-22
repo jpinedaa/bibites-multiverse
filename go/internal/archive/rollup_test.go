@@ -523,10 +523,7 @@ func TestEveryPersistedWriteSiteMarksItsKeyDirty(t *testing.T) {
 	//    a persisted one. It is driven through the same single writer.
 	clear()
 	a.mu.Lock()
-	for i := 0; i < speciesAggMax+2 && len(a.species.byKey) < speciesAggMax; i++ {
-		a.species.byKey[fmt.Sprintf("filler %d", i)] = &speciesAgg{
-			genomes: map[uint64]struct{}{}}
-	}
+	a.species.max = len(a.species.byKey)
 	a.rollupDirty.ledger = false
 	a.observeSpeciesLocked(migration(at, 1, 2, "E", "Overflow", "species", ""))
 	over, ledger := a.species.overflow, a.rollupDirty.ledger

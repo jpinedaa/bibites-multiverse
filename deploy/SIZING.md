@@ -247,9 +247,31 @@ Every term is bounded and none of them follows the ledger's length.
 
 | Term | What bounds it |
 |---|---|
-| Bounded aggregates | The approved retained state: 4,096 species, 8,192 genome fingerprints for each species, brain-coverage buckets, lanes, ancestry edges. "What the archive retains" lists them. |
+| Bounded aggregates | The approved retained state: 65,536 species, 8,192 genome fingerprints for each species, brain-coverage buckets, lanes, ancestry edges. "Species aggregate capacity" below explains the corrected species bound. |
 | Duplicate keys | The duplicate window, times the crossing rate. Two generations of the table. |
 | Genome-gap queue | The genome horizon. A gap is only ever queued for a crossing inside it, and a restart drains what aged out while the process was down. |
+
+#### Species aggregate capacity
+
+The species aggregate holds at most `65,536` distinct normalized species names. The original
+`4,096` limit came from a six-world rig that produced approximately `780` species in one week. It
+was not enough for the 17-world public map: the live archive reached the limit in the first week
+of the announced run and refused `217,153` later migration observations. The census still listed
+living species, but the full aggregate could not add them. The Species tab therefore labelled 26
+of 32 living species as having no recorded ancestry even though the raw record held later
+crossings for them.
+
+`65,536` covers the announced 90-day run at the observed public growth rate with headroom. It
+remains a fixed bound: the archive publishes a non-zero `ledgerOverflow` on
+`/api/species/tree` if the assumption fails again. Treat any non-zero value as a capacity defect,
+not as evidence that the named species never migrated.
+
+Raising the compiled limit stops new loss but does not change an old roll-up.
+During an upgrade from a saturated archive, run `restart-archive.sh --rebuild-rollup`.
+The command preserves the old sidecar and rebuilds the fold from the raw record.
+The command scans the durable segment receipts for an absent raw segment.
+If a raw segment is absent, restore its confirmed cold copy before the rebuild.
+An ordinary restart cannot recover observations that the old process did not write to the sidecar.
 
 Measured, on two pinned cores, replaying one copy of the production ledger of
 `2026-08-16` — `5,408,123` records — with the roll-up build:
@@ -305,10 +327,11 @@ and each species' six newest crossings.
 at a save. One or two on the live service; `273,252` on a copy with no genome
 store beside it, which is `65 MB` of the sidecar and is an artefact of the copy.
 
-**Losing this file costs replay time and no answer.** Every value in it is
-re-derivable from the raw lines. `backup.sh` copies it daily for that reason and
-for no other: the recovery for a damaged one is to delete it and pay one full
-replay.
+**Losing this file costs replay time while every line it covers remains on the host.** Every value
+in it is re-derivable from those raw lines. After a segment retires, recovery also needs its
+confirmed cold copy; replaying only the on-host window would move the aggregate's floor forward and
+lose the older answer. `backup.sh` copies the sidecar daily, and recovery preserves a damaged copy,
+restores any required cold segments, and then pays one full replay.
 
 ### Collector headroom, and what `GOMEMLIMIT` does
 
@@ -973,13 +996,15 @@ Run this procedure during provisioning and after a capacity alert:
 3. Calculate daily durable growth.
 4. Read actual free space and recent daily growth.
 5. Count ledger records.
-6. Calculate the archive resident set, which is also the replay peak.
-7. Select `MV_ARCHIVE_GOMEMLIMIT` from the host's archive ceiling.
-8. Measure or select a conservative replay rate.
-9. Calculate the remaining disk and memory headroom, and the date each one ends.
-10. Calculate peer, publisher, and viewer transfer, and compare the total with the
+6. Read `ledgerSpecies` and `ledgerOverflow` from `/api/species/tree`. A non-zero overflow is a
+   capacity defect and requires a fold rebuild while the raw source still exists.
+7. Calculate the archive resident set, which is also the replay peak.
+8. Select `MV_ARCHIVE_GOMEMLIMIT` from the host's archive ceiling.
+9. Measure or select a conservative replay rate.
+10. Calculate the remaining disk and memory headroom, and the date each one ends.
+11. Calculate peer, publisher, and viewer transfer, and compare the total with the
     provider allowance and budget in both directions.
-11. Record the result in private operations storage.
+12. Record the result in private operations storage.
 
 Actual recent growth outranks the model when the measurement window is representative.
 The model remains useful for new peers and higher achieved time scales.

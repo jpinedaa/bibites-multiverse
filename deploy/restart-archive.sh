@@ -45,11 +45,15 @@
 # USAGE
 #
 #   restart-archive.sh [--dry-run] [--reason "<text>"]
+#                      [--rebuild-rollup]
 #                      [--ignore-archive-hold]
 #                      [--i-proved-the-replay-fits --proof "<text>"]
 #
 #   --dry-run                    Print every step and act on nothing.
 #   --reason "<text>"            Copied into the receipt. Use it.
+#   --rebuild-rollup             Preserve rollup.jsonl, then rebuild it from
+#                                the complete raw record. The option refuses
+#                                when a raw segment is absent from the host.
 #   --ignore-archive-hold        Proceed despite an archive-deploy hold.
 #   --i-proved-the-replay-fits   Proceed despite a critical replay verdict.
 #                                REQUIRES --proof. The flag is deliberately
@@ -64,6 +68,7 @@
 set -uo pipefail
 
 DRY=0
+REBUILD_ROLLUP=0
 IGNORE_HOLD=0
 OVERRIDE_REPLAY=0
 PROOF=""
@@ -73,6 +78,7 @@ RC=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
+    --rebuild-rollup) REBUILD_ROLLUP=1 ;;
     --ignore-archive-hold) IGNORE_HOLD=1 ;;
     --i-proved-the-replay-fits) OVERRIDE_REPLAY=1 ;;
     --proof) PROOF="${2:?--proof needs text}"; shift ;;
@@ -105,6 +111,11 @@ T_START=""; T_RELAY_STOP=""; T_ARCHIVE=""; T_HEALTHZ=""
 T_RELAY_START=""; T_SUBSCRIBED=""; T_PEERS=""
 REPLAY_SEV="not read"; REPLAY_MSG=""
 REPLAY_SECONDS="not measured"
+ROLLUP_FILE="${MV_STATE:-/var/lib/multiverse}/archive/rollup.jsonl"
+SEGMENTS_DIR="${MV_STATE:-/var/lib/multiverse}/archive/segments"
+ROLLUP_BACKUP="not requested"
+ROLLUP_BACKUP_SHA="not measured"
+REBUILD_CANCELLED=0
 
 # Scratch holds a COPY OF deploy.env (see check_replay_headroom), so it comes
 # from the library rather than from a bare mktemp -d: rl_mktemp_d registers the
@@ -262,6 +273,61 @@ check_replay_headroom() {
        --i-proved-the-replay-fits --proof \"<what you measured, and where it is written>\""
 }
 
+# Count receipts whose raw segment is absent. This is the durable answer across
+# process restarts. ledgerRetiredTotal is not: it counts only the segments that
+# the current process removed.
+count_retired_segments() {
+  local receipt gz plain count=0
+  [ -d "$SEGMENTS_DIR" ] || { printf '0\n'; return; }
+  while IFS= read -r -d '' receipt; do
+    gz="${receipt%.receipt}"
+    plain="${gz%.gz}"
+    if [ ! -f "$gz" ] && [ ! -f "$plain" ]; then
+      count=$((count + 1))
+    fi
+  done < <(find "$SEGMENTS_DIR" -maxdepth 1 -type f -name '*.jsonl.gz.receipt' -print0)
+  printf '%s\n' "$count"
+}
+
+# A capacity correction cannot recover entries that the old bounded aggregate
+# never wrote to rollup.jsonl. This option pays one full replay while every raw
+# line is still on the host. A receipt without either raw segment form proves
+# that the on-host record is incomplete. Restore those cold copies first.
+check_rollup_rebuild() {
+  [ "$REBUILD_ROLLUP" = 1 ] || return 0
+
+  step "preflight: the full raw record can rebuild the roll-up"
+  local retired records="unknown"
+  if [ -d "$SEGMENTS_DIR" ] && [ ! -r "$SEGMENTS_DIR" ]; then
+    die "$SEGMENTS_DIR is not readable. The raw record cannot be proved complete."
+  fi
+  if [ -s "$TMPD/status.json" ] && command -v jq >/dev/null 2>&1; then
+    records="$(jq -r '.ledgerRecords // 0' "$TMPD/status.json" 2>/dev/null)"
+  fi
+  retired="$(count_retired_segments)"
+  case "$retired" in
+    ''|*[!0-9]*) die "the retired-segment count is not a whole number: $retired" ;;
+  esac
+  say "ledger records       $records"
+  say "absent raw segments  $retired"
+  if [ "$retired" != 0 ]; then
+    die "$retired raw segment(s) are absent from this host. Restore every required
+     confirmed cold copy before a full rebuild. Rebuilding only the on-host window
+     would discard older aggregate answers."
+  fi
+
+  if [ ! -e "$ROLLUP_FILE" ]; then
+    if [ "$DRY" = 1 ] && [ ! -s "$TMPD/status.json" ]; then
+      say "[dry-run] the production host must contain a regular file at $ROLLUP_FILE"
+      return 0
+    fi
+    die "$ROLLUP_FILE is absent. Nothing can be preserved."
+  fi
+  [ -f "$ROLLUP_FILE" ] && [ ! -L "$ROLLUP_FILE" ] \
+    || die "$ROLLUP_FILE is absent or is not a regular file. Nothing can be preserved."
+  say "the complete raw record is present; the rebuild can proceed"
+}
+
 announce_reminder() {
   step "preflight: the checks this script cannot make for you"
   say "1. identity backup created and checked"
@@ -285,6 +351,9 @@ RECEIPT — archive restart, complete record$([ "$DRY" = 1 ] && printf ' (DRY RU
   archive hold         $([ -e "$HOLD_README" ] && printf 'present%s' "$([ "$IGNORE_HOLD" = 1 ] && printf ', OVERRIDDEN with --ignore-archive-hold')" || printf 'none')
   replay verdict       $REPLAY_SEV$([ "$OVERRIDE_REPLAY" = 1 ] && printf ', OVERRIDDEN with --i-proved-the-replay-fits')
   replay proof         ${PROOF:-not given}
+  roll-up rebuild      $([ "$REBUILD_ROLLUP" = 1 ] && printf requested || printf 'not requested')
+  prior roll-up        $ROLLUP_BACKUP
+  prior roll-up sha256 $ROLLUP_BACKUP_SHA
   started              ${T_START:--}
   gate raised          ${T_GATE_UP:--}
   relay stopped        ${T_RELAY_STOP:--}
@@ -319,6 +388,7 @@ rl_take_lock "$LOCK_FILE"
 preflight_reads
 check_unit_dependency
 check_replay_headroom
+check_rollup_rebuild
 announce_reminder
 
 # THE GATE GOES UP BEFORE THE RELAY STOPS. Raising it afterwards would leave the
@@ -335,11 +405,62 @@ if ! run systemctl stop multiverse-relay; then
 fi
 
 if [ "$RC" = 0 ]; then
-  step "restart the archive"
-  T_ARCHIVE="$(now)"
-  if ! run systemctl restart multiverse-archive; then
-    crit "the archive restart command failed. THE RELAY IS STOPPED."
-    RC=1
+  if [ "$REBUILD_ROLLUP" = 1 ]; then
+    step "stop the archive before preserving its roll-up"
+    if ! run systemctl stop multiverse-archive; then
+      crit "the archive stop command failed. THE RELAY IS STOPPED."
+      RC=1
+    fi
+
+    if [ "$RC" = 0 ]; then
+      step "preserve the old roll-up and force one full replay"
+      # Stop the archive before this second read. A segment can retire between
+      # the preflight and the stop. If that occurs, keep the sidecar and perform
+      # an ordinary, complete-record restart instead of rebuilding from a gap.
+      retired_now="$(count_retired_segments)"
+      if [ "$retired_now" != 0 ]; then
+        crit "$retired_now raw segment(s) became absent before the archive stopped.
+        The roll-up rebuild is cancelled. The old sidecar stays in place."
+        REBUILD_CANCELLED=1
+        ROLLUP_BACKUP="rebuild cancelled; old sidecar kept in place"
+      else
+        ROLLUP_BACKUP="$ROLLUP_FILE.pre-rebuild-$(date -u +%Y%m%dT%H%M%SZ)"
+      fi
+      if [ "$REBUILD_CANCELLED" = 1 ]; then
+        :
+      elif [ "$DRY" = 0 ] && [ -e "$ROLLUP_BACKUP" ]; then
+        crit "the backup target already exists: $ROLLUP_BACKUP"
+        RC=1
+      elif ! run mv -- "$ROLLUP_FILE" "$ROLLUP_BACKUP"; then
+        crit "could not preserve $ROLLUP_FILE as $ROLLUP_BACKUP. THE ARCHIVE IS STOPPED."
+        RC=1
+      elif [ "$DRY" = 0 ]; then
+        if ! ROLLUP_BACKUP_SHA="$(sha256sum "$ROLLUP_BACKUP" | awk '{print $1}')" \
+           || [ -z "$ROLLUP_BACKUP_SHA" ]; then
+          crit "could not calculate the checksum of $ROLLUP_BACKUP. THE ARCHIVE IS STOPPED."
+          RC=1
+        else
+          say "preserved $ROLLUP_BACKUP"
+          say "sha256 $ROLLUP_BACKUP_SHA"
+        fi
+      fi
+    fi
+
+    if [ "$RC" = 0 ]; then
+      step "start the archive and rebuild the roll-up"
+      T_ARCHIVE="$(now)"
+      if ! run systemctl start multiverse-archive; then
+        crit "the archive start command failed. THE RELAY IS STOPPED."
+        RC=1
+      fi
+    fi
+  else
+    step "restart the archive"
+    T_ARCHIVE="$(now)"
+    if ! run systemctl restart multiverse-archive; then
+      crit "the archive restart command failed. THE RELAY IS STOPPED."
+      RC=1
+    fi
   fi
 fi
 
@@ -400,11 +521,20 @@ if [ "$RC" = 0 ]; then
   T_PEERS="$(now)"
 fi
 
+if [ "$REBUILD_CANCELLED" = 1 ] && [ "$RC" = 0 ]; then
+  RC=1
+fi
+
 receipt
 
 if [ "$RC" != 0 ]; then
-  printf '\nCRIT: the archive restart did not complete cleanly. The gate is down.\n' >&2
-  printf '      Read the receipt above and write it into the deployment record,\n' >&2
-  printf '      including any record gap.\n' >&2
+  if [ "$REBUILD_CANCELLED" = 1 ]; then
+    printf '\nCRIT: the restart completed, but the requested roll-up rebuild was cancelled.\n' >&2
+    printf '      Restore the absent raw segments before another rebuild attempt.\n' >&2
+  else
+    printf '\nCRIT: the archive restart did not complete cleanly. The gate is down.\n' >&2
+    printf '      Read the receipt above and write it into the deployment record,\n' >&2
+    printf '      including any record gap.\n' >&2
+  fi
 fi
 exit "$RC"

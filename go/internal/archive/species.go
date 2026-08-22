@@ -66,11 +66,16 @@ import (
 // The aggregate's bounds.
 const (
 	// speciesAggMax is how many distinct species the ledger aggregate tracks.
-	// The running rig's ledger holds ~780 after a week of six worlds speciating
-	// freely, so this is roughly five times the observed shape rather than a
-	// number picked to be large. Past it, new species are COUNTED and not
-	// tracked, and the view says so.
-	speciesAggMax = 4096
+	//
+	// The original 4,096 bound came from a six-world rig that produced about 780
+	// species in a week. The public map reached it in its first week with 17
+	// worlds and then refused 217,153 observations of newer species. That made
+	// currently living species look as though no crossing had ever named their
+	// ancestry. 65,536 covers the announced 90-day run at the measured public
+	// rate with headroom while keeping the retained state explicitly bounded.
+	// Past it, new species OBSERVATIONS are counted and not tracked, and the view
+	// says so.
+	speciesAggMax = 65536
 	// speciesGenomeMax bounds the distinct-genome fingerprint set of ONE
 	// species. The whole ledger holds ~59 000 distinct genomes across every
 	// species; a single species reaching this many is a world in a genetic
@@ -163,9 +168,15 @@ type speciesAgg struct {
 // speciesLedger is the whole aggregate.
 type speciesLedger struct {
 	byKey map[string]*speciesAgg
-	// overflow counts species the aggregate refused to track because it was
-	// full. It is published, because a truncated aggregate a reader cannot see
-	// is a wrong answer.
+	// max is speciesAggMax in every archive. It lives on the ledger so a unit
+	// test can exercise saturation with a small private aggregate instead of
+	// allocating and persisting 65,536 entries. It is not configuration and is
+	// not written to the roll-up.
+	max int
+	// overflow counts migration observations whose species the aggregate refused
+	// to track because it was full. The same untracked species can increment it
+	// more than once. It is published, because a truncated aggregate a reader
+	// cannot see is a wrong answer.
 	overflow int
 	// edges is how many tracked species carry a parent name — maintained here
 	// rather than counted per request, because the genealogy publishes it on
@@ -191,7 +202,7 @@ type speciesLedger struct {
 }
 
 func newSpeciesLedger() *speciesLedger {
-	return &speciesLedger{byKey: map[string]*speciesAgg{}}
+	return &speciesLedger{byKey: map[string]*speciesAgg{}, max: speciesAggMax}
 }
 
 // observeSpeciesLocked folds one recorded migration into the aggregate. The
@@ -213,7 +224,7 @@ func (a *Archive) observeSpeciesLocked(rec Record) {
 	}
 	e := a.species.byKey[key]
 	if e == nil {
-		if len(a.species.byKey) >= speciesAggMax {
+		if len(a.species.byKey) >= a.species.max {
 			a.species.overflow++
 			// The overflow counter is published, so it is persisted (rollup.go).
 			a.rollupDirty.ledger = true

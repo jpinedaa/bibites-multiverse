@@ -20,7 +20,7 @@ import (
 // first, never a year later.
 //
 // So the set became a WINDOW (dedupWindow, below), and with it every retained
-// thing in this package is bounded by construction: species at 4096, genome
+// thing in this package is bounded by construction: species at 65,536, genome
 // fingerprints per species at 8192, brain buckets at a year, lanes at the grid,
 // gaps at the retention horizon, and this at its own window. What it costs PER
 // KEY still decides how big the window may be.

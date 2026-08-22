@@ -4,7 +4,7 @@
 this document is implemented and nothing in it changes a published promise on its own.~~ It is the
 design study behind the change to what the archive keeps, written so the change could be argued
 with before it was made. **It is left as it was written**, except where a later phase corrected it
-in place — each correction is struck through and dated, and there are three.
+in place — each correction is struck through and dated, and there are four.
 
 The owner ratified shape **B for the state, D for the raw, and a window on top of D** on
 `2026-08-17`; all six phases shipped and the build carrying them is in production. The governing
@@ -56,7 +56,8 @@ Three separate things grow with the record, and they do not have the same fix.
 
 **Memory.** One structure grows with the ledger and nothing else does: the duplicate-suppression
 set (`dedup.go`, file header). Every other retained thing is bounded by construction — species at
-`4096`, genome fingerprints for each species at `8192`, brain buckets at a year, lanes at the
+~~`4096`~~ **`65,536`, corrected 2026-08-21 after the 17-world public map exhausted the original
+bound**, genome fingerprints for each species at `8192`, brain buckets at a year, lanes at the
 grid, genome gaps at the retention horizon. Isolated by measurement, that one set was about
 `70 percent` of the settled resident set before the `2026-08-16` fingerprint change and about
 `128 MB` of live heap after it. **With the set removed, the archive's retained state is bounded by
@@ -95,8 +96,8 @@ Every live endpoint and every M5 evidence item, against the minimal durable stat
 | `/api/status` `genomeGaps` | pending fetch set | yes, horizon | full replay | replay of the raw window |
 | `/api/status` eviction counters | four counters | yes | process-local | roll-up state |
 | `/api/hops` | last `60 s` of crossings | yes, time and count | live only, never persisted | unchanged |
-| `/api/species` | census, joined to all-time species counts | yes, `4096` | full replay | roll-up state |
-| `/api/species/tree` | parent edges, ancestry floor | yes, `4096` | full replay | roll-up state |
+| `/api/species` | census, joined to all-time species counts | yes, ~~`4096`~~ **`65,536`, corrected 2026-08-21** | full replay | roll-up state |
+| `/api/species/tree` | parent edges, ancestry floor | yes, ~~`4096`~~ **`65,536`, corrected 2026-08-21** | full replay | roll-up state |
 | `/api/species/trends` | `metrics.jsonl` tail | yes, byte-bounded read | sample file | unchanged |
 | `/api/species/history` | `metrics.jsonl` tail | yes, byte-bounded read | sample file | unchanged |
 | `/api/species/brains` numerator | brain histograms for each bucket | yes, `365 d` | `brains.jsonl` | unchanged |
