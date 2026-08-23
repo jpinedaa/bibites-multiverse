@@ -532,23 +532,44 @@ func TestFullMigrationQueueRefusesAtomicallyWithoutClosingDestination(t *testing
 	r.srv.mu.Lock()
 	pace := r.srv.migrationPaceLocked("peer-dest")
 	pace.mu.Lock()
-	pace.nextAllowed = time.Now().Add(5 * time.Second)
+	pace.nextAllowed = time.Now().Add(30 * time.Second)
 	pace.mu.Unlock()
 	r.srv.mu.Unlock()
 
 	ids := make([]string, 9)
 	for i := range ids {
 		ids[i] = wire.NewUUID()
-		source := sourceA
-		sourceID := "peer-source-a"
-		if i >= 4 {
-			source, sourceID = sourceB, "peer-source-b"
-		}
-		source.send(contractb.TypeMigrationPayload, contractb.MigrationPayload{
+	}
+	for i := 0; i < 4; i++ {
+		sourceA.send(contractb.TypeMigrationPayload, contractb.MigrationPayload{
 			MigrationID: ids[i],
 			Kind:        contracta.KindBibite,
 			Body:        contractb.Body{Version: "0.6.3.1", BB8: "test"},
-			SourcePeer:  sourceID,
+			SourcePeer:  "peer-source-a",
+			SourceSlot:  2,
+			DestSlot:    reservation.Slot,
+			ExitEdge:    contracta.EdgeE,
+		})
+	}
+	// The sources are separate WebSocket readers. Sending A's frames before B's
+	// does not by itself order their processing, so wait until A has filled the
+	// first half of the destination queue before asking B to fill the rest.
+	// Without this barrier, any of B's five frames could race ahead and A's last
+	// frame—not ids[8]—would correctly receive the full-queue refusal.
+	deadline := time.Now().Add(5 * time.Second)
+	for r.srv.ForwardedCount() != 4 {
+		if time.Now().After(deadline) {
+			t.Fatalf("source A produced %d forwarding records, want 4 before source B",
+				r.srv.ForwardedCount())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	for i := 4; i < 9; i++ {
+		sourceB.send(contractb.TypeMigrationPayload, contractb.MigrationPayload{
+			MigrationID: ids[i],
+			Kind:        contracta.KindBibite,
+			Body:        contractb.Body{Version: "0.6.3.1", BB8: "test"},
+			SourcePeer:  "peer-source-b",
 			SourceSlot:  2,
 			DestSlot:    reservation.Slot,
 			ExitEdge:    contracta.EdgeE,
@@ -564,7 +585,7 @@ func TestFullMigrationQueueRefusesAtomicallyWithoutClosingDestination(t *testing
 		}
 		return contractb.MigrationNack{}, false
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(5 * time.Second)
 	var refused contractb.MigrationNack
 	for {
 		if got, ok := findNack(sourceB, ids[8]); ok {
@@ -583,7 +604,7 @@ func TestFullMigrationQueueRefusesAtomicallyWithoutClosingDestination(t *testing
 	if got := r.srv.ForwardedCount(); got != 8 {
 		t.Fatalf("full queue produced %d forwarding records, want exactly 8 accepted enqueues", got)
 	}
-	deadline = time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(5 * time.Second)
 	for len(archive.findAll(contractb.TypeMigrationPayload)) < 8 {
 		if time.Now().After(deadline) {
 			t.Fatalf("archive received %d accepted payload copies, want 8",
@@ -607,7 +628,7 @@ func TestFullMigrationQueueRefusesAtomicallyWithoutClosingDestination(t *testing
 		DestSlot:    reservation.Slot,
 		ExitEdge:    contracta.EdgeE,
 	})
-	deadline = time.Now().Add(2 * time.Second)
+	deadline = time.Now().Add(5 * time.Second)
 	for {
 		if got, ok := findNack(sourceA, ids[0]); ok {
 			if got.NeverForwarded == nil || *got.NeverForwarded {
